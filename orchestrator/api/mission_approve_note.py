@@ -11,19 +11,22 @@ endpoint's commit keeps it with the approval, and its rollback drops it with one
 from __future__ import annotations
 
 import functools
-from typing import Any, Awaitable, Callable
+from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
-Endpoint = Callable[..., Awaitable[Any]]
+Endpoint = Callable[..., Any]
 
 
 def keeps_the_owners_note(endpoint: Endpoint) -> Endpoint:
-    """Wrap the mission approve endpoint: a note in its body goes on the mission first."""
+    """Wrap the mission approve endpoint: a note in its body goes on the mission first.
+
+    F105 (4 Nov): a plain ``def``, like the endpoint it wraps, so FastAPI runs the note's
+    query and the approval in its threadpool, never on the event loop."""
     @functools.wraps(endpoint)
-    async def wrapped(*args: Any, **kwargs: Any) -> Any:
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
         _keep_note(kwargs.get("db"), kwargs.get("mission_id"), kwargs.get("ctx"), kwargs.get("body"))
-        return await endpoint(*args, **kwargs)
+        return endpoint(*args, **kwargs)
     return wrapped
 
 

@@ -15,7 +15,6 @@ NVIDIA list is stubbed at the httpx boundary. What is pinned:
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import sys
 import types
@@ -446,7 +445,7 @@ def test_installed_ids_returns_route_keys():
             return _WSQ([("openrouter", "moonshotai/kimi-k3"), ("nvidia", "moonshotai/kimi-k3")])
 
     ctx = SimpleNamespace(workspace_id=uuid4())
-    payload = asyncio.run(mp.get_installed_ids(ctx=ctx, db=_DB()))
+    payload = mp.get_installed_ids(ctx=ctx, db=_DB())
     assert payload["model_ids"] == ["moonshotai/kimi-k3"]
     assert payload["routes"] == ["nvidia:moonshotai/kimi-k3", "openrouter:moonshotai/kimi-k3"]
 

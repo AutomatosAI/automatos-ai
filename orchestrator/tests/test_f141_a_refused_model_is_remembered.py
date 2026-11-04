@@ -397,7 +397,7 @@ def test_the_model_tabs_save_drops_it_too(db, seed_workspace):
     _route(db, LIVE)
     beancounter = _agent(db, ws, "BEANCOUNTER", {"provider": "anthropic", "model_id": DEAD, "unavailable": _stamped()})
     echoed = {"provider": "openrouter", "model_id": LIVE, "temperature": 0.7, "unavailable": _stamped()}
-    reply = asyncio.run(update_agent_model_config(beancounter.id, echoed, ctx=NS(workspace_id=ws), db=db))
+    reply = update_agent_model_config(beancounter.id, echoed, ctx=NS(workspace_id=ws), db=db)
     assert reply["model_config"] == {"provider": "openrouter", "model_id": LIVE, "temperature": 0.7}
 
 

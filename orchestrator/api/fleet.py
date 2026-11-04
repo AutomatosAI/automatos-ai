@@ -34,7 +34,7 @@ _require_fleet_read = require_task_context(TASKS_READ)
 
 
 @router.get("")
-async def get_fleet(
+def get_fleet(
     ctx: RequestContext = Depends(_require_fleet_read),
     db: Session = Depends(get_db),
 ):

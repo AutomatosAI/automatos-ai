@@ -30,11 +30,13 @@ import inspect
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
+
+from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 
-Route = Callable[..., Awaitable[Any]]
+Route = Callable[..., Any]
 
 APPROVED, DECLINED = "approved", "declined"
 MEMORY_TYPE = "decision"
@@ -71,13 +73,21 @@ def remembers_the_decision(decision: str) -> Callable[[Route], Route]:
 
         @functools.wraps(route)
         async def wrapped(*args: Any, **kwargs: Any) -> Any:
-            out = await route(*args, **kwargs)
+            out = await _run_route(route, *args, **kwargs)
             call = signature.bind(*args, **kwargs).arguments
             await remember_the_click(call.get("db"), call.get("ctx"), call.get("grant_id"), decision)
             return out
         wrapped.__signature__ = signature  # type: ignore[attr-defined]
         return wrapped
     return wrap
+
+
+async def _run_route(route: Route, *args: Any, **kwargs: Any) -> Any:
+    """The route's answer: awaited when it is a coroutine function, else run in FastAPI's
+    threadpool. F105 (4 Nov): a plain ``def`` route keeps its database work off the event loop."""
+    if inspect.iscoroutinefunction(route):
+        return await route(*args, **kwargs)
+    return await run_in_threadpool(route, *args, **kwargs)
 
 
 async def remember_the_click(db: Any, ctx: Any, grant_id: Any, decision: str) -> Optional[Dict[str, Any]]:

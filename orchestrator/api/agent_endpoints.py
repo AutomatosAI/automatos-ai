@@ -200,8 +200,36 @@ async def get_agent_performance(
         )
 
 
+def _get_agent_logs_entries(execution, agent_id):
+    """Log entries for this agent from one workflow execution's subtasks."""
+    entries = []
+    # Extract subtask data if available
+    output_data = execution.output_data or {}
+    subtasks = output_data.get("subtasks", []) if output_data else []
+            
+    # Create log entries for each subtask for this agent
+    if subtasks:
+        for subtask in subtasks:
+            if subtask and isinstance(subtask, dict):
+                selected_agent = subtask.get("selected_agent") or {}
+                if selected_agent.get("agent_id") == agent_id:
+                    result = subtask.get("execution_result") or {}
+                    entries.append({
+                        "timestamp": execution.started_at.isoformat() if execution.started_at else None,
+                        "level": "error" if result.get("status") == "failed" else "info",
+                        "message": subtask.get("description", "Task executed"),
+                        "details": (result.get("llm_response") or result.get("response") or "")[:200],
+                        "tokens_used": result.get("tokens_used", 0),
+                        "execution_time_ms": result.get("execution_time_ms", 0),
+                        "status": result.get("status", "unknown"),
+                        "workflow_id": execution.workflow_id,
+                        "execution_id": execution.id
+                    })
+    return entries
+
+
 @router.get("/{agent_id}/logs")
-async def get_agent_logs(
+def get_agent_logs(
     agent_id: int,
     limit: int = 50,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -231,28 +259,7 @@ async def get_agent_logs(
         
         logs = []
         for execution in executions:
-            # Extract subtask data if available
-            output_data = execution.output_data or {}
-            subtasks = output_data.get("subtasks", []) if output_data else []
-            
-            # Create log entries for each subtask for this agent
-            if subtasks:
-                for subtask in subtasks:
-                    if subtask and isinstance(subtask, dict):
-                        selected_agent = subtask.get("selected_agent") or {}
-                        if selected_agent.get("agent_id") == agent_id:
-                            result = subtask.get("execution_result") or {}
-                            logs.append({
-                                "timestamp": execution.started_at.isoformat() if execution.started_at else None,
-                                "level": "error" if result.get("status") == "failed" else "info",
-                                "message": subtask.get("description", "Task executed"),
-                                "details": (result.get("llm_response") or result.get("response") or "")[:200],
-                                "tokens_used": result.get("tokens_used", 0),
-                                "execution_time_ms": result.get("execution_time_ms", 0),
-                                "status": result.get("status", "unknown"),
-                                "workflow_id": execution.workflow_id,
-                                "execution_id": execution.id
-                            })
+            logs.extend(_get_agent_logs_entries(execution, agent_id))
             
             # Stop if we have enough logs
             if len(logs) >= limit:
@@ -500,7 +507,7 @@ async def agent_system_health():
 # ===================================================================
 
 @router.get("/{agent_id}/model-config")
-async def get_agent_model_config(
+def get_agent_model_config(
     agent_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -537,7 +544,7 @@ async def get_agent_model_config(
 
 
 @router.put("/{agent_id}/model-config", dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def update_agent_model_config(
+def update_agent_model_config(
     agent_id: int,
     model_config: Dict[str, Any],
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -614,7 +621,7 @@ async def update_agent_model_config(
 
 
 @router.get("/{agent_id}/model-usage")
-async def get_agent_model_usage(
+def get_agent_model_usage(
     agent_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -665,8 +672,39 @@ async def get_agent_model_usage(
         )
 
 
+def _switch_agent_model_apply(db, agent, request, new_model, new_model_id):
+    """Build and persist the agent's new model config; return (old_model_id, new_config)."""
+    from sqlalchemy.orm import attributes
+
+    # Get current config or create new one
+    current_config = agent.model_config or {}
+        
+    # Update with new model
+    new_config = {
+        "provider": new_model.provider,
+        "model_id": new_model_id,
+        "temperature": request.get("temperature", new_model.default_temperature),
+        # F196: the agent's own Max Output Tokens carries over; unset stays unset
+        # (an agent run's budget). The model's ceiling is not a setting.
+        "max_tokens": request.get("max_tokens") or current_config.get("max_tokens"),
+        "top_p": current_config.get("top_p", 1.0),
+        "frequency_penalty": current_config.get("frequency_penalty", 0.0),
+        "presence_penalty": current_config.get("presence_penalty", 0.0),
+        "fallback_model_id": current_config.get("fallback_model_id")
+    }
+        
+    # Store old config for reference
+    old_model_id = current_config.get("model_id", "unknown")
+        
+    # Update agent
+    agent.model_config = new_config
+    attributes.flag_modified(agent, "model_config")
+    db.commit()
+    return old_model_id, new_config
+
+
 @router.post("/{agent_id}/switch-model", dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def switch_agent_model(
+def switch_agent_model(
     agent_id: int,
     request: Dict[str, Any],
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -689,7 +727,6 @@ async def switch_agent_model(
     """
     try:
         from core.llm.model_registry import ModelRegistry
-        from sqlalchemy.orm import attributes
         
         agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
@@ -714,30 +751,7 @@ async def switch_agent_model(
                 detail=f"Invalid model_id: {new_model_id}"
             )
         
-        # Get current config or create new one
-        current_config = agent.model_config or {}
-        
-        # Update with new model
-        new_config = {
-            "provider": new_model.provider,
-            "model_id": new_model_id,
-            "temperature": request.get("temperature", new_model.default_temperature),
-            # F196: the agent's own Max Output Tokens carries over; unset stays unset
-            # (an agent run's budget). The model's ceiling is not a setting.
-            "max_tokens": request.get("max_tokens") or current_config.get("max_tokens"),
-            "top_p": current_config.get("top_p", 1.0),
-            "frequency_penalty": current_config.get("frequency_penalty", 0.0),
-            "presence_penalty": current_config.get("presence_penalty", 0.0),
-            "fallback_model_id": current_config.get("fallback_model_id")
-        }
-        
-        # Store old config for reference
-        old_model_id = current_config.get("model_id", "unknown")
-        
-        # Update agent
-        agent.model_config = new_config
-        attributes.flag_modified(agent, "model_config")
-        db.commit()
+        old_model_id, new_config = _switch_agent_model_apply(db, agent, request, new_model, new_model_id)
         
         logger.info(f"Switched agent {agent_id} from {old_model_id} to {new_model_id}")
         

@@ -42,8 +42,63 @@ def _parse_period(period: str) -> int:
 # ── Cost Tracker ─────────────────────────────────────────────
 
 
+def _get_cost_tracker_daily_trend(db, ctx, since):
+    """Per-day spend since `since`."""
+    # Daily trend
+    daily_rows = (
+        db.query(
+            cast(LLMUsage.created_at, Date).label("date"),
+            func.sum(LLMUsage.total_cost).label("cost"),
+        )
+        .filter(
+            LLMUsage.workspace_id == ctx.workspace_id,
+            LLMUsage.created_at >= since,
+        )
+        .group_by(cast(LLMUsage.created_at, Date))
+        .order_by(cast(LLMUsage.created_at, Date))
+        .all()
+    )
+
+    daily_trend = [
+        {"date": r.date.strftime("%Y-%m-%d"), "cost": round(float(r.cost or 0), 4)}
+        for r in daily_rows
+    ]
+    return daily_trend
+
+
+def _get_cost_tracker_top_agents(db, ctx, since):
+    """Top 3 agents by spend since `since` (deleted agents keep their stamped name)."""
+    # Top 3 agents by cost
+    # F049: a deleted agent's spend still counts, under the name stamped on
+    # its rows when it was deleted (an inner join used to drop it entirely).
+    spender = func.coalesce(
+        Agent.name, LLMUsage.agent_name, func.concat("Agent #", LLMUsage.agent_id)
+    ).label("name")
+    top_agents_rows = (
+        db.query(
+            spender,
+            func.sum(LLMUsage.total_cost).label("cost"),
+        )
+        .outerjoin(Agent, LLMUsage.agent_id == Agent.id)
+        .filter(
+            LLMUsage.workspace_id == ctx.workspace_id,
+            LLMUsage.created_at >= since,
+            LLMUsage.agent_id.isnot(None),
+        )
+        .group_by(spender)
+        .order_by(func.sum(LLMUsage.total_cost).desc())
+        .limit(3)
+        .all()
+    )
+
+    top_agents = [
+        {"name": r.name, "cost": round(float(r.cost or 0), 4)} for r in top_agents_rows
+    ]
+    return top_agents
+
+
 @router.get("/cost-tracker")
-async def get_cost_tracker(
+def get_cost_tracker(
     period: str = Query("30d", regex="^(1d|7d|30d|90d)$"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -64,52 +119,9 @@ async def get_cost_tracker(
             or 0
         )
 
-        # Daily trend
-        daily_rows = (
-            db.query(
-                cast(LLMUsage.created_at, Date).label("date"),
-                func.sum(LLMUsage.total_cost).label("cost"),
-            )
-            .filter(
-                LLMUsage.workspace_id == ctx.workspace_id,
-                LLMUsage.created_at >= since,
-            )
-            .group_by(cast(LLMUsage.created_at, Date))
-            .order_by(cast(LLMUsage.created_at, Date))
-            .all()
-        )
+        daily_trend = _get_cost_tracker_daily_trend(db, ctx, since)
 
-        daily_trend = [
-            {"date": r.date.strftime("%Y-%m-%d"), "cost": round(float(r.cost or 0), 4)}
-            for r in daily_rows
-        ]
-
-        # Top 3 agents by cost
-        # F049: a deleted agent's spend still counts, under the name stamped on
-        # its rows when it was deleted (an inner join used to drop it entirely).
-        spender = func.coalesce(
-            Agent.name, LLMUsage.agent_name, func.concat("Agent #", LLMUsage.agent_id)
-        ).label("name")
-        top_agents_rows = (
-            db.query(
-                spender,
-                func.sum(LLMUsage.total_cost).label("cost"),
-            )
-            .outerjoin(Agent, LLMUsage.agent_id == Agent.id)
-            .filter(
-                LLMUsage.workspace_id == ctx.workspace_id,
-                LLMUsage.created_at >= since,
-                LLMUsage.agent_id.isnot(None),
-            )
-            .group_by(spender)
-            .order_by(func.sum(LLMUsage.total_cost).desc())
-            .limit(3)
-            .all()
-        )
-
-        top_agents = [
-            {"name": r.name, "cost": round(float(r.cost or 0), 4)} for r in top_agents_rows
-        ]
+        top_agents = _get_cost_tracker_top_agents(db, ctx, since)
 
         # Period-over-period change
         prev_since = since - timedelta(days=days)
@@ -144,8 +156,37 @@ async def get_cost_tracker(
 # ── Agent Performance ────────────────────────────────────────
 
 
+def _get_agent_performance_rows(db, ctx, since):
+    """Per-agent task totals, done counts and average completion seconds since `since`."""
+    rows = (
+        db.query(
+            BoardTask.assigned_agent_id,
+            Agent.name,
+            func.count(BoardTask.id).label("total"),
+            func.count(BoardTask.id).filter(BoardTask.status == "done").label("done"),
+            func.avg(
+                extract("epoch", BoardTask.completed_at)
+                - extract("epoch", BoardTask.started_at)
+            ).filter(
+                BoardTask.status == "done",
+                BoardTask.completed_at.isnot(None),
+                BoardTask.started_at.isnot(None),
+            ).label("avg_sec"),
+        )
+        .join(Agent, BoardTask.assigned_agent_id == Agent.id)
+        .filter(
+            BoardTask.workspace_id == ctx.workspace_id,
+            BoardTask.assigned_agent_id.isnot(None),
+            BoardTask.created_at >= since,
+        )
+        .group_by(BoardTask.assigned_agent_id, Agent.name)
+        .all()
+    )
+    return rows
+
+
 @router.get("/agent-performance")
-async def get_agent_performance(
+def get_agent_performance(
     period: str = Query("30d", regex="^(1d|7d|30d|90d)$"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -158,30 +199,7 @@ async def get_agent_performance(
         days = _parse_period(period)
         since = datetime.now() - timedelta(days=days)
 
-        rows = (
-            db.query(
-                BoardTask.assigned_agent_id,
-                Agent.name,
-                func.count(BoardTask.id).label("total"),
-                func.count(BoardTask.id).filter(BoardTask.status == "done").label("done"),
-                func.avg(
-                    extract("epoch", BoardTask.completed_at)
-                    - extract("epoch", BoardTask.started_at)
-                ).filter(
-                    BoardTask.status == "done",
-                    BoardTask.completed_at.isnot(None),
-                    BoardTask.started_at.isnot(None),
-                ).label("avg_sec"),
-            )
-            .join(Agent, BoardTask.assigned_agent_id == Agent.id)
-            .filter(
-                BoardTask.workspace_id == ctx.workspace_id,
-                BoardTask.assigned_agent_id.isnot(None),
-                BoardTask.created_at >= since,
-            )
-            .group_by(BoardTask.assigned_agent_id, Agent.name)
-            .all()
-        )
+        rows = _get_agent_performance_rows(db, ctx, since)
 
         results = []
         for r in rows:
@@ -210,8 +228,35 @@ async def get_agent_performance(
 # ── Playbook Metrics ─────────────────────────────────────────
 
 
+def _get_playbook_metrics_rows(db, ctx, since):
+    """Per-recipe run, success and average-duration aggregates since `since`."""
+    rows = (
+        db.query(
+            RecipeExecution.recipe_id,
+            func.count(RecipeExecution.id).label("runs"),
+            func.count(RecipeExecution.id)
+            .filter(RecipeExecution.status == "completed")
+            .label("successes"),
+            func.avg(
+                extract("epoch", RecipeExecution.completed_at)
+                - extract("epoch", RecipeExecution.started_at)
+            ).filter(
+                RecipeExecution.status == "completed",
+                RecipeExecution.completed_at.isnot(None),
+            ).label("avg_duration"),
+        )
+        .filter(
+            RecipeExecution.workspace_id == ctx.workspace_id,
+            RecipeExecution.started_at >= since,
+        )
+        .group_by(RecipeExecution.recipe_id)
+        .all()
+    )
+    return rows
+
+
 @router.get("/playbook-metrics")
-async def get_playbook_metrics(
+def get_playbook_metrics(
     period: str = Query("30d", regex="^(1d|7d|30d|90d)$"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -225,28 +270,7 @@ async def get_playbook_metrics(
         days = _parse_period(period)
         since = datetime.now() - timedelta(days=days)
 
-        rows = (
-            db.query(
-                RecipeExecution.recipe_id,
-                func.count(RecipeExecution.id).label("runs"),
-                func.count(RecipeExecution.id)
-                .filter(RecipeExecution.status == "completed")
-                .label("successes"),
-                func.avg(
-                    extract("epoch", RecipeExecution.completed_at)
-                    - extract("epoch", RecipeExecution.started_at)
-                ).filter(
-                    RecipeExecution.status == "completed",
-                    RecipeExecution.completed_at.isnot(None),
-                ).label("avg_duration"),
-            )
-            .filter(
-                RecipeExecution.workspace_id == ctx.workspace_id,
-                RecipeExecution.started_at >= since,
-            )
-            .group_by(RecipeExecution.recipe_id)
-            .all()
-        )
+        rows = _get_playbook_metrics_rows(db, ctx, since)
 
         recipe_ids = [r.recipe_id for r in rows if r.recipe_id]
         name_map = {}
@@ -282,8 +306,46 @@ async def get_playbook_metrics(
 # ── Approval Gates ───────────────────────────────────────────
 
 
+def _get_approval_gates_recent(db, ctx, since):
+    """Most recent runs that moved past approval since `since`."""
+    # Recently approved/rejected (completed or failed after awaiting)
+    completed_runs = (
+        db.query(OrchestrationRun)
+        .filter(
+            OrchestrationRun.workspace_id == ctx.workspace_id,
+            OrchestrationRun.state.in_(["running", "completed", "failed", "cancelled"]),
+            OrchestrationRun.updated_at >= since,
+        )
+        .order_by(OrchestrationRun.updated_at.desc())
+        .limit(10)
+        .all()
+    )
+    return completed_runs
+
+
+def _get_approval_gates_avg_seconds(db, ctx, since):
+    """Average seconds from creation to start (proxy for approval time)."""
+    # Avg time from creation to started (proxy for approval time)
+    avg_approval_sec = (
+        db.query(
+            func.avg(
+                extract("epoch", OrchestrationRun.started_at)
+                - extract("epoch", OrchestrationRun.created_at)
+            )
+        )
+        .filter(
+            OrchestrationRun.workspace_id == ctx.workspace_id,
+            OrchestrationRun.started_at.isnot(None),
+            OrchestrationRun.created_at >= since,
+        )
+        .scalar()
+        or 0
+    )
+    return avg_approval_sec
+
+
 @router.get("/approval-gates")
-async def get_approval_gates(
+def get_approval_gates(
     period: str = Query("30d", regex="^(1d|7d|30d|90d)$"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -313,35 +375,9 @@ async def get_approval_gates(
             for r in pending
         ]
 
-        # Recently approved/rejected (completed or failed after awaiting)
-        completed_runs = (
-            db.query(OrchestrationRun)
-            .filter(
-                OrchestrationRun.workspace_id == ctx.workspace_id,
-                OrchestrationRun.state.in_(["running", "completed", "failed", "cancelled"]),
-                OrchestrationRun.updated_at >= since,
-            )
-            .order_by(OrchestrationRun.updated_at.desc())
-            .limit(10)
-            .all()
-        )
+        completed_runs = _get_approval_gates_recent(db, ctx, since)
 
-        # Avg time from creation to started (proxy for approval time)
-        avg_approval_sec = (
-            db.query(
-                func.avg(
-                    extract("epoch", OrchestrationRun.started_at)
-                    - extract("epoch", OrchestrationRun.created_at)
-                )
-            )
-            .filter(
-                OrchestrationRun.workspace_id == ctx.workspace_id,
-                OrchestrationRun.started_at.isnot(None),
-                OrchestrationRun.created_at >= since,
-            )
-            .scalar()
-            or 0
-        )
+        avg_approval_sec = _get_approval_gates_avg_seconds(db, ctx, since)
 
         return {
             "pending_count": len(pending),
@@ -368,8 +404,76 @@ async def get_approval_gates(
 DECISIONS_NOT_LOADED = "The decisions waiting for you could not be loaded. Try again shortly."
 
 
+def _get_decisions_needed_reports(db, ctx, limit):
+    """Unacknowledged reports that require approval, oldest first."""
+    from sqlalchemy import text
+    
+    # 1. Reports requiring approval that haven't been acknowledged.
+    report_rows = db.execute(
+        text(
+            """
+            SELECT id::text, title, summary, status,
+                   agent_name, created_at, requires_approval
+              FROM agent_reports
+             WHERE workspace_id = :ws
+               AND requires_approval = TRUE
+               AND acknowledged_at IS NULL
+          ORDER BY created_at ASC
+             LIMIT :limit
+            """
+        ),
+        {"ws": str(ctx.workspace_id), "limit": limit},
+    ).fetchall()
+
+    reports = [
+        {
+            "kind": "report",
+            "id": r.id,
+            "title": r.title,
+            "summary": r.summary,
+            "status": r.status,
+            "escalation_level": None,
+            "agent_name": r.agent_name,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in report_rows
+    ]
+    return reports
+
+
+def _get_decisions_needed_missions(db, ctx, limit):
+    """Orchestration runs in a blocked state, most recently updated first."""
+    # 2. Missions blocked / awaiting human review.
+    run_rows = (
+        db.query(OrchestrationRun)
+        .filter(
+            OrchestrationRun.workspace_id == ctx.workspace_id,
+            # F207: state_type is stored lowercase; "BLOCKED" matched no mission, ever.
+            OrchestrationRun.state_type == StateType.BLOCKED.value,
+        )
+        .order_by(OrchestrationRun.updated_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    missions = [
+        {
+            "kind": "mission",
+            "id": str(r.id),
+            "title": (r.goal[:120] if r.goal else "(no goal)"),
+            "summary": r.stop_detail or r.stop_reason or "blocked",
+            "status": r.state,
+            "escalation_level": None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+        }
+        for r in run_rows
+    ]
+    return missions
+
+
 @router.get("/decisions-needed")
-async def get_decisions_needed(
+def get_decisions_needed(
     limit: int = Query(10, ge=1, le=50),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -386,66 +490,10 @@ async def get_decisions_needed(
     Tasks themselves (priority urgent/high) are intentionally excluded —
     the kanban already surfaces those. Approval gates have their own widget.
     """
-    from sqlalchemy import text
-
     try:
-        # 1. Reports requiring approval that haven't been acknowledged.
-        report_rows = db.execute(
-            text(
-                """
-                SELECT id::text, title, summary, status,
-                       agent_name, created_at, requires_approval
-                  FROM agent_reports
-                 WHERE workspace_id = :ws
-                   AND requires_approval = TRUE
-                   AND acknowledged_at IS NULL
-              ORDER BY created_at ASC
-                 LIMIT :limit
-                """
-            ),
-            {"ws": str(ctx.workspace_id), "limit": limit},
-        ).fetchall()
+        reports = _get_decisions_needed_reports(db, ctx, limit)
 
-        reports = [
-            {
-                "kind": "report",
-                "id": r.id,
-                "title": r.title,
-                "summary": r.summary,
-                "status": r.status,
-                "escalation_level": None,
-                "agent_name": r.agent_name,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-            }
-            for r in report_rows
-        ]
-
-        # 2. Missions blocked / awaiting human review.
-        run_rows = (
-            db.query(OrchestrationRun)
-            .filter(
-                OrchestrationRun.workspace_id == ctx.workspace_id,
-                # F207: state_type is stored lowercase; "BLOCKED" matched no mission, ever.
-                OrchestrationRun.state_type == StateType.BLOCKED.value,
-            )
-            .order_by(OrchestrationRun.updated_at.desc())
-            .limit(limit)
-            .all()
-        )
-
-        missions = [
-            {
-                "kind": "mission",
-                "id": str(r.id),
-                "title": (r.goal[:120] if r.goal else "(no goal)"),
-                "summary": r.stop_detail or r.stop_reason or "blocked",
-                "status": r.state,
-                "escalation_level": None,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
-            }
-            for r in run_rows
-        ]
+        missions = _get_decisions_needed_missions(db, ctx, limit)
 
         merged = reports + missions
         merged.sort(key=lambda item: item.get("created_at") or "")

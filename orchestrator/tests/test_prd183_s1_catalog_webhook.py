@@ -38,6 +38,8 @@ os.environ.setdefault("POSTGRES_DB", "test")
 
 import asyncio  # noqa: E402
 
+import anyio  # noqa: E402
+
 import tests.conftest as _conftest  # noqa: E402
 _conftest._restore_real_app_modules()
 
@@ -81,8 +83,10 @@ def _prepare_debounce(monkeypatch, window: float = 0.01) -> None:
     monkeypatch.setattr(shopify.config, "SHOPIFY_SYNC_DEBOUNCE_SECONDS", window)
 
 
-def _run_and_drain(coro, settle: float = 0.08):
-    """Run *coro*, wait out the debounce window, then drain spawned tasks.
+def _run_and_drain(route, settle: float = 0.08):
+    """Run *route* the way FastAPI runs the plain ``def`` route (a threadpool
+    thread beside a running loop), wait out the debounce window, then drain
+    spawned tasks.
 
     ``forward_event`` debounces the catalog re-sync (PRD-189 S3); a
     deterministic test must sleep past the window so the timer fires and the
@@ -93,7 +97,7 @@ def _run_and_drain(coro, settle: float = 0.08):
         asyncio.set_event_loop(loop)
 
         async def _scenario():
-            result = await coro
+            result = await anyio.to_thread.run_sync(route)
             await asyncio.sleep(settle)
             return result
 
@@ -145,7 +149,7 @@ def test_catalog_webhook_updates_graph(monkeypatch):
     monkeypatch.setattr(shopify, "_sync_catalog_for_workspace", _fake_sync)
 
     req = shopify.EventRequest(shop="inbuilduk.myshopify.com", event="products/update")
-    result = _run_and_drain(shopify.forward_event(request=req, db=db, _auth=None))
+    result = _run_and_drain(lambda: shopify.forward_event(request=req, db=db, _auth=None))
 
     assert result["status"] == "received"
     # The catalog re-sync ran for the resolved workspace + event.
@@ -167,7 +171,7 @@ def test_non_catalog_event_does_not_resync(monkeypatch):
     monkeypatch.setattr(shopify, "_sync_catalog_for_workspace", _fake_sync)
 
     req = shopify.EventRequest(shop="inbuilduk.myshopify.com", event="app/uninstalled")
-    result = _run_and_drain(shopify.forward_event(request=req, db=db, _auth=None))
+    result = _run_and_drain(lambda: shopify.forward_event(request=req, db=db, _auth=None))
 
     assert result["status"] == "received"
     assert fired["count"] == 0
@@ -186,7 +190,7 @@ def test_catalog_event_unknown_shop_is_safe(monkeypatch):
     monkeypatch.setattr(shopify, "_sync_catalog_for_workspace", _fake_sync)
 
     req = shopify.EventRequest(shop="ghost.myshopify.com", event="products/update")
-    result = _run_and_drain(shopify.forward_event(request=req, db=db, _auth=None))
+    result = _run_and_drain(lambda: shopify.forward_event(request=req, db=db, _auth=None))
 
     assert result["status"] == "received"
     assert fired["count"] == 0

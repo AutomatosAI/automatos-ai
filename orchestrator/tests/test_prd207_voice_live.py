@@ -1720,11 +1720,9 @@ def test_voice_live_put_refuses_malformed_with_honest_reason():
     db.query.return_value.get.return_value = ws
 
     with pytest.raises(HTTPException) as exc:
-        asyncio.run(
-            save_voice_live_settings(
+        save_voice_live_settings(
                 payload={"voice_live": {"enabled": "yes"}}, ctx=_mint_ctx(), db=db
             )
-        )
     assert exc.value.status_code == 400
     assert "boolean" in exc.value.detail
     assert ws.settings["voice_live"]["enabled"] is False  # nothing written
@@ -1744,11 +1742,9 @@ def test_voice_live_put_merges_not_replaces(monkeypatch):
     db = MagicMock()
     db.query.return_value.get.return_value = ws
 
-    out = asyncio.run(
-        save_voice_live_settings(
+    out = save_voice_live_settings(
             payload={"voice_live": {"monthly_cap_minutes": 200}}, ctx=_mint_ctx(), db=db
         )
-    )
     assert out["voice_live"] == {
         "enabled": True,
         "retell_voice_id": "keep",
@@ -1780,9 +1776,7 @@ def test_voice_live_put_refuses_enabling_without_the_plan_and_stores_nothing(mon
     db.query.return_value.get.return_value = ws
 
     with pytest.raises(HTTPException) as exc:
-        asyncio.run(
-            save_voice_live_settings(payload={"voice_live": {"enabled": True}}, ctx=_mint_ctx(), db=db)
-        )
+        save_voice_live_settings(payload={"voice_live": {"enabled": True}}, ctx=_mint_ctx(), db=db)
     assert exc.value.status_code == 403
     assert exc.value.detail == {"code": VOICE_LIVE_PLAN_REQUIRED, "message": VOICE_LIVE_PLAN_REQUIRED_MESSAGE}
     assert ws.settings["voice_live"]["enabled"] is False  # nothing written
@@ -1802,9 +1796,7 @@ def test_voice_live_put_disabling_always_succeeds_even_without_the_plan(monkeypa
     db = MagicMock()
     db.query.return_value.get.return_value = ws
 
-    out = asyncio.run(
-        save_voice_live_settings(payload={"voice_live": {"enabled": False}}, ctx=_mint_ctx(), db=db)
-    )
+    out = save_voice_live_settings(payload={"voice_live": {"enabled": False}}, ctx=_mint_ctx(), db=db)
     assert out["voice_live"]["enabled"] is False
     assert db.commit.called
 
@@ -1820,9 +1812,7 @@ def test_voice_live_put_allows_enabling_on_the_local_edition_regardless_of_plan(
     db = MagicMock()
     db.query.return_value.get.return_value = ws
 
-    out = asyncio.run(
-        save_voice_live_settings(payload={"voice_live": {"enabled": True}}, ctx=_mint_ctx(), db=db)
-    )
+    out = save_voice_live_settings(payload={"voice_live": {"enabled": True}}, ctx=_mint_ctx(), db=db)
     assert out["voice_live"]["enabled"] is True
 
 
@@ -1839,9 +1829,7 @@ def test_voice_live_put_allows_enabling_on_saas_with_the_plan(monkeypatch):
     db = MagicMock()
     db.query.return_value.get.return_value = ws
 
-    out = asyncio.run(
-        save_voice_live_settings(payload={"voice_live": {"enabled": True}}, ctx=_mint_ctx(), db=db)
-    )
+    out = save_voice_live_settings(payload={"voice_live": {"enabled": True}}, ctx=_mint_ctx(), db=db)
     assert out["voice_live"]["enabled"] is True
 
 

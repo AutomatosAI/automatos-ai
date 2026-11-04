@@ -74,8 +74,60 @@ class SessionTokenResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _exchange_session_token_permissions(api_key_record, request: SessionTokenRequest) -> List[str]:
+    """Effective permissions: the request's (a subset of the key's) or the key's own."""
+    key_permissions: List[str] = api_key_record.permissions or []
+
+    if request.permissions is not None:
+        # Requested permissions must be a subset of the key's permissions.
+        # An empty key_permissions list means unrestricted (all allowed).
+        if key_permissions:
+            extra = set(request.permissions) - set(key_permissions)
+            if extra:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Requested permissions not granted by API key: {sorted(extra)}",
+                )
+        effective_permissions = request.permissions
+    else:
+        effective_permissions = key_permissions
+    return effective_permissions
+
+
+def _exchange_session_token_sign(api_key_record, request: SessionTokenRequest, effective_permissions: List[str]):
+    """Build and sign the session JWT. Returns (session_token, exp)."""
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(seconds=request.expires_in)
+
+    payload: dict = {
+        "workspace_id": str(api_key_record.workspace_id),
+        "api_key_id": str(api_key_record.id),
+        "permissions": effective_permissions,
+        "exp": exp,
+        "iat": now,
+    }
+
+    if request.user_id is not None:
+        payload["user_id"] = request.user_id
+
+    if api_key_record.default_agent_id is not None:
+        payload["default_agent_id"] = api_key_record.default_agent_id
+
+    # PRD-124: Include team lock in JWT so widget requests are team-scoped
+    api_key_team = getattr(api_key_record, "team", None)
+    if api_key_team:
+        payload["team"] = api_key_team
+
+    session_token = jwt.encode(
+        payload,
+        WIDGET_TOKEN_SECRET,
+        algorithm=WIDGET_TOKEN_ALGORITHM,
+    )
+    return session_token, exp
+
+
 @router.post("/auth", response_model=SessionTokenResponse)
-async def exchange_session_token(
+def exchange_session_token(
     request: SessionTokenRequest,
     db: Session = Depends(get_db),
 ) -> SessionTokenResponse:
@@ -104,50 +156,10 @@ async def exchange_session_token(
         )
 
     # --- 3. Resolve effective permissions --------------------------------
-    key_permissions: List[str] = api_key_record.permissions or []
-
-    if request.permissions is not None:
-        # Requested permissions must be a subset of the key's permissions.
-        # An empty key_permissions list means unrestricted (all allowed).
-        if key_permissions:
-            extra = set(request.permissions) - set(key_permissions)
-            if extra:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Requested permissions not granted by API key: {sorted(extra)}",
-                )
-        effective_permissions = request.permissions
-    else:
-        effective_permissions = key_permissions
+    effective_permissions = _exchange_session_token_permissions(api_key_record, request)
 
     # --- 4. Build and sign the JWT --------------------------------------
-    now = datetime.now(timezone.utc)
-    exp = now + timedelta(seconds=request.expires_in)
-
-    payload: dict = {
-        "workspace_id": str(api_key_record.workspace_id),
-        "api_key_id": str(api_key_record.id),
-        "permissions": effective_permissions,
-        "exp": exp,
-        "iat": now,
-    }
-
-    if request.user_id is not None:
-        payload["user_id"] = request.user_id
-
-    if api_key_record.default_agent_id is not None:
-        payload["default_agent_id"] = api_key_record.default_agent_id
-
-    # PRD-124: Include team lock in JWT so widget requests are team-scoped
-    api_key_team = getattr(api_key_record, "team", None)
-    if api_key_team:
-        payload["team"] = api_key_team
-
-    session_token = jwt.encode(
-        payload,
-        WIDGET_TOKEN_SECRET,
-        algorithm=WIDGET_TOKEN_ALGORITHM,
-    )
+    session_token, exp = _exchange_session_token_sign(api_key_record, request, effective_permissions)
 
     # --- 5. Resolve widget config for the browser ------------------------
     # PRD-008-A: read from the workspace's default Site; falls back to

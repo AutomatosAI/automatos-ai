@@ -7,7 +7,6 @@ workspace analytics stay super-admin. These are pure tests: the gate decision co
 takes a fake ctx + a MagicMock session; the new endpoints are driven directly with
 a mocked db. No DB / network.
 """
-import asyncio
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -79,7 +78,7 @@ def test_require_workspace_admin_allows_super_admin_returns_ctx():
     from core.auth.workspace_admin import require_workspace_admin
 
     ctx = _ctx(system_role="super_admin")
-    assert asyncio.run(require_workspace_admin(ctx=ctx, db=MagicMock())) is ctx
+    assert require_workspace_admin(ctx=ctx, db=MagicMock()) is ctx
 
 
 def test_require_workspace_admin_403s_plain_member():
@@ -90,7 +89,7 @@ def test_require_workspace_admin_403s_plain_member():
     db = MagicMock()
     db.execute.return_value.fetchone.return_value = None
     with pytest.raises(HTTPException) as ei:
-        asyncio.run(require_workspace_admin(ctx=_ctx(clerk_user_id="c"), db=db))
+        require_workspace_admin(ctx=_ctx(clerk_user_id="c"), db=db)
     assert ei.value.status_code == 403
 
 
@@ -142,7 +141,7 @@ def test_workspace_activation_is_scoped_boolean_first_value():
 
     db = MagicMock()
     db.query.return_value.filter.return_value.scalar.return_value = 3
-    out = asyncio.run(get_workspace_activation(ctx=_ctx(), db=db))
+    out = get_workspace_activation(ctx=_ctx(), db=db)
     assert out["activated"] is True
     assert out["completed_missions"] == 3
 
@@ -152,7 +151,7 @@ def test_workspace_activation_zero_completed_is_not_activated():
 
     db = MagicMock()
     db.query.return_value.filter.return_value.scalar.return_value = 0
-    out = asyncio.run(get_workspace_activation(ctx=_ctx(), db=db))
+    out = get_workspace_activation(ctx=_ctx(), db=db)
     assert out["activated"] is False
     assert out["completed_missions"] == 0
 
@@ -163,7 +162,7 @@ def test_deliverable_freshness_honest_empty():
 
     db = MagicMock()
     db.execute.return_value.fetchone.return_value = SimpleNamespace(last_at=None, total=0)
-    out = asyncio.run(get_deliverable_freshness(ctx=_ctx(), db=db))
+    out = get_deliverable_freshness(ctx=_ctx(), db=db)
     assert out["last_produced_at"] is None
     assert out["age_seconds"] is None
     assert out["total"] == 0
@@ -175,7 +174,7 @@ def test_deliverable_freshness_reports_age_seconds():
     db = MagicMock()
     two_hours_ago = datetime.now(timezone.utc) - timedelta(hours=2)
     db.execute.return_value.fetchone.return_value = SimpleNamespace(last_at=two_hours_ago, total=5)
-    out = asyncio.run(get_deliverable_freshness(ctx=_ctx(), db=db))
+    out = get_deliverable_freshness(ctx=_ctx(), db=db)
     assert out["total"] == 5
     assert out["age_seconds"] is not None
     assert out["age_seconds"] >= 7000  # ~2h, allowing for clock drift during the call

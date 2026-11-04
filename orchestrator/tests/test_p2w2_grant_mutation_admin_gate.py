@@ -31,7 +31,6 @@ os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
 os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
-import asyncio  # noqa: E402
 import uuid  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 from unittest.mock import MagicMock  # noqa: E402
@@ -96,16 +95,16 @@ def test_plain_member_403s_and_workspace_admin_passes():
     db = MagicMock()
     db.execute.return_value.fetchone.return_value = None  # plain member — no admin row
     with pytest.raises(HTTPException) as ei:
-        asyncio.run(require_workspace_admin(ctx=_ctx(clerk_user_id="clerk_1"), db=db))
+        require_workspace_admin(ctx=_ctx(clerk_user_id="clerk_1"), db=db)
     assert ei.value.status_code == 403
 
     ctx = _ctx(system_role="super_admin")
-    assert asyncio.run(require_workspace_admin(ctx=ctx, db=MagicMock())) is ctx
+    assert require_workspace_admin(ctx=ctx, db=MagicMock()) is ctx
 
     db = MagicMock()
     db.execute.return_value.fetchone.return_value = (1,)  # owner/admin membership row
     ctx = _ctx(clerk_user_id="clerk_1")
-    assert asyncio.run(require_workspace_admin(ctx=ctx, db=db)) is ctx
+    assert require_workspace_admin(ctx=ctx, db=db) is ctx
 
 
 # ---------------------------------------------------------------------------

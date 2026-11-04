@@ -89,7 +89,7 @@ def _said_when(board, task_id, before, after):
 def _cancel_on_the_board(board, task_id):
     from api.board_tasks import cancel_task
 
-    return asyncio.run(cancel_task(task_id, ctx=board.owner, db=board.db))
+    return cancel_task(task_id, ctx=board.owner, db=board.db)
 
 
 def _drag_to_cancelled(board, task_id):
@@ -133,7 +133,7 @@ def _from_the_card(board, pb):
 def _from_the_playbooks_page(board, pb):
     from api.workflow_recipes import cancel_execution
 
-    return asyncio.run(cancel_execution(str(pb.recipe.id), pb.run, ctx=board.owner, db=board.db))
+    return cancel_execution(str(pb.recipe.id), pb.run, ctx=board.owner, db=board.db)
 
 
 @pytest.mark.parametrize("cancel", [_from_the_card, _from_the_playbooks_page], ids=["the card", "the playbook's page"])

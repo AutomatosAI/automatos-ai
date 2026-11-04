@@ -109,7 +109,7 @@ class TriggerSetupRequest(BaseModel):
 
 
 @router.get("/decisions")
-async def list_decisions(
+def list_decisions(
     source: Optional[str] = Query(None, description="Filter by source channel"),
     agent_id: Optional[int] = Query(None, description="Filter by routed agent_id"),
     was_corrected: Optional[bool] = Query(None, description="Filter by correction status"),
@@ -161,7 +161,7 @@ async def list_decisions(
 
 
 @router.post("/rules", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def create_rule(
+def create_rule(
     body: CreateRuleRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -218,7 +218,7 @@ async def create_rule(
 
 
 @router.get("/rules")
-async def list_rules(
+def list_rules(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -259,7 +259,7 @@ async def list_rules(
 
 
 @router.delete("/rules/{rule_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def delete_rule(
+def delete_rule(
     rule_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -296,7 +296,7 @@ async def delete_rule(
 
 
 @router.post("/corrections", dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def record_correction(
+def record_correction(
     body: CorrectionRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -372,8 +372,35 @@ async def get_cache_stats(
 # ---------------------------------------------------------------------------
 
 
+def _setup_trigger_subscribe(db, ctx, body):
+    """Subscribe to the Composio trigger; returns (entity_pk, callback_url, composio_subscription_id)."""
+    from core.composio.client import get_composio_client
+    from core.composio.entity_manager import EntityManager
+
+    # Resolve entity for the workspace
+    entity_manager = EntityManager(db)
+    entity = entity_manager.get_or_create_entity(ctx.workspace_id)
+    entity_id = entity["composio_entity_id"]
+    entity_pk = entity["id"]
+
+    # Build callback URL
+    backend_url = config.BACKEND_URL or "http://localhost:8000"
+    callback_url = f"{backend_url}/api/composio/webhook"
+
+    # Subscribe via Composio SDK
+    client = get_composio_client()
+    result = client.subscribe_to_trigger(
+        entity_id=entity_id,
+        trigger_name=body.trigger_name,
+        callback_url=callback_url,
+    )
+
+    composio_subscription_id = result.get("id", "")
+    return entity_pk, callback_url, composio_subscription_id
+
+
 @router.post("/triggers/setup", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def setup_trigger(
+def setup_trigger(
     body: TriggerSetupRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -399,29 +426,7 @@ async def setup_trigger(
     if refused:
         raise HTTPException(status_code=400, detail=refused.replace("target_", ""))
     try:
-        from core.composio.client import get_composio_client
-        from core.composio.entity_manager import EntityManager
-
-        # Resolve entity for the workspace
-        entity_manager = EntityManager(db)
-        entity = entity_manager.get_or_create_entity(ctx.workspace_id)
-        entity_id = entity["composio_entity_id"]
-        entity_pk = entity["id"]
-
-        # Build callback URL
-        backend_url = config.BACKEND_URL or "http://localhost:8000"
-        callback_url = f"{backend_url}/api/composio/webhook"
-
-        # Subscribe via Composio SDK
-        client = get_composio_client()
-        result = client.subscribe_to_trigger(
-            entity_id=entity_id,
-            trigger_name=body.trigger_name,
-            callback_url=callback_url,
-        )
-
-        composio_subscription_id = result.get("id", "")
-
+        entity_pk, callback_url, composio_subscription_id = _setup_trigger_subscribe(db, ctx, body)
         # Persist subscription in database
         subscription = TriggerSubscription(
             entity_id=entity_pk,
@@ -515,7 +520,7 @@ async def reindex_semantic_embeddings(
 
 
 @router.get("/semantic/status")
-async def semantic_status(
+def semantic_status(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):

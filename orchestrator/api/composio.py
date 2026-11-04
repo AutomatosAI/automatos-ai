@@ -128,7 +128,7 @@ class WebhookPayload(BaseModel):
 # =============================================================================
 
 @router.get("/apps", response_model=List[AppResponse])
-async def list_available_apps(
+def list_available_apps(
     category: Optional[str] = Query(None, description="Filter by category"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -181,7 +181,7 @@ async def list_available_apps(
 
 
 @router.get("/apps/{app_name}/actions", response_model=List[ActionResponse])
-async def list_app_actions(
+def list_app_actions(
     app_name: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -525,7 +525,7 @@ def disconnect_app(
 # =============================================================================
 
 @router.get("/agents/{agent_id}/apps/{app_name}/features", response_model=List[ActionResponse])
-async def get_agent_app_features(
+def get_agent_app_features(
     agent_id: int,
     app_name: str,
     db: Session = Depends(get_db)
@@ -562,7 +562,7 @@ async def get_agent_app_features(
 
 
 @router.put("/agents/{agent_id}/apps/{app_name}/features", dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def update_agent_app_features(
+def update_agent_app_features(
     agent_id: int,
     app_name: str,
     request: BatchFeatureToggleRequest,
@@ -584,7 +584,7 @@ async def update_agent_app_features(
 
 
 @router.post("/agents/{agent_id}/apps/{app_name}/enable-all", dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def enable_all_features(
+def enable_all_features(
     agent_id: int,
     app_name: str,
     db: Session = Depends(get_db)
@@ -604,7 +604,7 @@ async def enable_all_features(
 
 
 @router.post("/agents/{agent_id}/apps/{app_name}/disable-all", dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def disable_all_features(
+def disable_all_features(
     agent_id: int,
     app_name: str,
     db: Session = Depends(get_db)
@@ -1011,7 +1011,7 @@ async def _dispatch_workflow(
 # =============================================================================
 
 @router.post("/triggers/subscribe", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def subscribe_to_trigger(
+def subscribe_to_trigger(
     request: TriggerSubscriptionRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -1065,7 +1065,7 @@ async def subscribe_to_trigger(
 
 
 @router.get("/triggers")
-async def list_trigger_subscriptions(
+def list_trigger_subscriptions(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -1096,7 +1096,7 @@ async def list_trigger_subscriptions(
 
 
 @router.delete("/triggers/{subscription_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def unsubscribe_trigger(
+def unsubscribe_trigger(
     subscription_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)

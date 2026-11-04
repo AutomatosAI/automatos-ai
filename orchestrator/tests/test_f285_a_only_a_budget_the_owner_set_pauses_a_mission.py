@@ -12,7 +12,6 @@ priced at. Resume raises a ceiling the owner set, and sets none where there was 
 """
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace as NS
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -70,7 +69,7 @@ def _approve(monkeypatch, run, body):
                         lambda: NS(approve_plan=lambda db, run_id, actor_id: run))
     monkeypatch.setattr(missions, "_run_to_response", lambda approved: approved)
     ctx = NS(workspace_id=uuid4(), user=NS(id="2"))
-    return asyncio.run(missions.approve_plan(run.id, missions.MissionApproveRequest(**body), ctx, MagicMock()))
+    return missions.approve_plan(run.id, missions.MissionApproveRequest(**body), ctx, MagicMock())
 
 
 def test_a_token_budget_typed_at_approval_is_the_owners_ceiling(monkeypatch):

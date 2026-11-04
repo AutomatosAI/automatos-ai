@@ -19,7 +19,6 @@ docstring is the spec; every lane is pinned here:
 """
 from __future__ import annotations
 
-import asyncio
 import os
 import sys
 import uuid
@@ -198,12 +197,12 @@ def test_dependency_403_names_permission_and_returns_ctx():
 
     viewer = _ctx(clerk_user_id="clerk_v")
     with pytest.raises(HTTPException) as ei:
-        asyncio.run(dep(_request(), ctx=viewer, db=_db("viewer")))
+        dep(_request(), ctx=viewer, db=_db("viewer"))
     assert ei.value.status_code == 403
     assert "agents:create" in ei.value.detail
 
     editor = _ctx(clerk_user_id="clerk_e")
-    assert asyncio.run(dep(_request(), ctx=editor, db=_db("editor"))) is editor
+    assert dep(_request(), ctx=editor, db=_db("editor")) is editor
 
 
 def test_dependency_workspace_path_param_mismatch_refuses():
@@ -215,20 +214,16 @@ def test_dependency_workspace_path_param_mismatch_refuses():
 
     owner = _ctx(clerk_user_id="clerk_o", workspace_id=ws)
     with pytest.raises(HTTPException) as ei:
-        asyncio.run(dep(_request({"workspace_id": str(other)}), ctx=owner, db=_db("owner")))
+        dep(_request({"workspace_id": str(other)}), ctx=owner, db=_db("owner"))
     assert ei.value.status_code == 403
 
     # Matching path param passes through to the normal role check.
     owner2 = _ctx(clerk_user_id="clerk_o", workspace_id=ws)
-    assert asyncio.run(
-        dep(_request({"workspace_id": str(ws)}), ctx=owner2, db=_db("owner"))
-    ) is owner2
+    assert dep(_request({"workspace_id": str(ws)}), ctx=owner2, db=_db("owner")) is owner2
 
     # The super-admin operator lane may cross workspaces (PRD-143 posture).
     su = _ctx(system_role="super_admin", clerk_user_id="clerk_su", workspace_id=ws)
-    assert asyncio.run(
-        dep(_request({"workspace_id": str(other)}), ctx=su, db=MagicMock())
-    ) is su
+    assert dep(_request({"workspace_id": str(other)}), ctx=su, db=MagicMock()) is su
 
 
 if __name__ == "__main__":

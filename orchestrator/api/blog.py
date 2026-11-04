@@ -157,7 +157,7 @@ async def update_post(
 
 
 @router.delete("/posts/{post_id}", dependencies=[Depends(require_workspace_permission("documents:delete"))])
-async def delete_post(
+def delete_post(
     post_id: UUID,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),

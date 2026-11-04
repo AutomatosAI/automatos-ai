@@ -455,7 +455,7 @@ def site(db_session, seed_workspace):
 def _history(site, conversation_id):
     from api.widgets.chat import widget_chat_history
 
-    return asyncio.run(widget_chat_history(conversation_id=conversation_id, auth=site.key, db=site.db))
+    return widget_chat_history(conversation_id=conversation_id, auth=site.key, db=site.db)
 
 
 def _send(site, conversation_id=None, agent_id=None, headers=None):
@@ -532,13 +532,23 @@ def test_a_widget_turn_is_marked_with_the_agent_its_key_is_locked_to(site, monke
 
     built, real = [], chatbot.StreamingChatService
 
+    class _NoReply:
+        async def stream_response_with_agent(self, **kwargs):
+            return
+            yield
+
     def _recording(*args, **kwargs):
         built.append(kwargs.get("widget_agent_lock"))
-        return real(*args, **kwargs)
+        real(*args, **kwargs)  # the real service takes the turn's marks
+        return _NoReply()
 
+    async def _stream(response):
+        return [frame async for frame in response.body_iterator]
+
+    # F105: the turn builds its streaming service (on a session of its own) when it streams.
     monkeypatch.setattr(chatbot, "StreamingChatService", _recording)
     agent = _barista(site.db, site.ws)
-    _send(site, agent_id=str(agent))
+    asyncio.run(_stream(_send(site, agent_id=str(agent))))
     site.key.default_agent_id = agent
-    _send(site)
+    asyncio.run(_stream(_send(site)))
     assert built == [None, agent]

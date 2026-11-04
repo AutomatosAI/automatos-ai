@@ -149,7 +149,7 @@ def test_cancel_on_a_missions_card_cancels_the_mission(db_session, seed_workspac
     ws = UUID(seed_workspace())
     run, card, _steps = _mission(db_session, ws)
 
-    out = asyncio.run(cancel_task(card.id, ctx=_owner(ws), db=db_session))
+    out = cancel_task(card.id, ctx=_owner(ws), db=db_session)
 
     db_session.refresh(run)
     assert run.state == RunState.CANCELLED.value                        # night (#0098): the mission ran on
@@ -164,7 +164,7 @@ def test_a_step_of_a_live_mission_is_the_missions_to_cancel(db_session, seed_wor
     _task, queued_card = steps[TaskState.QUEUED]
 
     with pytest.raises(HTTPException) as refused:
-        asyncio.run(cancel_task(queued_card.id, ctx=_owner(ws), db=db_session))
+        cancel_task(queued_card.id, ctx=_owner(ws), db=db_session)
 
     assert refused.value.status_code == 409 and f"/missions/{run.id}" in refused.value.detail
     assert _card(db_session, queued_card).status == "inbox"
@@ -178,7 +178,7 @@ def test_a_step_left_open_by_an_ended_mission_can_be_cancelled(db_session, seed_
     _run_row, _card_row, steps = _mission(db_session, ws, state=RunState.FAILED)
     _task, queued_card = steps[TaskState.QUEUED]
 
-    out = asyncio.run(cancel_task(queued_card.id, ctx=_owner(ws), db=db_session))
+    out = cancel_task(queued_card.id, ctx=_owner(ws), db=db_session)
 
     assert (out["applied"], out["status"]) == (True, "cancelled")
 

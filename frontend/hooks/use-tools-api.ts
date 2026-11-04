@@ -64,19 +64,39 @@ export function useToolCategories() {
   })
 }
 
+export type ToolsSyncResult = Awaited<ReturnType<typeof apiClient.syncToolsCache>>
+
+export const SYNC_ALREADY_RUNNING_TITLE = 'A catalogue sync is already running.'
+export const SYNC_FAILED_TITLE = 'Sync failed'
+export const SYNC_FAILED_FALLBACK = 'The catalogue sync did not complete. The backend log has the details.'
+
+/**
+ * The sync route answers 200 with the job, so a sync that failed (Composio rejected
+ * the key, say) or one already running must not read as "finished".
+ */
+function announceSyncResult(result: ToolsSyncResult) {
+  if (result?.already_running) {
+    toast(SYNC_ALREADY_RUNNING_TITLE, { description: 'This Sync did not start another one. Refresh the page when it is done.' })
+  } else if (result?.status === 'failed') {
+    toast.error(SYNC_FAILED_TITLE, { description: result.error || SYNC_FAILED_FALLBACK })
+  } else {
+    toast('Sync started/completed', { description: 'Marketplace cache sync finished. Refreshing tools list…' })
+  }
+}
+
 export function useSyncToolsCache() {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: (syncType: 'full' | 'incremental' = 'full') => apiClient.syncToolsCache(syncType),
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['tools'] })
       queryClient.invalidateQueries({ queryKey: ['tools', 'stats'] })
       queryClient.invalidateQueries({ queryKey: ['tools', 'categories'] })
-      toast('Sync started/completed', { description: 'Marketplace cache sync finished. Refreshing tools list…' })
+      announceSyncResult(result)
     },
     onError: (error: any) => {
-      toast.error('Sync failed', { description: error.message || 'Failed to sync tools cache.' })
+      toast.error(SYNC_FAILED_TITLE, { description: error.message || 'Failed to sync tools cache.' })
     },
   })
 }

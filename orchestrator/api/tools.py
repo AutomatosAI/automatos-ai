@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hmac
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from anyio import from_thread
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -22,12 +22,13 @@ from sqlalchemy.orm import Session
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
+from core.composio.bootstrap import in_flight_sync_job
 from core.composio.client import composio_available, composio_unavailable_reason, get_composio_client
 from core.composio.entity_manager import EntityManager
 from core.composio.pending_connections import CONNECTED, PENDING, is_pending, settle_pending
 from core.database.database import get_db
 from core.models.composio_cache import ComposioActionCache, ComposioAppCache, ComposioStatsCache, ComposioSyncJob
-from services.metadata_sync_service import MetadataSyncService
+from services.metadata_sync_service import MetadataSyncService, failed_job_reason
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -144,6 +145,8 @@ class IntegrationsStatusOut(BaseModel):
     last_sync: Optional[str] = None
     # Latest composio_sync_jobs row: running | completed | failed | None (never synced).
     sync_status: Optional[str] = None
+    # Why that sync failed, when the reason is one for people (Composio rejected the key).
+    sync_error: Optional[str] = None
 
 
 class ConnectIn(BaseModel):
@@ -156,23 +159,10 @@ class ConnectIn(BaseModel):
     auth_config_id: Optional[str] = None
 
 
-@router.get("/marketplace", response_model=MarketplaceOut)
-async def marketplace(
-    category: Optional[str] = Query(None),
-    search: Optional[str] = Query(None),
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    # Connected apps for this workspace (from DB ONLY - no API calls)
-    # PERFORMANCE FIX: Removed pending connection sync from page loads.
-    # Pending connections are now only synced:
-    # 1. After OAuth callback (in composio.py)
-    # 2. Via manual refresh endpoint
-    # This eliminates 48+ Composio API calls on every page load.
+def _marketplace_connected_set(db: Session, workspace_id: Any) -> set:
+    """The workspace's active app names, read from the DB only (no Composio calls)."""
     entity_manager = EntityManager(db)
-    entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
+    entity = entity_manager.get_entity_by_workspace(workspace_id)
     connected_set = set()
     if entity:
         connections = entity_manager.get_entity_connections(entity["id"])
@@ -182,14 +172,11 @@ async def marketplace(
             for c in connections
             if (c.get("status") or "").lower() == "active"
         }
+    return connected_set
 
-    # Read stats from composio_stats_cache (populated by /api/tools/sync)
-    stats_rows = db.query(ComposioStatsCache).all()
-    stats = {r.stat_key: r.stat_value for r in stats_rows}
-    last_synced = (stats.get("last_full_sync") or {}).get("timestamp")
 
-    # Cache-only marketplace (no live fallback).
-    # Internal tools should never appear here.
+def _marketplace_apps_query(db: Session, category: Optional[str], search: Optional[str]):
+    """Cache-only marketplace (no live fallback). Internal tools should never appear here."""
     q = db.query(ComposioAppCache).filter(
         ComposioAppCache.status == "ACTIVE",
         ~ComposioAppCache.app_name.in_(INTERNAL_APP_NAMES),
@@ -203,7 +190,62 @@ async def marketplace(
             | (ComposioAppCache.app_name.ilike(st))
             | (ComposioAppCache.description.ilike(st))
         )
+    return q
 
+
+def _marketplace_app_out(a: ComposioAppCache, connected_set: set) -> AppOut:
+    """One marketplace app, with its triggers from app_metadata."""
+    # Extract triggers from app_metadata JSONB field
+    meta = a.app_metadata or {}
+    triggers = meta.get("triggers") or []
+
+    # If triggers are missing but trigger_count > 0, log a warning
+    # This indicates triggers weren't synced properly
+    if not triggers and a.trigger_count > 0:
+        logger.warning(
+            f"App {a.app_name} has trigger_count={a.trigger_count} but no triggers in metadata. "
+            f"Re-sync may be needed: POST /api/tools/sync"
+        )
+
+    return AppOut(
+        id=a.id,
+        app_name=a.app_name,
+        display_name=a.display_name,
+        description=a.description,
+        logo_url=a.logo_url,
+        categories=a.categories or [],
+        auth_schemes=a.auth_schemes or [],
+        action_count=a.action_count or 0,
+        trigger_count=a.trigger_count or 0,
+        status=a.status,
+        is_connected=a.app_name.upper() in connected_set,
+        triggers=triggers,  # Include triggers array
+    )
+
+
+@router.get("/marketplace", response_model=MarketplaceOut)
+def marketplace(
+    category: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    # Connected apps for this workspace (from DB ONLY - no API calls)
+    # PERFORMANCE FIX: Removed pending connection sync from page loads.
+    # Pending connections are now only synced:
+    # 1. After OAuth callback (in composio.py)
+    # 2. Via manual refresh endpoint
+    # This eliminates 48+ Composio API calls on every page load.
+    connected_set = _marketplace_connected_set(db, ctx.workspace_id)
+
+    # Read stats from composio_stats_cache (populated by /api/tools/sync)
+    stats_rows = db.query(ComposioStatsCache).all()
+    stats = {r.stat_key: r.stat_value for r in stats_rows}
+    last_synced = (stats.get("last_full_sync") or {}).get("timestamp")
+
+    q = _marketplace_apps_query(db, category, search)
     total_apps = q.count()
     apps = (
         q.order_by(ComposioAppCache.action_count.desc())
@@ -213,37 +255,8 @@ async def marketplace(
     )
 
     # Build response with triggers from app_metadata
-    apps_out = []
-    for a in apps:
-        # Extract triggers from app_metadata JSONB field
-        meta = a.app_metadata or {}
-        triggers = meta.get("triggers") or []
-        
-        # If triggers are missing but trigger_count > 0, log a warning
-        # This indicates triggers weren't synced properly
-        if not triggers and a.trigger_count > 0:
-            logger.warning(
-                f"App {a.app_name} has trigger_count={a.trigger_count} but no triggers in metadata. "
-                f"Re-sync may be needed: POST /api/tools/sync"
-            )
-        
-        apps_out.append(
-            AppOut(
-                id=a.id,
-                app_name=a.app_name,
-                display_name=a.display_name,
-                description=a.description,
-                logo_url=a.logo_url,
-                categories=a.categories or [],
-                auth_schemes=a.auth_schemes or [],
-                action_count=a.action_count or 0,
-                trigger_count=a.trigger_count or 0,
-                status=a.status,
-                is_connected=a.app_name.upper() in connected_set,
-                triggers=triggers,  # Include triggers array
-            )
-        )
-    
+    apps_out = [_marketplace_app_out(a, connected_set) for a in apps]
+
     return MarketplaceOut(
         apps=apps_out,
         total_apps=total_apps,
@@ -254,7 +267,7 @@ async def marketplace(
 
 
 @router.get("/stats", response_model=StatsOut)
-async def stats(
+def stats(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -281,7 +294,7 @@ async def stats(
 
 
 @router.get("/integrations/status", response_model=IntegrationsStatusOut)
-async def integrations_status(
+def integrations_status(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -312,6 +325,7 @@ async def integrations_status(
         apps_cached=int(apps_cached),
         last_sync=last_sync,
         sync_status=latest_job.status if latest_job else None,
+        sync_error=failed_job_reason(latest_job),
     )
 
 
@@ -416,7 +430,7 @@ def connected(
 
 
 @router.get("/{app_name}/actions")
-async def app_actions(
+def app_actions(
     app_name: str,
     search: Optional[str] = Query(None),
     # NOTE: Many apps (e.g., GitHub) exceed 500 actions.
@@ -466,7 +480,7 @@ async def app_actions(
 
 
 @router.get("/{app_name}/triggers")
-async def app_triggers(
+def app_triggers(
     app_name: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -486,7 +500,7 @@ async def app_triggers(
 
 
 @router.post("/{app_name}/actions", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def save_app_actions(
+def save_app_actions(
     app_name: str,
     payload: Dict[str, Any],
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -565,7 +579,7 @@ def connect_app(
 
 @router.get("")
 @router.get("/")
-async def tools_index(
+def tools_index(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -576,7 +590,7 @@ async def tools_index(
     Returns this workspace's tools, the same shape as ``/workspace``, plus the
     routes that answer the narrower questions.
     """
-    payload = await workspace_tools(ctx=ctx, db=db)
+    payload = workspace_tools(ctx=ctx, db=db)
     if isinstance(payload, dict):
         payload = {
             **payload,
@@ -593,7 +607,7 @@ async def tools_index(
 
 
 @router.get("/workspace")
-async def workspace_tools(
+def workspace_tools(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -647,35 +661,10 @@ async def workspace_tools(
     return {"apps": out, "total": len(out)}
 
 
-@router.post("/add-to-workspace", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def add_to_workspace(
-    payload: ConnectIn,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    """
-    Add a tool to workspace without OAuth connection.
-    This creates a workspace record so the tool appears in Applications tab.
-    User can then click Connect to initiate OAuth.
-    """
-    logger.info(f"[ADD_TO_WORKSPACE] app={payload.app_name}, workspace={ctx.workspace_id}, user_id={ctx.user.id if ctx.user else 'None'}")
-
-    logger.info("[ADD_TO_WORKSPACE] Step 1: Creating EntityManager...")
-    entity_manager = EntityManager(db)
-
-    logger.info("[ADD_TO_WORKSPACE] Step 2: Getting or creating entity...")
-    entity = entity_manager.get_or_create_entity(ctx.workspace_id)
-    logger.info(f"[ADD_TO_WORKSPACE] Entity result: {entity}")
-
-    app_name = payload.app_name.upper()
-    logger.info(f"[ADD_TO_WORKSPACE] Step 3: Normalized app_name: {app_name}")
-
-    # Check if already exists
-    logger.info("[ADD_TO_WORKSPACE] Step 4: Checking existing connections...")
-    existing = entity_manager.get_entity_connections(entity["id"])
-    logger.info(f"[ADD_TO_WORKSPACE] Found {len(existing)} existing connections")
-    logger.info(f"[ADD_TO_WORKSPACE] Existing connections: {[c.get('app_name') for c in existing]}")
-
+def _add_to_workspace_existing(entity_manager: EntityManager, db: Session, entity: Dict[str, Any],
+                               existing: List[Dict[str, Any]], app_name: str) -> Optional[Dict[str, Any]]:
+    """The answer when ``app_name`` is already a workspace record (a pending one is reset to
+    added), or None when it is not there yet."""
     for conn in existing:
         if (conn.get("app_name") or "").upper() == app_name:
             current_status = (conn.get("status") or "").lower()
@@ -706,6 +695,41 @@ async def add_to_workspace(
                 "message": f"{app_name} is already in your workspace",
                 "app_name": app_name
             }
+    return None
+
+
+@router.post("/add-to-workspace", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
+def add_to_workspace(
+    payload: ConnectIn,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """
+    Add a tool to workspace without OAuth connection.
+    This creates a workspace record so the tool appears in Applications tab.
+    User can then click Connect to initiate OAuth.
+    """
+    logger.info(f"[ADD_TO_WORKSPACE] app={payload.app_name}, workspace={ctx.workspace_id}, user_id={ctx.user.id if ctx.user else 'None'}")
+
+    logger.info("[ADD_TO_WORKSPACE] Step 1: Creating EntityManager...")
+    entity_manager = EntityManager(db)
+
+    logger.info("[ADD_TO_WORKSPACE] Step 2: Getting or creating entity...")
+    entity = entity_manager.get_or_create_entity(ctx.workspace_id)
+    logger.info(f"[ADD_TO_WORKSPACE] Entity result: {entity}")
+
+    app_name = payload.app_name.upper()
+    logger.info(f"[ADD_TO_WORKSPACE] Step 3: Normalized app_name: {app_name}")
+
+    # Check if already exists
+    logger.info("[ADD_TO_WORKSPACE] Step 4: Checking existing connections...")
+    existing = entity_manager.get_entity_connections(entity["id"])
+    logger.info(f"[ADD_TO_WORKSPACE] Found {len(existing)} existing connections")
+    logger.info(f"[ADD_TO_WORKSPACE] Existing connections: {[c.get('app_name') for c in existing]}")
+
+    answer = _add_to_workspace_existing(entity_manager, db, entity, existing, app_name)
+    if answer is not None:
+        return answer
 
     # Add connection with status "added" (not connected yet)
     logger.info(f"[ADD_TO_WORKSPACE] Step 5: Adding connection to database...")
@@ -728,7 +752,7 @@ async def add_to_workspace(
 
 
 @router.get("/debug/connections")
-async def debug_connections(
+def debug_connections(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -763,7 +787,7 @@ async def debug_connections(
 
 
 @router.delete("/remove-from-workspace/{app_name}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def remove_from_workspace(
+def remove_from_workspace(
     app_name: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -803,7 +827,7 @@ async def remove_from_workspace(
 
 
 @router.post("/sync", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def sync(
+def sync(
     sync_type: str = Query("full", description="full or incremental"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -814,6 +838,11 @@ async def sync(
     # worked and the catalogue stayed empty. Say what is actually wrong instead.
     if not composio_available():
         raise HTTPException(status_code=400, detail=composio_unavailable_reason())
+    # One sync at a time: the boot sync, or an earlier click, may still be running.
+    running = in_flight_sync_job(db)
+    if running is not None:
+        logger.info(f"Sync already in flight (job {running.id}); not starting another")
+        return {**running.to_dict(), "job_id": running.id, "already_running": True}
     service = MetadataSyncService(db)
     if sync_type == "incremental":
         result = service.run_incremental_sync()
@@ -824,7 +853,7 @@ async def sync(
 
 
 @router.post("/sync/backfill-params", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def backfill_params(
+def backfill_params(
     request: Request,
     apps: str = Query(None, description="Comma-separated app names (e.g. JIRA,GITHUB,SLACK). Omit for auto."),
     db: Session = Depends(get_db),
@@ -904,7 +933,7 @@ def refresh_connections(
 
 
 @router.get("/sync/history")
-async def sync_history(
+def sync_history(
     limit: int = Query(10, ge=1, le=50),
     db: Session = Depends(get_db),
 ):
@@ -921,8 +950,59 @@ class SuggestionsOut(BaseModel):
     has_context: bool = False  # PRD-41: Whether context suggestions were included
 
 
+def _get_tool_suggestions_from_contexts(app_name_upper: str, contexts: List[Dict[str, Any]]) -> Tuple[List[str], bool]:
+    """Context-aware suggestions from the entities of the most recent context that has some."""
+    context_suggestions: List[str] = []
+    has_context = False
+    # Generate context-aware suggestions from entities
+    for context in contexts:
+        entities = context.get("entities", {})
+        logger.info(f"[ContextSuggestions] Context entities: {entities}")
+        if entities:
+            context_sugg = generate_context_suggestions(
+                app_name_upper,
+                entities,
+                limit=2
+            )
+            logger.info(f"[ContextSuggestions] Generated {len(context_sugg)} context suggestions: {context_sugg}")
+            context_suggestions.extend(context_sugg)
+            if context_sugg:
+                has_context = True
+            break  # Use most recent context only
+    return context_suggestions, has_context
+
+
+def _get_tool_suggestions_context(app_name_upper: str, workspace_id: Optional[str], context_user_id: Any,
+                                  session_id: Optional[str]) -> Tuple[List[str], bool]:
+    """PRD-41: the context suggestions and whether there were any; none without a session."""
+    if not (context_user_id and session_id):
+        return [], False
+    try:
+        from modules.memory.context_manager import get_recent_tool_context
+
+        logger.info(f"[ContextSuggestions] Fetching for workspace_id={workspace_id}, user_id={context_user_id}, app={app_name_upper}")
+
+        # Query Redis for recent tool context (10-minute TTL)
+        contexts = get_recent_tool_context(
+            user_id=context_user_id,
+            tool_name=app_name_upper,
+            max_age_minutes=10,
+            limit=5
+        )
+
+        logger.info(f"[ContextSuggestions] Retrieved {len(contexts) if contexts else 0} contexts from Redis for user_id={context_user_id}")
+
+        if contexts:
+            return _get_tool_suggestions_from_contexts(app_name_upper, contexts)
+
+    except Exception as e:  # noqa: BLE001 — suggestions fall back to the catalogue's own
+        logger.warning(f"Failed to retrieve context suggestions for {app_name_upper}: {e}")
+        # Continue with Phase 1 behavior
+    return [], False
+
+
 @router.get("/{app_name}/suggestions", response_model=SuggestionsOut)
-async def get_tool_suggestions(
+def get_tool_suggestions(
     app_name: str,
     session_id: Optional[str] = Query(None),
     request: Request = None,
@@ -949,50 +1029,14 @@ async def get_tool_suggestions(
     app_name_upper = app_name.upper()
 
     # PRD-41: Check for context-aware suggestions if user_id or workspace provided
-    context_suggestions = []
-    has_context = False
-
     # Derive user_id from auth context, fall back to workspace-based ID
     user_id = ctx.user.id
     workspace_id = str(ctx.workspace_id) if ctx.workspace_id else None
     context_user_id = user_id if user_id else (f"ws_{workspace_id}" if workspace_id else None)
 
-    if context_user_id and session_id:
-        try:
-            from modules.memory.context_manager import get_recent_tool_context
-
-            logger.info(f"[ContextSuggestions] Fetching for workspace_id={workspace_id}, user_id={context_user_id}, app={app_name_upper}")
-
-            # Query Redis for recent tool context (10-minute TTL)
-            contexts = get_recent_tool_context(
-                user_id=context_user_id,
-                tool_name=app_name_upper,
-                max_age_minutes=10,
-                limit=5
-            )
-
-            logger.info(f"[ContextSuggestions] Retrieved {len(contexts) if contexts else 0} contexts from Redis for user_id={context_user_id}")
-
-            if contexts:
-                # Generate context-aware suggestions from entities
-                for context in contexts:
-                    entities = context.get("entities", {})
-                    logger.info(f"[ContextSuggestions] Context entities: {entities}")
-                    if entities:
-                        context_sugg = generate_context_suggestions(
-                            app_name_upper,
-                            entities,
-                            limit=2
-                        )
-                        logger.info(f"[ContextSuggestions] Generated {len(context_sugg)} context suggestions: {context_sugg}")
-                        context_suggestions.extend(context_sugg)
-                        if context_sugg:
-                            has_context = True
-                        break  # Use most recent context only
-
-        except Exception as e:
-            logger.warning(f"Failed to retrieve context suggestions for {app_name_upper}: {e}")
-            # Continue with Phase 1 behavior
+    context_suggestions, has_context = _get_tool_suggestions_context(
+        app_name_upper, workspace_id, context_user_id, session_id
+    )
 
     # Get curated or generated suggestions (Phase 1)
     base_suggestions = []

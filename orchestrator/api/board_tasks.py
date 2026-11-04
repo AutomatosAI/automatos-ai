@@ -430,7 +430,7 @@ async def stream_board_events(
 
 
 @router.get("/{task_id}")
-async def get_task(
+def get_task(
     task_id: int,
     ctx: RequestContext = Depends(require_task_context(TASKS_READ)),
     db: Session = Depends(get_db),
@@ -571,7 +571,7 @@ async def update_task(
 
 
 @router.delete("/{task_id}", dependencies=[Depends(require_workspace_permission("missions:delete"))])
-async def delete_task(
+def delete_task(
     task_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -1071,7 +1071,7 @@ def _redispatch_task(db: Session, task: BoardTask) -> bool:
 
 
 @router.post("/{task_id}/run-now", dependencies=[Depends(require_workspace_permission("missions:execute"))])
-async def run_task_now(
+def run_task_now(
     task_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -1312,7 +1312,7 @@ class SessionDecisionBody(BaseModel):
 
 
 @router.post("/{task_id}/session-decision", dependencies=[Depends(require_workspace_permission("missions:update"))])
-async def decide_session_permission_route(
+def decide_session_permission_route(
     task_id: int,
     body: SessionDecisionBody,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1334,7 +1334,7 @@ async def decide_session_permission_route(
 
 
 @router.post("/{task_id}/cancel", dependencies=[Depends(require_workspace_permission("missions:update"))])
-async def cancel_task(
+def cancel_task(
     task_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

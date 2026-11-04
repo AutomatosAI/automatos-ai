@@ -10,6 +10,7 @@ Fetches usage data from OpenRouter's management API endpoints:
 Syncs activity data into the local llm_usage table for analytics queries.
 """
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -72,7 +73,8 @@ class OpenRouterAnalyticsService:
         if not rows:
             return {"synced": 0, "skipped": 0}
 
-        return self._upsert_activity_rows(rows, workspace_id)
+        # The upsert is synchronous SQLAlchemy: off the event loop (AGENTS.md).
+        return await asyncio.to_thread(self._upsert_activity_rows, rows, workspace_id)
 
     def _upsert_activity_rows(
         self, rows: List[Dict[str, Any]], workspace_id: UUID

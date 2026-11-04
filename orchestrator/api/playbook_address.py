@@ -18,7 +18,7 @@ from __future__ import annotations
 import functools
 import inspect
 import re
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from core.models.core import RecipeExecution, WorkflowTemplate
 from core.playbook_steps import steps_as_written
 
-Route = Callable[..., Awaitable[Dict[str, Any]]]
+Route = Callable[..., Dict[str, Any]]
 
 WORKSPACE_PLAYBOOK = "workspace"
 # A listed number: ASCII digits that fit the id column (a Postgres integer).
@@ -78,11 +78,14 @@ def edits_it_by_number_too(update: Route) -> Route:
     """The playbook edit route (``PUT /api/workflow-recipes/{recipe_id}``) at its
     address, by template id or by number, a 404 naming the address when the
     workspace has neither (F292). The steps it is sent are taken as written: each
-    with its order, none with the agent summary only a read adds."""
+    with its order, none with the agent summary only a read adds.
+
+    F105 (4 Nov): a plain ``def``, like the route it wraps, so FastAPI runs the lookup and
+    the edit in its threadpool, never on the event loop."""
     signature = inspect.signature(update)
 
     @functools.wraps(update)
-    async def edited(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+    def edited(*args: Any, **kwargs: Any) -> Dict[str, Any]:
         call = signature.bind(*args, **kwargs)
         given = call.arguments
         playbook = playbook_at(given["db"], given["ctx"].workspace_id, given["recipe_id"])
@@ -90,5 +93,5 @@ def edits_it_by_number_too(update: Route) -> Route:
         if isinstance(data, dict) and "steps" in data:
             data = {**data, "steps": steps_as_written(data["steps"])}
         given["recipe_id"], given["recipe_data"] = playbook.template_id, data
-        return await update(*call.args, **call.kwargs)
+        return update(*call.args, **call.kwargs)
     return edited

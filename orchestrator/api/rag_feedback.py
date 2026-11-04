@@ -50,7 +50,7 @@ class FeedbackStatsResponse(BaseModel):
 # --- Endpoints ---
 
 @router.post("", dependencies=[Depends(require_workspace_permission("agents:execute"))])
-async def submit_feedback(
+def submit_feedback(
     feedback: RAGFeedbackRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -81,7 +81,7 @@ async def submit_feedback(
 
 
 @router.get("/stats")
-async def get_feedback_stats(
+def get_feedback_stats(
     time_range: str = Query("7d", pattern="^(7d|30d|90d|all)$"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -128,7 +128,7 @@ async def get_feedback_stats(
 
 
 @router.get("/recent")
-async def get_recent_feedback(
+def get_recent_feedback(
     limit: int = Query(20, ge=1, le=100),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

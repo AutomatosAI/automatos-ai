@@ -140,7 +140,7 @@ _VISIBILITY_PREDICATE = (
 
 @router.get("", response_model=NotificationListResponse)
 @router.get("/", response_model=NotificationListResponse)
-async def list_notifications(
+def list_notifications(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     unread_only: bool = Query(False),
@@ -197,7 +197,7 @@ async def list_notifications(
 
 
 @router.get("/unread-count", response_model=UnreadCountResponse)
-async def unread_count(
+def unread_count(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> UnreadCountResponse:
@@ -223,8 +223,118 @@ async def unread_count(
     return UnreadCountResponse(success=True, count=int(count or 0))
 
 
+def _bulk_update_preferences_validate(payload: PreferenceBulkUpdateRequest) -> None:
+    """Fail fast (400) on unknown event types/destinations before any DB write."""
+    # Validation pass — fail fast before any DB write
+    for pref in payload.preferences:
+        if pref.event_type not in VALID_EVENT_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown event_type: {pref.event_type}",
+            )
+        if pref.destination not in _VALID_DESTINATIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown destination: {pref.destination}",
+            )
+        if pref.destination == "channel" and not pref.channel_connection_id:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"destination='channel' requires channel_connection_id "
+                    f"(event_type={pref.event_type})"
+                ),
+            )
+
+
+def _bulk_update_preferences_check_connections(
+    db: Session, ctx: RequestContext, payload: PreferenceBulkUpdateRequest
+) -> None:
+    """400 unless every referenced channel_connection_id belongs to this workspace."""
+    # Validate any referenced channel_connection_id belongs to this workspace
+    referenced_connections = {
+        p.channel_connection_id for p in payload.preferences if p.channel_connection_id
+    }
+    if referenced_connections:
+        try:
+            valid_rows = db.execute(
+                text(
+                    "SELECT id FROM channel_connections "
+                    "WHERE workspace_id = :ws_id "
+                    "  AND id = ANY(:ids)"
+                ),
+                {
+                    "ws_id": str(ctx.workspace_id),
+                    "ids": list(referenced_connections),
+                },
+            ).fetchall()
+        except Exception as exc:
+            logger.exception("Failed to validate channel_connection ids")
+            raise HTTPException(
+                status_code=500, detail="Failed to validate channel connections"
+            ) from exc
+        valid_ids = {str(r[0]) for r in valid_rows}
+        missing = referenced_connections - valid_ids
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"channel_connection_id not in workspace: {sorted(missing)}",
+            )
+
+
+def _bulk_update_preferences_write(
+    db: Session,
+    ctx: RequestContext,
+    user_id,
+    payload: PreferenceBulkUpdateRequest,
+    affected_event_types: set,
+) -> int:
+    """Delete the user's rows for the touched event types and insert the new ones; returns the count."""
+    # Delete every user-scoped row for the touched event_types in this workspace
+    if affected_event_types:
+        db.execute(
+            text(
+                """
+                DELETE FROM notification_preferences
+                 WHERE workspace_id = :ws_id
+                   AND user_id = :user_id
+                   AND event_type = ANY(:event_types)
+                """
+            ),
+            {
+                "ws_id": str(ctx.workspace_id),
+                "user_id": user_id,
+                "event_types": list(affected_event_types),
+            },
+        )
+
+    updated = 0
+    for pref in payload.preferences:
+        db.execute(
+            text(
+                """
+                INSERT INTO notification_preferences
+                    (workspace_id, user_id, event_type, destination,
+                     channel_connection_id, enabled)
+                VALUES (:ws_id, :user_id, :event_type, :destination,
+                        :channel_connection_id, :enabled)
+                """
+            ),
+            {
+                "ws_id": str(ctx.workspace_id),
+                "user_id": user_id,
+                "event_type": pref.event_type,
+                "destination": pref.destination,
+                "channel_connection_id": pref.channel_connection_id,
+                "enabled": pref.enabled,
+            },
+        )
+        updated += 1
+    return updated
+
+
 @router.post("/{notification_id}/read", response_model=SimpleSuccessResponse, dependencies=[Depends(require_workspace_permission("members:read"))])
-async def mark_read(
+def mark_read(
     notification_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -419,7 +529,7 @@ def list_preferences(
 
 @preferences_router.put("", response_model=PreferenceBulkUpdateResponse, dependencies=[Depends(require_workspace_permission("members:read"))])
 @preferences_router.put("/", response_model=PreferenceBulkUpdateResponse, dependencies=[Depends(require_workspace_permission("members:read"))])
-async def bulk_update_preferences(
+def bulk_update_preferences(
     payload: PreferenceBulkUpdateRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -437,100 +547,14 @@ async def bulk_update_preferences(
             detail="Notification preferences require an authenticated user",
         )
 
-    # Validation pass — fail fast before any DB write
-    for pref in payload.preferences:
-        if pref.event_type not in VALID_EVENT_TYPES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unknown event_type: {pref.event_type}",
-            )
-        if pref.destination not in _VALID_DESTINATIONS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unknown destination: {pref.destination}",
-            )
-        if pref.destination == "channel" and not pref.channel_connection_id:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"destination='channel' requires channel_connection_id "
-                    f"(event_type={pref.event_type})"
-                ),
-            )
+    _bulk_update_preferences_validate(payload)
 
-    # Validate any referenced channel_connection_id belongs to this workspace
-    referenced_connections = {
-        p.channel_connection_id for p in payload.preferences if p.channel_connection_id
-    }
-    if referenced_connections:
-        try:
-            valid_rows = db.execute(
-                text(
-                    "SELECT id FROM channel_connections "
-                    "WHERE workspace_id = :ws_id "
-                    "  AND id = ANY(:ids)"
-                ),
-                {
-                    "ws_id": str(ctx.workspace_id),
-                    "ids": list(referenced_connections),
-                },
-            ).fetchall()
-        except Exception:
-            logger.exception("Failed to validate channel_connection ids")
-            raise HTTPException(
-                status_code=500, detail="Failed to validate channel connections"
-            )
-        valid_ids = {str(r[0]) for r in valid_rows}
-        missing = referenced_connections - valid_ids
-        if missing:
-            raise HTTPException(
-                status_code=400,
-                detail=f"channel_connection_id not in workspace: {sorted(missing)}",
-            )
+    _bulk_update_preferences_check_connections(db, ctx, payload)
 
     affected_event_types = {p.event_type for p in payload.preferences}
 
     try:
-        # Delete every user-scoped row for the touched event_types in this workspace
-        if affected_event_types:
-            db.execute(
-                text(
-                    """
-                    DELETE FROM notification_preferences
-                     WHERE workspace_id = :ws_id
-                       AND user_id = :user_id
-                       AND event_type = ANY(:event_types)
-                    """
-                ),
-                {
-                    "ws_id": str(ctx.workspace_id),
-                    "user_id": user_id,
-                    "event_types": list(affected_event_types),
-                },
-            )
-
-        updated = 0
-        for pref in payload.preferences:
-            db.execute(
-                text(
-                    """
-                    INSERT INTO notification_preferences
-                        (workspace_id, user_id, event_type, destination,
-                         channel_connection_id, enabled)
-                    VALUES (:ws_id, :user_id, :event_type, :destination,
-                            :channel_connection_id, :enabled)
-                    """
-                ),
-                {
-                    "ws_id": str(ctx.workspace_id),
-                    "user_id": user_id,
-                    "event_type": pref.event_type,
-                    "destination": pref.destination,
-                    "channel_connection_id": pref.channel_connection_id,
-                    "enabled": pref.enabled,
-                },
-            )
-            updated += 1
+        updated = _bulk_update_preferences_write(db, ctx, user_id, payload, affected_event_types)
 
         db.commit()
     except HTTPException:
@@ -546,7 +570,7 @@ async def bulk_update_preferences(
 
 
 @router.post("/read-all", response_model=ReadAllResponse, dependencies=[Depends(require_workspace_permission("members:read"))])
-async def mark_all_read(
+def mark_all_read(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> ReadAllResponse:
@@ -577,7 +601,7 @@ async def mark_all_read(
 
 
 @router.post("/{notification_id}/dismiss", response_model=SimpleSuccessResponse, dependencies=[Depends(require_workspace_permission("members:read"))])
-async def dismiss(
+def dismiss(
     notification_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

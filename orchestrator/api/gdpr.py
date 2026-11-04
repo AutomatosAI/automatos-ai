@@ -37,7 +37,7 @@ def _actor_ref(ctx: RequestContext) -> str:
 
 
 @router.get("/export")
-async def export_my_workspace(
+def export_my_workspace(
     ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),
 ) -> JSONResponse:
@@ -49,7 +49,7 @@ async def export_my_workspace(
 
 
 @router.post("/erase")
-async def erase_my_workspace(
+def erase_my_workspace(
     body: Dict[str, Any] = Body(default_factory=dict),
     ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),
@@ -72,7 +72,7 @@ async def erase_my_workspace(
 
 
 @router.post("/erase-subject")
-async def erase_subject(
+def erase_subject(
     body: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),

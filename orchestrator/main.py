@@ -330,6 +330,7 @@ async def _seed_semantic_embeddings(leader: bool):
         embed_all_agents_on_startup,
         ensure_field_memory_collection,
         warm_action_index_on_startup,
+        warm_first_turn_on_startup,
         warm_output_budgets_on_startup,
     )
 
@@ -341,6 +342,8 @@ async def _seed_semantic_embeddings(leader: bool):
     # vectors in this process's memory (Redis caches only the texts' embeddings),
     # so a worker that skipped it would rank its first turns on a cold index.
     _asyncio.create_task(warm_action_index_on_startup())
+    # F105: and loads its first turn's modules off the loop (tokenizer, graph service, platform executor).
+    _asyncio.create_task(warm_first_turn_on_startup())
 
 
 async def _bootstrap_composio_catalog() -> None:

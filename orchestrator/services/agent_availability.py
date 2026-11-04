@@ -148,12 +148,15 @@ def _as_configured(listed: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             for a in listed if a.get("runtime") != RUNTIME_CLI or a.get("cli_provider")]
 
 
-def with_unavailable(endpoint: Callable[..., Awaitable[List[Any]]]) -> Callable[..., Awaitable[List[Any]]]:
+def with_unavailable(endpoint: Callable[..., List[Any]]) -> Callable[..., List[Any]]:
     """Wrap the Agents page's list (GET /api/agents/): an agent that can't run now
-    carries ``unavailable``, the sentence the page shows beside it."""
+    carries ``unavailable``, the sentence the page shows beside it.
+
+    F105 (4 Nov): a plain ``def``, like the list it wraps, so FastAPI runs the list and
+    the availability check in its threadpool, never on the event loop."""
     @functools.wraps(endpoint)
-    async def wrapped(*args: Any, **kwargs: Any) -> List[Any]:
-        responses = await endpoint(*args, **kwargs)
+    def wrapped(*args: Any, **kwargs: Any) -> List[Any]:
+        responses = endpoint(*args, **kwargs)
         ctx, db = kwargs.get("ctx"), kwargs.get("db")
         if not responses or ctx is None or db is None:
             return responses

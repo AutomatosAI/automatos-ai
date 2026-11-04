@@ -128,7 +128,7 @@ def test_audit_log_scoped_to_ctx_workspace(new_session, two_workspaces):
 
     # NB: called directly (not via FastAPI), so limit/offset are passed
     # explicitly — the Query(...) defaults only resolve under a real request.
-    resp = asyncio.run(gov.get_audit_log(ctx=_ctx(ws_a), db=s, limit=50, offset=0))
+    resp = gov.get_audit_log(ctx=_ctx(ws_a), db=s, limit=50, offset=0)
     actions = [r["action"] for r in resp["rows"]]
     assert resp["total"] == 2, "only this workspace's rows are counted"
     assert set(actions) == {"policy:deny", "gdpr:export"}
@@ -147,17 +147,17 @@ def test_audit_log_filters_compose(new_session, two_workspaces):
     s.commit()
 
     # action_prefix (limit/offset explicit — direct call, no FastAPI to resolve Query)
-    policy = asyncio.run(gov.get_audit_log(ctx=_ctx(ws_a), db=s, action_prefix="policy:", limit=50, offset=0))
+    policy = gov.get_audit_log(ctx=_ctx(ws_a), db=s, action_prefix="policy:", limit=50, offset=0)
     assert all(r["action"].startswith("policy:") for r in policy["rows"])
     assert policy["total"] == 3
 
     # actor_type
-    sys_rows = asyncio.run(gov.get_audit_log(ctx=_ctx(ws_a), db=s, actor_type="system", limit=50, offset=0))
+    sys_rows = gov.get_audit_log(ctx=_ctx(ws_a), db=s, actor_type="system", limit=50, offset=0)
     assert all(r["actor_type"] == "system" for r in sys_rows["rows"])
 
     # since window drops the 10-day-old row
     since = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-    recent = asyncio.run(gov.get_audit_log(ctx=_ctx(ws_a), db=s, action_prefix="policy:", since=since, limit=50, offset=0))
+    recent = gov.get_audit_log(ctx=_ctx(ws_a), db=s, action_prefix="policy:", since=since, limit=50, offset=0)
     assert recent["total"] == 2, "the 10-day-old policy row is filtered out by since"
     s.close()
 
@@ -169,12 +169,12 @@ def test_governance_status_reports_flag_honestly(new_session, two_workspaces, mo
     s.commit()
 
     monkeypatch.setattr(gov, "policy_plane_enabled", lambda: False)
-    off = asyncio.run(gov.get_status(ctx=_ctx(ws_a), db=s))
+    off = gov.get_status(ctx=_ctx(ws_a), db=s)
     assert off["policy_plane"]["enforcing"] is False, "an OFF plane reads OFF, loudly"
     assert off["audit"]["policy_verdicts"]["total"] == 1
     assert "by_status" in off["grants"]
 
     monkeypatch.setattr(gov, "policy_plane_enabled", lambda: True)
-    on = asyncio.run(gov.get_status(ctx=_ctx(ws_a), db=s))
+    on = gov.get_status(ctx=_ctx(ws_a), db=s)
     assert on["policy_plane"]["enforcing"] is True
     s.close()

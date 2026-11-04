@@ -14,7 +14,6 @@ save leaves the stored schedule and the scheduler's job as they were.
 """
 from __future__ import annotations
 
-import asyncio
 import uuid
 from types import SimpleNamespace as NS
 
@@ -46,7 +45,7 @@ def _owner(ws):
 def _save(ws, new_session, template_id, data):
     from api.workflow_recipes import update_workflow_recipe
 
-    return asyncio.run(update_workflow_recipe(template_id, ctx=_owner(ws), recipe_data=data, db=new_session()))
+    return update_workflow_recipe(template_id, ctx=_owner(ws), recipe_data=data, db=new_session())
 
 
 def _stored(new_session, recipe_id):
@@ -97,9 +96,9 @@ def test_a_new_playbook_with_schedule_type_none_is_refused_the_same_way(workspac
 
     template_id = f"f271-{uuid.uuid4().hex[:8]}"
     with pytest.raises(HTTPException) as refused:
-        asyncio.run(create_workflow_recipe(ctx=_owner(workspace), db=new_session(), recipe_data={
+        create_workflow_recipe(ctx=_owner(workspace), db=new_session(), recipe_data={
             "template_id": template_id, "name": "Weekly Instagram posts", "description": "f271",
-            "template_definition": {"steps": []}, "steps": [], "schedule_config": {"type": "none"}}))
+            "template_definition": {"steps": []}, "steps": [], "schedule_config": {"type": "none"}})
 
     assert (refused.value.status_code, refused.value.detail) == (422, REFUSAL)
     made = new_session().execute(

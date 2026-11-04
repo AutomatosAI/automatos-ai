@@ -138,6 +138,70 @@ def _parse_timestamp(ts: Optional[str]) -> Optional[datetime]:
         return None
 
 
+def _upsert_alert(db, alert: "Alert", receiver: Optional[str]) -> None:
+    """One AlertManager alert into ``infrastructure_alerts``, keyed by its fingerprint."""
+    fingerprint = alert.fingerprint or _compute_fingerprint(alert.labels)
+    alertname = alert.labels.get("alertname", "unknown")
+    severity = alert.labels.get("severity", "unknown")
+    service = alert.labels.get("service", alert.labels.get("job", None))
+    instance = alert.labels.get("instance", None)
+
+    from sqlalchemy import text
+    db.execute(
+        text(UPSERT_SQL),
+        {
+            "fingerprint": fingerprint,
+            "alertname": alertname,
+            "severity": severity,
+            "status": alert.status,
+            "service": service,
+            "instance": instance,
+            "labels": json.dumps(alert.labels),
+            "annotations": json.dumps(alert.annotations),
+            "starts_at": _parse_timestamp(alert.startsAt),
+            "ends_at": _parse_timestamp(alert.endsAt),
+            "generator_url": alert.generatorURL,
+            "receiver": receiver,
+            "raw_payload": json.dumps(alert.model_dump()),
+        },
+    )
+
+
+def _ingest_alerts(payload: "AlertManagerPayload", db, authorization: Optional[str],
+                   x_alert_source: Optional[str], x_alert_priority: Optional[str]) -> dict:
+    """The ingest route's work (F105: a plain def, run in the threadpool): check the bearer
+    token, upsert each alert, and count what was stored and what failed."""
+    # Validate Bearer token
+    if ALERT_INGEST_TOKEN:
+        expected = f"Bearer {ALERT_INGEST_TOKEN}"
+        if authorization != expected:
+            raise HTTPException(status_code=401, detail="Invalid token")
+
+    processed = 0
+    errors = 0
+
+    for alert in payload.alerts:
+        try:
+            _upsert_alert(db, alert, payload.receiver)
+            processed += 1
+        except Exception as e:  # noqa: BLE001 — one bad alert is counted; the batch goes on
+            logger.error(f"Failed to process alert {alert.labels}: {e}")
+            errors += 1
+
+    db.commit()
+
+    logger.info(
+        f"Alert ingest: {processed} processed, {errors} errors, "
+        f"source={x_alert_source}, priority={x_alert_priority}"
+    )
+
+    return {
+        "status": "ok",
+        "processed": processed,
+        "errors": errors,
+    }
+
+
 def create_alerts_router(get_db_dependency) -> APIRouter:
     """Create the alerts ingest router with the given DB dependency.
 
@@ -147,7 +211,7 @@ def create_alerts_router(get_db_dependency) -> APIRouter:
     router = APIRouter(tags=["alerts"])
 
     @router.post("/alerts/ingest")
-    async def ingest_alerts(
+    def ingest_alerts(
         payload: AlertManagerPayload,
         request: Request,
         authorization: Optional[str] = Header(None),
@@ -155,62 +219,10 @@ def create_alerts_router(get_db_dependency) -> APIRouter:
         x_alert_priority: Optional[str] = Header(None),
         db=Depends(get_db_dependency),
     ):
-        # Validate Bearer token
-        if ALERT_INGEST_TOKEN:
-            expected = f"Bearer {ALERT_INGEST_TOKEN}"
-            if authorization != expected:
-                raise HTTPException(status_code=401, detail="Invalid token")
-
-        processed = 0
-        errors = 0
-
-        for alert in payload.alerts:
-            try:
-                fingerprint = alert.fingerprint or _compute_fingerprint(alert.labels)
-                alertname = alert.labels.get("alertname", "unknown")
-                severity = alert.labels.get("severity", "unknown")
-                service = alert.labels.get("service", alert.labels.get("job", None))
-                instance = alert.labels.get("instance", None)
-
-                from sqlalchemy import text
-                db.execute(
-                    text(UPSERT_SQL),
-                    {
-                        "fingerprint": fingerprint,
-                        "alertname": alertname,
-                        "severity": severity,
-                        "status": alert.status,
-                        "service": service,
-                        "instance": instance,
-                        "labels": json.dumps(alert.labels),
-                        "annotations": json.dumps(alert.annotations),
-                        "starts_at": _parse_timestamp(alert.startsAt),
-                        "ends_at": _parse_timestamp(alert.endsAt),
-                        "generator_url": alert.generatorURL,
-                        "receiver": payload.receiver,
-                        "raw_payload": json.dumps(alert.model_dump()),
-                    },
-                )
-                processed += 1
-            except Exception as e:
-                logger.error(f"Failed to process alert {alert.labels}: {e}")
-                errors += 1
-
-        db.commit()
-
-        logger.info(
-            f"Alert ingest: {processed} processed, {errors} errors, "
-            f"source={x_alert_source}, priority={x_alert_priority}"
-        )
-
-        return {
-            "status": "ok",
-            "processed": processed,
-            "errors": errors,
-        }
+        return _ingest_alerts(payload, db, authorization, x_alert_source, x_alert_priority)
 
     @router.get("/alerts", dependencies=[Depends(require_super_admin)])
-    async def list_alerts(
+    def list_alerts(
         status: Optional[str] = None,
         severity: Optional[str] = None,
         limit: int = 50,

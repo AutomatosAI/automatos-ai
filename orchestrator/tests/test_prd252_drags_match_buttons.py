@@ -101,7 +101,7 @@ def test_run_now_starts_a_clean_run_too(monkeypatch):
     monkeypatch.setattr(bt, "notify_task_available", lambda *a, **k: None)
     task = _ticket("failed", result="Half the numbers", error_message="Provider timed out")
 
-    out = asyncio.run(bt.run_task_now(task.id, ctx=CTX, db=_FakeSession(agent=NS(id=5), task=task)))
+    out = bt.run_task_now(task.id, ctx=CTX, db=_FakeSession(agent=NS(id=5), task=task))
 
     assert out["rerun_of"] == "failed" and task.status == "assigned"
     assert (task.result, task.error_message) == (None, None)

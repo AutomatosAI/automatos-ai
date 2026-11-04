@@ -129,7 +129,7 @@ def test_the_missions_own_approve_takes_the_note_too(plan):
     from api.missions import MissionApproveRequest, approve_plan
     from modules.coordination.owner_note import OWNER_NOTE_KEY
 
-    asyncio.run(approve_plan(mission_id=plan.run.id, body=MissionApproveRequest(note=NOTE), ctx=plan.ctx, db=plan.db))
+    approve_plan(mission_id=plan.run.id, body=MissionApproveRequest(note=NOTE), ctx=plan.ctx, db=plan.db)
 
     run, _card = _fresh(plan)
     assert run.state == RunState.RUNNING.value and run.config[OWNER_NOTE_KEY] == NOTE

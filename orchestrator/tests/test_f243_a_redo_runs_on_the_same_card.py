@@ -97,7 +97,7 @@ def test_run_now_on_a_failed_playbook_card_runs_it_again(workspace, new_session,
 
     pb = _finished_playbook(new_session, workspace, status="failed", run_status="failed")
 
-    out = asyncio.run(run_task_now(pb.card, ctx=_owner(workspace), db=new_session()))
+    out = run_task_now(pb.card, ctx=_owner(workspace), db=new_session())
 
     card = _card(new_session, pb.card)
     assert out["started"] is True and launched == [card.source_id]          # night: "started", nothing ran

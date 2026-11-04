@@ -174,8 +174,31 @@ _REQUIRED_CONFIG = {
 }
 
 
+def _list_channels_repair(db, ctx, rows_to_repair):
+    """Drift-repair: best-effort DB update of rows whose adapter is actually running."""
+    if rows_to_repair:
+        # Drift-repair: silently update the DB to match the running
+        # state. Best-effort — list endpoints must not fail on a write.
+        try:
+            db.execute(
+                text(
+                    "UPDATE channel_connections SET status = 'active', updated_at = NOW() "
+                    "WHERE id = ANY(:ids)"
+                ),
+                {"ids": rows_to_repair},
+            )
+            db.commit()
+            logger.info(
+                "list_channels: repaired stale status on %d row(s) (ws=%s)",
+                len(rows_to_repair), ctx.workspace_id,
+            )
+        except Exception:
+            logger.exception("list_channels: failed to repair stale status rows")
+            db.rollback()
+
+
 @router.get("")
-async def list_channels(
+def list_channels(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -234,25 +257,8 @@ async def list_channels(
             }
         )
 
-    if rows_to_repair:
-        # Drift-repair: silently update the DB to match the running
-        # state. Best-effort — list endpoints must not fail on a write.
-        try:
-            db.execute(
-                text(
-                    "UPDATE channel_connections SET status = 'active', updated_at = NOW() "
-                    "WHERE id = ANY(:ids)"
-                ),
-                {"ids": rows_to_repair},
-            )
-            db.commit()
-            logger.info(
-                "list_channels: repaired stale status on %d row(s) (ws=%s)",
-                len(rows_to_repair), ctx.workspace_id,
-            )
-        except Exception:
-            logger.exception("list_channels: failed to repair stale status rows")
-            db.rollback()
+    _list_channels_repair(db, ctx, rows_to_repair)
+
 
     return out
 
@@ -449,25 +455,9 @@ def _current_channel_config(db: Session, channel_id: str) -> Dict[str, Any]:
     return existing.config if existing and isinstance(existing.config, dict) else {}
 
 
-@router.put("/{channel_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def update_channel(
-    channel_id: str,
-    payload: Dict[str, Any] = Body(...),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    """Update a channel connection's config."""
-    row = db.execute(
-        text("SELECT id FROM channel_connections WHERE id = :id AND workspace_id = :ws_id"),
-        {"id": channel_id, "ws_id": str(ctx.workspace_id)},
-    ).fetchone()
-
-    if not row:
-        raise HTTPException(404, "Channel connection not found")
-
-    updates = []
-    params: Dict[str, Any] = {"id": channel_id}
-
+def _update_channel_config(db: Session, channel_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The config the edit writes, its trigger_mode merged in or carried across; None when the
+    edit changes neither."""
     # PRD-225 US-006: trigger_mode rides the config JSONB (no new column). Merge
     # it into the config being written — rebuild-don't-mutate — so a mode update
     # never clobbers credentials and a config update never drops the mode.
@@ -493,6 +483,29 @@ async def update_channel(
         )
         if stored is not None:
             new_config = with_trigger_mode(new_config, stored)
+    return new_config
+
+
+@router.put("/{channel_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
+def update_channel(
+    channel_id: str,
+    payload: Dict[str, Any] = Body(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Update a channel connection's config."""
+    row = db.execute(
+        text("SELECT id FROM channel_connections WHERE id = :id AND workspace_id = :ws_id"),
+        {"id": channel_id, "ws_id": str(ctx.workspace_id)},
+    ).fetchone()
+
+    if not row:
+        raise HTTPException(404, "Channel connection not found")
+
+    updates = []
+    params: Dict[str, Any] = {"id": channel_id}
+
+    new_config = _update_channel_config(db, channel_id, payload)
     if new_config is not None:
         updates.append("config = :config")
         params["config"] = _json.dumps(new_config)
@@ -722,7 +735,7 @@ async def stop_channel(
 # ── Channel Analytics ──────────────────────────────────────────────
 
 @router.get("/analytics")
-async def get_channel_analytics(
+def get_channel_analytics(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):

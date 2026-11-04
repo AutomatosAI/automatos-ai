@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload, subqueryload
 from sqlalchemy import and_, or_, func, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -8,6 +8,7 @@ import time
 import logging
 
 from core.database.database import get_db
+from core.utils.background_tasks import launch_guarded, on_the_event_loop
 from services.agent_availability import with_unavailable
 from core.models import PriorityLevel
 from core.models import Agent, Skill, Pattern, agent_skills
@@ -63,10 +64,12 @@ def _reindex_agent_embedding(agent: Agent, db: Session) -> None:
 
     Creates its own DB session to avoid lifecycle issues with the request session.
     Non-blocking: failures are logged but never bubble up to the API caller.
+    The embed runs on the event loop whether the route runs there or in the
+    threadpool (F105); with no loop at all (a script) nothing is re-embedded.
     """
     import asyncio
 
-    agent_id = agent.id  # Capture before session closes
+    agent_id = agent.id  # Capture before session closes (and here, never on the loop's thread)
 
     async def _do_embed():
         from core.database.database import SessionLocal
@@ -81,11 +84,14 @@ def _reindex_agent_embedding(agent: Agent, db: Session) -> None:
         finally:
             _db.close()
 
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_do_embed())
-    except RuntimeError:
-        pass
+    def _start() -> None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return  # no loop (a script): nothing is re-embedded, as before
+        launch_guarded(_do_embed(), subsystem="agents", operation="reindex_embedding", agent_id=agent_id)
+
+    on_the_event_loop(_start)
 
 
 def _stable_tool_id(name: str) -> int:
@@ -406,7 +412,7 @@ async def get_agent_types(ctx: RequestContext = Depends(get_request_context_hybr
     }
 
 @router.get("/stats")
-async def get_agent_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def get_agent_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get comprehensive agent statistics"""
     try:
         # Filter by workspace
@@ -518,7 +524,7 @@ def _apply_agent_org_update(db: Session, workspace_id: Any, agent: Agent, agent_
 
 
 @router.post("/bulk", response_model=List[AgentResponse], dependencies=[Depends(require_workspace_permission("agents:create"))])
-async def create_agents_bulk(agents: List[AgentCreate], ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def create_agents_bulk(agents: List[AgentCreate], ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Create multiple agents at once"""
     try:
         created_agents = []
@@ -580,7 +586,7 @@ async def create_agents_bulk(agents: List[AgentCreate], ctx: RequestContext = De
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/", response_model=AgentResponse, dependencies=[Depends(require_workspace_permission("agents:create"))])
-async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Create a new agent with enhanced fields"""
     print("🚀 API CALL: create_agent function called!")
     try:
@@ -649,9 +655,51 @@ async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(ge
         logger.error(f"Error creating agent: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+def _list_agents_scope(ctx: RequestContext):
+    """The roster's scope: the workspace's agents, or them and the system agents the caller's role sees."""
+    # PRD-67: Build a single unified query covering workspace agents
+    # AND visible system agents, so filters and pagination apply to all.
+    user_role = getattr(ctx.user, "system_role", "user") if ctx.user else "user"
+    _ROLE_HIERARCHY = {"super_admin": {"super_admin", "admin"}, "admin": {"admin"}}
+    visible_roles = _ROLE_HIERARCHY.get(user_role, set())
+
+    # Base scope: workspace agents OR visible system agents
+    workspace_predicate = Agent.workspace_id == ctx.workspace_id
+    if visible_roles:
+        system_predicate = and_(
+            Agent.is_system_agent.is_(True),
+            Agent.status == "active",
+            or_(Agent.required_role.is_(None), Agent.required_role.in_(visible_roles)),
+        )
+        return or_(workspace_predicate, system_predicate)
+    return workspace_predicate
+
+
+def _list_agents_filtered(query, status: Optional[AgentStatus], agent_type: Optional[AgentType],
+                          priority_level: Optional[PriorityLevel], search: Optional[str]):
+    """The roster query with the list's filters applied, to workspace and system agents alike."""
+    # Apply filters uniformly to all agents (workspace + system)
+    if status:
+        query = query.filter(Agent.status == status.value)
+
+    if agent_type:
+        query = query.filter(Agent.agent_type == agent_type.value)
+
+    if priority_level:
+        query = query.filter(Agent.priority_level == priority_level.value)
+
+    if search:
+        search_filter = or_(
+            Agent.name.ilike(f"%{search}%"),
+            Agent.description.ilike(f"%{search}%")
+        )
+        query = query.filter(search_filter)
+    return query
+
+
 @router.get("/", response_model=List[AgentResponse])
 @with_unavailable  # F244: an agent that can't run now says why
-async def list_agents(
+def list_agents(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     status: Optional[AgentStatus] = None,
@@ -671,23 +719,7 @@ async def list_agents(
 ):
     """List agents with enhanced filtering and pagination"""
     try:
-        # PRD-67: Build a single unified query covering workspace agents
-        # AND visible system agents, so filters and pagination apply to all.
-        user_role = getattr(ctx.user, "system_role", "user") if ctx.user else "user"
-        _ROLE_HIERARCHY = {"super_admin": {"super_admin", "admin"}, "admin": {"admin"}}
-        visible_roles = _ROLE_HIERARCHY.get(user_role, set())
-
-        # Base scope: workspace agents OR visible system agents
-        workspace_predicate = Agent.workspace_id == ctx.workspace_id
-        if visible_roles:
-            system_predicate = and_(
-                Agent.is_system_agent.is_(True),
-                Agent.status == "active",
-                or_(Agent.required_role.is_(None), Agent.required_role.in_(visible_roles)),
-            )
-            scope_filter = or_(workspace_predicate, system_predicate)
-        else:
-            scope_filter = workspace_predicate
+        scope_filter = _list_agents_scope(ctx)
 
         query = (
             db.query(Agent)
@@ -705,22 +737,7 @@ async def list_agents(
                 ~and_(Agent.is_system_agent.is_(True), Agent.workspace_id.isnot(None))
             )
 
-        # Apply filters uniformly to all agents (workspace + system)
-        if status:
-            query = query.filter(Agent.status == status.value)
-
-        if agent_type:
-            query = query.filter(Agent.agent_type == agent_type.value)
-
-        if priority_level:
-            query = query.filter(Agent.priority_level == priority_level.value)
-
-        if search:
-            search_filter = or_(
-                Agent.name.ilike(f"%{search}%"),
-                Agent.description.ilike(f"%{search}%")
-            )
-            query = query.filter(search_filter)
+        query = _list_agents_filtered(query, status, agent_type, priority_level, search)
 
         # Deduplicate by id (system agents with workspace_id=NULL won't overlap,
         # but guard against edge cases) and apply pagination
@@ -737,8 +754,71 @@ async def list_agents(
         logger.error(f"Error listing agents: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+def _get_org_chart_tool_counts(db: Session, agent_ids: List[int]) -> Dict[int, int]:
+    """Batch-load tool counts per agent."""
+    from core.models.composio_cache import AgentAppAssignment
+
+    tool_counts_rows = (
+        db.query(
+            AgentAppAssignment.agent_id,
+            func.count(AgentAppAssignment.id).label("cnt"),
+        )
+        .filter(AgentAppAssignment.agent_id.in_(agent_ids))
+        .group_by(AgentAppAssignment.agent_id)
+        .all()
+    )
+    return {row.agent_id: row.cnt for row in tool_counts_rows}
+
+
+def _get_org_chart_nodes(agents: List[Agent], tool_counts: Dict[int, int]) -> tuple:
+    """The org chart's nodes (one per agent) and edges (reports_to), an agent with no
+    parent placed under the system agent (CTO)."""
+    # Build lookup for direct_reports count
+    direct_reports_count: Dict[int, int] = {}
+    for a in agents:
+        if a.reports_to_id and a.reports_to_id in {ag.id for ag in agents}:
+            direct_reports_count[a.reports_to_id] = direct_reports_count.get(a.reports_to_id, 0) + 1
+
+    # Detect system/CTO agent for orphan assignment
+    system_agent = next(
+        (a for a in agents if a.is_system_agent),
+        None,
+    )
+
+    nodes = []
+    edges = []
+
+    for a in agents:
+        skill_names = [s.name for s in a.skills] if a.skills else []
+        model_id = (a.model_config or {}).get("model_id")
+
+        parent_id = a.reports_to_id
+        # If the agent has no explicit parent and isn't the system agent,
+        # assign it under the system agent (CTO).
+        if parent_id is None and system_agent and a.id != system_agent.id:
+            parent_id = system_agent.id
+
+        nodes.append({
+            "id": a.id,
+            "name": a.name,
+            "job_title": a.job_title,
+            "team": a.team,
+            "status": a.status or "active",
+            "model": model_id,
+            "skills": skill_names,
+            "tools_count": tool_counts.get(a.id, 0),
+            "reports_to_id": parent_id,
+            "direct_reports_count": direct_reports_count.get(a.id, 0),
+            "is_system_agent": a.is_system_agent or False,
+        })
+
+        if parent_id is not None:
+            edges.append({"from": parent_id, "to": a.id})
+    return nodes, edges
+
+
 @router.get("/org-chart")
-async def get_org_chart(
+def get_org_chart(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -749,7 +829,6 @@ async def get_org_chart(
     and a distinct team list for grouping in the UI.
     """
     try:
-        from core.models.composio_cache import AgentAppAssignment
         from core.team_access import list_teams
 
         # Fetch active workspace agents — the workspace Auto (slug=auto-{ws_id})
@@ -771,60 +850,8 @@ async def get_org_chart(
             return {"success": True, "nodes": [], "edges": [], "teams": []}
 
         agent_ids = [a.id for a in agents]
-
-        # Batch-load tool counts per agent
-        tool_counts_rows = (
-            db.query(
-                AgentAppAssignment.agent_id,
-                func.count(AgentAppAssignment.id).label("cnt"),
-            )
-            .filter(AgentAppAssignment.agent_id.in_(agent_ids))
-            .group_by(AgentAppAssignment.agent_id)
-            .all()
-        )
-        tool_counts = {row.agent_id: row.cnt for row in tool_counts_rows}
-
-        # Build lookup for direct_reports count
-        direct_reports_count: Dict[int, int] = {}
-        for a in agents:
-            if a.reports_to_id and a.reports_to_id in {ag.id for ag in agents}:
-                direct_reports_count[a.reports_to_id] = direct_reports_count.get(a.reports_to_id, 0) + 1
-
-        # Detect system/CTO agent for orphan assignment
-        system_agent = next(
-            (a for a in agents if a.is_system_agent),
-            None,
-        )
-
-        nodes = []
-        edges = []
-
-        for a in agents:
-            skill_names = [s.name for s in a.skills] if a.skills else []
-            model_id = (a.model_config or {}).get("model_id")
-
-            parent_id = a.reports_to_id
-            # If the agent has no explicit parent and isn't the system agent,
-            # assign it under the system agent (CTO).
-            if parent_id is None and system_agent and a.id != system_agent.id:
-                parent_id = system_agent.id
-
-            nodes.append({
-                "id": a.id,
-                "name": a.name,
-                "job_title": a.job_title,
-                "team": a.team,
-                "status": a.status or "active",
-                "model": model_id,
-                "skills": skill_names,
-                "tools_count": tool_counts.get(a.id, 0),
-                "reports_to_id": parent_id,
-                "direct_reports_count": direct_reports_count.get(a.id, 0),
-                "is_system_agent": a.is_system_agent or False,
-            })
-
-            if parent_id is not None:
-                edges.append({"from": parent_id, "to": a.id})
+        tool_counts = _get_org_chart_tool_counts(db, agent_ids)
+        nodes, edges = _get_org_chart_nodes(agents, tool_counts)
 
         # PRD-158 S1: teams come from the Teams table (same source as /api/teams)
         # so the org-chart and the team API never disagree.
@@ -843,7 +870,7 @@ async def get_org_chart(
 
 
 @router.get("/{agent_id}/status")
-async def get_agent_status(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def get_agent_status(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get current status of a specific agent"""
     try:
         agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
@@ -869,7 +896,7 @@ async def get_agent_status(agent_id: int, ctx: RequestContext = Depends(get_requ
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/{agent_id}/execute", dependencies=[Depends(require_workspace_permission("agents:execute"))])
-async def execute_agent(agent_id: int, execution_data: dict = {}, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def execute_agent(agent_id: int, execution_data: dict = Body(default_factory=dict), ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Execute an agent with given parameters"""
     try:
         agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
@@ -919,7 +946,7 @@ async def get_agent(agent_id: int, groups: Optional[str] = Query(None), ctx: Req
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{agent_id}/skills")
-async def get_agent_skills(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def get_agent_skills(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get skills for a specific agent"""
     try:
         agent = db.query(Agent).options(joinedload(Agent.skills)).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
@@ -945,7 +972,7 @@ async def get_agent_skills(agent_id: int, ctx: RequestContext = Depends(get_requ
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/{agent_id}/skills", dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def add_agent_skills(agent_id: int, skill_ids: List[int], ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def add_agent_skills(agent_id: int, skill_ids: List[int], ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Add skills to an agent"""
     try:
         agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
@@ -968,7 +995,7 @@ async def add_agent_skills(agent_id: int, skill_ids: List[int], ctx: RequestCont
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/{agent_id}/skills/{skill_id}", dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def remove_agent_skill(agent_id: int, skill_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def remove_agent_skill(agent_id: int, skill_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Remove a single skill from an agent"""
     try:
         agent = db.query(Agent).options(joinedload(Agent.skills)).filter(
@@ -1008,62 +1035,73 @@ def _renamed_to_taken_name(db: Session, workspace_id, agent: Agent, new_name: st
     )
 
 
+def _update_agent_identity(db: Session, ctx: RequestContext, agent: Agent, agent_update: AgentUpdate) -> None:
+    """Who the agent is: name (refused when another agent has it), description, job title,
+    team and manager, and status."""
+    # Update fields if provided
+    if agent_update.name is not None:
+        if _renamed_to_taken_name(db, ctx.workspace_id, agent, agent_update.name):
+            raise HTTPException(status_code=400, detail="Agent with this name already exists")
+        agent.name = agent_update.name
+    
+    if agent_update.description is not None:
+        agent.description = agent_update.description
+
+    if agent_update.job_title is not None:
+        # Empty string clears the job title; non-empty stores the trimmed value.
+        trimmed = agent_update.job_title.strip()
+        agent.job_title = trimmed if trimmed else None
+
+    _apply_agent_org_update(db, ctx.workspace_id, agent, agent_update)  # #831: team / reports_to_id
+
+    if agent_update.status is not None:
+        agent.status = agent_update.status.value
+
+
+def _update_agent_settings(db: Session, ctx: RequestContext, agent: Agent, agent_update: AgentUpdate) -> None:
+    """How the agent works: tags, type, marketplace category, configuration (validated
+    merged) and its tools."""
+    if agent_update.tags is not None:
+        tags = _normalize_tags(agent_update.tags)
+        agent.tags = tags
+        # Remove tags from configuration if present (cleanup legacy data)
+        if agent.configuration and "tags" in agent.configuration:
+            config = agent.configuration.copy()
+            config.pop("tags", None)
+            agent.configuration = config
+
+    # Update agent_type if provided
+    if agent_update.agent_type is not None:
+        agent.agent_type = agent_update.agent_type
+
+    # Update marketplace_category if provided (used for icon mapping)
+    if agent_update.marketplace_category is not None:
+        agent.marketplace_category = agent_update.marketplace_category
+
+    # Update configuration if provided
+    if agent_update.configuration is not None:
+        # Merge with existing configuration (shallow — PRD-234 validates the
+        # MERGED result so a runtime/provider/model split across two updates
+        # can never leave a cli agent half-configured).
+        merged = {**(agent.configuration or {}), **agent_update.configuration}
+        _reject_invalid_runtime(merged)  # PRD-234 S1a
+        agent.configuration = merged
+
+    # Handle tool updates (NEW: agent_app_assignments)
+    if agent_update.tool_ids is not None:
+        _sync_agent_tool_assignments(db, ctx, agent, agent_update.tool_ids)
+
+
 @router.put("/{agent_id}", response_model=AgentResponse, dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Update an existing agent"""
     try:
         agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         
-        # Update fields if provided
-        if agent_update.name is not None:
-            if _renamed_to_taken_name(db, ctx.workspace_id, agent, agent_update.name):
-                raise HTTPException(status_code=400, detail="Agent with this name already exists")
-            agent.name = agent_update.name
-        
-        if agent_update.description is not None:
-            agent.description = agent_update.description
-
-        if agent_update.job_title is not None:
-            # Empty string clears the job title; non-empty stores the trimmed value.
-            trimmed = agent_update.job_title.strip()
-            agent.job_title = trimmed if trimmed else None
-
-        _apply_agent_org_update(db, ctx.workspace_id, agent, agent_update)  # #831: team / reports_to_id
-
-        if agent_update.status is not None:
-            agent.status = agent_update.status.value
-
-        if agent_update.tags is not None:
-            tags = _normalize_tags(agent_update.tags)
-            agent.tags = tags
-            # Remove tags from configuration if present (cleanup legacy data)
-            if agent.configuration and "tags" in agent.configuration:
-                config = agent.configuration.copy()
-                config.pop("tags", None)
-                agent.configuration = config
-
-        # Update agent_type if provided
-        if agent_update.agent_type is not None:
-            agent.agent_type = agent_update.agent_type
-
-        # Update marketplace_category if provided (used for icon mapping)
-        if agent_update.marketplace_category is not None:
-            agent.marketplace_category = agent_update.marketplace_category
-
-        # Update configuration if provided
-        if agent_update.configuration is not None:
-            # Merge with existing configuration (shallow — PRD-234 validates the
-            # MERGED result so a runtime/provider/model split across two updates
-            # can never leave a cli agent half-configured).
-            merged = {**(agent.configuration or {}), **agent_update.configuration}
-            _reject_invalid_runtime(merged)  # PRD-234 S1a
-            agent.configuration = merged
-
-        # Handle tool updates (NEW: agent_app_assignments)
-        if agent_update.tool_ids is not None:
-            _sync_agent_tool_assignments(db, ctx, agent, agent_update.tool_ids)
+        _update_agent_identity(db, ctx, agent, agent_update)
+        _update_agent_settings(db, ctx, agent, agent_update)
 
         db.commit()
         db.refresh(agent)
@@ -1083,89 +1121,103 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestCon
         logger.error(f"Error updating agent: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+def _delete_agent_refuse_if_in_a_playbook(db: Session, workspace_id: Any, agent_id: int) -> None:
+    """409 while a Playbook's steps name the agent."""
+    # Block delete if any Playbook references this agent in its steps JSON.
+    # Playbook steps store agent_id in opaque JSONB (no FK) — without this check,
+    # the Playbook will crash with FK violation next time it runs.
+    agent_ref = f'[{{"agent_id": {agent_id}}}]'
+    playbooks_using_agent = db.execute(
+        text(
+            "SELECT id, name FROM workflow_recipes "
+            "WHERE workspace_id = :workspace_id "
+            "AND steps @> CAST(:agent_ref AS jsonb)"
+        ),
+        {"workspace_id": workspace_id, "agent_ref": agent_ref},
+    ).fetchall()
+    if playbooks_using_agent:
+        names = [r.name for r in playbooks_using_agent]
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": f"Agent is used by {len(names)} Playbook(s). Reassign or remove the Playbook step(s) first.",
+                "playbooks": [{"id": r.id, "name": r.name} for r in playbooks_using_agent],
+            },
+        )
+
+
+def _delete_agent_related_rows(db: Session, agent_id: int) -> None:
+    """Delete the agent's rows in the tables without CASCADE, each in its own savepoint."""
+    # Delete related records first (tables without CASCADE) - use savepoints to handle errors
+    # Order matters: delete in correct order to avoid FK violations
+
+    deletions = [
+        ("agent_skills", "DELETE FROM agent_skills WHERE agent_id = :agent_id", True),
+        ("workflow_agents", "DELETE FROM workflow_agents WHERE agent_id = :agent_id", True),
+        # memory_items was dropped by prd187_s5_drop_memory_relics (a 0-row relic);
+        # keeping it here as `required` made every agent deletion 500 on a
+        # nonexistent table (PRD-209 live-test finding, 2026-08-29).
+        ("workflow_executions", "DELETE FROM workflow_executions WHERE agent_id = :agent_id", False),
+        # F135 (B66): routing rows name the agent with no ON DELETE; left in place,
+        # db.delete(agent) raised IntegrityError and the delete answered 500.
+        ("tool_routing_edges", "DELETE FROM tool_routing_edges WHERE agent_id = :agent_id", False),
+        ("tool_routing_affinities", "DELETE FROM tool_routing_affinities WHERE agent_id = :agent_id", False),
+    ]
+    
+    for table_name, sql_stmt, required in deletions:
+        savepoint = db.begin_nested()  # Create savepoint for this deletion
+        try:
+            db.execute(text(sql_stmt), {"agent_id": agent_id})
+            savepoint.commit()  # Commit savepoint
+        except Exception as e:
+            savepoint.rollback()  # Rollback savepoint, but keep main transaction
+            if required:
+                logger.exception(f"Error deleting {table_name} for agent {agent_id}: {e}")
+                raise HTTPException(status_code=500, detail="Internal server error") from e
+            else:
+                logger.warning(f"Error deleting {table_name} for agent {agent_id}: {e}")
+                # Continue for optional tables
+
+
+def _delete_agent_return_tickets(db: Session, agent_id: int, workspace_id: Any) -> list:
+    """Send the agent's unfinished tickets back to the inbox; the tickets sent."""
+    # The agent's live tickets. board_tasks.assigned_agent_id is ON DELETE
+    # SET NULL, so deleting an agent used to leave its work sitting on the
+    # board with no owner and nothing said about it (night 1, 2026-09-18 —
+    # the rescue was a PATCH the operator had to know to make). Send them
+    # back to the inbox, where an unowned ticket belongs, and NAME them in
+    # the response so the deletion is not silent.
+    orphaned = db.execute(
+        text(
+            "SELECT id, title, status FROM board_tasks "
+            "WHERE assigned_agent_id = :agent_id AND workspace_id = :workspace_id "
+            "  AND status NOT IN ('done', 'failed', 'cancelled', 'closed')"
+        ),
+        {"agent_id": agent_id, "workspace_id": workspace_id},
+    ).fetchall()
+    if orphaned:
+        db.execute(
+            text(
+                "UPDATE board_tasks "
+                "SET status = 'inbox', assigned_agent_id = NULL, lease_until = NULL "
+                "WHERE id = ANY(:ids)"
+            ),
+            {"ids": [r.id for r in orphaned]},
+        )
+    return orphaned
+
+
 @router.delete("/{agent_id}", dependencies=[Depends(require_workspace_permission("agents:delete"))])
-async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Delete an agent and all related records"""
     try:
         agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
 
-        # Block delete if any Playbook references this agent in its steps JSON.
-        # Playbook steps store agent_id in opaque JSONB (no FK) — without this check,
-        # the Playbook will crash with FK violation next time it runs.
-        agent_ref = f'[{{"agent_id": {agent_id}}}]'
-        playbooks_using_agent = db.execute(
-            text(
-                "SELECT id, name FROM workflow_recipes "
-                "WHERE workspace_id = :workspace_id "
-                "AND steps @> CAST(:agent_ref AS jsonb)"
-            ),
-            {"workspace_id": ctx.workspace_id, "agent_ref": agent_ref},
-        ).fetchall()
-        if playbooks_using_agent:
-            names = [r.name for r in playbooks_using_agent]
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "message": f"Agent is used by {len(names)} Playbook(s). Reassign or remove the Playbook step(s) first.",
-                    "playbooks": [{"id": r.id, "name": r.name} for r in playbooks_using_agent],
-                },
-            )
-
-        # Delete related records first (tables without CASCADE) - use savepoints to handle errors
-        # Order matters: delete in correct order to avoid FK violations
-
-        deletions = [
-            ("agent_skills", "DELETE FROM agent_skills WHERE agent_id = :agent_id", True),
-            ("workflow_agents", "DELETE FROM workflow_agents WHERE agent_id = :agent_id", True),
-            # memory_items was dropped by prd187_s5_drop_memory_relics (a 0-row relic);
-            # keeping it here as `required` made every agent deletion 500 on a
-            # nonexistent table (PRD-209 live-test finding, 2026-08-29).
-            ("workflow_executions", "DELETE FROM workflow_executions WHERE agent_id = :agent_id", False),
-            # F135 (B66): routing rows name the agent with no ON DELETE; left in place,
-            # db.delete(agent) raised IntegrityError and the delete answered 500.
-            ("tool_routing_edges", "DELETE FROM tool_routing_edges WHERE agent_id = :agent_id", False),
-            ("tool_routing_affinities", "DELETE FROM tool_routing_affinities WHERE agent_id = :agent_id", False),
-        ]
-        
-        for table_name, sql_stmt, required in deletions:
-            savepoint = db.begin_nested()  # Create savepoint for this deletion
-            try:
-                db.execute(text(sql_stmt), {"agent_id": agent_id})
-                savepoint.commit()  # Commit savepoint
-            except Exception as e:
-                savepoint.rollback()  # Rollback savepoint, but keep main transaction
-                if required:
-                    logger.error(f"Error deleting {table_name} for agent {agent_id}: {e}")
-                    raise HTTPException(status_code=500, detail="Internal server error")
-                else:
-                    logger.warning(f"Error deleting {table_name} for agent {agent_id}: {e}")
-                    # Continue for optional tables
-        
-        # The agent's live tickets. board_tasks.assigned_agent_id is ON DELETE
-        # SET NULL, so deleting an agent used to leave its work sitting on the
-        # board with no owner and nothing said about it (night 1, 2026-09-18 —
-        # the rescue was a PATCH the operator had to know to make). Send them
-        # back to the inbox, where an unowned ticket belongs, and NAME them in
-        # the response so the deletion is not silent.
-        orphaned = db.execute(
-            text(
-                "SELECT id, title, status FROM board_tasks "
-                "WHERE assigned_agent_id = :agent_id AND workspace_id = :workspace_id "
-                "  AND status NOT IN ('done', 'failed', 'cancelled', 'closed')"
-            ),
-            {"agent_id": agent_id, "workspace_id": ctx.workspace_id},
-        ).fetchall()
-        if orphaned:
-            db.execute(
-                text(
-                    "UPDATE board_tasks "
-                    "SET status = 'inbox', assigned_agent_id = NULL, lease_until = NULL "
-                    "WHERE id = ANY(:ids)"
-                ),
-                {"ids": [r.id for r in orphaned]},
-            )
+        _delete_agent_refuse_if_in_a_playbook(db, ctx.workspace_id, agent_id)
+        _delete_agent_related_rows(db, agent_id)
+        orphaned = _delete_agent_return_tickets(db, agent_id, ctx.workspace_id)
 
         # F049 (night 1): the agent's spend outlives it. llm_usage.agent_id has no
         # foreign key, so its rows would keep an id that names nothing — Analytics

@@ -2787,12 +2787,17 @@ class ApiClient {
   }
 
   async syncToolsCache(syncType: 'full' | 'incremental' = 'full') {
-    return this.request(`/api/tools/sync?sync_type=${syncType}`, { method: 'POST' })
+    // The finished job, or the one already running (a second Sync never starts another).
+    return this.request<{
+      job_id: number | null
+      status: 'running' | 'completed' | 'failed' | string
+      already_running?: boolean
+      error?: string | null
+    }>(`/api/tools/sync?sync_type=${syncType}`, { method: 'POST' })
   }
 
   async getIntegrationsStatus() {
-    // PRD-233 S2: honest integrations state — the same predicate the tool
-    // router uses to decide whether Composio tools are offered at all.
+    // PRD-233 S2: honest integrations state, from the predicate the tool router uses.
     return this.request<{
       available: boolean
       reason: string | null
@@ -2800,6 +2805,7 @@ class ApiClient {
       apps_cached: number
       last_sync: string | null
       sync_status: 'running' | 'completed' | 'failed' | string | null
+      sync_error: string | null
     }>('/api/tools/integrations/status')
   }
 

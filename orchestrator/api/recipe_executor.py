@@ -19,6 +19,7 @@ v2 changes:
 """
 
 import asyncio
+import functools
 import json
 import logging
 import time
@@ -34,6 +35,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from core.database.database import get_db, SessionLocal
+from core.utils.background_tasks import on_the_event_loop
 from core.models import Agent
 from core.models.core import PLAYBOOK_DOCUMENT_STEP, RecipeExecution, WorkflowTemplate as WorkflowRecipe
 from core.security.surface import origin_surface, widget_scopes, widget_turn
@@ -222,7 +224,16 @@ _running_executions: Dict[str, asyncio.Task] = {}
 
 def request_execution_cancel(execution_id: str) -> bool:
     """Signal a cancel to a locally-running execution. Returns True if the
-    task was found and cancelled on this replica, False otherwise."""
+    task was found and cancelled on this replica, False otherwise.
+
+    The task belongs to the event loop and ``Task.cancel`` is not thread-safe, so
+    a cancel asked from a route's threadpool thread (Cancel on a playbook's card,
+    F105) is made on the loop's own thread."""
+    return on_the_event_loop(functools.partial(_cancel_here, execution_id))
+
+
+def _cancel_here(execution_id: str) -> bool:
+    """``request_execution_cancel`` on the loop's thread."""
     task = _running_executions.get(execution_id)
     if task is None or task.done():
         return False

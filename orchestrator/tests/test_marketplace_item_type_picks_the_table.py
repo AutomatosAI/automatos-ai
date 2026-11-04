@@ -48,7 +48,7 @@ def _run(coro):
 def test_approving_a_playbook_leaves_the_agent_with_its_id_alone(twins):
     from api.marketplace import approve_marketplace_item
 
-    result = _run(approve_marketplace_item(_SHARED_ID, type="recipe", ctx=ADMIN, db=twins.db))
+    result = approve_marketplace_item(_SHARED_ID, type="recipe", ctx=ADMIN, db=twins.db)
 
     twins.db.refresh(twins.agent)
     twins.db.refresh(twins.playbook)
@@ -61,7 +61,7 @@ def test_deleting_a_playbook_leaves_the_agent_with_its_id_alone(twins):
     from api.marketplace import delete_marketplace_item
     from core.models.core import Agent, WorkflowTemplate
 
-    _run(delete_marketplace_item(_SHARED_ID, type="recipe", ctx=ADMIN, db=twins.db))
+    delete_marketplace_item(_SHARED_ID, type="recipe", ctx=ADMIN, db=twins.db)
 
     assert twins.db.get(WorkflowTemplate, _SHARED_ID) is None
     assert twins.db.get(Agent, _SHARED_ID) is not None
@@ -71,7 +71,7 @@ def test_deleting_an_agent_leaves_the_playbook_with_its_id_alone(twins):
     from api.marketplace import delete_marketplace_item
     from core.models.core import Agent, WorkflowTemplate
 
-    _run(delete_marketplace_item(_SHARED_ID, type="agent", ctx=ADMIN, db=twins.db))
+    delete_marketplace_item(_SHARED_ID, type="agent", ctx=ADMIN, db=twins.db)
 
     assert twins.db.get(Agent, _SHARED_ID) is None
     assert twins.db.get(WorkflowTemplate, _SHARED_ID) is not None
@@ -80,7 +80,7 @@ def test_deleting_an_agent_leaves_the_playbook_with_its_id_alone(twins):
 def test_toggle_featured_flips_only_the_named_type(twins):
     from api.marketplace import toggle_featured
 
-    result = _run(toggle_featured(_SHARED_ID, type="recipe", ctx=ADMIN, db=twins.db))
+    result = toggle_featured(_SHARED_ID, type="recipe", ctx=ADMIN, db=twins.db)
 
     twins.db.refresh(twins.agent)
     twins.db.refresh(twins.playbook)
@@ -95,7 +95,7 @@ def test_detail_returns_the_playbook_when_asked_for_one(twins):
     twins.playbook.is_approved = True
     twins.db.flush()
 
-    detail = _run(get_item(_SHARED_ID, type="recipe", ctx=ADMIN, db=twins.db))
+    detail = get_item(_SHARED_ID, type="recipe", ctx=ADMIN, db=twins.db)
 
     assert detail.type == "recipe" and detail.name == twins.playbook.name
 
@@ -104,7 +104,7 @@ def test_detail_hides_an_unapproved_item(twins):
     from api.marketplace import get_item
 
     with pytest.raises(HTTPException) as caught:
-        _run(get_item(_SHARED_ID, type="recipe", ctx=ADMIN, db=twins.db))
+        get_item(_SHARED_ID, type="recipe", ctx=ADMIN, db=twins.db)
     assert caught.value.status_code == 404
 
 

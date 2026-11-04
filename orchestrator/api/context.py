@@ -86,7 +86,7 @@ async def add_to_context(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/stats")
-async def get_context_stats(
+def get_context_stats(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
     db: Session = Depends(get_db)
@@ -112,7 +112,7 @@ async def get_context_stats(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/performance")
-async def get_rag_performance_data(
+def get_rag_performance_data(
     time_range: str = Query("24h", regex="^(1h|24h|7d|30d)$", description="Time range: 1h, 24h, 7d, or 30d"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
@@ -128,7 +128,7 @@ async def get_rag_performance_data(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/sources")
-async def get_context_sources(
+def get_context_sources(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
     db: Session = Depends(get_db)
@@ -142,7 +142,7 @@ async def get_context_sources(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/queries/recent")
-async def get_recent_queries(
+def get_recent_queries(
     limit: int = Query(default=10, ge=1, le=50),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
@@ -194,7 +194,7 @@ async def test_rag_configuration(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/system/health")
-async def get_context_system_health(
+def get_context_system_health(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
     db: Session = Depends(get_db)
@@ -248,96 +248,117 @@ async def initialize_context_system(
         logger.error(f"Error initializing context system: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+def _get_optimization_recommendations_coverage(db, ctx, recommendations):
+    """Check 1: document-processing coverage; appends to `recommendations`, returns the stats row."""
+    from sqlalchemy import text
+    
+    # Check 1: Embeddings coverage (Scoped to workspace)
+    embedding_query = text("""
+        SELECT 
+            COUNT(*) as total_docs,
+            COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_docs,
+            (SELECT COUNT(*) 
+             FROM document_chunks dc
+             JOIN documents d ON dc.document_id = d.id
+             WHERE d.workspace_id = :workspace_id AND dc.embedding IS NOT NULL
+            ) as embedded_chunks
+        FROM documents
+        WHERE workspace_id = :workspace_id
+    """)
+        
+    stats = db.execute(embedding_query, {"workspace_id": ctx.workspace_id}).fetchone()
+        
+    if stats and stats.total_docs > 0:
+        incomplete_docs = stats.total_docs - stats.completed_docs
+        if incomplete_docs > 0:
+            recommendations.append({
+                "type": "warning",
+                "category": "Coverage",
+                "title": "Incomplete Document Processing",
+                "description": f"{incomplete_docs} documents not fully processed",
+                "action": "Reprocess failed documents",
+                "impact": "high"
+            })
+    return stats
+
+
+def _get_optimization_recommendations_performance(db, ctx, recommendations):
+    """Check 2: slow-query warning; appends to `recommendations`."""
+    from sqlalchemy import text
+    
+    # Check 2: Query performance
+    perf_query = text("""
+        SELECT AVG(execution_time_ms) as avg_time
+        FROM document_usage
+        WHERE event_type IN ('document_searched', 'rag_query')
+            AND metadata->>'workspace_id' = :workspace_id
+            AND timestamp >= NOW() - INTERVAL '24 hours'
+    """)
+
+    perf = db.execute(perf_query, {"workspace_id": str(ctx.workspace_id)}).fetchone()
+        
+    if perf and perf.avg_time and perf.avg_time > 1000:
+        recommendations.append({
+            "type": "warning",
+            "category": "Performance",
+            "title": "Slow Query Performance",
+            "description": f"Average query time is {perf.avg_time:.0f}ms (target: <1000ms)",
+            "action": "Consider adding more vector indexes or reducing chunk size",
+            "impact": "medium"
+        })
+
+
+def _get_optimization_recommendations_usage(db, ctx, recommendations):
+    """Check 3: recent-usage info/health entry; appends to `recommendations`."""
+    from sqlalchemy import text
+    
+    # Check 3: Usage patterns
+    usage_query = text("""
+        SELECT COUNT(*) as query_count
+        FROM document_usage
+        WHERE event_type IN ('document_searched', 'rag_query')
+            AND metadata->>'workspace_id' = :workspace_id
+            AND timestamp >= NOW() - INTERVAL '24 hours'
+    """)
+
+    usage = db.execute(usage_query, {"workspace_id": str(ctx.workspace_id)}).fetchone()
+        
+    if usage and usage.query_count == 0:
+        recommendations.append({
+            "type": "info",
+            "category": "Usage",
+            "title": "No Recent Context Queries",
+            "description": "System has not been used for context retrieval in the last 24 hours",
+            "action": "Monitor usage patterns or test the RAG system",
+            "impact": "low"
+        })
+    elif usage and usage.query_count > 0:
+        recommendations.append({
+            "type": "success",
+            "category": "Health",
+            "title": "System Healthy",
+            "description": f"{usage.query_count} queries processed in last 24 hours",
+            "action": "No action needed",
+            "impact": "low"
+        })
+
+
 @router.get("/optimize")
-async def get_optimization_recommendations(
+def get_optimization_recommendations(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Analyze context system and provide optimization recommendations (Workspace Scoped)"""
     try:
-        from sqlalchemy import text
         recommendations = []
         
-        # Check 1: Embeddings coverage (Scoped to workspace)
-        embedding_query = text("""
-            SELECT 
-                COUNT(*) as total_docs,
-                COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_docs,
-                (SELECT COUNT(*) 
-                 FROM document_chunks dc
-                 JOIN documents d ON dc.document_id = d.id
-                 WHERE d.workspace_id = :workspace_id AND dc.embedding IS NOT NULL
-                ) as embedded_chunks
-            FROM documents
-            WHERE workspace_id = :workspace_id
-        """)
-        
-        stats = db.execute(embedding_query, {"workspace_id": ctx.workspace_id}).fetchone()
-        
-        if stats and stats.total_docs > 0:
-            incomplete_docs = stats.total_docs - stats.completed_docs
-            if incomplete_docs > 0:
-                recommendations.append({
-                    "type": "warning",
-                    "category": "Coverage",
-                    "title": "Incomplete Document Processing",
-                    "description": f"{incomplete_docs} documents not fully processed",
-                    "action": "Reprocess failed documents",
-                    "impact": "high"
-                })
+        stats = _get_optimization_recommendations_coverage(db, ctx, recommendations)
 
-        
-        # Check 2: Query performance
-        perf_query = text("""
-            SELECT AVG(execution_time_ms) as avg_time
-            FROM document_usage
-            WHERE event_type IN ('document_searched', 'rag_query')
-                AND metadata->>'workspace_id' = :workspace_id
-                AND timestamp >= NOW() - INTERVAL '24 hours'
-        """)
 
-        perf = db.execute(perf_query, {"workspace_id": str(ctx.workspace_id)}).fetchone()
-        
-        if perf and perf.avg_time and perf.avg_time > 1000:
-            recommendations.append({
-                "type": "warning",
-                "category": "Performance",
-                "title": "Slow Query Performance",
-                "description": f"Average query time is {perf.avg_time:.0f}ms (target: <1000ms)",
-                "action": "Consider adding more vector indexes or reducing chunk size",
-                "impact": "medium"
-            })
-        
-        # Check 3: Usage patterns
-        usage_query = text("""
-            SELECT COUNT(*) as query_count
-            FROM document_usage
-            WHERE event_type IN ('document_searched', 'rag_query')
-                AND metadata->>'workspace_id' = :workspace_id
-                AND timestamp >= NOW() - INTERVAL '24 hours'
-        """)
+        _get_optimization_recommendations_performance(db, ctx, recommendations)
 
-        usage = db.execute(usage_query, {"workspace_id": str(ctx.workspace_id)}).fetchone()
-        
-        if usage and usage.query_count == 0:
-            recommendations.append({
-                "type": "info",
-                "category": "Usage",
-                "title": "No Recent Context Queries",
-                "description": "System has not been used for context retrieval in the last 24 hours",
-                "action": "Monitor usage patterns or test the RAG system",
-                "impact": "low"
-            })
-        elif usage and usage.query_count > 0:
-            recommendations.append({
-                "type": "success",
-                "category": "Health",
-                "title": "System Healthy",
-                "description": f"{usage.query_count} queries processed in last 24 hours",
-                "action": "No action needed",
-                "impact": "low"
-            })
-        
+        _get_optimization_recommendations_usage(db, ctx, recommendations)
+
         # Check 4: Empty embeddings
         if stats and stats.embedded_chunks == 0:
             recommendations.append({
@@ -373,7 +394,7 @@ async def get_optimization_recommendations(
 # ===== RAG CONFIGURATION CRUD ENDPOINTS =====
 
 @router.post("/rag/config", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def create_rag_configuration(
+def create_rag_configuration(
     config: RAGConfigCreate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -422,7 +443,7 @@ async def create_rag_configuration(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/rag/config")
-async def list_rag_configurations(
+def list_rag_configurations(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -448,7 +469,7 @@ async def list_rag_configurations(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/rag/config/{config_id}")
-async def get_rag_configuration(
+def get_rag_configuration(
     config_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -482,7 +503,7 @@ async def get_rag_configuration(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.put("/rag/config/{config_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def update_rag_configuration(
+def update_rag_configuration(
     config_id: int,
     config_update: RAGConfigUpdate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -529,7 +550,7 @@ async def update_rag_configuration(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/rag/config/{config_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def delete_rag_configuration(
+def delete_rag_configuration(
     config_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)

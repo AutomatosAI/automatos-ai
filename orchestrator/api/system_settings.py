@@ -73,7 +73,7 @@ def _restamp_auto_models(db: Session, changed: Changed) -> Dict[str, Any]:
 
 
 @router.get("/", response_model=List[SystemSettingResponse])
-async def list_system_settings(
+def list_system_settings(
     category: Optional[str] = None,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid)
@@ -93,7 +93,7 @@ async def list_system_settings(
 
 
 @router.get("/categories", response_model=List[str])
-async def list_setting_categories(db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
+def list_setting_categories(db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
     """List all available setting categories"""
     _require_admin(ctx)
     try:
@@ -105,7 +105,7 @@ async def list_setting_categories(db: Session = Depends(get_db), ctx: RequestCon
 
 
 @router.get("/by-category", response_model=List[SystemSettingsByCategory])
-async def get_settings_by_category(db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
+def get_settings_by_category(db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get all settings grouped by category"""
     _require_admin(ctx)
     try:
@@ -133,7 +133,7 @@ async def get_settings_by_category(db: Session = Depends(get_db), ctx: RequestCo
 
 
 @router.get("/stats", response_model=SystemSettingsStats)
-async def get_settings_stats(db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
+def get_settings_stats(db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get system settings statistics"""
     _require_admin(ctx)
     try:
@@ -164,7 +164,7 @@ async def get_settings_stats(db: Session = Depends(get_db), ctx: RequestContext 
 
 
 @router.get("/{setting_id}", response_model=SystemSettingResponse)
-async def get_system_setting(
+def get_system_setting(
     setting_id: int,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid)
@@ -221,7 +221,7 @@ def update_system_setting(
 
 
 @router.post("/", response_model=SystemSettingResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def create_system_setting(
+def create_system_setting(
     setting_data: SystemSettingCreate,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid)
@@ -257,7 +257,7 @@ async def create_system_setting(
 
 
 @router.delete("/{setting_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def delete_system_setting(
+def delete_system_setting(
     setting_id: int,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid)

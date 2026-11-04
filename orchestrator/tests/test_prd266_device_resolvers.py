@@ -251,9 +251,9 @@ def test_require_workspace_admin_lets_an_admins_device_through_and_refuses_an_ed
     _member(db_session, ws, editor_person[0], "editor")
     allowed = _device_ctx(ws, owner_person)
 
-    assert asyncio.run(admin.require_workspace_admin(ctx=allowed, db=db_session)) is allowed
+    assert admin.require_workspace_admin(ctx=allowed, db=db_session) is allowed
     with pytest.raises(HTTPException) as refused:
-        asyncio.run(admin.require_workspace_admin(ctx=_device_ctx(ws, editor_person), db=db_session))
+        admin.require_workspace_admin(ctx=_device_ctx(ws, editor_person), db=db_session)
     assert refused.value.status_code == 403
 
 

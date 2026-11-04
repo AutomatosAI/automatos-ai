@@ -19,6 +19,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Optional, Set, Tuple
 
+from core.utils.background_tasks import on_the_event_loop
+
 logger = logging.getLogger(__name__)
 
 CHECK_EVERY_SECONDS = 15 * 60
@@ -45,17 +47,29 @@ def watches_the_credit(guard: Callable[..., Optional[str]]) -> Callable[..., Opt
 
 
 def _schedule_check(workspace_id: Any) -> None:
+    """Start a balance check when one is due. The check runs on the event loop, also when
+    the work starts from a threadpool route (the suggestion's Start, F105)."""
     from config import config
 
     if not config.IS_LOCAL_EDITION or not workspace_id:
         return
     key, now = str(workspace_id), time.monotonic()
-    if now - _last_check.get(key, float("-inf")) < CHECK_EVERY_SECONDS:
+    if _due(key, now):
+        on_the_event_loop(functools.partial(_start_check, key, now))
+
+
+def _due(key: str, now: float) -> bool:
+    return now - _last_check.get(key, float("-inf")) >= CHECK_EVERY_SECONDS
+
+
+def _start_check(key: str, now: float) -> None:
+    """On the loop's thread, where ``_last_check`` is written: another start may have won."""
+    if not _due(key, now):
         return
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        return      # no loop here (a sync caller): the next start that has one looks
+        return      # no loop here (a script, a sync test): the next start that has one looks
     _last_check[key] = now
     task = loop.create_task(check_credit(key))
     _running.add(task)

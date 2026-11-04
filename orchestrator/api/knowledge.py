@@ -31,7 +31,7 @@ class KnowledgeShareRequest(BaseModel):
 router = APIRouter(prefix="/api/knowledge", tags=["📚 Knowledge"])
 
 @router.post("/share", dependencies=[Depends(require_workspace_permission("knowledge:create"))])
-async def share_knowledge(
+def share_knowledge(
     request: KnowledgeShareRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
