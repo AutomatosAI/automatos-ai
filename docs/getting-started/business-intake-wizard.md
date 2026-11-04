@@ -14,162 +14,190 @@ The following files were used as context for generating this wiki page:
 - [orchestrator/core/models/business_profiles.py](orchestrator/core/models/business_profiles.py)
 - [orchestrator/modules/intake/__init__.py](orchestrator/modules/intake/__init__.py)
 - [orchestrator/modules/intake/firecrawl_client.py](orchestrator/modules/intake/firecrawl_client.py)
-- [orchestrator/modules/intake/plan_generator.py](orchestrator/modules/intake/plan_generator.py)
 
 </details>
 
 
 
-The **Business Intake Wizard** (PRD-130) is a multi-step onboarding flow designed to bootstrap a new workspace by autonomously researching a business domain, ingesting its public data into RAG and Knowledge Graph layers, and launching "Mission Zero" to configure the initial agent team `[docs/PRDS/130-BUSINESS-INTAKE-WIZARD-POC.md:1-8]()`.
+The **Business Intake Wizard** (PRD-130) is a specialized onboarding subsystem implemented in `[orchestrator/api/wizard.py:1-18]()` and supported by auxiliary modules in the `[orchestrator/modules/intake/__init__.py:1-13]()` package. It automates workspace bootstrapping by capturing key business domain metadata, executing targeted website mapping via Firecrawl, performing retrieval-augmented generation (RAG) document ingestion, constructing a business knowledge graph via Graphify, and generating a Mission Zero draft onboarding plan.
 
-## Overview
-
-The wizard implements an onboarding pipeline that moves from high-level user intent to a fully initialized AI workspace. To prevent timeout issues during long-running website scrapes (which can take significant time on medium-to-large sites), the system uses an asynchronous background pipeline that communicates progress to the frontend via a Server-Sent Events (SSE) feed `[orchestrator/api/wizard.py:14-18]()`.
-
-### Key Components
-- **WizardShell**: The React container managing step transitions and wizard state `[docs/PRDS/130-BUSINESS-INTAKE-WIZARD-POC.md:58-65]()`.
-- **BusinessProfile**: The SQLAlchemy model storing domain info, extracted sectors, brands, standards, and draft plans `[orchestrator/core/models/business_profiles.py:20-54]()`.
-- **FirecrawlClient**: A domain-locked crawler wrapper for URL discovery (`/map`) and content extraction (`/scrape`) `[orchestrator/modules/intake/firecrawl_client.py:32-40]()`.
-- **Plan Generator (`build_mission_goal`)**: Translates the scraped and profiled business data into a "Mission Zero" goal string for the coordinator `[orchestrator/modules/intake/plan_generator.py:42-50]()`.
-
-Sources: `[orchestrator/api/wizard.py:5-18]`, `[orchestrator/core/models/business_profiles.py:20-61]`, `[orchestrator/modules/intake/firecrawl_client.py:32-55]`, `[orchestrator/modules/intake/plan_generator.py:42-50]`
+Sources: `[orchestrator/api/wizard.py:1-18]`, `[orchestrator/modules/intake/__init__.py:1-13]`
 
 ---
 
-## Data Flow & Architecture
+## Overview & System Architecture
 
-The wizard bridges the gap between a user-supplied URL and a functional multi-agent workspace through distinct FastAPI endpoints and background tasks.
+The intake wizard executes as a sequential multi-stage pipeline exposed through FastAPI router endpoints:
 
-### Technical Sequence Diagram
-
-"Business Intake Wizard Flow"
-```mermaid
-sequenceDiagram
-    participant UI as "WizardShell (Frontend)"
-    participant API as "wizard.py (FastAPI)"
-    participant FC as "FirecrawlClient"
-    participant DB as "BusinessProfile (PostgreSQL)"
-    participant MS as "CoordinatorService"
-
-    UI->>API: POST /api/wizard/start (domain, goals)
-    API->>DB: Create BusinessProfile (status="started")
-    API-->>UI: profile_id, domain, status
-
-    UI->>API: POST /api/wizard/scan/{profile_id}
-    API->>FC: map(domain)
-    FC-->>API: List[str] (raw_map_urls)
-    API->>API: detect_archetype() & select_target_urls()
-    API-->>UI: ScanResponse (archetype, must_have_urls)
-
-    UI->>API: POST /api/wizard/scrape/{profile_id} (selected_urls)
-    API-->>UI: ScrapeAcceptedResponse (202 Accepted)
-    
-    Note over API, FC: Background Pipeline (launch_guarded)
-    loop For each selected URL
-        API->>FC: scrape(url)
-        API->>API: DocumentManager RAG Ingestion & Graphify
-    end
-    API->>API: Update BusinessProfile status -> planned
-
-    UI->>API: GET /api/wizard/progress/{profile_id} (SSE)
-    API-->>UI: stream progress events (STAGE_INGEST, STAGE_GRAPHIFY)
-
-    UI->>API: POST /api/wizard/plan/{profile_id}
-    API->>MS: create_mission(goal)
-    MS-->>UI: mission_id (Mission Zero)
-```
-Sources: `[orchestrator/api/wizard.py:7-12]`, `[orchestrator/modules/intake/firecrawl_client.py:79-191]`, `[orchestrator/core/models/business_profiles.py:20-54]`
+1. **Domain Entry & Verification**: Accepts target domain strings and optional business goals, optionally validating email domain ownership via `_verify_domain_match` in `[orchestrator/api/wizard.py:147-158]`.
+2. **Website Mapping**: Discovers domain URLs using `FirecrawlClient.map()` defined in `[orchestrator/modules/intake/firecrawl_client.py:79-138]`.
+3. **Archetype Detection**: Classifies business structures (e.g., Shopify storefronts) via `detect_archetype` in `[orchestrator/modules/intake/archetypes.py:1-47]()`.
+4. **Asynchronous Scrape Pipeline**: Dispatches background scrape tasks via `launch_guarded` in `[orchestrator/api/wizard.py:41-41]()`, extracting content into vector databases.
+5. **Knowledge Graph & RAG Ingestion**: Triggers Graphify builders and populates the `[orchestrator/core/models/business_profiles.py:20-61]` ORM model.
+6. **Draft Plan Generation**: Produces natural-language goals via `build_mission_goal` in `[orchestrator/modules/intake/plan_generator.py:42-106]()`.
 
 ### Natural Language to Code Entity Mapping
 
-"Wizard Subsystem Entity Map"
+Diagram: Natural Language to Code Entity Mapping for Business Intake
 ```mermaid
 graph TD
-    subgraph "Natural Language Space"
-        NL_Wizard["Business Intake Wizard"]
-        NL_Crawler["Firecrawl Website Scanner"]
-        NL_Profile["Business Profile Editor"]
-        NL_Plan["Mission Zero Draft Plan"]
+    subgraph "NaturalLanguageSpace"
+        DomainEntry["Domain Entry & Verification"]
+        WebsiteMapping["Website Map & Scan"]
+        AsyncScrape["Asynchronous Scrape Pipeline"]
+        KnowledgeGraph["Knowledge Graph Build"]
+        MissionZeroPlan["Mission Zero Plan Generation"]
     end
 
-    subgraph "Code Entity Space"
-        CE_API["orchestrator/api/wizard.py"]
-        CE_Client["modules/intake/firecrawl_client.py:FirecrawlClient"]
-        CE_Model["core/models/business_profiles.py:BusinessProfile"]
-        CE_Gen["modules/intake/plan_generator.py:build_mission_goal"]
+    subgraph "CodeEntitySpace"
+        StartEndpoint["StartBody /api/wizard/start"]
+        FirecrawlMap["FirecrawlClient.map()"]
+        ScrapePipeline["_run_scrape_pipeline /api/wizard/scrape"]
+        ProfileModel["BusinessProfile /api/wizard/profile PATCH"]
+        PlanGen["build_mission_goal() /api/wizard/plan"]
     end
 
-    NL_Wizard --> CE_API
-    NL_Crawler --> CE_Client
-    NL_Profile --> CE_Model
-    NL_Plan --> CE_Gen
+    DomainEntry --> StartEndpoint
+    WebsiteMapping --> FirecrawlMap
+    AsyncScrape --> ScrapePipeline
+    KnowledgeGraph --> ProfileModel
+    MissionZeroPlan --> PlanGen
 ```
-Sources: `[orchestrator/api/wizard.py:68-121]`, `[orchestrator/modules/intake/firecrawl_client.py:32-40]`, `[orchestrator/core/models/business_profiles.py:20-23]`, `[orchestrator/modules/intake/plan_generator.py:42-50]`
+Sources: `[orchestrator/api/wizard.py:75-121]`, `[orchestrator/modules/intake/firecrawl_client.py:79-138]`, `[orchestrator/core/models/business_profiles.py:20-61]`, `[orchestrator/modules/intake/plan_generator.py:42-50]()`
 
 ---
 
-## Implementation Details & Modules
+## Technical Data Flow
 
-### 1. API Endpoints (`orchestrator/api/wizard.py`)
-The wizard router exposes six core endpoints managing the intake state machine `[orchestrator/api/wizard.py:5-18]`:
-- `POST /api/wizard/start`: Verifies domain match against the user's email domain (if enabled) and creates a `BusinessProfile` row `[orchestrator/api/wizard.py:7-7, 147-158]()`.
-- `POST /api/wizard/scan/{profile_id}`: Invokes Firecrawl map functionality and detects business archetypes `[orchestrator/api/wizard.py:8-8, 43-47]()`.
-- `POST /api/wizard/scrape/{profile_id}`: Accepts selected URLs, returns `202 Accepted`, and launches the background ingestion pipeline `[orchestrator/api/wizard.py:9-17, 98-106]()`.
-- `GET /api/wizard/progress/{profile_id}`: Provides an SSE live progress feed via `progress.stream` `[orchestrator/api/wizard.py:10-10, 51-63]()`.
-- `PATCH /api/wizard/profile/{profile_id}`: Persists user modifications to the company profile `[orchestrator/api/wizard.py:11-11, 108-115]()`.
-- `POST /api/wizard/plan/{profile_id}`: Translates the profile into a Mission Zero goal and dispatches it to the coordination service `[orchestrator/api/wizard.py:12-12, 117-121]()`.
+Diagram: Wizard Execution Sequence Flow
+```mermaid
+sequenceDiagram
+    participant UI as "WizardShell UI"
+    participant API as "APIRouter /api/wizard"
+    participant FC as "FirecrawlClient"
+    participant DB as "BusinessProfile"
+    participant CS as "CoordinatorService"
 
-Sources: `[orchestrator/api/wizard.py:5-122]`
+    UI->>API: "POST /api/wizard/start {domain, goals}"
+    API->>DB: "Create BusinessProfile (status=started)"
+    API-->>UI: "Return StartResponse"
 
-### 2. Firecrawl Client (`orchestrator/modules/intake/firecrawl_client.py`)
-A domain-locked async wrapper around the cloud Firecrawl API (`https://api.firecrawl.dev/v1`) `[orchestrator/modules/intake/firecrawl_client.py:8-15, 32-48]()`. It restricts operations to a bound domain and enforces a strict page cap (`max_pages`) `[orchestrator/modules/intake/firecrawl_client.py:10-11, 42-54]()`.
-- `map(domain)`: Posts to `/map` to discover available URLs while rejecting off-domain links `[orchestrator/modules/intake/firecrawl_client.py:79-138]()`.
-- `scrape(url, schema, formats)`: Posts to `/scrape` to retrieve markdown and optional LLM-extracted structured data `[orchestrator/modules/intake/firecrawl_client.py:139-191]()`.
+    UI->>API: "POST /api/wizard/scan/{profile_id}"
+    API->>FC: "FirecrawlClient.map(domain)"
+    FC-->>API: "Return URL list"
+    API-->>UI: "Return ScanResponse"
 
-Sources: `[orchestrator/modules/intake/firecrawl_client.py:1-191]`
+    UI->>API: "POST /api/wizard/scrape/{profile_id} {selected_urls}"
+    API-->>UI: "Return 202 Accepted"
+    loop Background Pipeline
+        API->>FC: "FirecrawlClient.scrape(url)"
+        API->>DB: "Ingest to DocumentManager & Graphify"
+    end
 
-### 3. Plan Generator (`orchestrator/modules/intake/plan_generator.py`)
-Translates a scraped `BusinessProfile` dictionary into a rich natural-language goal string via `build_mission_goal()` `[orchestrator/modules/intake/plan_generator.py:42-50]()`. This goal string explicitly mandates specialist agent roles (`voyager`, `blueprint`, `scribe`, `forge`) for research, profile extraction, synthesis, and workspace configuration `[orchestrator/modules/intake/plan_generator.py:83-92]()`.
+    UI->>API: "GET /api/wizard/progress/{profile_id}"
+    API-->>UI: "SSE progress stream"
 
-Sources: `[orchestrator/modules/intake/plan_generator.py:1-107]`
+    UI->>API: "POST /api/wizard/plan/{profile_id}"
+    API->>CS: "CoordinatorService.create_mission(goal)"
+    CS-->>UI: "Return PlanResponse"
+```
+Sources: `[orchestrator/api/wizard.py:7-12]`, `[orchestrator/modules/intake/firecrawl_client.py:79-137]`, `[orchestrator/core/models/business_profiles.py:20-61]`
 
 ---
 
-## Data Model
+## Implementation Details
 
-The wizard relies on the `business_profiles` table, mapped by the `BusinessProfile` ORM model `[orchestrator/core/models/business_profiles.py:5-9, 20-23]()`.
+### Intake Initialization & Domain Validation
+The intake workflow initializes via `POST /api/wizard/start` handling `StartBody` validation schemas in `[orchestrator/api/wizard.py:75-78]`. It provisions a `BusinessProfile` row (`[orchestrator/core/models/business_profiles.py:20-61]`) and enforces domain verification through `_verify_domain_match` (`[orchestrator/api/wizard.py:147-158]`) when `WIZARD_REQUIRE_DOMAIN_VERIFY` is enabled.
 
-```python
-class BusinessProfile(Base):
-    __tablename__ = "business_profiles"
-    
-    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
-    workspace_id = Column(PGUUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
-    domain = Column(Text, nullable=False)
-    archetype = Column(Text, nullable=True)
-    company_name = Column(Text, nullable=True)
-    sectors = Column(JSONB, nullable=True)
-    brands = Column(JSONB, nullable=True)
-    standards = Column(JSONB, nullable=True)
-    voice_notes = Column(Text, nullable=True)
-    goals = Column(JSONB, nullable=True)
-    raw_map_urls = Column(JSONB, nullable=True)
-    selected_urls = Column(JSONB, nullable=True)
-    quality_findings = Column(JSONB, nullable=True)
-    draft_plan = Column(JSONB, nullable=True)
-    status = Column(Text, nullable=False, server_default="started")
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-```
+Sources: `[orchestrator/api/wizard.py:75-158]`, `[orchestrator/core/models/business_profiles.py:20-61]`
+
+### Firecrawl Website Scanning & Archetype Detection
+The `/api/wizard/scan/{profile_id}` route invokes `FirecrawlClient.map()` (`[orchestrator/modules/intake/firecrawl_client.py:79-138]`). Discovered URLs undergo domain-lock filtering (`_is_same_domain`) and page cap enforcement (`_max_pages`). Archetype detection processes the URL set to classify business types.
+
+Sources: `[orchestrator/modules/intake/firecrawl_client.py:32-138]`, `[orchestrator/api/wizard.py:87-96]`
+
+### Background Scrape Pipeline & Progress Streaming
+The `/api/wizard/scrape/{profile_id}` endpoint accepts `ScrapeBody` (`[orchestrator/api/wizard.py:98-100]`), returning HTTP `202 Accepted` before spawning background tasks via `launch_guarded` (`[orchestrator/api/wizard.py:41]`). Progress metrics are broadcast using Redis pub/sub helpers `progress_emit` and streamed via `/api/wizard/progress/{profile_id}` (`[orchestrator/api/wizard.py:51-63]`).
+
+Sources: `[orchestrator/api/wizard.py:41-63]`, `[orchestrator/api/wizard.py:98-106]`
+
+### Mission Zero Draft Plan Generation
+Upon scrape completion and graph construction, `/api/wizard/plan/{profile_id}` calls `build_mission_goal` (`[orchestrator/modules/intake/plan_generator.py:42-106]()`). The resulting structured prompt is registered with the coordination backend to create the Mission Zero execution tree. The `model_config` for agents created during Mission Zero is explicitly set from `config.LLM_MODEL` to avoid issues with outdated default models, as noted in `[orchestrator/alembic/versions/drop_agents_model_config_default.py:20-22]()`.
+
+Sources: `[orchestrator/modules/intake/plan_generator.py:42-106]()`, `[orchestrator/api/wizard.py:117-121]`, `[orchestrator/alembic/versions/drop_agents_model_config_default.py:20-22]`
+
+---
+
+## Data Model: BusinessProfile
+
+The persistent state is managed by `BusinessProfile` in `[orchestrator/core/models/business_profiles.py:20-61]`, mapped in table `business_profiles` (`[orchestrator/alembic/versions/prd130_business_profile.py:21-61]`):
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | UUID | Primary key (`gen_random_uuid`) |
+| `workspace_id` | UUID | Foreign key to `workspaces.id` (CASCADE) |
+| `domain` | Text | Target business domain |
+| `archetype` | Text | Detected business pattern (e.g., `shopify`) |
+| `company_name` | Text | Extracted organization name |
+| `sectors` | JSONB | Business classification tags |
+| `brands` | JSONB | Discovered product brands and suppliers |
+| `standards` | JSONB | Compliance frameworks and certifications |
+| `voice_notes` | Text | Tone and brand voice notes |
+| `goals` | JSONB | User intake objectives |
+| `raw_map_urls` | JSONB | Complete URL inventory from Firecrawl map |
+| `selected_urls` | JSONB | User-filtered scrape targets |
+| `draft_plan` | JSONB | Generated Mission Zero draft payload |
+| `status` | Text | Lifecycle state (`started`, `scanning`, `scraped`, `planned`) |
+
 Sources: `[orchestrator/core/models/business_profiles.py:20-61]`, `[orchestrator/alembic/versions/prd130_business_profile.py:21-61]`
 
 ---
 
-## Troubleshooting & Constraints
-- **Domain Verification**: Email-domain matching against the target domain can be toggled via `WIZARD_REQUIRE_DOMAIN_VERIFY=False` in configuration `[orchestrator/api/wizard.py:147-158]()`.
-- **Firecrawl Limits**: Page discovery is bounded by `FIRECRAWL_MAX_PAGES_PER_SCAN` to control scraping costs and runtime `[orchestrator/modules/intake/firecrawl_client.py:42-54]()`.
-- **Model Configuration**: Alembic migration `drop_agents_model_config_default` removes hardcoded `gpt-4` defaults on agent models, ensuring Mission Zero agents correctly resolve their LLM settings from system configurations `[orchestrator/alembic/versions/drop_agents_model_config_default.py:1-44]()`.
+## Key Components and Functions
 
-Sources: `[orchestrator/api/wizard.py:147-158]`, `[orchestrator/modules/intake/firecrawl_client.py:42-54]`, `[orchestrator/alembic/versions/drop_agents_model_config_default.py:1-44]`
+### FirecrawlClient
+Defined in `[orchestrator/modules/intake/firecrawl_client.py:32-191]`, this wrapper handles cloud requests to `https://api.firecrawl.dev/v1`. Core methods include `map()` for URL enumeration and `scrape()` for markdown and schema-guided extractions.
+
+Sources: `[orchestrator/modules/intake/firecrawl_client.py:32-191]`
+
+### Plan Generator
+Located in `[orchestrator/modules/intake/plan_generator.py:1-106]()`, `build_mission_goal()` compiles business profiles into multi-agent operational directives assigning specialized roles (`voyager`, `blueprint`, `scribe`, `forge`).
+
+Sources: `[orchestrator/modules/intake/plan_generator.py:1-106]()`
+
+---
+
+## API Reference
+
+All routes are mounted under `/api/wizard` (`[orchestrator/api/wizard.py:68]`):
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/wizard/start` | Initialize intake profile and validate domain |
+| `POST` | `/api/wizard/scan/{profile_id}` | Execute Firecrawl map and archetype analysis |
+| `POST` | `/api/wizard/scrape/{profile_id}` | Trigger background scrape and RAG ingestion |
+| `GET` | `/api/wizard/progress/{profile_id}` | Stream live progress events (SSE) |
+| `PATCH` | `/api/wizard/profile/{profile_id}` | Update business profile attributes |
+| `POST` | `/api/wizard/plan/{profile_id}` | Generate Mission Zero draft plan |
+
+Sources: `[orchestrator/api/wizard.py:7-13]`
+
+---
+
+## Summary Diagram: Intake Subsystem Architecture
+
+Diagram: Intake Subsystem Architecture Overview
+```mermaid
+graph TD
+    StartRoute["POST /api/wizard/start"] --> ProfileModel["BusinessProfile ORM"]
+    ScanRoute["POST /api/wizard/scan/{profile_id}"] --> FCClient["FirecrawlClient"]
+    FCClient --> ArchetypeModule["modules/intake/archetypes.py"]
+    ScrapeRoute["POST /api/wizard/scrape/{profile_id}"] --> ProgressStream["modules/intake/progress.py"]
+    ScrapeRoute --> DocManager["DocumentManager RAG"]
+    PlanRoute["POST /api/wizard/plan/{profile_id}"] --> PlanGen["modules/intake/plan_generator.py"]
+    PlanGen --> CoordService["CoordinatorService"]
+```
+Sources: `[orchestrator/api/wizard.py:1-199]`, `[orchestrator/modules/intake/firecrawl_client.py:32-137]`, `[orchestrator/modules/intake/plan_generator.py:42-106]()`
 
 ---

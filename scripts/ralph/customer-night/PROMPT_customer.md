@@ -69,7 +69,7 @@ Before doing anything else: `tail -60 {{NIGHT_DIR}}/DIARY.md` and read `{{NIGHT_
 - **Never address a draft to a real external address.** Every recipient ends in `@harbourline-coffee.example` or another `.example` domain. A draft is still a thing a person can accidentally send.
 - A question that was answered by `user:local` and you did not answer it was answered by the **real owner**, who shares this workspace. Note it in the diary and carry on — it is not a product fault and it does not belong in the Broken section.
 - Do not touch the repo, git, Docker, the database or logs. Do not fix the product. Do not install anything.
-- Keep an eye on spend with `cost`; if the night passes $40 in model calls, stop starting new work and say so in the report. (Gerard, 18 Sep: real testing is worth a few hundred euros over the programme — do not economise on the work itself.)
+- Keep an eye on spend with `cost`; if the night passes $75 in model calls, stop starting new work and say so in the report. (Gerard, 18 Sep: real testing is worth a few hundred euros over the programme — do not economise on the work itself.)
 - Write as you go. If this iteration is cut off, the diary and the report must already be useful.
 
 ## What you write

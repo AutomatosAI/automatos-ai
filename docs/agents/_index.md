@@ -8,22 +8,22 @@ The following files were used as context for generating this wiki page:
 - [frontend/components/agents/agent-configuration-modal.tsx](frontend/components/agents/agent-configuration-modal.tsx)
 - [frontend/components/agents/agent-configuration.tsx](frontend/components/agents/agent-configuration.tsx)
 - [frontend/components/agents/agent-details-modal.tsx](frontend/components/agents/agent-details-modal.tsx)
+- [frontend/components/agents/agent-management.tsx](frontend/components/agents/agent-management.tsx)
 - [frontend/components/agents/agent-performance.tsx](frontend/components/agents/agent-performance.tsx)
 - [frontend/components/agents/agent-roster.tsx](frontend/components/agents/agent-roster.tsx)
 - [frontend/components/agents/agent-skills.tsx](frontend/components/agents/agent-skills.tsx)
 - [frontend/components/agents/agent-status-control-modal.tsx](frontend/components/agents/agent-status-control-modal.tsx)
 - [frontend/components/agents/create-agent-modal.tsx](frontend/components/agents/create-agent-modal.tsx)
 - [frontend/components/agents/create-skill-modal.tsx](frontend/components/agents/create-skill-modal.tsx)
-- [frontend/components/agents/model-selector.tsx](frontend/components/agents/model-selector.tsx)
 - [frontend/components/agents/skill-configuration-modal.tsx](frontend/components/agents/skill-configuration-modal.tsx)
+- [frontend/components/documents/document-management.tsx](frontend/components/documents/document-management.tsx)
+- [frontend/components/tools/tools-dashboard.tsx](frontend/components/tools/tools-dashboard.tsx)
+- [frontend/components/workflows/active-workflows-panel.tsx](frontend/components/workflows/active-workflows-panel.tsx)
+- [frontend/components/workflows/workflow-management.tsx](frontend/components/workflows/workflow-management.tsx)
 - [frontend/hooks/use-agent-api.ts](frontend/hooks/use-agent-api.ts)
-- [frontend/hooks/use-model-api.ts](frontend/hooks/use-model-api.ts)
 - [frontend/lib/agent-constants.ts](frontend/lib/agent-constants.ts)
 - [orchestrator/alembic/versions/add_job_title_to_agents.py](orchestrator/alembic/versions/add_job_title_to_agents.py)
-- [orchestrator/api/agent_endpoints.py](orchestrator/api/agent_endpoints.py)
 - [orchestrator/api/agents.py](orchestrator/api/agents.py)
-- [orchestrator/core/models/__init__.py](orchestrator/core/models/__init__.py)
-- [orchestrator/core/models/core.py](orchestrator/core/models/core.py)
 
 </details>
 
@@ -31,139 +31,181 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This document covers the **Agent Management System** in Automatos AI, providing a high-level overview of agent creation, configuration, lifecycle management, personas, capabilities, and LLM provider integration. Agents serve as autonomous AI entities that execute tasks, coordinate multi-agent workflows, invoke external tools, and maintain persistent state across sessions.
+This document provides a high-level overview of the **Agent Management System** within Automatos AI. Agents are autonomous entities responsible for executing tasks, orchestrating workflows, maintaining state, and interacting with external tools and services. 
 
-Because this is a parent overview page, deep technical implementation details are delegated to specialized child pages. For details on creation flows, see [Creating Agents](#5.1). For configuration settings, see [Agent Configuration](#5.2). For persona management, see [Agent Personas](#5.3). For capabilities, see [Agent Plugins & Skills](#5.4). For runtime loops, see [Agent Factory & Runtime](#5.5). For key resolution, see [LLM Provider Management](#5.6). For backend endpoints, see [Agent API Reference](#5.7).
+This is a parent page. For detailed technical specifications, implementation flows, and code hooks, refer to the child pages:
+- [Creating Agents](#5.1) — Agent creation flow via `CreateAgentModal`, templates, basic info, and capabilities assignment
+- [Agent Configuration](#5.2) — General settings, resources, priority, runtime validation, and configuration modal tabs
+- [Agent Personas](#5.3) — Persona system, predefined vs custom prompts, the Auto CTO soul seeds, and voice profiles
+- [Agent Plugins & Skills](#5.4) — Plugin and skill assignment, skill loader/materializer, workspace-enabled items, portability and L1/L3 skill execution
+- [Agent Factory & Runtime](#5.5) — `AgentLifecycle`, `create_agent`, `activate_agent`, `execute_with_prompt`, tool loop with deduplication
+- [LLM Provider Management](#5.6) — `LLMManager` initialization, embeddings/rerank managers, 3-tier API key resolution (BYOK, credential store, env), provider auto-detection, LLM marketplace
+- [Agent API Reference](#5.7) — Backend API endpoints for agent CRUD, status, execution, plugins, model-config, assembled-context
+
+Sources:
+- [orchestrator/api/agents.py:1-32]()
+- [frontend/components/agents/create-agent-modal.tsx:1-65]()
 
 ---
 
-## Agent Entity Model & Architecture
+## Agent Entity Model
 
-Agents are modeled via the `Agent` SQLAlchemy model, maintaining attributes such as display name, role classifications, statuses (`active`, `idle`, `maintenance`), and isolated workspace foreign keys [orchestrator/core/models/core.py:178-210](). Every workspace includes a default orchestrator system agent known as **Auto** [orchestrator/core/seeds/seed_auto_agent.py:150-162]().
+Agents are represented by the `Agent` SQLAlchemy model [orchestrator/api/agents.py:13](). Every workspace is provisioned with a default system agent named **Auto**, which serves as the workspace's primary orchestrator and settings anchor. Agents track performance metrics, model usage configurations, and workspace-specific metadata.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | Integer | Primary key [orchestrator/api/agents.py:69]() |
+| `name` | String | Agent display name (e.g., "Auto") |
+| `agent_type` | String | Role classification (e.g., `assistant`, `support`, `custom`) [orchestrator/api/agents.py:25]() |
+| `status` | String | Operational state: `active`, `idle`, `maintenance` [orchestrator/api/agents.py:25]() |
+| `configuration` | JSONB | Execution priority, max tasks, and heartbeat settings |
+| `performance_metrics` | JSONB | Success rate, total tasks, and execution time stats |
+| `workspace_id` | UUID | Multi-tenant isolation foreign key |
+| `job_title` | String | Agent's specific job title [frontend/components/agents/agent-roster.tsx:140]() |
 
 ### Agent Data Model Relationships
 
-**Diagram: Agent Database Schema with SQLAlchemy Models**
+The following diagram bridges natural language entity descriptions to concrete database models and association tables in the codebase.
+
+**Diagram: AgentDatabaseSchemaMapping**
 
 ```mermaid
-graph TB
-    Agent["Agent<br/>orchestrator/core/models/core.py<br/>━━━━━<br/>id: Integer PK<br/>public_id: UUID<br/>agent_type: String<br/>workspace_id: UUID FK"]
+graph TD
+    Agent["Agent<br/>core.models.Agent<br/>━━━━━<br/>id: Integer PK<br/>agent_type: String<br/>workspace_id: UUID FK<br/>job_title: String"]
+    AgentSkills["agent_skills<br/>core.models.agent_skills<br/>━━━━━<br/>agent_id: Integer FK<br/>skill_id: Integer FK"]
+    Skill["Skill<br/>core.models.Skill<br/>━━━━━<br/>id: Integer PK<br/>name: String"]
+    AgentAppAssignment["AgentAppAssignment<br/>core.models.composio_cache.AgentAppAssignment<br/>━━━━━<br/>id: Integer PK<br/>agent_id: Integer FK<br/>app_name: String<br/>is_active: Boolean"]
+    AgentAssignedPlugin["AgentAssignedPlugin<br/>core.models.marketplace_plugins.AgentAssignedPlugin<br/>━━━━━<br/>id: Integer PK<br/>agent_id: Integer FK<br/>plugin_id: UUID FK"]
+    ComposioAppCache["ComposioAppCache<br/>core.models.composio_cache.ComposioAppCache<br/>━━━━━<br/>id: Integer PK<br/>app_name: String"]
+    MarketplacePlugin["MarketplacePlugin<br/>core.models.marketplace_plugins.MarketplacePlugin<br/>━━━━━<br/>id: UUID PK<br/>slug: String"]
     
-    Skills["agent_skills<br/>orchestrator/core/models/core.py<br/>━━━━━<br/>agent_id: Integer FK<br/>skill_id: Integer FK<br/>priority: Integer"]
-    
-    SkillTable["Skill<br/>orchestrator/core/models/core.py<br/>━━━━━<br/>id: Integer PK<br/>name: String(255)<br/>prompt_template: Text"]
-    
-    Tools["AgentAppAssignment<br/>orchestrator/core/models/composio_cache.py<br/>━━━━━<br/>id: Integer PK<br/>agent_id: Integer FK<br/>app_name: String<br/>is_active: Boolean"]
-    
-    Plugins["AgentAssignedPlugin<br/>orchestrator/core/models/marketplace_plugins.py<br/>━━━━━<br/>id: Integer PK<br/>agent_id: Integer FK<br/>plugin_id: UUID FK"]
-    
-    LLMConfig["AgentModelConfig<br/>orchestrator/core/models/core.py<br/>━━━━━<br/>agent_id: Integer FK<br/>provider: String<br/>model_name: String"]
-    
-    Workspace["Workspace<br/>orchestrator/core/models/workspaces.py<br/>━━━━━<br/>id: UUID PK<br/>settings: JSONB"]
-    
-    Agent --> Skills
-    Skills --> SkillTable
-    Agent --> Tools
-    Agent --> Plugins
-    Agent --> LLMConfig
-    Agent --> Workspace
+    Agent -->|"has many"| AgentSkills
+    AgentSkills -->|"links to"| Skill
+    Agent -->|"has many"| AgentAppAssignment
+    AgentAppAssignment -->|"references"| ComposioAppCache
+    Agent -->|"has many"| AgentAssignedPlugin
+    AgentAssignedPlugin -->|"references"| MarketplacePlugin
 ```
 
-**Sources:**
-- [orchestrator/core/models/core.py:31-41]()
-- [orchestrator/core/models/core.py:178-220]()
-- [orchestrator/core/models/composio_cache.py:14-25]()
-- [orchestrator/core/models/marketplace_plugins.py:16-25]()
+Sources:
+- [orchestrator/api/agents.py:13-17]()
+- [orchestrator/api/agents.py:175-176]()
+- [frontend/components/agents/agent-roster.tsx:140]()
 
 ---
 
-## Agent Provisioning Space (Natural Language to Code Entity Space)
+## Creating Agents
 
-When a user defines an agent through user-facing interfaces or wizards, natural language descriptions and UI configurations are mapped directly into backend database tables and runtime factories.
+Agent creation is managed through `CreateAgentModal` in the frontend [frontend/components/agents/create-agent-modal.tsx:67-79](), guiding users through basic identity setup, model configuration, and capability binding. The backend API endpoint `/api/agents` (POST) handles the actual agent creation, including LLM connection verification and triggering knowledge graph updates [orchestrator/api/agents.py:300-370](). The modal allows selection of agent categories like 'Analytics', 'Business', 'Development', etc., which map to database `agent_type` values [frontend/lib/agent-constants.ts:25-42]().
 
-### Agent Creation Flow Mapping
+For details, see [Creating Agents](#5.1).
 
-**Diagram: Natural Language Agent Creation to Code Entities**
-
-```mermaid
-graph TB
-    NLSpace["UserPromptAndWizardInput<br/>(Natural Language Space)"] --> UI["CreateAgentModal<br/>frontend/components/agents/create-agent-modal.tsx"]
-    UI --> API["POST /api/agents<br/>orchestrator/api/agents.py"]
-    API --> Factory["AgentFactory<br/>modules/agents/factory.py"]
-    Factory --> Model["AgentModel<br/>orchestrator/core/models/core.py"]
-```
-
-**Sources:**
-- [frontend/components/agents/create-agent-modal.tsx:67-78]()
-- [orchestrator/api/agents.py:362-438]()
-- [orchestrator/api/agent_endpoints.py:42-107]()
+Sources:
+- [frontend/components/agents/create-agent-modal.tsx:67-79]()
+- [orchestrator/api/agents.py:300-370]()
+- [frontend/lib/agent-constants.ts:25-42]()
 
 ---
 
-## Agent Runtime Execution Space (Natural Language to Code Entity Space)
+## Agent Configuration
 
-During execution, prompts pass through lifecycle handlers and context builders, bridging high-level intent into concrete tool loops and memory interactions.
+Agents expose granular settings managed via `AgentConfigurationModal` [frontend/components/agents/agent-configuration-modal.tsx:98-171]() and `AgentConfiguration` [frontend/components/agents/agent-configuration.tsx:40-77](). These settings include general parameters, resource limits, execution priority levels, and runtime validation rules organized into intuitive tabs. The `_reject_invalid_runtime` function validates runtime fields such as `cli` session mode configurations [orchestrator/api/agents.py:38-54](). The configuration also includes settings for heartbeat, which enables proactive checks and suggestions [frontend/components/agents/agent-configuration-modal.tsx:155-171]().
 
-### Runtime Execution Mapping
+For details, see [Agent Configuration](#5.2).
 
-**Diagram: Execution Intent to Agent Runtime Code Entities**
-
-```mermaid
-graph TB
-    NLPrompt["IncomingUserPrompt<br/>(Natural Language Space)"] --> Lifecycle["AgentLifecycle<br/>modules/agents/lifecycle.py"]
-    Lifecycle --> Runtime["AgentRuntime<br/>modules/agents/runtime.py"]
-    Runtime --> Memory["UnifiedMemoryService<br/>core/memory/unified_memory_service.py"]
-    Runtime --> ToolExec["UnifiedToolExecutor<br/>core/tools/executor.py"]
-```
-
-**Sources:**
-- [orchestrator/api/agent_endpoints.py:19-21]()
-- [orchestrator/api/agent_endpoints.py:82-91]()
+Sources:
+- [frontend/components/agents/agent-configuration-modal.tsx:98-171]()
+- [frontend/components/agents/agent-configuration.tsx:40-77]()
+- [orchestrator/api/agents.py:38-54]()
 
 ---
 
-## Sub-Topics and Child Pages
+## Agent Personas
 
-### Creating Agents
-Agent creation is managed interactively through the `CreateAgentModal` component, which guides users across basic information, capability assignments, and intelligence selection [frontend/components/agents/create-agent-modal.tsx:67-78](). 
+Agent personas define specialized behavioral constraints, system prompts, and voice profiles across modes like `none`, `predefined`, and `custom` [frontend/components/agents/create-agent-modal.tsx:57-58](). Predefined soul seeds such as the "Auto CTO" provide ready-to-use configurations for common engineering and operational roles. The `AgentConfigurationModal` manages persona state, including selection, custom prompts, and category filtering [frontend/components/agents/agent-configuration-modal.tsx:140-153](). Personas are fetched from `/api/personas` [frontend/components/agents/create-agent-modal.tsx:136]().
 
-For full implementation details, see [Creating Agents](#5.1).
+For details, see [Agent Personas](#5.3).
 
-### Agent Configuration
-Agents support granular configuration including resource constraints, execution priority levels, reporting hierarchies (`reports_to`), and modal tabs covering general preferences, models, and heartbeat rules [frontend/components/agents/agent-configuration-modal.tsx:105-171]().
+Sources:
+- [frontend/components/agents/agent-configuration-modal.tsx:140-153]()
+- [frontend/components/agents/create-agent-modal.tsx:44-57]()
+- [frontend/components/agents/create-agent-modal.tsx:136]()
 
-For full implementation details, see [Agent Configuration](#5.2).
+---
 
-### Agent Personas
-Personas define agent identity, behavior constraints, voice profiles, and custom prompt overrides. Seed agents such as **Auto** and **CTO** use predefined system prompts injected during context assembly.
+## Agent Plugins & Skills
 
-For full implementation details, see [Agent Personas](#5.3).
+Agents can be assigned portable skills and plugins via workspace association tables (`agent_skills`, `AgentAssignedPlugin`) [orchestrator/api/agents.py:13-17](). The skill loader materializes these capabilities into active execution contexts during prompt assembly, utilizing functions like `_fetch_attachable_skills` to guarantee proper workspace scoping [orchestrator/api/agents.py:104-123](). The frontend components `AgentConfigurationModal` and `AgentConfiguration` manage the assignment and display of these plugins and skills [frontend/components/agents/agent-configuration-modal.tsx:128-139](). Plugins are fetched from `/api/workspaces/{workspaceId}/plugins` and assigned plugins from `/api/agents/{selectedAgentId}/plugins` [frontend/components/agents/agent-configuration.tsx:108-109]().
 
-### Agent Plugins & Skills
-Agents extend their functional capabilities by linking workspace-scoped skills and plugins via explicit association tables (`agent_skills`, `agent_assigned_plugins`), ensuring strict tenant isolation and skill portability [orchestrator/core/models/core.py:31-36]().
+For details, see [Agent Plugins & Skills](#5.4).
 
-For full implementation details, see [Agent Plugins & Skills](#5.4).
+Sources:
+- [orchestrator/api/agents.py:13-17]()
+- [orchestrator/api/agents.py:104-123]()
+- [frontend/components/agents/agent-configuration-modal.tsx:128-139]()
+- [frontend/components/agents/agent-configuration.tsx:57-67]()
+- [frontend/components/agents/agent-configuration.tsx:108-109]()
 
-### Agent Factory & Runtime
-The `AgentFactory` and `AgentLifecycle` manage agent provisioning, activation, and prompt execution loops with built-in tool deduplication and error handling [orchestrator/api/agent_endpoints.py:32-88]().
+---
 
-For full implementation details, see [Agent Factory & Runtime](#5.5).
+## Agent Factory & Runtime
 
-### LLM Provider Management
-The `LLMManager` handles client initialization, embedding managers, and a 3-tier API key resolution mechanism supporting BYOK overrides, platform credential stores, and environment variables [orchestrator/core/models/core.py:136-150]().
+The execution runtime centers around `AgentLifecycle` and related services. The factory manages agent instance creation, while the lifecycle handles activation, execution loops, tool call deduplication, and periodic health checks. The `_reindex_agent_embedding` function triggers semantic re-embedding for agents in the background [orchestrator/api/agents.py:61-90](). Agent runtime configurations can specify `api` or `cli` modes, with `cli` mode requiring specific provider and model shapes [orchestrator/api/agents.py:45-47]().
 
-For full implementation details, see [LLM Provider Management](#5.6).
+The following diagram maps the logical runtime pipeline from UI initiation down to core factory execution classes in the codebase.
 
-### Agent API Reference
-The backend exposes RESTful endpoints under `/api/agents` for managing agent CRUD lifecycles, configuration updates, tool-to-app name resolutions, and performance statistics [orchestrator/api/agents.py:33]().
+**Diagram: RuntimeExecutionPipeline**
 
-For full implementation details, see [Agent API Reference](#5.7).
+```mermaid
+graph TD
+    UI["CreateAgentModal<br/>frontend/components/agents/create-agent-modal.tsx"]
+    API_CreateAgent["POST /api/agents<br/>orchestrator/api/agents.py"]
+    API_GetAgentStatus["GET /api/agents/{agent_id}<br/>orchestrator/api/agents.py"]
+    AgentModel["Agent<br/>core.models.Agent"]
+    SemanticIndexer["semantic_indexer.embed_agent<br/>core.routing.semantic_indexer.py"]
+    RuntimeValidator["_reject_invalid_runtime<br/>orchestrator/api/agents.py"]
+    
+    UI -->|"1. User creates agent"| API_CreateAgent
+    API_CreateAgent -->|"2. Validates runtime config"| RuntimeValidator
+    RuntimeValidator -- "If valid" --> API_CreateAgent
+    API_CreateAgent -->|"3. Creates Agent record"| AgentModel
+    AgentModel -->|"4. Triggers background re-embedding"| SemanticIndexer
+    SemanticIndexer -->|"5. Updates agent embedding"| AgentModel
+    API_CreateAgent -->|"6. Returns agent details"| UI
+    API_GetAgentStatus -->|"7. Retrieves agent data"| AgentModel
+```
 
-**Sources:**
-- [frontend/components/agents/create-agent-modal.tsx:67-178]()
-- [frontend/components/agents/agent-configuration-modal.tsx:105-171]()
-- [orchestrator/core/models/core.py:31-41]()
-- [orchestrator/api/agent_endpoints.py:32-88]()
-- [orchestrator/api/agents.py:33-182]()
+For details, see [Agent Factory & Runtime](#5.5).
+
+Sources:
+- [orchestrator/api/agents.py:61-90]()
+- [orchestrator/api/agents.py:300-370]()
+- [orchestrator/api/agents.py:45-47]()
+
+---
+
+## LLM Provider Management
+
+`LLMManager` coordinates multi-model access through a 3-tier API key resolution hierarchy spanning BYOK, encrypted credential stores, and environment variables. The `ModelSelector` component (`frontend/components/agents/model-selector.tsx`) provides the UI for configuring LLM models for agents [frontend/components/agents/agent-configuration-modal.tsx:58](). The `getDefaultModelConfig` function provides initial model settings [frontend/components/agents/create-agent-modal.tsx:6]().
+
+For details, see [LLM Provider Management](#5.6).
+
+Sources:
+- [frontend/components/agents/agent-configuration-modal.tsx:58]()
+- [frontend/components/agents/create-agent-modal.tsx:39]()
+- [frontend/components/agents/create-agent-modal.tsx:6]()
+
+---
+
+## Agent API Reference
+
+Backend endpoints under `/api/agents` (`orchestrator/api/agents.py`) manage agent CRUD operations, performance metrics retrieval, semantic re-indexing, and tool ID resolution [orchestrator/api/agents.py:35](). Key functions include `_resolve_tool_ids_to_app_names` for mapping tool IDs to connected application names and `_fetch_attachable_skills` for skill visibility [orchestrator/api/agents.py:104-176](). The API also handles agent status updates (start/stop) [frontend/hooks/use-agent-api.ts:58-59]() and provides statistics [frontend/hooks/use-agent-api.ts:160-166]().
+
+For details, see [Agent API Reference](#5.7).
+
+Sources:
+- [orchestrator/api/agents.py:1-176]()
+- [frontend/hooks/use-agent-api.ts:58-59]()
+- [frontend/hooks/use-agent-api.ts:160-166]()
 
 ---

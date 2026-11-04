@@ -7,295 +7,220 @@ The following files were used as context for generating this wiki page:
 
 - [docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md](docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md)
 - [frontend/components/settings/ChannelsSettingsTab.tsx](frontend/components/settings/ChannelsSettingsTab.tsx)
+- [frontend/components/settings/__tests__/channels-settings-local.test.ts](frontend/components/settings/__tests__/channels-settings-local.test.ts)
 - [orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py](orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py)
-- [orchestrator/alembic/versions/prd008a4_channel_drivers.py](orchestrator/alembic/versions/prd008a4_channel_drivers.py)
 - [orchestrator/api/channels.py](orchestrator/api/channels.py)
-- [orchestrator/channels/drivers/__init__.py](orchestrator/channels/drivers/__init__.py)
-- [orchestrator/channels/drivers/base.py](orchestrator/channels/drivers/base.py)
-- [orchestrator/channels/drivers/discord.py](orchestrator/channels/drivers/discord.py)
-- [orchestrator/channels/drivers/slack.py](orchestrator/channels/drivers/slack.py)
-- [orchestrator/channels/drivers/telegram.py](orchestrator/channels/drivers/telegram.py)
-- [orchestrator/channels/drivers/webhook.py](orchestrator/channels/drivers/webhook.py)
-- [orchestrator/channels/drivers/whatsapp.py](orchestrator/channels/drivers/whatsapp.py)
+- [orchestrator/api/heartbeat.py](orchestrator/api/heartbeat.py)
 - [orchestrator/channels/manager.py](orchestrator/channels/manager.py)
 - [orchestrator/channels/telegram_adapter.py](orchestrator/channels/telegram_adapter.py)
 - [orchestrator/core/models/channels.py](orchestrator/core/models/channels.py)
-- [orchestrator/tests/test_channel_adapter_contract.py](orchestrator/tests/test_channel_adapter_contract.py)
-- [orchestrator/tests/test_prd184_us005_legacy_channel_adapters_deleted.py](orchestrator/tests/test_prd184_us005_legacy_channel_adapters_deleted.py)
+- [orchestrator/tests/test_prd225_polling_answer_bridge.py](orchestrator/tests/test_prd225_polling_answer_bridge.py)
 
 </details>
 
 
 
-This page documents the HTTP API endpoints for managing channel connections (Telegram, Slack, Discord, WhatsApp, and Webhooks). These endpoints allow programmatic creation, configuration, lifecycle control, and monitoring of messaging platform integrations via a driver-mediated architecture.
+## Purpose and scope
 
-For the internal architecture and message processing pipeline, see [Channel Architecture](#12.1). For platform-specific driver implementations, see [Platform Adapters](#12.3).
+This page documents the channel-management API surface visible in the provided implementation, the `ChannelConnection` record, driver and adapter lifecycle boundaries, and the Channels settings tab. The API module describes itself as platform-agnostic: per-platform behavior belongs to `channels/drivers/`, while channel records and runtime adapter state are handled separately [orchestrator/api/channels.py:1-10](), [orchestrator/core/models/channels.py:19-45](), [orchestrator/channels/manager.py:22-26]().
 
----
-
-## Overview
-
-The Channel API (PRD-55 US-023) provides REST endpoints for:
-- **CRUD operations** on channel connections with driver-based validation [orchestrator/api/channels.py:5-11]().
-- **Connectivity Modes**: Support for both `webhook` (inbound POSTs) and `polling` (long-poll loops) [orchestrator/api/channels.py:29-36]().
-- **Lifecycle control**: Start/stop polling adapters and automated webhook installation [orchestrator/api/channels.py:246-324]().
-- **Verification**: Real-time credential testing against platform APIs [orchestrator/api/channels.py:188-243]().
-
-All endpoints require workspace-scoped authentication and enforce isolation through the `workspace_id` foreign key on the `channel_connections` table [orchestrator/core/models/channels.py:24-25]().
-
-**Sources:** [orchestrator/api/channels.py:1-55](), [orchestrator/channels/drivers/base.py:10-24](), [orchestrator/core/models/channels.py:24-25]()
+Sources: [orchestrator/api/channels.py:1-10](), [orchestrator/core/models/channels.py:19-45](), [orchestrator/channels/manager.py:22-26]()
 
 ---
 
-## Endpoint Mapping
+## 1. Overview
 
-The following diagram maps HTTP routes to handler functions, driver interactions, and database models.
+The API router is declared with the `/api/channels` prefix and the `channels` tag. It imports hybrid request context, database-session, and workspace-permission dependencies, along with the channel driver registry and trigger-mode helpers [orchestrator/api/channels.py:19-46]().
 
-Title: "Channel API Route Mapping"
+The driver boundary is intended to describe required configuration and supported connectivity modes, and to provide operations for verification, sending, webhook installation and removal, and polling lifecycle [orchestrator/api/channels.py:5-10](). The `ChannelConnection` model stores workspace and platform identifiers, configuration, status, mode, webhook URL, verification fields, metadata, optional default-agent routing, and activity counters [orchestrator/core/models/channels.py:19-45]().
+
+The provided API excerpt shows `GET /api/channels` and its workspace context/database dependencies. Its documentation says the response reconciles stored status with `ChannelManager` runtime state, so an adapter that is running can be represented as active even when the database row says inactive [orchestrator/api/channels.py:177-188](). `ChannelManager.is_running()` checks loaded adapter state and is documented as supporting this read-time reconciliation [orchestrator/channels/manager.py:176-187]().
+
+Sources: [orchestrator/api/channels.py:5-10](), [orchestrator/api/channels.py:19-46](), [orchestrator/api/channels.py:177-188](), [orchestrator/core/models/channels.py:19-45](), [orchestrator/channels/manager.py:176-187]()
+
+---
+
+## 2. API route mapping
+
+**Diagram: Channel-management concepts mapped to code entities**
+
 ```mermaid
 graph TB
-    subgraph "HTTP_Routes_(orchestrator/api/channels.py)"
-        GET_LIST["GET /api/channels"]
-        POST_CREATE["POST /api/channels"]
-        PUT_UPDATE["PUT /api/channels/{id}"]
-        DELETE_CH["DELETE /api/channels/{id}"]
-        POST_TEST["POST /api/channels/{id}/test"]
-        POST_START["POST /api/channels/{id}/start"]
-        POST_STOP["POST /api/channels/{id}/stop"]
-        GET_PLATFORMS["GET /api/channels/platforms"]
+    subgraph "NaturalLanguageSpace"
+        UserChannels["Manage channel connections"]
+        TestConnection["Test channel credentials"]
+        RuntimeState["Observe running polling adapters"]
+        SettingsUI["Configure channels in settings"]
     end
-    
-    subgraph "Router_Functions_(orchestrator/api/channels.py)"
-        list_channels["list_channels()"]
-        create_channel["create_channel()"]
-        update_channel["update_channel()"]
-        delete_channel["delete_channel()"]
-        test_channel["test_channel()"]
-        start_channel["start_channel()"]
-        stop_channel["stop_channel()"]
-        list_supported_platforms["list_supported_platforms()"]
+
+    subgraph "CodeEntitySpace"
+        ChannelsSettingsTab["ChannelsSettingsTab"]
+        ApiRouter["APIRouter /api/channels"]
+        list_channels["list_channels"]
+        ChannelConnection["ChannelConnection"]
+        ChannelManager["ChannelManager"]
+        is_running["is_running"]
+        DriverRegistry["get_driver / list_platforms"]
+        VerifyResult["VerifyResult"]
     end
-    
-    subgraph "Driver_Interface_(channels/drivers/base.py)"
-        ChannelDriver["ChannelDriver
-        .verify()
-        .send()
-        .install_webhook()
-        .uninstall_webhook()
-        .start_polling()
-        .stop_polling()"]
-    end
-    
-    subgraph "Database_Model"
-        ChannelConnection["ChannelConnection (channel_connections table)
-        - id
-        - workspace_id
-        - platform
-        - config (JSON)
-        - status
-        - mode (webhook/polling)
-        - webhook_url
-        - last_verified
-        - last_error
-        - metadata_ (JSON)
-        - message_count
-        - last_activity_at"]
-    end
-    
-    GET_LIST --> list_channels
-    POST_CREATE --> create_channel
-    PUT_UPDATE --> update_channel
-    DELETE_CH --> delete_channel
-    POST_TEST --> test_channel
-    POST_START --> start_channel
-    POST_STOP --> stop_channel
-    GET_PLATFORMS --> list_supported_platforms
-    
-    test_channel --> ChannelDriver
-    create_channel --> ChannelDriver
-    update_channel --> ChannelDriver
-    start_channel --> ChannelDriver
-    stop_channel --> ChannelDriver
-    list_supported_platforms --> ChannelDriver
-    
+
+    UserChannels --> ChannelsSettingsTab
+    SettingsUI --> ChannelsSettingsTab
+    ChannelsSettingsTab --> ApiRouter
+    ApiRouter --> list_channels
     list_channels --> ChannelConnection
-    create_channel --> ChannelConnection
-    update_channel --> ChannelConnection
-    delete_channel --> ChannelConnection
-    test_channel --> ChannelConnection
-    start_channel --> ChannelConnection
-    stop_channel --> ChannelConnection
+    list_channels --> is_running
+    is_running --> ChannelManager
+    TestConnection --> DriverRegistry
+    DriverRegistry --> VerifyResult
+    ApiRouter --> DriverRegistry
 ```
 
-**Sources:** [orchestrator/api/channels.py:171-761](), [orchestrator/channels/drivers/base.py:90-197](), [orchestrator/core/models/channels.py:19-45]()
+The diagram maps the UI component and the API router to the specific handler and runtime/model entities named in the provided files. The driver registry imports include `get_driver`, `list_platforms`, and `VerifyResult`; the provided excerpt does not show the remaining route handlers or their call sites [frontend/components/settings/ChannelsSettingsTab.tsx:176-181](), [orchestrator/api/channels.py:29-46](), [orchestrator/api/channels.py:177-188](), [orchestrator/channels/manager.py:176-187](), [orchestrator/core/models/channels.py:19-45]().
+
+Sources: [frontend/components/settings/ChannelsSettingsTab.tsx:176-181](), [orchestrator/api/channels.py:29-46](), [orchestrator/api/channels.py:177-188](), [orchestrator/channels/manager.py:176-187](), [orchestrator/core/models/channels.py:19-45]()
 
 ---
 
-## Endpoint Reference
+## 3. Endpoint reference
 
-### List Channels
-**Endpoint:** `GET /api/channels`  
-**Description:** Lists all channel connections for the current workspace. The `status` column is reconciled against `ChannelManager` at read time to reflect the actual running state of polling adapters [orchestrator/api/channels.py:177-188]().
-**Response:** `List[ChannelConnection]`
+### `GET /api/channels`
 
-### Create Channel
-**Endpoint:** `POST /api/channels`  
-**Description:** Creates a new channel connection. It validates the provided `config` using the platform's driver. If the mode is `webhook`, it attempts to install the webhook on the platform [orchestrator/api/channels.py:327-420]().
-**Request Body:**
-```json
-{
-  "platform": "telegram",
-  "mode": "webhook",
-  "config": {
-    "bot_token": "YOUR_BOT_TOKEN"
-  }
-}
-```
-**Response:** `ChannelConnection`
+- **Handler:** `list_channels` [orchestrator/api/channels.py:177-181]().
+- **Dependencies:** `get_request_context_hybrid` supplies `RequestContext`; `get_db` supplies the SQLAlchemy session [orchestrator/api/channels.py:177-181]().
+- **Purpose:** Lists channel connections for the current workspace. The handler documentation states that status is reconciled against `ChannelManager` at read time [orchestrator/api/channels.py:182-188]().
+- **Runtime check:** `ChannelManager.is_running()` checks whether an adapter is loaded and running; its documentation identifies it as a source used by `GET /api/channels` status reconciliation [orchestrator/channels/manager.py:176-187]().
 
-### Get Channel Details
-**Endpoint:** `GET /api/channels/{id}`  
-**Description:** Retrieves details for a specific channel connection by its ID [orchestrator/api/channels.py:423-446]().
-**Response:** `ChannelConnection`
+Sources: [orchestrator/api/channels.py:177-188](), [orchestrator/channels/manager.py:176-187]()
 
-### Update Channel
-**Endpoint:** `PUT /api/channels/{id}`  
-**Description:** Updates an existing channel connection. It re-validates the configuration and manages webhook installation/uninstallation or polling adapter restarts based on changes to `mode` or `config` [orchestrator/api/channels.py:449-600]().
-**Request Body:**
-```json
-{
-  "platform": "telegram",
-  "mode": "polling",
-  "config": {
-    "bot_token": "YOUR_NEW_BOT_TOKEN"
-  }
-}
-```
-**Response:** `ChannelConnection`
+### Other channel operations
 
-### Delete Channel
-**Endpoint:** `DELETE /api/channels/{id}`  
-**Description:** Deletes a channel connection. If it's a polling adapter, it will be stopped. If it's a webhook, the webhook will be uninstalled from the platform [orchestrator/api/channels.py:603-640]().
-**Response:** `{"message": "Channel connection deleted"}`
+The API module’s documentation describes CRUD endpoints and says drivers mediate verification, sending, webhook installation/removal, and polling start/stop behavior [orchestrator/api/channels.py:5-10](). The provided API excerpt does not show the definitions of the create, update, delete, test, start, stop, or analytics routes; therefore, their paths, payloads, response schemas, and authorization details cannot be specified from the supplied lines [orchestrator/api/channels.py:1-10](), [orchestrator/api/channels.py:177-188]().
 
-### Test Connection
-**Endpoint:** `POST /api/channels/{id}/test`  
-**Description:** Tests the connectivity of a channel using its driver's `verify()` method. For webhook-mode channels, it also attempts to install the webhook to ensure the URL is correctly registered [orchestrator/api/channels.py:643-700]().
-**Response:** `{"status": "connected" | "error", "detail": "..."}`
+`ChannelManager` exposes bulk and per-adapter lifecycle methods: `start_all()`, `stop_all()`, `start_adapter()`, `stop_adapter()`, and `is_running()` [orchestrator/channels/manager.py:32-41](), [orchestrator/channels/manager.py:74-82](), [orchestrator/channels/manager.py:88-121](), [orchestrator/channels/manager.py:176-187]().
 
-### Start Polling
-**Endpoint:** `POST /api/channels/{id}/start`  
-**Description:** Starts the polling adapter for a channel configured in `polling` mode. This is handled by the `ChannelManager` [orchestrator/api/channels.py:703-732]().
-**Response:** `{"message": "Polling started"}`
-
-### Stop Polling
-**Endpoint:** `POST /api/channels/{id}/stop`  
-**Description:** Stops the polling adapter for a channel configured in `polling` mode. This is handled by the `ChannelManager` [orchestrator/api/channels.py:735-761]().
-**Response:** `{"message": "Polling stopped"}`
-
-### List Supported Platforms
-**Endpoint:** `GET /api/channels/platforms`  
-**Description:** Returns a list of all supported channel platforms and their configuration requirements, sourced from the `channels.drivers` registry [orchestrator/api/channels.py:171-175](). This is used by the frontend to dynamically render connection forms.
-**Response:** `List[Dict[str, Any]]` (e.g., `{"id": "telegram", "name": "Telegram", "modes": ["webhook", "polling"], "required_config": [...]}`)
-
-**Sources:** [orchestrator/api/channels.py:171-761](), [orchestrator/channels/manager.py:88-121]()
+Sources: [orchestrator/api/channels.py:1-10](), [orchestrator/api/channels.py:177-188](), [orchestrator/channels/manager.py:32-41](), [orchestrator/channels/manager.py:74-82](), [orchestrator/channels/manager.py:88-121](), [orchestrator/channels/manager.py:176-187]()
 
 ---
 
-## Platform Driver Capabilities
+## 4. Connection data and driver configuration
 
-Drivers define the required configuration and supported connectivity modes. Legacy adapters for Teams, Google Chat, Signal, iMessage, IRC, Matrix, and LINE have been removed in favor of the driver registry [orchestrator/tests/test_prd184_us005_legacy_channel_adapters_deleted.py:38-46]().
+### Stored connection fields
 
-| Platform | Mode Support | Required Config Keys | Source |
-| :--- | :--- | :--- | :--- |
-| **Telegram** | Webhook, Polling | `bot_token` | [orchestrator/channels/drivers/telegram.py:55-58]() |
-| **Slack** | Webhook | `bot_token`, `signing_secret` | [orchestrator/channels/drivers/slack.py:38-42]() |
-| **Discord** | Webhook | `bot_token` | [orchestrator/channels/drivers/discord.py:43-46]() |
-| **WhatsApp** | Webhook | `phone_number_id`, `access_token` | [orchestrator/channels/drivers/whatsapp.py:40-44]() |
-| **Webhook** | Webhook (Outbound) | `webhook_url` | [orchestrator/channels/drivers/webhook.py:40-43]() |
+`ChannelConnection` maps to the `channel_connections` table. The UUID primary key and indexed workspace identifier scope each record; platform, JSON configuration, status, mode, webhook URL, verification outcome, metadata, routing, and activity fields describe its configuration and state [orchestrator/core/models/channels.py:19-45]().
 
-**Sources:** [orchestrator/channels/drivers/base.py:52-55](), [orchestrator/api/channels.py:156-168](), [orchestrator/channels/drivers/telegram.py:55-58](), [orchestrator/channels/drivers/slack.py:38-42](), [orchestrator/channels/drivers/discord.py:43-46](), [orchestrator/channels/drivers/whatsapp.py:40-44](), [orchestrator/channels/drivers/webhook.py:40-43]()
+| Field | Model meaning |
+|---|---|
+| `id` | UUID primary key [orchestrator/core/models/channels.py:23]() |
+| `workspace_id` | Non-null, indexed workspace UUID [orchestrator/core/models/channels.py:24]() |
+| `platform` | Platform name [orchestrator/core/models/channels.py:25]() |
+| `config` | JSON configuration [orchestrator/core/models/channels.py:26-29]() |
+| `status` | Connection status; server default is `inactive` [orchestrator/core/models/channels.py:30]() |
+| `mode` | Connectivity mode, documented as `webhook` or `polling` [orchestrator/core/models/channels.py:31-36]() |
+| `webhook_url` | Optional URL used for webhook-mode inbound traffic [orchestrator/core/models/channels.py:32-37]() |
+| `last_verified` | Timestamp updated when driver verification succeeds [orchestrator/core/models/channels.py:32-38]() |
+| `last_error` | Most recent verification failure reason [orchestrator/core/models/channels.py:33-39]() |
+| `metadata_` | Python attribute mapped to the database column `metadata` [orchestrator/core/models/channels.py:40]() |
+| `default_agent_id` | Optional default-routing agent identifier [orchestrator/core/models/channels.py:41]() |
+| `message_count` / `last_activity_at` | Message activity count and latest activity timestamp [orchestrator/core/models/channels.py:42-43]() |
+| `created_at` / `updated_at` | Creation and update timestamps [orchestrator/core/models/channels.py:44-45]() |
+
+Sources: [orchestrator/core/models/channels.py:19-45]()
+
+### Required configuration and settings fields
+
+The API’s `_REQUIRED_CONFIG` dictionary lists required fields for the platforms shown below. The settings tab defines user-facing fields for its listed platforms; labels and names are not always identical to the backend keys, so the table distinguishes the two [orchestrator/api/channels.py:162-174](), [frontend/components/settings/ChannelsSettingsTab.tsx:27-136]().
+
+| Platform | Backend required keys | Settings-tab fields |
+|---|---|---|
+| Telegram | `bot_token` [orchestrator/api/channels.py:162-164]() | `bot_token` [frontend/components/settings/ChannelsSettingsTab.tsx:39-45]() |
+| Slack | `bot_token`, `signing_secret` [orchestrator/api/channels.py:164-166]() | `bot_token`, `signing_secret`, `app_token` [frontend/components/settings/ChannelsSettingsTab.tsx:47-55]() |
+| Discord | `bot_token` [orchestrator/api/channels.py:165-167]() | `bot_token` [frontend/components/settings/ChannelsSettingsTab.tsx:58-62]() |
+| WhatsApp | `phone_number_id`, `access_token` [orchestrator/api/channels.py:171-174]() | `phone_number_id`, `access_token`, optional `verify_token` [frontend/components/settings/ChannelsSettingsTab.tsx:27-37]() |
+| Teams | `app_id`, `app_password` [orchestrator/api/channels.py:166-168]() | `app_id`, `app_password` [frontend/components/settings/ChannelsSettingsTab.tsx:65-72]() |
+| Google Chat | `service_account_key` [orchestrator/api/channels.py:168-170]() | `service_account_json` [frontend/components/settings/ChannelsSettingsTab.tsx:75-81]() |
+| Signal | `phone_number` [orchestrator/api/channels.py:169-171]() | `phone_number`, `api_url` [frontend/components/settings/ChannelsSettingsTab.tsx:84-91]() |
+| iMessage | `apple_id` [orchestrator/api/channels.py:170-172]() | `server_url`, `password` [frontend/components/settings/ChannelsSettingsTab.tsx:93-101]() |
+| IRC | `server`, `channel`, `nickname` [orchestrator/api/channels.py:170-172]() | `server`, `port`, `nickname`, `channels` [frontend/components/settings/ChannelsSettingsTab.tsx:103-113]() |
+| Matrix | `homeserver_url`, `access_token` [orchestrator/api/channels.py:171-173]() | `homeserver`, `user_id`, `access_token` [frontend/components/settings/ChannelsSettingsTab.tsx:115-124]() |
+| LINE | `channel_access_token`, `channel_secret` [orchestrator/api/channels.py:172-174]() | `channel_access_token`, `channel_secret` [frontend/components/settings/ChannelsSettingsTab.tsx:126-134]() |
+
+Sources: [orchestrator/api/channels.py:162-174](), [frontend/components/settings/ChannelsSettingsTab.tsx:27-136]()
 
 ---
 
-## Channel Lifecycle State Machine
+## 5. Channel lifecycle and verification
 
-Title: "Driver-Mediated Channel Lifecycle"
+`ChannelManager` stores loaded adapters in `_adapters`, keyed by connection ID [orchestrator/channels/manager.py:22-26](). At startup, `start_all()` queries `ChannelConnection` records whose status is `active` and mode is `polling`, then invokes `start_adapter()` for each. Webhook-mode rows are intentionally skipped because inbound requests go directly to the workspace webhook URL rather than requiring an in-process polling adapter [orchestrator/channels/manager.py:32-63]().
+
+`start_adapter()` stops an existing adapter for the same connection ID before creating and starting a replacement. `_create_adapter()` selects a platform adapter through a mapping and lazy imports; the shown mapping includes Telegram, Slack, Discord, and WhatsApp [orchestrator/channels/manager.py:88-114](), [orchestrator/channels/manager.py:126-170](). `stop_adapter()` removes the adapter from the in-memory mapping and stops it when present [orchestrator/channels/manager.py:116-120]().
+
+The API helper `_save_verify_outcome()` is documented as best-effort. It sets status to `active` on successful verification or `error` on failure, updates `last_verified` only on success, writes `last_error`, merges returned and extra metadata, and commits; on exception it logs and rolls back [orchestrator/api/channels.py:95-148]().
+
+**Diagram: Verification and polling lifecycle code flow**
+
 ```mermaid
-stateDiagram-v2
-    [*] --> Inactive: "Initial state or after deletion"
-    
-    Inactive --> Active: "POST /api/channels (create) or PUT /api/channels/{id} (update) with successful verify()"
-    Active --> Error: "verify() Fails / last_error set"
-    Error --> Active: "POST /api/channels/{id}/test (re-verify) succeeds"
-    
-    state "Active (Status)" {
-        WebhookMode --> PollingMode: "PUT /api/channels/{id} changes mode to 'polling' and POST /{id}/start"
-        PollingMode --> WebhookMode: "PUT /api/channels/{id} changes mode to 'webhook' and POST /{id}/stop"
-        PollingMode --> PollingMode: "POST /{id}/start (idempotent)"
-        WebhookMode --> WebhookMode: "POST /{id}/test (re-installs webhook)"
-    }
-    
-    Active --> [*]: "DELETE /api/channels/{id}"
-    
-    note right of WebhookMode
-        Platform POSTs inbound messages to
-        /api/webhooks/ws/{workspace_key}
-        No in-process adapter needed for ingress
-        Outbound replies via driver.send()
-    end note
-    
-    note right of PollingMode
-        ChannelManager.start_adapter()
-        Local process runs getUpdates loop (e.g., TelegramAdapter)
-        Outbound replies via driver.send()
-    end note
+graph TB
+    subgraph "NaturalLanguageSpace"
+        TestCredentials["Test channel credentials"]
+        StartPolling["Start a polling connection"]
+        BootPolling["Load active polling connections at boot"]
+    end
+
+    subgraph "CodeEntitySpace"
+        VerifyResult["VerifyResult"]
+        saveOutcome["_save_verify_outcome"]
+        channelTable["channel_connections"]
+        startAll["ChannelManager.start_all"]
+        startAdapter["ChannelManager.start_adapter"]
+        createAdapter["ChannelManager._create_adapter"]
+        TelegramAdapter["TelegramAdapter.start"]
+    end
+
+    TestCredentials --> VerifyResult
+    VerifyResult --> saveOutcome
+    saveOutcome --> channelTable
+    BootPolling --> startAll
+    startAll --> startAdapter
+    StartPolling --> startAdapter
+    startAdapter --> createAdapter
+    createAdapter --> TelegramAdapter
 ```
 
-**Sources:** [orchestrator/api/channels.py:89-138](), [orchestrator/channels/manager.py:32-68](), [orchestrator/core/models/channels.py:30-39]()
+The API helper persists the verification outcome, while the manager loads active polling rows and starts adapters through its factory; `TelegramAdapter.start()` initializes and starts the Telegram application and polling task [orchestrator/api/channels.py:95-148](), [orchestrator/channels/manager.py:32-63](), [orchestrator/channels/manager.py:88-170](), [orchestrator/channels/telegram_adapter.py:32-63]().
+
+Sources: [orchestrator/api/channels.py:95-148](), [orchestrator/channels/manager.py:32-63](), [orchestrator/channels/manager.py:88-170](), [orchestrator/channels/telegram_adapter.py:32-63]()
 
 ---
 
-## Database Schema: `channel_connections`
+## 6. Channels settings tab
 
-The `channel_connections` table stores the configuration and state for each channel integration. It was introduced as part of PRD-55 and extended in `prd008a4` to support the driver model [orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py:43-56](), [orchestrator/core/models/channels.py:19-45]().
+`ChannelsSettingsTab` is the React settings component. Its visible state includes channel connections, loading state, a connection-in-progress marker, a test-in-progress marker, and per-platform new-configuration values [frontend/components/settings/ChannelsSettingsTab.tsx:176-181](). The component defines platform forms and their input fields in `PLATFORMS` [frontend/components/settings/ChannelsSettingsTab.tsx:27-136]().
 
-| Column | Type | Description |
-| :--- | :--- | :--- |
-| `id` | `PGUUID` | Primary key, unique identifier for the connection. |
-| `workspace_id` | `PGUUID` | Foreign key to the workspace, ensuring multi-tenancy. |
-| `platform` | `String(50)` | The messaging platform (e.g., `telegram`, `slack`). |
-| `config` | `JSON` | Driver-specific credentials and settings (e.g., `bot_token`, `signing_secret`). |
-| `status` | `String(20)` | Current status: `active`, `inactive`, `error`. Default `inactive`. |
-| `mode` | `String(20)` | Connectivity mode: `webhook` or `polling`. Default `webhook`. |
-| `webhook_url` | `String` | The URL the platform should POST inbound traffic to (if in webhook mode). |
-| `last_verified` | `DateTime` | Timestamp of the last successful `verify()` operation. |
-| `last_error` | `String` | The error message from the most recent verification or operation failure. |
-| `metadata_` | `JSON` | Additional metadata returned by the driver during verification (e.g., bot username, team ID). |
-| `default_agent_id` | `Integer` | Optional ID of an agent to route messages to by default. |
-| `message_count` | `Integer` | Counter for messages processed through this channel. |
-| `last_activity_at` | `DateTime` | Timestamp of the last message activity on this channel. |
-| `created_at` | `DateTime` | Timestamp of creation. |
-| `updated_at` | `DateTime` | Timestamp of last update. |
+The UI defines Telegram as a multi-mode platform with webhook and polling choices. `POLLING_CAPABLE_PLATFORMS` contains Telegram; `defaultModeFor()` selects polling for a polling-capable mode in a local edition and otherwise selects the first configured mode. `needsPublicUrlLocally()` returns whether the local edition needs a public URL for a platform that is not polling-capable [frontend/components/settings/ChannelsSettingsTab.tsx:138-174]().
 
-**Sources:** [orchestrator/core/models/channels.py:19-45](), [orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py:43-56]()
+The supplied frontend excerpt establishes these state and mode-selection rules, but does not include the component’s request handlers or rendering logic for the API operations [frontend/components/settings/ChannelsSettingsTab.tsx:176-181]().
+
+Sources: [frontend/components/settings/ChannelsSettingsTab.tsx:27-136](), [frontend/components/settings/ChannelsSettingsTab.tsx:138-181]()
 
 ---
 
-## Technical Implementation Details
+## 7. Supporting implementation details
 
-### Webhook Provisioning
-The `_webhook_url_for` helper function [orchestrator/api/channels.py:67-78]() constructs the inbound webhook URL. This URL incorporates the workspace's `webhook_key` [orchestrator/api/channels.py:73-78](), which serves as a URL-as-secret for authenticating incoming requests without requiring additional headers. This ensures that only requests with the correct, unique key are processed.
+### Webhook URL construction
 
-### Polling Reconciliation
-The `ChannelManager` [orchestrator/channels/manager.py:22-225]() is responsible for managing the lifecycle of polling adapters. During `list_channels` [orchestrator/api/channels.py:177-188](), the API checks `ChannelManager.is_running(connection_id)` [orchestrator/channels/manager.py:176-187](). If the database `status` is `inactive` but the `ChannelManager` reports the adapter as running (e.g., due to an orchestrator restart or a crash/restart mismatch), the API updates the database status to `active` to reflect the true state.
+`_webhook_url_for()` queries `workspaces.webhook_key`; if a key exists, it constructs an inbound URL using `_PUBLIC_API_HOST` and the `/api/webhooks/ws/{webhook_key}` path. If the key is absent, it returns `None` [orchestrator/api/channels.py:67-79]().
 
-### Contract Enforcement
-All channel drivers must adhere to the `ChannelDriver` abstract base class [orchestrator/channels/drivers/base.py:95-197](). This contract mandates the implementation of `verify()` and `send()` methods. Drivers supporting polling must also implement `start_polling()` and `stop_polling()`, while webhook-capable drivers implement `install_webhook()` and `uninstall_webhook()`. The `test_channel_adapter_contract.py` [orchestrator/tests/test_channel_adapter_contract.py:149-157]() ensures that all concrete adapter implementations (e.g., `TelegramAdapter` [orchestrator/channels/telegram_adapter.py:19-258]()) conform to this interface, preventing silent breakage during refactors.
+Sources: [orchestrator/api/channels.py:67-79]()
 
-### Frontend UI (`ChannelsSettingsTab`)
-The `ChannelsSettingsTab.tsx` [frontend/components/settings/ChannelsSettingsTab.tsx:155-434]() component in the frontend provides the user interface for managing channel connections. It dynamically renders input fields based on the `required_config` and `optional_config` defined by each driver [frontend/components/settings/ChannelsSettingsTab.tsx:26-134](). It also handles the display of connection status, errors, and allows users to initiate `connect`, `test`, `start`, `stop`, and `delete` actions by calling the respective API endpoints [frontend/components/settings/ChannelsSettingsTab.tsx:181-370](). The `MULTI_MODE_PLATFORMS` constant [frontend/components/settings/ChannelsSettingsTab.tsx:140-153]() determines which platforms offer a choice between webhook and polling modes.
+### Telegram adapter
 
-**Sources:** [orchestrator/api/channels.py:61-78](), [orchestrator/channels/manager.py:176-187](), [orchestrator/tests/test_channel_adapter_contract.py:1-49](), [orchestrator/channels/drivers/base.py:95-197](), [frontend/components/settings/ChannelsSettingsTab.tsx:1-434]()
+`TelegramAdapter.start()` requires `bot_token`, builds the Telegram application, registers command and message handlers, initializes and starts the application, and starts polling in an asynchronous task. `stop()` stops the updater and application and cancels the task when present [orchestrator/channels/telegram_adapter.py:24-77]().
+
+`send_message()` splits text into chunks of at most 4096 characters and sends each chunk to the Telegram chat. `test_connection()` calls Telegram’s `getMe` endpoint and returns a connected result with the bot username on HTTP 200, otherwise an error result [orchestrator/channels/telegram_adapter.py:79-105]().
+
+On `/start` or `/help`, the adapter persists the chat ID as the workspace’s default Telegram chat ID only if it is not already set; it does not retarget the stored destination from later inbound messages [orchestrator/channels/telegram_adapter.py:106-122](), [orchestrator/channels/telegram_adapter.py:136-167]().
+
+Sources: [orchestrator/channels/telegram_adapter.py:24-105](), [orchestrator/channels/telegram_adapter.py:106-122](), [orchestrator/channels/telegram_adapter.py:136-167]()
 
 ---

@@ -5,123 +5,191 @@
 
 The following files were used as context for generating this wiki page:
 
-- [orchestrator/consumers/chatbot/prompt_analyzer.py](orchestrator/consumers/chatbot/prompt_analyzer.py)
+- [orchestrator/alembic/versions/prd201_s1_message_context_trace.py](orchestrator/alembic/versions/prd201_s1_message_context_trace.py)
 - [orchestrator/core/attachment_refs.py](orchestrator/core/attachment_refs.py)
+- [orchestrator/core/context_guard.py](orchestrator/core/context_guard.py)
+- [orchestrator/core/llm/request_scope.py](orchestrator/core/llm/request_scope.py)
+- [orchestrator/core/services/skill_l3_execution.py](orchestrator/core/services/skill_l3_execution.py)
+- [orchestrator/modules/agents/services/skill_portability.py](orchestrator/modules/agents/services/skill_portability.py)
 - [orchestrator/modules/attachments/extract.py](orchestrator/modules/attachments/extract.py)
-- [orchestrator/modules/attachments/resolver.py](orchestrator/modules/attachments/resolver.py)
 - [orchestrator/modules/context/__init__.py](orchestrator/modules/context/__init__.py)
 - [orchestrator/modules/context/budget.py](orchestrator/modules/context/budget.py)
 - [orchestrator/modules/context/modes.py](orchestrator/modules/context/modes.py)
 - [orchestrator/modules/context/planning.py](orchestrator/modules/context/planning.py)
+- [orchestrator/modules/context/result.py](orchestrator/modules/context/result.py)
 - [orchestrator/modules/context/sections/__init__.py](orchestrator/modules/context/sections/__init__.py)
 - [orchestrator/modules/context/sections/agent_roster.py](orchestrator/modules/context/sections/agent_roster.py)
-- [orchestrator/modules/context/sections/composio.py](orchestrator/modules/context/sections/composio.py)
+- [orchestrator/modules/context/sections/base.py](orchestrator/modules/context/sections/base.py)
 - [orchestrator/modules/context/sections/conversation.py](orchestrator/modules/context/sections/conversation.py)
-- [orchestrator/modules/context/sections/field_memory.py](orchestrator/modules/context/sections/field_memory.py)
+- [orchestrator/modules/context/sections/identity.py](orchestrator/modules/context/sections/identity.py)
 - [orchestrator/modules/context/sections/planning_history.py](orchestrator/modules/context/sections/planning_history.py)
-- [orchestrator/modules/context/sections/planning_knowledge.py](orchestrator/modules/context/sections/planning_knowledge.py)
-- [orchestrator/modules/context/sections/playbook_context.py](orchestrator/modules/context/sections/playbook_context.py)
-- [orchestrator/modules/context/sections/plugins.py](orchestrator/modules/context/sections/plugins.py)
+- [orchestrator/modules/context/sections/skills.py](orchestrator/modules/context/sections/skills.py)
+- [orchestrator/modules/context/sections/task_context.py](orchestrator/modules/context/sections/task_context.py)
 - [orchestrator/modules/context/service.py](orchestrator/modules/context/service.py)
+- [orchestrator/modules/tools/discovery/actions_skills.py](orchestrator/modules/tools/discovery/actions_skills.py)
+- [orchestrator/modules/tools/discovery/handlers_skill_runtime.py](orchestrator/modules/tools/discovery/handlers_skill_runtime.py)
+- [orchestrator/scripts/eval/tool_routing/eval_seed.yaml](orchestrator/scripts/eval/tool_routing/eval_seed.yaml)
+- [orchestrator/scripts/eval/tool_routing/eval_set.jsonl](orchestrator/scripts/eval/tool_routing/eval_set.jsonl)
+- [orchestrator/scripts/eval/tool_routing/seed_eval_set.py](orchestrator/scripts/eval/tool_routing/seed_eval_set.py)
+- [orchestrator/scripts/skill_signal_report.py](orchestrator/scripts/skill_signal_report.py)
+- [orchestrator/tests/test_auto_prompt_prefix_is_turn_stable.py](orchestrator/tests/test_auto_prompt_prefix_is_turn_stable.py)
+- [orchestrator/tests/test_context/__init__.py](orchestrator/tests/test_context/__init__.py)
+- [orchestrator/tests/test_context/conftest.py](orchestrator/tests/test_context/conftest.py)
+- [orchestrator/tests/test_context/test_budget_manager.py](orchestrator/tests/test_context/test_budget_manager.py)
+- [orchestrator/tests/test_context/test_identity_section.py](orchestrator/tests/test_context/test_identity_section.py)
+- [orchestrator/tests/test_context/test_memory_section.py](orchestrator/tests/test_context/test_memory_section.py)
 - [orchestrator/tests/test_context/test_modes.py](orchestrator/tests/test_context/test_modes.py)
+- [orchestrator/tests/test_context/test_prompt_caching.py](orchestrator/tests/test_context/test_prompt_caching.py)
 - [orchestrator/tests/test_context/test_service.py](orchestrator/tests/test_context/test_service.py)
+- [orchestrator/tests/test_context_guard.py](orchestrator/tests/test_context_guard.py)
+- [orchestrator/tests/test_f155_a_widget_turn_is_told_where_it_is.py](orchestrator/tests/test_f155_a_widget_turn_is_told_where_it_is.py)
+- [orchestrator/tests/test_f155_widget_born_work_remembers_as_a_widget_turn.py](orchestrator/tests/test_f155_widget_born_work_remembers_as_a_widget_turn.py)
+- [orchestrator/tests/test_f181_b_a_skill_says_which_scripts_it_lacks.py](orchestrator/tests/test_f181_b_a_skill_says_which_scripts_it_lacks.py)
+- [orchestrator/tests/test_f191_a_failed_command_is_not_a_success.py](orchestrator/tests/test_f191_a_failed_command_is_not_a_success.py)
 - [orchestrator/tests/test_prd164_planning_pack.py](orchestrator/tests/test_prd164_planning_pack.py)
-- [orchestrator/tests/test_prd179_field_read.py](orchestrator/tests/test_prd179_field_read.py)
+- [orchestrator/tests/test_prd202_s2_trigger_activation.py](orchestrator/tests/test_prd202_s2_trigger_activation.py)
 - [orchestrator/tests/test_prd223_attachment_refs.py](orchestrator/tests/test_prd223_attachment_refs.py)
+- [orchestrator/tests/test_prd263_skill_hash_in_context_trace.py](orchestrator/tests/test_prd263_skill_hash_in_context_trace.py)
+- [orchestrator/tests/test_prd263_skill_signal_report.py](orchestrator/tests/test_prd263_skill_signal_report.py)
 
 </details>
 
 
 
+
+
 ## Purpose and Scope
 
-`ContextService` serves as the unified prompt-building layer for the Automatos AI platform [orchestrator/modules/context/service.py:1-6](). It provides a single entry point for assembling LLM contexts, replacing fragmented prompt construction code paths with a modular, mode-based architecture [orchestrator/modules/context/service.py:86-91](). It coordinates section rendering, token budget allocation, tool loading, and conversation message formatting into an immutable `ContextResult` [orchestrator/modules/context/service.py:111-118]().
+`ContextService` is the unified prompt-building layer for the Automatos AI platform [orchestrator/modules/context/service.py:1-19](). It provides a single entry point for assembling LLM contexts, consolidating fragmented prompt assembly paths into a modular system. It manages the assembly of system prompts, message history formatting, tool schema loading, and ephemeral attachment injection based on specific execution modes [orchestrator/modules/context/modes.py:13-24]().
 
-Sources: [orchestrator/modules/context/service.py:1-6](), [orchestrator/modules/context/service.py:86-91](), [orchestrator/modules/context/service.py:111-118]()
+This parent page provides a high-level overview of the context building layer, bridging natural language intent with core code entities. Detailed mechanics are delegated to the child pages covering modes, priority systems, budget management, section types, and migration paths.
 
----
+### Context Service Assembly Pipeline (Code Entity Space)
 
-## Architecture Overview
-
-The Context Service orchestrates configuration lookup, section rendering, token budgeting, and tool resolution through dedicated internal modules [orchestrator/modules/context/service.py:96-183]().
-
-Title: Context Service Natural Language to Code Entity Mapping
 ```mermaid
 graph TB
-    subgraph "NaturalLanguageSpace ["User Prompt & Agent Goal"]"
-        NL_Chat["Chat / Conversation Request"]
-        NL_Task["Autonomous Task Execution"]
-        NL_Heartbeat["Agent / Orchestrator Tick"]
+    subgraph "Natural_Language_Layer"
+        NL["User_Request_Messages"] --> CS["ContextService<br/>(orchestrator/modules/context/service.py:118)"]
+    end
+    
+    subgraph "Configuration_Layer"
+        CM["ContextMode<br/>(orchestrator/modules/context/modes.py:13)"]
+        MC["ModeConfig<br/>(orchestrator/modules/context/modes.py:113)"]
+    end
+    
+    subgraph "Section_Registry_Layer"
+        SR["SECTION_REGISTRY<br/>(orchestrator/modules/context/sections/__init__.py:32)"]
+        IS["IdentitySection<br/>(orchestrator/modules/context/sections/identity.py:64)"]
+        SS["SkillsSection<br/>(orchestrator/modules/context/sections/skills.py:53)"]
+        TS["ToolsSection<br/>(orchestrator/modules/context/sections/tools.py)"]
+        MS["MemorySection<br/>(orchestrator/modules/context/sections/memory.py)"]
+    end
+    
+    subgraph "Budget_Layer"
+        TBM["TokenBudgetManager<br/>(orchestrator/modules/context/budget.py:51)"]
+        AR["AttachmentResolver<br/>(modules/attachments/resolver.py:57)"]
     end
 
-    subgraph "CodeEntitySpace ["Context Pipeline classes"]"
-        CS["ContextService<br/>[orchestrator/modules/context/service.py:86]"]
-        ModeCfg["ModeConfig<br/>[orchestrator/modules/context/modes.py:113]"]
-        Registry["SECTION_REGISTRY<br/>[orchestrator/modules/context/sections/__init__.py:31]"]
-        TBM["TokenBudgetManager<br/>[orchestrator/modules/context/budget.py:51]"]
-        Res["ContextResult<br/>[orchestrator/modules/context/result.py]"]
-    end
-
-    NL_Chat -->|build_context| CS
-    NL_Task -->|build_context| CS
-    NL_Heartbeat -->|build_context| CS
-
-    CS -->|lookup| ModeCfg
-    ModeCfg -->|instantiate| Registry
-    Registry -->|render & allocate| TBM
-    TBM -->|immutable result| Res
+    CS --> CM
+    CM --> MC
+    MC --> SR
+    SR --> IS
+    SR --> SS
+    SR --> TS
+    SR --> MS
+    IS --> TBM
+    SS --> TBM
+    TS --> TBM
+    MS --> TBM
+    CS --> AR
 ```
 
-Sources: [orchestrator/modules/context/service.py:86-183](), [orchestrator/modules/context/modes.py:113-120](), [orchestrator/modules/context/sections/__init__.py:31-51](), [orchestrator/modules/context/budget.py:51-62]()
+**Diagram 1: Context Service Assembly Pipeline (Code Entity Space)**
+
+Sources: [orchestrator/modules/context/service.py:118-186](), [orchestrator/modules/context/modes.py:13-120](), [orchestrator/modules/context/budget.py:51-148](), [modules/attachments/resolver.py:57-63]()
 
 ---
 
 ## 4.1. Context Modes
 
-Modes define the operational context and declarative section requirements for an LLM call via `ContextMode` and `ModeConfig` [orchestrator/modules/context/modes.py:13-120](). Supported modes include `CHATBOT`, `TASK_EXECUTION`, `HEARTBEAT_ORCHESTRATOR`, `HEARTBEAT_AGENT`, `RECIPE`, `ROUTER`, `ORCHESTRATOR_STAGE`, and `NL2SQL` [orchestrator/modules/context/modes.py:13-24](). Each configuration controls whether conversational personality is injected and how tools are filtered or loaded [orchestrator/modules/context/modes.py:113-120]().
+Execution modes (`ContextMode`) dictate the structural shape of prompts, personality injection, and tool loading strategies across the platform [orchestrator/modules/context/modes.py:13-24](). Each mode maps to a declarative `ModeConfig` defining its required sections, tool visibility rules, and token caps [orchestrator/modules/context/modes.py:113-120](). For example, `CHATBOT` mode enables personality and `filtered` tool loading, while `TASK_EXECUTION` disables personality and uses `full` tool loading [orchestrator/modules/context/modes.py:127-149](). Specific tools, like `platform_ask_orchestrator`, are restricted to `EXECUTION_TOOL_MODES` to prevent their appearance in inappropriate contexts [orchestrator/modules/context/modes.py:34-38]().
 
-For detailed mode definitions, tool pruning rules (`EXECUTION_ONLY_TOOLS`), and configuration properties, see [Context Modes](#4.1).
+For details on configuration parameters, execution-only tools like `platform_ask_orchestrator`, and mode specific behaviors, see [Context Modes](#4.1).
 
-Sources: [orchestrator/modules/context/modes.py:13-120]()
+Sources: [orchestrator/modules/context/modes.py:13-149](), [orchestrator/modules/context/service.py:119-126]()
 
 ---
 
 ## 4.2. Section Priority System
 
-Sections are assigned execution priorities that determine their importance during token budget trimming [orchestrator/modules/context/budget.py:51-62](). Critical sections like `IdentitySection` (Priority 1) and task or mission context (Priority 2) are strictly protected and never dropped [orchestrator/modules/context/budget.py:124-125](). Lower-priority sections such as skills, tools, memory, and datetime context are evaluated and dropped sequentially if token limits are exceeded [orchestrator/modules/context/budget.py:112-134]().
+Context sections are rendered independently and assigned integer priorities where lower numbers represent higher importance [orchestrator/modules/context/sections/base.py](). Critical blocks such as agent identity and task constraints are assigned top priority to protect them from being dropped during budget compression [orchestrator/modules/context/budget.py:51-58](). For instance, sections with priority 1-2 (e.g., `identity`, `task_context`, `playbook_context`) are never dropped, even if the total context exceeds the allocated budget [orchestrator/modules/context/budget.py:123-124]().
 
-For a complete breakdown of section priorities, execution rules, and how critical context is protected, see [Section Priority System](#4.2).
+The `IdentitySection` has priority 1, ensuring the agent's core identity, role, and persona are always included [orchestrator/modules/context/sections/identity.py:76-78](). The `TaskContextSection` has priority 2, ensuring the agent's current task description is preserved [orchestrator/modules/context/sections/task_context.py:26-28](). The `SkillsSection` has priority 4, and its rendering strategy focuses on providing L1 metadata (name + description) for most skills, with full L2 bodies only for a small set of "core always-on" skills like `platform-management` [orchestrator/modules/context/sections/skills.py:61-66](). This prevents irrelevant skills from consuming excessive tokens [orchestrator/modules/context/sections/skills.py:101-112]().
 
-Sources: [orchestrator/modules/context/budget.py:51-62](), [orchestrator/modules/context/budget.py:112-134]()
+For details on priority tiers, preservation rules, and section ordering, see [Section Priority System](#4.2).
+
+Sources: [orchestrator/modules/context/sections/base.py](), [orchestrator/modules/context/budget.py:51-124](), [orchestrator/modules/context/sections/identity.py:76-78](), [orchestrator/modules/context/sections/task_context.py:26-28](), [orchestrator/modules/context/sections/skills.py:61-112]()
 
 ---
 
 ## 4.3. Token Budget Management
 
-Token budget management is handled by `TokenBudgetManager`, which enforces per-mode budgets (`TokenBudget`) encompassing total window sizes, response reservations, and message reservations [orchestrator/modules/context/budget.py:24-62](). It applies token-boundary truncation caps (`max_tokens`) to individual sections and performs priority-based dropping when necessary [orchestrator/modules/context/budget.py:77-134](). It also separates cache-stable system prompt prefixes from volatile per-turn sections to optimize prompt caching [orchestrator/modules/context/service.py:66-81]().
+The `TokenBudgetManager` evaluates rendered sections against a model-aware `TokenBudget` [orchestrator/modules/context/budget.py:24-38](). It applies sequential token caps, truncates oversized sections without breaking word or JSON structures, and drops lower-priority sections when token limits are exceeded [orchestrator/modules/context/budget.py:51-148](). Default budgets are defined per `ContextMode`, with specific allocations for total tokens, reserved for response, and reserved for messages [orchestrator/modules/context/budget.py:154-195]().
 
-For detailed budget allocations, sequential section allocation algorithms, and caching strategies, see [Token Budget Management](#4.3).
+### Attachment and Message Resolution Flow (Code Entity Space)
 
-Sources: [orchestrator/modules/context/budget.py:24-148](), [orchestrator/modules/context/service.py:66-81]()
+```mermaid
+graph LR
+    subgraph "Natural_Language_Inputs"
+        Q["User_Query_With_Attachments"]
+    end
+    
+    subgraph "Parsing_Layer"
+        PA["PromptAnalyzer<br/>(orchestrator/consumers/chatbot/prompt_analyzer.py:34)"]
+        UP["render_unresolved_file_part<br/>(orchestrator/core/attachment_refs.py:42)"]
+    end
+    
+    subgraph "Resolution_Layer"
+        AR["AttachmentResolver<br/>(modules/attachments/resolver.py:57)"]
+        ET["extract_text<br/>(modules/attachments/extract.py:43)"]
+        CS["ConversationSection<br/>(orchestrator/modules/context/sections/conversation.py:29)"]
+    end
+
+    Q --> PA
+    PA --> UP
+    Q --> AR
+    AR --> ET
+    AR --> CS
+```
+
+**Diagram 2: Attachment and Message Resolution Flow (Code Entity Space)**
+
+For information on budget calculations per model window and context guards, see [Token Budget Management](#4.3).
+
+Sources: [orchestrator/consumers/chatbot/prompt_analyzer.py:34](), [orchestrator/core/attachment_refs.py:42](), [modules/attachments/resolver.py:57](), [modules/attachments/extract.py:43](), [orchestrator/modules/context/sections/conversation.py:29](), [orchestrator/modules/context/budget.py:24-195]()
 
 ---
 
 ## 4.4. Section Types
 
-The platform implements a diverse registry of modular sections (`SECTION_REGISTRY`) under `orchestrator/modules/context/sections/` [orchestrator/modules/context/sections/__init__.py:31-51](). These include core components like `IdentitySection`, `SkillsSection`, `ToolsSection`, `MemorySection`, `GraphSection`, `PlanningHistorySection`, and `OnboardingSection` [orchestrator/modules/context/sections/__init__.py:31-51](). Each section encapsulates its own rendering logic, error handling, and token limits [orchestrator/modules/context/sections/agent_roster.py:31-38]().
+The `SECTION_REGISTRY` maps string keys to concrete subclasses of `BaseSection` [orchestrator/modules/context/sections/__init__.py:32-56](). Individual section classes manage specialized payloads including identity formatting (`IdentitySection`), skill definitions (`SkillsSection`), memory retrieval (`MemorySection`), graph contexts (`GraphSection`), documents inventory (`DocumentsInventorySection`), and conversation history (`ConversationSection`) [orchestrator/modules/context/sections/__init__.py:32-56](). Other notable sections include `AgentRosterSection` for coordinator prompts [orchestrator/modules/context/sections/agent_roster.py:9-10]() and `PlanningHistorySection` for mission planning [orchestrator/modules/context/sections/planning_history.py]().
 
-For comprehensive documentation on each section class, its implementation, and rendering behavior, see [Section Types](#4.4).
+The `SkillsSection` specifically handles the dynamic loading of skill content. It renders L1 metadata (name and description) for most skills, allowing the LLM to use the `platform_load_skill` tool to fetch the full L2 body when needed [orchestrator/modules/context/sections/skills.py:53-66](). This mechanism, known as trigger-based L2 activation, significantly reduces prompt costs by avoiding the unconditional injection of large skill bodies [orchestrator/modules/context/sections/skills.py:101-112](). The `platform_load_skill` tool is registered as a platform action to enable this functionality [orchestrator/modules/tools/discovery/actions_skills.py:29-57](). The `SkillLoader` service is responsible for managing skill repositories, parsing `SKILL.md` files, and caching skill content [orchestrator/modules/agents/services/skill_loader.py]()].
 
-Sources: [orchestrator/modules/context/sections/__init__.py:31-51](), [orchestrator/modules/context/sections/agent_roster.py:31-38]()
+For detailed documentation on each section type and its rendering rules, see [Section Types](#4.4).
+
+Sources: [orchestrator/modules/context/sections/__init__.py:32-56](), [orchestrator/modules/context/sections/agent_roster.py:9-10](), [orchestrator/modules/context/sections/planning_history.py](), [orchestrator/modules/context/sections/skills.py:53-112](), [orchestrator/modules/tools/discovery/actions_skills.py:29-57]()
 
 ---
 
 ## 4.5. Migration & Integration
 
-`ContextService` replaces fragmented prompt-building paths across chat handlers, channel adapters, and planning engines with a centralized architecture [orchestrator/modules/context/service.py:86-91](). It integrates attachment resolution via `AttachmentResolver` for multimodal inputs, page context injection, and conversation history formatting via `ConversationSection` [orchestrator/modules/context/service.py:54-59](), [orchestrator/modules/context/sections/conversation.py:29-54]().
+`ContextService` replaces fragmented, ad-hoc prompt assembly paths across chat consumers, recipe runners, and background heartbeats with a unified entry point [orchestrator/modules/context/service.py:118-124](). It coordinates with `AttachmentResolver` for multimodal input injection and guarantees uniform compliance across all platform consumers [modules/attachments/resolver.py:57-63](). This consolidation ensures consistent context building and adherence to token budgets and priority rules across the entire platform.
 
-For details on migration history, attachment handling workflows, and consumer integration patterns, see [Migration & Integration](#4.5).
+The `ContextService` also plays a crucial role in observability by generating a detailed assembly trace for each LLM call. This trace, persisted in `ContextResult.to_assembly_trace()`, records the mode, driving model, budget, per-section token details, injected memory IDs, and the content hashes of skill bodies that served the turn [orchestrator/modules/context/result.py](). This allows for post-hoc analysis of "what Auto knew" during a turn, aiding in debugging and performance evaluation, particularly for skill activation signals [orchestrator/scripts/skill_signal_report.py]().
 
-Sources: [orchestrator/modules/context/service.py:54-91](), [orchestrator/modules/context/sections/conversation.py:29-54]()
+For details on integration patterns and historical prompt migration, see [Migration & Integration](#4.5).
+
+Sources: [orchestrator/modules/context/service.py:118-124](), [modules/attachments/resolver.py:57-63](), [orchestrator/modules/context/result.py](), [orchestrator/scripts/skill_signal_report.py]()
 
 ---

@@ -5,29 +5,40 @@
 
 The following files were used as context for generating this wiki page:
 
+- [frontend/app/api/chat/route.ts](frontend/app/api/chat/route.ts)
+- [frontend/components/__tests__/prd207-live-voice.test.tsx](frontend/components/__tests__/prd207-live-voice.test.tsx)
+- [frontend/components/chatbot/__tests__/composer-voice.test.tsx](frontend/components/chatbot/__tests__/composer-voice.test.tsx)
+- [frontend/components/chatbot/chat.tsx](frontend/components/chatbot/chat.tsx)
+- [frontend/components/chatbot/message.tsx](frontend/components/chatbot/message.tsx)
+- [frontend/components/voice/LiveVoiceMode.tsx](frontend/components/voice/LiveVoiceMode.tsx)
+- [frontend/components/voice/PresenceOrb.tsx](frontend/components/voice/PresenceOrb.tsx)
+- [frontend/components/voice/VoiceErrorBoundary.tsx](frontend/components/voice/VoiceErrorBoundary.tsx)
+- [frontend/components/voice/__tests__/voice-button.test.tsx](frontend/components/voice/__tests__/voice-button.test.tsx)
+- [frontend/components/voice/voice-button-view.ts](frontend/components/voice/voice-button-view.ts)
+- [frontend/components/voice/voice-button.tsx](frontend/components/voice/voice-button.tsx)
+- [frontend/components/voice/voice-controls.tsx](frontend/components/voice/voice-controls.tsx)
+- [frontend/lib/chat/hooks.ts](frontend/lib/chat/hooks.ts)
+- [frontend/types/chat.ts](frontend/types/chat.ts)
 - [orchestrator/api/chat.py](orchestrator/api/chat.py)
-- [orchestrator/api/routing.py](orchestrator/api/routing.py)
-- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
-- [orchestrator/consumers/chatbot/empty_completion.py](orchestrator/consumers/chatbot/empty_completion.py)
+- [orchestrator/consumers/chatbot/integration.py](orchestrator/consumers/chatbot/integration.py)
+- [orchestrator/consumers/chatbot/prompt_analyzer.py](orchestrator/consumers/chatbot/prompt_analyzer.py)
 - [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
-- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
-- [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
+- [orchestrator/consumers/chatbot/smart_memory.py](orchestrator/consumers/chatbot/smart_memory.py)
+- [orchestrator/consumers/chatbot/smart_orchestrator.py](orchestrator/consumers/chatbot/smart_orchestrator.py)
 - [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
-- [orchestrator/modules/tools/discovery/actions_agents.py](orchestrator/modules/tools/discovery/actions_agents.py)
-- [orchestrator/modules/tools/discovery/actions_board_tasks.py](orchestrator/modules/tools/discovery/actions_board_tasks.py)
-- [orchestrator/modules/tools/discovery/handlers_agents.py](orchestrator/modules/tools/discovery/handlers_agents.py)
-- [orchestrator/modules/tools/discovery/handlers_board_tasks.py](orchestrator/modules/tools/discovery/handlers_board_tasks.py)
-- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
-- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
-- [orchestrator/scripts/setup_jira_trigger.py](orchestrator/scripts/setup_jira_trigger.py)
-- [orchestrator/services/heartbeat_service.py](orchestrator/services/heartbeat_service.py)
-- [orchestrator/services/page_context.py](orchestrator/services/page_context.py)
-- [orchestrator/tests/test_board_task_handlers.py](orchestrator/tests/test_board_task_handlers.py)
-- [orchestrator/tests/test_prd221_page_context.py](orchestrator/tests/test_prd221_page_context.py)
-- [orchestrator/tests/test_prd221_page_prior_tools.py](orchestrator/tests/test_prd221_page_prior_tools.py)
-- [orchestrator/tests/test_prd222_empty_completion.py](orchestrator/tests/test_prd222_empty_completion.py)
-- [orchestrator/tests/test_prd222_unknown_model_error_names_the_way_out.py](orchestrator/tests/test_prd222_unknown_model_error_names_the_way_out.py)
-- [orchestrator/tests/test_prd224_assign_lane.py](orchestrator/tests/test_prd224_assign_lane.py)
+- [orchestrator/modules/context/sections/memory.py](orchestrator/modules/context/sections/memory.py)
+- [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)
+- [orchestrator/modules/memory/unified_memory_service.py](orchestrator/modules/memory/unified_memory_service.py)
+- [orchestrator/tests/test_f155_a_widget_turn_recalls_only_its_agents_memories.py](orchestrator/tests/test_f155_a_widget_turn_recalls_only_its_agents_memories.py)
+- [orchestrator/tests/test_l3_distill_input.py](orchestrator/tests/test_l3_distill_input.py)
+- [orchestrator/tests/test_memory_restart_and_isolation.py](orchestrator/tests/test_memory_restart_and_isolation.py)
+- [orchestrator/tests/test_memory_single_write_path.py](orchestrator/tests/test_memory_single_write_path.py)
+- [orchestrator/tests/test_memory_stored_sse.py](orchestrator/tests/test_memory_stored_sse.py)
+- [orchestrator/tests/test_p2w1_semantic_l2_recall.py](orchestrator/tests/test_p2w1_semantic_l2_recall.py)
+- [orchestrator/tests/test_recall_relevance_floor.py](orchestrator/tests/test_recall_relevance_floor.py)
+- [orchestrator/tests/test_smart_orchestrator_store_exchange.py](orchestrator/tests/test_smart_orchestrator_store_exchange.py)
+- [orchestrator/tests/test_unified_memory.py](orchestrator/tests/test_unified_memory.py)
+- [orchestrator/tests/test_us011_context_budgets.py](orchestrator/tests/test_us011_context_budgets.py)
 
 </details>
 
@@ -35,155 +46,167 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-The Streaming Chat Service is the core orchestration layer for real-time, token-by-token chat interactions within the Automatos platform. It leverages Server-Sent Events (SSE) and the AI SDK Data Stream format to provide a responsive user experience. The service bridges high-level user intent with low-level execution by coordinating the `SmartChatOrchestrator` for intent classification, the `ContextService` for unified prompt assembly (Identity, Skills, Memory, Tools), and the `AgentFactory` for execution. It also includes specialized logic for complexity-based routing via `AutoBrain` and the `UniversalRouter`, along with robust empty completion handling.
+This page documents the chat-streaming components visible in the supplied source: the `/api/chat` router boundary, `StreamingChatService`’s documented role and imports, `SmartChatOrchestrator` request preparation, and the empty-completion utilities imported by the chat service. The provided `service.py` excerpt ends at line 142, before the `StreamingChatService` implementation; the `smart_orchestrator.py` excerpt ends at line 188, before the body of `prepare_request()`. Accordingly, implementation details not present in those excerpts are not inferred here. [orchestrator/api/chat.py:14-22](), [orchestrator/api/chat.py:44-45](), [orchestrator/consumers/chatbot/service.py:1-13](), [orchestrator/consumers/chatbot/service.py:65-66](), [orchestrator/consumers/chatbot/smart_orchestrator.py:167-188]()
 
-Sources: `[orchestrator/consumers/chatbot/service.py:1-13]`, `[orchestrator/api/chat.py:1-7]`, `[orchestrator/consumers/chatbot/auto.py:1-22]`
+Sources: [orchestrator/api/chat.py:14-22](), [orchestrator/api/chat.py:44-45](), [orchestrator/consumers/chatbot/service.py:1-13](), [orchestrator/consumers/chatbot/service.py:65-66](), [orchestrator/consumers/chatbot/smart_orchestrator.py:167-188]()
 
 ---
 
 ## Architecture Overview
 
-The streaming architecture connects "Natural Language Space" (user input and conceptual intent) to "Code Entity Space" (specific service implementations and database models).
+The API module defines an `APIRouter` with prefix `/api/chat` and imports `ChatService` and `StreamingChatService` from the chatbot consumer package. The consumer module describes `StreamingChatService` as its SSE streaming orchestrator. It imports the shared tool-loop implementation, prompt analyzer, streaming handler, and empty-completion helpers; those imports identify integration points, but the supplied excerpt does not show their runtime call sequence. [orchestrator/api/chat.py:20-22](), [orchestrator/api/chat.py:44-45](), [orchestrator/consumers/chatbot/service.py:5-13](), [orchestrator/consumers/chatbot/service.py:27-36](), [orchestrator/consumers/chatbot/service.py:49-66]()
 
 ### System Entity Map: Natural Language to Code Space
 
-This diagram maps conceptual chat requirements to the specific classes and functions responsible for them.
+The diagram maps chat concepts to identifiers present in the source. Lines from `StreamingChatService` to its imported collaborators indicate module-level dependencies, not a verified runtime invocation order. [orchestrator/api/chat.py:20-22](), [orchestrator/api/chat.py:44-45](), [orchestrator/consumers/chatbot/service.py:27-36](), [orchestrator/consumers/chatbot/service.py:49-66]()
 
 ```mermaid
-graph TD
-    subgraph "NaturalLanguageSpace"
-        UserIntent["User Intent & Query"]
-        Context["Context & Memory"]
-        Tools["Tool Capabilities"]
-        Complexity["Complexity Assessment"]
-        Routing["Intelligent Routing"]
+graph LR
+    subgraph "Natural Language Space"
+        UserMessage["User message"]
+        RequestPrep["Request preparation"]
+        Stream["Streaming response"]
+        EmptyReply["Empty completion"]
+        ToolWork["Tool execution"]
     end
 
-    subgraph "CodeEntitySpace"
-        SCS["StreamingChatService<br/>(service.py)"]
-        SCO["SmartChatOrchestrator<br/>(smart_orchestrator.py)"]
-        CS["ContextService<br/>(modules/context)"]
-        AF["AgentFactory<br/>(agent_factory.py)"]
-        UTE["UnifiedToolExecutor<br/>(agent_factory.py)"]
-        TET["ToolExecutionTracker<br/>(service.py)"]
-        AB["AutoBrain<br/>(auto.py)"]
-        UR["UniversalRouter<br/>(core/routing/engine.py)"]
+    subgraph "Code Entity Space"
+        ChatRouter["router /api/chat"]
+        ChatService["ChatService"]
+        StreamingChatService["StreamingChatService"]
+        SmartChatOrchestrator["SmartChatOrchestrator"]
+        PrepareRequest["prepare_request"]
+        StreamingHandler["get_streaming_handler"]
+        PromptAnalyzer["get_prompt_analyzer"]
+        EmptyCheck["is_empty_completion"]
+        Fallback["with_fallback_content"]
+        ToolLoopExecutor["ToolLoopExecutor"]
     end
 
-    UserIntent -->|"route()"| UR
-    UR -->|"RoutingDecision"| SCS
-    SCS -->|"prepare_request()"| SCO
-    Context -->|"build_context()"| CS
-    Tools -->|"get_tools_for_agent_async()"| SCS
-    AF -->|"execute_with_prompt()"| SCS
-    SCS -->|"UnifiedToolExecutor"| UTE
-    UTE -->|"check_loop()"| TET
-    Complexity -->|"ComplexityAssessment"| AB
-    AB -->|"tool_hints"| SCO
+    UserMessage -->|"chat API boundary"| ChatRouter
+    ChatRouter -->|"imports"| ChatService
+    ChatRouter -->|"imports"| StreamingChatService
+    RequestPrep -->|"orchestrator method"| PrepareRequest
+    SmartChatOrchestrator -->|"defines"| PrepareRequest
+    Stream -->|"service responsibility"| StreamingChatService
+    StreamingChatService -.->|"module import"| StreamingHandler
+    StreamingChatService -.->|"module import"| PromptAnalyzer
+    EmptyReply -->|"predicate import"| EmptyCheck
+    EmptyCheck -.->|"paired helper import"| Fallback
+    ToolWork -.->|"shared tool-loop import"| ToolLoopExecutor
 ```
 
-Sources: `[orchestrator/consumers/chatbot/service.py:12-62]`, `[orchestrator/api/chat.py:17-27]`, `[orchestrator/core/routing/engine.py:58-85]`, `[orchestrator/modules/agents/factory/agent_factory.py:43-45]`, `[orchestrator/consumers/chatbot/auto.py:64-89]`
+Sources: [orchestrator/api/chat.py:20-22](), [orchestrator/api/chat.py:44-45](), [orchestrator/consumers/chatbot/service.py:5-13](), [orchestrator/consumers/chatbot/service.py:27-36](), [orchestrator/consumers/chatbot/service.py:49-66](), [orchestrator/consumers/chatbot/smart_orchestrator.py:114-121](), [orchestrator/consumers/chatbot/smart_orchestrator.py:167-188]()
 
----
+### Request and Dependency Map
 
-## StreamingChatService & Execution Pipeline
-
-The `StreamingChatService` manages the lifecycle of a chat message exchange, coordinating database updates, SSE streaming, tool loop iterations, and empty completion fallbacks.
-
-### Key Functions and Methods
-
-*   **`prepare_request`**: Normalizes input payloads, resolves workspace bindings, and constructs the runtime environment configuration.
-*   **`stream_response_with_agent`**: Drives the asynchronous generator that yields SSE data frames (`0:` text, `2:` tool calls/results) conforming to the AI SDK Data Stream protocol.
-*   **Empty Completion Handling (`is_empty_completion`, `with_fallback_content`)**: Detects when an LLM model returns an empty or whitespace-only response block and injects robust fallback content or triggers recovery paths.
-
-### Data Flow: Streaming Response Execution
+`service.py` imports `get_streaming_handler()` and `get_prompt_analyzer()`, the shared `ToolLoopExecutor` types, and the empty-completion helpers. These imports show that the chat service module is connected to streaming, prompt-analysis, tool-loop, and completion-handling components. The excerpt does not show the code that calls these symbols. [orchestrator/consumers/chatbot/service.py:27-36](), [orchestrator/consumers/chatbot/service.py:49-66]()
 
 ```mermaid
-sequenceDiagram
-    participant API as Chat API (chat.py)
-    participant SCS as StreamingChatService
-    participant SCO as SmartChatOrchestrator
-    participant LLM as LLMManager
-    participant EC as EmptyCompletion
+flowchart TD
+    ChatRequest["Chat request"]
+    ChatRouter["api/chat.py router"]
+    StreamingChatService["StreamingChatService"]
+    SmartChatOrchestrator["SmartChatOrchestrator"]
+    PrepareRequest["prepare_request"]
+    PromptAnalyzer["get_prompt_analyzer"]
+    StreamingHandler["get_streaming_handler"]
+    ToolLoop["ToolLoopExecutor"]
+    EmptyPredicate["is_empty_completion"]
+    FallbackContent["with_fallback_content"]
 
-    API->>SCS: stream_response_with_agent(...)
-    SCS->>SCO: prepare_request()
-    SCO-->>SCS: Assembled Prompt & Tool Set
-    SCS->>LLM: stream(prompt, tools)
-    LLM-->>SCS: Token Stream / Content Blocks
-    SCS->>EC: is_empty_completion(content)
-    alt Empty Completion Detected
-        EC->>SCS: with_fallback_content()
-        SCS-->>API: Fallback SSE Frame
-    else Valid Content
-        SCS-->>API: Standard SSE Data Stream
-    end
+    ChatRequest --> ChatRouter
+    ChatRouter -->|"imports"| StreamingChatService
+    SmartChatOrchestrator -->|"method"| PrepareRequest
+    StreamingChatService -.->|"imported in service module"| PromptAnalyzer
+    StreamingChatService -.->|"imported in service module"| StreamingHandler
+    StreamingChatService -.->|"imported in service module"| ToolLoop
+    StreamingChatService -.->|"imported in service module"| EmptyPredicate
+    EmptyPredicate -.->|"same import statement"| FallbackContent
 ```
 
-Sources: `[orchestrator/consumers/chatbot/service.py:1-64]`, `[orchestrator/consumers/chatbot/empty_completion.py:1-25]`
+Sources: [orchestrator/api/chat.py:20-22](), [orchestrator/consumers/chatbot/service.py:27-36](), [orchestrator/consumers/chatbot/service.py:49-66](), [orchestrator/consumers/chatbot/smart_orchestrator.py:167-188]()
 
 ---
 
-## SmartChatOrchestrator & Routing
+## SmartChatOrchestrator and Request Preparation
 
-The chat flow begins at `POST /api/chat`, where the `UniversalRouter` determines which agent should handle the request. If no specific agent is targeted, the system defaults to the workspace's "Auto" agent (`get_default_agent_id`).
+`SmartChatOrchestrator` is described as the central coordinator for chat processing. Its documented responsibilities include intent classification, unified context building through `ContextService`, and conversation-state tracking. The class retains workspace, agent, widget-mode, and optional database-session values; it initializes an intent classifier, a `SmartMemoryManager`, and the shared `UnifiedMemoryService`. [orchestrator/consumers/chatbot/smart_orchestrator.py:114-165]()
 
-*   **`UniversalRouter`**: Implements a tiered routing strategy, starting from Tier 0 (User Overrides) to Tier 3 (LLM Classification). `[orchestrator/core/routing/engine.py:58-164]`
-*   **`AutoBrain`**: Performs a 3-tier complexity assessment (`ATOM` to `ORGANISM`). It provides `tool_hints` and `needs_memory` flags that drive the `SmartChatOrchestrator`. `[orchestrator/consumers/chatbot/auto.py:14-22]`
-*   **`SmartChatOrchestrator`**: Coordinates final prompt assembly using `ContextService` in `CHATBOT` mode, ensuring agent identity, skills, and relevant memories are injected.
+The orchestrator constructor accepts `workspace_id`, optional `agent_id`, optional `agent_name`, `widget_mode`, and `db_session`. The default agent name is `"Automatos"`. The instance also creates a `ConversationState`, whose fields include the previous intent, prior tool calls, messages since memory retrieval, user name, and memory-fetch timestamp. [orchestrator/consumers/chatbot/smart_orchestrator.py:100-112](), [orchestrator/consumers/chatbot/smart_orchestrator.py:126-165]()
 
-Sources: `[orchestrator/api/chat.py:55-173]`, `[orchestrator/core/routing/engine.py:58-164]`, `[orchestrator/consumers/chatbot/auto.py:14-22]`
+### `prepare_request()`
 
----
+`prepare_request()` is an asynchronous method on `SmartChatOrchestrator`. The visible signature accepts conversation `messages`, `available_tools`, optional `chat_id`, `complexity_assessment`, `attachment_ids`, `model_id`, and `viewer_subject_id`. Its docstring says it prepares a chat request for the LLM using `ContextService` for unified prompt building, memory retrieval, and tool loading, while intent classification remains separate for tool-choice and response-routing decisions. The method body is not included in the supplied excerpt, so its internal sequence and specific transformations are not described here. [orchestrator/consumers/chatbot/smart_orchestrator.py:167-188]()
 
-## Tool Loop Prevention & Execution
+The docstring further specifies that `available_tools` is the tool surface already assembled by the chat entry point, with `is_super_admin` and page actions threaded in. A non-empty tool list is described as being shipped to `ContextService` as-is. [orchestrator/consumers/chatbot/smart_orchestrator.py:184-188]()
 
-The `StreamingChatService` utilizes `ToolLoopExecutor` (converged with the agent tool-loop spine) to manage multi-turn reasoning and tool calls.
+### `OrchestratedRequest`
 
-*   **`ToolExecutionTracker`**: Implements safety checks to prevent infinite loops:
-    *   **Exact Deduplication**: Prevents calling the same tool with identical arguments. `[orchestrator/consumers/chatbot/service.py:76-105]`
-    *   **Semantic Deduplication**: Uses string similarity (threshold 0.75) for search-based tools to avoid repeating similar queries. `[orchestrator/consumers/chatbot/service.py:85-95]`
-    *   **Retry Limits**: Enforces hard caps per tool invocation. `[orchestrator/consumers/chatbot/service.py:106-142]`
-*   **`UnifiedToolExecutor`**: Executes platform actions (`platform_*`), Composio integrations, and workspace file commands. `[orchestrator/modules/tools/discovery/platform_executor.py:1-231]`, `[orchestrator/modules/tools/discovery/platform_actions.py:57-104]`
+`OrchestratedRequest` is the result type documented for orchestration. Its visible fields include the system prompt and messages; tools and `tool_choice`; optional memory context and user name; intent and confidence; `requires_tools` and `requires_memory`; and preparation timing. It also carries optional `context_trace`, attachment-failure details, and a cacheable prompt prefix. The class comments describe `context_trace` as per-turn context-assembly information and `cacheable_prefix` as a stable prefix separated from volatile prompt content. [orchestrator/consumers/chatbot/smart_orchestrator.py:54-98]()
 
-Sources: `[orchestrator/consumers/chatbot/service.py:31-142]`, `[orchestrator/modules/tools/discovery/platform_executor.py:1-231]`
+| Field | Documented purpose |
+|---|---|
+| `system_prompt`, `messages` | Model-facing prompt and conversation messages. [orchestrator/consumers/chatbot/smart_orchestrator.py:54-64]() |
+| `tools`, `tool_choice` | Tool configuration; `tool_choice` is described as `"auto"`, `"required"`, or `"none"`. [orchestrator/consumers/chatbot/smart_orchestrator.py:65-68]() |
+| `memory_context`, `user_name` | Context injected into the request. [orchestrator/consumers/chatbot/smart_orchestrator.py:69-71]() |
+| `intent`, `intent_confidence` | Classification results. [orchestrator/consumers/chatbot/smart_orchestrator.py:73-78]() |
+| `requires_tools`, `requires_memory` | Boolean signals associated with the classified request. [orchestrator/consumers/chatbot/smart_orchestrator.py:73-78]() |
+| `preparation_time_ms` | Preparation timing. [orchestrator/consumers/chatbot/smart_orchestrator.py:79-80]() |
+| `context_trace` | Optional trace of context assembly. [orchestrator/consumers/chatbot/smart_orchestrator.py:82-86]() |
+| `attachment_failures` | Optional attachment failure records, documented with `attachment_id`, `filename`, and `reason`. [orchestrator/consumers/chatbot/smart_orchestrator.py:88-92]() |
+| `cacheable_prefix` | Optional stable prompt prefix intended for a cache-control breakpoint. [orchestrator/consumers/chatbot/smart_orchestrator.py:93-98]() |
 
----
+Sources: [orchestrator/consumers/chatbot/smart_orchestrator.py:54-98](), [orchestrator/consumers/chatbot/smart_orchestrator.py:100-112](), [orchestrator/consumers/chatbot/smart_orchestrator.py:114-165](), [orchestrator/consumers/chatbot/smart_orchestrator.py:167-188]()
 
-## Page Context Integration (PRD-221)
+### Memory and Background Work
 
-The service supports structured page context, allowing the agent to know the user's location in the UI without leaking sensitive authz fields.
+`SmartChatOrchestrator` obtains the shared `SmartMemoryManager` and `UnifiedMemoryService` during initialization. The module also defines `_spawn_background()`, which schedules a coroutine with `asyncio.create_task()`, retains a strong reference to the task, and removes the reference when the task completes. Its docstring describes memory writes—including fact extraction, daily summaries, and L1/L2 persistence—as work that must not block the streaming response. The supplied excerpt documents this helper and policy, but does not show which orchestration call sites use it. [orchestrator/consumers/chatbot/smart_orchestrator.py:30-52](), [orchestrator/consumers/chatbot/smart_orchestrator.py:150-160]()
 
-*   **`sanitize_page_context`**: Filters client-provided context to an allow-list (page, route, tab, selected IDs, filters). `[orchestrator/services/page_context.py:46-52]`
-*   **`inject_page_preamble`**: Injects a system-level hint about the user's current view into message history. `[orchestrator/services/page_context.py:178-195]`
-*   **`page_actions_from_context`**: Suggests relevant `platform_*` tools based on the page manifest. `[orchestrator/services/page_context.py:151-160]`
-
-Sources: `[orchestrator/api/chat.py:27]`, `[orchestrator/services/page_context.py:1-20]`
-
----
-
-## Platform Action Integration
-
-Agents manage the platform using natural language by invoking `platform_*` actions routed through `PlatformActionExecutor`.
-
-| Action Category | Handler Module | Key Operations |
-| :--- | :--- | :--- |
-| **Agents** | `handlers_agents.py` | `create_agent`, `list_agents`, `update_agent`, `get_agent` |
-| **Board Tasks** | `handlers_board_tasks.py` | `create_board_task`, `list_board_tasks`, `update_board_task_status` |
-| **Analytics** | `handlers_analytics.py` | `get_llm_usage`, `get_cost_breakdown` |
-| **Workspace** | `handlers_workspace.py` | `get_workspace_info`, `store_memory`, `checkpoint_thread` |
-
-Sources: `[orchestrator/modules/tools/discovery/platform_executor.py:19-146]`, `[orchestrator/modules/tools/discovery/handlers_agents.py:13-178]`, `[orchestrator/modules/tools/discovery/handlers_board_tasks.py:1-150]`
+Sources: [orchestrator/consumers/chatbot/smart_orchestrator.py:30-52](), [orchestrator/consumers/chatbot/smart_orchestrator.py:150-160]()
 
 ---
 
-## Heartbeat & Proactive Signals
+## StreamingChatService and `stream_response_with_agent()`
 
-The `HeartbeatService` provides health signals for the chat primitive, ensuring the system can detect degraded performance or failures in the chat pipeline.
+The `service.py` module header identifies `StreamingChatService` as the SSE streaming orchestrator. The supplied excerpt does not include the class definition or `stream_response_with_agent()` implementation. It therefore does not establish the method signature, LLM-provider call sequence, emitted event format, persistence timing, or stream termination behavior. [orchestrator/consumers/chatbot/service.py:1-13]()
 
-*   **`emit_primitive_finding`**: Writes status updates (`green`, `degraded`, `down`) for the "chat" primitive into the `heartbeat_results` table. `[orchestrator/services/heartbeat_service.py:64-132]`
-*   **`_emit_chat_primitive`**: Helper used by the chat service to report successful message exchanges. `[orchestrator/consumers/chatbot/service.py:44]`
+The service module imports `RoundState`, `ToolLoopExecutor`, `ToolLoopResult`, and `ToolPostResult` from the shared tool-loop module. The source comment characterizes this as a converged tool-loop spine shared by chat and agent execution. The module also imports `get_streaming_handler()` and the empty-completion helpers, but their call sites are outside the provided excerpt. [orchestrator/consumers/chatbot/service.py:27-36](), [orchestrator/consumers/chatbot/service.py:49-53](), [orchestrator/consumers/chatbot/service.py:65-66]()
 
-Sources: `[orchestrator/services/heartbeat_service.py:44-132]`, `[orchestrator/consumers/chatbot/service.py:44]`
+The API module imports FastAPI’s `StreamingResponse` and `StreamingChatService`. The endpoint implementation is not included in the provided API excerpt, so the exact route handler that constructs or returns the streaming response is not documented here. [orchestrator/api/chat.py:14-22]()
+
+Sources: [orchestrator/consumers/chatbot/service.py:1-13](), [orchestrator/consumers/chatbot/service.py:27-36](), [orchestrator/consumers/chatbot/service.py:49-53](), [orchestrator/consumers/chatbot/service.py:65-66](), [orchestrator/api/chat.py:14-22]()
+
+---
+
+## Empty-Completion Handling
+
+The chat service imports `NOTHING_SAID`, `is_empty_completion()`, and `with_fallback_content()` from `consumers.chatbot.empty_completion`. This establishes that the service module has named dependencies for detecting empty completions and supplying fallback content. The implementations and call sites are not present in the supplied excerpt, so exact detection rules, fallback wording, and application timing cannot be stated. [orchestrator/consumers/chatbot/service.py:65-66]()
+
+| Symbol | What the available source establishes |
+|---|---|
+| `NOTHING_SAID` | A named constant imported by the chat service. [orchestrator/consumers/chatbot/service.py:65-66]() |
+| `is_empty_completion()` | A predicate imported from the empty-completion module. [orchestrator/consumers/chatbot/service.py:65-66]() |
+| `with_fallback_content()` | A fallback-content helper imported from the same module. [orchestrator/consumers/chatbot/service.py:65-66]() |
+
+Sources: [orchestrator/consumers/chatbot/service.py:65-66]()
+
+---
+
+## Tool-Loop Integration
+
+The chat service imports the shared `RoundState`, `ToolLoopExecutor`, `ToolLoopResult`, and `ToolPostResult` types. Its import comment states that chat and agent execution share this tool-loop spine. The service also imports `is_nudge()` and `a_bare_pointer_goes_through_the_loop()`; their adjacent comments describe nudges as the user’s turn and bare pointers as going through the loop. The excerpt does not show the service’s tool-loop call sites or the tool-loop implementation, so iteration limits, deduplication rules, and failure transitions are not specified here. [orchestrator/consumers/chatbot/service.py:27-36]()
+
+Sources: [orchestrator/consumers/chatbot/service.py:27-36]()
+
+---
+
+## Request Context and Service Dependencies
+
+The service module imports `merge_into_trace()` and `page_actions_from_context()` from `services.page_context`, and `get_tools_for_agent_async()` as the async-native tool-schema source. The nearby comment says the chat hot path must not bridge the narrowing embed through a helper thread. These are documented dependencies and a stated constraint; the excerpt does not show their call sequence during request preparation. [orchestrator/consumers/chatbot/service.py:56-64]()
+
+The API module imports `ChatRequest`, `ChatMessageRequest`, and `MessagePart` from `api.chat_models`, along with hybrid request-context authentication and workspace-permission dependencies. The router is defined with the `/api/chat` prefix. The supplied lines establish the request-model and routing boundaries but do not include the streaming endpoint body. [orchestrator/api/chat.py:14-29](), [orchestrator/api/chat.py:44-45]()
+
+Sources: [orchestrator/consumers/chatbot/service.py:56-64](), [orchestrator/api/chat.py:14-29](), [orchestrator/api/chat.py:44-45]()
 
 ---

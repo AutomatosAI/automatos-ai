@@ -5,32 +5,24 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/context/configure-rag-modal.tsx](frontend/components/context/configure-rag-modal.tsx)
-- [frontend/components/documents/delete-confirmation-modal.tsx](frontend/components/documents/delete-confirmation-modal.tsx)
-- [frontend/components/documents/document-details-modal.tsx](frontend/components/documents/document-details-modal.tsx)
-- [frontend/components/documents/team-multi-select.tsx](frontend/components/documents/team-multi-select.tsx)
-- [frontend/components/documents/upload-provider-modal.tsx](frontend/components/documents/upload-provider-modal.tsx)
-- [frontend/hooks/use-context-management-api.ts](frontend/hooks/use-context-management-api.ts)
-- [frontend/hooks/use-document-api.ts](frontend/hooks/use-document-api.ts)
-- [frontend/hooks/use-notifications-api.ts](frontend/hooks/use-notifications-api.ts)
-- [frontend/hooks/use-teams.ts](frontend/hooks/use-teams.ts)
-- [frontend/hooks/use-template-api.ts](frontend/hooks/use-template-api.ts)
-- [orchestrator/alembic/versions/prd158_cloud_default_team.py](orchestrator/alembic/versions/prd158_cloud_default_team.py)
 - [orchestrator/api/context.py](orchestrator/api/context.py)
 - [orchestrator/api/documents.py](orchestrator/api/documents.py)
 - [orchestrator/api/github_webhooks.py](orchestrator/api/github_webhooks.py)
-- [orchestrator/api/system.py](orchestrator/api/system.py)
-- [orchestrator/core/models/cloud_sync.py](orchestrator/core/models/cloud_sync.py)
-- [orchestrator/modules/rag/chunking/semantic_chunker.py](orchestrator/modules/rag/chunking/semantic_chunker.py)
-- [orchestrator/modules/rag/ingestion/contextual_annotator.py](orchestrator/modules/rag/ingestion/contextual_annotator.py)
+- [orchestrator/api/models_endpoints.py](orchestrator/api/models_endpoints.py)
+- [orchestrator/modules/rag/__init__.py](orchestrator/modules/rag/__init__.py)
 - [orchestrator/modules/rag/ingestion/manager.py](orchestrator/modules/rag/ingestion/manager.py)
 - [orchestrator/modules/rag/service.py](orchestrator/modules/rag/service.py)
-- [orchestrator/modules/rag/services/cloud_file_downloader.py](orchestrator/modules/rag/services/cloud_file_downloader.py)
-- [orchestrator/modules/rag/services/cloud_sync_service.py](orchestrator/modules/rag/services/cloud_sync_service.py)
 - [orchestrator/modules/search/services/entity_extractor.py](orchestrator/modules/search/services/entity_extractor.py)
+- [orchestrator/services/document_downloads.py](orchestrator/services/document_downloads.py)
 - [orchestrator/tests/security/test_s5_closures.py](orchestrator/tests/security/test_s5_closures.py)
+- [orchestrator/tests/test_auto_model_workspace_save.py](orchestrator/tests/test_auto_model_workspace_save.py)
 - [orchestrator/tests/test_entity_extractor_no_vendor_key.py](orchestrator/tests/test_entity_extractor_no_vendor_key.py)
-- [orchestrator/tests/test_p2w1_contextual_annotations.py](orchestrator/tests/test_p2w1_contextual_annotations.py)
+- [orchestrator/tests/test_f357_an_upload_dedupes_only_in_its_own_workspace.py](orchestrator/tests/test_f357_an_upload_dedupes_only_in_its_own_workspace.py)
+- [orchestrator/tests/test_f450_only_the_platform_admin_changes_a_system_setting.py](orchestrator/tests/test_f450_only_the_platform_admin_changes_a_system_setting.py)
+- [orchestrator/tests/test_f451_the_platform_default_needs_agents_read.py](orchestrator/tests/test_f451_the_platform_default_needs_agents_read.py)
+- [orchestrator/tests/test_f453_a_document_download_is_the_callers_own.py](orchestrator/tests/test_f453_a_document_download_is_the_callers_own.py)
+- [orchestrator/tests/test_f453_b_document_content_is_the_callers_own.py](orchestrator/tests/test_f453_b_document_content_is_the_callers_own.py)
+- [orchestrator/tests/test_prd233_s4_storage_factory.py](orchestrator/tests/test_prd233_s4_storage_factory.py)
 
 </details>
 
@@ -38,202 +30,199 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This page documents the semantic chunking strategies used in Automatos AI's document ingestion pipeline. Chunking is the process of splitting large documents into smaller, semantically meaningful units for vector embedding and retrieval. This page covers the `SemanticChunker` implementation, mathematical foundations for entropy-based splitting, multi-modal strategies for different file types (PDF, DOCX, MD, PY), and the parent-child expansion mechanism for context retrieval.
+This page describes how document text is divided into chunks for knowledge-base ingestion, including configured chunk sizes and overlap, the semantic strategy names used by `SemanticChunker`, and the parent and header fields available for context expansion. `DocumentProcessor` has default character-based splitters, while `RAGConfig` exposes chunk-size settings; the semantic strategies are implemented in `SemanticChunker` [orchestrator/modules/rag/ingestion/manager.py:40-44](), [orchestrator/modules/rag/service.py:162-168](), [orchestrator/modules/rag/chunking/semantic_chunker.py:22-70]().
 
-For information about the overall RAG retrieval system and similarity search, see [RAG Retrieval System](). For the end-to-end document ingestion flow, see [Document Ingestion Pipeline]().
+This page focuses on chunking behavior and its data flow. It does not document the broader retrieval and ranking pipeline.
+
+Sources:
+- [orchestrator/modules/rag/ingestion/manager.py:40-44]()
+- [orchestrator/modules/rag/service.py:162-168]()
+- [orchestrator/modules/rag/chunking/semantic_chunker.py:22-70]()
 
 ---
 
 ## Chunking Architecture Overview
 
-The ingestion pipeline transforms raw files into vectorized chunks using a layered architecture that transitions from physical file formats to semantic vector space. The `DocumentManager` coordinates this process per workspace `[orchestrator/api/documents.py:78-87]()`, utilizing `DocumentProcessor` for extraction and `SemanticChunker` for splitting `[orchestrator/modules/rag/ingestion/manager.py:44-48]()`.
+`DocumentManager` ingestion uses document-type handling and chunking components, including `RecursiveCharacterTextSplitter`, `PythonCodeTextSplitter`, and—when importable—`SemanticChunker`. The default character splitters use a chunk size of 1,000 characters and overlap of 200 characters; they are configured with `length_function=len` [orchestrator/modules/rag/ingestion/manager.py:159-166](). The API’s upload-type mapping distinguishes formats including PDF, Markdown, JSON, DOCX, CSV, and spreadsheets [orchestrator/api/documents.py:89-96]().
 
-### Document Ingestion Flow
+### Document Ingestion and Chunking Data Flow (Natural Language to Code Entity Space)
 
 ```mermaid
-graph TB
+flowchart TB
     subgraph "Natural Language Space"
-        PDF["PDF (pdfplumber)"]
-        DOCX["DOCX (python-docx)"]
-        CODE["Python (PythonCodeTextSplitter)"]
-        MD["Markdown (section chunks, F311)"]
+        PDF["PDF document"]
+        DOCX["DOCX document"]
+        CODE["Python source"]
+        MD["Markdown document"]
+        CSV["CSV document"]
+        XLSX["Spreadsheet"]
+        JSON["JSON document"]
+        TEXT["Plain text"]
     end
 
     subgraph "Code Entity Space"
-        DocManager["DocumentManager<br/>(modules/rag/ingestion/manager.py)"]
-        Proc["DocumentProcessor<br/>(modules/rag/ingestion/manager.py)"]
-        SChunker["SemanticChunker<br/>(modules/rag/chunking/semantic_chunker.py)"]
-    end
-    
-    subgraph "Semantic Space"
-        Sim["Semantic Similarity"]
-        Entropy["Information Density<br/>(Entropy)"]
-        Hier["Hierarchical Split"]
+        TYPES["DocumentType"]
+        PROCESSOR["DocumentProcessor"]
+        RECURSIVE["RecursiveCharacterTextSplitter"]
+        PYTHON["PythonCodeTextSplitter"]
+        SEMANTIC["SemanticChunker"]
+        CHUNK["DocumentChunk"]
     end
 
-    subgraph "Vector Storage Layer"
-        S3V["S3VectorsBackend<br/>(modules/search/vector_store/backends/s3_vectors_backend.py)"]
-        PGV["EnhancedVectorStore<br/>(pgvector)"]
-    end
-
-    DocManager --> Proc
-    Proc --> PDF
-    Proc --> DOCX
-    Proc --> CODE
-    Proc --> MD
-    
-    PDF --> SChunker
-    DOCX --> SChunker
-    CODE --> SChunker
-    MD --> SChunker
-    
-    SChunker --> Sim
-    SChunker --> Entropy
-    SChunker --> Hier
-    
-    Sim --> S3V
-    Entropy --> S3V
-    Hier --> PGV
+    PDF --> TYPES
+    DOCX --> TYPES
+    CODE --> TYPES
+    MD --> TYPES
+    CSV --> TYPES
+    XLSX --> TYPES
+    JSON --> TYPES
+    TEXT --> TYPES
+    TYPES --> PROCESSOR
+    PROCESSOR --> RECURSIVE
+    PROCESSOR --> PYTHON
+    PROCESSOR --> SEMANTIC
+    RECURSIVE --> CHUNK
+    PYTHON --> CHUNK
+    SEMANTIC --> CHUNK
 ```
 
-**Sources:**
-- `[orchestrator/modules/rag/ingestion/manager.py:113-130]()`
-- `[orchestrator/modules/rag/ingestion/manager.py:44-48]()`
-- `[orchestrator/modules/rag/service.py:5-10]()`
+Sources:
+- [orchestrator/api/documents.py:89-96]()
+- [orchestrator/modules/rag/ingestion/manager.py:159-166]()
+- [orchestrator/modules/rag/ingestion/manager.py:98-107]()
+- [orchestrator/modules/rag/ingestion/manager.py:154-166]()
 
 ---
 
-## Semantic Chunking Strategies
+## Chunk Size and Overlap
 
-The `SemanticChunker` supports multiple advanced strategies defined in the `ChunkingStrategy` enum.
+The default `DocumentProcessor` configuration sets both the recursive text splitter and the Python code splitter to `chunk_size=1000` and `chunk_overlap=200` [orchestrator/modules/rag/ingestion/manager.py:159-166](). For the recursive splitter, the length function is `len`, so these values are character-based in that configuration [orchestrator/modules/rag/ingestion/manager.py:159-162]().
 
-### 1. Semantic Similarity
-This strategy splits text based on the cosine similarity between consecutive sentences. If the similarity falls below a defined threshold, a new chunk is started. The `RAGConfig` class allows tuning the `min_similarity` (default 0.5) and `diversity` (default 0.3) factors used during retrieval and chunking optimization `[orchestrator/modules/rag/service.py:169-172]()`.
+Separately, the RAG configuration model defines `chunk_size`, `min_chunk_size`, and `max_chunk_size` fields [orchestrator/modules/rag/service.py:162-168](). The context API’s `RAGConfigCreate` request model defaults to `chunk_size=1000` and `chunk_overlap=200`; the update model makes both fields optional [orchestrator/api/context.py:29-45](). These settings are distinct configuration surfaces: the shown `DocumentProcessor` constructor establishes its own splitter defaults, while the API models describe configurable RAG settings.
 
-### 2. Information Density (Entropy-based)
-Utilizes Shannon entropy to calculate information density. Boundaries are placed where information density shifts significantly, ensuring that fact-dense sections are preserved as cohesive units `[orchestrator/modules/rag/service.py:5-10]()`.
+| Setting | Shown default or behavior | Code location |
+|---|---|---|
+| Recursive text splitter size | 1,000 | [orchestrator/modules/rag/ingestion/manager.py:159-162]() |
+| Recursive text splitter overlap | 200 | [orchestrator/modules/rag/ingestion/manager.py:159-162]() |
+| Python code splitter size | 1,000 | [orchestrator/modules/rag/ingestion/manager.py:163-166]() |
+| Python code splitter overlap | 200 | [orchestrator/modules/rag/ingestion/manager.py:163-166]() |
+| RAG configuration size fields | `chunk_size`, `min_chunk_size`, `max_chunk_size` | [orchestrator/modules/rag/service.py:162-168]() |
+| Context API create defaults | `chunk_size=1000`, `chunk_overlap=200` | [orchestrator/api/context.py:29-34]() |
 
-### 3. Hierarchical Strategy
-Creates a parent-child relationship between chunks. Large "parent" chunks provide broad context, while smaller "child" chunks allow for high-precision vector matches. This is reflected in the `DocumentChunk` dataclass which includes a `parent_content` field for context expansion `[orchestrator/modules/rag/ingestion/manager.py:100-101]()`.
-
-### 4. Code-Aware Chunking
-When the `SemanticChunker` is unavailable or fails, `DocumentProcessor.chunk_document` falls back to a plain splitter: `PythonCodeTextSplitter` for Python files and `RecursiveCharacterTextSplitter` for everything else, both at 1,000 characters with 200 of overlap. The two are vendored from langchain-text-splitters 1.0.0 (MIT) in `[orchestrator/modules/rag/chunking/text_splitters.py]()` (PRD-262 US-026). The Python splitter cuts at classes and module-level functions first, then at blank lines, lines and words, so a definition is cut only when it is longer than a chunk `[orchestrator/modules/rag/ingestion/manager.py:439-442]()`.
-
-### 5. Adaptive Strategy
-The system balances chunk sizes dynamically. `RAGConfig` initializes with `chunk_size` (default 500), `min_chunk_size` (100), and `max_chunk_size` (1500) `[orchestrator/modules/rag/service.py:161-166]()`.
-
-**Sources:**
-- `[orchestrator/modules/rag/service.py:128-172]()`
-- `[orchestrator/modules/rag/ingestion/manager.py:94-111]()`
-- `[orchestrator/modules/rag/ingestion/manager.py:126-129]()`
+Sources:
+- [orchestrator/modules/rag/ingestion/manager.py:159-166]()
+- [orchestrator/modules/rag/service.py:162-168]()
+- [orchestrator/api/context.py:29-45]()
 
 ---
 
-## Multi-Modal Extraction Logic
+## Semantic Chunking Strategies Implementation
 
-The `DocumentProcessor` handles format-specific extraction before passing text to the chunker. It supports a wide array of MIME types including PDF, DOCX, Markdown, and various code formats `[orchestrator/api/documents.py:89-105]()`.
+`DocumentManager` attempts to import `SemanticChunker` and `ChunkingStrategy` from `modules.rag.chunking.semantic_chunker`; it sets `SEMANTIC_CHUNKER_AVAILABLE` according to whether that import succeeds [orchestrator/modules/rag/ingestion/manager.py:40-44](). The chunking module defines the strategy names and implementation [orchestrator/modules/rag/chunking/semantic_chunker.py:22-70]().
 
-| Format | Library | Strategy |
-| :--- | :--- | :--- |
-| **PDF** | `pdfplumber` / `PyPDF2` | Primary extraction via `pdfplumber` with a `PyPDF2` fallback for robust text recovery `[orchestrator/modules/rag/ingestion/manager.py:157-194]()`. |
-| **DOCX** | `python-docx` | Iterates through `doc.paragraphs` to maintain structural flow `[orchestrator/modules/rag/ingestion/manager.py:196-203]()`. |
-| **Markdown** | `section_chunks` | A Markdown or text document with headings is chunked by section, each chunk under the headings above it (F311); one without headings goes to the `SemanticChunker` `[orchestrator/modules/rag/chunking/markdown_sections.py]()`. |
-| **Cloud Files** | `CloudFileDownloader` | Downloads from Composio (Dropbox, OneDrive, GDrive, Box) before local processing `[orchestrator/modules/rag/services/cloud_file_downloader.py:28-35]()`. |
+The strategies below describe the named approaches exposed by that module. Their exact thresholds and algorithm details belong to `semantic_chunker.py`; they are not inferred from the splitter defaults or the API configuration fields.
 
-### Extraction Data Flow
+### Semantic Strategy Selection and Data Flow (Natural Language to Code Entity Space)
 
 ```mermaid
-graph LR
+flowchart LR
     subgraph "Natural Language Space"
-        File["Raw File (Cloud/Local)"]
-        MIME["MIME Detection (magic)"]
-    end
-    
-    subgraph "Code Entity Space"
-        Proc["DocumentProcessor<br/>(manager.py)"]
-        PDF_Ext["extract_text_from_pdf()"]
-        DOCX_Ext["extract_text_from_docx()"]
-    end
-    
-    subgraph "Semantic Space"
-        SChunk["SemanticChunker<br/>(semantic_chunker.py)"]
-        RAGS["RAGService<br/>(service.py)"]
+        TEXT["Document text"]
+        SENTENCES["Sentences and sections"]
+        TOPICS["Topics and structure"]
     end
 
-    File --> MIME
-    MIME --> Proc
-    Proc --> PDF_Ext
-    Proc --> DOCX_Ext
-    PDF_Ext --> SChunk
-    DOCX_Ext --> SChunk
-    SChunk --> RAGS
+    subgraph "Code Entity Space"
+        IMPORT["DocumentManager import"]
+        AVAILABLE["SEMANTIC_CHUNKER_AVAILABLE"]
+        ENUM["ChunkingStrategy"]
+        ENGINE["SemanticChunker"]
+        OUTPUT["SemanticChunk"]
+        STORED["DocumentChunk"]
+    end
+
+    TEXT --> IMPORT
+    IMPORT --> AVAILABLE
+    AVAILABLE --> ENGINE
+    SENTENCES --> ENGINE
+    TOPICS --> ENGINE
+    ENUM --> ENGINE
+    ENGINE --> OUTPUT
+    OUTPUT --> STORED
 ```
 
-**Sources:**
-- `[orchestrator/modules/rag/ingestion/manager.py:131-155]()`
-- `[orchestrator/api/documents.py:131-149]()`
-- `[orchestrator/modules/rag/services/cloud_file_downloader.py:71-84]()`
-- `[orchestrator/modules/rag/service.py:1-10]()`
+Sources:
+- [orchestrator/modules/rag/ingestion/manager.py:40-44]()
+- [orchestrator/modules/rag/chunking/semantic_chunker.py:22-70]()
+- [orchestrator/modules/rag/ingestion/manager.py:138-152]()
+
+### 1. Semantic Similarity (`SEMANTIC_SIMILARITY`)
+
+The semantic-similarity strategy uses similarity between adjacent sentences to determine chunk boundaries. Its implementation and strategy parameters are defined in `SemanticChunker` [orchestrator/modules/rag/chunking/semantic_chunker.py:55-70](), [orchestrator/modules/rag/chunking/semantic_chunker.py:107-133]().
+
+Sources:
+- [orchestrator/modules/rag/chunking/semantic_chunker.py:55-70]()
+- [orchestrator/modules/rag/chunking/semantic_chunker.py:107-133]()
+
+### 2. Information Density (`INFORMATION_DENSITY`)
+
+The information-density strategy is a named `SemanticChunker` strategy. Its implementation uses information-density calculations to inform segmentation [orchestrator/modules/rag/chunking/semantic_chunker.py:22-29](), [orchestrator/modules/rag/chunking/semantic_chunker.py:130-152]().
+
+Sources:
+- [orchestrator/modules/rag/chunking/semantic_chunker.py:22-29]()
+- [orchestrator/modules/rag/chunking/semantic_chunker.py:130-152]()
+
+### 3. Topic Coherence (`TOPIC_COHERENCE`)
+
+The topic-coherence strategy groups text according to topical continuity. The strategy implementation and keyword extraction helper are located in `semantic_chunker.py` [orchestrator/modules/rag/chunking/semantic_chunker.py:153-173]().
+
+Sources:
+- [orchestrator/modules/rag/chunking/semantic_chunker.py:153-173]()
+
+### 4. Hierarchical Strategy (`HIERARCHICAL`)
+
+The hierarchical strategy is one of the named chunking strategies [orchestrator/modules/rag/chunking/semantic_chunker.py:22-29](). Independently of that strategy, the ingestion model’s `DocumentChunk` includes `parent_content` and `headers` fields, which can carry parent-section content and heading hierarchy [orchestrator/modules/rag/ingestion/manager.py:138-152]().
+
+Sources:
+- [orchestrator/modules/rag/chunking/semantic_chunker.py:22-29]()
+- [orchestrator/modules/rag/ingestion/manager.py:138-152]()
+
+### 5. Adaptive Strategy (`ADAPTIVE`)
+
+The adaptive strategy is another named `SemanticChunker` strategy [orchestrator/modules/rag/chunking/semantic_chunker.py:22-29](). The strategy’s algorithm is defined in the semantic chunker module [orchestrator/modules/rag/chunking/semantic_chunker.py:174-210]().
+
+Sources:
+- [orchestrator/modules/rag/chunking/semantic_chunker.py:22-29]()
+- [orchestrator/modules/rag/chunking/semantic_chunker.py:174-210]()
+
+---
+
+## Coverage, Re-Ingestion & F086/F087 Safeguards
+
+The upload API exposes document coverage information from `doc_metadata.kept_pct`. If that value is an integer, `_coverage_fields` returns both the percentage and a `partial` flag determined by the configured `RAG_KEPT_WARN_PCT` threshold [orchestrator/api/documents.py:99-108]().
+
+Sources:
+- [orchestrator/api/documents.py:99-108]()
 
 ---
 
 ## Parent-Child Expansion & Metadata
 
-The system uses a `DocumentChunk` dataclass to track context expansion data.
+`DocumentChunk` carries `document_id`, `chunk_index`, `content`, optional `embedding`, metadata, `parent_content`, and `headers`. Its `to_dict()` method includes the chunk content, metadata, parent content, and headers [orchestrator/modules/rag/ingestion/manager.py:138-152]().
 
-### Metadata Schema
-Chunks include the following fields to facilitate retrieval expansion:
-- `chunk_index`: The sequence number within the document `[orchestrator/modules/rag/ingestion/manager.py:96]()`.
-- `parent_content`: Stores the text of the larger section for context injection `[orchestrator/modules/rag/ingestion/manager.py:100]()`.
-- `headers`: A dictionary mapping the header hierarchy (h1, h2, h3) to the chunk `[orchestrator/modules/rag/ingestion/manager.py:101]()`.
+| Field | Role |
+|---|---|
+| `document_id` | Identifies the source document for the chunk [orchestrator/modules/rag/ingestion/manager.py:138-139](). |
+| `chunk_index` | Stores the chunk’s index within the document [orchestrator/modules/rag/ingestion/manager.py:138-139](). |
+| `content` | Holds the chunk text [orchestrator/modules/rag/ingestion/manager.py:138-139](). |
+| `embedding` | Optional vector associated with the chunk [orchestrator/modules/rag/ingestion/manager.py:138-140](). |
+| `metadata` | Optional chunk metadata; serialized as an empty mapping when absent [orchestrator/modules/rag/ingestion/manager.py:140-152](). |
+| `parent_content` | Optional parent-section content for context expansion [orchestrator/modules/rag/ingestion/manager.py:141-152](). |
+| `headers` | Optional heading hierarchy, described in the model as `h1`, `h2`, and `h3` [orchestrator/modules/rag/ingestion/manager.py:142-152](). |
 
-### Context Retrieval Configuration
-The `RAGConfig` allows enabling `parent_child_expansion` with a configurable `expansion_window` (default 1), which retrieves adjacent chunks to provide the LLM with surrounding context `[orchestrator/modules/rag/service.py:156-157]()`.
+The model provides fields for parent content and header hierarchy; the shown definitions do not establish when retrieval expands a child chunk with its parent. That retrieval-time behavior should be documented with the retrieval implementation rather than inferred from the data model alone.
 
-**Sources:**
-- `[orchestrator/modules/rag/ingestion/manager.py:94-111]()`
-- `[orchestrator/modules/rag/service.py:156-157]()`
-
----
-
-## Entity Extraction and Knowledge Graph
-
-The `EntityExtractor` service performs Named Entity Recognition (NER) and relationship mapping to build a knowledge graph, augmenting the basic chunking strategy `[orchestrator/modules/search/services/entity_extractor.py:40-41]()`.
-
-1. **Regex-Based Extraction**: Fast extraction for technology names and acronyms `[orchestrator/modules/search/services/entity_extractor.py:90-121]()`.
-2. **LLM Extraction**: Uses an LLM (e.g., `gpt-4o-mini`) to identify Technologies, Concepts, Organizations, People, and Products `[orchestrator/modules/search/services/entity_extractor.py:123-146]()`.
-3. **Relationship Mapping**: Identifies links like `is_part_of`, `uses`, `created_by`, and `depends_on` `[orchestrator/modules/search/services/entity_extractor.py:31-37]()`.
-
-### Graph Knowledge Architecture
-
-```mermaid
-graph TD
-    subgraph "Natural Language Space"
-        Doc["Document Text"]
-        Query["User Question"]
-    end
-
-    subgraph "Code Entity Space"
-        E_Ext["EntityExtractor<br/>(entity_extractor.py)"]
-        LLM_Ext["_extract_with_llm()"]
-        Rel_Ext["extract_relationships()"]
-    end
-
-    subgraph "Data Models"
-        Ent["ExtractedEntity"]
-        Rel["ExtractedRelationship"]
-    end
-
-    Doc --> E_Ext
-    E_Ext --> LLM_Ext
-    E_Ext --> Rel_Ext
-    LLM_Ext --> Ent
-    Rel_Ext --> Rel
-```
-
-**Sources:**
-- `[orchestrator/modules/search/services/entity_extractor.py:40-63]()`
-- `[orchestrator/modules/search/services/entity_extractor.py:123-155]()`
-- `[orchestrator/modules/search/services/entity_extractor.py:185-190]()`
+Sources:
+- [orchestrator/modules/rag/ingestion/manager.py:138-152]()
 
 ---

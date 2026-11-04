@@ -5,272 +5,214 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/PRDS/PRD-227-BOARD-LIGHT-UP.md](docs/PRDS/PRD-227-BOARD-LIGHT-UP.md)
-- [docs/PRDS/PRD-WAVE-AUTO-MANAGER.md](docs/PRDS/PRD-WAVE-AUTO-MANAGER.md)
-- [orchestrator/alembic/versions/prd201_s1_message_context_trace.py](orchestrator/alembic/versions/prd201_s1_message_context_trace.py)
-- [orchestrator/core/context_guard.py](orchestrator/core/context_guard.py)
-- [orchestrator/core/llm/prompt_cache.py](orchestrator/core/llm/prompt_cache.py)
-- [orchestrator/core/llm/request_scope.py](orchestrator/core/llm/request_scope.py)
-- [orchestrator/core/observability/tracer.py](orchestrator/core/observability/tracer.py)
-- [orchestrator/modules/context/result.py](orchestrator/modules/context/result.py)
-- [orchestrator/modules/context/sections/base.py](orchestrator/modules/context/sections/base.py)
-- [orchestrator/services/audit_retention.py](orchestrator/services/audit_retention.py)
-- [orchestrator/services/board_events.py](orchestrator/services/board_events.py)
-- [orchestrator/services/chat_messenger.py](orchestrator/services/chat_messenger.py)
-- [orchestrator/services/orchestration_state.py](orchestrator/services/orchestration_state.py)
-- [orchestrator/tests/conftest.py](orchestrator/tests/conftest.py)
-- [orchestrator/tests/test_board_dispatch.py](orchestrator/tests/test_board_dispatch.py)
-- [orchestrator/tests/test_board_sse_listen_notify.py](orchestrator/tests/test_board_sse_listen_notify.py)
-- [orchestrator/tests/test_context_guard.py](orchestrator/tests/test_context_guard.py)
-- [orchestrator/tests/test_p2w2_audit_retention.py](orchestrator/tests/test_p2w2_audit_retention.py)
-- [orchestrator/tests/test_p2w2_governance_audit.py](orchestrator/tests/test_p2w2_governance_audit.py)
-- [orchestrator/tests/test_p2w2_governance_policy_budget.py](orchestrator/tests/test_p2w2_governance_policy_budget.py)
-- [orchestrator/tests/test_prd164_flywheel.py](orchestrator/tests/test_prd164_flywheel.py)
-- [orchestrator/tests/test_prd204_run_verdict.py](orchestrator/tests/test_prd204_run_verdict.py)
+- [orchestrator/core/best_effort.py](orchestrator/core/best_effort.py)
+- [orchestrator/core/database/database.py](orchestrator/core/database/database.py)
+- [orchestrator/core/database/pool_watch.py](orchestrator/core/database/pool_watch.py)
+- [orchestrator/core/health_probe.py](orchestrator/core/health_probe.py)
+- [orchestrator/tests/test_f229_health_off_the_loop.py](orchestrator/tests/test_f229_health_off_the_loop.py)
+- [orchestrator/tests/test_f458_full_pool_names_its_holders.py](orchestrator/tests/test_f458_full_pool_names_its_holders.py)
+- [orchestrator/tests/test_f458_health_never_waits_on_a_full_pool.py](orchestrator/tests/test_f458_health_never_waits_on_a_full_pool.py)
+- [orchestrator/tests/test_prd251w1_render_quota.py](orchestrator/tests/test_prd251w1_render_quota.py)
+- [orchestrator/tests/test_prd251w1_voice.py](orchestrator/tests/test_prd251w1_voice.py)
 
 </details>
 
 
 
-This document describes the architectural patterns used in the service layer of Automatos AI. The service layer provides business logic, orchestration, and resource management, sitting between API routers and the data persistence layer.
+## Purpose and Scope
 
----
+This page documents the service-layer patterns supported by the available implementation: module-level database and helper state, FastAPI-compatible database session lifecycles, transaction boundaries before long awaits, best-effort writes, connection-pool observation, and health-probe composition. The supplied files do not establish a general singleton-service registry or a universal dependency-injection framework, so this page describes the concrete mechanisms shown in the code instead. [orchestrator/core/database/database.py:82-104](), [orchestrator/core/database/database.py:115-158](), [orchestrator/core/best_effort.py:41-46](), [orchestrator/core/health_probe.py:47-76]()
+
+Sources: [orchestrator/core/database/database.py:82-104](), [orchestrator/core/database/database.py:115-158](), [orchestrator/core/best_effort.py:41-46](), [orchestrator/core/health_probe.py:47-76]()
 
 ## Service Layer Architecture
 
-The service layer implements the business logic tier in a three-layer architecture. Services consume database models, external APIs, and other services, while being consumed by API routers (FastAPI) and background workers.
+The shown service-layer mechanisms are organized around shared database infrastructure and focused helpers. `database.py` creates the SQLAlchemy engine and `SessionLocal` factory; callers obtain sessions through `get_db()` or `get_db_session()`. Best-effort writers use a module-level executor and consult `pool_watch` before writing, while health checks use pool counters before deciding whether a database probe should attempt a query. [orchestrator/core/database/database.py:82-104](), [orchestrator/core/database/database.py:115-140](), [orchestrator/core/best_effort.py:41-70](), [orchestrator/core/health_probe.py:69-93]()
 
-### Core Service Interaction
-
-The following diagram maps high-level system components to their corresponding code entities and shows the flow of data through the service layer.
+**Diagram: Service Responsibilities Mapped to Code Entities**
 
 ```mermaid
-graph TB
-    subgraph "API Layer (Code Entity Space)"
-        ChatRoute["orchestrator/api/chat.py"]
-        WorkspacesRoute["orchestrator/api/workspaces.py"]
-        SystemRoute["orchestrator/api/system.py"]
-    end
-    
-    subgraph "Service Layer (Logic Space)"
-        SmartOrchestrator["SmartChatOrchestrator"]
-        AgentFactory["AgentFactory"]
-        LLMManager["LLMManager"]
-        UnifiedExecutor["UnifiedToolExecutor"]
-        SmartMemory["SmartMemoryManager"]
-    end
-    
-    subgraph "Data Layer (Entity Space)"
-        AgentModel["Agent (ORM)"]
-        WorkspaceModel["Workspace (ORM)"]
-        Mem0Client["Mem0Client (External/L3)"]
-        Redis["Redis (Pub/Sub)"]
-        SysSetting["SystemSetting (ORM)"]
-    end
-    
-    ChatRoute --> SmartOrchestrator
-    WorkspacesRoute --> WorkspaceModel
-    SystemRoute --> SysSetting
-    
-    SmartOrchestrator --> AgentFactory
-    SmartOrchestrator --> SmartMemory
-    AgentFactory --> LLMManager
-    AgentFactory --> UnifiedExecutor
-    
-    AgentFactory --> AgentModel
-    SmartMemory --> Mem0Client
-    AgentFactory --> Redis
+graph LR
+    Request["Request handling"] --> Dependency["get_db"]
+    Dependency --> Factory["SessionLocal"]
+    Factory --> Engine["engine"]
+    Engine --> Watch["pool_watch.watch"]
+    Telemetry["Best-effort write"] --> Wrapper["off_loop"]
+    Wrapper --> Submit["_submit"]
+    Submit --> Guard["_within_pool_bound"]
+    Guard --> Room["pool_watch.pool_has_room"]
+    Health["Health probe"] --> Status["database_status"]
+    Status --> Room
+    Status --> Select["_select_one"]
 ```
 
-**Sources**: [orchestrator/api/chat.py:107-107](), [orchestrator/api/workspaces.py:43-58](), [orchestrator/main.py:37-81]()
+Sources: [orchestrator/core/database/database.py:82-104](), [orchestrator/core/database/database.py:115-140](), [orchestrator/core/best_effort.py:49-70](), [orchestrator/core/best_effort.py:89-106](), [orchestrator/core/health_probe.py:69-93](), [orchestrator/core/database/pool_watch.py:54-70]()
 
----
+## Shared Infrastructure and Instance Patterns
 
-## Singleton and Instance Patterns
+The database module constructs a module-level `engine` and `SessionLocal` factory. It also installs pool-watch instrumentation on that engine and stores the resulting watcher in `pool_holders`. These are shared module-level infrastructure objects; the available files do not show a general-purpose singleton pattern for domain-service classes. [orchestrator/core/database/database.py:82-104]()
 
-Automatos AI utilizes the Singleton pattern and centralized factory functions for core registry and stateful services to ensure consistent state and efficient resource usage across the application.
+`best_effort.py` similarly keeps module-level executor and pending-write state. `_submit()` creates the executor lazily on the first submission, then reuses it for subsequent writes. `health_probe.py` keeps a module-level `FullPoolClock` to track how long the pool has continuously appeared full. [orchestrator/core/best_effort.py:41-46](), [orchestrator/core/best_effort.py:60-70](), [orchestrator/core/health_probe.py:47-66]()
 
-### Singleton Implementation (`get_instance`)
-
-Services often use factory functions that act as singletons or manage shared state across the lifecycle of the FastAPI application.
-
-- **Centralized Config**: The `Config` class in `orchestrator/config.py` acts as the single source of truth for all environment variables, ensuring `os.getenv()` is only called in one place [orchestrator/config.py:28-32]().
-- **Agent Runtime Management**: `AgentFactory` maintains an internal `_agents` dictionary to cache `AgentRuntime` objects, preventing redundant LLM manager initializations.
-- **Monitoring**: `get_monitoring_service()` provides a platform-level monitoring instance used across agent executions.
-- **Tool Execution**: `get_unified_tool_executor()` lazily initializes the routing and execution logic for tools.
-
-**Sources**: [orchestrator/config.py:1-7](), [orchestrator/config.py:28-32](), [orchestrator/main.py:28-30]()
-
----
-
-## Dependency Injection & Service Composition
-
-Automatos AI uses composition to bridge different domains. Services are frequently composed to create complex pipelines, such as the `AgentFactory` which ties together LLM configuration, tool execution, and metadata management.
-
-### Composition in Agent Execution
-
-The `AgentFactory` composes several specialized entities to facilitate an agent's lifecycle:
-
-| Component | Role | Code Reference |
-| :--- | :--- | :--- |
-| `AgentMetadata` | Encapsulates user-defined configuration and skills | [orchestrator/core/models/core.py:24-24]() |
-| `ModelConfiguration` | Standardizes LLM parameters (temp, tokens, provider) | [orchestrator/core/llm/defaults.py:25-26]() |
-| `UnifiedToolExecutor` | Routes and executes tool calls during agent loops | [orchestrator/main.py:60-60]() |
-
-### System Settings Composition
-
-The system settings architecture demonstrates a compositional approach to platform configuration, organizing settings into logical categories that services consume at runtime:
-- **Orchestrator Settings**: Managed via `SystemLLMSettingsTab`, combining LLM configuration, personality (Soul), and Heartbeat autonomous settings [frontend/components/settings/SystemLLMSettingsTab.tsx:5-11]().
-- **Workspace Context**: The `RequestContext` injected via `get_request_context_hybrid` provides a unified way for services to access `workspace_id` and user roles [orchestrator/api/workspaces.py:44-46]().
-
-**Sources**: [frontend/components/settings/SystemLLMSettingsTab.tsx:5-11](), [orchestrator/api/workspaces.py:43-58](), [orchestrator/core/llm/defaults.py:25-26]()
-
----
-
-## Lazy Initialization & Resolution Patterns
-
-Expensive resources or environment-dependent configurations are resolved lazily to ensure the system remains portable and responsive.
-
-### API Key Resolution Strategy
-
-The platform implements a multi-tier resolution pattern for LLM API keys:
-1. **BYOK (Bring Your Own Key)**: Checked first from workspace-specific settings [orchestrator/api/workspaces.py:186-200]().
-2. **Platform Credentials**: Managed via `api/credentials.py` [orchestrator/main.py:58-58]().
-3. **Environment Variables**: Final fallback to system-level `.env` values defined in `Config` [orchestrator/config.py:37-42]().
-
-### Database Connection Resolution
-
-The `Config.get_database_url()` method lazily computes the connection string, enforcing `sslmode=require` only for non-local hosts to ensure security in production while maintaining ease of use in local development [orchestrator/config.py:48-58]().
-
-**Sources**: [orchestrator/config.py:48-58](), [orchestrator/api/workspaces.py:186-200](), [orchestrator/config.py:37-42]()
-
----
-
-## Service State Management
-
-Services manage both ephemeral runtime state and persistent database state, often bridging the two during high-frequency operations like agent execution.
-
-### Workspace Context Persistence
-
-The `api/workspaces.py` router demonstrates how service-level logic manages workspace state, such as auto-generating `webhook_key` for legacy workspaces [orchestrator/api/workspaces.py:69-72]() and masking sensitive integration tokens before returning them to the frontend [orchestrator/api/workspaces.py:78-87]().
+**Diagram: Module-Level Shared State and Its Callers**
 
 ```mermaid
-graph TD
-    subgraph "Workspace Service Logic (orchestrator/api/workspaces.py)"
-        GetWS["get_current_workspace"]
-        Masking["Mask sensitive tokens (L78-87)"]
-        WebhookGen["Generate Webhook Key (L69-72)"]
-        RoleResolve["resolve_workspace_role (L99-101)"]
-    end
-    
-    subgraph "Persistence (orchestrator/core/models/workspaces.py)"
-        DB_WS["Workspace Table"]
-        DB_Agent["Agent Table (Count check)"]
-    end
-    
-    GetWS --> DB_WS
-    GetWS --> DB_Agent
-    GetWS --> WebhookGen
-    WebhookGen --> DB_WS
-    GetWS --> Masking
-    GetWS --> RoleResolve
+flowchart TD
+    Import["Module initialization"] --> Engine["database.engine"]
+    Import --> Factory["database.SessionLocal"]
+    Engine --> WatchSetup["pool_watch.watch"]
+    WatchSetup --> Holders["database.pool_holders"]
+    Writer["off_loop caller"] --> Submit["_submit"]
+    Submit --> Executor["_executor"]
+    Submit --> Pending["_pending"]
+    Probe["database_status caller"] --> Clock["_full_pool"]
 ```
 
-**Sources**: [orchestrator/api/workspaces.py:43-118](), [orchestrator/api/workspaces.py:69-87]()
+Sources: [orchestrator/core/database/database.py:82-104](), [orchestrator/core/best_effort.py:41-46](), [orchestrator/core/best_effort.py:60-70](), [orchestrator/core/health_probe.py:47-76]()
 
-### Orchestration State Transitions
+## Database Dependency Injection and Session Lifecycle
 
-The `orchestration_state.py` service manages state transitions for `OrchestrationRun` and `OrchestrationTask` entities. It enforces valid transitions, updates timestamps, and records `OrchestrationEvent`s in the same transaction. This "dual-write" pattern ensures data consistency and provides an immutable audit trail of state changes. Optimistic locking is used to detect concurrent modifications, raising a `ConflictError` if a stale data error occurs.
+`get_db()` is a generator dependency that creates a `SessionLocal()` session, yields it to its consumer, and in `finally` rolls back any transaction left open before closing the session. The rollback is a no-op after a successful commit; otherwise it prevents an unfinished transaction from being returned to the pool. [orchestrator/core/database/database.py:115-127]()
+
+`get_db_session()` provides a context-manager alternative for non-dependency call sites. It commits after a successful body, rolls back and logs if an exception occurs, re-raises the exception, and closes the session in `finally`. The two patterns therefore have distinct commit semantics: `get_db()` guarantees cleanup but does not commit on success, while `get_db_session()` commits on successful exit. [orchestrator/core/database/database.py:115-140]()
+
+`end_open_transaction(db)` is an explicit boundary for long-running work. It commits before a long await so a session that has already queried the database does not retain an open transaction and checked-out connection throughout an LLM call or concurrent coroutine work. The helper also commits pending writes at that boundary, so callers should treat the resulting transaction boundary as deliberate rather than assuming one atomic commit at the end of the overall operation. [orchestrator/core/database/database.py:142-158]()
+
+**Diagram: Session Ownership and Cleanup Paths**
 
 ```mermaid
-graph TD
-    A[Caller (e.g., CoordinatorService)] --> B{transition_task / transition_run};
-    B --> C{Validate Transition};
-    C -- Invalid --> D[InvalidTransitionError];
-    C -- Valid --> E[Update Task/Run State & Timestamps];
-    E --> F[Create OrchestrationEvent];
-    F --> G{db.flush()};
-    G -- StaleDataError --> H[ConflictError];
-    G -- Success --> I[Return TaskTransition/RunTransition];
+sequenceDiagram
+    participant Caller as "FastAPI dependency consumer"
+    participant GetDb as "get_db"
+    participant Session as "SessionLocal"
+    participant Pool as "engine pool"
+    Caller->>GetDb: "Request begins"
+    GetDb->>Session: "Create session"
+    GetDb-->>Caller: "Yield session"
+    Caller->>Session: "Queries and writes"
+    Caller-->>GetDb: "Dependency scope ends"
+    GetDb->>Session: "rollback"
+    GetDb->>Session: "close"
+    Session-->>Pool: "Return connection"
+
+    participant ContextCaller as "Context-manager caller"
+    participant GetDbSession as "get_db_session"
+    ContextCaller->>GetDbSession: "Enter context"
+    GetDbSession->>Session: "Create session"
+    ContextCaller->>Session: "Queries and writes"
+    ContextCaller-->>GetDbSession: "Exit successfully"
+    GetDbSession->>Session: "commit"
+    GetDbSession->>Session: "close"
 ```
-**Title**: Orchestration State Transition Flow
-**Sources**: [orchestrator/services/orchestration_state.py:1-15](), [orchestrator/services/orchestration_state.py:84-185](), [orchestrator/services/orchestration_state.py:193-211]()
 
-### Chat Messenger for Background Messages
+Sources: [orchestrator/core/database/database.py:93-94](), [orchestrator/core/database/database.py:115-140](), [orchestrator/core/database/database.py:142-158]()
 
-The `chat_messenger.py` service provides a robust mechanism for background processes (e.g., watchers, scheduled tasks) to post messages into user conversations. It handles the resolution of target chats, ensuring messages are delivered to the correct workspace and user, falling back to a dedicated "Auto" chat thread if the specified chat is invalid or inaccessible. It also includes safeguards to prevent cross-user message leakage.
+## Non-Blocking Best-Effort Helpers
+
+`off_loop(fn)` is intended for synchronous writers that may be called from an event loop. If a loop is running, it submits the writer to the best-effort executor and returns `None` immediately; without a running loop, it calls the writer inline. `awaitable_off_loop(fn)` exposes an async wrapper that submits the synchronous function and awaits the submitted future. [orchestrator/core/best_effort.py:81-106]()
+
+`_submit()` copies the current `contextvars` context, lazily creates a `ThreadPoolExecutor` sized from `BEST_EFFORT_WRITE_THREADS`, submits the function through `_within_pool_bound`, and tracks the future in `_pending`. The completion callback logs failures and removes the future from the pending set. This preserves caller context for the worker and keeps write failures from propagating through the request wrapper. [orchestrator/core/best_effort.py:60-78]()
+
+Before executing a handed-off write, `_within_pool_bound()` polls `pool_watch.pool_has_room()` until a connection is available or `BEST_EFFORT_POOL_WAIT_S` expires. If the deadline passes, it logs a warning and drops the write. The room check and subsequent checkout are not atomic, so a concurrent request can still take the last connection after the check; in that case the write may wait on the pool’s own timeout, but on its worker thread rather than on the event loop. [orchestrator/core/best_effort.py:10-21](), [orchestrator/core/best_effort.py:49-58]()
+
+`drain(timeout)` waits for writes that had already been handed off when it began, including completion callbacks and their failure logs. It is described for tests and shutdown coordination; callers should not assume a best-effort write has completed merely because `off_loop()` returned. [orchestrator/core/best_effort.py:42-44](), [orchestrator/core/best_effort.py:109-120]()
+
+**Diagram: Best-Effort Write Dispatch and Pool Guard**
 
 ```mermaid
-graph TD
-    A[Background Producer] --> B[deliver_background_message];
-    B --> C{post_background_message};
-    C --> D{_resolve_user_int_id};
-    D -- No User ID --> E[Log Warning];
-    D -- User ID --> F{Resolve Target Chat};
-    F -- Valid Chat ID & Owner Match --> G[Use Provided Chat];
-    F -- Invalid Chat ID / Owner Mismatch --> H{find_or_create_auto_chat};
-    H --> I[Create/Retrieve Auto Chat];
-    G --> J[ChatService.add_message];
-    I --> J;
-    J --> K[db.commit()];
-    K --> L[notify_chat_event];
-    L --> M[Postgres LISTEN/NOTIFY];
-    M --> N[SSE Stream to Frontend];
-    C -- Failure --> O[Log Error (fail-soft)];
+flowchart TD
+    Call["Writer call"] --> Loop{"Event loop running?"}
+    Loop -->|"No"| Inline["Run writer inline"]
+    Loop -->|"Yes"| OffLoop["off_loop wrapper"]
+    OffLoop --> Submit["_submit"]
+    Awaitable["awaitable_off_loop wrapper"] --> Submit
+    Submit --> Context["Copy contextvars"]
+    Context --> Executor["ThreadPoolExecutor"]
+    Executor --> Guard["_within_pool_bound"]
+    Guard --> Room{"pool_watch.pool_has_room"}
+    Room -->|"Yes"| Write["Run writer"]
+    Room -->|"No before deadline"| Poll["Wait and poll"]
+    Poll --> Room
+    Room -->|"Deadline exceeded"| Drop["Log and drop write"]
+    Write --> Finished["_finished"]
+    Drop --> Finished
+    Finished --> Pending["_pending updated"]
 ```
-**Title**: Background Chat Message Delivery Flow
-**Sources**: [orchestrator/services/chat_messenger.py:1-24](), [orchestrator/services/chat_messenger.py:41-48](), [orchestrator/services/chat_messenger.py:51-98](), [orchestrator/services/chat_messenger.py:121-131](), [orchestrator/services/chat_messenger.py:133-172]()
 
-### Context Guard for LLM Calls
+Sources: [orchestrator/core/best_effort.py:10-21](), [orchestrator/core/best_effort.py:41-78](), [orchestrator/core/best_effort.py:81-120](), [orchestrator/core/database/pool_watch.py:54-70]()
 
-The `ContextGuard` in `core/context_guard.py` is a critical service for managing token usage before LLM calls. It prevents `context_length_exceeded` errors by dynamically compacting conversations when they approach the model's context limit. This involves counting tokens, resolving model-aware compaction thresholds, summarizing older turns, and flushing key facts to durable memory before discarding messages.
+## Connection Pool Observation and Health Probes
+
+`pool_watch.pool_has_room()` checks whether the engine pool has an idle connection or can open another connection within its overflow limit. `pool_numbers()` reports the checked-out count and configured limit when those values can be read. If pool inspection fails, `pool_has_room()` returns `True` so an unreadable or foreign pool does not prevent a caller from proceeding. [orchestrator/core/database/pool_watch.py:48-70]()
+
+`PoolWatch` records connection holders at checkout. When a checkout leaves the pool full and a report is due, it emits a diagnostic report; the watcher’s recorded holder data includes thread and asyncio-task information, and report generation can show the corresponding stack or await chain. The database module attaches this monitoring to the shared engine and exposes the watcher as `pool_holders`. [orchestrator/core/database/pool_watch.py:73-82](), [orchestrator/core/database/pool_watch.py:148-167](), [orchestrator/core/database/database.py:100-104]()
+
+`health_probe.database_status()` checks pool capacity before trying to execute `SELECT 1`. A full pool returns `busy` at first; if it remains full through the configured `HEALTH_POOL_STUCK_SECONDS` interval, it returns `stuck`. When room is available, the probe resets the full-pool clock and calls `_select_one()`, which opens a session, executes the query, and closes the session. [orchestrator/core/health_probe.py:47-76](), [orchestrator/core/health_probe.py:79-93]()
+
+The health helpers map `busy` to degraded status and `stuck` to unhealthy status. `http_status()` returns 503 only when the database is stuck; other states return 200. The supplied tests also pin the intended full-pool behavior: a busy pool is detected without checking out another connection, while a free pool still runs the query. [orchestrator/core/health_probe.py:35-45](), [orchestrator/core/health_probe.py:96-109](), [orchestrator/tests/test_f458_health_never_waits_on_a_full_pool.py:55-70]()
+
+**Diagram: Health Probe Decision Flow Mapped to Functions**
 
 ```mermaid
-graph TD
-    A[LLM Call Request] --> B{ContextGuard.check_and_compact};
-    B --> C[Count Tokens in Messages];
-    C --> D{Get Model Context Window};
-    D --> E{Resolve Compaction Threshold};
-    E -- Below Threshold --> F[Pass Messages Unchanged];
-    E -- Above Threshold --> G[Compact Messages];
-    G --> H[Summarize Older Turns];
-    G --> I[Keep Recent Context];
-    G --> J[Flush Key Facts to Durable Memory];
-    J --> F;
-    F --> K[Return (messages, was_compacted)];
+flowchart TD
+    Route["GET /health"] --> Status["health_probe.database_status"]
+    Status --> Room["pool_watch.pool_has_room"]
+    Room -->|"No room"| Clock["FullPoolClock.saw_full"]
+    Clock --> Threshold{"HEALTH_POOL_STUCK_SECONDS reached?"}
+    Threshold -->|"No"| Busy["DATABASE_BUSY"]
+    Threshold -->|"Yes"| Stuck["DATABASE_STUCK"]
+    Room -->|"Room available"| Reset["FullPoolClock.saw_room"]
+    Reset --> Select["_select_one"]
+    Select --> Query["SELECT 1"]
+    Query --> Healthy["HEALTHY"]
+    Busy --> Overall["overall_status"]
+    Stuck --> Overall
+    Healthy --> Overall
+    Overall --> Http["http_status"]
 ```
-**Title**: Context Guard Token Management Flow
-**Sources**: [orchestrator/core/context_guard.py:1-28](), [orchestrator/core/context_guard.py:49-51](), [orchestrator/core/context_guard.py:87-109](), [orchestrator/core/context_guard.py:158-163]()
 
-### Real-time Board Events
+Sources: [orchestrator/core/health_probe.py:35-45](), [orchestrator/core/health_probe.py:47-76](), [orchestrator/core/health_probe.py:79-109](), [orchestrator/core/database/pool_watch.py:54-70]()
 
-The `board_events.py` service enables real-time updates for the Command Center UI using PostgreSQL's `LISTEN/NOTIFY` mechanism. When a board task changes status, `notify_board_event` fires a `pg_notify` on the `board_events` channel. An `_SSEListener` thread, running a raw `psycopg2` connection, listens for these notifications and pushes them onto an `asyncio.Queue`. The `board_event_stream` then drains this queue and forwards the events as Server-Sent Events (SSE) to subscribed clients, ensuring sub-second UI updates. A similar mechanism exists for `notify_chat_event` to update chat interfaces.
+## Service Composition and Transaction Boundaries
+
+The supplied service-layer examples compose database resources and helper functions rather than relying on a single service container. `database.py` composes engine creation, session construction, read-release listener registration, and pool-watch setup at module initialization. Runtime consumers then use session factories or dependencies, while `pool_watch` and `health_probe` inspect the shared engine’s capacity. [orchestrator/core/database/database.py:82-104](), [orchestrator/core/database/pool_watch.py:48-70](), [orchestrator/core/health_probe.py:69-93]()
+
+For operations that combine database access with long asynchronous work, `end_open_transaction()` provides the explicit database boundary before the await. That avoids keeping a transaction open across remote or concurrent work, at the cost of committing any pending writes at that point. The available files document this pattern but do not include a concrete service call site using the helper. [orchestrator/core/database/database.py:142-158]()
+
+Best-effort writes compose context propagation, a bounded pool-capacity check, a thread executor, failure logging, and optional draining. Health checks compose pool observation with a query only when capacity is available, then translate component state into an overall status and HTTP status. [orchestrator/core/best_effort.py:49-78](), [orchestrator/core/best_effort.py:109-120](), [orchestrator/core/health_probe.py:69-109]()
+
+**Diagram: Shared Database Infrastructure Composed with Operational Helpers**
 
 ```mermaid
-graph TD
-    A[Board Task Status Change] --> B{notify_board_event};
-    B --> C[PostgreSQL: pg_notify("board_events", payload)];
-    C --> D[_SSEListener Thread];
-    D --> E[Raw psycopg2 LISTEN Connection];
-    E -- Notification Received --> F[asyncio.Queue.put_nowait(payload)];
-    F --> G[board_event_stream (AsyncIterator)];
-    G --> H[SSE Client (Frontend Command Center)];
-    I[Chat Message Landing] --> J{notify_chat_event};
-    J --> C;
+flowchart LR
+    Database["database.py"] --> Engine["engine"]
+    Database --> SessionFactory["SessionLocal"]
+    Engine --> Watch["pool_watch.watch"]
+    Watch --> Counters["pool_has_room"]
+    SessionFactory --> RequestSession["get_db"]
+    SessionFactory --> ManagedSession["get_db_session"]
+    RequestSession --> TransactionBoundary["end_open_transaction"]
+    ManagedSession --> TransactionBoundary
+    Counters --> BestEffortGuard["_within_pool_bound"]
+    Counters --> Probe["database_status"]
+    Probe --> Query["_select_one"]
+    Query --> Overall["overall_status"]
+    Overall --> Http["http_status"]
 ```
-**Title**: Real-time Board and Chat Event Flow
-**Sources**: [orchestrator/services/board_events.py:1-16](), [orchestrator/services/board_events.py:38-69](), [orchestrator/services/board_events.py:71-101](), [orchestrator/services/board_events.py:104-165]()
 
----
+Sources: [orchestrator/core/database/database.py:82-104](), [orchestrator/core/database/database.py:115-158](), [orchestrator/core/database/pool_watch.py:48-70](), [orchestrator/core/best_effort.py:49-58](), [orchestrator/core/health_probe.py:69-109]()
 
-## Service Initialization & Seeding
+## Design Implications
 
-The platform uses a robust seeding pattern to ensure that every workspace is initialized with a consistent set of core services and agents.
+| Pattern | Implementation | Operational implication |
+|---|---|---|
+| Shared database infrastructure | Module-level `engine`, `SessionLocal`, and `pool_holders` are initialized in `database.py`. [orchestrator/core/database/database.py:82-104]() | Database connection and pool instrumentation are shared through the database module. |
+| Explicit session ownership | `get_db()` rolls back and closes; `get_db_session()` commits on success, rolls back on error, and closes. [orchestrator/core/database/database.py:115-140]() | Callers should select the lifecycle matching their commit requirements. |
+| Long-await transaction boundary | `end_open_transaction()` commits before a potentially long await. [orchestrator/core/database/database.py:142-158]() | Prevents retaining an open transaction across long-running work, while making the commit incremental. |
+| Best-effort write isolation | `off_loop()` and `awaitable_off_loop()` hand writes to a bounded thread pool; pool pressure can cause a write to be dropped. [orchestrator/core/best_effort.py:49-58](), [orchestrator/core/best_effort.py:89-106]() | Non-critical writes do not synchronously block an event-loop caller, but are not guaranteed to complete. |
+| Pool visibility | `PoolWatch` records holders and `pool_numbers()` exposes capacity information. [orchestrator/core/database/pool_watch.py:54-82](), [orchestrator/core/database/pool_watch.py:148-167]() | Pool exhaustion can be investigated through holder diagnostics. |
+| Non-blocking health decision | `database_status()` checks capacity before `_select_one()`, and `http_status()` distinguishes a stuck pool from other states. [orchestrator/core/health_probe.py:69-109]() | A full pool is classified without immediately waiting for another connection. |
 
-- **Auto Agent Seeding**: Every workspace receives exactly one "Auto" agent (slug `auto-{workspace_id}`) which serves as the default orchestrator and single source of truth for the workspace's LLM config and persona [orchestrator/core/seeds/seed_auto_agent.py:5-10]().
-- **Skill Assignment**: Core skills like `platform-management` are idempotently assigned to system agents. The seeding process uses `pg_advisory_xact_lock` to prevent race conditions during concurrent workspace provisioning [orchestrator/core/seeds/seed_auto_agent.py:97-102]().
-- **Onboarding Guard**: The `FirstLoginGuard` and `useAutoTour` hooks coordinate to ensure the "Welcome Modal" and Shepherd tours only fire for brand-new workspaces (where `is_new_workspace` is true) [frontend/components/onboarding/first-login-guard.tsx:20-24](), [frontend/hooks/use-auto-tour.ts:30-32]().
-
-**Sources**: [orchestrator/core/seeds/seed_auto_agent.py:5-16](), [orchestrator/core/seeds/seed_auto_agent.py:97-102](), [frontend/components/onboarding/first-login-guard.tsx:20-28](), [frontend/hooks/use-auto-tour.ts:30-32]()
+Sources: [orchestrator/core/database/database.py:82-158](), [orchestrator/core/best_effort.py:49-120](), [orchestrator/core/database/pool_watch.py:48-82](), [orchestrator/core/database/pool_watch.py:148-167](), [orchestrator/core/health_probe.py:69-109]()
 
 ---

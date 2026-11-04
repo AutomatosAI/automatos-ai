@@ -5,262 +5,248 @@
 
 The following files were used as context for generating this wiki page:
 
-- [orchestrator/consumers/chatbot/tool_router.py](orchestrator/consumers/chatbot/tool_router.py)
-- [orchestrator/core/services/edge_builder.py](orchestrator/core/services/edge_builder.py)
-- [orchestrator/core/services/intent_clustering.py](orchestrator/core/services/intent_clustering.py)
 - [orchestrator/modules/context/sections/platform_actions.py](orchestrator/modules/context/sections/platform_actions.py)
 - [orchestrator/modules/context/sections/tools.py](orchestrator/modules/context/sections/tools.py)
 - [orchestrator/modules/tools/discovery/action_registry.py](orchestrator/modules/tools/discovery/action_registry.py)
 - [orchestrator/modules/tools/discovery/action_semantic_index.py](orchestrator/modules/tools/discovery/action_semantic_index.py)
-- [orchestrator/modules/tools/discovery/graph_router.py](orchestrator/modules/tools/discovery/graph_router.py)
-- [orchestrator/modules/tools/discovery/signal_recorder.py](orchestrator/modules/tools/discovery/signal_recorder.py)
-- [orchestrator/modules/tools/execution/unified_executor.py](orchestrator/modules/tools/execution/unified_executor.py)
-- [orchestrator/modules/tools/registry/tool_registry.py](orchestrator/modules/tools/registry/tool_registry.py)
-- [orchestrator/modules/tools/services/composio_hint_service.py](orchestrator/modules/tools/services/composio_hint_service.py)
-- [orchestrator/modules/tools/services/composio_tool_service.py](orchestrator/modules/tools/services/composio_tool_service.py)
+- [orchestrator/modules/tools/discovery/handlers_capabilities.py](orchestrator/modules/tools/discovery/handlers_capabilities.py)
 - [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
-- [orchestrator/scripts/seed_tool_routing_graph.py](orchestrator/scripts/seed_tool_routing_graph.py)
 - [orchestrator/tests/test_action_registry_filtered.py](orchestrator/tests/test_action_registry_filtered.py)
 - [orchestrator/tests/test_action_semantic_index.py](orchestrator/tests/test_action_semantic_index.py)
-- [orchestrator/tests/test_graph_router.py](orchestrator/tests/test_graph_router.py)
-- [orchestrator/tests/test_graph_router_negative.py](orchestrator/tests/test_graph_router_negative.py)
+- [orchestrator/tests/test_identity_section.py](orchestrator/tests/test_identity_section.py)
 - [orchestrator/tests/test_platform_actions_section.py](orchestrator/tests/test_platform_actions_section.py)
 - [orchestrator/tests/test_platform_actions_section_graph.py](orchestrator/tests/test_platform_actions_section_graph.py)
-- [orchestrator/tests/test_prd139_edge_builder.py](orchestrator/tests/test_prd139_edge_builder.py)
-- [orchestrator/tests/test_prd143_graph_seed.py](orchestrator/tests/test_prd143_graph_seed.py)
-- [orchestrator/tests/test_prd143_selection_at_scale.py](orchestrator/tests/test_prd143_selection_at_scale.py)
-- [orchestrator/tests/test_prd143_su_surface.py](orchestrator/tests/test_prd143_su_surface.py)
-- [orchestrator/tests/test_prd177_graph_router_tenant.py](orchestrator/tests/test_prd177_graph_router_tenant.py)
+- [orchestrator/tests/test_prd232_us014_promotion_prior.py](orchestrator/tests/test_prd232_us014_promotion_prior.py)
+- [orchestrator/tests/test_skills_section.py](orchestrator/tests/test_skills_section.py)
 - [orchestrator/tests/test_tool_router_semantic.py](orchestrator/tests/test_tool_router_semantic.py)
-- [orchestrator/tests/test_tool_routing_hardening.py](orchestrator/tests/test_tool_routing_hardening.py)
+- [orchestrator/tests/test_tool_surface_prb.py](orchestrator/tests/test_tool_surface_prb.py)
 
 </details>
 
 
 
-This page explains how platform actions are automatically detected and made available to agents based on user intent. Platform action discovery enables agents to introspect and manage the Automatos platform without manual tool configuration, bridging natural language requests to specific system management capabilities.
+## Purpose & Scope
 
-For the overall platform action system architecture, see [13.1 Platform Action System](). For confirmation and rate limiting of write actions, see [13.3 Confirmation & Rate Limiting]().
+This page describes how platform actions are surfaced for natural-language requests through `find_tools`, how `tool_hints` are passed into tool loading, how `PlatformActionsSection` builds prompt context, and how `ActionSemanticIndex` supports semantic ranking. The supplied code shows the discovery and context-assembly paths, but not where AutoBrain detects platform keywords or produces `tool_hints`; this page therefore documents the observable interfaces without attributing keyword detection to a specific implementation [orchestrator/modules/tools/discovery/handlers_capabilities.py:133-159](), [orchestrator/modules/context/sections/tools.py:64-85](), [orchestrator/modules/context/sections/platform_actions.py:60-87](), [orchestrator/modules/tools/discovery/action_semantic_index.py:113-130]().
 
----
-
-## Overview
-
-Platform actions discovery is the process by which the system detects when a user message requires platform management capabilities (e.g., "list my agents", "show workspace stats") and automatically makes the relevant `platform_*` actions available to the responding agent.
-
-Discovery happens in three primary phases:
-
-1.  **AutoBrain Detection Phase**: Fast keyword matching identifies platform-related queries during complexity assessment [orchestrator/consumers/chatbot/auto.py:115-180]().
-2.  **Semantic Narrowing**: If `SEMANTIC_TOOL_ROUTING` is enabled, the system uses an embedding-based index to rank the most relevant platform actions for the specific query [orchestrator/modules/tools/tool_router.py:88-104]().
-3.  **Context Assembly**: The `PlatformActionsSection` in the `ContextService` injects either the full action enum or a narrowed subset into the LLM's system prompt [orchestrator/modules/tools/discovery/action_registry.py:163-185]().
-
-Sources: [orchestrator/consumers/chatbot/auto.py:1-22](), [orchestrator/modules/tools/tool_router.py:1-15](), [orchestrator/modules/tools/discovery/action_registry.py:5-13]()
+Sources: [orchestrator/modules/tools/discovery/handlers_capabilities.py:133-159](), [orchestrator/modules/context/sections/tools.py:64-85](), [orchestrator/modules/context/sections/platform_actions.py:60-87](), [orchestrator/modules/tools/discovery/action_semantic_index.py:113-130]()
 
 ---
 
-## AutoBrain Keyword Detection
+## 1. Overview
 
-### Platform Keywords Dictionary
+Platform-action discovery connects natural-language queries to registered `ActionDefinition` records. The supplied implementation provides two discovery surfaces: `find_tools`, which returns matching actions and a suggested call form, and `PlatformActionsSection`, which renders an action catalog into prompt context [orchestrator/modules/tools/discovery/handlers_capabilities.py:133-159](), [orchestrator/modules/context/sections/platform_actions.py:60-87]().
 
-AutoBrain maintains a curated dictionary `_PLATFORM_KEYWORDS` mapping each platform action name to natural language trigger phrases. This enables O(1) keyword matching during Tier 2 heuristic assessment [orchestrator/consumers/chatbot/auto.py:121-180]().
+An `ActionDefinition` describes an operation using its name, description, category, parameter schema, permission level, and other metadata. `ActionRegistry` stores definitions and lazily registers platform and workspace actions on first access [orchestrator/modules/tools/discovery/action_registry.py:56-79](), [orchestrator/modules/tools/discovery/action_registry.py:138-158]().
 
-**Natural Language to Code Entity Mapping: Keyword Discovery**
+### Natural-language request to code entities
+
+**Diagram: Query discovery and catalog entities**
 
 ```mermaid
-graph TB
-    subgraph "Natural_Language_Space"
-        U1["'list my agents'"]
-        U2["'how much have i spent'"]
-        U3["'query the database'"]
-        U4["'create a task'"]
+flowchart LR
+    subgraph NaturalLanguageSpace["Natural Language Space"]
+        Query["User query"]
+        Intent["Natural language intent"]
     end
 
-    subgraph "Code_Entity_Space"
-        PK["_PLATFORM_KEYWORDS (dict)"]
-        A1["platform_list_agents"]
-        A2["platform_get_llm_usage"]
-        A3["platform_query_data"]
-        A4["platform_create_board_task"]
-        
-        PK --> A1
-        PK --> A2
-        PK --> A3
-        PK --> A4
+    subgraph CodeEntitySpace["Code Entity Space"]
+        FindTools["find_tools"]
+        RankedMatches["_ranked_matches"]
+        KeywordMatches["_keyword_matches"]
+        SemanticIndex["ActionSemanticIndex.rank_actions"]
+        Registry["ActionRegistry"]
+        Definition["ActionDefinition"]
+        CallForm["platform_execute(action, params)"]
     end
 
-    U1 -.->|"Matches trigger phrase"| A1
-    U2 -.->|"Matches trigger phrase"| A2
-    U3 -.->|"Matches trigger phrase"| A3
-    U4 -.->|"Matches trigger phrase"| A4
-
-    subgraph "Execution_Handlers"
-        H1["list_agents()"]
-        H2["get_llm_usage()"]
-        H3["query_data()"]
-        H4["create_board_task()"]
-    end
-
-    A1 === H1
-    A2 === H2
-    A3 === H3
-    A4 === H4
+    Query --> FindTools
+    Intent --> FindTools
+    FindTools --> RankedMatches
+    RankedMatches --> SemanticIndex
+    RankedMatches --> KeywordMatches
+    FindTools --> Registry
+    Registry --> Definition
+    RankedMatches --> Definition
+    Definition --> CallForm
 ```
 
-Sources: [orchestrator/consumers/chatbot/auto.py:121-180](), [orchestrator/modules/tools/discovery/platform_executor.py:19-152]()
+`find_tools` validates the query, obtains eligible actions from the registry, attempts semantic ranking, and falls back to token overlap when semantic ranking cannot provide matches. Its results include a `platform_execute` call form [orchestrator/modules/tools/discovery/handlers_capabilities.py:40-54](), [orchestrator/modules/tools/discovery/handlers_capabilities.py:93-117](), [orchestrator/modules/tools/discovery/handlers_capabilities.py:133-159]().
+
+Sources: [orchestrator/modules/tools/discovery/action_registry.py:56-79](), [orchestrator/modules/tools/discovery/action_registry.py:138-158](), [orchestrator/modules/tools/discovery/handlers_capabilities.py:40-54](), [orchestrator/modules/tools/discovery/handlers_capabilities.py:93-117](), [orchestrator/modules/tools/discovery/handlers_capabilities.py:133-159]()
 
 ---
 
-## Semantic Discovery (ActionSemanticIndex)
+## 2. Query Discovery, Keyword Matching, and Tool Hints
 
-When queries are complex or don't match static keywords, the system utilizes the `ActionSemanticIndex`. This component embeds `ActionDefinition` records and ranks them by cosine similarity to the user's query [orchestrator/modules/tools/discovery/action_semantic_index.py:2-8]().
+### `find_tools` discovery path
 
-### Semantic Discovery Pipeline
+`find_tools(db, workspace_id, params)` requires a non-empty `query`. It bounds the requested result limit to `1..25`, defaults to 8, and includes compact parameter details unless `include_params` is explicitly false [orchestrator/modules/tools/discovery/handlers_capabilities.py:20-22](), [orchestrator/modules/tools/discovery/handlers_capabilities.py:72-79](), [orchestrator/modules/tools/discovery/handlers_capabilities.py:133-140]().
+
+Before matching, the handler loads workspace-hidden categories and filters the registry to actions that are not admin-only or super-admin-only and are available on the current server. For widget turns, it further restricts eligible actions to those granted by the widget’s scopes [orchestrator/modules/tools/discovery/handlers_capabilities.py:57-69](), [orchestrator/modules/tools/discovery/handlers_capabilities.py:81-90](), [orchestrator/modules/tools/discovery/handlers_capabilities.py:141-147]().
+
+`_ranked_matches` asks `ActionSemanticIndex.rank_actions` for up to the requested limit and maps returned names back to eligible registry entries. If ranking raises or produces no eligible matches, it uses `_keyword_matches`, which scores actions by overlap between query tokens longer than two characters and the lowercased action name, description, and tags [orchestrator/modules/tools/discovery/handlers_capabilities.py:40-54](), [orchestrator/modules/tools/discovery/handlers_capabilities.py:93-117]().
+
+| Stage | Implementation | Result |
+|---|---|---|
+| Query validation and limit | `find_tools`, `_find_limit` | Rejects an empty query and bounds the result count [orchestrator/modules/tools/discovery/handlers_capabilities.py:72-79](), [orchestrator/modules/tools/discovery/handlers_capabilities.py:133-140](). |
+| Eligibility filtering | `_discoverable`, `_for_this_turn` | Excludes privileged, unavailable, hidden, or widget-ungranted actions as applicable [orchestrator/modules/tools/discovery/handlers_capabilities.py:57-69](), [orchestrator/modules/tools/discovery/handlers_capabilities.py:81-90](). |
+| Semantic matching | `_ranked_matches` | Uses `ActionSemanticIndex.rank_actions` and maps names to eligible definitions [orchestrator/modules/tools/discovery/handlers_capabilities.py:93-117](). |
+| Keyword fallback | `_keyword_matches` | Counts query-token matches in action name, description, and tags [orchestrator/modules/tools/discovery/handlers_capabilities.py:40-54](). |
+| Result formatting | `_match_row`, `find_tools` | Returns action metadata, permission level, call form, and optionally compact parameters [orchestrator/modules/tools/discovery/handlers_capabilities.py:24-37](), [orchestrator/modules/tools/discovery/handlers_capabilities.py:119-159](). |
+
+Sources: [orchestrator/modules/tools/discovery/handlers_capabilities.py:20-22](), [orchestrator/modules/tools/discovery/handlers_capabilities.py:24-37](), [orchestrator/modules/tools/discovery/handlers_capabilities.py:40-54](), [orchestrator/modules/tools/discovery/handlers_capabilities.py:57-90](), [orchestrator/modules/tools/discovery/handlers_capabilities.py:93-159]()
+
+### `tool_hints` and tool loading
+
+`ToolsSection.load_tools` accepts `tool_hints` alongside `intent_result`, `query`, and other context inputs. For the `FILTERED` strategy, it forwards `tool_hints` to `_load_filtered` [orchestrator/modules/context/sections/tools.py:64-75](), [orchestrator/modules/context/sections/tools.py:109-119]().
+
+The section defines five strategies: `FULL`, `FILTERED`, `DISPATCHER_ONLY`, `READ_ONLY`, and `NONE`. `NONE` returns no tools with `tool_choice="none"`; `DISPATCHER_ONLY` loads the dispatcher schema; `READ_ONLY` uses its read-only loader; and `FULL` and `FILTERED` use their respective helper paths. Errors are caught and return an empty tool list with `tool_choice="auto"` [orchestrator/modules/context/sections/tools.py:32-41](), [orchestrator/modules/context/sections/tools.py:87-134]().
+
+The supplied code establishes `tool_hints` as an input to tool loading, not how AutoBrain detects platform keywords or constructs the hints. The caller and hint-generation path are not present in the supplied excerpts [orchestrator/modules/context/sections/tools.py:64-75](), [orchestrator/modules/context/sections/tools.py:109-119]().
+
+**Diagram: Context tool-loading strategies**
 
 ```mermaid
-graph TD
-    subgraph "Natural_Language_Space"
-        Q["User Query: 'Analyze my token spend'"]
-    end
+flowchart TD
+    LoadTools["ToolsSection.load_tools"]
+    Strategy{"ToolLoadingStrategy"}
+    None["NONE"]
+    Dispatcher["DISPATCHER_ONLY"]
+    ReadOnly["READ_ONLY"]
+    Full["FULL"]
+    Filtered["FILTERED"]
+    Hints["tool_hints"]
+    FilterHelper["_load_filtered"]
+    Prebuilt["prebuilt_tools"]
+    Result["tool_schemas and tool_choice"]
 
-    subgraph "Code_Entity_Space"
-        ASI["ActionSemanticIndex"]
-        EM["EmbeddingManager"]
-        AR["ActionRegistry"]
-        PF["_apply_relevance_floor"]
-        
-        Q --> ASI
-        ASI --> EM
-        EM -->|"Vectorize"| ASI
-        ASI --> AR
-        AR -->|"Action Definitions"| ASI
-        ASI --> PF
-        PF -->|"Top-K Relevant Actions"| Result["platform_get_llm_usage, platform_workspace_stats"]
-    end
+    LoadTools --> Strategy
+    Strategy --> None
+    Strategy --> Dispatcher
+    Strategy --> ReadOnly
+    Strategy --> Full
+    Strategy --> Filtered
+    Hints --> FilterHelper
+    Filtered --> FilterHelper
+    Full --> Prebuilt
+    None --> Result
+    Dispatcher --> Result
+    ReadOnly --> Result
+    Full --> Result
+    FilterHelper --> Result
 ```
 
-Sources: [orchestrator/modules/tools/discovery/action_semantic_index.py:67-78](), [orchestrator/modules/tools/discovery/action_semantic_index.py:150-167]()
+In the filtered branch, `tool_hints` are passed to `_load_filtered`. In the full branch, non-empty `prebuilt_tools` are authoritative; otherwise the section can rebuild tools [orchestrator/modules/context/sections/tools.py:75-85](), [orchestrator/modules/context/sections/tools.py:94-118]().
 
-### Relevance Filtering
-The system applies a "relevance floor" to semantic results using `SEMANTIC_TOOL_ROUTING_FLOOR`. This prevents the agent from seeing irrelevant platform actions if the similarity score is too low [orchestrator/modules/tools/discovery/action_semantic_index.py:62-71]().
-
-Sources: [orchestrator/modules/tools/discovery/action_semantic_index.py:62-71]()
+Sources: [orchestrator/modules/context/sections/tools.py:32-41](), [orchestrator/modules/context/sections/tools.py:64-85](), [orchestrator/modules/context/sections/tools.py:87-134]()
 
 ---
 
-## Graph-Based Ranking
+## 3. `PlatformActionsSection` Context Section
 
-In addition to semantic similarity, the system can leverage a graph-based ranking approach when `TOOL_ROUTING_GRAPH` is enabled. This method uses historical success/failure data and learned relationships between actions to provide more intelligent recommendations.
+`PlatformActionsSection` is a priority-5 context section that renders a Markdown catalog of available `platform_execute` actions. It delegates catalog formatting to `ActionRegistry` and may use semantic or graph routing to narrow the catalog when a query is supplied [orchestrator/modules/context/sections/platform_actions.py:1-18](), [orchestrator/modules/context/sections/platform_actions.py:60-76]().
 
-The `PlatformActionsSection` first attempts to use graph routing via `_build_graph_filtered` [orchestrator/modules/context/sections/platform_actions.py:74-81](). If graph routing is enabled and returns results, these are prioritized. If it fails or returns no results, the system falls back to the embedding-based semantic ranking [orchestrator/modules/context/sections/platform_actions.py:82-86]().
+### Rendering flow and decision tree
 
-The `GraphRouter`'s `rank_chains` method considers affinities (positive boosts for successful actions, negative penalties for failures) and edge expansions to score potential action sequences [orchestrator/tests/test_graph_router_negative.py:5-13](). This allows the system to learn which actions are most likely to succeed for a given intent.
+`render(ctx)` derives context-mode tool exclusions and workspace-hidden categories. Widget turns take a separate `_build_widget` path. For other turns, it reads a string query from `ctx.kwargs["query"]` [orchestrator/modules/context/sections/platform_actions.py:78-112]().
+
+When a query exists and semantic routing is enabled, `_routed` tries graph routing when enabled, then falls back to embedding-based filtering. If routing does not return a catalog, the renderer may try the closed-pins fallback; otherwise, it builds the regular catalog. An exception in the render path is logged and degrades to an empty string [orchestrator/modules/context/sections/platform_actions.py:113-132](), [orchestrator/modules/context/sections/platform_actions.py:138-153]().
+
+| Condition | Behavior |
+|---|---|
+| Widget turn | Render through `_build_widget` [orchestrator/modules/context/sections/platform_actions.py:102-105](). |
+| Query and semantic routing enabled | Try `_routed`; use its result when available [orchestrator/modules/context/sections/platform_actions.py:107-116](). |
+| Graph routing enabled | Try `_build_graph_filtered`; on failure, continue to embedding routing [orchestrator/modules/context/sections/platform_actions.py:138-153](). |
+| No routed result, closed-pins fallback enabled | Try `_build_pins_text` [orchestrator/modules/context/sections/platform_actions.py:118-125](). |
+| No narrowed result | Build the regular catalog with applicable exclusions [orchestrator/modules/context/sections/platform_actions.py:127](). |
+| Render raises | Log the failure and return an empty string [orchestrator/modules/context/sections/platform_actions.py:128-132](). |
+
+The catalog preamble instructs the model to use `platform_execute(action, params)` for listed actions and distinguishes them from tools that have their own function schemas [orchestrator/modules/context/sections/platform_actions.py:155-159]().
+
+### Natural-language query to prompt catalog
+
+**Diagram: `PlatformActionsSection.render` routing**
 
 ```mermaid
-graph TD
-    subgraph "Natural_Language_Space"
-        Q["User Query: 'Fix the broken build'"]
-    end
+flowchart TD
+    Context["SectionContext"]
+    Render["PlatformActionsSection.render"]
+    Query["ctx.kwargs query"]
+    SemanticFlag["SEMANTIC_TOOL_ROUTING"]
+    GraphFlag["TOOL_ROUTING_GRAPH"]
+    Graph["PlatformActionsSection._build_graph_filtered"]
+    Embedding["PlatformActionsSection._build_filtered"]
+    Pins["PlatformActionsSection._build_pins_text"]
+    Catalog["PlatformActionsSection._build"]
+    Registry["ActionRegistry"]
+    Prompt["Platform Actions Markdown"]
 
-    subgraph "Code_Entity_Space"
-        GR["GraphRouter.rank_chains()"]
-        ASI["ActionSemanticIndex (fallback)"]
-        AR["ActionRegistry"]
-        DB["Tool Routing Telemetry (DB)"]
-        
-        Q --> GR
-        GR --> DB
-        DB -->|"Historical Affinities (succeeds_for_intent, fails_for_intent)"| GR
-        DB -->|"Learned Edges (used_after, meta_sibling)"| GR
-        GR -->|"Ranked Action Chains"| Result["platform_list_agents, platform_get_agent_heartbeat"]
-        GR -- "No results / Error" --> ASI
-        ASI --> Result
-    end
+    Context --> Render
+    Render --> Query
+    Query --> SemanticFlag
+    SemanticFlag --> GraphFlag
+    GraphFlag --> Graph
+    GraphFlag --> Embedding
+    Graph --> Embedding
+    Graph --> Prompt
+    Embedding --> Pins
+    Pins --> Catalog
+    Embedding --> Prompt
+    Catalog --> Registry
+    Registry --> Prompt
 ```
 
-Sources: [orchestrator/modules/context/sections/platform_actions.py:74-86](), [orchestrator/tests/test_graph_router_negative.py:5-13]()
+Sources: [orchestrator/modules/context/sections/platform_actions.py:1-18](), [orchestrator/modules/context/sections/platform_actions.py:60-76](), [orchestrator/modules/context/sections/platform_actions.py:78-159]()
 
 ---
 
-## Tool Injection & Dispatcher Schema
+## 4. `ActionSemanticIndex` and Semantic Ranking
 
-Platform actions are primarily exposed to the LLM via a single "Dispatcher" tool called `platform_execute`. This keeps the agent's tool surface lean while allowing access to over 47+ management actions [orchestrator/modules/tools/discovery/action_registry.py:163-185]().
+`ActionSemanticIndex` is a per-process semantic index over platform `ActionDefinition` records. Its constructor creates an embedding manager, obtains a cache service and action registry, and initializes per-process embedding state [orchestrator/modules/tools/discovery/action_semantic_index.py:113-136]().
 
-### Dispatcher Schema Construction
-The `ActionRegistry.to_dispatcher_schema` method builds the OpenAI function schema for `platform_execute`. It dynamically populates the `action` parameter's `enum` field based on:
-1.  **Admin Status**: Excludes `admin_only` actions for non-admin users [orchestrator/modules/tools/discovery/action_registry.py:175-177]().
-2.  **Discovery Results**: If AutoBrain or Semantic Discovery identifies specific actions, only those are included in the `allowed_names` list [orchestrator/modules/tools/discovery/action_registry.py:180-185]().
+The index is designed to reuse provider-agnostic embeddings and a per-text cache rather than introducing custom blob storage or a hardcoded model [orchestrator/modules/tools/discovery/action_semantic_index.py:1-7](), [orchestrator/modules/tools/discovery/action_semantic_index.py:113-136]().
 
-### Always-Included "Promoted" Actions
-Certain high-frequency actions are marked as `promoted=True`. These bypass the `platform_execute` dispatcher and are injected as first-class tools (e.g., `read_file`, `write_file`) to ensure the LLM uses them with maximum reliability [orchestrator/modules/tools/discovery/action_registry.py:133-161]().
+### Ranking inputs and request scope
 
-Sources: [orchestrator/modules/tools/discovery/action_registry.py:133-161](), [orchestrator/modules/tools/discovery/action_registry.py:163-185]()
+`_collect_enum_values` flattens enum values from object properties and array-item schemas, deduplicating them while preserving order [orchestrator/modules/tools/discovery/action_semantic_index.py:143-161]().
 
----
+`rank_actions_scope()` installs a fresh per-request `ContextVar` dictionary and restores the previous value when the scope ends. The code documents that the scope lets ranking calls within a turn share computed results, while the fresh dictionary limits that memoization to the request [orchestrator/modules/tools/discovery/action_semantic_index.py:26-55]().
 
-## `PlatformActionsSection` Rendering
+The index reads optional relevance-floor and promotion-boost configuration lazily. `_apply_relevance_floor` preserves candidate order while dropping scores below the configured absolute floor or, where applicable, the best-score ratio floor [orchestrator/modules/tools/discovery/action_semantic_index.py:57-82](), [orchestrator/modules/tools/discovery/action_semantic_index.py:85-110]().
 
-The `PlatformActionsSection` is responsible for generating the markdown catalog of available platform actions that gets injected into the LLM's system prompt. This section has a `priority` of 5 and its `render` method determines which actions to display based on the configured routing strategy [orchestrator/modules/context/sections/platform_actions.py:39-40]().
+| Concern | Symbol | Role |
+|---|---|---|
+| Action source | `ActionRegistry` | Supplies registered `ActionDefinition` records [orchestrator/modules/tools/discovery/action_semantic_index.py:21-22](), [orchestrator/modules/tools/discovery/action_semantic_index.py:113-123](). |
+| Parameter vocabulary | `_collect_enum_values` | Collects property and array-item enum values [orchestrator/modules/tools/discovery/action_semantic_index.py:143-161](). |
+| Per-turn memo scope | `rank_actions_scope` | Installs and resets per-request ranking state [orchestrator/modules/tools/discovery/action_semantic_index.py:26-55](). |
+| Relevance threshold | `_apply_relevance_floor` | Applies configured score cutoffs to sorted candidates [orchestrator/modules/tools/discovery/action_semantic_index.py:85-110](). |
+| Embedding dependencies | `create_embedding_manager`, `get_cache_service` | Provide embedding and cached-vector services to the index [orchestrator/modules/tools/discovery/action_semantic_index.py:113-123](). |
 
-The `render` method implements a decision tree:
-- If `SEMANTIC_TOOL_ROUTING` is disabled or no query is provided, it defaults to a full dump of all actions [orchestrator/modules/context/sections/platform_actions.py:71-72]().
-- If `SEMANTIC_TOOL_ROUTING` is enabled and a query is present:
-    - It first attempts `_build_graph_filtered` if `TOOL_ROUTING_GRAPH` is also enabled [orchestrator/modules/context/sections/platform_actions.py:74-81]().
-    - If graph routing fails or yields no results, it falls back to `_build_filtered` using the `ActionSemanticIndex` [orchestrator/modules/context/sections/platform_actions.py:82-91]().
-- If semantic filtering (either graph or embedding-based) yields no results, and `_fallback_mode_closed()` is true, it renders only "pinned" actions [orchestrator/modules/context/sections/platform_actions.py:94-100]().
-- Otherwise, it falls back to `_build()` which provides a full catalog of actions [orchestrator/modules/context/sections/platform_actions.py:102]().
-
-The `_PREAMBLE` constant provides introductory text for the platform actions section, instructing the LLM on how to use `platform_execute` [orchestrator/modules/context/sections/platform_actions.py:113-119]().
-
-Sources: [orchestrator/modules/context/sections/platform_actions.py:39-40](), [orchestrator/modules/context/sections/platform_actions.py:71-102](), [orchestrator/modules/context/sections/platform_actions.py:113-119]()
+Sources: [orchestrator/modules/tools/discovery/action_semantic_index.py:1-7](), [orchestrator/modules/tools/discovery/action_semantic_index.py:21-22](), [orchestrator/modules/tools/discovery/action_semantic_index.py:26-110](), [orchestrator/modules/tools/discovery/action_semantic_index.py:113-161]()
 
 ---
 
-## `tool_hints` Injection
+## 5. Registry, Dispatcher Narrowing, and Discovery Boundaries
 
-`tool_hints` are keywords or phrases extracted from the user's prompt that suggest relevant tools or applications. These hints are crucial for narrowing down the search space for Composio tools and platform actions.
+### `ActionRegistry` and `ActionDefinition`
 
-The `ComposioHintService` uses a three-tier strategy to generate hints for Composio actions [orchestrator/modules/tools/services/composio_hint_service.py:12-16]():
-1.  **Capability-based**: Matches prompt analysis to known tool capabilities [orchestrator/modules/tools/services/composio_hint_service.py:163-166]().
-2.  **Token-filtered**: Uses prompt tokens to filter actions from the `ComposioActionCache` [orchestrator/modules/tools/services/composio_hint_service.py:167-170]().
-3.  **Top-N fallback**: If the above fail, it provides a general list of safe actions [orchestrator/modules/tools/services/composio_hint_service.py:171-174]().
+`ActionDefinition` represents a platform operation and includes its name, description, category, parameter schema, permission level, confirmation requirements, workspace scope, administrative flags, tags, examples, and optional availability check. `to_openai_schema()` serializes the definition as a function schema [orchestrator/modules/tools/discovery/action_registry.py:56-79](), [orchestrator/modules/tools/discovery/action_registry.py:119-128]().
 
-For platform actions, `tool_hints` can influence the semantic ranking process, guiding the `ActionSemanticIndex` towards more relevant actions. The `ComposioToolService` also uses `tool_hints` to scope its SDK search for Composio actions, mapping hints like "email" to apps like "gmail" [orchestrator/modules/tools/services/composio_tool_service.py:78-95]().
+`ActionRegistry` is a thread-safe registry whose actions are registered at startup or lazily loaded on first access. Its initializer imports the platform action registrar and registers platform and workspace actions [orchestrator/modules/tools/discovery/action_registry.py:51-54](), [orchestrator/modules/tools/discovery/action_registry.py:138-158]().
 
-Sources: [orchestrator/modules/tools/services/composio_hint_service.py:12-16](), [orchestrator/modules/tools/services/composio_hint_service.py:163-174](), [orchestrator/modules/tools/services/composio_tool_service.py:78-95]()
+### Dispatcher loading
 
----
+`ToolsSection`’s `DISPATCHER_ONLY` branch calls `_load_dispatcher_only`, which is documented as returning only the `platform_execute` dispatcher schema. When a query is supplied and semantic routing is on, the loader narrows the dispatcher’s action enum and falls back to the full enum on error [orchestrator/modules/context/sections/tools.py:94-98](), [orchestrator/modules/context/sections/tools.py:140-152]().
 
-## CHATBOT Mode Integration
+The loader obtains the action registry and workspace-hidden categories, then imports `_narrow_dispatcher_actions_async` and the shared dispatcher-inclusion helper [orchestrator/modules/context/sections/tools.py:153-167]().
 
-In `CHATBOT` mode, the system optimizes for platform management. The `StreamingChatService` utilizes `AutoBrain` to assess complexity and determine if `tool_hints` should include the `platform` category [orchestrator/consumers/chatbot/service.py:43-46]().
+### Discovery safeguards
 
-### Execution Routing
-When the LLM calls `platform_execute`, the request is routed through `PlatformActionExecutor`. This thin dispatcher maps the action name to domain-specific handler modules [orchestrator/modules/tools/execution/exec_platform.py:5-9]().
+Action discovery does not itself authorize execution. The capability handler excludes admin-only and super-admin-only actions from its advertised discovery set and filters unavailable or workspace-hidden actions. Widget discovery is additionally constrained by granted tool scopes [orchestrator/modules/tools/discovery/handlers_capabilities.py:57-90]().
 
-| Category | Primary Handlers |
-| :--- | :--- |
-| **Agents** | `list_agents`, `create_agent`, `get_agent_heartbeat` [orchestrator/modules/tools/execution/exec_platform.py:19-28]() |
-| **Analytics** | `get_llm_usage`, `get_cost_breakdown`, `workspace_stats` [orchestrator/modules/tools/execution/exec_platform.py:42-47]() |
-| **Workspace** | `get_workspace_info`, `store_memory`, `update_workspace_settings` [orchestrator/modules/tools/execution/exec_platform.py:69-79]() |
-| **Tasks** | `create_board_task`, `list_board_tasks`, `update_board_task_status` [orchestrator/modules/tools/execution/exec_platform.py:94]() |
+`ActionDefinition.is_available()` returns true when no availability callback is configured; if a callback raises, it logs a warning and returns false. The capability handler uses `action_is_available` while building its discoverable set [orchestrator/modules/tools/discovery/action_registry.py:110-135](), [orchestrator/modules/tools/discovery/handlers_capabilities.py:57-69]().
 
-Sources: [orchestrator/consumers/chatbot/service.py:43-46](), [orchestrator/modules/tools/execution/exec_platform.py:5-9](), [orchestrator/modules/tools/execution/exec_platform.py:19-94]()
-
----
-
-## Performance and Maintenance
-
-### Detection Latency
-*   **Tier 1 (Cache)**: <5ms via Redis lookup [orchestrator/consumers/chatbot/auto.py:15]().
-*   **Tier 2 (Heuristics)**: <5ms via Regex matching [orchestrator/consumers/chatbot/auto.py:16]().
-*   **Tier 3 (Semantic/LLM)**: ~200ms fallback using embeddings or cheap LLM classification [orchestrator/consumers/chatbot/auto.py:17]().
-
-### Adding New Discovery Keywords
-To enable discovery for a new platform feature:
-1.  Register the action in `orchestrator/modules/tools/discovery/platform_actions.py` [orchestrator/modules/tools/discovery/action_registry.py:74-84]().
-2.  Add the handler to `PlatformActionExecutor` in `exec_platform.py` [orchestrator/modules/tools/execution/exec_platform.py:19-94]().
-3.  Add trigger phrases to `_PLATFORM_KEYWORDS` in `auto.py` to support fast heuristic discovery [orchestrator/consumers/chatbot/auto.py:121-180]().
-
-Sources: [orchestrator/consumers/chatbot/auto.py:14-17](), [orchestrator/modules/tools/execution/exec_platform.py:19-94](), [orchestrator/modules/tools/discovery/action_registry.py:74-84]()
+Sources: [orchestrator/modules/tools/discovery/action_registry.py:51-54](), [orchestrator/modules/tools/discovery/action_registry.py:56-79](), [orchestrator/modules/tools/discovery/action_registry.py:110-158](), [orchestrator/modules/context/sections/tools.py:94-98](), [orchestrator/modules/context/sections/tools.py:140-167](), [orchestrator/modules/tools/discovery/handlers_capabilities.py:57-90]()
 
 ---

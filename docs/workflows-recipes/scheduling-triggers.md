@@ -5,159 +5,183 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/activity/board/__tests__/schedule-choice.test.ts](frontend/components/activity/board/__tests__/schedule-choice.test.ts)
-- [frontend/components/activity/board/create-task-dialog.tsx](frontend/components/activity/board/create-task-dialog.tsx)
-- [frontend/components/activity/board/create-task-steps.tsx](frontend/components/activity/board/create-task-steps.tsx)
-- [frontend/components/activity/board/schedule-choice.ts](frontend/components/activity/board/schedule-choice.ts)
 - [frontend/components/workflows/execution-kitchen.tsx](frontend/components/workflows/execution-kitchen.tsx)
-- [frontend/hooks/use-board-tasks-api.ts](frontend/hooks/use-board-tasks-api.ts)
-- [orchestrator/alembic/versions/calendar_scheduled_board_tasks.py](orchestrator/alembic/versions/calendar_scheduled_board_tasks.py)
-- [orchestrator/alembic/versions/prd72_board_tasks.py](orchestrator/alembic/versions/prd72_board_tasks.py)
+- [orchestrator/alembic/versions/dedupe_skills_unique_workspace_name.py](orchestrator/alembic/versions/dedupe_skills_unique_workspace_name.py)
 - [orchestrator/api/composio.py](orchestrator/api/composio.py)
+- [orchestrator/api/patterns.py](orchestrator/api/patterns.py)
 - [orchestrator/api/recipe_executor.py](orchestrator/api/recipe_executor.py)
-- [orchestrator/api/scheduled_tasks.py](orchestrator/api/scheduled_tasks.py)
 - [orchestrator/api/skills.py](orchestrator/api/skills.py)
+- [orchestrator/api/templates.py](orchestrator/api/templates.py)
 - [orchestrator/api/tools.py](orchestrator/api/tools.py)
 - [orchestrator/api/webhooks.py](orchestrator/api/webhooks.py)
 - [orchestrator/api/workflow_recipes.py](orchestrator/api/workflow_recipes.py)
 - [orchestrator/core/composio/client.py](orchestrator/core/composio/client.py)
 - [orchestrator/core/composio/linkedin_image_workaround.py](orchestrator/core/composio/linkedin_image_workaround.py)
-- [orchestrator/core/composio/tool_executor.py](orchestrator/core/composio/tool_executor.py)
 - [orchestrator/core/credentials/tester.py](orchestrator/core/credentials/tester.py)
 - [orchestrator/core/credentials/types.py](orchestrator/core/credentials/types.py)
 - [orchestrator/core/database/credential_types_seed.json](orchestrator/core/database/credential_types_seed.json)
 - [orchestrator/core/routing/ingestors/webhook.py](orchestrator/core/routing/ingestors/webhook.py)
-- [orchestrator/core/seeds/utterances/scheduling.yaml](orchestrator/core/seeds/utterances/scheduling.yaml)
-- [orchestrator/modules/tools/discovery/handlers_scheduling.py](orchestrator/modules/tools/discovery/handlers_scheduling.py)
+- [orchestrator/core/services/skill_materializer.py](orchestrator/core/services/skill_materializer.py)
+- [orchestrator/modules/agents/services/skill_loader.py](orchestrator/modules/agents/services/skill_loader.py)
+- [orchestrator/modules/tools/discovery/actions_mission_create.py](orchestrator/modules/tools/discovery/actions_mission_create.py)
+- [orchestrator/modules/tools/discovery/actions_playbook_runs.py](orchestrator/modules/tools/discovery/actions_playbook_runs.py)
+- [orchestrator/modules/tools/discovery/actions_playbook_schedule.py](orchestrator/modules/tools/discovery/actions_playbook_schedule.py)
+- [orchestrator/modules/tools/discovery/actions_playbook_steps.py](orchestrator/modules/tools/discovery/actions_playbook_steps.py)
+- [orchestrator/modules/tools/discovery/actions_playbooks.py](orchestrator/modules/tools/discovery/actions_playbooks.py)
+- [orchestrator/modules/tools/discovery/card_numbers.py](orchestrator/modules/tools/discovery/card_numbers.py)
+- [orchestrator/modules/tools/discovery/handlers_playbooks.py](orchestrator/modules/tools/discovery/handlers_playbooks.py)
+- [orchestrator/modules/tools/discovery/playbook_lookup.py](orchestrator/modules/tools/discovery/playbook_lookup.py)
+- [orchestrator/modules/tools/discovery/playbook_staffing.py](orchestrator/modules/tools/discovery/playbook_staffing.py)
+- [orchestrator/modules/tools/discovery/timer_zones.py](orchestrator/modules/tools/discovery/timer_zones.py)
+- [orchestrator/modules/tools/discovery/wait_for_me.py](orchestrator/modules/tools/discovery/wait_for_me.py)
 - [orchestrator/services/metadata_sync_service.py](orchestrator/services/metadata_sync_service.py)
 - [orchestrator/services/playbook_scheduler.py](orchestrator/services/playbook_scheduler.py)
-- [orchestrator/services/scheduled_task_service.py](orchestrator/services/scheduled_task_service.py)
+- [orchestrator/services/schedule_util.py](orchestrator/services/schedule_util.py)
+- [orchestrator/services/scheduler.py](orchestrator/services/scheduler.py)
 - [orchestrator/services/webhook_dedup.py](orchestrator/services/webhook_dedup.py)
-- [orchestrator/tests/test_p2w0_service_imports_resolve.py](orchestrator/tests/test_p2w0_service_imports_resolve.py)
+- [orchestrator/tests/test_f240_a_weekly_timer_fires_on_its_day.py](orchestrator/tests/test_f240_a_weekly_timer_fires_on_its_day.py)
+- [orchestrator/tests/test_f241_b_mission_and_playbook_cards_are_named_by_number.py](orchestrator/tests/test_f241_b_mission_and_playbook_cards_are_named_by_number.py)
+- [orchestrator/tests/test_f288_c_a_started_run_is_named_by_its_card.py](orchestrator/tests/test_f288_c_a_started_run_is_named_by_its_card.py)
+- [orchestrator/tests/test_f321_a_a_playbook_auto_builds_has_an_agent_on_every_step.py](orchestrator/tests/test_f321_a_a_playbook_auto_builds_has_an_agent_on_every_step.py)
 - [orchestrator/tests/test_p2w2_webhook_dedup.py](orchestrator/tests/test_p2w2_webhook_dedup.py)
 - [orchestrator/tests/test_p2w2_webhook_signature_reject.py](orchestrator/tests/test_p2w2_webhook_signature_reject.py)
-- [orchestrator/tests/test_prd209_alembic_single_head.py](orchestrator/tests/test_prd209_alembic_single_head.py)
-- [orchestrator/tests/test_prd232_us007_seed_intent_clusters.py](orchestrator/tests/test_prd232_us007_seed_intent_clusters.py)
+- [orchestrator/tests/test_playbook_scheduler.py](orchestrator/tests/test_playbook_scheduler.py)
+- [orchestrator/tests/test_prd251_linkedin_scope.py](orchestrator/tests/test_prd251_linkedin_scope.py)
+- [orchestrator/tests/test_unified_scheduler.py](orchestrator/tests/test_unified_scheduler.py)
 
 </details>
 
 
 
-This page documents the execution trigger mechanisms for workflow recipes and workspace interactions: manual execution, cron-based scheduling, and webhook-based triggers. Each recipe can be configured with a trigger type that determines how it executes, while workspaces provide global and recipe-specific webhook ingestion channels backed by signature verification and deduplication.
+## Purpose & Scope
+This page details the execution trigger mechanisms for workflow recipes (playbooks) and workspace integrations within Automatos AI. It covers manual execution workflows, time-based cron scheduling managed by `PlaybookSchedulerService`, external webhook triggers handled via `TriggerSubscription`, cryptographic webhook signature verification (HMAC-SHA256 and Slack schemes), and idempotency through deduplication layers.
+
+Sources: [orchestrator/api/webhooks.py:6-14](), [orchestrator/api/workflow_recipes.py:40-112](), [orchestrator/services/playbook_scheduler.py:1-11]()
 
 ---
 
 ## Schedule Types Overview
 
-Recipes support three mutually exclusive schedule types defined in the configuration. These types determine the entry point into the execution engine.
+Workflow recipes support three mutually exclusive execution trigger categories defined within their schedule configurations: `manual`, `cron`, and `trigger`. These configuration types determine how executions are initiated within the runtime environment.
 
-| Type | Trigger Mechanism | Use Case |
-|------|------------------|----------|
-| `manual` | User-initiated via UI or API | One-off workflows, testing, ad-hoc tasks |
-| `cron` | Time-based with `APScheduler` via `PlaybookSchedulerService` | Periodic reports, scheduled maintenance, batch jobs |
-| `trigger` | Webhook HTTP POST | External event-driven workflows (Jira, GitHub, Slack, etc.) |
+| Type | Trigger Mechanism | Code Reference / Implementation | Use Case |
+|------|------------------|--------------------------------|----------|
+| `manual` | User-initiated via UI action or API call | `modules/tools/discovery/actions_playbook_runs.py::execute_playbook` | One-off workflows, testing, and ad-hoc tasks |
+| `cron` | Time-based scheduling using `APScheduler` | `services/playbook_scheduler.py::PlaybookSchedulerService` | Periodic reports, scheduled maintenance, and batch jobs |
+| `trigger` | External HTTP POST (Composio or custom webhooks) | `api/webhooks.py` and `api/workflow_recipes.py::_auto_register_trigger` | Event-driven automation responding to external webhooks (GitHub, Slack, Jira) |
 
-**Diagram: Trigger to Code Entity Mapping**
+**Diagram: Natural Language Space to Code Entity Space - Trigger Routing**
 
 ```mermaid
 graph TD
-    subgraph "External/User Space"
-        User["User Interface"]
-        Timer["Cron Schedule"]
-        Ext["External System (GitHub/Jira)"]
+    subgraph "Natural_Language_Space"
+        User["UserClickManualRun"]
+        Timer["ScheduledCronTimer"]
+        Ext["ExternalWebhookEvent"]
     end
 
-    subgraph "Code Entity Space"
-        API["POST /api/workflow-recipes/{id}/execute"]
-        Sched["PlaybookSchedulerService"]
-        Web["WebhookIngestor"]
-        Router["UniversalRouter"]
-        Exec["execute_recipe_direct"]
+    subgraph "Code_Entity_Space"
+        API["modules/tools/discovery/actions_playbook_runs.py::execute_playbook"]
+        Sched["services/playbook_scheduler.py::PlaybookSchedulerService._fire_playbook"]
+        Web["api/webhooks.py::_verify_webhook_signature"]
+        Router["core/routing/engine.py::UniversalRouter.route"]
     end
 
-    User -->|"Manual Click"| API
-    Timer -->|"Tick"| Sched
+    User -->|"Trigger Manual"| API
+    Timer -->|"APScheduler CronTrigger"| Sched
     Ext -->|"POST /api/webhooks/ws/{key}"| Web
     
-    API --> Exec
-    Sched -->|"schedule_playbook"| Exec
-    Web -->|"ingest()"| Router
-    Router -->|"route()"| Exec
+    Web -->|"Ingest Payload"| Router
 ```
 
-Sources: [orchestrator/api/webhooks.py:6-12](), [orchestrator/api/workflow_recipes.py:36-50](), [orchestrator/api/recipe_executor.py:5-19]()
+Sources: [orchestrator/api/webhooks.py:6-37](), [orchestrator/api/workflow_recipes.py:104-124](), [orchestrator/modules/tools/discovery/actions_playbook_runs.py:69-74]()
+
+---
+
+## PlaybookSchedulerService & Cron Execution
+
+Time-based cron execution relies on `PlaybookSchedulerService`, which integrates `APScheduler` (`AsyncIOScheduler`) with database-backed persistence or Redis job stores.
+
+### Lifecycle, Zones & Cron Synchronization
+*   **Startup Initialization**: During application startup, the service queries all cron-enabled playbooks where the `schedule_config` dictionary specifies a valid cron expression.
+*   **Timezones & Explicit Zones**: `default_schedule_zone` resolves execution timezones, while `with_explicit_zone` normalizes cron definitions to execute in the owner's configured local timezone rather than default server UTC [orchestrator/api/workflow_recipes.py:95]().
+*   **Job Reconciliation**: When a recipe is created or updated, `_sync_cron_schedule` calls `sync_playbook_schedule`, dynamically adding, updating, or removing scheduled jobs [orchestrator/api/workflow_recipes.py:40-49]() & [orchestrator/services/playbook_scheduler.py:87-110]().
+
+**Diagram: Natural Language Space to Code Entity Space - Scheduler Flow**
+
+```mermaid
+graph TD
+    subgraph "Natural_Language_Space"
+        OwnerTime["OwnerScheduledTimeAndZone"]
+    end
+
+    subgraph "Code_Entity_Space"
+        Sync["api/workflow_recipes.py::_sync_cron_schedule"]
+        Zone["services/playbook_scheduler.py::default_schedule_zone"]
+        Service["services/playbook_scheduler.py::PlaybookSchedulerService.schedule_playbook"]
+        CronTrig["services/playbook_scheduler.py::cron_trigger"]
+    end
+
+    OwnerTime -->|"Configure Schedule"| Sync
+    Sync -->|"Resolve Zone"| Zone
+    Zone -->|"Validate Cron"| CronTrig
+    CronTrig -->|"Register Job"| Service
+```
+
+Sources: [orchestrator/api/workflow_recipes.py:40-49](), [orchestrator/api/workflow_recipes.py:95](), [orchestrator/services/playbook_scheduler.py:35-154]()
 
 ---
 
 ## Workspace Webhooks vs. Recipe Webhooks
 
-The system distinguishes between a global workspace-level entry point and specific recipe triggers.
+The platform separates workspace-scoped ingestion endpoints from specific recipe triggers.
 
-### 1. Workspace Webhook (Universal Routing)
-Every workspace is assigned a unique `webhook_key` upon creation. Messages sent to this endpoint are processed by the `WebhookIngestor`, which normalizes various payload formats (Telegram, Slack, Twilio) into a `RequestEnvelope`.
-
-*   **Endpoint**: `POST /api/webhooks/ws/{workspace_key}` [orchestrator/api/webhooks.py:6]()
-*   **Logic**: The `UniversalRouter` analyzes the content to determine if it should trigger an agent or a specific workflow.
-*   **Platform Detection**: The system automatically detects the source platform (Slack, Telegram, WhatsApp, Twilio) based on payload structure [orchestrator/api/webhooks.py:159-185]().
-*   **Slack Verification**: Slack requests undergo specific v0 signing scheme verification with timestamp skew protection [orchestrator/api/webhooks.py:127-153]().
+### 1. Workspace Webhooks (Universal Routing)
+Every workspace exposes a unique endpoint where inbound payloads are accepted and routed through the Universal Router engine.
+*   **Endpoint Route**: `POST /api/webhooks/ws/{workspace_key}` [orchestrator/api/webhooks.py:6-7]().
+*   **Platform Detection**: `_detect_platform` analyzes incoming payload structures to categorize Telegram, Slack, WhatsApp, or Twilio transport types [orchestrator/api/webhooks.py:159-185]().
+*   **Normalization**: `WebhookIngestor` parses raw HTTP bodies into standardized request envelopes [orchestrator/api/webhooks.py:34]().
 
 ### 2. Recipe-Specific Webhooks
-Recipes configured with the `trigger` type receive a dedicated webhook mapping. These are task-specific and bypass the universal router to execute the associated recipe directly. 
+Recipes configured with the `trigger` type register workflow subscriptions.
+*   **Subscription Tracking**: `_auto_register_trigger` evaluates incoming trigger metadata, interacts with `EntityManager` and `get_composio_client()`, and persists active records via the `TriggerSubscription` model [orchestrator/api/workflow_recipes.py:104-160](). This function specifically handles Composio-sourced triggers by calling `client.subscribe_to_trigger` [orchestrator/api/workflow_recipes.py:153](). Non-Composio triggers are noted and skipped for Composio registration [orchestrator/api/workflow_recipes.py:120-123]().
 
-*   **Composio Integration**: For triggers sourced from Composio (e.g., GitHub events), the system automatically handles subscription via `_auto_register_trigger` [orchestrator/api/workflow_recipes.py:52-81]().
-*   **Subscription Storage**: Active subscriptions are stored in the `TriggerSubscription` table, linking the `composio_subscription_id` to the `workflow_id` [orchestrator/api/workflow_recipes.py:109-124]().
-
-Sources: [orchestrator/api/webhooks.py:6-12](), [orchestrator/api/workflow_recipes.py:52-130](), [orchestrator/core/composio/client.py:63-82]()
-
----
-
-## Agent-Initiated Scheduled Tasks
-
-Beyond recipe schedules, agents and operators can autonomously schedule tasks using the `ScheduledTaskService`.
-
-*   **Task Types**: Supports `one_shot` (ISO datetime) and `recurring` (Cron expression) [orchestrator/services/scheduled_task_service.py:75-78]().
-*   **Rate Limiting**: Limits to 10 active tasks per agent, 25 recurring tasks per workspace, and 50 operator tasks per workspace [orchestrator/services/scheduled_task_service.py:31-34]().
-*   **Delivery Modes**: Supports `chat` (opening a chat session with the target agent) and `board_task` (filing a board ticket into the workspace board) [orchestrator/services/scheduled_task_service.py:37-39]().
-*   **Execution Flow**: When a task fires, it registers with the `UnifiedScheduler` (APScheduler) and executes according to its delivery mode [orchestrator/services/scheduled_task_service.py:4-14]().
-
-Sources: [orchestrator/services/scheduled_task_service.py:31-78](), [orchestrator/services/scheduled_task_service.py:89-112]()
+Sources: [orchestrator/api/webhooks.py:6-37](), [orchestrator/api/workflow_recipes.py:104-160](), [orchestrator/core/models/composio.py:1-25]()
 
 ---
 
 ## Webhook Security & Verification
 
-The system implements strict verification for incoming webhooks to prevent unauthorized execution and replay attacks.
+Incoming webhook requests enforce rigorous validation to reject tampering, unauthorized calls, and replay attacks.
 
-### Signature Verification
-The `_verify_webhook_signature` function validates HMAC-SHA256 signatures for generic webhooks, GitHub, and Composio [orchestrator/api/webhooks.py:50-76]().
-*   **Headers Checked**: `X-Hub-Signature-256`, `X-Composio-Signature`, `X-Webhook-Signature`.
-*   **Algorithm**: Uses `hmac.compare_digest` to mitigate timing attacks [orchestrator/api/webhooks.py:83-89]().
+### HMAC-SHA256 Signature Verification
+The helper `_verify_webhook_signature` authenticates requests across GitHub, Composio, and custom webhook integrations [orchestrator/api/webhooks.py:50-64]().
+*   **Headers Evaluated**: Checks `X-Hub-Signature-256`, `X-Composio-Signature`, and `X-Webhook-Signature` [orchestrator/api/webhooks.py:69-73]().
+*   **Fail-Closed Policy**: If a secret is provisioned, missing or mismatched signatures raise an `HTTPException(401)` [orchestrator/api/webhooks.py:60-76]() & [orchestrator/api/webhooks.py:89-91](). Comparisons utilize constant-time evaluation via `hmac.compare_digest` [orchestrator/api/webhooks.py:87-89]().
+
+### Slack Signature Verification
+Slack integrations execute `_verify_slack_signature`, implementing the `v0` signing schema (`v0:{timestamp}:{raw_body}`) along with a strict timestamp skew window (`_SLACK_TS_SKEW_SECONDS = 300` seconds) to block replay attacks [orchestrator/api/webhooks.py:94-152]().
 
 ### Deduplication
-Incoming webhooks are processed through `webhook_dedup` to prevent duplicate execution from retried external requests [orchestrator/api/webhooks.py:35]().
+Webhook payloads pass through `webhook_dedup` checks to guarantee idempotency and prevent duplicate executions during upstream provider retries [orchestrator/api/webhooks.py:35]() & [orchestrator/services/webhook_dedup.py:1-10](). The `webhook_dedup` service uses a Redis-backed mechanism to store hashes of incoming webhook payloads for a short duration, preventing reprocessing of identical events within the deduplication window [orchestrator/services/webhook_dedup.py:12-30]().
 
-Sources: [orchestrator/api/webhooks.py:35](), [orchestrator/api/webhooks.py:50-91]()
+Sources: [orchestrator/api/webhooks.py:33-152](), [orchestrator/services/webhook_dedup.py:1-30]()
 
 ---
 
 ## Configuration Reference
 
 ### RecipeScheduleConfig Structure
-The configuration determines how the execution engine interacts with the recipe schedule.
+The schedule configuration dictionary stored within workflow templates controls runtime scheduling properties.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | `string` | `manual`, `cron`, or `trigger` [orchestrator/api/workflow_recipes.py:62-63]() |
-| `cron_expression` | `string` | Standard cron string (e.g., `0 9 * * 1`) [orchestrator/api/workflow_recipes.py:44]() |
-| `trigger_config` | `dict` | Contains `source` (e.g., 'composio') and `trigger_name` [orchestrator/api/workflow_recipes.py:65-75]() |
+| `type` | `string` | Execution trigger category: `manual`, `cron`, or `trigger` [orchestrator/modules/tools/discovery/actions_playbook_runs.py:71]() |
+| `cron_expression` | `string` | Standard cron string evaluated by `PlaybookSchedulerService` [orchestrator/modules/tools/discovery/actions_playbook_runs.py:71]() |
+| `timezone` | `string` | Target timezone for scheduled evaluation [orchestrator/services/playbook_scheduler.py:82-83]() |
+| `enabled` | `boolean` | Toggle flag to pause or resume timers without clearing parameters [orchestrator/modules/tools/discovery/actions_playbook_runs.py:72-73]() |
+| `trigger_config` | `dict` | Metadata parameters for webhook or third-party event bindings [orchestrator/api/workflow_recipes.py:113-117]() |
 
-### TriggerSubscription Model
-Used for mapping external events to internal logic.
-
-*   `composio_subscription_id`: The ID returned by Composio's subscription API [orchestrator/api/workflow_recipes.py:115]().
-*   `is_active`: Boolean flag for enabling/disabling the trigger [orchestrator/api/workflow_recipes.py:117]().
-*   `entity_id`: Links to the `ComposioEntity` associated with the workspace [orchestrator/api/workflow_recipes.py:109]().
-
-Sources: [orchestrator/api/workflow_recipes.py:36-130](), [orchestrator/core/composio/client.py:146-165]()
+Sources: [orchestrator/api/workflow_recipes.py:113-117](), [orchestrator/modules/tools/discovery/actions_playbook_runs.py:69-74](), [orchestrator/services/playbook_scheduler.py:80-85]()
 
 ---
