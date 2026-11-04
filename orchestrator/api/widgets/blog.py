@@ -160,7 +160,7 @@ async def get_published_post(
 
 
 @router.get("/categories")
-async def list_categories(
+def list_categories(
     workspace_id: UUID = Depends(resolve_blog_workspace),
     db: Session = Depends(get_db),
 ):
@@ -173,7 +173,7 @@ async def list_categories(
 
 
 @router.get("/tags")
-async def list_tags(
+def list_tags(
     workspace_id: UUID = Depends(resolve_blog_workspace),
     db: Session = Depends(get_db),
 ):
