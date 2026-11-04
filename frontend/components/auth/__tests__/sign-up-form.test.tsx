@@ -108,6 +108,33 @@ describe('SignUpForm in waitlist mode', () => {
   })
 })
 
+describe('SignUpForm legal links', () => {
+  it("links the company site's Privacy and Terms pages, in a new tab", () => {
+    render(<SignUpForm />)
+
+    const privacy = screen.getByRole('link', { name: 'Privacy' })
+    const terms = screen.getByRole('link', { name: 'Terms' })
+    expect(privacy).toHaveAttribute('href', 'https://automatos.app/privacy')
+    expect(terms).toHaveAttribute('href', 'https://automatos.app/terms')
+    for (const link of [privacy, terms]) {
+      expect(link).toHaveAttribute('target', '_blank')
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    }
+  })
+
+  it('keeps them once the visitor is on the waitlist', async () => {
+    createMock.mockRejectedValue(WAITLIST_MODE)
+    joinWaitlistMock.mockResolvedValue({ id: 'wle_test' })
+    render(<SignUpForm />)
+
+    submitSignUp()
+
+    expect(await screen.findByRole('heading', { name: ON_THE_LIST })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', 'https://automatos.app/privacy')
+    expect(screen.getByRole('link', { name: 'Terms' })).toHaveAttribute('href', 'https://automatos.app/terms')
+  })
+})
+
 describe('SignUpForm outside waitlist mode', () => {
   it('goes on to email verification and never touches the waitlist', async () => {
     createMock.mockResolvedValue({})

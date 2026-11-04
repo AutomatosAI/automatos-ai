@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardFooter } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import Link from 'next/link'
 import {
+    LegalLinks,
     OAuthSignUpButtons,
     SignUpEmailForm,
     SignUpHeading,
@@ -169,13 +170,14 @@ export function SignUpForm() {
                         )}
                     </AnimatePresence>
                 </CardContent>
-                <CardFooter className="flex justify-center border-t border-border/30 pt-6">
+                <CardFooter className="flex flex-col items-center gap-3 border-t border-border/30 pt-6">
                     <p className="text-sm text-muted-foreground">
                         Already have an invite?{' '}
                         <Link href="/sign-in" className="text-primary hover:text-primary/90 font-medium hover:underline transition-all">
                             Sign in
                         </Link>
                     </p>
+                    <LegalLinks />
                 </CardFooter>
             </Card>
         </motion.div >
