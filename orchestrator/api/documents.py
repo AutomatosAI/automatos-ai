@@ -1522,6 +1522,22 @@ def _get_queue_status_stats(db, ctx):
     return processed_today, avg_time, success_rate
 
 
+def _get_queue_status_failed(failed_docs):
+    """Format failed documents."""
+    # Format failed documents
+    failed_list = []
+    for doc in failed_docs:
+        failed_list.append({
+            "document_id": doc.id,
+            "filename": doc.filename,
+            "file_type": doc.file_type,
+            "file_size": doc.file_size,
+            "failed_at": doc.processed_date.isoformat() if doc.processed_date else None,
+            "error": doc.doc_metadata.get('error', 'Unknown error') if doc.doc_metadata else 'Processing failed'
+        })
+    return failed_list
+
+
 @router.get("/queue/status")
 def get_queue_status(
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1569,18 +1585,7 @@ def get_queue_status(
         
         # Format processing documents with progress estimates
         processing_list = _get_queue_status_processing(processing_docs)
-        # Format failed documents
-        failed_list = []
-        for doc in failed_docs:
-            failed_list.append({
-                "document_id": doc.id,
-                "filename": doc.filename,
-                "file_type": doc.file_type,
-                "file_size": doc.file_size,
-                "failed_at": doc.processed_date.isoformat() if doc.processed_date else None,
-                "error": doc.doc_metadata.get('error', 'Unknown error') if doc.doc_metadata else 'Processing failed'
-            })
-        
+        failed_list = _get_queue_status_failed(failed_docs)
         processed_today, avg_time, success_rate = _get_queue_status_stats(db, ctx)
         return {
             "queue_depth": len(pending_list),

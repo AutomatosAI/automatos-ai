@@ -146,8 +146,161 @@ class UpdateInfo(BaseModel):
 # GET /api/marketplace/items
 # ===================================================================
 
+def _list_items_agent_out(db, agent):
+    """Build the marketplace card for one agent."""
+    # Get creator name
+    creator_name = agent.created_by or "Unknown"
+    if agent.original_creator_id:
+        creator = db.query(UserModel).filter(UserModel.id == agent.original_creator_id).first()
+        if creator:
+            creator_name = creator.name or creator.email or f"User {creator.id}"
+
+    # Get tool names and icons for the card
+    tool_names = []
+    tool_icons = []
+    tool_assignments = db.execute(text('''
+        SELECT ata.tool_id, cac.logo_url
+        FROM agent_tool_assignments ata
+        LEFT JOIN composio_apps_cache cac
+            ON LOWER(cac.app_slug) = LOWER(ata.tool_id)
+            OR LOWER(cac.app_name) = LOWER(ata.tool_id)
+        WHERE ata.agent_id = :agent_id AND ata.enabled = true
+        LIMIT 3
+    '''), {"agent_id": agent.id}).fetchall()
+
+    for tool_id, logo_url in tool_assignments:
+        tool_names.append(tool_id.upper())
+        if logo_url:
+            tool_icons.append(logo_url)
+
+    return MarketplaceItemOut(
+        id=agent.id,
+        type='agent',
+        name=agent.name,
+        description=agent.description or '',
+        creator_name=creator_name,
+        icon=agent.marketplace_icon,
+        category=agent.marketplace_category,
+        tags=agent.tags or [],
+        install_count=agent.install_count,
+        is_featured=agent.is_featured,
+        is_approved=agent.is_approved,
+        version=agent.version,
+        metadata={
+            'agent_type': agent.agent_type,
+            'configuration': agent.configuration,
+            'model_config': agent.model_config,
+            'tool_names': tool_names,
+            'tool_icons': tool_icons
+        },
+        created_at=agent.created_at,
+        updated_at=agent.updated_at
+    )
+
+
+def _list_items_recipe_out(db, recipe):
+    """Build the marketplace card for one recipe."""
+    # Get creator name
+    creator_name = "Unknown"
+    if recipe.original_creator_id:
+        creator = db.query(UserModel).filter(UserModel.id == recipe.original_creator_id).first()
+        if creator:
+            creator_name = creator.email or f"User {creator.id}"
+
+    return MarketplaceItemOut(
+        id=recipe.id,
+        type='recipe',
+        name=recipe.name,
+        description=recipe.description or '',
+        creator_name=creator_name,
+        icon=recipe.marketplace_icon,
+        category=recipe.marketplace_category,
+        tags=recipe.tags or [],
+        install_count=recipe.install_count,
+        is_featured=recipe.is_featured,
+        is_approved=recipe.is_approved,
+        version=recipe.version,
+        owner_type=recipe.owner_type,
+        steps=recipe.steps or [],
+        inputs=recipe.inputs,
+        outputs=recipe.outputs,
+        execution_config=recipe.execution_config,
+        schedule_config=recipe.schedule_config,
+        metadata={
+            'required_tools': recipe.required_tools or [],
+            'recommended_agents': recipe.recommended_agents or [],
+            'quality_score': recipe.quality_score
+        },
+        created_at=recipe.created_at,
+        updated_at=recipe.updated_at
+    )
+
+
+def _list_items_agents(db, user_is_admin, category, search, featured, single_type, limit, offset):
+    """Marketplace agents matching the filters (paginated when a single type)."""
+    # Build query for marketplace agents
+    agent_query = db.query(Agent).filter(Agent.owner_type == 'marketplace')
+
+    if not user_is_admin:
+        agent_query = agent_query.filter(Agent.is_approved == True)
+
+    # Apply filters
+    if category:
+        agent_query = agent_query.filter(Agent.marketplace_category == category)
+
+    if search:
+        agent_query = agent_query.filter(or_(
+            Agent.name.ilike(f'%{search}%'),
+            Agent.description.ilike(f'%{search}%')
+        ))
+
+    if featured is not None:
+        agent_query = agent_query.filter(Agent.is_featured == featured)
+
+    # Order by install count
+    agent_query = agent_query.order_by(desc(Agent.install_count), desc(Agent.created_at))
+
+    # Apply per-query pagination only when fetching a single type
+    if single_type:
+        agent_query = agent_query.limit(limit).offset(offset)
+
+    agents = agent_query.all()
+    return agents
+
+
+def _list_items_recipes(db, user_is_admin, category, search, featured, single_type, limit, offset):
+    """Marketplace recipes matching the filters (paginated when a single type)."""
+    recipe_query = db.query(WorkflowRecipe).filter(WorkflowRecipe.owner_type == 'marketplace')
+
+    if not user_is_admin:
+        recipe_query = recipe_query.filter(WorkflowRecipe.is_approved == True)
+
+    # Apply filters
+    if category:
+        recipe_query = recipe_query.filter(WorkflowRecipe.marketplace_category == category)
+
+    if search:
+        recipe_query = recipe_query.filter(or_(
+            WorkflowRecipe.name.ilike(f'%{search}%'),
+            WorkflowRecipe.description.ilike(f'%{search}%')
+        ))
+
+    if featured is not None:
+        recipe_query = recipe_query.filter(WorkflowRecipe.is_featured == featured)
+
+    # Order by install count
+    recipe_query = recipe_query.order_by(desc(WorkflowRecipe.install_count), desc(WorkflowRecipe.created_at))
+
+    # Apply per-query pagination only when fetching a single type
+    if single_type:
+        recipe_query = recipe_query.limit(limit).offset(offset)
+
+    recipes = recipe_query.all()
+    return recipes
+
+
 @router.get("/items", response_model=List[MarketplaceItemOut])
-async def list_items(
+def list_items(
     type: Optional[str] = Query(None, description="Filter by type: agent, recipe, skill, llm, tool"),
     category: Optional[str] = Query(None, description="Filter by category"),
     search: Optional[str] = Query(None, description="Search by name or description"),
@@ -177,151 +330,16 @@ async def list_items(
 
         # Query agents
         if include_agents:
-            # Build query for marketplace agents
-            agent_query = db.query(Agent).filter(Agent.owner_type == 'marketplace')
-
-            if not user_is_admin:
-                agent_query = agent_query.filter(Agent.is_approved == True)
-
-            # Apply filters
-            if category:
-                agent_query = agent_query.filter(Agent.marketplace_category == category)
-
-            if search:
-                agent_query = agent_query.filter(or_(
-                    Agent.name.ilike(f'%{search}%'),
-                    Agent.description.ilike(f'%{search}%')
-                ))
-
-            if featured is not None:
-                agent_query = agent_query.filter(Agent.is_featured == featured)
-
-            # Order by install count
-            agent_query = agent_query.order_by(desc(Agent.install_count), desc(Agent.created_at))
-
-            # Apply per-query pagination only when fetching a single type
-            if single_type:
-                agent_query = agent_query.limit(limit).offset(offset)
-
-            agents = agent_query.all()
-
+            agents = _list_items_agents(db, user_is_admin, category, search, featured, single_type, limit, offset)
             # Convert agents to response format
             for agent in agents:
-                # Get creator name
-                creator_name = agent.created_by or "Unknown"
-                if agent.original_creator_id:
-                    creator = db.query(UserModel).filter(UserModel.id == agent.original_creator_id).first()
-                    if creator:
-                        creator_name = creator.name or creator.email or f"User {creator.id}"
-
-                # Get tool names and icons for the card
-                tool_names = []
-                tool_icons = []
-                tool_assignments = db.execute(text('''
-                    SELECT ata.tool_id, cac.logo_url
-                    FROM agent_tool_assignments ata
-                    LEFT JOIN composio_apps_cache cac
-                        ON LOWER(cac.app_slug) = LOWER(ata.tool_id)
-                        OR LOWER(cac.app_name) = LOWER(ata.tool_id)
-                    WHERE ata.agent_id = :agent_id AND ata.enabled = true
-                    LIMIT 3
-                '''), {"agent_id": agent.id}).fetchall()
-
-                for tool_id, logo_url in tool_assignments:
-                    tool_names.append(tool_id.upper())
-                    if logo_url:
-                        tool_icons.append(logo_url)
-
-                items.append(MarketplaceItemOut(
-                    id=agent.id,
-                    type='agent',
-                    name=agent.name,
-                    description=agent.description or '',
-                    creator_name=creator_name,
-                    icon=agent.marketplace_icon,
-                    category=agent.marketplace_category,
-                    tags=agent.tags or [],
-                    install_count=agent.install_count,
-                    is_featured=agent.is_featured,
-                    is_approved=agent.is_approved,
-                    version=agent.version,
-                    metadata={
-                        'agent_type': agent.agent_type,
-                        'configuration': agent.configuration,
-                        'model_config': agent.model_config,
-                        'tool_names': tool_names,
-                        'tool_icons': tool_icons
-                    },
-                    created_at=agent.created_at,
-                    updated_at=agent.updated_at
-                ))
-
+                items.append(_list_items_agent_out(db, agent))
         # Query recipes
         if include_recipes:
-            recipe_query = db.query(WorkflowRecipe).filter(WorkflowRecipe.owner_type == 'marketplace')
-
-            if not user_is_admin:
-                recipe_query = recipe_query.filter(WorkflowRecipe.is_approved == True)
-
-            # Apply filters
-            if category:
-                recipe_query = recipe_query.filter(WorkflowRecipe.marketplace_category == category)
-
-            if search:
-                recipe_query = recipe_query.filter(or_(
-                    WorkflowRecipe.name.ilike(f'%{search}%'),
-                    WorkflowRecipe.description.ilike(f'%{search}%')
-                ))
-
-            if featured is not None:
-                recipe_query = recipe_query.filter(WorkflowRecipe.is_featured == featured)
-
-            # Order by install count
-            recipe_query = recipe_query.order_by(desc(WorkflowRecipe.install_count), desc(WorkflowRecipe.created_at))
-
-            # Apply per-query pagination only when fetching a single type
-            if single_type:
-                recipe_query = recipe_query.limit(limit).offset(offset)
-
-            recipes = recipe_query.all()
-
+            recipes = _list_items_recipes(db, user_is_admin, category, search, featured, single_type, limit, offset)
             # Convert recipes to response format
             for recipe in recipes:
-                # Get creator name
-                creator_name = "Unknown"
-                if recipe.original_creator_id:
-                    creator = db.query(UserModel).filter(UserModel.id == recipe.original_creator_id).first()
-                    if creator:
-                        creator_name = creator.email or f"User {creator.id}"
-
-                items.append(MarketplaceItemOut(
-                    id=recipe.id,
-                    type='recipe',
-                    name=recipe.name,
-                    description=recipe.description or '',
-                    creator_name=creator_name,
-                    icon=recipe.marketplace_icon,
-                    category=recipe.marketplace_category,
-                    tags=recipe.tags or [],
-                    install_count=recipe.install_count,
-                    is_featured=recipe.is_featured,
-                    is_approved=recipe.is_approved,
-                    version=recipe.version,
-                    owner_type=recipe.owner_type,
-                    steps=recipe.steps or [],
-                    inputs=recipe.inputs,
-                    outputs=recipe.outputs,
-                    execution_config=recipe.execution_config,
-                    schedule_config=recipe.schedule_config,
-                    metadata={
-                        'required_tools': recipe.required_tools or [],
-                        'recommended_agents': recipe.recommended_agents or [],
-                        'quality_score': recipe.quality_score
-                    },
-                    created_at=recipe.created_at,
-                    updated_at=recipe.updated_at
-                ))
-
+                items.append(_list_items_recipe_out(db, recipe))
         # Sort combined items by install_count, then apply global pagination when fetching both types
         items.sort(key=lambda x: (x.install_count, x.created_at), reverse=True)
 
@@ -753,8 +771,95 @@ def check_updates(
 # POST /api/marketplace/submit
 # ===================================================================
 
+def _submit_item_trust(db, ctx):
+    """Resolve the submitting DB user and whether they are trusted (5+ approved items)."""
+    # Look up database user ID from Clerk user ID
+    user = None
+    user_id_int = None
+    if ctx.user.id:
+        # Try to find user by clerk_user_id first
+        user = db.query(UserModel).filter(UserModel.clerk_user_id == ctx.user.id).first()
+        if user:
+            user_id_int = user.id
+        # Fallback: try email lookup
+        elif ctx.user.email:
+            user = db.query(UserModel).filter(UserModel.email == ctx.user.email).first()
+            if user:
+                user_id_int = user.id
+
+    # Check if user is trusted (5+ approved marketplace items)
+    approved_count = db.query(Agent).filter(
+        Agent.original_creator_id == user_id_int,
+        Agent.owner_type == 'marketplace',
+        Agent.is_approved == True
+    ).count() if user_id_int else 0
+
+    is_trusted = approved_count >= 5
+
+    logger.info(f"User approval status - User ID: {user_id_int}, Approved count: {approved_count}, Is trusted: {is_trusted}")
+    return user_id_int, is_trusted
+
+
+def _submit_item_clone(db, request, workspace_agent, user_id_int, is_trusted):
+    """Create the marketplace clone of the workspace agent."""
+    # Clone to marketplace
+    marketplace_agent = Agent(
+        name=workspace_agent.name,
+        description=workspace_agent.description,
+        agent_type=workspace_agent.agent_type,
+        configuration=workspace_agent.configuration,
+        model_config=workspace_agent.model_config,
+        tags=workspace_agent.tags,
+        status=workspace_agent.status,
+
+        # Marketplace ownership
+        owner_type='marketplace',
+        owner_id='marketplace',
+        workspace_id=None,
+
+        # Creator tracking
+        original_creator_id=user_id_int,
+        cloned_from_id=workspace_agent.id,
+
+        # Approval
+        is_approved=is_trusted,
+        marketplace_category=request.category or workspace_agent.agent_type,
+        marketplace_icon=request.metadata.get('icon'),
+        version='1.0.0'
+    )
+
+    db.add(marketplace_agent)
+    db.flush()
+    return marketplace_agent
+
+
+def _submit_item_copy_links(db, workspace_agent, marketplace_agent):
+    """Copy skills and tool assignments onto the marketplace agent."""
+    # Copy skills
+    if workspace_agent.skills:
+        marketplace_agent.skills = workspace_agent.skills
+
+    # Copy tool assignments
+    tool_assignments = db.execute(text('''
+        SELECT tool_id, enabled FROM agent_tool_assignments
+        WHERE agent_id = :workspace_agent_id
+    '''), {"workspace_agent_id": workspace_agent.id}).fetchall()
+
+    if tool_assignments:
+        logger.info(f"Copying {len(tool_assignments)} tool assignments to marketplace agent")
+        for tool_id, enabled in tool_assignments:
+            db.execute(text('''
+                INSERT INTO agent_tool_assignments (agent_id, tool_id, enabled, created_at, updated_at)
+                VALUES (:agent_id, :tool_id, :enabled, NOW(), NOW())
+            '''), {
+                "agent_id": marketplace_agent.id,
+                "tool_id": tool_id,
+                "enabled": enabled
+            })
+
+
 @router.post("/submit", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_workspace_permission("agents:create"))])
-async def submit_item(
+def submit_item(
     request: SubmitRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -782,82 +887,9 @@ async def submit_item(
         if not workspace_agent:
             raise HTTPException(status_code=404, detail="Agent not found in workspace")
 
-        # Look up database user ID from Clerk user ID
-        user = None
-        user_id_int = None
-        if ctx.user.id:
-            # Try to find user by clerk_user_id first
-            user = db.query(UserModel).filter(UserModel.clerk_user_id == ctx.user.id).first()
-            if user:
-                user_id_int = user.id
-            # Fallback: try email lookup
-            elif ctx.user.email:
-                user = db.query(UserModel).filter(UserModel.email == ctx.user.email).first()
-                if user:
-                    user_id_int = user.id
-
-        # Check if user is trusted (5+ approved marketplace items)
-        approved_count = db.query(Agent).filter(
-            Agent.original_creator_id == user_id_int,
-            Agent.owner_type == 'marketplace',
-            Agent.is_approved == True
-        ).count() if user_id_int else 0
-
-        is_trusted = approved_count >= 5
-
-        logger.info(f"User approval status - User ID: {user_id_int}, Approved count: {approved_count}, Is trusted: {is_trusted}")
-
-        # Clone to marketplace
-        marketplace_agent = Agent(
-            name=workspace_agent.name,
-            description=workspace_agent.description,
-            agent_type=workspace_agent.agent_type,
-            configuration=workspace_agent.configuration,
-            model_config=workspace_agent.model_config,
-            tags=workspace_agent.tags,
-            status=workspace_agent.status,
-
-            # Marketplace ownership
-            owner_type='marketplace',
-            owner_id='marketplace',
-            workspace_id=None,
-
-            # Creator tracking
-            original_creator_id=user_id_int,
-            cloned_from_id=workspace_agent.id,
-
-            # Approval
-            is_approved=is_trusted,
-            marketplace_category=request.category or workspace_agent.agent_type,
-            marketplace_icon=request.metadata.get('icon'),
-            version='1.0.0'
-        )
-
-        db.add(marketplace_agent)
-        db.flush()
-
-        # Copy skills
-        if workspace_agent.skills:
-            marketplace_agent.skills = workspace_agent.skills
-
-        # Copy tool assignments
-        tool_assignments = db.execute(text('''
-            SELECT tool_id, enabled FROM agent_tool_assignments
-            WHERE agent_id = :workspace_agent_id
-        '''), {"workspace_agent_id": workspace_agent.id}).fetchall()
-
-        if tool_assignments:
-            logger.info(f"Copying {len(tool_assignments)} tool assignments to marketplace agent")
-            for tool_id, enabled in tool_assignments:
-                db.execute(text('''
-                    INSERT INTO agent_tool_assignments (agent_id, tool_id, enabled, created_at, updated_at)
-                    VALUES (:agent_id, :tool_id, :enabled, NOW(), NOW())
-                '''), {
-                    "agent_id": marketplace_agent.id,
-                    "tool_id": tool_id,
-                    "enabled": enabled
-                })
-
+        user_id_int, is_trusted = _submit_item_trust(db, ctx)
+        marketplace_agent = _submit_item_clone(db, request, workspace_agent, user_id_int, is_trusted)
+        _submit_item_copy_links(db, workspace_agent, marketplace_agent)
         db.commit()
 
         logger.info(f"Marketplace agent created - ID: {marketplace_agent.id}, Name: {marketplace_agent.name}, Approved: {marketplace_agent.is_approved}")
