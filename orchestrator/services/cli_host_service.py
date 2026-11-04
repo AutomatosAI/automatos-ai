@@ -460,10 +460,14 @@ def _terminal_grants_key(host_id: Any) -> str:
 
 
 def _redis():
+    """The redis-py client (``RedisClient.get_redis()``), or None without Redis. The wrapper
+    itself has no list commands: rpush on it raised, so every grant fell back to this process's
+    store and a host whose heartbeat reached another worker never saw it."""
     try:
         from core.redis.client import get_redis_client
 
-        return get_redis_client()
+        wrapper = get_redis_client()
+        return wrapper.get_redis() if wrapper is not None else None
     except Exception:  # noqa: BLE001 — no Redis is a supported local shape
         return None
 
