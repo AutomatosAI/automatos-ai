@@ -75,7 +75,7 @@ def waiting(engine, new_session):
 def test_a_report_awaiting_approval_and_a_blocked_mission_both_show(waiting, new_session):
     from api.kpi_api import get_decisions_needed
 
-    out = asyncio.run(get_decisions_needed(limit=10, ctx=NS(workspace_id=UUID(waiting)), db=new_session()))
+    out = get_decisions_needed(limit=10, ctx=NS(workspace_id=UUID(waiting)), db=new_session())
 
     assert [item["kind"] for item in out["items"]] == ["report", "mission"]     # night: []
     assert out["items"][0]["title"] == "Wholesale price list" and out["items"][0]["escalation_level"] is None
@@ -89,7 +89,7 @@ def test_a_list_that_could_not_be_loaded_says_so():
         def execute(self, *a, **k):
             raise RuntimeError("connection reset")
 
-    out = asyncio.run(get_decisions_needed(limit=10, ctx=NS(workspace_id=uuid.uuid4()), db=_Down()))
+    out = get_decisions_needed(limit=10, ctx=NS(workspace_id=uuid.uuid4()), db=_Down())
 
     assert out["items"] == [] and out["error"]                                  # night: a silent 0
     assert "connection reset" not in out["error"]

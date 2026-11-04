@@ -130,6 +130,6 @@ def test_analytics_names_a_deleted_agent_by_its_stamped_name(db):
 def test_the_kpi_card_keeps_a_deleted_agents_spend_in_its_top_spenders(db):
     from api.kpi_api import get_cost_tracker
 
-    out = asyncio.run(get_cost_tracker(period="7d", ctx=NS(workspace_id=WS), db=db))
+    out = get_cost_tracker(period="7d", ctx=NS(workspace_id=WS), db=db)
     assert [a["name"] for a in out["top_agents"]] == ["CELLAR", "WRITER", "Agent #15"]
     assert out["top_agents"][0]["cost"] == 4.0

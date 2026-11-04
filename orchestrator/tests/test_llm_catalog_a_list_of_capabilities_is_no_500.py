@@ -71,11 +71,11 @@ def catalog(db_session):
 def test_the_catalogue_answers_with_a_row_whose_capabilities_are_a_list(catalog):
     from api.llm_marketplace import browse_catalog
 
-    out = asyncio.run(browse_catalog(
+    out = browse_catalog(
         provider=None, vendor=None, category=None, price_tier=None, min_context=None, max_cost=None,
         capability=None, supports_tools=None, supports_vision=None, search=MODEL_ID,
         sort_by="popularity", limit=500, offset=0, ctx=NS(workspace_id=uuid4()), db=catalog,
-    ))
+    )
 
     assert [(m.model_id, m.capabilities) for m in out.models] == [(MODEL_ID, {})]
     assert out.providers["anthropic"] >= 1

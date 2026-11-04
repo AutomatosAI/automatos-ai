@@ -135,7 +135,7 @@ def _row(db, model_id):
 def _sync_endpoint(db, workspace_id):
     from api.llm_marketplace import sync_provider
 
-    return asyncio.run(sync_provider("anthropic", ctx=NS(workspace_id=workspace_id), db=db))
+    return sync_provider("anthropic", ctx=NS(workspace_id=workspace_id), db=db)
 
 
 def _last_job(db):
@@ -188,10 +188,10 @@ def test_anthropic_is_syncable_and_shows_when_it_was_last_synced(catalog, owners
     from api.llm_marketplace import sync_status
 
     _anthropic_answers(monkeypatch, _paged([]))
-    assert "anthropic" in asyncio.run(sync_status(db=catalog))["syncable"]
-    assert asyncio.run(sync_status(db=catalog))["last_synced"]["anthropic"] is None
+    assert "anthropic" in sync_status(db=catalog)["syncable"]
+    assert sync_status(db=catalog)["last_synced"]["anthropic"] is None
     _sync_endpoint(catalog, uuid4())
-    assert asyncio.run(sync_status(db=catalog))["last_synced"]["anthropic"] is not None
+    assert sync_status(db=catalog)["last_synced"]["anthropic"] is not None
 
 
 # ── what the owner is told when it cannot sync ──────────────────────────────

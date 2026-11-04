@@ -54,7 +54,7 @@ async def test_get_document_reassembles_content_from_chunks(db_session, seed_wor
     doc_id = _seed_doc(db_session, ws, filename="brief.pdf", chunks=("alpha content", "beta content"))
     auth = types.SimpleNamespace(workspace_id=uuid.UUID(ws), team=None)
 
-    detail = await get_document(doc_id, auth=auth, _perm=auth, db=db_session)
+    detail = get_document(doc_id, auth=auth, _perm=auth, db=db_session)
     assert detail.id == doc_id
     assert detail.title == "brief.pdf"            # filename, not a non-existent title col
     assert "alpha content" in detail.content and "beta content" in detail.content

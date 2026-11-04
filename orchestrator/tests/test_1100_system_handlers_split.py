@@ -53,7 +53,7 @@ def test_the_efficiency_route_on_an_empty_workspace(db_session, seed_workspace):
     from api.analytics_real import get_efficiency_score
 
     ctx = NS(workspace_id=UUID(seed_workspace()))
-    out = asyncio.run(get_efficiency_score(ctx=ctx, db=db_session))
+    out = get_efficiency_score(ctx=ctx, db=db_session)
     assert out["breakdown"]["agent_efficiency"] == 0 and out["breakdown"]["workflow_efficiency"] == 0
     assert out["grade"] in {"A", "B", "C", "D"} and "error" not in out
 
