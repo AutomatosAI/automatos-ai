@@ -494,9 +494,9 @@ but `media` and `voice` pull a published image.
 | `media` | `media-render` | `automatos_media_render` | built here from `./services/media-render`; nothing publishes it | none — port 8090 stays inside the compose network | Renders a Socials post (a template, your brand kit, the Kokoro voice and the music) into an MP4 or PNG: `docker compose --profile media up -d media-render`, which builds it the first time. See [Media rendering](#7b-media-rendering-the-media-profile). |
 | `voice` | `voice-tts` | `automatos_voice_tts` | built here from `./services/voice-tts`; nothing publishes it | none — port 8100 stays inside the compose network | Auto's server voice: Kokoro speaks Auto's replies as MP3 for the phone and the web quick-ask. `docker compose --profile voice up -d voice-tts`, which builds it the first time, then `VOICE_TTS_URL=http://voice-tts:8100` in `.env`. See [Auto's server voice](#7c-autos-server-voice-the-voice-profile). |
 
-Memory used to be a `memory` profile. It is in the default stack now, and the
-profile names no service, so an `.env` with `COMPOSE_PROFILES=memory` or a
-`docker compose --profile memory up -d` from then starts the default stack.
+Memory used to be an optional profile of its own. It is in the default stack
+now and that profile is gone: an `.env` or a command that still names it starts
+the default stack, memory included.
 
 Every third-party image above is pinned by digest in `docker-compose.yml`, and
 Dependabot moves the pins once a week. The CI test
@@ -1148,10 +1148,11 @@ From November 2026 the first `git pull && make up` changes two defaults:
 
 - **Memory is on.** Qdrant joins the default stack (about 75 MB to download once)
   and `envs/api.defaults` sets `QDRANT_URL=http://qdrant:6333`. An install that
-  already ran it with `--profile memory` and `QDRANT_URL` in `envs/api.local`
-  keeps its memories: the volume is the same, `automatos_qdrant_data`, and the
-  `envs/api.local` line still wins. `COMPOSE_PROFILES=memory` in `.env` can stay
-  or go. To keep memory off, set `QDRANT_URL=` (empty) in `envs/api.local`.
+  already ran it through the old memory profile and `QDRANT_URL` in
+  `envs/api.local` keeps its memories: the volume is the same,
+  `automatos_qdrant_data`, and the `envs/api.local` line still wins. The old
+  profile's name can stay in `.env`'s `COMPOSE_PROFILES` or go; it starts
+  nothing extra. To keep memory off, set `QDRANT_URL=` (empty) in `envs/api.local`.
 - **The backend sizes its worker count** (`WEB_CONCURRENCY=auto`, §4): up to 4
   processes where it ran 1. Each holds its own copy of the app in memory. To keep
   one, set `WEB_CONCURRENCY=1` in `envs/api.local`.
