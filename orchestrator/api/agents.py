@@ -8,6 +8,7 @@ import time
 import logging
 
 from core.database.database import get_db
+from core.utils.background_tasks import launch_guarded, on_the_event_loop
 from services.agent_availability import with_unavailable
 from core.models import PriorityLevel
 from core.models import Agent, Skill, Pattern, agent_skills
@@ -63,10 +64,12 @@ def _reindex_agent_embedding(agent: Agent, db: Session) -> None:
 
     Creates its own DB session to avoid lifecycle issues with the request session.
     Non-blocking: failures are logged but never bubble up to the API caller.
+    The embed runs on the event loop whether the route runs there or in the
+    threadpool (F105); with no loop at all (a script) nothing is re-embedded.
     """
     import asyncio
 
-    agent_id = agent.id  # Capture before session closes
+    agent_id = agent.id  # Capture before session closes (and here, never on the loop's thread)
 
     async def _do_embed():
         from core.database.database import SessionLocal
@@ -81,11 +84,14 @@ def _reindex_agent_embedding(agent: Agent, db: Session) -> None:
         finally:
             _db.close()
 
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_do_embed())
-    except RuntimeError:
-        pass
+    def _start() -> None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return  # no loop (a script): nothing is re-embedded, as before
+        launch_guarded(_do_embed(), subsystem="agents", operation="reindex_embedding", agent_id=agent_id)
+
+    on_the_event_loop(_start)
 
 
 def _stable_tool_id(name: str) -> int:
