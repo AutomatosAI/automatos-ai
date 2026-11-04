@@ -450,7 +450,7 @@ def _current_channel_config(db: Session, channel_id: str) -> Dict[str, Any]:
 
 
 @router.put("/{channel_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def update_channel(
+def update_channel(
     channel_id: str,
     payload: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -722,7 +722,7 @@ async def stop_channel(
 # ── Channel Analytics ──────────────────────────────────────────────
 
 @router.get("/analytics")
-async def get_channel_analytics(
+def get_channel_analytics(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
