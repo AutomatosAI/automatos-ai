@@ -34,6 +34,7 @@ import hashlib
 import json
 import logging
 import threading
+import time
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
@@ -222,42 +223,95 @@ def estimate_turn_budget(
 _DEFAULT_CONTEXT_WINDOW = 128_000
 
 
+# F105: how many models' context windows are kept, and for how long (get_context_window).
+# Every chat turn read its model's window from the registry on the caller's session, on the
+# event loop: for the context budget, and again before each model call of the turn. A
+# window is global (the registry is not per workspace) and changes only when the registry
+# is synced or an admin edits a model, so a read is kept for a few minutes.
+CONTEXT_WINDOW_CACHE_SIZE = 128
+CONTEXT_WINDOW_CACHE_TTL_SECONDS = 300
+_context_windows: "OrderedDict[str, Tuple[int, float]]" = OrderedDict()
+_context_window_lock = threading.Lock()
+
+
 def get_context_window(model_name: str, db_session=None) -> int:
     """
     Look up the context window for a model from the model registry DB.
 
     Falls back to a safe 128K default if the model isn't registered.
+
+    F105: the registry's answer (the window, or the default for a model it does not
+    hold) is kept per model for ``CONTEXT_WINDOW_CACHE_TTL_SECONDS`` in a bounded LRU
+    shared by every thread, so a turn reads the registry at most once per model and
+    window. A read that fails is never kept: the next call reads again.
     """
     if not model_name:
         return _DEFAULT_CONTEXT_WINDOW
 
     if db_session:
+        kept = _kept_context_window(model_name)
+        if kept is not None:
+            return kept
         try:
-            from core.models import LLMModel
-
-            # Try exact match first (covers both "openai/gpt-5.4" and "gpt-4o")
-            row = (
-                db_session.query(LLMModel.context_window)
-                .filter(LLMModel.model_id == model_name)
-                .first()
-            )
-            if row and row[0]:
-                return int(row[0])
-
-            # Try without provider prefix: "openai/gpt-5.4" → "gpt-5.4"
-            if "/" in model_name:
-                bare = model_name.split("/", 1)[1]
-                row = (
-                    db_session.query(LLMModel.context_window)
-                    .filter(LLMModel.model_id == bare)
-                    .first()
-                )
-                if row and row[0]:
-                    return int(row[0])
-        except Exception:
-            pass
+            window = _registry_context_window(db_session, model_name)
+        except Exception:  # noqa: BLE001 — an unreadable registry gives the safe default, as before
+            logger.debug("[ContextGuard] context window of %s unreadable; using the default", model_name,
+                         exc_info=True)
+            return _DEFAULT_CONTEXT_WINDOW
+        _keep_context_window(model_name, window)
+        return window
 
     return _DEFAULT_CONTEXT_WINDOW
+
+
+def _registry_context_window(db_session: Any, model_name: str) -> int:
+    """The registry's context window for ``model_name``, or the default when it holds none."""
+    from core.models import LLMModel
+
+    # Try exact match first (covers both "openai/gpt-5.4" and "gpt-4o")
+    row = (
+        db_session.query(LLMModel.context_window)
+        .filter(LLMModel.model_id == model_name)
+        .first()
+    )
+    if row and row[0]:
+        return int(row[0])
+
+    # Try without provider prefix: "openai/gpt-5.4" → "gpt-5.4"
+    if "/" in model_name:
+        bare = model_name.split("/", 1)[1]
+        row = (
+            db_session.query(LLMModel.context_window)
+            .filter(LLMModel.model_id == bare)
+            .first()
+        )
+        if row and row[0]:
+            return int(row[0])
+    return _DEFAULT_CONTEXT_WINDOW
+
+
+def _kept_context_window(model_name: str) -> Optional[int]:
+    """The window kept for ``model_name`` while it is fresh, else None."""
+    now = time.monotonic()
+    with _context_window_lock:
+        kept = _context_windows.get(model_name)
+        if kept is None:
+            return None
+        window, fresh_until = kept
+        if fresh_until <= now:
+            del _context_windows[model_name]
+            return None
+        _context_windows.move_to_end(model_name)
+        return window
+
+
+def _keep_context_window(model_name: str, window: int) -> None:
+    """Keep a model's window, dropping the least recently used past the cache's size."""
+    with _context_window_lock:
+        _context_windows[model_name] = (window, time.monotonic() + CONTEXT_WINDOW_CACHE_TTL_SECONDS)
+        _context_windows.move_to_end(model_name)
+        while len(_context_windows) > CONTEXT_WINDOW_CACHE_SIZE:
+            _context_windows.popitem(last=False)
 
 
 # ---------------------------------------------------------------------------
