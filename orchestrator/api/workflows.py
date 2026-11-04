@@ -431,6 +431,18 @@ def get_workflow(workflow_id: int, ctx: RequestContext = Depends(get_request_con
         logger.error(f"Error getting workflow {workflow_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+# The fields an edit may set; any other key in the body is ignored.
+WORKFLOW_EDITABLE_FIELDS = ("name", "description", "status", "owner", "tags",
+                            "default_policy_id", "workflow_definition")
+
+
+def _update_workflow_fields(workflow: Workflow, workflow_data: Dict[str, Any]) -> None:
+    """Set each editable field the edit provides; the others keep their values."""
+    for field in WORKFLOW_EDITABLE_FIELDS:
+        if field in workflow_data:
+            setattr(workflow, field, workflow_data[field])
+
+
 @router.put("/{workflow_id}", dependencies=[Depends(require_workspace_permission("missions:update"))])
 def update_workflow(
     workflow_id: int,
@@ -444,22 +456,8 @@ def update_workflow(
         if not workflow:
             raise HTTPException(status_code=404, detail="Workflow not found")
         
-        # Update fields if provided
-        if "name" in workflow_data:
-            workflow.name = workflow_data["name"]
-        if "description" in workflow_data:
-            workflow.description = workflow_data["description"]
-        if "status" in workflow_data:
-            workflow.status = workflow_data["status"]
-        if "owner" in workflow_data:
-            workflow.owner = workflow_data["owner"]
-        if "tags" in workflow_data:
-            workflow.tags = workflow_data["tags"]
-        if "default_policy_id" in workflow_data:
-            workflow.default_policy_id = workflow_data["default_policy_id"]
-        if "workflow_definition" in workflow_data:
-            workflow.workflow_definition = workflow_data["workflow_definition"]
-        
+        _update_workflow_fields(workflow, workflow_data)
+
         workflow.updated_at = datetime.now()
         db.commit()
         db.refresh(workflow)
