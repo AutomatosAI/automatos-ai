@@ -1436,21 +1436,21 @@ async def semantic_search(
 def _get_queue_status_step(progress_pct):
     """Current processing step and its display name for a progress percentage."""
     # Determine current processing step
-        if progress_pct < 20:
-            current_step = "text_extraction"
-            step_name = "Text Extraction"
-        elif progress_pct < 40:
-            current_step = "chunking"
-            step_name = "Chunking"
-        elif progress_pct < 70:
-            current_step = "embedding"
-            step_name = "Embedding Generation"
-        elif progress_pct < 90:
-            current_step = "storage"
-            step_name = "Vector Storage"
-        else:
-            current_step = "finalizing"
-            step_name = "Finalizing"
+    if progress_pct < 20:
+        current_step = "text_extraction"
+        step_name = "Text Extraction"
+    elif progress_pct < 40:
+        current_step = "chunking"
+        step_name = "Chunking"
+    elif progress_pct < 70:
+        current_step = "embedding"
+        step_name = "Embedding Generation"
+    elif progress_pct < 90:
+        current_step = "storage"
+        step_name = "Vector Storage"
+    else:
+        current_step = "finalizing"
+        step_name = "Finalizing"
     return current_step, step_name
 
 
@@ -1468,7 +1468,7 @@ def _get_queue_status_processing(processing_docs):
 
         current_step, step_name = _get_queue_status_step(progress_pct)
 
-    eta_seconds = max(0, int(estimated_total_time - time_since_upload.total_seconds()))
+        eta_seconds = max(0, int(estimated_total_time - time_since_upload.total_seconds()))
 
         processing_list.append({
             "document_id": doc.id,
