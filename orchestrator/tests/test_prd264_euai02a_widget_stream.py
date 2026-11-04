@@ -101,6 +101,14 @@ def test_the_notice_comes_first_even_when_the_answer_fails(edition):
     assert events[-1] == ("done", {"conversation_id": "chat-1"})
 
 
+def test_a_failed_answer_tells_the_visitor_nothing_of_the_exception(edition):
+    from api.widgets.chat_stream import STREAM_FAILED_MESSAGE
+
+    events = _stream([], fail_with=RuntimeError("connection to db-internal:5432 refused"))
+    error = next(payload for name, payload in events if name == "error")
+    assert error == {"message": STREAM_FAILED_MESSAGE}
+
+
 def test_tool_events_keep_their_shapes():
     start = json.dumps({"type": "tool-start", "data": {"toolName": "search_docs", "input": {"q": "beans"}}})
     end = json.dumps({"type": "tool-end", "data": {"toolName": "search_docs", "result": {"hits": 2}}})
