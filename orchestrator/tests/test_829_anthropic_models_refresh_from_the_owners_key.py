@@ -27,7 +27,6 @@ resolver is stubbed. What is pinned:
 """
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace as NS
 from uuid import uuid4
 

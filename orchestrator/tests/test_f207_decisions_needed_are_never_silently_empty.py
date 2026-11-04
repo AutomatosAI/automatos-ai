@@ -11,7 +11,6 @@ answering "nothing needs you".
 """
 from __future__ import annotations
 
-import asyncio
 import uuid
 from types import SimpleNamespace as NS
 from uuid import UUID

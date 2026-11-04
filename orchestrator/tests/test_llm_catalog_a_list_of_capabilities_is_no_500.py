@@ -13,7 +13,6 @@ the row in them.
 """
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace as NS
 from uuid import uuid4
 

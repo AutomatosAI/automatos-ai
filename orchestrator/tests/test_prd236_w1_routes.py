@@ -15,7 +15,6 @@ NVIDIA list is stubbed at the httpx boundary. What is pinned:
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import sys
 import types
