@@ -57,10 +57,14 @@ async def _require_operator(
     return ctx
 
 
-async def require_cli_host(
+def require_cli_host(
     host_id: UUID, request: Request, db: Session = Depends(get_db)
 ) -> CliHost:
-    """Host surface: the paired host named in the path, proven by its token."""
+    """Host surface: the paired host named in the path, proven by its token.
+
+    A plain ``def`` (F105): the token lookup is synchronous, so FastAPI runs it in the
+    threadpool. The host polls ``heartbeat`` and ``claim`` continuously, so a lookup on
+    the event loop held every other request on the worker each time."""
     _require_cli_runtime()
     token = request.headers.get(HOST_TOKEN_HEADER) or ""
     host = svc.resolve_host_by_token(db, token)
@@ -143,7 +147,7 @@ class ResultRequest(BaseModel):
 # ── operator surface ─────────────────────────────────────────────────────────
 
 @router.get("")
-async def list_cli_hosts(
+def list_cli_hosts(
     ctx: RequestContext = Depends(_require_operator),
     db: Session = Depends(get_db),
 ):
@@ -151,7 +155,7 @@ async def list_cli_hosts(
 
 
 @router.get("/health")
-async def cli_host_health(
+def cli_host_health(
     ctx: RequestContext = Depends(_require_operator),
     db: Session = Depends(get_db),
 ):
@@ -162,7 +166,7 @@ async def cli_host_health(
 
 
 @router.get("/workspace-check")
-async def workspace_check(
+def workspace_check(
     path: str = Query(..., min_length=1, max_length=1024, description="An agent's working_directory as typed"),
     ctx: RequestContext = Depends(_require_operator),
     db: Session = Depends(get_db),
@@ -174,7 +178,7 @@ async def workspace_check(
 
 
 @router.post("/{host_id}/terminal")
-async def open_terminal(
+def open_terminal(
     host_id: UUID,
     body: TerminalRequest,
     ctx: RequestContext = Depends(_require_operator),
@@ -205,7 +209,7 @@ async def open_terminal(
 
 
 @router.get("/settings")
-async def session_mode_settings(
+def session_mode_settings(
     ctx: RequestContext = Depends(_require_operator),
     db: Session = Depends(get_db),
 ):
@@ -215,7 +219,7 @@ async def session_mode_settings(
 
 
 @router.put("/settings")
-async def save_session_mode_settings(
+def save_session_mode_settings(
     body: SessionModeSettingsRequest,
     ctx: RequestContext = Depends(_require_operator),
     db: Session = Depends(get_db),
@@ -231,7 +235,7 @@ async def save_session_mode_settings(
 
 
 @router.post("/sessions")
-async def open_session(
+def open_session(
     body: SessionRequest,
     ctx: RequestContext = Depends(_require_operator),
     db: Session = Depends(get_db),
@@ -273,7 +277,7 @@ async def open_session(
 
 
 @router.post("/pairing-codes")
-async def create_pairing_code(
+def create_pairing_code(
     body: PairingCodeCreate,
     ctx: RequestContext = Depends(_require_operator),
     db: Session = Depends(get_db),
@@ -308,7 +312,7 @@ async def pair(body: PairRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/{host_id}/heartbeat")
-async def heartbeat(
+def heartbeat(
     body: HeartbeatRequest,
     host: CliHost = Depends(require_cli_host),
     db: Session = Depends(get_db),
@@ -320,7 +324,7 @@ async def heartbeat(
 
 
 @router.post("/{host_id}/claim")
-async def claim(
+def claim(
     body: ClaimRequest,
     host: CliHost = Depends(require_cli_host),
     db: Session = Depends(get_db),

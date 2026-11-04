@@ -28,9 +28,13 @@ Usage:
     )
 """
 
+import asyncio
 import functools
+import hashlib
 import json
 import logging
+import threading
+from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:
@@ -47,6 +51,12 @@ logger = logging.getLogger(__name__)
 # needs no internet. An encoding requested anywhere in orchestrator/ must be in that
 # fetch too: tests/test_prd262_offline_boot.py holds the two lists together.
 TOKENIZER_ENCODING = "cl100k_base"
+
+# F105: how many tool sets' token counts are kept (count_tool_tokens). A turn's tool list
+# is nearly the same every turn, so a handful of sets covers a worker's traffic.
+TOOL_TOKEN_CACHE_SIZE = 64
+_tool_token_counts: "OrderedDict[str, int]" = OrderedDict()
+_tool_token_lock = threading.Lock()
 
 
 @functools.lru_cache(maxsize=1)
@@ -135,10 +145,42 @@ def count_message_tokens(messages: List[Dict[str, Any]]) -> int:
 
 
 def count_tool_tokens(tools: Optional[List[Dict[str, Any]]]) -> int:
-    """Estimate tokens consumed by the tools/functions parameter."""
+    """Estimate tokens consumed by the tools/functions parameter.
+
+    F105: encoding the serialized tool list took up to 3.6 s on every chat turn, and the
+    list is nearly the same every turn. The count is kept per tool set (the SHA-256 of
+    the serialized list, a bounded LRU shared by every thread), so a repeat costs the
+    serialization and the hash, never the encoding.
+    """
     if not tools:
         return 0
-    return count_tokens(json.dumps(tools))
+    serialized = json.dumps(tools)
+    key = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    with _tool_token_lock:
+        cached = _tool_token_counts.get(key)
+        if cached is not None:
+            _tool_token_counts.move_to_end(key)
+            return cached
+    counted = count_tokens(serialized)
+    _remember_tool_tokens(key, counted)
+    return counted
+
+
+def _remember_tool_tokens(key: str, counted: int) -> None:
+    """Keep a tool set's count, dropping the least recently used past the cache's size."""
+    with _tool_token_lock:
+        _tool_token_counts[key] = counted
+        _tool_token_counts.move_to_end(key)
+        while len(_tool_token_counts) > TOOL_TOKEN_CACHE_SIZE:
+            _tool_token_counts.popitem(last=False)
+
+
+def _count_payload(
+    tools: Optional[List[Dict[str, Any]]], messages: List[Dict[str, Any]]
+) -> Tuple[int, int]:
+    """(tool tokens, message tokens) of one model call's payload: CPU work, so the guard
+    runs it in a worker thread (F105)."""
+    return count_tool_tokens(tools), count_message_tokens(messages)
 
 
 def estimate_turn_budget(
@@ -299,8 +341,9 @@ class ContextGuard:
         """
         context_window = get_context_window(model_name, db_session)
         compact_threshold, keep_recent_turns = _thresholds_for_model(context_window)
-        tool_tokens = count_tool_tokens(tools)
-        current_tokens = count_message_tokens(messages)
+        # F105: off the event loop. Encoding a long conversation and a new tool set takes
+        # seconds, and the turn's stream (and every other request) waited on the loop.
+        tool_tokens, current_tokens = await asyncio.to_thread(_count_payload, tools, messages)
         total_tokens = current_tokens + tool_tokens
         threshold = int(context_window * compact_threshold)
 

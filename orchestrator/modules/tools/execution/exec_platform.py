@@ -7,6 +7,8 @@ import logging
 from typing import Any, Dict, Optional
 from uuid import UUID
 
+from starlette.concurrency import run_in_threadpool
+
 logger = logging.getLogger(__name__)
 
 SEARCH_KNOWLEDGE = "search_knowledge"
@@ -42,6 +44,22 @@ async def execute_platform_tool(
 
     db = getattr(executor.platform_tools, "db", None)
     return dated_for_agent(db, owners_search(db, result, agent_id), agent_id)
+
+
+def _agent_name_param(db: Any, agent_id: int, workspace_id: UUID) -> Dict[str, Any]:
+    """``{"_agent_name": …}`` for the calling agent of this workspace, or ``{}`` when it is
+    not found or the lookup fails (logged): handlers attribute the call by it."""
+    try:
+        from core.models import Agent
+        agent = db.query(Agent).filter(
+            Agent.id == agent_id,
+            Agent.workspace_id == workspace_id,
+        ).first()
+        if agent:
+            return {"_agent_name": agent.name}
+    except Exception as e:
+        logger.debug("[exec_platform] _agent_name lookup failed: %s", e, exc_info=True)
+    return {}
 
 
 async def execute_platform_action(
@@ -88,16 +106,8 @@ async def execute_platform_action(
         }
         if agent_id:
             parameters["_agent_id"] = agent_id
-            try:
-                from core.models import Agent
-                agent = executor.db.query(Agent).filter(
-                    Agent.id == agent_id,
-                    Agent.workspace_id == workspace_id,
-                ).first()
-                if agent:
-                    parameters["_agent_name"] = agent.name
-            except Exception as e:
-                logger.debug("[exec_platform] _agent_name lookup failed: %s", e)
+            # F105: a database read, so in FastAPI's threadpool, never on the event loop.
+            parameters.update(await run_in_threadpool(_agent_name_param, executor.db, agent_id, workspace_id))
 
     try:
         from modules.tools.discovery.platform_executor import PlatformActionExecutor

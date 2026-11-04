@@ -184,7 +184,7 @@ class WorkflowStageTracker:
 
 
 @router.get("")
-async def list_workflows(
+def list_workflows(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
@@ -222,8 +222,161 @@ async def list_workflows(
         logger.error(f"Error listing workflows: {e}")
         raise HTTPException(status_code=500, detail="Error listing workflows")
 
+def _get_active_workflows_metrics(db: Session, workflow: Workflow):
+    """A workflow's five latest executions, its execution and success counts, its
+    success rate and its running execution, if any (get_active_workflows)."""
+    recent_executions = db.query(WorkflowExecution).filter(
+        WorkflowExecution.workflow_id == workflow.id
+    ).order_by(desc(WorkflowExecution.started_at)).limit(5).all()
+    
+    # Calculate workflow metrics
+    total_executions = db.query(WorkflowExecution).filter(
+        WorkflowExecution.workflow_id == workflow.id
+    ).count()
+    
+    successful_executions = db.query(WorkflowExecution).filter(
+        and_(
+            WorkflowExecution.workflow_id == workflow.id,
+            WorkflowExecution.status == ExecutionStatus.COMPLETED.value
+        )
+    ).count()
+    
+    success_rate = (successful_executions / max(total_executions, 1)) * 100
+    
+    # Get current execution status
+    current_execution = db.query(WorkflowExecution).filter(
+        and_(
+            WorkflowExecution.workflow_id == workflow.id,
+            WorkflowExecution.status == ExecutionStatus.RUNNING.value
+        )
+    ).first()
+    return recent_executions, total_executions, successful_executions, success_rate, current_execution
+
+
+def _get_active_workflows_progress(current_execution):
+    """(progress, current step, estimated completion) of a running execution (get_active_workflows)."""
+    # Simulate live progress for running workflows
+    progress = 0
+    current_step = "Idle"
+    estimated_completion = None
+    
+    if current_execution:
+        # Calculate progress based on execution time
+        elapsed = (datetime.now() - current_execution.started_at).total_seconds()
+        progress = min(95, int(elapsed / 60 * 20))  # Simulate progress
+        
+        # Determine current step (would be read from actual execution data)
+        if progress < 20:
+            current_step = "Initializing"
+        elif progress < 40:
+            current_step = "Processing"
+        elif progress < 70:
+            current_step = "Executing"
+        else:
+            current_step = "Finalizing"
+            
+        estimated_completion = (datetime.now() + timedelta(minutes=5-elapsed/60)).isoformat()
+    return progress, current_step, estimated_completion
+
+
+def _get_active_workflows_entry(db: Session, workflow: Workflow) -> Dict[str, Any]:
+    """One active workflow's live status, metrics and recent executions (get_active_workflows)."""
+    recent_executions, total_executions, successful_executions, success_rate, current_execution = (
+        _get_active_workflows_metrics(db, workflow)
+    )
+    progress, current_step, estimated_completion = _get_active_workflows_progress(current_execution)
+    return {
+        "id": workflow.id,
+        "name": workflow.name,
+        "description": workflow.description,
+        "status": workflow.status,
+        "current_execution": {
+            "id": current_execution.id if current_execution else None,
+            "status": current_execution.status if current_execution else "idle",
+            "progress": progress,
+            "current_step": current_step,
+            "started_at": current_execution.started_at.isoformat() if current_execution else None,
+            "estimated_completion": estimated_completion
+        },
+        "metrics": {
+            "total_executions": total_executions,
+            "successful_executions": successful_executions,
+            "success_rate": round(success_rate, 1),
+            "avg_duration": "4.2m",  # Would be calculated from actual data
+            "last_execution": recent_executions[0].started_at.isoformat() if recent_executions else None
+        },
+        "recent_executions": [
+            {
+                "id": exec.id,
+                "status": exec.status,
+                "started_at": exec.started_at.isoformat(),
+                "completed_at": exec.completed_at.isoformat() if exec.completed_at else None,
+                "duration": str(exec.completed_at - exec.started_at) if exec.completed_at else None
+            } for exec in recent_executions
+        ],
+        "created_at": workflow.created_at.isoformat(),
+        "updated_at": workflow.updated_at.isoformat()
+    }
+
+
+def _get_active_workflows_recipe_run(db: Session, exec_rec: RecipeExecution) -> Dict[str, Any]:
+    """One recipe run, for the Cooking tab (get_active_workflows)."""
+    # Get recipe name
+    recipe = db.query(WorkflowRecipe).filter(WorkflowRecipe.id == exec_rec.recipe_id).first()
+    recipe_name = recipe.name if recipe else f"Recipe #{exec_rec.recipe_id}"
+
+    step_results = exec_rec.step_results or []
+    total_steps = len(step_results) if step_results else 0
+    current_step = exec_rec.current_step or 0
+
+    # Calculate duration
+    duration = None
+    if exec_rec.completed_at and exec_rec.started_at:
+        duration = str(exec_rec.completed_at - exec_rec.started_at)
+
+    # Get total tokens and duration from output_data
+    output = exec_rec.output_data or {}
+    total_tokens = output.get("total_tokens", 0)
+    total_duration_ms = output.get("total_duration_ms", 0)
+
+    return {
+        "id": exec_rec.id,
+        "execution_id": exec_rec.execution_id,
+        "recipe_id": exec_rec.recipe_id,
+        "recipe_template_id": recipe.template_id if recipe else None,
+        "recipe_name": recipe_name,
+        "type": "recipe",
+        "status": exec_rec.status,
+        "current_step": current_step,
+        "total_steps": total_steps,
+        "step_results": step_results,
+        "started_at": exec_rec.started_at.isoformat() if exec_rec.started_at else None,
+        "completed_at": exec_rec.completed_at.isoformat() if exec_rec.completed_at else None,
+        "duration": duration,
+        "total_tokens": total_tokens,
+        "total_duration_ms": total_duration_ms,
+        "error_message": exec_rec.error_message,
+    }
+
+
+def _get_active_workflows_recipe_runs(db: Session, workspace_id: Any) -> List[Dict[str, Any]]:
+    """The workspace's 20 latest recipe runs for the Cooking tab; the ones read before a
+    failure (logged) when they cannot all be read (get_active_workflows)."""
+    recipe_runs = []
+    try:
+        recent_recipe_execs = db.query(RecipeExecution).filter(
+            RecipeExecution.workspace_id == workspace_id
+        ).order_by(desc(RecipeExecution.started_at)).limit(20).all()
+
+        for exec_rec in recent_recipe_execs:
+            recipe_runs.append(_get_active_workflows_recipe_run(db, exec_rec))
+    except Exception as recipe_err:  # noqa: BLE001 — moved verbatim (F105): the Cooking tab is best-effort
+        logger.warning(f"Error fetching recipe executions for cooking tab: {recipe_err}")
+    return recipe_runs
+
+
 @router.get("/active")
-async def get_active_workflows(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def get_active_workflows(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get all currently active workflows with live status"""
     try:
         active_workflows = db.query(Workflow).filter(Workflow.workspace_id == ctx.workspace_id).options(joinedload(Workflow.agents)).filter(
@@ -233,133 +386,10 @@ async def get_active_workflows(ctx: RequestContext = Depends(get_request_context
         # Get recent executions for each workflow
         workflow_data = []
         for workflow in active_workflows:
-            recent_executions = db.query(WorkflowExecution).filter(
-                WorkflowExecution.workflow_id == workflow.id
-            ).order_by(desc(WorkflowExecution.started_at)).limit(5).all()
-            
-            # Calculate workflow metrics
-            total_executions = db.query(WorkflowExecution).filter(
-                WorkflowExecution.workflow_id == workflow.id
-            ).count()
-            
-            successful_executions = db.query(WorkflowExecution).filter(
-                and_(
-                    WorkflowExecution.workflow_id == workflow.id,
-                    WorkflowExecution.status == ExecutionStatus.COMPLETED.value
-                )
-            ).count()
-            
-            success_rate = (successful_executions / max(total_executions, 1)) * 100
-            
-            # Get current execution status
-            current_execution = db.query(WorkflowExecution).filter(
-                and_(
-                    WorkflowExecution.workflow_id == workflow.id,
-                    WorkflowExecution.status == ExecutionStatus.RUNNING.value
-                )
-            ).first()
-            
-            # Simulate live progress for running workflows
-            progress = 0
-            current_step = "Idle"
-            estimated_completion = None
-            
-            if current_execution:
-                # Calculate progress based on execution time
-                elapsed = (datetime.now() - current_execution.started_at).total_seconds()
-                progress = min(95, int(elapsed / 60 * 20))  # Simulate progress
-                
-                # Determine current step (would be read from actual execution data)
-                if progress < 20:
-                    current_step = "Initializing"
-                elif progress < 40:
-                    current_step = "Processing"
-                elif progress < 70:
-                    current_step = "Executing"
-                else:
-                    current_step = "Finalizing"
-                    
-                estimated_completion = (datetime.now() + timedelta(minutes=5-elapsed/60)).isoformat()
-            
-            workflow_data.append({
-                "id": workflow.id,
-                "name": workflow.name,
-                "description": workflow.description,
-                "status": workflow.status,
-                "current_execution": {
-                    "id": current_execution.id if current_execution else None,
-                    "status": current_execution.status if current_execution else "idle",
-                    "progress": progress,
-                    "current_step": current_step,
-                    "started_at": current_execution.started_at.isoformat() if current_execution else None,
-                    "estimated_completion": estimated_completion
-                },
-                "metrics": {
-                    "total_executions": total_executions,
-                    "successful_executions": successful_executions,
-                    "success_rate": round(success_rate, 1),
-                    "avg_duration": "4.2m",  # Would be calculated from actual data
-                    "last_execution": recent_executions[0].started_at.isoformat() if recent_executions else None
-                },
-                "recent_executions": [
-                    {
-                        "id": exec.id,
-                        "status": exec.status,
-                        "started_at": exec.started_at.isoformat(),
-                        "completed_at": exec.completed_at.isoformat() if exec.completed_at else None,
-                        "duration": str(exec.completed_at - exec.started_at) if exec.completed_at else None
-                    } for exec in recent_executions
-                ],
-                "created_at": workflow.created_at.isoformat(),
-                "updated_at": workflow.updated_at.isoformat()
-            })
+            workflow_data.append(_get_active_workflows_entry(db, workflow))
         
         # Also fetch recipe executions for the Cooking tab
-        recipe_runs = []
-        try:
-            recent_recipe_execs = db.query(RecipeExecution).filter(
-                RecipeExecution.workspace_id == ctx.workspace_id
-            ).order_by(desc(RecipeExecution.started_at)).limit(20).all()
-
-            for exec_rec in recent_recipe_execs:
-                # Get recipe name
-                recipe = db.query(WorkflowRecipe).filter(WorkflowRecipe.id == exec_rec.recipe_id).first()
-                recipe_name = recipe.name if recipe else f"Recipe #{exec_rec.recipe_id}"
-
-                step_results = exec_rec.step_results or []
-                total_steps = len(step_results) if step_results else 0
-                current_step = exec_rec.current_step or 0
-
-                # Calculate duration
-                duration = None
-                if exec_rec.completed_at and exec_rec.started_at:
-                    duration = str(exec_rec.completed_at - exec_rec.started_at)
-
-                # Get total tokens and duration from output_data
-                output = exec_rec.output_data or {}
-                total_tokens = output.get("total_tokens", 0)
-                total_duration_ms = output.get("total_duration_ms", 0)
-
-                recipe_runs.append({
-                    "id": exec_rec.id,
-                    "execution_id": exec_rec.execution_id,
-                    "recipe_id": exec_rec.recipe_id,
-                    "recipe_template_id": recipe.template_id if recipe else None,
-                    "recipe_name": recipe_name,
-                    "type": "recipe",
-                    "status": exec_rec.status,
-                    "current_step": current_step,
-                    "total_steps": total_steps,
-                    "step_results": step_results,
-                    "started_at": exec_rec.started_at.isoformat() if exec_rec.started_at else None,
-                    "completed_at": exec_rec.completed_at.isoformat() if exec_rec.completed_at else None,
-                    "duration": duration,
-                    "total_tokens": total_tokens,
-                    "total_duration_ms": total_duration_ms,
-                    "error_message": exec_rec.error_message,
-                })
-        except Exception as recipe_err:
-            logger.warning(f"Error fetching recipe executions for cooking tab: {recipe_err}")
+        recipe_runs = _get_active_workflows_recipe_runs(db, ctx.workspace_id)
 
         return {
             "active_workflows": workflow_data,
@@ -375,7 +405,7 @@ async def get_active_workflows(ctx: RequestContext = Depends(get_request_context
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{workflow_id}")
-async def get_workflow(workflow_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def get_workflow(workflow_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get individual workflow by ID"""
     try:
         workflow = db.query(Workflow).filter(Workflow.id == workflow_id, Workflow.workspace_id == ctx.workspace_id).first()
@@ -402,7 +432,7 @@ async def get_workflow(workflow_id: int, ctx: RequestContext = Depends(get_reque
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.put("/{workflow_id}", dependencies=[Depends(require_workspace_permission("missions:update"))])
-async def update_workflow(
+def update_workflow(
     workflow_id: int,
     workflow_data: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -458,7 +488,7 @@ async def update_workflow(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/{workflow_id}", dependencies=[Depends(require_workspace_permission("missions:delete"))])
-async def delete_workflow(workflow_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def delete_workflow(workflow_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Delete workflow"""
     try:
         workflow = db.query(Workflow).filter(Workflow.id == workflow_id, Workflow.workspace_id == ctx.workspace_id).first()
@@ -500,7 +530,7 @@ async def delete_workflow(workflow_id: int, ctx: RequestContext = Depends(get_re
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/cleanup/old", dependencies=[Depends(require_workspace_permission("missions:delete"))])
-async def cleanup_old_workflows(days: int = 30, db: Session = Depends(get_db)):
+def cleanup_old_workflows(days: int = 30, db: Session = Depends(get_db)):
     """Delete workflows older than specified days"""
     from datetime import datetime, timedelta
     try:
@@ -551,8 +581,77 @@ async def cleanup_old_workflows(days: int = 30, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail="Internal server error")
 
+def _create_workflow_definition(workflow_data: Dict[str, Any]) -> Dict[str, Any]:
+    """The stored ``workflow_definition``, from the request's fields (create_workflow)."""
+    goal = workflow_data.get("goal")  # High-level objective (optional)
+    context = workflow_data.get("context")  # Additional context like {"codegraph_project": "my-repo"}
+    category = workflow_data.get("category", "automation")
+    priority = workflow_data.get("priority", "medium")
+    workflow_config = workflow_data.get("config", {})  # not `config`: that name is the settings module here
+    steps = workflow_data.get("steps", [])
+    agents = workflow_data.get("agents", [])
+
+    # Build workflow definition from frontend data
+    workflow_definition = {
+        "category": category,
+        "priority": priority,
+        "config": workflow_config,
+        "steps": steps,
+        "agents": agents,
+        "version": "1.0"
+    }
+    
+    # Store goal and context in workflow_definition (9-stage workflow fields)
+    if goal:
+        workflow_definition["goal"] = goal
+    if context:
+        workflow_definition["context"] = context
+    return workflow_definition
+
+
+def _create_workflow_row(db: Session, ctx: RequestContext, workflow_data: Dict[str, Any], name: str,
+                         description: str, tags: Any, workflow_definition: Dict[str, Any]) -> Workflow:
+    """The new workflow, committed (create_workflow)."""
+    # Create workflow record
+    # Default to ACTIVE status so workflows are immediately visible
+    is_active = workflow_data.get("is_active", True)
+    status = WorkflowStatus.ACTIVE.value if is_active else WorkflowStatus.DRAFT.value
+    
+    workflow = Workflow(
+        workspace_id=ctx.workspace_id,
+        name=name,
+        description=description,
+        tags=tags,
+        workflow_definition=workflow_definition,
+        status=status,
+        created_by=workflow_data.get("created_by", "system")
+    )
+
+    db.add(workflow)
+    db.commit()
+    db.refresh(workflow)
+    return workflow
+
+
+def _create_workflow_agents(db: Session, workflow: Workflow, agents: List[Any]) -> None:
+    """Associate the named agents with the new workflow (create_workflow)."""
+    # Handle both string names and dict objects
+    agent_names = []
+    for agent in agents:
+        if isinstance(agent, str):
+            agent_names.append(agent)
+        elif isinstance(agent, dict) and agent.get("name"):
+            agent_names.append(agent["name"])
+    
+    if agent_names:
+        # Get agent objects by name
+        agent_objects = db.query(Agent).filter(Agent.name.in_(agent_names)).all()
+        workflow.agents.extend(agent_objects)
+        db.commit()
+
+
 @router.post("", dependencies=[Depends(require_workspace_permission("missions:create"))])
-async def create_workflow(
+def create_workflow(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     workflow_data: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db)
@@ -571,12 +670,6 @@ async def create_workflow(
         # Extract required fields
         name = workflow_data.get("name")
         description = workflow_data.get("description", "")
-        goal = workflow_data.get("goal")  # High-level objective (optional)
-        context = workflow_data.get("context")  # Additional context like {"codegraph_project": "my-repo"}
-        category = workflow_data.get("category", "automation")
-        priority = workflow_data.get("priority", "medium")
-        config = workflow_data.get("config", {})
-        steps = workflow_data.get("steps", [])
         agents = workflow_data.get("agents", [])
         tags = workflow_data.get("tags", [])
 
@@ -588,57 +681,12 @@ async def create_workflow(
         if existing:
             raise HTTPException(status_code=400, detail=f"Workflow with name '{name}' already exists")
 
-        # Build workflow definition from frontend data
-        workflow_definition = {
-            "category": category,
-            "priority": priority,
-            "config": config,
-            "steps": steps,
-            "agents": agents,
-            "version": "1.0"
-        }
-        
-        # Store goal and context in workflow_definition (9-stage workflow fields)
-        if goal:
-            workflow_definition["goal"] = goal
-        if context:
-            workflow_definition["context"] = context
-
-        # Create workflow record
-        import json as json_lib
-        # Default to ACTIVE status so workflows are immediately visible
-        is_active = workflow_data.get("is_active", True)
-        status = WorkflowStatus.ACTIVE.value if is_active else WorkflowStatus.DRAFT.value
-        
-        workflow = Workflow(
-            workspace_id=ctx.workspace_id,
-            name=name,
-            description=description,
-            tags=tags,
-            workflow_definition=workflow_definition,
-            status=status,
-            created_by=workflow_data.get("created_by", "system")
-        )
-
-        db.add(workflow)
-        db.commit()
-        db.refresh(workflow)
+        workflow_definition = _create_workflow_definition(workflow_data)
+        workflow = _create_workflow_row(db, ctx, workflow_data, name, description, tags, workflow_definition)
 
         # Associate agents if provided
         if agents:
-            # Handle both string names and dict objects
-            agent_names = []
-            for agent in agents:
-                if isinstance(agent, str):
-                    agent_names.append(agent)
-                elif isinstance(agent, dict) and agent.get("name"):
-                    agent_names.append(agent["name"])
-            
-            if agent_names:
-                # Get agent objects by name
-                agent_objects = db.query(Agent).filter(Agent.name.in_(agent_names)).all()
-                workflow.agents.extend(agent_objects)
-                db.commit()
+            _create_workflow_agents(db, workflow, agents)
 
         # Real-time updates now handled via SSE/AI SDK streaming (stream_manager)
         # Legacy WebSocket broadcast removed
@@ -659,8 +707,28 @@ async def create_workflow(
         db.rollback()
         raise HTTPException(status_code=500, detail="Internal server error")
 
+def _duplicate_workflow_name(db: Session, original: Workflow, duplicate_data: Optional[Dict[str, Any]]) -> str:
+    """The duplicate's name: the one asked for, else the first free "<name> (Copy[ n])" (duplicate_workflow)."""
+    # Generate new name
+    if duplicate_data and duplicate_data.get("name"):
+        new_name = duplicate_data["name"]
+    else:
+        # Find a unique name
+        base_name = original.name
+        if " (Copy" in base_name:
+            # Remove existing copy suffix
+            base_name = base_name.split(" (Copy")[0]
+        
+        counter = 1
+        new_name = f"{base_name} (Copy)"
+        while db.query(Workflow).filter(Workflow.name == new_name).first():
+            counter += 1
+            new_name = f"{base_name} (Copy {counter})"
+    return new_name
+
+
 @router.post("/{workflow_id}/duplicate", dependencies=[Depends(require_workspace_permission("missions:update"))])
-async def duplicate_workflow(
+def duplicate_workflow(
     workflow_id: int,
     duplicate_data: Dict[str, Any] = Body(None),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -673,21 +741,7 @@ async def duplicate_workflow(
         if not original:
             raise HTTPException(status_code=404, detail="Workflow not found")
         
-        # Generate new name
-        if duplicate_data and duplicate_data.get("name"):
-            new_name = duplicate_data["name"]
-        else:
-            # Find a unique name
-            base_name = original.name
-            if " (Copy" in base_name:
-                # Remove existing copy suffix
-                base_name = base_name.split(" (Copy")[0]
-            
-            counter = 1
-            new_name = f"{base_name} (Copy)"
-            while db.query(Workflow).filter(Workflow.name == new_name).first():
-                counter += 1
-                new_name = f"{base_name} (Copy {counter})"
+        new_name = _duplicate_workflow_name(db, original, duplicate_data)
         
         # Create the duplicate
         duplicate = Workflow(
@@ -731,8 +785,142 @@ async def duplicate_workflow(
         db.rollback()
         raise HTTPException(status_code=500, detail="Internal server error")
 
+def _get_workflow_dashboard_stats_executions(db: Session, workspace_id: Any) -> Dict[str, Any]:
+    """The workspace's execution counts: all, running, today's and their outcomes, and the
+    overall success rate (get_workflow_dashboard_stats)."""
+    # Execution statistics - Filter by workspace via Workflow join
+    total_executions = db.query(WorkflowExecution).join(Workflow).filter(Workflow.workspace_id == workspace_id).count()
+    running_executions = db.query(WorkflowExecution).join(Workflow).filter(
+        Workflow.workspace_id == workspace_id,
+        WorkflowExecution.status == ExecutionStatus.RUNNING.value
+    ).count()
+    
+    # Today's statistics
+    today = datetime.now().date()
+    today_executions = db.query(WorkflowExecution).join(Workflow).filter(
+        Workflow.workspace_id == workspace_id,
+        func.date(WorkflowExecution.started_at) == today
+    ).count()
+    
+    completed_today = db.query(WorkflowExecution).join(Workflow).filter(
+        and_(
+            Workflow.workspace_id == workspace_id,
+            func.date(WorkflowExecution.started_at) == today,
+            WorkflowExecution.status == ExecutionStatus.COMPLETED.value
+        )
+    ).count()
+    
+    failed_today = db.query(WorkflowExecution).join(Workflow).filter(
+        and_(
+            Workflow.workspace_id == workspace_id,
+            func.date(WorkflowExecution.started_at) == today,
+            WorkflowExecution.status == ExecutionStatus.FAILED.value
+        )
+    ).count()
+    
+    # Success rate calculation
+    total_completed = db.query(WorkflowExecution).join(Workflow).filter(
+        Workflow.workspace_id == workspace_id,
+        WorkflowExecution.status == ExecutionStatus.COMPLETED.value
+    ).count()
+    
+    success_rate = (total_completed / max(total_executions, 1)) * 100
+    return {
+        "total_executions": total_executions, "running_executions": running_executions,
+        "today_executions": today_executions, "completed_today": completed_today, "failed_today": failed_today,
+        "success_rate": success_rate,
+    }
+
+
+def _get_workflow_dashboard_stats_activity(db: Session, workspace_id: Any) -> Dict[str, Any]:
+    """Agent utilization, the last week's executions, workflows by type and the last 30
+    days' executions per day (get_workflow_dashboard_stats)."""
+    # Agent utilization
+    total_agents = db.query(Agent).count()
+    active_agents = db.query(Agent).filter(Agent.status == 'active').count()
+    agent_utilization = (active_agents / max(total_agents, 1)) * 100
+    
+    # Recent activity (last 7 days)
+    week_ago = datetime.now() - timedelta(days=7)
+    recent_executions = db.query(WorkflowExecution).join(Workflow).filter(
+        Workflow.workspace_id == workspace_id,
+        WorkflowExecution.started_at >= week_ago
+    ).order_by(desc(WorkflowExecution.started_at)).limit(20).all()
+    
+    # Workflow type breakdown
+    workflow_types = {}
+    workflows = db.query(Workflow).all()
+    for workflow in workflows:
+        wf_def = workflow.workflow_definition or {}
+        wf_type = wf_def.get('category', 'General')
+        workflow_types[wf_type] = workflow_types.get(wf_type, 0) + 1
+    
+    # Performance trends (last 30 days)
+    thirty_days_ago = datetime.now() - timedelta(days=30)
+    daily_executions = db.query(
+        func.date(WorkflowExecution.started_at).label('date'),
+        func.count(WorkflowExecution.id).label('count')
+    ).join(Workflow).filter(
+        Workflow.workspace_id == workspace_id,
+        WorkflowExecution.started_at >= thirty_days_ago
+    ).group_by(func.date(WorkflowExecution.started_at)).order_by('date').all()
+    return {
+        "agent_utilization": agent_utilization, "recent_executions": recent_executions,
+        "workflow_types": workflow_types, "daily_executions": daily_executions,
+    }
+
+
+def _get_workflow_dashboard_stats_payload(workflow_counts: Dict[str, int], executions: Dict[str, Any],
+                                         activity: Dict[str, Any]) -> Dict[str, Any]:
+    """The dashboard's answer (get_workflow_dashboard_stats)."""
+    total_workflows = workflow_counts["total_workflows"]
+    total_executions, today_executions = executions["total_executions"], executions["today_executions"]
+    completed_today, success_rate = executions["completed_today"], executions["success_rate"]
+    agent_utilization = activity["agent_utilization"]
+    return {
+        "overview": {
+            **workflow_counts,
+            "total_executions": total_executions,
+            "running_executions": executions["running_executions"]
+        },
+        "today_stats": {
+            "executions": today_executions,
+            "completed": completed_today,
+            "failed": executions["failed_today"],
+            "success_rate": round((completed_today / max(today_executions, 1)) * 100, 1)
+        },
+        "performance": {
+            "overall_success_rate": round(success_rate, 1),
+            "avg_execution_time": "4.2m",  # Would be calculated from actual data
+            "agent_utilization": round(agent_utilization, 1),
+            "system_efficiency": round((success_rate + agent_utilization) / 2, 1)
+        },
+        "workflow_types": [
+            {"type": wf_type, "count": count, "percentage": round((count / max(total_workflows, 1)) * 100, 1)}
+            for wf_type, count in activity["workflow_types"].items()
+        ],
+        "execution_trends": [
+            {
+                "date": date.isoformat() if date else None,
+                "executions": count
+            } for date, count in activity["daily_executions"]
+        ],
+        "recent_activity": [
+            {
+                "id": exec.id,
+                "workflow_id": exec.workflow_id,
+                "status": exec.status,
+                "started_at": exec.started_at.isoformat(),
+                "completed_at": exec.completed_at.isoformat() if exec.completed_at else None,
+                "agent_id": exec.agent_id
+            } for exec in activity["recent_executions"]
+        ],
+        "last_updated": datetime.now().isoformat()
+    }
+
+
 @router.get("/stats/dashboard")
-async def get_workflow_dashboard_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def get_workflow_dashboard_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get comprehensive workflow statistics for dashboard"""
     try:
         # Basic workflow counts
@@ -740,125 +928,92 @@ async def get_workflow_dashboard_stats(ctx: RequestContext = Depends(get_request
         active_workflows = db.query(Workflow).filter(Workflow.workspace_id == ctx.workspace_id, Workflow.status == WorkflowStatus.ACTIVE.value).count()
         draft_workflows = db.query(Workflow).filter(Workflow.status == WorkflowStatus.DRAFT.value).count()
         archived_workflows = db.query(Workflow).filter(Workflow.status == WorkflowStatus.ARCHIVED.value).count()
-        
-        # Execution statistics - Filter by workspace via Workflow join
-        total_executions = db.query(WorkflowExecution).join(Workflow).filter(Workflow.workspace_id == ctx.workspace_id).count()
-        running_executions = db.query(WorkflowExecution).join(Workflow).filter(
-            Workflow.workspace_id == ctx.workspace_id,
-            WorkflowExecution.status == ExecutionStatus.RUNNING.value
-        ).count()
-        
-        # Today's statistics
-        today = datetime.now().date()
-        today_executions = db.query(WorkflowExecution).join(Workflow).filter(
-            Workflow.workspace_id == ctx.workspace_id,
-            func.date(WorkflowExecution.started_at) == today
-        ).count()
-        
-        completed_today = db.query(WorkflowExecution).join(Workflow).filter(
-            and_(
-                Workflow.workspace_id == ctx.workspace_id,
-                func.date(WorkflowExecution.started_at) == today,
-                WorkflowExecution.status == ExecutionStatus.COMPLETED.value
-            )
-        ).count()
-        
-        failed_today = db.query(WorkflowExecution).join(Workflow).filter(
-            and_(
-                Workflow.workspace_id == ctx.workspace_id,
-                func.date(WorkflowExecution.started_at) == today,
-                WorkflowExecution.status == ExecutionStatus.FAILED.value
-            )
-        ).count()
-        
-        # Success rate calculation
-        total_completed = db.query(WorkflowExecution).join(Workflow).filter(
-            Workflow.workspace_id == ctx.workspace_id,
-            WorkflowExecution.status == ExecutionStatus.COMPLETED.value
-        ).count()
-        
-        success_rate = (total_completed / max(total_executions, 1)) * 100
-        
-        # Agent utilization
-        total_agents = db.query(Agent).count()
-        active_agents = db.query(Agent).filter(Agent.status == 'active').count()
-        agent_utilization = (active_agents / max(total_agents, 1)) * 100
-        
-        # Recent activity (last 7 days)
-        week_ago = datetime.now() - timedelta(days=7)
-        recent_executions = db.query(WorkflowExecution).join(Workflow).filter(
-            Workflow.workspace_id == ctx.workspace_id,
-            WorkflowExecution.started_at >= week_ago
-        ).order_by(desc(WorkflowExecution.started_at)).limit(20).all()
-        
-        # Workflow type breakdown
-        workflow_types = {}
-        workflows = db.query(Workflow).all()
-        for workflow in workflows:
-            wf_def = workflow.workflow_definition or {}
-            wf_type = wf_def.get('category', 'General')
-            workflow_types[wf_type] = workflow_types.get(wf_type, 0) + 1
-        
-        # Performance trends (last 30 days)
-        thirty_days_ago = datetime.now() - timedelta(days=30)
-        daily_executions = db.query(
-            func.date(WorkflowExecution.started_at).label('date'),
-            func.count(WorkflowExecution.id).label('count')
-        ).join(Workflow).filter(
-            Workflow.workspace_id == ctx.workspace_id,
-            WorkflowExecution.started_at >= thirty_days_ago
-        ).group_by(func.date(WorkflowExecution.started_at)).order_by('date').all()
-        
-        return {
-            "overview": {
-                "total_workflows": total_workflows,
-                "active_workflows": active_workflows,
-                "draft_workflows": draft_workflows,
-                "archived_workflows": archived_workflows,
-                "total_executions": total_executions,
-                "running_executions": running_executions
-            },
-            "today_stats": {
-                "executions": today_executions,
-                "completed": completed_today,
-                "failed": failed_today,
-                "success_rate": round((completed_today / max(today_executions, 1)) * 100, 1)
-            },
-            "performance": {
-                "overall_success_rate": round(success_rate, 1),
-                "avg_execution_time": "4.2m",  # Would be calculated from actual data
-                "agent_utilization": round(agent_utilization, 1),
-                "system_efficiency": round((success_rate + agent_utilization) / 2, 1)
-            },
-            "workflow_types": [
-                {"type": wf_type, "count": count, "percentage": round((count / max(total_workflows, 1)) * 100, 1)}
-                for wf_type, count in workflow_types.items()
-            ],
-            "execution_trends": [
-                {
-                    "date": date.isoformat() if date else None,
-                    "executions": count
-                } for date, count in daily_executions
-            ],
-            "recent_activity": [
-                {
-                    "id": exec.id,
-                    "workflow_id": exec.workflow_id,
-                    "status": exec.status,
-                    "started_at": exec.started_at.isoformat(),
-                    "completed_at": exec.completed_at.isoformat() if exec.completed_at else None,
-                    "agent_id": exec.agent_id
-                } for exec in recent_executions
-            ],
-            "last_updated": datetime.now().isoformat()
+        workflow_counts = {
+            "total_workflows": total_workflows,
+            "active_workflows": active_workflows,
+            "draft_workflows": draft_workflows,
+            "archived_workflows": archived_workflows,
         }
+        executions = _get_workflow_dashboard_stats_executions(db, ctx.workspace_id)
+        activity = _get_workflow_dashboard_stats_activity(db, ctx.workspace_id)
+        return _get_workflow_dashboard_stats_payload(workflow_counts, executions, activity)
         
     except Exception as e:
         logger.error(f"Error getting workflow dashboard stats: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+def _get_workflow_live_progress_steps(progress: int) -> List[Dict[str, str]]:
+    """The execution's steps and each one's state at ``progress`` (get_workflow_live_progress)."""
+    # Define workflow steps
+    steps = [
+        {"name": "Initialization", "status": "completed", "duration": "0.5s"},
+        {"name": "Agent Assignment", "status": "completed", "duration": "0.2s"},
+        {"name": "Context Loading", "status": "completed" if progress > 20 else "running", "duration": "1.2s"},
+        {"name": "Task Processing", "status": "completed" if progress > 50 else "running" if progress > 20 else "pending", "duration": "2.8s"},
+        {"name": "Result Generation", "status": "completed" if progress > 80 else "running" if progress > 50 else "pending", "duration": "1.1s"},
+        {"name": "Finalization", "status": "completed" if progress > 95 else "running" if progress > 80 else "pending", "duration": "0.3s"}
+    ]
+    return steps
+
+
+def _get_workflow_live_progress_logs(current_execution: WorkflowExecution, steps: List[Dict[str, str]],
+                                     current_step_index: int, current_step: Dict[str, str],
+                                     progress: int) -> List[Dict[str, str]]:
+    """The execution's log lines so far (get_workflow_live_progress)."""
+    # Generate log entries
+    log_entries = [
+        {
+            "timestamp": (current_execution.started_at + timedelta(seconds=i*30)).isoformat(),
+            "level": "INFO",
+            "message": f"Step {i+1}: {steps[min(i, len(steps)-1)]['name']} {'completed' if i < current_step_index else 'in progress'}"
+        } for i in range(min(current_step_index + 1, len(steps)))
+    ]
+    
+    # Add current activity log
+    if progress < 95:
+        log_entries.append({
+            "timestamp": datetime.now().isoformat(),
+            "level": "INFO",
+            "message": f"Currently processing: {current_step['name']}"
+        })
+    return log_entries
+
+
+def _get_workflow_live_progress_payload(workflow_id: int, current_execution: WorkflowExecution, progress: int,
+                                        steps: List[Dict[str, str]], current_step_index: int,
+                                        current_step: Dict[str, str], elapsed: float,
+                                        log_entries: List[Dict[str, str]]) -> Dict[str, Any]:
+    """The running execution's live progress (get_workflow_live_progress)."""
+    return {
+        "workflow_id": workflow_id,
+        "execution_id": current_execution.id,
+        "status": "running",
+        "progress": {
+            "percentage": progress,
+            "current_step": current_step['name'],
+            "current_step_index": current_step_index,
+            "total_steps": len(steps),
+            "estimated_completion": (current_execution.started_at + timedelta(minutes=5)).isoformat()
+        },
+        "steps": steps,
+        "timing": {
+            "started_at": current_execution.started_at.isoformat(),
+            "elapsed_time": f"{int(elapsed)}s",
+            "estimated_total": "5m",
+            "estimated_remaining": f"{max(0, 300 - int(elapsed))}s"
+        },
+        "resources": {
+            "agent_id": current_execution.agent_id,
+            "memory_usage": f"{min(100, 20 + progress)}MB",
+            "cpu_usage": f"{min(100, 10 + progress//2)}%"
+        },
+        "log_entries": log_entries[-10:],  # Last 10 entries
+        "last_updated": datetime.now().isoformat()
+    }
+
+
 @router.get("/{workflow_id}/live-progress")
-async def get_workflow_live_progress(workflow_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def get_workflow_live_progress(workflow_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get live progress for a specific workflow execution"""
     try:
         # Get the workflow
@@ -884,64 +1039,15 @@ async def get_workflow_live_progress(workflow_id: int, ctx: RequestContext = Dep
         # Calculate detailed progress
         elapsed = (datetime.now() - current_execution.started_at).total_seconds()
         progress = min(95, int(elapsed / 60 * 20))  # Simulate progress
-        
-        # Define workflow steps
-        steps = [
-            {"name": "Initialization", "status": "completed", "duration": "0.5s"},
-            {"name": "Agent Assignment", "status": "completed", "duration": "0.2s"},
-            {"name": "Context Loading", "status": "completed" if progress > 20 else "running", "duration": "1.2s"},
-            {"name": "Task Processing", "status": "completed" if progress > 50 else "running" if progress > 20 else "pending", "duration": "2.8s"},
-            {"name": "Result Generation", "status": "completed" if progress > 80 else "running" if progress > 50 else "pending", "duration": "1.1s"},
-            {"name": "Finalization", "status": "completed" if progress > 95 else "running" if progress > 80 else "pending", "duration": "0.3s"}
-        ]
+        steps = _get_workflow_live_progress_steps(progress)
         
         # Get current step
         current_step_index = min(len(steps) - 1, int(progress / 20))
         current_step = steps[current_step_index]
-        
-        # Generate log entries
-        log_entries = [
-            {
-                "timestamp": (current_execution.started_at + timedelta(seconds=i*30)).isoformat(),
-                "level": "INFO",
-                "message": f"Step {i+1}: {steps[min(i, len(steps)-1)]['name']} {'completed' if i < current_step_index else 'in progress'}"
-            } for i in range(min(current_step_index + 1, len(steps)))
-        ]
-        
-        # Add current activity log
-        if progress < 95:
-            log_entries.append({
-                "timestamp": datetime.now().isoformat(),
-                "level": "INFO",
-                "message": f"Currently processing: {current_step['name']}"
-            })
-        
-        return {
-            "workflow_id": workflow_id,
-            "execution_id": current_execution.id,
-            "status": "running",
-            "progress": {
-                "percentage": progress,
-                "current_step": current_step['name'],
-                "current_step_index": current_step_index,
-                "total_steps": len(steps),
-                "estimated_completion": (current_execution.started_at + timedelta(minutes=5)).isoformat()
-            },
-            "steps": steps,
-            "timing": {
-                "started_at": current_execution.started_at.isoformat(),
-                "elapsed_time": f"{int(elapsed)}s",
-                "estimated_total": "5m",
-                "estimated_remaining": f"{max(0, 300 - int(elapsed))}s"
-            },
-            "resources": {
-                "agent_id": current_execution.agent_id,
-                "memory_usage": f"{min(100, 20 + progress)}MB",
-                "cpu_usage": f"{min(100, 10 + progress//2)}%"
-            },
-            "log_entries": log_entries[-10:],  # Last 10 entries
-            "last_updated": datetime.now().isoformat()
-        }
+        log_entries = _get_workflow_live_progress_logs(current_execution, steps, current_step_index, current_step,
+                                                       progress)
+        return _get_workflow_live_progress_payload(workflow_id, current_execution, progress, steps,
+                                                   current_step_index, current_step, elapsed, log_entries)
         
     except HTTPException:
         raise
@@ -1055,7 +1161,7 @@ async def execute_workflow_advanced(
 # `POST /{workflow_id}/execute-advanced` (execute_workflow_advanced) remains.
 
 @router.get("/executions/")
-async def list_executions(
+def list_executions(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     workflow_id: Optional[int] = None,
@@ -1102,7 +1208,7 @@ async def list_executions(
 # deletion note above). Executions are created inside execute_workflow_advanced.
 
 @router.get("/executions/{execution_id}")
-async def get_execution_status(execution_id: int, db: Session = Depends(get_db)):
+def get_execution_status(execution_id: int, db: Session = Depends(get_db)):
     """Get workflow execution status"""
     try:
         execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
@@ -1126,7 +1232,7 @@ async def get_execution_status(execution_id: int, db: Session = Depends(get_db))
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/executions/{execution_id}/cancel", dependencies=[Depends(require_workspace_permission("missions:execute"))])
-async def cancel_execution(execution_id: int, db: Session = Depends(get_db)):
+def cancel_execution(execution_id: int, db: Session = Depends(get_db)):
     """Cancel a running workflow execution"""
     try:
         execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
@@ -1173,8 +1279,20 @@ async def cancel_execution(execution_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _hand_back_the_connection(db: Session) -> None:
+    """F105: a stream route is done with the database once it has checked the execution.
+
+    The streams below read no database, but FastAPI closes the request's ``get_db``
+    session (the permission check's too) only when the response ends, so its pooled
+    connection sat idle in transaction for as long as the stream stayed open. Ending the
+    transaction gives it back now; ``get_db`` still closes the session afterwards. The
+    routes are plain ``def``s (threadpool), so this runs off the event loop.
+    """
+    db.rollback()
+
+
 @router.get("/executions/{execution_id}/stream")
-async def stream_execution_updates(execution_id: int, db: Session = Depends(get_db)):
+def stream_execution_updates(execution_id: int, db: Session = Depends(get_db)):
     """
     SSE stream for real-time workflow execution updates (PRD-28).
     
@@ -1201,7 +1319,8 @@ async def stream_execution_updates(execution_id: int, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail="Execution not found")
     
     logger.info(f"🚀 Starting SSE stream for execution {execution_id}")
-    
+    _hand_back_the_connection(db)
+
     try:
         from consumers.workflows.streaming import stream_workflow_execution
         
@@ -1221,7 +1340,7 @@ async def stream_execution_updates(execution_id: int, db: Session = Depends(get_
 
 
 @router.get("/executions/{execution_id}/stream/aisdk")
-async def stream_execution_aisdk(execution_id: int, db: Session = Depends(get_db)):
+def stream_execution_aisdk(execution_id: int, db: Session = Depends(get_db)):
     """
     AI SDK stream for real-time workflow execution updates.
     
@@ -1256,6 +1375,7 @@ async def stream_execution_aisdk(execution_id: int, db: Session = Depends(get_db
         )
 
     logger.info(f"🚀 Starting AI SDK stream for execution {execution_id} (status: {execution.status})")
+    _hand_back_the_connection(db)
 
     try:
         from consumers.workflows.streaming import stream_workflow_as_aisdk
@@ -1278,7 +1398,7 @@ async def stream_execution_aisdk(execution_id: int, db: Session = Depends(get_db
 
 
 @router.post("/stream", dependencies=[Depends(require_workspace_permission("missions:execute"))])
-async def stream_workflow_chat(request: Dict[str, Any] = Body(...), db: Session = Depends(get_db)):
+def stream_workflow_chat(request: Dict[str, Any] = Body(...), db: Session = Depends(get_db)):
     """
     AI SDK compatible streaming endpoint for useChat hook.
     
@@ -1324,6 +1444,7 @@ async def stream_workflow_chat(request: Dict[str, Any] = Body(...), db: Session 
         )
 
     logger.info(f"🚀 Starting AI SDK chat stream for execution {execution_id} (status: {execution.status})")
+    _hand_back_the_connection(db)
 
     try:
         from consumers.workflows.streaming import stream_workflow_as_aisdk
@@ -1361,7 +1482,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
 
 
 @router.get("/templates/recommended")
-async def get_recommended_workflow_templates(db: Session = Depends(get_db)):
+def get_recommended_workflow_templates(db: Session = Depends(get_db)):
     """Get recommended workflow templates based on system usage"""
     try:
         # Get existing workflows to analyze patterns
