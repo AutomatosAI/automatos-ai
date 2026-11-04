@@ -25,7 +25,7 @@ from core.auth.dependencies import RequestContext
 
 
 @router.get("")
-async def list_workflow_templates(
+def list_workflow_templates(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     is_featured: Optional[bool] = None,
     is_public: Optional[bool] = True,
@@ -97,7 +97,7 @@ async def list_workflow_templates(
 
 
 @router.get("/{template_id}")
-async def get_workflow_template(
+def get_workflow_template(
     template_id: str,
     db: Session = Depends(get_db)
 ):
@@ -120,7 +120,7 @@ async def get_workflow_template(
 
 
 @router.post("", dependencies=[Depends(require_workspace_permission("playbooks:create"))])
-async def create_workflow_template(
+def create_workflow_template(
     template_data: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db)
 ):
@@ -196,7 +196,7 @@ async def create_workflow_template(
 
 
 @router.put("/{template_id}", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
-async def update_workflow_template(
+def update_workflow_template(
     template_id: str,
     template_data: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db)
@@ -251,7 +251,7 @@ async def update_workflow_template(
 
 
 @router.delete("/{template_id}", dependencies=[Depends(require_workspace_permission("playbooks:delete"))])
-async def delete_workflow_template(
+def delete_workflow_template(
     template_id: str,
     db: Session = Depends(get_db)
 ):
@@ -292,7 +292,7 @@ async def delete_workflow_template(
 
 
 @router.post("/{template_id}/use", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
-async def record_template_usage(
+def record_template_usage(
     template_id: str,
     db: Session = Depends(get_db)
 ):
@@ -327,7 +327,7 @@ async def record_template_usage(
 
 
 @router.get("/categories/list")
-async def list_template_categories(db: Session = Depends(get_db)):
+def list_template_categories(db: Session = Depends(get_db)):
     """Get list of all unique tags used across templates"""
     try:
         templates = db.query(WorkflowTemplate.tags).filter(
@@ -354,7 +354,7 @@ async def list_template_categories(db: Session = Depends(get_db)):
 
 
 @router.get("/featured/list")
-async def list_featured_templates(
+def list_featured_templates(
     limit: int = Query(10, ge=1, le=50),
     db: Session = Depends(get_db)
 ):
