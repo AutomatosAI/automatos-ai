@@ -1049,16 +1049,8 @@ class AdminCostAnalyticsResponse(BaseModel):
 # ── Admin Analytics endpoints ────────────────────────────────────────
 
 
-@admin_router.get("/costs", response_model=AdminCostAnalyticsResponse)
-async def get_admin_cost_analytics(
-    period: str = Query("30d", description="7d|30d|90d"),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    """Platform-wide cost analytics across all workspaces (super-admin via the router-wide lock)."""
-    delta = PERIOD_MAP.get(period, timedelta(days=30))
-    since = datetime.utcnow() - delta
-
+def _admin_costs_totals(db, since):
+    """Platform-wide cost, tokens and request totals since `since`."""
     # Platform-wide aggregates (no workspace filter)
     agg = (
         db.query(
@@ -1073,7 +1065,31 @@ async def get_admin_cost_analytics(
     total_platform_cost = float(agg.total_cost or 0) if agg else 0.0
     total_tokens = int(agg.total_tokens or 0) if agg else 0
     total_requests = agg.total_requests or 0 if agg else 0
+    return total_platform_cost, total_tokens, total_requests
 
+
+def _admin_costs_top_model(db, r, since):
+    """The workspace's highest-cost model row in the period (or None)."""
+    # Find top model for this workspace in the period
+    top_model_row = (
+        db.query(
+            LLMUsage.model_id,
+            func.sum(LLMUsage.total_cost).label("cost"),
+        )
+        .filter(
+            LLMUsage.workspace_id == r.workspace_id,
+            LLMUsage.created_at >= since,
+            LLMUsage.request_type != ACTIVITY_SYNC_REQUEST_TYPE,
+        )
+        .group_by(LLMUsage.model_id)
+        .order_by(desc("cost"))
+        .first()
+    )
+    return top_model_row
+
+
+def _admin_costs_workspace_rows(db, since):
+    """Per-workspace cost rows plus a map of workspace id to Workspace."""
     # Cost by workspace
     ws_rows = (
         db.query(
@@ -1094,39 +1110,11 @@ async def get_admin_cost_analytics(
     if ws_ids:
         workspaces = db.query(Workspace).filter(Workspace.id.in_(ws_ids)).all()
         ws_map = {str(w.id): w for w in workspaces}
+    return ws_rows, ws_map
 
-    # Top model per workspace (subquery for each)
-    cost_by_workspace = []
-    for r in ws_rows:
-        ws_id_str = str(r.workspace_id) if r.workspace_id else "unknown"
-        ws = ws_map.get(ws_id_str)
 
-        # Find top model for this workspace in the period
-        top_model_row = (
-            db.query(
-                LLMUsage.model_id,
-                func.sum(LLMUsage.total_cost).label("cost"),
-            )
-            .filter(
-                LLMUsage.workspace_id == r.workspace_id,
-                LLMUsage.created_at >= since,
-                LLMUsage.request_type != ACTIVITY_SYNC_REQUEST_TYPE,
-            )
-            .group_by(LLMUsage.model_id)
-            .order_by(desc("cost"))
-            .first()
-        )
-
-        cost_by_workspace.append(WorkspaceCostEntry(
-            workspace_id=ws_id_str,
-            workspace_name=ws.name if ws else ws_id_str,
-            plan=ws.plan if ws else "unknown",
-            total_cost=round(float(r.total_cost or 0), 6),
-            total_tokens=int(r.total_tokens or 0),
-            total_requests=r.total_requests or 0,
-            top_model=top_model_row.model_id if top_model_row else None,
-        ))
-
+def _admin_costs_by_provider(db, since):
+    """Cost breakdown per usage provider."""
     # Cost by provider (platform-wide)
     provider_rows = (
         db.query(
@@ -1152,7 +1140,11 @@ async def get_admin_cost_analytics(
         )
         for r in provider_rows
     ]
+    return cost_by_provider
 
+
+def _admin_costs_daily_trend(db, since):
+    """Daily platform-wide cost and request counts."""
     # Daily cost trend (platform-wide)
     trend_rows = (
         db.query(
@@ -1174,7 +1166,11 @@ async def get_admin_cost_analytics(
         }
         for t in trend_rows
     ]
+    return daily_cost_trend
 
+
+def _admin_costs_byok_split(db, since):
+    """BYOK versus platform cost and request split."""
     # BYOK vs platform cost split
     byok_rows = (
         db.query(
@@ -1195,6 +1191,46 @@ async def get_admin_cost_analytics(
         byok_cost=round(float(byok_row.total_cost or 0), 6) if byok_row else 0.0,
         byok_requests=byok_row.request_count or 0 if byok_row else 0,
     )
+    return byok_split
+
+
+@admin_router.get("/costs", response_model=AdminCostAnalyticsResponse)
+def get_admin_cost_analytics(
+    period: str = Query("30d", description="7d|30d|90d"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Platform-wide cost analytics across all workspaces (super-admin via the router-wide lock)."""
+    delta = PERIOD_MAP.get(period, timedelta(days=30))
+    since = datetime.utcnow() - delta
+
+    total_platform_cost, total_tokens, total_requests = _admin_costs_totals(db, since)
+
+    ws_rows, ws_map = _admin_costs_workspace_rows(db, since)
+
+    # Top model per workspace (subquery for each)
+    cost_by_workspace = []
+    for r in ws_rows:
+        ws_id_str = str(r.workspace_id) if r.workspace_id else "unknown"
+        ws = ws_map.get(ws_id_str)
+
+        top_model_row = _admin_costs_top_model(db, r, since)
+
+        cost_by_workspace.append(WorkspaceCostEntry(
+            workspace_id=ws_id_str,
+            workspace_name=ws.name if ws else ws_id_str,
+            plan=ws.plan if ws else "unknown",
+            total_cost=round(float(r.total_cost or 0), 6),
+            total_tokens=int(r.total_tokens or 0),
+            total_requests=r.total_requests or 0,
+            top_model=top_model_row.model_id if top_model_row else None,
+        ))
+
+    cost_by_provider = _admin_costs_by_provider(db, since)
+
+    daily_cost_trend = _admin_costs_daily_trend(db, since)
+
+    byok_split = _admin_costs_byok_split(db, since)
 
     return AdminCostAnalyticsResponse(
         total_platform_cost=round(total_platform_cost, 6),
@@ -1210,20 +1246,8 @@ async def get_admin_cost_analytics(
 # ── Comprehensive Admin Dashboard ────────────────────────────────────
 
 
-@admin_router.get("/dashboard")
-async def get_admin_dashboard(
-    period: str = Query("30d", description="7d|30d|90d"),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    """
-    Comprehensive admin dashboard: workspaces with resource counts,
-    platform-wide model usage, daily cost by provider, top models,
-    and BYOK cost split.  All in a single call.
-    """
-    delta = PERIOD_MAP.get(period, timedelta(days=30))
-    since = datetime.utcnow() - delta
-
+def _admin_dashboard_totals(db, since):
+    """Platform-wide cost, tokens and request totals since `since`."""
     # ── Platform-wide aggregates ──
     agg = (
         db.query(
@@ -1237,11 +1261,11 @@ async def get_admin_dashboard(
     total_cost = float(agg.total_cost or 0) if agg else 0.0
     total_tokens = int(agg.total_tokens or 0) if agg else 0
     total_requests = agg.total_requests or 0 if agg else 0
+    return total_cost, total_tokens, total_requests
 
-    # ── All workspaces ──
-    all_ws = db.query(Workspace).filter(Workspace.is_active.is_(True)).all()
-    total_workspaces = len(all_ws)
 
+def _admin_dashboard_counts(db, since):
+    """Agent, recipe and in-period execution counts keyed by workspace id."""
     # Agent / recipe counts per workspace  (batch queries)
     agent_counts = dict(
         db.query(Agent.workspace_id, func.count(Agent.id))
@@ -1260,7 +1284,11 @@ async def get_admin_dashboard(
         .group_by(RecipeExecution.workspace_id)
         .all()
     )
+    return agent_counts, recipe_counts, execution_counts
 
+
+def _admin_dashboard_usage_map(db, since):
+    """LLM usage per workspace id string."""
     # LLM usage per workspace
     ws_usage_rows = (
         db.query(
@@ -1274,7 +1302,11 @@ async def get_admin_dashboard(
         .all()
     )
     ws_usage_map = {str(r.workspace_id): r for r in ws_usage_rows}
+    return ws_usage_map
 
+
+def _admin_dashboard_workspace_entries(all_ws, agent_counts, recipe_counts, execution_counts, ws_usage_map):
+    """One dashboard entry per active workspace with its resource counts and usage."""
     workspaces = []
     for ws in all_ws:
         ws_id = str(ws.id)
@@ -1292,10 +1324,11 @@ async def get_admin_dashboard(
             "tokens": int(usage.tokens or 0) if usage else 0,
             "requests": usage.requests or 0 if usage else 0,
         })
+    return workspaces
 
-    # Sort by cost descending
-    workspaces.sort(key=lambda w: w["cost"], reverse=True)
 
+def _admin_dashboard_models(db, since):
+    """Top 15 models platform-wide by cost."""
     # ── Top models platform-wide ──
     top_models = (
         db.query(
@@ -1323,7 +1356,11 @@ async def get_admin_dashboard(
         }
         for r in top_models
     ]
+    return models
 
+
+def _admin_dashboard_daily_by_provider(db, since):
+    """Chart-ready daily cost series per provider."""
     # ── Daily cost by provider (for stacked area chart) ──
     daily_provider_rows = (
         db.query(
@@ -1356,7 +1393,11 @@ async def get_admin_dashboard(
         for p in providers:
             entry[p] = day_map[d].get(p, 0)
         daily_by_provider.append(entry)
+    return providers, provider_labels, daily_by_provider
 
+
+def _admin_dashboard_byok_rows(db, since):
+    """Platform (False) and BYOK (True) cost/request rows."""
     # ── BYOK vs Platform split ──
     byok_rows = (
         db.query(
@@ -1371,6 +1412,45 @@ async def get_admin_dashboard(
     byok_map = {r.is_byok: r for r in byok_rows}
     p_row = byok_map.get(False)
     b_row = byok_map.get(True)
+    return p_row, b_row
+
+
+@admin_router.get("/dashboard")
+def get_admin_dashboard(
+    period: str = Query("30d", description="7d|30d|90d"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """
+    Comprehensive admin dashboard: workspaces with resource counts,
+    platform-wide model usage, daily cost by provider, top models,
+    and BYOK cost split.  All in a single call.
+    """
+    delta = PERIOD_MAP.get(period, timedelta(days=30))
+    since = datetime.utcnow() - delta
+
+    total_cost, total_tokens, total_requests = _admin_dashboard_totals(db, since)
+
+    # ── All workspaces ──
+    all_ws = db.query(Workspace).filter(Workspace.is_active.is_(True)).all()
+    total_workspaces = len(all_ws)
+
+    agent_counts, recipe_counts, execution_counts = _admin_dashboard_counts(db, since)
+
+    ws_usage_map = _admin_dashboard_usage_map(db, since)
+
+    workspaces = _admin_dashboard_workspace_entries(
+        all_ws, agent_counts, recipe_counts, execution_counts, ws_usage_map
+    )
+
+    # Sort by cost descending
+    workspaces.sort(key=lambda w: w["cost"], reverse=True)
+
+    models = _admin_dashboard_models(db, since)
+
+    providers, provider_labels, daily_by_provider = _admin_dashboard_daily_by_provider(db, since)
+
+    p_row, b_row = _admin_dashboard_byok_rows(db, since)
 
     # ── Revenue metrics ──
     # Compute daily average and projected monthly (for billing planning)

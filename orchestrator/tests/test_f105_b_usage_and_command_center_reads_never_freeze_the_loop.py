@@ -25,10 +25,6 @@ import pytest
 ORCH = Path(__file__).resolve().parents[1]
 ROUTERS = (ORCH / "api" / "llm_analytics.py", ORCH / "api" / "activity.py")
 HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
-# The super-admin cross-workspace dashboards (admin_router) are still async def over
-# the session: 133 and 163 lines each, so making them plain defs means splitting them
-# first (the changed-code shape rule). Not on a workspace's own pages.
-STILL_ON_THE_LOOP = {"get_admin_cost_analytics", "get_admin_dashboard"}
 
 
 def _routes(path: Path):
@@ -47,13 +43,14 @@ def _awaits(node: ast.AST) -> bool:
 @pytest.mark.parametrize("path", ROUTERS, ids=lambda p: p.name)
 def test_every_route_that_awaits_nothing_is_a_plain_def(path):
     offenders = {r.name for r in _routes(path) if isinstance(r, ast.AsyncFunctionDef) and not _awaits(r)}
-    assert offenders - STILL_ON_THE_LOOP == set(), f"async def over a synchronous session runs on the event loop: {offenders}"
+    assert offenders == set(), f"async def over a synchronous session runs on the event loop: {offenders}"
 
 
 def test_the_usage_and_feed_routes_are_plain_defs():
     names = {r.name: r for path in ROUTERS for r in _routes(path)}
     for name in ("get_usage", "get_summary", "get_costs", "get_cost_projections",
-                 "get_activity_feed", "get_board_stats", "get_workspace_digest"):
+                 "get_activity_feed", "get_board_stats", "get_workspace_digest",
+                 "get_admin_cost_analytics", "get_admin_dashboard"):
         assert isinstance(names[name], ast.FunctionDef), f"{name} must be a plain def"
 
 
