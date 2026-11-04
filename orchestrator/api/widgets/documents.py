@@ -149,7 +149,7 @@ async def search_documents(
 
 
 @router.get("/{document_id}", response_model=DocumentDetail)
-async def get_document(
+def get_document(
     document_id: int,
     auth: WidgetAuthContext = Depends(widget_auth),
     _perm: WidgetAuthContext = Depends(require_permission("documents:read")),
