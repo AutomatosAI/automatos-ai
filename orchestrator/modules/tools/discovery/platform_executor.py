@@ -8,6 +8,7 @@ Each handler is a standalone async function in modules/tools/discovery/handlers_
 All queries are workspace-scoped for multi-tenant isolation.
 """
 
+import asyncio
 import json
 import logging
 from typing import Any, Callable, Dict, NamedTuple, Optional, Union
@@ -810,8 +811,10 @@ class PlatformActionExecutor:
             return refused(f"Unknown platform action: {action_name}", NO_SUCH_ACTION)  # F449
 
         # F179: the gates a call clears are one method, so the workspace tools
-        # clear the same ones.
-        cleared = self.clear(action_name, params, caller_context)
+        # clear the same ones. F105: its reads and the grant it consults or issues are
+        # synchronous database work, so it runs in a worker thread, never on the event
+        # loop; this call waits for it, so the session is used by one thread at a time.
+        cleared = await asyncio.to_thread(self.clear, action_name, params, caller_context)
         if not isinstance(cleared, Cleared):
             return cleared
         # F193: a single-use yes whose call did nothing (a refusal after the gates,
@@ -819,7 +822,7 @@ class PlatformActionExecutor:
         result = await self._run_cleared(action_name, params, caller_context, cleared, handler)
         from modules.tools.execution.tool_grants import give_back_unused
 
-        give_back_unused(self.db, cleared.approved_via_grant_id, result)
+        await asyncio.to_thread(give_back_unused, self.db, cleared.approved_via_grant_id, result)
         return result
 
     @asks_the_owner_first  # PRD-256 US-004: after the role gates, an owner-only call from chat waits for a click
