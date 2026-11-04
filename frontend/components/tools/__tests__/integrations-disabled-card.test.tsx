@@ -24,9 +24,10 @@ const noKey: IntegrationsStatus = {
   apps_cached: 0,
   last_sync: null,
   sync_status: null,
+  sync_error: null,
 }
 
-const keyed = { available: true, reason: null, key_configured: true }
+const keyed = { available: true, reason: null, key_configured: true, sync_error: null }
 
 describe('PRD-233 S2 — IntegrationsDisabledCard', () => {
   it('renders the honest disabled state with the fix and the reason when there is no key', () => {
@@ -79,5 +80,22 @@ describe('PRD-233 S2 — IntegrationsDisabledCard', () => {
     render(<IntegrationsDisabledCard status={{ ...keyed, apps_cached: 0, last_sync: null, sync_status: 'failed' }} />)
     expect(screen.getByTestId('integrations-sync-failed')).toBeInTheDocument()
     expect(screen.getByText(CATALOGUE_SYNC_FAILED_TITLE)).toBeInTheDocument()
+    expect(screen.getByTestId('integrations-sync-failed').textContent).not.toContain('Reason:')
+  })
+
+  it('names the reason when Composio rejected the key, so Sync is not pressed again blind', () => {
+    render(
+      <IntegrationsDisabledCard
+        status={{
+          ...keyed,
+          apps_cached: 0,
+          last_sync: null,
+          sync_status: 'failed',
+          sync_error: 'Composio rejected the API key. Check COMPOSIO_KEY.',
+        }}
+      />,
+    )
+    const card = screen.getByTestId('integrations-sync-failed')
+    expect(card.textContent).toContain('Reason: Composio rejected the API key. Check COMPOSIO_KEY.')
   })
 })

@@ -8,7 +8,8 @@
  *
  * A keyed boot with an EMPTY catalogue is the other empty-grid case: the
  * backend syncs the catalogue itself on that boot, so the card says
- * "syncing" (or "last sync failed") instead of nothing.
+ * "syncing" (or "last sync failed") instead of nothing. A failed sync names
+ * its reason when the backend has one for people: Composio rejecting the key.
  */
 'use client'
 
@@ -59,12 +60,15 @@ export function IntegrationsDisabledCard({ status }: IntegrationsDisabledCardPro
     <Alert data-testid={failed ? 'integrations-sync-failed' : 'integrations-syncing'}>
       <RefreshCw className="h-4 w-4" />
       <AlertTitle>{failed ? CATALOGUE_SYNC_FAILED_TITLE : CATALOGUE_SYNCING_TITLE}</AlertTitle>
-      <AlertDescription>
+      <AlertDescription className="space-y-1">
         {failed ? (
-          <p>
-            The last catalogue sync did not complete — check that <code>COMPOSIO_KEY</code> is valid
-            (backend logs carry the error), then run Sync or restart the backend.
-          </p>
+          <>
+            <p>
+              The last catalogue sync did not complete — check that <code>COMPOSIO_KEY</code> is valid
+              (backend logs carry the error), then run Sync or restart the backend.
+            </p>
+            {status.sync_error ? <p className="text-muted-foreground">Reason: {status.sync_error}</p> : null}
+          </>
         ) : (
           <p>
             A Composio key is configured and the catalogue is being fetched in the background (first

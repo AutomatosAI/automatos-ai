@@ -22,12 +22,13 @@ from sqlalchemy.orm import Session
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
+from core.composio.bootstrap import in_flight_sync_job
 from core.composio.client import composio_available, composio_unavailable_reason, get_composio_client
 from core.composio.entity_manager import EntityManager
 from core.composio.pending_connections import CONNECTED, PENDING, is_pending, settle_pending
 from core.database.database import get_db
 from core.models.composio_cache import ComposioActionCache, ComposioAppCache, ComposioStatsCache, ComposioSyncJob
-from services.metadata_sync_service import MetadataSyncService
+from services.metadata_sync_service import MetadataSyncService, failed_job_reason
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -144,6 +145,8 @@ class IntegrationsStatusOut(BaseModel):
     last_sync: Optional[str] = None
     # Latest composio_sync_jobs row: running | completed | failed | None (never synced).
     sync_status: Optional[str] = None
+    # Why that sync failed, when the reason is one for people (Composio rejected the key).
+    sync_error: Optional[str] = None
 
 
 class ConnectIn(BaseModel):
@@ -312,6 +315,7 @@ async def integrations_status(
         apps_cached=int(apps_cached),
         last_sync=last_sync,
         sync_status=latest_job.status if latest_job else None,
+        sync_error=failed_job_reason(latest_job),
     )
 
 
@@ -814,6 +818,11 @@ async def sync(
     # worked and the catalogue stayed empty. Say what is actually wrong instead.
     if not composio_available():
         raise HTTPException(status_code=400, detail=composio_unavailable_reason())
+    # One sync at a time: the boot sync, or an earlier click, may still be running.
+    running = in_flight_sync_job(db)
+    if running is not None:
+        logger.info(f"Sync already in flight (job {running.id}); not starting another")
+        return {**running.to_dict(), "job_id": running.id, "already_running": True}
     service = MetadataSyncService(db)
     if sync_type == "incremental":
         result = service.run_incremental_sync()
