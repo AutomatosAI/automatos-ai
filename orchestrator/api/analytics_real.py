@@ -75,7 +75,7 @@ class PerformanceEnhancements(BaseModel):
 # ==== NEW DASHBOARD METRICS ====
 
 @ws_router.get("/dashboard/success-rate")
-async def get_agent_success_rate(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_agent_success_rate(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get agent success rate percentage with trend (UNION: workflows + missions)"""
     try:
         ws = ctx.workspace_id
@@ -134,7 +134,7 @@ async def get_agent_success_rate(ctx: RequestContext = Depends(get_request_conte
 
 
 @ws_router.get("/slos")
-async def get_slos(
+def get_slos(
     window: str = "24h",
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -159,7 +159,7 @@ async def get_slos(
 
 
 @ws_router.get("/substrate-health")
-async def get_substrate_health(
+def get_substrate_health(
     window: str = "24h",
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -208,7 +208,7 @@ def _parse_window(window: str) -> timedelta:
 
 
 @ws_router.get("/errors/by-subsystem")
-async def get_errors_by_subsystem(
+def get_errors_by_subsystem(
     window: str = "24h",
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -263,7 +263,7 @@ async def get_errors_by_subsystem(
 
 
 @router.get("/selection-health")
-async def get_selection_health(
+def get_selection_health(
     window: str = "24h",
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -392,7 +392,7 @@ async def get_always_failing_actions(
 
 
 @ws_router.get("/primitive-health")
-async def get_primitive_health(
+def get_primitive_health(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -468,7 +468,7 @@ async def get_primitive_health(
 
 
 @ws_router.get("/widget-engagement")
-async def get_widget_engagement(
+def get_widget_engagement(
     window: str = "7d",
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -547,7 +547,7 @@ async def get_widget_engagement(
 
 
 @router.get("/activation")
-async def get_activation(
+def get_activation(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -592,7 +592,7 @@ async def get_activation(
 
 
 @ws_router.get("/activation/workspace")
-async def get_workspace_activation(
+def get_workspace_activation(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -623,7 +623,7 @@ async def get_workspace_activation(
 
 
 @ws_router.get("/deliverable-freshness")
-async def get_deliverable_freshness(
+def get_deliverable_freshness(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -819,7 +819,7 @@ async def get_avg_task_completion_time(ctx: RequestContext = Depends(get_request
         return {"value": 0, "daily_average": 0, "improvement": 0, "unit": "minutes"}
 
 @router.get("/dashboard/system-load-trend")
-async def get_system_load_trend(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_system_load_trend(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get system load trend for 24h with color coding"""
     try:
         # Get system metrics
@@ -1021,7 +1021,7 @@ async def get_queue_depth(ctx: RequestContext = Depends(get_request_context_hybr
         }
 
 @router.get("/dashboard/efficiency-score")
-async def get_efficiency_score(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_efficiency_score(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get resource utilization efficiency score (0-100). Computed in ``api.dashboard_efficiency``."""
     try:
         # #1100: interval=None never blocks the event loop (the use since the previous call).
@@ -1046,7 +1046,7 @@ async def get_efficiency_score(ctx: RequestContext = Depends(get_request_context
 # ==== NEW PERFORMANCE ANALYTICS ENHANCEMENTS ====
 
 @router.get("/performance/cost-per-execution")
-async def get_cost_per_execution(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_cost_per_execution(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get cost per execution from real LLM usage data"""
     try:
         from sqlalchemy import cast, Date
@@ -1102,7 +1102,7 @@ async def get_cost_per_execution(ctx: RequestContext = Depends(get_request_conte
         return {"average_cost_per_execution": 0, "monthly_data": [], "cost_trend": "stable"}
 
 @router.get("/performance/peak-usage-hours")
-async def get_peak_usage_hours(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_peak_usage_hours(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get peak usage hours from real LLM usage / execution data"""
     try:
         from sqlalchemy import extract
@@ -1154,7 +1154,7 @@ async def get_peak_usage_hours(ctx: RequestContext = Depends(get_request_context
         return {"hourly_pattern": [], "peak_hours": [], "peak_period": "N/A"}
 
 @router.get("/performance/bottlenecks")
-async def get_bottleneck_detection(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_bottleneck_detection(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get resource bottleneck detection with recommendations"""
     try:
         bottlenecks = []
@@ -1212,7 +1212,7 @@ async def get_bottleneck_detection(ctx: RequestContext = Depends(get_request_con
         return {"bottlenecks_detected": 0, "bottlenecks": [], "overall_health": "good"}
 
 @router.get("/performance/predictive-alerts")
-async def get_predictive_alerts(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_predictive_alerts(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get predictive capacity alerts"""
     try:
         alerts = []
@@ -1441,16 +1441,16 @@ async def get_sla_compliance(ctx: RequestContext = Depends(get_request_context_h
 # ==== COMBINED DASHBOARD METRICS ENDPOINT ====
 
 @router.get("/dashboard/all-metrics")
-async def get_all_dashboard_metrics(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> DashboardMetrics:
+def get_all_dashboard_metrics(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> DashboardMetrics:
     """Get all enhanced dashboard metrics in one call for efficiency"""
     try:
         # Call individual metric endpoints
-        success_rate = await get_agent_success_rate(ctx, db)
-        completion_time = await get_avg_task_completion_time(ctx, db)
-        system_load = await get_system_load_trend(ctx, db)
-        error_rates = await get_error_rate_by_agent_type(ctx, db)
-        queue_depth = await get_queue_depth(ctx, db)
-        efficiency = await get_efficiency_score(ctx, db)
+        success_rate = get_agent_success_rate(ctx, db)
+        completion_time = get_avg_task_completion_time(ctx, db)
+        system_load = get_system_load_trend(ctx, db)
+        error_rates = get_error_rate_by_agent_type(ctx, db)
+        queue_depth = get_queue_depth(ctx, db)
+        efficiency = get_efficiency_score(ctx, db)
         
         return DashboardMetrics(
             agent_success_rate=success_rate["value"],
@@ -1468,15 +1468,15 @@ async def get_all_dashboard_metrics(ctx: RequestContext = Depends(get_request_co
 # ==== COMBINED PERFORMANCE ANALYTICS ENDPOINT ====
 
 @router.get("/performance/all-enhancements")
-async def get_all_performance_enhancements(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_all_performance_enhancements(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get all performance analytics enhancements in one call"""
     try:
-        cost_per_execution = await get_cost_per_execution(ctx, db)
-        peak_usage = await get_peak_usage_hours(ctx, db)
-        bottlenecks = await get_bottleneck_detection(ctx, db)
-        alerts = await get_predictive_alerts(ctx, db)
-        ranking = await get_agent_ranking(ctx, db)
-        sla = await get_sla_compliance(ctx, db)
+        cost_per_execution = get_cost_per_execution(ctx, db)
+        peak_usage = get_peak_usage_hours(ctx, db)
+        bottlenecks = get_bottleneck_detection(ctx, db)
+        alerts = get_predictive_alerts(ctx, db)
+        ranking = get_agent_ranking(ctx, db)
+        sla = get_sla_compliance(ctx, db)
         
         return {
             "cost_analysis": cost_per_execution,
