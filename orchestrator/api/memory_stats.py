@@ -16,6 +16,7 @@ from sqlalchemy import func, desc, text
 from datetime import datetime
 
 from core.database.database import get_db
+from modules.memory.health import memory_status, search_effectiveness
 from modules.memory.models import MemoryShortTerm
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
@@ -500,9 +501,8 @@ async def get_memory_health(
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """
-    Memory health report — PRD-77.
-    Shows total count, staleness, and basic health indicators.
-    Queries ALL memory tiers (global, per-agent, daily).
+    Memory health report — PRD-77: total count, staleness, and the status with the reason it
+    is not healthy (modules/memory/health.py). Queries ALL memory tiers (global, per-agent, daily).
     """
     service = _get_memory_service()
 
@@ -532,36 +532,14 @@ async def get_memory_health(
         except Exception as e:
             logger.warning("Memory health check failed: %s", e, exc_info=True)
 
-    # Search effectiveness from access log
-    search_stats = {"total_searches": 0, "hits": 0, "hit_rate": 0}
-    try:
-        row = db.execute(
-            text("""
-                SELECT
-                    COUNT(*) as total_searches,
-                    SUM(CASE WHEN had_results THEN 1 ELSE 0 END) as hits
-                FROM memory_access_log
-                WHERE workspace_id = :ws_id
-            """),
-            {"ws_id": str(ctx.workspace_id)},
-        ).fetchone()
-        if row and row.total_searches:
-            search_stats = {
-                "total_searches": row.total_searches,
-                "hits": row.hits or 0,
-                "hit_rate": round((row.hits or 0) / max(row.total_searches, 1), 2),
-            }
-    except Exception as e:
-        logger.debug("memory_access_log query failed: %s", e)
-
     return {
         "success": True,
         "mem0_available": mem0_available,
         "total_memories": total,
         "oldest_memory": oldest_memory,
         "newest_memory": newest_memory,
-        "search_effectiveness": search_stats,
-        "health_status": "healthy" if mem0_available and total > 0 else "degraded" if mem0_available else "unavailable",
+        "search_effectiveness": search_effectiveness(db, ctx.workspace_id),
+        **(await memory_status(service, mem0_available, total)),
     }
 
 

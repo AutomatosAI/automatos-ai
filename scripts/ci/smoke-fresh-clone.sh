@@ -566,7 +566,7 @@ boot_fresh() {
     boot_fresh_from_make
     return
   fi
-  echo "Starting compose stack (postgres, redis, minio, workspace-worker, backend) on an empty database..."
+  echo "Starting compose stack (postgres, redis, minio, qdrant, workspace-worker, backend) on an empty database..."
   up_started_ns="$(date +%s%N)"
   compose up -d --no-build postgres redis minio backend || fail "docker compose up failed"
   echo "Timing the fresh boot: liveness (/health), then readiness (/health/ready)..."

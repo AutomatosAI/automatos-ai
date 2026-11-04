@@ -198,7 +198,7 @@ Sources: [services/voice-tts/Dockerfile](), [services/voice-tts/README.md](), [o
 
 ## Multi-Service Coordination
 
-The `docker-compose.yml` file orchestrates the local stack, including a local S3-compatible store (MinIO) to provide a durable knowledge flywheel during development [docker-compose.yml:83-89](). It also includes an optional Qdrant service for durable and field memory, activated via the `memory` profile [docker-compose.yml:116-133]().
+The `docker-compose.yml` file orchestrates the local stack, including a local S3-compatible store (MinIO) to provide a durable knowledge flywheel during development [docker-compose.yml:83-89](). It also runs a Qdrant service for durable and field memory, in the default stack.
 
 **Service Dependency Graph**
 ```mermaid

@@ -166,12 +166,15 @@ S3_VECTORS_ENABLED=false
 # -----------------------------------------------------------------------------
 # Memory & vectors
 # -----------------------------------------------------------------------------
-# Durable (L3) memory and field memory run on Qdrant. It does NOT start by
-# default; with QDRANT_URL empty the backend keeps both features honestly OFF
-# (no writes attempted, no health probe, one boot log line — PRD-238 S10).
-# To switch memory on:   docker compose --profile memory up -d
-# and set in envs/api.local:   QDRANT_URL=http://qdrant:6333
-QDRANT_URL=
+# [ACTIVE] Durable (L3) memory and field memory run on Qdrant, which the default
+# stack starts (the qdrant service in docker-compose.yml). Writing a memory also
+# needs an embeddings key in Settings → API Keys: OpenRouter's, or the key of the
+# provider chosen under Settings → System Settings → Embeddings (see
+# PLATFORM_KEY_WORKSPACE_ID above); until there is one, Knowledge → Memory says so.
+# Your own Qdrant: QDRANT_URL in envs/api.local. Memory off: QDRANT_URL= (empty) in
+# envs/api.local; the backend then keeps both features honestly off (no writes
+# attempted, no health probe, one boot log line — PRD-238 S10).
+QDRANT_URL=http://qdrant:6333
 # mem0 is legacy (the durable store replaced it); left for operators who run one.
 MEM0_API_URL=http://mem0-server:8765
 # MEM0_API_KEY: set it in envs/api.local if you run your own mem0 (.env values are

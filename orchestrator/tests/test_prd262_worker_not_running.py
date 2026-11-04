@@ -1,6 +1,6 @@
 """PRD-262 US-040: without the workspace worker, a clear "not running" error, never a 500.
 
-The core stack (``docker-compose.core.yml``, ``make up CORE=1``) runs five containers and
+The core stack (``docker-compose.core.yml``, ``make up CORE=1``) runs six containers and
 leaves the workspace worker out. Every call the backend makes to it then fails to
 connect: compose's DNS has no ``workspace-worker`` to resolve, or nothing listens. This
 suite drives the real ``WorkspaceClient`` against a transport that refuses every

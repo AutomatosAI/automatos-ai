@@ -195,7 +195,7 @@ Automatos AI supports multiple vector store backends for RAG (Retrieval Augmente
 
 ### `Qdrant` (Vector Database)
 
-Qdrant is a dedicated vector similarity search engine used for durable (L3) and field memory. It is an opt-in service for local deployments, enabled via a Docker Compose profile [docker-compose.yml:118-119]().
+Qdrant is a dedicated vector similarity search engine used for durable (L3) and field memory. Local deployments run it in the default compose stack, and `envs/api.defaults` points the backend at it.
 
 **Key Features:**
 *   **Dedicated Vector Store**: Optimized for vector search operations.

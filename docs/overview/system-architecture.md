@@ -183,7 +183,7 @@ graph TB
 - **PostgreSQL**: Stores relational models, agent definitions, workspace states, and vector embeddings via `pgvector` [docker-compose.yml:30-51]().
 - **Redis**: Manages L1 session states, caching layer TTLs, task queues, and pub/sub events [docker-compose.yml:55-80]().
 - **MinIO**: Provides an S3-compliant object store locally via `S3_ENDPOINT_URL` [docker-compose.yml:90-111]().
-- **Qdrant**: Optional vector store profile for advanced shared vector field memory (`--profile memory`) [docker-compose.yml:123-134]().
+- **Qdrant**: the vector store for durable and field memory, in the default stack (`QDRANT_URL=http://qdrant:6333` in `envs/api.defaults`).
 
 **Sources**: [docker-compose.yml:30-134](), [orchestrator/Dockerfile:63-120](), [frontend/lib/api-client.ts:3-14]()
 

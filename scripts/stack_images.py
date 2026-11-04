@@ -35,7 +35,7 @@ the official tag found) and make up says why. A non-default ``API_PORT`` or
 ``MINIO_PORT`` whose ``NEXT_PUBLIC_*`` values still point at the default port stops
 here as a misconfiguration: the web app would call a port nothing listens on.
 
-The core stack (``make up CORE=1``, PRD-262 US-040) runs five containers without the
+The core stack (``make up CORE=1``, PRD-262 US-040) runs six containers without the
 workspace worker: ``COMPOSE_FILE`` names ``docker-compose.core.yml``, which puts the
 worker behind its ``workspace`` profile. make up then picks the tag by the same rule but
 pulls, re-tags and builds only the backend's and the frontend's images.

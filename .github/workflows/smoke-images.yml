@@ -41,9 +41,9 @@ name: smoke-images
 #   (PRD-262 US-015). Its backend runs WEB_CONCURRENCY=2 (a compose override the
 #   script writes), because a single uvicorn process has no manager to replace the
 #   worker the PRD-262 US-008 step kills. After it, on the same images (PRD-262 US-040,
-#   scripts/ci/smoke-core-stack.sh): `make up` from an .env written before W5 starts six
-#   containers; `make up CORE=1` on that stack stops the worker and runs five; and a fresh
-#   `make up CORE=1` (docker-compose.core.yml) runs five, answers /health/ready 200 and
+#   scripts/ci/smoke-core-stack.sh): `make up` from an .env written before W5 starts all
+#   seven containers; `make up CORE=1` on that stack stops the worker and runs six; and a
+#   fresh `make up CORE=1` (docker-compose.core.yml) runs six, answers /health/ready 200 and
 #   "Workspace worker not running" from a workspace endpoint, then starts the worker, which
 #   must leave a file in the deliverables folder with its host owner. Then, on the same
 #   images (PRD-262 US-041, scripts/ci/smoke-minio-upgrade.sh): a minio_data volume that
@@ -448,10 +448,10 @@ jobs:
         run: bash scripts/ci/smoke-fresh-clone.sh
 
       # PRD-262 US-040, on the images this job built (the boot above tore its stack down):
-      # an .env written before W5 still starts six containers, and the core override runs
-      # five without the worker (scripts/ci/smoke-core-stack.sh). No secret is exported:
+      # an .env written before W5 still starts all seven containers, and the core override
+      # runs six without the worker (scripts/ci/smoke-core-stack.sh). No secret is exported:
       # the old .env carries its own, and make env writes the fresh core stack's.
-      - name: The core stack runs five containers, and an .env from before W5 still runs six
+      - name: The core stack runs six containers, and an .env from before W5 still runs all seven
         env:
           DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
           AUTOMATOS_IMAGE_TAG: ${{ steps.target.outputs.tag }}

@@ -93,7 +93,7 @@ For details, see [Docker Containerization](#20.1).
 
 ## Docker Compose Setup
 
-The `docker-compose.yml` file provides a comprehensive local development environment, defining various services essential for the Automatos AI platform. This includes core data stores like `postgres` (with `pgvector` support), `redis` for caching and pub/sub, and `minio` as a local S3-compatible object store [docker-compose.yml:26-111](). An optional `qdrant` service is available via the `memory` profile for durable and field memory [docker-compose.yml:123-133](). Each service is configured with health checks to ensure proper startup and operation, and volumes are used for data persistence. The `docker-entrypoint.sh` script for the backend handles database migrations before application startup, ensuring schema alignment [orchestrator/Dockerfile:119-131]().
+The `docker-compose.yml` file provides a comprehensive local development environment, defining various services essential for the Automatos AI platform. This includes core data stores like `postgres` (with `pgvector` support), `redis` for caching and pub/sub, and `minio` as a local S3-compatible object store [docker-compose.yml:26-111](). A `qdrant` service in the default stack holds durable and field memory, and `envs/api.defaults` points the backend at it (`QDRANT_URL=http://qdrant:6333`). Each service is configured with health checks to ensure proper startup and operation, and volumes are used for data persistence. The `docker-entrypoint.sh` script for the backend handles database migrations before application startup, ensuring schema alignment [orchestrator/Dockerfile:119-131]().
 
 For details, see [Docker Compose Setup](#20.2).
 
@@ -123,7 +123,7 @@ For details, see [Database Setup](#20.4).
 
 ## Redis & Vector Store Configuration
 
-Redis is a critical component for caching, session management, and real-time communication via Pub/Sub channels. The `RedisClient` in `orchestrator/core/redis/client.py` manages connection pooling and provides methods for publishing and subscribing to messages, crucial for real-time workflow updates [orchestrator/core/redis/client.py:13-120](). The `docker-compose.yml` configures Redis with a password and disables dangerous commands like `FLUSHDB` and `FLUSHALL` for security [docker-compose.yml:61-62](). For vector storage, the platform supports `pgvector` (default) and an optional `Qdrant` service, which can be enabled via a Docker Compose profile for durable and field memory [docker-compose.yml:123-133](). S3 Vectors backend is also supported for cloud-based vector storage.
+Redis is a critical component for caching, session management, and real-time communication via Pub/Sub channels. The `RedisClient` in `orchestrator/core/redis/client.py` manages connection pooling and provides methods for publishing and subscribing to messages, crucial for real-time workflow updates [orchestrator/core/redis/client.py:13-120](). The `docker-compose.yml` configures Redis with a password and disables dangerous commands like `FLUSHDB` and `FLUSHALL` for security [docker-compose.yml:61-62](). For vector storage, the platform supports `pgvector` (default) and a `Qdrant` service, in the default stack, for durable and field memory. S3 Vectors backend is also supported for cloud-based vector storage.
 
 For details, see [Redis & Vector Store Configuration](#20.5).
 

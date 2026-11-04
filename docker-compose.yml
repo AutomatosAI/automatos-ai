@@ -50,10 +50,11 @@
 # also drives embeddings locally (PLATFORM_KEY_WORKSPACE_ID in envs/api.defaults).
 #
 # Profiles:
-#   - Default: postgres, redis, minio, backend, frontend and the
-#     workspace-worker (Code Canvas runtime), plus minio-volume-owner, a one-shot
-#     that runs before MinIO and exits (PRD-262 US-041). The worker's files live
-#     in a host directory — AUTOMATOS_WORKSPACE_DIR in .env, default ./workspaces next to
+#   - Default: postgres, redis, minio, qdrant (durable and field memory), backend,
+#     frontend and the workspace-worker (Code Canvas runtime), plus
+#     minio-volume-owner, a one-shot that runs before MinIO and exits (PRD-262
+#     US-041). The worker's files live in a host directory —
+#     AUTOMATOS_WORKSPACE_DIR in .env, default ./workspaces next to
 #     this file, created on first boot (PRD-233 S1). It is mounted as THE local
 #     workspace's root (/workspaces/<DEFAULT_WORKSPACE_ID>), so on your machine
 #     it holds artifacts/, reports/, sessions/… directly — no workspace-id
@@ -65,18 +66,20 @@
 #     automatos_workspaces_data, so it survives `docker compose up --build` too
 #     (F220); only `docker compose down -v` removes it.
 #   - All: Add --profile all (adminer, the database GUI)
-#   - Memory: Add --profile memory (qdrant, durable memory; also QDRANT_URL, below)
+#   - Memory is in the default stack: qdrant starts with it and envs/api.defaults sets
+#     QDRANT_URL=http://qdrant:6333. The old memory profile names no service now, so an
+#     .env with COMPOSE_PROFILES=memory and `--profile memory` still start the default.
 #   - Search: Add --profile search (searxng, web search for agents; also SEARXNG_URL)
 #   - Media: Add --profile media (media-render, the Socials video/image renderer;
 #     PRD-251 D3). Without it, rendering a post says it needs the media profile.
 #   - Voice: Add --profile voice (voice-tts, Auto's server voice) and VOICE_TTS_URL=http://voice-tts:8100 in .env
-#   - Core, five containers (PRD-262 US-040): `make up CORE=1`, or
+#   - Core, six containers without the worker (PRD-262 US-040): `make up CORE=1`, or
 #     docker compose -f docker-compose.yml -f docker-compose.core.yml up -d
 #     The override puts the workspace-worker behind a `workspace` profile, so
-#     postgres, redis, minio, backend and frontend run without it. Agents' workspace
-#     tools, the Deliverables file browser and Code Canvas then answer "Workspace
-#     worker not running". The default stays six containers, the worker included,
-#     for every .env old or new: no key turns the worker off.
+#     postgres, redis, minio, qdrant, backend and frontend run without it. Agents'
+#     workspace tools, the Deliverables file browser and Code Canvas then answer
+#     "Workspace worker not running". The default stays seven containers, the worker
+#     included, for every .env old or new: no key turns the worker off.
 #   docs/getting-started/self-hosting.md §3 lists every service, profile and the core
 #   override; orchestrator/tests/test_prd262_self_host_docs.py holds it to this file.
 # =============================================================================
@@ -242,17 +245,21 @@ services:
   # container was an extra 82 MB image doing work the app now does itself.)
 
   # ===========================================================================
-  # Qdrant — durable (L3) + field memory. OPT-IN (PRD-238 S10):
-  #   docker compose --profile memory up -d
-  # and QDRANT_URL=http://qdrant:6333 in envs/api.local. With the profile off
-  # the backend keeps memory honestly off (QDRANT_URL is empty by default).
-  # Prod is unchanged (hosted Qdrant via its own QDRANT_URL).
+  # Qdrant — durable (L3) + field memory, in the default stack
+  # ===========================================================================
+  # envs/api.defaults points the backend at it (QDRANT_URL=http://qdrant:6333), so a
+  # fresh install remembers; writing a memory still needs an embeddings key
+  # (Settings → API Keys), and the Memory tab says so until there is one. It was
+  # opt-in behind a `memory` profile (PRD-238 S10); that profile names no service now,
+  # so an .env or command that still names it starts this default stack. Your own
+  # Qdrant instead: QDRANT_URL in envs/api.local. Memory off: QDRANT_URL= (empty) in
+  # envs/api.local, which the backend treats as off (no writes, no probe); this
+  # container then idles. Prod is unchanged (hosted Qdrant via its own QDRANT_URL).
   # ===========================================================================
   qdrant:
     image: qdrant/qdrant:latest@sha256:b7b0444c4c351c970b98e90a6f89c2ee4287c65b44e52b4cb503fa5b2aa927ad
     container_name: automatos_qdrant
     restart: unless-stopped
-    profiles: ["memory"]
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${QDRANT_PORT:-6333}:6333"
     volumes:
@@ -294,6 +301,10 @@ services:
       workspace-worker:
         condition: service_started
         required: false
+      # Memory's store, started first. Not service_healthy: it has no healthcheck here,
+      # and the backend calls it only once memory is used, after its own boot steps.
+      qdrant:
+        condition: service_started
     # Local-edition topology + edition defaults (AUTH_EDITION=local,
     # DEFAULT_WORKSPACE_ID, MinIO/mem0/qdrant wiring). NO secrets — those stay in
     # `environment:` below as `:?`-required. `environment:` overrides env_file, so

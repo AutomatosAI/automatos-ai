@@ -20,8 +20,8 @@ canonical file builds (``automatos-<name>:dev``), with ``pull_policy: build``, s
 ``make dev`` never tags a build with a published name and never pulls one. It
 cannot add a service or point a service at anything else.
 
-PRD-262 US-040 adds the second override, ``docker-compose.core.yml``: the five-container
-core stack (``make up CORE=1``). It too is read only when passed explicitly, declares no
+PRD-262 US-040 adds the second override, ``docker-compose.core.yml``: the core stack
+without the worker (``make up CORE=1``). It too is read only when passed explicitly, declares no
 service the canonical file lacks, and names no image: it puts the workspace worker behind
 a profile and changes how the backend mounts the workspaces volume.
 

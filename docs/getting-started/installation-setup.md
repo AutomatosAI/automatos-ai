@@ -41,8 +41,8 @@ Before installing Automatos AI, ensure your host environment satisfies the follo
 - **Docker Engine** (25+) and **Docker Compose** (2.24.4+): the compose file's healthchecks use `start_interval`, which Compose refuses on an older engine
 - **Git** for repository cloning
 - **Minimum 8GB RAM** (16GB recommended for running local workers, MinIO, and Qdrant)
-- **Disk** for the images (the first `make up` downloads about 1.33 GB on amd64, measured 16 Oct 2026, and Docker unpacks them to more) and your data volumes; [self-hosting.md §1](self-hosting.md#1-prerequisites) has the breakdown
-- **Port Availability**: `3000` (frontend), `8000` (backend), `5432` (PostgreSQL), `6379` (Redis), `9000`/`9001` (MinIO)
+- **Disk** for the images (the first `make up` downloads about 1.41 GB on amd64, and Docker unpacks them to more) and your data volumes; [self-hosting.md §1](self-hosting.md#1-prerequisites) has the breakdown
+- **Port Availability**: `3000` (frontend), `8000` (backend), `5432` (PostgreSQL), `6379` (Redis), `6333` (Qdrant, memory), `9000`/`9001` (MinIO)
 
 Sources for service ports: [docker-compose.yml:41-129](../../docker-compose.yml#L41-L129), [docker-compose.yml:293-370](../../docker-compose.yml#L293-L370)
 
