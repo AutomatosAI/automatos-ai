@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload, subqueryload
 from sqlalchemy import and_, or_, func, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -896,7 +896,7 @@ def get_agent_status(agent_id: int, ctx: RequestContext = Depends(get_request_co
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/{agent_id}/execute", dependencies=[Depends(require_workspace_permission("agents:execute"))])
-def execute_agent(agent_id: int, execution_data: dict = {}, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def execute_agent(agent_id: int, execution_data: dict = Body(default_factory=dict), ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Execute an agent with given parameters"""
     try:
         agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
@@ -1035,6 +1035,63 @@ def _renamed_to_taken_name(db: Session, workspace_id, agent: Agent, new_name: st
     )
 
 
+def _update_agent_identity(db: Session, ctx: RequestContext, agent: Agent, agent_update: AgentUpdate) -> None:
+    """Who the agent is: name (refused when another agent has it), description, job title,
+    team and manager, and status."""
+    # Update fields if provided
+    if agent_update.name is not None:
+        if _renamed_to_taken_name(db, ctx.workspace_id, agent, agent_update.name):
+            raise HTTPException(status_code=400, detail="Agent with this name already exists")
+        agent.name = agent_update.name
+    
+    if agent_update.description is not None:
+        agent.description = agent_update.description
+
+    if agent_update.job_title is not None:
+        # Empty string clears the job title; non-empty stores the trimmed value.
+        trimmed = agent_update.job_title.strip()
+        agent.job_title = trimmed if trimmed else None
+
+    _apply_agent_org_update(db, ctx.workspace_id, agent, agent_update)  # #831: team / reports_to_id
+
+    if agent_update.status is not None:
+        agent.status = agent_update.status.value
+
+
+def _update_agent_settings(db: Session, ctx: RequestContext, agent: Agent, agent_update: AgentUpdate) -> None:
+    """How the agent works: tags, type, marketplace category, configuration (validated
+    merged) and its tools."""
+    if agent_update.tags is not None:
+        tags = _normalize_tags(agent_update.tags)
+        agent.tags = tags
+        # Remove tags from configuration if present (cleanup legacy data)
+        if agent.configuration and "tags" in agent.configuration:
+            config = agent.configuration.copy()
+            config.pop("tags", None)
+            agent.configuration = config
+
+    # Update agent_type if provided
+    if agent_update.agent_type is not None:
+        agent.agent_type = agent_update.agent_type
+
+    # Update marketplace_category if provided (used for icon mapping)
+    if agent_update.marketplace_category is not None:
+        agent.marketplace_category = agent_update.marketplace_category
+
+    # Update configuration if provided
+    if agent_update.configuration is not None:
+        # Merge with existing configuration (shallow — PRD-234 validates the
+        # MERGED result so a runtime/provider/model split across two updates
+        # can never leave a cli agent half-configured).
+        merged = {**(agent.configuration or {}), **agent_update.configuration}
+        _reject_invalid_runtime(merged)  # PRD-234 S1a
+        agent.configuration = merged
+
+    # Handle tool updates (NEW: agent_app_assignments)
+    if agent_update.tool_ids is not None:
+        _sync_agent_tool_assignments(db, ctx, agent, agent_update.tool_ids)
+
+
 @router.put("/{agent_id}", response_model=AgentResponse, dependencies=[Depends(require_workspace_permission("agents:update"))])
 def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Update an existing agent"""
@@ -1043,54 +1100,8 @@ def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestContext =
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         
-        # Update fields if provided
-        if agent_update.name is not None:
-            if _renamed_to_taken_name(db, ctx.workspace_id, agent, agent_update.name):
-                raise HTTPException(status_code=400, detail="Agent with this name already exists")
-            agent.name = agent_update.name
-        
-        if agent_update.description is not None:
-            agent.description = agent_update.description
-
-        if agent_update.job_title is not None:
-            # Empty string clears the job title; non-empty stores the trimmed value.
-            trimmed = agent_update.job_title.strip()
-            agent.job_title = trimmed if trimmed else None
-
-        _apply_agent_org_update(db, ctx.workspace_id, agent, agent_update)  # #831: team / reports_to_id
-
-        if agent_update.status is not None:
-            agent.status = agent_update.status.value
-
-        if agent_update.tags is not None:
-            tags = _normalize_tags(agent_update.tags)
-            agent.tags = tags
-            # Remove tags from configuration if present (cleanup legacy data)
-            if agent.configuration and "tags" in agent.configuration:
-                config = agent.configuration.copy()
-                config.pop("tags", None)
-                agent.configuration = config
-
-        # Update agent_type if provided
-        if agent_update.agent_type is not None:
-            agent.agent_type = agent_update.agent_type
-
-        # Update marketplace_category if provided (used for icon mapping)
-        if agent_update.marketplace_category is not None:
-            agent.marketplace_category = agent_update.marketplace_category
-
-        # Update configuration if provided
-        if agent_update.configuration is not None:
-            # Merge with existing configuration (shallow — PRD-234 validates the
-            # MERGED result so a runtime/provider/model split across two updates
-            # can never leave a cli agent half-configured).
-            merged = {**(agent.configuration or {}), **agent_update.configuration}
-            _reject_invalid_runtime(merged)  # PRD-234 S1a
-            agent.configuration = merged
-
-        # Handle tool updates (NEW: agent_app_assignments)
-        if agent_update.tool_ids is not None:
-            _sync_agent_tool_assignments(db, ctx, agent, agent_update.tool_ids)
+        _update_agent_identity(db, ctx, agent, agent_update)
+        _update_agent_settings(db, ctx, agent, agent_update)
 
         db.commit()
         db.refresh(agent)
@@ -1161,8 +1172,8 @@ def _delete_agent_related_rows(db: Session, agent_id: int) -> None:
         except Exception as e:
             savepoint.rollback()  # Rollback savepoint, but keep main transaction
             if required:
-                logger.error(f"Error deleting {table_name} for agent {agent_id}: {e}")
-                raise HTTPException(status_code=500, detail="Internal server error")
+                logger.exception(f"Error deleting {table_name} for agent {agent_id}: {e}")
+                raise HTTPException(status_code=500, detail="Internal server error") from e
             else:
                 logger.warning(f"Error deleting {table_name} for agent {agent_id}: {e}")
                 # Continue for optional tables

@@ -177,7 +177,7 @@ def _get_connected_apps_usage(db, conn, agent_ids, since):
                     total_usage = int(log_agg.total_usage or 0)
                     agent_count = int(log_agg.agent_count or 0)
                     last_used = log_agg.last_used
-            except Exception:
+            except Exception:  # noqa: BLE001 — usage counts are optional; the app lists without them
                 pass
     else:
         total_usage = 0

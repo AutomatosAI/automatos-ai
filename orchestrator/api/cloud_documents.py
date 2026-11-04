@@ -186,15 +186,6 @@ def _get_connection_or_404(
 
 def _list_connections_file_storage(db: Session, all_connections: list) -> list:
     """Active file-storage connections (Drive, Dropbox, ...) as response rows."""
-    # File storage categories to filter by
-    FILE_STORAGE_CATEGORIES = [
-        'document & file management',
-        'storage',
-        'cloud storage',
-        'file sharing',
-        'productivity',  # Some file tools are tagged as productivity
-    ]
-
     # Known file storage apps (fallback if category data is missing)
     KNOWN_FILE_STORAGE_APPS = [
         'GOOGLEDRIVE',
@@ -283,8 +274,8 @@ def list_connections(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error listing cloud connections: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.exception(f"Error listing cloud connections: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get(

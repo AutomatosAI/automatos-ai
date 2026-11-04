@@ -268,11 +268,11 @@ def _bulk_update_preferences_check_connections(
                     "ids": list(referenced_connections),
                 },
             ).fetchall()
-        except Exception:
+        except Exception as exc:
             logger.exception("Failed to validate channel_connection ids")
             raise HTTPException(
                 status_code=500, detail="Failed to validate channel connections"
-            )
+            ) from exc
         valid_ids = {str(r[0]) for r in valid_rows}
         missing = referenced_connections - valid_ids
         if missing:

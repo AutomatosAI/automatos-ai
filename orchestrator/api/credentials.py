@@ -298,7 +298,7 @@ def _get_item_response(store, cred):
     try:
         schema_fields = cred_type.schema_definition
         field_names = [field.get('name', '') for field in schema_fields if field.get('name')]
-    except Exception:
+    except Exception:  # noqa: BLE001 — a type without a readable schema lists no fields
         field_names = []
     
     return CredentialResponse(

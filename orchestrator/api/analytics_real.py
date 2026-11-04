@@ -932,7 +932,7 @@ def _get_error_rate_by_agent_type_executed(db, ws):
             error_rates[key] = {"total_executions": total, "failed_executions": failed}
 
     # Compute rates
-    for key, data in error_rates.items():
+    for data in error_rates.values():
         total = data["total_executions"]
         failed = data["failed_executions"]
         rate = round((failed / total * 100) if total > 0 else 0, 1)

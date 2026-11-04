@@ -201,7 +201,7 @@ def get_dashboard_summary(
 def _tally_agent_selection(selection_patterns: Dict[str, Any], assignments: Dict[str, Any]) -> None:
     """Count, per agent type, how often it was the best match and its scores."""
     # Analyze selection patterns
-    for subtask_id, matches in assignments.items():
+    for matches in assignments.values():
         if matches:
             best_match = matches[0]
             agent_type = best_match.get("agent_type", "unknown")

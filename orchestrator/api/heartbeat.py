@@ -450,7 +450,7 @@ def _list_workspace_heartbeats_entry(db, ws_id, agent, hb):
             job = service._scheduler.get_job(f"agent_hb_{agent.id}")
             if job and job.next_run_time:
                 next_run_at = job.next_run_time.isoformat()
-    except Exception:
+    except Exception:  # noqa: BLE001 — no scheduler here: the next run is unknown
         pass  # Scheduler may not be running in all environments
 
     return {

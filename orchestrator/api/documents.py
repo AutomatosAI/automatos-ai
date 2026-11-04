@@ -1793,7 +1793,7 @@ def _track_usage_event_save(db, event_type, document_id, query, results_count, m
         }
     except Exception as e:
         db.rollback()
-        logger.error(f"Error saving usage event: {e}")
+        logger.exception(f"Error saving usage event: {e}")
         # Fall back to just logging
         logger.info(f"Usage event (not persisted): type={event_type}, doc_id={document_id}, query={query[:50] if query else 'N/A'}")
         return {
@@ -1929,7 +1929,7 @@ def _get_usage_analytics_events(db, ctx, start_time):
             {"query": row.query, "count": row.count}
             for row in search_terms_result
         ]
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — the usage table may not exist yet; analytics render without it
         # Table might not exist yet - that's OK for MVP
         logger.debug(f"Could not get document_usage data (table might not exist): {e}")
         db.rollback()  # Clear failed transaction

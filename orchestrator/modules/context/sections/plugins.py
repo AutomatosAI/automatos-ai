@@ -17,6 +17,19 @@ from modules.context.sections.base import BaseSection, SectionContext
 logger = logging.getLogger(__name__)
 
 
+def _not_materialized(plugin_rows: list) -> list:
+    """The plugin rows whose skills are not materialized: only those bring prompt content."""
+    non_materialized = []
+    for row in plugin_rows:
+        _aap, plugin = (
+            row if isinstance(row, tuple) else (row, getattr(row, "plugin", row))
+        )
+        materialized_ids = getattr(plugin, "materialized_skill_ids", None) or []
+        if not materialized_ids:
+            non_materialized.append(row)
+    return non_materialized
+
+
 class PluginsSection(BaseSection):
     """Plugin tier-1 + tier-2 content for the agent's prompt.
 
@@ -70,16 +83,7 @@ class PluginsSection(BaseSection):
         if not plugin_rows:
             return ""
 
-        # Filter to non-materialized plugins only
-        non_materialized = []
-        for row in plugin_rows:
-            _aap, plugin = (
-                row if isinstance(row, tuple) else (row, getattr(row, "plugin", row))
-            )
-            materialized_ids = getattr(plugin, "materialized_skill_ids", None) or []
-            if not materialized_ids:
-                non_materialized.append(row)
-
+        non_materialized = _not_materialized(plugin_rows)
         if not non_materialized:
             return ""
 

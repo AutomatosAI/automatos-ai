@@ -140,22 +140,31 @@ def _model_to_out(m: OpenRouterModelCache) -> OpenRouterModelOut:
 def _browse_models_query(db, provider, category, tier, modality, supports_tools, supports_vision, supports_reasoning, min_context, max_prompt_cost, search):
     """Active cached models narrowed by the browse filters."""
     q = db.query(OpenRouterModelCache).filter(OpenRouterModelCache.status == "active")
+    q = _browse_models_exact(q, provider, category, tier, supports_tools, supports_vision, supports_reasoning)
+    return _browse_models_ranges(q, modality, min_context, max_prompt_cost, search)
 
-    # Filters
+
+def _browse_models_exact(q, provider, category, tier, supports_tools, supports_vision, supports_reasoning):
+    """The filters a model matches exactly: who serves it, its kind, and what it supports."""
     if provider:
         q = q.filter(OpenRouterModelCache.provider == provider)
     if category:
         q = q.filter(OpenRouterModelCache.category == category)
     if tier:
         q = q.filter(OpenRouterModelCache.tier == tier)
-    if modality:
-        q = q.filter(OpenRouterModelCache.modality.ilike(f"%{modality}%"))
     if supports_tools is not None:
         q = q.filter(OpenRouterModelCache.supports_tools == supports_tools)
     if supports_vision is not None:
         q = q.filter(OpenRouterModelCache.supports_vision == supports_vision)
     if supports_reasoning is not None:
         q = q.filter(OpenRouterModelCache.supports_reasoning == supports_reasoning)
+    return q
+
+
+def _browse_models_ranges(q, modality, min_context, max_prompt_cost, search):
+    """The filters a model matches by range or text: modality, context, cost and the search words."""
+    if modality:
+        q = q.filter(OpenRouterModelCache.modality.ilike(f"%{modality}%"))
     if min_context:
         q = q.filter(OpenRouterModelCache.context_length >= min_context)
     if max_prompt_cost is not None:

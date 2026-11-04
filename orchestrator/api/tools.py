@@ -995,7 +995,7 @@ def _get_tool_suggestions_context(app_name_upper: str, workspace_id: Optional[st
         if contexts:
             return _get_tool_suggestions_from_contexts(app_name_upper, contexts)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — suggestions fall back to the catalogue's own
         logger.warning(f"Failed to retrieve context suggestions for {app_name_upper}: {e}")
         # Continue with Phase 1 behavior
     return [], False
