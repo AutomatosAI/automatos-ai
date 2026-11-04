@@ -335,7 +335,7 @@ async def add_api_key(
 
 
 @router.get("", response_model=List[ApiKeyOut])
-async def list_api_keys(
+def list_api_keys(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -354,7 +354,7 @@ async def list_api_keys(
 
 
 @router.delete("/{key_id}", status_code=204, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def delete_api_key(
+def delete_api_key(
     key_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -559,7 +559,7 @@ async def set_platform_key(
 
 
 @router.delete("/platform/{provider}", status_code=200, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def remove_platform_key(
+def remove_platform_key(
     provider: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

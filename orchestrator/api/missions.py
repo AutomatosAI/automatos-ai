@@ -519,7 +519,7 @@ class PlanImportRequest(BaseModel):
 
 
 @router.post("/import-plan", status_code=201, dependencies=[Depends(require_workspace_permission("missions:create"))])
-async def import_mission_plan(
+def import_mission_plan(
     body: PlanImportRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -568,7 +568,7 @@ class ApprovalPolicyRequest(BaseModel):
 
 
 @router.get("/approval-policy")
-async def get_mission_approval_policy(
+def get_mission_approval_policy(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -579,7 +579,7 @@ async def get_mission_approval_policy(
 
 
 @router.put("/approval-policy", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def set_mission_approval_policy(
+def set_mission_approval_policy(
     body: ApprovalPolicyRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -603,7 +603,7 @@ async def set_mission_approval_policy(
 
 
 @router.get("")
-async def list_missions(
+def list_missions(
     state: Optional[str] = Query(None, description="Filter by state (e.g., 'running', 'completed')"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -875,7 +875,7 @@ async def list_archived_missions(
 
 
 @router.get("/archive/{archive_id}")
-async def get_archived_mission(
+def get_archived_mission(
     archive_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -1066,7 +1066,7 @@ async def get_mission(
 
 
 @router.get("/{mission_id}/events")
-async def get_mission_events(
+def get_mission_events(
     mission_id: UUID,
     event_type: Optional[str] = Query(None, description="Filter by event_type"),
     limit: int = Query(50, ge=1, le=200),
@@ -1118,7 +1118,7 @@ async def get_mission_events(
 
 
 @router.get("/{mission_id}/cost")
-async def get_mission_cost(
+def get_mission_cost(
     mission_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -1327,7 +1327,7 @@ async def get_mission_field(
 
 
 @router.patch("/{mission_id}/plan", dependencies=[Depends(require_workspace_permission("missions:update"))])
-async def update_mission_plan(
+def update_mission_plan(
     mission_id: UUID,
     body: MissionPlanEditRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1369,7 +1369,7 @@ async def update_mission_plan(
 
 @router.post("/{mission_id}/approve", dependencies=[Depends(require_workspace_permission("missions:update"))])
 @keeps_the_owners_note  # F291: the owner's note on the plan reaches every step
-async def approve_plan(
+def approve_plan(
     mission_id: UUID,
     body: MissionApproveRequest = MissionApproveRequest(),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1414,7 +1414,7 @@ async def approve_plan(
 
 
 @router.post("/{mission_id}/reject", dependencies=[Depends(require_workspace_permission("missions:update"))])
-async def reject_plan(
+def reject_plan(
     mission_id: UUID,
     body: MissionRejectRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1758,7 +1758,7 @@ async def save_as_routine(
 
 
 @router.post("/{mission_id}/pause", dependencies=[Depends(require_workspace_permission("missions:execute"))])
-async def pause_mission(
+def pause_mission(
     mission_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -1856,7 +1856,7 @@ async def resume_mission(
 
 
 @router.post("/{mission_id}/cancel", dependencies=[Depends(require_workspace_permission("missions:execute"))])
-async def cancel_mission(
+def cancel_mission(
     mission_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -1894,7 +1894,7 @@ async def cancel_mission(
 
 
 @router.delete("/{mission_id}", status_code=204, dependencies=[Depends(require_workspace_permission("missions:delete"))])
-async def delete_mission(
+def delete_mission(
     mission_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

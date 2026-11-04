@@ -521,7 +521,7 @@ async def get_workspace(
 
 
 @router.post("/{workspace_id}/pause")
-async def pause_workspace(
+def pause_workspace(
     workspace_id: UUID,
     body: PauseBody,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -558,7 +558,7 @@ async def pause_workspace(
 
 
 @router.post("/{workspace_id}/resume")
-async def resume_workspace(
+def resume_workspace(
     workspace_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -588,7 +588,7 @@ async def resume_workspace(
 
 
 @router.delete("/{workspace_id}")
-async def delete_workspace(
+def delete_workspace(
     workspace_id: UUID,
     background_tasks: BackgroundTasks,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -632,7 +632,7 @@ async def delete_workspace(
 
 
 @router.post("/{workspace_id}/purge")
-async def purge_workspace(
+def purge_workspace(
     workspace_id: UUID,
     background_tasks: BackgroundTasks,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -665,7 +665,7 @@ async def purge_workspace(
 
 
 @router.post("/{workspace_id}/restore")
-async def restore_workspace(
+def restore_workspace(
     workspace_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

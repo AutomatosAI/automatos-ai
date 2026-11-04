@@ -71,7 +71,7 @@ def _map_dialect_to_introspector(dialect_value: Optional[str]) -> str:
 
 
 @router.get("/", response_model=List[Dict[str, Any]])
-async def get_item(
+def get_item(
     ctx: RequestContext = Depends(get_request_context_hybrid), 
     db: Session = Depends(get_db),
     active_only: bool = False  # Show all sources by default
@@ -271,7 +271,7 @@ def introspect_and_persist(db: Session, source: DatabaseKnowledgeSource) -> Dict
 
 
 @router.post("/{source_id}/introspect", dependencies=[Depends(require_workspace_permission("knowledge:read"))])
-async def introspect_schema(
+def introspect_schema(
     source_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -301,7 +301,7 @@ async def introspect_schema(
 
 
 @router.get("/{source_id}/schema")
-async def get_schema(
+def get_schema(
     source_id: int,
     use_cache: bool = True,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -420,7 +420,7 @@ async def update_semantic_layer(
 
 
 @router.get("/{source_id}")
-async def get_database_source(
+def get_database_source(
     source_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -449,7 +449,7 @@ async def get_database_source(
 
 
 @router.delete("/{source_id}", dependencies=[Depends(require_workspace_permission("knowledge:delete"))])
-async def delete_database_source(
+def delete_database_source(
     source_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -483,7 +483,7 @@ async def delete_database_source(
 
 
 @router.get("/templates/list")
-async def list_query_templates(
+def list_query_templates(
     dialect: Optional[str] = None,
     category: Optional[str] = None,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -757,7 +757,7 @@ async def get_cache_statistics(
 # =============================================================================
 
 @router.get("/{source_id}/audit")
-async def list_audit_entries(
+def list_audit_entries(
     source_id: int,
     limit: int = 50,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -808,7 +808,7 @@ async def list_audit_entries(
 # =============================================================================
 
 @router.get("/{source_id}/examples")
-async def list_training_examples(
+def list_training_examples(
     source_id: int,
     verified_only: bool = False,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -870,7 +870,7 @@ async def add_training_example(
 
 
 @router.put("/{source_id}/examples/{example_id}", dependencies=[Depends(require_workspace_permission("knowledge:update"))])
-async def update_training_example(
+def update_training_example(
     source_id: int,
     example_id: int,
     body: Dict[str, Any] = Body(...),
@@ -1024,7 +1024,7 @@ async def get_training_example_stats(
 # =============================================================================
 
 @router.post("/{source_id}/schema/refresh", dependencies=[Depends(require_workspace_permission("knowledge:update"))])
-async def refresh_schema(
+def refresh_schema(
     source_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -1164,7 +1164,7 @@ async def run_benchmark(
 
 
 @router.get("/{source_id}/benchmark/history")
-async def get_benchmark_history(
+def get_benchmark_history(
     source_id: int,
     limit: int = 50,
     ctx: RequestContext = Depends(get_request_context_hybrid),

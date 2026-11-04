@@ -36,7 +36,7 @@ class CreateTeamRequest(BaseModel):
 
 
 @router.get("", response_model=List[TeamResponse])
-async def list_workspace_teams(
+def list_workspace_teams(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -45,7 +45,7 @@ async def list_workspace_teams(
 
 
 @router.post("", response_model=TeamResponse, status_code=201, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def create_workspace_team(
+def create_workspace_team(
     body: CreateTeamRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

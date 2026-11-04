@@ -199,7 +199,7 @@ def _progress_pct(steps: List[WorkflowStepStatus]) -> float:
     response_model=WorkflowStatusResponse,
     summary="Get workflow status with steps",
 )
-async def get_workflow_status(
+def get_workflow_status(
     workflow_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -243,7 +243,7 @@ async def get_workflow_status(
 
     dependencies=[Depends(require_workspace_permission("missions:execute"))],
 )
-async def pause_workflow(
+def pause_workflow(
     workflow_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -297,7 +297,7 @@ async def pause_workflow(
 
     dependencies=[Depends(require_workspace_permission("missions:execute"))],
 )
-async def resume_workflow(
+def resume_workflow(
     workflow_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -351,7 +351,7 @@ async def resume_workflow(
 
     dependencies=[Depends(require_workspace_permission("missions:execute"))],
 )
-async def cancel_workflow(
+def cancel_workflow(
     workflow_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

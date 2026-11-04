@@ -383,7 +383,7 @@ async def enable_skill(
 
 
 @router.delete("/{workspace_id}/skills/{skill_id}", dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def disable_skill(
+def disable_skill(
     workspace_id: UUID,
     skill_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -568,7 +568,7 @@ def _apply_frontmatter(skill, content: str, body: Any) -> str:
 
 
 @router.get("/{workspace_id}/skills/{skill_id}/content")
-async def get_workspace_skill_content(
+def get_workspace_skill_content(
     workspace_id: UUID,
     skill_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -616,7 +616,7 @@ async def get_workspace_skill_content(
 
 
 @router.post("/{workspace_id}/skills/create", status_code=201, dependencies=[Depends(require_workspace_permission("agents:create"))])
-async def create_workspace_skill(
+def create_workspace_skill(
     workspace_id: UUID,
     body: CreateSkillBody,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -811,7 +811,7 @@ async def update_workspace_skill(
 
 
 @router.delete("/{workspace_id}/skills/{skill_id}/owned", dependencies=[Depends(require_workspace_permission("agents:delete"))])
-async def delete_workspace_owned_skill(
+def delete_workspace_owned_skill(
     workspace_id: UUID,
     skill_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),

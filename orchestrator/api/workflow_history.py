@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/workflows", tags=["workflow-history"])
 
 @router.get("/{workflow_id}/executions")
-async def get_workflow_executions(
+def get_workflow_executions(
     workflow_id: int,
     limit: int = 10,
     offset: int = 0,

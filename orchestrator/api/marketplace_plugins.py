@@ -277,7 +277,7 @@ async def list_plugins(
 
 
 @router.get("/categories", response_model=List[CategoryOut])
-async def list_categories(
+def list_categories(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):

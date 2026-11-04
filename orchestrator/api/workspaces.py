@@ -179,7 +179,7 @@ class OnboardingResetRequest(BaseModel):
 
 
 @router.post("/current/onboarding/reset")
-async def reset_current_onboarding(
+def reset_current_onboarding(
     payload: OnboardingResetRequest = Body(default_factory=OnboardingResetRequest),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -255,7 +255,7 @@ def _workspace_checklist_counts(db: Session, workspace: Workspace) -> dict[str, 
 
 
 @router.get("/current/onboarding/checklist")
-async def get_current_onboarding_checklist(
+def get_current_onboarding_checklist(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -294,7 +294,7 @@ class ChecklistUpdateRequest(BaseModel):
     "/current/onboarding/checklist",
     dependencies=[Depends(require_workspace_permission("workspace:manage"))],
 )
-async def update_current_onboarding_checklist(
+def update_current_onboarding_checklist(
     payload: ChecklistUpdateRequest = Body(default_factory=ChecklistUpdateRequest),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -330,7 +330,7 @@ async def update_current_onboarding_checklist(
 
 
 @router.get("/current/integrations")
-async def get_integrations(
+def get_integrations(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -352,7 +352,7 @@ async def get_integrations(
 
 
 @router.put("/current/integrations", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def save_integrations(
+def save_integrations(
     payload: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -412,7 +412,7 @@ _ALLOWED_PROVIDERS = frozenset(_byok_slugs())
 
 
 @router.get("/current/byok-preferences")
-async def get_byok_preferences(
+def get_byok_preferences(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -426,7 +426,7 @@ async def get_byok_preferences(
 
 
 @router.put("/current/byok-preferences", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def save_byok_preferences(
+def save_byok_preferences(
     payload: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -464,7 +464,7 @@ async def save_byok_preferences(
 
 
 @router.put("/current/voice-live", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def save_voice_live_settings(
+def save_voice_live_settings(
     payload: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -515,7 +515,7 @@ async def save_voice_live_settings(
 
 
 @router.put("/current/socials", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def save_socials_settings(
+def save_socials_settings(
     payload: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

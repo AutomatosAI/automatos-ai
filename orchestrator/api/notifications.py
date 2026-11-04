@@ -140,7 +140,7 @@ _VISIBILITY_PREDICATE = (
 
 @router.get("", response_model=NotificationListResponse)
 @router.get("/", response_model=NotificationListResponse)
-async def list_notifications(
+def list_notifications(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     unread_only: bool = Query(False),
@@ -197,7 +197,7 @@ async def list_notifications(
 
 
 @router.get("/unread-count", response_model=UnreadCountResponse)
-async def unread_count(
+def unread_count(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> UnreadCountResponse:
@@ -224,7 +224,7 @@ async def unread_count(
 
 
 @router.post("/{notification_id}/read", response_model=SimpleSuccessResponse, dependencies=[Depends(require_workspace_permission("members:read"))])
-async def mark_read(
+def mark_read(
     notification_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -546,7 +546,7 @@ async def bulk_update_preferences(
 
 
 @router.post("/read-all", response_model=ReadAllResponse, dependencies=[Depends(require_workspace_permission("members:read"))])
-async def mark_all_read(
+def mark_all_read(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> ReadAllResponse:
@@ -577,7 +577,7 @@ async def mark_all_read(
 
 
 @router.post("/{notification_id}/dismiss", response_model=SimpleSuccessResponse, dependencies=[Depends(require_workspace_permission("members:read"))])
-async def dismiss(
+def dismiss(
     notification_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

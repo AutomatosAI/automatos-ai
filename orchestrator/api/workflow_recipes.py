@@ -229,7 +229,7 @@ def _enrich_steps_with_agents(steps: Optional[list], db: Session) -> Optional[li
 
 
 @router.get("")
-async def list_workflow_recipes(
+def list_workflow_recipes(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     is_featured: Optional[bool] = None,
     is_public: Optional[bool] = True,
@@ -753,7 +753,7 @@ def record_recipe_usage(
 
 
 @router.get("/categories/list")
-async def list_recipe_categories(
+def list_recipe_categories(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -785,7 +785,7 @@ async def list_recipe_categories(
 
 
 @router.get("/featured/list")
-async def list_featured_recipes(
+def list_featured_recipes(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     limit: int = Query(10, ge=1, le=50),
     db: Session = Depends(get_db)
@@ -1056,7 +1056,7 @@ def get_recipe_execution_detail(
 # ===================================================================
 
 @router.post("/{recipe_id}/executions/{execution_id}/cancel", dependencies=[Depends(require_workspace_permission("playbooks:execute"))])
-async def cancel_execution(
+def cancel_execution(
     recipe_id: str,
     execution_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1643,7 +1643,7 @@ webhook_router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 
 
 @webhook_router.get("/recipe/{webhook_id}")
-async def recipe_webhook_verify(
+def recipe_webhook_verify(
     webhook_id: str,
     db: Session = Depends(get_db),
 ):

@@ -342,7 +342,7 @@ async def list_files(
 
     dependencies=[Depends(require_workspace_permission("workspace:manage"))],
 )
-async def select_folder(
+def select_folder(
     connection_id: int,
     body: SelectFolderRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -441,7 +441,7 @@ async def trigger_sync(
 
 
 @router.get("/sync-jobs/{job_id}", response_model=SyncJobResponse)
-async def get_sync_job(
+def get_sync_job(
     job_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -478,7 +478,7 @@ async def get_sync_job(
     "/connections/{connection_id}/sync-status",
     response_model=SyncStatusResponse,
 )
-async def get_sync_status(
+def get_sync_status(
     connection_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -539,7 +539,7 @@ async def get_sync_status(
 
     dependencies=[Depends(require_workspace_permission("workspace:manage"))],
 )
-async def disconnect_connection(
+def disconnect_connection(
     connection_id: int,
     delete_vectors: bool = Query(False, description="Delete all S3 vectors for this connection"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
