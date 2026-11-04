@@ -348,8 +348,42 @@ async def get_heartbeat_status(
 
 # ── Analytics ──────────────────────────────────────────────────────
 
+def _get_heartbeat_analytics_today(db, ws_id, today_start):
+    """Today's heartbeat totals, tokens, successes and errors."""
+    # Today's stats
+    today_stats = db.execute(
+        text("""
+            SELECT
+                COUNT(*) as total,
+                SUM(tokens_used) as total_tokens,
+                SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as successes,
+                SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as errors
+            FROM heartbeat_results
+            WHERE workspace_id = :ws_id AND created_at >= :start
+        """),
+        {"ws_id": ws_id, "start": today_start}
+    ).fetchone()
+    return today_stats
+
+
+def _get_heartbeat_analytics_recent(db, ws_id, yesterday_start):
+    """Latest 20 heartbeat results since `yesterday_start`."""
+    # Recent events (last 24h)
+    recent = db.execute(
+        text("""
+            SELECT id, source_type, source_id, status, tokens_used, created_at
+            FROM heartbeat_results
+            WHERE workspace_id = :ws_id AND created_at >= :start
+            ORDER BY created_at DESC
+            LIMIT 20
+        """),
+        {"ws_id": ws_id, "start": yesterday_start}
+    ).fetchall()
+    return recent
+
+
 @router.get("/analytics", dependencies=[_SU])
-async def get_heartbeat_analytics(
+def get_heartbeat_analytics(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -361,31 +395,9 @@ async def get_heartbeat_analytics(
     yesterday_start = today_start - timedelta(days=1)
 
     try:
-        # Today's stats
-        today_stats = db.execute(
-            text("""
-                SELECT
-                    COUNT(*) as total,
-                    SUM(tokens_used) as total_tokens,
-                    SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as successes,
-                    SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as errors
-                FROM heartbeat_results
-                WHERE workspace_id = :ws_id AND created_at >= :start
-            """),
-            {"ws_id": ws_id, "start": today_start}
-        ).fetchone()
+        today_stats = _get_heartbeat_analytics_today(db, ws_id, today_start)
 
-        # Recent events (last 24h)
-        recent = db.execute(
-            text("""
-                SELECT id, source_type, source_id, status, tokens_used, created_at
-                FROM heartbeat_results
-                WHERE workspace_id = :ws_id AND created_at >= :start
-                ORDER BY created_at DESC
-                LIMIT 20
-            """),
-            {"ws_id": ws_id, "start": yesterday_start}
-        ).fetchall()
+        recent = _get_heartbeat_analytics_recent(db, ws_id, yesterday_start)
 
         return {
             "today": {
@@ -413,8 +425,57 @@ async def get_heartbeat_analytics(
 
 # ── PRD-72: Activity Command Centre Endpoints ─────────────────────
 
+def _list_workspace_heartbeats_entry(db, ws_id, agent, hb):
+    """One agent's heartbeat entry with its last run and next scheduled run."""
+    # Get last execution for this agent heartbeat
+    last_run_row = db.execute(
+        text("""
+            SELECT id, status, findings, tokens_used, cost, created_at
+            FROM heartbeat_results
+            WHERE workspace_id = :ws_id
+              AND source_type = 'agent'
+              AND source_id = :agent_id
+            ORDER BY created_at DESC
+            LIMIT 1
+        """),
+        {"ws_id": ws_id, "agent_id": str(agent.id)},
+    ).fetchone()
+
+    # Get next run time from scheduler if available
+    next_run_at = None
+    try:
+        from services.heartbeat_service import get_heartbeat_service
+        service = get_heartbeat_service()
+        if service._scheduler:
+            job = service._scheduler.get_job(f"agent_hb_{agent.id}")
+            if job and job.next_run_time:
+                next_run_at = job.next_run_time.isoformat()
+    except Exception:
+        pass  # Scheduler may not be running in all environments
+
+    return {
+        "id": agent.id,
+        "agent_id": agent.id,
+        "agent_name": agent.name,
+        "agent_description": agent.description,
+        "enabled": hb.get("enabled", False),
+        "interval_minutes": hb.get("interval_minutes", 60),
+        "prompt": hb.get("prompt", ""),
+        "auto_act": hb.get("auto_act", False),
+        "timezone": hb.get("timezone", "UTC"),
+        "active_hours_start": hb.get("active_hours_start", "08:00"),
+        "active_hours_end": hb.get("active_hours_end", "20:00"),
+        "last_run": {
+            "status": last_run_row.status,
+            "created_at": last_run_row.created_at.isoformat() if last_run_row.created_at else None,
+            "tokens_used": last_run_row.tokens_used,
+        } if last_run_row else None,
+        "next_run_at": next_run_at,
+    }
+
+
 @router.get("/workspace", dependencies=[_READ])
-async def list_workspace_heartbeats(
+def list_workspace_heartbeats(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -440,51 +501,7 @@ async def list_workspace_heartbeats(
             if not hb:
                 continue
 
-            # Get last execution for this agent heartbeat
-            last_run_row = db.execute(
-                text("""
-                    SELECT id, status, findings, tokens_used, cost, created_at
-                    FROM heartbeat_results
-                    WHERE workspace_id = :ws_id
-                      AND source_type = 'agent'
-                      AND source_id = :agent_id
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                """),
-                {"ws_id": ws_id, "agent_id": str(agent.id)},
-            ).fetchone()
-
-            # Get next run time from scheduler if available
-            next_run_at = None
-            try:
-                from services.heartbeat_service import get_heartbeat_service
-                service = get_heartbeat_service()
-                if service._scheduler:
-                    job = service._scheduler.get_job(f"agent_hb_{agent.id}")
-                    if job and job.next_run_time:
-                        next_run_at = job.next_run_time.isoformat()
-            except Exception:
-                pass  # Scheduler may not be running in all environments
-
-            heartbeats.append({
-                "id": agent.id,
-                "agent_id": agent.id,
-                "agent_name": agent.name,
-                "agent_description": agent.description,
-                "enabled": hb.get("enabled", False),
-                "interval_minutes": hb.get("interval_minutes", 60),
-                "prompt": hb.get("prompt", ""),
-                "auto_act": hb.get("auto_act", False),
-                "timezone": hb.get("timezone", "UTC"),
-                "active_hours_start": hb.get("active_hours_start", "08:00"),
-                "active_hours_end": hb.get("active_hours_end", "20:00"),
-                "last_run": {
-                    "status": last_run_row.status,
-                    "created_at": last_run_row.created_at.isoformat() if last_run_row.created_at else None,
-                    "tokens_used": last_run_row.tokens_used,
-                } if last_run_row else None,
-                "next_run_at": next_run_at,
-            })
+            heartbeats.append(_list_workspace_heartbeats_entry(db, ws_id, agent, hb))
 
         return {"heartbeats": heartbeats, "total": len(heartbeats)}
 
@@ -553,8 +570,38 @@ def toggle_heartbeat(
     }
 
 
+def _get_heartbeat_executions_rows(rows):
+    """Shape heartbeat_results rows into execution entries (error message from findings)."""
+    executions = []
+    for r in rows:
+        findings = r.findings
+        if isinstance(findings, str):
+            findings = json.loads(findings)
+
+        # Extract error message from findings if status is error
+        error_message = None
+        if r.status == "error" and findings:
+            for f in findings:
+                if f.get("check") in ("error", "llm_error"):
+                    error_message = f.get("detail", "")[:500]
+                    break
+
+        executions.append({
+            "id": r.id,
+            "status": r.status,
+            "started_at": r.created_at.isoformat() if r.created_at else None,
+            "completed_at": r.created_at.isoformat() if r.created_at else None,
+            "duration_seconds": None,  # Not tracked separately; heartbeats are fast
+            "tokens_used": r.tokens_used,
+            "cost": r.cost,
+            "error_message": error_message,
+            "findings_count": len(findings) if findings else 0,
+        })
+    return executions
+
+
 @router.get("/{heartbeat_id}/executions", dependencies=[_READ])
-async def get_heartbeat_executions(
+def get_heartbeat_executions(
     heartbeat_id: int,
     limit: int = Query(10, ge=1, le=100),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -590,31 +637,7 @@ async def get_heartbeat_executions(
             {"ws_id": ws_id, "agent_id": str(heartbeat_id), "lim": limit},
         ).fetchall()
 
-        executions = []
-        for r in rows:
-            findings = r.findings
-            if isinstance(findings, str):
-                findings = json.loads(findings)
-
-            # Extract error message from findings if status is error
-            error_message = None
-            if r.status == "error" and findings:
-                for f in findings:
-                    if f.get("check") in ("error", "llm_error"):
-                        error_message = f.get("detail", "")[:500]
-                        break
-
-            executions.append({
-                "id": r.id,
-                "status": r.status,
-                "started_at": r.created_at.isoformat() if r.created_at else None,
-                "completed_at": r.created_at.isoformat() if r.created_at else None,
-                "duration_seconds": None,  # Not tracked separately; heartbeats are fast
-                "tokens_used": r.tokens_used,
-                "cost": r.cost,
-                "error_message": error_message,
-                "findings_count": len(findings) if findings else 0,
-            })
+        executions = _get_heartbeat_executions_rows(rows)
 
         return {
             "agent_id": heartbeat_id,
