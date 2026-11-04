@@ -262,7 +262,7 @@ async def start_business_scan(
 # ===========================================================================
 
 @router.post("/start", response_model=StartResponse, status_code=201, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def start_wizard(
+def start_wizard(
     body: StartBody,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -476,7 +476,7 @@ async def progress_feed(
 
 
 @router.patch("/profile/{profile_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def patch_profile(
+def patch_profile(
     profile_id: str,
     body: ProfilePatch,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -499,7 +499,7 @@ async def patch_profile(
 
 
 @router.get("/profile/{profile_id}")
-async def get_profile(
+def get_profile(
     profile_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
