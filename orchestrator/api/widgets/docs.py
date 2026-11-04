@@ -85,7 +85,7 @@ _TEAM_FILTER_CLAUSE = TEAM_FILTER_CLAUSE
 # ---------------------------------------------------------------------------
 
 @router.post("/search", response_model=DocsSearchResponse)
-async def docs_search(
+def docs_search(
     body: DocsSearchRequest,
     auth: WidgetAuthContext = Depends(require_permission("documents:read")),
     db: Session = Depends(get_db),
@@ -133,7 +133,7 @@ async def docs_search(
 # ---------------------------------------------------------------------------
 
 @router.get("/{document_id}", response_model=DocsDetailResponse)
-async def docs_detail(
+def docs_detail(
     document_id: int,
     team: Optional[str] = Query(None, description="Team filter"),
     auth: WidgetAuthContext = Depends(require_permission("documents:read")),
@@ -174,7 +174,7 @@ async def docs_detail(
 # ---------------------------------------------------------------------------
 
 @router.get("/categories", response_model=List[DocsCategoryItem])
-async def docs_categories(
+def docs_categories(
     team: Optional[str] = Query(None, description="Team filter"),
     auth: WidgetAuthContext = Depends(require_permission("documents:read")),
     db: Session = Depends(get_db),
