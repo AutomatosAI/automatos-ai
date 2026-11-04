@@ -281,7 +281,7 @@ def _cas_resolve_grant(
 
 @router.post("/{grant_id}/deny")
 @remembers_the_decision(DECLINED)  # P256-FIX-N13-4: a decline is remembered too
-def deny_approval(
+async def deny_approval(
     grant_id: int,
     ctx: RequestContext = Depends(require_workspace_answerer),
     db: Session = Depends(get_db),

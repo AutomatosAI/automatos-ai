@@ -1406,7 +1406,7 @@ def update_mission_plan(
 
 @router.post("/{mission_id}/approve", dependencies=[Depends(require_workspace_permission("missions:update"))])
 @keeps_the_owners_note  # F291: the owner's note on the plan reaches every step
-def approve_plan(
+async def approve_plan(
     mission_id: UUID,
     body: MissionApproveRequest = MissionApproveRequest(),
     ctx: RequestContext = Depends(get_request_context_hybrid),
