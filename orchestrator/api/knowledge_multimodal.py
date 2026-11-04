@@ -180,8 +180,37 @@ def get_knowledge_types(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _create_knowledge_item_insert(db, ctx, item, kb_type_id):
+    """Insert the knowledge_items row; returns the id/created_at row."""
+    # Create knowledge item
+    insert_query = text("""
+        INSERT INTO knowledge_items 
+        (kb_type_id, title, content, summary, metadata, quality_score, importance_score, visibility, owner_id, status, workspace_id)
+        VALUES 
+        (:kb_type_id, :title, :content, :summary, :metadata, :quality_score, :importance_score, :visibility, :owner_id, 'active', :workspace_id)
+        RETURNING id, created_at
+    """)
+
+    result = db.execute(
+        insert_query,
+        {
+            "kb_type_id": kb_type_id,
+            "title": item.title,
+            "content": item.content,
+            "summary": item.summary,
+            "metadata": json.dumps(item.metadata),
+            "quality_score": item.quality_score,
+            "importance_score": item.importance_score,
+            "visibility": item.visibility,
+            "owner_id": item.owner_id,
+            "workspace_id": ctx.workspace_id
+        }
+    ).fetchone()
+    return result
+
+
 @router.post("/items", response_model=KnowledgeItemResponse, dependencies=[Depends(require_workspace_permission("knowledge:create"))])
-async def create_knowledge_item(
+def create_knowledge_item(
     item: KnowledgeItemCreate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -202,31 +231,7 @@ async def create_knowledge_item(
         
         kb_type_id = kb_type_row.id
         
-        # Create knowledge item
-        insert_query = text("""
-            INSERT INTO knowledge_items 
-            (kb_type_id, title, content, summary, metadata, quality_score, importance_score, visibility, owner_id, status, workspace_id)
-            VALUES 
-            (:kb_type_id, :title, :content, :summary, :metadata, :quality_score, :importance_score, :visibility, :owner_id, 'active', :workspace_id)
-            RETURNING id, created_at
-        """)
-        
-        result = db.execute(
-            insert_query,
-            {
-                "kb_type_id": kb_type_id,
-                "title": item.title,
-                "content": item.content,
-                "summary": item.summary,
-                "metadata": json.dumps(item.metadata),
-                "quality_score": item.quality_score,
-                "importance_score": item.importance_score,
-                "visibility": item.visibility,
-                "owner_id": item.owner_id,
-                "workspace_id": ctx.workspace_id
-            }
-        ).fetchone()
-        
+        result = _create_knowledge_item_insert(db, ctx, item, kb_type_id)
         db.commit()
         
         return KnowledgeItemResponse(
@@ -669,8 +674,78 @@ async def upload_document_multimodal(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _search_knowledge_formulas(db, ctx, search):
+    """Formula matches for search_knowledge."""
+    all_results = []
+    # Search formulas
+    if not search.kb_types or 'formula' in search.kb_types:
+        formula_query = text("""
+            SELECT 
+                f.id,
+                'formula' as kb_type,
+                LEFT(f.latex, 100) as title,
+                LEFT(COALESCE(f.ascii_math, f.latex), 300) as content_snippet,
+                1.0 as relevance_score,
+                1.0 as quality_score,
+                f.created_at
+            FROM kb_formulas f
+            WHERE f.workspace_id = :workspace_id
+            ORDER BY f.created_at DESC
+            LIMIT :limit
+        """)
+        formula_results = db.execute(formula_query, {"limit": search.limit, "workspace_id": ctx.workspace_id}).fetchall()
+        all_results.extend([
+            KnowledgeSearchResult(
+                id=row.id,
+                kb_type=row.kb_type,
+                title=row.title or 'Formula',
+                content_snippet=row.content_snippet or '',
+                relevance_score=float(row.relevance_score),
+                quality_score=float(row.quality_score),
+                created_at=row.created_at
+            )
+            for row in formula_results
+        ])
+    return all_results
+
+
+def _search_knowledge_tables(db, ctx, search):
+    """Table matches for search_knowledge."""
+    all_results = []
+    # Search tables
+    if not search.kb_types or 'table' in search.kb_types:
+        table_query = text("""
+            SELECT 
+                t.id,
+                'table' as kb_type,
+                'Table' as title,
+                LEFT(COALESCE(t.markdown_representation, ''), 300) as content_snippet,
+                1.0 as relevance_score,
+                1.0 as quality_score,
+                t.created_at
+            FROM kb_tables t
+            WHERE t.workspace_id = :workspace_id
+            ORDER BY t.created_at DESC
+            LIMIT :limit
+        """)
+        table_results = db.execute(table_query, {"limit": search.limit, "workspace_id": ctx.workspace_id}).fetchall()
+        all_results.extend([
+            KnowledgeSearchResult(
+                id=row.id,
+                kb_type=row.kb_type,
+                title=row.title or 'Table',
+                content_snippet=row.content_snippet or '',
+                relevance_score=float(row.relevance_score),
+                quality_score=float(row.quality_score),
+                created_at=row.created_at
+            )
+            for row in table_results
+        ])
+    return all_results
+
+
 @router.post("/search", response_model=List[KnowledgeSearchResult], dependencies=[Depends(require_workspace_permission("knowledge:read"))])
-async def search_knowledge(
+def search_knowledge(
     search: KnowledgeSearchRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -693,66 +768,8 @@ async def search_knowledge(
 
         all_results = []
 
-        # Search formulas
-        if not search.kb_types or 'formula' in search.kb_types:
-            formula_query = text("""
-                SELECT 
-                    f.id,
-                    'formula' as kb_type,
-                    LEFT(f.latex, 100) as title,
-                    LEFT(COALESCE(f.ascii_math, f.latex), 300) as content_snippet,
-                    1.0 as relevance_score,
-                    1.0 as quality_score,
-                    f.created_at
-                FROM kb_formulas f
-                WHERE f.workspace_id = :workspace_id
-                ORDER BY f.created_at DESC
-                LIMIT :limit
-            """)
-            formula_results = db.execute(formula_query, {"limit": search.limit, "workspace_id": ctx.workspace_id}).fetchall()
-            all_results.extend([
-                KnowledgeSearchResult(
-                    id=row.id,
-                    kb_type=row.kb_type,
-                    title=row.title or 'Formula',
-                    content_snippet=row.content_snippet or '',
-                    relevance_score=float(row.relevance_score),
-                    quality_score=float(row.quality_score),
-                    created_at=row.created_at
-                )
-                for row in formula_results
-            ])
-        
-        # Search tables
-        if not search.kb_types or 'table' in search.kb_types:
-            table_query = text("""
-                SELECT 
-                    t.id,
-                    'table' as kb_type,
-                    'Table' as title,
-                    LEFT(COALESCE(t.markdown_representation, ''), 300) as content_snippet,
-                    1.0 as relevance_score,
-                    1.0 as quality_score,
-                    t.created_at
-                FROM kb_tables t
-                WHERE t.workspace_id = :workspace_id
-                ORDER BY t.created_at DESC
-                LIMIT :limit
-            """)
-            table_results = db.execute(table_query, {"limit": search.limit, "workspace_id": ctx.workspace_id}).fetchall()
-            all_results.extend([
-                KnowledgeSearchResult(
-                    id=row.id,
-                    kb_type=row.kb_type,
-                    title=row.title or 'Table',
-                    content_snippet=row.content_snippet or '',
-                    relevance_score=float(row.relevance_score),
-                    quality_score=float(row.quality_score),
-                    created_at=row.created_at
-                )
-                for row in table_results
-            ])
-        
+        all_results.extend(_search_knowledge_formulas(db, ctx, search))
+        all_results.extend(_search_knowledge_tables(db, ctx, search))
         # Search images
         if not search.kb_types or 'image' in search.kb_types:
             image_query = text("""
@@ -792,8 +809,117 @@ async def search_knowledge(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _get_knowledge_item_formula(db, ctx, item_id):
+    """Fetch one formula row as the response dict (404 if missing)."""
+    query = text("""
+        SELECT 
+            id,
+            knowledge_item_id,
+            latex,
+            mathml,
+            ascii_math,
+            variables,
+            operators,
+            complexity_level,
+            formula_type,
+            domain,
+            created_at
+        FROM kb_formulas
+        WHERE id = :item_id AND workspace_id = :workspace_id
+    """)
+    result = db.execute(query, {"item_id": item_id, "workspace_id": ctx.workspace_id}).fetchone()
+    if not result:
+        raise HTTPException(status_code=404, detail="Formula not found")
+
+    return {
+        "id": result.id,
+        "kb_type": "formula",
+        "latex": result.latex,
+        "mathml": result.mathml,
+        "ascii_math": result.ascii_math,
+        "variables": result.variables,
+        "operators": result.operators,
+        "complexity_level": result.complexity_level,
+        "formula_type": result.formula_type,
+        "domain": result.domain,
+        "created_at": result.created_at
+    }
+
+
+def _get_knowledge_item_table(db, ctx, item_id):
+    """Fetch one table row as the response dict (404 if missing)."""
+    query = text("""
+        SELECT 
+            id,
+            knowledge_item_id,
+            headers,
+            row_count,
+            column_count,
+            markdown_representation,
+            csv_data,
+            json_data,
+            created_at
+        FROM kb_tables
+        WHERE id = :item_id AND workspace_id = :workspace_id
+    """)
+    result = db.execute(query, {"item_id": item_id, "workspace_id": ctx.workspace_id}).fetchone()
+    if not result:
+        raise HTTPException(status_code=404, detail="Table not found")
+
+    return {
+        "id": result.id,
+        "kb_type": "table",
+        "headers": result.headers,
+        "row_count": result.row_count,
+        "column_count": result.column_count,
+        "markdown": result.markdown_representation,
+        "csv": result.csv_data,
+        "json_data": result.json_data,
+        "created_at": result.created_at
+    }
+
+
+def _get_knowledge_item_image(db, ctx, item_id):
+    """Fetch one image row as the response dict (404 if missing)."""
+    query = text("""
+        SELECT 
+            id,
+            knowledge_item_id,
+            width,
+            height,
+            format,
+            description,
+            caption,
+            alt_text,
+            detected_objects,
+            detected_text,
+            storage_path,
+            created_at
+        FROM kb_images
+        WHERE id = :item_id AND workspace_id = :workspace_id
+    """)
+    result = db.execute(query, {"item_id": item_id, "workspace_id": ctx.workspace_id}).fetchone()
+    if not result:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    return {
+        "id": result.id,
+        "kb_type": "image",
+        "width": result.width,
+        "height": result.height,
+        "format": result.format,
+        "description": result.description,
+        "caption": result.caption,
+        "alt_text": result.alt_text,
+        "detected_objects": result.detected_objects,
+        "detected_text": result.detected_text,
+        "storage_path": result.storage_path,
+        "created_at": result.created_at
+    }
+
+
 @router.get("/items/{item_id}")
-async def get_knowledge_item(
+def get_knowledge_item(
     item_id: int,
     type: str = Query(..., description="Knowledge type: table, formula, or image"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -805,107 +931,11 @@ async def get_knowledge_item(
     try:
         # Query the appropriate table based on type
         if type == 'formula':
-            query = text("""
-                SELECT 
-                    id,
-                    knowledge_item_id,
-                    latex,
-                    mathml,
-                    ascii_math,
-                    variables,
-                    operators,
-                    complexity_level,
-                    formula_type,
-                    domain,
-                    created_at
-                FROM kb_formulas
-                WHERE id = :item_id AND workspace_id = :workspace_id
-            """)
-            result = db.execute(query, {"item_id": item_id, "workspace_id": ctx.workspace_id}).fetchone()
-            if not result:
-                raise HTTPException(status_code=404, detail="Formula not found")
-            
-            return {
-                "id": result.id,
-                "kb_type": "formula",
-                "latex": result.latex,
-                "mathml": result.mathml,
-                "ascii_math": result.ascii_math,
-                "variables": result.variables,
-                "operators": result.operators,
-                "complexity_level": result.complexity_level,
-                "formula_type": result.formula_type,
-                "domain": result.domain,
-                "created_at": result.created_at
-            }
-            
+            return _get_knowledge_item_formula(db, ctx, item_id)
         elif type == 'table':
-            query = text("""
-                SELECT 
-                    id,
-                    knowledge_item_id,
-                    headers,
-                    row_count,
-                    column_count,
-                    markdown_representation,
-                    csv_data,
-                    json_data,
-                    created_at
-                FROM kb_tables
-                WHERE id = :item_id AND workspace_id = :workspace_id
-            """)
-            result = db.execute(query, {"item_id": item_id, "workspace_id": ctx.workspace_id}).fetchone()
-            if not result:
-                raise HTTPException(status_code=404, detail="Table not found")
-            
-            return {
-                "id": result.id,
-                "kb_type": "table",
-                "headers": result.headers,
-                "row_count": result.row_count,
-                "column_count": result.column_count,
-                "markdown": result.markdown_representation,
-                "csv": result.csv_data,
-                "json_data": result.json_data,
-                "created_at": result.created_at
-            }
-            
+            return _get_knowledge_item_table(db, ctx, item_id)
         elif type == 'image':
-            query = text("""
-                SELECT 
-                    id,
-                    knowledge_item_id,
-                    width,
-                    height,
-                    format,
-                    description,
-                    caption,
-                    alt_text,
-                    detected_objects,
-                    detected_text,
-                    storage_path,
-                    created_at
-                FROM kb_images
-                WHERE id = :item_id AND workspace_id = :workspace_id
-            """)
-            result = db.execute(query, {"item_id": item_id, "workspace_id": ctx.workspace_id}).fetchone()
-            if not result:
-                raise HTTPException(status_code=404, detail="Image not found")
-            
-            return {
-                "id": result.id,
-                "kb_type": "image",
-                "width": result.width,
-                "height": result.height,
-                "format": result.format,
-                "description": result.description,
-                "caption": result.caption,
-                "alt_text": result.alt_text,
-                "detected_objects": result.detected_objects,
-                "detected_text": result.detected_text,
-                "storage_path": result.storage_path,
-                "created_at": result.created_at
-            }
+            return _get_knowledge_item_image(db, ctx, item_id)
         else:
             raise HTTPException(status_code=400, detail=f"Invalid type: {type}")
             
