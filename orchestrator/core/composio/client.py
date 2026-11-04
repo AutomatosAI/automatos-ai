@@ -23,6 +23,7 @@ from config import config
 from core.composio import lookup_cache
 from core.composio.auth_config_lookup import newest_enabled, toolkit_accounts, toolkit_auth_configs
 from core.composio.auth_schemes import custom_auth_fallback_scheme
+from core.composio.catalog_records import bulk_actions_from_items, toolkit_app_record
 from core.composio.deny_list import composio_action_denial, denied_result
 
 logger = logging.getLogger(__name__)
@@ -625,114 +626,42 @@ class ComposioClient:
             return []
 
         try:
-            # Paginate through all toolkit pages (max 1000 per page)
-            all_apps = []
-            cursor = None
-            page = 0
-            while True:
-                page += 1
-                kwargs = {"limit": 1000}
-                if cursor:
-                    kwargs["cursor"] = cursor
-                response = self.composio.toolkits.list(**kwargs)
-                items = response.items or []
-                all_apps.extend(items)
-                total = getattr(response, "total_items", len(all_apps))
-                logger.info(
-                    f"Fetched page {page}: {len(items)} toolkits "
-                    f"({len(all_apps)}/{int(total)} total)"
-                )
-                next_cursor = getattr(response, "next_cursor", None)
-                if not next_cursor or not items or len(all_apps) >= total:
-                    break
-                cursor = next_cursor
-
-            logger.info(f"Fetched {len(all_apps)} total toolkits from Composio API")
-
+            all_apps = self._list_all_toolkits()
             trigger_map = self._build_trigger_map()
-            results = []
-            for app in all_apps:
-                # Try multiple sources for triggers
-                raw_triggers = None
-                source = "none"
-                if hasattr(app, "meta") and hasattr(app.meta, "triggers"):
-                    raw_triggers = getattr(app.meta, "triggers", None)
-                    source = "app.meta.triggers"
-                if not raw_triggers and hasattr(app, "triggers"):
-                    raw_triggers = getattr(app, "triggers", None)
-                    source = "app.triggers"
-                if not raw_triggers:
-                    raw_triggers = trigger_map.get(app.slug.lower(), [])
-                    source = f"trigger_map[{app.slug.lower()}]"
-
-                normalized_triggers = self._normalize_triggers(raw_triggers)
-
-                # Log if we found triggers (for debugging)
-                if normalized_triggers and app.slug.lower() in ["slack", "gmail", "github"]:
-                    logger.debug(f"Found {len(normalized_triggers)} triggers for {app.slug} (source: {source})")
-                # Extract description from multiple possible sources
-                description = ""
-                if hasattr(app, "meta"):
-                    description = (
-                        getattr(app.meta, "description", None)
-                        or getattr(app.meta, "summary", None)
-                        or getattr(app, "description", None)
-                        or ""
-                    )
-                else:
-                    description = getattr(app, "description", None) or ""
-
-                # SDK uses tools_count (not actions_count)
-                action_count = 0
-                if hasattr(app, "meta"):
-                    action_count = int(
-                        getattr(app.meta, "tools_count", 0)
-                        or getattr(app.meta, "actions_count", 0)
-                        or 0
-                    )
-
-                # Logo: nested under meta (Pydantic model or dict)
-                logo_url = None
-                if hasattr(app, "meta") and app.meta is not None:
-                    if isinstance(app.meta, dict):
-                        logo_url = app.meta.get("logo")
-                    else:
-                        logo_url = getattr(app.meta, "logo", None)
-
-                # Categories: top-level List[str] on AppModel, fallback to meta
-                categories = getattr(app, "categories", None) or []
-                if not categories and hasattr(app, "meta"):
-                    meta_cats = (
-                        app.meta.get("categories", [])
-                        if isinstance(app.meta, dict)
-                        else getattr(app.meta, "categories", [])
-                    )
-                    categories = [
-                        (c.name if hasattr(c, "name") else str(c))
-                        for c in (meta_cats or [])
-                    ]
-                else:
-                    categories = [str(c) for c in categories]
-
-                results.append(
-                    {
-                        "name": app.slug,  # Use slug as the identifier (e.g. 'github')
-                        "display_name": app.name,
-                        "description": description,
-                        "logo_url": logo_url,
-                        "categories": categories,
-                        "auth_schemes": app.auth_schemes or [],
-                        "action_count": action_count,
-                        "triggers": normalized_triggers,
-                        "trigger_count": len(normalized_triggers),
-                    }
-                )
+            results = [toolkit_app_record(app, trigger_map) for app in all_apps]
             logos_found = sum(1 for r in results if r.get("logo_url"))
             logger.info(f"Composio apps: {len(results)} total, {logos_found} with logos")
             return results
         except Exception as e:
-            logger.error(f"Failed to get available apps: {e}")
+            logger.exception(f"Failed to get available apps: {e}")
             return []
+
+    def _list_all_toolkits(self) -> List[Any]:
+        """Every toolkit the SDK lists, following its cursor (max 1000 per page)."""
+        # Paginate through all toolkit pages (max 1000 per page)
+        all_apps = []
+        cursor = None
+        page = 0
+        while True:
+            page += 1
+            kwargs = {"limit": 1000}
+            if cursor:
+                kwargs["cursor"] = cursor
+            response = self.composio.toolkits.list(**kwargs)
+            items = response.items or []
+            all_apps.extend(items)
+            total = getattr(response, "total_items", len(all_apps))
+            logger.info(
+                f"Fetched page {page}: {len(items)} toolkits "
+                f"({len(all_apps)}/{int(total)} total)"
+            )
+            next_cursor = getattr(response, "next_cursor", None)
+            if not next_cursor or not items or len(all_apps) >= total:
+                break
+            cursor = next_cursor
+
+        logger.info(f"Fetched {len(all_apps)} total toolkits from Composio API")
+        return all_apps
 
     def _build_trigger_map(self) -> Dict[str, List[Dict[str, Any]]]:
         """Build a map of toolkit slug -> triggers."""
@@ -755,24 +684,6 @@ class ComposioClient:
             })
         logger.info(f"Built trigger map with {len(trigger_map)} toolkits")
         return trigger_map
-
-    def _normalize_triggers(self, triggers: Any) -> List[Dict[str, Any]]:
-        """Normalize triggers into a list of {name, display_name, description} dicts."""
-        if not triggers:
-            return []
-        if isinstance(triggers, list):
-            normalized = []
-            for trigger in triggers:
-                if isinstance(trigger, str):
-                    normalized.append({"name": trigger, "display_name": trigger, "description": ""})
-                elif isinstance(trigger, dict):
-                    normalized.append({
-                        "name": trigger.get("name") or trigger.get("slug") or trigger.get("trigger_name"),
-                        "display_name": trigger.get("display_name") or trigger.get("name") or trigger.get("slug"),
-                        "description": trigger.get("description", ""),
-                    })
-            return normalized
-        return []
 
     def get_trigger_types(self, toolkit_slugs: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         """
@@ -954,98 +865,7 @@ class ComposioClient:
             pages += 1
             logger.info(f"  Fetched page {pages}: {len(items)} actions (total so far: {len(out) + len(items)})")
 
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-
-                fn = item.get("function") if isinstance(item.get("function"), dict) else None
-                if item.get("type") and item.get("type") != "function" and fn is None:
-                    # Ignore non-function tools unless function payload exists.
-                    continue
-
-                # Extract display name (human-readable) from function.name or item.name
-                display_name_raw = (
-                    (fn or {}).get("name")
-                    or item.get("name")
-                    or ""
-                )
-                display_name_raw = str(display_name_raw).strip()
-
-                # Extract slug and derive API enum identifier (e.g., "GMAIL_FETCH_EMAILS")
-                item_slug = str(item.get("slug") or "").strip()
-                item_enum = str(item.get("enum") or "").strip()
-
-                # Prefer enum > slug-derived > display-name-derived
-                if item_enum:
-                    action_name = item_enum.upper()
-                elif item_slug:
-                    action_name = item_slug.upper().replace("-", "_")
-                elif display_name_raw:
-                    action_name = display_name_raw
-                else:
-                    continue
-
-                if not action_name:
-                    continue
-
-                toolkit = item.get("toolkit")
-                toolkit_slug = None
-                if isinstance(toolkit, dict):
-                    toolkit_slug = toolkit.get("slug") or toolkit.get("name")
-                elif isinstance(toolkit, str):
-                    toolkit_slug = toolkit
-                toolkit_slug = toolkit_slug or item.get("toolkit_slug") or item.get("toolkitSlug")
-
-                app_name = str(toolkit_slug or "").strip()
-                if not app_name and "_" in action_name:
-                    # Fallback: many actions are prefixed with TOOLKIT_*
-                    app_name = action_name.split("_", 1)[0]
-
-                app_name = app_name.upper().strip()
-                if not app_name:
-                    continue
-
-                # Extract all available fields from the API response
-                # (the REST API may include more metadata than the SDK wrapper exposes)
-                import json
-                # Safely extract metadata without circular references
-                extra_metadata = {}
-                excluded_keys = {
-                    "function", "name", "slug", "toolkit", "toolkit_slug", "toolkitSlug",
-                    "type", "description", "summary", "parameters", "response_schema",
-                    "tags", "category", "is_premium",
-                }
-                for k, v in item.items():
-                    if k not in excluded_keys:
-                        try:
-                            # Test if value is JSON-serializable (breaks circular refs)
-                            json.dumps(v, default=str)
-                            extra_metadata[k] = v
-                        except (TypeError, ValueError):
-                            # Skip non-serializable values (likely circular refs)
-                            pass
-                
-                out.append(
-                    {
-                        "app_name": app_name,
-                        "name": action_name,
-                        "display_name": display_name_raw or item.get("display_name") or action_name,
-                        "description": (
-                            (fn or {}).get("description")
-                            or item.get("description")
-                            or item.get("summary")
-                            or ""
-                        ),
-                        "parameters": (fn or {}).get("parameters") or item.get("parameters") or {},
-                        # Additional metadata fields (if present in API response)
-                        "response_schema": (fn or {}).get("response_schema") or item.get("response_schema") or {},
-                        "tags": item.get("tags") or (fn or {}).get("tags") or [],
-                        "category": item.get("category") or (fn or {}).get("category") or None,
-                        "is_premium": item.get("is_premium") or (fn or {}).get("is_premium") or False,
-                        # Store any extra metadata (sanitized to avoid circular refs)
-                        "metadata": self._sanitize_metadata(extra_metadata),
-                    }
-                )
+            out.extend(bulk_actions_from_items(items))
 
             cursor = data.get("next_cursor") or data.get("nextCursor")
             if not cursor:

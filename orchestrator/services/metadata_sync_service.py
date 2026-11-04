@@ -32,6 +32,11 @@ from core.models.composio_cache import (
 logger = logging.getLogger(__name__)
 
 INTERNAL_APP_NAMES = {"RAG", "MEMORY", "NL2SQL", "CODEGRAPH"}
+# Apps whose triggers and orphaned actions the sync logs one by one (the ones checked most).
+VERBOSE_LOG_APPS = ("SLACK", "GMAIL", "GITHUB")
+# Actions are committed in batches of this size, to avoid huge transactions.
+ACTION_COMMIT_BATCH_SIZE = 100
+ACTION_PROGRESS_LOG_EVERY = 500
 
 
 class MetadataSyncService:
@@ -57,129 +62,13 @@ class MetadataSyncService:
         errors: List[str] = []
 
         try:
-            logger.info("Step 1/4: Fetching available apps from Composio...")
-            apps = self.client.get_available_apps() or []
-            logger.info(f"Found {len(apps)} apps from Composio")
-            apps_by_name: Dict[str, Dict[str, Any]] = {}
-            for app in apps:
-                if not isinstance(app, dict):
-                    continue
-                name = (app.get("name") or "").strip()
-                if not name:
-                    continue
-                apps_by_name[name.upper()] = app
-
-            # Bulk fetch actions (paged) and group by app_name
-            logger.info("Step 2/4: Fetching all actions in bulk (this may take a while for 880+ tools)...")
-            # Use higher limit per page and more max pages to ensure we get ALL actions
-            bulk_actions = self.client.get_all_actions_bulk(limit=1000, max_pages=1000) or []
-            logger.info(f"Fetched {len(bulk_actions)} total actions from Composio")
-            actions_by_app: Dict[str, List[Dict[str, Any]]] = {}
-            for action in bulk_actions:
-                if not isinstance(action, dict):
-                    continue
-                an = (action.get("name") or "").strip()
-                app_name = (action.get("app_name") or "").strip().upper()
-                if not an or not app_name:
-                    continue
-                actions_by_app.setdefault(app_name, []).append(action)
-            logger.info(f"Grouped actions into {len(actions_by_app)} apps")
-
-            # Upsert apps first (no per-app action fetch)
-            logger.info("Step 3/4: Upserting apps into cache...")
-            for idx, (app_name, app) in enumerate(apps_by_name.items(), 1):
-                try:
-                    trigger_count = app.get("trigger_count", 0)
-                    triggers = app.get("triggers", [])
-                    if trigger_count > 0 or len(triggers) > 0:
-                        if app_name in ("SLACK", "GMAIL", "GITHUB"):
-                            logger.info(f"  Storing {trigger_count} triggers for {app_name}")
-                    elif app_name in ("SLACK", "GMAIL", "GITHUB"):
-                        logger.warning(f"⚠️  App {app_name} has 0 triggers - check Composio API / trigger_map")
-                    self._upsert_app_only(app_name, app)
-                    apps_synced += 1
-                    if idx % 50 == 0 or idx == len(apps_by_name):
-                        logger.info(f"  Upserted {idx}/{len(apps_by_name)} apps...")
-                except Exception as e:
-                    logger.error(f"Failed to upsert app {app_name}: {e}")
-                    errors.append(f"{app_name}: {e}")
-
-            # Upsert actions (and remove orphans so DB matches Composio bulk exactly)
-            logger.info("Step 4/4: Upserting actions into cache (removing orphans)...")
-            total_actions = sum(len(actions) for actions in actions_by_app.values())
-            action_idx = 0
-            batch_size = 100  # Commit in batches to avoid huge transactions
-            seen: Set[Tuple[str, str]] = set()  # (app_name, action_name) to avoid bulk duplicates
-            for app_name, actions in actions_by_app.items():
-                # Only store actions for known apps (avoid stray/unmapped toolkits)
-                if app_name not in apps_by_name:
-                    continue
-                keep_names = {(a.get("name") or "").strip() for a in actions if (a.get("name") or "").strip()}
-                if keep_names:
-                    deleted = self._delete_orphaned_actions(app_name, keep_names)
-                    if deleted and app_name in ("GITHUB", "SLACK", "GMAIL"):
-                        logger.info(f"  Removed {deleted} orphaned actions for {app_name}")
-                for action in actions:
-                    try:
-                        name = (action.get("name") or "").strip()
-                        if not name:
-                            continue
-                        key = (app_name, name)
-                        if key in seen:
-                            continue
-                        seen.add(key)
-                        self._upsert_action(app_name, name, action)
-                        actions_synced += 1
-                        action_idx += 1
-                        
-                        # Commit in batches to avoid huge transactions and memory issues
-                        if action_idx % batch_size == 0:
-                            self.db.commit()
-                            logger.info(f"  Upserted {action_idx}/{total_actions} actions (committed batch)...")
-                        elif action_idx % 500 == 0 or action_idx == total_actions:
-                            logger.info(f"  Upserted {action_idx}/{total_actions} actions...")
-                    except Exception as e:
-                        logger.error(f"Failed to upsert action {app_name}.{action.get('name')}: {e}")
-                        errors.append(f"{app_name}.{(action or {}).get('name')}: {e}")
-                        # Rollback this action but continue
-                        try:
-                            self.db.rollback()
-                        except Exception:
-                            pass
-
-            # Update action_count per app from actual DB count (matches bulk after orphan cleanup)
-            for app_name, app in apps_by_name.items():
-                try:
-                    cached = (
-                        self.db.query(ComposioAppCache)
-                        .filter(ComposioAppCache.app_name == app_name)
-                        .first()
-                    )
-                    if not cached:
-                        continue
-                    actual = (
-                        self.db.query(func.count(ComposioActionCache.id))
-                        .filter(ComposioActionCache.app_name == app_name)
-                        .scalar()
-                        or 0
-                    )
-                    cached.action_count = int(actual)
-                    cached.last_synced_at = datetime.utcnow()
-                except Exception as e:
-                    errors.append(f"{app_name}: failed to update counts: {e}")
-
+            apps_by_name, actions_by_app = self._fetch_catalogue()
+            apps_synced, errors = self._upsert_apps(apps_by_name)
+            actions_synced, action_errors = self._upsert_actions(apps_by_name, actions_by_app)
+            errors = [*errors, *action_errors, *self._refresh_action_counts(apps_by_name)]
             self.db.commit()
 
-            # Backfill parameter schemas for apps that have empty parameters.
-            # The v3 bulk API doesn't return parameter schemas, but the SDK
-            # per-app endpoint does (OpenAI function-calling format).
-            logger.info("Step 5/5: Backfilling parameter schemas for actions with empty params...")
-            backfilled = self._backfill_action_parameters(set(actions_by_app.keys()))
-            if backfilled:
-                logger.info(f"  Backfilled parameters for {backfilled} actions")
-
-            logger.info("Updating stats cache...")
-            self._update_stats()
+            backfilled = self._backfill_and_update_stats(set(actions_by_app.keys()))
             job.status = "completed"
             logger.info(
                 f"✅ Sync completed: {apps_synced} apps, {actions_synced} actions, "
@@ -191,10 +80,7 @@ class MetadataSyncService:
             errors.append(str(e))
             job.status = "failed"
             # Rollback on error to allow retry
-            try:
-                self.db.rollback()
-            except Exception:
-                pass
+            self._rollback_quietly()
         finally:
             completed_at = datetime.utcnow()
             job.completed_at = completed_at
@@ -213,6 +99,160 @@ class MetadataSyncService:
             "errors_count": len(errors),
             "duration_ms": job.duration_ms,
         }
+
+    def _fetch_catalogue(self) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, List[Dict[str, Any]]]]:
+        """Steps 1-2: every app keyed by upper-cased name, and the bulk actions grouped by app."""
+        logger.info("Step 1/4: Fetching available apps from Composio...")
+        apps = self.client.get_available_apps() or []
+        logger.info(f"Found {len(apps)} apps from Composio")
+        apps_by_name: Dict[str, Dict[str, Any]] = {}
+        for app in apps:
+            if not isinstance(app, dict):
+                continue
+            name = (app.get("name") or "").strip()
+            if not name:
+                continue
+            apps_by_name[name.upper()] = app
+
+        # Bulk fetch actions (paged) and group by app_name
+        logger.info("Step 2/4: Fetching all actions in bulk (this may take a while for 880+ tools)...")
+        # Use higher limit per page and more max pages to ensure we get ALL actions
+        bulk_actions = self.client.get_all_actions_bulk(limit=1000, max_pages=1000) or []
+        logger.info(f"Fetched {len(bulk_actions)} total actions from Composio")
+        actions_by_app: Dict[str, List[Dict[str, Any]]] = {}
+        for action in bulk_actions:
+            if not isinstance(action, dict):
+                continue
+            an = (action.get("name") or "").strip()
+            app_name = (action.get("app_name") or "").strip().upper()
+            if not an or not app_name:
+                continue
+            actions_by_app.setdefault(app_name, []).append(action)
+        logger.info(f"Grouped actions into {len(actions_by_app)} apps")
+        return apps_by_name, actions_by_app
+
+    def _upsert_apps(self, apps_by_name: Dict[str, Dict[str, Any]]) -> Tuple[int, List[str]]:
+        """Step 3: upsert every app row (no per-app action fetch). Returns (apps upserted, errors)."""
+        logger.info("Step 3/4: Upserting apps into cache...")
+        apps_synced = 0
+        errors: List[str] = []
+        for idx, (app_name, app) in enumerate(apps_by_name.items(), 1):
+            try:
+                trigger_count = app.get("trigger_count", 0)
+                triggers = app.get("triggers", [])
+                if trigger_count > 0 or len(triggers) > 0:
+                    if app_name in VERBOSE_LOG_APPS:
+                        logger.info(f"  Storing {trigger_count} triggers for {app_name}")
+                elif app_name in VERBOSE_LOG_APPS:
+                    logger.warning(f"⚠️  App {app_name} has 0 triggers - check Composio API / trigger_map")
+                self._upsert_app_only(app_name, app)
+                apps_synced += 1
+                if idx % 50 == 0 or idx == len(apps_by_name):
+                    logger.info(f"  Upserted {idx}/{len(apps_by_name)} apps...")
+            except Exception as e:
+                logger.exception(f"Failed to upsert app {app_name}: {e}")
+                errors.append(f"{app_name}: {e}")
+        return apps_synced, errors
+
+    def _upsert_actions(
+        self,
+        apps_by_name: Dict[str, Dict[str, Any]],
+        actions_by_app: Dict[str, List[Dict[str, Any]]],
+    ) -> Tuple[int, List[str]]:
+        """Step 4: upsert actions and remove orphans, so the DB matches Composio bulk exactly.
+
+        Returns (actions upserted, errors).
+        """
+        logger.info("Step 4/4: Upserting actions into cache (removing orphans)...")
+        total_actions = sum(len(actions) for actions in actions_by_app.values())
+        actions_synced = 0
+        errors: List[str] = []
+        seen: Set[Tuple[str, str]] = set()  # (app_name, action_name) to avoid bulk duplicates
+        for app_name, actions in actions_by_app.items():
+            # Only store actions for known apps (avoid stray/unmapped toolkits)
+            if app_name not in apps_by_name:
+                continue
+            keep_names = {(a.get("name") or "").strip() for a in actions if (a.get("name") or "").strip()}
+            if keep_names:
+                deleted = self._delete_orphaned_actions(app_name, keep_names)
+                if deleted and app_name in VERBOSE_LOG_APPS:
+                    logger.info(f"  Removed {deleted} orphaned actions for {app_name}")
+            for action in actions:
+                try:
+                    name = (action.get("name") or "").strip()
+                    if not name:
+                        continue
+                    key = (app_name, name)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    self._upsert_action(app_name, name, action)
+                    actions_synced += 1
+                    self._commit_action_batch(actions_synced, total_actions)
+                except Exception as e:
+                    logger.exception(f"Failed to upsert action {app_name}.{action.get('name')}: {e}")
+                    errors.append(f"{app_name}.{(action or {}).get('name')}: {e}")
+                    # Rollback this action but continue
+                    self._rollback_quietly()
+        return actions_synced, errors
+
+    def _commit_action_batch(self, action_idx: int, total_actions: int) -> None:
+        """Commit every ACTION_COMMIT_BATCH_SIZE actions, and log progress."""
+        # Commit in batches to avoid huge transactions and memory issues
+        if action_idx % ACTION_COMMIT_BATCH_SIZE == 0:
+            self.db.commit()
+            logger.info(f"  Upserted {action_idx}/{total_actions} actions (committed batch)...")
+        elif action_idx % ACTION_PROGRESS_LOG_EVERY == 0 or action_idx == total_actions:
+            logger.info(f"  Upserted {action_idx}/{total_actions} actions...")
+
+    def _refresh_action_counts(self, apps_by_name: Dict[str, Dict[str, Any]]) -> List[str]:
+        """Set action_count per app from the actual DB count (matches bulk after orphan cleanup).
+
+        Returns the errors.
+        """
+        errors: List[str] = []
+        for app_name in apps_by_name:
+            try:
+                cached = (
+                    self.db.query(ComposioAppCache)
+                    .filter(ComposioAppCache.app_name == app_name)
+                    .first()
+                )
+                if not cached:
+                    continue
+                actual = (
+                    self.db.query(func.count(ComposioActionCache.id))
+                    .filter(ComposioActionCache.app_name == app_name)
+                    .scalar()
+                    or 0
+                )
+                cached.action_count = int(actual)
+                cached.last_synced_at = datetime.utcnow()
+            except Exception as e:
+                logger.exception(f"Failed to update the action count for {app_name}")
+                errors.append(f"{app_name}: failed to update counts: {e}")
+        return errors
+
+    def _backfill_and_update_stats(self, synced_app_names: Set[str]) -> int:
+        """Step 5: backfill empty parameter schemas, then the stats cache. Returns actions backfilled."""
+        # Backfill parameter schemas for apps that have empty parameters.
+        # The v3 bulk API doesn't return parameter schemas, but the SDK
+        # per-app endpoint does (OpenAI function-calling format).
+        logger.info("Step 5/5: Backfilling parameter schemas for actions with empty params...")
+        backfilled = self._backfill_action_parameters(synced_app_names)
+        if backfilled:
+            logger.info(f"  Backfilled parameters for {backfilled} actions")
+
+        logger.info("Updating stats cache...")
+        self._update_stats()
+        return backfilled
+
+    def _rollback_quietly(self) -> None:
+        """Roll the session back after a sync error so the sync can carry on or end cleanly."""
+        try:
+            self.db.rollback()
+        except Exception:
+            logger.exception("Rollback after a metadata sync error failed")
 
     def run_incremental_sync(self) -> Dict[str, Any]:
         """Lightweight sync placeholder (currently full sync)."""
