@@ -176,8 +176,38 @@ async def get_credential_type_by_name(
 # Credential CRUD Endpoints
 # ============================================================================
 
+def _handle_request_response(created_cred, cred_type, field_names, bridge_result):
+    """Build the create-credential response (no decrypted values)."""
+    return CredentialResponse(
+        id=created_cred.id,
+        name=created_cred.name,
+        credential_type_id=created_cred.credential_type_id,
+        credential_type_name=cred_type.name,
+        credential_type_display_name=cred_type.display_name,
+        environment=created_cred.environment,
+        description=created_cred.description,
+        tags=created_cred.tags or [],
+        is_active=created_cred.is_active,
+        expires_at=created_cred.expires_at,
+        last_tested=created_cred.last_tested,
+        test_status=created_cred.test_status,
+        test_message=created_cred.test_message,
+        created_by=created_cred.created_by,
+        created_at=created_cred.created_at,
+        updated_at=created_cred.updated_at,
+        has_credentials=True,
+        field_names=field_names,
+        connection_status=bridge_result.status if bridge_result else None,
+        connection_id=bridge_result.connection_id if bridge_result else None,
+        auth_config_id=bridge_result.auth_config_id if bridge_result else None,
+        auth_scheme=bridge_result.auth_scheme if bridge_result else None,
+        oauth_redirect_url=bridge_result.oauth_redirect_url if bridge_result else None,
+        connection_error=bridge_result.error if bridge_result else None,
+    )
+
+
 @router.post("/", response_model=CredentialResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def handle_request(
+def handle_request(
     credential: CredentialCreate,
     request: Request,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -218,32 +248,7 @@ async def handle_request(
             decrypted_data=decrypted,
         )
 
-        response = CredentialResponse(
-            id=created_cred.id,
-            name=created_cred.name,
-            credential_type_id=created_cred.credential_type_id,
-            credential_type_name=cred_type.name,
-            credential_type_display_name=cred_type.display_name,
-            environment=created_cred.environment,
-            description=created_cred.description,
-            tags=created_cred.tags or [],
-            is_active=created_cred.is_active,
-            expires_at=created_cred.expires_at,
-            last_tested=created_cred.last_tested,
-            test_status=created_cred.test_status,
-            test_message=created_cred.test_message,
-            created_by=created_cred.created_by,
-            created_at=created_cred.created_at,
-            updated_at=created_cred.updated_at,
-            has_credentials=True,
-            field_names=field_names,
-            connection_status=bridge_result.status if bridge_result else None,
-            connection_id=bridge_result.connection_id if bridge_result else None,
-            auth_config_id=bridge_result.auth_config_id if bridge_result else None,
-            auth_scheme=bridge_result.auth_scheme if bridge_result else None,
-            oauth_redirect_url=bridge_result.oauth_redirect_url if bridge_result else None,
-            connection_error=bridge_result.error if bridge_result else None,
-        )
+        response = _handle_request_response(created_cred, cred_type, field_names, bridge_result)
 
         return response
     
@@ -258,8 +263,68 @@ async def handle_request(
         raise HTTPException(status_code=500, detail="Failed to create credential")
 
 
+def _get_item_query(db, ctx, credential_type_id, environment, active_only, search, tags):
+    """Workspace-scoped credential query with the list filters applied."""
+    # Build query
+    query = db.query(Credential).filter(Credential.workspace_id == ctx.workspace_id)
+    
+    # Apply filters
+    if credential_type_id:
+        query = query.filter(Credential.credential_type_id == credential_type_id)
+    if environment:
+        query = query.filter(Credential.environment == environment)
+    if active_only:
+        query = query.filter(Credential.is_active == True)
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.filter(
+            or_(
+                Credential.name.ilike(search_pattern),
+                Credential.description.ilike(search_pattern)
+            )
+        )
+    if tags:
+        tag_list = tags.split(',')
+        for tag in tag_list:
+            query = query.filter(Credential.tags.contains([tag]))
+    return query
+
+
+def _get_item_response(store, cred):
+    """Build one list entry from a credential row (values are never returned)."""
+    cred_type = store.get_credential_type(cred.credential_type_id)
+    
+    # Get field names from credential type schema
+    try:
+        schema_fields = cred_type.schema_definition
+        field_names = [field.get('name', '') for field in schema_fields if field.get('name')]
+    except Exception:
+        field_names = []
+    
+    return CredentialResponse(
+        id=cred.id,
+        name=cred.name,
+        credential_type_id=cred.credential_type_id,
+        credential_type_name=cred_type.name,
+        credential_type_display_name=cred_type.display_name,
+        environment=cred.environment,
+        description=cred.description,
+        tags=cred.tags or [],
+        is_active=cred.is_active,
+        expires_at=cred.expires_at,
+        last_tested=cred.last_tested,
+        test_status=cred.test_status,
+        test_message=cred.test_message,
+        created_by=cred.created_by,
+        created_at=cred.created_at,
+        updated_at=cred.updated_at,
+        has_credentials=True,
+        field_names=field_names
+    )
+
+
 @router.get("/")
-async def get_item(
+def get_item(
     ctx: RequestContext = Depends(get_request_context_hybrid), 
     credential_type_id: Optional[int] = Query(None, description="Filter by type"),
     environment: Optional[str] = Query(None, description="Filter by environment"),
@@ -280,29 +345,10 @@ async def get_item(
     set_request_id(str(uuid.uuid4()))
     
     try:
-        # Build query
-        query = db.query(Credential).filter(Credential.workspace_id == ctx.workspace_id)
-        
-        # Apply filters
-        if credential_type_id:
-            query = query.filter(Credential.credential_type_id == credential_type_id)
-        if environment:
-            query = query.filter(Credential.environment == environment)
-        if active_only:
-            query = query.filter(Credential.is_active == True)
-        if search:
-            search_pattern = f"%{search}%"
-            query = query.filter(
-                or_(
-                    Credential.name.ilike(search_pattern),
-                    Credential.description.ilike(search_pattern)
-                )
-            )
-        if tags:
-            tag_list = tags.split(',')
-            for tag in tag_list:
-                query = query.filter(Credential.tags.contains([tag]))
-        
+        query = _get_item_query(
+            db, ctx, credential_type_id, environment, active_only, search, tags
+        )
+
         # Get total count before pagination
         total = query.count()
         
@@ -312,39 +358,8 @@ async def get_item(
         # Calculate pagination metadata
         pages = (total + limit - 1) // limit
         
-        # Build responses
-        responses = []
-        for cred in credentials:
-            cred_type = store.get_credential_type(cred.credential_type_id)
-            
-            # Get field names from credential type schema
-            try:
-                schema_fields = cred_type.schema_definition
-                field_names = [field.get('name', '') for field in schema_fields if field.get('name')]
-            except Exception:
-                field_names = []
-            
-            responses.append(CredentialResponse(
-                id=cred.id,
-                name=cred.name,
-                credential_type_id=cred.credential_type_id,
-                credential_type_name=cred_type.name,
-                credential_type_display_name=cred_type.display_name,
-                environment=cred.environment,
-                description=cred.description,
-                tags=cred.tags or [],
-                is_active=cred.is_active,
-                expires_at=cred.expires_at,
-                last_tested=cred.last_tested,
-                test_status=cred.test_status,
-                test_message=cred.test_message,
-                created_by=cred.created_by,
-                created_at=cred.created_at,
-                updated_at=cred.updated_at,
-                has_credentials=True,
-                field_names=field_names
-            ))
-        
+        responses = [_get_item_response(store, cred) for cred in credentials]
+
         # Return paginated response
         return {
             "items": responses,
