@@ -24,14 +24,11 @@ already are, and a second row would show every post twice.
 from __future__ import annotations
 
 import asyncio
-import functools
 import logging
 import re
 from datetime import date, datetime, timezone
 from typing import Any, AsyncIterator, Iterator, List, Optional, Sequence, Tuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
-import anyio
 
 from core.storage import is_storage_configured
 from core.utils.background_tasks import launch_guarded
@@ -106,14 +103,10 @@ async def copy_files(workspace_id: Any, plan: Plan) -> List[str]:
 
 
 def _start(workspace_id: Any, plan: Plan) -> None:
-    """Launch ``copy_files`` on the event loop, from a route on the loop or one in the threadpool."""
-    launch = functools.partial(launch_guarded, subsystem="socials", operation="workspace_copy", workspace_id=workspace_id)
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        anyio.from_thread.run_sync(lambda: launch(copy_files(workspace_id, plan)))
-        return
-    launch(copy_files(workspace_id, plan))
+    """Launch ``copy_files`` on the event loop, from a route on the loop or one in the threadpool
+    (``launch_guarded`` creates the task on the loop's thread)."""
+    launch_guarded(copy_files(workspace_id, plan), subsystem="socials", operation="workspace_copy",
+                   workspace_id=workspace_id)
 
 
 def copy_when_approved(db: Any, post: Any, now: Optional[datetime] = None) -> None:
