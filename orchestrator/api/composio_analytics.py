@@ -319,33 +319,8 @@ def get_action_leaderboard(
     ]
 
 
-def _get_agent_tools_by_agent(db, agent_ids, since):
-    """Tool entries grouped by agent id, with the ToolExecutionLog fallback."""
-    features = (
-        db.query(AgentAppFeature)
-        .filter(
-            AgentAppFeature.agent_id.in_(agent_ids),
-            AgentAppFeature.created_at >= since,
-        )
-        .order_by(AgentAppFeature.agent_id, desc(AgentAppFeature.usage_count))
-        .all()
-    )
-
-    # Group by agent
-    from collections import defaultdict
-
-    by_agent: dict[int, list[AgentToolEntry]] = defaultdict(list)
-    for f in features:
-        by_agent[f.agent_id].append(
-            AgentToolEntry(
-                tool_name=f.action_name,
-                app_name=f.app_name,
-                usage_count=f.usage_count or 0,
-                enabled=f.enabled,
-            )
-        )
-
-    # Fallback: if AgentAppFeature has no data, derive from ToolExecutionLog
+def _get_agent_tools_log_fallback(db, agent_ids, since, by_agent):
+    """Fill by_agent from ToolExecutionLog when AgentAppFeature has no data."""
     if not by_agent:
         try:
             log_rows = (
@@ -378,6 +353,35 @@ def _get_agent_tools_by_agent(db, agent_ids, since):
                 )
         except Exception as e:
             logger.warning(f"ToolExecutionLog fallback for agent-tools failed: {e}")
+
+
+def _get_agent_tools_by_agent(db, agent_ids, since):
+    """Tool entries grouped by agent id, with the ToolExecutionLog fallback."""
+    features = (
+        db.query(AgentAppFeature)
+        .filter(
+            AgentAppFeature.agent_id.in_(agent_ids),
+            AgentAppFeature.created_at >= since,
+        )
+        .order_by(AgentAppFeature.agent_id, desc(AgentAppFeature.usage_count))
+        .all()
+    )
+
+    # Group by agent
+    from collections import defaultdict
+
+    by_agent: dict[int, list[AgentToolEntry]] = defaultdict(list)
+    for f in features:
+        by_agent[f.agent_id].append(
+            AgentToolEntry(
+                tool_name=f.action_name,
+                app_name=f.app_name,
+                usage_count=f.usage_count or 0,
+                enabled=f.enabled,
+            )
+        )
+
+    _get_agent_tools_log_fallback(db, agent_ids, since, by_agent)
     return by_agent
 
 
