@@ -4,8 +4,10 @@ Auto's hands on the messaging-channel surface (``channel_connections`` +
 ``channels/drivers/`` + ``ChannelManager``) — the same DB/service layer the
 ``/api/channels`` router uses. Connect delegates to the router-extracted
 ``api.channels.connect_channel_for_workspace`` so the driver-mediated
-verify/install flow has exactly one implementation. ``workspace_id`` always
-comes from the executor context, never the params.
+verify/install flow has exactly one implementation. Start and stop write the
+row; the worker that owns channel polling starts or stops the adapter
+(``channels.polling``), never the worker running the tool. ``workspace_id``
+always comes from the executor context, never the params.
 """
 
 import logging
@@ -156,37 +158,8 @@ async def configure_channel(db: Session, workspace_id: UUID, params: Dict[str, A
 
 
 async def start_channel(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Start the adapter for a channel connection (mirrors POST /api/channels/{id}/start)."""
-    channel_id = params.get("channel_id")
-    if not channel_id:
-        return {"success": False, "error": "Missing required parameter: channel_id"}
-
-    try:
-        row = db.execute(
-            text("SELECT id, platform, config FROM channel_connections WHERE id = :id AND workspace_id = :ws_id"),
-            {"id": str(channel_id), "ws_id": str(workspace_id)},
-        ).fetchone()
-        if not row:
-            return {"success": False, "error": "Channel connection not found"}
-
-        from channels.manager import get_channel_manager
-        manager = get_channel_manager()
-        await manager.start_adapter(str(channel_id), str(workspace_id), row.platform, row.config or {})
-
-        db.execute(
-            text("UPDATE channel_connections SET status = 'active', updated_at = NOW() WHERE id = :id"),
-            {"id": str(channel_id)},
-        )
-        db.commit()
-        return {"success": True, "status": "started", "channel_id": str(channel_id)}
-    except Exception as exc:
-        db.rollback()
-        logger.error("[channels] start_channel failed: %s", exc, exc_info=True)
-        return {"success": False, "error": str(exc)}
-
-
-async def stop_channel(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Stop the adapter for a channel connection (mirrors POST /api/channels/{id}/stop)."""
+    """Mark a channel connection active; the polling worker starts its adapter
+    (mirrors POST /api/channels/{id}/start)."""
     channel_id = params.get("channel_id")
     if not channel_id:
         return {"success": False, "error": "Missing required parameter: channel_id"}
@@ -199,15 +172,44 @@ async def stop_channel(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         if not row:
             return {"success": False, "error": "Channel connection not found"}
 
-        from channels.manager import get_channel_manager
-        manager = get_channel_manager()
-        await manager.stop_adapter(str(channel_id))
+        db.execute(
+            text("UPDATE channel_connections SET status = 'active', updated_at = NOW() WHERE id = :id"),
+            {"id": str(channel_id)},
+        )
+        db.commit()
+        from channels.polling import apply_polling_change
+
+        await apply_polling_change(str(channel_id))
+        return {"success": True, "status": "started", "channel_id": str(channel_id)}
+    except Exception as exc:
+        db.rollback()
+        logger.error("[channels] start_channel failed: %s", exc, exc_info=True)
+        return {"success": False, "error": str(exc)}
+
+
+async def stop_channel(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Mark a channel connection inactive; the polling worker stops its adapter
+    (mirrors POST /api/channels/{id}/stop)."""
+    channel_id = params.get("channel_id")
+    if not channel_id:
+        return {"success": False, "error": "Missing required parameter: channel_id"}
+
+    try:
+        row = db.execute(
+            text("SELECT id FROM channel_connections WHERE id = :id AND workspace_id = :ws_id"),
+            {"id": str(channel_id), "ws_id": str(workspace_id)},
+        ).fetchone()
+        if not row:
+            return {"success": False, "error": "Channel connection not found"}
 
         db.execute(
             text("UPDATE channel_connections SET status = 'inactive', updated_at = NOW() WHERE id = :id"),
             {"id": str(channel_id)},
         )
         db.commit()
+        from channels.polling import apply_polling_change
+
+        await apply_polling_change(str(channel_id))
         return {"success": True, "status": "stopped", "channel_id": str(channel_id)}
     except Exception as exc:
         db.rollback()

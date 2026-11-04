@@ -26,6 +26,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.auth.workspace_permission import require_workspace_permission
 
+from channels.polling import apply_polling_change
 from channels.drivers import (
     ConnectivityMode,
     DriverNotConfigured,
@@ -175,19 +176,20 @@ _REQUIRED_CONFIG = {
 
 
 @router.get("")
-async def list_channels(
+def list_channels(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
     """List all channel connections for the current workspace.
 
     The ``status`` column is reconciled against ``ChannelManager`` at
-    read time — a row that reads ``inactive`` in the DB but whose
-    adapter is actually loaded and running (common after orchestrator
-    restarts, or for older rows that pre-date the auto-status-update
-    code) is reported as ``active`` here so the dashboard reflects
-    reality. The DB itself is also corrected so subsequent reads are
-    cheap.
+    read time: a row whose polling adapter is still running is reported
+    as ``active``, on any worker (``is_running`` reads the running set
+    the polling worker publishes). The DB is not written back: the polling
+    worker converges the adapters to the rows, so writing a running
+    adapter's state into its row would undo a stop saved on another worker
+    before the polling worker had applied it. A plain ``def``: it awaits
+    nothing, so FastAPI runs its database and Redis reads in the threadpool.
     """
     rows = db.execute(
         text("""
@@ -207,12 +209,9 @@ async def list_channels(
         manager = None
 
     out: List[Dict[str, Any]] = []
-    rows_to_repair: List[str] = []
     for r in rows:
         effective_status = r.status
         if manager is not None and manager.is_running(str(r.id)):
-            if effective_status != "active":
-                rows_to_repair.append(str(r.id))
             effective_status = "active"
         out.append(
             {
@@ -233,26 +232,6 @@ async def list_channels(
                 "created_at": r.created_at.isoformat() if r.created_at else None,
             }
         )
-
-    if rows_to_repair:
-        # Drift-repair: silently update the DB to match the running
-        # state. Best-effort — list endpoints must not fail on a write.
-        try:
-            db.execute(
-                text(
-                    "UPDATE channel_connections SET status = 'active', updated_at = NOW() "
-                    "WHERE id = ANY(:ids)"
-                ),
-                {"ids": rows_to_repair},
-            )
-            db.commit()
-            logger.info(
-                "list_channels: repaired stale status on %d row(s) (ws=%s)",
-                len(rows_to_repair), ctx.workspace_id,
-            )
-        except Exception:
-            logger.exception("list_channels: failed to repair stale status rows")
-            db.rollback()
 
     return out
 
@@ -386,28 +365,6 @@ async def _install_connect_webhook(
     return webhook_url, install_result
 
 
-async def _start_connect_polling(
-    driver: Any,
-    conn_id: UUID,
-    workspace_id: str,
-    platform: str,
-    config: Dict[str, Any],
-) -> None:
-    """Polling mode: start the driver's poller."""
-    try:
-        started = await driver.start_polling(
-            connection_id=str(conn_id),
-            workspace_id=str(workspace_id),
-            config=config,
-        )
-        if not started:
-            logger.info(
-                "Polling not started for %s — likely optional dep missing", platform,
-            )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("start_polling failed for %s: %s", platform, exc)
-
-
 def _connected_reply(
     conn_id: UUID,
     platform: str,
@@ -442,17 +399,18 @@ async def connect_channel_for_workspace(
     """Create, verify and activate a channel connection — the single connect flow.
 
     Shared by ``POST /api/channels`` and the ``platform_connect_channel`` tool
-    (PRD-143 S10), so the driver-mediated verify + install_webhook/start_polling
-    behaviour cannot drift between the dashboard and Auto. Raises ``ValueError``
-    on an unsupported platform or missing required config fields — the router
-    maps that to HTTP 400.
+    (PRD-143 S10), so the driver-mediated verify + install_webhook behaviour
+    cannot drift between the dashboard and Auto. A polling-mode bot is started
+    by the worker that owns channel polling (``channels.polling``), never in
+    the request's own process. Raises ``ValueError`` on an unsupported platform
+    or missing required config fields — the router maps that to HTTP 400.
     """
     platform = (platform or "").lower()
     _validate_connect_request(db, workspace_id, platform, config, default_agent_id)
     conn_id = _insert_inactive_connection(db, workspace_id, platform, config, default_agent_id)
 
     # ------------------------------------------------------------------
-    # PRD-008-A.4 — driver-mediated verify + (install_webhook | start_polling)
+    # PRD-008-A.4 — driver-mediated verify + (install_webhook | the polling worker)
     # ------------------------------------------------------------------
     try:
         driver = get_driver(platform)()
@@ -500,7 +458,7 @@ async def connect_channel_for_workspace(
             db, driver, conn_id, workspace_id, platform, config,
         )
     elif requested_mode == "polling":
-        await _start_connect_polling(driver, conn_id, workspace_id, platform, config)
+        await apply_polling_change(str(conn_id))
 
     return _connected_reply(conn_id, platform, requested_mode, webhook_url, verify_result, install_result)
 
@@ -595,9 +553,10 @@ async def delete_channel(
     """Delete a channel connection.
 
     Calls the driver's ``uninstall_webhook`` first (so the platform
-    stops POSTing to us) and stops any running polling adapter, then
-    removes the row. Both side-effects are best-effort — the row is
-    always deleted even if the driver call fails.
+    stops POSTing to us), then removes the row; the worker that owns
+    channel polling stops a polling adapter once the row is gone. The
+    driver call is best-effort — the row is always deleted even if it
+    fails.
     """
     row = db.execute(
         text(
@@ -630,25 +589,13 @@ async def delete_channel(
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("uninstall_webhook failed for %s: %s", row.platform, exc)
-        else:
-            try:
-                await driver.stop_polling(connection_id=channel_id)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("stop_polling failed for %s: %s", row.platform, exc)
-
-    # Belt-and-braces: legacy adapter map may still hold a reference.
-    try:
-        from channels.manager import get_channel_manager
-        manager = get_channel_manager()
-        await manager.stop_adapter(channel_id)
-    except Exception:
-        pass
 
     db.execute(
         text("DELETE FROM channel_connections WHERE id = :id"),
         {"id": channel_id},
     )
     db.commit()
+    await apply_polling_change(channel_id)
 
     logger.info("Deleted channel connection %s", channel_id)
     return {"status": "deleted"}
@@ -731,39 +678,9 @@ async def start_channel(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Start the adapter for this channel connection."""
-    row = db.execute(
-        text("SELECT id, platform, config FROM channel_connections WHERE id = :id AND workspace_id = :ws_id"),
-        {"id": channel_id, "ws_id": str(ctx.workspace_id)},
-    ).fetchone()
-
-    if not row:
-        raise HTTPException(404, "Channel connection not found")
-
-    try:
-        from channels.manager import get_channel_manager
-        manager = get_channel_manager()
-        await manager.start_adapter(channel_id, str(ctx.workspace_id), row.platform, row.config or {})
-
-        db.execute(
-            text("UPDATE channel_connections SET status = 'active', updated_at = NOW() WHERE id = :id"),
-            {"id": channel_id},
-        )
-        db.commit()
-
-        return {"status": "started"}
-    except Exception as e:
-        logger.error("Failed to start channel %s: %s", channel_id, e)
-        raise HTTPException(500, "Internal server error")
-
-
-@router.post("/{channel_id}/stop", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def stop_channel(
-    channel_id: str,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    """Stop the adapter for this channel connection."""
+    """Mark this channel connection active. The worker that owns channel
+    polling starts a polling-mode adapter: at once when this request reached
+    it, else within one reconcile interval (``channels.polling``)."""
     row = db.execute(
         text("SELECT id FROM channel_connections WHERE id = :id AND workspace_id = :ws_id"),
         {"id": channel_id, "ws_id": str(ctx.workspace_id)},
@@ -773,20 +690,48 @@ async def stop_channel(
         raise HTTPException(404, "Channel connection not found")
 
     try:
-        from channels.manager import get_channel_manager
-        manager = get_channel_manager()
-        await manager.stop_adapter(channel_id)
+        db.execute(
+            text("UPDATE channel_connections SET status = 'active', updated_at = NOW() WHERE id = :id"),
+            {"id": channel_id},
+        )
+        db.commit()
+    except Exception as e:
+        logger.exception("Failed to start channel %s", channel_id)
+        raise HTTPException(500, "Internal server error") from e
 
+    await apply_polling_change(channel_id)
+    return {"status": "started"}
+
+
+@router.post("/{channel_id}/stop", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
+async def stop_channel(
+    channel_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Mark this channel connection inactive. The worker that owns channel
+    polling stops its adapter: at once when this request reached it, else
+    within one reconcile interval (``channels.polling``)."""
+    row = db.execute(
+        text("SELECT id FROM channel_connections WHERE id = :id AND workspace_id = :ws_id"),
+        {"id": channel_id, "ws_id": str(ctx.workspace_id)},
+    ).fetchone()
+
+    if not row:
+        raise HTTPException(404, "Channel connection not found")
+
+    try:
         db.execute(
             text("UPDATE channel_connections SET status = 'inactive', updated_at = NOW() WHERE id = :id"),
             {"id": channel_id},
         )
         db.commit()
-
-        return {"status": "stopped"}
     except Exception as e:
-        logger.error("Failed to stop channel %s: %s", channel_id, e)
-        raise HTTPException(500, "Internal server error")
+        logger.exception("Failed to stop channel %s", channel_id)
+        raise HTTPException(500, "Internal server error") from e
+
+    await apply_polling_change(channel_id)
+    return {"status": "stopped"}
 
 
 # ── Channel Analytics ──────────────────────────────────────────────
