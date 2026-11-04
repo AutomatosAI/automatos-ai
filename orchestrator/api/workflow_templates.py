@@ -105,6 +105,7 @@ def list_workflow_templates(
 @router.get("/{template_id}")
 def get_workflow_template(
     template_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Get a single workflow template by its template_id"""
@@ -128,6 +129,7 @@ def get_workflow_template(
 @router.post("", dependencies=[Depends(require_workspace_permission("playbooks:create"))])
 def create_workflow_template(
     template_data: Dict[str, Any] = Body(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -205,6 +207,7 @@ def create_workflow_template(
 def update_workflow_template(
     template_id: str,
     template_data: Dict[str, Any] = Body(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -259,6 +262,7 @@ def update_workflow_template(
 @router.delete("/{template_id}", dependencies=[Depends(require_workspace_permission("playbooks:delete"))])
 def delete_workflow_template(
     template_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -300,6 +304,7 @@ def delete_workflow_template(
 @router.post("/{template_id}/use", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
 def record_template_usage(
     template_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -362,6 +367,7 @@ def list_template_categories(db: Session = Depends(get_db)):
 @router.get("/featured/list")
 def list_featured_templates(
     limit: int = Query(10, ge=1, le=50),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Get featured workflow templates"""

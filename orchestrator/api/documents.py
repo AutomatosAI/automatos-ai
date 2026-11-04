@@ -16,7 +16,7 @@ from typing import List, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Body, BackgroundTasks
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, text
@@ -1755,7 +1755,7 @@ async def rag_retrieve(
 
 # Usage Analytics Endpoints
 
-def _track_usage_event_save(db, event_type, document_id, query, metadata):
+def _track_usage_event_save(db, event_type, document_id, query, results_count, metadata):
     """Insert the usage event row; fall back to log-only on failure."""
     from datetime import datetime
     import json
@@ -1804,18 +1804,24 @@ def _track_usage_event_save(db, event_type, document_id, query, metadata):
         }
 
 
+class UsageEventRequest(BaseModel):
+    """A usage event as the web app sends it (``useTrackSearchQuery``): a JSON body."""
+    event_type: str = Field(..., description="Event type (document_viewed, document_searched, chunk_retrieved, rag_query)")
+    document_id: Optional[int] = Field(None, description="Document ID (if applicable)")
+    query: Optional[str] = Field(None, description="Search query (if applicable)")
+    results_count: Optional[int] = Field(None, description="How many results the search returned")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
+
+
 @router.post("/analytics/track", dependencies=[Depends(require_workspace_permission("documents:read"))])
 def track_usage_event(
-    event_type: str = Query(..., description="Event type (document_viewed, document_searched, chunk_retrieved, rag_query)"),
-    document_id: Optional[int] = Query(None, description="Document ID (if applicable)"),
-    query: Optional[str] = Query(None, description="Search query (if applicable)"),
-    metadata: Optional[str] = Query(None, description="Additional metadata as JSON string"),
+    event: UsageEventRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
     Track document usage events for analytics
-    
+
     Event types:
     - document_viewed: User viewed a document
     - document_searched: User performed a search
@@ -1823,17 +1829,8 @@ def track_usage_event(
     - rag_query: RAG context was built
     """
     try:
-        import json
-        
-        # Parse metadata if provided
-        metadata_dict = {}
-        if metadata:
-            try:
-                metadata_dict = json.loads(metadata)
-            except Exception:
-                pass
-        
-        return _track_usage_event_save(db, event_type, document_id, query, metadata)
+        return _track_usage_event_save(db, event.event_type, event.document_id, event.query,
+                                       event.results_count, event.metadata)
     except Exception as e:
         logger.error(f"Error tracking usage event: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -1980,7 +1977,7 @@ def get_usage_analytics(
     - Time series data
     """
     try:
-        from datetime import datetime, timedelta
+        from datetime import datetime
         from sqlalchemy import text, func
         
         start_time = _get_usage_analytics_start_time(period)
