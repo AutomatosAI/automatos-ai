@@ -121,7 +121,7 @@ def test_webhook_burst_coalesces_to_one_resync(monkeypatch):
             "collections/update",
             "products/update",
         ):
-            result = await shopify.forward_event(
+            result = shopify.forward_event(
                 request=_event(event), db=db, _auth=None
             )
             assert result["status"] == "received"
@@ -152,7 +152,7 @@ def test_webhook_already_running_is_skipped(monkeypatch):
     monkeypatch.setattr(shopify, "_sync_catalog_for_workspace", _slow_sync)
 
     async def _scenario():
-        await shopify.forward_event(request=_event(), db=db, _auth=None)
+        shopify.forward_event(request=_event(), db=db, _auth=None)
         await asyncio.sleep(0.06)  # window expires → sync starts and blocks
         assert started == ["products/update"]
         # The task reference is HELD while in flight (the GC guard the old
@@ -161,7 +161,7 @@ def test_webhook_already_running_is_skipped(monkeypatch):
         assert held is not None and not held.done()
 
         # A further event while in flight: no second concurrent launch.
-        await shopify.forward_event(
+        shopify.forward_event(
             request=_event("inventory_levels/update"), db=db, _auth=None
         )
         await asyncio.sleep(0.06)  # its window expires against the guard
@@ -193,7 +193,7 @@ def test_webhook_debounce_window_from_config(monkeypatch):
     monkeypatch.setattr(shopify.config, "SHOPIFY_SYNC_DEBOUNCE_SECONDS", 30.0)
 
     async def _long_window():
-        await shopify.forward_event(request=_event(), db=db, _auth=None)
+        shopify.forward_event(request=_event(), db=db, _auth=None)
         await asyncio.sleep(0.1)
 
     _run(_long_window())
@@ -205,7 +205,7 @@ def test_webhook_debounce_window_from_config(monkeypatch):
     monkeypatch.setattr(shopify.config, "SHOPIFY_SYNC_DEBOUNCE_SECONDS", 0.02)
 
     async def _short_window():
-        await shopify.forward_event(request=_event(), db=db, _auth=None)
+        shopify.forward_event(request=_event(), db=db, _auth=None)
         await asyncio.sleep(0.1)
 
     _run(_short_window())
@@ -228,10 +228,10 @@ def test_workspaces_debounce_independently(monkeypatch):
 
     async def _scenario():
         for _ in range(3):
-            await shopify.forward_event(
+            shopify.forward_event(
                 request=_event(shop="a.myshopify.com"), db=_FakeDb(ws_a), _auth=None
             )
-            await shopify.forward_event(
+            shopify.forward_event(
                 request=_event(shop="b.myshopify.com"), db=_FakeDb(ws_b), _auth=None
             )
         await asyncio.sleep(0.1)

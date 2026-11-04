@@ -151,7 +151,7 @@ class SyncRequest(BaseModel):
 # ===================================================================
 
 @router.post("/provision", response_model=ProvisionResponse)
-async def provision_workspace(
+def provision_workspace(
     request: ProvisionRequest,
     db: Session = Depends(get_db),
     _auth: None = Depends(_verify_internal_key),
@@ -189,7 +189,7 @@ async def provision_workspace(
 # ===================================================================
 
 @router.post("/connect")
-async def connect_shopify_store(
+def connect_shopify_store(
     request: ConnectRequest,
     db: Session = Depends(get_db),
     _auth: None = Depends(_verify_internal_key),
@@ -240,7 +240,7 @@ async def connect_shopify_store(
 # ===================================================================
 
 @router.post("/deactivate")
-async def deactivate_workspace(
+def deactivate_workspace(
     request: DeactivateRequest,
     db: Session = Depends(get_db),
     _auth: None = Depends(_verify_internal_key),
@@ -275,7 +275,7 @@ async def deactivate_workspace(
 # ===================================================================
 
 @router.post("/sync")
-async def sync_shop_data(
+def sync_shop_data(
     request: SyncRequest,
     db: Session = Depends(get_db),
     _auth: None = Depends(_verify_internal_key),
@@ -469,7 +469,7 @@ def _fire_catalog_sync(workspace_id: str) -> None:
 
 
 @router.post("/events")
-async def forward_event(
+def forward_event(
     request: EventRequest,
     db: Session = Depends(get_db),
     _auth: None = Depends(_verify_internal_key),
@@ -862,7 +862,7 @@ async def _product_sync_impl(workspace_id: str, db: Session) -> "SyncStartRespon
 
 
 @router.get("/sync/status")
-async def get_product_sync_status(
+def get_product_sync_status(
     workspace_id: Optional[str] = None,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -1162,7 +1162,7 @@ async def _orders_sync_impl(
 
 
 @router.get("/sync/orders/status")
-async def get_orders_sync_status(
+def get_orders_sync_status(
     workspace_id: Optional[str] = None,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
