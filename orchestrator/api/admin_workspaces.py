@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, NamedTuple, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -108,8 +108,137 @@ class PauseBody(BaseModel):
 # Endpoints
 # ===================================================================
 
+class _WorkspaceCounts(NamedTuple):
+    """Per-workspace figures for the admin list, keyed by workspace id (owners by user id)."""
+    agents_by_ws: dict
+    docs_count_by_ws: dict
+    storage_by_ws: dict
+    chats_by_ws: dict
+    members_by_ws: dict
+    member_seen_by_ws: dict
+    owner_by_id: dict
+
+
+def _list_workspaces_query(db: Session, include_deleted: bool, include_paused: bool, plan: Optional[str], search: Optional[str]):
+    """Workspace query with the include/plan/search filters applied."""
+    q = db.query(Workspace)
+
+    if not include_deleted:
+        q = q.filter(Workspace.deleted_at.is_(None))
+    if not include_paused:
+        q = q.filter(Workspace.paused_at.is_(None))
+    if plan:
+        q = q.filter(Workspace.plan == plan)
+    if search:
+        needle = f"%{search.lower()}%"
+        q = q.filter(
+            (func.lower(Workspace.name).like(needle))
+            | (func.lower(Workspace.slug).like(needle))
+        )
+    return q
+
+
+def _list_workspaces_counts(db: Session, workspaces: list, workspace_ids: list) -> _WorkspaceCounts:
+    """Batched agent, document, chat, member and owner lookups for the page of workspaces."""
+    # Batched count queries (one per metric, not N+1)
+    agents_by_ws = dict(
+        db.query(Agent.workspace_id, func.count(Agent.id))
+        .filter(Agent.workspace_id.in_(workspace_ids))
+        .group_by(Agent.workspace_id)
+        .all()
+    ) if workspace_ids else {}
+
+    docs_agg = (
+        db.query(
+            Document.workspace_id,
+            func.count(Document.id),
+            func.coalesce(func.sum(Document.file_size), 0),
+        )
+        .filter(Document.workspace_id.in_(workspace_ids))
+        .group_by(Document.workspace_id)
+        .all()
+    ) if workspace_ids else []
+    docs_count_by_ws = {ws_id: cnt for ws_id, cnt, _ in docs_agg}
+    storage_by_ws = {ws_id: int(size) for ws_id, _, size in docs_agg}
+
+    chats_by_ws = dict(
+        db.query(Chat.workspace_id, func.count(Chat.id))
+        .filter(Chat.workspace_id.in_(workspace_ids))
+        .group_by(Chat.workspace_id)
+        .all()
+    ) if workspace_ids else {}
+
+    # Active members + last-seen, batched the same way (never N+1). The seat
+    # cap in core/workspaces/invitations.py counts exactly these rows
+    # (is_active members), so members_count is directly comparable to a
+    # tier's seats — that is what the console's downgrade warning reads.
+    member_agg = (
+        db.query(
+            WorkspaceMember.workspace_id,
+            func.count(WorkspaceMember.id),
+            func.max(User.last_sign_in),
+        )
+        .join(User, User.id == WorkspaceMember.user_id)
+        .filter(WorkspaceMember.workspace_id.in_(workspace_ids))
+        .filter(WorkspaceMember.is_active.is_(True))
+        .group_by(WorkspaceMember.workspace_id)
+        .all()
+    ) if workspace_ids else []
+    members_by_ws = {ws_id: cnt for ws_id, cnt, _ in member_agg}
+    member_seen_by_ws = {ws_id: seen for ws_id, _, seen in member_agg}
+
+    # Owner lookup (bulk)
+    owner_ids = {w.owner_id for w in workspaces if w.owner_id is not None}
+    owners = (
+        db.query(User).filter(User.id.in_(owner_ids)).all() if owner_ids else []
+    )
+    owner_by_id = {u.id: u for u in owners}
+    return _WorkspaceCounts(
+        agents_by_ws, docs_count_by_ws, storage_by_ws, chats_by_ws,
+        members_by_ws, member_seen_by_ws, owner_by_id,
+    )
+
+
+def _list_workspaces_items(workspaces: list, counts: _WorkspaceCounts) -> List[WorkspaceListItem]:
+    """List rows for the page of workspaces."""
+    (agents_by_ws, docs_count_by_ws, storage_by_ws, chats_by_ws,
+     members_by_ws, member_seen_by_ws, owner_by_id) = counts
+    items: List[WorkspaceListItem] = []
+    for w in workspaces:
+        owner = owner_by_id.get(w.owner_id) if w.owner_id else None
+        # The owner is counted even when no membership row exists for them —
+        # a solo workspace is otherwise reported as never active.
+        seen_candidates = [
+            t for t in (member_seen_by_ws.get(w.id), getattr(owner, "last_sign_in", None))
+            if t is not None
+        ]
+        last_active = max(seen_candidates) if seen_candidates else None
+        items.append(WorkspaceListItem(
+            id=str(w.id),
+            name=w.name,
+            slug=w.slug,
+            plan=w.plan,
+            is_personal=bool(w.is_personal),
+            is_active=bool(w.is_active),
+            owner_email=owner.email if owner else None,
+            owner_name=owner.name if owner else None,
+            agents_count=agents_by_ws.get(w.id, 0),
+            documents_count=docs_count_by_ws.get(w.id, 0),
+            storage_bytes=storage_by_ws.get(w.id, 0),
+            chats_count=chats_by_ws.get(w.id, 0),
+            members_count=members_by_ws.get(w.id, 0),
+            last_active_at=_utc_iso(last_active),
+            plan_limits=dict(w.plan_limits or {}),
+            created_at=w.created_at.isoformat() if w.created_at else None,
+            paused_at=w.paused_at.isoformat() if w.paused_at else None,
+            paused_reason=w.paused_reason,
+            deleted_at=w.deleted_at.isoformat() if w.deleted_at else None,
+        ))
+    return items
+
+
 @router.get("")
-async def list_workspaces(
+def list_workspaces(
     include_deleted: bool = Query(False),
     include_paused: bool = Query(True),
     plan: Optional[str] = Query(None),
@@ -125,20 +254,7 @@ async def list_workspaces(
     _assert_admin(ctx)
 
     try:
-        q = db.query(Workspace)
-
-        if not include_deleted:
-            q = q.filter(Workspace.deleted_at.is_(None))
-        if not include_paused:
-            q = q.filter(Workspace.paused_at.is_(None))
-        if plan:
-            q = q.filter(Workspace.plan == plan)
-        if search:
-            needle = f"%{search.lower()}%"
-            q = q.filter(
-                (func.lower(Workspace.name).like(needle))
-                | (func.lower(Workspace.slug).like(needle))
-            )
+        q = _list_workspaces_query(db, include_deleted, include_paused, plan, search)
 
         total = q.count()
 
@@ -152,91 +268,9 @@ async def list_workspaces(
         workspaces = q.offset((page - 1) * limit).limit(limit).all()
         workspace_ids = [w.id for w in workspaces]
 
-        # Batched count queries (one per metric, not N+1)
-        agents_by_ws = dict(
-            db.query(Agent.workspace_id, func.count(Agent.id))
-            .filter(Agent.workspace_id.in_(workspace_ids))
-            .group_by(Agent.workspace_id)
-            .all()
-        ) if workspace_ids else {}
+        counts = _list_workspaces_counts(db, workspaces, workspace_ids)
 
-        docs_agg = (
-            db.query(
-                Document.workspace_id,
-                func.count(Document.id),
-                func.coalesce(func.sum(Document.file_size), 0),
-            )
-            .filter(Document.workspace_id.in_(workspace_ids))
-            .group_by(Document.workspace_id)
-            .all()
-        ) if workspace_ids else []
-        docs_count_by_ws = {ws_id: cnt for ws_id, cnt, _ in docs_agg}
-        storage_by_ws = {ws_id: int(size) for ws_id, _, size in docs_agg}
-
-        chats_by_ws = dict(
-            db.query(Chat.workspace_id, func.count(Chat.id))
-            .filter(Chat.workspace_id.in_(workspace_ids))
-            .group_by(Chat.workspace_id)
-            .all()
-        ) if workspace_ids else {}
-
-        # Active members + last-seen, batched the same way (never N+1). The seat
-        # cap in core/workspaces/invitations.py counts exactly these rows
-        # (is_active members), so members_count is directly comparable to a
-        # tier's seats — that is what the console's downgrade warning reads.
-        member_agg = (
-            db.query(
-                WorkspaceMember.workspace_id,
-                func.count(WorkspaceMember.id),
-                func.max(User.last_sign_in),
-            )
-            .join(User, User.id == WorkspaceMember.user_id)
-            .filter(WorkspaceMember.workspace_id.in_(workspace_ids))
-            .filter(WorkspaceMember.is_active.is_(True))
-            .group_by(WorkspaceMember.workspace_id)
-            .all()
-        ) if workspace_ids else []
-        members_by_ws = {ws_id: cnt for ws_id, cnt, _ in member_agg}
-        member_seen_by_ws = {ws_id: seen for ws_id, _, seen in member_agg}
-
-        # Owner lookup (bulk)
-        owner_ids = {w.owner_id for w in workspaces if w.owner_id is not None}
-        owners = (
-            db.query(User).filter(User.id.in_(owner_ids)).all() if owner_ids else []
-        )
-        owner_by_id = {u.id: u for u in owners}
-
-        items: List[WorkspaceListItem] = []
-        for w in workspaces:
-            owner = owner_by_id.get(w.owner_id) if w.owner_id else None
-            # The owner is counted even when no membership row exists for them —
-            # a solo workspace is otherwise reported as never active.
-            seen_candidates = [
-                t for t in (member_seen_by_ws.get(w.id), getattr(owner, "last_sign_in", None))
-                if t is not None
-            ]
-            last_active = max(seen_candidates) if seen_candidates else None
-            items.append(WorkspaceListItem(
-                id=str(w.id),
-                name=w.name,
-                slug=w.slug,
-                plan=w.plan,
-                is_personal=bool(w.is_personal),
-                is_active=bool(w.is_active),
-                owner_email=owner.email if owner else None,
-                owner_name=owner.name if owner else None,
-                agents_count=agents_by_ws.get(w.id, 0),
-                documents_count=docs_count_by_ws.get(w.id, 0),
-                storage_bytes=storage_by_ws.get(w.id, 0),
-                chats_count=chats_by_ws.get(w.id, 0),
-                members_count=members_by_ws.get(w.id, 0),
-                last_active_at=_utc_iso(last_active),
-                plan_limits=dict(w.plan_limits or {}),
-                created_at=w.created_at.isoformat() if w.created_at else None,
-                paused_at=w.paused_at.isoformat() if w.paused_at else None,
-                paused_reason=w.paused_reason,
-                deleted_at=w.deleted_at.isoformat() if w.deleted_at else None,
-            ))
+        items = _list_workspaces_items(workspaces, counts)
 
         # Optional client-side sorts (storage/agents) — applied post count join
         if sort in ("storage_bytes", "agents_count"):
