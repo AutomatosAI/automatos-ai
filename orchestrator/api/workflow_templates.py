@@ -24,6 +24,21 @@ from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 
+def _list_workflow_templates_sorted(query, sort_by: str):
+    """Order the template query by the requested field (unknown fields leave it unordered)."""
+    if sort_by == 'popularity':
+        return query.order_by(WorkflowTemplate.popularity.desc())
+    if sort_by == 'created_at':
+        return query.order_by(WorkflowTemplate.created_at.desc())
+    if sort_by == 'use_count':
+        return query.order_by(WorkflowTemplate.use_count.desc())
+    if sort_by == 'average_rating':
+        return query.order_by(WorkflowTemplate.average_rating.desc())
+    if sort_by == 'name':
+        return query.order_by(WorkflowTemplate.name.asc())
+    return query
+
+
 @router.get("")
 def list_workflow_templates(
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -70,16 +85,7 @@ def list_workflow_templates(
         total = query.count()
         
         # Apply sorting
-        if sort_by == 'popularity':
-            query = query.order_by(WorkflowTemplate.popularity.desc())
-        elif sort_by == 'created_at':
-            query = query.order_by(WorkflowTemplate.created_at.desc())
-        elif sort_by == 'use_count':
-            query = query.order_by(WorkflowTemplate.use_count.desc())
-        elif sort_by == 'average_rating':
-            query = query.order_by(WorkflowTemplate.average_rating.desc())
-        elif sort_by == 'name':
-            query = query.order_by(WorkflowTemplate.name.asc())
+        query = _list_workflow_templates_sorted(query, sort_by)
         
         # Apply pagination
         templates = query.offset(skip).limit(limit).all()
