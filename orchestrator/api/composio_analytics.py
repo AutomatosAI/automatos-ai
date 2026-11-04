@@ -136,8 +136,58 @@ def _since(days: int) -> datetime:
 
 # ── Endpoints ─────────────────────────────────────────────────────────
 
+def _get_connected_apps_usage(db, conn, agent_ids, since):
+    """Action usage for one connected app across the workspace's agents."""
+    # Aggregate action usage for this app across workspace agents
+    if agent_ids:
+        action_agg = (
+            db.query(
+                func.sum(AgentAppFeature.usage_count).label("total_usage"),
+                func.count(func.distinct(AgentAppFeature.agent_id)).label("agent_count"),
+                func.max(AgentAppFeature.last_used_at).label("last_used"),
+            )
+            .filter(
+                AgentAppFeature.agent_id.in_(agent_ids),
+                AgentAppFeature.app_name == conn.app_name,
+                AgentAppFeature.created_at >= since,
+            )
+            .first()
+        )
+        total_usage = int(action_agg.total_usage or 0) if action_agg else 0
+        agent_count = int(action_agg.agent_count or 0) if action_agg else 0
+        last_used = action_agg.last_used if action_agg else None
+
+        # Fallback: query ToolExecutionLog if AgentAppFeature has no data
+        if total_usage == 0:
+            try:
+                log_agg = (
+                    db.query(
+                        func.count(ToolExecutionLog.id).label("total_usage"),
+                        func.count(func.distinct(ToolExecutionLog.agent_id)).label("agent_count"),
+                        func.max(ToolExecutionLog.executed_at).label("last_used"),
+                    )
+                    .filter(
+                        ToolExecutionLog.agent_id.in_(agent_ids),
+                        ToolExecutionLog.app_name == conn.app_name,
+                        ToolExecutionLog.executed_at >= since,
+                    )
+                    .first()
+                )
+                if log_agg:
+                    total_usage = int(log_agg.total_usage or 0)
+                    agent_count = int(log_agg.agent_count or 0)
+                    last_used = log_agg.last_used
+            except Exception:
+                pass
+    else:
+        total_usage = 0
+        agent_count = 0
+        last_used = None
+    return total_usage, agent_count, last_used
+
+
 @router.get("/apps", response_model=List[ConnectedAppStats])
-async def get_connected_apps(
+def get_connected_apps(
     days: int = Query(30, description="7|30|90"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -174,52 +224,7 @@ async def get_connected_apps(
 
     results: List[ConnectedAppStats] = []
     for conn in connections:
-        # Aggregate action usage for this app across workspace agents
-        if agent_ids:
-            action_agg = (
-                db.query(
-                    func.sum(AgentAppFeature.usage_count).label("total_usage"),
-                    func.count(func.distinct(AgentAppFeature.agent_id)).label("agent_count"),
-                    func.max(AgentAppFeature.last_used_at).label("last_used"),
-                )
-                .filter(
-                    AgentAppFeature.agent_id.in_(agent_ids),
-                    AgentAppFeature.app_name == conn.app_name,
-                    AgentAppFeature.created_at >= since,
-                )
-                .first()
-            )
-            total_usage = int(action_agg.total_usage or 0) if action_agg else 0
-            agent_count = int(action_agg.agent_count or 0) if action_agg else 0
-            last_used = action_agg.last_used if action_agg else None
-
-            # Fallback: query ToolExecutionLog if AgentAppFeature has no data
-            if total_usage == 0:
-                try:
-                    log_agg = (
-                        db.query(
-                            func.count(ToolExecutionLog.id).label("total_usage"),
-                            func.count(func.distinct(ToolExecutionLog.agent_id)).label("agent_count"),
-                            func.max(ToolExecutionLog.executed_at).label("last_used"),
-                        )
-                        .filter(
-                            ToolExecutionLog.agent_id.in_(agent_ids),
-                            ToolExecutionLog.app_name == conn.app_name,
-                            ToolExecutionLog.executed_at >= since,
-                        )
-                        .first()
-                    )
-                    if log_agg:
-                        total_usage = int(log_agg.total_usage or 0)
-                        agent_count = int(log_agg.agent_count or 0)
-                        last_used = log_agg.last_used
-                except Exception:
-                    pass
-        else:
-            total_usage = 0
-            agent_count = 0
-            last_used = None
-
+        total_usage, agent_count, last_used = _get_connected_apps_usage(db, conn, agent_ids, since)
         results.append(
             ConnectedAppStats(
                 app_name=conn.app_name,
@@ -234,28 +239,8 @@ async def get_connected_apps(
     return results
 
 
-@router.get("/actions", response_model=List[ActionLeaderboardEntry])
-async def get_action_leaderboard(
-    days: int = Query(30, description="7|30|90"),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    """Action leaderboard sorted by usage count descending."""
-    if not ctx.workspace_id:
-        raise HTTPException(400, "Workspace context required")
-
-    since = _since(days)
-
-    # Get workspace agent IDs
-    agent_ids = [
-        r[0]
-        for r in db.query(Agent.id)
-        .filter(Agent.workspace_id == ctx.workspace_id)
-        .all()
-    ]
-    if not agent_ids:
-        return []
-
+def _get_action_leaderboard_rows(db, agent_ids, since):
+    """Leaderboard rows from AgentAppFeature, falling back to ToolExecutionLog."""
     # Try AgentAppFeature first (populated by trigger)
     rows = (
         db.query(
@@ -296,7 +281,32 @@ async def get_action_leaderboard(
         except Exception as e:
             logger.warning(f"ToolExecutionLog fallback failed: {e}")
             rows = []
+    return rows
 
+
+@router.get("/actions", response_model=List[ActionLeaderboardEntry])
+def get_action_leaderboard(
+    days: int = Query(30, description="7|30|90"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Action leaderboard sorted by usage count descending."""
+    if not ctx.workspace_id:
+        raise HTTPException(400, "Workspace context required")
+
+    since = _since(days)
+
+    # Get workspace agent IDs
+    agent_ids = [
+        r[0]
+        for r in db.query(Agent.id)
+        .filter(Agent.workspace_id == ctx.workspace_id)
+        .all()
+    ]
+    if not agent_ids:
+        return []
+
+    rows = _get_action_leaderboard_rows(db, agent_ids, since)
     return [
         ActionLeaderboardEntry(
             action_name=r.action_name,
@@ -309,30 +319,8 @@ async def get_action_leaderboard(
     ]
 
 
-@router.get("/agent-tools", response_model=List[AgentToolMapping])
-async def get_agent_tools(
-    days: int = Query(30, description="7|30|90"),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    """Per-agent tool mapping with usage counts."""
-    if not ctx.workspace_id:
-        raise HTTPException(400, "Workspace context required")
-
-    since = _since(days)
-
-    # Get workspace agents that have Composio features
-    agents = (
-        db.query(Agent)
-        .filter(Agent.workspace_id == ctx.workspace_id)
-        .all()
-    )
-    if not agents:
-        return []
-
-    agent_map = {a.id: a.name for a in agents}
-    agent_ids = list(agent_map.keys())
-
+def _get_agent_tools_by_agent(db, agent_ids, since):
+    """Tool entries grouped by agent id, with the ToolExecutionLog fallback."""
     features = (
         db.query(AgentAppFeature)
         .filter(
@@ -390,7 +378,34 @@ async def get_agent_tools(
                 )
         except Exception as e:
             logger.warning(f"ToolExecutionLog fallback for agent-tools failed: {e}")
+    return by_agent
 
+
+@router.get("/agent-tools", response_model=List[AgentToolMapping])
+def get_agent_tools(
+    days: int = Query(30, description="7|30|90"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Per-agent tool mapping with usage counts."""
+    if not ctx.workspace_id:
+        raise HTTPException(400, "Workspace context required")
+
+    since = _since(days)
+
+    # Get workspace agents that have Composio features
+    agents = (
+        db.query(Agent)
+        .filter(Agent.workspace_id == ctx.workspace_id)
+        .all()
+    )
+    if not agents:
+        return []
+
+    agent_map = {a.id: a.name for a in agents}
+    agent_ids = list(agent_map.keys())
+
+    by_agent = _get_agent_tools_by_agent(db, agent_ids, since)
     return [
         AgentToolMapping(
             agent_id=aid,
@@ -414,25 +429,8 @@ def _get_workspace_agent_ids(db: Session, workspace_id) -> list[int]:
     ]
 
 
-@router.get("/execution-stats", response_model=ExecutionOverview)
-async def get_execution_stats(
-    days: int = Query(30, description="7|30|90"),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    """Overall execution stats: volume, success/error rates, latency percentiles."""
-    if not ctx.workspace_id:
-        raise HTTPException(400, "Workspace context required")
-
-    since = _since(days)
-    agent_ids = _get_workspace_agent_ids(db, ctx.workspace_id)
-    if not agent_ids:
-        return ExecutionOverview(
-            total_executions=0, success_count=0, error_count=0, timeout_count=0,
-            success_rate=0, error_rate=0, avg_latency_ms=0, cache_hit_rate=0,
-            unique_actions=0, unique_apps=0,
-        )
-
+def _get_execution_stats_row(db, agent_ids, since):
+    """Aggregate execution counts and latencies for the workspace's agents."""
     row = (
         db.query(
             func.count(ToolExecutionLog.id).label("total"),
@@ -451,12 +449,11 @@ async def get_execution_stats(
         )
         .first()
     )
+    return row
 
-    total = int(row.total or 0)
-    successes = int(row.successes or 0)
-    errors = int(row.errors or 0)
-    timeouts = int(row.timeouts or 0)
 
+def _get_execution_stats_percentiles(db, agent_ids, since):
+    """p50/p95 latency via percentile_cont; (None, None) on any failure."""
     # Percentiles via subquery (Postgres percentile_cont)
     p50 = p95 = None
     try:
@@ -476,7 +473,35 @@ async def get_execution_stats(
             p95 = round(float(pct.p95), 1) if pct.p95 is not None else None
     except Exception:
         pass
+    return p50, p95
 
+
+@router.get("/execution-stats", response_model=ExecutionOverview)
+def get_execution_stats(
+    days: int = Query(30, description="7|30|90"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Overall execution stats: volume, success/error rates, latency percentiles."""
+    if not ctx.workspace_id:
+        raise HTTPException(400, "Workspace context required")
+
+    since = _since(days)
+    agent_ids = _get_workspace_agent_ids(db, ctx.workspace_id)
+    if not agent_ids:
+        return ExecutionOverview(
+            total_executions=0, success_count=0, error_count=0, timeout_count=0,
+            success_rate=0, error_rate=0, avg_latency_ms=0, cache_hit_rate=0,
+            unique_actions=0, unique_apps=0,
+        )
+
+    row = _get_execution_stats_row(db, agent_ids, since)
+    total = int(row.total or 0)
+    successes = int(row.successes or 0)
+    errors = int(row.errors or 0)
+    timeouts = int(row.timeouts or 0)
+
+    p50, p95 = _get_execution_stats_percentiles(db, agent_ids, since)
     return ExecutionOverview(
         total_executions=total,
         success_count=successes,
