@@ -107,7 +107,7 @@ def _verify_agent_ownership(agent_id: int, workspace_id: str, db: Session):
 
 
 @router.get("/agents/{agent_id}/config", dependencies=[_READ])
-async def get_agent_heartbeat_config(
+def get_agent_heartbeat_config(
     agent_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -192,7 +192,7 @@ async def save_agent_heartbeat_config(
 
 
 @router.get("/agents/{agent_id}/last", dependencies=[_READ])
-async def get_agent_last_heartbeat(
+def get_agent_last_heartbeat(
     agent_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -243,7 +243,7 @@ async def run_orchestrator_heartbeat(
 
 
 @router.get("/orchestrator/history", dependencies=[_SU])
-async def get_orchestrator_heartbeat_history(
+def get_orchestrator_heartbeat_history(
     limit: int = Query(20, ge=1, le=100),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -296,7 +296,7 @@ async def run_agent_heartbeat(
 
 
 @router.get("/agents/{agent_id}/history", dependencies=[_READ])
-async def get_agent_heartbeat_history(
+def get_agent_heartbeat_history(
     agent_id: int,
     limit: int = Query(20, ge=1, le=100),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -494,7 +494,7 @@ async def list_workspace_heartbeats(
 
 
 @router.patch("/{heartbeat_id}/toggle", dependencies=[_UPDATE])
-async def toggle_heartbeat(
+def toggle_heartbeat(
     heartbeat_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
