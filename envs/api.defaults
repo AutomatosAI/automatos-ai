@@ -42,10 +42,16 @@ AUTOMATOS_MIGRATE_ON_BOOT=true
 
 # uvicorn's worker processes (PRD-262 US-029). uvicorn reads WEB_CONCURRENCY when
 # the command names no --workers; the production image defaults to 4 (Railway's).
-# One worker locally: one app import, one process's memory. A single process has
-# no manager, so a worker that dies ends the container, and restart:
-# unless-stopped brings it back. The development stage's --reload ignores it.
-WEB_CONCURRENCY=1
+# auto: the entrypoint (orchestrator/docker-entrypoint.sh) sizes it to the machine
+# before uvicorn starts: one worker per CPU and per 4 GB of memory the container may
+# use (Docker Desktop's VM limits count), at most 4, at least 1, and logs
+# `uvicorn workers: N`. One worker is one event loop, so a call that blocks it
+# stalls every request: 4 CPUs and 16 GB run 4, 8 GB runs 2. Each worker imports
+# the app and holds its own memory. Pin a number in envs/api.local (WEB_CONCURRENCY=1 runs
+# one process as before; a single process has no manager, so a worker that dies
+# ends the container, and restart: unless-stopped brings it back). The development
+# stage's --reload runs one process whatever this says.
+WEB_CONCURRENCY=auto
 
 # uvicorn reads every CLI option from UVICORN_<OPTION> (--timeout-graceful-shutdown
 # here). The browser's SSE streams (notifications, board events) never close, so

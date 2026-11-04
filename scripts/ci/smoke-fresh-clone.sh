@@ -83,9 +83,10 @@
 # checks out, scripts/ci/smoke_worker_restart.py kills one uvicorn worker of the
 # production-stage backend and needs uvicorn to start a replacement within 30 s, with
 # /health 200 and no container restart. uvicorn 0.24 never replaced a dead worker.
-# envs/api.defaults sets WEB_CONCURRENCY=1 (PRD-262 US-029), and a single uvicorn
-# process has no manager to restart a worker, so this variant's backend runs
-# RESTART_WORKERS through a compose override the script writes outside the checkout.
+# envs/api.defaults sets WEB_CONCURRENCY=auto (sized to the runner, which may be one
+# worker), and a single uvicorn process has no manager to restart a worker, so this
+# variant's backend runs RESTART_WORKERS through a compose override the script writes
+# outside the checkout.
 #
 # PRD-262 US-029, in every mode: the entrypoint is the only owner of migrations. After
 # the warm restarts, the database is stamped one revision behind head
@@ -318,8 +319,9 @@ GATES_FILE="${OUT_DIR}/health-gates.json"
 # report reads the earlier boots' lines from this copy.
 EARLIER_BACKEND_LOG="${RUNNER_TEMP:-/tmp}/smoke-backend-before-recreate.log"
 # The production stage's worker count under compose: envs/api.defaults'
-# WEB_CONCURRENCY (PRD-262 US-029; the image's own 4 is Railway's).
-BACKEND_WORKERS="${SMOKE_BACKEND_WORKERS:-1}"
+# WEB_CONCURRENCY (PRD-262 US-029; the image's own 4 is Railway's). auto: the count the
+# entrypoint sized for this runner and logged (`uvicorn workers: N`).
+BACKEND_WORKERS="${SMOKE_BACKEND_WORKERS:-auto}"
 # The pull-request variant's count (US-008 kills one of them), set through an override
 # written outside the checkout.
 RESTART_WORKERS=2

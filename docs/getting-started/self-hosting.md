@@ -571,8 +571,15 @@ You should not need to open the last three for a standard install.
      failure);
    - ensure the local workspace (`DEFAULT_WORKSPACE_ID`, named *Local
      Workspace*) and the operator user exist;
-   - start `uvicorn`. The application then runs its own boot stages,
-     including the Composio catalogue bootstrap (§7).
+   - start `uvicorn` with as many worker processes as the machine affords:
+     `WEB_CONCURRENCY=auto` (`envs/api.defaults`) is one per CPU and per 4 GB of
+     memory the container may use (Docker Desktop's VM settings count), at most
+     4, at least 1, and the log says `uvicorn workers: N (…)`. One worker is one
+     event loop, so on a bigger machine a slow request no longer holds up the
+     rest. Pin a number with `WEB_CONCURRENCY=2` in `envs/api.local` (1 runs one
+     process, as before). The application then runs its own boot stages in each
+     worker, including the Composio catalogue bootstrap (§7); seeds and the
+     scheduler run in one of them.
 4. **Frontend** starts after the backend's health check passes. The check
    probes every second while the backend starts, so the backend turns healthy
    about a second after it first answers `/health`, and compose starts the
@@ -1135,9 +1142,9 @@ after that change differs in four ways. Your data stays where it is.
 An `.env` written before the change still runs all seven containers; `make up CORE=1`
 runs six (§3).
 
-### Memory on by default
+### Memory on by default, and the worker count
 
-From November 2026 the first `git pull && make up` changes one default:
+From November 2026 the first `git pull && make up` changes two defaults:
 
 - **Memory is on.** Qdrant joins the default stack (about 75 MB to download once)
   and `envs/api.defaults` sets `QDRANT_URL=http://qdrant:6333`. An install that
@@ -1145,6 +1152,9 @@ From November 2026 the first `git pull && make up` changes one default:
   keeps its memories: the volume is the same, `automatos_qdrant_data`, and the
   `envs/api.local` line still wins. `COMPOSE_PROFILES=memory` in `.env` can stay
   or go. To keep memory off, set `QDRANT_URL=` (empty) in `envs/api.local`.
+- **The backend sizes its worker count** (`WEB_CONCURRENCY=auto`, §4): up to 4
+  processes where it ran 1. Each holds its own copy of the app in memory. To keep
+  one, set `WEB_CONCURRENCY=1` in `envs/api.local`.
 
 ## 11. Stopping and resetting
 
