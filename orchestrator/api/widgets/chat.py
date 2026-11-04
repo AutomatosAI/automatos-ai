@@ -17,6 +17,7 @@ event carries ``"ai_generated": true``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -32,8 +33,9 @@ from sqlalchemy.orm import Session
 from api.widgets.auth import WidgetAuthContext, require_permission, widget_auth
 from api.widgets.chat_stream import WidgetStreamContext, widget_event_stream
 from api.widgets.config import resolve_ai_disclosure
+from modules.policy.ai_disclosure import AIDisclosure
 from core.security.log_safe import log_safe
-from core.database.database import get_db
+from core.database.database import SessionLocal, end_open_transaction, get_db
 from integrations import PLUGIN_REGISTRY
 
 logger = logging.getLogger(__name__)
@@ -236,7 +238,7 @@ async def _run_vertical_plugin(body: WidgetChatRequest, auth: WidgetAuthContext,
     shape (force_text_only, skip_composio); the plugin's decision to rewrite
     or pass through is independent of it.
     """
-    vertical = _resolve_workspace_vertical(db, str(auth.workspace_id))
+    vertical = await asyncio.to_thread(_resolve_workspace_vertical, db, str(auth.workspace_id))
     plugin = PLUGIN_REGISTRY.get(vertical)
     if plugin is None:
         logger.warning("%s UNKNOWN_VERTICAL: %s — falling back to generic plugin", log_extra, vertical)
@@ -354,6 +356,65 @@ def _effective_agent_id(db: Session, auth: WidgetAuthContext, body: WidgetChatRe
     return agent_id
 
 
+@dataclass(frozen=True)
+class _TurnCall:
+    """What the turn's streaming service is called with: plain values, no ORM objects."""
+
+    chat_id: str
+    messages: List[dict]
+    agent_id: int
+    user_id: int
+    team: Optional[str]
+    is_proactive: bool
+
+
+def _plan_the_turn(db: Session, chat_service_cls: Any, body: WidgetChatRequest, turn: _WidgetTurn,
+                   auth: WidgetAuthContext, user_id: int, log_extra: str) -> Tuple[_TurnCall, AIDisclosure]:
+    """The turn's synchronous reads and writes on the request's session, run in a worker
+    thread (F105): open or resume the conversation, save the visitor's message, read the
+    history, the answering agent, its team and the AI notice. Then the request's
+    transaction ends (anything left staged is committed, as the turn's own commit used to),
+    which gives its pooled connection back: the turn streams on a session of its own."""
+    workspace_id = str(auth.workspace_id)
+    chat_service = chat_service_cls(db)
+    chat_id = _open_conversation(db, chat_service, body, turn, auth, user_id, log_extra)
+    message_history = _history_for_turn(chat_service, chat_id, turn, workspace_id, log_extra)
+    effective_agent_id = _effective_agent_id(db, auth, body, workspace_id, log_extra)
+    # PRD-124: the team that scopes this chat's documents.
+    agent_team = _retrieval_team(db, auth, effective_agent_id)
+    disclosure = resolve_ai_disclosure(db, auth.workspace_id)
+    end_open_transaction(db)
+    call = _TurnCall(chat_id=chat_id, messages=message_history, agent_id=effective_agent_id, user_id=user_id,
+                     team=agent_team, is_proactive=turn.is_proactive)
+    return call, disclosure
+
+
+async def _turn_chunks(streaming_service_cls: Any, auth: WidgetAuthContext, call: _TurnCall) -> AsyncIterator[Any]:
+    """The turn's chunks, from a streaming service on a session of its own, closed when the
+    stream ends (F105). The request's ``get_db`` session is never handed to the turn: FastAPI
+    closes it only when the response ends, so a turn on it kept the request's connection
+    for the whole stream (api/chat.py's turn has its own session for the same reason)."""
+    stream_db = SessionLocal()
+    try:
+        # F155: the key's scopes, team lock and agent lock mark every call of the turn.
+        streaming_service = streaming_service_cls(
+            stream_db, workspace_id=str(auth.workspace_id), widget_mode=True, widget_scopes=auth.permissions,
+            widget_team=auth.team, widget_agent_lock=call.agent_id if auth.default_agent_id else None)
+        # PRD-007 v0.5 — proactive openers must produce plain text only.
+        # `skip_composio` alone wasn't enough: the agent still had ~45
+        # platform tools loaded from its skill and would call one (40s
+        # with text_count=0). force_text_only=True clears use_tools
+        # entirely so the LLM can only emit text. Keeps openers within
+        # the <2s latency budget.
+        async for chunk in streaming_service.stream_response_with_agent(
+            chat_id=call.chat_id, messages=call.messages, agent_id=call.agent_id, user_id=call.user_id,
+            team=call.team, skip_composio=call.is_proactive, force_text_only=call.is_proactive,
+        ):
+            yield chunk
+    finally:
+        stream_db.close()
+
+
 # ---------------------------------------------------------------------------
 # POST /chat — send message, get SSE stream back
 # ---------------------------------------------------------------------------
@@ -386,39 +447,18 @@ async def widget_chat(
     _log_request(log_extra, body)
     chat_service_cls, streaming_service_cls = _chat_services(log_extra)
 
-    workspace_id = str(auth.workspace_id)
-    user_id = _get_widget_user_id(db)
+    # F105: the turn's database work runs in worker threads, never on the event loop, and
+    # ends the request's transaction before the stream starts (_plan_the_turn).
+    user_id = await asyncio.to_thread(_get_widget_user_id, db)
     turn = await _run_vertical_plugin(body, auth, db, log_extra)
-    chat_service = chat_service_cls(db)
-    chat_id = _open_conversation(db, chat_service, body, turn, auth, user_id, log_extra)
-    message_history = _history_for_turn(chat_service, chat_id, turn, workspace_id, log_extra)
-    effective_agent_id = _effective_agent_id(db, auth, body, workspace_id, log_extra)
-
-    # PRD-124: the team that scopes this chat's documents.
-    agent_team = _retrieval_team(db, auth, effective_agent_id)
-    # F155: the key's scopes, team lock and agent lock mark every call of the turn.
-    streaming_service = streaming_service_cls(
-        db, workspace_id=workspace_id, widget_mode=True, widget_scopes=auth.permissions, widget_team=auth.team,
-        widget_agent_lock=effective_agent_id if auth.default_agent_id else None)
+    call, disclosure = await asyncio.to_thread(
+        _plan_the_turn, db, chat_service_cls, body, turn, auth, user_id, log_extra)
     stream_ctx = WidgetStreamContext(
-        chat_id=chat_id, agent_id=effective_agent_id, team=agent_team, is_proactive=turn.is_proactive,
-        log_extra=log_extra, started_at=started_at, disclosure=resolve_ai_disclosure(db, auth.workspace_id),
+        chat_id=call.chat_id, agent_id=call.agent_id, team=call.team, is_proactive=call.is_proactive,
+        log_extra=log_extra, started_at=started_at, disclosure=disclosure,
     )
-
-    def _open_chunks() -> AsyncIterator[Any]:
-        # PRD-007 v0.5 — proactive openers must produce plain text only.
-        # `skip_composio` alone wasn't enough: the agent still had ~45
-        # platform tools loaded from its skill and would call one (40s
-        # with text_count=0). force_text_only=True clears use_tools
-        # entirely so the LLM can only emit text. Keeps openers within
-        # the <2s latency budget.
-        return streaming_service.stream_response_with_agent(
-            chat_id=chat_id, messages=message_history, agent_id=effective_agent_id, user_id=user_id,
-            team=agent_team, skip_composio=turn.is_proactive, force_text_only=turn.is_proactive,
-        )
-
     return StreamingResponse(
-        widget_event_stream(stream_ctx, _open_chunks),
+        widget_event_stream(stream_ctx, lambda: _turn_chunks(streaming_service_cls, auth, call)),
         media_type="text/event-stream",
         headers=_SSE_HEADERS,
     )
