@@ -19,6 +19,7 @@ import { PhonesDevicesTab } from './phones-devices/phones-devices-tab'
 import { BillingTab } from './billing/billing-tab'
 import { AutomatosCloudPanel, useHasAutomatosCloudTab } from './automatos-cloud-panel'
 import { WhatAutoDependsOn } from './what-auto-depends-on'
+import { ProactiveAutoSection } from './proactive-auto/proactive-auto-section'
 import { useSettingsTab } from './use-settings-tab'
 import { useSystemRole } from '@/contexts/role-context'
 import { isLocal } from '@/lib/auth-edition'
@@ -155,6 +156,7 @@ export function SettingsPanel() {
         <TabsContent value="orchestrator">
           <div className="space-y-6">
             <WhatAutoDependsOn />
+            <ProactiveAutoSection />
             <SystemLLMSettingsTab />
           </div>
         </TabsContent>

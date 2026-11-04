@@ -146,12 +146,13 @@ Sources: [frontend/components/marketplace/github-import-modal.tsx:21-64](), [fro
 
 ---
 
-## 14.4 Marketplace Backend & API
-
-The plugin catalog API is mounted at `/api/marketplace/plugins`; its list endpoint filters for approved and active plugins and supports catalog query parameters such as category, search, tags, sorting, and pagination. Other marketplace surfaces use their corresponding API and workspace endpoints, including the tools catalog and workspace plugin and skill lists. Backend ownership markers, workspace isolation, LLM marketplace routes, and installation statistics are covered in the child page. [orchestrator/api/marketplace_plugins.py:36-36](), [orchestrator/api/marketplace_plugins.py:171-189](), [frontend/components/marketplace/marketplace-tools-tab.tsx:103-139](), [frontend/components/marketplace/marketplace-plugins-tab.tsx:109-126](), [frontend/components/marketplace/marketplace-skills-tab.tsx:79-107]()
-
-For details, see [Marketplace Backend & API](#14.4).
-
-Sources: [orchestrator/api/marketplace_plugins.py:36-36](), [orchestrator/api/marketplace_plugins.py:171-189](), [frontend/components/marketplace/marketplace-tools-tab.tsx:103-139](), [frontend/components/marketplace/marketplace-plugins-tab.tsx:109-126](), [frontend/components/marketplace/marketplace-skills-tab.tsx:79-107]()
+## Detailed Documentation
+- [Marketplace Overview](#14.1) — MarketplaceHomepage, tabs (Applications, Agents, Playbooks, LLMs, Plugins, Skills, Widgets), search
+- [Browsing & Installing Items](#14.2) — Item cards, detail modals, install flow, cascade installer for dependencies, install_count tracking
+- [Publishing to Marketplace](#14.3) — Clone-to-workspace pattern, owner_type, dependency cloning, marketplace S3 asset storage, publish/developer pages
+- [Marketplace Backend & LLM Catalog](#14.4) — marketplace.py, marketplace_plugins.py, llm_marketplace.py, user_api_keys, usage tracker, workspace isolation and cloning logic
+- [Marketplace › Themes](themes-tab.md) — the Themes tab, the Marketplace's first tab: the storefront (web and phone screenshots per look), Official and signed themes, Add to my workspace, updates and pins, Publish theme
+- [The open Marketplace](open-marketplace.md) — for users: browsing `/marketplace` signed out on the hosted edition (one page for everyone; Add, sign in, back to the item), and Sync with Automatos Cloud on a local install (what it brings, adding a Cloud theme or item, updates after a Sync)
+- [Sync with Automatos Cloud](sync-with-automatos-cloud.md) — technical: a local install pulls Automatos Cloud's signed themes and its reviewed agents, Playbooks, packages and plugins (what leaves the install, the checks, updates, the review before an add, the settings, the routes); the hosted edition's catalogue, its files, bundles and plugin packages, the public reads and their rate limit
 
 ---

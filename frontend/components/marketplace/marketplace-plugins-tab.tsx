@@ -44,43 +44,13 @@ import { apiClient } from '@/lib/api-client'
 import { useSystemRole } from '@/contexts/role-context'
 import { MarketplacePluginDetailModal } from './marketplace-plugin-detail-modal'
 import { GitHubImportModal } from './github-import-modal'
+import { CloudItemBadges } from './cloud/cloud-item-badges'
+import type { PluginCategory, PluginSummary } from './plugin-types'
+import { useMarketplaceAccess } from './access/marketplace-access'
 
 // ===================================================================
 // Types
 // ===================================================================
-
-interface PluginSummary {
-  id: string
-  slug: string
-  name: string
-  version: string
-  description: string | null
-  category_id: string | null
-  category_name: string | null
-  tags: string[]
-  skills_count: number
-  commands_count: number
-  agents_count: number
-  hooks_count: number
-  token_estimate: number
-  enable_count: number
-  is_featured: boolean
-  security_status: string | null
-  approval_status: string | null
-  original_author: string | null
-  license: string | null
-  created_at: string | null
-}
-
-interface PluginCategory {
-  id: string
-  slug: string
-  name: string
-  description: string | null
-  icon: string | null
-  sort_order: number
-  parent_id: string | null
-}
 
 interface MarketplacePluginsTabProps {
   searchQuery: string
@@ -679,6 +649,7 @@ function FeaturedPluginCard({
                 </StatusBadge>
               </div>
               <p className="text-xs text-muted-foreground">v{plugin.version}</p>
+              <CloudItemBadges kind="plugin" id={plugin.id} className="mt-1" />
             </div>
           </div>
           <DropdownMenu>
@@ -763,7 +734,7 @@ interface PluginCardProps {
   globalIcon?: string | null
 }
 
-function PluginCard({
+export function PluginCard({
   plugin,
   index,
   isEnabled,
@@ -780,7 +751,7 @@ function PluginCard({
   globalIcon,
 }: PluginCardProps) {
   const isPending = plugin.approval_status === 'pending'
-
+  const { signedIn } = useMarketplaceAccess() // signed out, the public read has no enable counts
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -815,6 +786,7 @@ function PluginCard({
                     <> &middot; {plugin.original_author}</>
                   )}
                 </p>
+                <CloudItemBadges kind="plugin" id={plugin.id} className="mt-1" />
               </div>
             </div>
             {plugin.security_status === 'safe' && (
@@ -864,10 +836,10 @@ function PluginCard({
                 <span>{plugin.agents_count}</span>
               </div>
             )}
-            <div className="flex items-center gap-1 ml-auto" title="Enabled by workspaces">
+            {signedIn && <div className="flex items-center gap-1 ml-auto" title="Enabled by workspaces">
               <Download className="w-3 h-3" />
               <span>{plugin.enable_count}</span>
-            </div>
+            </div>}
           </div>
 
         </CardContent>

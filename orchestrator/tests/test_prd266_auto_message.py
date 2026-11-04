@@ -165,7 +165,7 @@ def test_a_scheduled_task_post_tells_the_chats_owner_only(people, told, new_sess
     assert told == [{
         "workspace_id": ws, "event_type": "auto_message", "title": "Auto messaged you",
         "message": "Weekly numbers Revenue: £4,210", "link_type": "chat", "link_id": str(message.chat_id),
-        "agent_name": "Auto", "user_id": owner[1],
+        "agent_name": "Auto", "user_id": owner[1], "message_id": None,
     }]
     assert _bell(new_session, ws, owner[1]) == [(
         "auto_message", "Auto messaged you", "Weekly numbers Revenue: £4,210", "chat",

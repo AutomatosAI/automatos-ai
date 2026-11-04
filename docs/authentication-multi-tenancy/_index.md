@@ -13,9 +13,10 @@ The following files were used as context for generating this wiki page:
 - [frontend/components/settings/__tests__/settings-panel-tab-param.test.tsx](frontend/components/settings/__tests__/settings-panel-tab-param.test.tsx)
 - [frontend/components/settings/__tests__/workspace-voice-live-card.test.tsx](frontend/components/settings/__tests__/workspace-voice-live-card.test.tsx)
 - [frontend/components/workspace-provider.tsx](frontend/components/workspace-provider.tsx)
-- [frontend/hooks/use-voice-live-settings.ts](frontend/hooks/use-voice-live-settings.ts)
-- [frontend/lib/voice/live/refusal.ts](frontend/lib/voice/live/refusal.ts)
-- [orchestrator/api/workspaces.py](orchestrator/api/workspaces.py)
+- [orchestrator/alembic/versions/prd_workspace_models_backfill.py](orchestrator/alembic/versions/prd_workspace_models_backfill.py)
+- [orchestrator/core/auth/clerk.py](orchestrator/core/auth/clerk.py)
+- [orchestrator/core/auth/clerk_azp.py](orchestrator/core/auth/clerk_azp.py)
+- [orchestrator/core/auth/clerk_mobile_template.py](orchestrator/core/auth/clerk_mobile_template.py)
 - [orchestrator/core/auth/hybrid.py](orchestrator/core/auth/hybrid.py)
 - [orchestrator/modules/context/sections/product_facts.py](orchestrator/modules/context/sections/product_facts.py)
 - [orchestrator/modules/voice/mint.py](orchestrator/modules/voice/mint.py)
@@ -56,13 +57,26 @@ Sources: [orchestrator/core/auth/hybrid.py:14-24](), [orchestrator/core/auth/hyb
 
 **Natural Language to Code Entity Mapping — Authentication and Request Context**
 
+The `ClerkAuth` class handles JWT verification using JWKS (JSON Web Key Set) [orchestrator/core/auth/clerk.py:26-32](). It normalizes user claims, including the `system_role` which is extracted from Clerk session token metadata [orchestrator/core/auth/clerk.py:131-143]().
+
+After the signature and expiry checks, `verify_token` also checks the token's `azp` (authorized party) claim against the allowed frontend origins, `CLERK_AUTHORIZED_PARTIES` plus `FRONTEND_URL`'s origin, and refuses a token minted on any other origin [orchestrator/core/auth/clerk.py:103-106](). The Automatos Go app's token has no `azp`, and passes on a marker claim from the Clerk `mobile` JWT template. See [Clerk Authorized Parties (azp)](clerk-authorized-parties.md).
+
+Title: Hybrid Authentication & Context Resolution
 ```mermaid
-graph LR
-    subgraph "Natural Language Space"
-        Client["Client request"]
-        Identity["User identity"]
-        Workspace["Workspace selection"]
-        Auth["Authentication credential"]
+graph TB
+    subgraph "Client_Layer"
+        Browser["Browser<br/>(Clerk Session)"]
+        Phone["Automatos Go<br/>(Clerk mobile template token)"]
+        Automation["Automation Client<br/>(API Key)"]
+        EnvConfig["Environment<br/>(DEFAULT_WORKSPACE_ID)"]
+    end
+    
+    subgraph "Authentication_Logic"
+        Hybrid["get_request_context_hybrid()"]
+        ClerkAuth["ClerkAuth.verify_token()"]
+        AzpCheck["azp_allowed()<br/>CLERK_AUTHORIZED_PARTIES"]
+        WorkspaceRes["_get_workspace_id_from_request()"]
+        AccessCheck["_user_has_workspace_access()"]
     end
     subgraph "Code Entity Space"
         Hybrid["get_request_context_hybrid"]
@@ -72,19 +86,21 @@ graph LR
         WorkspaceResolver["_get_workspace_id_from_request"]
         RequestContext["RequestContext"]
     end
-    Client --> Hybrid
-    Identity --> Clerk
-    Auth --> Bearers
-    Auth --> ApiKey
-    Clerk --> Hybrid
-    Bearers --> Hybrid
-    ApiKey --> Hybrid
-    Workspace --> WorkspaceResolver
-    WorkspaceResolver --> Hybrid
-    Hybrid --> RequestContext
+    
+    Browser -->|"Authorization: Bearer {jwt}"| Hybrid
+    Phone -->|"Authorization: Bearer {jwt}"| Hybrid
+    Automation -->|"x-api-key: {key}"| Hybrid
+    EnvConfig --> WorkspaceRes
+    
+    Hybrid --> ClerkAuth
+    ClerkAuth --> AzpCheck
+    Hybrid --> WorkspaceRes
+    WorkspaceRes --> AccessCheck
+    AccessCheck --> Context
+    ClerkAuth --> Context
 ```
 
-Sources: [orchestrator/core/auth/hybrid.py:14-24](), [orchestrator/core/auth/hybrid.py:55-94]()
+**Sources:** [orchestrator/core/auth/hybrid.py:49-88](), [orchestrator/core/auth/hybrid.py:146-165](), [orchestrator/core/auth/clerk.py:69-106](), [orchestrator/core/auth/clerk_azp.py:112-121]()
 
 ### Workspace Authorization and Frontend Context
 
@@ -182,6 +198,14 @@ Sources: [orchestrator/api/workspaces.py:118-141](), [frontend/components/settin
 - [Credentials & API Keys](#17.5)
 - [Billing, Credits & Metering](#17.6)
 
-Sources: [orchestrator/core/auth/hybrid.py:14-24](), [orchestrator/api/workspaces.py:70-83](), [frontend/components/workspace-provider.tsx:58-82]()
+## Child Pages
+- [Authentication Flow](#17.1) — Clerk JWT vs API key, get_request_context_hybrid, AUTH_EDITION saas vs local, sign-in/sign-up pages, Edge proxy security
+- [Clerk Authorized Parties (azp)](clerk-authorized-parties.md) — the azp check in verify_token, CLERK_AUTHORIZED_PARTIES and CLERK_AZP_REQUIRED, Automatos Go's mobile JWT template marker, log lines, 401 diagnosis
+- [Workspace Management](#17.2) — Workspace model, workspace_id context injection, workspace switching, model seeding, workspace purge, provisioning
+- [Data Isolation](#17.3) — Database foreign keys, tenancy matrix tests, query key scoping, memory namespacing, cache isolation, team access
+- [Admin Access Control](#17.4) — system_role field, admin gates, workspace_admin/workspace_permission dependencies, bootstrap mode, authz boundary sweeps
+- [Credentials Management](#17.5) — User API keys, BYOK overrides, credential store and types seed, integration bridges, encryption service, SDK API keys
+- [Teams, Members & Invitations](#17.6) — Teams table and team-scoped documents, workspace members, invitations, invite modal, workspace audit log
+- [Trials, Plan Tiers & Session Modes](#17.7) — trial_ledger metering and enforcement, plan_tiers, subscription/session mode runtime, CLI host service and services/cli-host allowlist
 
 ---

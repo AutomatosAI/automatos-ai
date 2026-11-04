@@ -3,7 +3,7 @@
 /**
  * PRD-270 US-270-09a (§5.7, §8-Q8, K21) — back on the Marketplace item after sign-in or sign-up.
  *
- * A signed-out visitor's Add, Sign in and Start free remember a Marketplace path
+ * A signed-out visitor's Add and Sign in remember a Marketplace path
  * (lib/marketplace/return-after-sign-in.ts). The sign-in, sign-up and SSO pages stay untouched and
  * land on '/', so this component, mounted once in Providers inside WorkspaceProvider, takes the
  * path once the person is signed in AND has a workspace (a new sign-up's first workspace is made

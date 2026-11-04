@@ -12,7 +12,10 @@ in ``mobile_digest_posts``. Proven here, on Postgres with committing sessions:
 * the scheduled digest's message is ``[text(Auto's Read), brief@1]`` in the person's Auto
   thread, in their phone's language, with source {origin daily_digest, local_date, via
   schedule}; ``post_now`` posts the same brief with no claim and no via, as today;
-* a brief posted on open raises no ``auto_message``; the scheduled one still does;
+* a brief posted on open raises no ``auto_message``; the scheduled one still does, and it and
+  ``post_now``'s each name their message's id (US-G03: the push opens the thread at the brief);
+* a person who paused suggestions (§6.9) still gets the scheduled brief, with none of their
+  suggestions in it, while another person's brief lists theirs;
 * ``todays_brief_message`` is the newest of the day's messages in the person's own Auto thread
   in the workspace; ``post_brief`` refuses a via that is neither; ``claim_brief`` is the
   digest's claim; ``due_people`` carries the phone's zone and language without comparing them;
@@ -33,6 +36,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 import logging
 import threading
 import uuid
@@ -380,6 +384,38 @@ def test_the_scheduled_digests_message_carries_brief_at_1_and_its_text_is_auto_s
     assert held.reads.count(cafe.ws) == 1  # one Read for the workspace, no second model call
 
 
+def _open_suggestion(s, ws, user_pk, title):
+    from core.models.proactive import ProactiveSuggestion
+
+    made = datetime.now(timezone.utc)
+    row = ProactiveSuggestion(
+        workspace_id=UUID(ws), user_id=user_pk, source_type="check_in", title=title, detail=f"Why: {title}.",
+        evidence=[], proposed_action={"kind": "board_task", "payload": {}}, subject_key=f"title:{title}",
+        severity="today", status="open", last_seen_at=made, created_at=made, expires_at=made + timedelta(days=7))
+    s.add(row)
+    s.flush()
+    return f"suggestion:{row.id}"
+
+
+def test_a_paused_person_still_gets_the_scheduled_brief_with_none_of_their_suggestions(cafe, held, new_session):
+    s = new_session()
+    _open_suggestion(s, cafe.ws, cafe.ana, "Restock oat milk")
+    bos = _open_suggestion(s, cafe.ws, cafe.bo, "Book the Lisbon flights")
+    s.execute(text("INSERT INTO proactive_person_settings (workspace_id, user_id, paused) "
+                   "VALUES (CAST(:w AS uuid), :u, true)"), {"w": cafe.ws, "u": cafe.ana})
+    s.commit()
+    _phone(new_session, cafe.ws, cafe.ana)
+    _phone(new_session, cafe.ws, cafe.bo)
+
+    _run(new_session, T_LISBON_8)
+
+    cards = {row.user_id: row.parts[1]["brief"] for row in _briefs(new_session, cafe.ws)}
+    assert set(cards) == {cafe.ana, cafe.bo}  # the paused person's brief still comes
+    assert cards[cafe.ana]["sections"]["suggestions"] == [] and cards[cafe.ana]["counts"]["suggestions"] == 0
+    assert "Restock oat milk" not in json.dumps(cards[cafe.ana]) and cards[cafe.ana]["prose"] == PROSE
+    assert [row["id"] for row in cards[cafe.bo]["sections"]["suggestions"]] == [bos]
+
+
 def test_post_now_posts_the_same_brief_with_no_claim_and_no_via(cafe, held, new_session):
     _phone(new_session, cafe.ws, cafe.ana)
 
@@ -410,6 +446,19 @@ def test_the_scheduled_brief_still_raises_auto_message(cafe, held, new_session):
     (brief,) = _briefs(new_session, cafe.ws)
     assert [(notice.chat_id, notice.origin, notice.excerpt) for notice in _told(held, cafe.ws)] == [
         (brief.chat_id, "daily_digest", PROSE)]
+
+
+def test_the_scheduled_brief_and_post_now_announce_their_message_ids(cafe, held, new_session):
+    """PRD-268 US-G03: each announced brief names its message, so its push opens the thread at it."""
+    _phone(new_session, cafe.ws, cafe.ana)
+
+    _run(new_session, T_LISBON_8)
+    assert asyncio.run(digest.post_now(UUID(cafe.ws), cafe.ana, now=T_LISBON_8, session_factory=new_session)) is True
+
+    scheduled, asked = _briefs(new_session, cafe.ws)
+    assert (scheduled.source["via"], "via" in asked.source) == (VIA_SCHEDULE, False)
+    assert [(notice.chat_id, notice.message_id) for notice in _told(held, cafe.ws)] == [
+        (scheduled.chat_id, scheduled.id), (asked.chat_id, asked.id)]
 
 
 # --------------------------------------------------------------------------- the day's message, the claim

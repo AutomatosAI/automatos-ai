@@ -160,7 +160,7 @@ Delete any orphaned components, hooks (`useCodegraphSettings`, `useKnowledgeGrap
 
 ## Verification
 
-1. **Inbuild UK chat (`28a228aa-dd63-46c7-baac-d29a0eb67283`):** Ask a question that requires reading 3+ ingested docs. Auto synthesizes, doesn't say "I found N documents."
+1. **Chat in a workspace with ingested documents:** Ask a question that requires reading 3+ ingested docs. Auto synthesizes, doesn't say "I found N documents."
 2. **Settings page:** Three LLM cards visible, all five legacy panels gone.
 3. **DB:** `SELECT DISTINCT category FROM system_settings WHERE category LIKE '%llm%' OR category IN ('codegraph','chatbot','complexity_assessor','coordination','knowledge_graph','memory_management','embeddings');` returns only `orchestrator_llm`, `system_llm`, `embeddings`.
 4. **Hardcoded defaults gone:** `rg "gpt-4|claude-3-sonnet" orchestrator/api/` returns nothing.

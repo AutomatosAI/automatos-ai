@@ -132,6 +132,20 @@ Object storage (such as AWS S3 or S3-compatible vector storage) is configured us
 
 Sources: [orchestrator/reports/config-surface.json:21-25]()
 
+### Sign-in (hosted edition, Clerk)
+The hosted edition (`AUTH_EDITION=saas`) signs people in with Clerk, and the API verifies each Clerk session token itself (`orchestrator/core/auth/clerk.py`). The local edition has no Clerk and reads none of these settings. Set them in the environment only; never commit their values.
+
+| Parameter / Variable | Required | Description |
+| :--- | :--- | :--- |
+| `CLERK_JWKS_URL` | **Yes** (hosted) | Where the API fetches the Clerk instance's public keys to check each token's signature. A hosted boot without it fails [orchestrator/config.py:577](../../orchestrator/config.py#L577) |
+| `CLERK_SECRET_KEY` | **Yes** (hosted) | The API's key for Clerk's Backend API: a user's email when the token carries none, invitations and organisation members, deleting a user. A hosted boot without it fails [orchestrator/config.py:575](../../orchestrator/config.py#L575) |
+| `CLERK_AUDIENCE` | No | When set, a token's `aud` claim must match it; empty skips that check [orchestrator/config.py:578](../../orchestrator/config.py#L578) |
+| `CLERK_AUTHORIZED_PARTIES` | No | The browser origins whose tokens the API accepts (the `azp` check), comma-separated. It has a shipped default [orchestrator/config.py:33-36](../../orchestrator/config.py#L33-L36), [orchestrator/config.py:582](../../orchestrator/config.py#L582) |
+| `CLERK_AZP_REQUIRED` | No | What happens to a token with no `azp` that isn't Automatos Go's: off (the default) logs a warning and accepts it, on refuses it with 401 [orchestrator/config.py:586](../../orchestrator/config.py#L586) |
+| `FRONTEND_URL` | No | The frontend's public URL. Its origin is always added to the authorized parties, and invitation links are built from it [orchestrator/config.py:611](../../orchestrator/config.py#L611) |
+
+The boot check that refuses a hosted start without Clerk is `validate_auth_edition` [orchestrator/config.py:2664-2668](../../orchestrator/config.py#L2664-L2668). For how the `azp` check works, its log lines and how to turn `CLERK_AZP_REQUIRED` on, see [Clerk Authorized Parties (azp)](../authentication-multi-tenancy/clerk-authorized-parties.md).
+
 ---
 
 ## LLM Tier Management (PRD-136)

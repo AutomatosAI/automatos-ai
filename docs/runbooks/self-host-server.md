@@ -256,6 +256,16 @@ outbound HTTPS and nothing inbound. What it sends, checks and stores is in
 - **Updates:** an install not pinned to a version moves to a newer listed version at the next Sync. An older HUD
   installed on purpose was offered the newer one at once, and the next Sync moved it.
 
+**The first Cloud install on a fresh install.** A fresh install has no theme storage bucket (`MARKETPLACE_S3_BUCKET`,
+`automatos-marketplace` by default) until its first theme is stored. From commit `bb6aa50` on, the first install
+creates it. An older install answers that first install with "Theme files can't be stored right now, so nothing was
+installed." (503) and logs `NoSuchBucket`. Update it, or create the bucket once from the MinIO container, with the
+credentials from its own environment as in [section 6](#6-backups):
+
+```bash
+sudo docker compose exec -T minio sh -c 'mc alias set b http://localhost:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" && mc mb --ignore-existing b/automatos-marketplace'
+```
+
 ## 8. Troubleshooting
 
 | What you see | Why | What to do |

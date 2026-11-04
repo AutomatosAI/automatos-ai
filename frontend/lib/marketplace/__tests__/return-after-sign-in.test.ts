@@ -4,8 +4,7 @@
  * - only '/marketplace' with its tab, item and add query is ever kept, rebuilt from those three:
  *   another site, '//', another path, a scheme, a backslash, a fragment, an overlong value or any
  *   other parameter is dropped (no open redirect);
- * - the sign-in and sign-up links carry it encoded as `redirect_url`, and an unsafe one becomes
- *   '/marketplace';
+ * - the sign-in link carries it encoded as `redirect_url`, and an unsafe one becomes '/marketplace';
  * - it is remembered in this tab for 30 minutes and taken once; an expired, tampered or malformed
  *   store gives nothing and is forgotten; storage errors never throw.
  */
@@ -20,7 +19,6 @@ import {
   remember,
   safeReturnPath,
   signInUrl,
-  signUpUrl,
   take,
 } from '../return-after-sign-in'
 
@@ -101,14 +99,13 @@ describe('the links', () => {
     expect(marketplaceItemPath('recipes', 'weekly report')).toBe('/marketplace?tab=recipes&item=weekly+report&add=1')
   })
 
-  it('sign-in and sign-up carry the return path, encoded, as redirect_url', () => {
+  it('sign-in carries the return path, encoded, as redirect_url', () => {
     expect(signInUrl(ARCADE)).toBe(`/sign-in?redirect_url=${encodeURIComponent(ARCADE)}`)
-    expect(signUpUrl(ARCADE)).toBe(`/sign-up?redirect_url=${encodeURIComponent(ARCADE)}`)
   })
 
   it('an unsafe return path rides as /marketplace, never as given', () => {
     expect(signInUrl('https://evil.example')).toBe('/sign-in?redirect_url=%2Fmarketplace')
-    expect(signUpUrl('//evil.example')).toBe('/sign-up?redirect_url=%2Fmarketplace')
+    expect(signInUrl('//evil.example')).toBe('/sign-in?redirect_url=%2Fmarketplace')
     expect(signInUrl(`${ARCADE}&next=//evil.example`)).toBe(`/sign-in?redirect_url=${encodeURIComponent(ARCADE)}`)
   })
 })

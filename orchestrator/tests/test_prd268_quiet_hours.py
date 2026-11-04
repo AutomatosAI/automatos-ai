@@ -241,6 +241,8 @@ def _audit(team) -> list:
 
 
 NIGHT_BODY = {"quiet_start": "22:00", "quiet_end": "07:00", "timezone": DUBLIN}
+# A GET's effective mode: this workspace never switched check-ins on, so it is off.
+MODE_OFF = {"effective_mode": "off"}
 
 
 @pytest.mark.parametrize("role", ["owner", "viewer"])
@@ -248,11 +250,11 @@ def test_any_member_sets_and_reads_back_their_quiet_hours_and_timezone(team, saa
     person = getattr(team, role)
     client = _as(team, person)
 
-    assert client.get(ME).json() == {"paused": False, **NO_QUIET_HOURS}
+    assert client.get(ME).json() == {"paused": False, **NO_QUIET_HOURS, **MODE_OFF}
     reply = client.put(ME, json=NIGHT_BODY)
 
     assert reply.status_code == 200 and reply.json() == {"paused": False, **NIGHT_BODY}
-    assert client.get(ME).json() == {"paused": False, **NIGHT_BODY}
+    assert client.get(ME).json() == {"paused": False, **NIGHT_BODY, **MODE_OFF}
     assert _rows(team) == [(person.pk, False, time(22, 0), time(7, 0), DUBLIN)]
     [(action, user_id, details)] = _audit(team)
     assert (action, user_id) == ("proactive:quiet_hours_changed", person.pk)
@@ -278,7 +280,7 @@ def test_what_a_put_leaves_out_stays_and_nulls_clear_the_hours(team, saas):
 def test_each_person_keeps_their_own_quiet_hours(team, saas):
     _as(team, team.owner).put(ME, json=NIGHT_BODY)
 
-    assert _as(team, team.viewer).get(ME).json() == {"paused": False, **NO_QUIET_HOURS}
+    assert _as(team, team.viewer).get(ME).json() == {"paused": False, **NO_QUIET_HOURS, **MODE_OFF}
     assert _rows(team) == [(team.owner.pk, False, time(22, 0), time(7, 0), DUBLIN)]
 
 

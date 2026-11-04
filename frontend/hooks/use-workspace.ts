@@ -14,6 +14,12 @@ export function useWorkspace() {
         const fetchWorkspace = async () => {
             // Wait for Auth to load
             if (!isLoaded) return
+            // A signed-out visitor (the public Marketplace) has no workspace: clear any earlier one and stop loading
+            if (!isSignedIn) {
+                setWorkspaceId(null)
+                setLoading(false)
+                return
+            }
 
             try {
                 setLoading(true)

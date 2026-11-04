@@ -2,10 +2,12 @@
 
 * ``GET /suggestions?status=open`` — the suggestions in one state (``open`` by default),
   newest first: an owner or admin sees every person's in the workspace, anyone else only the
-  ones addressed to them (W1 addresses every suggestion to the workspace owner, K11). A caller
-  with no person behind it, or none in this workspace, is 403. An open suggestion past its 7
-  days lapses first, here and in Start and Hide: it lists as ``expired`` and either decision
-  of it is 409 ``expired``.
+  ones addressed to them (W1 addresses every suggestion to the workspace owner, K11). A person
+  who paused suggestions (§6.9; a pause that cannot be read is a pause) lists none of their
+  own: nothing, or, as an owner or admin, every other person's. Start and Hide still take one
+  by its id. A caller with no person behind it, or none in this workspace, is 403. An open
+  suggestion past its 7 days lapses first, here and in Start and Hide: it lists as
+  ``expired`` and either decision of it is 409 ``expired``.
 * ``POST /suggestions/{suggestion_id}/start`` ``{via?}`` — Start (owners, admins and editors,
   the PRD-266 D16 rule; a viewer is 403): ``{suggestion, opens}``, where ``opens`` is the ticket
   Start filed (``{type: 'board_task', board_task_id}``) or the chat to open
@@ -19,17 +21,22 @@
   default), newest first: owners and admins.
 * ``GET /settings`` and ``PUT /settings`` ``{enabled?, caps?}`` — the workspace switch and the
   §6.9 caps, each cap over its default (owners and admins, the workspace manage permission):
-  ``{enabled, caps, platform_caps}``. A workspace can only tighten the platform's caps: a cap
-  looser than ``platform_caps`` is 422 ``caps_looser``, and caps that would not fit together
-  422 ``caps_wrong``; nothing is saved. A cap sent as null is back at its default. A change
-  is audited.
+  ``{enabled, caps, platform_caps}``, and on a ``GET`` also ``effective_mode``. A workspace can
+  only tighten the platform's caps: a cap looser than ``platform_caps`` is 422 ``caps_looser``,
+  and caps that would not fit together 422 ``caps_wrong``; nothing is saved. A cap sent as null
+  is back at its default. A change is audited.
 * ``GET /me`` and ``PUT /me`` ``{paused?, quiet_start?, quiet_end?, timezone?}`` — the
   caller's own settings in this workspace (any member; no person behind the caller is 403):
   "Pause suggestions" and their quiet hours, ``HH:MM`` to ``HH:MM`` in an IANA time zone (the
   phone's; null is the workspace's), read with the workspace's window
   (``services.proactive.quiet``). What a ``PUT`` leaves out stays; the two times are sent
   together, both null to clear them, and never the same. ``{paused, quiet_start, quiet_end,
-  timezone}``. A change is audited.
+  timezone}``, and on a ``GET`` also ``effective_mode``. A change is audited.
+
+``effective_mode`` (``off``, ``shadow`` or ``live``) is read-only: the workspace's mode
+(``services.proactive.switches.effective_mode``), the platform's where the workspace switch is
+on, else off, and off whenever either cannot be read. It is the one thing either answer says
+about the platform: never the platform setting's own value. Settings draws its one line from it.
 
 Another workspace's suggestion is 404. ``via`` says where the person decided (``web``,
 ``go``, ``push``, ``chat``, ``telegram``): left out, ``go`` for a paired device and ``web``
@@ -70,6 +77,7 @@ from services.board_consent import actor_ref
 from services.proactive import decisions, listing
 from services.proactive import settings as proactive_settings
 from services.proactive.decision_text import say
+from services.proactive.switches import effective_mode
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +98,8 @@ CAPS_LOOSER = "caps_looser"
 CAPS_STORED_WRONG = "caps_stored_wrong"
 HTTP_FORBIDDEN, HTTP_NOT_FOUND, HTTP_CONFLICT, HTTP_UNPROCESSABLE, HTTP_UNAVAILABLE = 403, 404, 409, 422, 503
 VIA_WEB, VIA_GO = "web", "go"
+# The workspace's mode on a settings read: services.proactive.switches.effective_mode, failing closed.
+EFFECTIVE_MODE = "effective_mode"
 
 SuggestionStatus = Literal["open", "started", "hidden", "expired"]
 Via = Literal["web", "go", "push", "chat", "telegram"]
@@ -295,7 +305,7 @@ def get_settings(
     ctx: RequestContext = Depends(require_workspace_permission(MANAGE_PERMISSION)),
     db: Session = Depends(get_db),
 ) -> Union[Dict[str, Any], JSONResponse]:
-    """The workspace switch and its caps, each over its default."""
+    """The workspace switch and its caps, each over its default, and the workspace's effective mode."""
     locale = request_locale(accept_language)
     if ctx.workspace_id is None:
         return _refused(locale, NO_WORKSPACE, HTTP_NOT_FOUND)
@@ -308,7 +318,7 @@ def get_settings(
         return _refused(locale, CAPS_STORED_WRONG, HTTP_CONFLICT)
     except SQLAlchemyError as failure:
         return _unavailable(db, locale, "settings read", failure, SETTINGS_UNREADABLE)
-    return current.to_dict()
+    return {**current.to_dict(), EFFECTIVE_MODE: effective_mode(db, ctx.workspace_id)}
 
 
 @router.put("/settings", response_model=None)
@@ -343,7 +353,8 @@ def get_my_settings(
     ctx: RequestContext = Depends(require_workspace_permission(MEMBER_PERMISSION)),
     db: Session = Depends(get_db),
 ) -> Union[Dict[str, Any], JSONResponse]:
-    """The caller's own proactive settings in this workspace: ``{paused, quiet_start, quiet_end, timezone}``."""
+    """The caller's own proactive settings in this workspace, ``{paused, quiet_start, quiet_end, timezone}``, and
+    the workspace's effective mode."""
     locale = request_locale(accept_language)
     if ctx.workspace_id is None:
         return _refused(locale, NO_WORKSPACE, HTTP_NOT_FOUND)
@@ -354,7 +365,7 @@ def get_my_settings(
         mine = proactive_settings.read_person(db, ctx.workspace_id, user_pk)
     except SQLAlchemyError as failure:
         return _unavailable(db, locale, "person settings read", failure, SETTINGS_UNREADABLE)
-    return mine.to_dict()
+    return {**mine.to_dict(), EFFECTIVE_MODE: effective_mode(db, ctx.workspace_id)}
 
 
 @router.put("/me", response_model=None)

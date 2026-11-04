@@ -50,6 +50,7 @@ from config import config
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.models.themes import ThemePackage, ThemePublisher, ThemeRevocation, ThemeRevocationSync
+from services.marketplace_bundles import catalog_items
 from services.marketplace_cloud import catalog, catalog_files
 from services.themes import serve, signature_verify, signed_upload, storage
 from services.themes.digest import sha256_hex
@@ -112,6 +113,9 @@ def cat(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "MARKETPLACE_PUBLIC_RATE_PER_MINUTE", 1000)
     monkeypatch.setattr(config, "THEME_FILE_CACHE_SECONDS", 4321)
     monkeypatch.setattr(catalog, "CATALOG_KEPT_SECONDS", 0)
+    # PRD-270 W2: this database holds the theme tables only, so the catalogue lists no item entry here (as in
+    # test_prd270w1_catalog_feed; test_prd270w2_catalog_items covers the entries, and their bundles, on Postgres).
+    monkeypatch.setattr(catalog_items, "item_set", lambda db: [])
     catalog.forget_cached()
     app = FastAPI()
     app.include_router(catalog_api.router)

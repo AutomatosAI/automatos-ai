@@ -56,6 +56,7 @@ function status(overrides: Partial<CloudSyncStatus> = {}): CloudSyncStatus {
     generatedAt: null,
     counts: { new: 0, updated: 0, unchanged: 0, refused: 0 },
     themes: 0,
+    items: { agent: 0, playbook: 0, package: 0, plugin: 0 },
     stale: true,
     ...overrides,
   }
@@ -132,6 +133,17 @@ describe('the status line', () => {
     renderButton()
 
     expect(await screen.findByTestId('cloud-sync-status')).toHaveTextContent('Last synced 2m ago · 3 themes')
+  })
+
+  it('names the agents, Playbooks, packages and plugins held after the themes, leaving out a type with none', async () => {
+    const twoMinutesAgo = new Date(Date.now() - 2 * 60_000).toISOString()
+    const items = { agent: 2, playbook: 1, package: 0, plugin: 1 }
+    api.get.mockResolvedValue(status({ lastSuccessAt: twoMinutesAgo, themes: 3, items, stale: false }))
+    renderButton()
+
+    expect(await screen.findByTestId('cloud-sync-status')).toHaveTextContent(
+      /^Last synced 2m ago · 3 themes · 2 agents · 1 Playbook · 1 plugin$/,
+    )
   })
 
   it('shows the last error in plain words, as text', async () => {

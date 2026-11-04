@@ -5,9 +5,10 @@
 or lists more than ``CATALOG_MAX_ITEMS`` items. Then each item is checked on its own, and one that fails
 is refused with a plain reason and counted, never listed:
 
-* its ``type`` is ``'theme'``. Any other type name is SKIPPED, neither refused nor a reason to fail the
-  Sync (PRD-270's second wave adds agents, Playbooks, packages and plugins to the same schema-1
-  catalogue); an item with no ``type``, or one that isn't a name, is refused;
+* its ``type`` is ``'theme'``. An item of a bundle type (an agent, a Playbook, a package or a plugin,
+  PRD-270's second wave) is read as an item entry instead (``items_feed.Entries.read``, on ``entries``).
+  Any other type name is SKIPPED, neither refused nor a reason to fail the Sync; an item with no
+  ``type``, or one that isn't a name, is refused;
 * its id, version and digest are ones a theme can have;
 * its ``package`` is exactly the catalogue's files path for its digest, or an https URL under the Design
   Kit's releases (§5.4). It is only checked: a package is fetched from a URL derived from the setting
@@ -39,6 +40,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Sequence, Tuple
 
 from config import config
+from services.marketplace_bundles.items_feed import NO_ENTRIES, Entries, is_bundle_item
 from services.marketplace_cloud.urls import package_path
 from services.themes import signature_verify
 from services.themes.contract import KB, MANIFEST_PATH, parse_json
@@ -100,12 +102,14 @@ class CheckedItem(NamedTuple):
 
 
 class Catalog(NamedTuple):
-    """A checked catalogue: its time, the items that verified, why the others were refused, how many were skipped."""
+    """A checked catalogue: its time, the items that verified, why the others were refused, how many were skipped,
+    and its item entries (``items_feed``)."""
 
     generated_at: datetime
     items: Tuple[CheckedItem, ...]
     refused: Tuple[str, ...]
     skipped: int
+    entries: Entries = NO_ENTRIES
 
 
 def feed_max_bytes() -> int:
@@ -134,8 +138,12 @@ def parse_catalog(data: bytes, db: Any) -> Catalog:
     keys = signature_verify.load_keys()  # once per catalogue; a keys file that doesn't load fails the Sync
     checked: List[CheckedItem] = []
     refused: List[str] = []
+    entries = NO_ENTRIES
     skipped = 0
     for number, item in enumerate(items, start=1):
+        if is_bundle_item(item):
+            entries = entries.read(item)
+            continue
         if _is_other_type(item):
             skipped += 1
             continue
@@ -144,7 +152,7 @@ def parse_catalog(data: bytes, db: Any) -> Catalog:
         except ItemRefused as refusal:
             logger.warning("Automatos Cloud catalogue: item %d refused: %s", number, refusal)
             refused.append(REFUSED_ITEM.format(number=number, reason=refusal))
-    return Catalog(generated_at, tuple(checked), tuple(refused), skipped)
+    return Catalog(generated_at, tuple(checked), tuple(refused), skipped, entries)
 
 
 def _json_object(data: bytes) -> Dict[str, Any]:
