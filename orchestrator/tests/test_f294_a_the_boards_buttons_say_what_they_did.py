@@ -71,7 +71,7 @@ def test_cancel_on_a_done_card_calls_it_off_and_says_so(board):
 
     card = _card(board, "done")
 
-    answer = asyncio.run(cancel_task(card.id, ctx=board.ctx, db=board.db))
+    answer = cancel_task(card.id, ctx=board.ctx, db=board.db)
 
     row, notes = _notes(board, card)
     assert answer["applied"] is True and "is cancelled now" in answer["message"]   # night 8: applied false, no words
@@ -84,7 +84,7 @@ def test_cancel_on_a_card_already_cancelled_says_there_is_nothing_to_cancel(boar
 
     card = _card(board, "cancelled")
 
-    answer = asyncio.run(cancel_task(card.id, ctx=board.ctx, db=board.db))
+    answer = cancel_task(card.id, ctx=board.ctx, db=board.db)
 
     assert answer["applied"] is False and "already cancelled: there is nothing to cancel" in answer["message"]
 

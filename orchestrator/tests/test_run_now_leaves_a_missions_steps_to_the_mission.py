@@ -52,7 +52,7 @@ def _run_now(mission, ticket):
     import api.board_tasks as bt
 
     with pytest.raises(HTTPException) as refused:
-        asyncio.run(bt.run_task_now(ticket.id, ctx=mission.ctx, db=mission.db))
+        bt.run_task_now(ticket.id, ctx=mission.ctx, db=mission.db)
     return refused.value
 
 

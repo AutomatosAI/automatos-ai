@@ -71,7 +71,7 @@ def test_cancel_on_a_playbooks_card_stops_its_run(workspace, new_session, stoppe
 
     pb = _running_playbook(new_session, workspace)
 
-    out = asyncio.run(cancel_task(pb.card, ctx=_owner(workspace), db=new_session()))
+    out = cancel_task(pb.card, ctx=_owner(workspace), db=new_session())
 
     assert out == {"id": pb.card, "status": "cancelled", "applied": True, "previous_status": "in_progress"}
     assert _execution_status(new_session, pb.run) == "cancelled"        # night: the run kept going
@@ -86,7 +86,7 @@ def test_a_run_that_ends_after_the_cancel_leaves_the_card_cancelled(workspace, n
     from services.board_task_bridge import complete_recipe_board_task
 
     pb = _running_playbook(new_session, workspace)
-    asyncio.run(cancel_task(pb.card, ctx=_owner(workspace), db=new_session()))
+    cancel_task(pb.card, ctx=_owner(workspace), db=new_session())
 
     complete_recipe_board_task(new_session(), pb.run, success=True, result="Stock report: 14 lines")
 
@@ -126,7 +126,7 @@ def test_whoever_may_not_stop_a_playbook_cannot_stop_it_from_the_board(workspace
     pb = _running_playbook(new_session, workspace)
 
     with pytest.raises(HTTPException) as refused:
-        asyncio.run(cancel_task(pb.card, ctx=_sdk_key(workspace), db=new_session()))
+        cancel_task(pb.card, ctx=_sdk_key(workspace), db=new_session())
 
     assert refused.value.status_code == 403 and "playbooks:execute" in refused.value.detail
     assert _execution_status(new_session, pb.run) == "running" and stopped_here == []
@@ -150,7 +150,7 @@ def test_a_cancel_that_fails_part_way_changes_nothing(workspace, new_session, st
 
     monkeypatch.setattr(board_cancel, "stop_ticket_run", _step_fails)
     with pytest.raises(RuntimeError):
-        asyncio.run(cancel_task(pb.card, ctx=_owner(workspace), db=new_session()))
+        cancel_task(pb.card, ctx=_owner(workspace), db=new_session())
 
     assert _execution_status(new_session, pb.run) == "running" and stopped_here == []
     assert _tickets(new_session, [pb.card])[pb.card].status == "in_progress"
@@ -168,6 +168,6 @@ def test_a_failed_ticket_can_be_cancelled(workspace, new_session):
     s.add(failed)
     s.commit()
 
-    out = asyncio.run(cancel_task(failed.id, ctx=_owner(workspace), db=new_session()))
+    out = cancel_task(failed.id, ctx=_owner(workspace), db=new_session())
 
     assert (out["applied"], out["status"]) == (True, "cancelled")

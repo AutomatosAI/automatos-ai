@@ -9,7 +9,6 @@ assign).
 """
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace as NS
 from uuid import UUID
 
@@ -50,7 +49,7 @@ def _ticket(board, agent):
 def _run_now(board, task):
     import api.board_tasks as bt
 
-    return asyncio.run(bt.run_task_now(task.id, ctx=board.ctx, db=board.db))
+    return bt.run_task_now(task.id, ctx=board.ctx, db=board.db)
 
 
 def test_1115_a_ticket_no_host_can_claim_is_queued_and_says_it_cannot_start(board):

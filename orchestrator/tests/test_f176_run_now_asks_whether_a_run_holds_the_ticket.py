@@ -49,7 +49,7 @@ def _ticket(board, **fields):
 def _run_now(board, task):
     import api.board_tasks as bt
 
-    return asyncio.run(bt.run_task_now(task.id, ctx=board.ctx, db=board.db))
+    return bt.run_task_now(task.id, ctx=board.ctx, db=board.db)
 
 
 def test_a_ticket_only_its_status_word_calls_running_is_started(board):

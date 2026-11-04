@@ -265,7 +265,7 @@ def test_run_now_never_says_a_host_must_start_an_api_agents_ticket(shop):
 
     task = f1094._ticket(shop, status="assigned", assigned_agent_id=shop.agent, blocked_reason=NO_HOST_REASON)
 
-    reply = asyncio.run(bt.run_task_now(task.id, ctx=shop.ctx, db=shop.db))
+    reply = bt.run_task_now(task.id, ctx=shop.ctx, db=shop.db)
 
     assert "nothing can start it" not in reply["message"] and reply["message"].endswith("started.")
     assert _row(shop, task).blocked_reason is None

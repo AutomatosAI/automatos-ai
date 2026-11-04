@@ -128,9 +128,9 @@ def test_the_boards_own_cancel_now_says_who_and_why(workspace, new_session):
     s.commit()
 
     ctx = SimpleNamespace(workspace_id=uuid.UUID(workspace), user_id="2")
-    assert asyncio.run(cancel_task(working, ctx=ctx, db=new_session()))["applied"] is True
+    assert cancel_task(working, ctx=ctx, db=new_session())["applied"] is True
     # F294 (night 8, #0422): a Done card is called off, as its drag does, and says so
-    called_off = asyncio.run(cancel_task(finished, ctx=ctx, db=new_session()))
+    called_off = cancel_task(finished, ctx=ctx, db=new_session())
     assert (called_off["applied"], called_off["previous_status"]) == (True, "done")
     rows = _tickets(new_session, [working, finished])
     ref = rows[working].runtime_ref
