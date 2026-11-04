@@ -724,8 +724,94 @@ def create_workspace_skill(
     }
 
 
+def _update_workspace_skill_migrate(db: Session, workspace_id: UUID, target_id: int, fork_id: int) -> int:
+    """Move agent_skills assignments (agents of this workspace) from the marketplace skill to the fork."""
+    from sqlalchemy import and_
+    from core.models.core import Agent, agent_skills as agent_skills_table
+
+    workspace_agent_ids = [
+        a.id for a in db.query(Agent.id).filter(Agent.workspace_id == workspace_id).all()
+    ]
+    migrated = 0
+    if workspace_agent_ids:
+        existing = db.execute(
+            agent_skills_table.select().where(
+                and_(
+                    agent_skills_table.c.agent_id.in_(workspace_agent_ids),
+                    agent_skills_table.c.skill_id == target_id,
+                )
+            )
+        ).fetchall()
+        for row in existing:
+            db.execute(agent_skills_table.delete().where(
+                and_(
+                    agent_skills_table.c.agent_id == row.agent_id,
+                    agent_skills_table.c.skill_id == target_id,
+                )
+            ))
+            db.execute(agent_skills_table.insert().values(
+                agent_id=row.agent_id, skill_id=fork_id,
+            ))
+            migrated += 1
+    return migrated
+
+
+def _update_workspace_skill_fork(
+    db: Session, workspace_id: UUID, target, body: "UpdateSkillBody", user_id, findings: list
+) -> Dict[str, Any]:
+    """Fork-on-edit: clone the marketplace skill into the workspace with the new content."""
+    from core.models.core import Skill
+    from core.models.marketplace_plugins import WorkspaceEnabledSkill
+
+    # Fork-on-edit
+    fork = Skill(
+        name=target.name,
+        description=target.description,
+        skill_type=target.skill_type,
+        category=target.category,
+        tags=list(target.tags) if target.tags else None,
+        prompt_template=body.content,
+        skill_source="workspace-fork",
+        skill_version=target.skill_version,
+        workspace_id=workspace_id,
+        is_active=True,
+        created_by=str(user_id) if user_id else None,
+        skill_metadata={"forked_from_skill_id": target.id},
+    )
+    _apply_frontmatter(fork, body.content, body)
+    db.add(fork)
+    db.flush()
+
+    # Migrate existing agent_skills assignments to the fork (within this workspace)
+    migrated = _update_workspace_skill_migrate(db, workspace_id, target.id, fork.id)
+
+    # Replace marketplace junction with fork-aware view: drop the old junction so
+    # listing surfaces the fork instead. (Listing already hides marketplace skills
+    # whose ids are forked_from_skill_id of a workspace skill — but dropping the
+    # junction is cleaner and ensures the user can re-enable the original later.)
+    db.query(WorkspaceEnabledSkill).filter(
+        WorkspaceEnabledSkill.workspace_id == workspace_id,
+        WorkspaceEnabledSkill.skill_id == target.id,
+    ).delete()
+
+    db.commit()
+    _invalidate_skill_cache(fork.name, db)
+    logger.info(
+        "Forked marketplace skill %d -> workspace skill %d (name=%s, %d agent assignments migrated)",
+        target.id, fork.id, fork.name, migrated,
+    )
+    return {
+        "success": True,
+        "skill_id": fork.id,
+        "forked": True,
+        "forked_from_skill_id": target.id,
+        "agents_migrated": migrated,
+        "warnings": _findings_to_payload([f for f in findings if f.severity in _WARNING_SEVERITIES]),
+    }
+
+
 @router.patch("/{workspace_id}/skills/{skill_id}", dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def update_workspace_skill(
+def update_workspace_skill(
     workspace_id: UUID,
     skill_id: int,
     body: UpdateSkillBody,
@@ -744,7 +830,7 @@ async def update_workspace_skill(
     """
     _assert_workspace_access(ctx, workspace_id)
 
-    from core.models.core import Agent, Skill, agent_skills as agent_skills_table
+    from core.models.core import Skill
     from core.models.marketplace_plugins import WorkspaceEnabledSkill
 
     target = db.query(Skill).filter(Skill.id == skill_id, Skill.is_active == True).first()
@@ -769,75 +855,7 @@ async def update_workspace_skill(
     user_id = _resolve_user_id(ctx, db)
 
     if target.workspace_id is None:
-        # Fork-on-edit
-        fork = Skill(
-            name=target.name,
-            description=target.description,
-            skill_type=target.skill_type,
-            category=target.category,
-            tags=list(target.tags) if target.tags else None,
-            prompt_template=body.content,
-            skill_source="workspace-fork",
-            skill_version=target.skill_version,
-            workspace_id=workspace_id,
-            is_active=True,
-            created_by=str(user_id) if user_id else None,
-            skill_metadata={"forked_from_skill_id": target.id},
-        )
-        _apply_frontmatter(fork, body.content, body)
-        db.add(fork)
-        db.flush()
-
-        # Migrate existing agent_skills assignments to the fork (within this workspace)
-        from sqlalchemy import and_
-        workspace_agent_ids = [
-            a.id for a in db.query(Agent.id).filter(Agent.workspace_id == workspace_id).all()
-        ]
-        migrated = 0
-        if workspace_agent_ids:
-            existing = db.execute(
-                agent_skills_table.select().where(
-                    and_(
-                        agent_skills_table.c.agent_id.in_(workspace_agent_ids),
-                        agent_skills_table.c.skill_id == target.id,
-                    )
-                )
-            ).fetchall()
-            for row in existing:
-                db.execute(agent_skills_table.delete().where(
-                    and_(
-                        agent_skills_table.c.agent_id == row.agent_id,
-                        agent_skills_table.c.skill_id == target.id,
-                    )
-                ))
-                db.execute(agent_skills_table.insert().values(
-                    agent_id=row.agent_id, skill_id=fork.id,
-                ))
-                migrated += 1
-
-        # Replace marketplace junction with fork-aware view: drop the old junction so
-        # listing surfaces the fork instead. (Listing already hides marketplace skills
-        # whose ids are forked_from_skill_id of a workspace skill — but dropping the
-        # junction is cleaner and ensures the user can re-enable the original later.)
-        db.query(WorkspaceEnabledSkill).filter(
-            WorkspaceEnabledSkill.workspace_id == workspace_id,
-            WorkspaceEnabledSkill.skill_id == target.id,
-        ).delete()
-
-        db.commit()
-        _invalidate_skill_cache(fork.name, db)
-        logger.info(
-            "Forked marketplace skill %d -> workspace skill %d (name=%s, %d agent assignments migrated)",
-            target.id, fork.id, fork.name, migrated,
-        )
-        return {
-            "success": True,
-            "skill_id": fork.id,
-            "forked": True,
-            "forked_from_skill_id": target.id,
-            "agents_migrated": migrated,
-            "warnings": _findings_to_payload([f for f in findings if f.severity in _WARNING_SEVERITIES]),
-        }
+        return _update_workspace_skill_fork(db, workspace_id, target, body, user_id, findings)
 
     # In-place update (already workspace-owned)
     target.prompt_template = body.content
