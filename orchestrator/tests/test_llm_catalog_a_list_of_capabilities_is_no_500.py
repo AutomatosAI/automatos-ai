@@ -85,8 +85,8 @@ def test_the_catalogue_answers_with_a_row_whose_capabilities_are_a_list(catalog)
 def test_the_comparison_answers_with_a_row_whose_capabilities_are_a_list(catalog):
     from api.llm_analytics import get_model_comparison
 
-    out = asyncio.run(get_model_comparison(
+    out = get_model_comparison(
         model_ids=f"{MODEL_ID}@anthropic", period="30d", ctx=NS(workspace_id=uuid4()), db=catalog,
-    ))
+    )
 
     assert [(c.model_id, c.capabilities) for c in out] == [(MODEL_ID, {})]
