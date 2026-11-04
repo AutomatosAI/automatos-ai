@@ -84,7 +84,7 @@ def caller_owns_agent(
 # ===================================================================
 
 @router.get("/{agent_id}/plugins", response_model=None)
-async def list_agent_plugins(
+def list_agent_plugins(
     agent_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -141,12 +141,149 @@ async def list_agent_plugins(
         raise HTTPException(status_code=500, detail="Failed to list agent plugins")
 
 
+def _update_agent_plugins_validate(db, agent_id, ctx, body):
+    """Check the agent and the requested plugins; return (workspace_id, de-duplicated plugin ids)."""
+    from core.models.core import Agent
+    from core.models.marketplace_plugins import WorkspaceEnabledPlugin
+
+    # Validate agent exists and belongs to authenticated user's workspace
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    if agent.workspace_id and agent.workspace_id != ctx.workspace_id:
+        raise HTTPException(status_code=403, detail="Access denied: workspace mismatch")
+
+    workspace_id = agent.workspace_id or ctx.workspace_id
+
+    # Deduplicate plugin_ids while preserving order
+    seen: set = set()
+    unique_plugin_ids: list = []
+    for pid in body.plugin_ids:
+        if pid not in seen:
+            seen.add(pid)
+            unique_plugin_ids.append(pid)
+
+    # Validate all plugin_ids are enabled for the agent's workspace
+    if unique_plugin_ids:
+        enabled_plugin_ids = {
+            row.plugin_id
+            for row in db.query(WorkspaceEnabledPlugin.plugin_id).filter(
+                WorkspaceEnabledPlugin.workspace_id == workspace_id,
+            ).all()
+        }
+
+        not_enabled = [
+            str(pid) for pid in unique_plugin_ids if pid not in enabled_plugin_ids
+        ]
+
+        if not_enabled:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Plugins not enabled for workspace: {', '.join(not_enabled)}",
+            )
+    return workspace_id, unique_plugin_ids
+
+
+def _update_agent_plugins_replace(db, agent_id, unique_plugin_ids):
+    """Drop the agent's existing plugin assignments and add the new ones in list order."""
+    from core.models.marketplace_plugins import AgentAssignedPlugin
+
+    # Remove existing assignments
+    db.query(AgentAssignedPlugin).filter(
+        AgentAssignedPlugin.agent_id == agent_id,
+    ).delete(synchronize_session="fetch")
+
+    # Create new assignments with priority based on list order
+    for priority, plugin_id in enumerate(unique_plugin_ids):
+        assignment = AgentAssignedPlugin(
+            agent_id=agent_id,
+            plugin_id=plugin_id,
+            priority=priority,
+        )
+        db.add(assignment)
+
+
+def _update_agent_plugins_link_skills(db, agent_id, workspace_id, valid_skill_ids):
+    """Enable the skills for the workspace and attach the missing ones to the agent."""
+    from core.models.core import agent_skills as agent_skills_table
+    from core.models.marketplace_plugins import WorkspaceEnabledSkill
+
+    # Idempotent upsert: WorkspaceEnabledSkill has composite PK
+    # (workspace_id, skill_id) so ON CONFLICT DO NOTHING works
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    for sid in valid_skill_ids:
+        stmt = pg_insert(WorkspaceEnabledSkill).values(
+            workspace_id=workspace_id,
+            skill_id=sid,
+        ).on_conflict_do_nothing()
+        db.execute(stmt)
+
+    # agent_skills has no unique constraint — bulk check then insert
+    from sqlalchemy import select as sa_select
+    existing_skill_ids = {
+        row[0] for row in db.execute(
+            sa_select(agent_skills_table.c.skill_id).where(
+                agent_skills_table.c.agent_id == agent_id,
+            )
+        ).fetchall()
+    }
+    new_ids = valid_skill_ids - existing_skill_ids
+    for sid in new_ids:
+        db.execute(
+            agent_skills_table.insert().values(
+                agent_id=agent_id, skill_id=sid,
+            )
+        )
+
+    logger.info(
+        "Auto-assigned %d materialized skill(s) to agent %s",
+        len(valid_skill_ids), agent_id,
+    )
+
+
+def _update_agent_plugins_skills(db, agent_id, workspace_id, unique_plugin_ids):
+    """PRD-71: auto-assign materialized skills; return (candidate ids, valid ids)."""
+    from core.models.core import Skill
+    from core.models.marketplace_plugins import MarketplacePlugin
+
+    # Collect candidate skill IDs from plugins, then validate against Skill table
+    candidate_skill_ids: set = set()
+    valid_skill_ids: set = set()
+    if unique_plugin_ids:
+        plugins = db.query(MarketplacePlugin).filter(
+            MarketplacePlugin.id.in_(unique_plugin_ids),
+        ).all()
+        for plugin in plugins:
+            for sid in (plugin.materialized_skill_ids or []):
+                candidate_skill_ids.add(sid)
+
+    if candidate_skill_ids:
+        # Resolve to only IDs that actually exist in the skills table
+        valid_skill_ids = {
+            row[0] for row in db.query(Skill.id).filter(
+                Skill.id.in_(candidate_skill_ids),
+            ).all()
+        }
+        if len(valid_skill_ids) < len(candidate_skill_ids):
+            stale = candidate_skill_ids - valid_skill_ids
+            logger.warning(
+                "Skipping %d stale materialized_skill_ids: %s",
+                len(stale), stale,
+            )
+
+        if valid_skill_ids:
+            _update_agent_plugins_link_skills(db, agent_id, workspace_id, valid_skill_ids)
+    return candidate_skill_ids, valid_skill_ids
+
+
 @router.put(
     "/{agent_id}/plugins",
     response_model=None,
     dependencies=[Depends(require_workspace_permission("agents:update")), Depends(caller_owns_agent)],
 )
-async def update_agent_plugins(
+def update_agent_plugins(
     agent_id: int,
     body: UpdateAgentPluginsBody,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -154,125 +291,13 @@ async def update_agent_plugins(
 ):
     """Update plugin assignments for an agent. Replaces existing assignments."""
     try:
-        from core.models.core import Agent
-        from core.models.marketplace_plugins import (
-            AgentAssignedPlugin,
-            MarketplacePlugin,
-            WorkspaceEnabledPlugin,
+        workspace_id, unique_plugin_ids = _update_agent_plugins_validate(db, agent_id, ctx, body)
+
+        _update_agent_plugins_replace(db, agent_id, unique_plugin_ids)
+
+        candidate_skill_ids, valid_skill_ids = _update_agent_plugins_skills(
+            db, agent_id, workspace_id, unique_plugin_ids
         )
-
-        # Validate agent exists and belongs to authenticated user's workspace
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
-        if not agent:
-            raise HTTPException(status_code=404, detail="Agent not found")
-
-        if agent.workspace_id and agent.workspace_id != ctx.workspace_id:
-            raise HTTPException(status_code=403, detail="Access denied: workspace mismatch")
-
-        workspace_id = agent.workspace_id or ctx.workspace_id
-
-        # Deduplicate plugin_ids while preserving order
-        seen: set = set()
-        unique_plugin_ids: list = []
-        for pid in body.plugin_ids:
-            if pid not in seen:
-                seen.add(pid)
-                unique_plugin_ids.append(pid)
-
-        # Validate all plugin_ids are enabled for the agent's workspace
-        if unique_plugin_ids:
-            enabled_plugin_ids = {
-                row.plugin_id
-                for row in db.query(WorkspaceEnabledPlugin.plugin_id).filter(
-                    WorkspaceEnabledPlugin.workspace_id == workspace_id,
-                ).all()
-            }
-
-            not_enabled = [
-                str(pid) for pid in unique_plugin_ids if pid not in enabled_plugin_ids
-            ]
-
-            if not_enabled:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Plugins not enabled for workspace: {', '.join(not_enabled)}",
-                )
-
-        # Remove existing assignments
-        db.query(AgentAssignedPlugin).filter(
-            AgentAssignedPlugin.agent_id == agent_id,
-        ).delete(synchronize_session="fetch")
-
-        # Create new assignments with priority based on list order
-        for priority, plugin_id in enumerate(unique_plugin_ids):
-            assignment = AgentAssignedPlugin(
-                agent_id=agent_id,
-                plugin_id=plugin_id,
-                priority=priority,
-            )
-            db.add(assignment)
-
-        # PRD-71: Auto-assign materialized skills from assigned plugins
-        from core.models.core import Skill, agent_skills as agent_skills_table
-        from core.models.marketplace_plugins import WorkspaceEnabledSkill
-
-        # Collect candidate skill IDs from plugins, then validate against Skill table
-        candidate_skill_ids: set = set()
-        if unique_plugin_ids:
-            plugins = db.query(MarketplacePlugin).filter(
-                MarketplacePlugin.id.in_(unique_plugin_ids),
-            ).all()
-            for plugin in plugins:
-                for sid in (plugin.materialized_skill_ids or []):
-                    candidate_skill_ids.add(sid)
-
-        if candidate_skill_ids:
-            # Resolve to only IDs that actually exist in the skills table
-            valid_skill_ids = {
-                row[0] for row in db.query(Skill.id).filter(
-                    Skill.id.in_(candidate_skill_ids),
-                ).all()
-            }
-            if len(valid_skill_ids) < len(candidate_skill_ids):
-                stale = candidate_skill_ids - valid_skill_ids
-                logger.warning(
-                    "Skipping %d stale materialized_skill_ids: %s",
-                    len(stale), stale,
-                )
-
-            if valid_skill_ids:
-                # Idempotent upsert: WorkspaceEnabledSkill has composite PK
-                # (workspace_id, skill_id) so ON CONFLICT DO NOTHING works
-                from sqlalchemy.dialects.postgresql import insert as pg_insert
-
-                for sid in valid_skill_ids:
-                    stmt = pg_insert(WorkspaceEnabledSkill).values(
-                        workspace_id=workspace_id,
-                        skill_id=sid,
-                    ).on_conflict_do_nothing()
-                    db.execute(stmt)
-
-                # agent_skills has no unique constraint — bulk check then insert
-                from sqlalchemy import select as sa_select
-                existing_skill_ids = {
-                    row[0] for row in db.execute(
-                        sa_select(agent_skills_table.c.skill_id).where(
-                            agent_skills_table.c.agent_id == agent_id,
-                        )
-                    ).fetchall()
-                }
-                new_ids = valid_skill_ids - existing_skill_ids
-                for sid in new_ids:
-                    db.execute(
-                        agent_skills_table.insert().values(
-                            agent_id=agent_id, skill_id=sid,
-                        )
-                    )
-
-                logger.info(
-                    "Auto-assigned %d materialized skill(s) to agent %s",
-                    len(valid_skill_ids), agent_id,
-                )
 
         db.commit()
 

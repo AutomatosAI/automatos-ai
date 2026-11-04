@@ -71,7 +71,7 @@ async def test_config_only_update_preserves_stored_trigger_mode():
 
     db = _FakeChannelDB({"bot_token": "OLD", "trigger_mode": "allow_all"})
     ctx = SimpleNamespace(workspace_id=uuid.uuid4())
-    res = await update_channel("chan-1", {"config": {"bot_token": "NEW"}}, ctx=ctx, db=db)
+    res = update_channel("chan-1", {"config": {"bot_token": "NEW"}}, ctx=ctx, db=db)
 
     assert res == {"status": "updated"}
     written = _written_config(db)
@@ -87,7 +87,7 @@ async def test_explicit_trigger_mode_overrides_stored():
 
     db = _FakeChannelDB({"bot_token": "OLD", "trigger_mode": "allow_all"})
     ctx = SimpleNamespace(workspace_id=uuid.uuid4())
-    await update_channel(
+    update_channel(
         "chan-1",
         {"config": {"bot_token": "NEW"}, "trigger_mode": "communication_only"},
         ctx=ctx, db=db,
@@ -105,7 +105,7 @@ async def test_modeless_channel_config_edit_materializes_no_mode():
 
     db = _FakeChannelDB({"bot_token": "OLD"})  # no trigger_mode key
     ctx = SimpleNamespace(workspace_id=uuid.uuid4())
-    await update_channel("chan-1", {"config": {"bot_token": "NEW"}}, ctx=ctx, db=db)
+    update_channel("chan-1", {"config": {"bot_token": "NEW"}}, ctx=ctx, db=db)
     written = _written_config(db)
     assert "trigger_mode" not in written  # no materialized default
     assert written["bot_token"] == "NEW"

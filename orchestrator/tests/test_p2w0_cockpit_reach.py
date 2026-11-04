@@ -142,7 +142,7 @@ def test_workspace_activation_is_scoped_boolean_first_value():
 
     db = MagicMock()
     db.query.return_value.filter.return_value.scalar.return_value = 3
-    out = asyncio.run(get_workspace_activation(ctx=_ctx(), db=db))
+    out = get_workspace_activation(ctx=_ctx(), db=db)
     assert out["activated"] is True
     assert out["completed_missions"] == 3
 
@@ -152,7 +152,7 @@ def test_workspace_activation_zero_completed_is_not_activated():
 
     db = MagicMock()
     db.query.return_value.filter.return_value.scalar.return_value = 0
-    out = asyncio.run(get_workspace_activation(ctx=_ctx(), db=db))
+    out = get_workspace_activation(ctx=_ctx(), db=db)
     assert out["activated"] is False
     assert out["completed_missions"] == 0
 
@@ -163,7 +163,7 @@ def test_deliverable_freshness_honest_empty():
 
     db = MagicMock()
     db.execute.return_value.fetchone.return_value = SimpleNamespace(last_at=None, total=0)
-    out = asyncio.run(get_deliverable_freshness(ctx=_ctx(), db=db))
+    out = get_deliverable_freshness(ctx=_ctx(), db=db)
     assert out["last_produced_at"] is None
     assert out["age_seconds"] is None
     assert out["total"] == 0
@@ -175,7 +175,7 @@ def test_deliverable_freshness_reports_age_seconds():
     db = MagicMock()
     two_hours_ago = datetime.now(timezone.utc) - timedelta(hours=2)
     db.execute.return_value.fetchone.return_value = SimpleNamespace(last_at=two_hours_ago, total=5)
-    out = asyncio.run(get_deliverable_freshness(ctx=_ctx(), db=db))
+    out = get_deliverable_freshness(ctx=_ctx(), db=db)
     assert out["total"] == 5
     assert out["age_seconds"] is not None
     assert out["age_seconds"] >= 7000  # ~2h, allowing for clock drift during the call

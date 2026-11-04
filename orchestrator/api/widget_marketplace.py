@@ -232,7 +232,7 @@ class DeveloperAnalyticsOut(BaseModel):
 # ===================================================================
 
 @router.get("/widgets", response_model=WidgetListResponse)
-async def browse_widgets(
+def browse_widgets(
     q: Optional[str] = Query(None, description="Search name, display_name, description"),
     category: Optional[str] = Query(None, description="Filter by category"),
     pricing: Optional[str] = Query(None, description="free | one_time | subscription"),
@@ -289,7 +289,7 @@ async def browse_widgets(
 # ===================================================================
 
 @router.get("/widgets/{widget_id}", response_model=WidgetDetailOut)
-async def get_widget_detail(
+def get_widget_detail(
     widget_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -315,7 +315,7 @@ async def get_widget_detail(
 # ===================================================================
 
 @router.get("/categories", response_model=List[CategoryOut])
-async def list_categories(
+def list_categories(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -337,7 +337,7 @@ async def list_categories(
 # ===================================================================
 
 @router.get("/featured", response_model=List[WidgetSummaryOut])
-async def featured_widgets(
+def featured_widgets(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -357,7 +357,7 @@ async def featured_widgets(
 # ===================================================================
 
 @router.post("/widgets/{widget_id}/install", status_code=201, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def install_widget(
+def install_widget(
     widget_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -406,7 +406,7 @@ async def install_widget(
 # ===================================================================
 
 @router.delete("/widgets/{widget_id}/install", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def uninstall_widget(
+def uninstall_widget(
     widget_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -435,7 +435,7 @@ async def uninstall_widget(
 # ===================================================================
 
 @router.get("/installed", response_model=List[InstallationOut])
-async def list_installed_widgets(
+def list_installed_widgets(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -472,7 +472,7 @@ async def list_installed_widgets(
 # ===================================================================
 
 @router.get("/widgets/{widget_id}/reviews", response_model=ReviewListResponse)
-async def list_reviews(
+def list_reviews(
     widget_id: str,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=50),
@@ -503,7 +503,7 @@ async def list_reviews(
 # ===================================================================
 
 @router.post("/widgets/{widget_id}/reviews", response_model=ReviewOut, status_code=201, dependencies=[Depends(require_workspace_permission("documents:create"))])
-async def create_review(
+def create_review(
     widget_id: str,
     body: CreateReviewRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -559,7 +559,7 @@ async def create_review(
 # ===================================================================
 
 @router.put("/reviews/{review_id}", response_model=ReviewOut, dependencies=[Depends(require_workspace_permission("documents:update"))])
-async def update_review(
+def update_review(
     review_id: str,
     body: UpdateReviewRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -593,7 +593,7 @@ async def update_review(
 # ===================================================================
 
 @router.delete("/reviews/{review_id}", dependencies=[Depends(require_workspace_permission("documents:delete"))])
-async def delete_review(
+def delete_review(
     review_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -620,7 +620,7 @@ async def delete_review(
 # ===================================================================
 
 @router.post("/widgets", response_model=WidgetDetailOut, status_code=201, dependencies=[Depends(require_workspace_permission("documents:create"))])
-async def create_widget(
+def create_widget(
     body: CreateWidgetRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -675,7 +675,7 @@ async def create_widget(
 # ===================================================================
 
 @router.put("/widgets/{widget_id}", response_model=WidgetDetailOut, dependencies=[Depends(require_workspace_permission("documents:update"))])
-async def update_widget(
+def update_widget(
     widget_id: str,
     body: UpdateWidgetRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -710,7 +710,7 @@ async def update_widget(
 # ===================================================================
 
 @router.post("/widgets/{widget_id}/submit", dependencies=[Depends(require_workspace_permission("documents:update"))])
-async def submit_widget_for_review(
+def submit_widget_for_review(
     widget_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -756,7 +756,7 @@ async def submit_widget_for_review(
 # ===================================================================
 
 @router.get("/developer/widgets", response_model=List[WidgetSummaryOut])
-async def developer_widgets(
+def developer_widgets(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -777,7 +777,7 @@ async def developer_widgets(
 # ===================================================================
 
 @router.get("/developer/analytics", response_model=DeveloperAnalyticsOut)
-async def developer_analytics(
+def developer_analytics(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -806,7 +806,7 @@ async def developer_analytics(
 # ===================================================================
 
 @router.put("/widgets/{widget_id}/approve")
-async def approve_widget(
+def approve_widget(
     widget_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -835,7 +835,7 @@ async def approve_widget(
 # ===================================================================
 
 @router.put("/widgets/{widget_id}/suspend")
-async def suspend_widget(
+def suspend_widget(
     widget_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

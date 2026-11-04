@@ -174,8 +174,31 @@ _REQUIRED_CONFIG = {
 }
 
 
+def _list_channels_repair(db, ctx, rows_to_repair):
+    """Drift-repair: best-effort DB update of rows whose adapter is actually running."""
+    if rows_to_repair:
+        # Drift-repair: silently update the DB to match the running
+        # state. Best-effort — list endpoints must not fail on a write.
+        try:
+            db.execute(
+                text(
+                    "UPDATE channel_connections SET status = 'active', updated_at = NOW() "
+                    "WHERE id = ANY(:ids)"
+                ),
+                {"ids": rows_to_repair},
+            )
+            db.commit()
+            logger.info(
+                "list_channels: repaired stale status on %d row(s) (ws=%s)",
+                len(rows_to_repair), ctx.workspace_id,
+            )
+        except Exception:
+            logger.exception("list_channels: failed to repair stale status rows")
+            db.rollback()
+
+
 @router.get("")
-async def list_channels(
+def list_channels(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -234,25 +257,8 @@ async def list_channels(
             }
         )
 
-    if rows_to_repair:
-        # Drift-repair: silently update the DB to match the running
-        # state. Best-effort — list endpoints must not fail on a write.
-        try:
-            db.execute(
-                text(
-                    "UPDATE channel_connections SET status = 'active', updated_at = NOW() "
-                    "WHERE id = ANY(:ids)"
-                ),
-                {"ids": rows_to_repair},
-            )
-            db.commit()
-            logger.info(
-                "list_channels: repaired stale status on %d row(s) (ws=%s)",
-                len(rows_to_repair), ctx.workspace_id,
-            )
-        except Exception:
-            logger.exception("list_channels: failed to repair stale status rows")
-            db.rollback()
+    _list_channels_repair(db, ctx, rows_to_repair)
+
 
     return out
 
@@ -450,7 +456,7 @@ def _current_channel_config(db: Session, channel_id: str) -> Dict[str, Any]:
 
 
 @router.put("/{channel_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def update_channel(
+def update_channel(
     channel_id: str,
     payload: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -722,7 +728,7 @@ async def stop_channel(
 # ── Channel Analytics ──────────────────────────────────────────────
 
 @router.get("/analytics")
-async def get_channel_analytics(
+def get_channel_analytics(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
