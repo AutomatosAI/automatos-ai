@@ -73,7 +73,7 @@ class WorkspacePluginOut(BaseModel):
 # ===================================================================
 
 @router.get("/{workspace_id}/plugins", response_model=None)
-async def list_workspace_plugins(
+def list_workspace_plugins(
     workspace_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
