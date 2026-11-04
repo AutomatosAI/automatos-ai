@@ -6,6 +6,7 @@ PRD-27: Chat endpoints for streaming conversations, history, and voting.
 Secured with hybrid auth (Clerk JWT + API key).
 """
 
+import asyncio
 import logging
 import uuid as _uuid
 from dataclasses import dataclass
@@ -396,6 +397,10 @@ async def stream_chat(
         message_text=message_text, mission_mode=bool(request.missionMode), plan_mode=bool(request.planMode),
         is_super_admin=_is_super_admin(ctx), page_context=page_ctx, spoken_mode=request.spokenMode,
     )
+    # F105 (4 Nov): and it is done with here. Ending its transaction gives the pooled
+    # connection back now (as api/voice_speech.py's speak does), instead of it sitting idle
+    # in transaction beside the turn's own session for as long as the reply streams.
+    await asyncio.to_thread(db.rollback)
     return StreamingResponse(
         run_detached_turn(
             chat_id=chat_id,
