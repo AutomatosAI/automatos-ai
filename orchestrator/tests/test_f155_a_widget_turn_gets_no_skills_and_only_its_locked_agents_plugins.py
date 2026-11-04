@@ -31,7 +31,10 @@ def _ctx(agent_id):
 def _render_plugins(monkeypatch, agent_id, **mark):
     from modules.context.sections.plugins import PluginsSection
 
-    monkeypatch.setattr(PluginsSection, "_build", lambda self, ctx: f"## Plugins of agent {ctx.agent.id}")
+    async def _build(self, ctx):
+        return f"## Plugins of agent {ctx.agent.id}"
+
+    monkeypatch.setattr(PluginsSection, "_build", _build)
     section = PluginsSection()
     if mark:
         with turn_surface(WIDGET, ("chat",), None, **mark):

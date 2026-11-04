@@ -22,7 +22,7 @@ class PluginsSection(BaseSection):
 
     Delegates to ``PluginContextService`` for the heavy lifting:
     - ``build_tier1_summary()`` -- lightweight overview (~200 tokens)
-    - ``build_tier2_content_sync()`` -- detailed content (~2000 tokens)
+    - ``build_tier2_content()`` -- detailed content (~2000 tokens), awaited
 
     Only includes non-materialized plugins (those without
     ``materialized_skill_ids``).
@@ -42,7 +42,7 @@ class PluginsSection(BaseSection):
             # its own plugins; none when any agent (Auto included) may answer it.
             return ""
         try:
-            return self._build(ctx)
+            return await self._build(ctx)
         except Exception:
             logger.warning("PluginsSection.render failed", exc_info=True)
             return ""
@@ -51,7 +51,9 @@ class PluginsSection(BaseSection):
     # Internal
     # ------------------------------------------------------------------
 
-    def _build(self, ctx: SectionContext) -> str:
+    async def _build(self, ctx: SectionContext) -> str:
+        """Tier 1 and tier 2 for the agent's plugins. F105 (4 Nov): tier 2 is awaited here;
+        its sync wrapper blocked the event loop for up to 30 s on a plugin file fetch."""
         agent = ctx.agent
         db = ctx.db_session
         if agent is None or db is None:
@@ -88,7 +90,7 @@ class PluginsSection(BaseSection):
             parts.append(tier1)
 
         task_context = ctx.task_description or ""
-        tier2 = plugin_svc.build_tier2_content_sync(
+        tier2 = await plugin_svc.build_tier2_content(
             non_materialized, task_context=task_context
         )
         if tier2:
