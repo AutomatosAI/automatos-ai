@@ -81,7 +81,7 @@ def test_deleting_an_agent_stamps_its_name_on_its_spend_first():
 
     cellar = NS(id=273, name="CELLAR", workspace_id=WS)
     db = _DeleteDb(cellar)
-    asyncio.run(delete_agent(273, NS(workspace_id=WS), db))
+    delete_agent(273, NS(workspace_id=WS), db)
     stamp = next(i for i, (kind, sql, _) in enumerate(db.log) if kind == "sql" and sql.startswith("UPDATE llm_usage"))
     gone = next(i for i, (kind, _, _) in enumerate(db.log) if kind == "delete")
     assert stamp < gone

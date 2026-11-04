@@ -82,7 +82,7 @@ def test_every_create_path_stops_at_the_plan_limit(cafe):
                                                         AgentCreate(name="B", agent_type="custom")],
                                                        ctx=cafe.ctx, db=cafe.db)):
         with pytest.raises(HTTPException) as refused:
-            asyncio.run(call())
+            call()
         assert refused.value.status_code == 402
         _refused_over_the_limit(refused.value, cafe)
 
@@ -96,8 +96,8 @@ def test_the_last_agent_that_fits_is_made_and_a_batch_that_would_not_fit_is_not(
 
     _hire(cafe, cafe.limit - 2)
     with pytest.raises(HTTPException) as refused:                      # 2 slots left, 3 asked for
-        asyncio.run(agents_api.create_agents_bulk(
-            [AgentCreate(name=n, agent_type="custom") for n in ("A", "B", "C")], ctx=cafe.ctx, db=cafe.db))
+        agents_api.create_agents_bulk(
+            [AgentCreate(name=n, agent_type="custom") for n in ("A", "B", "C")], ctx=cafe.ctx, db=cafe.db)
     assert refused.value.status_code == 402 and _agents(cafe) == cafe.limit - 2
 
     made = asyncio.run(handlers_agents.create_agent(cafe.db, cafe.ws, {"name": "Roaster"}))

@@ -527,7 +527,7 @@ def test_run_now_redispatches_idle_task(monkeypatch):
     ctx = _ns(workspace_id=_WS_ID, user=_ns(clerk_user_id="u1", id=1))
     db = _FakeSession(agent=_ns(id=4), task=task)
 
-    result = asyncio.run(bt.run_task_now(21, ctx=ctx, db=db))
+    result = bt.run_task_now(21, ctx=ctx, db=db)
 
     assert result["status"] == "assigned"
     assert task.attempts == 0, "Run Now resets the attempt cycle"
@@ -545,7 +545,7 @@ def test_run_now_requires_an_agent():
     ctx = _ns(workspace_id=_WS_ID, user=_ns(clerk_user_id="u1", id=1))
     db = _FakeSession(task=task)
     with _p.raises(HTTPException) as ei:
-        asyncio.run(bt.run_task_now(22, ctx=ctx, db=db))
+        bt.run_task_now(22, ctx=ctx, db=db)
     assert ei.value.status_code == 422
 
 
@@ -561,7 +561,7 @@ def test_run_now_rejects_already_running_task():
     ctx = _ns(workspace_id=_WS_ID, user=_ns(clerk_user_id="u1", id=1))
     db = _FakeSession(agent=_ns(id=4), task=task)
     with _p.raises(HTTPException) as ei:
-        asyncio.run(bt.run_task_now(23, ctx=ctx, db=db))
+        bt.run_task_now(23, ctx=ctx, db=db)
     assert ei.value.status_code == 409
 
 
@@ -1710,7 +1710,7 @@ def test_run_now_on_a_done_ticket_says_it_is_a_rerun_and_keeps_the_old_result(mo
     task = BoardTask(id=32, workspace_seq=12, workspace_id=_WS_ID, title="t", status="done", assigned_agent_id=4,
                      source_type="user", result="The Salt Loft gets coffee on Tuesdays.", attempts=1)
     ctx = _ns(workspace_id=_WS_ID, user=_ns(clerk_user_id="u1", id=1))
-    result = asyncio.run(bt.run_task_now(32, ctx=ctx, db=_FakeSession(agent=_ns(id=4), task=task)))
+    result = bt.run_task_now(32, ctx=ctx, db=_FakeSession(agent=_ns(id=4), task=task))
 
     assert result["status"] == "assigned" and result["rerun_of"] == "done"
     # PRD-252 R4: a ticket is named by its number, never its id behind a '#'
@@ -1729,6 +1729,6 @@ def test_run_now_on_a_running_ticket_says_what_is_happening():
                      lease_until=_live_lease())
     ctx = _ns(workspace_id=_WS_ID, user=_ns(clerk_user_id="u1", id=1))
     with _p.raises(HTTPException) as ei:
-        asyncio.run(bt.run_task_now(33, ctx=ctx, db=_FakeSession(agent=_ns(id=4), task=task)))
+        bt.run_task_now(33, ctx=ctx, db=_FakeSession(agent=_ns(id=4), task=task))
     assert ei.value.status_code == 409
     assert ei.value.detail == "Ticket #0013 is already running — nothing to start; it reports when it finishes."

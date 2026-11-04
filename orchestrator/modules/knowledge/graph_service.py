@@ -55,6 +55,7 @@ from graphify.serve import (
 from config import config
 from core.graph_storage import DbWorkspaceClient
 from core.llm.manager import get_system_setting
+from core.utils.background_tasks import on_the_event_loop
 from modules.knowledge.graph_direction import edge_payload, oriented_pairs
 from modules.knowledge.graph_provenance import SOURCE_DOC_ATTR, prune_document_facts, stamp_source_document
 from modules.knowledge.leiden_partition import cluster  # graphify's, Leiden on graspologic-native
@@ -510,8 +511,14 @@ class GraphifyService:
         Multiple calls within ``_DEBOUNCE_SECONDS`` reset the timer so only
         one rebuild fires per window.  Changed source metadata is accumulated
         so the rebuild can run incrementally instead of re-extracting every
-        document.
+        document. The timer belongs to the event loop, so this runs on the
+        loop's thread whichever thread asks: a threadpool route's call no
+        longer raises "no running event loop" (F105).
         """
+        on_the_event_loop(partial(self._debounce_rebuild, workspace_id, changed_sources))
+
+    def _debounce_rebuild(self, workspace_id: str, changed_sources: List[Dict[str, Any]]) -> None:
+        """``schedule_incremental_update`` on the loop's thread: re-arm the window."""
         # Accumulate changed sources across the debounce window
         if workspace_id not in self._pending_sources:
             self._pending_sources[workspace_id] = []

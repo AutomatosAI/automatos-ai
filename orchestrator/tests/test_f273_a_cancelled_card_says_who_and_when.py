@@ -89,7 +89,7 @@ def _said_when(board, task_id, before, after):
 def _cancel_on_the_board(board, task_id):
     from api.board_tasks import cancel_task
 
-    return asyncio.run(cancel_task(task_id, ctx=board.owner, db=board.db))
+    return cancel_task(task_id, ctx=board.owner, db=board.db)
 
 
 def _drag_to_cancelled(board, task_id):

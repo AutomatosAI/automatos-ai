@@ -400,7 +400,7 @@ def _status_session(apps_cached: int, last_sync: str | None, job_status: str | N
 async def test_status_endpoint_reports_disabled_state(composio_off):
     from api.tools import integrations_status
 
-    out = await integrations_status(ctx=MagicMock(), db=_status_session(0, None, None))
+    out = integrations_status(ctx=MagicMock(), db=_status_session(0, None, None))
     assert out.available is False
     assert out.reason == cc.COMPOSIO_UNAVAILABLE_NO_KEY
     assert out.key_configured is False
@@ -413,7 +413,7 @@ async def test_status_endpoint_reports_disabled_state(composio_off):
 async def test_status_endpoint_reports_available_state(composio_on):
     from api.tools import integrations_status
 
-    out = await integrations_status(
+    out = integrations_status(
         ctx=MagicMock(), db=_status_session(880, "2026-08-29T00:00:00Z", "completed")
     )
     assert out.available is True and out.reason is None
@@ -439,7 +439,7 @@ async def test_sync_refuses_without_a_key_instead_of_reporting_zero_apps(composi
 
     with patch("api.tools.MetadataSyncService") as service:
         with pytest.raises(HTTPException) as excinfo:
-            await sync(sync_type="full", ctx=MagicMock(), db=MagicMock())
+            sync(sync_type="full", ctx=MagicMock(), db=MagicMock())
 
     assert excinfo.value.status_code == 400
     assert excinfo.value.detail == cc.COMPOSIO_UNAVAILABLE_NO_KEY
@@ -454,7 +454,7 @@ async def test_sync_runs_the_full_catalogue_sync_when_a_key_is_configured(compos
     db.query.return_value.filter.return_value.first.return_value = None  # no sync in flight
     with patch("api.tools.MetadataSyncService") as service:
         service.return_value.run_full_sync.return_value = {"apps_synced": 880}
-        out = await sync(sync_type="full", ctx=MagicMock(), db=db)
+        out = sync(sync_type="full", ctx=MagicMock(), db=db)
 
     assert out == {"apps_synced": 880}
     service.return_value.run_full_sync.assert_called_once_with()

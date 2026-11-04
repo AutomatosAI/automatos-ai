@@ -53,8 +53,8 @@ def test_the_local_edition_makes_agent_50_on_a_basic_plan(full_cafe, monkeypatch
 
     made = asyncio.run(handlers_agents.create_agent(full_cafe.db, full_cafe.ws, {"name": "Probe"}))
     assert made["success"] is True and _agents(full_cafe) == ON_C1 + 1       # night: "includes 5 agents … has 49"
-    asyncio.run(agents_api.create_agent(AgentCreate(name="Roaster", agent_type="custom"),
-                                        ctx=full_cafe.ctx, db=full_cafe.db))
+    agents_api.create_agent(AgentCreate(name="Roaster", agent_type="custom"),
+                            ctx=full_cafe.ctx, db=full_cafe.db)
     assert _agents(full_cafe) == ON_C1 + 2
 
 

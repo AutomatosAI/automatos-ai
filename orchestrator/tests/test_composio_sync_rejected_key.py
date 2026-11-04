@@ -211,7 +211,7 @@ async def test_sync_route_returns_the_running_job_instead_of_starting_another(mo
     db = _sync_session(in_flight=running)
 
     with patch("api.tools.MetadataSyncService") as service:
-        out = await sync(sync_type="full", ctx=MagicMock(), db=db)
+        out = sync(sync_type="full", ctx=MagicMock(), db=db)
 
     service.assert_not_called()
     db.query.assert_called_once_with(ComposioSyncJob)
@@ -227,7 +227,7 @@ async def test_sync_route_hands_the_button_the_key_message(rejecting_client, mon
 
     monkeypatch.setattr("api.tools.composio_available", lambda: True)
 
-    out = await sync(sync_type="full", ctx=MagicMock(), db=_sync_session(in_flight=None))
+    out = sync(sync_type="full", ctx=MagicMock(), db=_sync_session(in_flight=None))
 
     assert out["status"] == "failed"
     assert out["error"] == KEY_MESSAGE

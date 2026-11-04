@@ -162,7 +162,7 @@ def test_a_ticket_waiting_for_an_answer_is_answered_not_started_over(board, monk
     task = _ticket("blocked", workspace_seq=59, blocked_reason="Waiting for your answer (question 1150)")
 
     for start in (lambda: board.drag(task, "in_progress"),
-                  lambda: asyncio.run(bt.run_task_now(task.id, ctx=CTX, db=_FakeSession(agent=NS(id=5), task=task)))):
+                  lambda: bt.run_task_now(task.id, ctx=CTX, db=_FakeSession(agent=NS(id=5), task=task))):
         with pytest.raises(HTTPException) as refused:
             start()
         assert refused.value.status_code == 409

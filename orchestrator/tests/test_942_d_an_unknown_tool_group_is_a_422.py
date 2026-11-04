@@ -52,7 +52,7 @@ def test_the_update_route_refuses_an_unknown_group_with_422_and_saves_nothing():
     db = _DB(_agent())
     update = AgentUpdate(configuration={"session_tool_groups": ["data", "spreadsheets"]})
     with pytest.raises(HTTPException) as refused:
-        asyncio.run(agents_api.update_agent(268, update, ctx=CTX, db=db))
+        agents_api.update_agent(268, update, ctx=CTX, db=db)
     assert refused.value.status_code == 422
     assert "spreadsheets" in str(refused.value.detail) and "data, graph, documents" in str(refused.value.detail)
     assert db.commits == 0
