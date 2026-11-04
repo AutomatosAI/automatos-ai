@@ -97,7 +97,7 @@ def _refuse_a_silent_ai_notice(settings: dict) -> None:
 # ---------------------------------------------------------------------------
 
 @router.get("")
-async def list_sites_route(
+def list_sites_route(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -140,7 +140,7 @@ def create_site_route(
 
 
 @router.get("/{site_id}")
-async def get_site_route(
+def get_site_route(
     site_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -152,7 +152,7 @@ async def get_site_route(
 
 
 @router.patch("/{site_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def patch_site_meta_route(
+def patch_site_meta_route(
     site_id: UUID,
     body: UpdateSiteMetaRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),

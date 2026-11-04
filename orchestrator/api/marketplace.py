@@ -397,7 +397,7 @@ def get_pending_items(
 # ===================================================================
 
 @router.get("/items/{item_id}", response_model=MarketplaceItemDetail)
-async def get_item(
+def get_item(
     item_id: int,
     type: MarketplaceItemType = _ITEM_TYPE_QUERY,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -638,7 +638,7 @@ async def install_item(
 # ===================================================================
 
 @router.get("/featured", response_model=List[MarketplaceItemOut])
-async def get_featured(
+def get_featured(
     limit: int = Query(8, ge=1, le=20),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -696,7 +696,7 @@ async def get_featured(
 # ===================================================================
 
 @router.get("/updates", response_model=List[UpdateInfo])
-async def check_updates(
+def check_updates(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -886,7 +886,7 @@ async def submit_item(
 # ===================================================================
 
 @router.post("/items/{item_id}/approve")
-async def approve_marketplace_item(
+def approve_marketplace_item(
     item_id: int,
     type: MarketplaceItemType = _ITEM_TYPE_QUERY,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -921,7 +921,7 @@ async def approve_marketplace_item(
 # ===================================================================
 
 @router.post("/items/{item_id}/toggle-featured")
-async def toggle_featured(
+def toggle_featured(
     item_id: int,
     type: MarketplaceItemType = _ITEM_TYPE_QUERY,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -951,7 +951,7 @@ async def toggle_featured(
 # ===================================================================
 
 @router.delete("/items/{item_id}")
-async def delete_marketplace_item(
+def delete_marketplace_item(
     item_id: int,
     type: MarketplaceItemType = _ITEM_TYPE_QUERY,
     ctx: RequestContext = Depends(get_request_context_hybrid),

@@ -228,7 +228,7 @@ async def browse_models(
 
 
 @router.get("/providers")
-async def list_providers(
+def list_providers(
     db: Session = Depends(get_db),
 ):
     """List all providers with model counts."""
@@ -243,7 +243,7 @@ async def list_providers(
 
 
 @router.get("/stats", response_model=OpenRouterStatsOut)
-async def stats(
+def stats(
     db: Session = Depends(get_db),
 ):
     """Get cache statistics."""
@@ -289,7 +289,7 @@ async def stats(
 
 
 @router.post("/sync", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def sync(
+def sync(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -305,7 +305,7 @@ async def sync(
 
 
 @router.get("/sync/history")
-async def sync_history(
+def sync_history(
     limit: int = Query(10, ge=1, le=50),
     db: Session = Depends(get_db),
 ):

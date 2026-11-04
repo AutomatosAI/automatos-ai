@@ -495,7 +495,7 @@ async def get_execution_stats(
 
 
 @router.get("/performance-by-action", response_model=List[ActionPerformance])
-async def get_performance_by_action(
+def get_performance_by_action(
     days: int = Query(30, description="7|30|90"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -548,7 +548,7 @@ async def get_performance_by_action(
 
 
 @router.get("/daily-volume", response_model=List[DailyVolume])
-async def get_daily_volume(
+def get_daily_volume(
     days: int = Query(30, description="7|30|90"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -592,7 +592,7 @@ async def get_daily_volume(
 
 
 @router.get("/recent-executions", response_model=List[RecentExecution])
-async def get_recent_executions(
+def get_recent_executions(
     limit: int = Query(20, ge=1, le=100),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -637,7 +637,7 @@ async def get_recent_executions(
 
 
 @router.get("/error-breakdown", response_model=List[ErrorBreakdown])
-async def get_error_breakdown(
+def get_error_breakdown(
     days: int = Query(30, description="7|30|90"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

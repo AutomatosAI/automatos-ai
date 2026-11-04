@@ -42,7 +42,7 @@ router = APIRouter(prefix="/api/deliverables", tags=["deliverables"])
 
 # ── List ─────────────────────────────────────────────────────────────
 @router.get("")
-async def list_deliverables(
+def list_deliverables(
     artifact_type: Optional[str] = Query(None, description="Filter by artifact_type (report, image, document, code, slide, spreadsheet, archive, audio, video)"),
     source_type: Optional[str] = Query(None, description="Filter by source (chat, task, mission, heartbeat, playbook, trigger, upload)"),
     source_type_exclude: Optional[str] = Query(None, description="Comma-separated source_types to exclude (e.g. 'heartbeat')"),
@@ -82,7 +82,7 @@ async def list_deliverables(
 # NOTE: declared BEFORE /{deliverable_id} so FastAPI matches the literal path
 # first — otherwise `stats` would be captured as an id.
 @router.get("/stats")
-async def deliverable_stats(
+def deliverable_stats(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -93,7 +93,7 @@ async def deliverable_stats(
 
 # ── Retention ───────────────────────────────────────────────────────
 @router.post("/retention", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def apply_retention(
+def apply_retention(
     source_type: str = Body("heartbeat", embed=True),
     keep_per_agent: int = Body(50, embed=True),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -129,7 +129,7 @@ async def get_deliverable(
 
 # ── Soft Delete ──────────────────────────────────────────────────────
 @router.delete("/{deliverable_id}", dependencies=[Depends(require_workspace_permission("documents:delete"))])
-async def delete_deliverable(
+def delete_deliverable(
     deliverable_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

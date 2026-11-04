@@ -174,7 +174,7 @@ async def get_template_by_type(agent_type: AgentType, ctx: RequestContext = Depe
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/templates/skills/suggestions")
-async def get_skill_suggestions(
+def get_skill_suggestions(
     agent_type: AgentType,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid)

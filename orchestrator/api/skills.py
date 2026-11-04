@@ -342,7 +342,7 @@ async def import_git_repository(
 
 
 @router.get("/sources", response_model=List[SkillSourceResponse])
-async def list_skill_sources(
+def list_skill_sources(
     source_type: Optional[str] = Query(None, description="Filter by source type"),
     status: Optional[str] = Query(None, description="Filter by status"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -374,7 +374,7 @@ async def list_skill_sources(
 
 
 @router.get("/sources/{source_id}", response_model=SkillSourceResponse)
-async def get_skill_source(
+def get_skill_source(
     source_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -401,7 +401,7 @@ async def get_skill_source(
 
 
 @router.post("/sources/{source_id}/update", response_model=Dict[str, Any], dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def update_git_repository(
+def update_git_repository(
     source_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -444,7 +444,7 @@ async def update_git_repository(
 
 
 @router.post("/sources/{source_id}/rollback", response_model=Dict[str, Any], dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def rollback_git_repository(
+def rollback_git_repository(
     source_id: int,
     commit_sha: str = Query(..., description="Commit SHA to rollback to"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -486,7 +486,7 @@ async def rollback_git_repository(
 
 
 @router.delete("/sources/{source_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def deactivate_skill_source(
+def deactivate_skill_source(
     source_id: int,
     deactivate_skills: bool = Query(False, description="Also deactivate associated skills"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -615,7 +615,7 @@ async def list_skills(
 
 
 @router.get("/{skill_id}", response_model=EnhancedSkillResponse)
-async def get_skill_details(
+def get_skill_details(
     skill_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -737,7 +737,7 @@ async def get_skill_content(
 
 
 @router.post("/admin/cleanup-old-mappings", dependencies=[Depends(require_workspace_permission("workspace:manage"))])  # Admin endpoint to avoid route conflicts
-async def cleanup_old_skill_mappings(
+def cleanup_old_skill_mappings(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -789,7 +789,7 @@ async def cleanup_old_skill_mappings(
 
 
 @router.delete("/{skill_id}", dependencies=[Depends(require_workspace_permission("agents:delete"))])
-async def deactivate_skill(
+def deactivate_skill(
     skill_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -1001,7 +1001,7 @@ async def assign_skills_to_agent(
 
 
 @router.delete("/agents/{agent_id}/skills", dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def remove_skills_from_agent(
+def remove_skills_from_agent(
     agent_id: int,
     skill_ids: List[int] = Query(..., description="Skill IDs to remove"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1045,7 +1045,7 @@ async def remove_skills_from_agent(
 # ============================================================================
 
 @router.post("/recommend", response_model=List[SkillRecommendation], dependencies=[Depends(require_workspace_permission("agents:read"))])
-async def recommend_skills(
+def recommend_skills(
     request: SkillRecommendationRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)

@@ -24,7 +24,7 @@ router = APIRouter(prefix="/api/models", tags=["models"])
 
 
 @router.get("/", response_model=List[Dict[str, Any]])
-async def list_models(
+def list_models(
     provider: Optional[str] = Query(None, description="Filter by provider (openai, anthropic, huggingface)"),
     status: str = Query('active', description="Filter by status (active, deprecated, beta)"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -77,7 +77,7 @@ def get_platform_default_route(ctx: RequestContext = Depends(get_request_context
 
 
 @router.get("/{model_id}", response_model=Dict[str, Any])
-async def get_model(
+def get_model(
     model_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -115,7 +115,7 @@ async def get_model(
 
 
 @router.get("/providers/", response_model=List[Dict[str, Any]])
-async def list_providers(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def list_providers(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """
     List all available LLM providers with their models.
     
@@ -157,7 +157,7 @@ async def list_providers(ctx: RequestContext = Depends(get_request_context_hybri
 
 
 @router.post("/recommend", response_model=Dict[str, Any], dependencies=[Depends(require_workspace_permission("agents:read"))])
-async def recommend_model(
+def recommend_model(
     requirements: Dict[str, Any],
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -217,7 +217,7 @@ async def recommend_model(
 
 
 @router.post("/estimate-cost", response_model=Dict[str, Any], dependencies=[Depends(require_workspace_permission("agents:read"))])
-async def estimate_cost(
+def estimate_cost(
     request: Dict[str, Any],
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -294,7 +294,7 @@ async def estimate_cost(
 
 
 @router.get("/by-task/{task_type}", response_model=List[Dict[str, Any]])
-async def get_models_by_task(
+def get_models_by_task(
     task_type: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -328,7 +328,7 @@ async def get_models_by_task(
 
 
 @router.get("/stats/", response_model=Dict[str, Any])
-async def get_model_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def get_model_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """
     Get overall statistics about available models.
     

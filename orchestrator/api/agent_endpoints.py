@@ -201,7 +201,7 @@ async def get_agent_performance(
 
 
 @router.get("/{agent_id}/logs")
-async def get_agent_logs(
+def get_agent_logs(
     agent_id: int,
     limit: int = 50,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -500,7 +500,7 @@ async def agent_system_health():
 # ===================================================================
 
 @router.get("/{agent_id}/model-config")
-async def get_agent_model_config(
+def get_agent_model_config(
     agent_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -537,7 +537,7 @@ async def get_agent_model_config(
 
 
 @router.put("/{agent_id}/model-config", dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def update_agent_model_config(
+def update_agent_model_config(
     agent_id: int,
     model_config: Dict[str, Any],
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -614,7 +614,7 @@ async def update_agent_model_config(
 
 
 @router.get("/{agent_id}/model-usage")
-async def get_agent_model_usage(
+def get_agent_model_usage(
     agent_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)

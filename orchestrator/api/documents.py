@@ -449,7 +449,7 @@ def _knowledge_documents(db: Session, workspace_id):
 
 
 @router.get("/analytics")
-async def get_document_analytics(
+def get_document_analytics(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -623,7 +623,7 @@ async def list_documents(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/pins")
-async def list_pinned_documents(
+def list_pinned_documents(
     chat_id: str = Query(..., description="Chat/conversation id"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -635,7 +635,7 @@ async def list_pinned_documents(
 
 
 @router.post("/{document_id}/pin", dependencies=[Depends(require_workspace_permission("documents:update"))])
-async def pin_document_to_chat(
+def pin_document_to_chat(
     document_id: int,
     chat_id: str = Query(..., description="Chat/conversation id to pin the document to"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -658,7 +658,7 @@ async def pin_document_to_chat(
 
 
 @router.delete("/{document_id}/pin", dependencies=[Depends(require_workspace_permission("documents:update"))])
-async def unpin_document_from_chat(
+def unpin_document_from_chat(
     document_id: int,
     chat_id: str = Query(..., description="Chat/conversation id to unpin the document from"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -671,7 +671,7 @@ async def unpin_document_from_chat(
 
 
 @router.get("/team-counts")
-async def document_team_counts(
+def document_team_counts(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -720,7 +720,7 @@ async def document_team_counts(
 # ``:int`` so a static one-segment route registered further down this file
 # (``/reprocess-status``) is not parsed as a document id and refused with 422 (#827).
 @router.get("/{document_id:int}", response_model=DocumentResponse)
-async def get_document(
+def get_document(
     document_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -756,7 +756,7 @@ async def get_document(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{document_id}/delete-impact")
-async def get_delete_impact(
+def get_delete_impact(
     document_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -822,7 +822,7 @@ async def get_delete_impact(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/{document_id}", dependencies=[Depends(require_workspace_permission("documents:delete"))])
-async def delete_document(
+def delete_document(
     document_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -2043,7 +2043,7 @@ async def reprocess_all_documents(
 
 
 @router.get("/reprocess-status")
-async def get_reprocess_status(
+def get_reprocess_status(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -2105,7 +2105,7 @@ class _BulkTeamAccessUpdate(_BaseModel):
 
 
 @router.patch("/{document_id}/team-access", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def update_document_team_access(
+def update_document_team_access(
     document_id: int,
     body: _TeamAccessUpdate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -2144,7 +2144,7 @@ async def update_document_team_access(
 
 
 @router.post("/bulk-team-access", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def bulk_update_team_access(
+def bulk_update_team_access(
     body: _BulkTeamAccessUpdate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

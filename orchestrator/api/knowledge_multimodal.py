@@ -132,7 +132,7 @@ class DocumentUploadResponse(BaseModel):
 # ================================================================
 
 @router.get("/types", response_model=List[KnowledgeTypeInfo])
-async def get_knowledge_types(
+def get_knowledge_types(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -917,7 +917,7 @@ async def get_knowledge_item(
 
 
 @router.get("/stats")
-async def get_knowledge_stats(
+def get_knowledge_stats(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):

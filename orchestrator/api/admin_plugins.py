@@ -270,7 +270,7 @@ async def approve_plugin(
 
 
 @router.post("/{plugin_id}/reject")
-async def reject_plugin(
+def reject_plugin(
     plugin_id: UUID,
     body: RejectBody,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -324,7 +324,7 @@ async def reject_plugin(
 
 
 @router.get("/{plugin_id}/scan", response_model=ScanResultOut)
-async def get_scan_results(
+def get_scan_results(
     plugin_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -838,7 +838,7 @@ async def delete_plugin(
 
 
 @router.post("/backfill-categories")
-async def backfill_categories(
+def backfill_categories(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):

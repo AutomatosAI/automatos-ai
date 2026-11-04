@@ -109,7 +109,7 @@ class TriggerSetupRequest(BaseModel):
 
 
 @router.get("/decisions")
-async def list_decisions(
+def list_decisions(
     source: Optional[str] = Query(None, description="Filter by source channel"),
     agent_id: Optional[int] = Query(None, description="Filter by routed agent_id"),
     was_corrected: Optional[bool] = Query(None, description="Filter by correction status"),
@@ -161,7 +161,7 @@ async def list_decisions(
 
 
 @router.post("/rules", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def create_rule(
+def create_rule(
     body: CreateRuleRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -218,7 +218,7 @@ async def create_rule(
 
 
 @router.get("/rules")
-async def list_rules(
+def list_rules(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -259,7 +259,7 @@ async def list_rules(
 
 
 @router.delete("/rules/{rule_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def delete_rule(
+def delete_rule(
     rule_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -296,7 +296,7 @@ async def delete_rule(
 
 
 @router.post("/corrections", dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def record_correction(
+def record_correction(
     body: CorrectionRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -515,7 +515,7 @@ async def reindex_semantic_embeddings(
 
 
 @router.get("/semantic/status")
-async def semantic_status(
+def semantic_status(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):

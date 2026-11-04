@@ -250,7 +250,7 @@ async def invite_member(
     "/members/{member_id}/role",
     dependencies=[Depends(require_workspace_permission("members:change_role")), Depends(STEP_UP)],
 )
-async def update_member_role(
+def update_member_role(
     workspace_id: str,
     member_id: int,
     request: UpdateMemberRoleRequest,
@@ -362,7 +362,7 @@ async def remove_member(
     response_model=List[InvitationResponse],
     dependencies=[Depends(require_workspace_permission("members:invite"))],
 )
-async def list_pending_invitations(
+def list_pending_invitations(
     workspace_id: str,
     ctx: RequestContext = Depends(get_request_context),
     db: Session = Depends(get_db),
@@ -506,7 +506,7 @@ def _join_from_invitation(db: Session, invitation: WorkspaceInvitation, user_id:
 
 
 @public_router.post("/accept-invitation", response_model=AcceptInvitationResponse)
-async def accept_invitation(
+def accept_invitation(
     payload: AcceptInvitationRequest,
     request: Request,
     db: Session = Depends(get_db),
@@ -556,7 +556,7 @@ async def accept_invitation(
 
 
 @public_router.get("/invitation-info")
-async def get_invitation_info(token: str, db: Session = Depends(get_db)):
+def get_invitation_info(token: str, db: Session = Depends(get_db)):
     """Public lookup of invitation metadata by token (for UI rendering before
     the user is signed in). Returns workspace name, inviter email, role.
     """
