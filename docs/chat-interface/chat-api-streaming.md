@@ -6,36 +6,22 @@
 The following files were used as context for generating this wiki page:
 
 - [frontend/app/api/chat/route.ts](frontend/app/api/chat/route.ts)
-- [frontend/app/chat/page.tsx](frontend/app/chat/page.tsx)
-- [frontend/components/chatbot/__tests__/widget-quick-prompts.test.ts](frontend/components/chatbot/__tests__/widget-quick-prompts.test.ts)
-- [frontend/components/chatbot/artifact-viewer.tsx](frontend/components/chatbot/artifact-viewer.tsx)
-- [frontend/components/chatbot/chat-widget.tsx](frontend/components/chatbot/chat-widget.tsx)
+- [frontend/components/__tests__/prd207-live-voice.test.tsx](frontend/components/__tests__/prd207-live-voice.test.tsx)
+- [frontend/components/chatbot/__tests__/composer-voice.test.tsx](frontend/components/chatbot/__tests__/composer-voice.test.tsx)
+- [frontend/components/chatbot/chat.tsx](frontend/components/chatbot/chat.tsx)
 - [frontend/components/chatbot/message.tsx](frontend/components/chatbot/message.tsx)
-- [frontend/components/chatbot/multimodal-input.tsx](frontend/components/chatbot/multimodal-input.tsx)
-- [frontend/components/chatbot/sidebar-history-item.tsx](frontend/components/chatbot/sidebar-history-item.tsx)
-- [frontend/components/chatbot/sidebar.tsx](frontend/components/chatbot/sidebar.tsx)
-- [frontend/components/chatbot/studio-chat-shell.tsx](frontend/components/chatbot/studio-chat-shell.tsx)
-- [frontend/components/chatbot/text-artifact.tsx](frontend/components/chatbot/text-artifact.tsx)
-- [frontend/lib/chat/api.ts](frontend/lib/chat/api.ts)
+- [frontend/components/voice/LiveVoiceMode.tsx](frontend/components/voice/LiveVoiceMode.tsx)
+- [frontend/components/voice/PresenceOrb.tsx](frontend/components/voice/PresenceOrb.tsx)
+- [frontend/components/voice/VoiceErrorBoundary.tsx](frontend/components/voice/VoiceErrorBoundary.tsx)
+- [frontend/components/voice/__tests__/voice-button.test.tsx](frontend/components/voice/__tests__/voice-button.test.tsx)
+- [frontend/components/voice/voice-button-view.ts](frontend/components/voice/voice-button-view.ts)
+- [frontend/components/voice/voice-button.tsx](frontend/components/voice/voice-button.tsx)
+- [frontend/components/voice/voice-controls.tsx](frontend/components/voice/voice-controls.tsx)
 - [frontend/lib/chat/hooks.ts](frontend/lib/chat/hooks.ts)
 - [frontend/types/chat.ts](frontend/types/chat.ts)
 - [orchestrator/api/chat.py](orchestrator/api/chat.py)
-- [orchestrator/api/routing.py](orchestrator/api/routing.py)
-- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
 - [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
-- [orchestrator/consumers/chatbot/streaming.py](orchestrator/consumers/chatbot/streaming.py)
-- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
-- [orchestrator/core/models/stream_events.py](orchestrator/core/models/stream_events.py)
-- [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
 - [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
-- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
-- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
-- [orchestrator/scripts/setup_jira_trigger.py](orchestrator/scripts/setup_jira_trigger.py)
-- [orchestrator/services/heartbeat_service.py](orchestrator/services/heartbeat_service.py)
-- [orchestrator/services/page_context.py](orchestrator/services/page_context.py)
-- [orchestrator/tests/test_prd221_page_context.py](orchestrator/tests/test_prd221_page_context.py)
-- [orchestrator/tests/test_prd221_page_prior_tools.py](orchestrator/tests/test_prd221_page_prior_tools.py)
-- [orchestrator/tests/test_us009_limit_reporting.py](orchestrator/tests/test_us009_limit_reporting.py)
 
 </details>
 
@@ -43,160 +29,102 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This document covers the **`/api/chat`** endpoint and its streaming response system, which powers real-time conversational interactions with AI agents. The chat API implements Server-Sent Events (SSE) streaming using the **AI SDK Data Stream format**, and integrates with the **AutoBrain** complexity assessor (`AutoBrain`), **UniversalRouter**, and **Workflow Engine** to deliver intelligent, context-aware responses.
+This page documents the chat API and the backend components visible in the supplied source: the `/api/chat` router, its request/authentication dependencies, the routing helper imports, the chatbot service boundary, and Auto’s progressive complexity model. The supplied excerpts do not include the `POST` handler body, the implementations of the routing helpers, or the streaming serializer, so exact request fields, response frames, and routing-header values cannot be verified here. [orchestrator/api/chat.py:1-44](), [orchestrator/consumers/chatbot/service.py:1-13]()
 
-The implementation bridges high-level natural language requests to low-level code entities like `AgentFactory`, `UniversalRouter`, and `StreamingChatService`.
-
-Sources: [orchestrator/api/chat.py:1-26](), [orchestrator/consumers/chatbot/service.py:1-13]()
+Sources: [orchestrator/api/chat.py:1-44](), [orchestrator/consumers/chatbot/service.py:1-13]()
 
 ---
 
-## Request/Response Format
+## API Boundary and Request Handling
 
-### Request Schema
+The FastAPI router is declared with the `/api/chat` prefix and the `💬 Chat` tag. The API module imports `StreamingResponse`, `ChatRequest`, `ChatMessageRequest`, `MessagePart`, hybrid authentication, workspace permission enforcement, and `RequestContext`; these imports identify the main API boundary and dependencies, but the supplied excerpt does not show the `POST` route’s decorator or handler body. [orchestrator/api/chat.py:14-29](), [orchestrator/api/chat.py:44-47]()
 
-The chat API accepts POST requests at `/api/chat`. The request body is processed by `POST /api/chat` which extracts the message and context for routing.
+The API resolves an authenticated principal to an integer user primary key through `get_user_id`, which calls `resolve_user_pk`. If no principal can be resolved, it falls back to an existing user row and raises HTTP 500 if the database has no users. [orchestrator/api/chat.py:79-104]()
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | `string?` | Chat session ID. If null, a new `Chat` record is created [orchestrator/api/chat.py:60-61]() |
-| `message` | `ChatMessageRequest` | Structured message content including `parts` (text/attachments) [orchestrator/api/chat.py:51-58]() |
-| `agentId` | `int?` | Explicit agent selection (Tier 0 override) [orchestrator/api/chat.py:71]() |
-| `context` | `dict?` | Page context (e.g., `page`, `route`, `tab`) for preamble injection [orchestrator/api/chat.py:69]() |
-| `locale` | `string?` | The person's language and region as a BCP 47 tag (`pt-BR`). Auto replies in that variant unless the person writes or speaks in another language; a value that is not a tag is ignored [orchestrator/api/chat_models.py](), [orchestrator/consumers/chatbot/reply_locale.py]() |
+The API also defines `_explicitly_chosen_agent`, which checks the requested agent against the workspace using `agent_in_workspace` and returns HTTP 404 for an agent outside that scope. `get_default_agent_id` looks up the workspace’s system agent by the `auto-{workspace_id}` slug, attempts lazy seeding if absent, and then falls back to the first agent in that workspace. [orchestrator/api/chat.py:106-155]()
 
-Sources: [orchestrator/api/chat.py:36-77](), [orchestrator/services/page_context.py:46-54]()
+Sources: [orchestrator/api/chat.py:14-29](), [orchestrator/api/chat.py:44-47](), [orchestrator/api/chat.py:79-155]()
 
 ---
 
-### Response Format: AI SDK Data Stream
+## Request-to-Code Flow
 
-Responses use the Vercel AI SDK Data Stream format (`text/plain; charset=utf-8`) with line-prefixed events. The `StreamingChatService` and streaming handlers manage this formatting.
+The supplied API excerpt establishes the `/api/chat` router and its imports, while the service module identifies `StreamingChatService` as the SSE streaming orchestrator. The excerpts do not show the route call site or the service’s stream implementation, so the diagram represents the documented component relationship rather than a fully verified function-call trace. [orchestrator/api/chat.py:20-29](), [orchestrator/api/chat.py:44](), [orchestrator/consumers/chatbot/service.py:5-13]()
 
-| Prefix | Description | Example |
-|--------|-------------|---------|
-| `0:` | Text chunk (JSON string) | `0:"Hello"\n` |
-| `d:` | Custom data (JSON) | `d:{"type":"workflow-update","status":"started"}\n` |
-| `e:` | Error event | `e:{"message":"Workflow timeout"}\n` |
+**Diagram: Natural-language chat request and backend entities**
 
-Sources: [orchestrator/api/chat.py:14-15](), [orchestrator/consumers/chatbot/service.py:45]()
-
----
-
-### Response Headers
-
-The API returns metadata about routing and complexity assessment in response headers.
-
-| Header | Description | Source |
-|--------|-------------|--------|
-| `x-routing-agent-id` | Selected agent ID from `UniversalRouter` | [orchestrator/core/routing/engine.py:170-176]() |
-| `x-routing-confidence`| Routing confidence (0.0-1.0) | [orchestrator/core/routing/engine.py:174]() |
-| `x-routing-type` | "agent", "workflow", or "orchestrate" | [orchestrator/core/routing/engine.py:172]() |
-| `x-auto-complexity` | "atom", "molecule", "cell", "organ", "organism" | [orchestrator/consumers/chatbot/auto.py:51-58]() |
-
-Sources: [orchestrator/core/routing/engine.py:169-182](), [orchestrator/consumers/chatbot/auto.py:51-58]()
-
----
-
-## Message Lifecycle
-
-The following diagram bridges natural language inputs to the underlying code entities executing the chat lifecycle.
-
-### Data Flow: API Entry to Stream (Natural Language to Code Entity Space)
-Title: "Chat Request and Streaming Flow"
-```mermaid
-sequenceDiagram
-    participant API as "api/chat.py:router"
-    participant Context as "services/page_context.py:sanitize_page_context"
-    participant Auto as "consumers/chatbot/auto.py:AutoBrain"
-    participant Router as "core/routing/engine.py:UniversalRouter"
-    participant Stream as "consumers/chatbot/service.py:StreamingChatService"
-
-    API->>Context: "sanitize_page_context(raw_context)"
-    Context-->>API: "sanitized_dict"
-    API->>API: "inject_page_preamble(history, sanitized_dict)"
-    API->>Auto: "assess(message_text)"
-    Auto-->>API: "ComplexityAssessment"
-    
-    API->>Router: "route(RequestEnvelope)"
-    Router-->>API: "RoutingDecision"
-    
-    API->>Stream: "stream_response_with_agent(agent_id, history)"
-    Stream-->>API: "AI SDK Data Stream (0: text, d: data)"
-```
-Sources: [orchestrator/api/chat.py:218-245](), [orchestrator/services/page_context.py:178-195](), [orchestrator/core/routing/engine.py:79-85]()
-
----
-
-## Complexity Assessment (AutoBrain)
-
-### Three-Tier Assessment Pipeline
-
-The **AutoBrain** (`AutoBrain`) evaluates every message to determine its complexity level (Atom → Organism), minimizing LLM costs by using fast heuristics first.
-
-Title: "AutoBrain Tiered Logic"
 ```mermaid
 graph TD
-    MSG["User Message"] --> T1["Tier 1: Redis Cache Lookup"]
-    T1 -- "Miss" --> T2["Tier 2: Regex Fast-Paths"]
-    T2 -- "Miss" --> T3["Tier 3: LLM Classification"]
-    
-    subgraph "Heuristic Patterns (Tier 2)"
-        P1["_ATOM_PATTERNS"]
-        P2["_PLATFORM_KEYWORDS"]
-    end
-    
-    T2 --> P1
-    T2 --> P2
-    
-    T3 --> Result["ComplexityAssessment"]
+    User["Natural-language user message"] --> Route["/api/chat router"]
+    Route --> Auth["get_request_context_hybrid"]
+    Route --> RequestTypes["ChatRequest / ChatMessageRequest / MessagePart"]
+    Route --> Dispatch["TurnLane / auto_lane / chosen_agent_lane"]
+    Dispatch --> ChatService["StreamingChatService"]
 ```
-Sources: [orchestrator/consumers/chatbot/auto.py:7-22](), [orchestrator/consumers/chatbot/auto.py:92-120](), [orchestrator/consumers/chatbot/auto.py:121-181]()
 
----
+Sources: [orchestrator/api/chat.py:14-29](), [orchestrator/api/chat.py:44-47](), [orchestrator/api/chat.py:20-27](), [orchestrator/consumers/chatbot/service.py:5-13]()
 
-## Tool Loop Prevention & Deduplication
+**Diagram: Natural-language intent to routing and execution entities**
 
-The `ToolExecutionTracker` prevents infinite loops and redundant processing during agent execution turns. It is instantiated within the tool-loop spine to monitor tool calls in a single turn.
-
-| Feature | Implementation |
-|---------|----------------|
-| **Exact Deduplication** | Tracks `(tool_name, hash(tool_args))` to detect identical calls [orchestrator/consumers/chatbot/service.py:31-35]() |
-| **Semantic Deduplication** | Uses `SequenceMatcher` to detect similar search queries for search tools [orchestrator/consumers/chatbot/service.py:85-94]() |
-| **Retry Limits** | Enforces per-tool limits across iteration counts [orchestrator/consumers/chatbot/service.py:31-35]() |
-
-Sources: [orchestrator/consumers/chatbot/service.py:76-104](), [orchestrator/consumers/chatbot/service.py:31-35]()
-
----
-
-## Platform Actions & Tool Execution
-
-Agents can interact with the platform itself via `PlatformActionExecutor`. If `AutoBrain` detects system-related keywords, it injects these as tool hints.
-
-### Code Entity Association: Tools (Natural Language to Code Entity Space)
-Title: "Natural Language to Platform Action Mapping"
 ```mermaid
 graph LR
-    NL["User: 'List my agents'"] -- "AutoBrain Tier 2" --> Hint["platform_list_agents"]
-    Hint -- "Tool Router" --> Registry["PlatformActionExecutor (platform_executor.py)"]
-    Registry -- "Dispatch" --> Handler["list_agents (handlers_agents.py)"]
-    Handler -- "SQLAlchemy" --> DB["Agent Table (core/models)"]
+    Intent["User intent in message text"] --> ChatService["StreamingChatService"]
+    ChatService --> ToolLoop["ToolLoopExecutor"]
+    ToolLoop --> Executor["UnifiedToolExecutor"]
 ```
-Sources: [orchestrator/consumers/chatbot/auto.py:122-125](), [orchestrator/modules/tools/discovery/platform_executor.py:19-28](), [orchestrator/modules/tools/discovery/platform_actions.py:57-103]()
+
+Sources: [orchestrator/consumers/chatbot/service.py:27-36](), [orchestrator/modules/agents/factory/agent_factory.py:49-51]()
 
 ---
 
-## LLM Configuration & Key Resolution
+## Streaming Service and Tool Execution Boundary
 
-The `LLMManager` handles the final execution of chat requests by resolving providers and API keys using a prioritized resolution strategy.
+`orchestrator/consumers/chatbot/service.py` describes `ChatService` as responsible for chat/message database operations and `StreamingChatService` as the SSE streaming orchestrator. The module imports the shared tool-loop types `RoundState`, `ToolLoopExecutor`, `ToolLoopResult`, and `ToolPostResult`, showing that the chatbot consumer uses the converged tool-loop spine. The supplied excerpt does not include the methods that produce stream frames or invoke the loop. [orchestrator/consumers/chatbot/service.py:5-13](), [orchestrator/consumers/chatbot/service.py:27-36]()
 
-- **Service Scoping**: LLM settings are scoped by service (e.g., `chatbot` uses `system_llm`, `orchestrator` uses `orchestrator_llm`) [orchestrator/core/llm/manager.py:34-54]()
-- **Key Resolution**: Implements a multi-tier strategy: 
-    1. Explicit `credential_name_{provider}` in system settings [orchestrator/core/llm/manager.py:166-170]()
-    2. Pattern-based lookup: `{environment}_{provider}_api` [orchestrator/core/llm/manager.py:138-142]()
-    3. Fallback to environment variables via `config` [orchestrator/core/llm/manager.py:145]()
-- **System Settings**: Providers and models are fetched dynamically from the database `SystemSetting` table, requiring explicit configuration to avoid hardcoded fallbacks [orchestrator/core/llm/manager.py:110-128]()
+The service also imports `get_streaming_handler`, `get_tool_router`, and `get_tools_for_agent_async`. Their presence indicates dependencies for stream handling and tool resolution, but the provided lines do not establish the invocation order or emitted protocol. [orchestrator/consumers/chatbot/service.py:44-60]()
 
-Sources: [orchestrator/core/llm/manager.py:98-128](), [orchestrator/core/llm/manager.py:135-187]()
+The agent factory exposes `get_unified_tool_executor`, which constructs `UnifiedToolExecutor` for a database session. This provides a code pointer for the agent-side executor boundary; the supplied excerpt does not prove that this function is called by the chat stream path. [orchestrator/modules/agents/factory/agent_factory.py:49-51]()
+
+Sources: [orchestrator/consumers/chatbot/service.py:5-13](), [orchestrator/consumers/chatbot/service.py:27-60](), [orchestrator/modules/agents/factory/agent_factory.py:49-51]()
+
+---
+
+## Routing Headers and AI SDK Data Stream
+
+The API imports `response_headers` from `api.chat_dispatch` alongside `TurnLane`, `auto_lane`, and `chosen_agent_lane`. This establishes that the chat API has a routing-header helper available at the API boundary. The supplied excerpt does not show where `response_headers` is called, which header names it sets, or what values it returns. [orchestrator/api/chat.py:25-26]()
+
+The frontend `app/api/chat/route.ts` acts as a proxy, forwarding requests to the backend. It explicitly sets the `x-vercel-ai-data-stream: v1` header in the response, indicating adherence to the AI SDK Data Stream format. It also forwards specific routing headers from the backend to the frontend: `x-routing-agent-id`, `x-routing-confidence`, `x-routing-type`, `x-routing-reasoning`, and `x-routing-request-id`. [frontend/app/api/chat/route.ts:83-88]()
+
+The `StreamingResponse` import in the backend API confirms that the API module uses FastAPI’s streaming response type. [orchestrator/api/chat.py:14-15]()
+
+Sources: [orchestrator/api/chat.py:14-15](), [orchestrator/api/chat.py:25-26](), [frontend/app/api/chat/route.ts:83-88]()
+
+---
+
+## Tool-Loop Caller Context
+
+The chatbot service defines `build_tool_caller_context`, which assembles context intended to accompany chat tool execution. Its parameters include the user query, conversation and turn identifiers, driving clerk, prior action, optional model ID, estimated input/output tokens, lane assignment, driving user ID, and system role. Its docstring describes threading this context into chat tool execution and identifies intent telemetry as one consumer. [orchestrator/consumers/chatbot/service.py:122-143]()
+
+The function’s implementation continues beyond the supplied excerpt, so the exact returned structure and downstream call sites are not documented here. The service imports `ToolLoopExecutor` and `RoundState`, establishing the relevant shared tool-loop entities without exposing the complete chat loop. [orchestrator/consumers/chatbot/service.py:27-36](), [orchestrator/consumers/chatbot/service.py:122-143]()
+
+Sources: [orchestrator/consumers/chatbot/service.py:27-36](), [orchestrator/consumers/chatbot/service.py:122-143]()
+
+---
+
+## Implementation Boundaries
+
+The supplied excerpts support the following implementation map:
+
+| Concern | Code entity | What the supplied source establishes |
+|---|---|---|
+| HTTP API | `api.chat.router` | Router prefix is `/api/chat`; API module imports `StreamingResponse` and chat request models. [orchestrator/api/chat.py:14-18](), [orchestrator/api/chat.py:44-47]() |
+| Authenticated principal | `get_user_id` | Resolves the request principal to a database user ID, with a fallback for principal-less paths. [orchestrator/api/chat.py:79-104]() |
+| Workspace-safe agent selection | `_explicitly_chosen_agent`, `get_default_agent_id` | Explicit selection is workspace-checked; default lookup is workspace-scoped and can lazy-seed Auto. [orchestrator/api/chat.py:106-155]() |
+| Routing helpers | `TurnLane`, `auto_lane`, `chosen_agent_lane`, `response_headers` | Imported by the API; their definitions and route call sites are not included. [orchestrator/api/chat.py:25-26]() |
+| Streaming orchestration | `StreamingChatService` | Identified in the service module as the SSE streaming orchestrator. [orchestrator/consumers/chatbot/service.py:5-13]() |
+| Tool-loop integration | `ToolLoopExecutor`, `RoundState` | Imported by the chatbot service as part of the converged tool-loop spine. [orchestrator/consumers/chatbot/service.py:27-36]() |
+| AI SDK Data Stream | `frontend/app/api/chat/route.ts` | Sets `x-vercel-ai-data-stream: v1` and forwards routing headers. [frontend/app/api/chat/route.ts:83-88]()
+
+Sources: [orchestrator/api/chat.py:14-47](), [orchestrator/api/chat.py:79-155](), [orchestrator/consumers/chatbot/service.py:5-13](), [orchestrator/consumers/chatbot/service.py:27-36](), [frontend/app/api/chat/route.ts:83-88]()
 
 ---

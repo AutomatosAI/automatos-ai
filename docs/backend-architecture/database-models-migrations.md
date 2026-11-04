@@ -5,247 +5,286 @@
 
 The following files were used as context for generating this wiki page:
 
-- [.github/workflows/test.yml](.github/workflows/test.yml)
-- [docker-compose.yml](docker-compose.yml)
-- [frontend/.dockerignore](frontend/.dockerignore)
-- [frontend/Dockerfile](frontend/Dockerfile)
-- [frontend/components/agents/agent-configuration-modal.tsx](frontend/components/agents/agent-configuration-modal.tsx)
-- [frontend/components/agents/agent-configuration.tsx](frontend/components/agents/agent-configuration.tsx)
-- [frontend/components/agents/agent-details-modal.tsx](frontend/components/agents/agent-details-modal.tsx)
-- [frontend/components/agents/agent-performance.tsx](frontend/components/agents/agent-performance.tsx)
-- [frontend/components/agents/agent-roster.tsx](frontend/components/agents/agent-roster.tsx)
-- [frontend/components/agents/agent-skills.tsx](frontend/components/agents/agent-skills.tsx)
-- [frontend/components/agents/agent-status-control-modal.tsx](frontend/components/agents/agent-status-control-modal.tsx)
-- [frontend/components/agents/create-agent-modal.tsx](frontend/components/agents/create-agent-modal.tsx)
-- [frontend/components/agents/create-skill-modal.tsx](frontend/components/agents/create-skill-modal.tsx)
-- [frontend/components/agents/model-selector.tsx](frontend/components/agents/model-selector.tsx)
-- [frontend/components/agents/skill-configuration-modal.tsx](frontend/components/agents/skill-configuration-modal.tsx)
-- [frontend/hooks/use-agent-api.ts](frontend/hooks/use-agent-api.ts)
-- [frontend/hooks/use-model-api.ts](frontend/hooks/use-model-api.ts)
-- [frontend/lib/agent-constants.ts](frontend/lib/agent-constants.ts)
-- [infrastructure/.env.example](infrastructure/.env.example)
-- [infrastructure/railway-manifest.json](infrastructure/railway-manifest.json)
-- [orchestrator/Dockerfile](orchestrator/Dockerfile)
-- [orchestrator/alembic/versions/add_job_title_to_agents.py](orchestrator/alembic/versions/add_job_title_to_agents.py)
-- [orchestrator/api/admin_prompts.py](orchestrator/api/admin_prompts.py)
-- [orchestrator/api/agent_endpoints.py](orchestrator/api/agent_endpoints.py)
-- [orchestrator/api/agents.py](orchestrator/api/agents.py)
-- [orchestrator/api/generated_images.py](orchestrator/api/generated_images.py)
-- [orchestrator/api/system_settings.py](orchestrator/api/system_settings.py)
+- [orchestrator/alembic/versions/prd263_harness_ledger_grants.py](orchestrator/alembic/versions/prd263_harness_ledger_grants.py)
+- [orchestrator/alembic/versions/prd266_merge_heads.py](orchestrator/alembic/versions/prd266_merge_heads.py)
+- [orchestrator/alembic/versions/prd266_mobile_devices.py](orchestrator/alembic/versions/prd266_mobile_devices.py)
+- [orchestrator/core/auth/device.py](orchestrator/core/auth/device.py)
+- [orchestrator/core/best_effort.py](orchestrator/core/best_effort.py)
 - [orchestrator/core/database/database.py](orchestrator/core/database/database.py)
+- [orchestrator/core/database/pool_watch.py](orchestrator/core/database/pool_watch.py)
+- [orchestrator/core/health_probe.py](orchestrator/core/health_probe.py)
 - [orchestrator/core/models/__init__.py](orchestrator/core/models/__init__.py)
 - [orchestrator/core/models/core.py](orchestrator/core/models/core.py)
-- [orchestrator/core/models/system_prompts.py](orchestrator/core/models/system_prompts.py)
-- [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
-- [orchestrator/core/seeds/seed_system_prompts.py](orchestrator/core/seeds/seed_system_prompts.py)
-- [orchestrator/core/services/audit_service.py](orchestrator/core/services/audit_service.py)
-- [orchestrator/core/services/prompt_registry.py](orchestrator/core/services/prompt_registry.py)
-- [orchestrator/requirements.in](orchestrator/requirements.in)
-- [orchestrator/tests/test_dockerfile_prod_parity.py](orchestrator/tests/test_dockerfile_prod_parity.py)
-- [orchestrator/tests/test_w1s8_get_db_lifecycle.py](orchestrator/tests/test_w1s8_get_db_lifecycle.py)
+- [orchestrator/core/models/harness.py](orchestrator/core/models/harness.py)
+- [orchestrator/core/services/auto_cadence.py](orchestrator/core/services/auto_cadence.py)
+- [orchestrator/router_manifest.py](orchestrator/router_manifest.py)
+- [orchestrator/scripts/harness_backfill_runs.py](orchestrator/scripts/harness_backfill_runs.py)
+- [orchestrator/services/themes/data/core-pages.json](orchestrator/services/themes/data/core-pages.json)
+- [orchestrator/tests/test_f229_health_off_the_loop.py](orchestrator/tests/test_f229_health_off_the_loop.py)
+- [orchestrator/tests/test_f458_full_pool_names_its_holders.py](orchestrator/tests/test_f458_full_pool_names_its_holders.py)
+- [orchestrator/tests/test_f458_health_never_waits_on_a_full_pool.py](orchestrator/tests/test_f458_health_never_waits_on_a_full_pool.py)
+- [orchestrator/tests/test_prd209_alembic_single_head.py](orchestrator/tests/test_prd209_alembic_single_head.py)
+- [orchestrator/tests/test_prd236_w1_routes.py](orchestrator/tests/test_prd236_w1_routes.py)
+- [orchestrator/tests/test_prd251w1_render_quota.py](orchestrator/tests/test_prd251w1_render_quota.py)
+- [orchestrator/tests/test_prd251w1_voice.py](orchestrator/tests/test_prd251w1_voice.py)
+- [orchestrator/tests/test_prd263_harness_backfill_runs.py](orchestrator/tests/test_prd263_harness_backfill_runs.py)
+- [orchestrator/tests/test_prd263_harness_history_runs.py](orchestrator/tests/test_prd263_harness_history_runs.py)
+- [orchestrator/tests/test_prd263_harness_ledger_migration.py](orchestrator/tests/test_prd263_harness_ledger_migration.py)
+- [orchestrator/tests/test_prd263_harness_review_cadence.py](orchestrator/tests/test_prd263_harness_review_cadence.py)
+- [orchestrator/tests/test_prd266_device_lane.py](orchestrator/tests/test_prd266_device_lane.py)
+- [orchestrator/tests/test_prd266_mobile_devices_model.py](orchestrator/tests/test_prd266_mobile_devices_model.py)
+- [orchestrator/tests/test_prd266_mobile_devices_routes.py](orchestrator/tests/test_prd266_mobile_devices_routes.py)
 
 </details>
 
 
 
-This page documents the SQLAlchemy ORM models that define the database schema for Automatos AI, focusing on their structure, usage of `workspace_id` foreign keys, `JSONB` fields, and the Alembic migration strategy. These models establish the data layer for agents, workflows, marketplace entities, multi-tenancy, and orchestration missions.
+## Purpose and Scope
 
-## Model Organization
+This page explains how SQLAlchemy model definitions are collected and registered, how the shown models express relationships and workspace ownership, and how model schema choices relate to Alembic migrations. It covers the visible `LLMModel` and `WorkspaceModel` definitions, JSON/JSONB examples, the `HarnessRun` and `HarnessTaskLedger` tables, database session setup, and the tested single-head migration policy. [orchestrator/core/models/__init__.py:1-23](), [orchestrator/core/models/core.py:36-49](), [orchestrator/core/models/core.py:55-143](), [orchestrator/core/models/harness.py:61-131](), [orchestrator/tests/test_prd209_alembic_single_head.py:16-28]()
 
-Database models are organized in the `orchestrator/core/models/` directory as a modular package. The `__init__.py` file serves as the central hub, importing and exposing models to allow unified imports like `from core.models import Agent, LLMUsage, OrchestrationRun` [orchestrator/core/models/__init__.py:1-54]().
+Sources: `orchestrator/core/models/__init__.py`, `orchestrator/core/models/core.py`, `orchestrator/core/models/harness.py`, `orchestrator/core/database/database.py`, `orchestrator/tests/test_prd209_alembic_single_head.py`
 
-### Module Structure
+---
 
-The following diagram illustrates the relationship between the model files and the entities they define.
+## 1. Model Organization & Architecture
 
-**Core Models Module Layout**
+`core.models` is the model aggregation package. It imports the main definitions from `core.py`, then workspace models and specialized model modules; this makes model symbols available through the package and registers their mappings for SQLAlchemy. Import order is intentional: `tools.py` is imported after `core.py` because it may extend `ToolUsageLog`. [orchestrator/core/models/__init__.py:1-17]()
+
+The aggregation module also imports orchestration, watches, socials, harness, content provenance, ticket counters, credits, billing, proactive, and other model groups. Some optional model packs use `try`/`except ImportError`, so their absence does not prevent the package import from succeeding. [orchestrator/core/models/__init__.py:58-80](), [orchestrator/core/models/__init__.py:82-120](), [orchestrator/core/models/__init__.py:122-148]()
+
+`core.py` imports the shared declarative `Base` from `core.database.base`, and defines association tables alongside model classes. This makes the shared metadata the registration point used by `Base.metadata.create_all`. [orchestrator/core/models/core.py:9-18](), [orchestrator/core/database/database.py:17-18](), [orchestrator/core/database/database.py:106-113]()
+
+### Module Layout
 
 ```mermaid
 graph TB
-    Init["orchestrator/core/models/__init__.py<br/>Central Import Hub"]
-    
-    CorePy["core.py<br/>Agent, Skill, Workflow<br/>BoardTask, LLMUsage, LLMModel"]
-    WorkspacesPy["workspaces.py<br/>Workspace, User<br/>WorkspaceMember"]
-    PluginsPy["marketplace_plugins.py<br/>MarketplacePlugin<br/>AgentAssignedPlugin"]
-    OrchPy["orchestration.py<br/>OrchestrationRun (Mission)<br/>OrchestrationTask"]
-    RoutingPy["routing.py<br/>RoutingDecisionRecord<br/>RoutingRule, TriggerSubscription"]
-    SystemPy["system_prompts.py<br/>SystemPrompt<br/>SystemPromptVersion<br/>SystemPromptEvalRun"]
-    ToolsPy["tools.py & composio_cache.py<br/>ToolUsageLog<br/>AgentAppAssignment<br/>ComposioAppCache"]
-    
-    Init --> CorePy
-    Init --> WorkspacesPy
-    Init --> PluginsPy
-    Init --> OrchPy
-    Init --> RoutingPy
-    Init --> SystemPy
-    Init --> ToolsPy
+    ModelsPackage["core.models"]
+    CoreModule["core.models.core"]
+    Base["core.database.base.Base"]
+    WorkspaceModels["core.models.workspaces"]
+    SpecializedModels["specialized model modules"]
+    HarnessModels["core.models.harness"]
+    SocialsModels["core.models.socials"]
+    OptionalModels["optional model packs"]
+    Metadata["Base.metadata"]
+    CreateTables["create_tables"]
+
+    ModelsPackage --> CoreModule
+    ModelsPackage --> WorkspaceModels
+    ModelsPackage --> SpecializedModels
+    ModelsPackage --> HarnessModels
+    ModelsPackage --> SocialsModels
+    ModelsPackage --> OptionalModels
+    CoreModule --> Base
+    HarnessModels --> Base
+    Base --> Metadata
+    Metadata --> CreateTables
 ```
 
-Sources: [orchestrator/core/models/__init__.py:1-80](), [orchestrator/core/models/core.py:43-140](), [orchestrator/core/models/system_prompts.py:32-138]()
-
-### Database Connection & Session Management
-
-The system uses SQLAlchemy with a PostgreSQL backend, utilizing `JSONB` for flexible configuration and `UUID` for multi-tenant identifiers [orchestrator/core/models/core.py:9-19]().
-
-**Session Lifecycle Pattern**
-The application follows a dependency injection pattern for database sessions. The `get_db` utility in `orchestrator/core/database/database.py` provides a scoped session per request, ensuring transactions are handled at the API level [orchestrator/core/database/database.py:105-117](). It includes a `rollback()` in the `finally` block to prevent "idle in transaction" connections [orchestrator/core/database/database.py:115-116]().
+Sources: `orchestrator/core/models/__init__.py:1-23`, `orchestrator/core/models/__init__.py:58-80`, `orchestrator/core/models/__init__.py:101-149`, `orchestrator/core/models/core.py:9-18`, `orchestrator/core/models/harness.py:20-35`, `orchestrator/core/database/database.py:106-113`
 
 ---
 
-## Core Entity Models
+## 2. Core Entity Models & JSONB Handling
 
-### LLM Registry & Usage Tracking
+### LLM Registry and Workspace Installs
 
-The system maintains a registry of available models and tracks their usage for analytics and cost management.
+`LLMModel` maps to `llm_models`. Its columns describe model identity and serving provider, capabilities, token limits, supported features, costs, status, marketplace metadata, and timestamps. `capabilities` and `recommended_for` use SQLAlchemy `JSON`; these declarations are not PostgreSQL `JSONB` columns in the shown model excerpt. The model also declares a uniqueness constraint on `(serving_provider, model_id)`. [orchestrator/core/models/core.py:55-65](), [orchestrator/core/models/core.py:67-119]()
 
-| Model | Table Name | Purpose |
-|-------|------------|---------|
-| `LLMModel` | `llm_models` | Registry of available models (GPT-4, Claude, etc.) with cost and capability metadata [orchestrator/core/models/core.py:47-98](). |
-| `WorkspaceModel` | `workspace_models` | Tracks which marketplace models are installed in a specific workspace [orchestrator/core/models/core.py:107-133](). |
-| `LLMUsage` | `llm_usage` | Granular tracking of token usage, latency, and costs per request [orchestrator/core/models/core.py:152-169](). |
-| `UserApiKey` | `user_api_keys` | Encrypted BYOK storage for workspace-provided API keys [orchestrator/core/models/core.py:136-150](). |
+`LLMModel.workspace_id` is a nullable UUID foreign key to `workspaces.id`, allowing the model row to be workspace-scoped or system-wide. Its `workspace_installs` relationship points to `WorkspaceModel` through `back_populates="model"` and uses `cascade="all, delete-orphan"`. [orchestrator/core/models/core.py:120-124]()
 
-Sources: [orchestrator/core/models/core.py:47-169]()
+`WorkspaceModel` maps to `workspace_models`. It records a required workspace foreign key and a required model foreign key, both configured with `ON DELETE CASCADE`, plus installation time, active state, and source. [orchestrator/core/models/core.py:127-136]()
 
-### Agent & Skill Models
+The central model module defines two association tables. `agent_skills` links agents and skills, stores a required attachment priority, and enforces uniqueness for `(agent_id, skill_id)`. `workflow_agents` links workflows to agents. [orchestrator/core/models/core.py:36-49]()
 
-Agents are the primary execution units. They are linked to skills and workflows via association tables `agent_skills` and `workflow_agents` [orchestrator/core/models/core.py:31-41]().
+### JSON and JSONB Storage
+
+The shown `LLMModel` registry fields use SQLAlchemy `JSON` for values such as `capabilities` and `recommended_for`. The `HarnessRun` model uses PostgreSQL `JSONB` for its `counts`, `verdicts`, and `prescriptions` fields. `HarnessTaskLedger` uses `JSONB` for its entry and proposal/apply value fields, including `prior_value`, `proposed_value`, and `value_at_apply`. [orchestrator/core/models/core.py:78-95](), [orchestrator/core/models/harness.py:20-35](), [orchestrator/core/models/harness.py:64-83](), [orchestrator/core/models/harness.py:109-120]()
+
+A migration guard documents a JSONB-specific change to `workflows.tags`: the column was changed to JSONB so PostgreSQL could build the `ix_workflows_tags_gin` GIN index, because PostgreSQL does not provide a GIN operator class for `json`. [orchestrator/tests/test_prd209_alembic_single_head.py:94-100]()
+
+### Harness Tables: Relational Keys, Constraints, and JSONB
+
+`HarnessTaskLedger` stores workspace-scoped HARNESS proposal and apply-rail records. It has a required cascading `workspace_id` foreign key, a unique constraint on `(workspace_id, board_task_id)`, and a unique index on `(workspace_id, rx_id)`. Its named check constraint restricts `state` to the declared ledger states. The JSONB columns hold proposal and application data. [orchestrator/core/models/harness.py:61-94]()
+
+`HarnessRun` stores a workspace’s run for a judged ISO-week window. It has a required cascading workspace foreign key, an index on `(workspace_id, cur_window)`, and a status check constraint. Counts, verdicts, and prescriptions are JSONB columns; report text and timestamps are stored separately. [orchestrator/core/models/harness.py:97-131]()
+
+The migration test verifies that the `HarnessTaskLedger` ORM model and its Alembic revision declare the same added columns, check constraint, and unique index. It also exercises the upgrade against both an older F156-shaped table and a `create_all`-built table, and verifies a second upgrade leaves the schema unchanged. [orchestrator/tests/test_prd263_harness_ledger_migration.py:1-14](), [orchestrator/tests/test_prd263_harness_ledger_migration.py:95-121](), [orchestrator/tests/test_prd263_harness_ledger_migration.py:124-138]()
 
 ```mermaid
 erDiagram
-    AGENTS ||--o{ AGENT_SKILLS : "possesses"
-    SKILLS ||--o{ AGENT_SKILLS : "assigned_to"
-    AGENTS }o--|| WORKSPACES : "belongs_to"
-    AGENTS ||--o{ AGENT_APP_ASSIGNMENTS : "has_tools"
-    
-    AGENTS {
+    workspaces ||--o{ workspace_models : "workspace installs"
+    llm_models ||--o{ workspace_models : "model installed"
+    workspaces ||--o{ harness_runs : "workspace run history"
+    workspaces ||--o{ harness_task_ledger : "workspace change ledger"
+
+    llm_models {
+        int id PK
+        string provider
+        string serving_provider
+        string model_id
+        json capabilities
+        uuid workspace_id FK
+    }
+
+    workspace_models {
         int id PK
         uuid workspace_id FK
-        varchar name
-        varchar agent_type
-        jsonb configuration
-        jsonb performance_metrics
-        varchar status
-        varchar job_title
+        int model_id FK
+        boolean is_active
+        string source
     }
-    
-    SKILLS {
+
+    harness_runs {
         int id PK
-        varchar name
-        text description
         uuid workspace_id FK
-        boolean is_active
+        string cur_window
+        string status
+        jsonb counts
+        jsonb verdicts
+        jsonb prescriptions
     }
-    
-    AGENT_APP_ASSIGNMENTS {
+
+    harness_task_ledger {
         int id PK
-        int agent_id FK
-        varchar app_name
-        boolean is_active
+        uuid workspace_id FK
+        int board_task_id
+        string state
+        jsonb entry
+        string rx_id
+        jsonb prior_value
+        jsonb proposed_value
     }
 ```
 
-Sources: [orchestrator/core/models/core.py:29-41](), [orchestrator/core/models/composio_cache.py:13-25](), [orchestrator/api/agents.py:12-25](), [orchestrator/alembic/versions/add_job_title_to_agents.py]()
+Sources: `orchestrator/core/models/core.py:55-95`, `orchestrator/core/models/core.py:120-136`, `orchestrator/core/models/harness.py:61-94`, `orchestrator/core/models/harness.py:97-131`
 
 ---
 
-## System Prompt Management (PRD-58)
+## 3. Session Lifecycle & Multi-Tenancy
 
-The system includes a versioned prompt management layer that allows admins to manage system-wide prompts with evaluation tracking [orchestrator/core/models/system_prompts.py:1-6]().
+### Workspace Foreign Keys and Ownership
 
-### Prompt Schema
+The shown models use `workspace_id` foreign keys to express tenant ownership. `LLMModel.workspace_id` is nullable; `WorkspaceModel.workspace_id`, `HarnessRun.workspace_id`, and `HarnessTaskLedger.workspace_id` are required and configured to cascade when the referenced workspace is deleted. [orchestrator/core/models/core.py:120-133](), [orchestrator/core/models/harness.py:61-66](), [orchestrator/core/models/harness.py:107-110]()
 
-| Class | Table | Role |
-|-------|-------|------|
-| `SystemPrompt` | `system_prompts` | The root prompt entity. Uses a `slug` as a stable identifier for code references [orchestrator/core/models/system_prompts.py:32-68](). |
-| `SystemPromptVersion` | `system_prompt_versions` | Immutable snapshots of prompt content. Only one version per prompt is marked as `active` [orchestrator/core/models/system_prompts.py:71-105](). |
-| `SystemPromptEvalRun` | `system_prompt_eval_runs` | Tracks FutureAGI evaluation, optimization, or safety check runs [orchestrator/core/models/system_prompts.py:108-138](). |
+`WorkspaceModel.model_id` references `llm_models.id` with `ON DELETE CASCADE`. The `LLMModel.workspace_installs` ORM relationship connects the model row to its install rows using the `model` back-reference. [orchestrator/core/models/core.py:120-124](), [orchestrator/core/models/core.py:127-136]()
 
-Sources: [orchestrator/core/models/system_prompts.py:32-138]()
+The HARNESS backfill implementation illustrates a workspace-scoped data migration: it imports records per workspace and ISO week, leaves an existing `(workspace, week)` run alone, and scopes its operations to a selected workspace when requested. Its tests verify that a second apply does not duplicate imported weeks. [orchestrator/scripts/harness_backfill_runs.py:8-23](), [orchestrator/scripts/harness_backfill_runs.py:35-46](), [orchestrator/tests/test_prd263_harness_backfill_runs.py:94-110]()
 
----
-
-## Mission & Orchestration Models
-
-The Mission system (Sequential Mission Coordinator) uses a set of specialized models to manage complex, multi-step agent goals [orchestrator/core/models/__init__.py:30-52]().
-
-### Orchestration Schema
-
-| Class | Table | Role |
-|-------|-------|------|
-| `OrchestrationRun` | `orchestration_runs` | Represents a "Mission". Stores high-level goal, budget configuration, and overall state [orchestrator/core/models/__init__.py:32](). |
-| `OrchestrationTask` | `orchestration_tasks` | A single step within a mission. Tracks assigned agent, input/output data, and execution state [orchestrator/core/models/__init__.py:33](). |
-| `OrchestrationEvent` | `orchestration_events` | Audit log for mission transitions and system actions [orchestrator/core/models/__init__.py:35](). |
-
-**Governance & Reliability**: 
-Missions utilize a `RunState` and `TaskState` machine to track progress, with terminal states including `COMPLETED`, `FAILED`, and `CANCELLED` [orchestrator/core/models/__init__.py:39-52]().
-
-Sources: [orchestrator/core/models/__init__.py:30-52]()
-
----
-
-## Data Patterns
-
-### Multi-Tenancy (Workspace ID)
-Multi-tenancy is strictly enforced via `workspace_id` foreign keys on nearly all models.
-- **Foreign Key**: Models like `LLMModel`, `WorkspaceModel`, `UserApiKey`, and `LLMUsage` include a `workspace_id` referencing the `workspaces` table [orchestrator/core/models/core.py:101](), [orchestrator/core/models/core.py:112](), [orchestrator/core/models/core.py:141](), [orchestrator/core/models/core.py:158]().
-- **Filtering**: API endpoints like `get_agent_performance` filter by `workspace_id` from the request context to ensure data isolation [orchestrator/api/agent_endpoints.py:134]().
-
-### JSONB Fields
-The codebase extensively uses `JSONB` for flexibility:
-- **Capabilities**: `LLMModel.capabilities` stores model-specific features [orchestrator/core/models/core.py:61]().
-- **Configuration**: `Agent.configuration` stores LLM parameters and execution settings [orchestrator/core/models/core.py:79-93]().
-- **Usage Stats**: `Agent.model_usage_stats` and `Agent.performance_metrics` store aggregated execution data [orchestrator/api/agent_endpoints.py:152-153]().
-
-**Natural Language Space to Code Entity Mapping**
+**Natural Language Space to Code Entity Mapping: workspace installs a model**
 
 ```mermaid
-graph LR
-    User["User / Developer"] -- "Creates Agent" --> API["orchestrator/api/agent_endpoints.py<br/>create_specialized_agent_endpoint()"]
-    API -- "Uses Factory" --> Factory["orchestrator/modules/agents/factory.py<br/>AgentFactory.create_agent()"]
-    Factory -- "Persists" --> AgentModel["Agent Model<br/>(core.py)"]
-    
-    subgraph "Data Storage"
-        AgentModel
-        WorkspaceID["workspace_id (UUID)"]
-        Config["configuration (JSONB)"]
-    end
-    
-    AgentModel -- "Linked to" --> WorkspaceID
-    AgentModel -- "Contains" --> Config
+flowchart LR
+    InstallConcept["Workspace installs a model"]
+    WorkspaceModel["WorkspaceModel"]
+    WorkspaceFK["workspace_id"]
+    WorkspaceTable["workspaces.id"]
+    ModelFK["model_id"]
+    ModelTable["llm_models.id"]
+    LLMModel["LLMModel.workspace_installs"]
+
+    InstallConcept --> WorkspaceModel
+    WorkspaceModel --> WorkspaceFK
+    WorkspaceFK --> WorkspaceTable
+    WorkspaceModel --> ModelFK
+    ModelFK --> ModelTable
+    ModelTable --> LLMModel
 ```
 
-Sources: [orchestrator/api/agent_endpoints.py:42-89](), [orchestrator/core/models/core.py:43-140](), [orchestrator/core/database/database.py:105-117]()
+Sources: `orchestrator/core/models/core.py:120-136`
 
-## Database Migrations with Alembic
-
-Alembic is used for database schema migrations, ensuring that the database schema evolves with the application code.
-
-### Alembic Configuration and Usage
-
-Alembic is configured in the `orchestrator/alembic.ini` file. Migration scripts are located in `orchestrator/alembic/versions/`.
-
-- **`alembic upgrade heads`**: This command is used to apply all pending migrations. In the `Dockerfile`, this command is executed during the development and production stages to ensure the database schema is up-to-date before the application starts [orchestrator/Dockerfile:131](). The `heads` argument is used to apply all unmerged heads in the migration tree.
-- **Single-Head Invariant**: While `alembic upgrade heads` is currently used due to multiple unmerged heads, the ideal state for Alembic is a single-head invariant. This means the migration history should be linear, simplifying schema management and preventing conflicts. Future work should aim to rebase and merge divergent branches into a single linear history.
-
-### Schema Drift and From-Zero Checks
-
-- **Schema Drift Prevention**: By running `alembic upgrade heads` at application startup, the system actively prevents schema drift. If the application code expects a different schema than what's in the database, the migration process will either update the schema or fail loudly, preventing runtime errors due to mismatched database structures.
-- **From-Zero Initialization**: For fresh deployments, the `scripts/init_test_db.py` script is used to initialize the database schema from scratch. This script typically involves creating all tables defined by the SQLAlchemy models and applying any necessary seed data. This is particularly useful in CI environments where a clean database is needed for each test run [orchestrator/tests/test_dockerfile_prod_parity.py:102](), [orchestrator/tests/test_w1s8_get_db_lifecycle.py:106](), [orchestrator/.github/workflows/test.yml:110]().
-
-**Migration Workflow**
+**Natural Language Space to Code Entity Mapping: HARNESS history is stored per workspace**
 
 ```mermaid
-graph TD
-    A[Developer Modifies Models] --> B{Generate Migration Script};
-    B -- "alembic revision --autogenerate" --> C[New Migration File<br/>(alembic/versions/...)];
-    C --> D[Review & Edit Migration Script];
-    D --> E[Commit Migration Script];
-    E --> F[Deployment / CI Environment];
-    F -- "docker-entrypoint.sh" --> G[Run alembic upgrade heads];
-    G --> H[Database Schema Updated];
+flowchart LR
+    HistoryConcept["HARNESS history per workspace"]
+    Backfill["scripts/harness_backfill_runs.py"]
+    WorkspaceDirectory["workspace volume directory"]
+    WorkspaceId["workspace_id"]
+    HarnessRun["HarnessRun"]
+    HarnessRunsTable["harness_runs"]
+    WeekKey["cur_window"]
+
+    HistoryConcept --> Backfill
+    Backfill --> WorkspaceDirectory
+    Backfill --> WorkspaceId
+    WorkspaceId --> HarnessRun
+    WeekKey --> HarnessRun
+    HarnessRun --> HarnessRunsTable
 ```
 
-Sources: [orchestrator/Dockerfile:131](), [orchestrator/requirements.in:14](), [orchestrator/.github/workflows/test.yml:110]()
+Sources: `orchestrator/scripts/harness_backfill_runs.py:5-23`, `orchestrator/scripts/harness_backfill_runs.py:35-46`, `orchestrator/core/models/harness.py:97-120`
+
+### Database URL, Engine, and Session Boundaries
+
+`get_database_url()` first attempts to obtain PostgreSQL connection parameters from the credential resolver. If that fails, it falls back to `DATABASE_URL` or the individual PostgreSQL configuration values; it raises an error if the required values are missing. [orchestrator/core/database/database.py:22-69]()
+
+The module creates a SQLAlchemy engine with connection-pool settings and a `SessionLocal` factory. `get_db()` yields a session and rolls back any open transaction before closing it; `get_db_session()` commits on normal completion, rolls back and re-raises on failure, then closes the session. [orchestrator/core/database/database.py:82-95](), [orchestrator/core/database/database.py:115-140]()
+
+`create_tables()` calls `Base.metadata.create_all(bind=engine)`. This is a schema-creation path, distinct from Alembic’s revision history; the single-head test describes the fresh-database bootstrap path as `create_all` plus raw DDL followed by stamping at `heads`. [orchestrator/core/database/database.py:106-113](), [orchestrator/tests/test_prd209_alembic_single_head.py:7-14]()
+
+Sources: `orchestrator/core/database/database.py:22-69`, `orchestrator/core/database/database.py:82-95`, `orchestrator/core/database/database.py:106-140`, `orchestrator/tests/test_prd209_alembic_single_head.py:7-14`
+
+---
+
+## 4. Alembic Migrations & Single-Head Policy
+
+The Alembic guard enforces a single-head invariant: there must be exactly one head, and the expected head is pinned in the test. It also checks that every other revision is an ancestor of that head, so databases stamped at historical revisions retain a forward upgrade path. The guard is structural and reads the revision files rather than requiring a database or Docker. [orchestrator/tests/test_prd209_alembic_single_head.py:16-28]()
+
+The guard’s documented fresh-database path uses `scripts/init_fresh_db.py`, which builds the schema through `create_all` plus raw DDL and stamps the database at `heads`. The test also documents that the stale `init_complete_schema.sql` snapshot was removed and that revision files must not be deleted: deployed databases may have stamped those revisions, and removing an ancestor can strand them. [orchestrator/tests/test_prd209_alembic_single_head.py:7-14](), [orchestrator/tests/test_prd209_alembic_single_head.py:25-28]()
+
+The test’s history notes show that the terminal revision changes as new migration work lands, sometimes with merge revisions joining branches. The correct invariant is the tested single head and ancestry chain, not a permanently fixed revision name in documentation. [orchestrator/tests/test_prd209_alembic_single_head.py:42-50]()
+
+### Migration Shape and Idempotency
+
+The HARNESS ledger migration test treats model/migration agreement as a schema contract. It checks that the migration adds the expected columns, relaxes `board_task_id` nullability, replaces the state check constraint, rewrites legacy `held` rows to `expired`, and creates the unique index. It also checks that the downgrade removes the introduced index, constraint, and columns. [orchestrator/tests/test_prd263_harness_ledger_migration.py:95-121]()
+
+The same test applies the migration to an older F156 table and verifies that the result matches the ORM model’s schema shape. Applying the migration a second time leaves that shape unchanged. [orchestrator/tests/test_prd263_harness_ledger_migration.py:124-138]()
+
+The single-head guard additionally requires the fresh path to be wired and the revision chain to remain intact. It describes fresh databases as being built through the initialization script rather than replaying the historical revision forest from an empty database. [orchestrator/tests/test_prd209_alembic_single_head.py:7-14](), [orchestrator/tests/test_prd209_alembic_single_head.py:25-28]()
+
+### Migration Verification Data Flow
+
+```mermaid
+flowchart TD
+    ModelDefinitions["core.models"]
+    Metadata["Base.metadata"]
+    FreshBootstrap["scripts/init_fresh_db.py"]
+    CreateAll["create_all plus raw DDL"]
+    Stamp["stamp heads"]
+    RevisionFiles["orchestrator/alembic/versions"]
+    HeadGuard["test_prd209_alembic_single_head.py"]
+    SingleHead["one pinned Alembic head"]
+    Ancestry["all revisions are ancestors"]
+    ModelMigrationTest["test_prd263_harness_ledger_migration.py"]
+    HarnessModel["HarnessTaskLedger"]
+    HarnessRevision["prd263_harness_ledger_grants"]
+    SchemaMatch["model and migration shape match"]
+
+    ModelDefinitions --> Metadata
+    Metadata --> CreateAll
+    FreshBootstrap --> CreateAll
+    CreateAll --> Stamp
+    RevisionFiles --> HeadGuard
+    HeadGuard --> SingleHead
+    HeadGuard --> Ancestry
+    ModelMigrationTest --> HarnessModel
+    ModelMigrationTest --> HarnessRevision
+    HarnessModel --> SchemaMatch
+    HarnessRevision --> SchemaMatch
+```
+
+Sources: `orchestrator/core/models/__init__.py:1-23`, `orchestrator/core/models/core.py:9-18`, `orchestrator/tests/test_prd209_alembic_single_head.py:7-28`, `orchestrator/tests/test_prd263_harness_ledger_migration.py:95-138`
+
+---
+
+## 5. Workspace Purge & Maintenance
+
+The shown foreign keys establish database-level cascade behavior for selected workspace-owned rows: deleting a workspace cascades to `WorkspaceModel` installs, `HarnessRun` rows, and `HarnessTaskLedger` rows. The supplied excerpts do not show a complete workspace-purge routine or its operational sequence, so those model-level cascades should not be read as a description of all purge behavior. [orchestrator/core/models/core.py:127-133](), [orchestrator/core/models/harness.py:61-66](), [orchestrator/core/models/harness.py:107-110]()
+
+The HARNESS backfill script provides a separate maintenance example. It defaults to dry-run behavior; with `--apply`, it imports missing workspace/week records, and it only removes files when `--remove-files` is also requested and the import has been verified for that workspace. [orchestrator/scripts/harness_backfill_runs.py:20-46]()
+
+Sources: `orchestrator/core/models/core.py:127-133`, `orchestrator/core/models/harness.py:61-66`, `orchestrator/core/models/harness.py:107-110`, `orchestrator/scripts/harness_backfill_runs.py:20-46`
 
 ---

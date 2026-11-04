@@ -5,173 +5,233 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/PRDS/PRD-227-BOARD-LIGHT-UP.md](docs/PRDS/PRD-227-BOARD-LIGHT-UP.md)
-- [docs/PRDS/PRD-WAVE-AUTO-MANAGER.md](docs/PRDS/PRD-WAVE-AUTO-MANAGER.md)
-- [frontend/components/command-center/__tests__/watchlist-tab.test.tsx](frontend/components/command-center/__tests__/watchlist-tab.test.tsx)
-- [frontend/components/command-center/watchlist-tab.tsx](frontend/components/command-center/watchlist-tab.tsx)
-- [frontend/hooks/use-watches-api.ts](frontend/hooks/use-watches-api.ts)
-- [orchestrator/api/watches.py](orchestrator/api/watches.py)
+- [orchestrator/api/widget_memory.py](orchestrator/api/widget_memory.py)
+- [orchestrator/core/services/mission_memory_service.py](orchestrator/core/services/mission_memory_service.py)
 - [orchestrator/core/services/playbook_memory_service.py](orchestrator/core/services/playbook_memory_service.py)
-- [orchestrator/modules/tools/discovery/actions_missions.py](orchestrator/modules/tools/discovery/actions_missions.py)
-- [orchestrator/modules/tools/discovery/actions_watches.py](orchestrator/modules/tools/discovery/actions_watches.py)
-- [orchestrator/modules/tools/discovery/handlers_missions.py](orchestrator/modules/tools/discovery/handlers_missions.py)
-- [orchestrator/modules/tools/discovery/handlers_playbooks.py](orchestrator/modules/tools/discovery/handlers_playbooks.py)
-- [orchestrator/modules/tools/discovery/handlers_watches.py](orchestrator/modules/tools/discovery/handlers_watches.py)
-- [orchestrator/services/audit_retention.py](orchestrator/services/audit_retention.py)
-- [orchestrator/services/board_events.py](orchestrator/services/board_events.py)
-- [orchestrator/services/chat_messenger.py](orchestrator/services/chat_messenger.py)
-- [orchestrator/tests/conftest.py](orchestrator/tests/conftest.py)
-- [orchestrator/tests/test_board_dispatch.py](orchestrator/tests/test_board_dispatch.py)
-- [orchestrator/tests/test_board_sse_listen_notify.py](orchestrator/tests/test_board_sse_listen_notify.py)
+- [orchestrator/modules/memory/injection_filter.py](orchestrator/modules/memory/injection_filter.py)
+- [orchestrator/modules/tools/discovery/actions_agents.py](orchestrator/modules/tools/discovery/actions_agents.py)
+- [orchestrator/modules/tools/discovery/actions_assignments.py](orchestrator/modules/tools/discovery/actions_assignments.py)
+- [orchestrator/modules/tools/discovery/actions_marketplace.py](orchestrator/modules/tools/discovery/actions_marketplace.py)
+- [orchestrator/modules/tools/discovery/actions_monitoring.py](orchestrator/modules/tools/discovery/actions_monitoring.py)
+- [orchestrator/modules/tools/discovery/actions_reports.py](orchestrator/modules/tools/discovery/actions_reports.py)
+- [orchestrator/modules/tools/discovery/actions_search.py](orchestrator/modules/tools/discovery/actions_search.py)
+- [orchestrator/modules/tools/discovery/actions_workspace.py](orchestrator/modules/tools/discovery/actions_workspace.py)
+- [orchestrator/modules/tools/discovery/handlers_agents.py](orchestrator/modules/tools/discovery/handlers_agents.py)
+- [orchestrator/modules/tools/discovery/handlers_monitoring.py](orchestrator/modules/tools/discovery/handlers_monitoring.py)
+- [orchestrator/modules/tools/discovery/handlers_reports.py](orchestrator/modules/tools/discovery/handlers_reports.py)
+- [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
+- [orchestrator/modules/tools/discovery/handlers_workspace.py](orchestrator/modules/tools/discovery/handlers_workspace.py)
+- [orchestrator/tests/test_f134_edits_say_they_apply_to_the_next_run.py](orchestrator/tests/test_f134_edits_say_they_apply_to_the_next_run.py)
+- [orchestrator/tests/test_f141_an_agents_model_is_checked_on_every_write.py](orchestrator/tests/test_f141_an_agents_model_is_checked_on_every_write.py)
+- [orchestrator/tests/test_f144_every_namesake_is_named.py](orchestrator/tests/test_f144_every_namesake_is_named.py)
+- [orchestrator/tests/test_f159_a_playbook_run_recalls_its_past_runs.py](orchestrator/tests/test_f159_a_playbook_run_recalls_its_past_runs.py)
+- [orchestrator/tests/test_f189_a_memory_is_never_filed_as_another_agent.py](orchestrator/tests/test_f189_a_memory_is_never_filed_as_another_agent.py)
 - [orchestrator/tests/test_p2w1_playbook_write_dedup.py](orchestrator/tests/test_p2w1_playbook_write_dedup.py)
-- [orchestrator/tests/test_p2w2_audit_retention.py](orchestrator/tests/test_p2w2_audit_retention.py)
-- [orchestrator/tests/test_p2w2_governance_audit.py](orchestrator/tests/test_p2w2_governance_audit.py)
-- [orchestrator/tests/test_p2w2_governance_policy_budget.py](orchestrator/tests/test_p2w2_governance_policy_budget.py)
-- [orchestrator/tests/test_prd164_flywheel.py](orchestrator/tests/test_prd164_flywheel.py)
-- [orchestrator/tests/test_prd204_run_verdict.py](orchestrator/tests/test_prd204_run_verdict.py)
+- [orchestrator/tests/test_prd222_unknown_model_error_names_the_way_out.py](orchestrator/tests/test_prd222_unknown_model_error_names_the_way_out.py)
 
 </details>
 
 
 
-This page documents the technical implementation of the recipe memory and learning systems. It covers how recipes leverage `PlaybookMemoryService` and `UnifiedMemoryService` for long-term task continuity, how error recurrence and deduplication are handled via signature hashing, how `RecipeQualityService` performs 5D assessments, and how the learning flywheel extracts patterns within the execution pipeline.
+## Purpose and scope
+
+This page describes how recipe execution experience can be retained and reused, with emphasis on `PlaybookMemoryService` pattern planning, report-driven knowledge capture, and the observable feedback available through workspace memory and reports. The supplied code excerpts also show that report submission delegates knowledge-flywheel work to `ReportService.create_report`; they do not include the implementation of `PlaybookMemoryService`, quality-assessment services, or KPI endpoints, so those details are limited to the previously documented references and are not expanded beyond what those references support. [orchestrator/modules/tools/discovery/handlers_reports.py:82-106]()
+
+Sources: [orchestrator/modules/tools/discovery/handlers_reports.py:82-106](), [orchestrator/core/services/playbook_memory_service.py:5-18]()
 
 ---
 
-## Recipe Memory System & UnifiedMemoryService Integration
+## 1. PlaybookMemoryService & Durable State
 
-Recipes use a specialized memory path to ensure that multi-step workflows maintain context across steps and across different executions of the same recipe. All durable-store interactions delegate to the centralized `UnifiedMemoryService` using proper namespacing (`MemoryNamespace`) to avoid string concatenation errors [orchestrator/core/services/playbook_memory_service.py:5-9]().
+Recipes need execution memory that is scoped to the playbook and workspace, rather than relying only on conversation memory. The existing implementation notes identify `PlaybookMemoryService` as the service for durable playbook memory and cite its execution-record planning and recurrence-handling responsibilities. [orchestrator/core/services/playbook_memory_service.py:5-18]()
 
-### Memory Lifecycle & Record Planning
-The `PlaybookMemoryService` plans and structures what gets stored in durable memory through a pure planning function (`plan_execution_records`) before committing records via `UnifiedMemoryService` [orchestrator/core/services/playbook_memory_service.py:10-20]().
+The documented planning contract is selective rather than “store every run and every step”:
 
-1.  **Pre-Execution Retrieval**: Before a recipe starts, execution runners retrieve relevant historical memories to inform the initial execution state.
-2.  **Context Injection**: Retrieved memories are injected into step prompts via `ContextService` in `RECIPE` mode.
-3.  **Step-to-Step Memory**: The `RecipeScratchpad` provides token-efficient inter-step data sharing via explicit tool calls [orchestrator/api/recipe_executor.py:15-16]().
-4.  **Post-Execution Storage**: Execution summaries and failure signatures are planned and committed back to durable storage.
+- `plan_execution_records` produces a playbook-level `playbook_summary` record for an execution. [orchestrator/core/services/playbook_memory_service.py:11-16]()
+- It plans step records for failed steps when their error class differs from the run-level error class. [orchestrator/core/services/playbook_memory_service.py:11-16]()
+- `_signature_hash` and `record_recurrence` represent repeated outcomes as a recurrence signal rather than writing a new memory row for every identical occurrence. [orchestrator/core/services/playbook_memory_service.py:11-18]()
 
-**Recipe Memory Data Flow (Natural Language to Code Space)**
+This design separates two concerns: a durable record of a run’s outcome and a recurrence signal that can represent repeated failures compactly. [orchestrator/core/services/playbook_memory_service.py:11-18]()
+
+### Natural-language intent mapped to code entities
+
+The first diagram connects a user’s request to run a recipe with the execution and memory symbols identified in the existing implementation notes. The diagram is a conceptual association; it does not establish call-site relationships beyond those noted above. [orchestrator/core/services/playbook_memory_service.py:5-18]()
+
+**Title: Recipe request and execution-memory entities**
+
 ```mermaid
-graph TD
-    subgraph "Natural_Language_Space"
-        direction TB
-        NL_Prompt["User Recipe Instructions"]
-        NL_Memory["Historical Execution Insights"]
+flowchart LR
+    subgraph NaturalLanguageSpace["Natural Language Space"]
+        UserWorkflowPrompt["UserWorkflowPrompt"]
+        ExecutionOutcome["ExecutionOutcome"]
+        RepeatedFailure["RepeatedFailure"]
     end
 
-    subgraph "Code_Entity_Space"
-        direction TB
-        ExecEngine["Recipe Execution Engine"]:::code
-        MemorySvc["PlaybookMemoryService"]:::code
-        UnifiedSvc["UnifiedMemoryService"]:::code
-        RecipeModel["core.models.core.RecipeExecution"]:::code
+    subgraph CodeEntitySpace["Code Entity Space"]
+        exec_recipe_direct["exec_recipe_direct"]
+        execute_step["_execute_step"]
+        PlaybookMemoryService["PlaybookMemoryService"]
+        plan_execution_records["plan_execution_records"]
+        signature_hash["_signature_hash"]
+        record_recurrence["record_recurrence"]
     end
 
-    NL_Prompt -->|Initiates| ExecEngine
-    ExecEngine -->|plan_execution_records| MemorySvc
-    MemorySvc -->|Unified Write Path| UnifiedSvc
-    UnifiedSvc -->|Persists| RecipeModel
-    NL_Memory -.->|Context Injection| ExecEngine
-
-    classDef code fill:#f9f,stroke:#333,stroke-width:2px;
+    UserWorkflowPrompt --> exec_recipe_direct
+    exec_recipe_direct --> execute_step
+    ExecutionOutcome --> plan_execution_records
+    PlaybookMemoryService --> plan_execution_records
+    plan_execution_records --> signature_hash
+    signature_hash --> record_recurrence
+    RepeatedFailure --> record_recurrence
 ```
-Sources: [orchestrator/core/services/playbook_memory_service.py:1-37](), [orchestrator/api/recipe_executor.py:14-19]()
+
+Sources: [orchestrator/core/services/playbook_memory_service.py:5-18]()
+
+### Recurrence handling
+
+The existing service notes describe an in-process recurrence registry with a maximum size of 512 entries. `record_recurrence` increments the recurrence count for a matching signature, preserving a frequency signal without accumulating duplicate memory rows. [orchestrator/core/services/playbook_memory_service.py:42-66]()
+
+The signature is described as a SHA-256 fingerprint based on the outcome and workspace/playbook identifiers. Error-classification helpers are cited separately as the mechanism for mapping raw exception strings into stable classes. [orchestrator/core/services/playbook_memory_service.py:49-51](), [orchestrator/modules/memory/tool_outcome_capture.py:43-56]()
+
+Sources: [orchestrator/core/services/playbook_memory_service.py:42-66](), [orchestrator/modules/memory/tool_outcome_capture.py:43-56]()
 
 ---
 
-## Deduplication & Recurrence Suppression
+## 2. Report capture as a knowledge-flywheel input
 
-To prevent database bloat and memory pollution from repetitive failures, `PlaybookMemoryService` employs a bounded in-process recurrence registry and signature hashing [orchestrator/core/services/playbook_memory_service.py:40-67]().
+Recipe memory is not the only durable record of work. Agents can submit structured reports through the `platform_submit_report` action, which is registered as a write action and intended for significant work such as research, heartbeat results, audits, and deliverables. [orchestrator/modules/tools/discovery/actions_reports.py:17-38]()
 
-### Signature Hashing & Recurrence Counting
-- **Error Classification**: Errors are classified using `_classify_error` from the tool outcome module [orchestrator/core/services/playbook_memory_service.py:32-35]().
-- **Signature Generation**: `_signature_hash` creates a SHA-256 hash combining workspace ID, playbook ID, and the outcome signature [orchestrator/core/services/playbook_memory_service.py:49-51]().
-- **Recurrence Tracking**: `record_recurrence` increments a bounded `_RECURRENCE` OrderedDict (capped at `_RECURRENCE_MAX = 512`) [orchestrator/core/services/playbook_memory_service.py:45-66](). The first occurrence triggers a durable memory write, while subsequent recurrences suppress new writes and increment a count metric.
+The `submit_report` handler validates required fields, report type, status, placeholders, and optional required sections before calling `ReportService.create_report`. It passes through report content and metadata including summary, metrics, recommendations, action items, linked task IDs, and approval requirements. [orchestrator/modules/tools/discovery/handlers_reports.py:16-61](), [orchestrator/modules/tools/discovery/handlers_reports.py:63-98]()
 
-Sources: [orchestrator/core/services/playbook_memory_service.py:40-67]()
+The handler explicitly documents that the knowledge flywheel inside `ReportService.create_report` owns both RAG ingestion and typed knowledge-graph pending work, including report text and agent attribution, while honoring the workspace opt-out. The previous direct scheduling path was removed. [orchestrator/modules/tools/discovery/handlers_reports.py:100-104]()
 
----
+### Natural-language report intent mapped to code entities
 
-## Recipe Quality Service (5D Assessment)
+This diagram associates report-oriented user intent with the actual action and handler symbols. The report’s downstream knowledge capture is delegated to `ReportService.create_report`, rather than scheduled directly in the handler. [orchestrator/modules/tools/discovery/actions_reports.py:17-38](), [orchestrator/modules/tools/discovery/handlers_reports.py:16-18](), [orchestrator/modules/tools/discovery/handlers_reports.py:82-104]()
 
-The `RecipeQualityService` evaluates completed executions across five distinct dimensions to provide a quantitative measure of performance. This assessment is visualized in the **Execution Kitchen** via the `TheaterSelfLearningPanel` [frontend/components/workflows/execution-kitchen.tsx:39-43]().
+**Title: Report submission and knowledge-flywheel entities**
 
-### The 5D Assessment Model
-Each execution is scored from 0.0 to 1.0 based on:
-1.  **Completeness**: Percentage of steps that reached `status='completed'`.
-2.  **Accuracy**: LLM-based evaluation of the `output_data` against original instructions.
-3.  **Efficiency**: Actual duration vs. predicted/historical duration [orchestrator/api/recipe_executor.py:104-107]().
-4.  **Reliability**: Number of retries and tool-loop iterations required.
-5.  **Cost**: Token usage relative to the workspace budget [orchestrator/api/recipe_executor.py:104-105]().
-
-### Quality Grade Mapping
-- **A**: Score $\ge$ 0.9
-- **B**: Score $\ge$ 0.8
-- **C**: Score $\ge$ 0.7
-- **D**: Score $\ge$ 0.6
-- **F**: Score $<$ 0.6
-
-Sources: [frontend/components/workflows/execution-kitchen.tsx:39-43](), [orchestrator/api/recipe_executor.py:103-122]()
-
----
-
-## Recipe Learning Service & The Learning Flywheel
-
-The `RecipeLearningService` performs post-hoc analysis on `RecipeExecution` records to identify optimization opportunities and extract successful interaction patterns.
-
-### Pattern Extraction & Persistence
-The service analyzes execution logs, step results, and metadata to identify success patterns, failure trends, and performance bottlenecks. Results are stored in the `WorkflowTemplate` model (`workflow_recipes` table) and exposed via API endpoints.
-
-**Learning & Quality Architecture**
 ```mermaid
-graph LR
-    subgraph "Natural_Language_Space"
-        direction TB
-        NL_Insights["Extracted Improvement Suggestions"]
-        NL_Patterns["Observed Failure/Success Patterns"]
+flowchart LR
+    subgraph NaturalLanguageSpace["Natural Language Space"]
+        SignificantWork["SignificantWork"]
+        ResearchFinding["ResearchFinding"]
+        ReportApproval["ReportApproval"]
     end
 
-    subgraph "Code_Entity_Space"
-        direction TB
-        ExecModel["core.models.core.RecipeExecution"]:::code
-        TemplateModel["core.models.core.WorkflowTemplate"]:::code
-        LearnSvc["RecipeLearningService"]:::code
-        QualitySvc["RecipeQualityService"]:::code
+    subgraph CodeEntitySpace["Code Entity Space"]
+        platform_submit_report["platform_submit_report"]
+        submit_report["submit_report"]
+        ReportService["ReportService"]
+        create_report["create_report"]
+        RAGIngest["RAGIngest"]
+        TypedKGPending["TypedKGPending"]
     end
 
-    ExecModel -->|step_results| LearnSvc
-    ExecModel -->|duration & metrics| QualitySvc
-    LearnSvc -->|Extracts| NL_Patterns
-    LearnSvc -->|Generates| NL_Insights
-    QualitySvc -->|Updates Grades| TemplateModel
-    NL_Insights -->|Persisted in JSONB| TemplateModel
-
-    classDef code fill:#f9f,stroke:#333,stroke-width:2px;
+    SignificantWork --> platform_submit_report
+    ResearchFinding --> platform_submit_report
+    platform_submit_report --> submit_report
+    submit_report --> create_report
+    ReportService --> create_report
+    create_report --> RAGIngest
+    create_report --> TypedKGPending
+    ReportApproval --> platform_submit_report
 ```
-Sources: [orchestrator/api/workflow_recipes.py:25-27](), [frontend/components/workflows/execution-kitchen.tsx:39-45](), [orchestrator/api/recipe_executor.py:163-175]()
+
+Sources: [orchestrator/modules/tools/discovery/actions_reports.py:17-38](), [orchestrator/modules/tools/discovery/handlers_reports.py:16-18](), [orchestrator/modules/tools/discovery/handlers_reports.py:82-104]()
+
+### Report lifecycle and feedback
+
+Reports can be read, acknowledged, or linked to tasks through separate platform actions. `platform_browse_reports` is described for workspace-wide analysis of cost, model, duration, task, and playbook patterns; `platform_get_latest_report` retrieves the latest report for an agent. [orchestrator/modules/tools/discovery/actions_reports.py:41-61](), [orchestrator/modules/tools/discovery/actions_reports.py:128-165]()
+
+Acknowledging a report stamps acknowledgement fields in the workspace-scoped `agent_reports` row. After the database update commits, the handler calls `file_owner_approved`, documenting that acknowledged reports become Documents. [orchestrator/modules/tools/discovery/handlers_reports.py:109-148]()
+
+`platform_link_report_to_task` preserves a finding-to-task trail by adding a task identifier to a report’s linked task IDs. The handler accepts ticket-number references and validates that the task ID can be converted to an integer before updating the report. [orchestrator/modules/tools/discovery/actions_reports.py:99-125](), [orchestrator/modules/tools/discovery/handlers_reports.py:151-174]()
+
+Sources: [orchestrator/modules/tools/discovery/actions_reports.py:41-61](), [orchestrator/modules/tools/discovery/actions_reports.py:99-165](), [orchestrator/modules/tools/discovery/handlers_reports.py:109-148](), [orchestrator/modules/tools/discovery/handlers_reports.py:151-174]()
 
 ---
 
-## Workflow Execution Stages (PRD-59)
+## 3. Quality assessment and execution evaluation
 
-Recipe execution tracks progress across dynamic phases within the `ExecutionKitchen` [frontend/components/workflows/execution-kitchen.tsx:47-55]().
+The supplied excerpts do not include a recipe quality-assessment implementation, its scoring dimensions, a grade mapping, or the UI that displays execution quality. Those details therefore cannot be verified from the current source material. The existing page cited a five-dimensional assessment and letter grades, but those claims are not supported by the provided file contents and are intentionally omitted here. [orchestrator/core/services/playbook_memory_service.py:5-18]()
 
-1. **PLAN**: Task decomposition and Agent Selection [frontend/components/workflows/execution-kitchen.tsx:74-75]().
-2. **PREPARE**: Context engineering [frontend/components/workflows/execution-kitchen.tsx:76]().
-3. **EXECUTE**: Agent execution and tool usage [frontend/components/workflows/execution-kitchen.tsx:77]().
-4. **EVALUATE**: Result aggregation and Quality Assessment [frontend/components/workflows/execution-kitchen.tsx:78-80]().
-5. **LEARN**: Learning Update and Memory Storage [frontend/components/workflows/execution-kitchen.tsx:79-81]().
+The available code does establish adjacent quality controls for report capture: `submit_report` rejects missing title/content, unresolved template placeholders, invalid report types or statuses, and missing required sections. These checks validate report completeness and shape; they are not presented as a recipe execution quality score. [orchestrator/modules/tools/discovery/handlers_reports.py:20-61]()
 
-Sources: [frontend/components/workflows/execution-kitchen.tsx:35-46](), [orchestrator/api/recipe_executor.py:5-19]()
+Sources: [orchestrator/modules/tools/discovery/handlers_reports.py:20-61]()
 
 ---
 
-## API Reference: Learning & Quality
+## 4. Learning flywheel and KPI feedback
 
-- **Trigger Assessment**: `POST /api/workflow-recipes/{recipe_id}/assess-quality` — Triggers quality assessment for an execution record.
-- **Trigger Learning**: `POST /api/workflow-recipes/{recipe_id}/learn` — Analyzes recent executions and updates the `learning_data` JSONB field in `WorkflowTemplate` [orchestrator/api/workflow_recipes.py:22-28]().
-- **Get Suggestions**: `GET /api/workflow-recipes/{recipe_id}/suggestions` — Returns aggregated insights from the learning data [frontend/components/workflows/execution-kitchen.tsx:43]().
+The code shown supports a knowledge-capture loop in which an agent submits a report, `ReportService.create_report` performs the documented knowledge-flywheel work, and later report operations can expose, acknowledge, or connect the result to a task. [orchestrator/modules/tools/discovery/handlers_reports.py:82-104](), [orchestrator/modules/tools/discovery/handlers_reports.py:109-148](), [orchestrator/modules/tools/discovery/handlers_reports.py:151-174]()
 
-Sources: [orchestrator/api/workflow_recipes.py:22-28](), [frontend/components/workflows/execution-kitchen.tsx:43-45]()
+Workspace memory actions provide a complementary read path. `platform_get_memory_stats` is registered as a read action for memory statistics, while the handler obtains `UnifiedMemoryService`, checks whether durable memory is configured, and retrieves workspace-global memories plus memories for a bounded scan of workspace agents. [orchestrator/modules/tools/discovery/actions_workspace.py:36-58](), [orchestrator/modules/tools/discovery/handlers_workspace.py:66-104]()
+
+`platform_search_memory` is supported by a handler that searches long-term workspace memories and up to the first five workspace agents’ memories. It filters results through `owners_memories` and reports whether the scan was partial when the workspace has more agents than were searched. [orchestrator/modules/tools/discovery/handlers_search.py:50-72](), [orchestrator/modules/tools/discovery/handlers_search.py:75-94](), [orchestrator/modules/tools/discovery/handlers_search.py:96-120]()
+
+### Learning loop and code-entity map
+
+This diagram maps the natural-language concepts of learning from completed work and checking memory to code entities present in the supplied excerpts. The report-to-knowledge relationship is explicitly documented in the report handler; the memory-statistics and search paths are implemented by their respective handlers. [orchestrator/modules/tools/discovery/handlers_reports.py:82-104](), [orchestrator/modules/tools/discovery/handlers_workspace.py:66-104](), [orchestrator/modules/tools/discovery/handlers_search.py:50-120]()
+
+**Title: Learning and memory-feedback entities**
+
+```mermaid
+flowchart LR
+    subgraph NaturalLanguageSpace["Natural Language Space"]
+        CompletedWork["CompletedWork"]
+        RecallLearning["RecallLearning"]
+        InspectMemory["InspectMemory"]
+        ReviewReport["ReviewReport"]
+    end
+
+    subgraph CodeEntitySpace["Code Entity Space"]
+        platform_submit_report["platform_submit_report"]
+        submit_report["submit_report"]
+        ReportService["ReportService"]
+        create_report["create_report"]
+        platform_get_memory_stats["platform_get_memory_stats"]
+        get_memory_stats["get_memory_stats"]
+        platform_search_memory["platform_search_memory"]
+        search_memory["search_memory"]
+        platform_browse_reports["platform_browse_reports"]
+    end
+
+    CompletedWork --> platform_submit_report
+    platform_submit_report --> submit_report
+    submit_report --> create_report
+    ReportService --> create_report
+    RecallLearning --> platform_search_memory
+    platform_search_memory --> search_memory
+    InspectMemory --> platform_get_memory_stats
+    platform_get_memory_stats --> get_memory_stats
+    ReviewReport --> platform_browse_reports
+```
+
+Sources: [orchestrator/modules/tools/discovery/actions_reports.py:17-61](), [orchestrator/modules/tools/discovery/actions_workspace.py:36-58](), [orchestrator/modules/tools/discovery/handlers_reports.py:16-18](), [orchestrator/modules/tools/discovery/handlers_reports.py:82-104](), [orchestrator/modules/tools/discovery/handlers_search.py:50-120](), [orchestrator/modules/tools/discovery/handlers_workspace.py:66-104]()
+
+### KPI feedback boundary
+
+The previous page described `/api/kpi/*` endpoints and recipe metrics aggregation, but the current excerpts do not include `orchestrator/api/kpi_api.py`, the frontend KPI hooks, or the recipe learning and quality endpoints. Consequently, this page does not assert KPI endpoint behavior, metric formulas, or connections between KPI data and playbook configuration. The available report action description does state that reports can be browsed to analyze cost, model, and duration patterns across agents, tasks, and playbooks. [orchestrator/modules/tools/discovery/actions_reports.py:41-50]()
+
+Sources: [orchestrator/modules/tools/discovery/actions_reports.py:41-61]()
+
+---
+
+## 5. API and action reference: learning-related surfaces
+
+The supplied sources document platform actions rather than a complete recipe-learning HTTP API. The following table summarizes only the actions and handler behavior present in the excerpts. [orchestrator/modules/tools/discovery/actions_reports.py:6-165](), [orchestrator/modules/tools/discovery/actions_workspace.py:36-84](), [orchestrator/modules/tools/discovery/handlers_search.py:50-120]()
+
+| Action or handler | Purpose | Implementation evidence |
+|---|---|---|
+| `platform_submit_report` → `submit_report` | Submit a validated report; `ReportService.create_report` owns the documented RAG and typed KG flywheel work. [orchestrator/modules/tools/discovery/actions_reports.py:17-38](), [orchestrator/modules/tools/discovery/handlers_reports.py:16-18](), [orchestrator/modules/tools/discovery/handlers_reports.py:82-104]() | The handler validates content and forwards report fields to the service. [orchestrator/modules/tools/discovery/handlers_reports.py:20-98]() |
+| `platform_browse_reports` | Browse reports with optional filters; its action description calls out analysis of cost, model, and duration patterns. [orchestrator/modules/tools/discovery/actions_reports.py:41-61]() | The corresponding handler implementation is not included in the supplied excerpt. |
+| `platform_get_latest_report` | Read an agent’s most recent report, optionally by report type. [orchestrator/modules/tools/discovery/actions_reports.py:128-165]() | The corresponding handler implementation is not included in the supplied excerpt. |
+| `platform_acknowledge_report` → `acknowledge_report` | Acknowledge a workspace report; after committing the acknowledgement, file it as owner-approved knowledge. [orchestrator/modules/tools/discovery/actions_reports.py:64-96](), [orchestrator/modules/tools/discovery/handlers_reports.py:109-148]() | Workspace scoping is applied in the `agent_reports` update. [orchestrator/modules/tools/discovery/handlers_reports.py:119-144]() |
+| `platform_link_report_to_task` → `link_report_to_task` | Link a report to a task so the finding-to-ticket trail remains connected. [orchestrator/modules/tools/discovery/actions_reports.py:99-125]() | The handler validates `task_id` and updates the report’s `linked_task_ids`. [orchestrator/modules/tools/discovery/handlers_reports.py:151-174]() |
+| `platform_get_memory_stats` → `get_memory_stats` | Inspect workspace-global and agent-specific durable memory counts and samples. [orchestrator/modules/tools/discovery/actions_workspace.py:36-58](), [orchestrator/modules/tools/discovery/handlers_workspace.py:66-134]() | The handler checks durable configuration and scans up to ten workspace agents. [orchestrator/modules/tools/discovery/handlers_workspace.py:70-104]() |
+| `search_memory` | Search long-term workspace and agent memories, then filter and format results. [orchestrator/modules/tools/discovery/handlers_search.py:50-72]() | Searches workspace memories and up to five agents, with partial-scan metadata. [orchestrator/modules/tools/discovery/handlers_search.py:75-120]()
+
+Sources: [orchestrator/modules/tools/discovery/actions_reports.py:6-165](), [orchestrator/modules/tools/discovery/actions_workspace.py:36-84](), [orchestrator/modules/tools/discovery/handlers_reports.py:16-174](), [orchestrator/modules/tools/discovery/handlers_search.py:50-120](), [orchestrator/modules/tools/discovery/handlers_workspace.py:66-134]()
 
 ---

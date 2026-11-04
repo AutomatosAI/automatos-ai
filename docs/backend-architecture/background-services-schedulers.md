@@ -5,35 +5,58 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/__tests__/prd197-substrate-tile.test.tsx](frontend/components/__tests__/prd197-substrate-tile.test.tsx)
-- [frontend/components/activity/board/__tests__/schedule-choice.test.ts](frontend/components/activity/board/__tests__/schedule-choice.test.ts)
-- [frontend/components/activity/board/create-task-dialog.tsx](frontend/components/activity/board/create-task-dialog.tsx)
-- [frontend/components/activity/board/create-task-steps.tsx](frontend/components/activity/board/create-task-steps.tsx)
-- [frontend/components/activity/board/schedule-choice.ts](frontend/components/activity/board/schedule-choice.ts)
-- [frontend/components/command-center/is-it-working-strip.tsx](frontend/components/command-center/is-it-working-strip.tsx)
-- [frontend/hooks/use-analytics-api.ts](frontend/hooks/use-analytics-api.ts)
-- [frontend/hooks/use-board-tasks-api.ts](frontend/hooks/use-board-tasks-api.ts)
-- [frontend/lib/api-client.ts](frontend/lib/api-client.ts)
-- [orchestrator/alembic/versions/calendar_scheduled_board_tasks.py](orchestrator/alembic/versions/calendar_scheduled_board_tasks.py)
-- [orchestrator/alembic/versions/prd72_board_tasks.py](orchestrator/alembic/versions/prd72_board_tasks.py)
-- [orchestrator/api/scheduled_tasks.py](orchestrator/api/scheduled_tasks.py)
-- [orchestrator/api/workflows.py](orchestrator/api/workflows.py)
-- [orchestrator/config.py](orchestrator/config.py)
-- [orchestrator/core/models/substrate_metrics.py](orchestrator/core/models/substrate_metrics.py)
-- [orchestrator/core/observability/substrate_metrics.py](orchestrator/core/observability/substrate_metrics.py)
-- [orchestrator/core/seeds/utterances/scheduling.yaml](orchestrator/core/seeds/utterances/scheduling.yaml)
-- [orchestrator/main.py](orchestrator/main.py)
-- [orchestrator/modules/tools/discovery/handlers_scheduling.py](orchestrator/modules/tools/discovery/handlers_scheduling.py)
-- [orchestrator/reports/route-manifest.json](orchestrator/reports/route-manifest.json)
-- [orchestrator/router_manifest.py](orchestrator/router_manifest.py)
-- [orchestrator/services/playbook_scheduler.py](orchestrator/services/playbook_scheduler.py)
-- [orchestrator/services/scheduled_task_service.py](orchestrator/services/scheduled_task_service.py)
-- [orchestrator/tests/authz_sweep_probe.py](orchestrator/tests/authz_sweep_probe.py)
-- [orchestrator/tests/test_p2w2_authz_boundary_sweep.py](orchestrator/tests/test_p2w2_authz_boundary_sweep.py)
-- [orchestrator/tests/test_prd154_s5_missions.py](orchestrator/tests/test_prd154_s5_missions.py)
-- [orchestrator/tests/test_prd209_alembic_single_head.py](orchestrator/tests/test_prd209_alembic_single_head.py)
-- [orchestrator/tests/test_prd222_w2s1_plan_tiers.py](orchestrator/tests/test_prd222_w2s1_plan_tiers.py)
-- [orchestrator/tests/test_prd232_us007_seed_intent_clusters.py](orchestrator/tests/test_prd232_us007_seed_intent_clusters.py)
+- [docs/PRDS/PRD-235-LOCAL-AI-OS-MANAGER.md](docs/PRDS/PRD-235-LOCAL-AI-OS-MANAGER.md)
+- [docs/PRDS/PRD-239-SESSION-AGENTS-PARITY.md](docs/PRDS/PRD-239-SESSION-AGENTS-PARITY.md)
+- [orchestrator/api/board_tasks.py](orchestrator/api/board_tasks.py)
+- [orchestrator/api/socials_media_tools.py](orchestrator/api/socials_media_tools.py)
+- [orchestrator/api/socials_publish.py](orchestrator/api/socials_publish.py)
+- [orchestrator/consumers/chatbot/named_template.py](orchestrator/consumers/chatbot/named_template.py)
+- [orchestrator/consumers/chatbot/named_template_note.py](orchestrator/consumers/chatbot/named_template_note.py)
+- [orchestrator/core/boot/reaper.py](orchestrator/core/boot/reaper.py)
+- [orchestrator/core/composio/tool_executor.py](orchestrator/core/composio/tool_executor.py)
+- [orchestrator/core/composio/upload_spec.py](orchestrator/core/composio/upload_spec.py)
+- [orchestrator/modules/socials/ai_options.py](orchestrator/modules/socials/ai_options.py)
+- [orchestrator/modules/socials/media_tools.py](orchestrator/modules/socials/media_tools.py)
+- [orchestrator/modules/socials/notify.py](orchestrator/modules/socials/notify.py)
+- [orchestrator/modules/socials/plan_visuals.py](orchestrator/modules/socials/plan_visuals.py)
+- [orchestrator/modules/socials/publish_lifecycle.py](orchestrator/modules/socials/publish_lifecycle.py)
+- [orchestrator/modules/socials/publish_records.py](orchestrator/modules/socials/publish_records.py)
+- [orchestrator/modules/socials/publisher.py](orchestrator/modules/socials/publisher.py)
+- [orchestrator/modules/socials/publishing.py](orchestrator/modules/socials/publishing.py)
+- [orchestrator/modules/socials/schedule_jobs.py](orchestrator/modules/socials/schedule_jobs.py)
+- [orchestrator/modules/tools/discovery/handlers_board_tasks.py](orchestrator/modules/tools/discovery/handlers_board_tasks.py)
+- [orchestrator/modules/tools/discovery/mission_refs.py](orchestrator/modules/tools/discovery/mission_refs.py)
+- [orchestrator/services/board_dispatcher.py](orchestrator/services/board_dispatcher.py)
+- [orchestrator/services/ticket_cards.py](orchestrator/services/ticket_cards.py)
+- [orchestrator/services/ticket_numbers.py](orchestrator/services/ticket_numbers.py)
+- [orchestrator/services/ticket_refs.py](orchestrator/services/ticket_refs.py)
+- [orchestrator/tests/test_1115_run_now_says_why_a_ticket_cannot_start.py](orchestrator/tests/test_1115_run_now_says_why_a_ticket_cannot_start.py)
+- [orchestrator/tests/test_a_restart_orphan_is_failed_not_done.py](orchestrator/tests/test_a_restart_orphan_is_failed_not_done.py)
+- [orchestrator/tests/test_board_task_handlers.py](orchestrator/tests/test_board_task_handlers.py)
+- [orchestrator/tests/test_composio_upload_takes_the_canonical_tool_slug.py](orchestrator/tests/test_composio_upload_takes_the_canonical_tool_slug.py)
+- [orchestrator/tests/test_f155_a_widget_turn_sees_tasks_and_playbooks_as_their_status.py](orchestrator/tests/test_f155_a_widget_turn_sees_tasks_and_playbooks_as_their_status.py)
+- [orchestrator/tests/test_f176_run_now_asks_whether_a_run_holds_the_ticket.py](orchestrator/tests/test_f176_run_now_asks_whether_a_run_holds_the_ticket.py)
+- [orchestrator/tests/test_f241_auto_acts_on_the_ticket_it_is_given.py](orchestrator/tests/test_f241_auto_acts_on_the_ticket_it_is_given.py)
+- [orchestrator/tests/test_f351_c_a_named_template_gets_the_studio_prompt.py](orchestrator/tests/test_f351_c_a_named_template_gets_the_studio_prompt.py)
+- [orchestrator/tests/test_f369_a_no_questions_means_defaults_not_questions.py](orchestrator/tests/test_f369_a_no_questions_means_defaults_not_questions.py)
+- [orchestrator/tests/test_f369_b_a_ticket_number_in_autos_chat_is_its_number.py](orchestrator/tests/test_f369_b_a_ticket_number_in_autos_chat_is_its_number.py)
+- [orchestrator/tests/test_playbook_restart_durability.py](orchestrator/tests/test_playbook_restart_durability.py)
+- [orchestrator/tests/test_prd234_lane_consent.py](orchestrator/tests/test_prd234_lane_consent.py)
+- [orchestrator/tests/test_prd234_s1a_cli_runtime.py](orchestrator/tests/test_prd234_s1a_cli_runtime.py)
+- [orchestrator/tests/test_prd234_s3_cli_ticket_lane.py](orchestrator/tests/test_prd234_s3_cli_ticket_lane.py)
+- [orchestrator/tests/test_prd238_w3_follow_through.py](orchestrator/tests/test_prd238_w3_follow_through.py)
+- [orchestrator/tests/test_prd251_service.py](orchestrator/tests/test_prd251_service.py)
+- [orchestrator/tests/test_prd251bw3_brand_style.py](orchestrator/tests/test_prd251bw3_brand_style.py)
+- [orchestrator/tests/test_prd251bw3_media_tools.py](orchestrator/tests/test_prd251bw3_media_tools.py)
+- [orchestrator/tests/test_prd251w2_approval_notify.py](orchestrator/tests/test_prd251w2_approval_notify.py)
+- [orchestrator/tests/test_prd251w3_publisher.py](orchestrator/tests/test_prd251w3_publisher.py)
+- [orchestrator/tests/test_prd251w3_recovery.py](orchestrator/tests/test_prd251w3_recovery.py)
+- [orchestrator/tests/test_prd251w3_schedule.py](orchestrator/tests/test_prd251w3_schedule.py)
+- [orchestrator/tests/test_prd251w3_send_once.py](orchestrator/tests/test_prd251w3_send_once.py)
+- [orchestrator/tests/test_prd252_ticket_numbers.py](orchestrator/tests/test_prd252_ticket_numbers.py)
+- [orchestrator/tests/test_run_now_leaves_a_missions_steps_to_the_mission.py](orchestrator/tests/test_run_now_leaves_a_missions_steps_to_the_mission.py)
+- [orchestrator/tests/test_w1s6_boot_reaper.py](orchestrator/tests/test_w1s6_boot_reaper.py)
+- [orchestrator/tests/test_w2s6_restart_recovery_realdb.py](orchestrator/tests/test_w2s6_restart_recovery_realdb.py)
 
 </details>
 
@@ -41,256 +64,273 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-Background Services in Automatos AI are scheduled, long-running tasks that execute independently of user requests. These services handle periodic maintenance, proactive monitoring, recipe scheduling, memory consolidation, and metadata synchronization. The system uses a unified scheduler with file-based locking to ensure exactly-one worker execution in multi-process deployments.
+This page describes scheduler ownership and scheduled jobs, PostgreSQL-backed board-task dispatch, and boot-time recovery for work orphaned by a process restart. The scheduler’s single-worker ownership is enforced by an `fcntl` lock; the board dispatch spine coordinates worker claims using PostgreSQL row locking and leases. [orchestrator/modules/socials/schedule_jobs.py:1-7]() [orchestrator/services/board_dispatcher.py:1-17]()
 
-This page covers the scheduler architecture, registered background services, lifecycle management, and specific implementations for memory maintenance and task scheduling.
+Sources: `[orchestrator/modules/socials/schedule_jobs.py:1-7]()` `[orchestrator/services/board_dispatcher.py:1-17]()`
 
 ---
 
 ## Unified Scheduler Architecture
 
-### File Lock Pattern
+### Scheduler Ownership
 
-Automatos AI uses **fcntl file locking** to ensure only one uvicorn worker acquires the scheduler lock, preventing duplicate job executions when running with multiple workers. This is critical for maintaining consistency in `APScheduler` job execution across scaled backend instances.
+The socials scheduling module uses `get_unified_scheduler()` to access the unified scheduler. Its `_leader()` helper returns the APScheduler instance only when it exists and is running; otherwise it returns `None`. Scheduled social-post jobs are registered on that instance. The scheduler module’s documented ownership model is a worker holding the `fcntl` lock. [orchestrator/modules/socials/schedule_jobs.py:3-7]() [orchestrator/modules/socials/schedule_jobs.py:113-118]()
 
-**Lock Acquisition Flow:**
-
-```mermaid
-graph TB
-    subgraph "UvicornWorkers"
-        W1["Worker 1 (PID: 1234)"]
-        W2["Worker 2 (PID: 1235)"]
-        W3["Worker 3 (PID: 1236)"]
-    end
-    
-    subgraph "LockFile"
-        Lock["/tmp/automatos_scheduler.lock"]
-    end
-    
-    subgraph "SchedulerOwnership"
-        Owner["UnifiedScheduler (Owner: Worker 1)"]
-        Jobs["APScheduler Jobs:<br/>- HeartbeatService<br/>- PlaybookScheduler<br/>- ScheduledTaskService"]
-    end
-    
-    W1 -->|"fcntl.flock(LOCK_EX | LOCK_NB)"| Lock
-    W2 -->|"fcntl.flock(LOCK_EX | LOCK_NB) -> BlockingIOError"| Lock
-    W3 -->|"fcntl.flock(LOCK_EX | LOCK_NB) -> BlockingIOError"| Lock
-    
-    Lock -->|"✅ Lock acquired"| Owner
-    Owner --> Jobs
-    
-    W2 -.->|"Skips scheduler"| API2["Handles API requests only"]
-    W3 -.->|"Skips scheduler"| API3["Handles API requests only"]
-```
-
-Sources: `orchestrator/services/scheduler.py` (Note: Implementation logic described in existing architecture documentation).
-
-### APScheduler Integration
-
-The `UnifiedScheduler` wraps `AsyncIOScheduler` from the APScheduler library. It supports both `MemoryJobStore` for volatile tasks and `RedisJobStore` for persistent job definitions across restarts.
-
-**Scheduler Stack:**
+**Scheduler ownership and scheduled-job access**
 
 ```mermaid
-graph TB
-    subgraph "ServiceLayer"
-        HS["HeartbeatService"]
-        PS["PlaybookScheduler"]
-        STS["ScheduledTaskService"]
-    end
-    
-    subgraph "SchedulerLayer"
-        APS["AsyncIOScheduler (apscheduler)"]
-    end
-    
-    subgraph "PersistenceLayer"
-        RedisJS["RedisJobStore (Optional)"]
-        MemJS["MemoryJobStore (Default)"]
-    end
-    
-    HS -->|"add_job()"| APS
-    PS -->|"add_job()"| APS
-    STS -->|"add_job()"| APS
-    
-    APS --> RedisJS
-    APS --> MemJS
+flowchart LR
+    Workers["Application workers"]
+    Lock["fcntl lock"]
+    Leader["Worker holding scheduler lock"]
+    Unified["get_unified_scheduler"]
+    APS["UnifiedScheduler.apscheduler"]
+    Running{"Scheduler running?"}
+    Register["schedule_jobs.register"]
+    Other["Worker without running scheduler"]
+
+    Workers --> Lock
+    Lock --> Leader
+    Leader --> Unified
+    Unified --> APS
+    APS --> Running
+    Running -->|"yes"| Register
+    Running -->|"no"| Other
 ```
 
-Sources: `orchestrator/services/heartbeat_service.py`, `orchestrator/services/playbook_scheduler.py`, `orchestrator/services/scheduled_task_service.py`
+Sources: `[orchestrator/modules/socials/schedule_jobs.py:3-7]()` `[orchestrator/modules/socials/schedule_jobs.py:87-99]()` `[orchestrator/modules/socials/schedule_jobs.py:113-118]()`
+
+### APScheduler Jobs and Persistence
+
+Social posts use one APScheduler `DateTrigger` job per post, identified by `social-publish-<post_id>`. `register()` targets the module-level `fire_scheduled_post` function and supplies the post and workspace IDs as strings. It replaces an existing job with the same ID, limits it to one instance, and allows a late job to fire so the handler can decide whether to publish or mark the post missed. [orchestrator/modules/socials/schedule_jobs.py:1-7]() [orchestrator/modules/socials/schedule_jobs.py:76-99]()
+
+The module documents that the scheduler uses a `RedisJobStore`, which pickles job targets; consequently, the target is a module-level function with plain string arguments rather than a closure. [orchestrator/modules/socials/schedule_jobs.py:3-7]()
+
+| Entity | Role |
+|---|---|
+| `get_unified_scheduler()` | Provides the unified scheduler used by the socials job integration. [orchestrator/modules/socials/schedule_jobs.py:113-118]() |
+| `fire_scheduled_post` | Module-level target for a scheduled post job. [orchestrator/modules/socials/schedule_jobs.py:3-7]() |
+| `job_id()` | Builds the stable `social-publish-<post_id>` job ID. [orchestrator/modules/socials/schedule_jobs.py:52-77]() |
+| `register()` | Adds or replaces a one-shot `DateTrigger` job. [orchestrator/modules/socials/schedule_jobs.py:87-99]() |
+| `sync_job()` | Registers or removes a post’s job when this worker hosts the scheduler. [orchestrator/modules/socials/schedule_jobs.py:132-144]() |
+| `reconcile()` | Reconciles database posts and scheduler jobs; the module documents this as a leader pass. [orchestrator/modules/socials/schedule_jobs.py:9-15]() |
+
+Sources: `[orchestrator/modules/socials/schedule_jobs.py:1-15]()` `[orchestrator/modules/socials/schedule_jobs.py:52-99]()` `[orchestrator/modules/socials/schedule_jobs.py:113-144]()`
+
+### Keeping Scheduled Jobs in Sync
+
+A request may be handled by a worker that does not host the scheduler. In that case, `sync_job()` has no running scheduler on which to register or remove a job; the documented reconcile pass catches up by registering missing jobs, moving jobs whose slots changed, and removing jobs for posts no longer scheduled. [orchestrator/modules/socials/schedule_jobs.py:9-15]() [orchestrator/modules/socials/schedule_jobs.py:132-144]()
+
+The reconcile pass also ends stale publishes that exceeded the configured run limit plus a margin. The boot reaper separately handles orphaned social posts still in `rendering` after restart. [orchestrator/modules/socials/schedule_jobs.py:26-30]() [orchestrator/core/boot/reaper.py:15-20]()
+
+**Scheduled social-post lifecycle**
+
+```mermaid
+flowchart TD
+    Write["Post status or scheduled slot changes"]
+    Sync["sync_job"]
+    Leader{"Running unified scheduler on this worker?"}
+    Register["register"]
+    Unregister["unregister"]
+    Reconcile["reconcile"]
+    DateJob["DateTrigger job"]
+    Fire["fire_scheduled_post"]
+    Claim["publisher.begin_publish"]
+    Publish["US-301 publisher"]
+    Missed["Post marked missed"]
+
+    Write --> Sync
+    Sync --> Leader
+    Leader -->|"yes, scheduled with slot"| Register
+    Leader -->|"yes, not scheduled"| Unregister
+    Leader -->|"no"| Reconcile
+    Reconcile --> Register
+    Reconcile --> Unregister
+    Register --> DateJob
+    DateJob --> Fire
+    Fire --> Claim
+    Claim -->|"approval and claim pass"| Publish
+    Claim -->|"slot or eligibility invalid"| Missed
+```
+
+Sources: `[orchestrator/modules/socials/schedule_jobs.py:9-25]()` `[orchestrator/modules/socials/schedule_jobs.py:87-144]()` `[orchestrator/modules/socials/schedule_jobs.py:26-30]()`
+
+---
+
+## Board Dispatch Spine and `SKIP LOCKED`
+
+The board dispatcher is the PostgreSQL-native claim, notification, and lease-recovery layer for `BoardTask`. Its documented claim strategy uses `FOR UPDATE SKIP LOCKED`: concurrent workers lock disjoint rows, while workers encountering a row already locked by another claimant skip it rather than double-claiming it. [orchestrator/services/board_dispatcher.py:1-17]()
+
+A claimed task carries a lease. If a worker crashes or hangs, the lease expires and the sweeper can requeue the task; the dispatcher documentation notes that `attempts` is incremented on claim. [orchestrator/services/board_dispatcher.py:10-12]()
+
+`notify_task_available()` issues `pg_notify` on the `board_task_available` channel with a workspace-and-task payload. Notification failure is logged and swallowed, leaving the poll loop as a latency fallback rather than a correctness dependency. [orchestrator/services/board_dispatcher.py:47-50]() [orchestrator/services/board_dispatcher.py:127-139]()
+
+`claim_tasks()` is the dispatch primitive for claiming a bounded set of tasks. Its signature accepts worker identity, claim limit, lease duration, runtime, workspace, and optional agent-slot and provider constraints. The dispatcher also defines SQL helpers for runtime, recipe, mission-mirror, and provider eligibility. [orchestrator/services/board_dispatcher.py:68-124]() [orchestrator/services/board_dispatcher.py:142-156]()
+
+Board-task handler code provides a fail-soft notification path for chat-side assigned writes. `_notify_dispatch_safe()` calls `notify_task_available()`, while `_is_dispatch_claimable()` defines the relevant state as `assigned`, with an assigned agent, and not a recipe mirror. [orchestrator/modules/tools/discovery/handlers_board_tasks.py:55-74]() [orchestrator/modules/tools/discovery/handlers_board_tasks.py:120-130]()
+
+| Mechanism | Role |
+|---|---|
+| `claim_tasks()` | Claims a bounded set of assigned tasks for a worker. [orchestrator/services/board_dispatcher.py:142-156]() |
+| `FOR UPDATE SKIP LOCKED` | Prevents competing claimants from taking the same locked row. [orchestrator/services/board_dispatcher.py:7-9]() |
+| Lease and `attempts` | Enable expiry-based recovery after a worker crash or hang. [orchestrator/services/board_dispatcher.py:10-12]() |
+| `NOTIFY_CHANNEL` | Defines the `board_task_available` PostgreSQL notification channel. [orchestrator/services/board_dispatcher.py:47-50]() |
+| `notify_task_available()` | Sends a best-effort wake-up notification; polling remains the fallback. [orchestrator/services/board_dispatcher.py:127-139]() |
+| `_is_dispatch_claimable()` | Identifies assigned, agent-owned tasks that are not recipe mirrors. [orchestrator/modules/tools/discovery/handlers_board_tasks.py:120-130]() |
+
+**Board dispatch data flow**
+
+```mermaid
+flowchart TD
+    Assigned["BoardTask assigned"]
+    Handler["_notify_dispatch_safe"]
+    Notify["notify_task_available"]
+    Channel["board_task_available"]
+    Poll["Poll loop fallback"]
+    Claim["claim_tasks"]
+    Lock["FOR UPDATE SKIP LOCKED"]
+    Lease["Lease and attempts"]
+    Runner["Background task runner"]
+    Complete["Task completion"]
+    Expire["Lease expires"]
+    Sweep["Sweeper requeues task"]
+
+    Assigned --> Handler
+    Handler --> Notify
+    Notify --> Channel
+    Channel --> Claim
+    Poll --> Claim
+    Claim --> Lock
+    Lock --> Lease
+    Lease --> Runner
+    Runner --> Complete
+    Lease --> Expire
+    Expire --> Sweep
+    Sweep --> Claim
+```
+
+Sources: `[orchestrator/services/board_dispatcher.py:1-17]()` `[orchestrator/services/board_dispatcher.py:47-50]()` `[orchestrator/services/board_dispatcher.py:127-156]()` `[orchestrator/modules/tools/discovery/handlers_board_tasks.py:55-74]()`
 
 ---
 
 ## Registered Background Services
 
-### HeartbeatService
+### Heartbeat and Other Scheduled Services
 
-The `HeartbeatService` manages periodic "ticks" for both the orchestrator and individual agents. It supports cron-based triggers and respects workspace active hours.
+This page’s provided implementation excerpts do not include the heartbeat service or the application’s scheduler startup wiring. The scheduler integration described here is therefore limited to the unified scheduler access and scheduled social-post jobs shown in `schedule_jobs.py`. [orchestrator/modules/socials/schedule_jobs.py:113-118]()
 
-**Key Features:**
-- **Orchestrator Tick**: Periodic workspace-level checks. It triggers `_orchestrator_tick` with specific workspace configurations.
-- **Agent Tick**: Per-agent periodic tasks, often used for status transitions in `BoardTask` management. It triggers `_agent_tick`.
-- **Daily Summary**: A cron job scheduled at 01:00 UTC daily for memory consolidation and reporting.
+Sources: `[orchestrator/modules/socials/schedule_jobs.py:113-118]()`
 
-Sources: `orchestrator/services/heartbeat_service.py`
+### Socials Schedule Jobs (`schedule_jobs.py`)
 
-### PlaybookScheduler
+`register()` creates a one-shot `DateTrigger` job named `social-publish-<post_id>`, targeting `fire_scheduled_post` with string post and workspace IDs. `sync_job()` registers a job for a scheduled post with a slot, and removes it for posts that are not scheduled or have no slot. Both functions are fail-soft: registration or removal errors are logged so the write can stand and the reconcile pass can catch up. [orchestrator/modules/socials/schedule_jobs.py:76-99]() [orchestrator/modules/socials/schedule_jobs.py:132-144]()
 
-The `PlaybookScheduler` is responsible for scheduling and executing workflows (playbooks). It integrates with APScheduler to manage cron-based and one-shot playbook runs.
+The job’s fire path uses `publisher.begin_publish` to guard approval and claim the post before the publisher runs. A late job evaluates whether the post is still eligible; a missed slot, disabled Socials, stale approval, or mismatched AI-generated video label can result in `missed` rather than publishing stale content. [orchestrator/modules/socials/schedule_jobs.py:16-25]()
 
-**Key Features:**
-- **Scheduling Playbooks**: Playbooks can be scheduled via cron expressions or for a single future execution.
-- **Execution**: When a scheduled playbook fires, it initiates a new `RecipeExecution`.
-- **Concurrency**: Manages concurrent playbook executions to prevent resource contention.
+The reconcile pass aligns stored posts and APScheduler jobs, and the same module documents recovery of publishes left in progress beyond their run limit. [orchestrator/modules/socials/schedule_jobs.py:9-15]() [orchestrator/modules/socials/schedule_jobs.py:26-30]()
 
-Sources: `orchestrator/services/playbook_scheduler.py`
+Sources: `[orchestrator/modules/socials/schedule_jobs.py:9-30]()` `[orchestrator/modules/socials/schedule_jobs.py:76-99]()` `[orchestrator/modules/socials/schedule_jobs.py:132-144]()`
 
-### ScheduledTaskService (PRD-77)
+### Boot Reaper (`reaper.py`)
 
-The `ScheduledTaskService` manages agent-initiated tasks. When an agent calls the `platform_schedule_task` tool, this service creates a database record in `agent_scheduled_tasks` and registers a job with the `UnifiedScheduler` [orchestrator/services/scheduled_task_service.py:4-10]().
+The boot reaper’s `reap_orphaned_runs` sweep addresses durable-launch surfaces left in flight after the previous process dies. It uses `BOOT_REAPER_STALE_MINUTES` to avoid treating legitimately running work as orphaned, and records each reaped surface through `record_error` with operation `boot_reap`. [orchestrator/core/boot/reaper.py:1-28]()
 
-**Task Lifecycle:**
-1.  **Creation**: Validates `one_shot` (ISO datetime) or `recurring` (5-field cron) schedules [orchestrator/services/scheduled_task_service.py:100-112]().
-2.  **Registration**: Registers the job with APScheduler using `_register_with_scheduler` [orchestrator/services/scheduled_task_service.py:158-159]().
-3.  **Execution**: When the job fires, it typically creates a new chat session with the target agent, injecting the task description as the opening message [orchestrator/services/scheduled_task_service.py:8-10](). For `deliver_as='board_task'`, it files a ticket on the board [orchestrator/services/scheduled_task_service.py:37-39]().
-4.  **Limits**: Enforces a maximum of 10 active tasks per agent [orchestrator/services/scheduled_task_service.py:31-31]() and 25 recurring tasks per workspace [orchestrator/services/scheduled_task_service.py:32-32](). Operator-scheduled tasks have a separate limit of 50 per workspace [orchestrator/services/scheduled_task_service.py:33-33]().
-5.  **Provenance**: Captures `origin_chat_id` during creation to allow the agent to post results back to the source conversation.
+The documented surfaces are:
 
-Sources: `orchestrator/services/scheduled_task_service.py`
+- **Board tasks:** stale `in_progress` tasks are closed through `finalize_board_task_run` with an `orphaned_on_restart` error, so they follow the normal failed-run completion path. [orchestrator/core/boot/reaper.py:89-118]()
+- **Business profiles:** stale `scraping` or `scanning` profiles become `failed`, with the orphan reason appended to `quality_findings.errors`. [orchestrator/core/boot/reaper.py:121-144]()
+- **Workflow executions:** the reaper includes pending or running workflow executions among its targets. [orchestrator/core/boot/reaper.py:11-14]() [orchestrator/core/boot/reaper.py:147-149]()
+- **Social posts and render reservations:** stale `rendering` posts are failed, and expired render reservations are deleted. [orchestrator/core/boot/reaper.py:15-20]()
 
----
+Missions are deliberately excluded because their state is owned by the coordinator’s reconcile loop; reaping them here could race that state machine. [orchestrator/core/boot/reaper.py:30-32]()
 
-## Memory Maintenance Patterns
-
-Background services are heavily utilized for memory management, specifically for consolidation, decay, and promotion between layers.
-
-### Unified Memory Jobs (PRD-79)
-
-The `Config` class defines intervals and toggles for background memory maintenance tasks [orchestrator/config.py:129-134]().
-
-| Job Type | Interval / Schedule | Purpose |
-| :--- | :--- | :--- |
-| **Consolidation** | 3600s (1 hour) | Folds session logs (L1) into short-term memory (L2) [orchestrator/config.py:130-130]() |
-| **Decay** | 3600s (1 hour) | Applies Ebbinghaus decay to L2 items; archives items below 0.3 threshold [orchestrator/config.py:108-110]() |
-| **Promotion** | 03:00 UTC | Promotes high-signal L2 memories (importance > 0.7) to L3 durable storage [orchestrator/config.py:117-119]() |
-| **Archival** | Monthly (Day 1) | Folds aged L2+L3 memories into the business knowledge graph [orchestrator/config.py:135-138]() |
-
-Sources: `orchestrator/config.py`
-
-### Memory Stats & Health Monitoring
-
-A dedicated background process (often part of the Heartbeat loop) updates memory health metrics.
-
-**Memory Health Metrics:**
-| Metric | Description | Source |
-| :--- | :--- | :--- |
-| **Hit Rate** | Ratio of searches that returned results vs total searches | `orchestrator/api/memory_stats.py` |
-| **Total Memories** | Scoped count across Global, Agent, and Daily tiers | `orchestrator/api/memory_stats.py` |
-
-Sources: `orchestrator/api/memory_stats.py`
+Sources: `[orchestrator/core/boot/reaper.py:1-32]()` `[orchestrator/core/boot/reaper.py:89-149]()`
 
 ---
 
 ## Code-to-System Mapping
 
-The following diagrams bridge the Natural Language concepts to the specific Code Entities used in Background Services.
+### Assigned Board Work to Dispatch Claim
 
-### Task Scheduling System
-
-```mermaid
-graph LR
-    subgraph "Natural Language Space"
-        Schedule["'Schedule a daily report'"]
-        Trigger["'Every Monday at 9AM'"]
-        BoardTask["'File a board task for later'"]
-    end
-
-    subgraph "Code Entity Space"
-        Tool["platform_schedule_task (Tool)"]
-        SVC["ScheduledTaskService (Class)"]
-        DB["agent_scheduled_tasks (Table)"]
-        API["/api/v1/scheduled-tasks (Router)"]
-        SCHED["UnifiedScheduler (APScheduler)"]
-        CreateTaskDialog["frontend/components/activity/board/create-task-dialog.tsx"]
-        UseScheduledTaskHook["frontend/hooks/use-scheduled-tasks-api.ts"]
-    end
-
-    Schedule --> Tool
-    Tool --> SVC
-    SVC --> DB
-    Trigger --> SCHED
-    API --> SVC
-    SCHED --> SVC
-    CreateTaskDialog --> UseScheduledTaskHook
-    UseScheduledTaskHook --> API
-    BoardTask --> CreateTaskDialog
-```
-Sources: `orchestrator/services/scheduled_task_service.py`, `orchestrator/api/scheduled_tasks.py`, `frontend/components/activity/board/create-task-dialog.tsx`, `frontend/hooks/use-scheduled-tasks-api.ts`
-
-### Heartbeat & Notification Delivery
+This mapping connects the user-visible action of assigning a board task with the dispatcher’s code entities. The handler’s best-effort notification wakes the PostgreSQL dispatch path; the claim primitive coordinates worker claims. [orchestrator/modules/tools/discovery/handlers_board_tasks.py:55-74]() [orchestrator/services/board_dispatcher.py:127-156]()
 
 ```mermaid
-graph LR
-    subgraph "Natural Language Space"
-        Check["'Check my tasks every hour'"]
-        Notify["'Send a Slack alert if failed'"]
+flowchart LR
+    subgraph NaturalLanguageSpace["Natural Language Space"]
+        Assign["Assign a board task to an agent"]
+        Execute["Run the assigned task"]
     end
 
-    subgraph "Code Entity Space"
-        HBS["HeartbeatService (Class)"]
-        ND["NotificationDispatcher (Service)"]
-        WND["dispatch_watch_notification (Function)"]
-        CM["deliver_background_message (Function)"]
-        SCHED["APScheduler (Engine)"]
+    subgraph CodeEntitySpace["Code Entity Space"]
+        Handler["_notify_dispatch_safe"]
+        Notify["notify_task_available"]
+        Channel["board_task_available"]
+        Claim["claim_tasks"]
+        SQL["FOR UPDATE SKIP LOCKED"]
+        Lease["Lease and attempts"]
+        Runner["Background task runner"]
     end
 
-    Check --> SCHED
-    SCHED --> HBS
-    HBS --> WND
-    WND --> ND
-    WND --> CM
-    Notify --> ND
+    Assign --> Handler
+    Handler --> Notify
+    Notify --> Channel
+    Channel --> Claim
+    Claim --> SQL
+    SQL --> Lease
+    Lease --> Runner
+    Execute --> Runner
 ```
-Sources: `orchestrator/services/heartbeat_service.py`, `orchestrator/services/watch_notifications.py`
+
+Sources: `[orchestrator/modules/tools/discovery/handlers_board_tasks.py:55-74]()` `[orchestrator/services/board_dispatcher.py:47-50]()` `[orchestrator/services/board_dispatcher.py:127-156]()`
+
+### Schedule a Social Post to a One-Shot Job
+
+A scheduled post’s persisted status and slot are reflected in the scheduler through `sync_job()` or the leader’s reconcile pass. `register()` translates the slot into an APScheduler `DateTrigger` job that invokes `fire_scheduled_post`. [orchestrator/modules/socials/schedule_jobs.py:9-15]() [orchestrator/modules/socials/schedule_jobs.py:87-99]() [orchestrator/modules/socials/schedule_jobs.py:132-144]()
+
+```mermaid
+flowchart LR
+    subgraph NaturalLanguageSpace["Natural Language Space"]
+        Schedule["Publish this post at its scheduled time"]
+        Correct["Move or cancel the scheduled time"]
+    end
+
+    subgraph CodeEntitySpace["Code Entity Space"]
+        Sync["sync_job"]
+        Leader["_leader"]
+        Unified["get_unified_scheduler"]
+        APS["UnifiedScheduler.apscheduler"]
+        Register["register"]
+        Job["social-publish-<post_id>"]
+        Trigger["DateTrigger"]
+        Fire["fire_scheduled_post"]
+        Reconcile["reconcile"]
+    end
+
+    Schedule --> Sync
+    Correct --> Sync
+    Sync --> Leader
+    Leader --> Unified
+    Unified --> APS
+    APS --> Register
+    Register --> Job
+    Job --> Trigger
+    Trigger --> Fire
+    Sync --> Reconcile
+    Reconcile --> Register
+```
+
+Sources: `[orchestrator/modules/socials/schedule_jobs.py:9-15]()` `[orchestrator/modules/socials/schedule_jobs.py:76-99]()` `[orchestrator/modules/socials/schedule_jobs.py:113-144]()`
 
 ---
 
-## Service Lifecycle
+## Service Lifecycle and Error Handling
 
-### Startup and Initialization
+Scheduler ownership determines whether a request-handling worker can update jobs immediately. `sync_job()` uses `_leader()` and returns without changing jobs when this worker has no running scheduler; the reconcile pass is documented as the mechanism that catches up. [orchestrator/modules/socials/schedule_jobs.py:9-15]() [orchestrator/modules/socials/schedule_jobs.py:113-144]()
 
-Background services are initialized within the FastAPI lifespan manager in `main.py`. The `HeartbeatService` is typically started with a shared scheduler instance.
+Board notification is best-effort: `notify_task_available()` catches failures and logs them, while the polling loop remains the fallback. Chat-side `_notify_dispatch_safe()` also catches failures so a notification problem does not fail the tool call. [orchestrator/services/board_dispatcher.py:127-139]() [orchestrator/modules/tools/discovery/handlers_board_tasks.py:55-74]()
 
-```mermaid
-graph TD
-    Start["Lifespan Start (orchestrator/main.py)"] --> Lock["Acquire fcntl Lock"]
-    Lock -->|"Success"| InitSched["Init UnifiedScheduler"]
-    InitSched --> LoadHB["HeartbeatService.start(scheduler)"]
-    LoadHB --> LoadDBHB["_load_heartbeat_configs()"]
-    LoadDBHB --> QueryWS["Query Workspace Settings"]
-    LoadDBHB --> QueryAgent["Query Agent Configs"]
-    QueryWS --> Ready["Background Services Active"]
-    QueryAgent --> Ready
-```
+The boot reaper isolates board-task close failures so one task does not stop the rest of that sweep. For a board task, it calls `finalize_board_task_run` with a timeout; if closing raises, it rolls back and checks whether the task was nevertheless persisted as failed. [orchestrator/core/boot/reaper.py:89-118]()
 
-Sources: `orchestrator/main.py`, `orchestrator/services/heartbeat_service.py`
-
-### Execution Concurrency Control
-
-To prevent resource exhaustion, the `HeartbeatService` implements rate limiting on concurrent ticks.
-- **Agent Limit**: Max 1 concurrent heartbeat per agent [orchestrator/services/heartbeat_service.py:29-29]().
-- **Workspace Limit**: Max 5 concurrent heartbeats per workspace [orchestrator/services/heartbeat_service.py:29-29]().
-
-Sources: `orchestrator/services/heartbeat_service.py`
-
----
-
-## Error Handling & Resilience
-
-Background services are designed to be resilient to transient failures:
-- **Lock Failures**: If the `fcntl` lock cannot be acquired, the worker simply skips scheduler initialization, acting as a pure API node.
-- **Database Availability**: Services like `HeartbeatService` wrap DB access in try-finally blocks to ensure connections are returned to the pool even if a tick fails.
-- **Notification Fail-Soft**: The `dispatch_watch_notification` utility is designed to never raise exceptions into the caller, ensuring that a failure in the notification pipeline (e.g., Slack API down) does not crash the background worker.
-
-Sources: `orchestrator/services/heartbeat_service.py`, `orchestrator/services/watch_notifications.py`
+Sources: `[orchestrator/modules/socials/schedule_jobs.py:9-15]()` `[orchestrator/modules/socials/schedule_jobs.py:113-144]()` `[orchestrator/services/board_dispatcher.py:127-139]()` `[orchestrator/modules/tools/discovery/handlers_board_tasks.py:55-74]()` `[orchestrator/core/boot/reaper.py:89-118]()`
 
 ---

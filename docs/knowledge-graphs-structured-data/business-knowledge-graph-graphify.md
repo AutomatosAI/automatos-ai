@@ -5,22 +5,36 @@
 
 The following files were used as context for generating this wiki page:
 
+- [.gitattributes](.gitattributes)
 - [frontend/components/knowledge/BusinessGraphPanel.tsx](frontend/components/knowledge/BusinessGraphPanel.tsx)
 - [frontend/components/knowledge/BusinessGraphVisualization.tsx](frontend/components/knowledge/BusinessGraphVisualization.tsx)
 - [frontend/components/knowledge/KnowledgeGraphExplorer.tsx](frontend/components/knowledge/KnowledgeGraphExplorer.tsx)
+- [frontend/lib/__tests__/lucide-imports.test.ts](frontend/lib/__tests__/lucide-imports.test.ts)
 - [orchestrator/api/knowledge_graph.py](orchestrator/api/knowledge_graph.py)
 - [orchestrator/api/shopify.py](orchestrator/api/shopify.py)
-- [orchestrator/modules/context/sections/graph_context.py](orchestrator/modules/context/sections/graph_context.py)
-- [orchestrator/modules/knowledge/community_reports.py](orchestrator/modules/knowledge/community_reports.py)
+- [orchestrator/modules/knowledge/graph_edge_rules.py](orchestrator/modules/knowledge/graph_edge_rules.py)
 - [orchestrator/modules/knowledge/graph_extraction.py](orchestrator/modules/knowledge/graph_extraction.py)
+- [orchestrator/modules/knowledge/graph_relations.py](orchestrator/modules/knowledge/graph_relations.py)
 - [orchestrator/modules/knowledge/graph_service.py](orchestrator/modules/knowledge/graph_service.py)
-- [orchestrator/modules/tools/discovery/actions_graph.py](orchestrator/modules/tools/discovery/actions_graph.py)
 - [orchestrator/modules/tools/discovery/handlers_graph.py](orchestrator/modules/tools/discovery/handlers_graph.py)
+- [orchestrator/tests/helpers_graph_extraction.py](orchestrator/tests/helpers_graph_extraction.py)
+- [orchestrator/tests/test_api_key_domain_check.py](orchestrator/tests/test_api_key_domain_check.py)
+- [orchestrator/tests/test_f206_a_graph_extraction_fits_its_cap.py](orchestrator/tests/test_f206_a_graph_extraction_fits_its_cap.py)
+- [orchestrator/tests/test_f312_a_a_person_is_never_produced.py](orchestrator/tests/test_f312_a_a_person_is_never_produced.py)
+- [orchestrator/tests/test_f312_b_a_claim_of_effect_needs_the_documents_words.py](orchestrator/tests/test_f312_b_a_claim_of_effect_needs_the_documents_words.py)
+- [orchestrator/tests/test_f312_c_blend_components_are_part_of_the_blend.py](orchestrator/tests/test_f312_c_blend_components_are_part_of_the_blend.py)
+- [orchestrator/tests/test_f312_d_a_supplier_edge_points_from_the_supplier.py](orchestrator/tests/test_f312_d_a_supplier_edge_points_from_the_supplier.py)
+- [orchestrator/tests/test_f312_f_a_nodes_role_decides_what_its_edges_may_say.py](orchestrator/tests/test_f312_f_a_nodes_role_decides_what_its_edges_may_say.py)
 - [orchestrator/tests/test_graph_relation_vocab.py](orchestrator/tests/test_graph_relation_vocab.py)
-- [orchestrator/tests/test_prd165_s2_graph.py](orchestrator/tests/test_prd165_s2_graph.py)
-- [orchestrator/tests/test_prd165_s3_community.py](orchestrator/tests/test_prd165_s3_community.py)
+- [orchestrator/tests/test_issue_1073_graph_event_loop.py](orchestrator/tests/test_issue_1073_graph_event_loop.py)
 - [orchestrator/tests/test_prd183_s1_catalog_webhook.py](orchestrator/tests/test_prd183_s1_catalog_webhook.py)
+- [orchestrator/tests/test_prd183_s5_vertical_provision.py](orchestrator/tests/test_prd183_s5_vertical_provision.py)
 - [orchestrator/tests/test_prd189_s3_webhook_debounce.py](orchestrator/tests/test_prd189_s3_webhook_debounce.py)
+- [orchestrator/tests/test_repo_line_endings.py](orchestrator/tests/test_repo_line_endings.py)
+- [services/cli-host/automatos_cli_host/__main__.py](services/cli-host/automatos_cli_host/__main__.py)
+- [services/cli-host/automatos_cli_host/sandbox.py](services/cli-host/automatos_cli_host/sandbox.py)
+- [services/cli-host/tests/test_platform_guard.py](services/cli-host/tests/test_platform_guard.py)
+- [services/cli-host/tests/test_session_on_windows.py](services/cli-host/tests/test_session_on_windows.py)
 
 </details>
 
@@ -28,145 +42,305 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-The Knowledge Graph & Entity Extraction system provides structured intelligence across three primary domains: unstructured documentation, agent-generated reports, and structured codebases. It extracts entities (concepts, processes, metrics, symbols) and identifies semantic, structural, or causal relationships to enable advanced retrieval, impact analysis, and context-aware reasoning.
+This page describes the workspace business knowledge graph: how `GraphifyService` builds and caches graphs, how extraction represents business facts, how graph exports and community reports are organized, how clients drill into graph clusters, and how the `BusinessGraphPanel` presents the graph. It also covers the Shopify catalog-sync path where it is supported by the provided code. [orchestrator/modules/knowledge/graph_service.py:1-22](), [orchestrator/modules/knowledge/graph_extraction.py:1-10](), [orchestrator/api/knowledge_graph.py:1-10](), [frontend/components/knowledge/BusinessGraphPanel.tsx:66-88](), [orchestrator/tests/test_prd183_s1_catalog_webhook.py:12-16]()
 
-Key capabilities include:
-- **Business Graph Extraction**: LLM-powered extraction of concepts, entities, and processes from business documents and agent reports. [orchestrator/modules/knowledge/graph_extraction.py:5-10]()
-- **Graphify Pipeline**: A multi-stage lifecycle (collect → extract → merge → build → cluster → export) that builds NetworkX graphs for each workspace. [orchestrator/modules/knowledge/graph_service.py:9-22]()
-- **Team-Scoped Filtering**: PRD-124 compliant visibility rules ensuring agents only see graph nodes they have permission to access. [orchestrator/modules/knowledge/graph_service.py:148-181]()
-- **Relation Canonicalization**: A deterministic mapper that snaps free-text LLM relations to a controlled vocabulary (e.g., `uses`, `depends_on`, `triggers`) to prevent legend flooding. [orchestrator/modules/knowledge/graph_extraction.py:46-65]()
-- **Cluster-First Exploration**: Server-side subgraph queries for large graphs, allowing users to drill into communities, expand neighborhoods, or find paths without downloading the full graph. [frontend/components/knowledge/KnowledgeGraphExplorer.tsx:19-26]()
+Sources: [orchestrator/modules/knowledge/graph_service.py:1-22](), [orchestrator/modules/knowledge/graph_extraction.py:1-10](), [orchestrator/api/knowledge_graph.py:1-10](), [frontend/components/knowledge/BusinessGraphPanel.tsx:66-88](), [orchestrator/tests/test_prd183_s1_catalog_webhook.py:12-16]()
 
 ---
 
-## System Architecture
+## 1. GraphifyService Architecture & Lifecycle
 
-The architecture bridges "Natural Language Space" (documentation/chat) with "Code Entity Space" (source code/structured metadata) through a unified Graphify service layer and a set of platform tool handlers.
+`GraphifyService` is the centralized integration point for graphify operations. Its module describes the lifecycle as source collection, extraction and merge, graph construction, clustering and analysis, export and cache, snapshot and diff, report generation, and history pruning. The module imports graphify’s construction, clustering, export, and traversal helpers, along with workspace storage and graph-specific relation, provenance, and clustering utilities. [orchestrator/modules/knowledge/graph_service.py:1-22](), [orchestrator/modules/knowledge/graph_service.py:37-62]()
 
-### Knowledge Graph Lifecycle
+### 1.1 Build, cache, export, and incremental updates
+
+The service defines workspace graph artefact paths under `graph/`: `graph.json`, `meta.json`, `communities.json`, and `graph.html`. It also names a latest diff, dated graph snapshots, and dated build reports. The cache has a maximum size of 20 entries, and incremental work is debounced for 60 seconds. [orchestrator/modules/knowledge/graph_service.py:66-88]()
+
+Pending sources are partitioned by `partition_pending_sources()`. A `document` pending contributes its `id`; `mission_synthesis` and `generated_document` pendings contribute their `document_id`, falling back to `id`; and a `report` pending contributes text for report extraction. Reports without non-empty text are skipped. Other pending types are left to their own rebuild paths. [orchestrator/modules/knowledge/graph_service.py:90-143]()
+
+The graph-service module describes the exported `graph.json` as NetworkX `node_link_data`, and the API accepts that format for graph import. An import can either replace the workspace graph or merge incoming nodes and edges into the existing graph; clustering, analysis, and derived exports are rerun as part of import. [orchestrator/modules/knowledge/graph_service.py:13-20](), [orchestrator/api/knowledge_graph.py:32-46]()
+
+The service’s pipeline description includes snapshots and diffs, report generation, and history pruning. The available module excerpt names the dated snapshot and report paths but does not show the implementations or the exact report-generation algorithm. [orchestrator/modules/knowledge/graph_service.py:8-20]()
+
+### 1.2 Provenance and source scope
+
+Graph extraction’s node and edge constructors include `source_file`; the node constructor also accepts `source_location`, and the edge constructor includes both `source_file` and `source_location`. This metadata supports tracing extracted facts back to their originating material. The graph service imports provenance helpers named `stamp_source_document` and `prune_document_facts`; their implementations are not included in the provided file excerpts. [orchestrator/modules/knowledge/graph_extraction.py:51-100](), [orchestrator/modules/knowledge/graph_service.py:55-60]()
+
+The service also defines team-visibility helpers. `node_is_visible()` makes a node visible when the requesting agent has no team restriction, when the node has no `team_access` restriction, or when the agent’s team is listed; `team_filtered_view()` provides the graph-level filtering entry point. [orchestrator/modules/knowledge/graph_service.py:146-175]()
+
+**Diagram: Graph build and export path**
 
 ```mermaid
-graph TD
-    subgraph "Data_Sources"
-        Docs["DocumentManager<br/>(PDF, MD, DOCX)"]
-        Reports["Agent Reports<br/>(Task Outputs)"]
-        Shopify["Shopify Catalog<br/>(Products, Variants)"]
+flowchart LR
+    subgraph "Natural Language Space"
+        Docs["Workspace document facts"]
+        Reports["Agent report text"]
+        Syntheses["Mission synthesis and generated document references"]
     end
 
-    subgraph "Extraction_&_Build"
-        GE["graph_extraction.py<br/>(LLM + Mappers)"]
-        GS["GraphifyService<br/>(NetworkX Build)"]
-        Vocab["canonicalize_relation<br/>(Vocab Snapping)"]
-        Cluster["graphify.cluster<br/>(Community Detection)"]
+    subgraph "Code Entity Space"
+        Partition["partition_pending_sources"]
+        Extract["graph_extraction"]
+        Build["GraphifyService"]
+        Construct["build_from_json"]
+        Cluster["cluster"]
+        Analyze["god_nodes and surprising_connections"]
+        Export["to_json and to_html"]
+        Store["DbWorkspaceClient"]
     end
 
-    subgraph "Storage_&_Workspace_Files"
-        GJSON["/graph/graph.json"]
-        Meta["/graph/meta.json"]
-        Comm["/graph/communities.json"]
-        Diff["/graph/latest_diff.json"]
-    end
-
-    Docs --> GE
-    Reports --> GE
-    Shopify --> GE
-    GE --> Vocab
-    Vocab --> GS
-    GS --> Cluster
-    Cluster --> GJSON
-    Cluster --> Meta
-    Cluster --> Comm
-    Cluster --> Diff
-
-    subgraph "Consumption"
-        UI["BusinessGraphPanel.tsx"]
-        Explorer["KnowledgeGraphExplorer.tsx"]
-        Agent["handle_query_graph"]
-    end
-
-    GJSON --> UI
-    Comm --> Explorer
-    GS --> Agent
+    Docs --> Partition
+    Reports --> Partition
+    Syntheses --> Partition
+    Partition --> Extract
+    Extract --> Build
+    Build --> Construct
+    Construct --> Cluster
+    Cluster --> Analyze
+    Analyze --> Export
+    Export --> Store
 ```
 
-**Sources**: [orchestrator/modules/knowledge/graph_service.py:9-22](), [orchestrator/modules/knowledge/graph_extraction.py:132-148](), [frontend/components/knowledge/BusinessGraphPanel.tsx:190-217](), [orchestrator/api/shopify.py:7-12]()
+Sources: [orchestrator/modules/knowledge/graph_service.py:8-20](), [orchestrator/modules/knowledge/graph_service.py:37-62](), [orchestrator/modules/knowledge/graph_service.py:90-143](), [orchestrator/modules/knowledge/graph_extraction.py:1-10]()
+
+**Diagram: Business facts mapped to graph entities and persisted artefacts**
+
+```mermaid
+flowchart LR
+    subgraph "Natural Language Space"
+        Document["Business document"]
+        Report["Agent report"]
+        Catalog["Shopify catalog"]
+    end
+
+    subgraph "Code Entity Space"
+        DocumentExtractor["graph_extraction"]
+        ReportPartition["partition_pending_sources"]
+        CatalogMapper["map_shopify_catalog"]
+        CatalogSync["_product_sync_impl"]
+        GraphService["GraphifyService"]
+        ImportAPI["POST /api/knowledge/graph/import"]
+        GraphFile["graph/graph.json"]
+        MetaFile["graph/meta.json"]
+        CommunitiesFile["graph/communities.json"]
+        HtmlFile["graph/graph.html"]
+    end
+
+    Document --> DocumentExtractor
+    Report --> ReportPartition
+    Catalog --> CatalogMapper
+    CatalogMapper --> CatalogSync
+    DocumentExtractor --> GraphService
+    ReportPartition --> GraphService
+    CatalogSync --> ImportAPI
+    ImportAPI --> GraphService
+    GraphService --> GraphFile
+    GraphService --> MetaFile
+    GraphService --> CommunitiesFile
+    GraphService --> HtmlFile
+```
+
+Sources: [orchestrator/modules/knowledge/graph_extraction.py:1-10](), [orchestrator/modules/knowledge/graph_service.py:13-20](), [orchestrator/modules/knowledge/graph_service.py:90-143](), [orchestrator/api/knowledge_graph.py:32-46](), [orchestrator/tests/test_prd183_s1_catalog_webhook.py:12-16]()
+
+### 1.3 Shopify catalog graph updates
+
+The Shopify catalog graph is produced from catalog data—products, variants, collections, and vendors—by `map_shopify_catalog` and imported through `import_graph` from `_product_sync_impl`. It is not produced by re-extracting documents. [orchestrator/tests/test_prd183_s1_catalog_webhook.py:12-16]()
+
+The regression test documents the event-flow distinction: catalog-shaped Shopify webhook events dispatch a catalog resync for the workspace resolved from the shop domain, while non-catalog events do not trigger that resync. The same test explains that the earlier generic incremental pending path did not recognize Shopify-shaped pending data. [orchestrator/tests/test_prd183_s1_catalog_webhook.py:3-16](), [orchestrator/tests/test_prd183_s1_catalog_webhook.py:125-173]()
+
+Shopify sync routes use `_resolve_sync_workspace()` to constrain the target workspace: cross-workspace admins may select an explicit workspace, while other callers are pinned to their authenticated workspace and receive a 403 for a mismatch. [orchestrator/api/shopify.py:63-84]()
+
+Sources: [orchestrator/tests/test_prd183_s1_catalog_webhook.py:3-16](), [orchestrator/tests/test_prd183_s1_catalog_webhook.py:125-173](), [orchestrator/api/shopify.py:63-84]()
 
 ---
 
-## Business Graph Extraction
+## 2. LLM Graph Extraction & Canonical Relations
 
-The system uses `graph_extraction.py` to convert unstructured text into a formal graph schema. A critical component is the **Controlled Relation Vocabulary**, which prevents the graph from accruing thousands of unique, redundant relation strings.
+`graph_extraction.py` provides structured graph extraction from documents and reports using an LLM, and deterministic mappings for platform metadata. Its documented output shape is `nodes`, `edges`, and `hyperedges`. The extraction module loads the configured Graphify model through `Config().GRAPHIFY_MODEL`, reads an extraction timeout from the `knowledge_graph` system-setting category, and imports relation normalization and extracted-graph checking helpers. [orchestrator/modules/knowledge/graph_extraction.py:1-10](), [orchestrator/modules/knowledge/graph_extraction.py:18-30]()
 
-### Relation Canonicalization
-Every LLM-extracted relation is passed through `canonicalize_relation`. It uses a hierarchy of exact matches, synonyms, and keyword heuristics to snap inputs to a set of `CANONICAL_RELATIONS`. [orchestrator/modules/knowledge/graph_extraction.py:58-65]()
+### 2.1 Extraction records
 
-| Canonical Relation | Examples of Synonyms |
-| :--- | :--- |
-| `uses` | utilizes, leverages, consumes, used by |
-| `part_of` | belongs to, contained in, component of |
-| `depends_on` | requires, needs, contingent on |
-| `produces` | generates, creates, outputs, returns |
-| `causes` | results in, leads to, due to |
-| `triggers` | invokes, calls, fires, feeds |
+The document prompt asks the model to identify concepts, entities, processes, metrics, rules, and relationships. It requests one JSON object per line for nodes, edges, and hyperedges, and instructs the model to prioritize important entities and relationships, avoid hallucinating entities, and use allowed relation types. [orchestrator/modules/knowledge/graph_extraction.py:107-155]()
 
-The original LLM-generated phrase is preserved in the `relation_label` field for UI display, while the `relation` field stores the canonical slug. [orchestrator/modules/knowledge/graph_extraction.py:132-148]()
+Nodes carry an identifier, label, `file_type`, source file and location, confidence, weight, and optional `team_access`. Edges carry source and target IDs, a relation and display label, confidence and score, source metadata, weight, and internal source/target fields. [orchestrator/modules/knowledge/graph_extraction.py:51-100]()
 
-**Sources**: [orchestrator/modules/knowledge/graph_extraction.py:46-129](), [orchestrator/tests/test_graph_relation_vocab.py:23-55]()
+The prompt distinguishes `EXTRACTED`, `INFERRED`, and `AMBIGUOUS` confidence labels and asks for confidence scores that reflect the certainty of implied or uncertain relationships. It also describes when to emit a hyperedge for a shared concept or flow involving three or more nodes. [orchestrator/modules/knowledge/graph_extraction.py:123-145]()
+
+### 2.2 Controlled relation vocabulary and direction
+
+`graph_relations.py` defines a bounded canonical vocabulary. Relations include `uses`, `part_of`, `member_of`, `depends_on`, `produces`, `supplies`, `buys`, `responsible_for`, `substitutes_for`, `causes`, `enables`, `blocks`, `mitigates`, `measures`, `governed_by`, `precedes`, `triggers`, `has_property`, `references`, and `related_to`. The module’s glosses define each relation in source-to-target direction. [orchestrator/modules/knowledge/graph_relations.py:36-65]()
+
+The module supplies direct synonym mappings and inverse synonym mappings. Inverse phrases such as `contains` and `supplied_by` represent the opposite reading direction and are mapped to the appropriate canonical relation with direction handled separately. Unknown or blank relation text falls back to `related_to`, as pinned by the relation-vocabulary tests. [orchestrator/modules/knowledge/graph_relations.py:67-123](), [orchestrator/tests/test_graph_relation_vocab.py:72-90]()
+
+The tests also pin an important representation rule: canonicalization changes the machine-readable `relation` while retaining the original or explicitly supplied phrase as `relation_label`. For example, `is unavailable` maps to `has_property` while remaining available as the display label. [orchestrator/tests/test_graph_relation_vocab.py:93-118]()
+
+| Relation | Meaning in source → target direction |
+|---|---|
+| `part_of` | Source is a component or item of target. |
+| `supplies` | Source supplies target. |
+| `buys` | Source buys, orders, or takes target. |
+| `responsible_for` | Source owns or handles target. |
+| `depends_on` | Source needs target. |
+| `related_to` | Fallback relation for otherwise unmatched text. |
+
+Sources: [orchestrator/modules/knowledge/graph_relations.py:40-65]()
+
+### 2.3 Edge validation boundary
+
+The extraction module imports `check_extracted_graph` from `graph_edge_rules` and `resolve_relation` from `graph_relations`, establishing those modules as part of the extraction path. The provided contents do not include `graph_edge_rules.py` or the relevant function bodies in `graph_extraction.py`; specific validation rules beyond the documented relation vocabulary should therefore be verified in those implementations rather than inferred here. [orchestrator/modules/knowledge/graph_extraction.py:18-22]()
+
+The relation vocabulary module explains that the edge endpoints and the cases where an edge is refused or turned around are defined in `graph_edge_rules`. The detailed endpoint rules are not present in the provided file contents. [orchestrator/modules/knowledge/graph_relations.py:25-26]()
+
+**Diagram: Natural-language facts normalized into graph relations**
+
+```mermaid
+flowchart LR
+    subgraph "Natural Language Space"
+        Text["Document or report text"]
+        Phrase["Extracted relation phrase"]
+    end
+
+    subgraph "Code Entity Space"
+        Extract["graph_extraction"]
+        Resolve["resolve_relation"]
+        Vocabulary["CANONICAL_RELATIONS"]
+        Label["relation_label"]
+        Rules["check_extracted_graph"]
+        Edge["Normalized graph edge"]
+    end
+
+    Text --> Extract
+    Extract --> Phrase
+    Phrase --> Resolve
+    Resolve --> Vocabulary
+    Phrase --> Label
+    Vocabulary --> Rules
+    Label --> Edge
+    Rules --> Edge
+```
+
+Sources: [orchestrator/modules/knowledge/graph_extraction.py:18-22](), [orchestrator/modules/knowledge/graph_extraction.py:107-155](), [orchestrator/modules/knowledge/graph_relations.py:36-65](), [orchestrator/tests/test_graph_relation_vocab.py:93-118]()
 
 ---
 
-## Graphify Service Implementation
+## 3. Cluster-First Drill-In API & Community Reports
 
-The `GraphifyService` acts as the singleton manager for workspace graphs, handling caching and incremental builds.
+The knowledge graph API describes the workspace graph as the canonical graph surface. Graph lifecycle REST operations cover import, rebuild, and delete; agents query the graph through `platform_graph_*` tools rather than the removed entity-explorer endpoints. [orchestrator/api/knowledge_graph.py:1-10]()
 
-### Pipeline Stages
-1. **Partitioning**: Debounced pending sources are split into document IDs and raw text sources (like agent reports). [orchestrator/modules/knowledge/graph_service.py:96-140]()
-2. **Build**: Invokes `graphify.build.build_from_json` to construct the NetworkX object. [orchestrator/modules/knowledge/graph_service.py:45]()
-3. **Clustering**: Identifies communities and scores nodes for centrality. [orchestrator/modules/knowledge/graph_service.py:46]()
-4. **Diffing**: Compares the new build against the previous version to generate `latest_diff.json`. [orchestrator/modules/knowledge/graph_service.py:19]()
-5. **Snapshotting**: Maintains a history of up to 30 daily snapshots in `/graph/history/`. [orchestrator/modules/knowledge/graph_service.py:81-82]()
+### 3.1 Graph lifecycle API
 
-### Team Filtering (PRD-124)
-Visibility is strictly enforced via `team_filtered_view`. If an agent has a `team` assigned, the service creates a subgraph where nodes are only included if their `team_access` attribute is empty or contains the agent's team. [orchestrator/modules/knowledge/graph_service.py:168-181]()
+| Operation | Behavior |
+|---|---|
+| `POST /api/knowledge/graph/import` | Accepts a `.json` NetworkX `node_link_data` graph, checks the upload size and JSON shape, and imports it for the authenticated workspace. `merge` selects merge rather than replacement behavior. |
+| `POST /api/knowledge/graph/build` | Triggers `GraphifyService.build_graph()` for the authenticated workspace. |
+| `DELETE /api/knowledge/graph` | Deletes the primary graph artefacts and removes the workspace entry from the service cache. |
 
-**Sources**: [orchestrator/modules/knowledge/graph_service.py:44-54](), [orchestrator/modules/knowledge/graph_service.py:148-166]()
+These routes require workspace permissions for graph creation or deletion, and derive the workspace from the hybrid request context. [orchestrator/api/knowledge_graph.py:12-22](), [orchestrator/api/knowledge_graph.py:29-46](), [orchestrator/api/knowledge_graph.py:85-119]()
+
+### 3.2 Cluster-first drill-in
+
+The API’s cluster-first design is intended to avoid sending the entire `graph.json` to the browser. The documented drill-in sequence is communities, a community subgraph, node expansion, path lookup, and search-to-focus. The API excerpt defines `_load_ws_graph()` to load the workspace graph or return 404, and `_read_communities()` to read `graph/communities.json` or return an error when community data is missing or corrupt. [orchestrator/api/knowledge_graph.py:122-155]()
+
+`GET /api/knowledge/graph/communities` is the cluster-first entry point. Its documented purpose is to return a community overview, including IDs and member counts and, when available, titles and summaries. [orchestrator/api/knowledge_graph.py:158-166]()
+
+`KnowledgeGraphExplorer` calls `graphCommunitiesOverview()` to populate the community list. It calls `graphCommunitySubgraph()` to load a selected cluster, `graphExpandNode()` to extend a view around a node, `graphPath()` to request a path between selected nodes, and `graphSearchNodes()` to find candidates for search-to-focus. The provided API excerpt does not show the backend route implementations for all of these operations. [frontend/components/knowledge/KnowledgeGraphExplorer.tsx:77-103](), [frontend/components/knowledge/KnowledgeGraphExplorer.tsx:105-145]()
+
+### 3.3 Agent graph queries and visibility
+
+`handle_query_graph()` accepts a natural-language question and optional traversal mode, depth, and token budget. It loads the workspace graph, applies team filtering, scores graph nodes against terms from the question, selects a starting node, traverses using BFS or DFS, and returns a text summary. [orchestrator/modules/tools/discovery/handlers_graph.py:121-184]()
+
+Graph handlers resolve an agent’s team and use `team_filtered_view()` before querying. The graph service’s visibility rule allows nodes with no `team_access` restriction to remain visible and restricts nodes with team access to agents in the permitted team. [orchestrator/modules/tools/discovery/handlers_graph.py:53-75](), [orchestrator/modules/knowledge/graph_service.py:151-175]()
+
+### 3.4 Community reports and build artefacts
+
+The graph-service module lists `communities.json` as community labels and members, `meta.json` as summary statistics, and dated Markdown build reports under `graph/reports/{date}_build.md`. It also documents daily graph snapshots, a latest diff, and a maximum of 30 history snapshots by default, configurable through the `knowledge_graph.max_history_snapshots` system setting. [orchestrator/modules/knowledge/graph_service.py:13-20](), [orchestrator/modules/knowledge/graph_service.py:81-88]()
+
+The provided excerpt describes the build-report artefact and pipeline stage but does not show how report text is composed or the precise fields included in a report. [orchestrator/modules/knowledge/graph_service.py:8-20]()
+
+**Diagram: Cluster-first graph exploration**
+
+```mermaid
+sequenceDiagram
+    participant Explorer as "KnowledgeGraphExplorer"
+    participant Client as "apiClient"
+    participant API as "orchestrator/api/knowledge_graph.py"
+    participant Service as "GraphifyService"
+    participant Storage as "DbWorkspaceClient"
+
+    Explorer->>Client: "graphCommunitiesOverview()"
+    Client->>API: "GET /api/knowledge/graph/communities"
+    API->>Storage: "read_file graph/communities.json"
+    Storage-->>API: "Community metadata"
+    API-->>Explorer: "Community overview"
+
+    Explorer->>Client: "graphCommunitySubgraph(cid)"
+    Client->>API: "Community subgraph request"
+    API->>Service: "load_graph(workspace_id)"
+    Service-->>API: "Workspace graph"
+    API-->>Explorer: "Community subgraph"
+
+    Explorer->>Client: "graphExpandNode(node.id) or graphPath(from.id, to.id)"
+    Client->>API: "Node expansion or path request"
+    API->>Service: "Graph traversal"
+    Service-->>Explorer: "Focused subgraph"
+```
+
+Sources: [orchestrator/api/knowledge_graph.py:122-166](), [orchestrator/api/knowledge_graph.py:130-155](), [frontend/components/knowledge/KnowledgeGraphExplorer.tsx:77-145]()
 
 ---
 
-## Agent Graph Tools & Context
+## 4. UI Components & Visualization Layer
 
-Agents interact with the graph through `PlatformActions` and a dedicated `ContextService` section.
+The frontend provides a workspace graph panel and a cluster-first explorer. `BusinessGraphPanel` owns graph-level UI state, build and import actions, data queries, and the visualization wiring. `KnowledgeGraphExplorer` provides community-first drill-in and subgraph interactions. Both use `BusinessGraphVisualization` as the graph renderer. [frontend/components/knowledge/BusinessGraphPanel.tsx:66-88](), [frontend/components/knowledge/KnowledgeGraphExplorer.tsx:21-28](), [frontend/components/knowledge/BusinessGraphVisualization.tsx:121-140]()
 
-### Graph Tools
-Handlers in `handlers_graph.py` provide the logic for agent tools:
-- `platform_query_graph`: Natural language query using BFS/DFS traversal. [orchestrator/modules/tools/discovery/handlers_graph.py:98-112]()
-- `platform_graph_neighbors`: Returns direct connections for a specific concept. [orchestrator/modules/tools/discovery/handlers_graph.py:184-192]()
-- `platform_graph_path`: Finds the shortest path between two concepts. [orchestrator/modules/tools/discovery/actions_graph.py:106-112]()
-- `platform_graph_communities`: Lists high-level domain clusters. [orchestrator/modules/tools/discovery/actions_graph.py:145-153]()
+### 4.1 `BusinessGraphPanel`
 
-### GraphSection (Context Injection)
-The `GraphSection` (Priority 45) automatically injects relevant graph excerpts into agent prompts. It scores graph nodes against the current user message, performs a BFS traversal from the top hits, and formats the result as text. [orchestrator/modules/context/sections/graph_context.py:28-37]()
+`BusinessGraphPanel` obtains the active `workspaceId` from `useWorkspace()`. Its ephemeral state includes text search, a minimum confidence threshold, selected community and node, import and build status, import errors, and drag state. It also uses `useGraphPrefs(workspaceId, 'knowledge')` for persisted graph preferences. [frontend/components/knowledge/BusinessGraphPanel.tsx:68-87]()
 
-**Sources**: [orchestrator/modules/tools/discovery/handlers_graph.py:70-90](), [orchestrator/modules/context/sections/graph_context.py:46-100]()
+The panel’s import flow uploads a `.json` file to `/api/knowledge/graph/import` as multipart form data, includes the merge value, adds workspace and Clerk authorization headers when available, and invalidates `business-graph` queries after a successful import. Its build action calls `apiClient.buildBusinessGraph()` and invalidates the same query family on success. [frontend/components/knowledge/BusinessGraphPanel.tsx:90-137](), [frontend/components/knowledge/BusinessGraphPanel.tsx:139-158](), [frontend/components/knowledge/BusinessGraphPanel.tsx:182-194]()
 
----
+The panel defines workspace-scoped React Query keys for graph data and metadata. The shown query excerpt reads `graph/meta.json` through `apiClient.getWorkspaceFileContent()`; the remaining query implementation and rendering logic are not included in the provided excerpt. [frontend/components/knowledge/BusinessGraphPanel.tsx:54-59](), [frontend/components/knowledge/BusinessGraphPanel.tsx:196-206]()
 
-## Visualization & Explorer
+### 4.2 `KnowledgeGraphExplorer`
 
-The frontend provides two primary ways to interact with the graph: the **Business Graph Panel** (full view) and the **Knowledge Graph Explorer** (drill-in view).
+The explorer queries community overview data with a workspace-scoped query key. Selecting a community resets visualization focus and loads its subgraph; expanding a node merges returned nodes and links into the current subgraph; path lookup replaces the current view with path results; and search requests matching nodes before a selected match is expanded into a focused view. [frontend/components/knowledge/KnowledgeGraphExplorer.tsx:77-103](), [frontend/components/knowledge/KnowledgeGraphExplorer.tsx:105-160]()
 
-### Cluster-First Explorer (PRD-165)
-For graphs too large for browser rendering, the `KnowledgeGraphExplorer` uses server-side drill-in:
-1. **Communities Overview**: Lists all clusters with summaries and member counts. [frontend/components/knowledge/KnowledgeGraphExplorer.tsx:76-83]()
-2. **Community Subgraph**: Loads only the nodes and links for a specific cluster. [frontend/components/knowledge/KnowledgeGraphExplorer.tsx:87-101]()
-3. **Neighborhood Expansion**: Fetches the 1-hop neighbors of a selected node to grow the local view. [frontend/components/knowledge/KnowledgeGraphExplorer.tsx:103-114]()
+When a community is active, the explorer derives its title from the overview, falling back to `Cluster {id}`. It also supports editing a community label and invalidates the community query after a successful label update. [frontend/components/knowledge/KnowledgeGraphExplorer.tsx:170-187]()
 
-### Force-Directed Rendering
-The `BusinessGraphVisualization` uses `react-force-graph-2d` with custom drawing logic for:
-- **God-node Halos**: Visual indicators for high-degree nodes. [frontend/components/knowledge/BusinessGraphVisualization.tsx:13]()
-- **Directional Particles**: "Data flow" animations on focused subgraphs. [frontend/components/knowledge/BusinessGraphVisualization.tsx:12]()
-- **Adaptive Labels**: Labels that appear/disappear based on zoom level and node importance. [frontend/components/knowledge/BusinessGraphVisualization.tsx:14-15]()
+### 4.3 `BusinessGraphVisualization`
 
-**Sources**: [frontend/components/knowledge/KnowledgeGraphExplorer.tsx:20-26](), [frontend/components/knowledge/BusinessGraphVisualization.tsx:6-17](), [frontend/components/knowledge/BusinessGraphPanel.tsx:68-86]()
+`BusinessGraphVisualization` is a client-side force-directed renderer that dynamically loads `react-force-graph-2d` without server-side rendering. Its input model includes graph nodes and links; props support community selection, minimum confidence, visible node types, visible relations, and type- or community-based colouring. [frontend/components/knowledge/BusinessGraphVisualization.tsx:28-38](), [frontend/components/knowledge/BusinessGraphVisualization.tsx:44-79]()
+
+The component exposes `zoomToFit()` and `resetFocus()` through `BusinessGraphHandle`. It also observes container resizing, supports clearing focus with Escape, and filters nodes and links according to the supplied type and relation visibility sets. [frontend/components/knowledge/BusinessGraphVisualization.tsx:81-84](), [frontend/components/knowledge/BusinessGraphVisualization.tsx:148-187]()
+
+The component documentation describes click-to-focus, hover tooltips, directional edge particles on focused subgraphs, high-degree “god-node” highlighting, and adaptive labels. [frontend/components/knowledge/BusinessGraphVisualization.tsx:3-17]()
+
+**Diagram: UI components and graph data paths**
+
+```mermaid
+flowchart LR
+    Panel["BusinessGraphPanel"]
+    Explorer["KnowledgeGraphExplorer"]
+    Viz["BusinessGraphVisualization"]
+    Build["apiClient.buildBusinessGraph()"]
+    Import["POST /api/knowledge/graph/import"]
+    Communities["graphCommunitiesOverview()"]
+    Subgraph["graphCommunitySubgraph(cid)"]
+    Expand["graphExpandNode(node.id)"]
+    Path["graphPath(from.id, to.id)"]
+    Search["graphSearchNodes(q)"]
+
+    Panel --> Build
+    Panel --> Import
+    Panel --> Viz
+    Explorer --> Communities
+    Explorer --> Subgraph
+    Explorer --> Expand
+    Explorer --> Path
+    Explorer --> Search
+    Explorer --> Viz
+```
+
+Sources: [frontend/components/knowledge/BusinessGraphPanel.tsx:90-137](), [frontend/components/knowledge/BusinessGraphPanel.tsx:182-194](), [frontend/components/knowledge/KnowledgeGraphExplorer.tsx:77-160](), [frontend/components/knowledge/BusinessGraphVisualization.tsx:121-140]()
 
 ---

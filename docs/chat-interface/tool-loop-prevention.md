@@ -5,24 +5,23 @@
 
 The following files were used as context for generating this wiki page:
 
-- [orchestrator/consumers/chatbot/intent_classifier.py](orchestrator/consumers/chatbot/intent_classifier.py)
-- [orchestrator/consumers/chatbot/personality.py](orchestrator/consumers/chatbot/personality.py)
-- [orchestrator/consumers/chatbot/smart_tool_router.py](orchestrator/consumers/chatbot/smart_tool_router.py)
-- [orchestrator/core/services/auto_autonomy.py](orchestrator/core/services/auto_autonomy.py)
-- [orchestrator/modules/tools/discovery/actions_autonomy.py](orchestrator/modules/tools/discovery/actions_autonomy.py)
-- [orchestrator/modules/tools/discovery/handlers_autonomy.py](orchestrator/modules/tools/discovery/handlers_autonomy.py)
-- [orchestrator/modules/tools/execution/exec_research.py](orchestrator/modules/tools/execution/exec_research.py)
-- [orchestrator/tests/security/test_nl2sql_tenancy.py](orchestrator/tests/security/test_nl2sql_tenancy.py)
-- [orchestrator/tests/security/test_w3_full_autonomy_gate.py](orchestrator/tests/security/test_w3_full_autonomy_gate.py)
-- [orchestrator/tests/test_nl2sql_agent_path.py](orchestrator/tests/test_nl2sql_agent_path.py)
-- [orchestrator/tests/test_nl2sql_semantic_audit_templates.py](orchestrator/tests/test_nl2sql_semantic_audit_templates.py)
-- [orchestrator/tests/test_prd143_manifest_parity.py](orchestrator/tests/test_prd143_manifest_parity.py)
-- [orchestrator/tests/test_prd232_us001_dispatcher_survives_route.py](orchestrator/tests/test_prd232_us001_dispatcher_survives_route.py)
-- [orchestrator/tests/test_prd232_us002_flag_split.py](orchestrator/tests/test_prd232_us002_flag_split.py)
-- [orchestrator/tests/test_prd263_harness_report_only.py](orchestrator/tests/test_prd263_harness_report_only.py)
-- [orchestrator/tests/test_us014_graph_router_delegation.py](orchestrator/tests/test_us014_graph_router_delegation.py)
-- [orchestrator/tests/test_us015_registry_intent_filter.py](orchestrator/tests/test_us015_registry_intent_filter.py)
-- [orchestrator/tests/test_w3_auto_autonomy_service.py](orchestrator/tests/test_w3_auto_autonomy_service.py)
+- [orchestrator/consumers/chatbot/narration.py](orchestrator/consumers/chatbot/narration.py)
+- [orchestrator/modules/tools/execution/cap_answer.py](orchestrator/modules/tools/execution/cap_answer.py)
+- [orchestrator/modules/tools/execution/nudges.py](orchestrator/modules/tools/execution/nudges.py)
+- [orchestrator/modules/tools/execution/tool_loop.py](orchestrator/modules/tools/execution/tool_loop.py)
+- [orchestrator/tests/test_f099_a_cited_source_that_did_not_run.py](orchestrator/tests/test_f099_a_cited_source_that_did_not_run.py)
+- [orchestrator/tests/test_f108_b_a_claimed_action_is_nudged_once.py](orchestrator/tests/test_f108_b_a_claimed_action_is_nudged_once.py)
+- [orchestrator/tests/test_f108_claimed_actions_need_a_result.py](orchestrator/tests/test_f108_claimed_actions_need_a_result.py)
+- [orchestrator/tests/test_f186_a_the_reply_is_the_answer.py](orchestrator/tests/test_f186_a_the_reply_is_the_answer.py)
+- [orchestrator/tests/test_f187_b_a_claim_needs_the_action_that_does_it.py](orchestrator/tests/test_f187_b_a_claim_needs_the_action_that_does_it.py)
+- [orchestrator/tests/test_f295_a_a_nudge_is_the_users_turn_so_the_retry_answers_it.py](orchestrator/tests/test_f295_a_a_nudge_is_the_users_turn_so_the_retry_answers_it.py)
+- [orchestrator/tests/test_f295_b_an_empty_retry_keeps_the_reply_it_was_about.py](orchestrator/tests/test_f295_b_an_empty_retry_keeps_the_reply_it_was_about.py)
+- [orchestrator/tests/test_f295_d_a_nudge_says_it_is_the_platform_and_no_apology_is_kept.py](orchestrator/tests/test_f295_d_a_nudge_says_it_is_the_platform_and_no_apology_is_kept.py)
+- [orchestrator/tests/test_f297_b_a_run_that_wrote_no_answer_says_so_plainly.py](orchestrator/tests/test_f297_b_a_run_that_wrote_no_answer_says_so_plainly.py)
+- [orchestrator/tests/test_f297_c_a_mission_step_with_no_answer_is_a_failed_attempt.py](orchestrator/tests/test_f297_c_a_mission_step_with_no_answer_is_a_failed_attempt.py)
+- [orchestrator/tests/test_f297_d_an_empty_reply_after_tool_calls_is_asked_for_its_answer.py](orchestrator/tests/test_f297_d_an_empty_reply_after_tool_calls_is_asked_for_its_answer.py)
+- [orchestrator/tests/test_f328_a_a_run_stopped_by_its_round_cap_ends_on_its_answer.py](orchestrator/tests/test_f328_a_a_run_stopped_by_its_round_cap_ends_on_its_answer.py)
+- [orchestrator/tests/test_tool_loop_narrated_actions.py](orchestrator/tests/test_tool_loop_narrated_actions.py)
 
 </details>
 
@@ -30,166 +29,300 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-The Tool Loop Prevention system is a critical safety and efficiency mechanism within Automatos AI. It prevents agents from entering infinite execution loops where they repeatedly call the same tools with identical or semantically similar parameters during a single conversation turn.
+Tool loop prevention bounds repeated tool execution and preserves a usable answer when a model gets stuck, narrates an action instead of calling a tool, or reaches its allowed number of tool rounds. The shared `ToolLoopExecutor` is designed for both the chat tool loop and the agent `execute_with_prompt` loop; its `ToolExecutionTracker` handles deduplication and per-tool limits. [orchestrator/modules/tools/execution/tool_loop.py:1-18](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:1-8]()
 
-This system addresses several key operational risks:
-- **Infinite Loops**: Prevents agents from getting stuck in "retry-fail" cycles.
-- **Cost Management**: Reduces LLM token consumption by blocking redundant tool invocations.
-- **API Protection**: Shields external integrations (e.g., Composio, GitHub, Slack) from excessive duplicate requests.
-- **Response Quality**: Forces the agent to pivot to alternative strategies when a specific tool approach is exhausted.
+This page covers loop control, tracker state, recovery nudges, and the answer-at-cap behavior. It does not describe tool authorization or the implementations behind individual tools. The loop provides pre-tool and post-tool hooks and forwards `workspace_id` to tool callbacks. [orchestrator/modules/tools/execution/tool_loop.py:11-18](), [orchestrator/modules/tools/execution/tool_loop.py:95-137]()
 
-Sources: [orchestrator/consumers/chatbot/service.py:1-13](), [orchestrator/consumers/chatbot/service.py:155-162]()
+Sources: [orchestrator/modules/tools/execution/tool_loop.py:1-18](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:1-8]()
 
 ---
 
-## System Overview
+## System Overview & Architecture
 
-The system primarily revolves around the `ToolExecutionTracker` class [orchestrator/consumers/chatbot/service.py:155-162](). It is instantiated during the lifecycle of a chat or agent execution turn to track state.
+The shared executor is intended to serve chat’s `_stream_tool_loop` and the agent `execute_with_prompt` inner loop. Centralizing the loop applies the same iteration cap and tracker-based deduplication across those callers. [orchestrator/modules/tools/execution/tool_loop.py:1-8](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:1-8]()
 
-The prevention logic implements three distinct layers of protection:
-1.  **Exact Deduplication**: Uses argument hashing to block bit-for-bit identical calls [orchestrator/consumers/chatbot/service.py:220-227]().
-2.  **Semantic Deduplication**: Uses string normalization and similarity ratios to block repetitive search queries [orchestrator/consumers/chatbot/service.py:230-244]().
-3.  **Execution Caps**: Enforces strict per-tool and per-turn iteration limits defined in `TOOL_RETRY_LIMITS` [orchestrator/consumers/chatbot/service.py:173-189]().
+`ToolLoopExecutor` receives an LLM callback and tool callback, and optionally accepts streaming, pre-tool, and post-tool hooks. It returns a `ToolLoopResult` containing the response, iteration count, and flags for forced completion and reaching the cap. The tracker holds per-run execution and outcome state. [orchestrator/modules/tools/execution/tool_loop.py:86-150](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:69-129]()
 
-Sources: [orchestrator/consumers/chatbot/service.py:155-190](), [orchestrator/consumers/chatbot/service.py:209-217]()
+The prevention and recovery layers include:
 
----
+1. **Iteration cap:** limits the number of tool rounds. [orchestrator/modules/tools/execution/tool_loop.py:5-8]()
+2. **Exact-call deduplication:** identifies repeated tool calls with matching canonical arguments. [orchestrator/modules/tools/execution/tool_execution_tracker.py:69-76]()
+3. **Search-query deduplication:** detects repeated or similar queries from earlier model responses. [orchestrator/modules/tools/execution/tool_execution_tracker.py:42-58](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:78-82]()
+4. **Per-tool limits:** bounds repeated execution, with prefix-aware defaults and dispatcher-aware counting described by the tracker. [orchestrator/modules/tools/execution/tool_execution_tracker.py:69-100]()
+5. **Reply correctness checks:** handles cases such as citing an offered tool that did not run or narrating an action without making a tool call. A completed-action claim without a successful matching action is handled by replacing the claim in the reply, not by retrying the model. [orchestrator/modules/tools/execution/nudges.py:43-59](), [orchestrator/tests/test_f099_a_cited_source_that_did_not_run.py:70-82](), [orchestrator/tests/test_tool_loop_narrated_actions.py:111-139](), [orchestrator/tests/test_f108_b_a_claimed_action_is_nudged_once.py:8-11]()
+6. **Bounded recovery:** retries a truncated tool call or requests a missing answer once; non-chat runs can also get one tools-disabled answer attempt after reaching the cap. [orchestrator/modules/tools/execution/tool_loop.py:7-11](), [orchestrator/modules/tools/execution/nudges.py:66-79](), [orchestrator/modules/tools/execution/cap_answer.py:63-77]()
 
-## Architecture and Data Flow
+Sources: [orchestrator/modules/tools/execution/tool_loop.py:1-18](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:42-100](), [orchestrator/modules/tools/execution/nudges.py:43-79](), [orchestrator/modules/tools/execution/cap_answer.py:63-77]()
 
-The following diagrams illustrate how the `ToolExecutionTracker` bridges the natural language intent (queries) with the code-level execution state.
+### Tool Execution Tracking and Loop Architecture
 
-### Tool Execution Tracking Logic
+A model’s tool calls enter the shared loop as a round. The tracker evaluates calls before execution; allowed calls reach the callback, while skipped calls are recorded and represented in the loop’s continued conversation. The executor’s result reports the final response and cap status. [orchestrator/modules/tools/execution/tool_loop.py:86-150](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:103-136]()
 
-This diagram shows how the `StreamingChatService` or `AgentFactory` utilizes the tracker during the LLM's tool-calling loop.
-
-**Diagram: Tool Loop Prevention Flow**
+**Diagram: Request and Tool-Call Flow from Natural Language Space to Code Entities**
 ```mermaid
-graph TD
-    subgraph "Execution Context [orchestrator/consumers/chatbot/service.py]"
-        Stream["StreamingChatService.stream_response_with_agent()"]
-        Loop["Tool Loop (Converged Spine)"]
-    end
+flowchart TD
+    UserRequest["Natural-language request"]
+    ModelResponse["LLM response with tool_calls"]
+    Executor["ToolLoopExecutor.run"]
+    Round["ToolExecutionTracker.begin_round"]
+    Dedup["ToolExecutionTracker.should_skip_execution"]
+    Callback["tool_callback(name, args, call_id, workspace_id)"]
+    Record["ToolExecutionTracker.record_execution"]
+    Outcome["ToolExecutionTracker.record_outcome"]
+    Skip["Skipped-call reason"]
+    Next["Next LLM response"]
+    Cap["ToolLoopResult.max_iterations_reached"]
 
-    subgraph "ToolExecutionTracker (Code Entity Space)"
-        Tracker["ToolExecutionTracker [orchestrator/consumers/chatbot/service.py:155]"]
-        ExactSet["exact_executions (Set[Tuple[str, str]]) [orchestrator/consumers/chatbot/service.py:192]"]
-        SearchDict["search_queries (Dict[str, List[str]]) [orchestrator/consumers/chatbot/service.py:193]"]
-        CountDict["tool_counts (Dict[str, int]) [orchestrator/consumers/chatbot/service.py:194]"]
-    end
-
-    subgraph "Natural Language Space"
-        UserQuery["User Search Intent"]
-        SimilarQuery["'find bug' vs 'find the bug'"]
-    end
-
-    Stream -->|Initialize| Tracker
-    Loop -->|should_skip_execution()| Tracker
-    Tracker -->|Verify Limit| CountDict
-    Tracker -->|Verify Hash| ExactSet
-    Tracker -->|Verify Similarity| SearchDict
-    SearchDict -.->|_normalize_query()| UserQuery
-    SearchDict -.->|_queries_are_similar()| SimilarQuery
-    
-    Tracker -->|Decision (bool, reason)| Loop
-    Loop -->|If Allowed| Exec["UnifiedToolExecutor [orchestrator/modules/tools/tool_router.py]"]
-    Exec -->|record_execution()| Tracker
+    UserRequest --> ModelResponse
+    ModelResponse --> Executor
+    Executor --> Round
+    Round --> Dedup
+    Dedup -->|"allowed"| Callback
+    Callback --> Record
+    Callback --> Outcome
+    Dedup -->|"duplicate or capped"| Skip
+    Outcome --> Next
+    Skip --> Next
+    Executor --> Cap
 ```
 
-Sources: [orchestrator/consumers/chatbot/service.py:155-194](), [orchestrator/consumers/chatbot/service.py:209-244](), [orchestrator/modules/agents/factory/agent_factory.py:43-45]()
+Sources: [orchestrator/modules/tools/execution/tool_loop.py:86-150](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:103-136]()
+
+The next diagram connects a natural-language request to search-query comparison. The tracker extracts and normalizes query text, then compares it with queries recorded for earlier rounds. The comparison described by the tracker uses normalized strings and `SequenceMatcher`; it is not embedding-based semantic search. [orchestrator/modules/tools/execution/tool_execution_tracker.py:42-58](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:78-82]()
+
+**Diagram: Search-Spiral Detection from Natural Language Space to Code Entities**
+```mermaid
+flowchart LR
+    EarlierQuery["Earlier model-response search query"]
+    NewQuery["New natural-language search query"]
+    ToolName["SEARCH_TOOLS tool name"]
+    Extract["_extract_query_from_args"]
+    Normalize["_normalize_query"]
+    Similar["_queries_are_similar"]
+    Round["ToolExecutionTracker.begin_round"]
+    Decision["ToolExecutionTracker.should_skip_execution"]
+    Allowed["Tool callback may run"]
+    Skipped["Search skipped"]
+
+    NewQuery --> Extract
+    ToolName --> Decision
+    Extract --> Normalize
+    EarlierQuery --> Normalize
+    Normalize --> Similar
+    Round --> Decision
+    Similar --> Decision
+    Decision -->|"not repeated"| Allowed
+    Decision -->|"similar earlier query"| Skipped
+```
+
+Sources: [orchestrator/modules/tools/execution/tool_execution_tracker.py:42-66](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:78-82](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:131-135]()
+
+### Key Data and Callback Contracts
+
+| Entity | Role |
+|---|---|
+| `ToolExecutionTracker` | Maintains per-run deduplication, call counts, outcomes, and skipped-call state. [orchestrator/modules/tools/execution/tool_execution_tracker.py:69-129]() |
+| `ToolLoopExecutor` | Coordinates the LLM and tool callbacks; supports iteration caps, streaming, and pre-/post-tool hooks. [orchestrator/modules/tools/execution/tool_loop.py:1-18](), [orchestrator/modules/tools/execution/tool_loop.py:134-150]() |
+| `ToolPostResult` | Lets a post-tool hook force a final response, append follow-up messages, or override tool content sent to the LLM. [orchestrator/modules/tools/execution/tool_loop.py:95-111]() |
+| `PreToolResult` | Lets a pre-tool hook block execution with explanatory content or replace the input arguments. [orchestrator/modules/tools/execution/tool_loop.py:113-137]() |
+| `ToolLoopResult` | Carries the response, iteration count, and flags for forced completion and reaching the maximum. [orchestrator/modules/tools/execution/tool_loop.py:139-150]() |
+| `TRACKERS_MADE` | A `ContextVar` through which trackers can be collected during a chat turn. [orchestrator/modules/tools/execution/tool_execution_tracker.py:36-40](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:127-129]() |
+
+Sources: [orchestrator/modules/tools/execution/tool_loop.py:95-150](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:36-40](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:69-129]()
 
 ---
 
 ## Deduplication Strategies
 
-### 1. Exact Deduplication (Hashing)
-The system prevents the exact same tool from being called with the exact same arguments.
-- **Mechanism**: The `_hash_args` method converts the `tool_args` dictionary into a sorted JSON string and generates an MD5 hex digest [orchestrator/consumers/chatbot/service.py:265-271]().
-- **Storage**: The tracker maintains a set of `(tool_name, args_hash)` tuples in `exact_executions` [orchestrator/consumers/chatbot/service.py:192]().
+### 1. Exact Deduplication (Parameter Hash)
 
-Sources: [orchestrator/consumers/chatbot/service.py:192](), [orchestrator/consumers/chatbot/service.py:220-227](), [orchestrator/consumers/chatbot/service.py:265-271]()
+The tracker stores exact-call identity as `(tool_name, argument_hash)`. `_hash_args` serializes arguments with sorted JSON keys before hashing, so dictionary key order does not by itself distinguish otherwise equivalent arguments. [orchestrator/modules/tools/execution/tool_execution_tracker.py:103-105](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:137-138]()
 
-### 2. Semantic Deduplication (Search Tools)
-For tools defined in `SEARCH_TOOLS` (e.g., `search_knowledge`, `smart_query_database`), the system performs fuzzy matching on the query string [orchestrator/consumers/chatbot/service.py:164-171]().
-- **Normalization**: `_normalize_query` removes punctuation, converts to lowercase, and strips extra whitespace using regex `[^\w\s]` [orchestrator/consumers/chatbot/service.py:73-80]().
-- **Similarity**: `_queries_are_similar` uses `difflib.SequenceMatcher` with a default threshold of **0.75** [orchestrator/consumers/chatbot/service.py:82-91]().
-- **Extraction**: `_extract_query_from_args` looks for keys like `query`, `search_query`, `q`, `text`, `question`, `prompt` [orchestrator/consumers/chatbot/service.py:94-100]().
+The tracker also records outcomes to distinguish a successful call from a failed or approval-pending call. A repeated call can therefore be described accurately rather than being presented as newly completed. [orchestrator/modules/tools/execution/tool_execution_tracker.py:22-38](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:112-123]()
 
-Sources: [orchestrator/consumers/chatbot/service.py:73-100](), [orchestrator/consumers/chatbot/service.py:164-171](), [orchestrator/consumers/chatbot/service.py:230-244]()
+| Repeat case | Tracker response |
+|---|---|
+| Previous call failed | `REFUSED_AGAIN` reports that the exact call already failed and includes the refusal text. [orchestrator/modules/tools/execution/tool_execution_tracker.py:22-26]() |
+| Previous call succeeded | `RAN_ONCE` reports that the identical call already ran. [orchestrator/modules/tools/execution/tool_execution_tracker.py:27-28]() |
+| Previous call is waiting for approval | `WAITING_AGAIN` reports that the call remains pending and was not requested again. [orchestrator/modules/tools/execution/tool_execution_tracker.py:30-32]() |
 
-### 3. Execution Limits (Retry Caps)
-The `TOOL_RETRY_LIMITS` dictionary defines the maximum number of times a specific tool can be invoked in one turn [orchestrator/consumers/chatbot/service.py:173-189]().
+Tests cover repeated refused and successful calls and the case where changed arguments remain eligible for execution. [orchestrator/tests/test_f309_d_a_repeat_of_a_refused_call_says_it_was_refused.py:28-45]()
 
-| Tool Name / Category | Limit | Rationale |
-| :--- | :--- | :--- |
-| `smart_query_database` | 2 | Expensive and self-corrects internally [orchestrator/consumers/chatbot/service.py:184]() |
-| `read_file` | 8 | Higher limit for iterative code reading [orchestrator/consumers/chatbot/service.py:179]() |
-| `composio_execute` | 5 | Standard external action limit [orchestrator/consumers/chatbot/service.py:174]() |
-| `platform_default` | 25 | High limit for platform introspection [orchestrator/consumers/chatbot/service.py:186]() |
-| `default` | 5 | Standard fallback [orchestrator/consumers/chatbot/service.py:188]() |
+Sources: [orchestrator/modules/tools/execution/tool_execution_tracker.py:22-38](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:103-123](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:137-138](), [orchestrator/tests/test_f309_d_a_repeat_of_a_refused_call_says_it_was_refused.py:28-45]()
 
-Sources: [orchestrator/consumers/chatbot/service.py:173-189]()
+### 2. Similar-Query Deduplication
+
+The tracker defines search-oriented tools in `SEARCH_TOOLS`, including `search_knowledge`, `semantic_search`, `search_codebase`, `search_tables`, and `query_database`. `_normalize_query` lowercases text, removes punctuation, and collapses whitespace. `_queries_are_similar` accepts normalized equality or a `SequenceMatcher` ratio meeting its configured threshold. [orchestrator/modules/tools/execution/tool_execution_tracker.py:42-58](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:78-82]()
+
+`_extract_query_from_args` looks for query text under keys including `query`, `search_query`, `q`, `text`, `question`, and `prompt`. `begin_round()` snapshots the per-tool query count at the start of a round; this lets multiple distinct searches in one response be treated as a batch rather than automatically treating each as a retry of another. Similar searches from earlier rounds can still be detected. [orchestrator/modules/tools/execution/tool_execution_tracker.py:61-66](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:131-135]()
+
+Tests cover distinct searches in a batch, an identical query repeated within a batch, and a rephrased query in a later response. [orchestrator/tests/test_f120_a_batch_of_questions_is_searched.py:41-57](), [orchestrator/tests/test_f120_a_batch_of_questions_is_searched.py:83-96]()
+
+Sources: [orchestrator/modules/tools/execution/tool_execution_tracker.py:42-66](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:78-82](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:131-135](), [orchestrator/tests/test_f120_a_batch_of_questions_is_searched.py:41-57](), [orchestrator/tests/test_f120_a_batch_of_questions_is_searched.py:83-96]()
+
+### 3. Per-Tool Limits and Dispatcher-Aware Counting
+
+The tracker defines default limits for tool categories and specific tool names. Its documentation describes prefix-aware limits and dispatcher-aware counting for `platform_execute`. [orchestrator/modules/tools/execution/tool_execution_tracker.py:69-100]()
+
+| Tool or limit key | Limit |
+|---|---:|
+| `composio_execute` | 5 |
+| `search_knowledge` | 12 |
+| `semantic_search` | 5 |
+| `search_codebase` | 5 |
+| `smart_query_database` | 5 |
+| `query_database` | 5 |
+| `list_directory` | 5 |
+| `read_file` | 8 |
+| `write_file` | 5 |
+| `platform_default` | 25 |
+| `workspace_default` | 8 |
+| `default` | 5 |
+
+The `search_knowledge` limit accommodates multiple distinct questions in a single user request; the tests verify that twelve distinct searches can run and a thirteenth is skipped. [orchestrator/modules/tools/execution/tool_execution_tracker.py:84-100](), [orchestrator/tests/test_f120_a_batch_of_questions_is_searched.py:59-66]()
+
+Sources: [orchestrator/modules/tools/execution/tool_execution_tracker.py:69-100](), [orchestrator/tests/test_f120_a_batch_of_questions_is_searched.py:59-66]()
 
 ---
 
-## Implementation Details
+## Nudges, Unrun Sources, and Claim Validation
 
-### ToolExecutionTracker Class
-The `ToolExecutionTracker` is the core state container for prevention logic.
+Recovery checks address mismatches between the response and the actions or evidence in the current turn. They are separate from call deduplication: deduplication controls whether a tool call runs again, while the reply checks determine whether a response needs correction or a bounded retry. [orchestrator/modules/tools/execution/nudges.py:43-79](), [orchestrator/tests/test_f099_a_cited_source_that_did_not_run.py:70-82]()
 
-**Diagram: ToolExecutionTracker Structure**
+- **Unrun source citation:** `cited_tool_not_run` checks whether a reply names an offered tool as a source even though that tool did not run. The recovery message asks the model either to run that tool or say the answer came from an earlier conversation. [orchestrator/modules/tools/execution/nudges.py:51-59](), [orchestrator/tests/test_f099_a_cited_source_that_did_not_run.py:32-40](), [orchestrator/tests/test_f099_a_cited_source_that_did_not_run.py:70-82]()
+- **Narrated action without a tool call:** `NARRATION_RECOVERY_MSG` tells the model that describing an action did not execute it. Tests verify that the loop nudges once, that a retry can make a real tool call, and that another narrated reply does not prompt a second nudge. [orchestrator/modules/tools/execution/nudges.py:43-49](), [orchestrator/tests/test_tool_loop_narrated_actions.py:111-139]()
+- **Unsupported completed-action claim:** An unbacked claim is handled by taking the claim sentence out of the reply and inserting a not-done line; the model is not called again. A refused action does not back the claim, while a successful matching action does. [orchestrator/tests/test_f108_b_a_claimed_action_is_nudged_once.py:61-90](), [orchestrator/tests/test_f108_claimed_actions_need_a_result.py:62-70]()
+- **Platform-check framing:** Nudge messages are framed as an automatic platform check rather than a message from the owner. The nudge utilities also remove an opening apology from a reply when the remaining content can be retained. [orchestrator/modules/tools/execution/nudges.py:119-127](), [orchestrator/tests/test_f295_d_a_nudge_says_it_is_the_platform_and_no_apology_is_kept.py:23-50]()
+
+Sources: [orchestrator/modules/tools/execution/nudges.py:43-59](), [orchestrator/modules/tools/execution/nudges.py:119-127](), [orchestrator/tests/test_f099_a_cited_source_that_did_not_run.py:32-40](), [orchestrator/tests/test_tool_loop_narrated_actions.py:111-139](), [orchestrator/tests/test_f108_b_a_claimed_action_is_nudged_once.py:61-90]()
+
+---
+
+## Error Recovery, Truncation, Cap Answers, and Stuck-Loop Learning
+
+### 1. Truncated Tool-Call Recovery
+
+If the model response ends with `finish_reason == "length"` while writing a tool call, the executor’s documented recovery is to add a shorter-content instruction and call the LLM again rather than repeatedly retrying malformed JSON. `LENGTH_RECOVERY_MSG` explains that the arguments were truncated and asks for concise content. [orchestrator/modules/tools/execution/tool_loop.py:7-11](), [orchestrator/modules/tools/execution/nudges.py:66-74]()
+
+Sources: [orchestrator/modules/tools/execution/tool_loop.py:7-11](), [orchestrator/modules/tools/execution/nudges.py:66-74]()
+
+### 2. Answering at the Iteration Cap
+
+`ran_out_of_rounds` identifies a result that reached the configured cap while the pending response still requests tool calls. The `answers_at_the_cap` wrapper applies to non-chat runs: it makes one additional LLM call with tools disabled. [orchestrator/modules/tools/execution/cap_answer.py:46-60](), [orchestrator/modules/tools/execution/cap_answer.py:80-92]()
+
+`answer_at_the_cap` retains the pending response’s text in conversation history, adds `CAP_ANSWER_MSG`, and asks for an answer using results already available. It returns no replacement if the reply is blank or still asks for tools. On failure or no usable answer, the wrapper returns the original loop result. Chat is excluded because its caller handles the cap answer itself. [orchestrator/modules/tools/execution/cap_answer.py:37-44](), [orchestrator/modules/tools/execution/cap_answer.py:63-77](), [orchestrator/modules/tools/execution/cap_answer.py:85-100]()
+
+Sources: [orchestrator/modules/tools/execution/cap_answer.py:37-60](), [orchestrator/modules/tools/execution/cap_answer.py:63-77](), [orchestrator/modules/tools/execution/cap_answer.py:80-100]()
+
+### 3. Empty Answer After Tool Calls
+
+`MISSING_ANSWER_MSG` asks for the completed work itself when the response after tool execution is empty. The test verifies that the request follows the tool result, that a non-empty answer is not requested again, and that a second empty response does not trigger another retry. [orchestrator/modules/tools/execution/nudges.py:75-79](), [orchestrator/tests/test_f297_d_an_empty_reply_after_tool_calls_is_asked_for_its_answer.py:46-60]()
+
+Sources: [orchestrator/modules/tools/execution/nudges.py:75-79](), [orchestrator/tests/test_f297_d_an_empty_reply_after_tool_calls_is_asked_for_its_answer.py:46-60]()
+
+### 4. Stuck-Loop Learning
+
+`_round_signature` fingerprints a round’s tool calls using their action names and arguments. `_record_stuck_learning` attempts to save a stuck-loop failure through `capture_tool_outcome`, scoped to the workspace. Capture errors are caught so that learning does not raise into the tool loop; the fallback is a log message. [orchestrator/modules/tools/execution/tool_loop.py:46-57](), [orchestrator/modules/tools/execution/tool_loop.py:60-84]()
+
+Sources: [orchestrator/modules/tools/execution/tool_loop.py:46-84]()
+
+### 5. End-to-End Recovery Flow
+
+Recovery remains bounded: truncation recovery retries the LLM, empty post-tool answers get one request, and non-chat cap handling makes at most one tools-disabled answer call. Narration recovery is also limited to one nudge. [orchestrator/modules/tools/execution/tool_loop.py:7-11](), [orchestrator/modules/tools/execution/cap_answer.py:63-77](), [orchestrator/tests/test_f297_d_an_empty_reply_after_tool_calls_is_asked_for_its_answer.py:46-60](), [orchestrator/tests/test_tool_loop_narrated_actions.py:130-139]()
+
+**Diagram: Bounded Recovery Paths**
 ```mermaid
-classDiagram
-    class ToolExecutionTracker {
-        +Set exact_executions
-        +Dict search_queries
-        +Dict tool_counts
-        +SEARCH_TOOLS: Set
-        +TOOL_RETRY_LIMITS: Dict
-        +should_skip_execution(tool_name, tool_args) Tuple
-        +record_execution(tool_name, tool_args) void
-        +get_execution_count(tool_name) int
-        -_hash_args(tool_args) str
-    }
-    class SearchUtilities {
-        +_normalize_query(query) str
-        +_queries_are_similar(q1, q2) bool
-        +_extract_query_from_args(tool_name, tool_args) Optional
-    }
-    ToolExecutionTracker ..> SearchUtilities : uses
+flowchart TD
+    Response["LLM response"]
+    ToolCall["Response requests tool call"]
+    ToolRun["Tool callback runs"]
+    Truncated["finish_reason is length"]
+    LengthRetry["Length-recovery message and LLM retry"]
+    Empty["Post-tool response is blank"]
+    MissingAnswer["MISSING_ANSWER_MSG with one answer request"]
+    Cap["ToolLoopResult reaches max_iterations with pending tool_calls"]
+    Chat["Current request is chat"]
+    Agent["Non-chat run"]
+    CapAnswer["answer_at_the_cap with tools disabled"]
+    Return["Return loop result or recovered response"]
+
+    Response --> Truncated
+    Truncated --> LengthRetry
+    Response --> ToolCall
+    ToolCall --> ToolRun
+    ToolRun --> Empty
+    Empty --> MissingAnswer
+    ToolRun --> Cap
+    Cap --> Chat
+    Cap --> Agent
+    Chat --> Return
+    Agent --> CapAnswer
+    LengthRetry --> Return
+    MissingAnswer --> Return
+    CapAnswer --> Return
 ```
 
-Sources: [orchestrator/consumers/chatbot/service.py:155-271](), [orchestrator/consumers/chatbot/service.py:73-100]()
+Sources: [orchestrator/modules/tools/execution/tool_loop.py:7-11](), [orchestrator/modules/tools/execution/cap_answer.py:46-77](), [orchestrator/tests/test_f297_d_an_empty_reply_after_tool_calls_is_asked_for_its_answer.py:46-60]()
 
-### Converged Tool Loop Spine
-Automatos uses a converged tool-loop spine shared between chat and agent execution (PRD-142) [orchestrator/consumers/chatbot/service.py:30-35](). 
+### Tool Loop Types and Tracker State
 
-1.  **Check**: Before calling the executor, `should_skip_execution` is invoked [orchestrator/consumers/chatbot/service.py:209-217]().
-2.  **Bypass**: If a skip is triggered, the system returns a `(True, reason)` tuple. The reason is fed back into the LLM loop to explain why the tool was not run [orchestrator/consumers/chatbot/service.py:224, 243]().
-3.  **Telemetry**: Every tool call is wrapped in a `caller_context` built by `build_tool_caller_context`, which includes `turn_id` and `prior_action` to help the tracker and telemetry service group sequential calls [orchestrator/consumers/chatbot/service.py:103-152]().
+`ToolLoopExecutor` exposes the loop callbacks and result hooks. `ToolExecutionTracker` holds the deduplication and per-run outcome state, while `ToolLoopResult` represents the final response and cap status. [orchestrator/modules/tools/execution/tool_loop.py:86-150](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:69-129]()
 
-Sources: [orchestrator/consumers/chatbot/service.py:30-35](), [orchestrator/consumers/chatbot/service.py:103-152](), [orchestrator/consumers/chatbot/service.py:209-246]()
+**Diagram: Core Tool Loop Types**
+```mermaid
+classDiagram
+    class ToolLoopExecutor {
+        +LLMCallback llm_callback
+        +ToolCallback tool_callback
+        +EventCallback on_event
+        +ToolPostResult on_tool_result
+        +PreToolHook on_pre_tool
+        +run() ToolLoopResult
+    }
 
----
+    class ToolExecutionTracker {
+        +exact_executions
+        +search_queries
+        +tool_counts
+        +succeeded
+        +failed
+        +outcomes
+        +refused
+        +waiting
+        +ran_as
+        +skipped
+        +begin_round()
+        +should_skip_execution()
+        +record_execution()
+        +record_outcome()
+    }
 
-## Smart Tool Router and Intent Classifier Integration
+    class ToolLoopResult {
+        +response
+        +iterations
+        +forced_final
+        +max_iterations_reached
+    }
 
-Tool loop prevention operates in tandem with the `SmartToolRouter` and `SmartIntentClassifier` to ensure agents receive only the relevant tool subset and maintain clear boundaries.
+    class ToolPostResult {
+        +force_final
+        +final_content
+        +followup_messages
+        +llm_context_override
+    }
 
-- **SmartIntentClassifier**: Classifies the incoming message into categories like `DATA_QUERY`, `SEARCH`, `EXTERNAL_ACTION`, `CREATION`, or `MEMORY_RECALL` [orchestrator/consumers/chatbot/intent_classifier.py:23-34](). It dictates whether tools are needed at all via `requires_tools` [orchestrator/consumers/chatbot/intent_classifier.py:41]().
-- **SmartToolRouter**: Maps classified intents to `ActionRegistry` categories (`_INTENT_TO_REGISTRY_CATEGORIES`) and can delegate semantic ranking to `GraphRouter` when enabled, avoiding tool sprawl that could trigger confusing retry loops [orchestrator/consumers/chatbot/smart_tool_router.py:11-51]().
+    class PreToolResult {
+        +block
+        +block_content
+        +updated_input
+    }
 
-Sources: [orchestrator/consumers/chatbot/intent_classifier.py:23-46](), [orchestrator/consumers/chatbot/smart_tool_router.py:11-51]()
+    ToolLoopExecutor --> ToolExecutionTracker : "uses"
+    ToolLoopExecutor ..> ToolLoopResult : "returns"
+    ToolLoopExecutor ..> ToolPostResult : "post-tool hook"
+    ToolLoopExecutor ..> PreToolResult : "pre-tool hook"
+```
 
----
-
-## Interaction with AutoBrain (PRD-68)
-
-The `AutoBrain` (Complexity Assessor) influences the tool loop by providing `tool_hints` and determining if the request is an `ATOM` (no tools) or a `MOLECULE` (single tool) [orchestrator/consumers/chatbot/auto.py:47-53]().
-
-- **ATOM**: Complexity assessment skips the tool loop entirely [orchestrator/consumers/chatbot/auto.py:49]().
-- **Tool Hints**: For higher complexity levels, `AutoBrain` injects `tool_hints` into the orchestrator, which the `ToolExecutionTracker` then monitors during the resulting multi-turn execution [orchestrator/consumers/chatbot/auto.py:76, 121-176]().
-
-Sources: [orchestrator/consumers/chatbot/auto.py:47-53](), [orchestrator/consumers/chatbot/auto.py:76](), [orchestrator/consumers/chatbot/auto.py:121-176]()
+Sources: [orchestrator/modules/tools/execution/tool_loop.py:86-150](), [orchestrator/modules/tools/execution/tool_execution_tracker.py:69-129]()
 
 ---

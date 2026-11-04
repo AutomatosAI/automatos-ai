@@ -9,183 +9,218 @@ The following files were used as context for generating this wiki page:
 - [docs/PRDS/PRD-226-AUTO-MANAGER-DOCTRINE.md](docs/PRDS/PRD-226-AUTO-MANAGER-DOCTRINE.md)
 - [docs/auto-cto-custom-soul.txt](docs/auto-cto-custom-soul.txt)
 - [docs/auto-cto-soul.md](docs/auto-cto-soul.md)
+- [frontend/components/assignments/__tests__/mission-team-copy.test.tsx](frontend/components/assignments/__tests__/mission-team-copy.test.tsx)
+- [frontend/components/assignments/mission-card-constellation.tsx](frontend/components/assignments/mission-card-constellation.tsx)
+- [frontend/components/assignments/studio/entry-grid.tsx](frontend/components/assignments/studio/entry-grid.tsx)
+- [orchestrator/alembic/versions/20260224_add_semantic_routing_columns.py](orchestrator/alembic/versions/20260224_add_semantic_routing_columns.py)
+- [orchestrator/alembic/versions/20260225_create_marketplace_widgets.py](orchestrator/alembic/versions/20260225_create_marketplace_widgets.py)
+- [orchestrator/alembic/versions/20260225_create_sdk_api_keys.py](orchestrator/alembic/versions/20260225_create_sdk_api_keys.py)
+- [orchestrator/alembic/versions/20260225_create_widget_installs_reviews.py](orchestrator/alembic/versions/20260225_create_widget_installs_reviews.py)
+- [orchestrator/alembic/versions/20260225_create_workspace_shares.py](orchestrator/alembic/versions/20260225_create_workspace_shares.py)
 - [orchestrator/alembic/versions/20260226_add_cto_agent_columns.py](orchestrator/alembic/versions/20260226_add_cto_agent_columns.py)
 - [orchestrator/alembic/versions/20260226_merge_heads_for_cto_agent.py](orchestrator/alembic/versions/20260226_merge_heads_for_cto_agent.py)
 - [orchestrator/consumers/chatbot/cto_prompt_builder.py](orchestrator/consumers/chatbot/cto_prompt_builder.py)
-- [orchestrator/consumers/chatbot/intent_classifier.py](orchestrator/consumers/chatbot/intent_classifier.py)
 - [orchestrator/consumers/chatbot/personality.py](orchestrator/consumers/chatbot/personality.py)
-- [orchestrator/consumers/chatbot/smart_tool_router.py](orchestrator/consumers/chatbot/smart_tool_router.py)
+- [orchestrator/core/routing/semantic_indexer.py](orchestrator/core/routing/semantic_indexer.py)
 - [orchestrator/core/seeds/auto-cto-custom-soul.txt](orchestrator/core/seeds/auto-cto-custom-soul.txt)
+- [orchestrator/core/seeds/llm_tier_settings.py](orchestrator/core/seeds/llm_tier_settings.py)
+- [orchestrator/core/seeds/platform-management-skill.md](orchestrator/core/seeds/platform-management-skill.md)
+- [orchestrator/core/seeds/seed_auto_agent.py](orchestrator/core/seeds/seed_auto_agent.py)
 - [orchestrator/core/seeds/seed_cto_agent.py](orchestrator/core/seeds/seed_cto_agent.py)
-- [orchestrator/core/services/auto_autonomy.py](orchestrator/core/services/auto_autonomy.py)
+- [orchestrator/core/seeds/seed_packages.py](orchestrator/core/seeds/seed_packages.py)
+- [orchestrator/core/seeds/seed_socials_package.py](orchestrator/core/seeds/seed_socials_package.py)
+- [orchestrator/core/seeds/utterances/socials.yaml](orchestrator/core/seeds/utterances/socials.yaml)
 - [orchestrator/modules/coordination/dispatch_contract.py](orchestrator/modules/coordination/dispatch_contract.py)
-- [orchestrator/modules/tools/discovery/actions_autonomy.py](orchestrator/modules/tools/discovery/actions_autonomy.py)
-- [orchestrator/modules/tools/discovery/handlers_autonomy.py](orchestrator/modules/tools/discovery/handlers_autonomy.py)
-- [orchestrator/modules/tools/execution/exec_research.py](orchestrator/modules/tools/execution/exec_research.py)
-- [orchestrator/tests/security/test_nl2sql_tenancy.py](orchestrator/tests/security/test_nl2sql_tenancy.py)
-- [orchestrator/tests/security/test_w3_full_autonomy_gate.py](orchestrator/tests/security/test_w3_full_autonomy_gate.py)
-- [orchestrator/tests/test_nl2sql_agent_path.py](orchestrator/tests/test_nl2sql_agent_path.py)
-- [orchestrator/tests/test_nl2sql_semantic_audit_templates.py](orchestrator/tests/test_nl2sql_semantic_audit_templates.py)
-- [orchestrator/tests/test_prd143_manifest_parity.py](orchestrator/tests/test_prd143_manifest_parity.py)
-- [orchestrator/tests/test_prd232_us001_dispatcher_survives_route.py](orchestrator/tests/test_prd232_us001_dispatcher_survives_route.py)
-- [orchestrator/tests/test_prd232_us002_flag_split.py](orchestrator/tests/test_prd232_us002_flag_split.py)
-- [orchestrator/tests/test_prd263_harness_report_only.py](orchestrator/tests/test_prd263_harness_report_only.py)
-- [orchestrator/tests/test_us014_graph_router_delegation.py](orchestrator/tests/test_us014_graph_router_delegation.py)
-- [orchestrator/tests/test_us015_registry_intent_filter.py](orchestrator/tests/test_us015_registry_intent_filter.py)
-- [orchestrator/tests/test_w3_auto_autonomy_service.py](orchestrator/tests/test_w3_auto_autonomy_service.py)
+- [orchestrator/modules/socials/topics.py](orchestrator/modules/socials/topics.py)
+- [orchestrator/modules/tools/discovery/actions_socials.py](orchestrator/modules/tools/discovery/actions_socials.py)
+- [orchestrator/modules/tools/discovery/handlers_socials.py](orchestrator/modules/tools/discovery/handlers_socials.py)
+- [orchestrator/modules/tools/discovery/question_turns.py](orchestrator/modules/tools/discovery/question_turns.py)
+- [orchestrator/modules/tools/discovery/social_post_list.py](orchestrator/modules/tools/discovery/social_post_list.py)
+- [orchestrator/services/package_installer.py](orchestrator/services/package_installer.py)
+- [orchestrator/tests/test_f379_e_the_posts_are_listed_with_what_they_need.py](orchestrator/tests/test_f379_e_the_posts_are_listed_with_what_they_need.py)
+- [orchestrator/tests/test_f381_a_a_how_to_question_changes_nothing.py](orchestrator/tests/test_f381_a_a_how_to_question_changes_nothing.py)
+- [orchestrator/tests/test_package_installer_ref_resolution.py](orchestrator/tests/test_package_installer_ref_resolution.py)
+- [orchestrator/tests/test_prd226_doctrine.py](orchestrator/tests/test_prd226_doctrine.py)
+- [orchestrator/tests/test_prd230_packages_seed.py](orchestrator/tests/test_prd230_packages_seed.py)
+- [orchestrator/tests/test_prd251w1_social_post_tools.py](orchestrator/tests/test_prd251w1_social_post_tools.py)
+- [orchestrator/tests/test_prd251w1_socials_package.py](orchestrator/tests/test_prd251w1_socials_package.py)
+- [orchestrator/tests/test_prd251w3_one_way_out.py](orchestrator/tests/test_prd251w3_one_way_out.py)
+- [orchestrator/tests/test_prd263_persona_lift.py](orchestrator/tests/test_prd263_persona_lift.py)
+- [orchestrator/tests/test_public_counts_auto_and_tier_tooltips.py](orchestrator/tests/test_public_counts_auto_and_tier_tooltips.py)
 
 </details>
 
 
 
+
+
 ## Purpose and Scope
 
-Agent Personas define the personality, behavior, and voice of AI agents in the Automatos AI platform. A persona consists of a system prompt, voice profile, and behavioral metadata that shapes how an agent communicates and approaches tasks. The system supports a multi-tier approach: predefined global personas, custom workspace-level personas, and specialized **System Agents** (like the Auto CTO) that possess platform-wide awareness and code-level consciousness.
+An agent persona is prompt-level identity and behavioral guidance. This page describes the workspace-configurable Automatos chat personality, the per-workspace Auto agent and its Manager’s Doctrine, the global CTO soul seed, and seeded marketplace-agent personas. It distinguishes those prompt mechanisms from voice profiles: the supplied implementation shows communication-style settings, but does not provide enough source to document a separate audio voice-profile system. [orchestrator/consumers/chatbot/personality.py:5-10](), [orchestrator/core/seeds/seed_auto_agent.py:5-15](), [orchestrator/core/seeds/auto-cto-custom-soul.txt:1-27]()
 
-This document covers:
-- The `Agent` data structure and its role in the persona lifecycle [orchestrator/core/models/core.py:183-261]().
-- The three-mode persona system (None, Predefined, Custom) and the personality module [orchestrator/consumers/chatbot/personality.py:1-124]().
-- **System Agents**: Implementation of the Auto CTO seed agent, role-based persona injection, and custom soul loading [orchestrator/core/seeds/seed_cto_agent.py:1-115]().
-- **Voice Profiles**: Management of audio profiles and integration with agent settings.
-- Implementation of persona selection and category mapping [frontend/lib/agent-constants.ts:25-65]().
-
-**Sources:** [orchestrator/core/models/core.py:183-261](), [orchestrator/consumers/chatbot/personality.py:1-124](), [orchestrator/core/seeds/seed_cto_agent.py:1-115]()
+Sources: [orchestrator/consumers/chatbot/personality.py:5-10](), [orchestrator/core/seeds/seed_auto_agent.py:5-15](), [orchestrator/core/seeds/auto-cto-custom-soul.txt:1-27]()
 
 ---
 
 ## Persona System Architecture
 
-The persona system bridges the gap between raw LLM capabilities and specific professional roles. While standard agents are workspace-scoped, System Agents are global entities with specialized privileges.
+Personas shape an agent through prompt text. In the chatbot personality module, workspace orchestrator settings select a predefined personality or a custom soul, and independently select a communication style. The per-workspace Auto seed composes a friendly base voice with a compact management doctrine. The global CTO’s soul is a separate seed file and is explicitly distinguished from the per-workspace Auto persona. [orchestrator/consumers/chatbot/personality.py:7-10](), [orchestrator/consumers/chatbot/personality.py:76-109](), [orchestrator/core/seeds/seed_auto_agent.py:32-37](), [orchestrator/core/seeds/seed_auto_agent.py:68-120]()
 
 ### Persona Modes and System Types
 
-| Mode / Type | Backend Logic | Visibility | Use Case |
-| :--- | :--- | :--- | :--- |
-| **None** | Default platform identity based on `agent_type`. | Workspace | Purely functional utility agents. |
-| **Predefined** | Uses `system_prompt` from a shared persona library (e.g., `chatbot-friendly`, `chatbot-technical`) [orchestrator/consumers/chatbot/personality.py:105-110](). | Workspace | Standard roles (e.g., customer support, data analyst). |
-| **Custom** | Uses a unique `custom_soul` or prompt provided by the user [orchestrator/consumers/chatbot/personality.py:8-10](). | Workspace | Highly specialized behaviors or domain-specific tasks. |
-| **System Agent** | `is_system_agent=True` with specialized `agent_type='system'` [orchestrator/core/seeds/seed_cto_agent.py:78-80](). | Global | Platform CTO, admin tools, infrastructure monitoring. |
+| Mode or persona source | Behavior | Scope and purpose |
+|---|---|---|
+| `friendly`, `professional`, `technical` | Selects a predefined personality block. An unknown mode falls back to the friendly block. [orchestrator/consumers/chatbot/personality.py:76-103](), [orchestrator/consumers/chatbot/personality.py:147-151]() | Workspace chatbot personality, when selected in orchestrator settings. [orchestrator/consumers/chatbot/personality.py:7-10]() |
+| `custom` | Uses trimmed `custom_soul` text when it is non-empty; otherwise falls through to the predefined-map lookup and its friendly fallback. [orchestrator/consumers/chatbot/personality.py:147-151]() | Workspace-configured custom chatbot personality. [orchestrator/consumers/chatbot/personality.py:7-10]() |
+| `communication_style` | Adds a concise or detailed instruction; `balanced` adds no suffix. [orchestrator/consumers/chatbot/personality.py:105-109]() | A response-length/style modifier independent of the personality block. [orchestrator/consumers/chatbot/personality.py:139-153]() |
+| Auto persona | Seeds a friendly base voice with the Manager’s Doctrine appended. [orchestrator/core/seeds/seed_auto_agent.py:75-85](), [orchestrator/core/seeds/seed_auto_agent.py:96-120]() | One default chat agent per workspace, hidden from the Roster UI and visible to workspace members. [orchestrator/core/seeds/seed_auto_agent.py:5-16]() |
+| CTO soul seed | Defines a CTO and Workspace Orchestrator identity, authority boundaries, personality, operating rhythm, and routing principles. [orchestrator/core/seeds/auto-cto-custom-soul.txt:1-27](), [orchestrator/core/seeds/auto-cto-custom-soul.txt:53-79]() | Global, admin-only CTO agent; it is not the per-workspace Auto persona. [orchestrator/core/seeds/seed_auto_agent.py:32-37]() |
+| Marketplace agent persona | Seeded persona text is attached to marketplace agents, including the Social Media Director and Brand Designer. [orchestrator/core/seeds/seed_socials_package.py:7-15](), [orchestrator/core/seeds/seed_socials_package.py:102-118]() | Role-specific agents installed from the Socials package. [orchestrator/core/seeds/seed_socials_package.py:7-15]() |
 
-**Sources:** [orchestrator/consumers/chatbot/personality.py:8-110](), [orchestrator/core/models/core.py:202-215](), [orchestrator/core/seeds/seed_cto_agent.py:78-80]()
+Sources: [orchestrator/consumers/chatbot/personality.py:7-10](), [orchestrator/consumers/chatbot/personality.py:76-109](), [orchestrator/consumers/chatbot/personality.py:139-153](), [orchestrator/core/seeds/seed_auto_agent.py:5-16](), [orchestrator/core/seeds/seed_auto_agent.py:32-37](), [orchestrator/core/seeds/seed_auto_agent.py:68-120](), [orchestrator/core/seeds/auto-cto-custom-soul.txt:1-27](), [orchestrator/core/seeds/auto-cto-custom-soul.txt:53-79](), [orchestrator/core/seeds/seed_socials_package.py:7-15](), [orchestrator/core/seeds/seed_socials_package.py:102-118]()
 
-### Data Flow: Persona Initialization and Resolution
+### Natural Language Space to Code Entity Space: Persona Resolution
 
-When an agent processes a prompt or chat message, the `AutomatosPersonality` module resolves its persona based on workspace orchestrator settings and agent configuration.
+This mapping connects persona concepts to the named implementation entities that load settings and build prompt text. `load_orchestrator_settings` reads the workspace’s `settings["orchestrator"]` values with defaults and a 120-second cache; `AutomatosPersonality.get_base_system_prompt` then selects the personality block and communication suffix. [orchestrator/consumers/chatbot/personality.py:25-69](), [orchestrator/consumers/chatbot/personality.py:112-153]()
 
-**Title: Persona Resolution and Injection Flow**
+**Diagram: Workspace personality settings mapped to prompt-building entities**
+
 ```mermaid
 graph TD
     subgraph "Natural Language Space"
-        Req["User Chat Request"] --> ChatApi["api/chat.py"]
+        NL_Custom["Custom soul"]
+        NL_Preset["Friendly / professional / technical"]
+        NL_Style["Concise / balanced / detailed"]
     end
 
     subgraph "Code Entity Space"
-        ChatApi --> LoadOrch["load_orchestrator_settings(workspace_id)"]
-        LoadOrch --> Cache["_orch_cache TTL Store"]
-        LoadOrch --> DB["Workspace Model Settings JSONB"]
-        
-        LoadOrch --> Pers["AutomatosPersonality.get_base_system_prompt()"]
-        Pers --> ModeEval{"personality_mode"}
-        
-        ModeEval -- "custom" --> Soul["custom_soul prompt"]
-        ModeEval -- "predefined/preset" --> Reg["prompt_registry.get_raw(slug)"]
-        Reg --> Fallback["_PERSONALITY_MAP defaults"]
-        
-        Soul --> PromptAssembly["Assembled System Prompt"]
-        Fallback --> PromptAssembly
+        CE_Settings["Workspace.settings.orchestrator"]
+        CE_Load["load_orchestrator_settings"]
+        CE_Class["AutomatosPersonality"]
+        CE_Build["get_base_system_prompt"]
+        CE_Map["_PERSONALITY_MAP"]
+        CE_Suffix["_COMMUNICATION_SUFFIX"]
     end
 
-    ChatApi -.-> LoadOrch
-    PromptAssembly -.-> LLM["LLM Client Execution"]
+    NL_Custom --> CE_Settings
+    NL_Preset --> CE_Settings
+    NL_Style --> CE_Settings
+    CE_Settings --> CE_Load
+    CE_Load --> CE_Build
+    CE_Class --> CE_Build
+    CE_Build --> CE_Map
+    CE_Build --> CE_Suffix
 ```
-**Sources:** [orchestrator/consumers/chatbot/personality.py:36-172](), [orchestrator/core/models/workspaces.py:1-50]()
+
+Sources: [orchestrator/consumers/chatbot/personality.py:25-69](), [orchestrator/consumers/chatbot/personality.py:76-109](), [orchestrator/consumers/chatbot/personality.py:112-153]()
 
 ---
 
-## Personality Module & Presets
+## The Per-Workspace Auto Agent & Manager’s Doctrine
 
-The `AutomatosPersonality` class manages workspace-level personality configuration and builds base system prompts dynamically [orchestrator/consumers/chatbot/personality.py:119-147]().
+Every workspace gets exactly one Auto agent, identified by the `auto-{workspace_id}` slug convention. The seed describes this row as the workspace’s default chat agent and the source of truth for its orchestrator LLM configuration, persona, and configuration. Auto agents are workspace-scoped, visible to workspace members, and hidden from the Roster UI when marked as system agents. [orchestrator/core/seeds/seed_auto_agent.py:5-16]()
 
-### Workspace Settings & Cache
-Workspace orchestrator configurations are loaded with a Time-To-Live (TTL) cache to avoid hitting the database on every message exchange:
-- Defaults include `personality_mode: friendly`, `communication_style: balanced`, `proactive_level: notify`, and `thinking_level: medium` [orchestrator/consumers/chatbot/personality.py:27-33]().
-- `load_orchestrator_settings(workspace_id: str)` checks `_orch_cache` before querying the `Workspace` model's JSONB `settings` field [orchestrator/consumers/chatbot/personality.py:36-68]().
+### Soul Seed and Doctrine Composition
 
-### Personality Presets
-The system defines built-in persona blocks mapping to behavioral archetypes:
-- **Friendly**: Warm, approachable, memory-oriented, action-biased (`_FRIENDLY_PERSONALITY`) [orchestrator/consumers/chatbot/personality.py:75-81]().
-- **Professional**: Polished, enterprise-appropriate, structured, risk-proactive (`_PROFESSIONAL_PERSONALITY`) [orchestrator/consumers/chatbot/personality.py:83-89]().
-- **Technical**: Developer-focused, precise, code-first, step-by-step reasoning (`_TECHNICAL_PERSONALITY`) [orchestrator/consumers/chatbot/personality.py:91-97]().
-- **Communication Suffixes**: Modifies verbosity via `_COMMUNICATION_SUFFIX` for `concise`, `balanced`, or `detailed` styles [orchestrator/consumers/chatbot/personality.py:112-116]().
+The Auto seed’s `_FRIENDLY_FALLBACK` supplies the base identity and voice; `MANAGER_DOCTRINE_BLOCK` adds operational guidance. `compose_persona_with_doctrine` strips the base voice and appends the doctrine separated by a blank line. `_default_persona` uses that shared composition path for a fresh workspace’s Auto persona. [orchestrator/core/seeds/seed_auto_agent.py:42-65](), [orchestrator/core/seeds/seed_auto_agent.py:75-85](), [orchestrator/core/seeds/seed_auto_agent.py:96-120]()
 
-**Sources:** [orchestrator/consumers/chatbot/personality.py:27-116]()
+The doctrine’s nine principles cover situational awareness, choosing among `RESPOND`, `ASSIGN`, and `MISSION`, delegation, reuse of existing agents, explicit handoff contracts, board tracking, decision-shaped asks, recurring work as Playbooks, and narration of assignments and escalations. Its awareness guidance names `platform_board_summary`, `platform_list_missions`, and `platform_list_agents`. [orchestrator/core/seeds/seed_auto_agent.py:75-85]()
 
----
+The seed comments describe the doctrine as deliberately compact for recurring chatbot context, and the tests enforce a 1,400-character ceiling (approximately 350 tokens by the test’s estimate). The doctrine tests also assert that the lane names and awareness-tool names remain consistent. [orchestrator/core/seeds/seed_auto_agent.py:68-74](), [orchestrator/tests/test_prd226_doctrine.py:19-31](), [orchestrator/tests/test_prd226_doctrine.py:66-78](), [orchestrator/tests/test_prd226_doctrine.py:106-129]()
 
-## System Agents: The Auto CTO Seed Agent
+The CTO soul file and the platform-management skill are distinct homes for the broader doctrine. The Auto seed comment says the CTO soul file feeds the global, admin-only CTO agent, not the per-workspace Auto agent; the per-workspace Auto persona is built from the friendly base and doctrine. [orchestrator/core/seeds/seed_auto_agent.py:32-37]()
 
-System agents represent deeply embedded platform personas. The primary example is the **Auto CTO** (`auto-cto`), seeded into the platform via `seed_cto_agent.py` [orchestrator/core/seeds/seed_cto_agent.py:1-115]().
+Sources: [orchestrator/core/seeds/seed_auto_agent.py:5-16](), [orchestrator/core/seeds/seed_auto_agent.py:42-65](), [orchestrator/core/seeds/seed_auto_agent.py:68-85](), [orchestrator/core/seeds/seed_auto_agent.py:96-120](), [orchestrator/tests/test_prd226_doctrine.py:19-31](), [orchestrator/tests/test_prd226_doctrine.py:66-78](), [orchestrator/tests/test_prd226_doctrine.py:106-129]()
 
-### Auto CTO Architecture and Persona
-The Auto CTO is initialized as an administrative system agent with direct access to platform architecture knowledge, database schemas, and multi-agent coordination frameworks [orchestrator/core/seeds/seed_cto_agent.py:68-115]().
-- **Soul Document**: Loaded from `auto-cto-custom-soul.txt`, defining its persona as an Irish technical lead made of code, direct dry wit, and strict engineering opinions [orchestrator/core/seeds/seed_cto_agent.py:25-40]().
-- **Configuration**: Stored with `is_system_agent=True`, `required_role='admin'`, and a customized configuration containing architectural living summaries (FastAPI, Redis, PostgreSQL, S3 Vectors, Universal Router) [orchestrator/core/seeds/seed_cto_agent.py:78-90]().
+### Personality Base Voices
 
-**Title: Auto CTO Seed and Execution Lifecycle**
+The chatbot personality module defines three predefined voices:
+
+- `friendly`: warm and approachable; favors action when asked to do something and direct answers when asked how, where, or whether. [orchestrator/consumers/chatbot/personality.py:76-82]()
+- `professional`: polished and enterprise-appropriate, with structured responses and proactive risk/dependency flags. [orchestrator/consumers/chatbot/personality.py:84-90]()
+- `technical`: precise and developer-focused, leading with implementation specifics and avoiding small talk. [orchestrator/consumers/chatbot/personality.py:92-97]()
+
+These are mapped by `_PERSONALITY_MAP`. The Auto seed has its own friendly base text in `_FRIENDLY_FALLBACK`; the supplied seed excerpt shows `compose_persona_with_doctrine` and `_default_persona`, but does not include the subsequent preset definitions, so this page does not assume that the Auto seed exposes the same full preset list. [orchestrator/consumers/chatbot/personality.py:99-103](), [orchestrator/core/seeds/seed_auto_agent.py:42-65](), [orchestrator/core/seeds/seed_auto_agent.py:113-120]()
+
+Sources: [orchestrator/consumers/chatbot/personality.py:76-103](), [orchestrator/core/seeds/seed_auto_agent.py:42-65](), [orchestrator/core/seeds/seed_auto_agent.py:113-120]()
+
+### Always-On Platform Management Skill
+
+The Auto seed identifies `platform-management` as its always-on platform-management skill. The skill manifest describes it as a workspace operating charter and declares platform actions for managing agents, skills, plugins, tools, Playbooks, tasks, watches, schedules, and missions. The persona doctrine is identity-level guidance; the skill provides the operational reference and action catalog. [orchestrator/core/seeds/seed_auto_agent.py:32-38](), [orchestrator/core/seeds/platform-management-skill.md:1-7](), [orchestrator/core/seeds/platform-management-skill.md:26-56](), [orchestrator/core/seeds/platform-management-skill.md:88-131]()
+
+Sources: [orchestrator/core/seeds/seed_auto_agent.py:32-38](), [orchestrator/core/seeds/platform-management-skill.md:1-7](), [orchestrator/core/seeds/platform-management-skill.md:26-56](), [orchestrator/core/seeds/platform-management-skill.md:88-131]()
+
+### Natural Language Space to Code Entity Space: Auto Agent Integration
+
+The seed path joins a natural-language base voice to the doctrine and produces the persona used for a fresh workspace’s Auto agent. `seed_auto_agent.py` also explicitly distinguishes this per-workspace composition from the CTO soul file’s global-agent role. [orchestrator/core/seeds/seed_auto_agent.py:32-37](), [orchestrator/core/seeds/seed_auto_agent.py:96-120]()
+
+**Diagram: Auto voice and doctrine mapped to seed entities**
+
 ```mermaid
 graph TD
-    subgraph "Initialization Space"
-        SeedRunner["python -m core.seeds.seed_cto_agent"] --> LoadSoul["_load_soul_document()"]
-        LoadSoul --> ReadTxt["Read auto-cto-custom-soul.txt"]
-        ReadTxt --> UPSERT["Database Upsert on Agent.slug='auto-cto'"]
+    subgraph "Natural Language Space"
+        NL_Voice["Friendly Auto identity"]
+        NL_Doctrine["Manager's Doctrine"]
+        NL_Skill["Platform management charter"]
+        NL_CTO["CTO soul and Irish tech-lead voice"]
     end
 
-    subgraph "Runtime & Authority Space"
-        UPSERT --> AgentModel["Agent Model (is_system_agent=True)"]
-        AgentModel --> Config["Configuration JSON (extra_context, suggested_model)"]
-        Config --> Execution["Auto CTO Runtime Governor"]
+    subgraph "Code Entity Space"
+        CE_Friendly["_FRIENDLY_FALLBACK"]
+        CE_Block["MANAGER_DOCTRINE_BLOCK"]
+        CE_Compose["compose_persona_with_doctrine"]
+        CE_Default["_default_persona"]
+        CE_Seed["seed_auto_agent"]
+        CE_Skill["PLATFORM_SKILL"]
+        CE_CTO["auto-cto-custom-soul.txt"]
     end
 
-    ReadTxt -.-> SeedRunner
-    UPSERT -.-> AgentModel
+    NL_Voice --> CE_Friendly
+    NL_Doctrine --> CE_Block
+    CE_Friendly --> CE_Compose
+    CE_Block --> CE_Compose
+    CE_Compose --> CE_Default
+    CE_Default --> CE_Seed
+    NL_Skill --> CE_Skill
+    NL_CTO --> CE_CTO
 ```
-**Sources:** [orchestrator/core/seeds/seed_cto_agent.py:25-115](), [orchestrator/core/seeds/auto-cto-custom-soul.txt:1-87]()
 
-**Sources:** [orchestrator/core/seeds/seed_cto_agent.py:1-115](), [orchestrator/core/seeds/auto-cto-custom-soul.txt:1-87]()
-
----
-
-## Implementation Details
-
-### 1. Persona Management in UI
-The `AgentConfigurationModal` and `CreateAgentModal` manage user-facing persona configurations:
-- **Category Mapping**: UI categories map to backend `agent_type` values via `CATEGORY_TO_DB_MAP` [frontend/lib/agent-constants.ts:48-65]().
-- **Persona Library**: Fetches predefined templates providing `system_prompt` and `suggested_temperature` [frontend/components/agents/create-agent-modal.tsx:129-142]().
-- **Custom Prompts**: Allows switching to custom mode, persisting prompts into the agent's database entity [frontend/components/agents/agent-configuration-modal.tsx:142-147]().
-
-### 2. Voice Profiles
-Voice profiles link agents to audio synthesis engines (such as Retell transport integrations):
-- **State Tracking**: `AgentConfigurationModal` manages `selectedVoiceProfileId` and loading states [frontend/components/agents/agent-configuration-modal.tsx:154-157]().
-- **Persistence**: Voice configurations are stored inside the agent's JSONB `configuration` field [orchestrator/core/models/core.py:217-235]().
-
-**Sources:** [frontend/lib/agent-constants.ts:48-65](), [frontend/components/agents/create-agent-modal.tsx:129-142](), [orchestrator/core/models/core.py:217-235]()
+Sources: [orchestrator/core/seeds/seed_auto_agent.py:32-38](), [orchestrator/core/seeds/seed_auto_agent.py:42-65](), [orchestrator/core/seeds/seed_auto_agent.py:75-85](), [orchestrator/core/seeds/seed_auto_agent.py:96-120](), [orchestrator/core/seeds/auto-cto-custom-soul.txt:1-27]()
 
 ---
 
-## Technical Data Structures
+## Specialized Marketplace Personas
 
-### Agent Model Persona Fields
-The `Agent` SQLAlchemy model defines persona storage and attributes:
+Marketplace agents can carry role-specific persona prompts. The Socials package seeds two marketplace agents—the Social Media Director and Brand Designer—and describes their personas and built-in skills as part of the package’s agent inventory. [orchestrator/core/seeds/seed_socials_package.py:7-15](), [orchestrator/core/seeds/seed_socials_package.py:50-57]()
 
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `name` | String | Display name of the agent [orchestrator/core/models/core.py:185](). |
-| `agent_type` | String | Functional role type (e.g., `support`, `data_analyst`, `system`) [orchestrator/core/models/core.py:188](). |
-| `is_system_agent` | Boolean | Identifies global system-seeded agents like Auto CTO [orchestrator/core/models/core.py:195](). |
-| `use_custom_persona` | Boolean | Toggles between predefined presets and custom prompts [orchestrator/core/models/core.py:202](). |
-| `custom_persona_prompt`| Text | Raw custom system prompt text [orchestrator/core/models/core.py:205](). |
-| `configuration` | JSONB | Extended metadata including voice settings, temperature, and extra context [orchestrator/core/models/core.py:217-235](). |
+### Specialized Roles and Boundaries
 
-**Sources:** [orchestrator/core/models/core.py:183-235]()
+The Social Media Director persona directs the agent to turn existing workspace materials into channel-specific social content, use workspace templates and brand guidance, source factual claims, and draft through the Socials platform actions. It explicitly prohibits publishing, scheduling, or approving posts; the persona says a person approves each post and the platform publishes it. [orchestrator/core/seeds/seed_socials_package.py:83-94](), [orchestrator/core/seeds/seed_socials_package.py:102-116]()
+
+The Socials seed describes marketplace agents as real `Agent` rows with `owner_type='marketplace'`; the package installer clones agents and Playbooks into a workspace as workspace-owned items. Seed documentation also states that each install copies the seeded persona, and that skill links are reconciled against global built-in skills named by the agent. [orchestrator/core/seeds/seed_socials_package.py:7-15](), [orchestrator/core/seeds/seed_socials_package.py:17-28]()
+
+Sources: [orchestrator/core/seeds/seed_socials_package.py:7-28](), [orchestrator/core/seeds/seed_socials_package.py:50-57](), [orchestrator/core/seeds/seed_socials_package.py:83-116]()
+
+---
+
+## Persona Assembly & Plugin Integration
+
+The supplied source excerpts establish persona text composition and seeded marketplace-agent persona behavior. They do not include the implementation of an agent execution-context assembly API, plugin prompt assembly, or an `AssembledContextOut` model; those details therefore are not specified here.
+
+However, the `semantic_indexer.py` module shows how an agent's persona is incorporated into its semantic representation for routing. The `build_agent_semantic_text` function concatenates various agent attributes, including `agent.custom_persona_prompt`, into a single text block for embedding. This embedding is used for Tier 2.5 routing, where incoming queries are matched by cosine similarity to determine the most relevant agent. [orchestrator/core/routing/semantic_indexer.py:34-35](), [orchestrator/core/routing/semantic_indexer.py:67-69]()
+
+Sources: [orchestrator/core/seeds/seed_auto_agent.py:96-120](), [orchestrator/core/seeds/seed_socials_package.py:7-28](), [orchestrator/core/routing/semantic_indexer.py:34-35](), [orchestrator/core/routing/semantic_indexer.py:67-69]()
+
+---
+
+## Voice Profiles & UI Configuration
+
+The supplied personality implementation documents communication style, not an audio voice-profile assignment system. `communication_style` accepts `concise`, `balanced`, or `detailed`; concise and detailed append explicit instructions to the prompt, while balanced adds no suffix. [orchestrator/consumers/chatbot/personality.py:7-10](), [orchestrator/consumers/chatbot/personality.py:105-109](), [orchestrator/consumers/chatbot/personality.py:139-153]()
+
+Workspace personality settings are loaded from `Workspace.settings["orchestrator"]`. `load_orchestrator_settings` starts with defaults, reads recognized keys, and caches successful database loads for 120 seconds. The listed defaults include `personality_mode`, `custom_soul`, and `communication_style`, as well as `proactive_level` and `thinking_level`; the shown `get_base_system_prompt` uses the first three to construct its prompt. [orchestrator/consumers/chatbot/personality.py:25-34](), [orchestrator/consumers/chatbot/personality.py:37-69](), [orchestrator/consumers/chatbot/personality.py:120-153]()
+
+The provided files do not show a voice-profile model, voice-selection UI, or connection from persona configuration to real-time speech settings. Treat audio voice profiles as outside the documented scope of this page rather than inferring them from the communication-style setting. [orchestrator/consumers/chatbot/personality.py:7-10](), [orchestrator/consumers/chatbot/personality.py:105-109]()
+
+Sources: [orchestrator/consumers/chatbot/personality.py:7-10](), [orchestrator/consumers/chatbot/personality.py:25-69](), [orchestrator/consumers/chatbot/personality.py:105-109](), [orchestrator/consumers/chatbot/personality.py:120-153]()
 
 ---

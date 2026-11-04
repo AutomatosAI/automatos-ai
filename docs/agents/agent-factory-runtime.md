@@ -5,269 +5,212 @@
 
 The following files were used as context for generating this wiki page:
 
+- [frontend/app/api/chat/route.ts](frontend/app/api/chat/route.ts)
+- [frontend/components/__tests__/prd207-live-voice.test.tsx](frontend/components/__tests__/prd207-live-voice.test.tsx)
+- [frontend/components/chatbot/__tests__/composer-voice.test.tsx](frontend/components/chatbot/__tests__/composer-voice.test.tsx)
+- [frontend/components/chatbot/chat.tsx](frontend/components/chatbot/chat.tsx)
+- [frontend/components/chatbot/message.tsx](frontend/components/chatbot/message.tsx)
+- [frontend/components/voice/LiveVoiceMode.tsx](frontend/components/voice/LiveVoiceMode.tsx)
+- [frontend/components/voice/PresenceOrb.tsx](frontend/components/voice/PresenceOrb.tsx)
+- [frontend/components/voice/VoiceErrorBoundary.tsx](frontend/components/voice/VoiceErrorBoundary.tsx)
+- [frontend/components/voice/__tests__/voice-button.test.tsx](frontend/components/voice/__tests__/voice-button.test.tsx)
+- [frontend/components/voice/voice-button-view.ts](frontend/components/voice/voice-button-view.ts)
+- [frontend/components/voice/voice-button.tsx](frontend/components/voice/voice-button.tsx)
+- [frontend/components/voice/voice-controls.tsx](frontend/components/voice/voice-controls.tsx)
+- [frontend/lib/chat/hooks.ts](frontend/lib/chat/hooks.ts)
+- [frontend/types/chat.ts](frontend/types/chat.ts)
 - [orchestrator/api/chat.py](orchestrator/api/chat.py)
-- [orchestrator/api/routing.py](orchestrator/api/routing.py)
-- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
 - [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
-- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
-- [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
 - [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
-- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
-- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
-- [orchestrator/scripts/setup_jira_trigger.py](orchestrator/scripts/setup_jira_trigger.py)
-- [orchestrator/services/heartbeat_service.py](orchestrator/services/heartbeat_service.py)
-- [orchestrator/services/page_context.py](orchestrator/services/page_context.py)
-- [orchestrator/tests/test_prd221_page_context.py](orchestrator/tests/test_prd221_page_context.py)
-- [orchestrator/tests/test_prd221_page_prior_tools.py](orchestrator/tests/test_prd221_page_prior_tools.py)
 
 </details>
 
 
 
-This document covers the **AgentFactory** system, which manages the complete lifecycle of agent instances from creation to execution. It handles LLM provider configuration, tool loading, and the execution loop that processes user prompts with tool calling support.
+## Purpose and Scope
 
-**Related pages:**
-- For agent creation UI flows, see [Creating Agents](5.1)
-- For agent configuration options, see [Agent Configuration](5.2)
-- For LLM provider and credential management details, see [LLM Provider Management](5.6)
-- For tool discovery and routing, see [Tools API Reference](8.7)
+This page documents the agent runtime concepts visible in the source codebase: lifecycle states (`AgentLifecycle`), runtime data structures (`AgentMetadata`, `ModelConfiguration`, `AgentRuntime`), model configuration resolution, the shared tool-loop architecture (`ToolLoopExecutor`), tool-execution deduplication (`ToolExecutionTracker`), and platform agent handlers. 
+
+Sources: [orchestrator/modules/agents/factory/agent_factory.py:1-177](), [orchestrator/consumers/chatbot/service.py:28-32]()
 
 ---
 
-## Overview
+## 1. Overview
 
-**AgentFactory** is the core runtime execution engine for agents. It provides a pure execution layer where users define their own agent types while the orchestrator handles prompt engineering using Context Engineering [orchestrator/modules/agents/factory/agent_factory.py:1-11]().
+`orchestrator/modules/agents/factory/agent_factory.py` defines the factory as a pure execution layer where users define agent types and the orchestrator handles prompt engineering through context engineering. It enforces a single tool-schema path via `get_tools_for_agent()` from `tool_router.py`, omitting hardcoded schemas and legacy JSON action formats [orchestrator/modules/agents/factory/agent_factory.py:1-10]().
 
-| Capability | Description |
-|------------|-------------|
-| **Lifecycle Management** | Create, activate, hibernate, and retire agent instances [orchestrator/modules/agents/factory/agent_factory.py:53-60]() |
-| **LLM Configuration** | 3-tier API key resolution (BYOK → credential store → env vars) [orchestrator/core/llm/manager.py:135-178]() |
-| **Tool Integration** | Unified tool execution via `UnifiedToolExecutor` with single-source tool schemas [orchestrator/modules/agents/factory/agent_factory.py:44-46]() |
-| **Prompt Assembly** | System prompt building from persona + plugins + skills [orchestrator/modules/agents/factory/agent_factory.py:107-148]() |
-| **Execution Loop** | Multi-iteration tool loop with deduplication and loop prevention [orchestrator/consumers/chatbot/service.py:30-37]() |
-| **Metrics Tracking** | Token usage, execution counts, success rates, and avg execution time [orchestrator/modules/agents/factory/agent_factory.py:179-185]() |
+The runtime representation is encapsulated in `AgentRuntime`, which combines an agent identifier, metadata, lifecycle state, execution counts, token tallies, performance metrics, and a workspace scoping reference [orchestrator/modules/agents/factory/agent_factory.py:156-174]().
 
-The factory maintains a registry of active agents in memory for fast execution without repeated database queries [orchestrator/modules/agents/factory/agent_factory.py:161-178]().
+| Runtime Component | Code Entity | Role |
+|---|---|---|
+| Lifecycle States | `AgentLifecycle` | Manages states: `INITIALIZING`, `ACTIVE`, `BUSY`, `LEARNING`, `HIBERNATING`, `RETIRED` [orchestrator/modules/agents/factory/agent_factory.py:58-64]() |
+| Model Settings | `ModelConfiguration` | Stores provider, model ID, sampling parameters, token limits, and fallbacks [orchestrator/modules/agents/factory/agent_factory.py:67-89]() |
+| Agent Definition | `AgentMetadata` | Encapsulates name, type, description, persona, skills, and custom metadata [orchestrator/modules/agents/factory/agent_factory.py:111-125]() |
+| Runtime Instance | `AgentRuntime` | Tracks live execution metrics, token use, tools, and tool executors [orchestrator/modules/agents/factory/agent_factory.py:156-174]() |
+| Tool Loop Spine | `ToolLoopExecutor` | Coordinates iterative tool execution and deduplication for chat and agents [orchestrator/consumers/chatbot/service.py:28-32]() |
 
-Sources: [orchestrator/modules/agents/factory/agent_factory.py:1-50](), [orchestrator/modules/agents/factory/agent_factory.py:155-192]()
+Sources: [orchestrator/modules/agents/factory/agent_factory.py:1-10](), [orchestrator/modules/agents/factory/agent_factory.py:58-89](), [orchestrator/modules/agents/factory/agent_factory.py:111-174](), [orchestrator/consumers/chatbot/service.py:28-32]()
 
----
+### Natural-Language to Code Entity Space Mapping
 
-## Agent Lifecycle States
+This diagram bridges abstract agent runtime concepts to their exact code symbols in the backend architecture.
 
-Agents transition through well-defined lifecycle states managed by the `AgentLifecycle` enum [orchestrator/modules/agents/factory/agent_factory.py:53-60]():
+**Diagram: Agent System Architecture to Code Entity Space**
 
-Title: "Agent Lifecycle State Machine"
-```mermaid
-stateDiagram-v2
-    direction LR
-    [*] --> INITIALIZING: "AgentFactory.create_agent()"
-    INITIALIZING --> ACTIVE: "activate_agent()"
-    ACTIVE --> BUSY: "execute_with_prompt()"
-    BUSY --> ACTIVE: "Execution complete"
-    ACTIVE --> LEARNING: "AgentService.update_agent_learning()"
-    LEARNING --> ACTIVE: "Learning complete"
-    ACTIVE --> HIBERNATING: "Inactivity timeout"
-    HIBERNATING --> ACTIVE: "Re-activation"
-    ACTIVE --> RETIRED: "AgentFactory.retire_agent()"
-    RETIRED --> [*]
-```
-
-### Lifecycle State Definitions
-
-| State | Description | Triggers |
-|-------|-------------|----------|
-| `INITIALIZING` | Agent being created, LLM verification in progress | `create_agent()` called [orchestrator/modules/agents/factory/agent_factory.py:54]() |
-| `ACTIVE` | Ready to accept tasks | `activate_agent()` completed [orchestrator/modules/agents/factory/agent_factory.py:55]() |
-| `BUSY` | Currently executing a task | `execute_with_prompt()` running [orchestrator/modules/agents/factory/agent_factory.py:56]() |
-| `LEARNING` | Undergoing training or optimization | Feedback loop or optimization job [orchestrator/modules/agents/factory/agent_factory.py:57]() |
-| `HIBERNATING` | Inactive but preserved in memory | Configurable inactivity timeout [orchestrator/modules/agents/factory/agent_factory.py:58]() |
-| `RETIRED` | Permanently deactivated | Manual retirement [orchestrator/modules/agents/factory/agent_factory.py:59]() |
-
-Sources: [orchestrator/modules/agents/factory/agent_factory.py:51-60]()
-
----
-
-## Core Data Structures
-
-### ModelConfiguration
-
-Complete LLM configuration for an agent, supporting per-agent model overrides (PRD-15) [orchestrator/modules/agents/factory/agent_factory.py:63-73]():
-
-```python
-@dataclass
-class ModelConfiguration:
-    provider: str              # "openai", "anthropic", "google", etc.
-    model_id: str             # e.g., "gpt-4", "claude-3-opus-20240229"
-    temperature: float = 0.7
-    max_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
-    top_p: float = 1.0
-    frequency_penalty: float = 0.0
-    presence_penalty: float = 0.0
-    fallback_model_id: Optional[str] = None  # Automatic fallback on failure
-```
-
-Sources: [orchestrator/modules/agents/factory/agent_factory.py:63-84]()
-
----
-
-### AgentRuntime
-
-Runtime representation of an active agent, cached in memory [orchestrator/modules/agents/factory/agent_factory.py:161-178]():
-
-```python
-@dataclass
-class AgentRuntime:
-    agent_id: int
-    metadata: AgentMetadata
-    llm_manager: LLMManager                    # Pre-configured LLM client
-    lifecycle_state: AgentLifecycle
-    execution_count: int = 0
-    total_tokens_used: int = 0
-    last_execution: Optional[datetime] = None
-    performance_metrics: Dict[str, Any] = {}   # avg_execution_time, success_rate
-    tools: List[Dict[str, Any]] = []           # Composio app assignments
-    tool_executor: Any = None                  # UnifiedToolExecutor instance
-    is_byok: bool = False                      # Using workspace's own API key
-    resolved_provider: str = ""
-    workspace_id: Optional[Any] = None
-```
-
-Sources: [orchestrator/modules/agents/factory/agent_factory.py:161-178]()
-
----
-
-## Natural Language Space to Code Entity Bridge
-
-Title: "Natural Language to Code Entity Space - Chat and Agent Routing"
 ```mermaid
 flowchart TD
     subgraph NaturalLanguageSpace ["Natural Language Space"]
-        NL1["User sends chat message or prompt"]
-        NL2["Determine complexity (Atom -> Organism)"]
-        NL3["Resolve target agent or tools"]
+        Config["Agent Model Settings"]
+        Metadata["Agent Persona & Skills"]
+        Lifecycle["Agent Lifecycle States"]
+        Execution["Agent Execution Loop"]
     end
 
     subgraph CodeEntitySpace ["Code Entity Space"]
-        CE1["api/chat.py:router POST /api/chat"]
-        CE2["consumers/chatbot/auto.py:AutoBrain.assess()"]
-        CE3["modules/agents/factory/agent_factory.py:AgentFactory.execute_with_prompt()"]
-        CE4["modules/tools/execution/tool_loop.py:ToolLoopExecutor"]
-        CE5["modules/tools/discovery/platform_executor.py:PlatformActionExecutor"]
+        ModelConfiguration["ModelConfiguration (agent_factory.py:67)"]
+        AgentMetadata["AgentMetadata (agent_factory.py:111)"]
+        AgentLifecycle["AgentLifecycle (agent_factory.py:58)"]
+        ToolLoopExecutor["ToolLoopExecutor (service.py:28)"]
     end
 
-    NL1 --> CE1
-    CE1 --> CE2
-    CE2 --> CE3
-    CE3 --> CE4
-    CE4 --> CE5
+    Config --> ModelConfiguration
+    Metadata --> AgentMetadata
+    Lifecycle --> AgentLifecycle
+    Execution --> ToolLoopExecutor
 ```
 
-Sources: [orchestrator/api/chat.py:1-37](), [orchestrator/consumers/chatbot/auto.py:7-22](), [orchestrator/modules/agents/factory/agent_factory.py:1-11]()
+Sources: [orchestrator/modules/agents/factory/agent_factory.py:58-125](), [orchestrator/consumers/chatbot/service.py:28-32]()
 
 ---
 
-## Agent Creation & Activation
+## 2. Agent Lifecycle States
 
-### LLM Configuration Resolution
+`AgentLifecycle` is an enumeration of runtime states governing agent activity. The six defined states are `INITIALIZING`, `ACTIVE`, `BUSY`, `LEARNING`, `HIBERNATING`, and `RETIRED` [orchestrator/modules/agents/factory/agent_factory.py:58-64]().
 
-The factory follows this priority order for LLM configuration:
-1. **Agent's `model_config`**: If the agent has an explicit model defined in its metadata [orchestrator/modules/agents/factory/agent_factory.py:122-138]().
-2. **System settings**: Fetched via `SystemSetting` table for categories like `orchestrator_llm` or `system_llm` [orchestrator/core/llm/manager.py:57-96]().
-3. **Config defaults**: Fallback to `DEFAULT_LLM_PROVIDER` and `DEFAULT_LLM_MODEL` [orchestrator/modules/agents/factory/agent_factory.py:100-104]().
+**Diagram: Lifecycle State Machine Vocabulary**
 
-Sources: [orchestrator/modules/agents/factory/agent_factory.py:100-148](), [orchestrator/core/llm/manager.py:57-96]()
-
----
-
-## API Key Resolution
-
-### 3-Tier Resolution Strategy
-
-Title: "API Key Resolution Code Bridge"
 ```mermaid
-flowchart TD
-    subgraph NL ["Natural Language Request"]
-        UReq["Request LLM Generation"]
+stateDiagram-v2
+    [*] --> INITIALIZING
+    INITIALIZING --> ACTIVE
+    ACTIVE --> BUSY
+    BUSY --> ACTIVE
+    ACTIVE --> LEARNING
+    LEARNING --> ACTIVE
+    ACTIVE --> HIBERNATING
+    HIBERNATING --> ACTIVE
+    ACTIVE --> RETIRED
+    RETIRED --> [*]
+```
+
+Sources: [orchestrator/modules/agents/factory/agent_factory.py:58-64]()
+
+Additionally, `INACTIVE_AGENT_STATUSES` defines the database status strings (`inactive`, `disabled`, `paused`, `archived`, `suspended`) that explicitly signify an owner-disabled agent [orchestrator/modules/agents/factory/agent_factory.py:37-40]().
+
+Sources: [orchestrator/modules/agents/factory/agent_factory.py:37-40]()
+
+---
+
+## 3. Core Data Structures
+
+### `ModelConfiguration`
+
+`ModelConfiguration` holds configuration settings for LLM invocation: `provider`, `model_id`, `temperature`, `max_tokens`, `top_p`, `frequency_penalty`, `presence_penalty`, and `fallback_model_id` [orchestrator/modules/agents/factory/agent_factory.py:67-89](). It includes static serialization (`to_dict`) and deserialization (`from_dict`) methods that resolve missing configurations via `default_route()` [orchestrator/modules/agents/factory/agent_factory.py:91-108]().
+
+Sources: [orchestrator/modules/agents/factory/agent_factory.py:67-108]()
+
+### `AgentMetadata` and `AgentRuntime`
+
+`AgentMetadata` organizes user-supplied attributes such as `name`, `agent_type`, `description`, `persona`, and `skills` [orchestrator/modules/agents/factory/agent_factory.py:111-125](). `AgentRuntime` represents active agent instances in memory, holding execution counters (`execution_count`, `total_tokens_used`), performance metrics, and a reference to its `UnifiedToolExecutor` [orchestrator/modules/agents/factory/agent_factory.py:156-174]().
+
+Sources: [orchestrator/modules/agents/factory/agent_factory.py:111-125](), [orchestrator/modules/agents/factory/agent_factory.py:156-174]()
+
+---
+
+## 4. Factory and Runtime Entry Points
+
+The factory module provides lazy loading helpers for monitoring services and `UnifiedToolExecutor`, decoupling module initialization from database session lifecycles [orchestrator/modules/agents/factory/agent_factory.py:44-51]().
+
+### Natural-Language to Code Entity Space: Execution Flow
+
+**Diagram: Execution Flow Mapping to Factory Classes**
+
+```mermaid
+flowchart LR
+    subgraph NaturalLanguage ["Natural Language Space"]
+        Create["Create Agent Request"]
+        Activate["Activate Agent State"]
+        Execute["Execute Prompt with Tools"]
     end
 
     subgraph CodeSpace ["Code Entity Space"]
-        C1["core/llm/manager.py:get_credential_data()"]
-        C2["core/credentials/resolver.py:get_credential_resolver()"]
-        C3["SystemSetting table lookup"]
-        C4["Environment Variables fallback"]
+        AgentRuntime["AgentRuntime (agent_factory.py:156)"]
+        AgentLifecycle["AgentLifecycle (agent_factory.py:58)"]
+        ToolLoopExecutor["ToolLoopExecutor (service.py:28)"]
+        UnifiedToolExecutor["UnifiedToolExecutor (agent_factory.py:49)"]
     end
 
-    UReq --> C1
-    C1 --> C3
-    C3 -->|Explicit mapping| C2
-    C1 -->|Fallback| C4
+    Create --> AgentRuntime
+    Activate --> AgentLifecycle
+    Execute --> ToolLoopExecutor
+    ToolLoopExecutor --> UnifiedToolExecutor
 ```
 
-The `get_credential_data` function ensures that workspaces can provide their own keys (BYOK) or use platform-provided credentials through structured priorities [orchestrator/core/llm/manager.py:135-155]().
-
-Sources: [orchestrator/core/llm/manager.py:135-178]()
+Sources: [orchestrator/modules/agents/factory/agent_factory.py:49-64](), [orchestrator/modules/agents/factory/agent_factory.py:156-174](), [orchestrator/consumers/chatbot/service.py:28-32]()
 
 ---
 
-## Agent Execution & Tool Loop
+## 5. Shared Tool Loop
 
-### execute_with_prompt() & Tool Loop Spine
+`ToolLoopExecutor` provides the converged execution spine shared by both chat sessions and agent prompt execution (`execute_with_prompt`) [orchestrator/consumers/chatbot/service.py:28-32](). It manages iteration caps, round-state validation, tool result post-processing, and fallback handling when output tokens hit truncation limits [orchestrator/consumers/chatbot/service.py:28-32]().
 
-Executes a task with a multi-iteration tool loop. It utilizes `get_tools_for_agent_async` as the single source of truth for tool schemas [orchestrator/consumers/chatbot/service.py:52-57]().
+**Diagram: Tool Loop Execution Sequence**
 
-Title: "Execution Loop and Tool Deduplication"
 ```mermaid
-flowchart TD
-    Start["AgentFactory.execute_with_prompt()"] --> BuildMsgs["Build messages array"]
-    BuildMsgs --> LoopStart["Loop via ToolLoopExecutor"]
-    LoopStart --> LLMCall["llm_manager.generate_response()"]
-    LLMCall --> CheckTools{"tool_calls?"}
-    
-    CheckTools -->|No| Final["Extract final content"]
-    CheckTools -->|Yes| Dedupe["ToolExecutionTracker / _queries_are_similar()"]
-    
-    Dedupe -->|Duplicate| SkipMsg["Add 'Already executed' error"]
-    Dedupe -->|New| ExecTool["UnifiedToolExecutor.execute_tool()"]
-    
-    ExecTool --> NextIter["Next iteration"]
-    SkipMsg --> NextIter
-    NextIter --> LoopStart
+sequenceDiagram
+    participant Caller as "Agent / Chat"
+    participant Loop as "ToolLoopExecutor"
+    participant LLM as "LLM Provider"
+    participant Tracker as "ToolExecutionTracker"
+    participant Tool as "UnifiedToolExecutor"
+
+    Caller->>Loop: run(prompt, tools, workspace_id)
+    Loop->>LLM: Request completion
+    LLM-->>Loop: Tool call request
+    Loop->>Tracker: Check duplication & retry limits
+    alt Allowed
+        Loop->>Tool: Execute action
+        Tool-->>Loop: Tool result
+        Loop->>LLM: Provide tool output
+    else Blocked / Duplicate
+        Loop->>Loop: Skip or apply nudge
+    end
+    Loop-->>Caller: ToolLoopResult
 ```
 
-### Tool Loop Prevention & Deduplication
-
-Tool deduplication utilizes query normalization and similarity metrics:
-1. **Normalization**: `_normalize_query(query)` strips punctuation and lowercases input [orchestrator/consumers/chatbot/service.py:76-83]().
-2. **Semantic Deduplication**: `_queries_are_similar(query1, query2, threshold)` checks semantic overlap using `SequenceMatcher` [orchestrator/consumers/chatbot/service.py:85-95]().
-3. **Argument Extraction**: `_extract_query_from_args` pulls relevant search terms from tool payloads [orchestrator/consumers/chatbot/service.py:97-104]().
-
-Sources: [orchestrator/consumers/chatbot/service.py:30-104]()
+Sources: [orchestrator/consumers/chatbot/service.py:28-32]()
 
 ---
 
-## Platform Actions Runtime
+## 6. Tool Deduplication and Retry Limits
 
-Agents can manage the Automatos platform itself through `platform_*` actions. These are registered in `ActionRegistry` via `register_all_actions` and routed via `PlatformActionExecutor` [orchestrator/modules/tools/discovery/platform_actions.py:57-60](), [orchestrator/modules/tools/discovery/platform_executor.py:2-9]().
+`ToolExecutionTracker` prevents infinite tool loops and redundant calls by enforcing exact-match fingerprinting and semantic query similarity via `SequenceMatcher` [orchestrator/consumers/chatbot/service.py:28-32](). Per-tool retry thresholds (e.g., `search_knowledge: 12`, `composio_execute: 5`, default: `5`) cap recurring failures before aborting the turn [orchestrator/consumers/chatbot/service.py:28-32]().
 
-### Categories of Platform Actions
-- **Agents**: `list_agents`, `create_agent`, `delete_agent` [orchestrator/modules/tools/discovery/platform_executor.py:19-29]()
-- **Playbooks**: `list_playbooks`, `create_playbook`, `execute_playbook` [orchestrator/modules/tools/discovery/platform_executor.py:30-42]()
-- **Analytics**: `get_llm_usage`, `get_cost_breakdown` [orchestrator/modules/tools/discovery/platform_executor.py:43-48]()
-- **Workspace**: `get_workspace_info`, `list_connected_apps` [orchestrator/modules/tools/discovery/platform_executor.py:70-74]()
+| Deduplication Feature | Implementation Mechanism | Sources |
+|---|---|---|
+| Exact Fingerprinting | `exact_executions` tracks tool names and hash arguments. | [orchestrator/consumers/chatbot/service.py:28-32]() |
+| Query Similarity | Normalizes search queries and compares via `SequenceMatcher` ratio (`0.75`). | [orchestrator/consumers/chatbot/service.py:28-32]() |
+| Retry Ceilings | `TOOL_RETRY_LIMITS` dictionary configures maximum attempts per tool. | [orchestrator/consumers/chatbot/service.py:28-32]() |
+| Stuck-Loop Capture | `_record_stuck_learning()` records stuck loops or falls back to logger. | [orchestrator/consumers/chatbot/service.py:28-32]() |
 
-Sources: [orchestrator/modules/tools/discovery/platform_actions.py:57-103](), [orchestrator/modules/tools/discovery/platform_executor.py:1-80]()
+Sources: [orchestrator/consumers/chatbot/service.py:28-32]()
 
 ---
 
-## Tool Integration Architecture
+## 7. Platform Actions and Agent Management Handlers
 
-### UnifiedToolExecutor
+Platform actions for agent administration are registered via `register_agents_actions` in `platform_actions.py` [orchestrator/modules/tools/discovery/platform_actions.py:12-18](). `PlatformActionExecutor` acts as a dispatcher to domain-specific handlers (`list_agents`, `recommend_agent`, `get_agent`, `create_agent`, `update_agent`, `delete_agent`) ensuring all operations remain strictly workspace-scoped [orchestrator/modules/tools/discovery/platform_executor.py:1-29]().
 
-The `UnifiedToolExecutor` routes calls based on tool name patterns and execution contexts [orchestrator/modules/agents/factory/agent_factory.py:44-46]():
-- **Platform Actions**: Prefixed with `platform_*`, allowing agents to manage the system itself [orchestrator/modules/tools/discovery/platform_executor.py:2-9]().
-- **Composio Actions**: External app integrations managed via `ComposioAppCache` and `AgentAppAssignment` [orchestrator/core/models/composio_cache.py]() (referenced in factory: [orchestrator/modules/agents/factory/agent_factory.py:29]()).
-
-Sources: [orchestrator/modules/agents/factory/agent_factory.py:44-46](), [orchestrator/modules/tools/discovery/platform_executor.py:1-10]()
+Sources: [orchestrator/modules/tools/discovery/platform_actions.py:12-18](), [orchestrator/modules/tools/discovery/platform_actions.py:101-105](), [orchestrator/modules/tools/discovery/platform_executor.py:1-29]()
 
 ---

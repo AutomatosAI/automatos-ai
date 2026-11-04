@@ -8,14 +8,21 @@ The following files were used as context for generating this wiki page:
 - [orchestrator/api/context.py](orchestrator/api/context.py)
 - [orchestrator/api/documents.py](orchestrator/api/documents.py)
 - [orchestrator/api/github_webhooks.py](orchestrator/api/github_webhooks.py)
-- [orchestrator/api/system.py](orchestrator/api/system.py)
-- [orchestrator/modules/rag/ingestion/contextual_annotator.py](orchestrator/modules/rag/ingestion/contextual_annotator.py)
+- [orchestrator/api/models_endpoints.py](orchestrator/api/models_endpoints.py)
+- [orchestrator/modules/rag/__init__.py](orchestrator/modules/rag/__init__.py)
 - [orchestrator/modules/rag/ingestion/manager.py](orchestrator/modules/rag/ingestion/manager.py)
 - [orchestrator/modules/rag/service.py](orchestrator/modules/rag/service.py)
 - [orchestrator/modules/search/services/entity_extractor.py](orchestrator/modules/search/services/entity_extractor.py)
+- [orchestrator/services/document_downloads.py](orchestrator/services/document_downloads.py)
 - [orchestrator/tests/security/test_s5_closures.py](orchestrator/tests/security/test_s5_closures.py)
+- [orchestrator/tests/test_auto_model_workspace_save.py](orchestrator/tests/test_auto_model_workspace_save.py)
 - [orchestrator/tests/test_entity_extractor_no_vendor_key.py](orchestrator/tests/test_entity_extractor_no_vendor_key.py)
-- [orchestrator/tests/test_p2w1_contextual_annotations.py](orchestrator/tests/test_p2w1_contextual_annotations.py)
+- [orchestrator/tests/test_f357_an_upload_dedupes_only_in_its_own_workspace.py](orchestrator/tests/test_f357_an_upload_dedupes_only_in_its_own_workspace.py)
+- [orchestrator/tests/test_f450_only_the_platform_admin_changes_a_system_setting.py](orchestrator/tests/test_f450_only_the_platform_admin_changes_a_system_setting.py)
+- [orchestrator/tests/test_f451_the_platform_default_needs_agents_read.py](orchestrator/tests/test_f451_the_platform_default_needs_agents_read.py)
+- [orchestrator/tests/test_f453_a_document_download_is_the_callers_own.py](orchestrator/tests/test_f453_a_document_download_is_the_callers_own.py)
+- [orchestrator/tests/test_f453_b_document_content_is_the_callers_own.py](orchestrator/tests/test_f453_b_document_content_is_the_callers_own.py)
+- [orchestrator/tests/test_prd233_s4_storage_factory.py](orchestrator/tests/test_prd233_s4_storage_factory.py)
 
 </details>
 
@@ -23,188 +30,167 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-The Document Ingestion Pipeline transforms raw documents from multiple sources into searchable, semantically-indexed content that agents can query through RAG (Retrieval-Augmented Generation). This pipeline handles text extraction, chunking, situating context (annotation), embedding generation, and storage in high-performance vector databases.
+This page describes the document-ingestion components visible in the provided code: upload validation and type mapping in `orchestrator/api/documents.py`, processing data structures and setup in `DocumentProcessor` and `DocumentChunk` in `orchestrator/modules/rag/ingestion/manager.py`, and the RAG module’s public ingestion and retrieval exports. The shown excerpts do not include the complete upload handler or the remainder of `DocumentManager`, so details that depend on those implementations are not inferred here. [orchestrator/api/documents.py:78-95]() [orchestrator/api/documents.py:144-172]() [orchestrator/modules/rag/ingestion/manager.py:92-168]() [orchestrator/modules/rag/__init__.py:26-74]()
 
-The system supports local file uploads via the `DocumentManager` [orchestrator/modules/rag/ingestion/manager.py:77-87](), automated synchronization with cloud providers via `CloudSyncService`, and advanced multimodal extraction.
-
-Sources: [orchestrator/modules/rag/ingestion/manager.py:77-87]()
+Sources: [orchestrator/api/documents.py:78-95](), [orchestrator/api/documents.py:144-172](), [orchestrator/modules/rag/ingestion/manager.py:92-168](), [orchestrator/modules/rag/__init__.py:26-74]()
 
 ---
 
-## Pipeline Architecture
+## Pipeline Architecture & Data Flow
 
-The ingestion pipeline consists of six sequential stages: **source retrieval → format detection → text extraction → contextual annotation → semantic chunking → embedding & storage**.
+The code identifies `DocumentManager` as the main upload/storage entry point and exports ingestion components—including `DocumentProcessor`, `DocumentChunk`, and `IngestionPipeline`—from `modules.rag`. The API excerpt defines a workspace-aware `get_document_manager()` factory and begins the `/api/documents/upload` handler. The supplied excerpt ends while the handler is validating MIME and extension; subsequent behavior is not described here. [orchestrator/api/documents.py:78-118]() [orchestrator/api/documents.py:144-172]() [orchestrator/modules/rag/__init__.py:42-65]()
 
-### System Data Flow
-This diagram illustrates the flow from raw data to the "Code Entity Space" where specific services process the information.
+### System Data Flow: Natural Language Space to Code Entity Space
+
+The diagram connects user-facing upload concepts and agent document actions to named API and ingestion symbols. `DocumentManager` is identified as the main upload entry point by the RAG module’s documentation and exports; the shown excerpts do not establish the internal calls between individual processing stages. [orchestrator/api/documents.py:109-118]() [orchestrator/api/documents.py:144-172]() [orchestrator/modules/rag/__init__.py:5-21]() [orchestrator/modules/rag/__init__.py:42-65]()
 
 ```mermaid
 graph TB
-    subgraph "Input Sources"
-        Upload["handle_request<br/>(documents.py)"]
-        PlatformUpload["platform_upload_document<br/>(Platform Action)"]
-    end
-    
-    subgraph "Stage 1: Format Detection"
-        MagicDetect["python-magic<br/>MIME & Extension"]
-        FormatRoute["DocumentProcessor<br/>detect_file_type"]
-    end
-    
-    subgraph "Stage 2: Text Extraction"
-        PDFExtract["pdfplumber<br/>PyPDF2 Fallback"]
-        DOCXExtract["python-docx"]
-        TextExtract["Plain Text / MD"]
+    subgraph "Natural Language Space"
+        Upload["POST /api/documents/upload"]
+        AgentAction["platform_upload_document"]
+        SearchAction["platform_search_documents"]
     end
 
-    subgraph "Stage 3: Contextual Enhancement"
-        Annotator["annotate_chunks<br/>(contextual_annotator.py)"]
-        LLMAnnotate["Situating Preface<br/>(Anthropic Pattern)"]
+    subgraph "Code Entity Space"
+        Handler["handle_request<br/>orchestrator/api/documents.py"]
+        Factory["get_document_manager(workspace_id)"]
+        Manager["DocumentManager<br/>modules/rag/ingestion/manager.py"]
+        Processor["DocumentProcessor"]
+        Chunk["DocumentChunk"]
+        Pipeline["IngestionPipeline"]
+        RAG["RAGService"]
     end
-    
-    subgraph "Stage 4: Semantic Chunking"
-        SemanticChunker["SemanticChunker<br/>(Strategy-based)"]
-        Strategies["SEMANTIC_SIMILARITY<br/>INFORMATION_DENSITY"]
-    end
-    
-    subgraph "Stage 5: Embedding & Entity Extraction"
-        EmbedMgr["EmbeddingManager"]
-        EntityExt["EntityExtractor<br/>(NER + LLM)"]
-    end
-    
-    subgraph "Stage 6: Storage"
-        S3Vectors["S3_VECTORS_ENABLED<br/>(config.py)"]
-        PGMetadata["PostgreSQL<br/>(Document & DocumentChunk)"]
-    end
-    
-    Upload --> MagicDetect
-    PlatformUpload --> MagicDetect
-    MagicDetect --> FormatRoute
-    
-    FormatRoute -->|PDF| PDFExtract
-    FormatRoute -->|DOCX| DOCXExtract
-    FormatRoute -->|Text| TextExtract
-    
-    PDFExtract --> Annotator
-    DOCXExtract --> Annotator
-    TextExtract --> Annotator
 
-    Annotator --> LLMAnnotate
-    LLMAnnotate --> SemanticChunker
-    
-    SemanticChunker --> Strategies
-    Strategies --> EmbedMgr
-    Strategies --> EntityExt
-    
-    EmbedMgr --> S3Vectors
-    EntityExt --> PGMetadata
-    S3Vectors --> PGMetadata
+    Upload --> Handler
+    Handler --> Factory
+    Factory --> Manager
+    AgentAction --> Manager
+    Manager --> Processor
+    Processor --> Chunk
+    Manager --> Pipeline
+    SearchAction --> RAG
 ```
 
-Sources: [orchestrator/api/documents.py:111-122](), [orchestrator/modules/rag/ingestion/manager.py:113-130](), [orchestrator/modules/rag/ingestion/contextual_annotator.py:111-136]()
+Sources: [orchestrator/api/documents.py:109-118](), [orchestrator/api/documents.py:144-172](), [orchestrator/modules/rag/__init__.py:5-21](), [orchestrator/modules/rag/__init__.py:42-65]()
+
+### Component Boundaries
+
+| Component | Role established by the shown code | Source |
+|---|---|---|
+| `handle_request` | FastAPI upload handler at `POST /api/documents/upload`; receives an `UploadFile`, form fields, request context, and database session. | [orchestrator/api/documents.py:144-154]() |
+| `get_document_manager(workspace_id)` | Creates `DocumentManager` with database configuration, workspace ID, S3 Vectors setting, and documents bucket. | [orchestrator/api/documents.py:109-118]() |
+| `processing_type(file_type)` | Maps listed API file types to `DocumentType` values, defaulting to `DocumentType.TEXT`. | [orchestrator/api/documents.py:88-95]() |
+| `DocumentProcessor` | Initializes recursive text and Python code splitters and detects document types from MIME type and extension. | [orchestrator/modules/rag/ingestion/manager.py:154-189]() |
+| `DocumentChunk` | Carries document ID, chunk index, content, optional embedding and metadata, parent content, and headers. | [orchestrator/modules/rag/ingestion/manager.py:134-152]() |
+| `RAGService` | Exported as the RAG retrieval service; the module’s documented usage calls `retrieve()` for search. | [orchestrator/modules/rag/__init__.py:12-21]() [orchestrator/modules/rag/__init__.py:26-33]() |
+
+Sources: [orchestrator/api/documents.py:88-118](), [orchestrator/api/documents.py:144-154](), [orchestrator/modules/rag/ingestion/manager.py:134-189](), [orchestrator/modules/rag/__init__.py:12-33]()
 
 ---
 
-## Stage 1: Format Detection
+## Stage 1: Format Detection, MIME Validation & Workspace Context
 
-The `DocumentProcessor` uses `python-magic` and file extensions to categorize documents into `DocumentType` enums [orchestrator/modules/rag/ingestion/manager.py:131-155](). The API layer enforces a strict `ALLOWED_MIME_TYPES` allowlist [orchestrator/api/documents.py:89-105]().
+The upload API defines a 50 MiB size limit and an allowlist associating detected MIME types with accepted filename extensions. In the visible portion of `handle_request`, the handler rejects a missing filename, reads the uploaded content, measures its byte length, rejects content larger than `MAX_UPLOAD_BYTES`, and detects MIME type with `magic.from_buffer(content, mime=True)`. The supplied excerpt ends while the handler is validating MIME and extension; subsequent behavior is not described here. [orchestrator/api/documents.py:120-136]() [orchestrator/api/documents.py:138-143]() [orchestrator/api/documents.py:144-172]()
 
-| Format | DocumentType | Detection Method |
-|--------|--------------|------------------|
-| PDF | `PDF` | `application/pdf` or `.pdf` |
-| Word | `DOCX` | OpenXML MIME or `.docx` |
-| Markdown | `MARKDOWN` | `.md`, `.markdown` |
-| Python | `PYTHON` | `.py` |
-| Spreadsheet | `XLSX` / `CSV` | OpenXML Spreadsheet / `text/csv` |
+The API’s `UPLOAD_FILE_TYPES` mapping classifies supported extensions for listing, while `processing_type()` translates those classifications into the ingestion enum. Separately, `DocumentProcessor.detect_file_type()` uses the file’s MIME type and extension to select a `DocumentType`. [orchestrator/api/documents.py:78-95]() [orchestrator/modules/rag/ingestion/manager.py:168-189]()
 
-Sources: [orchestrator/modules/rag/ingestion/manager.py:62-71](), [orchestrator/api/documents.py:89-104]()
+| Listed file type | Extensions | Processing type |
+|---|---|---|
+| `pdf` | `.pdf` | `DocumentType.PDF` |
+| `markdown` | `.md`, `.markdown` | `DocumentType.MARKDOWN` |
+| `text` | `.txt` | `DocumentType.TEXT` |
+| `document` | `.doc`, `.docx` | `DocumentType.DOCX` |
+| `json` | `.json` | `DocumentType.JSON` |
+| `csv` | `.csv` | `DocumentType.CSV` |
+| `spreadsheet` | `.xlsx`, `.xls` | `DocumentType.XLSX` |
 
----
+The API mappings and fallback are defined in `UPLOAD_FILE_TYPES` and `processing_type()`. [orchestrator/api/documents.py:78-95]()
 
-## Stage 2: Text Extraction
+The upload handler obtains `RequestContext` through `get_request_context_hybrid`, and the endpoint declares the `documents:create` workspace permission dependency. `get_document_manager(workspace_id)` passes the workspace ID into `DocumentManager`; this establishes workspace context at the API/factory boundary, but the omitted implementation prevents a claim here about the precise deduplication query or its scope. [orchestrator/api/documents.py:36-38]() [orchestrator/api/documents.py:109-118]() [orchestrator/api/documents.py:144-153]()
 
-Extraction is handled by the `DocumentProcessor` with specific logic for each format.
-
-### PDF Extraction
-The system uses a prioritized dual-parser approach [orchestrator/modules/rag/ingestion/manager.py:157-194]():
-1.  **pdfplumber**: Primary extractor. Includes cleaning logic to remove null characters and fix double-character artifacts [orchestrator/modules/rag/ingestion/manager.py:162-171]().
-2.  **PyPDF2**: Fallback parser used if `pdfplumber` fails [orchestrator/modules/rag/ingestion/manager.py:178-186]().
-
-### DOCX and Text
-- **DOCX**: Uses `python-docx` to iterate through paragraphs [orchestrator/modules/rag/ingestion/manager.py:196-203]().
-- **Text/MD**: Direct read with encoding detection.
-
-Sources: [orchestrator/modules/rag/ingestion/manager.py:157-194]()
+Sources: [orchestrator/api/documents.py:36-38](), [orchestrator/api/documents.py:78-95](), [orchestrator/api/documents.py:109-118](), [orchestrator/api/documents.py:120-172](), [orchestrator/modules/rag/ingestion/manager.py:168-189]()
 
 ---
 
-## Stage 3: Contextual Annotation
+## Stage 2: Text Extraction & Transaction Safety
 
-Implemented in `contextual_annotator.py`, this stage prepends a ~50-100 token situating preface to each chunk before embedding [orchestrator/modules/rag/ingestion/contextual_annotator.py:3-9]().
+`DocumentProcessor` constructs a `RecursiveCharacterTextSplitter` with a 1,000-character chunk size and 200-character overlap, and a `PythonCodeTextSplitter` with the same configured size and overlap. Its visible `detect_file_type()` implementation checks MIME type and/or extension for PDF, DOCX, Markdown, Python, JSON, XLSX, and CSV, then falls back to `DocumentType.TEXT`. [orchestrator/modules/rag/ingestion/manager.py:154-189]()
 
-- **Mechanism**: A cheap LLM reads the `parent_text` and the `chunk_text` to generate context [orchestrator/modules/rag/ingestion/contextual_annotator.py:51-58]().
-- **Persistence**: The annotation is stored in `DocumentChunk.metadata` under the `contextual_annotation` key [orchestrator/modules/rag/ingestion/contextual_annotator.py:36-37]().
-- **Robustness**: If annotation fails, the system logs a warning and falls back to raw text, ensuring ingestion completes [orchestrator/modules/rag/ingestion/contextual_annotator.py:90-95]().
+The manager module also contains transaction and optional entity-table safeguards:
 
-Sources: [orchestrator/modules/rag/ingestion/contextual_annotator.py:76-109](), [orchestrator/tests/test_p2w1_contextual_annotations.py:65-83]()
+- `_rollback_step(conn, step, document_id)` attempts to roll back a failed processing step and logs a warning if rollback itself fails. [orchestrator/modules/rag/ingestion/manager.py:56-70]()
+- `_kb_entities_table_exists(cursor)` checks whether `public.kb_entities` exists using `to_regclass`, memoizes the result, and returns `False` if the check raises an exception. [orchestrator/modules/rag/ingestion/manager.py:73-90]()
 
----
+These helpers establish safeguards in the manager module; the shown excerpts do not include their call sites, so they do not establish which processing stages invoke them. [orchestrator/modules/rag/ingestion/manager.py:56-90]()
 
-## Stage 4: Semantic Chunking
-
-The `SemanticChunker` splits documents based on mathematical optimization and structural boundaries [orchestrator/modules/rag/chunking/semantic_chunker.py:52-70]().
-
-### Chunking Strategies
-| Strategy | Implementation Logic |
-|----------|----------------------|
-| `SEMANTIC_SIMILARITY` | Groups sentences based on cosine similarity thresholds using `VectorOperations`. |
-| `INFORMATION_DENSITY` | Uses `InformationTheory` to finalize chunks when entropy reaches a threshold. |
-| `HIERARCHICAL` | Preserves document structure (h1, h2, h3) in `DocumentChunk.headers` [orchestrator/modules/rag/ingestion/manager.py:101](). |
-
-Sources: [orchestrator/modules/rag/ingestion/manager.py:94-111](), [orchestrator/modules/rag/service.py:7-9]()
+Sources: [orchestrator/modules/rag/ingestion/manager.py:56-90](), [orchestrator/modules/rag/ingestion/manager.py:154-189]()
 
 ---
 
-## Stage 5: Embedding and Entity Extraction
+## Stage 3: Chunk Representation & Contextual Fields
 
-- **Embedding Generation**: Managed by `DocumentManager`. Vectors are generated for the *annotated* content, ensuring the vector representation includes the situating context [orchestrator/modules/rag/ingestion/contextual_annotator.py:5-6]().
-- **Entity Extraction**: The `EntityExtractor` uses a hybrid approach of regex patterns [orchestrator/modules/search/services/entity_extractor.py:90-121]() and LLM analysis [orchestrator/modules/search/services/entity_extractor.py:123-146]() to identify technologies, organizations, and concepts for the Knowledge Graph.
+The manager defines `DocumentChunk` with fields for document identity, position, text, optional embedding and metadata, optional parent content, and header hierarchy. Its `to_dict()` method serializes the document ID, chunk index, content, metadata, parent content, and headers. [orchestrator/modules/rag/ingestion/manager.py:134-152]()
 
-Sources: [orchestrator/modules/search/services/entity_extractor.py:90-146]()
+The RAG module exports `SemanticChunker`, `ChunkingStrategy`, `ChunkMetadata`, `SemanticChunk`, `DocumentChunker`, and `MultiModalChunker`. The provided files identify these public symbols but do not include the semantic chunker implementation or enough call-site code to establish which strategy is selected during ingestion. [orchestrator/modules/rag/__init__.py:34-41]() [orchestrator/modules/rag/__init__.py:92-99]()
 
----
+### Chunking Concepts: Natural Language Space to Code Entity Space
 
-## Stage 6: Storage and Vector Databases
-
-The system utilizes PostgreSQL for metadata and pluggable vector backends (pgvector or S3).
-
-### Storage Entity Association
-This diagram bridges the Natural Language concept of "Knowledge Storage" to specific code entities.
+This mapping relates document content and contextual annotations to the concrete chunk data structures named in the code. It does not imply an unshown invocation order between `DocumentProcessor`, `SemanticChunker`, and `DocumentChunk`. [orchestrator/modules/rag/ingestion/manager.py:134-168]() [orchestrator/modules/rag/__init__.py:34-41]()
 
 ```mermaid
-sequenceDiagram
-    participant API as "api/documents.py"
-    participant DM as "DocumentManager"
-    participant DB as "PostgreSQL (Document Table)"
-    participant VS as "VectorStore (S3/pgvector)"
+graph LR
+    subgraph "Natural Language Space"
+        Text["Extracted document text"]
+        Context["Section context and header hierarchy"]
+        Parent["Parent section content"]
+    end
 
-    Note over API, VS: Direct Upload Flow
-    API->>DM: handle_request()
-    DM->>DB: INSERT INTO documents (content_hash, status)
-    DM->>DM: process_document()
-    DM->>DB: INSERT INTO document_chunks (content, metadata, embedding)
-    DM->>VS: upsert_embeddings()
+    subgraph "Code Entity Space"
+        Processor["DocumentProcessor"]
+        Semantic["SemanticChunker"]
+        Strategy["ChunkingStrategy"]
+        Chunk["DocumentChunk"]
+        Metadata["ChunkMetadata"]
+    end
+
+    Text --> Processor
+    Text --> Semantic
+    Semantic --> Strategy
+    Strategy --> Chunk
+    Context --> Chunk
+    Parent --> Chunk
+    Chunk --> Metadata
 ```
 
-Sources: [orchestrator/api/documents.py:158-170](), [orchestrator/modules/rag/ingestion/manager.py:94-111](), [orchestrator/tests/security/test_s5_closures.py:34-42]()
+Sources: [orchestrator/modules/rag/ingestion/manager.py:134-168](), [orchestrator/modules/rag/__init__.py:34-41]()
+
+The API’s `_coverage_fields(doc)` reads `kept_pct` from `doc_metadata`. If it is an integer, the response fields include that percentage and a `partial` boolean computed by comparing it with `RAG_KEPT_WARN_PCT`; if it is not an integer, the helper returns an empty dictionary. The excerpt establishes this presentation behavior, not how `kept_pct` is calculated or stored. [orchestrator/api/documents.py:98-107]()
+
+Sources: [orchestrator/api/documents.py:98-107](), [orchestrator/modules/rag/ingestion/manager.py:134-152]()
 
 ---
 
-## Security and Multi-Tenancy
+## Stage 4: Embedding Generation & Entity Extraction
 
-- **Workspace Scoping**: Every `DocumentManager` instance is initialized with a `workspace_id` [orchestrator/api/documents.py:78-87]().
-- **Content Access**: The `GET /api/documents/content` route requires `RequestContext` to ensure users only access documents within their authorized workspace [orchestrator/api/documents.py:21-24]().
-- **Analytics Isolation**: `document_usage` tracking attributes every read/write to a `workspace_id` in the metadata JSONB [orchestrator/tests/security/test_s5_closures.py:34-50]().
+`DocumentChunk` has an optional `embedding` field, and `DocumentManager` is documented as supporting embedding generation and storage. The RAG package exports ingestion and retrieval components, but the shown manager excerpt does not include the embedding-generation implementation, provider selection, batch sizing, or vector-write call sites. [orchestrator/modules/rag/ingestion/manager.py:3-11]() [orchestrator/modules/rag/ingestion/manager.py:134-152]() [orchestrator/modules/rag/__init__.py:42-65]()
 
-Sources: [orchestrator/api/documents.py:111-113](), [orchestrator/api/context.py:94-100]()
+The available `EntityExtractor` implementation first runs regex-based extraction and, when enabled and the input is under 8,000 characters, attempts LLM-based extraction. It deduplicates and limits the resulting entities. Its LLM manager is initialized lazily through `_manager()`, which calls `create_llm_manager()` with the `entity_extraction` service and request type. [orchestrator/modules/search/services/entity_extractor.py:39-69]() [orchestrator/modules/search/services/entity_extractor.py:77-118]()
+
+The manager includes `_kb_entities_table_exists()` as a safe existence check for `public.kb_entities`; the supplied excerpt does not show whether or where document ingestion invokes `EntityExtractor` or persists extracted entities. [orchestrator/modules/rag/ingestion/manager.py:73-90]() [orchestrator/modules/search/services/entity_extractor.py:39-118]()
+
+Sources: [orchestrator/modules/rag/ingestion/manager.py:3-11](), [orchestrator/modules/rag/ingestion/manager.py:73-90](), [orchestrator/modules/rag/ingestion/manager.py:134-152](), [orchestrator/modules/search/services/entity_extractor.py:39-118](), [orchestrator/modules/rag/__init__.py:42-65]()
+
+---
+
+## Storage & Retrieval Boundary
+
+`get_document_manager(workspace_id)` configures `DocumentManager` with database connection settings, workspace identity, `S3_VECTORS_ENABLED`, and `S3_DOCUMENTS_BUCKET`. This establishes the storage configuration passed by the API factory; the provided excerpt does not show how `DocumentManager` writes document records, chunks, or vectors to a particular backend. [orchestrator/api/documents.py:109-118]()
+
+The RAG module describes the overall system as upload, parse, chunk, embed, store, and search, and exports `RAGService` and `get_rag_service` for retrieval. `RAGResult` in `service.py` includes chunks, formatted context, token count, source names, query, diversity and information-gain scores, and a source map. [orchestrator/modules/rag/__init__.py:1-21]() [orchestrator/modules/rag/__init__.py:26-33]() [orchestrator/modules/rag/service.py:55-67]()
+
+The `ToolResultFormatter` excerpt shows a downstream full-document read path: it looks up a document’s `file_path` and `filename`; for eligible text-file extensions it attempts an S3 download, then falls back to reading `document_chunks` ordered by chunk index and joining chunk content. This is a content-reassembly path, not evidence of the ingestion write implementation. [orchestrator/modules/tools/formatting/result_formatter.py:112-118]() [orchestrator/modules/tools/formatting/result_formatter.py:126-164]()
+
+Sources: [orchestrator/api/documents.py:109-118](), [orchestrator/modules/rag/__init__.py:1-33](), [orchestrator/modules/rag/service.py:55-67](), [orchestrator/modules/tools/formatting/result_formatter.py:112-164]()
 
 ---

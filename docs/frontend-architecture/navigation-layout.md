@@ -5,263 +5,288 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/app/assignments/page.tsx](frontend/app/assignments/page.tsx)
-- [frontend/app/globals.css](frontend/app/globals.css)
+- [frontend/app/deliverables/__tests__/deliverables-route.test.tsx](frontend/app/deliverables/__tests__/deliverables-route.test.tsx)
+- [frontend/app/deliverables/page.tsx](frontend/app/deliverables/page.tsx)
+- [frontend/app/tools/__tests__/tools-route.test.tsx](frontend/app/tools/__tests__/tools-route.test.tsx)
 - [frontend/app/tools/page.tsx](frontend/app/tools/page.tsx)
-- [frontend/components/assignments/studio/assignments-hub.tsx](frontend/components/assignments/studio/assignments-hub.tsx)
-- [frontend/components/assignments/studio/entry-grid.tsx](frontend/components/assignments/studio/entry-grid.tsx)
-- [frontend/components/assignments/studio/mission-card.tsx](frontend/components/assignments/studio/mission-card.tsx)
-- [frontend/components/assignments/studio/missions-body.tsx](frontend/components/assignments/studio/missions-body.tsx)
-- [frontend/components/assignments/studio/mkt-card.tsx](frontend/components/assignments/studio/mkt-card.tsx)
-- [frontend/components/assignments/studio/playbook-card.tsx](frontend/components/assignments/studio/playbook-card.tsx)
-- [frontend/components/assignments/studio/playbooks-body.tsx](frontend/components/assignments/studio/playbooks-body.tsx)
-- [frontend/components/assignments/studio/status-head.tsx](frontend/components/assignments/studio/status-head.tsx)
-- [frontend/components/auth/profile-menu.tsx](frontend/components/auth/profile-menu.tsx)
-- [frontend/components/command-center/activity-tab.tsx](frontend/components/command-center/activity-tab.tsx)
-- [frontend/components/command-center/calendar-tab.tsx](frontend/components/command-center/calendar-tab.tsx)
-- [frontend/components/command-center/stats-strip.tsx](frontend/components/command-center/stats-strip.tsx)
-- [frontend/components/command-center/summary-tab.tsx](frontend/components/command-center/summary-tab.tsx)
-- [frontend/components/layout/__tests__/prd184-us006-placebo-relics.test.tsx](frontend/components/layout/__tests__/prd184-us006-placebo-relics.test.tsx)
-- [frontend/components/layout/__tests__/studio-sidebar.test.tsx](frontend/components/layout/__tests__/studio-sidebar.test.tsx)
+- [frontend/components/__tests__/prd244-w3-style-tone.test.ts](frontend/components/__tests__/prd244-w3-style-tone.test.ts)
+- [frontend/components/__tests__/studio-honest-chrome.test.ts](frontend/components/__tests__/studio-honest-chrome.test.ts)
+- [frontend/components/assignments/assignments-missions-grid.tsx](frontend/components/assignments/assignments-missions-grid.tsx)
+- [frontend/components/assignments/assignments-page.tsx](frontend/components/assignments/assignments-page.tsx)
+- [frontend/components/assignments/assignments-playbooks-grid.tsx](frontend/components/assignments/assignments-playbooks-grid.tsx)
+- [frontend/components/deliverables/socials/__tests__/socials-shells.test.tsx](frontend/components/deliverables/socials/__tests__/socials-shells.test.tsx)
+- [frontend/components/deliverables/studio/__tests__/deliverables-studio.test.tsx](frontend/components/deliverables/studio/__tests__/deliverables-studio.test.tsx)
+- [frontend/components/deliverables/studio/deliverables-studio.tsx](frontend/components/deliverables/studio/deliverables-studio.tsx)
 - [frontend/components/layout/header.tsx](frontend/components/layout/header.tsx)
-- [frontend/components/layout/main-layout.tsx](frontend/components/layout/main-layout.tsx)
 - [frontend/components/layout/mobile-sidebar.tsx](frontend/components/layout/mobile-sidebar.tsx)
 - [frontend/components/layout/sidebar.tsx](frontend/components/layout/sidebar.tsx)
-- [frontend/components/layout/studio-header.tsx](frontend/components/layout/studio-header.tsx)
-- [frontend/components/layout/studio-sidebar.tsx](frontend/components/layout/studio-sidebar.tsx)
-- [frontend/components/settings/CredentialTypesTab.tsx](frontend/components/settings/CredentialTypesTab.tsx)
-- [frontend/components/settings/CredentialsTab.tsx](frontend/components/settings/CredentialsTab.tsx)
-- [frontend/components/shared/stats-bar.tsx](frontend/components/shared/stats-bar.tsx)
+- [frontend/components/missions/mission-list.tsx](frontend/components/missions/mission-list.tsx)
+- [frontend/components/tools/__tests__/tools-studio-variant.test.ts](frontend/components/tools/__tests__/tools-studio-variant.test.ts)
 - [frontend/components/tools/my-tools-dashboard.tsx](frontend/components/tools/my-tools-dashboard.tsx)
-- [frontend/components/ui/help-tooltip.tsx](frontend/components/ui/help-tooltip.tsx)
-- [frontend/lib/tooltips.json](frontend/lib/tooltips.json)
-- [frontend/lib/use-tooltips.ts](frontend/lib/use-tooltips.ts)
+- [frontend/components/ui/__tests__/theme-toggle.test.tsx](frontend/components/ui/__tests__/theme-toggle.test.tsx)
+- [frontend/components/workflows/playbook-execution-config.tsx](frontend/components/workflows/playbook-execution-config.tsx)
+- [frontend/components/workflows/playbook-preview-panel.tsx](frontend/components/workflows/playbook-preview-panel.tsx)
+- [frontend/components/workflows/playbook-schedule-config.tsx](frontend/components/workflows/playbook-schedule-config.tsx)
+- [frontend/components/workflows/playbook-step-builder.tsx](frontend/components/workflows/playbook-step-builder.tsx)
+- [frontend/components/workflows/playbooks-tab.tsx](frontend/components/workflows/playbooks-tab.tsx)
+- [frontend/components/workflows/view-playbook-modal.tsx](frontend/components/workflows/view-playbook-modal.tsx)
+- [frontend/hooks/use-assignments-api.ts](frontend/hooks/use-assignments-api.ts)
+- [frontend/hooks/use-studio-theme.ts](frontend/hooks/use-studio-theme.ts)
+- [frontend/lib/__tests__/studio-menu-consistency.test.ts](frontend/lib/__tests__/studio-menu-consistency.test.ts)
+- [frontend/lib/deliverables/tabs.ts](frontend/lib/deliverables/tabs.ts)
+- [frontend/lib/studio-menu.ts](frontend/lib/studio-menu.ts)
+- [orchestrator/api/assignments.py](orchestrator/api/assignments.py)
 
 </details>
 
 
 
-## Purpose
+## Purpose and Scope
 
-This document covers the frontend navigation system and page layout architecture, including the dual-mode layout system (Classic vs. Studio), role-based menu filtering, page context tracking, and the integration of global UI components like tooltips and the onboarding tour system.
+This page documents the frontend layout shell and navigation: Classic and Studio sidebars, responsive navigation, headers and profile controls, Studio menu configuration, and the filters that determine which navigation items are displayed. It also describes how route state maps to navigation state and how pages opt into Studio and full-bleed layouts. [frontend/components/layout/main-layout.tsx:18-27](), [frontend/components/layout/sidebar.tsx:33-35](), [frontend/app/tools/page.tsx:8-27]()
+
+Sources: [frontend/components/layout/main-layout.tsx:18-27](), [frontend/components/layout/sidebar.tsx:33-35](), [frontend/app/tools/page.tsx:8-27]()
 
 ---
 
 ## Navigation Architecture Overview
 
-The application uses a Next.js App Router structure where the `MainLayout` component [frontend/components/layout/main-layout.tsx:29-193]() manages the primary navigation shell. It dynamically switches between the "Classic" layout and the "Studio" layout based on the `useIsStudio` hook [frontend/components/layout/main-layout.tsx:34]().
+`MainLayout` is the composition point for the page shell. It imports the Classic `Sidebar`, `MobileSidebar`, and `Header`, the Studio `StudioSidebar` and `StudioHeader`, and the floating `AutoWidget`. It also reads viewport and theme state through hooks like `useIsTabletOrBelow` and `useIsStudio`. [frontend/components/layout/main-layout.tsx:4-16]()
 
-### Global Layout Hierarchy
+The layout exposes a `fullBleed` prop for content that needs a full-height, unconstrained content region; its documented intent is for full-canvas surfaces such as chat. In the Studio desktop shell, `fullBleed` selects a flex-based main region, while the ordinary branch applies page padding and a maximum-width wrapper. [frontend/components/layout/main-layout.tsx:18-27](), [frontend/components/layout/main-layout.tsx:70-100]()
 
-The `MainLayout` component [frontend/components/layout/main-layout.tsx:29-193]() is responsible for rendering the overall page structure. It conditionally renders either the "Studio" shell or the "Classic" shell based on the `isStudio` flag [frontend/components/layout/main-layout.tsx:91]().
+`StudioDesktopShell` owns Studio sidebar collapse state through `useStudioSidebarCollapsed`. The hook restores the preference from `localStorage` and writes it on toggle; if storage is blocked, the rail still toggles for the current render but the preference is not persisted. [frontend/components/layout/main-layout.tsx:36-63]()
 
-**Layout Component Hierarchy Diagram**
+The Classic shell maintains its own `sidebarCollapsed` and `mobileMenuOpen` state. Its menu handler opens the mobile sheet when `isMobileLayout` is true and toggles the desktop sidebar otherwise. [frontend/components/layout/main-layout.tsx:145-155]()
+
+**Diagram: Layout component and code entities**
+
 ```mermaid
 graph TB
-    subgraph "ProviderHierarchy"
-        ClerkProvider["ClerkProvider<br/>(Authentication)"]
-        RoleProvider["RoleProvider<br/>(role-context.tsx)"]
-WorkspaceProvider["WorkspaceProvider<br/>(Current Workspace)"]
-    end
-
-    subgraph "MainLayout [main-layout.tsx]"
-        direction TB
-        IsStudio{{"isStudio?"}}
-
-        subgraph "StudioShell"
-            StudioSidebar["StudioSidebar<br/>(Labelled Rail)"]
-            StudioHeader["StudioHeader<br/>(Editorial)"]
-            StudioPageTabs["StudioPageTabs<br/>(Sub-navigation)"]
-        end
-
-        subgraph "ClassicShell"
-            SidebarComp["Sidebar<br/>(Desktop Glass)"]
-            MobileSidebar["MobileSidebar<br/>(Sheet-based)"]
-            HeaderComp["Header<br/>(Branding/Actions)"]
-        end
-    end
-
-    ClerkProvider --> RoleProvider
-    RoleProvider --> WorkspaceProvider
-    WorkspaceProvider --> MainLayout
-
-    IsStudio -- "Yes (Desktop)" --> StudioShell
-    IsStudio -- "No (Classic Desktop)" --> ClassicShell
-    IsStudio -- "Mobile (Studio or Classic)" --> MobileSidebar
-
-    StudioShell --> PageContent["Page Content"]
+    MainLayout["MainLayout<br/>main-layout.tsx"] --> useIsStudio["useIsStudio<br/>use-studio-theme"]
+    MainLayout --> useIsTabletOrBelow["useIsTabletOrBelow<br/>use-mobile"]
+    MainLayout --> StudioDesktopShell["StudioDesktopShell<br/>main-layout.tsx"]
+    MainLayout --> ClassicShell["ClassicShell<br/>main-layout.tsx"]
+    StudioDesktopShell --> StudioSidebar["StudioSidebar<br/>studio-sidebar.tsx"]
+    StudioDesktopShell --> StudioHeader["StudioHeader<br/>studio-header.tsx"]
+    ClassicShell --> Sidebar["Sidebar<br/>sidebar.tsx"]
+    ClassicShell --> MobileSidebar["MobileSidebar<br/>mobile-sidebar.tsx"]
+    ClassicShell --> Header["Header<br/>header.tsx"]
+    MainLayout --> AutoWidget["AutoWidget<br/>chat-widget.tsx"]
+    StudioDesktopShell --> PageContent["PageContent"]
     ClassicShell --> PageContent
-    MobileSidebar --> PageContent
 ```
-The `MainLayout` also handles the `AutoWidget` (floating assistant) visibility and current page context [frontend/components/layout/main-layout.tsx:118-122](), [frontend/components/layout/main-layout.tsx:186-190]().
 
-**Sources:**
-- [frontend/components/layout/main-layout.tsx:29-193]()
-- [frontend/components/layout/main-layout.tsx:34]()
-- [frontend/components/layout/main-layout.tsx:91]()
-- [frontend/components/layout/main-layout.tsx:118-122]()
-- [frontend/components/layout/main-layout.tsx:186-190]()
+Sources: [frontend/components/layout/main-layout.tsx:4-16](), [frontend/components/layout/main-layout.tsx:29-34](), [frontend/components/layout/main-layout.tsx:70-100](), [frontend/components/layout/main-layout.tsx:145-185](), [frontend/components/layout/sidebar.tsx:132-151](), [frontend/components/layout/header.tsx:18-24]()
 
 ---
 
 ## Sidebar & Navigation Logic
 
-The application supports two distinct sidebar implementations: the classic `Sidebar` [frontend/components/layout/sidebar.tsx:37]() and the `StudioSidebar` [frontend/components/layout/studio-sidebar.tsx:40]().
+The navigation surfaces are implemented separately for Classic desktop, mobile, and Studio. Classic desktop defines its item list in `sidebar.tsx`; the mobile implementation has its own list in `mobile-sidebar.tsx`. Studio primary and footer menu entries are configured in `frontend/lib/studio-menu.ts`. [frontend/components/layout/sidebar.tsx:38-130](), [frontend/components/layout/mobile-sidebar.tsx:34-117](), [frontend/lib/studio-menu.ts:28-90]()
 
-### Navigation Items Configuration
-Navigation items are defined in a central array in the classic sidebar [frontend/components/layout/sidebar.tsx:38-129]() and a grouped configuration for Studio in `frontend/lib/studio-menu.ts`.
+The Classic desktop sidebar uses `usePathname` to determine whether the current path is a chat page, reads system role and workspace state, and resolves edition and exposure information before filtering its items. The mobile sidebar applies the corresponding edition, role, and exposure checks to its own item list. [frontend/components/layout/sidebar.tsx:132-151](), [frontend/components/layout/mobile-sidebar.tsx:119-135]()
 
-| Item Name | Studio Group | Classic Icon | Studio Icon |
-|-----------|--------------|--------------|-------------|
-| Chat | OPERATIONS | `MessageCircle` | `MessagesSquare` |
-| Command Center | OPERATIONS | `Radar` | `LayoutDashboard` |
-| Assignments | OPERATIONS | `ClipboardList` | `ClipboardList` |
-| Deliverables | OPERATIONS | `Package` | `Package` |
-| Agent Management | WORKFORCE | `Bot` | `Bot` |
-| Tools & Integrations | WORKFORCE | `Wrench` | `PlugZap` |
-| Knowledge Base | WORKFORCE | `Database` | `Library` |
-| Marketplace | WORKFORCE | `Store` | `Store` |
-| Team Management | WORKSPACE | `Users` | `Users` |
-| Analytics | WORKSPACE | `BarChart3` | `TrendingUp` |
-| Workspace Admin | WORKSPACE | `Building2` | `Building2` |
+Studio menu entries carry stable IDs, labels, descriptions, routes, icons, and group metadata. `StudioMenuItem` also supports `requiredExposure` and `requiredRole` gates; footer entries have an optional `requiredRole` and an `external` flag. [frontend/lib/studio-menu.ts:28-66]()
 
-**Sources:**
-- [frontend/components/layout/sidebar.tsx:38-129]()
-- [frontend/components/layout/studio-sidebar.tsx:40]()
+### Navigation Items Configuration & Edition Filtering
 
-### Role-Based Filtering
-Navigation items are filtered based on the user's system role and workspace exposure. The `filterNavForEdition` function [frontend/components/layout/sidebar.tsx:145]() removes SaaS-only surfaces in the local edition. Subsequently, items are filtered by `requiredRole` (e.g., 'admin') using the `isAdmin` flag from `useSystemRole` [frontend/components/layout/sidebar.tsx:146-148](). Finally, `isNavItemVisible` [frontend/components/layout/sidebar.tsx:149]() checks against the `navExposure` derived from the workspace's plan tier.
+The Classic desktop and mobile lists include items such as Chat, Assignments, Deliverables, Command Center, Agents, Tools, Marketplace, Knowledge Base, Team, and Analytics. The desktop list also defines Workspace Admin with an `admin` role requirement. [frontend/components/layout/sidebar.tsx:38-130](), [frontend/components/layout/mobile-sidebar.tsx:34-117]()
 
-```typescript
-// frontend/components/layout/sidebar.tsx:145-150
-const filteredNavItems = filterNavForEdition(navigationItems).filter(item => {
-  if (item.requiredRole) {
-    return item.requiredRole === 'admin' && isAdmin
-  }
-  return isNavItemVisible((item as { requiredExposure?: string }).requiredExposure, navExposure)
-})
+The filtering flow distinguishes edition, role, and plan exposure. The Classic desktop sidebar first passes items through `filterNavForEdition`, then applies an admin check to items with `requiredRole` and `isNavItemVisible` to other items. The mobile sidebar uses the same sequence. [frontend/components/layout/sidebar.tsx:140-150](), [frontend/components/layout/mobile-sidebar.tsx:126-135]()
+
+The sidebar comments explicitly describe a hidden navigation item as distinct from a deleted route: plan-tier-gated surfaces may be omitted from the rail while their routes still resolve. [frontend/components/layout/sidebar.tsx:140-145](), [frontend/components/layout/mobile-sidebar.tsx:126-130]()
+
+| Navigation Item | Target Route | Role or Exposure Metadata |
+|---|---|---|
+| Chat | `/chat` | None configured |
+| Command Center | `/command-center` | None configured |
+| Assignments | `/assignments` | None configured |
+| Deliverables | `/deliverables` | None configured |
+| Agent Management | `/agents` | None configured |
+| Tools & Integrations | `/tools` | None configured |
+| Knowledge Base | `/documents` | None configured |
+| Marketplace | `/marketplace` | None configured |
+| Team Management | `/team` | `requiredExposure: 'team'` |
+| Analytics | `/analytics` | `requiredExposure: 'analytics'` |
+| Workspace Admin | `/admin/workspaces` | `requiredRole: 'admin'` |
+
+Sources: [frontend/components/layout/sidebar.tsx:38-130](), [frontend/components/layout/sidebar.tsx:140-150](), [frontend/components/layout/mobile-sidebar.tsx:34-117](), [frontend/components/layout/mobile-sidebar.tsx:126-135]()
+
+**Diagram: Navigation filtering from user and workspace context to visible rail items**
+
+```mermaid
+flowchart LR
+    ClassicItems["navigationItems<br/>sidebar.tsx"] --> EditionFilter["filterNavForEdition"]
+    MobileItems["navigationItems<br/>mobile-sidebar.tsx"] --> EditionFilter
+    EditionFilter --> RoleCheck["useSystemRole<br/>isAdmin"]
+    RoleCheck --> Exposure["navExposureForEdition<br/>workspace.exposure"]
+    Exposure --> Visibility["isNavItemVisible"]
+    Visibility --> ClassicRail["SidebarFilteredNavItems"]
+    Visibility --> MobileRail["MobileSidebarFilteredNavItems"]
 ```
-The `MobileSidebar` [frontend/components/layout/mobile-sidebar.tsx:130-135]() applies similar filtering logic.
 
-**Sources:**
-- [frontend/components/layout/sidebar.tsx:145]()
-- [frontend/components/layout/sidebar.tsx:146-148]()
-- [frontend/components/layout/sidebar.tsx:149]()
-- [frontend/components/layout/mobile-sidebar.tsx:130-135]()
+Sources: [frontend/components/layout/sidebar.tsx:27-31](), [frontend/components/layout/sidebar.tsx:132-150](), [frontend/components/layout/mobile-sidebar.tsx:24-28](), [frontend/components/layout/mobile-sidebar.tsx:119-135]()
 
-### Sidebar Collapse and Toggle
-Both `Sidebar` and `StudioSidebar` support collapsing. The `Sidebar` [frontend/components/layout/sidebar.tsx:153-160]() uses `motion.div` from `framer-motion` for smooth transitions. The `StudioSidebar` [frontend/components/layout/studio-sidebar.tsx:65-95]() has a dedicated toggle button that updates the `collapsed` state and persists it to `localStorage` [frontend/components/layout/main-layout.tsx:47-49]().
+**Diagram: Natural-language destinations mapped to route and configuration code entities**
 
-**Sources:**
-- [frontend/components/layout/sidebar.tsx:153-160]()
-- [frontend/components/layout/studio-sidebar.tsx:65-95]()
-- [frontend/components/layout/main-layout.tsx:47-49]()
+```mermaid
+graph TB
+    Destination["Knowledge Base"] --> ClassicHref["/documents"]
+    ClassicHref --> ClassicItem["sidebar.tsx navigationItems"]
+    ClassicItem --> ClassicRail["Sidebar"]
+    TeamDestination["Team Management"] --> TeamExposure["requiredExposure team"]
+    TeamExposure --> ExposureCheck["isNavItemVisible"]
+    ExposureCheck --> TeamItem["sidebar.tsx Team item"]
+    StudioChat["Studio Chat"] --> StudioRoute["/chat"]
+    StudioRoute --> StudioConfig["STUDIO_MENU_PRIMARY chat"]
+    StudioConfig --> ActiveRoute["resolveActiveMenuId"]
+```
+
+Sources: [frontend/components/layout/sidebar.tsx:38-130](), [frontend/components/layout/sidebar.tsx:145-150](), [frontend/lib/studio-menu.ts:68-85](), [frontend/lib/studio-menu.ts:92-116]()
+
+### Studio Menu Configuration & Active Route Resolution
+
+`STUDIO_MENU_PRIMARY` is the Studio sidebar’s single source of truth. Its 11 entries are divided into `OPERATIONS`, `WORKFORCE`, and `WORKSPACE`; `STUDIO_MENU_FOOTER` contains Docs and Settings. The primary items cover Chat, Command Centre, Assignments, Deliverables, Agent Management, Tools & Integrations, Knowledge Base, Marketplace, Team Management, Analytics, and Workspace Admin. [frontend/lib/studio-menu.ts:1-8](), [frontend/lib/studio-menu.ts:28-53](), [frontend/lib/studio-menu.ts:68-90]()
+
+`resolveActiveMenuId(pathname)` handles selected nested routes explicitly: `/chat` paths map to `chat`, mission details map to `assign`, activity details map to `cmd`, and marketplace, admin, playbooks, settings, and deliverables prefixes map to their corresponding IDs. Other paths fall through to exact-href matching and then prefix matching against `STUDIO_MENU_PRIMARY`. [frontend/lib/studio-menu.ts:92-116]()
+
+The Studio menu does not define a shared header sub-navigation configuration. Studio pages compose their own tabs, as asserted by the menu consistency test. [frontend/lib/__tests__/studio-menu-consistency.test.ts:12-21]()
+
+The consistency test also checks that the primary menu has 11 unique IDs, that Workspace Admin and Settings have admin role gates, and that execution detail routes resolve to the Command Centre menu item. [frontend/lib/__tests__/studio-menu-consistency.test.ts:12-33]()
+
+| Studio group or footer | ID | Label | Route | Gate |
+|---|---|---|---|---|
+| `OPERATIONS` | `chat` | Chat | `/chat` | — |
+| `OPERATIONS` | `cmd` | Command Centre | `/command-center` | — |
+| `OPERATIONS` | `assign` | Assignments | `/assignments` | — |
+| `OPERATIONS` | `deliv` | Deliverables | `/deliverables` | — |
+| `WORKFORCE` | `agents` | Agent Management | `/agents` | — |
+| `WORKFORCE` | `tools` | Tools & Integrations | `/tools` | — |
+| `WORKFORCE` | `kb` | Knowledge Base | `/documents` | — |
+| `WORKFORCE` | `market` | Marketplace | `/marketplace` | — |
+| `WORKSPACE` | `team` | Team Management | `/team` | `requiredExposure: 'team'` |
+| `WORKSPACE` | `analytics` | Analytics | `/analytics` | `requiredExposure: 'analytics'` |
+| `WORKSPACE` | `admin` | Workspace Admin | `/admin/workspaces` | `requiredRole: 'admin'` |
+| Footer | `docs` | Docs | External | `external: true` |
+| Footer | `settings` | Settings | `/settings` | `requiredRole: 'admin'` |
+
+Sources: [frontend/lib/studio-menu.ts:28-90](), [frontend/lib/__tests__/studio-menu-consistency.test.ts:12-33]()
+
+**Diagram: Studio menu labels, IDs, route matching, and role/exposure metadata**
+
+```mermaid
+flowchart LR
+    StudioMenu["STUDIO_MENU_PRIMARY"] --> Operations["OPERATIONS"]
+    StudioMenu --> Workforce["WORKFORCE"]
+    StudioMenu --> Workspace["WORKSPACE"]
+    Operations --> Chat["chat /chat"]
+    Operations --> Assign["assign /assignments"]
+    Workforce --> Tools["tools /tools"]
+    Workforce --> Knowledge["kb /documents"]
+    Workspace --> Team["team requiredExposure team"]
+    Workspace --> Analytics["analytics requiredExposure analytics"]
+    Workspace --> Admin["admin requiredRole admin"]
+    Pathname["pathname"] --> Resolver["resolveActiveMenuId"]
+    Resolver --> ActiveId["active menu id"]
+    FooterMenu["STUDIO_MENU_FOOTER"] --> Settings["settings /settings requiredRole admin"]
+```
+
+Sources: [frontend/lib/studio-menu.ts:28-90](), [frontend/lib/studio-menu.ts:92-116]()
 
 ---
 
-## Theme & Layout Patterns
+## Header & Profile Menu
 
-### Studio Layout
-The Studio layout, activated when `isStudio` is true [frontend/components/layout/main-layout.tsx:91](), features a "labelled rail" sidebar (`StudioSidebar`) [frontend/components/layout/studio-sidebar.tsx:14-17](), an editorial header (`StudioHeader`) [frontend/components/layout/studio-header.tsx:26](), and context-aware sub-navigation via `StudioPageTabs` [frontend/components/layout/main-layout.tsx:100](). The main content area can be `fullBleed` for full-canvas surfaces like chat [frontend/components/layout/main-layout.tsx:101-104]().
+### Header Architecture
 
-### Glass & Matte UI Systems
-The frontend utilizes a CSS variable-based theme system defined in `frontend/app/globals.css` [frontend/app/globals.css:6-225]():
-*   **Glass:** High-alpha backgrounds with backdrop-blur and neon glow effects, defined by variables like `--glass-card-alpha`, `--glass-panel-alpha`, `--glass-border-alpha`, and `--glass-glow-alpha` [frontend/app/globals.css:39-48](), [frontend/app/globals.css:111-120]().
-*   **Matte:** Flat surfaces based on a cool-grey palette, removing glows for a "landing page" feel. This theme explicitly sets `_alpha` variables to `0` or `1` to achieve a flat look [frontend/app/globals.css:149-190]().
-*   **Studio:** A cream paper palette with serif headlines and mono detail, with its own set of semantic color locks [frontend/app/globals.css:210-224]().
+The Classic `Header` accepts an `onMenuClick` callback and renders a menu button, Automatos branding, a Help and documentation dropdown, a theme toggle, a notification bell, and an edition-dependent profile control. It also renders `CreditBalancePill` only when `isSaaS` is true. [frontend/components/layout/header.tsx:18-35](), [frontend/components/layout/header.tsx:37-49](), [frontend/components/layout/header.tsx:52-105]()
 
-**Navigation Visual Mapping**
+`StudioHeader` renders a search control followed by `StudioHeaderUtilities`. The utilities component includes the hosted-edition credit pill, Help dropdown, notifications, theme toggle, and the profile control. [frontend/components/layout/studio-header.tsx:28-49](), [frontend/components/layout/studio-header.tsx:51-60](), [frontend/components/layout/studio-header.tsx:62-117]()
+
+### Profile Menu vs User Profile Button
+
+The Classic header uses `isSaaS` to select `ProfileMenu` for the hosted edition and `UserProfileButton` otherwise. Its comments characterize `ProfileMenu` as the account menu and `UserProfileButton` as a sign-in affordance when signed out; they also note that the local edition has no accounts. [frontend/components/layout/header.tsx:101-105]()
+
+**Diagram: Header utilities and edition-dependent profile control**
+
 ```mermaid
 graph LR
-    subgraph "Sidebar [sidebar.tsx]"
-        ClassicItem["Nav Item<br/>(Lucide Icon)"]
-        PremiumIcon["PremiumIcon<br/>(Custom SVG)"]
-    end
-
-    subgraph "StudioSidebar [studio-sidebar.tsx]"
-        Group["StudioMenuGroup<br/>(OPERATIONS/WORKFORCE/WORKSPACE)"]
-        WSItem["sh-ws-card<br/>(Workspace Identity)"]
-    end
-
-    subgraph "CodeEntities"
-        useSystemIcons["useSystemIcons hook"]
-        resolveActive["resolveActiveMenuId"]
-        STUDIO_MENU_PRIMARY["STUDIO_MENU_PRIMARY"]
-    end
-
-    PremiumIcon --> useSystemIcons
-    ClassicItem --> resolveActive
-    Group --> STUDIO_MENU_PRIMARY
-    WSItem --> STUDIO_MENU_PRIMARY
+    ClassicHeader["Header<br/>header.tsx"] --> ClassicHelp["HelpDropdown"]
+    ClassicHeader --> ClassicTheme["ThemeToggle"]
+    ClassicHeader --> ClassicNotifications["NotificationBell"]
+    StudioHeader["StudioHeader<br/>studio-header.tsx"] --> StudioUtilities["StudioHeaderUtilities"]
+    StudioUtilities --> StudioHelp["HelpDropdown"]
+    StudioUtilities --> StudioTheme["ThemeToggle"]
+    StudioUtilities --> StudioNotifications["NotificationBell"]
+    ClassicHeader --> SaaSChoice["isSaaS"]
+    StudioUtilities --> SaaSChoice
+    SaaSChoice --> ProfileMenu["ProfileMenu"]
+    SaaSChoice --> UserProfileButton["UserProfileButton"]
+    SaaSChoice --> CreditPill["CreditBalancePill"]
 ```
 
-**Sources:**
-- [frontend/components/layout/main-layout.tsx:91]()
-- [frontend/components/layout/studio-sidebar.tsx:14-17]()
-- [frontend/components/layout/studio-header.tsx:26]()
-- [frontend/components/layout/main-layout.tsx:100]()
-- [frontend/components/layout/main-layout.tsx:101-104]()
-- [frontend/app/globals.css:6-225]()
-- [frontend/app/globals.css:39-48]()
-- [frontend/app/globals.css:111-120]()
-- [frontend/app/globals.css:149-190]()
-- [frontend/app/globals.css:210-224]()
+Sources: [frontend/components/layout/header.tsx:3-16](), [frontend/components/layout/header.tsx:52-105](), [frontend/components/layout/studio-header.tsx:3-17](), [frontend/components/layout/studio-header.tsx:56-117]()
 
 ---
 
-## Page Context & Tooltips
+## Mobile Sidebar
 
-### Context Tracking
-The `MainLayout` tracks the current page context via the `getCurrentPage` function [frontend/components/layout/main-layout.tsx:55-73](). This context is then passed to the `AutoWidget` (floating assistant) to provide page-specific help [frontend/components/layout/main-layout.tsx:118-122](), [frontend/components/layout/main-layout.tsx:186-190]().
+The Classic shell tracks `mobileMenuOpen` and uses it in a `Sheet` when the layout is mobile. [frontend/components/layout/main-layout.tsx:145-155](), [frontend/components/layout/main-layout.tsx:183-185]()
 
-### Tooltip System
-Tooltips are driven by a centralized `frontend/lib/tooltips.json` file. This file contains descriptions and documentation links for UI elements across different modules like `activity` [frontend/lib/tooltips.json:2-53]() and `agents` [frontend/lib/tooltips.json:55-163](). The `useTooltips` hook [frontend/lib/use-tooltips.ts]() provides access to this data. The `HelpTooltip` component [frontend/components/ui/help-tooltip.tsx]() is used to render these tooltips.
+`MobileSidebar` receives an `onNavigate` callback. It renders its filtered navigation list, links to configured item hrefs, and calls `onNavigate` when selected. Its navigation links use a minimum 48-pixel height and show the item label and description alongside an icon. The mobile sidebar also renders a branded header above the navigation list. [frontend/components/layout/mobile-sidebar.tsx:30-32](), [frontend/components/layout/mobile-sidebar.tsx:137-175](), [frontend/components/layout/mobile-sidebar.tsx:187-200]()
 
-| Tooltip Key | Context | Description |
-|-------------|---------|-------------|
-| `working_now` | Activity | Agents actively processing tasks [frontend/lib/tooltips.json:8-11]() |
-| `model_selection` | Agent Creation | The LLM that powers the agent [frontend/lib/tooltips.json:110-113]() |
-| `temperature` | Agent Config | Controls creativity vs determinism [frontend/lib/tooltips.json:146-150]() |
+**Diagram: Classic mobile menu interaction**
 
-**Sources:**
-- [frontend/components/layout/main-layout.tsx:55-73]()
-- [frontend/components/layout/main-layout.tsx:118-122]()
-- [frontend/components/layout/main-layout.tsx:186-190]()
-- [frontend/lib/tooltips.json]()
-- [frontend/lib/tooltips.json:2-53]()
-- [frontend/lib/tooltips.json:55-163]()
-- [frontend/lib/use-tooltips.ts]()
-- [frontend/components/ui/help-tooltip.tsx]()
+```mermaid
+sequenceDiagram
+    participant User
+    participant Header as Header
+    participant Shell as ClassicShell
+    participant Sheet as Sheet
+    participant Mobile as MobileSidebar
+
+    User->>Header: Click menu button
+    Header->>Shell: onMenuClick
+    Shell->>Shell: setMobileMenuOpen true
+    Shell->>Sheet: open true
+    User->>Mobile: Select navigation link
+    Mobile->>Shell: onNavigate
+    Shell->>Sheet: Update open state
+```
+
+Sources: [frontend/components/layout/header.tsx:18-35](), [frontend/components/layout/main-layout.tsx:145-155](), [frontend/components/layout/mobile-sidebar.tsx:30-32](), [frontend/components/layout/mobile-sidebar.tsx:152-175]()
 
 ---
 
-## Global Header Actions
+## Studio Shell & Full-Bleed Layout Patterns
 
-The `StudioHeader` [frontend/components/layout/studio-header.tsx:34]() and classic `Header` [frontend/components/layout/header.tsx:23]() components provide utility clusters for global actions.
+The Studio shell renders `StudioSidebar` and `StudioHeader`, with a `main` content area. Its normal content branch applies responsive padding and a centered wrapper capped at `1720px`; the `fullBleed` branch instead renders children in a flex column without that wrapper. [frontend/components/layout/main-layout.tsx:70-100]()
 
-| Action | Studio Component | Classic Component | Implementation |
-|--------|------------------|-------------------|----------------|
-| Search | `sh-cmdk` button [frontend/components/layout/studio-header.tsx:37]() | N/A | Dispatches `automatos:global-search-open` event [frontend/components/layout/studio-header.tsx:28-30]() |
-| Notifications | `NotificationBell` [frontend/components/layout/studio-header.tsx:97]() | `NotificationBell` [frontend/components/layout/header.tsx:95]() | Displays real-time unread counts and alerts |
-| Theme | `ThemeToggle` [frontend/components/layout/studio-header.tsx:102]() | `ThemeToggle` [frontend/components/layout/header.tsx:92]() | Toggles between Light, Dark, Matte, and Studio themes |
-| Help/Docs | `DropdownMenu` [frontend/components/layout/studio-header.tsx:53]() | `DropdownMenu` [frontend/components/layout/header.tsx:54]() | Links to external Documentation and API Reference [frontend/components/layout/studio-header.tsx:65-92](), [frontend/components/layout/header.tsx:67-87]() |
-| User Profile | `ProfileMenu` (SaaS) / `UserProfileButton` (Local) [frontend/components/layout/studio-header.tsx:106]() | `ProfileMenu` (SaaS) / `UserProfileButton` (Local) [frontend/components/layout/header.tsx:100]() | Manages user authentication, profile, and logout [frontend/components/auth/profile-menu.tsx:20-30]() |
+Studio sidebar collapse state is owned by `MainLayout` and stored under `studioSidebarCollapsed` in local storage. [frontend/components/layout/main-layout.tsx:36-63](), [frontend/components/layout/main-layout.tsx:76-80]()
 
-**Sources:**
-- [frontend/components/layout/studio-header.tsx:34]()
-- [frontend/components/layout/header.tsx:23]()
-- [frontend/components/layout/studio-header.tsx:37]()
-- [frontend/components/layout/studio-header.tsx:28-30]()
-- [frontend/components/layout/studio-header.tsx:97]()
-- [frontend/components/layout/header.tsx:95]()
-- [frontend/components/layout/studio-header.tsx:102]()
-- [frontend/components/layout/header.tsx:92]()
-- [frontend/components/layout/studio-header.tsx:53]()
-- [frontend/components/layout/header.tsx:54]()
-- [frontend/components/layout/studio-header.tsx:65-92]()
-- [frontend/components/layout/header.tsx:67-87]()
-- [frontend/components/layout/studio-header.tsx:106]()
-- [frontend/components/layout/header.tsx:100]()
-- [frontend/components/auth/profile-menu.tsx:20-30]()
+`useIsStudio()` reads the optional UI-style context and returns `false` if the provider is absent. `useActiveTheme()` reads the active theme from that context, and `useThemeLayout()` determines whether the theme renders, falls back, or remains pending based on the active theme’s `minWidth` and viewport-width state. [frontend/hooks/use-studio-theme.ts:7-21](), [frontend/hooks/use-studio-theme.ts:23-29](), [frontend/hooks/use-studio-theme.ts:31-52]()
+
+Pages use `useIsStudio()` to select style-specific content. `ToolsPage` renders `ToolsDashboard variant="studio"` inside `MainLayout fullBleed` when Studio is active and uses the ordinary `MainLayout` and default dashboard variant otherwise. [frontend/app/tools/page.tsx:8-27]()
+
+`DeliverablesPage` follows the same two-style pattern: it renders `DeliverablesStudio` in a full-bleed layout for Studio and the Classic deliverables tabs otherwise. The page’s comments state that both styles use Classic below 1024 pixels pending the mobile pass. [frontend/app/deliverables/page.tsx:47-63](), [frontend/app/deliverables/page.tsx:96-105](), [frontend/app/deliverables/page.tsx:107-184]()
+
+**Diagram: Page selection to shell and full-bleed content**
+
+```mermaid
+flowchart LR
+    ToolsPage["ToolsPage"] --> IsStudio["useIsStudio"]
+    IsStudio -->|true| StudioTools["ToolsDashboard variant studio"]
+    StudioTools --> FullBleedTools["MainLayout fullBleed"]
+    IsStudio -->|false| ClassicTools["ToolsDashboard"]
+    ClassicTools --> ClassicLayout["MainLayout"]
+    DeliverablesPage["DeliverablesPage"] --> DeliverablesIsStudio["useIsStudio"]
+    DeliverablesIsStudio -->|true| DeliverablesStudio["DeliverablesStudio"]
+    DeliverablesStudio --> DeliverablesFullBleed["MainLayout fullBleed"]
+    DeliverablesIsStudio -->|false| ClassicDeliverables["Classic deliverables tabs"]
+    ClassicDeliverables --> ClassicDeliverablesLayout["MainLayout"]
+```
+
+Sources: [frontend/app/tools/page.tsx:8-27](), [frontend/app/deliverables/page.tsx:47-63](), [frontend/app/deliverables/page.tsx:96-108](), [frontend/components/layout/main-layout.tsx:70-100]()
 
 ---

@@ -5,436 +5,306 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/command-center/__tests__/watchlist-tab.test.tsx](frontend/components/command-center/__tests__/watchlist-tab.test.tsx)
-- [frontend/components/command-center/watchlist-tab.tsx](frontend/components/command-center/watchlist-tab.tsx)
-- [frontend/hooks/use-watches-api.ts](frontend/hooks/use-watches-api.ts)
-- [orchestrator/api/watches.py](orchestrator/api/watches.py)
+- [orchestrator/api/board_task_rebrief.py](orchestrator/api/board_task_rebrief.py)
 - [orchestrator/api/widget_memory.py](orchestrator/api/widget_memory.py)
-- [orchestrator/consumers/chatbot/empty_completion.py](orchestrator/consumers/chatbot/empty_completion.py)
+- [orchestrator/consumers/chatbot/claim_removed.py](orchestrator/consumers/chatbot/claim_removed.py)
 - [orchestrator/core/services/mission_memory_service.py](orchestrator/core/services/mission_memory_service.py)
 - [orchestrator/core/services/playbook_memory_service.py](orchestrator/core/services/playbook_memory_service.py)
 - [orchestrator/modules/memory/injection_filter.py](orchestrator/modules/memory/injection_filter.py)
-- [orchestrator/modules/memory/resume_context.py](orchestrator/modules/memory/resume_context.py)
 - [orchestrator/modules/tools/discovery/actions_agents.py](orchestrator/modules/tools/discovery/actions_agents.py)
+- [orchestrator/modules/tools/discovery/actions_assignments.py](orchestrator/modules/tools/discovery/actions_assignments.py)
 - [orchestrator/modules/tools/discovery/actions_board_tasks.py](orchestrator/modules/tools/discovery/actions_board_tasks.py)
 - [orchestrator/modules/tools/discovery/actions_marketplace.py](orchestrator/modules/tools/discovery/actions_marketplace.py)
-- [orchestrator/modules/tools/discovery/actions_missions.py](orchestrator/modules/tools/discovery/actions_missions.py)
 - [orchestrator/modules/tools/discovery/actions_monitoring.py](orchestrator/modules/tools/discovery/actions_monitoring.py)
-- [orchestrator/modules/tools/discovery/actions_playbooks.py](orchestrator/modules/tools/discovery/actions_playbooks.py)
 - [orchestrator/modules/tools/discovery/actions_reports.py](orchestrator/modules/tools/discovery/actions_reports.py)
-- [orchestrator/modules/tools/discovery/actions_watches.py](orchestrator/modules/tools/discovery/actions_watches.py)
+- [orchestrator/modules/tools/discovery/actions_search.py](orchestrator/modules/tools/discovery/actions_search.py)
 - [orchestrator/modules/tools/discovery/actions_workspace.py](orchestrator/modules/tools/discovery/actions_workspace.py)
 - [orchestrator/modules/tools/discovery/handlers_agents.py](orchestrator/modules/tools/discovery/handlers_agents.py)
-- [orchestrator/modules/tools/discovery/handlers_board_tasks.py](orchestrator/modules/tools/discovery/handlers_board_tasks.py)
-- [orchestrator/modules/tools/discovery/handlers_missions.py](orchestrator/modules/tools/discovery/handlers_missions.py)
 - [orchestrator/modules/tools/discovery/handlers_monitoring.py](orchestrator/modules/tools/discovery/handlers_monitoring.py)
-- [orchestrator/modules/tools/discovery/handlers_playbooks.py](orchestrator/modules/tools/discovery/handlers_playbooks.py)
 - [orchestrator/modules/tools/discovery/handlers_reports.py](orchestrator/modules/tools/discovery/handlers_reports.py)
-- [orchestrator/modules/tools/discovery/handlers_watches.py](orchestrator/modules/tools/discovery/handlers_watches.py)
+- [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
 - [orchestrator/modules/tools/discovery/handlers_workspace.py](orchestrator/modules/tools/discovery/handlers_workspace.py)
-- [orchestrator/tests/test_board_task_handlers.py](orchestrator/tests/test_board_task_handlers.py)
+- [orchestrator/modules/tools/discovery/owner_only.py](orchestrator/modules/tools/discovery/owner_only.py)
+- [orchestrator/modules/tools/discovery/send_back_checks.py](orchestrator/modules/tools/discovery/send_back_checks.py)
+- [orchestrator/modules/tools/discovery/send_backs.py](orchestrator/modules/tools/discovery/send_backs.py)
+- [orchestrator/modules/tools/discovery/ticket_changes.py](orchestrator/modules/tools/discovery/ticket_changes.py)
+- [orchestrator/modules/tools/discovery/ticket_edit_moves.py](orchestrator/modules/tools/discovery/ticket_edit_moves.py)
+- [orchestrator/modules/tools/discovery/ticket_edits.py](orchestrator/modules/tools/discovery/ticket_edits.py)
+- [orchestrator/modules/tools/discovery/ticket_moves.py](orchestrator/modules/tools/discovery/ticket_moves.py)
+- [orchestrator/modules/tools/execution/call_effects.py](orchestrator/modules/tools/execution/call_effects.py)
+- [orchestrator/modules/tools/execution/owner_reasons.py](orchestrator/modules/tools/execution/owner_reasons.py)
+- [orchestrator/modules/tools/services/action_capability_filter.py](orchestrator/modules/tools/services/action_capability_filter.py)
+- [orchestrator/services/board_task_view.py](orchestrator/services/board_task_view.py)
+- [orchestrator/services/done_needs_an_artifact.py](orchestrator/services/done_needs_an_artifact.py)
+- [orchestrator/tests/test_f134_edits_say_they_apply_to_the_next_run.py](orchestrator/tests/test_f134_edits_say_they_apply_to_the_next_run.py)
+- [orchestrator/tests/test_f141_an_agents_model_is_checked_on_every_write.py](orchestrator/tests/test_f141_an_agents_model_is_checked_on_every_write.py)
+- [orchestrator/tests/test_f144_every_namesake_is_named.py](orchestrator/tests/test_f144_every_namesake_is_named.py)
+- [orchestrator/tests/test_f159_a_playbook_run_recalls_its_past_runs.py](orchestrator/tests/test_f159_a_playbook_run_recalls_its_past_runs.py)
+- [orchestrator/tests/test_f189_a_memory_is_never_filed_as_another_agent.py](orchestrator/tests/test_f189_a_memory_is_never_filed_as_another_agent.py)
+- [orchestrator/tests/test_f241_e_a_new_card_never_copies_one_and_notes_are_the_owners.py](orchestrator/tests/test_f241_e_a_new_card_never_copies_one_and_notes_are_the_owners.py)
+- [orchestrator/tests/test_f279_a_send_back_is_the_boards_reject.py](orchestrator/tests/test_f279_a_send_back_is_the_boards_reject.py)
+- [orchestrator/tests/test_f309_c_an_approval_through_the_edit_tool_keeps_its_note.py](orchestrator/tests/test_f309_c_an_approval_through_the_edit_tool_keeps_its_note.py)
+- [orchestrator/tests/test_f351_a_a_document_claim_needs_a_document.py](orchestrator/tests/test_f351_a_a_document_claim_needs_a_document.py)
+- [orchestrator/tests/test_f449_a_a_refused_call_reads_in_the_owners_words.py](orchestrator/tests/test_f449_a_a_refused_call_reads_in_the_owners_words.py)
 - [orchestrator/tests/test_p2w1_playbook_write_dedup.py](orchestrator/tests/test_p2w1_playbook_write_dedup.py)
-- [orchestrator/tests/test_prd206_resume_context.py](orchestrator/tests/test_prd206_resume_context.py)
-- [orchestrator/tests/test_prd222_empty_completion.py](orchestrator/tests/test_prd222_empty_completion.py)
 - [orchestrator/tests/test_prd222_unknown_model_error_names_the_way_out.py](orchestrator/tests/test_prd222_unknown_model_error_names_the_way_out.py)
-- [orchestrator/tests/test_prd224_assign_lane.py](orchestrator/tests/test_prd224_assign_lane.py)
+- [orchestrator/tests/test_prd256_fix_honesty_per_claim.py](orchestrator/tests/test_prd256_fix_honesty_per_claim.py)
+- [orchestrator/tests/test_prd256_fix_send_back_waits_for_the_click.py](orchestrator/tests/test_prd256_fix_send_back_waits_for_the_click.py)
 
 </details>
 
 
 
-Platform actions in Automatos AI are organized into **13 distinct categories** that group 47+ self-management operations. These categories enable agents to introspect, query, configure, and control the platform itself, providing operational autonomy for tasks ranging from resource management to infrastructure monitoring.
+## Purpose and scope
 
-For the overall platform action system architecture, see [Platform Action System](#13.1). For execution mechanics and permissions, see [Confirmation, Approvals & Rate Limiting](#13.3).
+This page catalogs the `platform_*` action families visible in the supplied code excerpts. It focuses on how action definitions expose names, schemas, categories, and permission levels, and how selected handlers operate. The excerpts show implementation details for agents, workspace and memory, board tasks, reports, monitoring, and marketplace; for several other families, they show only action names in the owner-only policy list. [orchestrator/modules/tools/discovery/actions_agents.py:91-143](), [orchestrator/modules/tools/discovery/actions_workspace.py:6-58](), [orchestrator/modules/tools/discovery/actions_board_tasks.py:24-37](), [orchestrator/modules/tools/discovery/actions_reports.py:6-15](), [orchestrator/modules/tools/discovery/owner_only.py:42-72]()
 
----
-
-## Overview
-
-Platform actions follow a structured taxonomy defined by three layers:
-1.  **Permission Tiers**: `read`, `write`, and `destructive`. These control risk and determine if user confirmation is required [orchestrator/modules/tools/discovery/action_registry.py:15-18]().
-2.  **Functional Categories**: Logical groupings such as `agents`, `memory`, `monitoring`, `missions`, and `analytics` [orchestrator/modules/tools/discovery/platform_actions.py:14-20]().
-3.  **Individual Actions**: Discrete operations defined via `ActionDefinition` objects (e.g., `platform_query_loki_logs`, `platform_create_mission`) [orchestrator/modules/tools/discovery/platform_executor.py:94-205]().
-
-This organization allows the **AutoBrain** complexity assessor to inject specific `tool_hints` when it detects platform-related keywords in natural language, such as "token usage" or "list my agents" [orchestrator/consumers/chatbot/auto.py:122-173]().
-
-**Sources:** [orchestrator/modules/tools/discovery/platform_actions.py:1-53](), [orchestrator/modules/tools/discovery/platform_executor.py:1-110](), [orchestrator/consumers/chatbot/auto.py:1-173]().
+Sources: [orchestrator/modules/tools/discovery/actions_agents.py:91-143](), [orchestrator/modules/tools/discovery/actions_workspace.py:6-58](), [orchestrator/modules/tools/discovery/actions_board_tasks.py:24-37](), [orchestrator/modules/tools/discovery/actions_reports.py:6-15](), [orchestrator/modules/tools/discovery/owner_only.py:42-72]()
 
 ---
 
-## Category Taxonomy
+## 1. Action family taxonomy and registration
 
-The following diagram maps the logical categories to specific code-level action identifiers registered in the `ActionRegistry` and dispatched via `PlatformActionExecutor`.
+Action-definition modules construct `ActionDefinition` objects and pass them to `ActionRegistry.register`. The visible definitions include a tool name, description, category, parameter schema, permission level, and optional metadata such as `tags`, `promoted`, and `requires_confirmation`. [orchestrator/modules/tools/discovery/actions_board_tasks.py:24-37](), [orchestrator/modules/tools/discovery/actions_reports.py:17-38](), [orchestrator/modules/tools/discovery/actions_workspace.py:15-34]()
 
-### Platform Action Entity Map
+Agent registration wraps the registry so that `platform_create_agent` and `platform_update_agent` receive `runtime`, `provider`, and `model` schema properties as they are registered. The wrapper rebuilds the definition rather than mutating it in place. [orchestrator/modules/tools/discovery/actions_agents.py:41-46](), [orchestrator/modules/tools/discovery/actions_agents.py:49-68](), [orchestrator/modules/tools/discovery/actions_agents.py:71-88]()
+
+The owner-only policy names actions that, when called from a person’s chat turn, require the owner’s click. The policy also distinguishes conditional cases: for example, a `platform_update_playbook` call is owner-only when it sets the playbook timer, and a `platform_create_agent` call is owner-only when it creates a CLI agent. [orchestrator/modules/tools/discovery/owner_only.py:42-72]()
+
+### Natural-language requests mapped to code entities
+
+This diagram connects example requests to action names and the shown registration or handler symbols. The edges identify the corresponding tool and implementation symbols shown in the excerpts. [orchestrator/modules/tools/discovery/actions_agents.py:91-139](), [orchestrator/modules/tools/discovery/actions_workspace.py:15-34](), [orchestrator/modules/tools/discovery/handlers_workspace.py:40-63](), [orchestrator/modules/tools/discovery/actions_board_tasks.py:24-81](), [orchestrator/modules/tools/discovery/actions_reports.py:17-38](), [orchestrator/modules/tools/discovery/handlers_reports.py:16-26]()
+
+**Diagram: Natural-language request to action definition and handler**
+
 ```mermaid
-graph TB
-    subgraph "Agents"
-        A1["platform_list_agents<br/>(handlers_agents:list_agents)"]
-        A2["platform_get_agent<br/>(handlers_agents:get_agent)"]
-        A3["platform_create_agent<br/>(handlers_agents:create_agent)"]
-        A4["platform_recommend_agent<br/>(handlers_agents:recommend_agent)"]
-    end
-    
-    subgraph "Board Tasks"
-        BT1["platform_create_task<br/>(handlers_board_tasks:create_task)"]
-        BT2["platform_list_tasks<br/>(handlers_board_tasks:list_tasks)"]
-        BT3["platform_get_task<br/>(handlers_board_tasks:get_task)"]
-        BT4["platform_update_task_status<br/>(handlers_board_tasks:update_task_status)"]
-        BT5["platform_assign_task<br/>(handlers_board_tasks:assign_task)"]
-        BT6["platform_board_summary<br/>(handlers_board_tasks:board_summary)"]
+flowchart LR
+    subgraph NaturalLanguageSpace["Natural Language Space"]
+        NL_Agent["Who should take this work?"]
+        NL_Workspace["What workspace am I in?"]
+        NL_Task["Create a task to fix login"]
+        NL_Report["Submit research findings"]
     end
 
-    subgraph "Playbooks"
-        P1["platform_list_playbooks<br/>(handlers_playbooks:list_playbooks)"]
-        P2["platform_get_playbook<br/>(handlers_playbooks:get_playbook)"]
-        P3["platform_create_playbook<br/>(handlers_playbooks:create_playbook)"]
-        P4["platform_update_playbook<br/>(handlers_playbooks:update_playbook)"]
-        P5["platform_run_playbook<br/>(handlers_playbooks:run_playbook)"]
+    subgraph CodeEntitySpace["Code Entity Space"]
+        Action_Agent["platform_recommend_agent"]
+        Register_Agent["register_agents_actions"]
+        Action_Workspace["platform_get_workspace_info"]
+        Handler_Workspace["get_workspace_info"]
+        Action_Task["platform_create_task"]
+        Register_Task["register_board_task_actions"]
+        Action_Report["platform_submit_report"]
+        Register_Report["register_report_actions"]
+        Handler_Report["submit_report"]
     end
 
-    subgraph "Missions"
-        M1["platform_create_mission<br/>(handlers_missions:create_mission)"]
-        M2["platform_list_missions<br/>(handlers_missions:list_missions)"]
-        M3["platform_get_mission<br/>(handlers_missions:get_mission)"]
-        M4["platform_approve_mission_plan<br/>(handlers_missions:approve_mission_plan)"]
-        M5["platform_reject_mission_plan<br/>(handlers_missions:reject_mission_plan)"]
-    end
-
-    subgraph "Documents"
-        D1["platform_list_documents<br/>(handlers_documents:list_documents)"]
-        D2["platform_get_document<br/>(handlers_documents:get_document)"]
-        D3["platform_upload_document<br/>(handlers_documents:upload_document)"]
-        D4["platform_search_documents<br/>(handlers_documents:search_documents)"]
-    end
-
-    subgraph "Graph"
-        G1["platform_query_graph<br/>(handlers_graph:query_graph)"]
-        G2["platform_graph_neighbors<br/>(handlers_graph:graph_neighbors)"]
-        G3["platform_graph_impact<br/>(handlers_graph:graph_impact)"]
-        G4["platform_graph_path<br/>(handlers_graph:graph_path)"]
-    end
-
-    subgraph "Code Graph"
-        CG1["platform_query_codegraph<br/>(handlers_codegraph:query_codegraph)"]
-        CG2["platform_codegraph_neighbors<br/>(handlers_codegraph:codegraph_neighbors)"]
-    end
-
-    subgraph "Marketplace"
-        MP1["platform_list_marketplace_items<br/>(handlers_marketplace:list_marketplace_items)"]
-        MP2["platform_get_marketplace_item<br/>(handlers_marketplace:get_marketplace_item)"]
-        MP3["platform_install_marketplace_item<br/>(handlers_marketplace:install_marketplace_item)"]
-    end
-
-    subgraph "Monitoring"
-        MO1["platform_get_logs<br/>(handlers_monitoring:get_logs)"]
-        MO2["platform_list_services<br/>(handlers_monitoring:list_services)"]
-        MO3["platform_query_loki_logs<br/>(handlers_monitoring:query_loki_logs)"]
-        MO4["platform_query_prometheus<br/>(handlers_monitoring:query_prometheus)"]
-        MO5["platform_get_alerts<br/>(handlers_monitoring:get_alerts)"]
-    end
-
-    subgraph "Reports"
-        R1["platform_submit_report<br/>(handlers_reports:submit_report)"]
-        R2["platform_acknowledge_report<br/>(handlers_reports:acknowledge_report)"]
-        R3["platform_link_report_to_task<br/>(handlers_reports:link_report_to_task)"]
-    end
-
-    subgraph "Scheduling"
-        S1["platform_schedule_task<br/>(handlers_scheduling:schedule_task)"]
-        S2["platform_list_scheduled_tasks<br/>(handlers_scheduling:list_scheduled_tasks)"]
-        S3["platform_cancel_scheduled_task<br/>(handlers_scheduling:cancel_scheduled_task)"]
-    end
-
-    subgraph "Members"
-        MEB1["platform_list_members<br/>(handlers_members:list_members)"]
-        MEB2["platform_invite_member<br/>(handlers_members:invite_member)"]
-    end
-
-    subgraph "API Keys"
-        AK1["platform_list_api_keys<br/>(handlers_api_keys:list_api_keys)"]
-        AK3["platform_revoke_api_key<br/>(handlers_api_keys:revoke_api_key)"]
-    end
-
-    subgraph "Autonomy"
-        AU1["platform_create_watch<br/>(handlers_watches:create_watch)"]
-        AU2["platform_list_watches<br/>(handlers_watches:list_watches)"]
-        AU3["platform_get_watch<br/>(handlers_watches:get_watch)"]
-        AU4["platform_update_watch<br/>(handlers_watches:update_watch)"]
-        AU5["platform_delete_watch<br/>(handlers_watches:delete_watch)"]
-    end
-
-    subgraph "Governance"
-        GO1["platform_list_approvals<br/>(handlers_governance:list_approvals)"]
-        GO2["platform_approve_action<br/>(handlers_governance:approve_action)"]
-        GO3["platform_reject_action<br/>(handlers_governance:reject_action)"]
-    end
-
-    subgraph "Onboarding"
-        ON1["platform_get_onboarding_status<br/>(handlers_onboarding:get_onboarding_status)"]
-        ON2["platform_advance_onboarding<br/>(handlers_onboarding:advance_onboarding)"]
-    end
-
-    subgraph "Workspace"
-        W1["platform_get_workspace_info<br/>(handlers_workspace:get_workspace_info)"]
-        W2["platform_get_memory_stats<br/>(handlers_workspace:get_memory_stats)"]
-        W3["platform_store_memory<br/>(handlers_workspace:store_memory)"]
-        W4["platform_resume_context<br/>(handlers_workspace:resume_context)"]
-        W5["platform_list_connected_apps<br/>(handlers_workspace:list_connected_apps)"]
-    end
-
-    subgraph "Analytics"
-        AN1["platform_get_llm_usage<br/>(handlers_analytics:get_llm_usage)"]
-        AN2["platform_get_cost_breakdown<br/>(handlers_analytics:get_cost_breakdown)"]
-        AN3["platform_workspace_stats<br/>(handlers_analytics:workspace_stats)"]
-    end
-
-    subgraph "System"
-        SY1["platform_get_system_health<br/>(handlers_system:get_system_health)"]
-        SY2["platform_get_system_config<br/>(handlers_system:get_system_config)"]
-    end
-
-    subgraph "Search"
-        SE1["platform_search_memory<br/>(handlers_search:search_memory)"]
-        SE2["platform_search_chat_history<br/>(handlers_search:search_chat_history)"]
-        SE3["platform_search_documents<br/>(handlers_search:search_documents)"]
-    end
-
-    style A1 fill:#f9f,stroke:#333,stroke-width:2px
-    style BT1 fill:#f9f,stroke:#333,stroke-width:2px
-    style P1 fill:#f9f,stroke:#333,stroke-width:2px
-    style M1 fill:#f9f,stroke:#333,stroke-width:2px
-    style D1 fill:#f9f,stroke:#333,stroke-width:2px
-    style G1 fill:#f9f,stroke:#333,stroke-width:2px
-    style CG1 fill:#f9f,stroke:#333,stroke-width:2px
-    style MP1 fill:#f9f,stroke:#333,stroke-width:2px
-    style MO1 fill:#f9f,stroke:#333,stroke-width:2px
-    style R1 fill:#f9f,stroke:#333,stroke-width:2px
-    style S1 fill:#f9f,stroke:#333,stroke-width:2px
-    style MEB1 fill:#f9f,stroke:#333,stroke-width:2px
-    style AK1 fill:#f9f,stroke:#333,stroke-width:2px
-    style AU1 fill:#f9f,stroke:#333,stroke-width:2px
-    style GO1 fill:#f9f,stroke:#333,stroke-width:2px
-    style ON1 fill:#f9f,stroke:#333,stroke-width:2px
-    style W1 fill:#f9f,stroke:#333,stroke-width:2px
-    style AN1 fill:#f9f,stroke:#333,stroke-width:2px
-    style SY1 fill:#f9f,stroke:#333,stroke-width:2px
-    style SE1 fill:#f9f,stroke:#333,stroke-width:2px
-```
-**Sources:** [orchestrator/modules/tools/discovery/platform_executor.py:19-246](), [orchestrator/modules/tools/discovery/platform_actions.py:53-96]().
-
----
-
-## Detailed Category Breakdown
-
-### 1. Agents
-These actions manage the creation, listing, retrieval, and configuration of AI agents within a workspace.
-- `platform_list_agents`: Lists all agents in the current workspace, including their status, type, and basic configuration [orchestrator/modules/tools/discovery/handlers_agents.py:13-92]().
-- `platform_get_agent`: Retrieves detailed configuration for a specific agent by name or ID [orchestrator/modules/tools/discovery/handlers_agents.py:95-178]().
-- `platform_create_agent`: Provisions a new agent with specified name, type, model, and other parameters. Handles cases where an unknown model ID is provided by falling back to the workspace default [orchestrator/modules/tools/discovery/actions_agents.py:117-164](), [orchestrator/tests/test_prd222_unknown_model_error_names_the_way_out.py:22-29]().
-- `platform_recommend_agent`: Ranks and recommends agents best suited for a given objective, considering skills, tools, and model fit [orchestrator/modules/tools/discovery/actions_agents.py:13-52]().
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_agents.py:1-412](), [orchestrator/modules/tools/discovery/handlers_agents.py:1-690](), [orchestrator/tests/test_prd222_unknown_model_error_names_the_way_out.py:1-44]().
-
-### 2. Board Tasks
-These actions allow agents to interact with the task board, creating, listing, updating, and assigning tasks.
-- `platform_create_task`: Creates a new task on the board, optionally assigning it to an agent, setting priority, and defining approval actions [orchestrator/modules/tools/discovery/actions_board_tasks.py:23-93]().
-- `platform_list_tasks`: Lists tasks on the board with filters for status, priority, and assigned agent. It ensures `tags` and `description` are surfaced for harness commands [orchestrator/modules/tools/discovery/actions_board_tasks.py:97-141](), [orchestrator/tests/test_board_task_handlers.py:1-169]().
-- `platform_get_task`: Retrieves details of a specific task.
-- `platform_update_task_status`: Updates the status of one or more tasks. This handler includes logic to notify the board SSE and dispatch loop for real-time updates [orchestrator/modules/tools/discovery/handlers_board_tasks.py:4-62]().
-- `platform_assign_task`: Assigns a task to a specific agent.
-- `platform_board_summary`: Provides an overview of the task board, including counts by status and priority [orchestrator/modules/tools/discovery/actions_board_tasks.py:144-159]().
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_board_tasks.py:1-274](), [orchestrator/modules/tools/discovery/handlers_board_tasks.py:1-689](), [orchestrator/tests/test_board_task_handlers.py:1-1683]().
-
-### 3. Playbooks
-Actions for managing and executing automated multi-step workflows (recipes).
-- `platform_list_playbooks`: Lists all playbooks in the workspace [orchestrator/modules/tools/discovery/handlers_playbooks.py:12-39]().
-- `platform_get_playbook`: Retrieves detailed information about a specific playbook, including its steps and execution count [orchestrator/modules/tools/discovery/handlers_playbooks.py:42-98]().
-- `platform_create_playbook`: Creates a new playbook with a given name and description [orchestrator/modules/tools/discovery/handlers_playbooks.py:101-138]().
-- `platform_update_playbook`: Modifies an existing playbook's properties like name, description, tags, and configuration [orchestrator/modules/tools/discovery/handlers_playbooks.py:141-187]().
-- `platform_run_playbook`: Initiates the execution of a playbook.
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_playbooks.py:1-160](), [orchestrator/modules/tools/discovery/handlers_playbooks.py:1-708]().
-
-### 4. Missions
-These actions enable the creation and management of multi-agent coordination efforts, often involving goal decomposition and verification.
-- `platform_create_mission`: Creates a new mission with a specified goal. It attaches recent chat context for the planner and handles narration origin for tracking [orchestrator/modules/tools/discovery/handlers_missions.py:94-158]().
-- `platform_list_missions`: Lists active and completed missions.
-- `platform_get_mission`: Retrieves details of a specific mission.
-- `platform_approve_mission_plan`: Approves a mission plan, allowing it to proceed.
-- `platform_reject_mission_plan`: Rejects a mission plan.
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_missions.py:1-120](), [orchestrator/modules/tools/discovery/handlers_missions.py:1-465]().
-
-### 5. Documents
-Actions related to managing knowledge base documents, including listing, retrieving, uploading, and searching.
-- `platform_list_documents`: Lists documents in the workspace.
-- `platform_get_document`: Retrieves the content of a specific document.
-- `platform_upload_document`: Uploads a new document to the knowledge base.
-- `platform_search_documents`: Searches across documents using semantic retrieval.
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_documents.py:1-100]().
-
-### 6. Graph
-Actions for querying and interacting with the business knowledge graph.
-- `platform_query_graph`: Executes a query against the knowledge graph.
-- `platform_graph_neighbors`: Finds neighbors of a node in the graph.
-- `platform_graph_impact`: Analyzes the impact of changes related to a graph entity.
-- `platform_graph_path`: Finds paths between two nodes in the graph.
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_graph.py:1-100]().
-
-### 7. Code Graph
-Actions for querying and interacting with the code graph.
-- `platform_query_codegraph`: Executes a query against the code graph.
-- `platform_codegraph_neighbors`: Finds neighbors of a code entity in the graph.
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_codegraph.py:1-50]().
-
-### 8. Marketplace
-Actions for browsing, retrieving, and installing items from the Automatos AI Marketplace.
-- `platform_list_marketplace_items`: Lists items available in the marketplace.
-- `platform_get_marketplace_item`: Retrieves details of a specific marketplace item.
-- `platform_install_marketplace_item`: Installs an item (agent, playbook, tool) from the marketplace into the workspace.
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_marketplace.py:1-70]().
-
-### 9. Monitoring
-These actions provide deep visibility into the system's runtime state and logs.
-- `platform_get_logs`: Fetches deployment logs from a Railway service. Can list available services or filter logs by service and text [orchestrator/modules/tools/discovery/handlers_monitoring.py:14-62]().
-- `platform_list_services`: Lists all Railway services in the project [orchestrator/modules/tools/discovery/handlers_monitoring.py:65-84]().
-- `platform_query_loki_logs`: Queries application logs from Loki, with fallback to direct Loki access if Grafana proxy fails [orchestrator/modules/tools/discovery/handlers_monitoring.py:87-184]().
-- `platform_query_prometheus`: Queries metrics from Prometheus.
-- `platform_get_alerts`: Retrieves active alerts from the infrastructure.
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_monitoring.py:1-120](), [orchestrator/modules/tools/discovery/handlers_monitoring.py:1-508]().
-
-### 10. Reports
-Actions for submitting and managing structured reports generated by agents.
-- `platform_submit_report`: Submits a new report with title, content, type, and status. It resolves the calling agent's context and integrates with the `ReportService` [orchestrator/modules/tools/discovery/handlers_reports.py:14-89]().
-- `platform_acknowledge_report`: Marks a report as acknowledged by a user [orchestrator/modules/tools/discovery/handlers_reports.py:92-127]().
-- `platform_link_report_to_task`: Links a report to an existing task by adding the task ID to its `linked_task_ids` [orchestrator/modules/tools/discovery/handlers_reports.py:130-180]().
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_reports.py:1-100](), [orchestrator/modules/tools/discovery/handlers_reports.py:1-366]().
-
-### 11. Scheduling
-Actions for scheduling and managing one-time or recurring tasks.
-- `platform_schedule_task`: Schedules a task to run at a specified time or interval.
-- `platform_list_scheduled_tasks`: Lists currently scheduled tasks.
-- `platform_cancel_scheduled_task`: Cancels a scheduled task.
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_scheduling.py:1-70]().
-
-### 12. Members
-Actions for managing workspace members and invitations.
-- `platform_list_members`: Lists members of the current workspace.
-- `platform_invite_member`: Invites a new member to the workspace.
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_members.py:1-50]().
-
-### 13. API Keys
-Actions for managing API keys within the workspace.
-- `platform_list_api_keys`: Lists API keys configured for the workspace.
-- There is no create tool: an owner or admin creates a key in Settings → Widget SDK → API keys,
-  which shows the full key once, so it never enters the LLM context.
-- `platform_revoke_api_key`: Revokes an existing API key (an owner's or admin's, confirmed).
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_api_keys.py:1-70]().
-
-### 14. Autonomy (Watches)
-Actions related to creating and managing autonomous monitoring "watches" that can trigger actions based on conditions.
-- `platform_create_watch`: Creates a new watch to monitor specific conditions [orchestrator/modules/tools/discovery/actions_watches.py:13-52]().
-- `platform_list_watches`: Lists all watches in the workspace [orchestrator/modules/tools/discovery/actions_watches.py:55-70]().
-- `platform_get_watch`: Retrieves details of a specific watch [orchestrator/modules/tools/discovery/actions_watches.py:73-90]().
-- `platform_update_watch`: Modifies an existing watch [orchestrator/modules/tools/discovery/actions_watches.py:93-110]().
-- `platform_delete_watch`: Deletes a watch [orchestrator/modules/tools/discovery/actions_watches.py:113-128]().
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_watches.py:1-128](), [orchestrator/modules/tools/discovery/handlers_watches.py:1-400]().
-
-### 15. Governance
-Actions for managing approval flows and governance policies.
-- `platform_list_approvals`: Lists pending approvals.
-- `platform_approve_action`: Approves a pending action.
-- `platform_reject_action`: Rejects a pending action.
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_governance.py:1-70]().
-
-### 16. Onboarding
-Actions to manage the user onboarding process.
-- `platform_get_onboarding_status`: Retrieves the current status of the onboarding process.
-- `platform_advance_onboarding`: Advances the onboarding state machine.
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_onboarding.py:1-50]().
-
-### 17. Workspace
-General workspace-level actions, including information, memory statistics, and connected applications.
-- `platform_get_workspace_info`: Retrieves metadata about the current workspace, such as name, member count, and resource counts [orchestrator/modules/tools/discovery/handlers_workspace.py:35-58]().
-- `platform_get_memory_stats`: Provides statistics on memory usage, including global and agent-specific memories [orchestrator/modules/tools/discovery/handlers_workspace.py:61-129]().
-- `platform_store_memory`: Stores a curated fact into workspace long-term memory, with options for type, importance, scope, and provenance [orchestrator/modules/tools/discovery/actions_workspace.py:60-143](), [orchestrator/modules/tools/discovery/handlers_workspace.py:166-179]().
-- `platform_resume_context`: Retrieves recent threads, decisions, and open loops to help users resume work [orchestrator/modules/tools/discovery/actions_workspace.py:146-157]().
-- `platform_list_connected_apps`: Lists applications connected to the workspace and assigned to agents [orchestrator/modules/tools/discovery/handlers_workspace.py:135-163]().
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_workspace.py:1-414](), [orchestrator/modules/tools/discovery/handlers_workspace.py:1-505]().
-
-### 18. Analytics
-Actions for retrieving usage and cost analytics.
-- `platform_get_llm_usage`: Retrieves LLM usage statistics.
-- `platform_get_cost_breakdown`: Provides a breakdown of costs.
-- `platform_workspace_stats`: Retrieves general workspace statistics.
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_analytics.py:1-70]().
-
-### 19. System
-Actions for retrieving system-level information.
-- `platform_get_system_health`: Retrieves the overall health status of the system.
-- `platform_get_system_config`: Retrieves system configuration details.
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_system.py:1-50]().
-
-### 20. Search
-Actions for searching various data sources within the platform.
-- `platform_search_memory`: Performs a semantic search across global and agent-specific memories.
-- `platform_search_chat_history`: Searches past conversations.
-- `platform_search_documents`: Searches across uploaded documents.
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_search.py:1-70]().
-
----
-
-## Natural Language to Platform Action Flow
-
-The `AutoBrain` service acts as the first tier of detection. It uses regex patterns and keyword matching to identify when a user is asking for platform-level information, subsequently injecting `tool_hints` that guide the LLM toward using `platform_*` actions.
-
-### NL to Platform Execution Sequence
-```mermaid
-sequenceDiagram
-    participant User
-    participant Auto["AutoBrain (Complexity Assessor)"]
-    participant Router["Universal Router"]
-    participant Executor["PlatformActionExecutor"]
-    participant Handler["Domain Handler (e.g. handlers_analytics.py)"]
-
-    User->>Auto: "How many tokens have I used today?"
-    Note over Auto: Detects 'token usage' keyword [orchestrator/consumers/chatbot/auto.py:133]()
-    Auto-->>Router: ComplexityAssessment(tool_hints=["platform_get_llm_usage"])
-    
-    Router->>Executor: execute("platform_get_llm_usage", {})
-    Note over Executor: Dispatches to get_llm_usage [orchestrator/modules/tools/discovery/platform_executor.py:43]()
-    
-    Executor->>Handler: get_llm_usage(db, workspace_id)
-    Handler-->>Executor: { "total_tokens": 45000, "cost": 0.82 }
-    Executor-->>User: "You have used 45,000 tokens today costing $0.82."
+    NL_Agent --> Action_Agent --> Register_Agent
+    NL_Workspace --> Action_Workspace --> Handler_Workspace
+    NL_Task --> Action_Task --> Register_Task
+    NL_Report --> Action_Report --> Register_Report
+    Action_Report --> Handler_Report
 ```
 
-**Sources:** [orchestrator/consumers/chatbot/auto.py:121-173](), [orchestrator/modules/tools/discovery/platform_executor.py:42-47](), [orchestrator/api/chat.py:18-24]().
+Sources: [orchestrator/modules/tools/discovery/actions_agents.py:91-139](), [orchestrator/modules/tools/discovery/actions_workspace.py:15-34](), [orchestrator/modules/tools/discovery/handlers_workspace.py:40-63](), [orchestrator/modules/tools/discovery/actions_board_tasks.py:24-81](), [orchestrator/modules/tools/discovery/actions_reports.py:6-38](), [orchestrator/modules/tools/discovery/handlers_reports.py:16-26]()
 
-### Implementation Summary
+### Definition and implementation correspondence
 
-1.  **`platform_actions.py`**: The central registry where all 47+ actions are categorized and registered [orchestrator/modules/tools/discovery/platform_actions.py:53-96]().
-2.  **`platform_executor.py`**: The thin dispatcher that maps action strings to their specific Python handler functions [orchestrator/modules/tools/discovery/platform_executor.py:19-246]().
-3.  **`auto.py`**: The heuristic engine that translates user intent into platform action hints [orchestrator/consumers/chatbot/auto.py:121-173]().
+| Family | Definition or action symbols | Shown implementation symbols |
+|---|---|---|
+| Agents | `register_agents_actions`, `platform_recommend_agent`, `platform_list_agents` | `list_agents`, `get_agent` [orchestrator/modules/tools/discovery/actions_agents.py:91-143](), [orchestrator/modules/tools/discovery/handlers_agents.py:31-109]() |
+| Workspace and memory | `register_workspace_actions_defs`, `platform_get_workspace_info`, `platform_get_memory_stats`, `platform_resume_context` | `get_workspace_info`, `get_memory_stats`, `list_connected_apps` [orchestrator/modules/tools/discovery/actions_workspace.py:6-84](), [orchestrator/modules/tools/discovery/handlers_workspace.py:40-168]() |
+| Board tasks | `register_board_task_actions`, `platform_create_task` | Board task implementation is not included in the shown handler excerpt; its action registration and schema are shown [orchestrator/modules/tools/discovery/actions_board_tasks.py:24-81]() |
+| Reports | `register_report_actions`, `platform_submit_report`, `platform_browse_reports`, `platform_acknowledge_report` | `submit_report`, `acknowledge_report`, `link_report_to_task` [orchestrator/modules/tools/discovery/actions_reports.py:6-125](), [orchestrator/modules/tools/discovery/handlers_reports.py:16-174]() |
+| Monitoring | Monitoring action definitions are in a separate definition module | `prometheus_available`, `loki_available`, `railway_api_available`, `get_logs`, `list_services`, `query_loki_logs` [orchestrator/modules/tools/discovery/handlers_monitoring.py:14-112]() |
+| Marketplace | `register_marketplace_actions`, `platform_browse_marketplace_plugins`, `platform_browse_marketplace_agents`, `platform_browse_marketplace_skills` | Definition excerpt shown; corresponding handlers are not included [orchestrator/modules/tools/discovery/actions_marketplace.py:6-123]() |
 
-**Sources:** [orchestrator/modules/tools/discovery/platform_actions.py:1-96](), [orchestrator/modules/tools/discovery/platform_executor.py:1-246](), [orchestrator/consumers/chatbot/auto.py:1-173]().
+Sources: [orchestrator/modules/tools/discovery/actions_agents.py:91-143](), [orchestrator/modules/tools/discovery/handlers_agents.py:31-109](), [orchestrator/modules/tools/discovery/actions_workspace.py:6-84](), [orchestrator/modules/tools/discovery/handlers_workspace.py:40-168](), [orchestrator/modules/tools/discovery/actions_board_tasks.py:24-81](), [orchestrator/modules/tools/discovery/actions_reports.py:6-125](), [orchestrator/modules/tools/discovery/handlers_reports.py:16-174](), [orchestrator/modules/tools/discovery/handlers_monitoring.py:14-112](), [orchestrator/modules/tools/discovery/actions_marketplace.py:6-123]()
+
+---
+
+## 2. Catalog of platform action families
+
+### 2.1 Agents
+
+Agent actions cover roster discovery and recommendation, and include agent creation and update. `platform_recommend_agent` is a read action that accepts an objective, an optional runtime preference (`any`, `cli`, or `api`), and an optional result limit. The registration wrapper adds runtime-related schema fields to create and update actions. [orchestrator/modules/tools/discovery/actions_agents.py:41-68](), [orchestrator/modules/tools/discovery/actions_agents.py:91-139]()
+
+`list_agents` filters `Agent` rows by `workspace_id`, optionally filters by status, and returns agent summaries. On widget turns it returns the restricted `_visitor_view`; otherwise it includes details such as runtime, model-related information, tool and skill counts, heartbeat state, and tags. `get_agent` resolves an agent by ID or name and also returns the restricted view on widget turns. [orchestrator/modules/tools/discovery/handlers_agents.py:20-44](), [orchestrator/modules/tools/discovery/handlers_agents.py:46-79](), [orchestrator/modules/tools/discovery/handlers_agents.py:82-109]()
+
+Sources: [orchestrator/modules/tools/discovery/actions_agents.py:41-68](), [orchestrator/modules/tools/discovery/actions_agents.py:91-139](), [orchestrator/modules/tools/discovery/handlers_agents.py:20-109]()
+
+### 2.2 Workspace
+
+`register_workspace_actions_defs` registers workspace information, memory, integrations, and system-health actions. The visible tools include `platform_get_workspace_info`, `platform_get_memory_stats`, `platform_resume_context`, `platform_checkpoint_thread`, `platform_list_connected_apps`, and `platform_get_system_health`. The health action is marked `super_admin_only` and promoted. [orchestrator/modules/tools/discovery/actions_workspace.py:6-34](), [orchestrator/modules/tools/discovery/actions_workspace.py:36-117](), [orchestrator/modules/tools/discovery/actions_workspace.py:119-168]()
+
+`get_workspace_info` loads the workspace by ID and returns workspace metadata plus agent and document counts. `get_memory_stats` obtains the unified memory service, checks durable configuration, retrieves workspace-level memories, and scans up to ten workspace agents for agent-specific memories. `list_connected_apps` aggregates active `AgentAppAssignment` rows by app name and type for agents in the workspace. [orchestrator/modules/tools/discovery/handlers_workspace.py:40-63](), [orchestrator/modules/tools/discovery/handlers_workspace.py:66-137](), [orchestrator/modules/tools/discovery/handlers_workspace.py:140-168]()
+
+Sources: [orchestrator/modules/tools/discovery/actions_workspace.py:6-168](), [orchestrator/modules/tools/discovery/handlers_workspace.py:40-168]()
+
+### 2.3 Documents
+
+The owner-only policy excerpt names `platform_read_document` in a test-provided task brief, but the supplied files do not include its action definition or handler implementation. This page therefore does not infer its schema or execution behavior. [orchestrator/tests/test_f241_e_a_new_card_never_copies_one_and_notes_are_the_owners.py:22-28]()
+
+Sources: [orchestrator/tests/test_f241_e_a_new_card_never_copies_one_and_notes_are_the_owners.py:22-28]()
+
+### 2.4 Missions
+
+The owner-only policy identifies `platform_create_mission`, `platform_approve_mission`, `platform_cancel_mission`, and `platform_update_mission_plan` as mission-related actions. The excerpt marks mission plan edits as owner-only; it does not provide the action definitions or handler implementations for these tools. [orchestrator/modules/tools/discovery/owner_only.py:43-73]()
+
+Sources: [orchestrator/modules/tools/discovery/owner_only.py:43-73]()
+
+### 2.5 Playbooks
+
+The owner-only policy names `platform_create_playbook`, `platform_schedule_playbook`, `platform_delete_playbook`, `platform_update_playbook`, and `platform_execute_playbook`. It specifies that a playbook update is owner-only when it sets the timer, and that creating, scheduling, deleting, or running a playbook is included in the owner-only action set. [orchestrator/modules/tools/discovery/owner_only.py:50-62]()
+
+Sources: [orchestrator/modules/tools/discovery/owner_only.py:50-62]()
+
+### 2.6 Reports
+
+`register_report_actions` registers report submission, browsing, acknowledgement, report-to-task linkage, and latest-report retrieval. The definitions distinguish read actions such as `platform_browse_reports` and `platform_get_latest_report` from write actions such as `platform_submit_report` and `platform_acknowledge_report`. [orchestrator/modules/tools/discovery/actions_reports.py:6-15](), [orchestrator/modules/tools/discovery/actions_reports.py:17-165]()
+
+`submit_report` validates required title and content, rejects template placeholders, validates report type and status, optionally checks required sections, resolves the calling agent, and delegates persistence to `ReportService.create_report`. `acknowledge_report` updates acknowledgement fields within the workspace and, after committing, calls `file_owner_approved`. `link_report_to_task` validates the task reference and updates the report’s linked task IDs. [orchestrator/modules/tools/discovery/handlers_reports.py:16-106](), [orchestrator/modules/tools/discovery/handlers_reports.py:109-148](), [orchestrator/modules/tools/discovery/handlers_reports.py:151-174]()
+
+Sources: [orchestrator/modules/tools/discovery/actions_reports.py:6-165](), [orchestrator/modules/tools/discovery/handlers_reports.py:16-174]()
+
+### 2.7 Monitoring
+
+Monitoring handler utilities check whether Prometheus, Loki, or the Railway API are configured. `get_logs` requires a configured `RailwayClient` and a service name, delegates to `fetch_service_logs`, and formats and truncates the returned text for model consumption. `list_services` delegates to `RailwayClient.list_services`. [orchestrator/modules/tools/discovery/handlers_monitoring.py:14-37](), [orchestrator/modules/tools/discovery/handlers_monitoring.py:39-109]()
+
+`query_loki_logs` checks Loki availability, bounds its time range and result limit, builds a LogQL selector, and tries the Grafana datasource proxy before the direct Loki fallback. The supplied excerpt shows the Grafana-proxy request and the start of the fallback path. [orchestrator/modules/tools/discovery/handlers_monitoring.py:112-185]()
+
+Sources: [orchestrator/modules/tools/discovery/handlers_monitoring.py:14-109](), [orchestrator/modules/tools/discovery/handlers_monitoring.py:112-185]()
+
+### 2.8 Marketplace
+
+`register_marketplace_actions` registers marketplace discovery actions for plugins, agents, and skills. These are read actions with optional search, category, and limit parameters. The excerpt also shows workspace-inventory actions for enabled plugins and skills; browsing for new items is distinguished from listing items already enabled in the workspace. [orchestrator/modules/tools/discovery/actions_marketplace.py:6-46](), [orchestrator/modules/tools/discovery/actions_marketplace.py:48-123](), [orchestrator/modules/tools/discovery/actions_marketplace.py:125-173]()
+
+Sources: [orchestrator/modules/tools/discovery/actions_marketplace.py:6-173]()
+
+### 2.9 Scheduling
+
+The owner-only policy names `platform_schedule_playbook` and `platform_schedule_task`; scheduling-related actions in that set require owner approval when called from a person’s chat turn. The supplied excerpts do not show their action definitions or scheduling handlers. [orchestrator/modules/tools/discovery/owner_only.py:50-59]()
+
+Sources: [orchestrator/modules/tools/discovery/owner_only.py:50-59]()
+
+### 2.10 Graph
+
+The supplied excerpts do not show graph action definitions or handlers. No graph implementation details are inferred here.
+
+Sources: [orchestrator/modules/tools/discovery/owner_only.py:42-72]()
+
+### 2.11 Autonomy
+
+The supplied excerpts do not show autonomy action definitions or handlers. The owner-only module does state that a person’s owner-only action cannot bypass the click requirement based on role or the full-autonomy setting. [orchestrator/modules/tools/discovery/owner_only.py:1-19]()
+
+Sources: [orchestrator/modules/tools/discovery/owner_only.py:1-19]()
+
+### 2.12 Web
+
+The supplied excerpts do not show web action definitions or handlers. No web-access behavior is inferred here.
+
+Sources: [orchestrator/modules/tools/discovery/owner_only.py:42-72]()
+
+### 2.13 Socials
+
+The owner-only policy names `platform_submit_social_post` and states that it sends a social post for approval; its accompanying verb explicitly says that nothing posts yet. The excerpt does not include the action definition or publishing handler. [orchestrator/modules/tools/discovery/owner_only.py:43-64](), [orchestrator/modules/tools/discovery/owner_only.py:99-112]()
+
+Sources: [orchestrator/modules/tools/discovery/owner_only.py:43-64](), [orchestrator/modules/tools/discovery/owner_only.py:99-112]()
+
+### 2.14 Brand
+
+The supplied excerpts do not show brand action definitions or handlers. No brand behavior is inferred here.
+
+Sources: [orchestrator/modules/tools/discovery/owner_only.py:42-72]()
+
+### 2.15 Tasks and board
+
+`register_board_task_actions` registers task creation, listing, snapshots, summaries, retrieval, waiting, assignment, and update operations. `platform_create_task` is a promoted `write` action with `requires_confirmation=False`; its schema includes title and description requirements and optional fields for assignment, priority, parent ticket, review mode, deadline, approval action, initial status, and auto-approval. [orchestrator/modules/tools/discovery/actions_board_tasks.py:24-37](), [orchestrator/modules/tools/discovery/actions_board_tasks.py:58-81](), [orchestrator/modules/tools/discovery/actions_board_tasks.py:103-148]()
+
+The board status schema is sourced from `api.board_tasks.VALID_STATUSES` when importable and uses a stable fallback list otherwise. The supplied tests show a refusal path that prevents creating a duplicate card when the proposed title is effectively another ticket’s number, and a chat directive that assigns the existing card rather than creating a copy. [orchestrator/modules/tools/discovery/actions_board_tasks.py:10-21](), [orchestrator/tests/test_f241_e_a_new_card_never_copies_one_and_notes_are_the_owners.py:46-80]()
+
+Sources: [orchestrator/modules/tools/discovery/actions_board_tasks.py:10-21](), [orchestrator/modules/tools/discovery/actions_board_tasks.py:24-37](), [orchestrator/modules/tools/discovery/actions_board_tasks.py:58-81](), [orchestrator/modules/tools/discovery/actions_board_tasks.py:103-148](), [orchestrator/tests/test_f241_e_a_new_card_never_copies_one_and_notes_are_the_owners.py:46-80]()
+
+---
+
+## 3. Data flow and owner-only gating
+
+For report submission, the handler validates input and caller-agent context before constructing `ReportService` and calling `create_report`. For report acknowledgement, it updates the workspace-scoped row, commits, and then invokes `file_owner_approved`. [orchestrator/modules/tools/discovery/handlers_reports.py:16-106](), [orchestrator/modules/tools/discovery/handlers_reports.py:109-148]()
+
+For workspace memory statistics, the handler obtains the unified memory service, reads workspace memories, loads workspace agents, and concurrently retrieves memories for up to ten agents. [orchestrator/modules/tools/discovery/handlers_workspace.py:66-105]()
+
+**Diagram: Natural-language requests through visible definitions and data paths**
+
+```mermaid
+flowchart LR
+    subgraph NaturalLanguageSpace["Natural Language Space"]
+        NL_Report["Submit a report"]
+        NL_Memory["How many memories are there?"]
+        NL_Health["Check the system health"]
+        NL_Task["Create a task"]
+    end
+
+    subgraph CodeEntitySpace["Code Entity Space"]
+        Def_Report["platform_submit_report"]
+        Handler_Report["submit_report"]
+        Service_Report["ReportService.create_report"]
+        Def_Memory["platform_get_memory_stats"]
+        Handler_Memory["get_memory_stats"]
+        Service_Memory["get_unified_memory_service"]
+        Def_Health["platform_get_system_health"]
+        Def_Task["platform_create_task"]
+        Registry_Task["register_board_task_actions"]
+    end
+
+    NL_Report --> Def_Report --> Handler_Report --> Service_Report
+    NL_Memory --> Def_Memory --> Handler_Memory --> Service_Memory
+    NL_Health --> Def_Health
+    NL_Task --> Def_Task --> Registry_Task
+```
+
+Sources: [orchestrator/modules/tools/discovery/actions_reports.py:17-38](), [orchestrator/modules/tools/discovery/handlers_reports.py:16-106](), [orchestrator/modules/tools/discovery/actions_workspace.py:38-58](), [orchestrator/modules/tools/discovery/handlers_workspace.py:66-105](), [orchestrator/modules/tools/discovery/actions_workspace.py:145-168](), [orchestrator/modules/tools/discovery/actions_board_tasks.py:24-81]()
+
+### Owner-only checks and confirmation grants
+
+`OWNER_ONLY_ACTIONS` lists the action names treated as owner-only, including agent, mission, playbook, scheduling, social-post, and board-update operations. The policy module states that for a person’s chat turn the action waits for the owner’s click and resumes through the approval-grant path; agent runs, playbook steps, and heartbeats do not carry a driving user and are unchanged. The excerpt also states that the owner-only ask follows role, hierarchy, and rate-limit checks. [orchestrator/modules/tools/discovery/owner_only.py:1-19](), [orchestrator/modules/tools/discovery/owner_only.py:42-72]()
+
+**Diagram: Owner-only confirmation flow described by the policy module**
+
+```mermaid
+flowchart TB
+    Call["Person chat turn calls an action"]
+    Checks["Role, hierarchy, and rate-limit checks"]
+    OwnerPolicy{"Action requires owner click?"}
+    Ask["Return confirmation ask"]
+    Click["Owner clicks approval card"]
+    Resume["Resume the same call and consume grant"]
+    Execute["Execute action"]
+    Direct["Continue without owner-only ask"]
+
+    Call --> Checks --> OwnerPolicy
+    OwnerPolicy -- "Yes" --> Ask --> Click --> Resume --> Execute
+    OwnerPolicy -- "No" --> Direct --> Execute
+```
+
+Sources: [orchestrator/modules/tools/discovery/owner_only.py:1-19](), [orchestrator/modules/tools/discovery/owner_only.py:42-72]()
+
+---
+
+## 4. Source files in the supplied excerpts
+
+| Area | File | Role established by the excerpt |
+|---|---|---|
+| Board task definitions | `orchestrator/modules/tools/discovery/actions_board_tasks.py` | Registers board task action definitions and schemas [orchestrator/modules/tools/discovery/actions_board_tasks.py:24-37]() |
+| Agent definitions | `orchestrator/modules/tools/discovery/actions_agents.py` | Registers agent actions and injects runtime-related schema properties [orchestrator/modules/tools/discovery/actions_agents.py:41-92]() |
+| Agent handlers | `orchestrator/modules/tools/discovery/handlers_agents.py` | Implements agent listing, retrieval, and view shaping [orchestrator/modules/tools/discovery/handlers_agents.py:20-148]() |
+| Workspace definitions | `orchestrator/modules/tools/discovery/actions_workspace.py` | Registers workspace, memory, integration, and health actions [orchestrator/modules/tools/discovery/actions_workspace.py:6-168]() |
+| Workspace handlers | `orchestrator/modules/tools/discovery/handlers_workspace.py` | Implements workspace info, memory stats, and connected-app listing [orchestrator/modules/tools/discovery/handlers_workspace.py:40-168]() |
+| Report definitions | `orchestrator/modules/tools/discovery/actions_reports.py` | Registers report actions [orchestrator/modules/tools/discovery/actions_reports.py:6-165]() |
+| Report handlers | `orchestrator/modules/tools/discovery/handlers_reports.py` | Validates and processes report submission, acknowledgement, and task linkage [orchestrator/modules/tools/discovery/handlers_reports.py:16-174]() |
+| Monitoring handlers | `orchestrator/modules/tools/discovery/handlers_monitoring.py` | Checks monitoring integrations and queries deployment or Loki logs [orchestrator/modules/tools/discovery/handlers_monitoring.py:14-185]() |
+| Marketplace definitions | `orchestrator/modules/tools/discovery/actions_marketplace.py` | Registers marketplace browse and workspace-inventory actions [orchestrator/modules/tools/discovery/actions_marketplace.py:6-173]() |
+| Owner-only policy | `orchestrator/modules/tools/discovery/owner_only.py` | Lists owner-only action names and describes the click/grant behavior [orchestrator/modules/tools/discovery/owner_only.py:1-19](), [orchestrator/modules/tools/discovery/owner_only.py:42-72]() |
+| Board task regression tests | `orchestrator/tests/test_f241_e_a_new_card_never_copies_one_and_notes_are_the_owners.py` | Tests duplicate-card refusal and assignment of an existing ticket [orchestrator/tests/test_f241_e_a_new_card_never_copies_one_and_notes_are_the_owners.py:46-80]() |
+
+Sources: [orchestrator/modules/tools/discovery/actions_board_tasks.py:24-37](), [orchestrator/modules/tools/discovery/actions_agents.py:41-92](), [orchestrator/modules/tools/discovery/handlers_agents.py:20-148](), [orchestrator/modules/tools/discovery/actions_workspace.py:6-168](), [orchestrator/modules/tools/discovery/handlers_workspace.py:40-168](), [orchestrator/modules/tools/discovery/actions_reports.py:6-165](), [orchestrator/modules/tools/discovery/handlers_reports.py:16-174](), [orchestrator/modules/tools/discovery/handlers_monitoring.py:14-185](), [orchestrator/modules/tools/discovery/actions_marketplace.py:6-173](), [orchestrator/modules/tools/discovery/owner_only.py:1-19](), [orchestrator/modules/tools/discovery/owner_only.py:42-72](), [orchestrator/tests/test_f241_e_a_new_card_never_copies_one_and_notes_are_the_owners.py:46-80]()
 
 ---

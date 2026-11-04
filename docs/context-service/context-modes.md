@@ -5,147 +5,197 @@
 
 The following files were used as context for generating this wiki page:
 
+- [orchestrator/alembic/versions/prd201_s1_message_context_trace.py](orchestrator/alembic/versions/prd201_s1_message_context_trace.py)
+- [orchestrator/core/attachment_refs.py](orchestrator/core/attachment_refs.py)
+- [orchestrator/core/context_guard.py](orchestrator/core/context_guard.py)
+- [orchestrator/core/llm/request_scope.py](orchestrator/core/llm/request_scope.py)
+- [orchestrator/core/services/skill_l3_execution.py](orchestrator/core/services/skill_l3_execution.py)
+- [orchestrator/modules/agents/services/skill_portability.py](orchestrator/modules/agents/services/skill_portability.py)
+- [orchestrator/modules/attachments/extract.py](orchestrator/modules/attachments/extract.py)
 - [orchestrator/modules/context/__init__.py](orchestrator/modules/context/__init__.py)
 - [orchestrator/modules/context/budget.py](orchestrator/modules/context/budget.py)
 - [orchestrator/modules/context/modes.py](orchestrator/modules/context/modes.py)
 - [orchestrator/modules/context/planning.py](orchestrator/modules/context/planning.py)
 - [orchestrator/modules/context/sections/__init__.py](orchestrator/modules/context/sections/__init__.py)
 - [orchestrator/modules/context/sections/agent_roster.py](orchestrator/modules/context/sections/agent_roster.py)
-- [orchestrator/modules/context/sections/composio.py](orchestrator/modules/context/sections/composio.py)
-- [orchestrator/modules/context/sections/field_memory.py](orchestrator/modules/context/sections/field_memory.py)
+- [orchestrator/modules/context/sections/base.py](orchestrator/modules/context/sections/base.py)
+- [orchestrator/modules/context/sections/conversation.py](orchestrator/modules/context/sections/conversation.py)
 - [orchestrator/modules/context/sections/planning_history.py](orchestrator/modules/context/sections/planning_history.py)
-- [orchestrator/modules/context/sections/planning_knowledge.py](orchestrator/modules/context/sections/planning_knowledge.py)
-- [orchestrator/modules/context/sections/playbook_context.py](orchestrator/modules/context/sections/playbook_context.py)
-- [orchestrator/modules/context/sections/plugins.py](orchestrator/modules/context/sections/plugins.py)
+- [orchestrator/modules/tools/discovery/handlers_skill_runtime.py](orchestrator/modules/tools/discovery/handlers_skill_runtime.py)
 - [orchestrator/tests/test_context/test_modes.py](orchestrator/tests/test_context/test_modes.py)
 - [orchestrator/tests/test_context/test_service.py](orchestrator/tests/test_context/test_service.py)
+- [orchestrator/tests/test_context_guard.py](orchestrator/tests/test_context_guard.py)
+- [orchestrator/tests/test_f181_b_a_skill_says_which_scripts_it_lacks.py](orchestrator/tests/test_f181_b_a_skill_says_which_scripts_it_lacks.py)
+- [orchestrator/tests/test_f191_a_failed_command_is_not_a_success.py](orchestrator/tests/test_f191_a_failed_command_is_not_a_success.py)
 - [orchestrator/tests/test_prd164_planning_pack.py](orchestrator/tests/test_prd164_planning_pack.py)
-- [orchestrator/tests/test_prd179_field_read.py](orchestrator/tests/test_prd179_field_read.py)
+- [orchestrator/tests/test_prd223_attachment_refs.py](orchestrator/tests/test_prd223_attachment_refs.py)
 
 </details>
 
 
 
-Context modes define how `ContextService` assembles system prompts, tools, and messages for different execution scenarios. Each mode declares which sections it needs, how tools are loaded, and optional constraints like maximum token budgets. This unified system replaces fragmented prompt-building paths with a single declarative interface [orchestrator/modules/context/modes.py:1-6]().
+Context modes define how `ContextService` (`[orchestrator/modules/context/service.py]()`) assembles system prompts, tools, and message payloads for different execution scenarios. Each mode is backed by a declarative `ModeConfig` dataclass (`[orchestrator/modules/context/modes.py:113-121]()`) that specifies required sections, tool loading strategies, personality injection flags, and token budget constraints.
 
 ---
 
 ## Purpose and Scope
 
-Context modes are declarative configurations defined in `orchestrator/modules/context/modes.py` that control:
+Context modes serve as the configuration backbone for prompt assembly across the Automatos AI platform. They control:
 
-1.  **Section Composition**: Which concrete section classes from `SECTION_REGISTRY` are instantiated and rendered into the final system prompt [orchestrator/modules/context/modes.py:116-116](), [orchestrator/modules/context/sections/__init__.py:31-51]().
-2.  **Tool Loading Strategy**: Whether to load all tools (`full`), filter them by intent (`filtered`), use the platform dispatcher only (`dispatcher_only`), or load no tools (`none`) [orchestrator/modules/context/modes.py:117-117]().
-3.  **Personality Injection**: Whether to include conversational "chatbot" personality traits via `AutomatosPersonality` or remain professional and neutral [orchestrator/modules/context/modes.py:118-118]().
-4.  **Token Budgeting & Execution Constraints**: Maximum token caps per mode and tool visibility rules such as PRD-229 execution-only tool stripping [orchestrator/modules/context/modes.py:26-34]().
+1. **Section Composition**: Which prompt sections (Identity, Skills, Memory, Task Context, etc.) are included in the final system prompt `[orchestrator/modules/context/modes.py:117]()`.
+2. **Tool Loading Strategy**: Whether tools are loaded fully (`full`), filtered (`filtered`), restricted to the platform dispatcher (`dispatcher_only`), read-only (`read_only`), or omitted (`none`) `[orchestrator/modules/context/modes.py:118]()`.
+3. **Personality Injection**: Whether conversational tone and chatbot heuristics (`personality=True`) or neutral professional instructions (`personality=False`) are applied `[orchestrator/modules/context/modes.py:119]()`.
+4. **Token Budgeting**: Specific token allocation limits (`max_tokens`) per mode `[orchestrator/modules/context/modes.py:120]()`.
 
-Sources: [orchestrator/modules/context/modes.py:1-121](), [orchestrator/modules/context/sections/__init__.py:31-51]()
+Sources: `[orchestrator/modules/context/modes.py:1-121]()`
 
 ---
 
-## Architecture & Data Flow
+## Architecture Overview
 
-The following diagram bridges the natural language space (user requests, agent roles) to the code entity space (`ContextMode`, `ModeConfig`, and `ContextService`), illustrating how runtime parameters resolve into concrete prompt sections and tool loading strategies.
+### Context Mode Lifecycle and Data Flow
 
-Title: "ContextModeResolutionAndAssembly"
+The following diagram bridges natural language routing and consumer execution contexts to concrete codebase symbols (`ContextMode`, `ModeConfig`, `ContextService`, `SECTION_REGISTRY`, and `TokenBudgetManager`).
+
+Title: "Context Assembly and Mode Routing"
 ```mermaid
 graph TB
-    subgraph "NaturalLanguageSpace"
-        UserRequest["UserChatMessageOrTask"]
-        AgentRole["AgentRoleOrchestration"]
+    subgraph "Code_Entity_Space"
+        Chat["SmartChatOrchestrator"]
+        AgentFactory["AgentFactory"]
+        Heartbeat["HeartbeatService"]
+        Coordinator["CoordinatorService"]
+        Planner["MissionPlanner"]
+        ModesEnum["ContextMode"]
+        ModeConfigClass["ModeConfig"]
+        Registry["SECTION_REGISTRY"]
     end
 
-    subgraph "CodeEntitySpace"
-        Enum["ContextMode (modes.py)"]
-        Config["ModeConfig (modes.py)"]
-        Service["ContextService (service.py)"]
-        Registry["SECTION_REGISTRY (sections/__init__.py)"]
-        BudgetMgr["TokenBudgetManager (budget.py)"]
+    subgraph "Context_Service_Execution"
+        Svc["ContextService"]
+        BudgetMgr["TokenBudgetManager"]
     end
 
-    UserRequest --> Enum
-    AgentRole --> Enum
-    Enum --> Config
-    Config --> Service
-    Service --> Registry
-    Service --> BudgetMgr
+    subgraph "Natural_Language_Space"
+        Prompt["SystemPrompt_Output"]
+    end
+
+    Chat -->|"ContextMode.CHATBOT"| ModesEnum
+    AgentFactory -->|"ContextMode.TASK_EXECUTION"| ModesEnum
+    Heartbeat -->|"ContextMode.HEARTBEAT_AGENT"| ModesEnum
+    Coordinator -->|"ContextMode.COORDINATOR"| ModesEnum
+    Planner -->|"ContextMode.PLANNING"| ModesEnum
+
+    ModesEnum --> ModeConfigClass
+    ModeConfigClass --> Svc
+    Svc --> Registry
+    Registry --> BudgetMgr
+    BudgetMgr --> Prompt
 ```
 
-Sources: [orchestrator/modules/context/modes.py:13-24](), [orchestrator/modules/context/modes.py:112-121](), [orchestrator/modules/context/sections/__init__.py:31-51](), [orchestrator/modules/context/budget.py:51-68]()
+Sources: `[orchestrator/modules/context/modes.py:13-24]`, `[orchestrator/modules/context/modes.py:112-121]`, `[orchestrator/modules/context/sections/__init__.py:33-56]`, `[orchestrator/modules/context/budget.py:51-73]()`
 
 ---
 
-## Tool Filtering & PRD-229 Enforcement
+## Available Context Modes
 
-Certain platform tools—specifically `platform_ask_orchestrator`—are restricted to worker execution lanes. The codebase implements strict checks via `EXECUTION_ONLY_TOOLS`, `EXECUTION_TOOL_MODES`, and `excluded_tool_names()` to strip these tools from non-execution surfaces (such as `CHATBOT`) [orchestrator/modules/context/modes.py:26-53]().
-
-Title: "ToolFilteringFlowPRD229"
-```mermaid
-graph LR
-    subgraph "CodeEntitySpace"
-        ToolsInput["RawToolList"]
-        ExSet["EXECUTION_ONLY_TOOLS"]
-        ModeCheck["excluded_tool_names(mode)"]
-        StripFn["strip_actions_from_surface()"]
-        PruneEnum["_prune_dispatcher_enum()"]
-        CleanTools["FilteredToolSurface"]
-    end
-
-    ToolsInput --> StripFn
-    ExSet --> ModeCheck
-    ModeCheck --> StripFn
-    StripFn --> PruneEnum
-    PruneEnum --> CleanTools
-```
-
-Functions and constants involved in tool enforcement:
-- `EXECUTION_ONLY_TOOLS`: A `frozenset` containing restricted actions like `platform_ask_orchestrator` [orchestrator/modules/context/modes.py:34-34]().
-- `EXECUTION_TOOL_MODES`: A `frozenset` containing modes permitted to run execution tools (e.g., `ContextMode.TASK_EXECUTION`) [orchestrator/modules/context/modes.py:38-38]().
-- `excluded_tool_names(mode)`: Determines whether tool exclusions apply based on the active mode [orchestrator/modules/context/modes.py:41-53]().
-- `strip_actions_from_surface(tools, excluded)`: Pure function that rebuilds tool definitions or prunes dispatch enums without mutating input objects [orchestrator/modules/context/modes.py:56-81]().
-
-Sources: [orchestrator/modules/context/modes.py:26-110]()
-
----
-
-## Mode Configurations Catalog
-
-The `MODE_CONFIGS` dictionary maps each `ContextMode` enum value to a frozen `ModeConfig` dataclass instance [orchestrator/modules/context/modes.py:112-122]().
+The platform defines specialized modes via the `ContextMode` string enum (`[orchestrator/modules/context/modes.py:13-24]()`). Each mode is configured in `MODE_CONFIGS` (`[orchestrator/modules/context/modes.py:123-169]()`).
 
 ### CHATBOT
-*   **Purpose**: User-facing conversational interactions with conversational tone and greetings [orchestrator/modules/context/modes.py:122-136]().
-*   **Sections**: `identity`, `onboarding`, `skills`, `composio`, `plugins`, `platform_actions`, `memory`, `business_graph`, `datetime_context`, `conversation` [orchestrator/modules/context/modes.py:127-132]().
-*   **Tool Loading**: `filtered` [orchestrator/modules/context/modes.py:133-133]().
-*   **Personality**: `True` [orchestrator/modules/context/modes.py:134-134]().
+* **Purpose**: User-facing conversational interaction.
+* **Sections**: `identity`, `product_facts`, `onboarding`, `skills`, `composio`, `plugins`, `platform_actions`, `documents_inventory`, `memory`, `business_graph`, `datetime_context`, `conversation`, `standing_rules` `[orchestrator/modules/context/modes.py:128-134]()`.
+* **Personality**: `True` (enables chatbot greetings, conversational tone, and user awareness) `[orchestrator/modules/context/modes.py:136]()`.
+* **Tool Strategy**: `filtered` `[orchestrator/modules/context/modes.py:135]()`.
+* **Budget**: 128,000 total tokens (60,000 reserved for messages) `[orchestrator/modules/context/budget.py:155-159]()`.
 
 ### TASK_EXECUTION
-*   **Purpose**: Professional, neutral agent execution for specific tasks [orchestrator/modules/context/modes.py:137-149]().
-*   **Sections**: `identity`, `skills`, `composio`, `plugins`, `platform_actions`, `memory`, `business_graph`, `task_context`, `datetime_context`, `conversation` [orchestrator/modules/context/modes.py:141-145]().
-*   **Tool Loading**: `full` [orchestrator/modules/context/modes.py:146-146]().
-*   **Personality**: `False` [orchestrator/modules/context/modes.py:147-147]().
+* **Purpose**: Professional, neutral agent execution for operational tasks.
+* **Sections**: `identity`, `skills`, `composio`, `plugins`, `platform_actions`, `memory`, `business_graph`, `task_context`, `datetime_context`, `conversation` `[orchestrator/modules/context/modes.py:142-146]()`.
+* **Personality**: `False` (neutral, professional prompt tone) `[orchestrator/modules/context/modes.py:149]()`.
+* **Tool Strategy**: `full` `[orchestrator/modules/context/modes.py:148]()`.
 
 ### HEARTBEAT_ORCHESTRATOR & HEARTBEAT_AGENT
-*   **Purpose**: Autonomous scheduled checks and background task management [orchestrator/modules/context/modes.py:150-174]().
-*   **Heartbeat Orchestrator**: Uses `dispatcher_only` tool loading, lean 8,000 token budget, and neutral tone [orchestrator/modules/context/modes.py:150-160]().
-*   **Heartbeat Agent**: Includes `field_memory` for cross-run learning (PRD-179) with `full` tool loading and 128k budget [orchestrator/modules/context/modes.py:161-174]().
+* **Purpose**: Autonomous scheduled platform checks and background agent execution.
+* **HEARTBEAT_ORCHESTRATOR**: Uses `dispatcher_only` tool loading, `personality=False`, and an 8,000 token system budget `[orchestrator/modules/context/modes.py:154-161]()`.
+* **HEARTBEAT_AGENT**: Executes scheduled agent tasks autonomously with `full` tool loading and `field_memory` digests for cross-run learning (PRD-179) `[orchestrator/modules/context/modes.py:163-169]()`.
 
 ### RECIPE
-*   **Purpose**: Multi-step playbook and workflow execution [orchestrator/modules/context/modes.py:175-185]().
-*   **Sections**: `identity`, `skills`, `composio`, `plugins`, `platform_actions`, `playbook_context`, `task_context`, `datetime_context`, `conversation` [orchestrator/modules/context/modes.py:175-185]().
-*   **Tool Loading**: `full` [orchestrator/modules/context/modes.py:175-185]().
+* **Purpose**: Multi-step playbook and workflow step execution, incorporating `playbook_context` and strict task scoping.
 
-### ROUTER
-*   **Purpose**: Fast intent classification and message routing without executing heavy tool sets [orchestrator/modules/context/modes.py:186-196]().
-*   **Tool Loading**: `none` [orchestrator/modules/context/modes.py:186-196]().
-
-### ORCHESTRATOR_STAGE
-*   **Purpose**: Execution of intermediate high-level orchestrator lifecycle stages [orchestrator/modules/context/modes.py:197-207]().
-*   **Tool Loading**: `dispatcher_only` [orchestrator/modules/context/modes.py:197-207]().
+### ROUTER & ORCHESTRATOR_STAGE
+* **Purpose**: Internal platform routing decisions and state management stages. `ROUTER` loads no tools (`none`), while orchestrator stages handle intermediary DAG transitions.
 
 ### NL2SQL
-*   **Purpose**: Natural language to SQL query generation and database reasoning [orchestrator/modules/context/modes.py:208-218]().
-*   **Tool Loading**: `filtered` [orchestrator/modules/context/modes.py:208-218]().
+* **Purpose**: Database schema inspection and natural-language-to-SQL query generation, constrained by tight token limits (`2,000` reserved message budget) `[orchestrator/modules/context/budget.py:180-184]()`.
 
-Sources: [orchestrator/modules/context/modes.py:122-246]()
+### COORDINATOR & PLANNING
+* **Purpose**: Mission decomposition and task graph planning surfaces, utilizing specialized planning context packs and `AgentRosterSection` integrations `[orchestrator/modules/context/sections/agent_roster.py:20-30]`, `[orchestrator/tests/test_prd164_planning_pack.py:1-18]()`.
+
+### CHECK_IN
+* **Purpose**: Proactive check-ins by agents (PRD-268 US-C02c) `[orchestrator/modules/context/modes.py:24]()`.
+
+Sources: `[orchestrator/modules/context/modes.py:13-25]`, `[orchestrator/modules/context/modes.py:123-169]`, `[orchestrator/modules/context/budget.py:154-195]`, `[orchestrator/modules/context/sections/agent_roster.py:20-30]()`
+
+---
+
+## Tool Stripping and PRD-229 Enforcement
+
+To maintain strict vertical tool boundaries, `platform_ask_orchestrator` is permitted **only** in worker execution surfaces (`TASK_EXECUTION`). It is stripped across all other modes `[orchestrator/modules/context/modes.py:27-35]()`:
+
+```python
+EXECUTION_ONLY_TOOLS: frozenset[str] = frozenset({"platform_ask_orchestrator"})
+EXECUTION_TOOL_MODES: frozenset["ContextMode"] = frozenset({ContextMode.TASK_EXECUTION})
+```
+
+The helper functions `excluded_tool_names()`, `strip_actions_from_surface()`, and `_prune_dispatcher_enum()` enforce this boundary at runtime `[orchestrator/modules/context/modes.py:42-110]()`. When rendering non-execution surfaces, `strip_actions_from_surface` either drops the first-class execution tool or removes `platform_ask_orchestrator` from the `platform_execute` dispatcher's action enum `[orchestrator/modules/context/modes.py:57-83]()`.
+
+Sources: `[orchestrator/modules/context/modes.py:27-110]()`
+
+---
+
+## Token Budget Management
+
+The `TokenBudgetManager` (`[orchestrator/modules/context/budget.py:51-62]()`) allocates token budgets across rendered sections and manages priority-based truncation:
+
+1. **Per-Section Capping**: Applies `max_tokens` limits via token-boundary truncation (`truncate_to_token_budget`) `[orchestrator/modules/context/budget.py:77-106]()`.
+2. **Priority-Based Dropping**: If total tokens exceed the available budget, sections are dropped starting from the highest priority number (lowest importance) `[orchestrator/modules/context/budget.py:113-134]()`.
+3. **Protected Tiers**: Priority `1` and `2` sections (e.g., `identity`, `task_context`) are **never dropped** `[orchestrator/modules/context/budget.py:122-125]()`.
+
+Sources: `[orchestrator/modules/context/budget.py:51-147]()`
+
+---
+
+## Code Entity to Natural Language Bridge
+
+The following diagram bridges natural language tool filtering requirements to concrete codebase symbols (`excluded_tool_names`, `strip_actions_from_surface`, `_prune_dispatcher_enum`, and `TokenBudgetManager`).
+
+Title: "Tool Filtering and Context Translation"
+```mermaid
+graph LR
+    subgraph "Code_Entity_Space"
+        ModeFn["excluded_tool_names"]
+        StripFn["strip_actions_from_surface"]
+        PruneFn["_prune_dispatcher_enum"]
+        BudgetMgr["TokenBudgetManager"]
+    end
+
+    subgraph "Context_Service_Logic"
+        ToolLoad["ToolsSection_load_tools"]
+        Alloc["TokenBudget_allocate"]
+    end
+
+    subgraph "Natural_Language_Space"
+        PromptOutput["CleanedPromptSurface"]
+    end
+
+    ModeFn --> StripFn
+    StripFn --> PruneFn
+    ToolLoad --> StripFn
+    Alloc --> BudgetMgr
+    BudgetMgr --> PromptOutput
+    StripFn --> PromptOutput
+```
+
+Sources: `[orchestrator/modules/context/modes.py:41-110]`, `[orchestrator/modules/context/budget.py:51-147]()`
 
 ---
