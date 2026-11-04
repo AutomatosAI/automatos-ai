@@ -101,7 +101,7 @@ def test_grant_with_oversight_unknown_falls_safe_to_human_in_the_loop():
 
 def test_list_grants_carries_oversight():
     rows = [_Grant(10, RISK_DESTRUCTIVE), _Grant(11, RISK_READ), _Grant(12, None)]
-    resp = asyncio.run(grants_api.list_grants(status=None, ctx=_ctx(), db=_db_returning(rows)))
+    resp = grants_api.list_grants(status=None, ctx=_ctx(), db=_db_returning(rows))
 
     grants = resp["grants"]
     assert len(grants) == 3

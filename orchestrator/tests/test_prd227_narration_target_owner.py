@@ -224,7 +224,7 @@ def test_import_plan_strips_caller_supplied_origin_and_chat_id(monkeypatch):
         user=types.SimpleNamespace(id="user_owner", clerk_user_id=None),
     )
 
-    asyncio.run(am.import_mission_plan(body, ctx, MagicMock()))
+    am.import_mission_plan(body, ctx, MagicMock())
 
     cfg = captured["config"]
     assert "origin_chat_id" not in cfg, "import-plan must strip caller origin_chat_id"
