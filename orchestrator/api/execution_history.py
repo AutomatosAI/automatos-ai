@@ -102,8 +102,103 @@ def get_execution_details(execution_id: int, db: Session = Depends(get_db), ctx:
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _get_execution_stages_early(input_data):
+    """Pipeline stages 1-4 (decomposition through agent execution)."""
+    return [
+        {
+            "stage": 1,
+            "name": "Task Decomposition",
+            "status": "completed" if input_data.get("decomposition", {}).get("is_real") else "skipped",
+            "data": input_data.get("decomposition", {}),
+            "metrics": {
+                "task_count": input_data.get("decomposition", {}).get("task_count", 0),
+                "execution_strategy": input_data.get("decomposition", {}).get("execution_strategy", "parallel")
+            }
+        },
+        {
+            "stage": 2,
+            "name": "Agent Selection",
+            "status": "completed" if input_data.get("agent_selection", {}).get("is_real") else "skipped",
+            "data": input_data.get("agent_selection", {}),
+            "metrics": {
+                "unique_agents": input_data.get("agent_selection", {}).get("summary", {}).get("unique_agents", 0),
+                "avg_match_score": input_data.get("agent_selection", {}).get("summary", {}).get("avg_match_score", 0)
+            }
+        },
+        {
+            "stage": 3,
+            "name": "Context Engineering",
+            "status": "completed" if input_data.get("context_engineering", {}).get("is_real") else "skipped",
+            "data": input_data.get("context_engineering", {}),
+            "metrics": {
+                "total_sources": input_data.get("context_engineering", {}).get("summary", {}).get("total_sources_retrieved", 0),
+                "avg_quality": input_data.get("context_engineering", {}).get("summary", {}).get("avg_context_quality", 0)
+            }
+        },
+        {
+            "stage": 4,
+            "name": "Agent Execution",
+            "status": "completed" if input_data.get("agent_execution", {}).get("is_real") else "skipped",
+            "data": input_data.get("agent_execution", {}),
+            "metrics": {
+                "success_rate": input_data.get("agent_execution", {}).get("summary", {}).get("success_rate", 0),
+                "total_tokens": input_data.get("agent_execution", {}).get("summary", {}).get("total_tokens_used", 0),
+                "execution_time_ms": input_data.get("agent_execution", {}).get("summary", {}).get("total_execution_time_ms", 0)
+            }
+        },
+    ]
+
+
+def _get_execution_stages_late(input_data, output_data):
+    """Pipeline stages 5-9 (result aggregation through memory consolidation)."""
+    return [
+        {
+            "stage": 5,
+            "name": "Result Aggregation",
+            "status": "completed" if input_data.get("result_aggregation", {}).get("is_real") else "skipped",
+            "data": input_data.get("result_aggregation", {}),
+            "quality_scores": input_data.get("result_aggregation", {}).get("quality_scores", {})
+        },
+        {
+            "stage": 6,
+            "name": "Learning Update",
+            "status": "completed" if input_data.get("learning_system", {}).get("is_real") else "skipped",
+            "data": input_data.get("learning_system", {}),
+            "metrics": {
+                "total_updates": input_data.get("learning_system", {}).get("updates", {}).get("total_updates", 0),
+                "agents_improved": len(input_data.get("learning_system", {}).get("updates", {}).get("agent_performance_updates", []))
+            }
+        },
+        {
+            "stage": 7,
+            "name": "Quality Assessment",
+            "status": "completed" if output_data.get("quality_scores") else "skipped",
+            "quality_scores": output_data.get("quality_scores", {})
+        },
+        {
+            "stage": 8,
+            "name": "Memory Storage",
+            "status": "completed" if input_data.get("memory_storage", {}).get("is_real") else "skipped",
+            "data": input_data.get("memory_storage", {}),
+            "metrics": {
+                "experiences_stored": input_data.get("memory_storage", {}).get("results", {}).get("total_experiences", 0),
+                "agents_with_memory": len(input_data.get("memory_storage", {}).get("results", {}).get("per_agent", {}))
+            }
+        },
+        {
+            "stage": 9,
+            "name": "Memory Consolidation",
+            "status": "completed" if input_data.get("memory_consolidation", {}).get("is_real") else "skipped",
+            "data": input_data.get("memory_consolidation", {}),
+            "metrics": {
+                "patterns_extracted": input_data.get("memory_consolidation", {}).get("results", {}).get("patterns_extracted", 0),
+                "agents_consolidated": len(input_data.get("memory_consolidation", {}).get("results", {}).get("agents_consolidated", []))
+            }
+        }
+    ]
+
 @router.get("/execution/{execution_id}/stages")
-async def get_execution_stages(execution_id: int, db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
+def get_execution_stages(execution_id: int, db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get the 9-stage pipeline details for an execution"""
     try:
         execution = db.query(WorkflowExecution).filter(
@@ -117,92 +212,7 @@ async def get_execution_stages(execution_id: int, db: Session = Depends(get_db),
         input_data = execution.input_data or {}
         output_data = execution.output_data or {}
         
-        stages = [
-            {
-                "stage": 1,
-                "name": "Task Decomposition",
-                "status": "completed" if input_data.get("decomposition", {}).get("is_real") else "skipped",
-                "data": input_data.get("decomposition", {}),
-                "metrics": {
-                    "task_count": input_data.get("decomposition", {}).get("task_count", 0),
-                    "execution_strategy": input_data.get("decomposition", {}).get("execution_strategy", "parallel")
-                }
-            },
-            {
-                "stage": 2,
-                "name": "Agent Selection",
-                "status": "completed" if input_data.get("agent_selection", {}).get("is_real") else "skipped",
-                "data": input_data.get("agent_selection", {}),
-                "metrics": {
-                    "unique_agents": input_data.get("agent_selection", {}).get("summary", {}).get("unique_agents", 0),
-                    "avg_match_score": input_data.get("agent_selection", {}).get("summary", {}).get("avg_match_score", 0)
-                }
-            },
-            {
-                "stage": 3,
-                "name": "Context Engineering",
-                "status": "completed" if input_data.get("context_engineering", {}).get("is_real") else "skipped",
-                "data": input_data.get("context_engineering", {}),
-                "metrics": {
-                    "total_sources": input_data.get("context_engineering", {}).get("summary", {}).get("total_sources_retrieved", 0),
-                    "avg_quality": input_data.get("context_engineering", {}).get("summary", {}).get("avg_context_quality", 0)
-                }
-            },
-            {
-                "stage": 4,
-                "name": "Agent Execution",
-                "status": "completed" if input_data.get("agent_execution", {}).get("is_real") else "skipped",
-                "data": input_data.get("agent_execution", {}),
-                "metrics": {
-                    "success_rate": input_data.get("agent_execution", {}).get("summary", {}).get("success_rate", 0),
-                    "total_tokens": input_data.get("agent_execution", {}).get("summary", {}).get("total_tokens_used", 0),
-                    "execution_time_ms": input_data.get("agent_execution", {}).get("summary", {}).get("total_execution_time_ms", 0)
-                }
-            },
-            {
-                "stage": 5,
-                "name": "Result Aggregation",
-                "status": "completed" if input_data.get("result_aggregation", {}).get("is_real") else "skipped",
-                "data": input_data.get("result_aggregation", {}),
-                "quality_scores": input_data.get("result_aggregation", {}).get("quality_scores", {})
-            },
-            {
-                "stage": 6,
-                "name": "Learning Update",
-                "status": "completed" if input_data.get("learning_system", {}).get("is_real") else "skipped",
-                "data": input_data.get("learning_system", {}),
-                "metrics": {
-                    "total_updates": input_data.get("learning_system", {}).get("updates", {}).get("total_updates", 0),
-                    "agents_improved": len(input_data.get("learning_system", {}).get("updates", {}).get("agent_performance_updates", []))
-                }
-            },
-            {
-                "stage": 7,
-                "name": "Quality Assessment",
-                "status": "completed" if output_data.get("quality_scores") else "skipped",
-                "quality_scores": output_data.get("quality_scores", {})
-            },
-            {
-                "stage": 8,
-                "name": "Memory Storage",
-                "status": "completed" if input_data.get("memory_storage", {}).get("is_real") else "skipped",
-                "data": input_data.get("memory_storage", {}),
-                "metrics": {
-                    "experiences_stored": input_data.get("memory_storage", {}).get("results", {}).get("total_experiences", 0),
-                    "agents_with_memory": len(input_data.get("memory_storage", {}).get("results", {}).get("per_agent", {}))
-                }
-            },
-            {
-                "stage": 9,
-                "name": "Memory Consolidation",
-                "status": "completed" if input_data.get("memory_consolidation", {}).get("is_real") else "skipped",
-                "data": input_data.get("memory_consolidation", {}),
-                "metrics": {
-                    "patterns_extracted": input_data.get("memory_consolidation", {}).get("results", {}).get("patterns_extracted", 0),
-                    "agents_consolidated": len(input_data.get("memory_consolidation", {}).get("results", {}).get("agents_consolidated", []))
-                }
-            }
-        ]
+        stages = _get_execution_stages_early(input_data) + _get_execution_stages_late(input_data, output_data)
         
         return {
             "execution_id": execution_id,
