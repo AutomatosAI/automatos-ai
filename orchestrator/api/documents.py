@@ -1433,19 +1433,9 @@ async def semantic_search(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-def _get_queue_status_processing(processing_docs):
-    """Format processing documents with progress estimates."""
-    from datetime import datetime, timedelta
-
-    processing_list = []
-    for doc in processing_docs:
-        # Estimate progress based on time since upload
-        # This is a placeholder - real implementation would track actual progress
-        time_since_upload = datetime.now() - doc.upload_date if doc.upload_date else timedelta(0)
-        estimated_total_time = 120  # 2 minutes average
-        progress_pct = min(int((time_since_upload.total_seconds() / estimated_total_time) * 100), 95)
-
-        # Determine current processing step
+def _get_queue_status_step(progress_pct):
+    """Current processing step and its display name for a progress percentage."""
+    # Determine current processing step
         if progress_pct < 20:
             current_step = "text_extraction"
             step_name = "Text Extraction"
@@ -1461,8 +1451,24 @@ def _get_queue_status_processing(processing_docs):
         else:
             current_step = "finalizing"
             step_name = "Finalizing"
+    return current_step, step_name
 
-        eta_seconds = max(0, int(estimated_total_time - time_since_upload.total_seconds()))
+
+def _get_queue_status_processing(processing_docs):
+    """Format processing documents with progress estimates."""
+    from datetime import datetime, timedelta
+
+    processing_list = []
+    for doc in processing_docs:
+        # Estimate progress based on time since upload
+        # This is a placeholder - real implementation would track actual progress
+        time_since_upload = datetime.now() - doc.upload_date if doc.upload_date else timedelta(0)
+        estimated_total_time = 120  # 2 minutes average
+        progress_pct = min(int((time_since_upload.total_seconds() / estimated_total_time) * 100), 95)
+
+        current_step, step_name = _get_queue_status_step(progress_pct)
+
+    eta_seconds = max(0, int(estimated_total_time - time_since_upload.total_seconds()))
 
         processing_list.append({
             "document_id": doc.id,
