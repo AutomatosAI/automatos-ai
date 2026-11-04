@@ -908,8 +908,58 @@ def _merge_orchestrator(existing: Dict[str, Any], payload: Dict[str, Any]) -> Di
 
 # ── What Automatos Knows (Memory Stats) ─────────────────────────────
 
+def _get_memory_stats_breakdown(db: Session, MemoryShortTerm, workspace_id, total: int):
+    """Returns (by_type, by_level, agents_with_memories) for the workspace's short-term memories."""
+    by_type = dict(
+        db.query(MemoryShortTerm.content_type, func.count(MemoryShortTerm.id))
+        .filter(MemoryShortTerm.workspace_id == workspace_id)
+        .group_by(MemoryShortTerm.content_type)
+        .all()
+    )
+
+    promoted = (
+        db.query(func.count(MemoryShortTerm.id))
+        .filter(
+            MemoryShortTerm.workspace_id == workspace_id,
+            MemoryShortTerm.promoted_to_l3.is_(True),
+        )
+        .scalar() or 0
+    )
+    by_level = {"short_term": total - promoted, "promoted_to_durable": promoted}
+
+    agents_with_memories = (
+        db.query(func.count(func.distinct(MemoryShortTerm.agent_id)))
+        .filter(
+            MemoryShortTerm.workspace_id == workspace_id,
+            MemoryShortTerm.agent_id.isnot(None),
+        )
+        .scalar() or 0
+    )
+    return by_type, by_level, agents_with_memories
+
+
+def _get_memory_stats_recent(MemoryShortTerm, base) -> list:
+    """The 5 most recent memories (content preview only)."""
+    recent_rows = (
+        base.order_by(desc(MemoryShortTerm.created_at))
+        .limit(5)
+        .all()
+    )
+    recent = []
+    for m in recent_rows:
+        content_preview = str(m.content)[:120] if m.content else ""
+        recent.append({
+            "id": str(m.id),
+            "type": m.content_type,
+            "level": "promoted_to_durable" if m.promoted_to_l3 else "short_term",
+            "preview": content_preview,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+        })
+    return recent
+
+
 @router.get("/current/memory-stats")
-async def get_memory_stats(
+def get_memory_stats(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -937,30 +987,8 @@ async def get_memory_stats(
 
         total = base.count()
 
-        by_type = dict(
-            db.query(MemoryShortTerm.content_type, func.count(MemoryShortTerm.id))
-            .filter(MemoryShortTerm.workspace_id == workspace_id)
-            .group_by(MemoryShortTerm.content_type)
-            .all()
-        )
-
-        promoted = (
-            db.query(func.count(MemoryShortTerm.id))
-            .filter(
-                MemoryShortTerm.workspace_id == workspace_id,
-                MemoryShortTerm.promoted_to_l3.is_(True),
-            )
-            .scalar() or 0
-        )
-        by_level = {"short_term": total - promoted, "promoted_to_durable": promoted}
-
-        agents_with_memories = (
-            db.query(func.count(func.distinct(MemoryShortTerm.agent_id)))
-            .filter(
-                MemoryShortTerm.workspace_id == workspace_id,
-                MemoryShortTerm.agent_id.isnot(None),
-            )
-            .scalar() or 0
+        by_type, by_level, agents_with_memories = _get_memory_stats_breakdown(
+            db, MemoryShortTerm, workspace_id, total
         )
 
         yesterday = datetime.utcnow() - timedelta(hours=24)
@@ -969,21 +997,7 @@ async def get_memory_stats(
         )
 
         # 5 most recent memories (content preview only)
-        recent_rows = (
-            base.order_by(desc(MemoryShortTerm.created_at))
-            .limit(5)
-            .all()
-        )
-        recent = []
-        for m in recent_rows:
-            content_preview = str(m.content)[:120] if m.content else ""
-            recent.append({
-                "id": str(m.id),
-                "type": m.content_type,
-                "level": "promoted_to_durable" if m.promoted_to_l3 else "short_term",
-                "preview": content_preview,
-                "created_at": m.created_at.isoformat() if m.created_at else None,
-            })
+        recent = _get_memory_stats_recent(MemoryShortTerm, base)
 
         return {
             "total_memories": total,
