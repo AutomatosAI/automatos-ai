@@ -84,7 +84,7 @@ def caller_owns_agent(
 # ===================================================================
 
 @router.get("/{agent_id}/plugins", response_model=None)
-async def list_agent_plugins(
+def list_agent_plugins(
     agent_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
