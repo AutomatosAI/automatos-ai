@@ -74,6 +74,7 @@ import re
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from modules.tools.discovery.brand_turns import refusal_on_a_brand_turn
 from modules.tools.discovery.card_words_said import owners_card_words
@@ -165,12 +166,14 @@ IN_PROGRESS = "in_progress"
 
 def follows_the_owner(execute: Execute) -> Execute:
     """Wrap PlatformExecutor.execute: a call that doesn't follow the owner's words is
-    refused, before any gate or handler runs, with the call that does."""
+    refused, before any gate or handler runs, with the call that does. The owner's words
+    and the board are read in FastAPI's threadpool (F105), never on the event loop."""
     @functools.wraps(execute)
     async def wrapped(self: Any, action_name: str, params: Any, caller_context: Any = None) -> Dict[str, Any]:
         # Gerard, 7 Oct: a turn routed to the Brand designer changes no setting and starts no mission.
         refusal = (refusal_on_a_brand_turn(action_name)
-                   or refusal_for(self.db, self.workspace_id, action_name, params, caller_context))
+                   or await run_in_threadpool(refusal_for, self.db, self.workspace_id, action_name, params,
+                                              caller_context))
         if refusal:
             logger.info("[follows_the_owner] %s refused: %s", action_name, refusal[:160])
             return refused(refusal)   # F449: with the owner's reason and the card it is about, when it says them

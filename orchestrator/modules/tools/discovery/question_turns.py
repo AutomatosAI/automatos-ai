@@ -27,6 +27,8 @@ import logging
 import re
 from typing import Any, Awaitable, Callable, Dict, Optional
 
+from starlette.concurrency import run_in_threadpool
+
 logger = logging.getLogger(__name__)
 
 # The calls a how-to question never makes: an agent and what it carries, a connection, the board's
@@ -101,11 +103,12 @@ Execute = Callable[..., Awaitable[Dict[str, Any]]]
 
 def answers_the_question_first(execute: Execute) -> Execute:
     """Wrap PlatformExecutor.execute: in a turn whose owner asked how, a call that changes an agent,
-    a connection, the board's work, the kit or a setting is refused, with the answer to give instead."""
+    a connection, the board's work, the kit or a setting is refused, with the answer to give instead.
+    The owner's words are read in FastAPI's threadpool (F105), never on the event loop."""
     @functools.wraps(execute)
     async def wrapped(self: Any, action_name: str, params: Any, caller_context: Any = None) -> Dict[str, Any]:
         db, workspace_id = getattr(self, "db", None), getattr(self, "workspace_id", None)
-        refusal = refusal_on_a_question(db, workspace_id, action_name, caller_context, params)
+        refusal = await run_in_threadpool(refusal_on_a_question, db, workspace_id, action_name, caller_context, params)
         if refusal:
             logger.info("[F381] %s refused: the owner asked a question", action_name)
             return {"success": False, "error": refusal}

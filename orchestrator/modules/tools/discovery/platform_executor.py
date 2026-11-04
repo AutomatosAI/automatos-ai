@@ -838,7 +838,12 @@ class PlatformActionExecutor:
     ) -> Dict[str, Any]:
         """Everything after the permission gates (``clear``): the hierarchy check,
         the rate limit, the destructive backstop, the server-side params and the
-        handler itself."""
+        handler itself.
+
+        F105: the hierarchy check and the server-side params read the database, so each runs
+        in FastAPI's threadpool while this call waits for it (one thread uses the session at a
+        time); the rate limit and the handler run on the loop. Every step decides as before, in
+        the same order."""
         action_def, full_autonomy = cleared.action_def, cleared.full_autonomy
 
         # PRD-140 Phase 1 — hierarchy permission check. Runs before the
@@ -848,101 +853,128 @@ class PlatformActionExecutor:
         if action_def and action_def.permission_level in ("write", "destructive"):
             target_spec = _HIERARCHY_TARGETS.get(action_name)
             if target_spec is not None:
-                target_type, target_param = target_spec
-                actor_id_raw = params.get("_agent_id") if isinstance(params, dict) else None
-                # A bulk call carries its targets as ``<target_param>s`` (e.g.
-                # platform_update_task_status task_ids) — EVERY id is gated, and
-                # one denial denies the whole call. A missing/None target keeps
-                # the pre-bulk behaviour (one check with target_id=None).
-                bulk_key = f"{target_param}s" if target_param else None
-                bulk_raw = (
-                    params.get(bulk_key)
-                    if (bulk_key and isinstance(params, dict))
-                    else None
+                denied = await run_in_threadpool(
+                    self._hierarchy_denial, action_name, params, caller_context, action_def, target_spec,
                 )
-                if isinstance(bulk_raw, (list, tuple)) and bulk_raw:
-                    target_ids_raw = list(bulk_raw)
-                else:
-                    target_ids_raw = [
-                        params.get(target_param)
-                        if (target_param and isinstance(params, dict))
-                        else None
-                    ]
-                try:
-                    actor_id = int(actor_id_raw) if actor_id_raw is not None else None
-                except (TypeError, ValueError):
-                    actor_id = None
-                n_targets = len(target_ids_raw)
-                for idx, target_id_raw in enumerate(target_ids_raw, 1):
-                    try:
-                        target_id = int(target_id_raw) if target_id_raw is not None else None
-                    except (TypeError, ValueError):
-                        target_id = target_id_raw  # leave string IDs alone (UUIDs etc.)
+                if denied is not None:
+                    return denied
 
-                    try:
-                        decision = can_actor_modify(
-                            self.db,
-                            actor_agent_id=actor_id,
-                            target_type=target_type,
-                            workspace_id=self.workspace_id,
-                            target_id=target_id,
-                            change_type="update" if action_def.permission_level == "write" else "delete",
-                            source="platform_tool",
-                            caller_context=caller_context,
-                        )
-                    except Exception as e:
-                        # Fail closed: a permission check that errors must DENY, never
-                        # fall through to execution. can_actor_modify's DB probes
-                        # (_agent_row / _reports_to_id) aren't all savepoint-guarded,
-                        # so a transient DB error would otherwise raise out of the gate
-                        # and leave the write's fate to upstream handling. Deny locally
-                        # and escalate to Auto — mirrors the registry-lookup fail-closed
-                        # above.
-                        # The target id itself is caller-supplied data: it is returned
-                        # in the error below, never written to the log.
-                        logger.warning(
-                            "[PlatformExecutor] hierarchy_check_failed action=%s actor=%s "
-                            "target=%s (#%d of %d) err=%s — denying (fail-closed)",
-                            action_name, actor_id, target_type, idx, n_targets, e,
-                        )
-                        return {
-                            "success": False,
-                            "permission_denied": True,
-                            "reason": "permission_check_failed",
-                            "escalation_target": "auto",
-                            "error": (
-                                f"Action '{action_name}' denied — permission check could not be "
-                                "completed. Route this through the auto for arbitration."
-                            ),
-                        }
-                    if not decision.allowed:
-                        logger.warning(
-                            "[PlatformExecutor] hierarchy_denied action=%s actor=%s (%s) "
-                            "target=%s (#%d of %d) reason=%s",
-                            action_name, actor_id, decision.actor_name, target_type, idx, n_targets,
-                            decision.reason,
-                        )
-                        return {
-                            "success": False,
-                            "permission_denied": True,
-                            "reason": decision.reason,
-                            "escalation_target": decision.escalation_target,
-                            # F133: a refusal that says how to get it done, when it has one.
-                            "error": (
-                                f"Action '{action_name}' denied ({decision.reason}). {decision.message}"
-                                if decision.message
-                                else (
-                                    f"Action '{action_name}' denied — {decision.reason}. "
-                                    + (
-                                        f"Route this through the {decision.escalation_target} "
-                                        "for arbitration."
-                                        if decision.escalation_target
-                                        else ""
-                                    )
-                                ).strip()
-                            ),
-                        }
+        limited = await self._rate_limited(action_name, params, action_def)
+        if limited is not None:
+            return limited
 
+        misconfigured = _misconfigured_destructive(action_name, action_def)
+        if misconfigured is not None:
+            return misconfigured
+
+        params = await run_in_threadpool(self._server_params, action_name, params, caller_context, full_autonomy)
+        return await self._run_handler(action_name, params, cleared, handler)
+
+    def _hierarchy_denial(
+        self,
+        action_name: str,
+        params: Dict[str, Any],
+        caller_context: Optional[Dict[str, Any]],
+        action_def: Any,
+        target_spec: tuple,
+    ) -> Optional[Dict[str, Any]]:
+        """PRD-140 Phase 1: the hierarchy check over every target the call names, in the
+        threadpool (F105). The refusal for the first target the actor may not change, else None."""
+        target_type, target_param = target_spec
+        actor_id_raw = params.get("_agent_id") if isinstance(params, dict) else None
+        # A bulk call carries its targets as ``<target_param>s`` (e.g.
+        # platform_update_task_status task_ids) — EVERY id is gated, and
+        # one denial denies the whole call. A missing/None target keeps
+        # the pre-bulk behaviour (one check with target_id=None).
+        bulk_key = f"{target_param}s" if target_param else None
+        bulk_raw = (
+            params.get(bulk_key)
+            if (bulk_key and isinstance(params, dict))
+            else None
+        )
+        if isinstance(bulk_raw, (list, tuple)) and bulk_raw:
+            target_ids_raw = list(bulk_raw)
+        else:
+            target_ids_raw = [
+                params.get(target_param)
+                if (target_param and isinstance(params, dict))
+                else None
+            ]
+        try:
+            actor_id = int(actor_id_raw) if actor_id_raw is not None else None
+        except (TypeError, ValueError):
+            actor_id = None
+        n_targets = len(target_ids_raw)
+        for idx, target_id_raw in enumerate(target_ids_raw, 1):
+            denied = self._hierarchy_check(
+                action_name, action_def, caller_context, target_type, actor_id, target_id_raw, (idx, n_targets),
+            )
+            if denied is not None:
+                return denied
+        return None
+
+    def _hierarchy_check(
+        self,
+        action_name: str,
+        action_def: Any,
+        caller_context: Optional[Dict[str, Any]],
+        target_type: str,
+        actor_id: Optional[int],
+        target_id_raw: Any,
+        place: tuple,
+    ) -> Optional[Dict[str, Any]]:
+        """One target's hierarchy decision: the refusal, or None when the actor may change it.
+        ``place``: (this target's number, how many the call names), for the log."""
+        idx, n_targets = place
+        try:
+            target_id = int(target_id_raw) if target_id_raw is not None else None
+        except (TypeError, ValueError):
+            target_id = target_id_raw  # leave string IDs alone (UUIDs etc.)
+
+        try:
+            decision = can_actor_modify(
+                self.db,
+                actor_agent_id=actor_id,
+                target_type=target_type,
+                workspace_id=self.workspace_id,
+                target_id=target_id,
+                change_type="update" if action_def.permission_level == "write" else "delete",
+                source="platform_tool",
+                caller_context=caller_context,
+            )
+        except Exception as e:  # noqa: BLE001 — fails closed: the call is denied, never run
+            # Fail closed: a permission check that errors must DENY, never
+            # fall through to execution. can_actor_modify's DB probes
+            # (_agent_row / _reports_to_id) aren't all savepoint-guarded,
+            # so a transient DB error would otherwise raise out of the gate
+            # and leave the write's fate to upstream handling. Deny locally
+            # and escalate to Auto — mirrors the registry-lookup fail-closed
+            # above.
+            # The target id itself is caller-supplied data: it is returned
+            # in the error below, never written to the log.
+            logger.warning(
+                "[PlatformExecutor] hierarchy_check_failed action=%s actor=%s "
+                "target=%s (#%d of %d) err=%s — denying (fail-closed)",
+                action_name, actor_id, target_type, idx, n_targets, e,
+            )
+            return {
+                "success": False,
+                "permission_denied": True,
+                "reason": "permission_check_failed",
+                "escalation_target": "auto",
+                "error": (
+                    f"Action '{action_name}' denied — permission check could not be "
+                    "completed. Route this through the auto for arbitration."
+                ),
+            }
+        if not decision.allowed:
+            return _hierarchy_refusal(action_name, actor_id, target_type, place, decision)
+        return None
+
+    async def _rate_limited(
+        self, action_name: str, params: Dict[str, Any], action_def: Any,
+    ) -> Optional[Dict[str, Any]]:
+        """The answer to a write over its rate limit, else None. On the loop: the limiter is async."""
         # Rate limit write/destructive actions — scoped per (workspace, agent)
         # so a chatty Auto session doesn't starve mission tasks of headroom.
         if action_def and action_def.permission_level in ("write", "destructive"):
@@ -967,28 +999,31 @@ class PlatformActionExecutor:
                         ),
                     }
                 raise
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — the rate limiter fails open, as before
                 logger.warning("[PlatformExecutor] Rate limiter unavailable, failing open: %s", exc)
+        return None
 
-        # US-003: Destructive safety check — destructive actions must require confirmation
-        if (
-            action_def
-            and action_def.permission_level == "destructive"
-            and not action_def.requires_confirmation
-        ):
-            logger.error(
-                "[PlatformExecutor] Destructive action '%s' missing requires_confirmation flag — "
-                "rejecting as safety precaution",
-                action_name,
-            )
-            return {
-                "success": False,
-                "error": (
-                    f"Internal error: destructive action '{action_name}' is misconfigured "
-                    "(missing confirmation requirement). Contact platform admin."
-                ),
-            }
+    def _server_params(
+        self,
+        action_name: str,
+        params: Dict[str, Any],
+        caller_context: Optional[Dict[str, Any]],
+        full_autonomy: bool,
+    ) -> Dict[str, Any]:
+        """The params the handler gets: what only the server knows, injected, with any
+        caller-supplied copy stripped first. In the threadpool (F105): the team scope's
+        mission, the person a mission action is made for and the caller's admin role are
+        database reads."""
+        params = self._bound_to_the_run(action_name, params, caller_context)
+        params = self._attributed(action_name, params, caller_context)
+        params = _carried_from_the_chat(action_name, params, caller_context)
+        params = _kept_with_the_memory(action_name, params, caller_context)
+        return self._listed_for_the_caller(action_name, params, caller_context, full_autonomy)
 
+    def _bound_to_the_run(
+        self, action_name: str, params: Dict[str, Any], caller_context: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """The team scope, the calling task's field and the ask-Auto binding."""
         # PRD-124/126: Auto-inject _agent_id for graph tools (team scoping).
         # PRD-157 S2: the document-reading tools are team-scoped the same way.
         if (
@@ -997,23 +1032,7 @@ class PlatformActionExecutor:
             or action_name in ("platform_read_document", "platform_grep_documents", "platform_search_documents")
         ):
             if "_agent_id" not in params:
-                # Resolve agent_id from the active mission or caller context
-                try:
-                    from core.models.orchestration import OrchestrationRun
-                    active_run = (
-                        self.db.query(OrchestrationRun)
-                        .filter(
-                            OrchestrationRun.workspace_id == self.workspace_id,
-                            OrchestrationRun.state == "running",
-                        )
-                        .first()
-                    )
-                    if active_run:
-                        _aid = (active_run.config or {}).get("agent_id")
-                        if _aid:
-                            params = {**params, "_agent_id": int(_aid)}
-                except Exception as e:
-                    logger.debug("[PRD-124] Failed to resolve _agent_id for graph tool: %s", e)
+                params = self._team_scope(params)
 
         # PRD-108 / PRD-178 S1 (F020): Auto-inject field_id for field tools from
         # the CALLING task's run — threaded down via caller_context["field_context"]
@@ -1039,7 +1058,33 @@ class PlatformActionExecutor:
         # (exec_platform). Only the server context wins.
         if action_name == "platform_ask_orchestrator":
             params = _bind_ask_orchestrator_context(params, caller_context)
+        return params
 
+    def _team_scope(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """PRD-124: the running mission's agent, for a graph or document tool that names none."""
+        # Resolve agent_id from the active mission or caller context
+        try:
+            from core.models.orchestration import OrchestrationRun
+            active_run = (
+                self.db.query(OrchestrationRun)
+                .filter(
+                    OrchestrationRun.workspace_id == self.workspace_id,
+                    OrchestrationRun.state == "running",
+                )
+                .first()
+            )
+            if active_run:
+                _aid = (active_run.config or {}).get("agent_id")
+                if _aid:
+                    params = {**params, "_agent_id": int(_aid)}
+        except Exception as e:  # noqa: BLE001 — no running mission read: the call stays unscoped, as before
+            logger.debug("[PRD-124] Failed to resolve _agent_id for graph tool: %s", e)
+        return params
+
+    def _attributed(
+        self, action_name: str, params: Dict[str, Any], caller_context: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Who a mission action and a driver-aware action are made for."""
         # PRD-163 S1/Q56: attribute mission create + lifecycle to the chatting
         # user. The chat path threads the driving user's clerk id via
         # caller_context['user_id'] (on the local edition, which has no Clerk
@@ -1085,76 +1130,16 @@ class PlatformActionExecutor:
             if isinstance(caller_context, dict) and _caller_is_super_admin(caller_context):
                 params = {**params, "_driving_super_admin": True}
 
-        # PRD-205 S4: capture the originating conversation for watch-creating
-        # actions (direct create + the launches whose handlers auto-create a
-        # watch) so verdicts post back into that chat. Server-injected from
-        # caller_context; a caller-supplied param of the same name is ALWAYS
-        # stripped first -- inject-on-truthy alone would let a spoofed tool
-        # arg survive the headless paths (board dispatcher, workflows) where
-        # caller_context carries no conversation_id. The origin is never
-        # spoofable via tool args.
-        _WATCH_ORIGIN_ACTIONS = (
-            "platform_create_watch",
-            "platform_create_mission",
-            "platform_execute_playbook",
-            "platform_schedule_task",
-            # PRD-224 US-005: the ASSIGN-lane ticket auto-attaches a watch whose
-            # verdict must post back to THIS conversation.
-            "platform_create_task",
-        )
-        if action_name in _WATCH_ORIGIN_ACTIONS:
-            params = {k: v for k, v in params.items() if k != "_origin_chat_id"}
-            _origin_chat = (caller_context or {}).get("conversation_id")
-            if _origin_chat:
-                params = {**params, "_origin_chat_id": str(_origin_chat)}
+        return params
 
-        # PRD-224 US-005: the ASSIGN-lane flag rides caller_context (set only when
-        # Auto's turn routed ASSIGN). Strip-then-inject like the origin above, so a
-        # tool arg can NEVER fake supervision on headless paths (board dispatcher,
-        # heartbeat, recipes) where caller_context carries no lane. This is what
-        # makes auto-supervision mechanical — the LLM cannot forget or spoof it.
-        if action_name == "platform_create_task":
-            params = {k: v for k, v in params.items() if k != "_assign_lane"}
-            if (caller_context or {}).get("assign_lane"):
-                params = {**params, "_assign_lane": True}
-
-        # PRD-206 S1: memory writes carry their owner (drives the Q7 private/
-        # workspace scope default) and their originating chat (the thread
-        # link). Server-injected from caller_context; caller-supplied values
-        # of the same names are ALWAYS stripped first (the #565 strip-then-
-        # inject hardening) so neither is spoofable via tool args.
-        _MEMORY_CONTEXT_ACTIONS = (
-            "platform_store_memory",
-            "platform_checkpoint_thread",
-            "platform_resume_context",
-        )
-        if action_name in _MEMORY_CONTEXT_ACTIONS:
-            params = {
-                k: v for k, v in params.items()
-                if k not in ("_user_id", "_origin_chat_id")
-            }
-            if action_name == "platform_store_memory":
-                # F189: a memory is never filed as another agent (it recalls it as its own).
-                params = {k: v for k, v in params.items() if k != "agent_id"}
-            _mem_user = (caller_context or {}).get("user_id")
-            if _mem_user:
-                params = {**params, "_user_id": str(_mem_user)}
-            _mem_chat = (caller_context or {}).get("conversation_id")
-            if _mem_chat:
-                params = {**params, "_origin_chat_id": str(_mem_chat)}
-
-        # PRD-234 D16: a ticket the operator asks Auto to file, assign or re-queue
-        # in a live chat turn carries the driving user, so the local edition can
-        # record the board-task consent before dispatch. Strip-then-inject, like
-        # the memory keys above — never caller-supplied.
-        if action_name in OPERATOR_CONSENT_ACTIONS:
-            from services.board_consent import driver_from_caller_context
-
-            params = {k: v for k, v in params.items() if k != "_user_id"}
-            _driver = driver_from_caller_context(caller_context)
-            if _driver:
-                params = {**params, "_user_id": _driver}
-
+    def _listed_for_the_caller(
+        self,
+        action_name: str,
+        params: Dict[str, Any],
+        caller_context: Optional[Dict[str, Any]],
+        full_autonomy: bool,
+    ) -> Dict[str, Any]:
+        """platform_list_tools' caller roles, and the chat turn every handler runs in."""
         # F122: platform_list_tools lists what THIS caller may run. Both flags
         # come from the predicates the gates above read. Strip-then-inject like
         # the keys around it, so a tool arg can never claim a role.
@@ -1177,16 +1162,166 @@ class PlatformActionExecutor:
         _turn = (caller_context or {}).get("turn_id")
         if _turn:
             params = {**params, "_turn_id": str(_turn)}
+        return params
+
+    async def _run_handler(
+        self, action_name: str, params: Dict[str, Any], cleared: "Cleared", handler: Callable,
+    ) -> Dict[str, Any]:
+        """The handler itself, on the loop. A failure is logged, and its work rolled back in
+        the threadpool (F105)."""
         try:
             result = await handler(self.db, self.workspace_id, params)
             return marked(result, cleared)
         except Exception as e:
             logger.error(f"[PlatformExecutor] {action_name} failed: {e}", exc_info=True)
-            try:
-                self.db.rollback()
-            except Exception:
-                pass
+            await run_in_threadpool(self._roll_back_quietly)
             return {"success": False, "error": f"Action '{action_name}' failed"}
+
+    def _roll_back_quietly(self) -> None:
+        """A failed handler's work, rolled back; a rollback that fails too changes nothing the
+        caller is told."""
+        try:
+            self.db.rollback()
+        except Exception:  # noqa: BLE001 — the action's failure is already logged and answered
+            pass
+
+
+def _hierarchy_refusal(
+    action_name: str, actor_id: Optional[int], target_type: str, place: tuple, decision: Any,
+) -> Dict[str, Any]:
+    """The refusal of a target the actor may not change (PRD-140), logged."""
+    idx, n_targets = place
+    logger.warning(
+        "[PlatformExecutor] hierarchy_denied action=%s actor=%s (%s) "
+        "target=%s (#%d of %d) reason=%s",
+        action_name, actor_id, decision.actor_name, target_type, idx, n_targets,
+        decision.reason,
+    )
+    return {
+        "success": False,
+        "permission_denied": True,
+        "reason": decision.reason,
+        "escalation_target": decision.escalation_target,
+        # F133: a refusal that says how to get it done, when it has one.
+        "error": (
+            f"Action '{action_name}' denied ({decision.reason}). {decision.message}"
+            if decision.message
+            else (
+                f"Action '{action_name}' denied — {decision.reason}. "
+                + (
+                    f"Route this through the {decision.escalation_target} "
+                    "for arbitration."
+                    if decision.escalation_target
+                    else ""
+                )
+            ).strip()
+        ),
+    }
+
+
+def _misconfigured_destructive(action_name: str, action_def: Any) -> Optional[Dict[str, Any]]:
+    """US-003's backstop: a destructive action that does not ask first is refused, never run."""
+    # US-003: Destructive safety check — destructive actions must require confirmation
+    if (
+        action_def
+        and action_def.permission_level == "destructive"
+        and not action_def.requires_confirmation
+    ):
+        logger.error(
+            "[PlatformExecutor] Destructive action '%s' missing requires_confirmation flag — "
+            "rejecting as safety precaution",
+            action_name,
+        )
+        return {
+            "success": False,
+            "error": (
+                f"Internal error: destructive action '{action_name}' is misconfigured "
+                "(missing confirmation requirement). Contact platform admin."
+            ),
+        }
+    return None
+
+
+def _carried_from_the_chat(
+    action_name: str, params: Dict[str, Any], caller_context: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """The chat a watch reports back to, and the ASSIGN lane's supervision."""
+    # PRD-205 S4: capture the originating conversation for watch-creating
+    # actions (direct create + the launches whose handlers auto-create a
+    # watch) so verdicts post back into that chat. Server-injected from
+    # caller_context; a caller-supplied param of the same name is ALWAYS
+    # stripped first -- inject-on-truthy alone would let a spoofed tool
+    # arg survive the headless paths (board dispatcher, workflows) where
+    # caller_context carries no conversation_id. The origin is never
+    # spoofable via tool args.
+    _WATCH_ORIGIN_ACTIONS = (
+        "platform_create_watch",
+        "platform_create_mission",
+        "platform_execute_playbook",
+        "platform_schedule_task",
+        # PRD-224 US-005: the ASSIGN-lane ticket auto-attaches a watch whose
+        # verdict must post back to THIS conversation.
+        "platform_create_task",
+    )
+    if action_name in _WATCH_ORIGIN_ACTIONS:
+        params = {k: v for k, v in params.items() if k != "_origin_chat_id"}
+        _origin_chat = (caller_context or {}).get("conversation_id")
+        if _origin_chat:
+            params = {**params, "_origin_chat_id": str(_origin_chat)}
+
+    # PRD-224 US-005: the ASSIGN-lane flag rides caller_context (set only when
+    # Auto's turn routed ASSIGN). Strip-then-inject like the origin above, so a
+    # tool arg can NEVER fake supervision on headless paths (board dispatcher,
+    # heartbeat, recipes) where caller_context carries no lane. This is what
+    # makes auto-supervision mechanical — the LLM cannot forget or spoof it.
+    if action_name == "platform_create_task":
+        params = {k: v for k, v in params.items() if k != "_assign_lane"}
+        if (caller_context or {}).get("assign_lane"):
+            params = {**params, "_assign_lane": True}
+    return params
+
+
+def _kept_with_the_memory(
+    action_name: str, params: Dict[str, Any], caller_context: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """A memory's owner and chat, and the person a ticket's consent is recorded for."""
+    # PRD-206 S1: memory writes carry their owner (drives the Q7 private/
+    # workspace scope default) and their originating chat (the thread
+    # link). Server-injected from caller_context; caller-supplied values
+    # of the same names are ALWAYS stripped first (the #565 strip-then-
+    # inject hardening) so neither is spoofable via tool args.
+    _MEMORY_CONTEXT_ACTIONS = (
+        "platform_store_memory",
+        "platform_checkpoint_thread",
+        "platform_resume_context",
+    )
+    if action_name in _MEMORY_CONTEXT_ACTIONS:
+        params = {
+            k: v for k, v in params.items()
+            if k not in ("_user_id", "_origin_chat_id")
+        }
+        if action_name == "platform_store_memory":
+            # F189: a memory is never filed as another agent (it recalls it as its own).
+            params = {k: v for k, v in params.items() if k != "agent_id"}
+        _mem_user = (caller_context or {}).get("user_id")
+        if _mem_user:
+            params = {**params, "_user_id": str(_mem_user)}
+        _mem_chat = (caller_context or {}).get("conversation_id")
+        if _mem_chat:
+            params = {**params, "_origin_chat_id": str(_mem_chat)}
+
+    # PRD-234 D16: a ticket the operator asks Auto to file, assign or re-queue
+    # in a live chat turn carries the driving user, so the local edition can
+    # record the board-task consent before dispatch. Strip-then-inject, like
+    # the memory keys above — never caller-supplied.
+    if action_name in OPERATOR_CONSENT_ACTIONS:
+        from services.board_consent import driver_from_caller_context
+
+        params = {k: v for k, v in params.items() if k != "_user_id"}
+        _driver = driver_from_caller_context(caller_context)
+        if _driver:
+            params = {**params, "_user_id": _driver}
+    return params
 
 
 # Every platform action's handler, by name; PlatformActionExecutor copies it per instance. A new tool adds one entry.
