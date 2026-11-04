@@ -133,8 +133,67 @@ def list_workspace_plugins(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _enable_plugin_find(db, workspace_id, body):
+    """Return the approved, active plugin; 404 if it is not, 409 if already enabled."""
+    from core.models.marketplace_plugins import (
+        MarketplacePlugin,
+        WorkspaceEnabledPlugin,
+    )
+
+    # Validate plugin exists, is approved, and is active
+    plugin = db.query(MarketplacePlugin).filter(
+        MarketplacePlugin.id == body.plugin_id,
+        MarketplacePlugin.approval_status == "approved",
+        MarketplacePlugin.is_active == True,
+    ).first()
+
+    if not plugin:
+        raise HTTPException(
+            status_code=404,
+            detail="Plugin not found or not approved/active",
+        )
+
+    # Check if already enabled
+    existing = db.query(WorkspaceEnabledPlugin).filter(
+        WorkspaceEnabledPlugin.workspace_id == workspace_id,
+        WorkspaceEnabledPlugin.plugin_id == body.plugin_id,
+    ).first()
+
+    if existing:
+        raise HTTPException(status_code=409, detail="Plugin is already enabled for this workspace")
+    return plugin
+
+
+def _enable_plugin_record(db, ctx, workspace_id, body, plugin):
+    """Insert the workspace junction row, bump enable_count and commit."""
+    from core.models.marketplace_plugins import WorkspaceEnabledPlugin
+
+    # Resolve user id for enabled_by (Integer FK to users table)
+    enabled_by = None
+    user_id_str = getattr(ctx.user, "id", None)
+    if user_id_str:
+        try:
+            enabled_by = int(user_id_str)
+        except (ValueError, TypeError):
+            # Clerk user id or non-integer — skip FK
+            enabled_by = None
+
+    # Create junction record
+    junction = WorkspaceEnabledPlugin(
+        workspace_id=workspace_id,
+        plugin_id=body.plugin_id,
+        enabled_by=enabled_by,
+    )
+    db.add(junction)
+
+    # Increment enable_count on the plugin
+    plugin.enable_count = (plugin.enable_count or 0) + 1
+
+    db.commit()
+
+
 @router.post("/{workspace_id}/plugins", status_code=201, dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def enable_plugin(
+def enable_plugin(
     workspace_id: UUID,
     body: EnablePluginBody,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -144,55 +203,8 @@ async def enable_plugin(
     _assert_workspace_access(ctx, workspace_id)
 
     try:
-        from core.models.marketplace_plugins import (
-            MarketplacePlugin,
-            WorkspaceEnabledPlugin,
-        )
-
-        # Validate plugin exists, is approved, and is active
-        plugin = db.query(MarketplacePlugin).filter(
-            MarketplacePlugin.id == body.plugin_id,
-            MarketplacePlugin.approval_status == "approved",
-            MarketplacePlugin.is_active == True,
-        ).first()
-
-        if not plugin:
-            raise HTTPException(
-                status_code=404,
-                detail="Plugin not found or not approved/active",
-            )
-
-        # Check if already enabled
-        existing = db.query(WorkspaceEnabledPlugin).filter(
-            WorkspaceEnabledPlugin.workspace_id == workspace_id,
-            WorkspaceEnabledPlugin.plugin_id == body.plugin_id,
-        ).first()
-
-        if existing:
-            raise HTTPException(status_code=409, detail="Plugin is already enabled for this workspace")
-
-        # Resolve user id for enabled_by (Integer FK to users table)
-        enabled_by = None
-        user_id_str = getattr(ctx.user, "id", None)
-        if user_id_str:
-            try:
-                enabled_by = int(user_id_str)
-            except (ValueError, TypeError):
-                # Clerk user id or non-integer — skip FK
-                enabled_by = None
-
-        # Create junction record
-        junction = WorkspaceEnabledPlugin(
-            workspace_id=workspace_id,
-            plugin_id=body.plugin_id,
-            enabled_by=enabled_by,
-        )
-        db.add(junction)
-
-        # Increment enable_count on the plugin
-        plugin.enable_count = (plugin.enable_count or 0) + 1
-
-        db.commit()
+        plugin = _enable_plugin_find(db, workspace_id, body)
+        _enable_plugin_record(db, ctx, workspace_id, body, plugin)
 
         return {
             "success": True,
@@ -209,8 +221,30 @@ async def enable_plugin(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _disable_plugin_unassign_agents(db, workspace_id, plugin_id):
+    """Remove the plugin's assignments from this workspace's agents; return how many."""
+    from core.models.marketplace_plugins import AgentAssignedPlugin
+
+    # Remove agent assignments for this plugin from agents in this workspace
+    from core.models.core import Agent
+
+    workspace_agent_ids = [
+        a.id for a in db.query(Agent.id).filter(
+            Agent.workspace_id == workspace_id,
+        ).all()
+    ]
+
+    removed_agent_count = 0
+    if workspace_agent_ids:
+        removed_agent_count = db.query(AgentAssignedPlugin).filter(
+            AgentAssignedPlugin.agent_id.in_(workspace_agent_ids),
+            AgentAssignedPlugin.plugin_id == plugin_id,
+        ).delete(synchronize_session="fetch")
+    return removed_agent_count
+
+
 @router.delete("/{workspace_id}/plugins/{plugin_id}", dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def disable_plugin(
+def disable_plugin(
     workspace_id: UUID,
     plugin_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -221,7 +255,6 @@ async def disable_plugin(
 
     try:
         from core.models.marketplace_plugins import (
-            AgentAssignedPlugin,
             MarketplacePlugin,
             WorkspaceEnabledPlugin,
         )
@@ -235,21 +268,7 @@ async def disable_plugin(
         if not junction:
             raise HTTPException(status_code=404, detail="Plugin is not enabled for this workspace")
 
-        # Remove agent assignments for this plugin from agents in this workspace
-        from core.models.core import Agent
-
-        workspace_agent_ids = [
-            a.id for a in db.query(Agent.id).filter(
-                Agent.workspace_id == workspace_id,
-            ).all()
-        ]
-
-        removed_agent_count = 0
-        if workspace_agent_ids:
-            removed_agent_count = db.query(AgentAssignedPlugin).filter(
-                AgentAssignedPlugin.agent_id.in_(workspace_agent_ids),
-                AgentAssignedPlugin.plugin_id == plugin_id,
-            ).delete(synchronize_session="fetch")
+        removed_agent_count = _disable_plugin_unassign_agents(db, workspace_id, plugin_id)
 
         # Remove the workspace junction record
         db.delete(junction)
