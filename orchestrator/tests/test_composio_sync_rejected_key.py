@@ -250,7 +250,7 @@ async def test_status_endpoint_carries_the_rejected_key_reason(monkeypatch):
     monkeypatch.setattr("api.tools.composio_unavailable_reason", lambda: None)
     failed = ComposioSyncJob(status="failed", errors_count=1, error_details={"errors": [KEY_MESSAGE]})
 
-    out = await integrations_status(ctx=MagicMock(), db=_status_session(failed))
+    out = integrations_status(ctx=MagicMock(), db=_status_session(failed))
 
     assert out.sync_status == "failed"
     assert out.sync_error == KEY_MESSAGE
@@ -265,7 +265,7 @@ async def test_status_endpoint_never_shows_raw_errors(monkeypatch):
     failed = ComposioSyncJob(status="failed", errors_count=1,
                              error_details={"errors": ["(psycopg2.OperationalError) server closed the connection"]})
 
-    out = await integrations_status(ctx=MagicMock(), db=_status_session(failed))
+    out = integrations_status(ctx=MagicMock(), db=_status_session(failed))
 
     assert out.sync_status == "failed"
     assert out.sync_error is None
