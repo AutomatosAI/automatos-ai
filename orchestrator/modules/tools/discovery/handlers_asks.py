@@ -230,6 +230,7 @@ def _park_and_count(
 ) -> _Filed:
     """Park the subject behind the staged row, commit both, and count the cascade blocked
     behind it. The caller's transaction ends here, so the sends never hold it (F105)."""
+    from core.database.database import end_open_transaction
     from services.ask_cascade import count_downstream_blocked
 
     if park is not None:
@@ -248,7 +249,9 @@ def _park_and_count(
         downstream = 0
     filed = _Filed(grant=grant, ask_id=grant.id, asked_by=grant.asked_by_agent_id,
                    channel_refs=grant.channel_refs, downstream=downstream)
-    db.rollback()  # the count's read ends here: nothing of it is held across the sends
+    # The count's read ends here, so nothing of it is held across the sends. A commit, not a
+    # rollback: a caller joined to an outer transaction loses nothing to it (end_open_transaction).
+    end_open_transaction(db)
     return filed
 
 
