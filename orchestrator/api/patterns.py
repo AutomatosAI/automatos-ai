@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/patterns", tags=["patterns"])
 
 @router.get("/", )
-async def list_patterns(
+def list_patterns(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -44,7 +44,7 @@ async def list_patterns(
 @router.post("/", 
     dependencies=[Depends(require_workspace_permission("knowledge:create"))],
 )
-async def create_pattern(
+def create_pattern(
     pattern_data: PatternCreate, 
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -89,7 +89,7 @@ async def create_pattern(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{pattern_id}", )
-async def get_pattern(
+def get_pattern(
     pattern_id: int, 
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -122,7 +122,7 @@ async def get_pattern(
 @router.delete("/{pattern_id}", 
     dependencies=[Depends(require_workspace_permission("knowledge:delete"))],
 )
-async def delete_pattern(
+def delete_pattern(
     pattern_id: int, 
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
