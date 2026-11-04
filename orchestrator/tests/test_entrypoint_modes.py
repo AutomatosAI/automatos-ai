@@ -605,7 +605,7 @@ def test_compose_defaults_turn_the_lifecycle_on():
 
 def test_compose_defaults_size_the_workers_and_stop_within_five_seconds():
     """The production stage under compose: the entrypoint sizes the worker count to the machine
-    (WEB_CONCURRENCY=auto, test_entrypoint_web_concurrency.py), and SSE streams cut after 5 s on stop."""
+    (WEB_CONCURRENCY=0, test_entrypoint_web_concurrency.py), and SSE streams cut after 5 s on stop."""
     lines = _API_DEFAULTS.read_text(encoding="utf-8").splitlines()
-    assert "WEB_CONCURRENCY=auto" in lines
+    assert "WEB_CONCURRENCY=0" in lines
     assert "UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN=5" in lines

@@ -43,10 +43,10 @@
 #   this script's child, and a server that stops serving is stopped so the
 #   container exits and restarts (the liveness watchdog, below).
 #
-#   WEB_CONCURRENCY=auto (envs/api.defaults): before a server starts, the
-#   worker count is sized to the container's CPUs and memory and exported as a
-#   number, which uvicorn reads (below). A number passes through unchanged, as
-#   the image's 4 does on Railway.
+#   WEB_CONCURRENCY=0 (envs/api.defaults; `auto` too): before a server starts,
+#   the worker count is sized to the container's CPUs and memory and exported as
+#   a number, which uvicorn reads (below). A number from 1 up passes through
+#   unchanged, as the image's 4 does on Railway.
 #
 # Database connection: POSTGRES_HOST/PORT/USER/PASSWORD/DB when POSTGRES_HOST
 # is set (compose); otherwise DATABASE_URL (Railway, Kubernetes secrets).
@@ -395,24 +395,27 @@ run_boot_steps() {
 }
 
 # =============================================================================
-# The worker count: WEB_CONCURRENCY=auto
+# The worker count: WEB_CONCURRENCY=0, sized to this machine
 # =============================================================================
 # uvicorn reads WEB_CONCURRENCY when the command names no --workers. One worker is
 # one event loop, so a call that blocks it stalls every request; a machine with
-# room for more should run more. envs/api.defaults sets `auto` for the local
-# edition, which this resolves before the server starts: one worker per CPU and
-# per WEB_CONCURRENCY_BYTES_PER_WORKER of memory the container may use, at most
-# WEB_CONCURRENCY_MAX, at least 1. The container's own limits count, not the
+# room for more should run more. envs/api.defaults sets 0 for the local edition
+# ("size it here"; `auto` means the same), which this resolves before the server
+# starts: one worker per CPU and per WEB_CONCURRENCY_BYTES_PER_WORKER of memory
+# the container may use, at most WEB_CONCURRENCY_MAX, at least 1. The container's own limits count, not the
 # host's: the cgroup's CPU quota and memory limit (v2's cpu.max and memory.max,
 # else v1's), so Docker Desktop's VM and a compose `cpus:`/`mem_limit:` are
-# respected; without them nproc and /proc/meminfo's MemTotal. A number (the
-# image's 4, which Railway runs, or an operator's own in envs/api.local) passes
-# through unchanged. Under --reload (the development stage) uvicorn runs one
-# process whatever the count, so `auto` resolves to 1 there. The count is logged
-# once, as `uvicorn workers: N`, which the fresh-clone smoke reads.
+# respected; without them nproc and /proc/meminfo's MemTotal. A number from 1 up
+# (the image's 4, which Railway runs, or an operator's own in envs/api.local)
+# passes through unchanged. Under --reload (the development stage) uvicorn runs one
+# process whatever the count, so 0 resolves to 1 there. The count is logged once,
+# as `uvicorn workers: N`, which the fresh-clone smoke reads. 0, not a word, is the
+# default because uvicorn int()s WEB_CONCURRENCY: an image older than this
+# resolver, run from a newer checkout, reads 0 as one process, where `auto` stops
+# it with a ValueError.
 # AUTOMATOS_CGROUP_DIR and AUTOMATOS_MEMINFO_FILE move the two places it reads,
 # for the tests.
-WEB_CONCURRENCY_AUTO=auto
+WEB_CONCURRENCY_SIZED="0 auto"  # the values sized to the machine
 WEB_CONCURRENCY_MAX=4
 WEB_CONCURRENCY_BYTES_PER_WORKER=4000000000
 BYTES_PER_GB=1000000000
@@ -504,19 +507,26 @@ runs_reload() {
     return 1
 }
 
-# Before a server command: WEB_CONCURRENCY=auto becomes a number, and the count is
-# logged. Anything else passes through as it is.
+is_sized_here() {
+    case " $WEB_CONCURRENCY_SIZED " in
+        *" ${1:-unset} "*) return 0 ;;
+    esac
+    return 1
+}
+
+# Before a server command: WEB_CONCURRENCY=0 (or auto) becomes a number, and the
+# count is logged. Anything else passes through as it is.
 resolve_web_concurrency() {
-    local cpus memory memory_said
-    if [ "${WEB_CONCURRENCY:-}" != "$WEB_CONCURRENCY_AUTO" ]; then
-        if [ -n "${WEB_CONCURRENCY:-}" ]; then
-            echo "👷 uvicorn workers: ${WEB_CONCURRENCY} (WEB_CONCURRENCY)"
+    local asked="${WEB_CONCURRENCY:-}" cpus memory memory_said
+    if ! is_sized_here "$asked"; then
+        if [ -n "$asked" ]; then
+            echo "👷 uvicorn workers: ${asked} (WEB_CONCURRENCY)"
         fi
         return 0
     fi
     if runs_reload "$@"; then
         export WEB_CONCURRENCY=1
-        echo "👷 uvicorn workers: 1 (WEB_CONCURRENCY=auto; --reload runs one process)"
+        echo "👷 uvicorn workers: 1 (WEB_CONCURRENCY=${asked}; --reload runs one process)"
         return 0
     fi
     cpus=$(container_cpus)
@@ -527,7 +537,7 @@ resolve_web_concurrency() {
     fi
     WEB_CONCURRENCY=$(workers_for "$cpus" "$memory")
     export WEB_CONCURRENCY
-    echo "👷 uvicorn workers: ${WEB_CONCURRENCY} (WEB_CONCURRENCY=auto: ${cpus} CPUs, ${memory_said}; one per CPU and per $((WEB_CONCURRENCY_BYTES_PER_WORKER / BYTES_PER_GB)) GB, at most ${WEB_CONCURRENCY_MAX})"
+    echo "👷 uvicorn workers: ${WEB_CONCURRENCY} (WEB_CONCURRENCY=${asked}, sized here: ${cpus} CPUs, ${memory_said}; one per CPU and per $((WEB_CONCURRENCY_BYTES_PER_WORKER / BYTES_PER_GB)) GB, at most ${WEB_CONCURRENCY_MAX})"
 }
 
 # =============================================================================

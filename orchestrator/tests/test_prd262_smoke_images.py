@@ -20,7 +20,7 @@ modes and ``images.yml``'s tags. The lane itself runs only in CI:
   both arches pass, for the images the merge job publishes;
 * the script empties the Docker cache before make up, never builds in an image mode,
   times the boots while make up runs, and asserts the backend's worker count:
-  envs/api.defaults' WEB_CONCURRENCY (``auto``: the count the entrypoint sized for the
+  envs/api.defaults' WEB_CONCURRENCY (``0``: the count the entrypoint sized for the
   runner and logged), or the pull-request variant's 2 (PRD-262 US-029: the production
   CMD names no --workers);
 * outside CI, the pull refuses to empty the host's image cache unless told it may.
@@ -532,7 +532,7 @@ def test_the_expected_worker_count_is_the_one_compose_sets():
     cmd = [line for line in _DOCKERFILE.read_text(encoding="utf-8").splitlines() if line.startswith("CMD ")][-1]
     assert "--workers" not in cmd, f"the production CMD names --workers, which WEB_CONCURRENCY cannot change: {cmd}"
     defaults = (_REPO / "envs" / "api.defaults").read_text(encoding="utf-8")
-    workers = re.search(r"^WEB_CONCURRENCY=(\d+|auto)$", defaults, re.M)
+    workers = re.search(r"^WEB_CONCURRENCY=(\d+)$", defaults, re.M)
     assert workers, "envs/api.defaults sets no WEB_CONCURRENCY"
     assert f'BACKEND_WORKERS="${{SMOKE_BACKEND_WORKERS:-{workers.group(1)}}}"' in _script()
 

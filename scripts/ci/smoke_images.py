@@ -28,8 +28,9 @@ tool does the rest, one command per step:
 * ``workers``: the backend's processes. This is the first CI boot of the production
   stage, so it must run without ``--reload`` and with the expected worker count, the
   one compose's WEB_CONCURRENCY sets (PRD-262 US-029: the CMD names no ``--workers``).
-  ``--expect auto`` (envs/api.defaults' WEB_CONCURRENCY=auto) expects the count the
-  entrypoint sized for the runner and logged as ``uvicorn workers: N``;
+  ``--expect 0`` (envs/api.defaults' WEB_CONCURRENCY=0, sized to the machine; ``auto``
+  too) expects the count the entrypoint sized for the runner and logged as
+  ``uvicorn workers: N``;
 * ``images``: each app container runs its ``ghcr.io/automatosai/automatos-*`` image,
   which carries the commit's ``org.opencontainers.image.revision``. A pulled image's
   ``RepoDigests`` holds the index digest its tag resolves to on GHCR (a local build
@@ -95,7 +96,7 @@ DEFAULT_ROUTE = "00000000"
 TOP_ARGS = ("-eo", "pid,ppid,args", "-ww")
 WORKER_MARK = "spawn_main"  # uvicorn starts each --workers process with multiprocessing's spawn
 RELOAD_FLAG = "--reload"
-AUTO_WORKERS = "auto"  # --expect auto: the count the entrypoint logged
+SIZED_WORKERS = ("0", "auto")  # --expect either: the count the entrypoint sized and logged
 LOGGED_WORKERS = re.compile(r"uvicorn workers: (\d+)")  # orchestrator/docker-entrypoint.sh
 ARCH_NAMES = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
 PULL_FILE, PROCESSES_FILE, IMAGES_FILE = "pull.json", "processes.json", "images.json"
@@ -494,9 +495,9 @@ def cmd_pull(args: argparse.Namespace) -> int:
 
 
 def cmd_workers(args: argparse.Namespace) -> int:
-    """Check the backend's processes: no --reload, ``--expect`` workers (``auto``: as logged)."""
+    """Check the backend's processes: no --reload, ``--expect`` workers (0 or auto: as logged)."""
     expected = args.expect
-    if expected == AUTO_WORKERS:
+    if expected in SIZED_WORKERS:
         expected = logged_workers(docker_text("logs", args.container))
     found = backend_processes(parse_top(docker_text("top", args.container, *TOP_ARGS)), expected)
     _write(args.out, found)
@@ -544,8 +545,8 @@ def _optional_int(text: str) -> Optional[int]:
 
 
 def _expected_workers(text: str):
-    """``--expect``: a worker count, or ``auto`` for the one the entrypoint logged."""
-    return text if text == AUTO_WORKERS else int(text)
+    """``--expect``: a worker count, or 0 / ``auto`` for the one the entrypoint sized and logged."""
+    return text if text in SIZED_WORKERS else int(text)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -572,7 +573,7 @@ def build_parser() -> argparse.ArgumentParser:
     workers = commands.add_parser("workers", help="the backend runs without --reload, with --expect workers")
     workers.add_argument("--container", required=True)
     workers.add_argument("--expect", type=_expected_workers, required=True,
-                         help="the worker count, or auto: the one the entrypoint logged")
+                         help="the worker count, or 0 (or auto): the one the entrypoint sized and logged")
     workers.add_argument("--out", type=Path, required=True)
     images = commands.add_parser("images", help="each app container runs its published image")
     images.add_argument("--mode", choices=MODES, required=True)

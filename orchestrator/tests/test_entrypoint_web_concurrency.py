@@ -1,11 +1,16 @@
-"""WEB_CONCURRENCY=auto: the local edition's uvicorn worker count, sized to the machine.
+"""WEB_CONCURRENCY=0: the local edition's uvicorn worker count, sized to the machine.
 
-``envs/api.defaults`` sets ``WEB_CONCURRENCY=auto``. One worker is one event loop, so
-a call that blocks it stalls every request, and a large server ran one worker as a
-laptop did. Before a server command, ``orchestrator/docker-entrypoint.sh`` resolves
-``auto`` to one worker per CPU and per 4 GB of memory the container may use, at most
-4, at least 1, exports the number (uvicorn reads WEB_CONCURRENCY and refuses a word)
-and logs ``uvicorn workers: N`` once, which the fresh-clone smoke reads. It reads the
+``envs/api.defaults`` sets ``WEB_CONCURRENCY=0``, "size it here". One worker is one
+event loop, so a call that blocks it stalls every request, and a large server ran one
+worker as a laptop did. Before a server command, ``orchestrator/docker-entrypoint.sh``
+resolves 0 (or ``auto``, for an operator who types it) to one worker per CPU and per
+4 GB of memory the container may use, at most 4, at least 1, exports the number and
+logs ``uvicorn workers: N`` once, which the fresh-clone smoke reads.
+
+The default is a number, not a word, because uvicorn does ``int(WEB_CONCURRENCY)``
+(uvicorn 0.50.1, config.py:351): a backend image older than the resolver, run from a
+newer checkout's envs/api.defaults, crashed on ``auto`` (the merge base's ``make up``
+lane), and reads 0 as one process (main.py run(): workers <= 1 serves in-process). It reads the
 container's own limits: the cgroup's cpu.max and memory.max (v1's cfs quota and
 memory.limit_in_bytes on an older host), else nproc and /proc/meminfo, so Docker
 Desktop's VM is what counts, not the Mac.
@@ -99,8 +104,9 @@ def _started_with(calls: list[str]) -> str:
 # --------------------------------------------------------------------------- the sizing
 
 
+@pytest.mark.parametrize("value", ["0", "auto"])
 @pytest.mark.parametrize("nproc, files, mem_total_kb, expected", [
-    # A 12-core, 48 GB server: four workers, the most auto runs.
+    # A 12-core, 48 GB server: four workers, the most sizing runs.
     (12, {"cpu.max": "max 100000", "memory.max": "max"}, 48 * GIB // 1024, 4),
     # Docker Desktop's VM at 8 GB and 4 CPUs: no cgroup limit, its MemTotal counts.
     (4, {"cpu.max": "max 100000", "memory.max": "max"}, 8_039_988, 2),
@@ -119,24 +125,25 @@ def _started_with(calls: list[str]) -> str:
     (2, {"cpu/cpu.cfs_quota_us": "-1", "cpu/cpu.cfs_period_us": "100000"}, 32 * GIB // 1024, 2),
     # No cgroup files at all: nproc and MemTotal.
     (3, {}, 64 * GIB // 1024, 3),
-    # Nothing readable about memory: one worker, as before auto.
+    # Nothing readable about memory: one worker, as before sizing.
     (8, {}, None, 1),
 ], ids=["server-12c-48g", "docker-desktop-8g", "cpu-quota", "memory-limit", "small-machine",
         "half-a-cpu", "cgroup-v1", "cgroup-v1-no-quota", "no-cgroup", "memory-unknown"])
-def test_auto_sizes_the_workers_to_the_container(tmp_path, nproc, files, mem_total_kb, expected):
-    env = {"WEB_CONCURRENCY": "auto", "FAKE_NPROC": str(nproc), **_machine(tmp_path, files, mem_total_kb)}
+def test_zero_and_auto_size_the_workers_to_the_container(tmp_path, value, nproc, files, mem_total_kb, expected):
+    env = {"WEB_CONCURRENCY": value, "FAKE_NPROC": str(nproc), **_machine(tmp_path, files, mem_total_kb)}
     code, calls, out = _run(tmp_path, _SERVER, env)
     assert code == 0, out
-    assert _started_with(calls) == str(expected), "uvicorn is started with the number, never the word"
+    assert _started_with(calls) == str(expected), "uvicorn is started with the sized number"
     assert [int(n) for n in _LOGGED.findall(out)] == [expected], "logged once, with the number it runs"
-    assert "WEB_CONCURRENCY=auto" in out
+    assert f"WEB_CONCURRENCY={value}, sized here" in out
 
 
 def test_the_log_line_says_what_it_read(tmp_path):
-    env = {"WEB_CONCURRENCY": "auto", "FAKE_NPROC": "4",
+    env = {"WEB_CONCURRENCY": "0", "FAKE_NPROC": "4",
            **_machine(tmp_path, {"cpu.max": "max 100000", "memory.max": str(8 * GIB)}, 64 * GIB // 1024)}
     _, _, out = _run(tmp_path, _SERVER, env)
-    assert "uvicorn workers: 2 (WEB_CONCURRENCY=auto: 4 CPUs, 8 GB of memory; one per CPU and per 4 GB, at most 4)" in out
+    assert ("uvicorn workers: 2 (WEB_CONCURRENCY=0, sized here: 4 CPUs, 8 GB of memory; "
+            "one per CPU and per 4 GB, at most 4)") in out
 
 
 # --------------------------------------------------------------------------- what passes through
@@ -170,31 +177,35 @@ def test_the_railway_image_cmd_keeps_its_four_workers(tmp_path):
     assert _started_with(calls) == "4"
 
 
-def test_the_development_stages_reload_runs_one_process(tmp_path):
-    """make dev: uvicorn --reload ignores the count, so auto says one instead of a number it would not run."""
+@pytest.mark.parametrize("value", ["0", "auto"])
+def test_the_development_stages_reload_runs_one_process(tmp_path, value):
+    """make dev: uvicorn --reload ignores the count, so 0 says one instead of a number it would not run."""
     development = _DOCKERFILE.read_text(encoding="utf-8").split("FROM base as development", 1)[1].split("\nFROM ", 1)[0]
     cmd = next(line for line in development.splitlines() if line.startswith("CMD ")).removeprefix("CMD ")
     assert "--reload" in cmd
-    env = {"WEB_CONCURRENCY": "auto", "FAKE_NPROC": "12", **_machine(tmp_path, {}, 64 * GIB // 1024)}
+    env = {"WEB_CONCURRENCY": value, "FAKE_NPROC": "12", **_machine(tmp_path, {}, 64 * GIB // 1024)}
     code, calls, out = _run(tmp_path, ["/bin/sh", "-c", cmd], env)
     assert code == 0, out
     assert _started_with(calls) == "1"
-    assert "uvicorn workers: 1 (WEB_CONCURRENCY=auto; --reload runs one process)" in out
+    assert f"uvicorn workers: 1 (WEB_CONCURRENCY={value}; --reload runs one process)" in out
 
 
 def test_a_one_off_command_is_left_alone(tmp_path):
     """`docker compose run backend <cmd>`: no boot step, no resolution, no log line."""
-    env = {"WEB_CONCURRENCY": "auto", "FAKE_NPROC": "12", **_machine(tmp_path, {}, 64 * GIB // 1024)}
+    env = {"WEB_CONCURRENCY": "0", "FAKE_NPROC": "12", **_machine(tmp_path, {}, 64 * GIB // 1024)}
     code, calls, out = _run(tmp_path, ["fake-app", "--once"], env)
     assert code == 0, out
-    assert calls == ["WEB_CONCURRENCY=auto fake-app --once"]
+    assert calls == ["WEB_CONCURRENCY=0 fake-app --once"]
     assert "uvicorn workers" not in out
 
 
 # --------------------------------------------------------------------------- the defaults
 
 
-def test_the_local_edition_defaults_to_auto():
-    lines = _API_DEFAULTS.read_text(encoding="utf-8").splitlines()
-    assert "WEB_CONCURRENCY=auto" in lines
-    assert not [line for line in lines if line.startswith("WEB_CONCURRENCY=") and line != "WEB_CONCURRENCY=auto"]
+def test_the_local_edition_defaults_to_zero_a_number_an_older_image_can_read():
+    """An older image's uvicorn int()s the value and serves 0 in one process, as before the
+    resolver; the word `auto` stopped it with a ValueError."""
+    values = [line.split("=", 1)[1] for line in _API_DEFAULTS.read_text(encoding="utf-8").splitlines()
+              if line.startswith("WEB_CONCURRENCY=")]
+    assert values == ["0"]
+    assert int(values[0]) <= 1, "uvicorn's single-process branch, not its multiprocess supervisor"

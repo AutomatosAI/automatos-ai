@@ -572,9 +572,10 @@ You should not need to open the last three for a standard install.
    - ensure the local workspace (`DEFAULT_WORKSPACE_ID`, named *Local
      Workspace*) and the operator user exist;
    - start `uvicorn` with as many worker processes as the machine affords:
-     `WEB_CONCURRENCY=auto` (`envs/api.defaults`) is one per CPU and per 4 GB of
-     memory the container may use (Docker Desktop's VM settings count), at most
-     4, at least 1, and the log says `uvicorn workers: N (…)`. One worker is one
+     `WEB_CONCURRENCY=0` (`envs/api.defaults`: size the workers to this machine)
+     is one per CPU and per 4 GB of memory the container may use (Docker
+     Desktop's VM settings count), at most 4, at least 1, and the log says
+     `uvicorn workers: N (…)`. One worker is one
      event loop, so on a bigger machine a slow request no longer holds up the
      rest. Pin a number with `WEB_CONCURRENCY=2` in `envs/api.local` (1 runs one
      process, as before). The application then runs its own boot stages in each
@@ -1153,9 +1154,10 @@ From November 2026 the first `git pull && make up` changes two defaults:
   `automatos_qdrant_data`, and the `envs/api.local` line still wins. The old
   profile's name can stay in `.env`'s `COMPOSE_PROFILES` or go; it starts
   nothing extra. To keep memory off, set `QDRANT_URL=` (empty) in `envs/api.local`.
-- **The backend sizes its worker count** (`WEB_CONCURRENCY=auto`, §4): up to 4
-  processes where it ran 1. Each holds its own copy of the app in memory. To keep
-  one, set `WEB_CONCURRENCY=1` in `envs/api.local`.
+- **The backend sizes its worker count** (`WEB_CONCURRENCY=0`, §4): up to 4
+  processes where it ran 1, each with its own copy of the app in memory. An
+  older backend image reads that 0 as one process, as before. To keep one, set
+  `WEB_CONCURRENCY=1` in `envs/api.local`.
 
 ## 11. Stopping and resetting
 
