@@ -26,7 +26,6 @@ DB-free: fakes and in-memory SQLite stand in for Postgres.
 """
 from __future__ import annotations
 
-import asyncio
 import importlib.util
 import json
 import os
@@ -509,7 +508,7 @@ def test_validate_socials_update_is_fail_closed(value, reason):
 
 
 def _gate(db, ctx=None):
-    return asyncio.run(socials_settings.require_socials_enabled(ctx=ctx or _member_ctx(), db=db))
+    return socials_settings.require_socials_enabled(ctx=ctx or _member_ctx(), db=db)
 
 
 def test_gate_is_404_when_the_master_switch_is_off(master):

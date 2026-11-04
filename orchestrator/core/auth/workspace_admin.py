@@ -130,7 +130,7 @@ def may_answer_workspace_questions(db, ctx: RequestContext) -> bool:
     return _super_admin_or_member_in(db, ctx, WORKSPACE_ANSWERER_ROLES)
 
 
-async def require_workspace_admin(
+def require_workspace_admin(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db=Depends(get_db),
 ) -> RequestContext:
@@ -143,7 +143,7 @@ async def require_workspace_admin(
     )
 
 
-async def require_workspace_answerer(
+def require_workspace_answerer(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db=Depends(get_db),
 ) -> RequestContext:

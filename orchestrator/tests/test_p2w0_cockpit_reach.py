@@ -7,7 +7,6 @@ workspace analytics stay super-admin. These are pure tests: the gate decision co
 takes a fake ctx + a MagicMock session; the new endpoints are driven directly with
 a mocked db. No DB / network.
 """
-import asyncio
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -79,7 +78,7 @@ def test_require_workspace_admin_allows_super_admin_returns_ctx():
     from core.auth.workspace_admin import require_workspace_admin
 
     ctx = _ctx(system_role="super_admin")
-    assert asyncio.run(require_workspace_admin(ctx=ctx, db=MagicMock())) is ctx
+    assert require_workspace_admin(ctx=ctx, db=MagicMock()) is ctx
 
 
 def test_require_workspace_admin_403s_plain_member():
@@ -90,7 +89,7 @@ def test_require_workspace_admin_403s_plain_member():
     db = MagicMock()
     db.execute.return_value.fetchone.return_value = None
     with pytest.raises(HTTPException) as ei:
-        asyncio.run(require_workspace_admin(ctx=_ctx(clerk_user_id="c"), db=db))
+        require_workspace_admin(ctx=_ctx(clerk_user_id="c"), db=db)
     assert ei.value.status_code == 403
 
 

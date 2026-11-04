@@ -16,7 +16,6 @@ job. Rows are grouped by family story.
 """
 from __future__ import annotations
 
-import asyncio
 import os
 import re
 import sys
@@ -121,12 +120,10 @@ def test_representative_route_wiring_and_semantics(story, module, path_re, perm,
 
     dep = require_workspace_permission(perm)
     with pytest.raises(HTTPException) as ei:
-        asyncio.run(dep(SimpleNamespace(path_params={}), ctx=_ctx(), db=_db("viewer")))
+        dep(SimpleNamespace(path_params={}), ctx=_ctx(), db=_db("viewer"))
     assert ei.value.status_code == 403
     ok_ctx = _ctx()
-    assert asyncio.run(
-        dep(SimpleNamespace(path_params={}), ctx=ok_ctx, db=_db(allowed_role))
-    ) is ok_ctx
+    assert dep(SimpleNamespace(path_params={}), ctx=ok_ctx, db=_db(allowed_role)) is ok_ctx
 
 
 def test_read_shaped_posts_stay_viewer_reachable():
