@@ -228,6 +228,21 @@ def _enrich_steps_with_agents(steps: Optional[list], db: Session) -> Optional[li
     return enriched
 
 
+def _list_workflow_recipes_sorted(query, sort_by: str):
+    """Apply the requested sort order to the recipe query."""
+    if sort_by == 'popularity':
+        return query.order_by(WorkflowRecipe.popularity.desc())
+    if sort_by == 'created_at':
+        return query.order_by(WorkflowRecipe.created_at.desc())
+    if sort_by == 'use_count':
+        return query.order_by(WorkflowRecipe.use_count.desc())
+    if sort_by == 'average_rating':
+        return query.order_by(WorkflowRecipe.average_rating.desc())
+    if sort_by == 'name':
+        return query.order_by(WorkflowRecipe.name.asc())
+    return query
+
+
 @router.get("")
 def list_workflow_recipes(
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -277,16 +292,7 @@ def list_workflow_recipes(
         total = query.count()
 
         # Apply sorting
-        if sort_by == 'popularity':
-            query = query.order_by(WorkflowRecipe.popularity.desc())
-        elif sort_by == 'created_at':
-            query = query.order_by(WorkflowRecipe.created_at.desc())
-        elif sort_by == 'use_count':
-            query = query.order_by(WorkflowRecipe.use_count.desc())
-        elif sort_by == 'average_rating':
-            query = query.order_by(WorkflowRecipe.average_rating.desc())
-        elif sort_by == 'name':
-            query = query.order_by(WorkflowRecipe.name.asc())
+        query = _list_workflow_recipes_sorted(query, sort_by)
 
         # Apply pagination
         recipes = query.offset(skip).limit(limit).all()
@@ -1361,6 +1367,27 @@ def _submit_recipe_user_id(db: Session, ctx: RequestContext) -> Optional[int]:
     return user_id_int
 
 
+def _submit_recipe_trust(db: Session, user_id_int: Optional[int]):
+    """Returns (total_approved, is_trusted): trusted after 5+ approved marketplace agents or recipes."""
+    # Check if user is trusted (5+ approved marketplace items - agents OR recipes)
+    from core.models.core import Agent
+    approved_agent_count = db.query(Agent).filter(
+        Agent.original_creator_id == user_id_int,
+        Agent.owner_type == 'marketplace',
+        Agent.is_approved == True
+    ).count() if user_id_int else 0
+
+    approved_recipe_count = db.query(WorkflowRecipe).filter(
+        WorkflowRecipe.original_creator_id == user_id_int,
+        WorkflowRecipe.owner_type == 'marketplace',
+        WorkflowRecipe.is_approved == True
+    ).count() if user_id_int else 0
+
+    total_approved = approved_agent_count + approved_recipe_count
+    is_trusted = total_approved >= 5
+    return total_approved, is_trusted
+
+
 def _submit_recipe_clone(
     workspace_recipe: WorkflowRecipe,
     recipe_data: Dict[str, Any],
@@ -1453,21 +1480,7 @@ def submit_recipe_to_marketplace(
         user_id_int = _submit_recipe_user_id(db, ctx)
 
         # Check if user is trusted (5+ approved marketplace items - agents OR recipes)
-        from core.models.core import Agent
-        approved_agent_count = db.query(Agent).filter(
-            Agent.original_creator_id == user_id_int,
-            Agent.owner_type == 'marketplace',
-            Agent.is_approved == True
-        ).count() if user_id_int else 0
-
-        approved_recipe_count = db.query(WorkflowRecipe).filter(
-            WorkflowRecipe.original_creator_id == user_id_int,
-            WorkflowRecipe.owner_type == 'marketplace',
-            WorkflowRecipe.is_approved == True
-        ).count() if user_id_int else 0
-
-        total_approved = approved_agent_count + approved_recipe_count
-        is_trusted = total_approved >= 5
+        total_approved, is_trusted = _submit_recipe_trust(db, user_id_int)
 
         logger.info(f"User approval status - User ID: {user_id_int}, Approved items: {total_approved}, Is trusted: {is_trusted}")
 

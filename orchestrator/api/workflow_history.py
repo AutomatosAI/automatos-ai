@@ -241,50 +241,62 @@ def get_live_progress(
             "error": str(e)
         }
 
+def _store_event_memory_operation(input_data: Dict[str, Any], event_data: Dict[str, Any]) -> None:
+    if "recent_memory_operations" not in input_data:
+        input_data["recent_memory_operations"] = []
+    input_data["recent_memory_operations"].append({
+        **event_data,
+        "timestamp": datetime.now().isoformat()
+    })
+    # Keep only last 100 operations
+    input_data["recent_memory_operations"] = input_data["recent_memory_operations"][-100:]
+
+    # Update counter
+    input_data["memory_operation_count"] = input_data.get("memory_operation_count", 0) + 1
+
+
+def _store_event_communication(input_data: Dict[str, Any], event_data: Dict[str, Any]) -> None:
+    if "recent_communications" not in input_data:
+        input_data["recent_communications"] = []
+    input_data["recent_communications"].append({
+        **event_data,
+        "timestamp": datetime.now().isoformat()
+    })
+    # Keep only last 100 messages
+    input_data["recent_communications"] = input_data["recent_communications"][-100:]
+
+    # Update counter
+    input_data["message_count"] = input_data.get("message_count", 0) + 1
+
+
+def _store_event_learning_insight(input_data: Dict[str, Any], event_data: Dict[str, Any]) -> None:
+    if "learning_insights" not in input_data:
+        input_data["learning_insights"] = []
+    input_data["learning_insights"].append({
+        **event_data,
+        "timestamp": datetime.now().isoformat()
+    })
+
+    # Update counter
+    input_data["patterns_learned"] = input_data.get("patterns_learned", 0) + 1
+
+
+def _store_event_metric_update(input_data: Dict[str, Any], event_data: Dict[str, Any]) -> None:
+    # Update metrics directly
+    for key, value in event_data.items():
+        input_data[key] = value
+
+
 def _store_orchestration_event_apply(execution, event_type: str, event_data: Dict[str, Any]) -> None:
     """Append the event (or metric update) to the execution's input_data."""
-    # Store event based on type
     if event_type == "memory_operation":
-        if "recent_memory_operations" not in execution.input_data:
-            execution.input_data["recent_memory_operations"] = []
-        execution.input_data["recent_memory_operations"].append({
-            **event_data,
-            "timestamp": datetime.now().isoformat()
-        })
-        # Keep only last 100 operations
-        execution.input_data["recent_memory_operations"] = execution.input_data["recent_memory_operations"][-100:]
-            
-        # Update counter
-        execution.input_data["memory_operation_count"] = execution.input_data.get("memory_operation_count", 0) + 1
-        
+        _store_event_memory_operation(execution.input_data, event_data)
     elif event_type == "communication":
-        if "recent_communications" not in execution.input_data:
-            execution.input_data["recent_communications"] = []
-        execution.input_data["recent_communications"].append({
-            **event_data,
-            "timestamp": datetime.now().isoformat()
-        })
-        # Keep only last 100 messages
-        execution.input_data["recent_communications"] = execution.input_data["recent_communications"][-100:]
-            
-        # Update counter
-        execution.input_data["message_count"] = execution.input_data.get("message_count", 0) + 1
-        
+        _store_event_communication(execution.input_data, event_data)
     elif event_type == "learning_insight":
-        if "learning_insights" not in execution.input_data:
-            execution.input_data["learning_insights"] = []
-        execution.input_data["learning_insights"].append({
-            **event_data,
-            "timestamp": datetime.now().isoformat()
-        })
-            
-        # Update counter
-        execution.input_data["patterns_learned"] = execution.input_data.get("patterns_learned", 0) + 1
-        
+        _store_event_learning_insight(execution.input_data, event_data)
     elif event_type == "metric_update":
-        # Update metrics directly
-        for key, value in event_data.items():
-            execution.input_data[key] = value
+        _store_event_metric_update(execution.input_data, event_data)
 
 
 @router.post("/{workflow_id}/store-orchestration-event", dependencies=[Depends(require_workspace_permission("missions:update"))])

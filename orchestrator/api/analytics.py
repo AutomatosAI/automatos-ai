@@ -103,6 +103,46 @@ def _get_dashboard_summary_cost(db: Session, ws, since_date: datetime):
     return total_cost, total_tokens, total_duration
 
 
+def _get_dashboard_summary_response(
+    days: int, wf_total: int, m_total: int, m_completed: int, m_failed: int,
+    total_executions: int, completed_executions: int, failed_executions: int,
+    success_rate: float, active_agents: int, total_workflows: int,
+    avg_duration: float, avg_tokens: float, avg_cost: float, total_cost: float,
+) -> Dict[str, Any]:
+    """The dashboard summary response body."""
+    return {
+        "success": True,
+        "data": {
+            "period_days": days,
+            "timestamp": datetime.now().isoformat(),
+            "executions": {
+                "total": total_executions,
+                "completed": completed_executions,
+                "failed": failed_executions,
+                "success_rate": success_rate,
+                "sources": {"workflows": wf_total, "missions": m_total},
+            },
+            "agents": {
+                "active": active_agents
+            },
+            "workflows": {
+                "active": total_workflows
+            },
+            "missions": {
+                "total": m_total,
+                "completed": m_completed,
+                "failed": m_failed,
+            },
+            "performance": {
+                "avg_duration_seconds": avg_duration,
+                "avg_tokens": avg_tokens,
+                "avg_cost": avg_cost,
+                "total_cost": total_cost
+            }
+        }
+    }
+
+
 @router.get("/dashboard/summary")
 def get_dashboard_summary(
     days: int = Query(7, ge=1, le=90, description="Number of days for summary"),
@@ -147,41 +187,36 @@ def get_dashboard_summary(
         avg_tokens = total_tokens / all_completed
         avg_duration = total_duration / all_completed
 
-        return {
-            "success": True,
-            "data": {
-                "period_days": days,
-                "timestamp": datetime.now().isoformat(),
-                "executions": {
-                    "total": total_executions,
-                    "completed": completed_executions,
-                    "failed": failed_executions,
-                    "success_rate": success_rate,
-                    "sources": {"workflows": wf_total, "missions": m_total},
-                },
-                "agents": {
-                    "active": active_agents
-                },
-                "workflows": {
-                    "active": total_workflows
-                },
-                "missions": {
-                    "total": m_total,
-                    "completed": m_completed,
-                    "failed": m_failed,
-                },
-                "performance": {
-                    "avg_duration_seconds": avg_duration,
-                    "avg_tokens": avg_tokens,
-                    "avg_cost": avg_cost,
-                    "total_cost": total_cost
-                }
-            }
-        }
+        return _get_dashboard_summary_response(
+            days, wf_total, m_total, m_completed, m_failed, total_executions,
+            completed_executions, failed_executions, success_rate, active_agents,
+            total_workflows, avg_duration, avg_tokens, avg_cost, total_cost,
+        )
 
     except Exception as e:
         logger.error(f"Error getting dashboard summary: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+def _tally_agent_selection(selection_patterns: Dict[str, Any], assignments: Dict[str, Any]) -> None:
+    """Count, per agent type, how often it was the best match and its scores."""
+    # Analyze selection patterns
+    for subtask_id, matches in assignments.items():
+        if matches:
+            best_match = matches[0]
+            agent_type = best_match.get("agent_type", "unknown")
+
+            if agent_type not in selection_patterns:
+                selection_patterns[agent_type] = {
+                    "agent_type": agent_type,
+                    "selection_count": 0,
+                    "total_match_score": 0,
+                    "total_skill_coverage": 0
+                }
+
+            selection_patterns[agent_type]["selection_count"] += 1
+            selection_patterns[agent_type]["total_match_score"] += best_match.get("match_score", 0)
+            selection_patterns[agent_type]["total_skill_coverage"] += best_match.get("skill_coverage", 0)
 
 
 def _analyze_agent_selection_patterns(executions: list):
@@ -203,23 +238,7 @@ def _analyze_agent_selection_patterns(executions: list):
             coverage_rates.append(summary.get("coverage", 0))
             skill_match_scores.append(summary.get("avg_match_score", 0))
 
-            # Analyze selection patterns
-            for subtask_id, matches in assignments.items():
-                if matches:
-                    best_match = matches[0]
-                    agent_type = best_match.get("agent_type", "unknown")
-
-                    if agent_type not in selection_patterns:
-                        selection_patterns[agent_type] = {
-                            "agent_type": agent_type,
-                            "selection_count": 0,
-                            "total_match_score": 0,
-                            "total_skill_coverage": 0
-                        }
-
-                    selection_patterns[agent_type]["selection_count"] += 1
-                    selection_patterns[agent_type]["total_match_score"] += best_match.get("match_score", 0)
-                    selection_patterns[agent_type]["total_skill_coverage"] += best_match.get("skill_coverage", 0)
+            _tally_agent_selection(selection_patterns, assignments)
     return selection_patterns, skill_match_scores, coverage_rates
 
 

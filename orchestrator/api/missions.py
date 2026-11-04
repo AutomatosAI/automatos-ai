@@ -651,6 +651,36 @@ def list_missions(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _get_mission_stats_averages(db: Session, base_filter: list):
+    """Returns (avg_duration_minutes, avg_tokens_used): completed-mission duration and token averages."""
+    # Average duration (completed missions only)
+    avg_duration_row = (
+        db.query(
+            func.avg(
+                func.extract("epoch", OrchestrationRun.completed_at)
+                - func.extract("epoch", OrchestrationRun.started_at)
+            )
+        )
+        .filter(
+            *base_filter,
+            OrchestrationRun.state == RunState.COMPLETED.value,
+            OrchestrationRun.started_at.isnot(None),
+            OrchestrationRun.completed_at.isnot(None),
+        )
+        .scalar()
+    )
+    avg_duration_minutes = round(float(avg_duration_row) / 60.0, 2) if avg_duration_row else None
+
+    # Average tokens used
+    avg_tokens = (
+        db.query(func.avg(OrchestrationRun.tokens_used))
+        .filter(*base_filter)
+        .scalar()
+    )
+    avg_tokens_used = round(float(avg_tokens), 2) if avg_tokens else 0.0
+    return avg_duration_minutes, avg_tokens_used
+
+
 def _get_mission_stats_summary(db: Session, base_filter: list):
     """Headline numbers: totals, success rate, average duration/tokens/tasks."""
     # Total missions
@@ -680,31 +710,7 @@ def _get_mission_stats_summary(db: Session, base_filter: list):
 
     success_rate = round(completed_count / terminal_count, 4) if terminal_count > 0 else 0.0
 
-    # Average duration (completed missions only)
-    avg_duration_row = (
-        db.query(
-            func.avg(
-                func.extract("epoch", OrchestrationRun.completed_at)
-                - func.extract("epoch", OrchestrationRun.started_at)
-            )
-        )
-        .filter(
-            *base_filter,
-            OrchestrationRun.state == RunState.COMPLETED.value,
-            OrchestrationRun.started_at.isnot(None),
-            OrchestrationRun.completed_at.isnot(None),
-        )
-        .scalar()
-    )
-    avg_duration_minutes = round(float(avg_duration_row) / 60.0, 2) if avg_duration_row else None
-
-    # Average tokens used
-    avg_tokens = (
-        db.query(func.avg(OrchestrationRun.tokens_used))
-        .filter(*base_filter)
-        .scalar()
-    )
-    avg_tokens_used = round(float(avg_tokens), 2) if avg_tokens else 0.0
+    avg_duration_minutes, avg_tokens_used = _get_mission_stats_averages(db, base_filter)
 
     # Average tasks per mission
     task_counts = (
@@ -1726,6 +1732,34 @@ def _save_as_routine_build_recipe(
     return recipe
 
 
+def _save_as_routine_load_tasks(db: Session, run):
+    """The run's tasks and their dependencies; 400 when the mission has no tasks."""
+    # Load tasks and dependencies for this run
+    tasks = (
+        db.query(OrchestrationTask)
+        .filter(OrchestrationTask.run_id == run.id)
+        .order_by(OrchestrationTask.sequence_number)
+        .all()
+    )
+
+    if not tasks:
+        raise HTTPException(
+            status_code=400,
+            detail="Mission has no tasks to convert into a routine",
+        )
+
+    dependencies = (
+        db.query(OrchestrationTaskDependency)
+        .filter(
+            OrchestrationTaskDependency.task_id.in_(
+                [t.id for t in tasks]
+            )
+        )
+        .all()
+    )
+    return tasks, dependencies
+
+
 @router.post("/{mission_id}/save-as-routine", status_code=201, dependencies=[Depends(require_workspace_permission("missions:create"))])
 def save_as_routine(
     mission_id: UUID,
@@ -1743,29 +1777,7 @@ def save_as_routine(
                 detail=f"Mission is in '{run.state}' state, expected 'completed'",
             )
 
-        # Load tasks and dependencies for this run
-        tasks = (
-            db.query(OrchestrationTask)
-            .filter(OrchestrationTask.run_id == run.id)
-            .order_by(OrchestrationTask.sequence_number)
-            .all()
-        )
-
-        if not tasks:
-            raise HTTPException(
-                status_code=400,
-                detail="Mission has no tasks to convert into a routine",
-            )
-
-        dependencies = (
-            db.query(OrchestrationTaskDependency)
-            .filter(
-                OrchestrationTaskDependency.task_id.in_(
-                    [t.id for t in tasks]
-                )
-            )
-            .all()
-        )
+        tasks, dependencies = _save_as_routine_load_tasks(db, run)
 
         # Extract template definition
         template_def = _extract_routine_template(tasks, dependencies, run.goal)
