@@ -14,6 +14,7 @@ Automatos app from the Shopify App Store:
 from __future__ import annotations
 
 import asyncio
+import functools
 import hmac
 import logging
 from typing import Any, Dict, List, Optional
@@ -27,6 +28,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.workspaces import Workspace
+from core.utils.background_tasks import on_the_event_loop
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -387,7 +389,14 @@ def _schedule_catalog_sync(workspace_id: str, event: str) -> None:
 
     Every call within the window resets the timer and accumulates the event
     name, so a webhook burst produces one re-sync carrying a coalesced reason.
+    The debounce state belongs to the event loop, so it is kept on the loop's
+    thread whichever thread asks (``/events`` is a threadpool route, F105).
     """
+    on_the_event_loop(functools.partial(_debounce_catalog_sync, workspace_id, event))
+
+
+def _debounce_catalog_sync(workspace_id: str, event: str) -> None:
+    """``_schedule_catalog_sync`` on the loop's thread: re-arm the window."""
     _catalog_pending_events.setdefault(workspace_id, []).append(event)
 
     existing = _catalog_debounce_handles.pop(workspace_id, None)
