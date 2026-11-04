@@ -469,7 +469,7 @@ async def widget_chat(
 # ---------------------------------------------------------------------------
 
 @router.get("/chat/{conversation_id}", response_model=List[WidgetMessageOut])
-async def widget_chat_history(
+def widget_chat_history(
     conversation_id: str,
     auth: WidgetAuthContext = Depends(require_permission("chat")),
     db: Session = Depends(get_db),

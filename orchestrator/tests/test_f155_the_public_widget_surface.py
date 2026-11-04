@@ -455,7 +455,7 @@ def site(db_session, seed_workspace):
 def _history(site, conversation_id):
     from api.widgets.chat import widget_chat_history
 
-    return asyncio.run(widget_chat_history(conversation_id=conversation_id, auth=site.key, db=site.db))
+    return widget_chat_history(conversation_id=conversation_id, auth=site.key, db=site.db)
 
 
 def _send(site, conversation_id=None, agent_id=None, headers=None):
