@@ -25,6 +25,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from config import config
 from core.auth.pairing import PAIRING_CODE_TTL_SECONDS, hash_secret, mint_token, new_pairing_code, normalize_pairing_code, secrets_match
@@ -1289,12 +1290,27 @@ async def record_events(
     every command the host is holding (PRD-245 S0.4) and the Plan card for a
     plan the turn presented (PRD-253 Wave P), and hand back control (``cancel``)
     and the operator's answers the host must act on. Events are not persisted
-    individually here — S2 maps them to board events and the fleet."""
+    individually here — S2 maps them to board events and the fleet.
+
+    F105: session hosts post here constantly, so every step that reads or writes the
+    session runs in the threadpool (``run_in_threadpool``: what a step reaches may start
+    loop work), and a held command's or a plan's bell and Telegram message go out with
+    this request's transaction ended (``handlers_asks.stage_question``)."""
     from services.session_plans import raise_session_plan
 
     events = [ev for ev in (events or []) if isinstance(ev, dict)]
     if events and all(_terminal_event_name(ev) for ev in events):
-        return _record_terminal_events(db, host, task_id, events)
+        return await run_in_threadpool(_record_terminal_events, db, host, task_id, events)
+    task, ref, renewed = await run_in_threadpool(_absorb_events, db, host, task_id, events)
+    ref = await raise_session_holds(db, task, ref)
+    ref = await raise_session_plan(db, task, ref, events)
+    return await run_in_threadpool(_answer_flush, db, task, ref, events, renewed)
+
+
+def _absorb_events(
+    db: Session, host: CliHost, task_id: int, events: List[Dict[str, Any]],
+) -> Tuple[BoardTask, Dict[str, Any], bool]:
+    """The batch onto its ticket: the lease renewed and the live summary kept, committed."""
     task = _owned_task(db, host, task_id)
     renewed = renew_lease(db, task_id, lease_seconds=config.BOARD_DISPATCH_LEASE_SECONDS)
     ref = dict(task.runtime_ref or {})
@@ -1304,8 +1320,14 @@ async def record_events(
         _absorb_hook_event(ref, task, ev)
     task.runtime_ref = ref
     db.commit()
-    ref = await raise_session_holds(db, task, ref)
-    ref = await raise_session_plan(db, task, ref, events)
+    return task, ref, renewed
+
+
+def _answer_flush(
+    db: Session, task: BoardTask, ref: Dict[str, Any], events: List[Dict[str, Any]], renewed: bool,
+) -> Dict[str, Any]:
+    """The batch on the Code Canvas, then what the host must act on: a cancel, and the
+    operator's answers it has not received yet."""
     # PRD-235 W2 S3: the same events light up the Code Canvas panel.
     projects_dir = getattr(config, "LOCAL_PROJECTS_DIR", "") or None
     canvas: List[Dict[str, Any]] = []
@@ -1690,18 +1712,29 @@ async def raise_session_holds(db: Session, task: BoardTask, ref: Dict[str, Any])
         return ref
     try:
         return await _raise_session_holds(db, task, ref, pending)
-    except Exception:  # noqa: BLE001 — never break the flush over a question row
-        logger.error("[cli-host] hold questions for ticket #%s not filed this flush", task.id, exc_info=True)
-        db.rollback()
+    except Exception as failure:  # noqa: BLE001 — never break the flush over a question row
+        await run_in_threadpool(_holds_not_filed, db, task, failure)
         return ref
+
+
+def _holds_not_filed(db: Session, task: BoardTask, failure: BaseException) -> None:
+    """A flush whose hold questions failed: said, and its transaction rolled back (in the
+    threadpool, F105: naming the ticket may read its row)."""
+    logger.error("[cli-host] hold questions for ticket #%s not filed this flush", task.id, exc_info=failure)
+    db.rollback()
+
+
+def _hold_context(db: Session, task: BoardTask) -> Tuple[Dict[str, int], Optional[str]]:
+    """The open hold rows an earlier flush committed before failing, and the asking agent's name."""
+    known = _open_hold_question_ids_by_request(db, task)  # rows an earlier flush committed before failing
+    agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first() if task.assigned_agent_id else None
+    return known, getattr(agent, "name", None)
 
 
 async def _raise_session_holds(
     db: Session, task: BoardTask, ref: Dict[str, Any], pending: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    known = _open_hold_question_ids_by_request(db, task)  # rows an earlier flush committed before failing
-    agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first() if task.assigned_agent_id else None
-    agent_name = getattr(agent, "name", None)
+    known, agent_name = await run_in_threadpool(_hold_context, db, task)
     updated: List[Dict[str, Any]] = []
     for entry in pending:
         if entry.get("grant_id") is not None:
@@ -1717,12 +1750,31 @@ async def _raise_session_holds(
     # ``record_events`` already committed the events, so re-reading loses nothing
     # of ours and picks up theirs; this write then owns ``pending_permissions``
     # ONLY, instead of stamping a whole document read before the wait over it.
+    return await run_in_threadpool(_keep_pending_permissions, db, task, updated)
+
+
+def _keep_pending_permissions(db: Session, task: BoardTask, updated: List[Dict[str, Any]]) -> Dict[str, Any]:
     db.refresh(task)
     fresh = dict(task.runtime_ref or {})
     fresh["pending_permissions"] = updated
     task.runtime_ref = fresh
     db.commit()
     return fresh
+
+
+def _hold_question_ask(
+    task: BoardTask, agent_name: Optional[str], entry: Dict[str, Any],
+) -> Tuple[Any, Any, Dict[str, Any]]:
+    """The ticket's id, its workspace and ``stage_question``'s arguments for one hold, read
+    off the row in the threadpool (F105): the previous hold's commit expired it."""
+    request_id = str(entry.get("request_id"))
+    return task.id, task.workspace_id, dict(
+        subject_type=SUBJECT_BOARD_TASK, subject_id=str(task.id),
+        question=session_hold_question(task.id, entry, ticket=ticket_label(task)), options=list(SESSION_HOLD_OPTIONS),
+        ttl_seconds=SESSION_HOLD_TTL_SECONDS,
+        asked_by_agent_id=task.assigned_agent_id, agent_name=agent_name,
+        details={SESSION_HOLD_MARKER: {"request_id": request_id, "task_id": task.id}},
+    )
 
 
 async def _stage_hold_question(
@@ -1735,25 +1787,19 @@ async def _stage_hold_question(
     from modules.tools.discovery.handlers_asks import stage_question
 
     request_id = str(entry.get("request_id"))
+    ticket_id, workspace_id, ask = await run_in_threadpool(_hold_question_ask, task, agent_name, entry)
     try:
-        res = await stage_question(
-            db, task.workspace_id,
-            subject_type=SUBJECT_BOARD_TASK, subject_id=str(task.id),
-            question=session_hold_question(task.id, entry, ticket=ticket_label(task)), options=list(SESSION_HOLD_OPTIONS),
-            ttl_seconds=SESSION_HOLD_TTL_SECONDS,
-            asked_by_agent_id=task.assigned_agent_id, agent_name=agent_name,
-            details={SESSION_HOLD_MARKER: {"request_id": request_id, "task_id": task.id}},
-        )
+        res = await stage_question(db, workspace_id, **ask)
     except Exception:  # noqa: BLE001 — the events flush must reach the host regardless
         logger.error("[cli-host] no question row for hold %s on ticket #%s — the Canvas card stands alone",
-                     request_id, task.id, exc_info=True)
-        db.rollback()
+                     request_id, ticket_id, exc_info=True)
+        await run_in_threadpool(db.rollback)
         return None
     ask_id = res.get("ask_id") if isinstance(res, dict) else None
     if ask_id is None:
-        logger.error("[cli-host] hold %s on ticket #%s: the ask internals returned no id (%s)", request_id, task.id, res)
+        logger.error("[cli-host] hold %s on ticket #%s: the ask internals returned no id (%s)", request_id, ticket_id, res)
         return None
-    logger.info("[cli-host] hold %s on ticket #%s is question #%s", request_id, task.id, ask_id)
+    logger.info("[cli-host] hold %s on ticket #%s is question #%s", request_id, ticket_id, ask_id)
     return int(ask_id)
 
 
