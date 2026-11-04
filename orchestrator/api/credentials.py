@@ -388,7 +388,7 @@ async def credentials_health(ctx: RequestContext = Depends(get_request_context_h
 
 
 @router.get("/stats")
-async def get_credential_stats(
+def get_credential_stats(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -589,7 +589,7 @@ async def update_credential(
 
 
 @router.delete("/{credential_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def delete_credential(
+def delete_credential(
     credential_id: int,
     request: Request,
     ctx: RequestContext = Depends(get_request_context_hybrid),
