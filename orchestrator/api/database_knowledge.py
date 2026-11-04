@@ -549,8 +549,161 @@ async def execute_template(
     return result
 
 
+def _execute_validated_sql_audit(
+    db: Session,
+    source: DatabaseKnowledgeSource,
+    sql: str,
+    validated_sql: Optional[str],
+    *,
+    execution_time_ms: int,
+    row_count: int,
+    success: bool,
+    error_message: Optional[str],
+    validation_errors: Optional[Dict[str, Any]],
+) -> None:
+    """Record one audit row for a raw-SQL execution attempt and commit it."""
+    db.add(DatabaseQueryAudit(
+        tenant_id=1,  # legacy integer column
+        source_id=source.id,
+        user_id=None,
+        agent_id=None,
+        session_id=None,
+        natural_language_query=sql or "",
+        generated_sql=sql,
+        validated_sql=validated_sql,
+        execution_time_ms=execution_time_ms,
+        row_count=row_count,
+        bytes_processed=None,
+        success=success,
+        error_message=error_message,
+        validation_errors=validation_errors,
+        was_cached=False,
+        cache_key=None,
+        visualization_type=None,
+        confidence_score=None
+    ))
+    db.commit()
+
+
+def _execute_validated_sql_validate(
+    db: Session, source: DatabaseKnowledgeSource, source_id: int, sql: str, payload: Dict[str, Any]
+):
+    """Validate and rewrite the SQL; audit and raise 400 on validation failure."""
+    from modules.nl2sql import SQLValidator, SQLValidationError
+    validator = SQLValidator(max_limit=min(int(payload.get("max_rows", 1000)), source.max_rows_limit or 1000))
+    try:
+        validated_sql, reasons = validator.validate_and_rewrite(sql, schema_metadata=source.schema_metadata)
+    except SQLValidationError as e:
+        # audit failure
+        _execute_validated_sql_audit(
+            db, source, sql, None,
+            execution_time_ms=0, row_count=0, success=False,
+            error_message=str(e), validation_errors={"error": str(e)},
+        )
+        logging.getLogger(__name__).error(f"SQL validation failed for source {source_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="SQL validation failed")
+    return validated_sql, reasons
+
+
+def _execute_validated_sql_credentials(
+    db: Session, source: DatabaseKnowledgeSource, source_id: int, sql: str, validated_sql: str
+):
+    """Resolve decrypted source credentials; audit and raise 400 on failure."""
+    from core.credentials.service import CredentialStore
+    cred_store = CredentialStore(db)
+    try:
+        creds = cred_store.get_decrypted_credential(
+            credential_id=source.credential_id,
+            service_name="database_query"
+        )
+    except Exception as e:
+        # audit failure
+        _execute_validated_sql_audit(
+            db, source, sql, validated_sql,
+            execution_time_ms=0, row_count=0, success=False,
+            error_message="Credential resolution failed", validation_errors=None,
+        )
+        logging.getLogger(__name__).error(f"Failed to resolve credentials for source {source_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Failed to resolve database credentials")
+    return creds
+
+
+def _execute_validated_sql_url(source: DatabaseKnowledgeSource, creds: Dict[str, Any], dialect: str):
+    """Build the SQLAlchemy URL (escapes credential values) or raise 400 for an unsupported dialect."""
+    from sqlalchemy.engine import URL as SAURL
+    if dialect.startswith("postgres"):
+        return SAURL.create(
+            drivername="postgresql+psycopg2",
+            username=creds.get('user'),
+            password=creds.get('password'),
+            host=creds.get('host'),
+            port=int(creds.get('port', 5432)),
+            database=creds.get('database'),
+        )
+    if dialect.startswith("mysql"):
+        return SAURL.create(
+            drivername="mysql+pymysql",
+            username=creds.get('user'),
+            password=creds.get('password'),
+            host=creds.get('host'),
+            port=int(creds.get('port', 3306)),
+            database=creds.get('database'),
+        )
+    raise HTTPException(status_code=400, detail=f"Unsupported dialect: {source.dialect}")
+
+
+def _execute_validated_sql_run(
+    db: Session,
+    source: DatabaseKnowledgeSource,
+    source_id: int,
+    sql: str,
+    validated_sql: str,
+    url,
+    dialect: str,
+):
+    """Run the validated SQL against the external engine; audit success or failure.
+
+    Returns (columns, rows, duration_ms).
+    """
+    from sqlalchemy import create_engine, text
+    engine = create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5)
+
+    # Execute with timeout if supported (Postgres SET LOCAL statement_timeout)
+    rows: List[Dict[str, Any]] = []
+    columns: List[str] = []
+    duration_ms = 0
+    try:
+        with engine.connect() as conn:
+            # Set timeout for Postgres
+            if dialect.startswith("postgres") and (source.query_timeout_seconds or 0) > 0:
+                timeout_ms = int((source.query_timeout_seconds or 30) * 1000)
+                conn.execute(text("SET LOCAL statement_timeout = :timeout_ms"), {"timeout_ms": timeout_ms})
+            import time
+            start = time.time()
+            result = conn.execute(text(validated_sql))
+            columns = list(result.keys())
+            rows = [dict(zip(columns, r)) for r in result.fetchall()]
+            duration_ms = int((time.time() - start) * 1000)
+            # audit success
+            _execute_validated_sql_audit(
+                db, source, sql, validated_sql,
+                execution_time_ms=duration_ms, row_count=len(rows), success=True,
+                error_message=None, validation_errors=None,
+            )
+    except Exception as e:
+        # audit failure
+        _execute_validated_sql_audit(
+            db, source, sql, validated_sql,
+            execution_time_ms=duration_ms, row_count=0, success=False,
+            error_message=str(e), validation_errors=None,
+        )
+        logging.getLogger(__name__).error(f"SQL query execution failed for source {source_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Query execution failed")
+    return columns, rows, duration_ms
+
+
 @router.post("/{source_id}/query/sql", dependencies=[Depends(require_workspace_permission("knowledge:read"))])
-async def execute_validated_sql(
+def execute_validated_sql(
     source_id: int,
     payload: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -571,162 +724,13 @@ async def execute_validated_sql(
     if not source:
         raise HTTPException(status_code=404, detail="Database source not found")
 
-    # Validate SQL
-    from modules.nl2sql import SQLValidator, SQLValidationError
-    validator = SQLValidator(max_limit=min(int(payload.get("max_rows", 1000)), source.max_rows_limit or 1000))
-    try:
-        validated_sql, reasons = validator.validate_and_rewrite(sql, schema_metadata=source.schema_metadata)
-    except SQLValidationError as e:
-        # audit failure
-        db.add(DatabaseQueryAudit(
-            tenant_id=1,  # legacy integer column
-            source_id=source.id,
-            user_id=None,
-            agent_id=None,
-            session_id=None,
-            natural_language_query=sql or "",
-            generated_sql=sql,
-            validated_sql=None,
-            execution_time_ms=0,
-            row_count=0,
-            bytes_processed=None,
-            success=False,
-            error_message=str(e),
-            validation_errors={"error": str(e)},
-            was_cached=False,
-            cache_key=None,
-            visualization_type=None,
-            confidence_score=None
-        ))
-        db.commit()
-        logging.getLogger(__name__).error(f"SQL validation failed for source {source_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=400, detail="SQL validation failed")
-
-    # Resolve creds and execute
-    from sqlalchemy import create_engine, text
-    from core.credentials.service import CredentialStore
-    cred_store = CredentialStore(db)
-    try:
-        creds = cred_store.get_decrypted_credential(
-            credential_id=source.credential_id,
-            service_name="database_query"
-        )
-    except Exception as e:
-        # audit failure
-        db.add(DatabaseQueryAudit(
-            tenant_id=1,  # legacy integer column
-            source_id=source.id,
-            user_id=None,
-            agent_id=None,
-            session_id=None,
-            natural_language_query=sql or "",
-            generated_sql=sql,
-            validated_sql=validated_sql,
-            execution_time_ms=0,
-            row_count=0,
-            bytes_processed=None,
-            success=False,
-            error_message="Credential resolution failed",
-            validation_errors=None,
-            was_cached=False,
-            cache_key=None,
-            visualization_type=None,
-            confidence_score=None
-        ))
-        db.commit()
-        logging.getLogger(__name__).error(f"Failed to resolve credentials for source {source_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=400, detail="Failed to resolve database credentials")
-
-    # Build URL using SQLAlchemy URL.create() to safely escape credential values
-    from sqlalchemy.engine import URL as SAURL
-    from urllib.parse import quote_plus
+    validated_sql, reasons = _execute_validated_sql_validate(db, source, source_id, sql, payload)
+    creds = _execute_validated_sql_credentials(db, source, source_id, sql, validated_sql)
     dialect = source.dialect.lower()
-    if dialect.startswith("postgres"):
-        url = SAURL.create(
-            drivername="postgresql+psycopg2",
-            username=creds.get('user'),
-            password=creds.get('password'),
-            host=creds.get('host'),
-            port=int(creds.get('port', 5432)),
-            database=creds.get('database'),
-        )
-    elif dialect.startswith("mysql"):
-        url = SAURL.create(
-            drivername="mysql+pymysql",
-            username=creds.get('user'),
-            password=creds.get('password'),
-            host=creds.get('host'),
-            port=int(creds.get('port', 3306)),
-            database=creds.get('database'),
-        )
-    else:
-        raise HTTPException(status_code=400, detail=f"Unsupported dialect: {source.dialect}")
-
-    engine = create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5)
-
-    # Execute with timeout if supported (Postgres SET LOCAL statement_timeout)
-    rows: List[Dict[str, Any]] = []
-    columns: List[str] = []
-    duration_ms = 0
-    try:
-        with engine.connect() as conn:
-            # Set timeout for Postgres
-            if dialect.startswith("postgres") and (source.query_timeout_seconds or 0) > 0:
-                timeout_ms = int((source.query_timeout_seconds or 30) * 1000)
-                conn.execute(text("SET LOCAL statement_timeout = :timeout_ms"), {"timeout_ms": timeout_ms})
-            import time
-            start = time.time()
-            result = conn.execute(text(validated_sql))
-            columns = list(result.keys())
-            rows = [dict(zip(columns, r)) for r in result.fetchall()]
-            duration_ms = int((time.time() - start) * 1000)
-            # audit success
-            db.add(DatabaseQueryAudit(
-                tenant_id=1,  # legacy integer column
-                source_id=source.id,
-                user_id=None,
-                agent_id=None,
-                session_id=None,
-                natural_language_query=sql or "",
-                generated_sql=sql,
-                validated_sql=validated_sql,
-                execution_time_ms=duration_ms,
-                row_count=len(rows),
-                bytes_processed=None,
-                success=True,
-                error_message=None,
-                validation_errors=None,
-                was_cached=False,
-                cache_key=None,
-                visualization_type=None,
-                confidence_score=None
-            ))
-            db.commit()
-    except Exception as e:
-        # audit failure
-        db.add(DatabaseQueryAudit(
-            tenant_id=1,  # legacy integer column
-            source_id=source.id,
-            user_id=None,
-            agent_id=None,
-            session_id=None,
-            natural_language_query=sql or "",
-            generated_sql=sql,
-            validated_sql=validated_sql,
-            execution_time_ms=duration_ms,
-            row_count=0,
-            bytes_processed=None,
-            success=False,
-            error_message=str(e),
-            validation_errors=None,
-            was_cached=False,
-            cache_key=None,
-            visualization_type=None,
-            confidence_score=None
-        ))
-        db.commit()
-        logging.getLogger(__name__).error(f"SQL query execution failed for source {source_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=400, detail="Query execution failed")
+    url = _execute_validated_sql_url(source, creds, dialect)
+    columns, rows, duration_ms = _execute_validated_sql_run(
+        db, source, source_id, sql, validated_sql, url, dialect
+    )
 
     return {
         "sql": validated_sql,
