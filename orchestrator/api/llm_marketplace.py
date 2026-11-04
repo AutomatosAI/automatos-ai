@@ -380,8 +380,23 @@ def _apply_sort(query, sort_by: Optional[str]):
 
 # ── Endpoints ─────────────────────────────────────────────────────────
 
+def _browse_catalog_counts(db, provider):
+    """Active-model counts per serving provider and per vendor (vendor counts honour the provider filter)."""
+    provider_counts = dict(
+        db.query(LLMModel.serving_provider, func.count(LLMModel.id))
+        .filter(LLMModel.status == "active")
+        .group_by(LLMModel.serving_provider)
+        .all()
+    )
+    vendor_query = db.query(LLMModel.provider, func.count(LLMModel.id)).filter(LLMModel.status == "active")
+    if provider:
+        vendor_query = vendor_query.filter(LLMModel.serving_provider == registry.normalize_slug(provider))
+    vendor_counts = dict(vendor_query.group_by(LLMModel.provider).all())
+    return provider_counts, vendor_counts
+
+
 @router.get("/catalog", response_model=CatalogOut)
-async def browse_catalog(
+def browse_catalog(
     provider: Optional[str] = Query(None, description="Serving provider slug (openrouter, nvidia, openai…)"),
     vendor: Optional[str] = Query(None, description="Vendor (moonshotai, deepseek, openai…)"),
     category: Optional[str] = Query(None),
@@ -410,16 +425,8 @@ async def browse_catalog(
     total = query.count()
     models = _apply_sort(query, sort_by).offset(offset).limit(limit).all()
 
-    provider_counts = dict(
-        db.query(LLMModel.serving_provider, func.count(LLMModel.id))
-        .filter(LLMModel.status == "active")
-        .group_by(LLMModel.serving_provider)
-        .all()
-    )
-    vendor_query = db.query(LLMModel.provider, func.count(LLMModel.id)).filter(LLMModel.status == "active")
-    if provider:
-        vendor_query = vendor_query.filter(LLMModel.serving_provider == registry.normalize_slug(provider))
-    vendor_counts = dict(vendor_query.group_by(LLMModel.provider).all())
+    provider_counts, vendor_counts = _browse_catalog_counts(db, provider)
+
 
     installed = _get_installed_ids(db, ctx.workspace_id)
     available = _get_available_providers(db, ctx.workspace_id)
