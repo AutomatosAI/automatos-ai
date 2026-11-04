@@ -356,8 +356,59 @@ async def list_plan_tiers(
     return {"tiers": tiers}
 
 
+def _change_workspace_plan_members(db: Session, workspace: Workspace):
+    """Active member count and the downgrade warnings for the workspace's new tier."""
+    members_count = (
+        db.query(func.count(WorkspaceMember.id))
+        .filter(WorkspaceMember.workspace_id == workspace.id)
+        .filter(WorkspaceMember.is_active.is_(True))
+        .scalar()
+    ) or 0
+
+    warnings: List[str] = []
+    seats = (get_tier(workspace.plan) or {}).get("seats")
+    # Mirror the enforcement exactly (core/workspaces/invitations.py): -1 is the
+    # only "unlimited" sentinel there, so a tier tuned to seats=0 via
+    # AUTOMATOS_PLAN_TIERS_JSON blocks EVERY invite and must still warn. Do not
+    # borrow the 0-means-unlimited convention that plan_tiers documents for
+    # max_agents / watcher_limit — that is a different key with a different rule.
+    if isinstance(seats, int) and seats != -1 and seats < members_count:
+        warnings.append(
+            f"{workspace.name} has {members_count} active members but "
+            f"{workspace.plan} allows {seats}. No one was removed — the cap "
+            f"applies to the next invitation."
+        )
+    return members_count, warnings
+
+
+def _change_workspace_plan_audit(
+    db: Session, ctx: RequestContext, workspace: Workspace, previous_plan, limits_changed: dict, warnings: List[str]
+) -> None:
+    """Audit-log and log the plan change."""
+    AuditService(db).log(
+        workspace_id=str(workspace.id),
+        user_id=resolve_internal_user_id(db, ctx),
+        action="workspace.plan_changed",
+        resource_type="workspace",
+        resource_id=str(workspace.id),
+        resource_name=workspace.name,
+        details={
+            "from_plan": previous_plan,
+            "to_plan": workspace.plan,
+            "limits_changed": limits_changed,
+            "budget_applied": False,
+            "actor_email": getattr(ctx.user, "email", None),
+            "warnings": warnings,
+        },
+    )
+    logger.info(
+        "[admin] workspace %s plan %s -> %s by %s",
+        workspace.id, previous_plan, workspace.plan, getattr(ctx.user, "email", "?"),
+    )
+
+
 @router.patch("/{workspace_id}/plan")
-async def change_workspace_plan(
+def change_workspace_plan(
     workspace_id: UUID,
     body: PlanChangeBody,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -415,47 +466,9 @@ async def change_workspace_plan(
         if previous_limits.get(key) != new_limits.get(key)
     }
 
-    members_count = (
-        db.query(func.count(WorkspaceMember.id))
-        .filter(WorkspaceMember.workspace_id == workspace.id)
-        .filter(WorkspaceMember.is_active.is_(True))
-        .scalar()
-    ) or 0
+    members_count, warnings = _change_workspace_plan_members(db, workspace)
 
-    warnings: List[str] = []
-    seats = (get_tier(workspace.plan) or {}).get("seats")
-    # Mirror the enforcement exactly (core/workspaces/invitations.py): -1 is the
-    # only "unlimited" sentinel there, so a tier tuned to seats=0 via
-    # AUTOMATOS_PLAN_TIERS_JSON blocks EVERY invite and must still warn. Do not
-    # borrow the 0-means-unlimited convention that plan_tiers documents for
-    # max_agents / watcher_limit — that is a different key with a different rule.
-    if isinstance(seats, int) and seats != -1 and seats < members_count:
-        warnings.append(
-            f"{workspace.name} has {members_count} active members but "
-            f"{workspace.plan} allows {seats}. No one was removed — the cap "
-            f"applies to the next invitation."
-        )
-
-    AuditService(db).log(
-        workspace_id=str(workspace.id),
-        user_id=resolve_internal_user_id(db, ctx),
-        action="workspace.plan_changed",
-        resource_type="workspace",
-        resource_id=str(workspace.id),
-        resource_name=workspace.name,
-        details={
-            "from_plan": previous_plan,
-            "to_plan": workspace.plan,
-            "limits_changed": limits_changed,
-            "budget_applied": False,
-            "actor_email": getattr(ctx.user, "email", None),
-            "warnings": warnings,
-        },
-    )
-    logger.info(
-        "[admin] workspace %s plan %s -> %s by %s",
-        workspace.id, previous_plan, workspace.plan, getattr(ctx.user, "email", "?"),
-    )
+    _change_workspace_plan_audit(db, ctx, workspace, previous_plan, limits_changed, warnings)
 
     return {
         "id": str(workspace.id),
@@ -468,8 +481,51 @@ async def change_workspace_plan(
     }
 
 
+def _get_workspace_counts(db: Session, workspace_id: UUID):
+    """Returns (agents, documents, storage_bytes, chats, messages) counts for the workspace."""
+    agents_count = db.query(func.count(Agent.id)).filter(
+        Agent.workspace_id == workspace_id
+    ).scalar() or 0
+
+    docs_count = db.query(func.count(Document.id)).filter(
+        Document.workspace_id == workspace_id
+    ).scalar() or 0
+
+    storage_bytes = db.query(
+        func.coalesce(func.sum(Document.file_size), 0)
+    ).filter(Document.workspace_id == workspace_id).scalar() or 0
+
+    chats_count = db.query(func.count(Chat.id)).filter(
+        Chat.workspace_id == workspace_id
+    ).scalar() or 0
+
+    messages_count = db.query(func.count(Message.id)).filter(
+        Message.workspace_id == workspace_id
+    ).scalar() or 0
+    return agents_count, docs_count, storage_bytes, chats_count, messages_count
+
+
+def _get_workspace_members_and_activity(db: Session, workspace_id: UUID, owner):
+    """Returns (members_count, last_active) -- last sign-in of a member or the owner."""
+    # Same shape as the list route — the detail view inherits these fields,
+    # so leaving them at their defaults would report 0 members and no limits
+    # for a workspace that has both.
+    members_count, member_seen = (
+        db.query(func.count(WorkspaceMember.id), func.max(User.last_sign_in))
+        .join(User, User.id == WorkspaceMember.user_id)
+        .filter(WorkspaceMember.workspace_id == workspace_id)
+        .filter(WorkspaceMember.is_active.is_(True))
+        .one()
+    )
+    seen_candidates = [
+        t for t in (member_seen, getattr(owner, "last_sign_in", None)) if t is not None
+    ]
+    last_active = max(seen_candidates) if seen_candidates else None
+    return members_count, last_active
+
+
 @router.get("/{workspace_id}", response_model=WorkspaceDetail)
-async def get_workspace(
+def get_workspace(
     workspace_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -487,40 +543,11 @@ async def get_workspace(
             if w.owner_id else None
         )
 
-        agents_count = db.query(func.count(Agent.id)).filter(
-            Agent.workspace_id == workspace_id
-        ).scalar() or 0
-
-        docs_count = db.query(func.count(Document.id)).filter(
-            Document.workspace_id == workspace_id
-        ).scalar() or 0
-
-        storage_bytes = db.query(
-            func.coalesce(func.sum(Document.file_size), 0)
-        ).filter(Document.workspace_id == workspace_id).scalar() or 0
-
-        chats_count = db.query(func.count(Chat.id)).filter(
-            Chat.workspace_id == workspace_id
-        ).scalar() or 0
-
-        messages_count = db.query(func.count(Message.id)).filter(
-            Message.workspace_id == workspace_id
-        ).scalar() or 0
-
-        # Same shape as the list route — the detail view inherits these fields,
-        # so leaving them at their defaults would report 0 members and no limits
-        # for a workspace that has both.
-        members_count, member_seen = (
-            db.query(func.count(WorkspaceMember.id), func.max(User.last_sign_in))
-            .join(User, User.id == WorkspaceMember.user_id)
-            .filter(WorkspaceMember.workspace_id == workspace_id)
-            .filter(WorkspaceMember.is_active.is_(True))
-            .one()
+        agents_count, docs_count, storage_bytes, chats_count, messages_count = (
+            _get_workspace_counts(db, workspace_id)
         )
-        seen_candidates = [
-            t for t in (member_seen, getattr(owner, "last_sign_in", None)) if t is not None
-        ]
-        last_active = max(seen_candidates) if seen_candidates else None
+
+        members_count, last_active = _get_workspace_members_and_activity(db, workspace_id, owner)
 
         return WorkspaceDetail(
             id=str(w.id),
