@@ -69,8 +69,37 @@ def get_workflow_executions(
         logger.error(f"Error fetching workflow executions: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+def _get_execution_details_sections(execution):
+    """Pull the logs, memory, learning, communication and analytics sections out of input_data."""
+    # Extract orchestrator logs
+    orchestrator_logs = []
+    if execution.input_data and "orchestrator_logs" in execution.input_data:
+        orchestrator_logs = execution.input_data["orchestrator_logs"]
+        
+    # Extract memory data
+    memory_data = {}
+    if execution.input_data and "memory_retrieval" in execution.input_data:
+        memory_data = execution.input_data["memory_retrieval"]
+        
+    # Extract learning data
+    learning_data = {}
+    if execution.input_data and "learning_system" in execution.input_data:
+        learning_data = execution.input_data["learning_system"]
+        
+    # Extract communication data
+    communication_data = []
+    if execution.input_data and "communications" in execution.input_data:
+        communication_data = execution.input_data["communications"]
+        
+    # Extract analytics
+    analytics = {}
+    if execution.input_data and "analytics" in execution.input_data:
+        analytics = execution.input_data["analytics"]
+    return orchestrator_logs, memory_data, learning_data, communication_data, analytics
+
+
 @router.get("/executions/{execution_id}")
-async def get_execution_details(
+def get_execution_details(
     execution_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -87,31 +116,10 @@ async def get_execution_details(
         if not execution:
             raise HTTPException(status_code=404, detail="Execution not found")
         
-        # Extract orchestrator logs
-        orchestrator_logs = []
-        if execution.input_data and "orchestrator_logs" in execution.input_data:
-            orchestrator_logs = execution.input_data["orchestrator_logs"]
-        
-        # Extract memory data
-        memory_data = {}
-        if execution.input_data and "memory_retrieval" in execution.input_data:
-            memory_data = execution.input_data["memory_retrieval"]
-        
-        # Extract learning data
-        learning_data = {}
-        if execution.input_data and "learning_system" in execution.input_data:
-            learning_data = execution.input_data["learning_system"]
-        
-        # Extract communication data
-        communication_data = []
-        if execution.input_data and "communications" in execution.input_data:
-            communication_data = execution.input_data["communications"]
-        
-        # Extract analytics
-        analytics = {}
-        if execution.input_data and "analytics" in execution.input_data:
-            analytics = execution.input_data["analytics"]
-        
+        orchestrator_logs, memory_data, learning_data, communication_data, analytics = (
+            _get_execution_details_sections(execution)
+        )
+
         return {
             "id": execution.id,
             "workflow_id": execution.workflow_id,
@@ -139,8 +147,60 @@ async def get_execution_details(
         logger.error(f"Error fetching execution details: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+def _get_live_progress_payload(execution) -> Dict[str, Any]:
+    """Progress, metrics and recent activity for a running execution."""
+    # Extract live data from the execution
+    input_data = execution.input_data or {}
+        
+    # Calculate progress
+    total_subtasks = input_data.get("total_subtasks", 0)
+    completed_subtasks = input_data.get("completed_subtasks", 0)
+    progress = (completed_subtasks / total_subtasks * 100) if total_subtasks > 0 else 0
+        
+    # Extract recent memory activities
+    memory_activities = []
+    if "recent_memory_operations" in input_data:
+        memory_activities = input_data["recent_memory_operations"][-10:]  # Last 10 operations
+        
+    # Extract recent communications
+    communications = []
+    if "recent_communications" in input_data:
+        communications = input_data["recent_communications"][-10:]  # Last 10 messages
+        
+    # Get active agents
+    active_agents = []
+    if "active_agents" in input_data:
+        active_agents = input_data["active_agents"]
+        
+    # Build metrics
+    metrics = {
+        "total_tasks": total_subtasks,
+        "completed_tasks": completed_subtasks,
+        "active_agents": len(active_agents),
+        "memory_operations": input_data.get("memory_operation_count", 0),
+        "messages_exchanged": input_data.get("message_count", 0),
+        "patterns_learned": input_data.get("patterns_learned", 0),
+        "avg_response_time": input_data.get("avg_response_time", 0),
+        "success_rate": input_data.get("current_success_rate", 0),
+        "token_usage": input_data.get("total_tokens", 0),
+        "estimated_cost": input_data.get("estimated_cost", 0)
+    }
+        
+    return {
+        "status": execution.status,
+        "progress": progress,
+        "current_step": input_data.get("current_step", ""),
+        "completed_steps": completed_subtasks,
+        "total_steps": total_subtasks,
+        "active_agents": active_agents,
+        "metrics": metrics,
+        "memory_activities": memory_activities,
+        "communications": communications
+    }
+
+
 @router.get("/{workflow_id}/live-progress")
-async def get_live_progress(
+def get_live_progress(
     workflow_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -168,55 +228,8 @@ async def get_live_progress(
                 "communications": []
             }
         
-        # Extract live data from the execution
-        input_data = execution.input_data or {}
-        
-        # Calculate progress
-        total_subtasks = input_data.get("total_subtasks", 0)
-        completed_subtasks = input_data.get("completed_subtasks", 0)
-        progress = (completed_subtasks / total_subtasks * 100) if total_subtasks > 0 else 0
-        
-        # Extract recent memory activities
-        memory_activities = []
-        if "recent_memory_operations" in input_data:
-            memory_activities = input_data["recent_memory_operations"][-10:]  # Last 10 operations
-        
-        # Extract recent communications
-        communications = []
-        if "recent_communications" in input_data:
-            communications = input_data["recent_communications"][-10:]  # Last 10 messages
-        
-        # Get active agents
-        active_agents = []
-        if "active_agents" in input_data:
-            active_agents = input_data["active_agents"]
-        
-        # Build metrics
-        metrics = {
-            "total_tasks": total_subtasks,
-            "completed_tasks": completed_subtasks,
-            "active_agents": len(active_agents),
-            "memory_operations": input_data.get("memory_operation_count", 0),
-            "messages_exchanged": input_data.get("message_count", 0),
-            "patterns_learned": input_data.get("patterns_learned", 0),
-            "avg_response_time": input_data.get("avg_response_time", 0),
-            "success_rate": input_data.get("current_success_rate", 0),
-            "token_usage": input_data.get("total_tokens", 0),
-            "estimated_cost": input_data.get("estimated_cost", 0)
-        }
-        
-        return {
-            "status": execution.status,
-            "progress": progress,
-            "current_step": input_data.get("current_step", ""),
-            "completed_steps": completed_subtasks,
-            "total_steps": total_subtasks,
-            "active_agents": active_agents,
-            "metrics": metrics,
-            "memory_activities": memory_activities,
-            "communications": communications
-        }
-        
+        return _get_live_progress_payload(execution)
+
     except Exception as e:
         logger.error(f"Error fetching live progress: {e}")
         return {
@@ -228,8 +241,54 @@ async def get_live_progress(
             "error": str(e)
         }
 
+def _store_orchestration_event_apply(execution, event_type: str, event_data: Dict[str, Any]) -> None:
+    """Append the event (or metric update) to the execution's input_data."""
+    # Store event based on type
+    if event_type == "memory_operation":
+        if "recent_memory_operations" not in execution.input_data:
+            execution.input_data["recent_memory_operations"] = []
+        execution.input_data["recent_memory_operations"].append({
+            **event_data,
+            "timestamp": datetime.now().isoformat()
+        })
+        # Keep only last 100 operations
+        execution.input_data["recent_memory_operations"] = execution.input_data["recent_memory_operations"][-100:]
+            
+        # Update counter
+        execution.input_data["memory_operation_count"] = execution.input_data.get("memory_operation_count", 0) + 1
+        
+    elif event_type == "communication":
+        if "recent_communications" not in execution.input_data:
+            execution.input_data["recent_communications"] = []
+        execution.input_data["recent_communications"].append({
+            **event_data,
+            "timestamp": datetime.now().isoformat()
+        })
+        # Keep only last 100 messages
+        execution.input_data["recent_communications"] = execution.input_data["recent_communications"][-100:]
+            
+        # Update counter
+        execution.input_data["message_count"] = execution.input_data.get("message_count", 0) + 1
+        
+    elif event_type == "learning_insight":
+        if "learning_insights" not in execution.input_data:
+            execution.input_data["learning_insights"] = []
+        execution.input_data["learning_insights"].append({
+            **event_data,
+            "timestamp": datetime.now().isoformat()
+        })
+            
+        # Update counter
+        execution.input_data["patterns_learned"] = execution.input_data.get("patterns_learned", 0) + 1
+        
+    elif event_type == "metric_update":
+        # Update metrics directly
+        for key, value in event_data.items():
+            execution.input_data[key] = value
+
+
 @router.post("/{workflow_id}/store-orchestration-event", dependencies=[Depends(require_workspace_permission("missions:update"))])
-async def store_orchestration_event(
+def store_orchestration_event(
     workflow_id: int,
     event_type: str,
     event_data: Dict[str, Any],
@@ -257,48 +316,8 @@ async def store_orchestration_event(
             execution.input_data = {}
         
         # Store event based on type
-        if event_type == "memory_operation":
-            if "recent_memory_operations" not in execution.input_data:
-                execution.input_data["recent_memory_operations"] = []
-            execution.input_data["recent_memory_operations"].append({
-                **event_data,
-                "timestamp": datetime.now().isoformat()
-            })
-            # Keep only last 100 operations
-            execution.input_data["recent_memory_operations"] = execution.input_data["recent_memory_operations"][-100:]
-            
-            # Update counter
-            execution.input_data["memory_operation_count"] = execution.input_data.get("memory_operation_count", 0) + 1
-        
-        elif event_type == "communication":
-            if "recent_communications" not in execution.input_data:
-                execution.input_data["recent_communications"] = []
-            execution.input_data["recent_communications"].append({
-                **event_data,
-                "timestamp": datetime.now().isoformat()
-            })
-            # Keep only last 100 messages
-            execution.input_data["recent_communications"] = execution.input_data["recent_communications"][-100:]
-            
-            # Update counter
-            execution.input_data["message_count"] = execution.input_data.get("message_count", 0) + 1
-        
-        elif event_type == "learning_insight":
-            if "learning_insights" not in execution.input_data:
-                execution.input_data["learning_insights"] = []
-            execution.input_data["learning_insights"].append({
-                **event_data,
-                "timestamp": datetime.now().isoformat()
-            })
-            
-            # Update counter
-            execution.input_data["patterns_learned"] = execution.input_data.get("patterns_learned", 0) + 1
-        
-        elif event_type == "metric_update":
-            # Update metrics directly
-            for key, value in event_data.items():
-                execution.input_data[key] = value
-        
+        _store_orchestration_event_apply(execution, event_type, event_data)
+
         # Mark the object as modified so SQLAlchemy knows to update it
         from sqlalchemy.orm import attributes
         attributes.flag_modified(execution, "input_data")
