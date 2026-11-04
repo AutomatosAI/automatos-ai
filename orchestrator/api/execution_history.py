@@ -31,7 +31,7 @@ router = APIRouter(
 
 
 @router.get("/workflow/{workflow_id}/latest")
-async def get_latest_execution(workflow_id: int, db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
+def get_latest_execution(workflow_id: int, db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get the most recent execution for a workflow with full details"""
     try:
         execution = db.query(WorkflowExecution).filter(
@@ -50,7 +50,7 @@ async def get_latest_execution(workflow_id: int, db: Session = Depends(get_db), 
 
 
 @router.get("/workflow/{workflow_id}/all")
-async def get_all_executions(
+def get_all_executions(
     workflow_id: int,
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
@@ -82,7 +82,7 @@ async def get_all_executions(
 
 
 @router.get("/execution/{execution_id}/details")
-async def get_execution_details(execution_id: int, db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
+def get_execution_details(execution_id: int, db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get detailed information about a specific execution"""
     try:
         execution = db.query(WorkflowExecution).filter(
