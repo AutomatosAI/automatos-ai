@@ -455,8 +455,63 @@ async def list_providers(
     return provider_registry.public_registry()
 
 
+def _set_platform_key_provider(body: "PlatformKeyCreate") -> str:
+    """Lower-cased provider name; 400 when unsupported or bring-your-own-key only."""
+    provider = body.provider.lower()
+    if provider not in SUPPORTED_PROVIDERS:
+        raise HTTPException(400, f"Unsupported provider. Supported: {SUPPORTED_PROVIDERS}")
+    if not provider_registry.platform_key_allowed(provider):
+        # PRD-236 §Terms: NVIDIA's trial endpoint is BYO key only in saas.
+        raise HTTPException(
+            400,
+            f"'{provider}' is a bring-your-own-key provider in this edition — "
+            "add it under the workspace's own API keys instead of a platform key.",
+        )
+    return provider
+
+
+def _set_platform_key_create(
+    db: Session, ctx: RequestContext, provider: str, cred_name: str, encrypted_data
+) -> Dict[str, Any]:
+    """Create the platform credential row (no existing one for this workspace)."""
+    from core.models.credentials import Credential, CredentialType
+
+    cred_type = (
+        db.query(CredentialType)
+        .filter(CredentialType.name == cred_name)
+        .first()
+    )
+    if not cred_type:
+        cred_type = (
+            db.query(CredentialType)
+            .filter(CredentialType.name == "generic_api")
+            .first()
+        )
+    if not cred_type:
+        raise HTTPException(500, "No suitable credential type found — run seed data")
+
+    new_cred = Credential(
+        name=cred_name,
+        credential_type_id=cred_type.id,
+        workspace_id=ctx.workspace_id,
+        encrypted_data=encrypted_data,
+        environment="development",
+        description=f"Platform API key for {provider}",
+        is_active=True,
+        test_status="not_tested",
+        created_by=str(ctx.user.id) if ctx.user and ctx.user.id else None,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(new_cred)
+    db.commit()
+    logger.info(f"Platform key created for provider={provider}")
+
+    return {"status": "created", "provider": provider}
+
+
 @router.put("/platform", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def set_platform_key(
+def set_platform_key(
     body: PlatformKeyCreate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -468,19 +523,10 @@ async def set_platform_key(
     credentials table so the CredentialResolver picks it up for all
     workspaces.
     """
-    from core.models.credentials import Credential, CredentialType
+    from core.models.credentials import Credential
     from sqlalchemy import and_
 
-    provider = body.provider.lower()
-    if provider not in SUPPORTED_PROVIDERS:
-        raise HTTPException(400, f"Unsupported provider. Supported: {SUPPORTED_PROVIDERS}")
-    if not provider_registry.platform_key_allowed(provider):
-        # PRD-236 §Terms: NVIDIA's trial endpoint is BYO key only in saas.
-        raise HTTPException(
-            400,
-            f"'{provider}' is a bring-your-own-key provider in this edition — "
-            "add it under the workspace's own API keys instead of a platform key.",
-        )
+    provider = _set_platform_key_provider(body)
 
     if not ctx.workspace_id:
         raise HTTPException(400, "Workspace context required")
@@ -514,38 +560,7 @@ async def set_platform_key(
                 pass
             return {"status": "updated", "provider": provider}
 
-        cred_type = (
-            db.query(CredentialType)
-            .filter(CredentialType.name == cred_name)
-            .first()
-        )
-        if not cred_type:
-            cred_type = (
-                db.query(CredentialType)
-                .filter(CredentialType.name == "generic_api")
-                .first()
-            )
-        if not cred_type:
-            raise HTTPException(500, "No suitable credential type found — run seed data")
-
-        new_cred = Credential(
-            name=cred_name,
-            credential_type_id=cred_type.id,
-            workspace_id=ctx.workspace_id,
-            encrypted_data=encrypted_data,
-            environment="development",
-            description=f"Platform API key for {provider}",
-            is_active=True,
-            test_status="not_tested",
-            created_by=str(ctx.user.id) if ctx.user and ctx.user.id else None,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-        )
-        db.add(new_cred)
-        db.commit()
-        logger.info(f"Platform key created for provider={provider}")
-
-        return {"status": "created", "provider": provider}
+        return _set_platform_key_create(db, ctx, provider, cred_name, encrypted_data)
 
     except HTTPException:
         raise
