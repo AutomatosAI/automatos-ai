@@ -17,7 +17,6 @@ event carries ``"ai_generated": true``.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 import uuid
@@ -27,6 +26,7 @@ from typing import Any, AsyncIterator, List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -238,7 +238,7 @@ async def _run_vertical_plugin(body: WidgetChatRequest, auth: WidgetAuthContext,
     shape (force_text_only, skip_composio); the plugin's decision to rewrite
     or pass through is independent of it.
     """
-    vertical = await asyncio.to_thread(_resolve_workspace_vertical, db, str(auth.workspace_id))
+    vertical = await run_in_threadpool(_resolve_workspace_vertical, db, str(auth.workspace_id))
     plugin = PLUGIN_REGISTRY.get(vertical)
     if plugin is None:
         logger.warning("%s UNKNOWN_VERTICAL: %s — falling back to generic plugin", log_extra, vertical)
@@ -447,11 +447,11 @@ async def widget_chat(
     _log_request(log_extra, body)
     chat_service_cls, streaming_service_cls = _chat_services(log_extra)
 
-    # F105: the turn's database work runs in worker threads, never on the event loop, and
-    # ends the request's transaction before the stream starts (_plan_the_turn).
-    user_id = await asyncio.to_thread(_get_widget_user_id, db)
+    # F105: the turn's database work runs in FastAPI's threadpool, never on the event loop,
+    # and ends the request's transaction before the stream starts (_plan_the_turn).
+    user_id = await run_in_threadpool(_get_widget_user_id, db)
     turn = await _run_vertical_plugin(body, auth, db, log_extra)
-    call, disclosure = await asyncio.to_thread(
+    call, disclosure = await run_in_threadpool(
         _plan_the_turn, db, chat_service_cls, body, turn, auth, user_id, log_extra)
     stream_ctx = WidgetStreamContext(
         chat_id=call.chat_id, agent_id=call.agent_id, team=call.team, is_proactive=call.is_proactive,

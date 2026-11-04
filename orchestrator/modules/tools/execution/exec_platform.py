@@ -3,10 +3,11 @@ Platform tool executors -- research tools (RAG, CodeGraph) and platform actions.
 Extracted from unified_executor.py.
 """
 
-import asyncio
 import logging
 from typing import Any, Dict, Optional
 from uuid import UUID
+
+from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 
@@ -105,8 +106,8 @@ async def execute_platform_action(
         }
         if agent_id:
             parameters["_agent_id"] = agent_id
-            # F105: a database read, so in a worker thread, never on the event loop.
-            parameters.update(await asyncio.to_thread(_agent_name_param, executor.db, agent_id, workspace_id))
+            # F105: a database read, so in FastAPI's threadpool, never on the event loop.
+            parameters.update(await run_in_threadpool(_agent_name_param, executor.db, agent_id, workspace_id))
 
     try:
         from modules.tools.discovery.platform_executor import PlatformActionExecutor
