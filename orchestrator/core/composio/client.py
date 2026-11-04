@@ -25,6 +25,7 @@ from core.composio.auth_config_lookup import newest_enabled, toolkit_accounts, t
 from core.composio.auth_schemes import custom_auth_fallback_scheme
 from core.composio.catalog_records import bulk_actions_from_items, toolkit_app_record
 from core.composio.deny_list import composio_action_denial, denied_result
+from core.composio.key_rejection import raise_if_key_rejected, raise_if_sdk_rejected_key
 
 logger = logging.getLogger(__name__)
 
@@ -619,6 +620,9 @@ class ComposioClient:
         The Composio API defaults to 100 items per page. We paginate using
         cursor-based pagination to fetch ALL toolkits (typically 500+).
 
+        Never raises: a failure is logged and gives ``[]``. The catalogue sync
+        calls :meth:`fetch_available_apps`, which raises instead.
+
         Returns:
             List of available apps with metadata
         """
@@ -626,15 +630,32 @@ class ComposioClient:
             return []
 
         try:
-            all_apps = self._list_all_toolkits()
-            trigger_map = self._build_trigger_map()
-            results = [toolkit_app_record(app, trigger_map) for app in all_apps]
-            logos_found = sum(1 for r in results if r.get("logo_url"))
-            logger.info(f"Composio apps: {len(results)} total, {logos_found} with logos")
-            return results
+            return self.fetch_available_apps()
         except Exception as e:
             logger.exception(f"Failed to get available apps: {e}")
             return []
+
+    def fetch_available_apps(self) -> List[Dict[str, Any]]:
+        """Every Composio app as a catalogue record, raising when the listing fails.
+
+        The catalogue sync's call: an empty list here means Composio listed no apps,
+        never that the call failed, so a failure can't pass for an empty catalogue.
+        A rejected API key (HTTP 401/403) raises :class:`ComposioAuthError`; any
+        other failure propagates as raised.
+        """
+        if not self.composio:
+            return []
+
+        try:
+            all_apps = self._list_all_toolkits()
+        except Exception as exc:
+            raise_if_sdk_rejected_key(exc)
+            raise
+        trigger_map = self._build_trigger_map()
+        results = [toolkit_app_record(app, trigger_map) for app in all_apps]
+        logos_found = sum(1 for r in results if r.get("logo_url"))
+        logger.info(f"Composio apps: {len(results)} total, {logos_found} with logos")
+        return results
 
     def _list_all_toolkits(self) -> List[Any]:
         """Every toolkit the SDK lists, following its cursor (max 1000 per page)."""
@@ -829,6 +850,8 @@ class ComposioClient:
 
         This is used by the metadata sync to avoid making one Composio API call per app.
         It hits the Composio REST endpoint directly and paginates using `next_cursor`.
+        A rejected API key (HTTP 401/403) raises ComposioAuthError, so the sync fails
+        with that reason; any other non-200 page ends the listing as before.
         """
         if not self.api_key:
             return []
@@ -853,6 +876,7 @@ class ComposioClient:
                 params["cursor"] = cursor
 
             resp = requests.get(url, headers=headers, params=params, timeout=30)
+            raise_if_key_rejected(resp.status_code)
             if resp.status_code != 200:
                 logger.warning(f"Failed bulk tools fetch: {resp.status_code} {resp.text}")
                 break

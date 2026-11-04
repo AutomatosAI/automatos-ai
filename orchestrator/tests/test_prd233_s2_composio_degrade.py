@@ -450,9 +450,11 @@ async def test_sync_refuses_without_a_key_instead_of_reporting_zero_apps(composi
 async def test_sync_runs_the_full_catalogue_sync_when_a_key_is_configured(composio_on):
     from api.tools import sync
 
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = None  # no sync in flight
     with patch("api.tools.MetadataSyncService") as service:
         service.return_value.run_full_sync.return_value = {"apps_synced": 880}
-        out = await sync(sync_type="full", ctx=MagicMock(), db=MagicMock())
+        out = await sync(sync_type="full", ctx=MagicMock(), db=db)
 
     assert out == {"apps_synced": 880}
     service.return_value.run_full_sync.assert_called_once_with()

@@ -16,12 +16,13 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from sqlalchemy import func, or_, cast, String
 from sqlalchemy.orm import Session
 
 from core.composio.client import get_composio_client
+from core.composio.key_rejection import COMPOSIO_KEY_REJECTED_MESSAGE
 from core.models.composio_cache import (
     ComposioActionCache,
     ComposioAppCache,
@@ -39,6 +40,23 @@ ACTION_COMMIT_BATCH_SIZE = 100
 ACTION_PROGRESS_LOG_EVERY = 500
 
 
+def sync_failure_reason(errors: Sequence[str]) -> Optional[str]:
+    """The reason a failed sync can show the operator, or ``None`` when only the log has it.
+
+    Only a message written for people is passed on: Composio rejecting the API key.
+    Other errors are raw exception text (SQL, HTTP bodies), which stays in the server
+    log and the job's ``error_details``.
+    """
+    return COMPOSIO_KEY_REJECTED_MESSAGE if COMPOSIO_KEY_REJECTED_MESSAGE in errors else None
+
+
+def failed_job_reason(job: Optional[ComposioSyncJob]) -> Optional[str]:
+    """The reason a failed sync job can show on the Tools page, or ``None``."""
+    if job is None or job.status != "failed":
+        return None
+    return sync_failure_reason((job.error_details or {}).get("errors") or [])
+
+
 class MetadataSyncService:
     def __init__(self, db: Session):
         self.db = db
@@ -49,6 +67,10 @@ class MetadataSyncService:
 
         IMPORTANT: This must not make one Composio API call per app.
         We fetch actions in bulk (paged) and group them by app for upsert.
+
+        A failure ends the job ``failed`` with the error in ``error_details``; the
+        result's ``error`` is the reason the operator can be shown (see
+        :func:`sync_failure_reason`), ``None`` otherwise.
         """
         logger.info("Starting full metadata sync...")
         started_at = datetime.utcnow()
@@ -98,12 +120,17 @@ class MetadataSyncService:
             "actions_synced": actions_synced,
             "errors_count": len(errors),
             "duration_ms": job.duration_ms,
+            "error": sync_failure_reason(errors) if job.status == "failed" else None,
         }
 
     def _fetch_catalogue(self) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, List[Dict[str, Any]]]]:
-        """Steps 1-2: every app keyed by upper-cased name, and the bulk actions grouped by app."""
+        """Steps 1-2: every app keyed by upper-cased name, and the bulk actions grouped by app.
+
+        Raises when the apps can't be listed (ComposioAuthError for a rejected key),
+        so the job fails instead of completing with an empty catalogue.
+        """
         logger.info("Step 1/4: Fetching available apps from Composio...")
-        apps = self.client.get_available_apps() or []
+        apps = self.client.fetch_available_apps() or []
         logger.info(f"Found {len(apps)} apps from Composio")
         apps_by_name: Dict[str, Dict[str, Any]] = {}
         for app in apps:
