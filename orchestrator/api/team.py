@@ -128,12 +128,31 @@ def _activity_by_user(db, user_col, ts_col, ws_col, workspace_id, user_ids, sinc
     return {uid: (int(count or 0), latest) for uid, count, latest in rows}
 
 
+def _list_team_members_activity(db, ctx, workspace_id, member_ids):
+    """Per-member chat and tool activity, when the caller may see it."""
+    # Editors and viewers get the roster and nothing else — the aggregate
+    # queries are not even issued for them.
+    show_activity = workspace_permission_granted(db, ctx, ACTIVITY_PERMISSION)
+    chats: dict = {}
+    tools: dict = {}
+    if show_activity:
+        since = datetime.utcnow() - timedelta(days=ACTIVITY_WINDOW_DAYS)
+        chats = _activity_by_user(
+            db, Chat.user_id, Chat.created_at, Chat.workspace_id, workspace_id, member_ids, since,
+        )
+        tools = _activity_by_user(
+            db, ToolExecutionLog.user_id, ToolExecutionLog.executed_at,
+            ToolExecutionLog.workspace_id, workspace_id, member_ids, since,
+        )
+    return show_activity, chats, tools
+
+
 @router.get(
     "/members",
     response_model=List[TeamMemberResponse],
     dependencies=[Depends(require_workspace_permission("members:read"))],
 )
-async def list_team_members(
+def list_team_members(
     workspace_id: str,
     ctx: RequestContext = Depends(get_request_context),
     db: Session = Depends(get_db)
@@ -154,21 +173,7 @@ async def list_team_members(
     users = db.query(User).filter(User.id.in_(member_ids | inviter_ids)).all()
     user_by_id = {u.id: u for u in users}
 
-    # Editors and viewers get the roster and nothing else — the aggregate
-    # queries are not even issued for them.
-    show_activity = workspace_permission_granted(db, ctx, ACTIVITY_PERMISSION)
-    chats: dict = {}
-    tools: dict = {}
-    if show_activity:
-        since = datetime.utcnow() - timedelta(days=ACTIVITY_WINDOW_DAYS)
-        chats = _activity_by_user(
-            db, Chat.user_id, Chat.created_at, Chat.workspace_id, workspace_id, member_ids, since,
-        )
-        tools = _activity_by_user(
-            db, ToolExecutionLog.user_id, ToolExecutionLog.executed_at,
-            ToolExecutionLog.workspace_id, workspace_id, member_ids, since,
-        )
-
+    show_activity, chats, tools = _list_team_members_activity(db, ctx, workspace_id, member_ids)
     response = []
     for m in members:
         user = user_by_id.get(m.user_id)

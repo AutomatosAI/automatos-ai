@@ -375,8 +375,43 @@ def get_scan_results(
         raise HTTPException(status_code=500, detail="Failed to fetch scan results")
 
 
+def _deactivate_plugin_cascade(db, plugin, plugin_id, performed_by):
+    """Cascade-remove enablements and assignments; build the sync history row."""
+    # Cascade: remove all WorkspaceEnabledPlugin records for this plugin
+    workspace_count = db.query(WorkspaceEnabledPlugin).filter(
+        WorkspaceEnabledPlugin.plugin_id == plugin_id,
+    ).count()
+    db.query(WorkspaceEnabledPlugin).filter(
+        WorkspaceEnabledPlugin.plugin_id == plugin_id,
+    ).delete(synchronize_session="fetch")
+
+    # Cascade: remove all AgentAssignedPlugin records for this plugin
+    agent_count = db.query(AgentAssignedPlugin).filter(
+        AgentAssignedPlugin.plugin_id == plugin_id,
+    ).count()
+    db.query(AgentAssignedPlugin).filter(
+        AgentAssignedPlugin.plugin_id == plugin_id,
+    ).delete(synchronize_session="fetch")
+
+    # Create sync history record with cascade details
+    history = PluginSyncHistory(
+        action="deactivate",
+        plugin_id=plugin.id,
+        plugin_slug=plugin.slug,
+        status="completed",
+        completed_at=datetime.utcnow(),
+        details={
+            "deactivated_by": performed_by,
+            "workspaces_affected": workspace_count,
+            "agents_affected": agent_count,
+        },
+        performed_by=performed_by,
+    )
+    return workspace_count, agent_count, history
+
+
 @router.post("/{plugin_id}/deactivate")
-async def deactivate_plugin(
+def deactivate_plugin(
     plugin_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -396,36 +431,7 @@ async def deactivate_plugin(
 
         performed_by = str(getattr(ctx.user, "id", "admin"))
 
-        # Cascade: remove all WorkspaceEnabledPlugin records for this plugin
-        workspace_count = db.query(WorkspaceEnabledPlugin).filter(
-            WorkspaceEnabledPlugin.plugin_id == plugin_id,
-        ).count()
-        db.query(WorkspaceEnabledPlugin).filter(
-            WorkspaceEnabledPlugin.plugin_id == plugin_id,
-        ).delete(synchronize_session="fetch")
-
-        # Cascade: remove all AgentAssignedPlugin records for this plugin
-        agent_count = db.query(AgentAssignedPlugin).filter(
-            AgentAssignedPlugin.plugin_id == plugin_id,
-        ).count()
-        db.query(AgentAssignedPlugin).filter(
-            AgentAssignedPlugin.plugin_id == plugin_id,
-        ).delete(synchronize_session="fetch")
-
-        # Create sync history record with cascade details
-        history = PluginSyncHistory(
-            action="deactivate",
-            plugin_id=plugin.id,
-            plugin_slug=plugin.slug,
-            status="completed",
-            completed_at=datetime.utcnow(),
-            details={
-                "deactivated_by": performed_by,
-                "workspaces_affected": workspace_count,
-                "agents_affected": agent_count,
-            },
-            performed_by=performed_by,
-        )
+        workspace_count, agent_count, history = _deactivate_plugin_cascade(db, plugin, plugin_id, performed_by)
         db.add(history)
         db.commit()
 
@@ -446,8 +452,38 @@ async def deactivate_plugin(
         raise HTTPException(status_code=500, detail="Failed to deactivate plugin")
 
 
+def _list_pending_plugins_item(db, p):
+    """Build the pending-plugin row, with its security scan summary if any."""
+    # Load scan if available
+    risk_score = None
+    static_count = 0
+    llm_summary = None
+    if p.security_scan_id:
+        scan = db.query(PluginSecurityScan).filter(
+            PluginSecurityScan.id == p.security_scan_id,
+        ).first()
+        if scan:
+            risk_score = scan.llm_risk_score
+            static_count = len(scan.static_findings) if scan.static_findings else 0
+            llm_summary = scan.llm_summary
+
+    return PendingPluginOut(
+        id=str(p.id),
+        slug=p.slug,
+        name=p.name,
+        version=p.version,
+        description=p.description,
+        source_type=p.source_type,
+        security_status=p.security_status or "pending",
+        created_at=p.created_at.isoformat() if p.created_at else None,
+        risk_score=risk_score,
+        static_findings_count=static_count,
+        llm_summary=llm_summary,
+    )
+
+
 @router.get("/pending")
-async def list_pending_plugins(
+def list_pending_plugins(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -467,33 +503,7 @@ async def list_pending_plugins(
 
         items = []
         for p in plugins:
-            # Load scan if available
-            risk_score = None
-            static_count = 0
-            llm_summary = None
-            if p.security_scan_id:
-                scan = db.query(PluginSecurityScan).filter(
-                    PluginSecurityScan.id == p.security_scan_id,
-                ).first()
-                if scan:
-                    risk_score = scan.llm_risk_score
-                    static_count = len(scan.static_findings) if scan.static_findings else 0
-                    llm_summary = scan.llm_summary
-
-            items.append(PendingPluginOut(
-                id=str(p.id),
-                slug=p.slug,
-                name=p.name,
-                version=p.version,
-                description=p.description,
-                source_type=p.source_type,
-                security_status=p.security_status or "pending",
-                created_at=p.created_at.isoformat() if p.created_at else None,
-                risk_score=risk_score,
-                static_findings_count=static_count,
-                llm_summary=llm_summary,
-            ))
-
+            items.append(_list_pending_plugins_item(db, p))
         return {
             "items": [item.model_dump() for item in items],
             "total": total,
