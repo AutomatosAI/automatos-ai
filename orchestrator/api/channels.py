@@ -13,7 +13,7 @@ webhook, and start/stop polling.
 import json as _json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException
@@ -277,23 +277,15 @@ async def create_channel(
         raise HTTPException(400, str(exc))
 
 
-async def connect_channel_for_workspace(
+def _validate_connect_request(
     db: Session,
     workspace_id: str,
     platform: str,
     config: Dict[str, Any],
-    default_agent_id: Optional[str] = None,
-    mode: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Create, verify and activate a channel connection — the single connect flow.
-
-    Shared by ``POST /api/channels`` and the ``platform_connect_channel`` tool
-    (PRD-143 S10), so the driver-mediated verify + install_webhook/start_polling
-    behaviour cannot drift between the dashboard and Auto. Raises ``ValueError``
-    on an unsupported platform or missing required config fields — the router
-    maps that to HTTP 400.
-    """
-    platform = (platform or "").lower()
+    default_agent_id: Optional[str],
+) -> None:
+    """Raise ``ValueError`` before anything is written: an unsupported platform,
+    missing required config fields, or another workspace's default agent."""
     if platform not in _SUPPORTED_PLATFORMS:
         raise ValueError(f"Platform must be one of {_SUPPORTED_PLATFORMS}")
 
@@ -308,6 +300,15 @@ async def connect_channel_for_workspace(
     if default_agent_id not in (None, "") and not agent_in_workspace(db, default_agent_id, workspace_id):
         raise ValueError("default_agent_id is not an agent of this workspace")
 
+
+def _insert_inactive_connection(
+    db: Session,
+    workspace_id: str,
+    platform: str,
+    config: Dict[str, Any],
+    default_agent_id: Optional[str],
+) -> UUID:
+    """Save the new row as ``inactive``; the driver's verify decides what it becomes."""
     conn_id = uuid4()
     db.execute(
         text("""
@@ -325,6 +326,130 @@ async def connect_channel_for_workspace(
     db.commit()
 
     logger.info("Created channel connection %s (%s) for workspace %s", conn_id, platform, workspace_id)
+    return conn_id
+
+
+def _connect_mode(driver: Any, mode: Optional[str]) -> str:
+    """The mode asked for, or the driver's preferred one when it does not support it."""
+    requested_mode = str(mode or driver.default_mode().value).lower()
+    if not driver.supports(ConnectivityMode(requested_mode) if requested_mode in {"webhook", "polling"} else driver.default_mode()):
+        # Fall back to the driver's preferred mode rather than erroring.
+        requested_mode = driver.default_mode().value
+    return requested_mode
+
+
+async def _install_connect_webhook(
+    db: Session,
+    driver: Any,
+    conn_id: UUID,
+    workspace_id: str,
+    platform: str,
+    config: Dict[str, Any],
+) -> Tuple[Optional[str], Optional[VerifyResult]]:
+    """Webhook mode: register the inbound URL with the platform and record the
+    outcome on the row. Returns the URL and the install result (None, None
+    when the workspace has no webhook key)."""
+    install_result: Optional[VerifyResult] = None
+    webhook_url = _webhook_url_for(db, workspace_id)
+    if webhook_url:
+        try:
+            install_result = await driver.install_webhook(
+                workspace_id=str(workspace_id),
+                config=config,
+                webhook_url=webhook_url,
+            )
+        except NotImplementedError:
+            install_result = VerifyResult(ok=True, identity=webhook_url)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("install_webhook failed for %s: %s", platform, exc)
+            install_result = VerifyResult(ok=False, error=str(exc))
+        if install_result and install_result.ok:
+            db.execute(
+                text(
+                    "UPDATE channel_connections SET webhook_url = :url, updated_at = NOW() "
+                    "WHERE id = :id"
+                ),
+                {"url": webhook_url, "id": str(conn_id)},
+            )
+            db.commit()
+        elif install_result:
+            # Webhook install failed — keep status=active (verify was ok)
+            # but surface the install error so the merchant knows
+            # they need to set the URL manually.
+            _save_verify_outcome(
+                db, str(conn_id),
+                VerifyResult(
+                    ok=False,
+                    error=f"verify ok but webhook install failed: {install_result.error}",
+                ),
+            )
+    return webhook_url, install_result
+
+
+async def _start_connect_polling(
+    driver: Any,
+    conn_id: UUID,
+    workspace_id: str,
+    platform: str,
+    config: Dict[str, Any],
+) -> None:
+    """Polling mode: start the driver's poller."""
+    try:
+        started = await driver.start_polling(
+            connection_id=str(conn_id),
+            workspace_id=str(workspace_id),
+            config=config,
+        )
+        if not started:
+            logger.info(
+                "Polling not started for %s — likely optional dep missing", platform,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("start_polling failed for %s: %s", platform, exc)
+
+
+def _connected_reply(
+    conn_id: UUID,
+    platform: str,
+    requested_mode: str,
+    webhook_url: Optional[str],
+    verify_result: VerifyResult,
+    install_result: Optional[VerifyResult],
+) -> Dict[str, Any]:
+    """What the connect flow answers once verify passed."""
+    return {
+        "id": str(conn_id),
+        "platform": platform,
+        "status": "active",
+        "mode": requested_mode,
+        "webhook_url": webhook_url,
+        "test": _verify_result_dict(verify_result),
+        "install": (
+            _verify_result_dict(install_result)
+            if install_result is not None else None
+        ),
+    }
+
+
+async def connect_channel_for_workspace(
+    db: Session,
+    workspace_id: str,
+    platform: str,
+    config: Dict[str, Any],
+    default_agent_id: Optional[str] = None,
+    mode: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create, verify and activate a channel connection — the single connect flow.
+
+    Shared by ``POST /api/channels`` and the ``platform_connect_channel`` tool
+    (PRD-143 S10), so the driver-mediated verify + install_webhook/start_polling
+    behaviour cannot drift between the dashboard and Auto. Raises ``ValueError``
+    on an unsupported platform or missing required config fields — the router
+    maps that to HTTP 400.
+    """
+    platform = (platform or "").lower()
+    _validate_connect_request(db, workspace_id, platform, config, default_agent_id)
+    conn_id = _insert_inactive_connection(db, workspace_id, platform, config, default_agent_id)
 
     # ------------------------------------------------------------------
     # PRD-008-A.4 — driver-mediated verify + (install_webhook | start_polling)
@@ -344,10 +469,7 @@ async def connect_channel_for_workspace(
             },
         }
 
-    requested_mode = str(mode or driver.default_mode().value).lower()
-    if not driver.supports(ConnectivityMode(requested_mode) if requested_mode in {"webhook", "polling"} else driver.default_mode()):
-        # Fall back to the driver's preferred mode rather than erroring.
-        requested_mode = driver.default_mode().value
+    requested_mode = _connect_mode(driver, mode)
 
     verify_result = await driver.verify(workspace_id=str(workspace_id), config=config)
 
@@ -374,65 +496,13 @@ async def connect_channel_for_workspace(
     install_result: Optional[VerifyResult] = None
 
     if requested_mode == "webhook":
-        webhook_url = _webhook_url_for(db, workspace_id)
-        if webhook_url:
-            try:
-                install_result = await driver.install_webhook(
-                    workspace_id=str(workspace_id),
-                    config=config,
-                    webhook_url=webhook_url,
-                )
-            except NotImplementedError:
-                install_result = VerifyResult(ok=True, identity=webhook_url)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("install_webhook failed for %s: %s", platform, exc)
-                install_result = VerifyResult(ok=False, error=str(exc))
-            if install_result and install_result.ok:
-                db.execute(
-                    text(
-                        "UPDATE channel_connections SET webhook_url = :url, updated_at = NOW() "
-                        "WHERE id = :id"
-                    ),
-                    {"url": webhook_url, "id": str(conn_id)},
-                )
-                db.commit()
-            elif install_result:
-                # Webhook install failed — keep status=active (verify was ok)
-                # but surface the install error so the merchant knows
-                # they need to set the URL manually.
-                _save_verify_outcome(
-                    db, str(conn_id),
-                    VerifyResult(
-                        ok=False,
-                        error=f"verify ok but webhook install failed: {install_result.error}",
-                    ),
-                )
+        webhook_url, install_result = await _install_connect_webhook(
+            db, driver, conn_id, workspace_id, platform, config,
+        )
     elif requested_mode == "polling":
-        try:
-            started = await driver.start_polling(
-                connection_id=str(conn_id),
-                workspace_id=str(workspace_id),
-                config=config,
-            )
-            if not started:
-                logger.info(
-                    "Polling not started for %s — likely optional dep missing", platform,
-                )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("start_polling failed for %s: %s", platform, exc)
+        await _start_connect_polling(driver, conn_id, workspace_id, platform, config)
 
-    return {
-        "id": str(conn_id),
-        "platform": platform,
-        "status": "active",
-        "mode": requested_mode,
-        "webhook_url": webhook_url,
-        "test": _verify_result_dict(verify_result),
-        "install": (
-            _verify_result_dict(install_result)
-            if install_result is not None else None
-        ),
-    }
+    return _connected_reply(conn_id, platform, requested_mode, webhook_url, verify_result, install_result)
 
 
 def _current_channel_config(db: Session, channel_id: str) -> Dict[str, Any]:
