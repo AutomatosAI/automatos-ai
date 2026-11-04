@@ -108,7 +108,7 @@ def _ctx():
 def _call(db, workspace_id=WS):
     from api.team import list_team_members
 
-    return asyncio.run(list_team_members(workspace_id=workspace_id, ctx=_ctx(), db=db))
+    return list_team_members(workspace_id=workspace_id, ctx=_ctx(), db=db)
 
 
 def _queries(db, cls):

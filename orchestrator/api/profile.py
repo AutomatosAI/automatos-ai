@@ -140,7 +140,7 @@ def _update_values(body: ProfileUpdate) -> dict:
 
 
 @router.get("", response_model=ProfileOut)
-async def get_profile(
+def get_profile(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> ProfileOut:
@@ -149,7 +149,7 @@ async def get_profile(
 
 
 @router.put("", response_model=ProfileOut, dependencies=[Depends(_PROFILE_WRITE_GATE)])
-async def update_profile(
+def update_profile(
     body: ProfileUpdate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

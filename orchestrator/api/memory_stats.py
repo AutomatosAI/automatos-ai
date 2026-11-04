@@ -230,7 +230,7 @@ async def get_real_memory_stats(ctx: RequestContext = Depends(get_request_contex
 
 
 @router.get("/stats/agents")
-async def get_agent_memory_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+def get_agent_memory_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
     """Get memory stats per agent with type/level breakdown."""
     try:
         ws_filter = MemoryShortTerm.workspace_id == ctx.workspace_id

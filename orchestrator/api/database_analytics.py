@@ -25,7 +25,7 @@ router = APIRouter(
 )
 
 @router.get("/stats")
-async def get_database_query_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def get_database_query_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get real-time database query statistics"""
     try:
         # Query the database_query_audit table for real stats
@@ -81,7 +81,7 @@ async def get_database_query_stats(ctx: RequestContext = Depends(get_request_con
         }
 
 @router.get("/performance")
-async def get_database_performance(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def get_database_performance(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get database query performance over time"""
     try:
         # PRD-156 S3: workspace-scoped via the source join (see /stats).
@@ -116,7 +116,7 @@ async def get_database_performance(ctx: RequestContext = Depends(get_request_con
         return []
 
 @router.get("/top-queries")
-async def get_top_queries(limit: int = 10, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def get_top_queries(limit: int = 10, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get most frequently executed queries"""
     try:
         # PRD-156 S3: workspace-scoped via the source join (see /stats).

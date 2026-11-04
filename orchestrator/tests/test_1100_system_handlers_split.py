@@ -94,7 +94,7 @@ def test_the_health_route_puts_the_checks_together(monkeypatch, db_session):
     healthy = shc.ComponentHealth(name="database", status="healthy", last_check=datetime.now())
     monkeypatch.setattr(system, "component_health", lambda db: [healthy])
     monkeypatch.setattr(capability_report, "onboarding_capabilities", lambda db, workspace_id=None: {"llm": True})
-    out = asyncio.run(system.get_system_health(ctx=NS(workspace_id=None), db=db_session))
+    out = system.get_system_health(ctx=NS(workspace_id=None), db=db_session)
     assert out.overall_status == "healthy" and out.components == [healthy]
     assert set(out.system_metrics) == {"cpu_usage", "memory_usage", "memory_available", "disk_usage", "disk_free"}
     assert out.capabilities == {"llm": True}

@@ -449,7 +449,7 @@ def _knowledge_documents(db: Session, workspace_id):
 
 
 @router.get("/analytics")
-async def get_document_analytics(
+def get_document_analytics(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -521,9 +521,51 @@ async def get_document_analytics(
         logger.error(f"Error getting document analytics: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+def _list_documents_query(db, ctx, status, file_type, search, team, source_type, exclude_source_type, content_hash):
+    """Workspace-scoped, filtered Document query for list_documents."""
+    query = db.query(Document).filter(Document.workspace_id == ctx.workspace_id)
+
+    # Apply filters
+    if status:
+        query = query.filter(Document.status == status)
+    if file_type:
+        query = query.filter(Document.file_type == file_type)
+    if content_hash:
+        query = query.filter(Document.content_hash == content_hash)
+    if source_type:
+        # PRD-164 S3 (Q58): agent outputs are a filterable team-like scope
+        query = query.filter(Document.source_type == source_type)
+    if exclude_source_type:
+        query = query.filter(
+            or_(Document.source_type.is_(None), Document.source_type != exclude_source_type)
+        )
+    if search:
+        query = query.filter(
+            or_(
+                Document.filename.ilike(f"%{search}%"),
+                Document.description.ilike(f"%{search}%")
+            )
+        )
+
+    # PRD-158 S3: server-side team scope through the centralized builder.
+    # Case-insensitive overlap so legacy mixed-case team_access still matches
+    # (new writes are normalized in S2); public docs (empty team_access) always show.
+    from modules.rag.retrieval_filters import build_retrieval_filters
+    _scope = build_retrieval_filters(workspace_id=ctx.workspace_id, team=team)
+    if _scope.has_team_restriction:
+        query = query.filter(
+            text(
+                "(team_access = '{}' OR EXISTS ("
+                "SELECT 1 FROM unnest(team_access) ta "
+                "WHERE LOWER(TRIM(ta)) = ANY(CAST(:team_terms AS text[]))))"
+            )
+        ).params(team_terms=_scope.team_terms)
+    return query
+
+
 @router.get("", response_model=List[DocumentResponse])  # F327 (night 9b): the plain path answered 307, empty body
 @router.get("/", response_model=List[DocumentResponse])
-async def list_documents(
+def list_documents(
     ctx: RequestContext = Depends(get_request_context_hybrid),
 
     skip: int = Query(0, ge=0),
@@ -549,44 +591,7 @@ async def list_documents(
 ):
     """List documents with filtering and pagination"""
     try:
-        query = db.query(Document).filter(Document.workspace_id == ctx.workspace_id)
-
-        # Apply filters
-        if status:
-            query = query.filter(Document.status == status)
-        if file_type:
-            query = query.filter(Document.file_type == file_type)
-        if content_hash:
-            query = query.filter(Document.content_hash == content_hash)
-        if source_type:
-            # PRD-164 S3 (Q58): agent outputs are a filterable team-like scope
-            query = query.filter(Document.source_type == source_type)
-        if exclude_source_type:
-            query = query.filter(
-                or_(Document.source_type.is_(None), Document.source_type != exclude_source_type)
-            )
-        if search:
-            query = query.filter(
-                or_(
-                    Document.filename.ilike(f"%{search}%"),
-                    Document.description.ilike(f"%{search}%")
-                )
-            )
-
-        # PRD-158 S3: server-side team scope through the centralized builder.
-        # Case-insensitive overlap so legacy mixed-case team_access still matches
-        # (new writes are normalized in S2); public docs (empty team_access) always show.
-        from modules.rag.retrieval_filters import build_retrieval_filters
-        _scope = build_retrieval_filters(workspace_id=ctx.workspace_id, team=team)
-        if _scope.has_team_restriction:
-            query = query.filter(
-                text(
-                    "(team_access = '{}' OR EXISTS ("
-                    "SELECT 1 FROM unnest(team_access) ta "
-                    "WHERE LOWER(TRIM(ta)) = ANY(CAST(:team_terms AS text[]))))"
-                )
-            ).params(team_terms=_scope.team_terms)
-
+        query = _list_documents_query(db, ctx, status, file_type, search, team, source_type, exclude_source_type, content_hash)
         documents = query.order_by(Document.upload_date.desc()).offset(skip).limit(limit).all()
         
         return [
@@ -623,7 +628,7 @@ async def list_documents(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/pins")
-async def list_pinned_documents(
+def list_pinned_documents(
     chat_id: str = Query(..., description="Chat/conversation id"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -635,7 +640,7 @@ async def list_pinned_documents(
 
 
 @router.post("/{document_id}/pin", dependencies=[Depends(require_workspace_permission("documents:update"))])
-async def pin_document_to_chat(
+def pin_document_to_chat(
     document_id: int,
     chat_id: str = Query(..., description="Chat/conversation id to pin the document to"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -658,7 +663,7 @@ async def pin_document_to_chat(
 
 
 @router.delete("/{document_id}/pin", dependencies=[Depends(require_workspace_permission("documents:update"))])
-async def unpin_document_from_chat(
+def unpin_document_from_chat(
     document_id: int,
     chat_id: str = Query(..., description="Chat/conversation id to unpin the document from"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -671,7 +676,7 @@ async def unpin_document_from_chat(
 
 
 @router.get("/team-counts")
-async def document_team_counts(
+def document_team_counts(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -720,7 +725,7 @@ async def document_team_counts(
 # ``:int`` so a static one-segment route registered further down this file
 # (``/reprocess-status``) is not parsed as a document id and refused with 422 (#827).
 @router.get("/{document_id:int}", response_model=DocumentResponse)
-async def get_document(
+def get_document(
     document_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -756,7 +761,7 @@ async def get_document(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{document_id}/delete-impact")
-async def get_delete_impact(
+def get_delete_impact(
     document_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -822,7 +827,7 @@ async def get_delete_impact(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/{document_id}", dependencies=[Depends(require_workspace_permission("documents:delete"))])
-async def delete_document(
+def delete_document(
     document_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -1025,8 +1030,27 @@ async def _reembed_or_refuse(db: Session, document: Document, workspace_id: str,
                f"stored chunks to rebuild from. Please re-upload the document."
     )
 
+def _get_document_content_highlight(chunks, highlight_chunk_ids):
+    """Join chunk text and wrap highlighted chunks in <mark> tags."""
+    # Reconstruct full content from chunks
+    full_content = "\n\n".join(c.content for c in chunks)
+
+    # Apply highlighting if requested
+    highlighted_content = full_content
+    if highlight_chunk_ids:
+        highlight_set = set(highlight_chunk_ids)
+        for chunk in chunks:
+            if chunk.id in highlight_set:
+                highlighted_content = highlighted_content.replace(
+                    chunk.content,
+                    f'<mark data-chunk-id="{chunk.id}">{chunk.content}</mark>',
+                    1
+                )
+    return highlighted_content
+
+
 @router.get("/{document_id}/content")
-async def get_document_content_by_id(
+def get_document_content_by_id(
     document_id: int,
     highlight_chunk_ids: Optional[List[int]] = Query(None, description="Chunk IDs to highlight in content"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1055,21 +1079,7 @@ async def get_document_content_by_id(
         result = db.execute(query, {"document_id": document_id})
         chunks = result.fetchall()
 
-        # Reconstruct full content from chunks
-        full_content = "\n\n".join(c.content for c in chunks)
-
-        # Apply highlighting if requested
-        highlighted_content = full_content
-        if highlight_chunk_ids:
-            highlight_set = set(highlight_chunk_ids)
-            for chunk in chunks:
-                if chunk.id in highlight_set:
-                    highlighted_content = highlighted_content.replace(
-                        chunk.content,
-                        f'<mark data-chunk-id="{chunk.id}">{chunk.content}</mark>',
-                        1
-                    )
-
+        highlighted_content = _get_document_content_highlight(chunks, highlight_chunk_ids)
         chunks_response = [
             {
                 "chunk_id": row.id,
@@ -1423,8 +1433,119 @@ async def semantic_search(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _get_queue_status_step(progress_pct):
+    """Current processing step and its display name for a progress percentage."""
+    # Determine current processing step
+    if progress_pct < 20:
+        current_step = "text_extraction"
+        step_name = "Text Extraction"
+    elif progress_pct < 40:
+        current_step = "chunking"
+        step_name = "Chunking"
+    elif progress_pct < 70:
+        current_step = "embedding"
+        step_name = "Embedding Generation"
+    elif progress_pct < 90:
+        current_step = "storage"
+        step_name = "Vector Storage"
+    else:
+        current_step = "finalizing"
+        step_name = "Finalizing"
+    return current_step, step_name
+
+
+def _get_queue_status_processing(processing_docs):
+    """Format processing documents with progress estimates."""
+    from datetime import datetime, timedelta
+
+    processing_list = []
+    for doc in processing_docs:
+        # Estimate progress based on time since upload
+        # This is a placeholder - real implementation would track actual progress
+        time_since_upload = datetime.now() - doc.upload_date if doc.upload_date else timedelta(0)
+        estimated_total_time = 120  # 2 minutes average
+        progress_pct = min(int((time_since_upload.total_seconds() / estimated_total_time) * 100), 95)
+
+        current_step, step_name = _get_queue_status_step(progress_pct)
+
+        eta_seconds = max(0, int(estimated_total_time - time_since_upload.total_seconds()))
+
+        processing_list.append({
+            "document_id": doc.id,
+            "filename": doc.filename,
+            "file_type": doc.file_type,
+            "file_size": doc.file_size,
+            "status": "processing",
+            "progress": progress_pct,
+            "current_step": current_step,
+            "step_name": step_name,
+            "started_at": doc.upload_date.isoformat() if doc.upload_date else None,
+            "eta_seconds": eta_seconds
+        })
+    return processing_list
+
+
+def _get_queue_status_stats(db, ctx):
+    """Today's processed count, average processing time and success rate."""
+    from datetime import datetime
+
+    # Calculate stats for today
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    processed_today = db.query(Document).filter(
+        Document.workspace_id == ctx.workspace_id,
+        Document.status == 'completed',
+        Document.processed_date >= today_start
+    ).count()
+
+    # Calculate average processing time (last 100 completed docs)
+    recent_completed = db.query(Document).filter(
+        Document.workspace_id == ctx.workspace_id,
+        Document.status == 'completed',
+        Document.processed_date.isnot(None),
+        Document.upload_date.isnot(None)
+    ).order_by(Document.processed_date.desc()).limit(100).all()
+
+    avg_time = 0.0
+    if recent_completed:
+        total_time = sum([
+            (doc.processed_date - doc.upload_date).total_seconds() 
+            for doc in recent_completed 
+            if doc.processed_date and doc.upload_date
+        ])
+        avg_time = round(total_time / len(recent_completed), 1)
+
+    # Calculate success rate (last 100 attempts)
+    recent_all = db.query(Document).filter(
+        Document.workspace_id == ctx.workspace_id,
+        Document.status.in_(['completed', 'failed'])
+    ).order_by(Document.upload_date.desc()).limit(100).all()
+
+    success_rate = 0.0
+    if recent_all:
+        success_count = sum([1 for doc in recent_all if doc.status == 'completed'])
+        success_rate = round((success_count / len(recent_all)) * 100, 1)
+    return processed_today, avg_time, success_rate
+
+
+def _get_queue_status_failed(failed_docs):
+    """Format failed documents."""
+    # Format failed documents
+    failed_list = []
+    for doc in failed_docs:
+        failed_list.append({
+            "document_id": doc.id,
+            "filename": doc.filename,
+            "file_type": doc.file_type,
+            "file_size": doc.file_size,
+            "failed_at": doc.processed_date.isoformat() if doc.processed_date else None,
+            "error": doc.doc_metadata.get('error', 'Unknown error') if doc.doc_metadata else 'Processing failed'
+        })
+    return failed_list
+
+
 @router.get("/queue/status")
-async def get_queue_status(
+def get_queue_status(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -1438,7 +1559,7 @@ async def get_queue_status(
     - Queue depth and estimated completion times
     """
     try:
-        from datetime import datetime, timedelta
+        from datetime import datetime
 
         # Get documents by status (filtered by workspace)
         pending_docs = db.query(Document).filter(
@@ -1469,95 +1590,9 @@ async def get_queue_status(
             })
         
         # Format processing documents with progress estimates
-        processing_list = []
-        for doc in processing_docs:
-            # Estimate progress based on time since upload
-            # This is a placeholder - real implementation would track actual progress
-            time_since_upload = datetime.now() - doc.upload_date if doc.upload_date else timedelta(0)
-            estimated_total_time = 120  # 2 minutes average
-            progress_pct = min(int((time_since_upload.total_seconds() / estimated_total_time) * 100), 95)
-            
-            # Determine current processing step
-            if progress_pct < 20:
-                current_step = "text_extraction"
-                step_name = "Text Extraction"
-            elif progress_pct < 40:
-                current_step = "chunking"
-                step_name = "Chunking"
-            elif progress_pct < 70:
-                current_step = "embedding"
-                step_name = "Embedding Generation"
-            elif progress_pct < 90:
-                current_step = "storage"
-                step_name = "Vector Storage"
-            else:
-                current_step = "finalizing"
-                step_name = "Finalizing"
-            
-            eta_seconds = max(0, int(estimated_total_time - time_since_upload.total_seconds()))
-            
-            processing_list.append({
-                "document_id": doc.id,
-                "filename": doc.filename,
-                "file_type": doc.file_type,
-                "file_size": doc.file_size,
-                "status": "processing",
-                "progress": progress_pct,
-                "current_step": current_step,
-                "step_name": step_name,
-                "started_at": doc.upload_date.isoformat() if doc.upload_date else None,
-                "eta_seconds": eta_seconds
-            })
-        
-        # Format failed documents
-        failed_list = []
-        for doc in failed_docs:
-            failed_list.append({
-                "document_id": doc.id,
-                "filename": doc.filename,
-                "file_type": doc.file_type,
-                "file_size": doc.file_size,
-                "failed_at": doc.processed_date.isoformat() if doc.processed_date else None,
-                "error": doc.doc_metadata.get('error', 'Unknown error') if doc.doc_metadata else 'Processing failed'
-            })
-        
-        # Calculate stats for today
-        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-
-        processed_today = db.query(Document).filter(
-            Document.workspace_id == ctx.workspace_id,
-            Document.status == 'completed',
-            Document.processed_date >= today_start
-        ).count()
-
-        # Calculate average processing time (last 100 completed docs)
-        recent_completed = db.query(Document).filter(
-            Document.workspace_id == ctx.workspace_id,
-            Document.status == 'completed',
-            Document.processed_date.isnot(None),
-            Document.upload_date.isnot(None)
-        ).order_by(Document.processed_date.desc()).limit(100).all()
-        
-        avg_time = 0.0
-        if recent_completed:
-            total_time = sum([
-                (doc.processed_date - doc.upload_date).total_seconds() 
-                for doc in recent_completed 
-                if doc.processed_date and doc.upload_date
-            ])
-            avg_time = round(total_time / len(recent_completed), 1)
-        
-        # Calculate success rate (last 100 attempts)
-        recent_all = db.query(Document).filter(
-            Document.workspace_id == ctx.workspace_id,
-            Document.status.in_(['completed', 'failed'])
-        ).order_by(Document.upload_date.desc()).limit(100).all()
-        
-        success_rate = 0.0
-        if recent_all:
-            success_count = sum([1 for doc in recent_all if doc.status == 'completed'])
-            success_rate = round((success_count / len(recent_all)) * 100, 1)
-        
+        processing_list = _get_queue_status_processing(processing_docs)
+        failed_list = _get_queue_status_failed(failed_docs)
+        processed_today, avg_time, success_rate = _get_queue_status_stats(db, ctx)
         return {
             "queue_depth": len(pending_list),
             "currently_processing": len(processing_list),
@@ -1720,8 +1755,57 @@ async def rag_retrieve(
 
 # Usage Analytics Endpoints
 
+def _track_usage_event_save(db, event_type, document_id, query, metadata):
+    """Insert the usage event row; fall back to log-only on failure."""
+    from datetime import datetime
+    import json
+
+    # Create usage event record in document_usage table
+    try:
+        insert_query = text("""
+            INSERT INTO document_usage (event_type, document_id, query, results_count, metadata, timestamp)
+            VALUES (:event_type, :document_id, :query, :results_count, :metadata, :timestamp)
+            RETURNING id
+        """)
+
+        result = db.execute(
+            insert_query,
+            {
+                "event_type": event_type,
+                "document_id": document_id,
+                "query": query,
+                "results_count": results_count,
+                "metadata": json.dumps(metadata) if metadata else None,
+                "timestamp": datetime.now()
+            }
+        )
+        db.commit()
+
+        event_id = result.fetchone()[0]
+        logger.info(f"✅ Usage event saved: id={event_id}, type={event_type}, doc_id={document_id}, query={query[:50] if query else 'N/A'}")
+
+        return {
+            "success": True,
+            "event_id": event_id,
+            "event_type": event_type,
+            "document_id": document_id,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error saving usage event: {e}")
+        # Fall back to just logging
+        logger.info(f"Usage event (not persisted): type={event_type}, doc_id={document_id}, query={query[:50] if query else 'N/A'}")
+        return {
+            "success": True,
+            "event_type": event_type,
+            "document_id": document_id,
+            "timestamp": datetime.now().isoformat()
+        }
+
+
 @router.post("/analytics/track", dependencies=[Depends(require_workspace_permission("documents:read"))])
-async def track_usage_event(
+def track_usage_event(
     event_type: str = Query(..., description="Event type (document_viewed, document_searched, chunk_retrieved, rag_query)"),
     document_id: Optional[int] = Query(None, description="Document ID (if applicable)"),
     query: Optional[str] = Query(None, description="Search query (if applicable)"),
@@ -1739,7 +1823,6 @@ async def track_usage_event(
     - rag_query: RAG context was built
     """
     try:
-        from datetime import datetime
         import json
         
         # Parse metadata if provided
@@ -1750,56 +1833,139 @@ async def track_usage_event(
             except Exception:
                 pass
         
-        # Create usage event record in document_usage table
-        try:
-            insert_query = text("""
-                INSERT INTO document_usage (event_type, document_id, query, results_count, metadata, timestamp)
-                VALUES (:event_type, :document_id, :query, :results_count, :metadata, :timestamp)
-                RETURNING id
-            """)
-            
-            result = db.execute(
-                insert_query,
-                {
-                    "event_type": event_type,
-                    "document_id": document_id,
-                    "query": query,
-                    "results_count": results_count,
-                    "metadata": json.dumps(metadata) if metadata else None,
-                    "timestamp": datetime.now()
-                }
-            )
-            db.commit()
-            
-            event_id = result.fetchone()[0]
-            logger.info(f"✅ Usage event saved: id={event_id}, type={event_type}, doc_id={document_id}, query={query[:50] if query else 'N/A'}")
-            
-            return {
-                "success": True,
-                "event_id": event_id,
-                "event_type": event_type,
-                "document_id": document_id,
-                "timestamp": datetime.now().isoformat()
-            }
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Error saving usage event: {e}")
-            # Fall back to just logging
-            logger.info(f"Usage event (not persisted): type={event_type}, doc_id={document_id}, query={query[:50] if query else 'N/A'}")
-            return {
-                "success": True,
-                "event_type": event_type,
-                "document_id": document_id,
-                "timestamp": datetime.now().isoformat()
-            }
-        
+        return _track_usage_event_save(db, event_type, document_id, query, metadata)
     except Exception as e:
         logger.error(f"Error tracking usage event: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _get_usage_analytics_start_time(period):
+    """Start of the analytics window for the requested period."""
+    from datetime import datetime, timedelta
+
+    # Parse period
+    if period == "24h":
+        start_time = datetime.now() - timedelta(hours=24)
+    elif period == "7d":
+        start_time = datetime.now() - timedelta(days=7)
+    elif period == "30d":
+        start_time = datetime.now() - timedelta(days=30)
+    else:
+        start_time = datetime.now() - timedelta(days=7)
+    return start_time
+
+
+def _get_usage_analytics_popular_docs(db, ctx):
+    """Most accessed completed documents in the workspace."""
+    # Get document access statistics
+    # For MVP, we'll calculate from existing document data
+
+    # Most accessed documents (by view count or recent activity)
+    popular_docs_query = text("""
+        SELECT
+            id,
+            filename,
+            file_type,
+            upload_date,
+            processed_date,
+            CASE
+                WHEN processed_date IS NOT NULL THEN 1
+                ELSE 0
+            END as access_count
+        FROM documents
+        WHERE status = 'completed'
+            AND workspace_id = :workspace_id
+        ORDER BY processed_date DESC NULLS LAST
+        LIMIT 10
+    """)
+
+    popular_docs_result = db.execute(popular_docs_query, {"workspace_id": str(ctx.workspace_id)})
+    popular_documents = [
+        {
+            "document_id": row.id,
+            "filename": row.filename,
+            "file_type": row.file_type,
+            "view_count": row.access_count
+        }
+        for row in popular_docs_result
+    ]
+    return popular_documents
+
+
+def _get_usage_analytics_events(db, ctx, start_time):
+    """Event counts and popular search terms from document_usage."""
+    # Get REAL event counts and search terms from document_usage table
+    popular_search_terms = []
+    usage_event_counts = {"rag_query": 0, "document_searched": 0, "chunk_retrieved": 0, "document_viewed": 0}
+    usage_total_events = 0
+    try:
+        # Count all event types in one query
+        event_counts_query = text("""
+            SELECT event_type, COUNT(*) as count
+            FROM document_usage
+            WHERE timestamp >= :start_time
+                AND metadata->>'workspace_id' = :workspace_id
+            GROUP BY event_type
+        """)
+        event_counts_result = db.execute(event_counts_query, {"start_time": start_time, "workspace_id": str(ctx.workspace_id)}).fetchall()
+        for row in event_counts_result:
+            usage_event_counts[row.event_type] = row.count
+            usage_total_events += row.count
+
+        # Popular search terms
+        search_terms_query = text("""
+            SELECT
+                metadata->>'query' as query,
+                COUNT(*) as count
+            FROM document_usage
+            WHERE event_type IN ('document_searched', 'rag_query')
+                AND timestamp >= :start_time
+                AND metadata->>'workspace_id' = :workspace_id
+                AND metadata->>'query' IS NOT NULL
+            GROUP BY metadata->>'query'
+            ORDER BY count DESC
+            LIMIT 10
+        """)
+
+        search_terms_result = db.execute(search_terms_query, {"start_time": start_time, "workspace_id": str(ctx.workspace_id)}).fetchall()
+        popular_search_terms = [
+            {"query": row.query, "count": row.count}
+            for row in search_terms_result
+        ]
+    except Exception as e:
+        # Table might not exist yet - that's OK for MVP
+        logger.debug(f"Could not get document_usage data (table might not exist): {e}")
+        db.rollback()  # Clear failed transaction
+    return popular_search_terms, usage_event_counts, usage_total_events
+
+
+def _get_usage_analytics_time_series(db, ctx, start_time):
+    """Documents uploaded per day since start_time."""
+    # Time series data (documents uploaded per day)
+    time_series_query = text("""
+        SELECT
+            DATE(upload_date) as date,
+            COUNT(*) as count
+        FROM documents
+        WHERE upload_date >= :start_time
+            AND workspace_id = :workspace_id
+        GROUP BY DATE(upload_date)
+        ORDER BY date
+    """)
+
+    time_series_result = db.execute(time_series_query, {"start_time": start_time, "workspace_id": str(ctx.workspace_id)})
+    time_series = [
+        {
+            "date": row.date.isoformat() if row.date else None,
+            "count": row.count
+        }
+        for row in time_series_result
+    ]
+    return time_series
+
+
 @router.get("/analytics/usage")
-async def get_usage_analytics(
+def get_usage_analytics(
     period: str = Query("7d", description="Time period (24h, 7d, 30d)"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -1817,49 +1983,8 @@ async def get_usage_analytics(
         from datetime import datetime, timedelta
         from sqlalchemy import text, func
         
-        # Parse period
-        if period == "24h":
-            start_time = datetime.now() - timedelta(hours=24)
-        elif period == "7d":
-            start_time = datetime.now() - timedelta(days=7)
-        elif period == "30d":
-            start_time = datetime.now() - timedelta(days=30)
-        else:
-            start_time = datetime.now() - timedelta(days=7)
-        
-        # Get document access statistics
-        # For MVP, we'll calculate from existing document data
-        
-        # Most accessed documents (by view count or recent activity)
-        popular_docs_query = text("""
-            SELECT
-                id,
-                filename,
-                file_type,
-                upload_date,
-                processed_date,
-                CASE
-                    WHEN processed_date IS NOT NULL THEN 1
-                    ELSE 0
-                END as access_count
-            FROM documents
-            WHERE status = 'completed'
-                AND workspace_id = :workspace_id
-            ORDER BY processed_date DESC NULLS LAST
-            LIMIT 10
-        """)
-        
-        popular_docs_result = db.execute(popular_docs_query, {"workspace_id": str(ctx.workspace_id)})
-        popular_documents = [
-            {
-                "document_id": row.id,
-                "filename": row.filename,
-                "file_type": row.file_type,
-                "view_count": row.access_count
-            }
-            for row in popular_docs_result
-        ]
-        
+        start_time = _get_usage_analytics_start_time(period)
+        popular_documents = _get_usage_analytics_popular_docs(db, ctx)
         # Get document statistics
         stats_query = text("""
             SELECT
@@ -1872,70 +1997,8 @@ async def get_usage_analytics(
 
         stats_result = db.execute(stats_query, {"start_time": start_time, "workspace_id": str(ctx.workspace_id)}).fetchone()
         
-        # Get REAL event counts and search terms from document_usage table
-        popular_search_terms = []
-        usage_event_counts = {"rag_query": 0, "document_searched": 0, "chunk_retrieved": 0, "document_viewed": 0}
-        usage_total_events = 0
-        try:
-            # Count all event types in one query
-            event_counts_query = text("""
-                SELECT event_type, COUNT(*) as count
-                FROM document_usage
-                WHERE timestamp >= :start_time
-                    AND metadata->>'workspace_id' = :workspace_id
-                GROUP BY event_type
-            """)
-            event_counts_result = db.execute(event_counts_query, {"start_time": start_time, "workspace_id": str(ctx.workspace_id)}).fetchall()
-            for row in event_counts_result:
-                usage_event_counts[row.event_type] = row.count
-                usage_total_events += row.count
-
-            # Popular search terms
-            search_terms_query = text("""
-                SELECT
-                    metadata->>'query' as query,
-                    COUNT(*) as count
-                FROM document_usage
-                WHERE event_type IN ('document_searched', 'rag_query')
-                    AND timestamp >= :start_time
-                    AND metadata->>'workspace_id' = :workspace_id
-                    AND metadata->>'query' IS NOT NULL
-                GROUP BY metadata->>'query'
-                ORDER BY count DESC
-                LIMIT 10
-            """)
-
-            search_terms_result = db.execute(search_terms_query, {"start_time": start_time, "workspace_id": str(ctx.workspace_id)}).fetchall()
-            popular_search_terms = [
-                {"query": row.query, "count": row.count}
-                for row in search_terms_result
-            ]
-        except Exception as e:
-            # Table might not exist yet - that's OK for MVP
-            logger.debug(f"Could not get document_usage data (table might not exist): {e}")
-            db.rollback()  # Clear failed transaction
-        
-        # Time series data (documents uploaded per day)
-        time_series_query = text("""
-            SELECT
-                DATE(upload_date) as date,
-                COUNT(*) as count
-            FROM documents
-            WHERE upload_date >= :start_time
-                AND workspace_id = :workspace_id
-            GROUP BY DATE(upload_date)
-            ORDER BY date
-        """)
-
-        time_series_result = db.execute(time_series_query, {"start_time": start_time, "workspace_id": str(ctx.workspace_id)})
-        time_series = [
-            {
-                "date": row.date.isoformat() if row.date else None,
-                "count": row.count
-            }
-            for row in time_series_result
-        ]
-        
+        popular_search_terms, usage_event_counts, usage_total_events = _get_usage_analytics_events(db, ctx, start_time)
+        time_series = _get_usage_analytics_time_series(db, ctx, start_time)
         return {
             "period": period,
             "start_time": start_time.isoformat(),
@@ -2043,7 +2106,7 @@ async def reprocess_all_documents(
 
 
 @router.get("/reprocess-status")
-async def get_reprocess_status(
+def get_reprocess_status(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -2105,7 +2168,7 @@ class _BulkTeamAccessUpdate(_BaseModel):
 
 
 @router.patch("/{document_id}/team-access", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def update_document_team_access(
+def update_document_team_access(
     document_id: int,
     body: _TeamAccessUpdate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -2144,7 +2207,7 @@ async def update_document_team_access(
 
 
 @router.post("/bulk-team-access", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def bulk_update_team_access(
+def bulk_update_team_access(
     body: _BulkTeamAccessUpdate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

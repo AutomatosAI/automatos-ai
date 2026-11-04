@@ -137,26 +137,8 @@ def _model_to_out(m: OpenRouterModelCache) -> OpenRouterModelOut:
 
 # ── Endpoints ─────────────────────────────────────────────────────────
 
-@router.get("/models", response_model=OpenRouterMarketplaceOut)
-async def browse_models(
-    provider: Optional[str] = Query(None, description="Filter by provider slug"),
-    category: Optional[str] = Query(None, description="fast, balanced, premium, coding, reasoning, vision, free"),
-    tier: Optional[str] = Query(None, description="free, budget, mid, premium"),
-    modality: Optional[str] = Query(None, description="Filter by modality substring"),
-    supports_tools: Optional[bool] = Query(None),
-    supports_vision: Optional[bool] = Query(None),
-    supports_reasoning: Optional[bool] = Query(None),
-    min_context: Optional[int] = Query(None, description="Minimum context window"),
-    max_prompt_cost: Optional[float] = Query(None, description="Max prompt cost per token"),
-    search: Optional[str] = Query(None, description="Search name, model_id, or description"),
-    sort_by: Optional[str] = Query("popularity", description="cost|context|name|newest"),
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    """Browse OpenRouter models from local cache with rich filters."""
-
+def _browse_models_query(db, provider, category, tier, modality, supports_tools, supports_vision, supports_reasoning, min_context, max_prompt_cost, search):
+    """Active cached models narrowed by the browse filters."""
     q = db.query(OpenRouterModelCache).filter(OpenRouterModelCache.status == "active")
 
     # Filters
@@ -185,9 +167,11 @@ async def browse_models(
             OpenRouterModelCache.model_id.ilike(pattern),
             OpenRouterModelCache.description.ilike(pattern),
         ))
+    return q
 
-    total = q.count()
 
+def _browse_models_sort(q, sort_by):
+    """Apply the requested sort order."""
     # Sort
     if sort_by == "cost":
         q = q.order_by(OpenRouterModelCache.prompt_cost.asc())
@@ -199,7 +183,33 @@ async def browse_models(
         q = q.order_by(OpenRouterModelCache.created_timestamp.desc().nullslast())
     else:  # popularity / default
         q = q.order_by(OpenRouterModelCache.context_length.desc())
+    return q
 
+
+@router.get("/models", response_model=OpenRouterMarketplaceOut)
+def browse_models(
+    provider: Optional[str] = Query(None, description="Filter by provider slug"),
+    category: Optional[str] = Query(None, description="fast, balanced, premium, coding, reasoning, vision, free"),
+    tier: Optional[str] = Query(None, description="free, budget, mid, premium"),
+    modality: Optional[str] = Query(None, description="Filter by modality substring"),
+    supports_tools: Optional[bool] = Query(None),
+    supports_vision: Optional[bool] = Query(None),
+    supports_reasoning: Optional[bool] = Query(None),
+    min_context: Optional[int] = Query(None, description="Minimum context window"),
+    max_prompt_cost: Optional[float] = Query(None, description="Max prompt cost per token"),
+    search: Optional[str] = Query(None, description="Search name, model_id, or description"),
+    sort_by: Optional[str] = Query("popularity", description="cost|context|name|newest"),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Browse OpenRouter models from local cache with rich filters."""
+
+    q = _browse_models_query(db, provider, category, tier, modality, supports_tools, supports_vision, supports_reasoning, min_context, max_prompt_cost, search)
+    total = q.count()
+
+    q = _browse_models_sort(q, sort_by)
     models = q.offset(offset).limit(limit).all()
 
     # Provider counts for filter chips
@@ -228,7 +238,7 @@ async def browse_models(
 
 
 @router.get("/providers")
-async def list_providers(
+def list_providers(
     db: Session = Depends(get_db),
 ):
     """List all providers with model counts."""
@@ -243,7 +253,7 @@ async def list_providers(
 
 
 @router.get("/stats", response_model=OpenRouterStatsOut)
-async def stats(
+def stats(
     db: Session = Depends(get_db),
 ):
     """Get cache statistics."""
@@ -289,7 +299,7 @@ async def stats(
 
 
 @router.post("/sync", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def sync(
+def sync(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -305,7 +315,7 @@ async def sync(
 
 
 @router.get("/sync/history")
-async def sync_history(
+def sync_history(
     limit: int = Query(10, ge=1, le=50),
     db: Session = Depends(get_db),
 ):

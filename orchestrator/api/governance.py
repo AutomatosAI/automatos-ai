@@ -112,7 +112,7 @@ def _retention_status() -> Dict[str, Any]:
 
 
 @router.get("/audit-log")
-async def get_audit_log(
+def get_audit_log(
     action_prefix: Optional[str] = None,
     actor_type: Optional[str] = None,
     resource_type: Optional[str] = None,
@@ -155,7 +155,7 @@ async def get_audit_log(
 
 
 @router.get("/status")
-async def get_status(
+def get_status(
     ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -205,7 +205,7 @@ async def get_status(
 # ===========================================================================
 
 @router.get("/policy")
-async def get_policy(
+def get_policy(
     ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -215,7 +215,7 @@ async def get_policy(
 
 
 @router.put("/policy")
-async def put_policy(
+def put_policy(
     body: Dict[str, Any] = Body(default_factory=dict),
     ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),
@@ -248,7 +248,7 @@ async def put_policy(
 
 
 @router.get("/budget")
-async def get_budget(
+def get_budget(
     ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -258,7 +258,7 @@ async def get_budget(
 
 
 @router.put("/budget")
-async def put_budget(
+def put_budget(
     body: Dict[str, Any] = Body(default_factory=dict),
     ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),

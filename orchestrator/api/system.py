@@ -48,7 +48,7 @@ def _validate_system_config_value(config_key: str, config_value: Any) -> None:
 
 # System Configuration endpoints
 @router.post("/config", response_model=SystemConfigResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def create_system_config(config_data: SystemConfigCreate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def create_system_config(config_data: SystemConfigCreate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Create or update system configuration"""
     try:
         _validate_system_config_value(config_data.config_key, config_data.config_value)
@@ -96,7 +96,7 @@ async def create_system_config(config_data: SystemConfigCreate, ctx: RequestCont
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/config", response_model=List[SystemConfigResponse])
-async def list_system_configs(
+def list_system_configs(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
@@ -139,7 +139,7 @@ async def list_system_configs(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/config/{config_key}", response_model=SystemConfigResponse)
-async def get_system_config(config_key: str, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def get_system_config(config_key: str, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get system configuration by key. Returns empty default if not yet created."""
     try:
         config = db.query(SystemConfiguration).filter(
@@ -176,7 +176,7 @@ async def get_system_config(config_key: str, ctx: RequestContext = Depends(get_r
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.put("/config/{config_key}", response_model=SystemConfigResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def update_system_config(
+def update_system_config(
     config_key: str, 
     config_data: SystemConfigCreate, 
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -226,7 +226,7 @@ async def update_system_config(
 
 # RAG Configuration endpoints
 @router.post("/rag", response_model=RAGConfigResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def create_rag_config(rag_data: RAGConfigCreate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def create_rag_config(rag_data: RAGConfigCreate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Create RAG configuration"""
     try:
         rag_config = RAGConfiguration(
@@ -269,7 +269,7 @@ async def create_rag_config(rag_data: RAGConfigCreate, ctx: RequestContext = Dep
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/rag", response_model=List[RAGConfigResponse])
-async def list_rag_configs(
+def list_rag_configs(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
@@ -308,7 +308,7 @@ async def list_rag_configs(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/rag/{config_id}", response_model=RAGConfigResponse)
-async def get_rag_config(config_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def get_rag_config(config_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get RAG configuration by ID"""
     try:
         config = db.query(RAGConfiguration).filter(RAGConfiguration.id == config_id).first()
@@ -366,7 +366,7 @@ async def test_rag_config(
 
 # System Health endpoints
 @router.get("/health", response_model=SystemHealthResponse)
-async def get_system_health(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def get_system_health(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get system health status. The component checks live in ``api.system_health_checks``."""
     try:
         # #1100: interval=None is non-blocking — it reports the CPU use since
@@ -462,7 +462,7 @@ async def get_agent_types(ctx: RequestContext = Depends(get_request_context_hybr
     }
 
 @router.get("/agent-statistics")
-async def get_item(
+def get_item(
     ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get comprehensive agent statistics"""
     try:
@@ -491,7 +491,7 @@ async def get_item(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/agent/{agent_id}/status")
-async def get_agent_status(
+def get_agent_status(
     agent_id: int, 
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -523,7 +523,7 @@ async def get_agent_status(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/agent/{agent_id}/execute", dependencies=[Depends(require_workspace_permission("agents:execute"))])
-async def execute_agent(
+def execute_agent(
     agent_id: int, 
     execution_data: dict = {}, 
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -561,7 +561,7 @@ async def execute_agent(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/performance-baseline")
-async def get_performance_baseline(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def get_performance_baseline(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """
     ## 📊 Get Performance Baseline
     
@@ -589,7 +589,7 @@ async def get_performance_baseline(ctx: RequestContext = Depends(get_request_con
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/learning-state/update", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def update_learning_state(
+def update_learning_state(
     request: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -620,7 +620,7 @@ async def update_learning_state(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/performance-test", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def run_performance_test(
+def run_performance_test(
     request: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -666,7 +666,7 @@ async def run_performance_test(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/performance-comparison")
-async def get_performance_comparison(
+def get_performance_comparison(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     baseline_date: Optional[str] = None,
     db: Session = Depends(get_db)

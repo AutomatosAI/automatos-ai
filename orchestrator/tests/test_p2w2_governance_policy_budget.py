@@ -99,18 +99,17 @@ def workspace(engine, new_session):
 def test_put_policy_rejects_invalid_posture(new_session, workspace):
     s = new_session()
     with pytest.raises(HTTPException) as ei:
-        asyncio.run(gov.put_policy(body={"posture": "reckless"}, ctx=_ctx(workspace), db=s))
+        gov.put_policy(body={"posture": "reckless"}, ctx=_ctx(workspace), db=s)
     assert ei.value.status_code == 422
     # nothing persisted — GET still reports the Balanced default
-    got = asyncio.run(gov.get_policy(ctx=_ctx(workspace), db=s))
+    got = gov.get_policy(ctx=_ctx(workspace), db=s)
     assert got["posture"] == "balanced"
     s.close()
 
 
 def test_put_policy_roundtrip(new_session, workspace):
     s = new_session()
-    asyncio.run(
-        gov.put_policy(
+    gov.put_policy(
             body={
                 "posture": "strict",
                 "agents_inherit_admin": True,
@@ -119,8 +118,7 @@ def test_put_policy_roundtrip(new_session, workspace):
             ctx=_ctx(workspace),
             db=s,
         )
-    )
-    got = asyncio.run(gov.get_policy(ctx=_ctx(workspace), db=s))
+    got = gov.get_policy(ctx=_ctx(workspace), db=s)
     assert got["posture"] == "strict"
     assert got["agents_inherit_admin"] is True
     assert got["route_overrides"] == {"external_side_effect": "auto"}
@@ -133,22 +131,20 @@ def test_put_budget_validates_keys_and_lands_under_plan_limits(new_session, work
     s = new_session()
     # unknown key → 422
     with pytest.raises(HTTPException) as ei:
-        asyncio.run(gov.put_budget(body={"max_cost_usd": 10, "bogus": 1}, ctx=_ctx(workspace), db=s))
+        gov.put_budget(body={"max_cost_usd": 10, "bogus": 1}, ctx=_ctx(workspace), db=s)
     assert ei.value.status_code == 422
 
     # negative ceiling → 422 (set_budget's ValueError)
     with pytest.raises(HTTPException) as ei2:
-        asyncio.run(gov.put_budget(body={"max_cost_usd": -3}, ctx=_ctx(workspace), db=s))
+        gov.put_budget(body={"max_cost_usd": -3}, ctx=_ctx(workspace), db=s)
     assert ei2.value.status_code == 422
 
     # valid budget lands under plan_limits.budget exactly
-    asyncio.run(
-        gov.put_budget(
+    gov.put_budget(
             body={"max_cost_usd": 25.0, "max_total_tokens": 5_000_000, "window": "day"},
             ctx=_ctx(workspace),
             db=s,
         )
-    )
     row = s.execute(
         text("SELECT plan_limits FROM workspaces WHERE id = CAST(:id AS uuid)"),
         {"id": workspace},

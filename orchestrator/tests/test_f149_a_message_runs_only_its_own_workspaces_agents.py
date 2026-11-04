@@ -200,7 +200,7 @@ def test_the_rest_rule_refuses_another_workspaces_playbook(cafes):
 
     body = routing.CreateRuleRequest(source_pattern="webhook", target_workflow_id=cafes.their_playbook)
     with pytest.raises(HTTPException) as refused:
-        asyncio.run(routing.create_rule(body=body, ctx=NS(workspace_id=cafes.ours), db=cafes.db))
+        routing.create_rule(body=body, ctx=NS(workspace_id=cafes.ours), db=cafes.db)
     assert (refused.value.status_code, refused.value.detail) == (400, "target_workflow_id is not a playbook of this workspace")
 
 
@@ -235,7 +235,7 @@ def test_an_api_key_is_locked_only_to_its_own_workspaces_agent(cafes):
     body = api_keys.ApiKeyCreateRequest(name="till", key_type="server", permissions=["chat"],
                                         default_agent_id=cafes.their_agent)
     with pytest.raises(HTTPException) as refused:
-        asyncio.run(api_keys.create_api_key(body=body, ctx=NS(workspace_id=cafes.ours), db=cafes.db))
+        api_keys.create_api_key(body=body, ctx=NS(workspace_id=cafes.ours), db=cafes.db)
     assert (refused.value.status_code, refused.value.detail) == (400, "default_agent_id is not an agent of this workspace")
 
 
@@ -253,18 +253,18 @@ def test_a_trigger_subscription_names_only_this_workspaces_targets(cafes, surfac
     if surface == "routing":
         import api.routing as routing
 
-        call = lambda: routing.setup_trigger(body=routing.TriggerSetupRequest(agent_id=cafes.their_agent),
-                                             ctx=NS(workspace_id=cafes.ours), db=cafes.db)
+        def call():
+            return routing.setup_trigger(body=routing.TriggerSetupRequest(agent_id=cafes.their_agent),
+                                         ctx=NS(workspace_id=cafes.ours), db=cafes.db)
     else:
         import api.composio as composio
 
-        call = lambda: composio.subscribe_to_trigger(
-            request=composio.TriggerSubscriptionRequest(trigger_name="JIRA_NEW_ISSUE_TRIGGER", agent_id=cafes.their_agent),
-            ctx=NS(workspace_id=cafes.ours), db=cafes.db)
+        def call():
+            return composio.subscribe_to_trigger(
+                request=composio.TriggerSubscriptionRequest(trigger_name="JIRA_NEW_ISSUE_TRIGGER", agent_id=cafes.their_agent),
+                ctx=NS(workspace_id=cafes.ours), db=cafes.db)
     with pytest.raises(HTTPException) as refused:
-        pending = call()
-        if asyncio.iscoroutine(pending):  # the routing surface may still be a coroutine route
-            asyncio.run(pending)
+        call()
     assert (refused.value.status_code, refused.value.detail) == (400, "agent_id is not an agent of this workspace")
 
 
