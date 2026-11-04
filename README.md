@@ -4,7 +4,7 @@
 
 ### The open-source AI Operating System
 
-**Run a workforce of AI agents on your own machine — any model, 1,000+ tools, one Knowledge Graph, and Auto to run it all.**
+**Run a workforce of AI agents on your own machine — any model, 1,500+ tools, one Knowledge Graph, and Auto to run it all.**
 
 [![GitHub stars](https://img.shields.io/github/stars/AutomatosAI/automatos-ai?style=flat&logo=github)](https://github.com/AutomatosAI/automatos-ai/stargazers)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
@@ -37,7 +37,7 @@ Most agent frameworks give you a library. Automatos gives you the whole machine:
 | Programs | **Playbooks** — reusable multi-step automations; **Missions** coordinate agents on a goal |
 | A task manager | **Command Center** — the board, the calendar, live agent status and reports |
 | A file system | **Deliverables** and **Knowledge** — RAG over your documents plus a Knowledge Graph |
-| Drivers | **1,000+ tool integrations** through Composio and **400+ models** through one provider registry |
+| Drivers | **1,500+ tools** through Composio and **600+ models across 7+ providers** through one provider registry |
 | An app store | **Marketplace** — ready-made agents, Playbooks, packages, skills and plugins: 100+ agents, 20+ Playbooks, 400+ skills and 70+ plugins in the hosted Studio marketplace; 14 agent templates, 5 Playbooks and 3 packages in a fresh local install, plus the open library of 140+ skills to import |
 
 ## One codebase, two editions
@@ -50,7 +50,7 @@ Most agent frameworks give you a library. Automatos gives you the whole machine:
 The edition is a runtime flag (`AUTH_EDITION=local|saas`). Product capability is not gated: every agent, tool, Playbook, Mission and Deliverable feature in the code runs in the local edition. Session mode (your own Claude Code as an agent runtime) is local-only by design.
 
 <p align="center">
-  <strong>Marketplace agents &middot; Composio tool integrations (bring your own key) &middot; 400+ LLMs through OpenRouter, direct keys, or NVIDIA for free &middot; Your own Claude Code as an agent &middot; Reusable skills</strong>
+  <strong>Marketplace agents &middot; 1,500+ Composio tool integrations (bring your own key) &middot; 600+ LLMs across 7+ providers through OpenRouter, direct keys, or NVIDIA for free &middot; Your own Claude Code as an agent &middot; Reusable skills</strong>
 </p>
 
 <br>
@@ -137,9 +137,9 @@ Session mode turns your Claude Code subscription into an agent runtime — witho
 
 <br>
 
-## 1,000+ tool integrations
+## 1,500+ tool integrations
 
-Connect your agents to GitHub, Slack, Jira, Stripe, Shopify, Datadog, Notion, HubSpot, and a thousand more through the Composio catalogue. Browse, install, and assign integrations to specific agents from a single dashboard — no glue code, no per-tool SDKs. In the local edition this needs your own `COMPOSIO_API_KEY`; without one the Tools page says so and the native platform tools keep working.
+Connect your agents to GitHub, Slack, Jira, Stripe, Shopify, Datadog, Notion, HubSpot, and 1,500+ more through the Composio catalogue. Browse, install, and assign integrations to specific agents from a single dashboard — no glue code, no per-tool SDKs. In the local edition this needs your own `COMPOSIO_API_KEY`; without one the Tools page says so and the native platform tools keep working.
 
 <p align="center">
   <img src="docs/assets/03-Marketplace-tools.png" alt="Community Marketplace" width="800">
