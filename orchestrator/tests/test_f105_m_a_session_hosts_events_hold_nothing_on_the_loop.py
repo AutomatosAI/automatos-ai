@@ -220,8 +220,9 @@ def test_the_shared_ask_internals_answer_as_before_with_the_transaction_ended_be
                    "Move on to other work — the answer will resume it.",
     }
     assert (park.status, park.blocked_reason) == ("blocked", f"Awaiting human answer (ask #{question.id})")
-    # filed, parked and committed; the count's read ended; the Telegram reference kept
-    assert seen.db.names() == ["add", "flush", "commit", "cascade counted", "rollback", "commit"]
+    # filed, parked and committed; the count's read ended with a commit (end_open_transaction:
+    # a rollback would discard an outer transaction the caller joined); the Telegram reference kept
+    assert seen.db.names() == ["add", "flush", "commit", "cascade counted", "commit", "commit"]
     assert loop not in seen.db.threads()
     assert _sends_saw(seen) == [("bell", False), ("telegram", False)]
     assert question.channel_refs == TELEGRAM
