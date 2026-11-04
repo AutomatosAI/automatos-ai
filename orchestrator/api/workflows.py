@@ -1173,8 +1173,20 @@ async def cancel_execution(execution_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _hand_back_the_connection(db: Session) -> None:
+    """F105: a stream route is done with the database once it has checked the execution.
+
+    The streams below read no database, but FastAPI closes the request's ``get_db``
+    session (the permission check's too) only when the response ends, so its pooled
+    connection sat idle in transaction for as long as the stream stayed open. Ending the
+    transaction gives it back now; ``get_db`` still closes the session afterwards. The
+    routes are plain ``def``s (threadpool), so this runs off the event loop.
+    """
+    db.rollback()
+
+
 @router.get("/executions/{execution_id}/stream")
-async def stream_execution_updates(execution_id: int, db: Session = Depends(get_db)):
+def stream_execution_updates(execution_id: int, db: Session = Depends(get_db)):
     """
     SSE stream for real-time workflow execution updates (PRD-28).
     
@@ -1201,7 +1213,8 @@ async def stream_execution_updates(execution_id: int, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail="Execution not found")
     
     logger.info(f"🚀 Starting SSE stream for execution {execution_id}")
-    
+    _hand_back_the_connection(db)
+
     try:
         from consumers.workflows.streaming import stream_workflow_execution
         
@@ -1221,7 +1234,7 @@ async def stream_execution_updates(execution_id: int, db: Session = Depends(get_
 
 
 @router.get("/executions/{execution_id}/stream/aisdk")
-async def stream_execution_aisdk(execution_id: int, db: Session = Depends(get_db)):
+def stream_execution_aisdk(execution_id: int, db: Session = Depends(get_db)):
     """
     AI SDK stream for real-time workflow execution updates.
     
@@ -1256,6 +1269,7 @@ async def stream_execution_aisdk(execution_id: int, db: Session = Depends(get_db
         )
 
     logger.info(f"🚀 Starting AI SDK stream for execution {execution_id} (status: {execution.status})")
+    _hand_back_the_connection(db)
 
     try:
         from consumers.workflows.streaming import stream_workflow_as_aisdk
@@ -1278,7 +1292,7 @@ async def stream_execution_aisdk(execution_id: int, db: Session = Depends(get_db
 
 
 @router.post("/stream", dependencies=[Depends(require_workspace_permission("missions:execute"))])
-async def stream_workflow_chat(request: Dict[str, Any] = Body(...), db: Session = Depends(get_db)):
+def stream_workflow_chat(request: Dict[str, Any] = Body(...), db: Session = Depends(get_db)):
     """
     AI SDK compatible streaming endpoint for useChat hook.
     
@@ -1324,6 +1338,7 @@ async def stream_workflow_chat(request: Dict[str, Any] = Body(...), db: Session 
         )
 
     logger.info(f"🚀 Starting AI SDK chat stream for execution {execution_id} (status: {execution.status})")
+    _hand_back_the_connection(db)
 
     try:
         from consumers.workflows.streaming import stream_workflow_as_aisdk
