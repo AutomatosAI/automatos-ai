@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/cache", tags=["cache"])
 
 
 @router.get("/stats")
-async def get_cache_stats(
+def get_cache_stats(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -58,7 +58,7 @@ async def get_cache_stats(
 
 
 @router.post("/clear/{namespace}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def clear_cache_namespace(
+def clear_cache_namespace(
     namespace: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -99,7 +99,7 @@ async def clear_cache_namespace(
 
 
 @router.post("/invalidate/cloud/{connection_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def invalidate_cloud_cache(
+def invalidate_cloud_cache(
     connection_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
