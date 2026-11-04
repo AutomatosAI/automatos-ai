@@ -567,9 +567,73 @@ def create_workflow_recipe(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _update_workflow_recipe_fields(recipe: WorkflowRecipe, recipe_id: str, recipe_data: Dict[str, Any],
+                                   db: Session, ctx: RequestContext) -> None:
+    """Set the edit's fields on the recipe, validating steps, execution and schedule as they change."""
+    # Ensure webhook_id in schedule_config for trigger/webhook types
+    if 'schedule_config' in recipe_data:
+        sc = recipe_data['schedule_config']
+        if sc and sc.get('type') in ('trigger', 'webhook') and 'webhook_id' not in sc:
+            # Preserve existing webhook_id on update — generating a new one
+            # breaks any external automation (JIRA, GitHub, etc.) already
+            # configured to POST to the old URL.
+            existing_wh = (recipe.schedule_config or {}).get('webhook_id')
+            sc['webhook_id'] = existing_wh or uuid4().hex
+
+    # Update fields if provided
+    updatable_fields = [
+        'name', 'description', 'tags',
+        'template_definition', 'steps', 'inputs', 'outputs',
+        'execution_config', 'schedule_config',
+        'recommended_agents', 'required_tools',
+        'is_public', 'is_featured',
+        'preview_image', 'documentation_url', 'version', 'changelog'
+    ]
+
+    for field in updatable_fields:
+        if field in recipe_data:
+            setattr(recipe, field, recipe_data[field])
+
+    # Validate steps if updated
+    if 'steps' in recipe_data:
+        is_valid, error = recipe.validate_steps()
+        if not is_valid:
+            logger.warning(f"[update_recipe] Steps validation failed for {recipe_id}: {error}")
+            raise HTTPException(status_code=400, detail=f"Invalid steps: {error}")
+
+        _check_step_agents(db, ctx.workspace_id, recipe.steps)
+
+    # Validate execution_config if updated
+    if 'execution_config' in recipe_data:
+        is_valid, error = recipe.validate_execution_config()
+        if not is_valid:
+            logger.warning(f"[update_recipe] execution_config validation failed for {recipe_id}: {error} | data: {recipe_data.get('execution_config')}")
+            raise HTTPException(status_code=400, detail=f"Invalid execution_config: {error}")
+
+    # Validate schedule_config if updated
+    if 'schedule_config' in recipe_data:
+        _explicit_schedule(recipe, db, ctx.workspace_id)
+
+
+def _update_workflow_recipe_trigger(recipe: WorkflowRecipe, db: Session, ctx: RequestContext) -> None:
+    """Register the edited schedule's trigger; old subscriptions go only once the new one exists."""
+    new_sub_id = _auto_register_trigger(recipe, ctx.workspace_id, db)
+    if new_sub_id:
+        # New subscription created — deactivate old ones (except the new one)
+        _cleanup_trigger_subscriptions(recipe.id, db)
+        # Re-activate the newly created one (cleanup may have caught it)
+        new_sub = db.query(TriggerSubscription).filter(
+            TriggerSubscription.composio_subscription_id == new_sub_id,
+            TriggerSubscription.workflow_id == recipe.id,
+        ).first()
+        if new_sub:
+            new_sub.is_active = True
+    db.commit()
+
+
 @router.put("/{recipe_id}", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
 @edits_it_by_number_too  # F292: by the number the list shows, steps as the read gives them
-async def update_workflow_recipe(
+def update_workflow_recipe(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     recipe_data: Dict[str, Any] = Body(...),
@@ -597,49 +661,7 @@ async def update_workflow_recipe(
                 detail="System recipes cannot be modified"
             )
 
-        # Ensure webhook_id in schedule_config for trigger/webhook types
-        if 'schedule_config' in recipe_data:
-            sc = recipe_data['schedule_config']
-            if sc and sc.get('type') in ('trigger', 'webhook') and 'webhook_id' not in sc:
-                # Preserve existing webhook_id on update — generating a new one
-                # breaks any external automation (JIRA, GitHub, etc.) already
-                # configured to POST to the old URL.
-                existing_wh = (recipe.schedule_config or {}).get('webhook_id')
-                sc['webhook_id'] = existing_wh or uuid4().hex
-
-        # Update fields if provided
-        updatable_fields = [
-            'name', 'description', 'tags',
-            'template_definition', 'steps', 'inputs', 'outputs',
-            'execution_config', 'schedule_config',
-            'recommended_agents', 'required_tools',
-            'is_public', 'is_featured',
-            'preview_image', 'documentation_url', 'version', 'changelog'
-        ]
-
-        for field in updatable_fields:
-            if field in recipe_data:
-                setattr(recipe, field, recipe_data[field])
-
-        # Validate steps if updated
-        if 'steps' in recipe_data:
-            is_valid, error = recipe.validate_steps()
-            if not is_valid:
-                logger.warning(f"[update_recipe] Steps validation failed for {recipe_id}: {error}")
-                raise HTTPException(status_code=400, detail=f"Invalid steps: {error}")
-
-            _check_step_agents(db, ctx.workspace_id, recipe.steps)
-
-        # Validate execution_config if updated
-        if 'execution_config' in recipe_data:
-            is_valid, error = recipe.validate_execution_config()
-            if not is_valid:
-                logger.warning(f"[update_recipe] execution_config validation failed for {recipe_id}: {error} | data: {recipe_data.get('execution_config')}")
-                raise HTTPException(status_code=400, detail=f"Invalid execution_config: {error}")
-
-        # Validate schedule_config if updated
-        if 'schedule_config' in recipe_data:
-            _explicit_schedule(recipe, db, ctx.workspace_id)
+        _update_workflow_recipe_fields(recipe, recipe_id, recipe_data, db, ctx)
 
         recipe.updated_at = datetime.now()
         db.commit()
@@ -648,18 +670,7 @@ async def update_workflow_recipe(
         # Re-register trigger if schedule_config changed
         # Only deactivate old subscriptions if new registration succeeds
         if 'schedule_config' in recipe_data:
-            new_sub_id = _auto_register_trigger(recipe, ctx.workspace_id, db)
-            if new_sub_id:
-                # New subscription created — deactivate old ones (except the new one)
-                _cleanup_trigger_subscriptions(recipe.id, db)
-                # Re-activate the newly created one (cleanup may have caught it)
-                new_sub = db.query(TriggerSubscription).filter(
-                    TriggerSubscription.composio_subscription_id == new_sub_id,
-                    TriggerSubscription.workflow_id == recipe.id,
-                ).first()
-                if new_sub:
-                    new_sub.is_active = True
-            db.commit()
+            _update_workflow_recipe_trigger(recipe, db, ctx)
 
         # Sync cron scheduler
         _sync_cron_schedule(recipe)

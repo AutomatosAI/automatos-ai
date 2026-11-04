@@ -14,7 +14,6 @@ save leaves the stored schedule and the scheduler's job as they were.
 """
 from __future__ import annotations
 
-import asyncio
 import uuid
 from types import SimpleNamespace as NS
 
@@ -46,7 +45,7 @@ def _owner(ws):
 def _save(ws, new_session, template_id, data):
     from api.workflow_recipes import update_workflow_recipe
 
-    return asyncio.run(update_workflow_recipe(template_id, ctx=_owner(ws), recipe_data=data, db=new_session()))
+    return update_workflow_recipe(template_id, ctx=_owner(ws), recipe_data=data, db=new_session())
 
 
 def _stored(new_session, recipe_id):

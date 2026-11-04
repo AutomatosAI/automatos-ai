@@ -2063,7 +2063,7 @@ async def _reprocess_workspace(workspace_id: str) -> None:
 
 
 @router.post("/reprocess-all", dependencies=[Depends(require_workspace_permission("documents:update"))])
-async def reprocess_all_documents(
+def reprocess_all_documents(
     background_tasks: BackgroundTasks,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
