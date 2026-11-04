@@ -830,19 +830,26 @@ async def render_social_post(
 
 
 @router.get("/posts/{post_id}/media/{file_name}")
-async def get_social_post_media(
+def get_social_post_media(  # a plain def (F105): the lookup and the storage open are synchronous
     post_id: UUID,
     file_name: str,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
-    """A rendered file of the caller's post, streamed from storage (D9)."""
+    """A rendered file of the caller's post, streamed from storage (D9).
+
+    F105: the post's lookup is the request's last use of the database, so its transaction
+    ends before the file streams. FastAPI closes the ``get_db`` session (the Socials gate's
+    too) only when the response ends: a long video held a pooled connection idle in
+    transaction for the whole download.
+    """
     post = _load(db, ctx, post_id)
     if not media_store.valid_file_name(file_name):
         raise HTTPException(status_code=404, detail=MEDIA_NOT_FOUND)
     key = media_store.media_key(post.workspace_id, post.id, file_name)
+    db.rollback()
     try:
-        stored = await asyncio.to_thread(media_store.MediaStore().open, key)
+        stored = media_store.MediaStore().open(key)
     except Exception as exc:  # noqa: BLE001 — storage is down: say so, never a 500 trace
         logger.error("[Socials] opening %s failed: %s", key, exc, exc_info=True)
         raise HTTPException(status_code=503, detail=MEDIA_STORAGE_UNAVAILABLE) from exc
