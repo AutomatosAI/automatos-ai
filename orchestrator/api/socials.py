@@ -647,7 +647,7 @@ async def create_social_post(
 
 
 @router.get("/posts/{post_id}")
-async def get_social_post(
+def get_social_post(
     post_id: UUID,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -684,7 +684,7 @@ async def update_social_post(
 
 
 @router.post("/posts/{post_id}/submit", dependencies=[CAN_UPDATE])
-async def submit_social_post(
+def submit_social_post(
     post_id: UUID,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -727,7 +727,7 @@ def approve_social_post(  # a plain def (F105): it awaits nothing, and its write
 
 
 @router.post("/posts/{post_id}/request-changes", dependencies=[CAN_REVIEW])
-async def request_changes_social_post(
+def request_changes_social_post(
     post_id: UUID,
     body: RequestChangesRequest,
     db: Session = Depends(get_db),
@@ -743,7 +743,7 @@ async def request_changes_social_post(
 
 
 @router.post("/posts/{post_id}/reject", dependencies=[CAN_REVIEW])
-async def reject_social_post(
+def reject_social_post(
     post_id: UUID,
     body: Optional[RejectRequest] = None,
     db: Session = Depends(get_db),
@@ -760,7 +760,7 @@ async def reject_social_post(
 
 
 @router.post("/posts/{post_id}/schedule", dependencies=[CAN_UPDATE])
-async def schedule_social_post(
+def schedule_social_post(
     post_id: UUID,
     body: ScheduleRequest,
     db: Session = Depends(get_db),
@@ -776,7 +776,7 @@ async def schedule_social_post(
 
 
 @router.post("/posts/{post_id}/unschedule", dependencies=[CAN_UPDATE])
-async def unschedule_social_post(
+def unschedule_social_post(
     post_id: UUID,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -885,7 +885,7 @@ def list_social_post_media(
 
 
 @router.get("/usage")
-async def get_socials_usage(
+def get_socials_usage(
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
@@ -959,7 +959,7 @@ async def list_social_footage_sources(
 
 
 @router.get("/sources", dependencies=[CAN_READ_SOURCES])
-async def search_social_sources(
+def search_social_sources(
     kind: Optional[str] = Query(None, description="deliverable, report, document, url or metric; every kind when omitted"),
     q: Optional[str] = Query(None, max_length=post_sources.SEARCH_QUERY_MAX_CHARS),
     limit: int = Query(post_sources.SEARCH_DEFAULT_LIMIT, ge=1, le=post_sources.SEARCH_MAX_LIMIT),
