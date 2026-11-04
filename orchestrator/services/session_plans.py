@@ -23,9 +23,10 @@ guesses whether a resumed session already presented its plan.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from core.models.approval_grants import SUBJECT_BOARD_TASK
 from core.models.core import Agent, BoardTask
@@ -155,16 +156,26 @@ async def raise_session_plan(
 
     Returns the ``runtime_ref`` the caller continues with — the one it came in with
     when filing fails: the flush must still reach the host, and the plan is still
-    the turn's final message and its plan.md."""
+    the turn's final message and its plan.md.
+
+    F105: the session host's event route raises it, so every step over the session runs
+    in the threadpool, and the card's bell and Telegram message go out with the
+    request's transaction ended (``handlers_asks.stage_question``)."""
     event = _plan_event(events)
     if event is None or any(p.get("attempt") == ref.get("attempt") for p in session_plans(ref)):
         return ref
     try:
         return await _record_plan(db, task, ref, event)
-    except Exception:  # noqa: BLE001 — never break the flush over the Plan card
-        logger.error("[cli-host] the plan of ticket #%s was not filed this flush", task.id, exc_info=True)
-        db.rollback()
+    except Exception as failure:  # noqa: BLE001 — never break the flush over the Plan card
+        await run_in_threadpool(_plan_not_filed, db, task, failure)
         return ref
+
+
+def _plan_not_filed(db: Session, task: BoardTask, failure: BaseException) -> None:
+    """A flush whose Plan card failed: said, and its transaction rolled back (in the
+    threadpool, F105: naming the ticket may read its row)."""
+    logger.error("[cli-host] the plan of ticket #%s was not filed this flush", task.id, exc_info=failure)
+    db.rollback()
 
 
 async def _record_plan(db: Session, task: BoardTask, ref: Dict[str, Any], event: Dict[str, Any]) -> Dict[str, Any]:
@@ -176,7 +187,7 @@ async def _record_plan(db: Session, task: BoardTask, ref: Dict[str, Any], event:
         entry = {**entry, "answer": PLAN_APPROVE, "answered_at": now, "folded_at": now, "approved_in_turn": True}
     else:
         entry = {**entry, "grant_id": await _file_plan_card(db, task, entry)}
-    return _append_plan(db, task, entry)
+    return await run_in_threadpool(_append_plan, db, task, entry)
 
 
 def _plan_kept(text: str) -> str:
@@ -191,10 +202,21 @@ async def _file_plan_card(db: Session, task: BoardTask, entry: Dict[str, Any]) -
     only a run still ``in_progress``), and the turn's end parks it."""
     from modules.tools.discovery.handlers_asks import stage_question
 
+    ticket_id, workspace_id, ask = await run_in_threadpool(_plan_card_ask, db, task, entry)
+    staged = await stage_question(db, workspace_id, **ask)
+    ask_id = staged.get("ask_id") if isinstance(staged, dict) else None
+    if ask_id is None:
+        raise RuntimeError(f"the Plan card of ticket #{ticket_id} was not filed")
+    logger.info("[cli-host] ticket #%s presented plan %s (ask #%s)", ticket_id, entry["version"], ask_id)
+    return int(ask_id)
+
+
+def _plan_card_ask(db: Session, task: BoardTask, entry: Dict[str, Any]) -> Tuple[Any, Any, Dict[str, Any]]:
+    """The ticket's id, its workspace and ``stage_question``'s arguments for its Plan card,
+    the asking agent's name among them, read in the threadpool (F105)."""
     agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first() if task.assigned_agent_id else None
     agent_name = getattr(agent, "name", None)
-    staged = await stage_question(
-        db, task.workspace_id,
+    return task.id, task.workspace_id, dict(
         subject_type=SUBJECT_BOARD_TASK, subject_id=str(int(task.id)),
         question=plan_question(task, agent_name, entry),
         options=list(PLAN_OPTIONS),
@@ -202,11 +224,6 @@ async def _file_plan_card(db: Session, task: BoardTask, entry: Dict[str, Any]) -
         park=None,
         details={PLAN_MARKER: {"task_id": int(task.id), "version": entry["version"], "attempt": entry["attempt"]}},
     )
-    ask_id = staged.get("ask_id") if isinstance(staged, dict) else None
-    if ask_id is None:
-        raise RuntimeError(f"the Plan card of ticket #{task.id} was not filed")
-    logger.info("[cli-host] ticket #%s presented plan %s (ask #%s)", task.id, entry["version"], ask_id)
-    return int(ask_id)
 
 
 def plan_question(task: Any, agent_name: Optional[str], entry: Dict[str, Any]) -> str:

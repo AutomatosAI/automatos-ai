@@ -12,11 +12,15 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from modules.tools.discovery.ask_ticket_numbers import asks_by_ticket_number
 
@@ -177,25 +181,56 @@ async def stage_question(
 
     ``park`` — the board-task row to flip to ``blocked`` behind the ask, or
     ``None`` to leave the subject as it is. The caller has validated the subject.
+
+    F105: the row, the park and the cascade count run in the threadpool, and the bell
+    and Telegram message go out with the caller's transaction ended, on a short-lived
+    session of their own (``_tell_the_owner``). A session host's event flush raised
+    these while its request's connection sat idle in transaction for both sends.
     """
     from core.models.approval_grants import KIND_QUESTION
     from core.services.approval_grants import DEFAULT_TTL_SECONDS, create_grant
-    from services.ask_cascade import count_downstream_blocked, is_urgent_cascade
 
     question, options = clean_question(question, options)
-    grant = create_grant(
-        db, workspace_id,
-        subject_type=subject_type,
-        subject_id=subject_id,
-        kind=KIND_QUESTION,
-        question_md=question,
-        options=options,
-        asked_by_agent_id=asked_by_agent_id,
-        agent_id=asked_by_agent_id,
-        reason="Awaiting human answer",
-        ttl_seconds=int(ttl_seconds) if ttl_seconds else DEFAULT_TTL_SECONDS,
-        details=details,
-    )
+
+    def _file() -> _Filed:
+        grant = create_grant(
+            db, workspace_id,
+            subject_type=subject_type,
+            subject_id=subject_id,
+            kind=KIND_QUESTION,
+            question_md=question,
+            options=options,
+            asked_by_agent_id=asked_by_agent_id,
+            agent_id=asked_by_agent_id,
+            reason="Awaiting human answer",
+            ttl_seconds=int(ttl_seconds) if ttl_seconds else DEFAULT_TTL_SECONDS,
+            details=details,
+        )
+        return _park_and_count(db, workspace_id, grant, park, subject_type, subject_id)
+
+    filed = await run_in_threadpool(_file)
+    channel_refs = await _tell_the_owner(workspace_id, filed, question=question, agent_name=agent_name)
+    await run_in_threadpool(_keep_channel_refs, db, filed, channel_refs)
+    return _staged(filed, park is not None, subject_type, subject_id)
+
+
+@dataclass(frozen=True)
+class _Filed:
+    """A committed ask as its sends need it, read in the threadpool: they never touch its row."""
+
+    grant: Any
+    ask_id: int
+    asked_by: Optional[int]
+    channel_refs: Optional[Dict[str, Any]]
+    downstream: int
+
+
+def _park_and_count(
+    db: Session, workspace_id: UUID, grant: Any, park: Any, subject_type: str, subject_id: str,
+) -> _Filed:
+    """Park the subject behind the staged row, commit both, and count the cascade blocked
+    behind it. The caller's transaction ends here, so the sends never hold it (F105)."""
+    from services.ask_cascade import count_downstream_blocked
 
     if park is not None:
         park.status = "blocked"
@@ -211,31 +246,78 @@ async def stage_question(
     except Exception:  # noqa: BLE001 — the row is committed; a cascade count must not unfile the ask
         logger.warning("[asks] downstream count failed for %s %s (ask #%s)", subject_type, subject_id, grant.id, exc_info=True)
         downstream = 0
-    await _dispatch_question_pending(
-        db, workspace_id, grant_id=grant.id, question=question,
-        agent_id=grant.asked_by_agent_id, agent_name=agent_name,
-        urgent=is_urgent_cascade(downstream),
-    )
-    # PRD-225 US-005: send the correlated Telegram message to the workspace
-    # default chat and record its message_id, so a reply answers the question.
-    await _capture_question_telegram(
-        db, workspace_id, grant, agent_name=agent_name, question=question,
-    )
+    filed = _Filed(grant=grant, ask_id=grant.id, asked_by=grant.asked_by_agent_id,
+                   channel_refs=grant.channel_refs, downstream=downstream)
+    db.rollback()  # the count's read ends here: nothing of it is held across the sends
+    return filed
+
+
+def _sends_session() -> Optional[Session]:
+    """The bell's and Telegram's own session, its connection taken from the pool here, in
+    the threadpool, never on the event loop. None, logged, when there is none to take: the
+    ask is committed and stands in the Questions tab, which reads grants."""
+    from core.database.database import SessionLocal
+
+    sends = SessionLocal()
+    try:
+        sends.connection()
+    except SQLAlchemyError:
+        logger.exception("[asks] no connection for the question's bell and Telegram message; it stands in-app")
+        sends.close()
+        return None
+    return sends
+
+
+async def _tell_the_owner(
+    workspace_id: UUID, filed: _Filed, *, question: str, agent_name: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """Ring the bell and send the Telegram message for a committed ask, on their own
+    short-lived session (F105). Returns the row's ``channel_refs`` as the Telegram send
+    left them, for the caller's session to keep."""
+    from services.ask_cascade import is_urgent_cascade
+
+    sends = await run_in_threadpool(_sends_session)
+    if sends is None:
+        return filed.channel_refs
+    sent = SimpleNamespace(id=filed.ask_id, channel_refs=filed.channel_refs)
+    try:
+        await _dispatch_question_pending(
+            sends, workspace_id, grant_id=filed.ask_id, question=question,
+            agent_id=filed.asked_by, agent_name=agent_name,
+            urgent=is_urgent_cascade(filed.downstream),
+        )
+        # PRD-225 US-005: send the correlated Telegram message to the workspace
+        # default chat and record its message_id, so a reply answers the question.
+        await _capture_question_telegram(
+            sends, workspace_id, sent, agent_name=agent_name, question=question,
+        )
+        await run_in_threadpool(sends.commit)
+    finally:
+        await run_in_threadpool(sends.close)
+    return sent.channel_refs
+
+
+def _keep_channel_refs(db: Session, filed: _Filed, channel_refs: Optional[Dict[str, Any]]) -> None:
+    """Telegram's message onto the row (a reply to it answers the question), committed."""
+    if channel_refs != filed.channel_refs:
+        filed.grant.channel_refs = channel_refs
     db.commit()
 
-    parked = park is not None
+
+def _staged(filed: _Filed, parked: bool, subject_type: str, subject_id: str) -> Dict[str, Any]:
+    """What ``stage_question`` answers its caller."""
     return {
         "success": True,
-        "ask_id": grant.id,
+        "ask_id": filed.ask_id,
         "parked": parked,
         "subject_type": subject_type,
         "subject_id": subject_id,
-        "downstream_blocked": downstream,
+        "downstream_blocked": filed.downstream,
         "message": (
-            f"Parked {subject_type} {subject_id} and asked the human (ask #{grant.id}). "
+            f"Parked {subject_type} {subject_id} and asked the human (ask #{filed.ask_id}). "
             "Move on to other work — the answer will resume it."
             if parked else
-            f"Asked the human about {subject_type} {subject_id} (ask #{grant.id}); the work carries on meanwhile."
+            f"Asked the human about {subject_type} {subject_id} (ask #{filed.ask_id}); the work carries on meanwhile."
         ),
     }
 
