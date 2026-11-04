@@ -164,12 +164,95 @@ def _extract_content_items(manifest: Optional[Dict], key: str) -> List[PluginCon
     return result
 
 
+def _list_plugins_apply_filters(
+    db: Session, query, category: Optional[str], search: Optional[str], tags: Optional[List[str]], sort: str
+):
+    """Apply the category, search, tags filters and the sort order to the plugin query."""
+    from core.models.marketplace_plugins import MarketplacePlugin, PluginCategory
+
+    # Category filter (by slug) — return empty set if category not found
+    if category:
+        cat = db.query(PluginCategory).filter(
+            PluginCategory.slug == category,
+        ).first()
+        if cat:
+            query = query.filter(MarketplacePlugin.category_id == cat.id)
+        else:
+            # Unknown category → return nothing rather than ignoring the filter
+            query = query.filter(MarketplacePlugin.id == None)
+
+    # Search filter
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            or_(
+                MarketplacePlugin.name.ilike(search_term),
+                MarketplacePlugin.description.ilike(search_term),
+                MarketplacePlugin.slug.ilike(search_term),
+            )
+        )
+
+    # Tags filter
+    if tags:
+        for tag in tags:
+            query = query.filter(MarketplacePlugin.tags.any(tag))
+
+    # Sorting
+    if sort == "popular":
+        query = query.order_by(desc(MarketplacePlugin.enable_count))
+    elif sort == "newest":
+        query = query.order_by(desc(MarketplacePlugin.created_at))
+    elif sort == "name":
+        query = query.order_by(asc(MarketplacePlugin.name))
+    else:
+        query = query.order_by(desc(MarketplacePlugin.enable_count))
+    return query
+
+
+def _list_plugins_items(db: Session, plugins: list) -> list:
+    """Summary rows for the page of plugins, with their category names."""
+    from core.models.marketplace_plugins import PluginCategory
+
+    items = []
+    for p in plugins:
+        cat_name = None
+        if p.category_id:
+            cat = db.query(PluginCategory).filter(
+                PluginCategory.id == p.category_id,
+            ).first()
+            if cat:
+                cat_name = cat.name
+
+        items.append(PluginSummaryOut(
+            id=str(p.id),
+            slug=p.slug,
+            name=p.name,
+            version=p.version,
+            description=p.description,
+            category_id=str(p.category_id) if p.category_id else None,
+            category_name=cat_name,
+            tags=p.tags or [],
+            skills_count=p.skills_count or 0,
+            commands_count=p.commands_count or 0,
+            agents_count=p.agents_count or 0,
+            hooks_count=p.hooks_count or 0,
+            token_estimate=p.token_estimate or 0,
+            enable_count=p.enable_count or 0,
+            is_featured=p.is_featured or False,
+            security_status=p.security_status,
+            original_author=p.original_author,
+            license=p.license,
+            created_at=p.created_at.isoformat() if p.created_at else None,
+        ))
+    return items
+
+
 # ===================================================================
 # Endpoints
 # ===================================================================
 
 @router.get("", response_model=None)
-async def list_plugins(
+def list_plugins(
     category: Optional[str] = Query(None, description="Filter by category slug"),
     search: Optional[str] = Query(None, description="Search plugin name/description"),
     tags: Optional[List[str]] = Query(None, description="Filter by tags"),
@@ -181,86 +264,21 @@ async def list_plugins(
 ):
     """List approved and active marketplace plugins with optional filters."""
     try:
-        from core.models.marketplace_plugins import MarketplacePlugin, PluginCategory
+        from core.models.marketplace_plugins import MarketplacePlugin
 
         query = db.query(MarketplacePlugin).filter(
             MarketplacePlugin.approval_status == "approved",
             MarketplacePlugin.is_active == True,
         )
 
-        # Category filter (by slug) — return empty set if category not found
-        if category:
-            cat = db.query(PluginCategory).filter(
-                PluginCategory.slug == category,
-            ).first()
-            if cat:
-                query = query.filter(MarketplacePlugin.category_id == cat.id)
-            else:
-                # Unknown category → return nothing rather than ignoring the filter
-                query = query.filter(MarketplacePlugin.id == None)
-
-        # Search filter
-        if search:
-            search_term = f"%{search}%"
-            query = query.filter(
-                or_(
-                    MarketplacePlugin.name.ilike(search_term),
-                    MarketplacePlugin.description.ilike(search_term),
-                    MarketplacePlugin.slug.ilike(search_term),
-                )
-            )
-
-        # Tags filter
-        if tags:
-            for tag in tags:
-                query = query.filter(MarketplacePlugin.tags.any(tag))
-
-        # Sorting
-        if sort == "popular":
-            query = query.order_by(desc(MarketplacePlugin.enable_count))
-        elif sort == "newest":
-            query = query.order_by(desc(MarketplacePlugin.created_at))
-        elif sort == "name":
-            query = query.order_by(asc(MarketplacePlugin.name))
-        else:
-            query = query.order_by(desc(MarketplacePlugin.enable_count))
+        query = _list_plugins_apply_filters(db, query, category, search, tags, sort)
 
         total = query.count()
         offset = (page - 1) * limit
         plugins = query.offset(offset).limit(limit).all()
 
         # Build response with category names
-        items = []
-        for p in plugins:
-            cat_name = None
-            if p.category_id:
-                cat = db.query(PluginCategory).filter(
-                    PluginCategory.id == p.category_id,
-                ).first()
-                if cat:
-                    cat_name = cat.name
-
-            items.append(PluginSummaryOut(
-                id=str(p.id),
-                slug=p.slug,
-                name=p.name,
-                version=p.version,
-                description=p.description,
-                category_id=str(p.category_id) if p.category_id else None,
-                category_name=cat_name,
-                tags=p.tags or [],
-                skills_count=p.skills_count or 0,
-                commands_count=p.commands_count or 0,
-                agents_count=p.agents_count or 0,
-                hooks_count=p.hooks_count or 0,
-                token_estimate=p.token_estimate or 0,
-                enable_count=p.enable_count or 0,
-                is_featured=p.is_featured or False,
-                security_status=p.security_status,
-                original_author=p.original_author,
-                license=p.license,
-                created_at=p.created_at.isoformat() if p.created_at else None,
-            ))
+        items = _list_plugins_items(db, plugins)
 
         return {
             "items": [item.model_dump() for item in items],
