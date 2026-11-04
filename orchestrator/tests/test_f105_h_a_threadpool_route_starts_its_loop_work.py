@@ -306,3 +306,66 @@ def test_work_started_twice_from_route_threads_looks_once(credit):
 def test_work_started_with_no_loop_looks_at_nothing_and_leaves_the_check_due(credit):
     assert credit.guard(None, WS, "a script") is None
     assert credit.checked == [] and credit.module._last_check == {}
+
+
+# ---------------------------------------------------------------------------
+# api/recipe_executor.request_execution_cancel (Cancel on a playbook's card)
+# ---------------------------------------------------------------------------
+
+
+class _RunningRun:
+    """A playbook run's task on this worker: where its cancel was made."""
+
+    def __init__(self):
+        self.cancelled_in = []
+
+    def done(self):
+        return bool(self.cancelled_in)
+
+    def cancel(self):
+        self.cancelled_in.append(threading.get_ident())
+        return True
+
+
+@pytest.fixture
+def running_run(monkeypatch):
+    import api.recipe_executor as rex
+
+    run = _RunningRun()
+    monkeypatch.setattr(rex, "_running_executions", {"exec-f105-h": run})
+    return SimpleNamespace(module=rex, run=run)
+
+
+def test_a_cancel_from_a_route_thread_is_made_on_the_loops_thread(running_run):
+    """``Task.cancel`` is not thread-safe: the Cancel route's thread hands it to the loop."""
+    loop_thread, stopped = _from_a_route_thread(
+        lambda: running_run.module.request_execution_cancel("exec-f105-h"), lambda: True)
+    assert stopped is True and running_run.run.cancelled_in == [loop_thread]
+
+
+def test_a_cancel_on_the_loop_and_with_no_loop_is_made_where_it_is_asked(running_run):
+    async def on_the_loop():
+        return running_run.module.request_execution_cancel("exec-f105-h"), threading.get_ident()
+
+    stopped, loop_thread = anyio.run(on_the_loop)
+    assert stopped is True and running_run.run.cancelled_in == [loop_thread]
+    assert running_run.module.request_execution_cancel("exec-f105-h") is False      # already done
+    assert running_run.module.request_execution_cancel("not-on-this-worker") is False
+
+
+def test_a_real_run_cancelled_from_a_route_thread_stops_at_once(monkeypatch):
+    import api.recipe_executor as rex
+
+    monkeypatch.setattr(rex, "_running_executions", {})
+
+    async def route():
+        run = asyncio.get_running_loop().create_task(asyncio.sleep(SETTLE_SECONDS * 10))
+        rex._running_executions["exec-real"] = run
+        await asyncio.sleep(0)
+        stopped = await anyio.to_thread.run_sync(rex.request_execution_cancel, "exec-real")
+        with anyio.fail_after(SETTLE_SECONDS):
+            with pytest.raises(asyncio.CancelledError):
+                await run
+        return stopped
+
+    assert anyio.run(route) is True
