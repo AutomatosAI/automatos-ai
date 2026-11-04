@@ -86,7 +86,7 @@ async def add_to_context(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/stats")
-async def get_context_stats(
+def get_context_stats(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
     db: Session = Depends(get_db)
@@ -112,7 +112,7 @@ async def get_context_stats(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/performance")
-async def get_rag_performance_data(
+def get_rag_performance_data(
     time_range: str = Query("24h", regex="^(1h|24h|7d|30d)$", description="Time range: 1h, 24h, 7d, or 30d"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
@@ -128,7 +128,7 @@ async def get_rag_performance_data(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/sources")
-async def get_context_sources(
+def get_context_sources(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
     db: Session = Depends(get_db)
@@ -142,7 +142,7 @@ async def get_context_sources(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/queries/recent")
-async def get_recent_queries(
+def get_recent_queries(
     limit: int = Query(default=10, ge=1, le=50),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
@@ -194,7 +194,7 @@ async def test_rag_configuration(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/system/health")
-async def get_context_system_health(
+def get_context_system_health(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
     db: Session = Depends(get_db)
@@ -373,7 +373,7 @@ async def get_optimization_recommendations(
 # ===== RAG CONFIGURATION CRUD ENDPOINTS =====
 
 @router.post("/rag/config", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def create_rag_configuration(
+def create_rag_configuration(
     config: RAGConfigCreate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -422,7 +422,7 @@ async def create_rag_configuration(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/rag/config")
-async def list_rag_configurations(
+def list_rag_configurations(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -448,7 +448,7 @@ async def list_rag_configurations(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/rag/config/{config_id}")
-async def get_rag_configuration(
+def get_rag_configuration(
     config_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -482,7 +482,7 @@ async def get_rag_configuration(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.put("/rag/config/{config_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def update_rag_configuration(
+def update_rag_configuration(
     config_id: int,
     config_update: RAGConfigUpdate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -529,7 +529,7 @@ async def update_rag_configuration(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/rag/config/{config_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def delete_rag_configuration(
+def delete_rag_configuration(
     config_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
