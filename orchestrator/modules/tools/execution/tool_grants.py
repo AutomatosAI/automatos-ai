@@ -30,6 +30,7 @@ no new config key.
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import json
 import logging
@@ -428,8 +429,17 @@ def _notify_approval_pending(grant: Any, workspace_id: UUID | str) -> None:
 
     Mirrors ``services/board_approval``: dispatched off-transaction on the
     running loop with its own session; no loop (pure unit tests, sync callers)
-    ⇒ skip silently. A dispatch fault never reaches the executor.
+    ⇒ skip silently. A dispatch fault never reaches the executor. F105 (4 Nov):
+    the platform executor's gates now run on a threadpool thread, so the notice
+    is scheduled on the loop's own thread (``on_the_event_loop``), never skipped.
     """
+    from core.utils.background_tasks import on_the_event_loop
+
+    on_the_event_loop(functools.partial(_start_approval_notice, grant, workspace_id))
+
+
+def _start_approval_notice(grant: Any, workspace_id: UUID | str) -> None:
+    """On the loop's thread: start the notice's dispatch; with no loop, nothing."""
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:

@@ -369,3 +369,40 @@ def test_a_real_run_cancelled_from_a_route_thread_stops_at_once(monkeypatch):
         return stopped
 
     assert anyio.run(route) is True
+
+
+# ---------------------------------------------------------------------------
+# tool_grants._notify_approval_pending (lane L moved the executor's gates to a thread)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def notices(monkeypatch):
+    """The approval_pending dispatch, recorded with the thread it ran on."""
+    from modules.tools.execution import tool_grants
+
+    ran = []
+
+    async def _dispatch(workspace_id, **kw):
+        ran.append((workspace_id, kw["grant_id"], threading.get_ident()))
+
+    monkeypatch.setattr(tool_grants, "_dispatch_approval_pending", _dispatch)
+    return tool_grants, ran
+
+
+def test_an_approval_card_raised_from_a_route_thread_is_announced_on_the_loop(notices):
+    tool_grants, ran = notices
+    grant = SimpleNamespace(id=31, tool_name="platform_send_email", risk_tier="high", reason="r")
+
+    loop_thread, _ = _from_a_route_thread(lambda: tool_grants._notify_approval_pending(grant, WS),
+                                          lambda: ran)
+
+    assert ran == [(WS, 31, loop_thread)]
+
+
+def test_an_approval_card_raised_with_no_loop_is_skipped_as_before(notices):
+    tool_grants, ran = notices
+
+    tool_grants._notify_approval_pending(SimpleNamespace(id=32), WS)
+
+    assert ran == []
