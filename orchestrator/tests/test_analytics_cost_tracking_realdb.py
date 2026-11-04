@@ -194,7 +194,7 @@ def seeded_documents(engine, new_session):
 def test_document_analytics_counts_only_the_users_rag_documents(seeded_documents, new_session):
     db = new_session()
     try:
-        out = _run(docs_api.get_document_analytics(ctx=_ctx(seeded_documents), db=db))
+        out = docs_api.get_document_analytics(ctx=_ctx(seeded_documents), db=db)
     finally:
         db.close()
     assert out["total_documents"] == 2 and out["agent_outputs"] == 2
@@ -206,9 +206,9 @@ def test_document_analytics_counts_only_the_users_rag_documents(seeded_documents
 def test_document_list_can_leave_agent_outputs_out(seeded_documents, new_session):
     db = new_session()
     try:
-        everything = _run(docs_api.list_documents(ctx=_ctx(seeded_documents), skip=0, limit=100, team=None, db=db))
-        knowledge = _run(docs_api.list_documents(ctx=_ctx(seeded_documents), skip=0, limit=100, team=None,
-                                                 exclude_source_type="agent_output", db=db))
+        everything = docs_api.list_documents(ctx=_ctx(seeded_documents), skip=0, limit=100, team=None, db=db)
+        knowledge = docs_api.list_documents(ctx=_ctx(seeded_documents), skip=0, limit=100, team=None,
+                                                 exclude_source_type="agent_output", db=db)
     finally:
         db.close()
     assert len(everything) == 4 and len(knowledge) == 2

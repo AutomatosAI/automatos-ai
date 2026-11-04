@@ -45,7 +45,7 @@ def test_a_skill_kept_in_its_prompt_is_listed_with_its_skill_md(cafe):
 
     skill = _skill_358(cafe)
 
-    shown = asyncio.run(get_skill_details(skill.id, ctx=cafe.ctx, db=cafe.db))
+    shown = get_skill_details(skill.id, ctx=cafe.ctx, db=cafe.db)
 
     files = [(f.file_path, f.file_size_bytes, f.estimated_tokens) for f in shown.files]
     assert files and files[0][0] == "SKILL.md"                            # night: no files, 0 tokens

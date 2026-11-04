@@ -132,14 +132,14 @@ def test_team_access_endpoints_execute_against_real_schema(live_db):
     db = SessionLocal()
     try:
         with pytest.raises(HTTPException) as ei:
-            asyncio.run(update_document_team_access(
+            update_document_team_access(
                 missing_id, _TeamAccessUpdate(team_access=["finance"]), ctx=ctx, db=db,
-            ))
+            )
         assert ei.value.status_code == 404  # SQL executed; just no matching row
 
-        res = asyncio.run(bulk_update_team_access(
+        res = bulk_update_team_access(
             _BulkTeamAccessUpdate(document_ids=[missing_id], team_access=["finance"]), ctx=ctx, db=db,
-        ))
+        )
         assert res["updated"] == 0
     finally:
         db.close()

@@ -166,7 +166,7 @@ def test_the_agent_model_config_save_refuses_a_body_naming_no_model(body):
 
     agent = NS(id=7, name="Auto", is_system_agent=True, model_config=dict(CHOSEN))
     with pytest.raises(HTTPException) as raised:
-        asyncio.run(update_agent_model_config(7, body, ctx=NS(workspace_id="ws"), db=_OneAgentDb(agent)))
+        update_agent_model_config(7, body, ctx=NS(workspace_id="ws"), db=_OneAgentDb(agent))
     assert raised.value.status_code == 422 and agent.model_config == CHOSEN
 
 

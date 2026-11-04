@@ -135,6 +135,6 @@ def test_model_config_refuses_a_deprecated_route_with_the_reason(monkeypatch):
     db = _AgentDB(SimpleNamespace(id=57, name="Researcher", is_system_agent=False, model_config={}))
     ctx = SimpleNamespace(workspace_id=WS)
     with pytest.raises(HTTPException) as info:
-        asyncio.run(ep.update_agent_model_config(57, {"model_id": "deepseek/deepseek-coder", "provider": "openrouter"}, ctx, db))
+        ep.update_agent_model_config(57, {"model_id": "deepseek/deepseek-coder", "provider": "openrouter"}, ctx, db)
     assert info.value.status_code == 422
     assert "DeepSeek Coder is no longer offered by OpenRouter" in str(info.value.detail)

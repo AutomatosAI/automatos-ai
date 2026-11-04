@@ -46,14 +46,14 @@ async def test_team_filter_and_counts_are_server_side(db_session, seed_workspace
     ctx = types.SimpleNamespace(workspace_id=uuid.UUID(ws))
 
     # Counts are aggregated over ALL 120 docs, not a ≤100 slice.
-    counts = await document_team_counts(ctx=ctx, db=db_session)
+    counts = document_team_counts(ctx=ctx, db=db_session)
     assert counts["counts"]["support"] == 60
     assert counts["counts"]["sales"] == 40
     assert counts["untagged"] == 20
     assert counts["total"] == 120
 
     # team=sales filters server-side → 40 sales + 20 public (public always visible).
-    sales = await list_documents(
+    sales = list_documents(
         ctx=ctx, skip=0, limit=1000, status=None, file_type=None, search=None, team="sales", db=db_session
     )
     assert len(sales) == 60
@@ -61,7 +61,7 @@ async def test_team_filter_and_counts_are_server_side(db_session, seed_workspace
         assert (not d.team_access) or ("sales" in [t.lower() for t in d.team_access])
 
     # Normalization: 'Sales' resolves to the same set as 'sales'.
-    sales_caps = await list_documents(
+    sales_caps = list_documents(
         ctx=ctx, skip=0, limit=1000, status=None, file_type=None, search=None, team="Sales", db=db_session
     )
     assert len(sales_caps) == 60
@@ -78,7 +78,7 @@ async def test_no_team_param_returns_all(db_session, seed_workspace):
     db_session.flush()
 
     ctx = types.SimpleNamespace(workspace_id=uuid.UUID(ws))
-    everything = await list_documents(
+    everything = list_documents(
         ctx=ctx, skip=0, limit=1000, status=None, file_type=None, search=None, team=None, db=db_session
     )
     assert len(everything) == 15   # no team restriction → workspace-wide
