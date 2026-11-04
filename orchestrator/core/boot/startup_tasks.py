@@ -5,7 +5,8 @@ fire-and-forget from ``main.py`` whose failures were only ``logger.warning``-ed.
 Extracted here they are importable + unit-testable, and on failure they now also
 fire ``record_error(subsystem="startup")`` so a failed boot seed surfaces on the
 ERRORS-by-subsystem dashboard tile instead of dying silently. The action-index
-warm-up (#927) and the output-budget load (#836) follow the same contract.
+warm-up (#927), the output-budget load (#836) and the first-turn module load
+(F105) follow the same contract.
 
 Every function here is *self-guarding*: it never raises, so launching it with a
 bare ``create_task`` cannot leave an unretrieved task exception.
@@ -19,12 +20,16 @@ loop held every request and made APScheduler miss its jobs.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import logging
 from typing import Set
 
 from core.utils.exception_telemetry import record_error
 
 logger = logging.getLogger(__name__)
+
+# The knowledge-graph section imports it on a chat turn (modules/context/sections/graph_context.py).
+GRAPH_SERVICE_MODULE = "modules.knowledge.graph_service"
 
 # Long-lived refresh tasks, held so the loop does not drop them.
 _refreshers: Set["asyncio.Task[None]"] = set()
@@ -119,6 +124,31 @@ async def warm_action_index_on_startup() -> None:
     except Exception as exc:
         logger.warning("#927: warming the action index failed (non-fatal): %s", exc, exc_info=True)
         record_error(subsystem="startup", operation="warm_action_index", error=exc)
+
+
+def _load_first_turn_modules() -> None:
+    """The tiktoken encoding and the graph service, each loaded once per process."""
+    from core.context_guard import get_tokenizer
+
+    get_tokenizer()
+    importlib.import_module(GRAPH_SERVICE_MODULE)
+
+
+async def warm_first_turn_on_startup() -> None:
+    """Load what a worker's first chat turn would otherwise load on the event loop (F105).
+
+    A self-hosted install's loop watchdog caught both on 4 Nov: the knowledge-graph
+    section's first ``import modules.knowledge.graph_service`` (networkx and graphify,
+    3.9 s) and the context guard's first count through the tiktoken encoding. Each is
+    a once-per-process cost, so every worker pays it here, in a worker thread, before
+    its first turn does. Non-fatal: any failure is logged + recorded.
+    """
+    try:
+        await asyncio.to_thread(_load_first_turn_modules)
+        logger.info("F105: first-turn modules loaded (tokenizer, %s)", GRAPH_SERVICE_MODULE)
+    except Exception as exc:
+        logger.warning("F105: loading the first-turn modules failed (non-fatal): %s", exc, exc_info=True)
+        record_error(subsystem="startup", operation="warm_first_turn", error=exc)
 
 
 async def warm_output_budgets_on_startup() -> None:

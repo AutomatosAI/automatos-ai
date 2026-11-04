@@ -288,3 +288,38 @@ def test_the_shared_context_is_built_in_a_thread(monkeypatch):
 
     assert threads and threads[0] != loop_thread
     startup_tasks.record_error.assert_not_called()
+
+
+# --------------------------------------------------------------------------- the first turn's modules (F105)
+
+
+def test_the_first_turns_tokenizer_and_graph_service_load_in_a_thread(monkeypatch):
+    import core.context_guard as context_guard
+
+    loaded = {}
+    record_error = MagicMock()
+    monkeypatch.setattr(context_guard, "get_tokenizer", lambda: loaded.setdefault("tokenizer", _here()))
+    monkeypatch.setattr(startup_tasks, "importlib",
+                        SimpleNamespace(import_module=lambda name: loaded.setdefault(name, _here())))
+    monkeypatch.setattr(startup_tasks, "record_error", record_error)
+
+    _, loop_thread = _run(startup_tasks.warm_first_turn_on_startup)
+
+    assert set(loaded) == {"tokenizer", "modules.knowledge.graph_service"}
+    assert loop_thread not in loaded.values()
+    record_error.assert_not_called()
+
+
+def test_a_first_turn_module_that_fails_to_load_is_recorded_not_raised(monkeypatch):
+    import core.context_guard as context_guard
+
+    def broken():
+        raise RuntimeError("no encoding")
+
+    record_error = MagicMock()
+    monkeypatch.setattr(context_guard, "get_tokenizer", broken)
+    monkeypatch.setattr(startup_tasks, "record_error", record_error)
+
+    _run(startup_tasks.warm_first_turn_on_startup)
+
+    assert record_error.call_args.kwargs["operation"] == "warm_first_turn"
