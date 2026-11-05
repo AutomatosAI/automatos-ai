@@ -2,9 +2,12 @@
 
 pybuild deletes the scipy subpackages no code path loads (stats, io, signal, interpolate,
 ndimage, cluster, odr, fftpack, differentiate, datasets, misc; about 29 MB) and fails the
-build when one it keeps is missing. scipy is in the lock for datasketch (graphify's
-dedup) and graspologic-native; networkx's pagerank reaches scipy.sparse; the app's own
-one use, core/math/probability_theory.py, takes Student's t from scipy.special. This
+build when one it keeps is missing. graphifyy's own dedup (its datasketch-compatible
+MinHash/LSH, since GHSA-pcc4-rvhr-2pr8 dropped datasketch itself from the lock) and
+graspologic-native need it; networkx's pagerank reaches scipy.sparse; the app's own one
+use, core/math/probability_theory.py, takes Student's t from scipy.special. `integrate`
+was kept only for datasketch's scipy.integrate.quad and has no other reason to stay, but
+moving it to PRUNED is a separate, unverified change — this suite does not make it. This
 suite checks:
 
 - the Dockerfile: the prune RUN in pybuild, on the first half of the lock (scipy is in
@@ -12,17 +15,16 @@ suite checks:
   the lists scripts/ci/image_scipy.py checks in the image;
 - the guard for future code: no module under orchestrator/ imports a pruned subpackage,
   at any depth, lazily or not, nor names one through ``import scipy`` and an attribute;
-- the guard for scipy and datasketch bumps, on the versions the lock installs here: no
-  module of a kept subpackage imports a pruned one when it loads (only inside a
-  function), and datasketch reaches only kept subpackages;
+- the guard for a scipy bump, on the version the lock installs here: no module of a kept
+  subpackage imports a pruned one when it loads (only inside a function);
 - core.math's confidence interval for a small sample is Student's t (2.776 for 4 degrees
   of freedom at 95 %), which it now takes from scipy.special;
 - scripts/ci/image_scipy.py: the image's bare Python can start it (standard library at
   module level), it imports the app with image_site_packages.py's throwaway settings,
   and both workflows run it inside the image they built.
 
-File reads, ASTs of the installed scipy and datasketch, and one confidence interval; no
-Docker, no network.
+File reads, ASTs of the installed scipy, and one confidence interval; no Docker, no
+network.
 """
 from __future__ import annotations
 
@@ -186,13 +188,6 @@ def test_no_kept_subpackage_imports_a_pruned_one_when_it_loads():
         found += [f"{'.'.join(parts)} -> {name}" for name in _module_level_imports(path, package)
                   if ".".join(name.split(".")[:2]) in pruned]
     assert found == []
-
-
-def test_datasketch_reaches_only_kept_subpackages():
-    paths = sorted(_package_dir("datasketch").rglob("*.py"))
-    kept = {f"scipy.{name}" for name in image_scipy.KEPT}
-    reached = {name for path in paths for _, name in _scipy_names(ast.parse(path.read_text(encoding="utf-8")))}
-    assert reached and reached <= kept, reached - kept
 
 
 def test_a_small_samples_interval_is_students_t():

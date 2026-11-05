@@ -116,7 +116,9 @@ google-genai>=2.31.0  # Google Gemini native API (google-generativeai is retired
 # CSV and JSON with the standard library and writes with xlsxwriter. Railway's build
 # lost the last of both with graspologic (PRD-262 US-027).
 numpy>=1.26.2,<3.0.0
-networkx==3.1
+# Exactly 3.4.2: the lowest patch of the lowest minor graphifyy 0.9.70 (below) needs,
+# so the bump for GHSA-pcc4-rvhr-2pr8 moves this as little as possible.
+networkx==3.4.2
 
 # RAG's fallback text splitters are vendored in modules/rag/chunking/text_splitters.py
 # (PRD-262 US-026): langchain-text-splitters and langchain-core left, with langsmith
@@ -137,7 +139,7 @@ tree-sitter-rust>=0.24.2
 tree-sitter-c>=0.24.2
 tree-sitter-cpp>=0.23.4
 tree-sitter-ruby>=0.23.1
-tree-sitter-php>=0.25.1
+tree-sitter-php>=0.24.1,<0.25  # graphifyy 0.9.70 (below) caps it below 0.25
 tree-sitter-swift>=0.7.4
 tree-sitter-kotlin>=1.1.0  # the tree-sitter-grammars one, whose names are `identifier`
 tree-sitter-c-sharp>=0.23.5
@@ -167,15 +169,17 @@ xlsxwriter>=3.2.0
 pypdfium2>=5.0.0,<6.0.0  # F353: draws a document Deliverable's first page for its card
 prometheus-client>=0.20.0
 
-# PRD-126: Business Knowledge Graph (Graphify Integration). Pinned exactly to the
-# version `>=0.3.28` resolved to (networkx==3.1 holds it there), so a rebuild can't
-# move the graph code under us (PRD-262 US-015). Installed without its [leiden] extra:
+# PRD-126: Business Knowledge Graph (Graphify Integration). Pinned exactly, so a
+# rebuild can't move the graph code under us (PRD-262 US-015). 0.9.70 fixes
+# GHSA-pcc4-rvhr-2pr8 (incomplete cpp #include hardening in the Fortran extractor
+# let indexing an untrusted repo read or exfiltrate an arbitrary host file) and
+# needs networkx>=3.4, bumped below with it. Installed without its [leiden] extra:
 # modules/knowledge/leiden_partition.py serves graphify.cluster's Leiden calls from
 # graspologic-native, the Rust core graspologic's leiden() forwarded to, so the extra's
 # graspologic and the ~585 MB it pulled in (numba, llvmlite, POT, gensim, statsmodels,
 # matplotlib, scikit-learn, pandas) are in no image (PRD-262 US-027). The adapter
 # replaces graphify's _partition, so a graphifyy bump is checked against it first.
-graphifyy==0.8.31
+graphifyy==0.9.70
 graspologic-native==1.3.1
 
 # PRD-256 (#847): OpenTelemetry traces over OTLP, default OFF (OTEL_ENABLED). Installed
