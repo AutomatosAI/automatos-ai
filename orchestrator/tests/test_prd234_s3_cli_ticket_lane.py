@@ -95,7 +95,9 @@ def test_hosts_online_but_none_runs_the_agents_cli_is_said_on_the_ticket(monkeyp
 
 
 def test_no_cli_host_reason_reads_the_online_hosts_and_stays_quiet_when_it_cannot(monkeypatch):
+    import services.cli_host_pauses as pauses
     import services.cli_host_service as hosts
+    monkeypatch.setattr(pauses, "paused_lines", lambda db, ws, cli: [])   # no host paused anything
     monkeypatch.setattr(hosts, "serving_providers", lambda db, ws: ["claude"])
     assert lane.no_cli_host_reason_for(None, "ws", "claude") is None
     reason = lane.no_cli_host_reason_for(None, "ws", "codex")
@@ -109,6 +111,39 @@ def test_no_cli_host_reason_reads_the_online_hosts_and_stays_quiet_when_it_canno
     assert lane.no_cli_host_reason_for(None, "ws", "codex") is None   # a wrong line is worse than none
     # the provider lookup is tolerant of a double with no query()
     assert lane.agent_cli_provider(object(), 15) == "claude" and lane.agent_cli_provider(None, None) == "claude"
+
+
+def test_a_cli_paused_at_its_usage_limit_says_so_not_install_it(monkeypatch):
+    """F083 (5 Nov 2026): the host paused claude at its weekly limit, and every claude
+    agent read "Install and log in to claude on a host": the wrong fix for a limit
+    that lifts by itself."""
+    import services.cli_host_pauses as pauses
+    import services.cli_host_service as hosts
+    monkeypatch.setattr(hosts, "serving_providers", lambda db, ws: [])
+    monkeypatch.setattr(pauses, "paused_lines",
+                        lambda db, ws, cli: ["paused: claude usage limit, resumes ~09:00 (host automatos-dev)"])
+    reason = lane.no_cli_host_reason_for(None, "ws", "claude")
+    assert reason == ("Waiting for a CLI host that runs claude — paused: claude usage limit, resumes ~09:00 "
+                      "(host automatos-dev). The ticket is claimed when it resumes.")
+    assert lane.is_no_cli_host_reason(reason)            # cleared like any no-CLI line once the host serves
+    t = SimpleNamespace(id=7, blocked_reason=reason)
+    assert lane.queued_line(t) == ("queued for your Claude Code session as ticket 7 "
+                                   "(paused: claude usage limit, resumes ~09:00 (host automatos-dev))")
+
+
+def test_paused_lines_name_each_online_host_that_paused_the_cli():
+    from services.cli_host_pauses import paused_lines
+
+    def _host(name, online, caps):
+        return SimpleNamespace(name=name, is_online=lambda: online, capabilities=caps)
+
+    rows = [_host("vps", True, {"providers": [], "paused": {"claude": "paused: claude usage limit, resumes ~09:00"}}),
+            _host("laptop", False, {"paused": {"claude": "paused: claude usage limit, resumes ~10:00"}}),
+            _host("mac", True, {"paused": {"codex": "paused: codex usage limit, resumes ~11:00"}}),
+            _host("old", True, None)]
+    db = SimpleNamespace(query=lambda model: SimpleNamespace(filter=lambda *a: SimpleNamespace(all=lambda: rows)))
+    assert paused_lines(db, "ws", "claude") == ["paused: claude usage limit, resumes ~09:00 (host vps)"]
+    assert paused_lines(db, "ws", "copilot") == []
 
 
 def test_no_host_online_is_said_on_the_ticket_and_in_the_reply(monkeypatch):

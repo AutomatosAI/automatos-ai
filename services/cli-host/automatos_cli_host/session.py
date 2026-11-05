@@ -65,6 +65,7 @@ STOP_GRACE_SECONDS = 2.0
 KILL_GRACE_SECONDS = 5.0
 PTY_ROWS, PTY_COLS = 50, 200
 _OUTPUT_TAIL_BYTES = 16 * 1024
+_PARKED_SCAN_BYTES = 1024    # F083: the last output the drain reads for a parked-at-limit line
 # F167: a PreToolUse event carries the host's decision and, for a hold, the
 # operator's answer. The backend keeps them on the ticket's ``recent_tools``.
 DECISION_REASON_CHARS = 300
@@ -199,6 +200,8 @@ class Session:
         self._ask_lock = threading.Lock()
         self.notifications: List[Dict[str, Any]] = []
         self.output_tail: deque = deque(maxlen=_OUTPUT_TAIL_BYTES)
+        self._recent_output = b""                      # the drain thread's own window, for the parked check
+        self.parked = threading.Event()                # F083: the CLI holds its turn at its usage limit
         self.terminal_log: Optional[BoundedLog] = None
         self._contract_injected = False
         self._policy: Optional[PolicyContext] = None
@@ -584,6 +587,8 @@ class Session:
                 return self._exit_reason(preset)
             if self.cancel_requested.is_set():
                 return "cancelled"
+            if self.parked.is_set():
+                return turn_end.PARKED_AT_LIMIT
             if now > deadline:
                 return "timeout"
             if turn_end.is_gated(preset) and not self.session_started.is_set() and now - self.started_at > proof_window:
@@ -608,12 +613,21 @@ class Session:
                 if not chunk:
                     break
                 self.output_tail.extend(chunk)
+                self._watch_for_parking(chunk)
                 if self.terminal_log is not None:
                     self.terminal_log.write(chunk)
         finally:
             child.close()
             if self.terminal_log is not None:
                 self.terminal_log.close()
+
+    def _watch_for_parking(self, chunk: bytes) -> None:
+        """F083: Claude Code holds its turn at its usage limit ("continuing automatically
+        at 9am") instead of exiting. Seen here, the wait loop ends the session at once:
+        the ticket goes back to the queue and the host pauses the CLI until the reset."""
+        self._recent_output = (self._recent_output + chunk)[-_PARKED_SCAN_BYTES:]
+        if not self.parked.is_set() and usage_limit.is_parked(self._recent_output.decode("utf-8", "replace")):
+            self.parked.set()
 
     def _terminate(self) -> None:
         if self.proc is None or self.proc.poll() is not None:

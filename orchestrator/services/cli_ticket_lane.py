@@ -44,6 +44,9 @@ NO_CLI_HOST_REASON = (
     NO_CLI_HOST_PREFIX + "{cli} — the host(s) online serve {served}. Install and log in to "
     "{cli} on a host (or pick another CLI for this agent); the ticket is claimed on the next poll."
 )
+# F083: a host runs this CLI but paused it at its usage limit, which lifts by itself.
+PAUSED_MARK = "paused:"   # how the host's own pause line starts
+PAUSED_CLI_REASON = NO_CLI_HOST_PREFIX + "{cli} — {paused}. The ticket is claimed when it resumes."
 
 
 def is_no_cli_host_reason(reason: Any) -> bool:
@@ -66,15 +69,20 @@ def agent_cli_provider(db: Session, agent_id: Optional[int]) -> str:
 def no_cli_host_reason_for(db: Session, workspace_id: Any, cli: str) -> Optional[str]:
     """The blocked line when hosts are online but none serves ``cli``; ``None``
     when one does — or when it cannot be determined (a line that may be wrong is
-    worse than no line; the claim filter is the real guard)."""
+    worse than no line; the claim filter is the real guard). A host that paused
+    ``cli`` at its usage limit is named, with its own line and reset time (F083)."""
     try:
         from services import cli_host_service
+        from services.cli_host_pauses import paused_lines
         served = cli_host_service.serving_providers(db, workspace_id)
+        paused = [] if cli in served else paused_lines(db, workspace_id, cli)
     except Exception:  # noqa: BLE001
         logger.debug("[CliTicketLane] served-CLI lookup unavailable", exc_info=True)
         return None
     if cli in served:
         return None
+    if paused:
+        return PAUSED_CLI_REASON.format(cli=cli, paused="; ".join(paused))
     return NO_CLI_HOST_REASON.format(cli=cli, served=", ".join(served) or "no CLI")
 
 
@@ -222,8 +230,11 @@ def queued_line(task: BoardTask) -> str:
     line = QUEUED_LINE.format(ticket=ticket_label(task))
     reason = getattr(task, "blocked_reason", None)
     if is_no_cli_host_reason(reason):
-        head = reason.split(" — ")[0]                      # "Waiting for a CLI host that runs codex"
-        line += f" ({head[0].lower()}{head[1:]} — none online runs it yet)"
+        head, _, why = reason.partition(" — ")             # "Waiting for a CLI host that runs codex"
+        if why.startswith(PAUSED_MARK):
+            line += f" ({why.split('. ')[0]})"             # F083: "paused: claude usage limit, resumes ~09:00 (host …)"
+        else:
+            line += f" ({head[0].lower()}{head[1:]} — none online runs it yet)"
     elif reason:
         line += " (no CLI host is online yet — start it with `make cli-host`)"
     return line

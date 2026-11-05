@@ -14,7 +14,8 @@ It does what the host relies on, and nothing else:
 
 Scenario knobs (environment): ``FAKE_CLAUDE_SCENARIO`` = ``happy`` (default),
 ``exit-early`` (dies before Stop), ``slow`` (sleeps before Stop), ``no-start`` (never fires a hook),
-``usage-limit`` (prints a plan-limit notice mid-turn and exits 1 — ``FAKE_CLAUDE_LIMIT_TEXT`` overrides it);
+``usage-limit`` (prints a plan-limit notice mid-turn and exits 1 — ``FAKE_CLAUDE_LIMIT_TEXT`` overrides it),
+``usage-limit-parked`` (prints Claude Code's own limit lines, then holds the turn like the TUI does);
 ``FAKE_CLAUDE_SESSION_NOTE=1`` also writes ``note.md`` into the ticket folder (the
 ``--add-dir``) and reports an edit of the host's own ``ticket.md`` there (PRD-245 S0.7).
 """
@@ -130,6 +131,16 @@ def main(argv) -> int:
         print(os.environ.get("FAKE_CLAUDE_LIMIT_TEXT", "You've hit your limit · resets 3pm (Europe/Dublin)"),
               flush=True)
         return 1
+
+    if scenario == "usage-limit-parked":
+        # Claude Code's own lines (5 Nov 2026), colour and cursor moves included: it
+        # does not exit, it waits for the window — hours — until something ends it.
+        sys.stdout.write("\x1b[38;2;255;107;128mYou've hit your weekly limit · resets 9am (Europe/Berlin)\r\n"
+                         "\x1b[38;2;153;153;153m●\x1b[3GUsage limit reached · continuing automatically at 9am · "
+                         "esc to cancel\r\n")
+        sys.stdout.flush()
+        while True:
+            time.sleep(0.2)
 
     # One allowed edit inside cwd, one Bash outside the allowlist (must be denied).
     edit = {"file_path": os.path.join(cwd, "hello.txt"), "content": "hi"}
