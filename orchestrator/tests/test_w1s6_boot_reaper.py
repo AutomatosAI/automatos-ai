@@ -99,11 +99,11 @@ class _FakeSession:
         self.rollbacks += 1
 
 
-def _board(id_, status, started_at, updated_at=None):
+def _board(id_, status, started_at, updated_at=None, lease_until=None):
     return SimpleNamespace(
         id=id_, status=status, started_at=started_at,
         updated_at=updated_at, completed_at=None, error_message=None,
-        workspace_id=None, assigned_agent_id=None,
+        workspace_id=None, assigned_agent_id=None, lease_until=lease_until,
     )
 
 
@@ -242,6 +242,27 @@ def test_fresh_rows_are_not_reaped(monkeypatch):
 
     assert n == 0 and closed == []
     rec.assert_not_called()
+
+
+def test_a_ticket_whose_lease_is_live_is_not_reaped(monkeypatch):
+    """5 Nov: a respawned uvicorn worker ran the sweep and failed two morning tickets whose
+    CLI host sessions were still running and renewing their leases."""
+    monkeypatch.setattr(reaper, "record_error", MagicMock())
+    running = _board(85, "in_progress", OLD, lease_until=NOW + timedelta(minutes=8))
+    running_naive = _board(86, "in_progress", OLD, lease_until=(NOW + timedelta(minutes=2)).replace(tzinfo=None))
+    closed = _completion_writer(monkeypatch, running, running_naive)
+
+    assert _reap(_FakeSession({BoardTask: [running, running_naive]})) == 0
+    assert closed == [] and running.status == running_naive.status == "in_progress"
+
+
+def test_a_ticket_whose_lease_has_run_out_is_reaped(monkeypatch):
+    monkeypatch.setattr(reaper, "record_error", MagicMock())
+    lost = _board(87, "in_progress", OLD, lease_until=NOW - timedelta(minutes=1))
+    closed = _completion_writer(monkeypatch, lost)
+
+    assert _reap(_FakeSession({BoardTask: [lost]})) == 1
+    assert [task_id for task_id, _ in closed] == [87] and lost.status == "failed"
 
 
 # ---------------------------------------------------------------------------
