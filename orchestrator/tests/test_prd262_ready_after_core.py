@@ -293,7 +293,8 @@ def test_only_the_boot_leader_embeds_the_agents_and_every_worker_warms_its_index
         return run
 
     for name in ("embed_all_agents_on_startup", "ensure_field_memory_collection",
-                 "warm_action_index_on_startup", "warm_output_budgets_on_startup"):
+                 "warm_action_index_on_startup", "warm_first_turn_on_startup",
+                 "warm_output_budgets_on_startup"):
         monkeypatch.setattr(startup_tasks, name, recorder(name))
 
     async def scenario():
@@ -304,7 +305,7 @@ def test_only_the_boot_leader_embeds_the_agents_and_every_worker_warms_its_index
 
     assert ("embed_all_agents_on_startup" in started) is embedded
     assert {"warm_output_budgets_on_startup", "ensure_field_memory_collection",
-            "warm_action_index_on_startup"} <= set(started)
+            "warm_action_index_on_startup", "warm_first_turn_on_startup"} <= set(started)
 
 
 def test_the_composio_catalogue_stage_runs_off_the_event_loop(monkeypatch):

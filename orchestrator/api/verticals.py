@@ -132,7 +132,7 @@ class VerticalProvisionResponse(BaseModel):
 
 
 @router.post("/{vertical}/provision", response_model=VerticalProvisionResponse)
-async def provision_vertical_workspace(
+def provision_vertical_workspace(
     vertical: str,
     request: VerticalProvisionRequest,
     db: Session = Depends(get_db),
@@ -176,7 +176,7 @@ class VerticalDomainsRequest(BaseModel):
 
 
 @router.patch("/{vertical}/provision/domains")
-async def update_vertical_key_domains(
+def update_vertical_key_domains(
     vertical: str,
     request: VerticalDomainsRequest,
     db: Session = Depends(get_db),
@@ -262,7 +262,7 @@ def _webhook_actor(vertical: str, external_id: str) -> str:
 
 
 @router.post("/{vertical}/gdpr/erase-subject")
-async def gdpr_erase_subject(
+def gdpr_erase_subject(
     vertical: str,
     request: VerticalGdprEraseSubjectRequest,
     db: Session = Depends(get_db),
@@ -292,7 +292,7 @@ async def gdpr_erase_subject(
 
 
 @router.post("/{vertical}/gdpr/erase")
-async def gdpr_erase_workspace(
+def gdpr_erase_workspace(
     vertical: str,
     request: VerticalGdprEraseRequest,
     db: Session = Depends(get_db),
@@ -323,7 +323,7 @@ async def gdpr_erase_workspace(
 
 
 @router.get("/{vertical}/gdpr/export")
-async def gdpr_export_workspace(
+def gdpr_export_workspace(
     vertical: str,
     external_id: str,
     customer_id: Optional[str] = None,

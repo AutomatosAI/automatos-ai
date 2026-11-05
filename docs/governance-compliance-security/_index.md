@@ -5,148 +5,121 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/compliance/README.md](docs/compliance/README.md)
-- [frontend/components/command-center/__tests__/governance-approvals-inbox.test.tsx](frontend/components/command-center/__tests__/governance-approvals-inbox.test.tsx)
-- [frontend/components/command-center/__tests__/governance-compliance-pane.test.tsx](frontend/components/command-center/__tests__/governance-compliance-pane.test.tsx)
-- [frontend/components/command-center/__tests__/governance-policy-pane.test.tsx](frontend/components/command-center/__tests__/governance-policy-pane.test.tsx)
-- [frontend/components/command-center/__tests__/governance-policy-plane-tile.test.tsx](frontend/components/command-center/__tests__/governance-policy-plane-tile.test.tsx)
-- [frontend/components/command-center/governance-tab.tsx](frontend/components/command-center/governance-tab.tsx)
-- [frontend/components/command-center/governance/approvals-inbox.tsx](frontend/components/command-center/governance/approvals-inbox.tsx)
-- [frontend/components/command-center/governance/audit-pane.tsx](frontend/components/command-center/governance/audit-pane.tsx)
-- [frontend/components/command-center/governance/compliance-pane.tsx](frontend/components/command-center/governance/compliance-pane.tsx)
-- [frontend/components/command-center/governance/policy-pane.tsx](frontend/components/command-center/governance/policy-pane.tsx)
-- [frontend/hooks/use-approval-grants.ts](frontend/hooks/use-approval-grants.ts)
-- [frontend/hooks/use-gdpr.ts](frontend/hooks/use-gdpr.ts)
-- [frontend/hooks/use-governance.ts](frontend/hooks/use-governance.ts)
-- [orchestrator/alembic/versions/prd196_s3_audit_logs_ws_created_index.py](orchestrator/alembic/versions/prd196_s3_audit_logs_ws_created_index.py)
-- [orchestrator/api/gdpr.py](orchestrator/api/gdpr.py)
-- [orchestrator/api/governance.py](orchestrator/api/governance.py)
-- [orchestrator/tests/test_p2w2_gdpr_admin_dep.py](orchestrator/tests/test_p2w2_gdpr_admin_dep.py)
-- [orchestrator/tests/test_p2w2_grants_oversight.py](orchestrator/tests/test_p2w2_grants_oversight.py)
-- [orchestrator/tests/test_prd200_approval_renotify.py](orchestrator/tests/test_prd200_approval_renotify.py)
+- [orchestrator/api/mobile_push.py](orchestrator/api/mobile_push.py)
+- [orchestrator/services/mobile/digest_now.py](orchestrator/services/mobile/digest_now.py)
+- [orchestrator/services/mobile/discovery.py](orchestrator/services/mobile/discovery.py)
+- [orchestrator/tests/authz_sweep_probe.py](orchestrator/tests/authz_sweep_probe.py)
+- [orchestrator/tests/test_p2w2_authz_boundary_sweep.py](orchestrator/tests/test_p2w2_authz_boundary_sweep.py)
+- [orchestrator/tests/test_prd266_digest_now.py](orchestrator/tests/test_prd266_digest_now.py)
+- [orchestrator/tests/test_prd266_discovery.py](orchestrator/tests/test_prd266_discovery.py)
 
 </details>
 
 
 
-This page provides a high-level overview of the governance, compliance, and security features within the Automatos AI platform. It covers mechanisms for approvals, audit logging, data privacy (GDPR), adherence to the EU AI Act, and general security hardening practices. Each section briefly introduces the topic and links to dedicated child pages for in-depth technical details.
+## Purpose and scope
 
-## Governance Dashboard & Approvals Inbox
+This page introduces Automatos AI’s governance, compliance, and security concerns at a high level. It connects human approval and policy workflows with audit and data-subject processes, and with tests that check authorization boundaries. For implementation detail, see the child pages linked below. The available boundary-sweep test describes a contract for classifying mutating routes and failing CI when a route is left unclassified. [orchestrator/tests/test_p2w2_authz_boundary_sweep.py:1-30]()
 
-The platform provides a centralized "Governance" tab within the Command Center, acting as the human-in-the-loop interface for oversight. This tab is accessible only to workspace administrators and consolidates several critical functions: an Approvals Inbox, an Audit Pane, a Policy Pane, and a Compliance Pane [frontend/components/command-center/governance-tab.tsx:3-14]().
+- [Governance Command Center](#26.1) — governance-tab, policy plane, approvals inbox, audit and compliance panes, questions tab, governance hooks and APIs, and `modules/policy`.
+- [Audit, GDPR & AI Act Compliance](#26.2) — audit service and retention, GDPR export and erasure, `/api/gdpr`, EU AI Act policy modules, `ai_label`, and content provenance.
+- [Security Hardening & AuthZ Sweeps](#26.3) — authorization-boundary sweep, CORS coverage, widget fail-closed checks, hierarchy gates, git sanitizer, pinned HTTP validator, and template security.
 
-The Approvals Inbox (`ApprovalsInbox`) is a key component, presenting pending approval grants and parked missions that require human review [frontend/components/command-center/governance/approvals-inbox.tsx:4-13](). It displays details such as the subject, tool involved, risk tier, rationale for oversight (e.g., Art.14 for external side-effects), and estimated cost [frontend/components/command-center/governance/approvals-inbox.tsx:81-92](). Users can `Grant`, `Deny`, or `Revoke` approvals, which trigger corresponding mutations via `useGrantApproval`, `useDenyApproval`, and `useRevokeApproval` hooks [frontend/components/command-center/governance/approvals-inbox.tsx:60-75]().
+Sources: [orchestrator/tests/test_p2w2_authz_boundary_sweep.py:1-30]()
 
-For details on the governance API, `use-governance` hooks, approval grant flows, and renotification mechanisms, see [Governance Dashboard & Approvals Inbox](#26.1).
+---
 
-### Governance Overview Diagram
+## 26.1 Governance Command Center
+
+The governance command center brings together approval handling, policy controls, audit visibility, and compliance information. These are related but distinct responsibilities: approvals provide a human decision point, policy modules describe governance rules, and audit views support review of system activity. For details on the UI, hooks, routes, and policy modules, see [Governance Command Center](#26.1).
+
+The boundary-sweep contract also distinguishes authorization patterns, including workspace permissions, administrator gates, routes using their own authentication, and routes public by design. This helps connect governance features to the broader question of who may perform a mutating action. [orchestrator/tests/test_p2w2_authz_boundary_sweep.py:7-24]()
+
+**Diagram: Governance concepts mapped to available code entities**
 
 ```mermaid
-graph TD
-    subgraph "Command Center (Frontend)"
-        CC[("Command Center UI")] --> GT(GovernanceTab)
-        GT --> AI(ApprovalsInbox)
-        GT --> AP(AuditPane)
-        GT --> PP(PolicyPane)
-        GT --> CP(CompliancePane)
-        AI -- "useApprovalGrants" --> HAG(useApprovalGrants Hook)
-        AI -- "useMissions" --> HUM(useMissions Hook)
-        AP -- "useGovernanceAuditLog" --> HGAL(useGovernanceAuditLog Hook)
-        PP -- "usePolicy" --> HUP(usePolicy Hook)
-        PP -- "useBudget" --> HUB(useBudget Hook)
-        CP -- "useGdprEraseSubject" --> HGES(useGdprEraseSubject Hook)
-        CP -- "useGdprEraseWorkspace" --> HGEW(useGdprEraseWorkspace Hook)
+graph LR
+    subgraph "Natural Language Space"
+        Governance["Governance Command Center"]
+        Approvals["Approval workflows"]
+        Policy["Policy controls"]
+        AuthZ["Authorization classification"]
     end
-
-    subgraph "Backend (orchestrator)"
-        HAG --> APIAG(api.approval_grants)
-        HUM --> APIM(api.missions)
-        HGAL --> APIG(api.governance)
-        HUP --> APIG
-        HUB --> APIG
-        HGES --> APIGDPR(api.gdpr)
-        HGEW --> APIGDPR
-
-        APIGDPR -- "erase_data_subject" --> SG(GdprService)
-        APIGDPR -- "erase_workspace" --> SG
-        APIGDPR -- "export_workspace" --> SG
-        APIG -- "AuditService.log" --> AS(AuditService)
-        APIG -- "load_policy_document" --> MPD(modules.policy.policy_document)
-        APIG -- "set_policy_document" --> MPD
-        APIG -- "load_budget" --> MB(modules.policy.budget)
-        APIG -- "set_budget" --> MB
-        APIG -- "policy_plane_enabled" --> MPF(modules.policy.flag)
-        AS --> AL(AuditLog Table)
-        SG --> AL
-        SG --> AG(ApprovalGrant Table)
-        SG --> QDRANT(Qdrant Field Memory)
-        SG --> DM(Durable Memory)
+    subgraph "Code Entity Space"
+        Governance --> SweepTest["test_p2w2_authz_boundary_sweep.py"]
+        AuthZ --> SweepTest
+        SweepTest --> PermissionGate["require_workspace_permission"]
+        SweepTest --> AdminGate["require_workspace_admin"]
+        SweepTest --> AnswererGate["require_workspace_answerer"]
+        SweepTest --> PublicByDesign["PUBLIC_BY_DESIGN"]
+        SweepTest --> OwnAuth["OWN_AUTH_ROUTES"]
     end
-
-    style GT fill:#f9f,stroke:#333,stroke-width:2px
-    style AI fill:#f9f,stroke:#333,stroke-width:2px
-    style AP fill:#f9f,stroke:#333,stroke-width:2px
-    style PP fill:#f9f,stroke:#333,stroke-width:2px
-    style CP fill:#f9f,stroke:#333,stroke-width:2px
-    style APIG fill:#bbf,stroke:#333,stroke-width:2px
-    style APIGDPR fill:#bbf,stroke:#333,stroke-width:2px
-    style SG fill:#bbf,stroke:#333,stroke-width:2px
-    style AS fill:#bbf,stroke:#333,stroke-width:2px
-    style AL fill:#ccf,stroke:#333,stroke-width:2px
-    style AG fill:#ccf,stroke:#333,stroke-width:2px
-    style QDRANT fill:#ccf,stroke:#333,stroke-width:2px
-    style DM fill:#ccf,stroke:#333,stroke-width:2px
 ```
-Sources:
-- [frontend/components/command-center/governance-tab.tsx:3-14]()
-- [frontend/components/command-center/governance/approvals-inbox.tsx:4-13]()
-- [frontend/components/command-center/governance/approvals-inbox.tsx:81-92]()
-- [frontend/components/command-center/governance/approvals-inbox.tsx:60-75]()
-- [orchestrator/api/governance.py:1-39]()
-- [orchestrator/api/gdpr.py:1-30]()
-- [orchestrator/services/gdpr_service.py]()
-- [orchestrator/core/workspaces/audit.py]()
-- [orchestrator/modules/policy/policy_document.py]()
-- [orchestrator/modules/policy/budget.py]()
-- [orchestrator/modules/policy/flag.py]()
 
-## Audit, GDPR & AI Act Compliance
+Sources: [orchestrator/tests/test_p2w2_authz_boundary_sweep.py:7-24]()
 
-The platform implements robust auditing and compliance features. The `AuditPane` provides a filterable and paginated view of the workspace's audit log, capturing actions related to policy verdicts, GDPR operations, approval grants, and governance configuration [frontend/components/command-center/governance/audit-pane.tsx:4-8, 16-22](). This log is tenant-scoped and accessible only to workspace administrators, with the `workspace_id` filter applied from the request context to prevent cross-tenant data access [orchestrator/api/governance.py:126-130](). A composite index `ix_audit_logs_workspace_created` on `audit_logs` table (`workspace_id`, `created_at`) optimizes read and retention sweeps [orchestrator/alembic/versions/prd196_s3_audit_logs_ws_created_index.py:1-10]().
+---
 
-GDPR compliance is handled by the `GdprService`, which provides functionalities for data export and erasure with cascade effects across SQL, Qdrant field memory, and durable memory [orchestrator/api/gdpr.py:1-9](). The `CompliancePane` in the frontend allows administrators to initiate subject-level or workspace-level data erasure [frontend/components/command-center/governance-compliance-pane.test.tsx:63-77](). Subject erasure (`erase_data_subject`) reports what was and was not deleted, including "gaps" (e.g., SQL data being workspace-scoped, not subject-scoped) and "untagged history" (data written before subject tags existed) [frontend/components/command-center/governance-compliance-pane.test.tsx:49-61](). Workspace erasure (`erase_workspace`) requires explicit confirmation of the workspace ID to prevent accidental data loss [orchestrator/api/gdpr.py:57-67]().
+## 26.2 Audit, GDPR & AI Act Compliance
 
-For the EU AI Act, the platform includes a scaffold for Annex IV technical file documentation and maps Art.14 oversight to approval cards [docs/compliance/README.md:21-22](). The `modules/policy/ai_act` module is relevant here.
+Audit logging and retention, GDPR export and erasure, and EU AI Act compliance are grouped here because they address different parts of accountable platform operation: recording activity, handling data-subject requests, and applying AI-related governance requirements. The child page covers the relevant services, routes, and policy modules in detail. See [Audit, GDPR & AI Act Compliance](#26.2).
 
-For detailed information on `audit_service` and retention, `audit_logs` indexes, `GdprService` erasure cascades, and the `gdpr` API/hooks, see [Audit, GDPR & AI Act Compliance](#26.2).
+The available authorization probe recognizes an in-handler workspace-admin check in `api/gdpr.py` as a distinct classification case; it is treated as classified rather than silently changed by the boundary sweep. [orchestrator/tests/authz_sweep_probe.py:89-99]() For retention behavior, GDPR cascades, and AI Act policy details, see the child page.
 
-Sources:
-- [frontend/components/command-center/governance/audit-pane.tsx:4-8]()
-- [frontend/components/command-center/governance/audit-pane.tsx:16-22]()
-- [orchestrator/api/governance.py:126-130]()
-- [orchestrator/alembic/versions/prd196_s3_audit_logs_ws_created_index.py:1-10]()
-- [orchestrator/api/gdpr.py:1-9]()
-- [frontend/components/command-center/governance-compliance-pane.test.tsx:63-77]()
-- [frontend/components/command-center/governance-compliance-pane.test.tsx:49-61]()
-- [orchestrator/api/gdpr.py:57-67]()
-- [docs/compliance/README.md:21-22]()
-- [orchestrator/modules/policy/ai_act.py]()
+**Diagram: Compliance topics mapped to the available route-probe reference**
 
-## Security Hardening Practices
+```mermaid
+graph LR
+    subgraph "Natural Language Space"
+        Audit["Audit and retention"]
+        GDPR["GDPR export and erasure"]
+        AIAct["EU AI Act compliance"]
+    end
+    subgraph "Code Entity Space"
+        GDPR --> Probe["tests/authz_sweep_probe.py"]
+        Probe --> GDPRGate["api/gdpr.py in-handler admin check"]
+        Audit --> AuditChild["Audit, GDPR & AI Act Compliance"]
+        AIAct --> AuditChild
+    end
+```
 
-Security is a foundational aspect of the platform, with several practices implemented to harden the system against vulnerabilities. These include:
+Sources: [orchestrator/tests/authz_sweep_probe.py:89-99]()
 
-*   **Authorization Boundary Sweeps:** Regular reviews and enforcement of authorization boundaries ensure that access controls are correctly applied across the system, particularly for sensitive operations and data.
-*   **CORS Boot Guard:** A robust Cross-Origin Resource Sharing (CORS) configuration is in place from the application's boot sequence to prevent unauthorized cross-origin requests.
-*   **Fail-Closed Widget Authentication:** Widget authentication mechanisms are designed to "fail closed," meaning that in case of an authentication failure, access is denied by default, preventing potential bypasses.
-*   **Webhook HMAC and Deduplication:** Webhooks are secured using HMAC (Hash-based Message Authentication Code) for signature verification, ensuring the integrity and authenticity of incoming requests. Deduplication mechanisms prevent replay attacks and ensure idempotent processing.
-*   **Permission Bypass Audit:** The system includes auditing capabilities to detect and log any attempts at permission bypass, providing visibility into potential security breaches.
-*   **Tenant Isolation Test Suites:** Comprehensive test suites are run to verify strict tenant isolation, ensuring that data and operations of one workspace cannot inadvertently or maliciously affect another.
+---
 
-For a detailed discussion of these and other security measures, see [Security Hardening Practices](#26.3).
+## 26.3 Security Hardening & AuthZ Sweeps
 
-Sources:
-- [orchestrator/api/governance.py:1-39]() (Implicit in `require_workspace_admin` dependency)
-- [orchestrator/api/gdpr.py:1-30]() (Implicit in `require_workspace_admin` dependency)
+The authorization-boundary sweep uses the committed route manifest as its contract and probes the live FastAPI application as ground truth. Its stated goal is to classify each mutating route exactly one way; an unclassified route is intended to fail CI. [orchestrator/tests/test_p2w2_authz_boundary_sweep.py:1-30]() The probe gathers authorization facts from the route dependency tree and endpoint source, including workspace permissions, administrator dependencies, and explicit in-handler gates. [orchestrator/tests/authz_sweep_probe.py:41-55]() [orchestrator/tests/authz_sweep_probe.py:78-110]()
+
+This sweep is one part of the security-hardening picture. The child page covers it alongside CORS tests, widget fail-closed checks, hierarchy gates, and other security checks. See [Security Hardening & AuthZ Sweeps](#26.3).
+
+**Diagram: Mutating-route authorization sweep mapped to code entities**
+
+```mermaid
+graph LR
+    subgraph "Natural Language Space"
+        Mutations["Mutating routes"]
+        Contract["Route-manifest contract"]
+        LiveApp["Live application probe"]
+        Classification["Exactly-one authorization classification"]
+        CI["CI failure for unclassified route"]
+    end
+    subgraph "Code Entity Space"
+        Mutations --> Sweep["test_p2w2_authz_boundary_sweep.py"]
+        Contract --> Manifest["reports/route-manifest.json"]
+        Sweep --> Manifest
+        Sweep --> Probe["tests/authz_sweep_probe.py"]
+        Probe --> App["main.app"]
+        Probe --> Hybrid["get_request_context_hybrid"]
+        Probe --> Permission["require_workspace_permission"]
+        Probe --> WorkspaceAdmin["require_workspace_admin"]
+        Probe --> Answerer["require_workspace_answerer"]
+        Probe --> HandlerGate["admin_in_handler"]
+        Classification --> Sweep
+        Sweep --> CI
+    end
+```
+
+Sources: [orchestrator/tests/test_p2w2_authz_boundary_sweep.py:1-30](), [orchestrator/tests/authz_sweep_probe.py:41-55](), [orchestrator/tests/authz_sweep_probe.py:78-110]()
 
 ---

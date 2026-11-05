@@ -302,7 +302,7 @@ def _allowed(db, ctx) -> bool:
     from core.auth.workspace_admin import require_workspace_admin
 
     try:
-        return asyncio.run(require_workspace_admin(ctx=ctx, db=db)) is ctx
+        return require_workspace_admin(ctx=ctx, db=db) is ctx
     except HTTPException as refused:
         assert refused.status_code == 403
         return False

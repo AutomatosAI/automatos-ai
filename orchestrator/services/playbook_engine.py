@@ -48,36 +48,13 @@ lazily so the seam module itself stays cheap.
 """
 from __future__ import annotations
 
-import asyncio
 import functools
 import logging
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
-from anyio import NoEventLoopError, from_thread
+from core.utils.background_tasks import on_the_event_loop
 
 logger = logging.getLogger(__name__)
-
-
-def on_the_event_loop(start: Callable[[], None]) -> None:
-    """Call ``start`` where it can schedule a task on the event loop: here when a
-    loop runs in this thread, else on the loop's own thread when this is a route's
-    threadpool (anyio's worker thread). With neither, a script or a plain test, it
-    runs here, as it always did.
-
-    F296 (night 8): the board's re-brief is a plain ``def`` route, so FastAPI runs
-    it in its threadpool, where no loop runs. Re-briefing a playbook's card saved
-    the new brief, then ``asyncio.create_task`` raised "no running event loop": the
-    owner got a 500 for a change that had applied (#0249), and the run stayed
-    pending until the stall watchdog failed it ("Stalled: no progress for 120s")."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        try:
-            from_thread.run_sync(start)
-            return
-        except NoEventLoopError:
-            pass  # not a route's thread either: start it here
-    start()
 
 
 class PlaybookEngine:

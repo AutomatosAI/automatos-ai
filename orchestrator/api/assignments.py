@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/assignments", tags=["assignments"])
 
 
 @router.get("/recommended")
-async def get_recommended(
+def get_recommended(
     limit: int = Query(12, ge=1, le=24),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

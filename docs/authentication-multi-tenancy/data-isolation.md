@@ -6,24 +6,21 @@
 The following files were used as context for generating this wiki page:
 
 - [docs/workspace-execution/security-sandboxing.md](docs/workspace-execution/security-sandboxing.md)
-- [orchestrator/alembic/versions/prd158_teams_table.py](orchestrator/alembic/versions/prd158_teams_table.py)
-- [orchestrator/api/knowledge_multimodal.py](orchestrator/api/knowledge_multimodal.py)
-- [orchestrator/api/teams.py](orchestrator/api/teams.py)
-- [orchestrator/api/widgets/__init__.py](orchestrator/api/widgets/__init__.py)
+- [orchestrator/api/api_keys.py](orchestrator/api/api_keys.py)
+- [orchestrator/api/widgets/auth.py](orchestrator/api/widgets/auth.py)
+- [orchestrator/api/widgets/config.py](orchestrator/api/widgets/config.py)
 - [orchestrator/api/widgets/cors.py](orchestrator/api/widgets/cors.py)
-- [orchestrator/api/widgets/data.py](orchestrator/api/widgets/data.py)
-- [orchestrator/api/widgets/documents.py](orchestrator/api/widgets/documents.py)
-- [orchestrator/core/team_access.py](orchestrator/core/team_access.py)
-- [orchestrator/modules/rag/services/multimodal_knowledge_tools.py](orchestrator/modules/rag/services/multimodal_knowledge_tools.py)
-- [orchestrator/modules/tools/execution/exec_multimodal.py](orchestrator/modules/tools/execution/exec_multimodal.py)
+- [orchestrator/api/widgets/session.py](orchestrator/api/widgets/session.py)
+- [orchestrator/core/database/migrations/043_team_based_document_scoping.sql](orchestrator/core/database/migrations/043_team_based_document_scoping.sql)
+- [orchestrator/core/models/sdk_api_keys.py](orchestrator/core/models/sdk_api_keys.py)
+- [orchestrator/core/services/api_key_service.py](orchestrator/core/services/api_key_service.py)
 - [orchestrator/tests/security/test_prd172_tenant_isolation.py](orchestrator/tests/security/test_prd172_tenant_isolation.py)
-- [orchestrator/tests/security/test_tenancy_matrix.py](orchestrator/tests/security/test_tenancy_matrix.py)
-- [orchestrator/tests/test_documents_team_filter.py](orchestrator/tests/test_documents_team_filter.py)
+- [orchestrator/tests/test_f155_widget_key_limits.py](orchestrator/tests/test_f155_widget_key_limits.py)
 - [orchestrator/tests/test_p2w2_cors_boot_guard.py](orchestrator/tests/test_p2w2_cors_boot_guard.py)
+- [orchestrator/tests/test_p2w2_widget_fail_closed.py](orchestrator/tests/test_p2w2_widget_fail_closed.py)
 - [orchestrator/tests/test_prd008a_cors_coverage.py](orchestrator/tests/test_prd008a_cors_coverage.py)
+- [orchestrator/tests/test_prd008a_widget_config_resolver.py](orchestrator/tests/test_prd008a_widget_config_resolver.py)
 - [orchestrator/tests/test_prd186_s3_hardening.py](orchestrator/tests/test_prd186_s3_hardening.py)
-- [orchestrator/tests/test_teams_api.py](orchestrator/tests/test_teams_api.py)
-- [orchestrator/tests/test_widget_docs_schema.py](orchestrator/tests/test_widget_docs_schema.py)
 
 </details>
 
@@ -31,199 +28,242 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-Data isolation ensures that resources belonging to one workspace cannot be accessed by users from another workspace. Every database record representing user-created content is scoped to a `workspace_id`, and all API queries automatically filter by the authenticated user's workspace. This prevents workspace spoofing, unauthorized cross-workspace access, and data leaks between tenants.
+This page describes the isolation mechanisms evidenced by the provided code: workspace ownership on SDK API keys, workspace-scoped key-management operations, workspace identity in widget authentication, shared S3 vector filtering, and tenant-isolation tests. The available files do not establish general memory namespacing or query-key scoping behavior, so those mechanisms are not inferred here. [orchestrator/core/models/sdk_api_keys.py:29-73](), [orchestrator/core/services/api_key_service.py:48-62](), [orchestrator/api/widgets/auth.py:46-56](), [orchestrator/tests/test_prd186_s3_hardening.py:80-133](), [orchestrator/tests/security/test_prd172_tenant_isolation.py:1-17]()
 
-Automatos AI implements a multi-layered isolation strategy encompassing database foreign keys, request-scoped context injection, standardized memory namespacing, and cache prefixing.
-
-**Sources:** [orchestrator/core/models/workspaces.py:4-8](), [orchestrator/core/auth/hybrid.py:23-37]()
+Sources: [orchestrator/core/models/sdk_api_keys.py:29-73](), [orchestrator/core/services/api_key_service.py:48-62](), [orchestrator/api/widgets/auth.py:46-56](), [orchestrator/tests/test_prd186_s3_hardening.py:80-133](), [orchestrator/tests/security/test_prd172_tenant_isolation.py:1-17]()
 
 ---
 
-## RequestContext as the Isolation Boundary
+## Workspace Identity and Isolation Boundary
 
-Every API endpoint receives a `RequestContext` from the `get_request_context_hybrid` authentication dependency. This context contains the resolved `workspace_id` and `UserContext`, which together define the isolation boundary for that request.
+`WidgetAuthContext` carries a `workspace_id` UUID together with the API-key ID, permissions, optional default agent, and optional team lock. The `widget_auth` dependency accepts a Bearer token, attempts JWT decoding, and then uses raw API-key validation as a fallback. [orchestrator/api/widgets/auth.py:46-56](), [orchestrator/api/widgets/auth.py:62-93](), [orchestrator/api/widgets/auth.py:100-116]()
 
-### Authentication and Workspace Resolution Flow
+For a decoded JWT, `widget_auth` reads the workspace and key IDs from the payload. If the request also supplies `X-Workspace-ID`, the header must match the JWT workspace; a mismatch raises HTTP 403. On success, the dependency sets workspace, key, and permission values on `request.state` and returns the populated context. [orchestrator/api/widgets/auth.py:134-171]()
 
-The following diagram illustrates how an incoming request is associated with a specific workspace before reaching the business logic.
+### Widget Request Identity: Natural Language to Code Entities
 
-**Figure 1: Workspace Resolution and Context Injection**
+**Figure 1: Widget request identity and workspace binding**
+
 ```mermaid
-graph TB
-    subgraph "Natural Language Space"
-        User["User / Agent Request"]
-        WS_Header["'x-workspace-id' Header"]
+flowchart LR
+    subgraph "NaturalLanguageSpace"
+        Caller["StorefrontOrSDKCaller"]
+        Header["X-Workspace-ID"]
+        Token["BearerJWTOrRawAPIKey"]
     end
 
-    subgraph "Code Entity Space"
-        AuthDep["hybrid.py:get_request_context_hybrid"]
-        ClerkAuth["clerk.py:get_clerk_auth"]
-        APIKeyAuth["api_key_service.py:ApiKeyService"]
-        WS_Resolver["hybrid.py:_get_workspace_id_from_request"]
-        RequestContext["RequestContext<br/>workspace_id: UUID<br/>user: UserContext"]
-        Endpoint["FastAPI Route Handler"]
+    subgraph "CodeEntitySpace"
+        Auth["api/widgets/auth.py:widget_auth"]
+        Decoder["api/widgets/auth.py:_try_jwt"]
+        Context["WidgetAuthContext"]
+        State["request.state.workspace_id"]
+        Route["WidgetRouteHandler"]
     end
 
-    User --> AuthDep
-    WS_Header --> WS_Resolver
-    AuthDep --> ClerkAuth
-    AuthDep --> APIKeyAuth
-    ClerkAuth --> WS_Resolver
-    APIKeyAuth --> WS_Resolver
-    WS_Resolver --> RequestContext
-    RequestContext --> Endpoint
-
-    style RequestContext stroke-dasharray: 5 5
+    Caller --> Token
+    Caller --> Header
+    Token --> Auth
+    Header --> Auth
+    Auth --> Decoder
+    Decoder --> Context
+    Auth -->|"JWTWorkspaceHeaderMismatch:HTTP403"| Route
+    Context --> State
+    State --> Route
 ```
-**Sources:** [orchestrator/core/auth/hybrid.py:49-88](), [orchestrator/core/auth/dependencies.py:1-10]()
 
-The `RequestContext` is constructed after resolving the workspace through multiple strategies in priority order:
-1. **Header Overrides**: `x-workspace-id` or `x-workspace` [orchestrator/core/auth/hybrid.py:67-74]().
-2. **Query Parameters**: `workspace_id` [orchestrator/core/auth/hybrid.py:76-78]().
-3. **Environment Defaults**: `config.WORKSPACE_ID` or `config.DEFAULT_WORKSPACE_ID` [orchestrator/core/auth/hybrid.py:80-86]().
+Sources: [orchestrator/api/widgets/auth.py:46-56](), [orchestrator/api/widgets/auth.py:62-93](), [orchestrator/api/widgets/auth.py:100-116](), [orchestrator/api/widgets/auth.py:134-171]()
 
 ---
 
-## Database and Schema Isolation
+## Database and Query Scoping
 
-### Workspace Model and Membership
-The `Workspace` model serves as the root for all tenant data [orchestrator/core/models/workspaces.py:21-25](). Access is gated by `_user_has_workspace_access`, which verifies that a user is either the owner or an active member in the `workspace_members` table [orchestrator/core/auth/hybrid.py:146-166]().
+### Workspace Foreign Keys
+
+`SdkApiKey.workspace_id` is a non-null PostgreSQL UUID foreign key to `workspaces.id` with `ON DELETE CASCADE`. The model also defines an index on `workspace_id`, making workspace ownership explicit on each SDK key row. [orchestrator/core/models/sdk_api_keys.py:29-43]()
+
+The model associates the key with its `Workspace` through an ORM relationship. Other key attributes include the hashed key, permissions, allowed domains and IPs, active status, and optional default-agent and team locks. [orchestrator/core/models/sdk_api_keys.py:44-73]()
 
 ### Query Key Scoping
-Standardized query filtering prevents cross-tenant leaks. For instance, the `_workspace_exists` helper ensures that only non-deleted workspaces are queryable [orchestrator/core/auth/hybrid.py:91-106](). In the frontend, the `useWorkspace` hook ensures that the current active workspace ID is persisted in `localStorage` as `last_active_workspace` to maintain session continuity [frontend/components/workspace-provider.tsx:161-163]().
 
-| Component | Isolation Technique | Primary Code Reference |
-| :--- | :--- | :--- |
-| **ORM** | `workspace_id` Foreign Keys | [orchestrator/core/models/workspaces.py:4-8]() |
-| **Auth** | `_user_has_workspace_access` | [orchestrator/core/auth/hybrid.py:146-165]() |
-| **Frontend** | `wsScope` Query Keys | [frontend/components/workspace-provider.tsx:112-120]() |
-| **Security** | `paused_at` Admin Gate | [orchestrator/core/auth/hybrid.py:109-125]() |
+`ApiKeyService.list_api_keys` filters records by the supplied `workspace_id` before ordering them by creation time. `revoke_api_key` filters by both key ID and workspace ID, returning `False` when no matching row exists. These predicates prevent those operations from listing or revoking a key belonging to another workspace. [orchestrator/core/services/api_key_service.py:143-170](), [orchestrator/core/services/api_key_service.py:175-190]()
 
-**Sources:** [orchestrator/core/models/workspaces.py:21-56](), [orchestrator/core/auth/hybrid.py:91-166]()
+The API-key creation route requires workspace context, passes `ctx.workspace_id` into `ApiKeyService.create_api_key`, and checks that a requested `default_agent_id` belongs to that workspace before creating the key. The service persists the workspace ID on the new `SdkApiKey` record. [orchestrator/api/api_keys.py:138-175](), [orchestrator/core/services/api_key_service.py:48-93]()
+
+| Boundary | Implementation | Isolation effect |
+|---|---|---|
+| Key ownership | `SdkApiKey.workspace_id` references `workspaces.id` and is non-null. [orchestrator/core/models/sdk_api_keys.py:29-43]() | Every SDK key row is associated with a workspace. |
+| Key listing | `ApiKeyService.list_api_keys(db, workspace_id)` filters on `SdkApiKey.workspace_id`. [orchestrator/core/services/api_key_service.py:175-190]() | The returned key list is limited to the requested workspace. |
+| Key revocation | `ApiKeyService.revoke_api_key(db, key_id, workspace_id)` filters on both values. [orchestrator/core/services/api_key_service.py:143-170]() | A key in another workspace does not match the revocation query. |
+| Key creation | The route passes the request workspace ID to `create_api_key`; the service stores it on the record. [orchestrator/api/api_keys.py:138-175](), [orchestrator/core/services/api_key_service.py:48-93]() | New keys are attached to the request workspace. |
+| Default-agent lock | The route calls `agent_in_workspace` before accepting a default agent ID. [orchestrator/api/api_keys.py:155-160]() | A key cannot be created with a default agent outside the request workspace. |
+
+Sources: [orchestrator/core/models/sdk_api_keys.py:29-73](), [orchestrator/core/services/api_key_service.py:48-93](), [orchestrator/core/services/api_key_service.py:143-190](), [orchestrator/api/api_keys.py:138-175]()
+
+### API-Key Flow: Natural Language to Code Entities
+
+**Figure 2: Workspace-scoped SDK API-key operations**
+
+```mermaid
+flowchart LR
+    subgraph "NaturalLanguageSpace"
+        Admin["WorkspaceAdmin"]
+        Request["CreateListOrRevokeAPIKey"]
+        Workspace["RequestWorkspace"]
+    end
+
+    subgraph "CodeEntitySpace"
+        Router["orchestrator/api/api_keys.py"]
+        Context["RequestContext.workspace_id"]
+        Service["ApiKeyService"]
+        Create["create_api_key"]
+        List["list_api_keys"]
+        Revoke["revoke_api_key"]
+        Model["SdkApiKey"]
+        Column["SdkApiKey.workspace_id"]
+    end
+
+    Admin --> Request
+    Workspace --> Context
+    Request --> Router
+    Router --> Context
+    Context --> Create
+    Context --> List
+    Context --> Revoke
+    Create --> Model
+    Model --> Column
+    List -->|"FilterByWorkspace"| Column
+    Revoke -->|"FilterByKeyAndWorkspace"| Column
+```
+
+Sources: [orchestrator/api/api_keys.py:132-175](), [orchestrator/core/services/api_key_service.py:48-105](), [orchestrator/core/services/api_key_service.py:143-190](), [orchestrator/core/models/sdk_api_keys.py:29-43]()
 
 ---
 
-## Memory and Vector Isolation
+## Memory and Cache Isolation
 
-Memory and vector data utilize strict namespacing to ensure agents only retrieve context relevant to their own workspace.
+### Memory Namespacing
 
-### S3 Vector Hardening
-For shared vector storage (e.g., S3), isolation is enforced by dropping any hits that lack a `workspace_id` stamp or possess a mismatched ID [orchestrator/tests/test_prd186_s3_hardening.py:83-106](). All document ingestion pipelines automatically stamp vectors with the caller's `workspace_id` during the `add_documents` phase [orchestrator/tests/test_prd186_s3_hardening.py:108-117]().
+The tenant-isolation test module identifies memory among the domains in its stated cross-tenant acceptance scope. The provided excerpt does not show memory-specific test cases or implementation details, so it is not sufficient to document memory key formats, namespace construction, or retrieval predicates. [orchestrator/tests/security/test_prd172_tenant_isolation.py:1-17]()
 
 ### Cache Isolation
-Redis and in-memory caches are namespaced to prevent cross-contamination. The `WidgetCORSMiddleware` uses an origin-based cache that is strictly validated against the `SdkApiKey.allowed_domains` for the specific merchant [orchestrator/api/widgets/cors.py:74-88]().
 
-**Sources:** [orchestrator/tests/test_prd186_s3_hardening.py:4-8](), [orchestrator/api/widgets/cors.py:104-131]()
+`api/widgets/cors.py` maintains `_dynamic_origin_cache`, mapping origins to an allow/deny verdict and expiry time. The cache is bounded, uses a 60-second TTL, and stores successful and denied lookup verdicts; exceptions during the lookup fail closed and are not cached. This is an origin-verdict cache, not evidence of tenant-scoped application-data caching. [orchestrator/api/widgets/cors.py:75-89](), [orchestrator/api/widgets/cors.py:105-132]()
+
+Sources: [orchestrator/tests/security/test_prd172_tenant_isolation.py:1-17](), [orchestrator/api/widgets/cors.py:75-89](), [orchestrator/api/widgets/cors.py:105-132]()
+
+---
+
+## Shared Vector-Store Isolation
+
+The S3 Vectors hardening tests describe a shared-bucket isolation rule: writes stamp each vector’s metadata with the backend workspace ID, while search results with a missing, `None`, or mismatched `workspace_id` must be excluded. The tests instantiate `S3VectorsBackend` for `ws-a` and mock the client boundary. [orchestrator/tests/test_prd186_s3_hardening.py:52-72](), [orchestrator/tests/test_prd186_s3_hardening.py:80-116]()
+
+The tests also require disconnect cleanup to be scoped to the caller’s files: `delete_for_files` lists vectors using file-specific key prefixes rather than sweeping the shared index. The test asserts that the old connection-wide deletion method is absent from both the real and mock backends. [orchestrator/tests/test_prd186_s3_hardening.py:119-139]()
+
+**Figure 3: Shared S3 Vectors tenant boundary**
+
+```mermaid
+flowchart LR
+    subgraph "NaturalLanguageSpace"
+        Tenant["WorkspaceTenant"]
+        Ingest["AddDocumentChunks"]
+        Search["SearchDocuments"]
+        Disconnect["DisconnectFiles"]
+    end
+
+    subgraph "CodeEntitySpace"
+        Backend["S3VectorsBackend(workspace_id)"]
+        Write["add_documents"]
+        Metadata["metadata.workspace_id"]
+        Query["search"]
+        Filter["RejectMissingOrMismatchedWorkspace"]
+        Delete["delete_for_files"]
+        Prefix["FileScopedKeyPrefix"]
+        Shared["SharedS3VectorsIndex"]
+    end
+
+    Tenant --> Backend
+    Ingest --> Write
+    Backend --> Write
+    Write --> Metadata
+    Metadata --> Shared
+    Search --> Query
+    Query --> Shared
+    Shared --> Filter
+    Filter -->|"OnlyMatchingWorkspaceHits"| Search
+    Disconnect --> Delete
+    Delete --> Prefix
+    Prefix --> Shared
+```
+
+Sources: [orchestrator/tests/test_prd186_s3_hardening.py:52-72](), [orchestrator/tests/test_prd186_s3_hardening.py:80-139]()
 
 ---
 
 ## Widget and CORS Isolation
 
-The widget subsystem provides a secure boundary for external storefronts. Unlike the internal dashboard, widgets do not use global allowlists.
+`WidgetCORSMiddleware` covers `/api/widgets` and `/api/sites`. Platform origins are derived from `config.CORS_ALLOW_ORIGINS`; merchant origins are authorized for `/api/widgets` through the `allowed_domains` of active public API keys. `/api/sites` is treated as first-party dashboard CRUD and does not consult merchant keys. [orchestrator/api/widgets/cors.py:9-37](), [orchestrator/api/widgets/cors.py:49-67](), [orchestrator/api/widgets/cors.py:105-116]()
 
-### Dynamic CORS Authorization
-1. **Platform Origins**: First-party domains defined in `config.CORS_ALLOW_ORIGINS` are granted access to all routes [orchestrator/api/widgets/cors.py:62-71]().
-2. **Merchant Origins**: Storefronts are authorized dynamically. The system checks if the requesting origin is named on **any** active public SDK key via `ApiKeyService.origin_allowed_by_any_key` [orchestrator/api/widgets/cors.py:91-102]().
-3. **Path Scoping**: CORS middleware only applies to `/api/widgets` and `/api/sites`. Internal routes like `/api/agents` are protected by the standard app-wide middleware [orchestrator/api/widgets/cors.py:51-54]().
+For dynamic checks, `_origin_allowed_dynamic` first accepts platform origins, rejects non-platform origins on paths outside the widget key-scoped prefix, and otherwise performs a cached lookup. The lookup runs in a threadpool through `_origin_allowed_by_key_sync`, which calls `ApiKeyService.origin_allowed_by_any_key`; lookup exceptions fail closed. [orchestrator/api/widgets/cors.py:92-132]()
 
-**Figure 2: CORS and Widget Security Boundary**
+The CORS check is not the authentication boundary for `/api/sites`: the middleware documentation identifies cookie JWT authentication as that surface’s security boundary. Widget requests separately pass through `widget_auth`, which resolves the workspace from a JWT or API key and checks a supplied workspace header against the JWT workspace. [orchestrator/api/widgets/cors.py:22-37](), [orchestrator/api/widgets/auth.py:100-116](), [orchestrator/api/widgets/auth.py:134-171]()
+
+**Figure 4: CORS origin decision path**
+
 ```mermaid
-graph LR
-    subgraph "External Request"
-        Storefront["Merchant Storefront"]
-        Dashboard["Automatos Dashboard"]
+flowchart LR
+    subgraph "NaturalLanguageSpace"
+        Browser["BrowserPreflight"]
+        Storefront["MerchantStorefrontOrigin"]
+        Dashboard["FirstPartyDashboardOrigin"]
     end
 
-    subgraph "Middleware [api/widgets/cors.py]"
-        CheckPath["_path_is_covered"]
-        IsPlatform{"_origin_is_platform?"}
-        KeyLookup["_origin_allowed_dynamic"]
+    subgraph "CodeEntitySpace"
+        Middleware["api/widgets/cors.py:WidgetCORSMiddleware"]
+        Covered["COVERED_PATH_PREFIXES"]
+        Dynamic["api/widgets/cors.py:_origin_allowed_dynamic"]
+        Platform["api/widgets/cors.py:_origin_is_platform"]
+        Cache["_dynamic_origin_cache"]
+        Sync["_origin_allowed_by_key_sync"]
+        Service["ApiKeyService.origin_allowed_by_any_key"]
+        Decision["CORSAllowOrDeny"]
     end
 
-    Storefront -- "OPTIONS /api/widgets" --> CheckPath
-    Dashboard -- "PATCH /api/sites" --> CheckPath
-    CheckPath --> IsPlatform
-    IsPlatform -- "Yes" --> Allow["Allow Request"]
-    IsPlatform -- "No" --> KeyLookup
-    KeyLookup -- "Valid Key Found" --> Allow
-    KeyLookup -- "No Match" --> Deny["403 Forbidden"]
+    Browser --> Middleware
+    Middleware --> Covered
+    Covered --> Dynamic
+    Storefront --> Dynamic
+    Dashboard --> Dynamic
+    Dynamic --> Platform
+    Platform -->|"PlatformOrigin"| Decision
+    Platform -->|"NonPlatformOrigin"| Cache
+    Cache -->|"CacheMissOnWidgetsPath"| Sync
+    Sync --> Service
+    Service --> Decision
+    Dynamic -->|"NonWidgetPath"| Decision
 ```
-**Sources:** [orchestrator/api/widgets/cors.py:38-131](), [orchestrator/tests/test_prd008a_cors_coverage.py:31-47]()
+
+Sources: [orchestrator/api/widgets/cors.py:49-67](), [orchestrator/api/widgets/cors.py:75-132](), [orchestrator/api/widgets/cors.py:139-161]()
 
 ---
 
-## Sandbox and Filesystem Isolation
+## Tenant Isolation Tests and Verification
 
-Automatos AI implements physical isolation for agent execution environments.
+`test_prd172_tenant_isolation.py` defines a cross-tenant acceptance matrix in which workspace A must not read, write, or delete workspace B’s data across the stated domains, including skills, documents/vectors, workflows, memory, and context. The module describes its tests as pure or behavioral, with mocked database query chains and injected authentication contexts; it notes that the end-to-end DB matrix runs in CI. [orchestrator/tests/security/test_prd172_tenant_isolation.py:1-17]()
 
-1.  **Workspace Directories**: The `WorkspaceWorker` manages isolated directories on persistent volumes for each `workspace_id` [docs/workspace-execution/security-sandboxing.md:32-34]().
-2.  **Path Traversal Prevention**: The `WorkspaceManager` uses `resolve_safe_path` to ensure agents cannot escape their root directory using `..` or symlinks [docs/workspace-execution/security-sandboxing.md:37-38]().
-3.  **Command Whitelisting**: Agents are restricted to a predefined set of `ALLOWED_COMMANDS` (e.g., `python3`, `git`, `npm`) and blocked from dangerous patterns like `rm -rf /` or `sudo` [docs/workspace-execution/security-sandboxing.md:40-52]().
+The visible skills tests verify that a private skill belonging to workspace B is not visible to workspace A, while a global skill and a workspace A skill are visible. They also test that attaching a skill to another workspace’s agent raises HTTP 404, and that super-admin recognition accepts either the `admin_all_workspaces` sentinel or the literal super-admin role. [orchestrator/tests/security/test_prd172_tenant_isolation.py:76-124]()
 
-**Sources:** [docs/workspace-execution/security-sandboxing.md:30-52](), [orchestrator/tests/security/test_prd172_tenant_isolation.py:1-15]()
+The S3 hardening tests verify vector writes, search filtering for unlabeled and mismatched hits, and file-scoped deletion. The CORS coverage tests lock the covered prefixes and assert that merchant key lookup is not used for `/api/sites`. [orchestrator/tests/test_prd186_s3_hardening.py:80-139](), [orchestrator/tests/test_prd008a_cors_coverage.py:24-58](), [orchestrator/tests/test_prd008a_cors_coverage.py:130-148]()
 
----
+| Test suite or case | Focus | Verification |
+|---|---|---|
+| `TestF002SkillsIsolation` | Skill visibility and agent attachment across workspaces | Exercises `_skill_visible_to` and `_assert_agent_in_workspace` with workspace A and B fixtures. [orchestrator/tests/security/test_prd172_tenant_isolation.py:76-117]() |
+| `TestF002SkillsIsolation` super-admin checks | Global visibility and admin recognition | Tests the super-admin flag and role paths. [orchestrator/tests/security/test_prd172_tenant_isolation.py:100-124]() |
+| S3 vector search tests | Workspace labels on shared-bucket results | Confirms unlabeled, `None`, and other-workspace hits are excluded. [orchestrator/tests/test_prd186_s3_hardening.py:83-106]() |
+| S3 vector write test | Tenant label on stored vectors | Confirms `add_documents` writes `workspace_id` metadata. [orchestrator/tests/test_prd186_s3_hardening.py:108-117]() |
+| S3 disconnect deletion test | File-scoped cleanup | Confirms vector listing uses file key prefixes rather than an index-wide sweep. [orchestrator/tests/test_prd186_s3_hardening.py:119-139]() |
+| CORS path coverage tests | Middleware route coverage | Locks `/api/widgets` and `/api/sites` prefixes and excludes unrelated paths. [orchestrator/tests/test_prd008a_cors_coverage.py:24-58]() |
+| CORS merchant-origin tests | Merchant-origin and Sites separation | Confirms merchant key lookup applies to widget paths and not `/api/sites`. [orchestrator/tests/test_prd008a_cors_coverage.py:98-148]() |
 
-## Team Access Control
-
-Team access provides a granular layer of data isolation within a workspace, allowing documents and other knowledge items to be scoped to specific teams.
-
-### Team Entity and Normalization
-The `teams` table stores `Team` entities, each associated with a `workspace_id` and having a `name` and `normalized_name` [alembic/versions/prd158_teams_table.py:25-38](). The `normalize_team` function ensures consistency by stripping whitespace and lowercasing team names, preventing "Support" and "support" from being treated as different teams [orchestrator/core/team_access.py:14-20](). All team write operations, such as `get_or_create_team` and `ensure_teams`, use this normalization to prevent duplication and maintain data integrity [orchestrator/core/team_access.py:92-131]().
-
-### Document and Knowledge Item Scoping
-Documents and knowledge items can be assigned to one or more teams using the `team_access` field (for documents) or `metadata->'team_access'` (for multimodal knowledge items).
-- **Documents**: The `documents` table has a `team_access` column of type `ARRAY` of strings. Queries for documents can filter by team using the `TEAM_FILTER_CLAUSE` [orchestrator/core/team_access.py:47-47](). Public documents (with an empty `team_access` array) are visible to all users within the workspace [orchestrator/tests/test_documents_team_filter.py:57-64]().
-- **Multimodal Knowledge Items**: For `knowledge_items`, team access is stored within a JSONB `metadata` column. The `metadata_team_filter_clause` helper generates the appropriate SQL to filter these items, ensuring that an empty or absent `team_access` list makes the item visible to all, while a specified team list restricts visibility [orchestrator/core/team_access.py:50-71]().
-
-### API Filtering
-API endpoints like `/api/documents` and `/api/knowledge/types` incorporate server-side team filtering. For example, `list_documents` can filter by a `team` parameter, returning only documents accessible to that team (including public documents) [orchestrator/tests/test_documents_team_filter.py:57-64](). Similarly, `get_knowledge_types` counts knowledge items per type, scoped to the requesting user's `workspace_id` [orchestrator/api/knowledge_multimodal.py:154-161]().
-
-**Figure 3: Team Access Control Flow**
-```mermaid
-graph TD
-    subgraph "User Request"
-        User["User (with RequestContext.workspace_id)"]
-        TeamParam["Optional 'team' parameter"]
-    end
-
-    subgraph "Backend Services"
-        RequestContext["RequestContext<br/>workspace_id"]
-        NormalizeTeam["core.team_access:normalize_team"]
-        DocumentAPI["api.documents:list_documents"]
-        KnowledgeAPI["api.knowledge_multimodal:get_knowledge_types"]
-        DBQuery["Database Query"]
-    end
-
-    subgraph "Database Tables"
-        DocumentsTable["documents<br/>(workspace_id, team_access ARRAY)"]
-        KnowledgeItemsTable["knowledge_items<br/>(workspace_id, metadata JSONB)"]
-        TeamsTable["teams<br/>(workspace_id, name, normalized_name)"]
-    end
-
-    User -- "Request" --> RequestContext
-    TeamParam --> NormalizeTeam
-    NormalizeTeam --> DocumentAPI
-    NormalizeTeam --> KnowledgeAPI
-
-    DocumentAPI -- "Filters by workspace_id AND (team_access = '{}' OR :team = ANY(team_access))" --> DocumentsTable
-    KnowledgeAPI -- "Filters by workspace_id AND (metadata->'team_access' = '[]' OR metadata->'team_access' @> to_jsonb(:team::text))" --> KnowledgeItemsTable
-    DocumentAPI -- "Retrieves team counts" --> TeamsTable
-    KnowledgeAPI -- "Retrieves type counts" --> TeamsTable
-
-    DocumentsTable --> "Filtered Results" --> DocumentAPI
-    KnowledgeItemsTable --> "Filtered Results" --> KnowledgeAPI
-    TeamsTable --> "Team Counts" --> DocumentAPI
-    TeamsTable --> "Type Counts" --> KnowledgeAPI
-```
-**Sources:**
-- [alembic/versions/prd158_teams_table.py:25-38]()
-- [orchestrator/core/team_access.py:14-20]()
-- [orchestrator/core/team_access.py:47-47]()
-- [orchestrator/core/team_access.py:50-71]()
-- [orchestrator/core/team_access.py:92-131]()
-- [orchestrator/api/knowledge_multimodal.py:154-161]()
-- [orchestrator/tests/test_documents_team_filter.py:57-64]()
-- [orchestrator/tests/test_teams_api.py:63-70]()
+Sources: [orchestrator/tests/security/test_prd172_tenant_isolation.py:1-124](), [orchestrator/tests/test_prd186_s3_hardening.py:80-139](), [orchestrator/tests/test_prd008a_cors_coverage.py:24-58](), [orchestrator/tests/test_prd008a_cors_coverage.py:98-148]()
 
 ---

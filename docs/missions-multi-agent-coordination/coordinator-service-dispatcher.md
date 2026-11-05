@@ -5,183 +5,241 @@
 
 The following files were used as context for generating this wiki page:
 
+- [frontend/components/missions/__tests__/approve-body.test.ts](frontend/components/missions/__tests__/approve-body.test.ts)
+- [frontend/components/missions/__tests__/mission-retry.test.tsx](frontend/components/missions/__tests__/mission-retry.test.tsx)
+- [frontend/components/missions/__tests__/mission-stats.test.ts](frontend/components/missions/__tests__/mission-stats.test.ts)
+- [frontend/components/missions/approve-body.ts](frontend/components/missions/approve-body.ts)
 - [frontend/components/missions/create-mission-modal.tsx](frontend/components/missions/create-mission-modal.tsx)
 - [frontend/components/missions/index.ts](frontend/components/missions/index.ts)
+- [frontend/components/missions/mission-budget-bar.tsx](frontend/components/missions/mission-budget-bar.tsx)
 - [frontend/components/missions/mission-card.tsx](frontend/components/missions/mission-card.tsx)
 - [frontend/components/missions/mission-detail-page.tsx](frontend/components/missions/mission-detail-page.tsx)
 - [frontend/components/missions/mission-field-inspector.tsx](frontend/components/missions/mission-field-inspector.tsx)
 - [frontend/components/missions/mission-field-panel.tsx](frontend/components/missions/mission-field-panel.tsx)
 - [frontend/components/missions/mission-field-viz.tsx](frontend/components/missions/mission-field-viz.tsx)
+- [frontend/components/tools/tool-actions-modal.tsx](frontend/components/tools/tool-actions-modal.tsx)
+- [frontend/components/tools/tool-details-modal.tsx](frontend/components/tools/tool-details-modal.tsx)
+- [frontend/components/workflows/templates-tab.tsx](frontend/components/workflows/templates-tab.tsx)
 - [frontend/hooks/use-missions-api.ts](frontend/hooks/use-missions-api.ts)
+- [frontend/stores/mission-store.ts](frontend/stores/mission-store.ts)
 - [frontend/types/missions.ts](frontend/types/missions.ts)
 - [orchestrator/alembic/versions/prd123_checkpoint_count.py](orchestrator/alembic/versions/prd123_checkpoint_count.py)
+- [orchestrator/api/mission_retry.py](orchestrator/api/mission_retry.py)
 - [orchestrator/api/missions.py](orchestrator/api/missions.py)
 - [orchestrator/core/models/orchestration.py](orchestrator/core/models/orchestration.py)
 - [orchestrator/core/models/orchestration_enums.py](orchestrator/core/models/orchestration_enums.py)
-- [orchestrator/modules/context/adapters/vector_field.py](orchestrator/modules/context/adapters/vector_field.py)
-- [orchestrator/modules/coordination/__init__.py](orchestrator/modules/coordination/__init__.py)
-- [orchestrator/modules/coordination/agent_matcher.py](orchestrator/modules/coordination/agent_matcher.py)
+- [orchestrator/modules/coordination/credit_pause.py](orchestrator/modules/coordination/credit_pause.py)
 - [orchestrator/modules/coordination/dispatcher.py](orchestrator/modules/coordination/dispatcher.py)
+- [orchestrator/modules/coordination/one_step_at_a_time.py](orchestrator/modules/coordination/one_step_at_a_time.py)
 - [orchestrator/modules/coordination/planner.py](orchestrator/modules/coordination/planner.py)
-- [orchestrator/modules/coordination/primitive_heartbeat.py](orchestrator/modules/coordination/primitive_heartbeat.py)
 - [orchestrator/modules/coordination/reconciler.py](orchestrator/modules/coordination/reconciler.py)
-- [orchestrator/modules/coordination/templates.py](orchestrator/modules/coordination/templates.py)
 - [orchestrator/modules/coordination/verification.py](orchestrator/modules/coordination/verification.py)
-- [orchestrator/modules/memory/durable_store.py](orchestrator/modules/memory/durable_store.py)
 - [orchestrator/services/coordinator_service.py](orchestrator/services/coordinator_service.py)
-- [orchestrator/services/gdpr_service.py](orchestrator/services/gdpr_service.py)
-- [orchestrator/tests/test_82c_wiring.py](orchestrator/tests/test_82c_wiring.py)
-- [orchestrator/tests/test_agents_api_plugins.py](orchestrator/tests/test_agents_api_plugins.py)
-- [orchestrator/tests/test_budget_gate.py](orchestrator/tests/test_budget_gate.py)
-- [orchestrator/tests/test_coordinator_parallel.py](orchestrator/tests/test_coordinator_parallel.py)
-- [orchestrator/tests/test_dispatcher_parallel.py](orchestrator/tests/test_dispatcher_parallel.py)
-- [orchestrator/tests/test_mission_final_output_promotion.py](orchestrator/tests/test_mission_final_output_promotion.py)
-- [orchestrator/tests/test_mission_retry_feeds_critique.py](orchestrator/tests/test_mission_retry_feeds_critique.py)
-- [orchestrator/tests/test_p2w2_gdpr_subject_tags.py](orchestrator/tests/test_p2w2_gdpr_subject_tags.py)
-- [orchestrator/tests/test_parallel_decomposition.py](orchestrator/tests/test_parallel_decomposition.py)
-- [orchestrator/tests/test_planner_capability_routing.py](orchestrator/tests/test_planner_capability_routing.py)
-- [orchestrator/tests/test_plugin_assignment_api.py](orchestrator/tests/test_plugin_assignment_api.py)
-- [orchestrator/tests/test_plugin_runtime_integration.py](orchestrator/tests/test_plugin_runtime_integration.py)
-- [orchestrator/tests/test_prd128_notification_dispatcher.py](orchestrator/tests/test_prd128_notification_dispatcher.py)
-- [orchestrator/tests/test_prd181_gdpr.py](orchestrator/tests/test_prd181_gdpr.py)
-- [orchestrator/tests/test_synthesis_executor.py](orchestrator/tests/test_synthesis_executor.py)
+- [orchestrator/tests/test_f247_a_mission_out_of_credit_pauses_and_resumes.py](orchestrator/tests/test_f247_a_mission_out_of_credit_pauses_and_resumes.py)
+- [orchestrator/tests/test_f267_b_no_step_starts_while_another_is_redone.py](orchestrator/tests/test_f267_b_no_step_starts_while_another_is_redone.py)
 - [orchestrator/tests/test_w1s1_hotpath_telemetry.py](orchestrator/tests/test_w1s1_hotpath_telemetry.py)
 
 </details>
 
 
 
-The Coordinator Service and Dispatcher form the core execution engine for Missions (multi-agent orchestrations). This layer is responsible for the autonomous lifecycle of a mission, from initial goal decomposition and task dispatching to verification and stall recovery. It operates as a stateless, database-authoritative service that ensures reliable task execution across a distributed agent roster.
+## Purpose and Scope
 
-## Coordinator Service
+This page describes the mission coordination execution path: the stateless `CoordinatorService` tick loop, task dispatch through `MissionDispatcher`, optimistic task claiming, reconciliation and stall detection, and per-mission power-mode defaults. The coordinator connects planning, dispatch, reconciliation, and verification while treating the database as the authoritative source of mission state. [orchestrator/services/coordinator_service.py:5-17]()
 
-The `CoordinatorService` is the primary orchestrator that manages the state machine of `OrchestrationRun` and `OrchestrationTask` entities. It serves as the glue between the planner, dispatcher, reconciler, and verifier [orchestrator/services/coordinator_service.py:5-17]().
-
-### 5-Second Tick Loop
-The service implements a "tick" pattern, executing every 5 seconds to process active missions. This loop ensures that the system remains responsive to task completions and external state changes without maintaining long-lived connections [orchestrator/services/coordinator_service.py:5-10]().
-
-**Tick Workflow:**
-1.  **Poll Active Runs:** Queries `OrchestrationRun` records where `state` is `ACTIVE` (e.g., `RUNNING`, `PAUSED`) [orchestrator/core/models/orchestration_enums.py:18-22]().
-2.  **Dispatch Phase:** Invokes `MissionDispatcher.dispatch_ready` to identify and start available tasks in the DAG [orchestrator/modules/coordination/dispatcher.py:228-245]().
-3.  **Execution:** If tasks are dispatched, it calls `AgentFactory.execute_with_prompt` directly to run the agent logic.
-4.  **Reconcile Phase:** Invokes `MissionReconciler.reconcile` to detect stalled tasks, process verifications, and advance the mission state [orchestrator/modules/coordination/reconciler.py:126-147]().
-
-### Mission Context & Planning
-Missions are initiated via the `MissionCreateRequest` which accepts a natural language goal [orchestrator/api/missions.py:83-95](). The `MissionPlanner` then decomposes this goal into a task DAG [orchestrator/modules/coordination/planner.py:5-12]().
-- **Goal Decomposition:** The planner uses either template matching or LLM-based decomposition to create a set of `PlannedTask` objects [orchestrator/modules/coordination/planner.py:7-12]().
-- **Complexity Scoring:** Goals are analyzed for word count, deliverables, and domain breadth to assign a `ComplexityTier` (Simple, Moderate, Complex) [orchestrator/modules/coordination/planner.py:184-210]().
-- **Budgeting:** Each task is assigned an estimated token budget based on its complexity tier [orchestrator/modules/coordination/planner.py:169-174]().
-- **Power Modes:** Mission execution behavior (timeouts, tool iterations) is governed by `light`, `standard`, or `max` power modes [orchestrator/services/coordinator_service.py:91-95]().
-
-**Sources:**
-- `orchestrator/services/coordinator_service.py` [5-17, 91-95]()
-- `orchestrator/api/missions.py` [83-95]()
-- `orchestrator/modules/coordination/planner.py` [5-12, 169-174, 184-210]()
-- `orchestrator/core/models/orchestration_enums.py` [18-40]()
+Sources: [orchestrator/services/coordinator_service.py:5-17]()
 
 ---
 
-## Mission Dispatcher
+## Coordinator Service & Tick Loop
 
-The `MissionDispatcher` handles the logic of selecting the next task and assigning it to an agent. It supports parallel dispatch of tasks whose dependencies are met [orchestrator/modules/coordination/dispatcher.py:2-6]().
+`CoordinatorService` is the mission lifecycle coordinator. Its documented responsibilities include a five-second tick loop and coordinating the planner, dispatcher, reconciler, and verifier. It is designed to be stateless: each tick reads current state from the database and obtains its own `SessionLocal` session rather than retaining a session on the singleton. [orchestrator/services/coordinator_service.py:5-12]()
 
-### Topological Sort & Dependency Resolution
-The dispatcher uses a `DependencyResolver` to determine which tasks are "ready." A task is ready if its upstream dependencies in the DAG are satisfied. It respects the `max_concurrent` limit defined in the mission configuration [orchestrator/modules/coordination/dispatcher.py:228-245]().
+### Tick responsibilities
 
-### Optimistic Locking with `version_id`
-To prevent double-dispatching in multi-node environments, the dispatcher uses a raw SQL optimistic lock pattern in `claim_task`:
-- It attempts to update the task state from `queued` or `retrying` to `assigned` only if the `version_id` matches the one read during the current tick [orchestrator/modules/coordination/dispatcher.py:140-151]().
-- It atomically increments the `version_id` and sets the `assigned_agent_id` [orchestrator/modules/coordination/dispatcher.py:142-147]().
-- If `result.rowcount > 0`, the claim succeeded; otherwise, another instance claimed the task [orchestrator/modules/coordination/dispatcher.py:160-178]().
+The tick is the recurring opportunity to progress active mission work. The coordinator’s documented processing components are:
 
-### Agent Selection
-The `AgentMatcher` resolves the `agent_role` requested in the plan to a specific `Agent` ID within the workspace roster [orchestrator/modules/coordination/dispatcher.py:41](). If no matching agent is found, the task fails with a `NO_AGENT_AVAILABLE` code [orchestrator/core/models/orchestration_enums.py:190]().
+1. **Planning:** `MissionPlanner` decomposes a goal into a task plan. The planner’s documented responsibilities include template matching, LLM decomposition as a fallback, and structural plan validation. [orchestrator/services/coordinator_service.py:62-66]() [orchestrator/modules/coordination/planner.py:5-15]()
+2. **Dispatch:** `MissionDispatcher.dispatch_ready()` is the dispatch entry point identified by the coordinator’s design notes. The dispatcher supports parallel dispatch up to the mission’s concurrency limit. [orchestrator/services/coordinator_service.py:9-12]() [orchestrator/modules/coordination/dispatcher.py:5-13]()
+3. **Reconciliation:** `MissionReconciler.reconcile()` checks completed task outputs, detects and recovers stalls, and checks whether the run can advance. [orchestrator/modules/coordination/reconciler.py:5-12,128-144]()
+4. **Verification:** Completed task outputs flow through `VerificationService`; the reconciler’s verification phase handles those tasks before its stall and run-completion checks. [orchestrator/modules/coordination/reconciler.py:133-160]() [orchestrator/modules/coordination/verification.py:5-12]()
 
-**Code-to-System Mapping: Dispatch Flow**
+The coordinator module also documents parallel dispatch through `MissionDispatcher.dispatch_ready()` and `asyncio.gather()`. The coordinator’s per-tick session model and database-authoritative design allow later ticks to re-read mission state rather than relying on process-local task state. [orchestrator/services/coordinator_service.py:9-12]()
+
+### State and persistence
+
+The mission record is represented by `OrchestrationRun`, stored in `orchestration_runs`; its state includes lifecycle status, plan and config, concurrency settings, token usage, and budget fields. Tasks are represented by `OrchestrationTask`, stored in `orchestration_tasks`, and carry their own state and assignment information. [orchestrator/core/models/orchestration.py:39-49,67-83,95-113,156-167,194-218]()
+
+The run and task state enums include lifecycle states such as `RUNNING`, `PAUSED`, `VERIFYING`, and terminal run states, as well as task states such as `QUEUED`, `ASSIGNED`, `RUNNING`, `COMPLETED`, `VERIFIED`, `FAILED`, `STALLED`, and `RETRYING`. Notably, `completed` is not a terminal task state; verification is a separate step. [orchestrator/core/models/orchestration_enums.py:29-59]()
+
+### Coordinator flow: natural-language goal to code entities
+
+The diagram connects the user’s goal and mission processing concepts to the concrete classes and methods named in the code. The shown code documents the component responsibilities and relationships; the exact tick method body is not included in the supplied source excerpt. [orchestrator/services/coordinator_service.py:5-17,54-73]() [orchestrator/modules/coordination/planner.py:5-15]() [orchestrator/modules/coordination/dispatcher.py:5-13]() [orchestrator/modules/coordination/reconciler.py:5-12]()
+
+**Diagram: Mission goal and coordinator components**
+
 ```mermaid
-graph TD
-    subgraph "Natural Language Space"
-        Goal["User Goal: 'Write a business plan'"]
-    end
+flowchart LR
+    Goal["Natural-language mission goal"]
+    Planner["MissionPlanner"]
+    Run["OrchestrationRun"]
+    Task["OrchestrationTask"]
+    Tick["CoordinatorService tick"]
+    Dispatcher["MissionDispatcher.dispatch_ready"]
+    Reconciler["MissionReconciler.reconcile"]
+    Verifier["VerificationService"]
 
-    subgraph "Code Entity Space"
-        Dispatcher["MissionDispatcher.dispatch_ready()"]
-        SQL["UPDATE orchestration_tasks SET state='assigned' WHERE version_id=X"]
-        AgentFactory["AgentFactory.execute_with_prompt()"]
-        TaskModel["OrchestrationTask (state='running')"]
-    end
-
-    Goal --> Dispatcher
-    Dispatcher --> SQL
-    SQL -- "Success" --> AgentFactory
-    AgentFactory --> TaskModel
+    Goal --> Planner
+    Planner --> Run
+    Planner --> Task
+    Run --> Tick
+    Task --> Tick
+    Tick --> Dispatcher
+    Tick --> Reconciler
+    Reconciler --> Verifier
 ```
-Sources:
-- `orchestrator/modules/coordination/dispatcher.py` [2-18, 120-178, 228-245]()
-- `orchestrator/core/models/orchestration_enums.py` [48-60, 190]()
+
+Sources: [orchestrator/services/coordinator_service.py:5-17,54-73]() [orchestrator/modules/coordination/planner.py:5-15]() [orchestrator/modules/coordination/dispatcher.py:5-13]() [orchestrator/modules/coordination/reconciler.py:5-12]()
 
 ---
 
-## Mission Reconciler & Stall Detection
+## Mission Dispatcher & Topological Routing
 
-The `MissionReconciler` ensures missions do not get stuck due to agent crashes or timeouts.
+`MissionDispatcher` is a stateless dispatcher: its inputs come from the database, and the caller manages transactions. Its documented role is to send orchestration tasks to roster agents, dispatching up to `max_concurrent` tasks simultaneously. It uses `AgentMatcher` to select an agent, creates a board task before dispatch for kanban visibility, and stores output and token tracking on the task and run. [orchestrator/modules/coordination/dispatcher.py:5-13,128-133]()
 
-### Stall Detection Logic
-The reconciler identifies tasks that have exceeded their expected duration:
-- **ASSIGNED Stalls:** Tasks stuck in `ASSIGNED` state without transitioning to `RUNNING` within 60 seconds [orchestrator/modules/coordination/reconciler.py:7]().
-- **RUNNING Stalls:** Tasks that remain in `RUNNING` state for more than 300 seconds [orchestrator/modules/coordination/reconciler.py:7]().
+### Ready tasks, dependencies, and concurrency
 
-Stalled tasks are transitioned to `stalled` state, emitting a `STALL_DETECTED` event [orchestrator/core/models/orchestration_enums.py:111-114](). The `escalate_stalled_task` service is then called to handle recovery [orchestrator/modules/coordination/reconciler.py:160-184]().
+The dispatcher imports `DependencyResolver`, which supplies dependency-related coordination, and exposes `count_active_tasks()` to count tasks in `ASSIGNED` or `RUNNING` states. Its module documentation describes `dispatch_ready()` as dispatching up to the mission’s `max_concurrent` tasks per tick. Together, these components support DAG-aware dispatch while limiting simultaneous active work. [orchestrator/modules/coordination/dispatcher.py:5-13,45-57,135-154]()
 
-### Verification Pipeline
-When a task moves to `COMPLETED`, the Reconciler triggers the `VerificationService`:
-1.  **Deterministic Checks:** Fast validation (e.g., structural quality signals) [orchestrator/modules/coordination/verification.py:6-7]().
-2.  **LLM Judge:** A cross-model LLM reviewer (different family than the executor) scores the output on relevance, completeness, accuracy, and format compliance [orchestrator/modules/coordination/verification.py:40-41, 102-141]().
+The task model includes a `sequence_number`, while dependencies are represented by the orchestration dependency model imported by the coordinator and dispatcher. The available excerpts do not show the full dependency-resolution or ready-task query implementation, so details beyond the documented topological dispatch responsibility are not inferred here. [orchestrator/core/models/orchestration.py:156-198]() [orchestrator/services/coordinator_service.py:36-42]() [orchestrator/modules/coordination/dispatcher.py:45-57]()
 
-**Code-to-System Mapping: Verification Flow**
+### Agent matching and dispatch outcomes
+
+`AgentMatcher` is the dispatcher’s agent-selection component. The dispatcher documentation states that if no agent matches, the task fails with `NO_AGENT_AVAILABLE`. Dispatch attempts are represented by the immutable `DispatchResult`, which can report whether work was dispatched, the task and agent identifiers, a skipped reason, or an error. [orchestrator/modules/coordination/dispatcher.py:9-13,47,111-120]()
+
+### Natural-language request to dispatch entities
+
+This diagram maps a goal and its decomposed tasks to code entities used in the mission path. The planner source documents goal decomposition into a task DAG; the dispatcher source documents `dispatch_ready()`, `AgentMatcher`, and execution through `execute_with_prompt()`. [orchestrator/modules/coordination/planner.py:5-15]() [orchestrator/modules/coordination/dispatcher.py:5-13,45-57,128-133]()
+
+**Diagram: Goal decomposition and task dispatch**
+
 ```mermaid
-graph LR
-    subgraph "Code Entity Space"
-        Task["OrchestrationTask (COMPLETED)"]
-        Reconciler["MissionReconciler.reconcile()"]
-        DetCheck["DeterministicChecker.check()"]
-        Judge["VerificationService (LLM Judge)"]
-        FinalState["TaskState (VERIFIED)"]
-    end
+flowchart TD
+    Goal["Natural-language goal"]
+    Planner["MissionPlanner"]
+    Run["OrchestrationRun"]
+    Tasks["OrchestrationTask"]
+    Dependencies["OrchestrationTaskDependency"]
+    Resolver["DependencyResolver"]
+    Ready["MissionDispatcher.dispatch_ready"]
+    Matcher["AgentMatcher"]
+    Agent["Roster Agent"]
+    Execute["execute_with_prompt"]
+    Result["DispatchResult"]
 
-    Task --> Reconciler
-    Reconciler --> DetCheck
-    DetCheck --> Judge
-    Judge --> FinalState
+    Goal --> Planner
+    Planner --> Run
+    Planner --> Tasks
+    Tasks --> Dependencies
+    Tasks --> Resolver
+    Dependencies --> Resolver
+    Resolver --> Ready
+    Ready --> Matcher
+    Matcher --> Agent
+    Agent --> Execute
+    Execute --> Result
 ```
-Sources:
-- `orchestrator/modules/coordination/reconciler.py` [1-17, 126-150, 160-184]()
-- `orchestrator/modules/coordination/verification.py` [1-16, 40-41, 102-141]()
-- `orchestrator/core/models/orchestration_enums.py` [111-114]()
+
+Sources: [orchestrator/modules/coordination/planner.py:5-15]() [orchestrator/modules/coordination/dispatcher.py:5-13,45-57,111-120,128-133]() [orchestrator/core/models/orchestration.py:156-167]()
 
 ---
 
-## Data Flow & Models
+## Optimistic Locking
 
-The coordination system relies on `orchestration` models to maintain state across asynchronous ticks.
+The dispatcher documents an optimistic claim pattern: a raw SQL conditional `UPDATE` checks `version_id` to prevent double dispatch. The task model also declares `version_id` as its SQLAlchemy optimistic-locking column. These mechanisms protect task claiming when concurrent workers or overlapping ticks contend for the same task. [orchestrator/modules/coordination/dispatcher.py:8-12,172-180]() [orchestrator/core/models/orchestration.py:136-140]()
 
-| Table | Purpose | Key Fields |
-| :--- | :--- | :--- |
-| `orchestration_runs` | Top-level mission state | `state`, `version_id`, `tokens_used`, `budget_config` |
-| `orchestration_tasks` | Individual units of work | `state`, `assigned_agent_id`, `version_id`, `output` |
-| `orchestration_events` | Audit log for state changes | `event_type`, `actor_type`, `old_state`, `new_state` |
+### Claiming a queued task
 
-### State Transitions
-The system strictly follows defined transitions managed by `transition_task` and `transition_run`. These functions ensure a dual-write pattern: updating the entity row and appending an event to `orchestration_events` in a single transaction [orchestrator/services/orchestration_state.py:8-12]().
+`MissionDispatcher.claim_task()` is the atomic claim entry point. Its documented contract is to claim a queued task using optimistic locking, with the task and selected `agent_id` supplied by the caller. The conditional update succeeds only when the expected version still matches; a competing claim that has already changed the row cannot claim the same version. [orchestrator/modules/coordination/dispatcher.py:172-180]()
 
-### Vector Field Shared Context
-During mission execution, agents share knowledge through a `VectorFieldSharedContext` [orchestrator/modules/context/adapters/vector_field.py:3-17]().
-- **Resonance:** Patterns injected by one agent become queryable by others in the same field, with relevance calculated as `cosine_similarity² × decayed_strength` [orchestrator/modules/context/adapters/vector_field.py:15-16, 69-78]().
-- **Isolation:** Per-mission isolation is enforced via the `field_id` payload filter in a shared Qdrant collection [orchestrator/modules/context/adapters/vector_field.py:48-50]().
+The supplied excerpt does not include the remainder of `claim_task()`’s implementation, so this page does not specify the exact SQL predicates, state transitions, or post-update ORM refresh behavior. [orchestrator/modules/coordination/dispatcher.py:172-180]()
 
-**Sources:**
-- `orchestrator/core/models/orchestration.py` [39-154, 156-232]()
-- `orchestrator/core/models/orchestration_enums.py` [29-60]()
-- `orchestrator/modules/context/adapters/vector_field.py` [3-17, 69-78]()
+Sources: [orchestrator/modules/coordination/dispatcher.py:8-12,172-180]() [orchestrator/core/models/orchestration.py:136-140]()
+
+---
+
+## Reconciler & Stall Detection
+
+`MissionReconciler` is stateless and reads mission data from the database. A reconciliation pass handles completed-task verification, stall detection and recovery, and run advancement or failure checks. The caller manages the database transaction. [orchestrator/modules/coordination/reconciler.py:5-12,120-144]()
+
+### Verification and reconciliation order
+
+`reconcile()` first invokes `_verify_completed_tasks()`, then `_detect_and_recover_stalls()`, and then escalates detected stalls. Its documented final checks determine whether tasks are terminal and whether the run should advance or fail. The method returns a `ReconcileResult` containing stall counts, task verification/failure counts, and run advancement information. [orchestrator/modules/coordination/reconciler.py:100-112,128-160]()
+
+Verification is advisory: `VerificationService` performs deterministic checks and a cross-model LLM review, and its documented policy is not to reject or retry tasks based on verification scores. Feedback is retained for downstream consumers. [orchestrator/modules/coordination/verification.py:5-12]()
+
+### Stall thresholds and recovery
+
+The reconciler documents two stall thresholds:
+
+- **`ASSIGNED`:** a task stuck for more than 60 seconds is considered stalled.
+- **`RUNNING`:** a task stuck for more than 300 seconds is considered stalled.
+
+Stalled tasks are subject to recovery and can be escalated. During reconciliation, detected stalls lead to a query for tasks in `STALLED` state and calls to `escalate_stalled_task()` for those tasks. The event enum includes `STALL_DETECTED` and `TASK_STALLED` for stall-related event reporting. [orchestrator/modules/coordination/reconciler.py:5-9,158-184]() [orchestrator/core/models/orchestration_enums.py:115-125]()
+
+**Table: Reconciliation checks**
+
+| Check | Behavior |
+|---|---|
+| Completed-task verification | Processes completed task outputs through the verification phase. [orchestrator/modules/coordination/reconciler.py:133-155]() |
+| Assigned-task stall | Detects `ASSIGNED` tasks beyond the 60-second threshold. [orchestrator/modules/coordination/reconciler.py:5-9]() |
+| Running-task stall | Detects `RUNNING` tasks beyond the 300-second threshold. [orchestrator/modules/coordination/reconciler.py:5-9]() |
+| Stall escalation | Queries stalled tasks and invokes `escalate_stalled_task()`. [orchestrator/modules/coordination/reconciler.py:163-184]() |
+| Run advancement or failure | Checks whether the run can advance or must fail after task reconciliation. [orchestrator/modules/coordination/reconciler.py:5-9,133-144]() |
+
+### Reconciliation flow
+
+**Diagram: Task completion, verification, and stall recovery**
+
+```mermaid
+flowchart TD
+    Tick["CoordinatorService tick"]
+    Reconcile["MissionReconciler.reconcile"]
+    Verify["MissionReconciler._verify_completed_tasks"]
+    Service["VerificationService"]
+    StallCheck["MissionReconciler._detect_and_recover_stalls"]
+    Escalate["escalate_stalled_task"]
+    Advance["Run advancement or failure check"]
+    Result["ReconcileResult"]
+
+    Tick --> Reconcile
+    Reconcile --> Verify
+    Verify --> Service
+    Reconcile --> StallCheck
+    StallCheck --> Escalate
+    Verify --> Advance
+    StallCheck --> Advance
+    Advance --> Result
+```
+
+Sources: [orchestrator/services/coordinator_service.py:5-17,70-73]() [orchestrator/modules/coordination/reconciler.py:100-112,128-184]() [orchestrator/modules/coordination/verification.py:5-12]()
+
+---
+
+## Power Modes & Execution Limits
+
+Mission power modes define fallback caps for tool iterations, forced LLM tier, and task timeout. The defaults are `light`, `standard`, and `max`; operators can retune live values through `system_settings` in the `power_modes` category. The stored setting takes precedence when present, with the hardcoded values acting as fallback defaults. [orchestrator/services/coordinator_service.py:91-107]()
+
+| Power mode | Maximum tool iterations | Forced LLM tier | Timeout (seconds) | Source |
+|---|---:|---|---:|---|
+| `light` | 5 | `system_llm` | 120 | [orchestrator/services/coordinator_service.py:103-105]() |
+| `standard` | 10 | None | 240 | [orchestrator/services/coordinator_service.py:103-106]() |
+| `max` | 50 | `orchestrator_llm` | 600 | [orchestrator/services/coordinator_service.py:103-107]() |
+
+If `power_mode` is absent from mission config, `standard` is the documented default. Power mode does **not** determine the token budget: the coordinator’s documented policy resolves that from the agent’s maximum output-token setting, then the model registry ceiling, then `DEFAULT_MAX_OUTPUT_TOKENS`. [orchestrator/services/coordinator_service.py:91-99]()
+
+The mission creation UI includes a `PowerModePicker` and a separate “Pause on budget exceeded” option. These are distinct controls: the backend power-mode defaults govern execution caps, while the UI presents a separate budget-pause setting. [frontend/components/missions/create-mission-modal.tsx:70-75,103-115]()
+
+Sources: [orchestrator/services/coordinator_service.py:91-107]() [frontend/components/missions/create-mission-modal.tsx:70-75,103-115]()
 
 ---

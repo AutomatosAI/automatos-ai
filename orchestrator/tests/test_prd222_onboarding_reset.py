@@ -392,7 +392,7 @@ def test_endpoint_404_when_reset_disabled(monkeypatch):
 
     monkeypatch.setattr(config, "ONBOARDING_RESET_ENABLED", False)
     with pytest.raises(HTTPException) as exc:
-        _run(reset_current_onboarding(OnboardingResetRequest(), _Ctx("admin"), object()))
+        reset_current_onboarding(OnboardingResetRequest(), _Ctx("admin"), object())
     assert exc.value.status_code == 404   # unadvertised, NOT 403
 
 
@@ -404,7 +404,7 @@ def test_endpoint_403_for_non_member_when_enabled(monkeypatch):
     # A plain user whose workspace role does NOT grant workspace:manage.
     monkeypatch.setattr(wsmod, "workspace_permission_granted", lambda *_a, **_k: False)
     with pytest.raises(HTTPException) as exc:
-        _run(reset_current_onboarding(OnboardingResetRequest(), _Ctx("user"), object()))
+        reset_current_onboarding(OnboardingResetRequest(), _Ctx("user"), object())
     assert exc.value.status_code == 403
 
 
@@ -441,9 +441,9 @@ def test_endpoint_admin_success_returns_report(monkeypatch):
         lambda db, ws, **kw: canned,
     )
 
-    out = _run(reset_current_onboarding(
+    out = reset_current_onboarding(
         OnboardingResetRequest(wipe_built=True), _Ctx("super_admin"), _DB()
-    ))
+    )
     assert out == canned
 
 

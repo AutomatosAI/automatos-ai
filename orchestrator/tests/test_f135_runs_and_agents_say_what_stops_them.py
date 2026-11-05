@@ -154,7 +154,7 @@ def test_deleting_an_agent_clears_its_routing_rows_before_the_agent():
     from api.agents import delete_agent
 
     db = _DeleteDb(MONITOR)
-    asyncio.run(delete_agent(303, NS(workspace_id=WS), db))
+    delete_agent(303, NS(workspace_id=WS), db)
     gone = db.sql.index("<delete agent 303>")
     for table in ("tool_routing_edges", "tool_routing_affinities"):
         cleared = db.sql.index(f"DELETE FROM {table} WHERE agent_id = :agent_id")

@@ -104,7 +104,7 @@ class TestListAgentPlugins:
         rows_q.join.return_value.filter.return_value.order_by.return_value.all.return_value = [row1, row2]
         db.query.side_effect = [agent_q, rows_q]
 
-        result = await list_agent_plugins(agent_id=42, ctx=ctx, db=db)
+        result = list_agent_plugins(agent_id=42, ctx=ctx, db=db)
         items = result["items"]
         assert len(items) == 2
         assert items[0]["slug"] == "email-auto"
@@ -124,7 +124,7 @@ class TestListAgentPlugins:
         rows_q.join.return_value.filter.return_value.order_by.return_value.all.return_value = []
         db.query.side_effect = [agent_q, rows_q]
 
-        result = await list_agent_plugins(agent_id=42, ctx=ctx, db=db)
+        result = list_agent_plugins(agent_id=42, ctx=ctx, db=db)
         assert result["items"] == []
 
     @pytest.mark.asyncio
@@ -138,7 +138,7 @@ class TestListAgentPlugins:
 
         ctx = _make_ctx(uuid4())
         with pytest.raises(HTTPException) as exc_info:
-            await list_agent_plugins(agent_id=999, ctx=ctx, db=db)
+            list_agent_plugins(agent_id=999, ctx=ctx, db=db)
         assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
@@ -155,7 +155,7 @@ class TestListAgentPlugins:
         db.query.return_value = agent_q
 
         with pytest.raises(HTTPException) as exc_info:
-            await list_agent_plugins(agent_id=42, ctx=ctx, db=db)
+            list_agent_plugins(agent_id=42, ctx=ctx, db=db)
         assert exc_info.value.status_code == 403
 
 
@@ -188,7 +188,7 @@ class TestUpdateAgentPlugins:
         plugins_q.filter.return_value.all.return_value = []
         db.query.side_effect = [agent_q, wep_q, delete_q, plugins_q]
 
-        result = await update_agent_plugins(agent_id=42, body=body, ctx=ctx, db=db)
+        result = update_agent_plugins(agent_id=42, body=body, ctx=ctx, db=db)
         assert result["success"] is True
         assert len(result["plugin_ids"]) == 1
         db.add.assert_called_once()
@@ -219,7 +219,7 @@ class TestUpdateAgentPlugins:
         plugins_q.filter.return_value.all.return_value = []
         db.query.side_effect = [agent_q, wep_q, delete_q, plugins_q]
 
-        result = await update_agent_plugins(agent_id=42, body=body, ctx=ctx, db=db)
+        result = update_agent_plugins(agent_id=42, body=body, ctx=ctx, db=db)
         assert len(result["plugin_ids"]) == 2
         assert db.add.call_count == 2
 
@@ -241,7 +241,7 @@ class TestUpdateAgentPlugins:
         db.query.side_effect = [agent_q, wep_q]
 
         with pytest.raises(HTTPException) as exc_info:
-            await update_agent_plugins(agent_id=42, body=body, ctx=ctx, db=db)
+            update_agent_plugins(agent_id=42, body=body, ctx=ctx, db=db)
         assert exc_info.value.status_code == 400
         assert "not enabled" in exc_info.value.detail
 
@@ -266,7 +266,7 @@ class TestUpdateAgentPlugins:
         plugins_q.filter.return_value.all.return_value = []
         db.query.side_effect = [agent_q, wep_q, delete_q, plugins_q]
 
-        await update_agent_plugins(agent_id=42, body=body, ctx=ctx, db=db)
+        update_agent_plugins(agent_id=42, body=body, ctx=ctx, db=db)
 
         added_objects = [call.args[0] for call in db.add.call_args_list]
         assert len(added_objects) == 3

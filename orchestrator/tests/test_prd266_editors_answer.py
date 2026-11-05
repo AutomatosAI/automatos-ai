@@ -18,7 +18,6 @@ owner's or admin's (``require_workspace_admin``): an editor's revoke is 403. Aga
 """
 from __future__ import annotations
 
-import asyncio
 import os
 import sys
 import uuid
@@ -321,7 +320,7 @@ def _never_answer() -> list:
 def test_api_keys_sdk_keys_and_the_saas_anonymous_never_answer(ctx):
     assert admin.may_answer_workspace_questions(_NoQueries(), ctx) is False
     with pytest.raises(HTTPException) as refused:
-        asyncio.run(admin.require_workspace_answerer(ctx=ctx, db=_NoQueries()))
+        admin.require_workspace_answerer(ctx=ctx, db=_NoQueries())
     assert (refused.value.status_code, refused.value.detail) == (403, admin.ANSWERER_ONLY)
 
 
@@ -329,7 +328,7 @@ def test_the_super_admin_answers_as_the_local_operator_does():
     operator = UserContext(email="operator@automatos.local", system_role="super_admin")
     ctx = RequestContext(workspace_id=uuid.uuid4(), user=operator, auth_type="anonymous")
 
-    assert asyncio.run(admin.require_workspace_answerer(ctx=ctx, db=_NoQueries())) is ctx
+    assert admin.require_workspace_answerer(ctx=ctx, db=_NoQueries()) is ctx
 
 
 # --------------------------------------------------------------------------- Needs-you

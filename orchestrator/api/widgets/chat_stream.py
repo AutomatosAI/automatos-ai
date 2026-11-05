@@ -44,6 +44,9 @@ from modules.tools.widget_callback import (
 logger = logging.getLogger(__name__)
 
 TEXT_PREFIX = "0:"
+# What a visitor sees when the turn fails. The exception goes to the server log only: the
+# widget is a public surface, and an exception's text can name internals.
+STREAM_FAILED_MESSAGE = "Sorry, something went wrong. Please try again."
 DATA_PREFIX = "d:"
 _COUNT_KEYS = (
     "total", "dict", "non_str", "text", "data_event", "other",
@@ -226,12 +229,12 @@ async def widget_event_stream(
             _log_first_text(ctx, texts_before, translator.counts["yielded_message"], stream_start)
             for frame in frames:
                 yield frame
-    except Exception as exc:
+    except Exception:
         logger.exception(
             "%s STREAM_ERROR: chat_id=%s after %.0fms",
             ctx.log_extra, ctx.chat_id, (time.perf_counter() - stream_start) * 1000,
         )
-        yield sse("error", {"message": str(exc)})
+        yield sse("error", {"message": STREAM_FAILED_MESSAGE})
     finally:
         _log_stream_done(ctx, translator.counts, stream_start)
         yield sse("done", {"conversation_id": ctx.chat_id})

@@ -92,7 +92,7 @@ def _run(coro):
 def test_usage_by_route_separates_free_paid_and_subscription(seeded, new_session):
     db = new_session()
     try:
-        rows = _run(api.get_usage(period="30d", group_by="route", ctx=_ctx(seeded), db=db))
+        rows = api.get_usage(period="30d", group_by="route", ctx=_ctx(seeded), db=db)
     finally:
         db.close()
     by_key = {r.key: r for r in rows}
@@ -109,7 +109,7 @@ def test_usage_by_route_separates_free_paid_and_subscription(seeded, new_session
 def test_summary_carries_providers_cache_and_no_sync_dollars(seeded, new_session):
     db = new_session()
     try:
-        summary = _run(api.get_summary(period="30d", ctx=_ctx(seeded), db=db))
+        summary = api.get_summary(period="30d", ctx=_ctx(seeded), db=db)
     finally:
         db.close()
     assert summary.total_requests == 4 and summary.total_cost == pytest.approx(0.0245)
@@ -123,8 +123,8 @@ def test_summary_carries_providers_cache_and_no_sync_dollars(seeded, new_session
 def test_usage_by_execution_and_agent_join_back_to_the_spender(seeded, new_session):
     db = new_session()
     try:
-        by_exec = {r.key: r for r in _run(api.get_usage(period="30d", group_by="execution", ctx=_ctx(seeded), db=db))}
-        by_agent = {r.key: r for r in _run(api.get_usage(period="30d", group_by="agent", ctx=_ctx(seeded), db=db))}
+        by_exec = {r.key: r for r in api.get_usage(period="30d", group_by="execution", ctx=_ctx(seeded), db=db)}
+        by_agent = {r.key: r for r in api.get_usage(period="30d", group_by="agent", ctx=_ctx(seeded), db=db)}
     finally:
         db.close()
     assert by_exec["mission:m1"].total_cost == pytest.approx(0.02) and by_exec["board_task:97"].total_tokens == 237_400
@@ -138,7 +138,7 @@ def test_usage_by_execution_and_agent_join_back_to_the_spender(seeded, new_sessi
 def test_daily_series_is_keyed_by_route_with_facts(seeded, new_session):
     db = new_session()
     try:
-        out = _run(api.get_daily_costs_by_model(period="30d", ctx=_ctx(seeded), db=db))
+        out = api.get_daily_costs_by_model(period="30d", ctx=_ctx(seeded), db=db)
     finally:
         db.close()
     assert set(out["models"]) == {r["key"] for r in out["routes"]}
@@ -150,9 +150,9 @@ def test_daily_series_is_keyed_by_route_with_facts(seeded, new_session):
 def test_projections_and_comparison_are_route_aware(seeded, new_session):
     db = new_session()
     try:
-        proj = _run(api.get_cost_projections(period="30d", ctx=_ctx(seeded), db=db))
-        cmp_ = _run(api.get_model_comparison(model_ids="moonshotai/kimi-k3@nvidia,moonshotai/kimi-k3",
-                                             period="30d", ctx=_ctx(seeded), db=db))
+        proj = api.get_cost_projections(period="30d", ctx=_ctx(seeded), db=db)
+        cmp_ = api.get_model_comparison(model_ids="moonshotai/kimi-k3@nvidia,moonshotai/kimi-k3",
+                                       period="30d", ctx=_ctx(seeded), db=db)
     finally:
         db.close()
     assert proj.current_period_cost == pytest.approx(0.0245)
@@ -194,7 +194,7 @@ def seeded_documents(engine, new_session):
 def test_document_analytics_counts_only_the_users_rag_documents(seeded_documents, new_session):
     db = new_session()
     try:
-        out = _run(docs_api.get_document_analytics(ctx=_ctx(seeded_documents), db=db))
+        out = docs_api.get_document_analytics(ctx=_ctx(seeded_documents), db=db)
     finally:
         db.close()
     assert out["total_documents"] == 2 and out["agent_outputs"] == 2
@@ -206,9 +206,9 @@ def test_document_analytics_counts_only_the_users_rag_documents(seeded_documents
 def test_document_list_can_leave_agent_outputs_out(seeded_documents, new_session):
     db = new_session()
     try:
-        everything = _run(docs_api.list_documents(ctx=_ctx(seeded_documents), skip=0, limit=100, team=None, db=db))
-        knowledge = _run(docs_api.list_documents(ctx=_ctx(seeded_documents), skip=0, limit=100, team=None,
-                                                 exclude_source_type="agent_output", db=db))
+        everything = docs_api.list_documents(ctx=_ctx(seeded_documents), skip=0, limit=100, team=None, db=db)
+        knowledge = docs_api.list_documents(ctx=_ctx(seeded_documents), skip=0, limit=100, team=None,
+                                                 exclude_source_type="agent_output", db=db)
     finally:
         db.close()
     assert len(everything) == 4 and len(knowledge) == 2

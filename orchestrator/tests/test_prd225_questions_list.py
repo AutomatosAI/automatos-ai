@@ -239,7 +239,7 @@ async def test_list_filters_by_kind_and_enriches_cascade():
         status=GrantStatus.PENDING.value,  # kind defaults to 'approval'
     ))
 
-    res = await list_grants(status=None, kind="question", ctx=ctx, db=db)
+    res = list_grants(status=None, kind="question", ctx=ctx, db=db)
     grants = res["grants"]
     assert len(grants) == 1
     q = grants[0]
@@ -260,5 +260,5 @@ async def test_list_without_kind_does_not_enrich_approvals():
         workspace_id=ws, subject_type="board_task", subject_id="1",
         status=GrantStatus.PENDING.value,
     ))
-    res = await list_grants(status=None, kind=None, ctx=ctx, db=db)
+    res = list_grants(status=None, kind=None, ctx=ctx, db=db)
     assert "cascade" not in res["grants"][0]

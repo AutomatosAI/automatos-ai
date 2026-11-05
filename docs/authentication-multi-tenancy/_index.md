@@ -5,55 +5,57 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/landing/landing-page.tsx](frontend/components/landing/landing-page.tsx)
-- [frontend/components/settings/WebhooksSettingsTab.tsx](frontend/components/settings/WebhooksSettingsTab.tsx)
+- [frontend/components/__tests__/prd264-voice-ai-label.test.tsx](frontend/components/__tests__/prd264-voice-ai-label.test.tsx)
+- [frontend/components/settings/SettingsPanel.tsx](frontend/components/settings/SettingsPanel.tsx)
+- [frontend/components/settings/SystemLLMSettingsTab.tsx](frontend/components/settings/SystemLLMSettingsTab.tsx)
+- [frontend/components/settings/WorkspaceVoiceLiveCard.tsx](frontend/components/settings/WorkspaceVoiceLiveCard.tsx)
+- [frontend/components/settings/__tests__/settings-panel-edition.test.tsx](frontend/components/settings/__tests__/settings-panel-edition.test.tsx)
+- [frontend/components/settings/__tests__/settings-panel-tab-param.test.tsx](frontend/components/settings/__tests__/settings-panel-tab-param.test.tsx)
+- [frontend/components/settings/__tests__/workspace-voice-live-card.test.tsx](frontend/components/settings/__tests__/workspace-voice-live-card.test.tsx)
 - [frontend/components/workspace-provider.tsx](frontend/components/workspace-provider.tsx)
 - [orchestrator/alembic/versions/prd_workspace_models_backfill.py](orchestrator/alembic/versions/prd_workspace_models_backfill.py)
 - [orchestrator/core/auth/clerk.py](orchestrator/core/auth/clerk.py)
 - [orchestrator/core/auth/clerk_azp.py](orchestrator/core/auth/clerk_azp.py)
 - [orchestrator/core/auth/clerk_mobile_template.py](orchestrator/core/auth/clerk_mobile_template.py)
 - [orchestrator/core/auth/hybrid.py](orchestrator/core/auth/hybrid.py)
-- [orchestrator/core/models/workspaces.py](orchestrator/core/models/workspaces.py)
-- [orchestrator/services/trial_ledger.py](orchestrator/services/trial_ledger.py)
-- [orchestrator/services/workspace_model_seeding.py](orchestrator/services/workspace_model_seeding.py)
+- [orchestrator/modules/context/sections/product_facts.py](orchestrator/modules/context/sections/product_facts.py)
+- [orchestrator/modules/voice/mint.py](orchestrator/modules/voice/mint.py)
+- [orchestrator/tests/test_f232_auto_knows_what_automatos_is.py](orchestrator/tests/test_f232_auto_knows_what_automatos_is.py)
 - [orchestrator/tests/test_invitation_routing.py](orchestrator/tests/test_invitation_routing.py)
-- [orchestrator/tests/test_prd222_trial_enforcement.py](orchestrator/tests/test_prd222_trial_enforcement.py)
-- [orchestrator/tests/test_prd222_trial_ledger.py](orchestrator/tests/test_prd222_trial_ledger.py)
-- [orchestrator/tests/test_prd230_chat_trial_metering.py](orchestrator/tests/test_prd230_chat_trial_metering.py)
-- [orchestrator/tests/test_workspace_model_seeding.py](orchestrator/tests/test_workspace_model_seeding.py)
+- [orchestrator/tests/test_prd266_ai_providers_route.py](orchestrator/tests/test_prd266_ai_providers_route.py)
 
 </details>
 
 
 
-This document covers the authentication and authorization mechanisms in Automatos AI, including hybrid authentication (Clerk JWT + API keys), workspace-based multi-tenancy, data isolation patterns, and admin access control.
+## Purpose and Scope
 
-For information about user management and team collaboration, see [Teams, Members & Invitations](#17.6). For credential storage (API keys for external services), see [Credentials Management](#17.5).
+This page gives a high-level map of how authentication, workspace context, authorization, credentials, and billing relate in Automatos AI. The hybrid authentication module provides request-scoped workspace context, while the workspace endpoint exposes the active workspace and its role, plan, and settings to the frontend. Detailed implementation guides are linked in the child pages below. [orchestrator/core/auth/hybrid.py:29-43](), [orchestrator/api/workspaces.py:70-83](), [orchestrator/api/workspaces.py:118-154](), [frontend/components/workspace-provider.tsx:58-82]()
 
----
+For deep technical details, see the child pages:
 
-## Overview
+- [Authentication Flow](#17.1) — Clerk JWT vs API key, auth editions, request context, sign-in and invitations, and mobile device lane tokens.
+- [Workspace & Team Management](#17.2) — Workspace provisioning, switching, team management, admin workspaces console, and purge.
+- [Data Isolation](#17.3) — Workspace-scoped data, query keys, memory namespacing, caches, and isolation tests.
+- [Admin Access Control & Plan Tiers](#17.4) — System roles, workspace permission gates, plan tiers, trial ledger enforcement, and bootstrap mode.
+- [Credentials & API Keys](#17.5) — Encrypted credentials, integration bridges, SDK API keys, and user BYOK keys.
+- [Billing, Credits & Metering](#17.6) — Credit balances, usage metering, billing integrations, and out-of-credit pauses.
 
-Automatos AI implements a **hybrid authentication system** supporting both Clerk JWT tokens (for user sessions) and API keys (for automation/headless clients). Multi-tenancy is achieved via **workspace-scoped isolation** at all data layers: database foreign keys, Redis cache namespaces, and memory namespaces.
-
-**Key components:**
-
-| Component | Purpose | Location |
-|-----------|---------|----------|
-| `get_request_context_hybrid` | Validates Clerk JWT or API key, returns `RequestContext` | [orchestrator/core/auth/hybrid.py:246-300]() |
-| `RequestContext` | Contains `workspace_id`, `user_id`, `system_role` | [orchestrator/core/auth/dependencies.py:56-67]() |
-| `_provision_new_user_workspace` | Auto-provisions personal workspace and seeds notification defaults | [orchestrator/core/auth/hybrid.py:200-244]() |
-| `require_workspace_permission` | Dependency for RBAC (viewer/editor/admin) within a workspace | [orchestrator/tests/test_p2w2_family_gates.py:41-44]() |
-
-**Sources:** [orchestrator/core/auth/hybrid.py:246-300](), [orchestrator/core/auth/dependencies.py:56-67](), [orchestrator/core/auth/hybrid.py:200-244]()
+Sources: [orchestrator/core/auth/hybrid.py:29-43](), [orchestrator/api/workspaces.py:70-83](), [orchestrator/api/workspaces.py:118-154](), [frontend/components/workspace-provider.tsx:58-82]()
 
 ---
 
-## Authentication Flow
+## Overview & Architecture
 
-### Hybrid Auth: Clerk JWT + API Keys
+Authentication and tenant context meet at `get_request_context_hybrid`: the module imports bearer-token resolution, Clerk auth, `RequestContext`, workspace provisioning helpers, and `ApiKeyService`. It also resolves workspace identifiers from request state, headers, query parameters, or configured defaults, and includes checks for workspace existence and membership. [orchestrator/core/auth/hybrid.py:14-24](), [orchestrator/core/auth/hybrid.py:55-94](), [orchestrator/core/auth/hybrid.py:97-112](), [orchestrator/core/auth/hybrid.py:134-190]()
 
-Automatos AI supports multiple authentication methods that resolve to a `RequestContext`. The `get_request_context_hybrid` function acts as the primary entry point for resolving identity from headers or session tokens [orchestrator/core/auth/hybrid.py:246-300](). 
+The `/api/workspaces/current` endpoint uses that request context to load the active workspace and return workspace metadata, including plan, role, plan limits, onboarding snapshot, settings, and other workspace-level state. In the frontend, `WorkspaceProvider` represents this workspace context; when its remembered workspace changes, it invalidates React Query data so workspace-scoped views refetch. [orchestrator/api/workspaces.py:70-83](), [orchestrator/api/workspaces.py:118-154](), [frontend/components/workspace-provider.tsx:58-82](), [frontend/components/workspace-provider.tsx:159-167]()
+
+Sources: [orchestrator/core/auth/hybrid.py:14-24](), [orchestrator/core/auth/hybrid.py:55-94](), [orchestrator/core/auth/hybrid.py:97-112](), [orchestrator/core/auth/hybrid.py:134-190](), [orchestrator/api/workspaces.py:70-83](), [orchestrator/api/workspaces.py:118-154](), [frontend/components/workspace-provider.tsx:58-82](), [frontend/components/workspace-provider.tsx:159-167]()
+
+### Authentication and Request-Context Mapping
+
+**Natural Language to Code Entity Mapping — Authentication and Request Context**
 
 The `ClerkAuth` class handles JWT verification using JWKS (JSON Web Key Set) [orchestrator/core/auth/clerk.py:26-32](). It normalizes user claims, including the `system_role` which is extracted from Clerk session token metadata [orchestrator/core/auth/clerk.py:131-143]().
 
@@ -76,9 +78,13 @@ graph TB
         WorkspaceRes["_get_workspace_id_from_request()"]
         AccessCheck["_user_has_workspace_access()"]
     end
-    
-    subgraph "Context_Entity"
-        Context["RequestContext<br/>workspace_id<br/>user_id<br/>system_role"]
+    subgraph "Code Entity Space"
+        Hybrid["get_request_context_hybrid"]
+        Clerk["get_clerk_auth"]
+        Bearers["resolve_registered_bearers"]
+        ApiKey["ApiKeyService"]
+        WorkspaceResolver["_get_workspace_id_from_request"]
+        RequestContext["RequestContext"]
     end
     
     Browser -->|"Authorization: Bearer {jwt}"| Hybrid
@@ -96,106 +102,101 @@ graph TB
 
 **Sources:** [orchestrator/core/auth/hybrid.py:49-88](), [orchestrator/core/auth/hybrid.py:146-165](), [orchestrator/core/auth/clerk.py:69-106](), [orchestrator/core/auth/clerk_azp.py:112-121]()
 
----
+### Workspace Authorization and Frontend Context
 
-### Workspace Provisioning & Invitations
+**Natural Language to Code Entity Mapping — Workspace Access and UI Context**
 
-When a new user signs up, the system auto-provisions a personal workspace unless a pending invitation exists [orchestrator/core/auth/hybrid.py:168-174](). This prevents the "invitee race condition" where a user joined to a team accidentally lands in a private personal silo [orchestrator/tests/test_invitation_routing.py:3-12]().
-
-- **Default Preferences:** Provisions seed defaults for the `NotificationDispatcher` (e.g., `heartbeat_complete` -> `in_app`) [orchestrator/core/auth/hybrid.py:200-210]().
-- **Invitation Logic:** `_get_pending_invitation_token` searches for unexpired tokens matching the user's email [orchestrator/core/auth/hybrid.py:177-198]().
-
-For details, see [Authentication Flow](#17.1).
-
-**Sources:** [orchestrator/core/auth/hybrid.py:168-198](), [orchestrator/tests/test_invitation_routing.py:87-104]()
-
----
-
-## Workspace Management
-
-### Workspace Resolution Priority
-
-The system resolves the active `workspace_id` from the request using a strict priority order [orchestrator/core/auth/hybrid.py:49-59]():
-1. Header: `x-workspace-id` or `x-workspace`
-2. Query Parameter: `workspace_id`
-3. Environment Variables: `WORKSPACE_ID` or `DEFAULT_WORKSPACE_ID`
-
-### Role-Based Access Control (RBAC)
-Within a workspace, users are assigned roles (`owner`, `admin`, `editor`, `viewer`) [frontend/components/workspace-provider.tsx:45-50](). Mutating routes are protected by `require_workspace_permission`, ensuring a `viewer` cannot perform actions like `agents:create` or `missions:delete` [orchestrator/tests/test_p2w2_family_gates.py:49-78]().
-
-### Workspace Model Seeding
-New workspaces are seeded with a set of default LLM models to ensure immediate usability. The `seed_workspace_models` function selects active, OpenRouter-served models (defaults first, then featured by popularity) and adds them to the `workspace_models` table. It also sets the primary model in `workspaces.settings.orchestrator` if not already present [orchestrator/services/workspace_model_seeding.py:72-123](). This process is idempotent and designed to degrade gracefully without raising errors if no models are available [orchestrator/services/workspace_model_seeding.py:121-123](). An Alembic migration `prd_workspace_models_backfill` ensures existing zero-model workspaces are also brought up to this baseline [orchestrator/alembic/versions/prd_workspace_models_backfill.py:28-66]().
-
-For details, see [Workspace Management](#17.2).
-
-**Sources:** [orchestrator/core/auth/hybrid.py:49-88](), [frontend/components/workspace-provider.tsx:72-79](), [orchestrator/tests/test_p2w2_family_gates.py:118-130](), [orchestrator/services/workspace_model_seeding.py:72-123](), [orchestrator/alembic/versions/prd_workspace_models_backfill.py:28-66]()
-
----
-
-## Data Isolation
-
-### Database Multi-Tenancy
-
-The `Workspace` model serves as the root for all multi-tenant data [orchestrator/core/models/workspaces.py:21-25](). Hard-deletion of a workspace is managed by the `Workspace Hard-Delete (Purge) Service`, which wipes S3 objects and cascades deletes across all tables containing a `workspace_id` column [orchestrator/services/workspace_purge.py:7-15]().
-
-Title: Code Entity Space - Multi-Tenancy Schema
 ```mermaid
-erDiagram
-    "workspaces" ||--o{ "users" : "owner_id"
-    "workspaces" ||--o{ "workspace_members" : "workspace_id"
-    "workspaces" ||--o{ "agents" : "workspace_id"
-    "workspaces" ||--o{ "documents" : "workspace_id"
-    
-    "workspaces" {
-        uuid id
-        string name
-        string plan
-        jsonb onboarding
-        datetime deleted_at
-    }
-    "users" {
-        int id
-        string clerk_user_id
-        string system_role
-    }
-    "workspace_members" {
-        uuid workspace_id
-        int user_id
-        boolean is_active
-    }
+graph LR
+    subgraph "Natural Language Space"
+        Select["Active workspace"]
+        Membership["Workspace membership"]
+        Role["Workspace role"]
+        Interface["Workspace-aware interface"]
+    end
+    subgraph "Code Entity Space"
+        Context["get_request_context_hybrid"]
+        ResolveID["_get_workspace_id_from_request"]
+        Access["_user_has_workspace_access"]
+        MemberCheck["_user_is_workspace_member"]
+        Endpoint["get_current_workspace"]
+        Provider["WorkspaceProvider"]
+        QueryCache["queryClient.invalidateQueries"]
+    end
+    Select --> ResolveID
+    ResolveID --> Context
+    Membership --> Access
+    Membership --> MemberCheck
+    Access --> Context
+    MemberCheck --> Context
+    Context --> Endpoint
+    Endpoint --> Provider
+    Provider --> Interface
+    Provider --> QueryCache
 ```
 
-For details, see [Data Isolation](#17.3).
-
-**Sources:** [orchestrator/core/models/workspaces.py:21-56](), [orchestrator/services/workspace_purge.py:51-70]()
+Sources: [orchestrator/core/auth/hybrid.py:55-94](), [orchestrator/core/auth/hybrid.py:134-190](), [orchestrator/api/workspaces.py:70-83](), [frontend/components/workspace-provider.tsx:159-167](), [frontend/components/workspace-provider.tsx:169-190]()
 
 ---
 
-## Admin & Access Control
+## 17.1 Authentication Flow
 
-### System Roles
-The `UserContext` maintains a `system_role` (`super_admin`, `admin`, `user`) [orchestrator/core/auth/dependencies.py:8-33](). On the frontend, `RoleProvider` enforces defense-in-depth by requiring an `@automatos.app` email domain for admin elevation [frontend/contexts/role-context.tsx:48-53]().
+The hybrid auth module brings together Clerk auth, bearer resolution, API-key service, and request-context types. It also contains workspace resolution and access-check helpers. For the supported authentication lanes, edition-specific behavior, sign-in and invitation flows, and mobile device lane tokens, see [Authentication Flow](#17.1). [orchestrator/core/auth/hybrid.py:14-24](), [orchestrator/core/auth/hybrid.py:55-94](), [orchestrator/core/auth/hybrid.py:134-190]()
 
-### Admin Console
-The Admin Workspaces API allows platform administrators to list, pause, resume, and soft-delete workspaces platform-wide [orchestrator/api/admin_workspaces.py:5-15]().
-
-For details, see [Admin Access Control](#17.4).
-
-**Sources:** [orchestrator/core/auth/dependencies.py:30-40](), [frontend/contexts/role-context.tsx:33-68](), [orchestrator/api/admin_workspaces.py:95-108]()
+Sources: [orchestrator/core/auth/hybrid.py:14-24](), [orchestrator/core/auth/hybrid.py:55-94](), [orchestrator/core/auth/hybrid.py:134-190]()
 
 ---
 
-## Trials, Plan Tiers & Session Modes
+## 17.2 Workspace & Team Management
 
-The platform implements a trial system, managed by the `trial_ledger` service, which tracks granted and spent USD for each workspace's trial [orchestrator/services/trial_ledger.py:1-26](). The trial state (`active`, `warned`, `exhausted`, `converted`) is stored within the `workspaces.onboarding.trial` JSONB field [orchestrator/services/trial_ledger.py:44-47]().
+`GET /api/workspaces/current` returns the active workspace using `ctx.workspace_id`; its response includes the workspace’s plan, role, plan limits, settings, and onboarding snapshot. The frontend `WorkspaceProvider` consumes workspace state and invalidates cached queries when the remembered workspace changes. For provisioning, switching, team administration, and purge details, see [Workspace & Team Management](#17.2). [orchestrator/api/workspaces.py:70-83](), [orchestrator/api/workspaces.py:118-154](), [frontend/components/workspace-provider.tsx:159-167]()
 
-The `resolve_trial_routing` function acts as a choke point for LLM key resolution, determining if a request should be metered against the trial, blocked, or passed through [orchestrator/services/trial_ledger.py:209-219](). BYOK (Bring Your Own Key) requests bypass trial metering [orchestrator/tests/test_prd222_trial_enforcement.py:56-59](). The system also enforces a global daily cap on trial spend [orchestrator/services/trial_ledger.py:124-125]().
-
-For details, see [Trials, Plan Tiers & Session Modes](#17.7).
-
-**Sources:** [orchestrator/services/trial_ledger.py:1-26](), [orchestrator/services/trial_ledger.py:44-47](), [orchestrator/services/trial_ledger.py:209-219](), [orchestrator/tests/test_prd222_trial_enforcement.py:56-59](), [orchestrator/services/trial_ledger.py:124-125]()
+Sources: [orchestrator/api/workspaces.py:70-83](), [orchestrator/api/workspaces.py:118-154](), [frontend/components/workspace-provider.tsx:159-167]()
 
 ---
+
+## 17.3 Data Isolation
+
+The auth module checks workspace access and active membership, while workspace endpoints operate on the request context’s workspace identifier. On the client, a workspace change triggers query invalidation, helping prevent cached workspace views from remaining in use after a switch. For database scoping, memory namespaces, cache isolation, and tenant-isolation tests, see [Data Isolation](#17.3). [orchestrator/core/auth/hybrid.py:134-190](), [orchestrator/api/workspaces.py:70-87](), [frontend/components/workspace-provider.tsx:159-167]()
+
+Sources: [orchestrator/core/auth/hybrid.py:134-190](), [orchestrator/api/workspaces.py:70-87](), [frontend/components/workspace-provider.tsx:159-167]()
+
+---
+
+## 17.4 Admin Access Control & Plan Tiers
+
+The workspace response distinguishes a per-workspace role from the user’s system role: the endpoint returns `role`, resolving it through `resolve_workspace_role` for the applicable request context. It also returns the workspace plan and plan-derived exposure information, with local-edition exposure handled separately. For role gates, plan enforcement, trial ledger behavior, and bootstrap mode, see [Admin Access Control & Plan Tiers](#17.4). [orchestrator/api/workspaces.py:101-114](), [orchestrator/api/workspaces.py:118-141]()
+
+The settings UI also uses system-role state to gate the System Settings tab, and applies an explicit local-edition tab allowlist. See the child page for the full authorization model and its backend gates. [frontend/components/settings/SettingsPanel.tsx:59-73](), [frontend/components/settings/SettingsPanel.tsx:75-99]()
+
+Sources: [orchestrator/api/workspaces.py:101-114](), [orchestrator/api/workspaces.py:118-141](), [frontend/components/settings/SettingsPanel.tsx:59-73](), [frontend/components/settings/SettingsPanel.tsx:75-99]()
+
+---
+
+## 17.5 Credentials & API Keys
+
+The hybrid auth module imports `ApiKeyService` as part of its authentication dependencies. The workspace endpoint returns settings through `masked_settings`, indicating that sensitive integration values are masked in the workspace response. For credential encryption, credential types, integration bridges, credential testing, SDK keys, and user BYOK keys, see [Credentials & API Keys](#17.5). [orchestrator/core/auth/hybrid.py:14-24](), [orchestrator/api/workspaces.py:20-23](), [orchestrator/api/workspaces.py:98-100]()
+
+Sources: [orchestrator/core/auth/hybrid.py:14-24](), [orchestrator/api/workspaces.py:20-23](), [orchestrator/api/workspaces.py:98-100]()
+
+---
+
+## 17.6 Billing, Credits & Metering
+
+The workspace endpoint exposes plan information and computes an exposure profile based on the edition and workspace plan. The settings panel includes Billing among the hosted-edition tabs, while its local-edition tab allowlist omits Billing. A voice-call mint path also checks plan eligibility and credits before proceeding. For the billing service, credit ledger, metering, alerts, and out-of-credit behavior, see [Billing, Credits & Metering](#17.6). [orchestrator/api/workspaces.py:118-141](), [frontend/components/settings/SettingsPanel.tsx:53-73](), [frontend/components/settings/SettingsPanel.tsx:79-99](), [orchestrator/modules/voice/mint.py:105-128]()
+
+Sources: [orchestrator/api/workspaces.py:118-141](), [frontend/components/settings/SettingsPanel.tsx:53-73](), [frontend/components/settings/SettingsPanel.tsx:79-99](), [orchestrator/modules/voice/mint.py:105-128]()
+
+---
+
+## Child Pages Reference
+
+- [Authentication Flow](#17.1)
+- [Workspace & Team Management](#17.2)
+- [Data Isolation](#17.3)
+- [Admin Access Control & Plan Tiers](#17.4)
+- [Credentials & API Keys](#17.5)
+- [Billing, Credits & Metering](#17.6)
 
 ## Child Pages
 - [Authentication Flow](#17.1) — Clerk JWT vs API key, get_request_context_hybrid, AUTH_EDITION saas vs local, sign-in/sign-up pages, Edge proxy security

@@ -5,220 +5,231 @@
 
 The following files were used as context for generating this wiki page:
 
-- [orchestrator/consumers/chatbot/tool_router.py](orchestrator/consumers/chatbot/tool_router.py)
-- [orchestrator/core/services/skill_l3_execution.py](orchestrator/core/services/skill_l3_execution.py)
-- [orchestrator/modules/agents/services/skill_portability.py](orchestrator/modules/agents/services/skill_portability.py)
+- [orchestrator/consumers/chatbot/knowledge_prefetch.py](orchestrator/consumers/chatbot/knowledge_prefetch.py)
+- [orchestrator/core/seeds/utterances/graph.yaml](orchestrator/core/seeds/utterances/graph.yaml)
+- [orchestrator/modules/context/result.py](orchestrator/modules/context/result.py)
+- [orchestrator/modules/context/sections/documents_inventory.py](orchestrator/modules/context/sections/documents_inventory.py)
+- [orchestrator/modules/context/sections/graph_context.py](orchestrator/modules/context/sections/graph_context.py)
 - [orchestrator/modules/context/sections/identity.py](orchestrator/modules/context/sections/identity.py)
-- [orchestrator/modules/context/sections/platform_actions.py](orchestrator/modules/context/sections/platform_actions.py)
 - [orchestrator/modules/context/sections/skills.py](orchestrator/modules/context/sections/skills.py)
 - [orchestrator/modules/context/sections/task_context.py](orchestrator/modules/context/sections/task_context.py)
-- [orchestrator/modules/context/sections/tools.py](orchestrator/modules/context/sections/tools.py)
-- [orchestrator/modules/tools/discovery/action_registry.py](orchestrator/modules/tools/discovery/action_registry.py)
-- [orchestrator/modules/tools/discovery/action_semantic_index.py](orchestrator/modules/tools/discovery/action_semantic_index.py)
+- [orchestrator/modules/context/service.py](orchestrator/modules/context/service.py)
+- [orchestrator/modules/tools/data_routes.py](orchestrator/modules/tools/data_routes.py)
+- [orchestrator/modules/tools/discovery/actions_analytics.py](orchestrator/modules/tools/discovery/actions_analytics.py)
+- [orchestrator/modules/tools/discovery/actions_data_routes.py](orchestrator/modules/tools/discovery/actions_data_routes.py)
+- [orchestrator/modules/tools/discovery/actions_field.py](orchestrator/modules/tools/discovery/actions_field.py)
+- [orchestrator/modules/tools/discovery/actions_graph.py](orchestrator/modules/tools/discovery/actions_graph.py)
 - [orchestrator/modules/tools/discovery/actions_skills.py](orchestrator/modules/tools/discovery/actions_skills.py)
-- [orchestrator/modules/tools/discovery/handlers_skill_runtime.py](orchestrator/modules/tools/discovery/handlers_skill_runtime.py)
-- [orchestrator/modules/tools/execution/unified_executor.py](orchestrator/modules/tools/execution/unified_executor.py)
-- [orchestrator/modules/tools/registry/tool_registry.py](orchestrator/modules/tools/registry/tool_registry.py)
-- [orchestrator/modules/tools/services/composio_hint_service.py](orchestrator/modules/tools/services/composio_hint_service.py)
-- [orchestrator/modules/tools/services/composio_tool_service.py](orchestrator/modules/tools/services/composio_tool_service.py)
-- [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
-- [orchestrator/tests/test_action_registry_filtered.py](orchestrator/tests/test_action_registry_filtered.py)
-- [orchestrator/tests/test_action_semantic_index.py](orchestrator/tests/test_action_semantic_index.py)
-- [orchestrator/tests/test_identity_section.py](orchestrator/tests/test_identity_section.py)
-- [orchestrator/tests/test_p2w1_agent_skills_repair.py](orchestrator/tests/test_p2w1_agent_skills_repair.py)
-- [orchestrator/tests/test_platform_actions_section.py](orchestrator/tests/test_platform_actions_section.py)
+- [orchestrator/scripts/eval/tool_routing/eval_seed.yaml](orchestrator/scripts/eval/tool_routing/eval_seed.yaml)
+- [orchestrator/scripts/eval/tool_routing/eval_set.jsonl](orchestrator/scripts/eval/tool_routing/eval_set.jsonl)
+- [orchestrator/scripts/eval/tool_routing/seed_eval_set.py](orchestrator/scripts/eval/tool_routing/seed_eval_set.py)
+- [orchestrator/scripts/skill_signal_report.py](orchestrator/scripts/skill_signal_report.py)
+- [orchestrator/tests/test_auto_prompt_prefix_is_turn_stable.py](orchestrator/tests/test_auto_prompt_prefix_is_turn_stable.py)
+- [orchestrator/tests/test_context/__init__.py](orchestrator/tests/test_context/__init__.py)
+- [orchestrator/tests/test_context/conftest.py](orchestrator/tests/test_context/conftest.py)
+- [orchestrator/tests/test_context/test_budget_manager.py](orchestrator/tests/test_context/test_budget_manager.py)
+- [orchestrator/tests/test_context/test_identity_section.py](orchestrator/tests/test_context/test_identity_section.py)
+- [orchestrator/tests/test_context/test_memory_section.py](orchestrator/tests/test_context/test_memory_section.py)
+- [orchestrator/tests/test_context/test_prompt_caching.py](orchestrator/tests/test_context/test_prompt_caching.py)
+- [orchestrator/tests/test_f077c_a_number_question_goes_to_the_database.py](orchestrator/tests/test_f077c_a_number_question_goes_to_the_database.py)
+- [orchestrator/tests/test_f078_the_prompt_names_the_connected_database.py](orchestrator/tests/test_f078_the_prompt_names_the_connected_database.py)
+- [orchestrator/tests/test_f155_a_widget_turn_is_told_where_it_is.py](orchestrator/tests/test_f155_a_widget_turn_is_told_where_it_is.py)
+- [orchestrator/tests/test_f155_a_widget_turns_prompt_carries_only_what_its_key_may_read.py](orchestrator/tests/test_f155_a_widget_turns_prompt_carries_only_what_its_key_may_read.py)
+- [orchestrator/tests/test_f155_widget_born_work_remembers_as_a_widget_turn.py](orchestrator/tests/test_f155_widget_born_work_remembers_as_a_widget_turn.py)
+- [orchestrator/tests/test_f227_each_question_is_searched_on_its_own.py](orchestrator/tests/test_f227_each_question_is_searched_on_its_own.py)
+- [orchestrator/tests/test_f302_b_a_shop_question_always_reaches_the_database.py](orchestrator/tests/test_f302_b_a_shop_question_always_reaches_the_database.py)
+- [orchestrator/tests/test_f312_a_auto_reaches_for_the_knowledge_graph.py](orchestrator/tests/test_f312_a_auto_reaches_for_the_knowledge_graph.py)
+- [orchestrator/tests/test_f312_b_the_graph_tools_name_the_graphs_own_relations.py](orchestrator/tests/test_f312_b_the_graph_tools_name_the_graphs_own_relations.py)
+- [orchestrator/tests/test_f330_b_a_question_turn_holds_no_connection_while_the_documents_are_searched.py](orchestrator/tests/test_f330_b_a_question_turn_holds_no_connection_while_the_documents_are_searched.py)
 - [orchestrator/tests/test_prd202_s2_trigger_activation.py](orchestrator/tests/test_prd202_s2_trigger_activation.py)
-- [orchestrator/tests/test_skills_section.py](orchestrator/tests/test_skills_section.py)
-- [orchestrator/tests/test_tool_router_semantic.py](orchestrator/tests/test_tool_router_semantic.py)
+- [orchestrator/tests/test_prd263_skill_hash_in_context_trace.py](orchestrator/tests/test_prd263_skill_hash_in_context_trace.py)
+- [orchestrator/tests/test_prd263_skill_signal_report.py](orchestrator/tests/test_prd263_skill_signal_report.py)
 
 </details>
 
 
 
-This page documents the detailed technical implementation of the section types that make up the unified prompt-building system in `ContextService`. Each section implements the `BaseSection` contract, rendering specific contextual components into the system prompt while adhering to priority-based token budgeting and fallback behaviors.
-
-**Sources:** [orchestrator/modules/context/sections/__init__.py:1-64](), [orchestrator/modules/context/modes.py:1-134]()
+This page provides comprehensive technical documentation for the individual section types implemented within the `ContextService` prompt-building pipeline `[orchestrator/modules/context/sections/__init__.py:1-76]`. Each section encapsulates a distinct component of the LLM prompt, complete with priority levels, token budgets, and rendering logic.
 
 ---
 
-## BaseSection Contract & Registry
+## Purpose and Scope
 
-All sections inherit from `BaseSection`, an abstract base class defining the standard lifecycle methods for rendering markdown content and managing token constraints.
+The section architecture decouples prompt generation into modular, reusable components (`BaseSection` implementations). These sections are dynamically assembled based on the active `ContextMode` `[orchestrator/modules/context/modes.py:1-120]` and filtered through the token budget management system `[orchestrator/modules/context/budget.py:1-147]`.
 
-| Method / Attribute | Purpose | Type / Return |
-|-------------------|---------|---------------|
-| `render(ctx: SectionContext)` | Async method building the section's text content | `str` (Markdown) |
-| `truncate(text: str, max_tokens: int)` | Static method ensuring compliance with token limits | `str` |
-| `name` | Unique string identifier for registry mapping | `str` |
-| `priority` | Integer precedence (1 is highest; protected from trimming) | `int` (1–10) |
-| `max_tokens` | Optional hard ceiling for section length | `Optional[int]` |
+Sources: `[orchestrator/modules/context/sections/__init__.py:1-76]`, `[orchestrator/modules/context/modes.py:1-120]`, `[orchestrator/modules/context/budget.py:1-147]`
 
-**Diagram: Section Hierarchy and Priority Flow**
+---
+
+## BaseSection and SectionContext Interface
+
+All section implementations inherit from `BaseSection`, defining a uniform interface for prompt construction `[orchestrator/modules/context/sections/base.py:1-50]`.
+
+| Method / Attribute | Type / Signature | Description |
+|---|---|---|
+| `name` | `str` | Section identifier registered in `SECTION_REGISTRY` |
+| `priority` | `int` | Priority tier (1–10); lower numbers denote higher priority and protection against budget trimming |
+| `max_tokens` | `Optional[int]` | Optional hard limit for truncation |
+| `render(ctx: SectionContext)` | `async def render(ctx: SectionContext) -> str` | Generates the markdown string for the section |
+| `truncate(text: str, max_tokens: int)` | `staticmethod` | Truncates text on token boundaries via context guard |
+
+`SectionContext` holds request-scoped data passed across sections, including `agent`, `workspace_id`, `messages`, `task_description`, and `db_session`.
+
+Sources: `[orchestrator/modules/context/sections/base.py:1-50]`, `[orchestrator/modules/context/service.py:173-186]`
+
+---
+
+## Section Registry and Mapping
+
+The `SECTION_REGISTRY` maps string keys declared in `ModeConfig.sections` `[orchestrator/modules/context/modes.py:113-120]` to their concrete `BaseSection` classes `[orchestrator/modules/context/sections/__init__.py:31-51]`.
+
+### Diagram: Natural Language Space to Code Entity Space — Section Architecture
 
 ```mermaid
 graph TB
-    BaseSection["BaseSection"]
-    P1["IdentitySection<br/>Priority 1<br/>(Never Dropped)"]
-    P2["TaskContextSection<br/>Priority 2<br/>(Never Dropped)"]
-    P2_1["OnboardingSection<br/>Priority 2<br/>(Never Dropped)"]
-    P3["ConversationSection<br/>Priority 3<br/>(History Logic)"]
-    P3_Tools["ToolsSection<br/>Priority 3<br/>(Schema Loading)"]
-    P4["SkillsSection<br/>Priority 4<br/>(L1/L2 Activation)"]
-    P5["PlatformActionsSection<br/>Priority 5<br/>(Action Catalog)"]
-    P6["MemorySection<br/>Priority 6<br/>(Context Bundle)"]
+    subgraph "NaturalLanguageSpace"
+        NL_Identity["AgentIdentityAndPersona"]
+        NL_Skills["SkillsAndCapabilitiesCatalog"]
+        NL_Task["ActiveTaskAndDependencies"]
+        NL_Memory["UserMemoriesAndFieldHistory"]
+        NL_Graph["KnowledgeGraphContext"]
+        NL_Documents["DocumentsAndDatabasesInventory"]
+    end
 
-    BaseSection --> P1 & P2 & P2_1 & P3 & P3_Tools & P4 & P5 & P6
+    subgraph "CodeEntitySpace"
+        IdentitySec["IdentitySection<br/>orchestrator/modules/context/sections/identity.py:64"]
+        SkillsSec["SkillsSection<br/>orchestrator/modules/context/sections/skills.py:36"]
+        TaskSec["TaskContextSection<br/>orchestrator/modules/context/sections/task_context.py:18"]
+        MemorySec["MemorySection<br/>orchestrator/modules/context/sections/memory.py"]
+        GraphSec["GraphSection<br/>orchestrator/modules/context/sections/graph_context.py:47"]
+        DocumentsInvSec["DocumentsInventorySection<br/>orchestrator/modules/context/sections/documents_inventory.py:38"]
+        Registry["SECTION_REGISTRY<br/>orchestrator/modules/context/sections/__init__.py:31"]
+    end
+
+    NL_Identity --> IdentitySec
+    NL_Skills --> SkillsSec
+    NL_Task --> TaskSec
+    NL_Memory --> MemorySec
+    NL_Graph --> GraphSec
+    NL_Documents --> DocumentsInvSec
+
+    IdentitySec --> Registry
+    SkillsSec --> Registry
+    TaskSec --> Registry
+    MemorySec --> Registry
+    GraphSec --> Registry
+    DocumentsInvSec --> Registry
 ```
-
-**Sources:** [orchestrator/modules/context/sections/base.py:1-50](), [orchestrator/modules/context/sections/__init__.py:27-43]()
+Sources: `[orchestrator/modules/context/sections/__init__.py:31-51]`, `[orchestrator/modules/context/sections/identity.py:64]`, `[orchestrator/modules/context/sections/skills.py:36]`, `[orchestrator/modules/context/sections/task_context.py:18]`, `[orchestrator/modules/context/sections/graph_context.py:47]`, `[orchestrator/modules/context/sections/documents_inventory.py:38]`
 
 ---
 
-## Natural Language Space to Code Entity Space: Tool & Action Routing
+## Core Section Types Reference
 
-The following diagram maps high-level user natural language inputs and tool intentions to the underlying code entities and routing modules responsible for execution.
+| Priority | Section Name | Class Name | Purpose | Max Tokens | Drop Eligible? |
+|----------|-------------|------------|---------|------------|---------------|
+| 1 | `identity` | `IdentitySection` | Agent name, role, workspace, persona, personality presets | None (Optional) | No (Priority 1) |
+| 2 | `task_context` | `TaskContextSection` | Current task description, status, board info, dependency context | 1500 | No (Priority 2) |
+| 2 | `onboarding` | `OnboardingSection` | Mission Zero onboarding flow guidance | 800 | No (Priority 2) |
+| 3 | `conversation` | `ConversationSection` | Message history formatting and unresolved attachments | N/A | No |
+| 3 | `tools` | `ToolsSection` | Tool schemas loader (`FULL`, `FILTERED`, `DISPATCHER_ONLY`) | N/A | No |
+| 4 | `skills` | `SkillsSection` | Trigger-based L1 metadata catalog + core L2 body | None | Yes |
+| 5 | `platform_actions` | `PlatformActionsSection` | Summary of `platform_*` management tools | 2000 | Yes |
+| 6 | `memory` | `MemorySection` | User memories, daily logs, and context bundle | 1500 | Yes |
+| 6 | `field_memory` | `FieldMemorySection` | Cross-run durable field memory for heartbeat agents | N/A | Yes |
+| 7 | `documents_inventory` | `DocumentsInventorySection` | Names documents and connected databases in the workspace | N/A | Yes |
+| 45 | `business_graph` | `GraphSection` | Business knowledge graph insights and routing | 800 | Yes |
 
-**Diagram: Natural Language Tool Resolution to Code Entities**
+Sources: `[orchestrator/modules/context/sections/__init__.py:31-51]`, `[orchestrator/modules/context/sections/identity.py:68-78]`, `[orchestrator/modules/context/sections/task_context.py:18-28]`, `[orchestrator/modules/context/sections/skills.py:44-48]`, `[orchestrator/modules/context/budget.py:121-123]`, `[orchestrator/modules/context/sections/documents_inventory.py:1-23]`, `[orchestrator/modules/context/sections/graph_context.py:47-56]`
+
+---
+
+## Detailed Section Implementations
+
+### IdentitySection (Priority 1)
+Implemented in `[orchestrator/modules/context/sections/identity.py:64-164]`. It establishes agent identity. When `personality=True` (configured in `CHATBOT` mode `[orchestrator/modules/context/modes.py:127-136]`), it delegates to `AutomatosPersonality` (`[orchestrator/consumers/chatbot/personality.py:112-172]`) to construct conversational guidelines, greetings, and action styles, drawing on workspace orchestrator settings with TTL caching `[orchestrator/consumers/chatbot/personality.py:37-69]`. For non-chatbot modes (`TASK_EXECUTION`, `HEARTBEAT_AGENT`), it builds a concise, neutral identity prompt incorporating the agent's role, description, persona, and response formatting rules `[orchestrator/modules/context/sections/identity.py:96-125]`.
+
+A special `WIDGET_CHAT_NOTE` is appended for public widget turns, informing the agent about the restricted environment and that owner's assets cannot be changed `[orchestrator/modules/context/sections/identity.py:17-21]`, `[orchestrator/modules/context/sections/identity.py:164]`. This is part of the F155 security surface `[orchestrator/core/security/surface.py:1-20]`.
+
+Sources: `[orchestrator/modules/context/sections/identity.py:64-164]`, `[orchestrator/consumers/chatbot/personality.py:37-172]`, `[orchestrator/modules/context/modes.py:127-136]`, `[orchestrator/core/security/surface.py:1-20]`
+
+### TaskContextSection (Priority 2)
+Implemented in `[orchestrator/modules/context/sections/task_context.py:18-88]`. It injects the active task description (`ctx.task_description`), status, priority, board name, and dependency instructions into `TASK_EXECUTION` mode prompts. Because it holds priority 2, it is protected against budget trimming `[orchestrator/modules/context/budget.py:123-125]`.
+
+Sources: `[orchestrator/modules/context/sections/task_context.py:18-88]`, `[orchestrator/modules/context/budget.py:123-125]`
+
+### SkillsSection (Priority 4)
+Implemented in `[orchestrator/modules/context/sections/skills.py:36-131]`. It implements trigger-based skill activation to minimize prompt overhead:
+- **L1 Metadata**: Every attached non-core skill injects only its name and description (~50-100 tokens), acting as an on-demand catalog `[orchestrator/modules/context/sections/skills.py:110]`.
+- **L2 Full Body**: The complete `SKILL.md` body is rendered exclusively for core always-on skills (defined in `_DEFAULT_CORE_ALWAYS_ON` `[orchestrator/modules/context/sections/skills.py:34]`, e.g., `platform-management`) `[orchestrator/modules/context/sections/skills.py:103-109]`.
+- **On-Demand Loading**: When the model requires a skill's full instructions, it executes the `platform_load_skill` action `[orchestrator/modules/tools/discovery/actions_skills.py:29-57]`.
+- **Widget Turn Handling**: Skills are not included on a widget turn (`widget_turn()`) because `platform_load_skill` is not a widget tool, and the core always-on skill is an owner-facing manual `[orchestrator/modules/context/sections/skills.py:69-75]`.
+- **Skill Body Hashing**: The `_body_hash` function `[orchestrator/modules/context/sections/skills.py:49-52]` generates a SHA256 hash of the rendered skill body, which is recorded in `ctx.kwargs[SKILL_BODIES_KEY]` `[orchestrator/modules/context/sections/skills.py:129]` and subsequently included in the `ContextResult.skill_bodies` for tracing `[orchestrator/modules/context/service.py:106-115]`.
+
+### Diagram: Natural Language Space to Code Entity Space — Skills and Tool Execution
 
 ```mermaid
 graph TD
-    NL["Natural Language Query<br/>'Send a slack message to #eng'"] --> Router["ToolRouter<br/>modules/tools/tool_router.py"]
-    
-    subgraph "Discovery & Indexing Layer"
-        Router --> SemanticIndex["ActionSemanticIndex<br/>modules/tools/discovery/action_semantic_index.py"]
-        Router --> ActionReg["ActionRegistry<br/>modules/tools/discovery/action_registry.py"]
-        Router --> HintService["ComposioHintService<br/>modules/tools/services/composio_hint_service.py"]
+    subgraph "NaturalLanguageSpace"
+        NL_SkillCatalog["SkillCatalogMentionL1Metadata"]
+        NL_ModelDecision["ModelDecidesToLoadSkill"]
     end
 
-    subgraph "Execution & Dispatch Layer"
-        SemanticIndex --> UnifiedExec["UnifiedToolExecutor<br/>modules/tools/execution/unified_executor.py"]
-        ActionReg --> PlatformExec["exec_platform.py"]
-        HintService --> ComposioExec["exec_composio.py"]
+    subgraph "CodeEntitySpace"
+        SkillsSec["SkillsSection<br/>orchestrator/modules/context/sections/skills.py:36"]
+        LoadSkillTool["platform_load_skill<br/>orchestrator/modules/tools/discovery/actions_skills.py:29"]
+        Handler["load_skill<br/>orchestrator/modules/tools/data_routes.py:100"]
+        DBQuery["SkillLoader.load_skill_content<br/>orchestrator/modules/agents/services/skill_loader.py:490"]
     end
 
-    UnifiedExec --> ToolResult["Tool Execution Result / Tool Outcome Capture"]
+    NL_SkillCatalog --> SkillsSec
+    NL_ModelDecision --> LoadSkillTool
+    LoadSkillTool --> Handler
+    Handler --> DBQuery
 ```
-
-**Sources:** [orchestrator/modules/tools/tool_router.py:1-174](), [orchestrator/modules/tools/discovery/action_semantic_index.py:1-55](), [orchestrator/modules/tools/execution/unified_executor.py:58-146]()
-
----
-
-## Natural Language Space to Code Entity Space: Prompt Mode Assembly
-
-This diagram illustrates how high-level operating contexts map to specific section assemblers and runtime components inside `ContextService`.
-
-**Diagram: Context Modes to Code Entity Mapping**
-
-```mermaid
-graph TD
-    PromptMode["Context Modes<br/>(CHATBOT, TASK_EXECUTION, HEARTBEAT)"] --> ContextService["ContextService.build_context()"]
-
-    subgraph "Code Entity Space"
-        ContextService --> IdentitySec["IdentitySection<br/>modules/context/sections/identity.py"]
-        ContextService --> ToolsSec["ToolsSection<br/>modules/context/sections/tools.py"]
-        ContextService --> PlatformSec["PlatformActionsSection<br/>modules/context/sections/platform_actions.py"]
-        ContextService --> MemorySec["MemorySection<br/>modules/context/sections/memory.py"]
-    end
-
-    IdentitySec --> Personality["AutomatosPersonality<br/>consumers/chatbot/personality.py"]
-    ToolsSec --> ToolLoader["load_tools()<br/>ToolLoadingStrategy"]
-    PlatformSec --> ActionSummary["ActionRegistry.build_prompt_summary()"]
-    MemorySec --> MemService["UnifiedMemoryService<br/>modules/memory/unified_memory_service.py"]
-```
-
-**Sources:** [orchestrator/modules/context/sections/identity.py:122-165](), [orchestrator/modules/context/sections/tools.py:61-124](), [orchestrator/modules/context/sections/platform_actions.py:48-108]()
+Sources: `[orchestrator/modules/context/sections/skills.py:36-131]`, `[orchestrator/modules/tools/discovery/actions_skills.py:29-57]`, `[orchestrator/modules/context/sections/skills.py:69-75]`, `[orchestrator/modules/context/sections/skills.py:49-52]`, `[orchestrator/modules/context/sections/skills.py:129]`, `[orchestrator/modules/context/service.py:106-115]`, `[orchestrator/modules/context/sections/skills.py:34]`, `[orchestrator/modules/context/sections/skills.py:103-109]`, `[orchestrator/modules/tools/data_routes.py:100]`, `[orchestrator/modules/agents/services/skill_loader.py:490]`
 
 ---
 
-## IdentitySection (Priority 1)
+### PlatformActionsSection (Priority 5)
+Implemented in `[orchestrator/modules/context/sections/platform_actions.py:30-108]`. It renders a markdown catalog of available `platform_execute` actions `[orchestrator/modules/tools/discovery/action_registry.py:28-56]`. Working alongside `SmartToolRouter` `[orchestrator/consumers/chatbot/smart_tool_router.py:65-78]` and intent classifiers (`[orchestrator/consumers/chatbot/intent_classifier.py:48-56]`), it maps user intent to registry categories `[orchestrator/consumers/chatbot/smart_tool_router.py:40-52]`. When semantic tool routing (`config.SEMANTIC_TOOL_ROUTING`) is enabled and a user query is present, it uses `ActionSemanticIndex` `[orchestrator/modules/tools/discovery/action_semantic_index.py:113-116]` or `GraphRouter` to rank actions by cosine similarity or edge chains and filter the catalog to the top-$K$ candidates `[orchestrator/modules/context/sections/platform_actions.py:72-91]`.
 
-**Purpose:** Establishes core agent parameters including name, role, workspace assignment, and behavioral persona. It is protected from trimming and guarantees baseline identity awareness across all execution contexts. [orchestrator/modules/context/sections/identity.py:55-70]()
-
-### Rendering Implementation
-- **Basic Mode (`_build`)**: Formats standard metadata for non-chatbot modes (`TASK_EXECUTION`, `HEARTBEAT`), incorporating workspace identity, agent description, and response formatting rules. [orchestrator/modules/context/sections/identity.py:87-121]()
-- **Chatbot Personality (`_build_chatbot_identity`)**: Engaged when `personality=True` in session configuration. Combines outputs from `AutomatosPersonality` (base prompt, platform skills, action response styles) with agent-specific traits [orchestrator/modules/context/sections/identity.py:122-165]().
-
-**Sources:** [orchestrator/modules/context/sections/identity.py:55-165]()
+Sources: `[orchestrator/modules/context/sections/platform_actions.py:30-108]`, `[orchestrator/modules/tools/discovery/action_registry.py:28-56]`, `[orchestrator/consumers/chatbot/smart_tool_router.py:40-78]`, `[orchestrator/modules/tools/discovery/action_semantic_index.py:113-116]`
 
 ---
 
-## TaskContextSection (Priority 2)
+### MemorySection and FieldMemorySection (Priority 6)
+- **`MemorySection`**: Injects user memories, historical context bundles from `UnifiedMemoryService`, and daily summaries into chatbot sessions `[orchestrator/modules/context/sections/memory.py]`.
+- **`FieldMemorySection`**: Injected in `HEARTBEAT_AGENT` mode `[orchestrator/modules/context/modes.py:166-170]`, it provides the workspace-scoped durable field memory digest, enabling recurring autonomous agents to build upon cross-run learnings `[orchestrator/modules/context/sections/field_memory.py]`. The `platform_field_query` and `platform_field_inject` actions `[orchestrator/modules/tools/discovery/actions_field.py:9-82]` allow agents to interact with this shared field.
 
-**Purpose:** Injects active task payloads, operational states, board assignments, and inter-task dependencies into execution turns [orchestrator/modules/context/sections/task_context.py:18-88]().
-
-### Context Elements
-- **Task Payload**: Direct text from `ctx.task_description`. [orchestrator/modules/context/sections/task_context.py:43-51]()
-- **Execution Metadata**: Status indicators, priority tiers, and board context dictionaries passed through `kwargs`. [orchestrator/modules/context/sections/task_context.py:54-68]()
-- **Dependency Directives**: Guidelines for processing preceding task outputs (`## DEPENDENCY CONTEXT`). [orchestrator/modules/context/sections/task_context.py:71-84]()
-
-**Sources:** [orchestrator/modules/context/sections/task_context.py:18-88]()
+Sources: `[orchestrator/modules/context/sections/__init__.py:37-48]`, `[orchestrator/modules/context/modes.py:166-170]`, `[orchestrator/modules/tools/discovery/actions_field.py:9-82]`
 
 ---
 
-## OnboardingSection (Priority 2)
+### DocumentsInventorySection (Priority 7)
+Implemented in `[orchestrator/modules/context/sections/documents_inventory.py:1-125]`. This section informs the agent about the documents and connected databases available in the workspace. It dynamically generates a summary of:
+- The number and titles of the owner's documents and reports saved by agents `[orchestrator/modules/context/sections/documents_inventory.py:110-123]`.
+- The names of active connected databases `[orchestrator/modules/context/sections/documents_inventory.py:64-74]`.
+- Guidance on how to use `search_knowledge` for documents and `platform_query_data` for numerical or database record questions `[orchestrator/modules/context/sections/documents_inventory.py:50-57]`.
+- Specific instructions for handling spreadsheets, noting they should be processed with code rather than searched `[orchestrator/modules/context/sections/documents_inventory.py:58-61]`.
 
-**Purpose:** Manages guided onboarding workflows (Mission Zero) during initial workspace provisioning, injecting step-by-step instructions and goal tracking states into the prompt.
+For widget turns, this section respects the key's scopes, only naming documents and databases that the widget key is permitted to read (`documents:read`, `data:query`) `[orchestrator/modules/context/sections/documents_inventory.py:104-109]`. Working alongside `knowledge_prefetch.py` (`[orchestrator/consumers/chatbot/knowledge_prefetch.py:1-130]`), questions concerning workspace documents can be automatically prefetched prior to the initial model call.
 
-**Sources:** [orchestrator/modules/context/sections/__init__.py:27-43]()
-
----
-
-## ConversationSection (Priority 3)
-
-**Purpose:** Formats message history, filters system logs, and applies sliding-window token budgets. The `render()` method returns an empty string; historical messages are injected via structured API formatting (`format_messages()`). [orchestrator/modules/context/sections/conversation.py:29-35]()
-
-### Attachment Integration
-Prevents reference anomalies via `render_unresolved_file_part`. If an attachment identifier exists in `resolved_attachment_ids`, the section yields execution to `AttachmentResolver` for direct multimodal or textual injection. [orchestrator/modules/context/sections/conversation.py:63-66]()
-
-**Sources:** [orchestrator/modules/context/sections/conversation.py:1-182](), [orchestrator/core/attachment_refs.py:1-30]()
+Sources: `[orchestrator/modules/context/sections/documents_inventory.py:1-125]`, `[orchestrator/consumers/chatbot/knowledge_prefetch.py:1-130]`, `[orchestrator/tests/test_f078_the_prompt_names_the_connected_database.py:1-136]`
 
 ---
 
-## ToolsSection (Priority 3)
+### GraphSection / GraphContext (Priority 45)
+Implemented in `[orchestrator/modules/context/sections/graph_context.py:47-162]`. It loads the workspace knowledge graph via `GraphService`, scores nodes against user message terms, and extracts a BFS neighborhood excerpt when relevance clears `_RELEVANCE_THRESHOLD` (0.3) `[orchestrator/modules/context/sections/graph_context.py:32-34]`, `[orchestrator/modules/context/sections/graph_context.py:102-103]`. It also injects `GRAPH_ROUTE_LINE` on chatbot turns, instructing the agent to utilize `platform_query_graph` for relational and multi-document queries `[orchestrator/modules/context/sections/graph_context.py:38-44]`, `[orchestrator/modules/context/sections/graph_context.py:108-116]`. The `platform_graph_path`, `platform_graph_communities`, and `platform_graph_stats` actions `[orchestrator/modules/tools/discovery/actions_graph.py:15-111]` provide agents with capabilities to traverse and analyze the graph.
 
-**Purpose:** Manages tool schema discovery and determines execution strategies (`tool_choice`). It does not emit text into the system prompt; instead, it populates `ContextResult.tools` [orchestrator/modules/context/sections/tools.py:41-56]().
-
-### Tool Loading Strategies
-- **`FULL`**: Resolves all assigned core, platform, and Composio tools. [orchestrator/modules/context/sections/tools.py:94-101]()
-- **`FILTERED`**: Executes intent-based dynamic filtering via `SmartToolRouter` and `ComposioHintService`. [orchestrator/modules/context/sections/tools.py:103-113]()
-- **`DISPATCHER_ONLY`**: Restricts tool payloads to the `platform_execute` dispatcher schema (optimized for orchestrator ticks). [orchestrator/modules/context/sections/tools.py:91-92]()
-- **`NONE`**: Suppresses tool delivery entirely (`tool_choice="none"`). [orchestrator/modules/context/sections/tools.py:88-89]()
-
-**Sources:** [orchestrator/modules/context/sections/tools.py:32-124]()
+Sources: `[orchestrator/modules/context/sections/graph_context.py:47-162]`, `[orchestrator/modules/tools/discovery/actions_graph.py:15-111]`
 
 ---
 
-## SkillsSection (Priority 4)
+## Token Budget Allocation and Trimming
 
-**Purpose:** Implements trigger-based skill loading to minimize context consumption [orchestrator/modules/context/sections/skills.py:1-185]().
+When rendered sections exceed the available budget (`TokenBudget.available_for_sections`), `TokenBudgetManager` `[orchestrator/modules/context/budget.py:51-147]` evaluates sections in descending order of priority number (lowest importance first). Sections with priority 1 and 2 (`identity`, `task_context`, `onboarding`) are explicitly protected and never dropped `[orchestrator/modules/context/budget.py:123-125]`.
 
-### L1 vs L2 Activation Tiers
-- **L1 Catalog (Default)**: Injects lightweight titles and descriptions for all assigned skills (~50–100 tokens per skill) [orchestrator/modules/context/sections/skills.py:168-173]().
-- **L2 Full Body (On-Demand)**: Pulls complete markdown skill files (`SKILL.md`) when explicitly required by system pins (`SKILL_CORE_ALWAYS_ON`) or when the model calls `platform_load_skill` [orchestrator/modules/context/sections/skills.py:87-91](), [orchestrator/modules/tools/discovery/actions_skills.py:29-56]().
-
-**Sources:** [orchestrator/modules/context/sections/skills.py:1-185]()
-
----
-
-## PlatformActionsSection (Priority 5)
-
-**Purpose:** Renders a categorized markdown inventory of available `platform_execute` actions [orchestrator/modules/context/sections/platform_actions.py:30-37]().
-
-### Semantic Filtering Pipeline
-When `SEMANTIC_TOOL_ROUTING` is enabled and a query string is present in `ctx.kwargs`, `PlatformActionsSection` queries `ActionSemanticIndex` to rank actions by cosine similarity. It renders only the top-K matches via `ActionRegistry.build_filtered_prompt_summary()`, falling back safely to the full catalog on error [orchestrator/modules/context/sections/platform_actions.py:48-108]().
-
-**Sources:** [orchestrator/modules/context/sections/platform_actions.py:1-365](), [orchestrator/modules/tools/discovery/action_semantic_index.py:1-114]()
-
----
-
-## MemorySection (Priority 6)
-
-**Purpose:** Bridges the layered persistence architecture to the prompt space by injecting user preferences, historical logs, and semantic context bundles [orchestrator/modules/context/sections/memory.py:32-194]().
-
-### Retrieval Architecture
-- **Context Router Path**: Queries `UnifiedMemoryService.retrieve_context()` in `CHATBOT` mode to construct a multi-tiered context bundle (L0–L4) [orchestrator/modules/context/sections/memory.py:90-126]().
-- **Smart Memory Fallback**: Utilizes `SmartMemoryManager.retrieve_memories()` to pull global and agent-scoped memory tiers if primary context resolution encounters faults [orchestrator/modules/context/sections/memory.py:78-79]().
-
-**Sources:** [orchestrator/modules/context/sections/memory.py:32-194](), [orchestrator/modules/memory/unified_memory_service.py:1-200]()
+Sources: `[orchestrator/modules/context/budget.py:51-147]`
 
 ---

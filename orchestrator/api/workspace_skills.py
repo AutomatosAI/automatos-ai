@@ -125,12 +125,109 @@ class MarketplaceSkillOut(BaseModel):
         from_attributes = True
 
 
+def _list_workspace_skills_assignment_counts(db: Session, workspace_id: UUID) -> Dict[int, int]:
+    """Agents in this workspace that each skill is assigned to, by skill_id."""
+    from sqlalchemy import func
+    from core.models.core import Agent, agent_skills as agent_skills_table
+
+    workspace_agent_ids_subq = (
+        db.query(Agent.id)
+        .filter(Agent.workspace_id == workspace_id)
+        .subquery()
+    )
+    assignment_rows = (
+        db.query(agent_skills_table.c.skill_id, func.count().label("agent_count"))
+        .filter(agent_skills_table.c.agent_id.in_(workspace_agent_ids_subq))
+        .group_by(agent_skills_table.c.skill_id)
+        .all()
+    )
+    assigned_count_by_skill: Dict[int, int] = {row.skill_id: row.agent_count for row in assignment_rows}
+    return assigned_count_by_skill
+
+
+def _list_workspace_skills_owned(
+    db: Session, workspace_id: UUID, assigned_count_by_skill: Dict[int, int]
+):
+    """Workspace-owned skills (forked or user-created): (items, seen_skill_ids)."""
+    from core.models.core import Skill
+
+    items: List[WorkspaceSkillOut] = []
+    seen_skill_ids: set[int] = set()
+    owned_skills = (
+        db.query(Skill)
+        .filter(
+            Skill.workspace_id == workspace_id,
+            Skill.is_active == True,
+        )
+        .order_by(Skill.name)
+        .all()
+    )
+    for skill in owned_skills:
+        tokens = (len(skill.prompt_template) // 4) if skill.prompt_template else 0
+        metadata = skill.skill_metadata if isinstance(skill.skill_metadata, dict) else {}
+        items.append(WorkspaceSkillOut(
+            skill_id=skill.id,
+            name=skill.name,
+            description=skill.description,
+            category=skill.category,
+            skill_version=skill.skill_version,
+            tags=skill.tags,
+            estimated_tokens=tokens,
+            skill_source=skill.skill_source,
+            enabled_at=skill.created_at.isoformat() if skill.created_at else None,
+            origin="workspace",
+            forked_from_skill_id=metadata.get("forked_from_skill_id"),
+            assigned_agent_count=assigned_count_by_skill.get(skill.id, 0),
+        ))
+        seen_skill_ids.add(skill.id)
+    return items, seen_skill_ids
+
+
+def _list_workspace_skills_marketplace(
+    db: Session,
+    workspace_id: UUID,
+    items: List[WorkspaceSkillOut],
+    seen_skill_ids: set,
+    assigned_count_by_skill: Dict[int, int],
+) -> None:
+    """Append the marketplace skills enabled for the workspace to ``items``."""
+    from core.models.core import Skill
+    from core.models.marketplace_plugins import WorkspaceEnabledSkill
+
+    forked_origin_ids = {
+        i.forked_from_skill_id for i in items if i.forked_from_skill_id is not None
+    }
+    rows = (
+        db.query(WorkspaceEnabledSkill, Skill)
+        .join(Skill, Skill.id == WorkspaceEnabledSkill.skill_id)
+        .filter(WorkspaceEnabledSkill.workspace_id == workspace_id)
+        .all()
+    )
+    for wes, skill in rows:
+        if skill.id in seen_skill_ids or skill.id in forked_origin_ids:
+            continue
+        tokens = (len(skill.prompt_template) // 4) if skill.prompt_template else 0
+        items.append(WorkspaceSkillOut(
+            skill_id=skill.id,
+            name=skill.name,
+            description=skill.description,
+            category=skill.category,
+            skill_version=skill.skill_version,
+            tags=skill.tags,
+            estimated_tokens=tokens,
+            skill_source=skill.skill_source,
+            enabled_at=wes.enabled_at.isoformat() if wes.enabled_at else None,
+            origin="marketplace",
+            assigned_agent_count=assigned_count_by_skill.get(skill.id, 0),
+        ))
+
+
 # ===================================================================
 # Endpoints
 # ===================================================================
 
 @router.get("/{workspace_id}/skills", response_model=None)
-async def list_workspace_skills(
+def list_workspace_skills(
     workspace_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -143,86 +240,19 @@ async def list_workspace_skills(
     _assert_workspace_access(ctx, workspace_id)
 
     try:
-        from sqlalchemy import func
-        from core.models.core import Agent, Skill, agent_skills as agent_skills_table
-        from core.models.marketplace_plugins import WorkspaceEnabledSkill
-
-        items: List[WorkspaceSkillOut] = []
-        seen_skill_ids: set[int] = set()
+        from core.models.core import Skill
 
         # Pre-compute assignment counts per skill_id, scoped to agents in this workspace,
         # so the "assigned / unassigned" filter and the remove-when-unused affordance
         # don't need an N+1 round trip from the UI.
-        workspace_agent_ids_subq = (
-            db.query(Agent.id)
-            .filter(Agent.workspace_id == workspace_id)
-            .subquery()
-        )
-        assignment_rows = (
-            db.query(agent_skills_table.c.skill_id, func.count().label("agent_count"))
-            .filter(agent_skills_table.c.agent_id.in_(workspace_agent_ids_subq))
-            .group_by(agent_skills_table.c.skill_id)
-            .all()
-        )
-        assigned_count_by_skill: Dict[int, int] = {row.skill_id: row.agent_count for row in assignment_rows}
+        assigned_count_by_skill = _list_workspace_skills_assignment_counts(db, workspace_id)
 
         # Workspace-owned skills (forked or user-created)
-        owned_skills = (
-            db.query(Skill)
-            .filter(
-                Skill.workspace_id == workspace_id,
-                Skill.is_active == True,
-            )
-            .order_by(Skill.name)
-            .all()
-        )
-        for skill in owned_skills:
-            tokens = (len(skill.prompt_template) // 4) if skill.prompt_template else 0
-            metadata = skill.skill_metadata if isinstance(skill.skill_metadata, dict) else {}
-            items.append(WorkspaceSkillOut(
-                skill_id=skill.id,
-                name=skill.name,
-                description=skill.description,
-                category=skill.category,
-                skill_version=skill.skill_version,
-                tags=skill.tags,
-                estimated_tokens=tokens,
-                skill_source=skill.skill_source,
-                enabled_at=skill.created_at.isoformat() if skill.created_at else None,
-                origin="workspace",
-                forked_from_skill_id=metadata.get("forked_from_skill_id"),
-                assigned_agent_count=assigned_count_by_skill.get(skill.id, 0),
-            ))
-            seen_skill_ids.add(skill.id)
+        items, seen_skill_ids = _list_workspace_skills_owned(db, workspace_id, assigned_count_by_skill)
 
         # Marketplace skills enabled via junction (skip any already shadowed by a fork
         # that points back at the same marketplace id — see PATCH/fork below)
-        forked_origin_ids = {
-            i.forked_from_skill_id for i in items if i.forked_from_skill_id is not None
-        }
-        rows = (
-            db.query(WorkspaceEnabledSkill, Skill)
-            .join(Skill, Skill.id == WorkspaceEnabledSkill.skill_id)
-            .filter(WorkspaceEnabledSkill.workspace_id == workspace_id)
-            .all()
-        )
-        for wes, skill in rows:
-            if skill.id in seen_skill_ids or skill.id in forked_origin_ids:
-                continue
-            tokens = (len(skill.prompt_template) // 4) if skill.prompt_template else 0
-            items.append(WorkspaceSkillOut(
-                skill_id=skill.id,
-                name=skill.name,
-                description=skill.description,
-                category=skill.category,
-                skill_version=skill.skill_version,
-                tags=skill.tags,
-                estimated_tokens=tokens,
-                skill_source=skill.skill_source,
-                enabled_at=wes.enabled_at.isoformat() if wes.enabled_at else None,
-                origin="marketplace",
-                assigned_agent_count=assigned_count_by_skill.get(skill.id, 0),
-            ))
+        _list_workspace_skills_marketplace(db, workspace_id, items, seen_skill_ids, assigned_count_by_skill)
 
         # Marketplace catalogue size — total active skills with workspace_id IS NULL.
         # Shipped so the UI can render "Marketplace (Enabled) X of Y" instead of
@@ -246,8 +276,27 @@ async def list_workspace_skills(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _list_available_skills_items(all_skills: list, enabled_ids: set) -> list:
+    """Marketplace skill rows with their enabled flag."""
+    items = []
+    for skill in all_skills:
+        tokens = len(skill.prompt_template or "") // 4 if skill.prompt_template else 0
+        items.append(MarketplaceSkillOut(
+            id=skill.id,
+            name=skill.name,
+            description=skill.description,
+            category=skill.category,
+            skill_version=skill.skill_version,
+            tags=skill.tags,
+            estimated_tokens=tokens,
+            skill_source=skill.skill_source,
+            is_enabled=skill.id in enabled_ids,
+        ))
+    return items
+
+
 @router.get("/{workspace_id}/skills/available", response_model=None)
-async def list_available_skills(
+def list_available_skills(
     workspace_id: UUID,
     q: Optional[str] = Query(None, description="Search query"),
     category: Optional[str] = Query(None, description="Filter by category"),
@@ -286,20 +335,7 @@ async def list_available_skills(
             .all()
         )
 
-        items = []
-        for skill in all_skills:
-            tokens = len(skill.prompt_template or "") // 4 if skill.prompt_template else 0
-            items.append(MarketplaceSkillOut(
-                id=skill.id,
-                name=skill.name,
-                description=skill.description,
-                category=skill.category,
-                skill_version=skill.skill_version,
-                tags=skill.tags,
-                estimated_tokens=tokens,
-                skill_source=skill.skill_source,
-                is_enabled=skill.id in enabled_ids,
-            ))
+        items = _list_available_skills_items(all_skills, enabled_ids)
 
         return {
             "items": [item.model_dump() for item in items],
@@ -314,8 +350,21 @@ async def list_available_skills(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _enable_skill_resolve_user(ctx: RequestContext) -> Optional[int]:
+    """Numeric id of the enabling user, or None when the id is not an integer."""
+    # Resolve user id
+    enabled_by = None
+    user_id_str = getattr(ctx.user, "id", None)
+    if user_id_str:
+        try:
+            enabled_by = int(user_id_str)
+        except (ValueError, TypeError):
+            enabled_by = None
+    return enabled_by
+
+
 @router.post("/{workspace_id}/skills", status_code=201, dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def enable_skill(
+def enable_skill(
     workspace_id: UUID,
     body: EnableSkillBody,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -351,13 +400,7 @@ async def enable_skill(
             raise HTTPException(status_code=409, detail="Skill is already enabled for this workspace")
 
         # Resolve user id
-        enabled_by = None
-        user_id_str = getattr(ctx.user, "id", None)
-        if user_id_str:
-            try:
-                enabled_by = int(user_id_str)
-            except (ValueError, TypeError):
-                enabled_by = None
+        enabled_by = _enable_skill_resolve_user(ctx)
 
         junction = WorkspaceEnabledSkill(
             workspace_id=workspace_id,
@@ -383,7 +426,7 @@ async def enable_skill(
 
 
 @router.delete("/{workspace_id}/skills/{skill_id}", dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def disable_skill(
+def disable_skill(
     workspace_id: UUID,
     skill_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -568,7 +611,7 @@ def _apply_frontmatter(skill, content: str, body: Any) -> str:
 
 
 @router.get("/{workspace_id}/skills/{skill_id}/content")
-async def get_workspace_skill_content(
+def get_workspace_skill_content(
     workspace_id: UUID,
     skill_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -616,7 +659,7 @@ async def get_workspace_skill_content(
 
 
 @router.post("/{workspace_id}/skills/create", status_code=201, dependencies=[Depends(require_workspace_permission("agents:create"))])
-async def create_workspace_skill(
+def create_workspace_skill(
     workspace_id: UUID,
     body: CreateSkillBody,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -681,8 +724,94 @@ async def create_workspace_skill(
     }
 
 
+def _update_workspace_skill_migrate(db: Session, workspace_id: UUID, target_id: int, fork_id: int) -> int:
+    """Move agent_skills assignments (agents of this workspace) from the marketplace skill to the fork."""
+    from sqlalchemy import and_
+    from core.models.core import Agent, agent_skills as agent_skills_table
+
+    workspace_agent_ids = [
+        a.id for a in db.query(Agent.id).filter(Agent.workspace_id == workspace_id).all()
+    ]
+    migrated = 0
+    if workspace_agent_ids:
+        existing = db.execute(
+            agent_skills_table.select().where(
+                and_(
+                    agent_skills_table.c.agent_id.in_(workspace_agent_ids),
+                    agent_skills_table.c.skill_id == target_id,
+                )
+            )
+        ).fetchall()
+        for row in existing:
+            db.execute(agent_skills_table.delete().where(
+                and_(
+                    agent_skills_table.c.agent_id == row.agent_id,
+                    agent_skills_table.c.skill_id == target_id,
+                )
+            ))
+            db.execute(agent_skills_table.insert().values(
+                agent_id=row.agent_id, skill_id=fork_id,
+            ))
+            migrated += 1
+    return migrated
+
+
+def _update_workspace_skill_fork(
+    db: Session, workspace_id: UUID, target, body: "UpdateSkillBody", user_id, findings: list
+) -> Dict[str, Any]:
+    """Fork-on-edit: clone the marketplace skill into the workspace with the new content."""
+    from core.models.core import Skill
+    from core.models.marketplace_plugins import WorkspaceEnabledSkill
+
+    # Fork-on-edit
+    fork = Skill(
+        name=target.name,
+        description=target.description,
+        skill_type=target.skill_type,
+        category=target.category,
+        tags=list(target.tags) if target.tags else None,
+        prompt_template=body.content,
+        skill_source="workspace-fork",
+        skill_version=target.skill_version,
+        workspace_id=workspace_id,
+        is_active=True,
+        created_by=str(user_id) if user_id else None,
+        skill_metadata={"forked_from_skill_id": target.id},
+    )
+    _apply_frontmatter(fork, body.content, body)
+    db.add(fork)
+    db.flush()
+
+    # Migrate existing agent_skills assignments to the fork (within this workspace)
+    migrated = _update_workspace_skill_migrate(db, workspace_id, target.id, fork.id)
+
+    # Replace marketplace junction with fork-aware view: drop the old junction so
+    # listing surfaces the fork instead. (Listing already hides marketplace skills
+    # whose ids are forked_from_skill_id of a workspace skill — but dropping the
+    # junction is cleaner and ensures the user can re-enable the original later.)
+    db.query(WorkspaceEnabledSkill).filter(
+        WorkspaceEnabledSkill.workspace_id == workspace_id,
+        WorkspaceEnabledSkill.skill_id == target.id,
+    ).delete()
+
+    db.commit()
+    _invalidate_skill_cache(fork.name, db)
+    logger.info(
+        "Forked marketplace skill %d -> workspace skill %d (name=%s, %d agent assignments migrated)",
+        target.id, fork.id, fork.name, migrated,
+    )
+    return {
+        "success": True,
+        "skill_id": fork.id,
+        "forked": True,
+        "forked_from_skill_id": target.id,
+        "agents_migrated": migrated,
+        "warnings": _findings_to_payload([f for f in findings if f.severity in _WARNING_SEVERITIES]),
+    }
+
+
 @router.patch("/{workspace_id}/skills/{skill_id}", dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def update_workspace_skill(
+def update_workspace_skill(
     workspace_id: UUID,
     skill_id: int,
     body: UpdateSkillBody,
@@ -701,7 +830,7 @@ async def update_workspace_skill(
     """
     _assert_workspace_access(ctx, workspace_id)
 
-    from core.models.core import Agent, Skill, agent_skills as agent_skills_table
+    from core.models.core import Skill
     from core.models.marketplace_plugins import WorkspaceEnabledSkill
 
     target = db.query(Skill).filter(Skill.id == skill_id, Skill.is_active == True).first()
@@ -726,75 +855,7 @@ async def update_workspace_skill(
     user_id = _resolve_user_id(ctx, db)
 
     if target.workspace_id is None:
-        # Fork-on-edit
-        fork = Skill(
-            name=target.name,
-            description=target.description,
-            skill_type=target.skill_type,
-            category=target.category,
-            tags=list(target.tags) if target.tags else None,
-            prompt_template=body.content,
-            skill_source="workspace-fork",
-            skill_version=target.skill_version,
-            workspace_id=workspace_id,
-            is_active=True,
-            created_by=str(user_id) if user_id else None,
-            skill_metadata={"forked_from_skill_id": target.id},
-        )
-        _apply_frontmatter(fork, body.content, body)
-        db.add(fork)
-        db.flush()
-
-        # Migrate existing agent_skills assignments to the fork (within this workspace)
-        from sqlalchemy import and_
-        workspace_agent_ids = [
-            a.id for a in db.query(Agent.id).filter(Agent.workspace_id == workspace_id).all()
-        ]
-        migrated = 0
-        if workspace_agent_ids:
-            existing = db.execute(
-                agent_skills_table.select().where(
-                    and_(
-                        agent_skills_table.c.agent_id.in_(workspace_agent_ids),
-                        agent_skills_table.c.skill_id == target.id,
-                    )
-                )
-            ).fetchall()
-            for row in existing:
-                db.execute(agent_skills_table.delete().where(
-                    and_(
-                        agent_skills_table.c.agent_id == row.agent_id,
-                        agent_skills_table.c.skill_id == target.id,
-                    )
-                ))
-                db.execute(agent_skills_table.insert().values(
-                    agent_id=row.agent_id, skill_id=fork.id,
-                ))
-                migrated += 1
-
-        # Replace marketplace junction with fork-aware view: drop the old junction so
-        # listing surfaces the fork instead. (Listing already hides marketplace skills
-        # whose ids are forked_from_skill_id of a workspace skill — but dropping the
-        # junction is cleaner and ensures the user can re-enable the original later.)
-        db.query(WorkspaceEnabledSkill).filter(
-            WorkspaceEnabledSkill.workspace_id == workspace_id,
-            WorkspaceEnabledSkill.skill_id == target.id,
-        ).delete()
-
-        db.commit()
-        _invalidate_skill_cache(fork.name, db)
-        logger.info(
-            "Forked marketplace skill %d -> workspace skill %d (name=%s, %d agent assignments migrated)",
-            target.id, fork.id, fork.name, migrated,
-        )
-        return {
-            "success": True,
-            "skill_id": fork.id,
-            "forked": True,
-            "forked_from_skill_id": target.id,
-            "agents_migrated": migrated,
-            "warnings": _findings_to_payload([f for f in findings if f.severity in _WARNING_SEVERITIES]),
-        }
+        return _update_workspace_skill_fork(db, workspace_id, target, body, user_id, findings)
 
     # In-place update (already workspace-owned)
     target.prompt_template = body.content
@@ -811,7 +872,7 @@ async def update_workspace_skill(
 
 
 @router.delete("/{workspace_id}/skills/{skill_id}/owned", dependencies=[Depends(require_workspace_permission("agents:delete"))])
-async def delete_workspace_owned_skill(
+def delete_workspace_owned_skill(
     workspace_id: UUID,
     skill_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),

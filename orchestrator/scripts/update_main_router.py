@@ -100,7 +100,7 @@ def main():
     print("\nNext steps:")
     print("1. Restart your backend server")
     print("2. Test the new endpoints")
-    print("3. Run: python scripts/sync_composio_metadata.py")
+    print("3. Run: python scripts/run_tools_sync.py")
     print("\n" + "=" * 60)
 
 

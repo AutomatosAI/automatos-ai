@@ -805,7 +805,7 @@ def _persist_integration_default(db: Session, workspace, key: str, value: str):
 # =============================================================================
 
 @router.get("/ws/{workspace_key}")
-async def workspace_webhook_verify(
+def workspace_webhook_verify(
     workspace_key: str,
     request: Request,
     db: Session = Depends(get_db),

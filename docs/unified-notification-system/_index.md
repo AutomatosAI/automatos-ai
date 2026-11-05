@@ -5,114 +5,189 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/app/layout.tsx](frontend/app/layout.tsx)
-- [frontend/components/activity/widgets/command-centre-dashboard.tsx](frontend/components/activity/widgets/command-centre-dashboard.tsx)
-- [frontend/components/activity/widgets/decisions-needed-widget.tsx](frontend/components/activity/widgets/decisions-needed-widget.tsx)
-- [frontend/components/activity/widgets/playbook-metrics-widget.tsx](frontend/components/activity/widgets/playbook-metrics-widget.tsx)
-- [frontend/components/activity/widgets/self-learning-health-widget.tsx](frontend/components/activity/widgets/self-learning-health-widget.tsx)
-- [frontend/hooks/use-kpi-api.ts](frontend/hooks/use-kpi-api.ts)
-- [frontend/hooks/use-learning-api.ts](frontend/hooks/use-learning-api.ts)
-- [orchestrator/api/kpi_api.py](orchestrator/api/kpi_api.py)
-- [orchestrator/core/services/auto_reporting.py](orchestrator/core/services/auto_reporting.py)
+- [orchestrator/core/services/notification_columns.py](orchestrator/core/services/notification_columns.py)
 - [orchestrator/core/services/notification_dispatcher.py](orchestrator/core/services/notification_dispatcher.py)
-- [orchestrator/modules/memory/tool_outcome_capture.py](orchestrator/modules/memory/tool_outcome_capture.py)
-- [orchestrator/modules/tools/discovery/actions_auto_reporting.py](orchestrator/modules/tools/discovery/actions_auto_reporting.py)
-- [orchestrator/modules/tools/discovery/handlers_auto_reporting.py](orchestrator/modules/tools/discovery/handlers_auto_reporting.py)
-- [orchestrator/tests/test_p2w2_ask_notification.py](orchestrator/tests/test_p2w2_ask_notification.py)
-- [orchestrator/tests/test_tool_outcome_capture.py](orchestrator/tests/test_tool_outcome_capture.py)
+- [orchestrator/services/mobile/digest.py](orchestrator/services/mobile/digest.py)
+- [orchestrator/services/notification_events/auto_message.py](orchestrator/services/notification_events/auto_message.py)
+- [orchestrator/services/notification_events/review_pending.py](orchestrator/services/notification_events/review_pending.py)
+- [orchestrator/services/push/fanout.py](orchestrator/services/push/fanout.py)
+- [orchestrator/services/push/payload.py](orchestrator/services/push/payload.py)
+- [orchestrator/tests/fixtures/prd266_push_signature_vectors.json](orchestrator/tests/fixtures/prd266_push_signature_vectors.json)
+- [orchestrator/tests/test_prd128_a_notice_never_aborts_the_work_it_reports.py](orchestrator/tests/test_prd128_a_notice_never_aborts_the_work_it_reports.py)
+- [orchestrator/tests/test_prd266_auto_message.py](orchestrator/tests/test_prd266_auto_message.py)
+- [orchestrator/tests/test_prd266_push_payload.py](orchestrator/tests/test_prd266_push_payload.py)
+- [orchestrator/tests/test_prd268w2_brief_claim.py](orchestrator/tests/test_prd268w2_brief_claim.py)
+- [orchestrator/tests/test_prd268w2_brief_push_message_id.py](orchestrator/tests/test_prd268w2_brief_push_message_id.py)
 
 </details>
 
 
 
-The **Unified Notification System** (PRD-128) provides a centralized pipeline for capturing, routing, and surfacing events across the Automatos AI platform. It consolidates notification logic from heartbeats, tasks, missions, playbooks, and agent errors into a single `NotificationDispatcher` service. This system enables users to receive real-time updates via an in-app "bell" dropdown or external channels (Telegram, Slack, Webhooks) based on per-workspace and per-user preferences.
+## Purpose and Scope
+
+The Unified Notification System (PRD-128) is the platform’s centralized path for raising completion and attention events, resolving notification preferences, and delivering notifications to enabled destinations. The `NotificationDispatcher` is documented as the shared entry point for events from sources including heartbeats, tasks, missions, playbooks, reports, triggers, and agent errors. [orchestrator/core/services/notification_dispatcher.py:1-7]()
+
+This parent page outlines how event producers, routing preferences, and notification surfaces fit together. It links to child pages for dispatcher behavior, API and settings details, and the notification UI. [orchestrator/core/services/notification_dispatcher.py:1-39]()
+
+Sources: [orchestrator/core/services/notification_dispatcher.py:1-39]()
 
 ## System Architecture
 
-The notification architecture follows a "fire-and-forget" fan-out pattern. Event sources invoke the dispatcher, which resolves routing logic and distributes messages to one or more destinations.
+The high-level flow is: an event producer calls the dispatcher; the dispatcher resolves workspace and user preferences; and enabled destinations receive the event. In-app writes use the caller’s database session, while external delivery is delegated to `send_workspace_notification`. The dispatcher does not commit or abort the caller’s work. [orchestrator/core/services/notification_dispatcher.py:3-20] [orchestrator/core/services/notification_dispatcher.py:32-39]()
+
+Push is handled separately from the dispatcher’s preference destinations: the dispatcher hands eligible push events to `services.push.fanout.hand_over`, which is responsible for delivery. [orchestrator/core/services/notification_dispatcher.py:35-38] [orchestrator/services/push/fanout.py:1-10]()
+
+Sources: [orchestrator/core/services/notification_dispatcher.py:3-20] [orchestrator/core/services/notification_dispatcher.py:32-39] [orchestrator/services/push/fanout.py:1-10]()
 
 ### Notification Flow
 
 ```mermaid
 graph TD
     subgraph "Event Sources"
-        H["HeartbeatService"]
-        T["BoardTask / Task API"]
-        M["CoordinatorService (Missions)"]
-        P["RecipeExecution (Playbooks)"]
-        A["Agent Runtime (Errors/Asks)"]
+        Heartbeat["heartbeat"]
+        Task["task"]
+        Mission["mission"]
+        Playbook["playbook"]
+        Report["report"]
+        Trigger["trigger"]
+        AgentError["agent error"]
     end
 
-    subgraph "Core Pipeline"
-        ND["NotificationDispatcher.dispatch()"]
-        AR["AutoReporting Service"]
-        NP[("notification_preferences table")]
-        NS["notification_service.py (External)"]
+    subgraph "Dispatch Pipeline"
+        Dispatch["NotificationDispatcher.dispatch()"]
+        Preferences[("notification_preferences")]
+        InApp["in-app notification row"]
+        External["send_workspace_notification()"]
+        Push["services.push.fanout.hand_over()"]
     end
 
     subgraph "Destinations"
-        IA["In-App (notifications table)"]
-        TG["Telegram"]
-        SL["Slack"]
-        WH["Webhook"]
-        SI["Silent (Dropped)"]
+        Bell["in-app surface"]
+        Telegram["telegram"]
+        Slack["slack"]
+        Webhook["webhook"]
+        Phone["push delivery"]
+        Silent["silent"]
     end
 
-    H & T & M & P & A --> ND
-    ND --> AR
-    ND --> NP
-    ND -- "in_app" --> IA
-    ND -- "external" --> NS
-    ND -- "skip" --> SI
-    NS --> TG & SL & WH
+    Heartbeat --> Dispatch
+    Task --> Dispatch
+    Mission --> Dispatch
+    Playbook --> Dispatch
+    Report --> Dispatch
+    Trigger --> Dispatch
+    AgentError --> Dispatch
+    Dispatch --> Preferences
+    Dispatch --> InApp
+    InApp --> Bell
+    Dispatch --> External
+    External --> Telegram
+    External --> Slack
+    External --> Webhook
+    Dispatch --> Push
+    Push --> Phone
+    Preferences --> Silent
 ```
-**Sources:** [orchestrator/core/services/notification_dispatcher.py:1-28](), [orchestrator/modules/tools/discovery/handlers_auto_reporting.py:57-64]()
 
-## Core Components
+Sources: [orchestrator/core/services/notification_dispatcher.py:1-7] [orchestrator/core/services/notification_dispatcher.py:21-39] [orchestrator/services/push/fanout.py:1-10]()
 
-### NotificationDispatcher
-The `NotificationDispatcher` is the central entry point for all notification events [orchestrator/core/services/notification_dispatcher.py:93-94](). It is designed to be non-blocking; the caller owns the transaction, ensuring notification writes roll back if the primary work fails [orchestrator/core/services/notification_dispatcher.py:11-13](). It handles the resolution of workspace-level defaults and user-specific overrides to determine exactly where a message should be sent [orchestrator/core/services/notification_dispatcher.py:18-21]().
+### Natural Language to Code Entity Mapping: Events and Routing
 
-For technical details on fan-out logic and transaction handling, see [NotificationDispatcher](#23.1).
+This mapping connects platform concepts to the named dispatcher entities and event types. `VALID_EVENT_TYPES` includes completion, failure, approval, mission, playbook, trigger, report, review, and suggestion events. [orchestrator/core/services/notification_dispatcher.py:58-125]()
 
-### Notification API & Settings
-The system provides a RESTful interface for fetching unread counts, marking notifications as read, and managing routing preferences for over 20 event types (e.g., `task_complete`, `agent_error`, `mission_budget_paused`) [orchestrator/core/services/notification_dispatcher.py:45-74]().
+```mermaid
+graph LR
+    subgraph "Natural Language Space"
+        Completion["task or workflow completed"]
+        MissionUpdate["mission needs attention"]
+        Review["ticket ready for review"]
+        AutoMessage["Auto posted a message"]
+        PreferencesConcept["workspace notification preferences"]
+    end
 
-For API specifications and event type definitions, see [Notification API & Settings](#23.2).
+    subgraph "Code Entity Space"
+        Dispatcher["NotificationDispatcher.dispatch()"]
+        TaskComplete["task_complete"]
+        MissionEvents["mission_plan_ready / mission_complete / mission_failed"]
+        ReviewEvent["review_pending"]
+        AutoMessageEvent["auto_message"]
+        PreferenceTable[("notification_preferences")]
+        ReviewAnnounce["services.notification_events.review_pending.announce()"]
+        AutoAnnounce["services.notification_events.auto_message.announce()"]
+    end
 
-### Notification Bell UI
-The user-facing interface consists of a real-time notification bell in the navbar. It polls for unread updates and provides a popover list of recent events. Each notification is actionable, containing deep links to the relevant entity (e.g., a specific mission or task).
+    Completion --> Dispatcher
+    Dispatcher --> TaskComplete
+    MissionUpdate --> Dispatcher
+    Dispatcher --> MissionEvents
+    Review --> ReviewAnnounce
+    ReviewAnnounce --> ReviewEvent
+    AutoMessage --> AutoAnnounce
+    AutoAnnounce --> AutoMessageEvent
+    PreferencesConcept --> PreferenceTable
+    PreferenceTable --> Dispatcher
+```
 
-For details on the React components and polling logic, see [Notification Bell UI](#23.3).
+Sources: [orchestrator/core/services/notification_dispatcher.py:58-125] [orchestrator/services/notification_events/review_pending.py:28-44] [orchestrator/services/notification_events/auto_message.py:46-55]()
 
-## Event Vocabulary
+### Natural Language to Code Entity Mapping: In-App and Push
 
-The system supports a wide range of events across different platform modules:
+An in-app notification is inserted into the `notifications` table. For push-eligible events, the dispatcher passes a `PushEvent` to `hand_over`; `PUSH_EVENT_TYPES` defines which event types map to push types. [orchestrator/core/services/notification_dispatcher.py:35-38] [orchestrator/core/services/notification_dispatcher.py:146-151] [orchestrator/services/push/fanout.py:114-131] [orchestrator/services/push/payload.py:45-60]()
 
-| Category | Event Types |
-| :--- | :--- |
-| **Tasks** | `task_complete`, `task_failed`, `task_sla_breach` |
-| **Missions** | `mission_plan_ready`, `mission_complete`, `mission_failed`, `mission_budget_paused` |
-| **Playbooks** | `playbook_step_complete`, `playbook_complete`, `playbook_failed`, `playbook_benched` |
-| **System** | `heartbeat_complete`, `agent_error`, `approval_pending`, `report_submitted`, `question_pending`, `trigger_fired` |
-| **Observability** | `watch_verdict`, `watch_action`, `watch_escalation` |
+```mermaid
+graph LR
+    subgraph "Natural Language Space"
+        BellNotice["show an in-app notice"]
+        PhoneNotice["send an eligible phone push"]
+        EventLink["open the related chat or task"]
+    end
 
-**Sources:** [orchestrator/core/services/notification_dispatcher.py:45-74](), [orchestrator/tests/test_p2w2_ask_notification.py:121-127]()
+    subgraph "Code Entity Space"
+        Insert["NotificationDispatcher._insert_in_app()"]
+        Notifications[("notifications")]
+        Handover["services.push.fanout.hand_over()"]
+        PushEvent["services.push.fanout.PushEvent"]
+        EventTypes["services.push.payload.PUSH_EVENT_TYPES"]
+        Payload["services.push.payload.build_payload()"]
+    end
 
-## Auto-Reporting & Quiet Hours
+    BellNotice --> Insert
+    Insert --> Notifications
+    PhoneNotice --> Handover
+    Handover --> PushEvent
+    PushEvent --> EventTypes
+    EventTypes --> Payload
+    EventLink --> PushEvent
+```
 
-Wave 2 of the notification system introduced `auto_reporting` settings stored in `workspace.settings` [orchestrator/core/services/auto_reporting.py:6-23](). This layer provides:
-*   **Primary/Fallback Channels:** Workspace-wide defaults for all notifications [orchestrator/core/services/auto_reporting.py:42-55]().
-*   **Quiet Hours:** Logic to funnel non-urgent traffic to `in_app` during specified windows to prevent external noise (e.g., Slack/Telegram pings at night) [orchestrator/core/services/auto_reporting.py:99-105]().
-*   **Severity Overrides:** Urgent and security-related events bypass quiet hours [orchestrator/core/services/notification_dispatcher.py:165-178]().
+Sources: [orchestrator/core/services/notification_dispatcher.py:35-38] [orchestrator/core/services/notification_dispatcher.py:146-151] [orchestrator/services/push/fanout.py:114-131] [orchestrator/services/push/payload.py:45-60]()
 
-**Sources:** [orchestrator/core/services/auto_reporting.py:1-27](), [orchestrator/core/services/notification_dispatcher.py:129-141]()
+Sources: [orchestrator/core/services/notification_dispatcher.py:35-38] [orchestrator/core/services/notification_dispatcher.py:146-151] [orchestrator/services/push/fanout.py:114-131] [orchestrator/services/push/payload.py:45-60]()
 
-## Implementation Constraints
-*   **Non-Blocking Delivery:** External delivery is delegated to `send_workspace_notification` and wrapped in try/except blocks to ensure platform stability [orchestrator/core/services/notification_dispatcher.py:25-27, 206-215]().
-*   **Outcome Noise Gate:** Tool outcomes are filtered; trivial successes are gated out, while notable successes (e.g., resource creation) and all failures are captured [orchestrator/modules/memory/tool_outcome_capture.py:132-146]().
-*   **Deduping:** Identical outcomes are deduped by content-hash to prevent notification spam [orchestrator/modules/memory/tool_outcome_capture.py:164-173]().
+## Core Sub-Topics
 
-**Sources:** [orchestrator/core/services/notification_dispatcher.py:190-215](), [orchestrator/modules/memory/tool_outcome_capture.py:1-15]()
+### 23.1 NotificationDispatcher
+
+`NotificationDispatcher` is the common event dispatch entry point. It reads `notification_preferences`, supports multiple enabled destination rows for an event, and falls back to an in-app notification when the workspace has no preferences for that event type. Push is handed off separately from the preference destinations. [orchestrator/core/services/notification_dispatcher.py:3-7] [orchestrator/core/services/notification_dispatcher.py:21-39]()
+
+For details on `dispatch()`, preference resolution, destination fan-out, and default preference seeding, see [NotificationDispatcher](#23.1).
+
+Sources: [orchestrator/core/services/notification_dispatcher.py:3-7] [orchestrator/core/services/notification_dispatcher.py:21-39]()
+
+### 23.2 Notification API & Settings
+
+The dispatcher’s routing model is scoped by workspace and can incorporate user-specific preferences. The supported event types are centralized in `VALID_EVENT_TYPES`; individual producers raise events through the dispatcher rather than defining separate delivery paths. [orchestrator/core/services/notification_dispatcher.py:3-7] [orchestrator/core/services/notification_dispatcher.py:25-31] [orchestrator/core/services/notification_dispatcher.py:58-125]()
+
+For details on `/api/notifications`, `/api/notification-preferences`, event types, scoping, auto-reporting hooks, and KPI digests, see [Notification API & Settings](#23.2).
+
+Sources: [orchestrator/core/services/notification_dispatcher.py:3-7] [orchestrator/core/services/notification_dispatcher.py:25-31] [orchestrator/core/services/notification_dispatcher.py:58-125]()
+
+### 23.3 Notification Bell UI
+
+In-app delivery creates notification rows, providing the persisted input for the user-facing notification surface. The event may carry link metadata, and push delivery can use related identifiers to direct a phone to the associated resource. [orchestrator/core/services/notification_dispatcher.py:146-151] [orchestrator/services/push/fanout.py:114-131]()
+
+For details on `NotificationBell`, polling, popover behavior, link routing, read and dismiss actions, `NotificationsSettingsTab`, and the needs-you widget, see [Notification Bell UI](#23.3).
+
+Sources: [orchestrator/core/services/notification_dispatcher.py:146-151] [orchestrator/services/push/fanout.py:114-131]()
 
 ---

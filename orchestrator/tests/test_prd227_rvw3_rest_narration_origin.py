@@ -136,7 +136,7 @@ def test_import_plan_sets_origin_from_clerk_launching_chat(monkeypatch):
         plan={"tasks": [{"id": 1}]},
         config={"source": "chat", "chat_id": launch_chat, "keep": "yes"},
     )
-    asyncio.run(am.import_mission_plan(body, _clerk_ctx("user_owner"), MagicMock()))
+    am.import_mission_plan(body, _clerk_ctx("user_owner"), MagicMock())
 
     cfg = captured["config"]
     assert cfg["origin_chat_id"] == launch_chat
@@ -152,7 +152,7 @@ def test_import_plan_no_origin_for_non_clerk_caller(monkeypatch):
         goal="x", plan={"tasks": [{"id": 1}]},
         config={"chat_id": str(uuid.uuid4())},
     )
-    asyncio.run(am.import_mission_plan(body, _nonclerk_ctx(), MagicMock()))
+    am.import_mission_plan(body, _nonclerk_ctx(), MagicMock())
 
     assert "origin_chat_id" not in captured["config"]
     assert "chat_id" not in captured["config"]

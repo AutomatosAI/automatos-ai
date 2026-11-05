@@ -178,7 +178,7 @@ def _social_render_error(e: Exception) -> HTTPException:
 
 
 @router.post("/templates", status_code=201, dependencies=[Depends(require_workspace_permission("documents:create"))])
-async def create_template(
+def create_template(
     body: TemplateCreateRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -222,7 +222,7 @@ async def create_template(
 
 
 @router.get("/templates")
-async def list_templates(
+def list_templates(
     format: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -256,7 +256,7 @@ async def list_template_presets(ctx: RequestContext = Depends(get_request_contex
 
 
 @router.get("/templates/{template_id}")
-async def get_template(
+def get_template(
     template_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -279,7 +279,7 @@ async def get_template(
 
 
 @router.put("/templates/{template_id}", dependencies=[Depends(require_workspace_permission("documents:update"))])
-async def update_template(
+def update_template(
     template_id: UUID,
     body: TemplateUpdateRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -308,7 +308,7 @@ async def update_template(
 
 
 @router.delete("/templates/{template_id}", dependencies=[Depends(require_workspace_permission("documents:delete"))])
-async def delete_template(
+def delete_template(
     template_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -520,7 +520,7 @@ def _registered_response(service, result, title: str, tags: List[str]) -> Genera
 
 
 @router.get("/variables")
-async def list_variables(
+def list_variables(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -557,7 +557,7 @@ async def list_variables(
 
 
 @router.post("/preview-blocks", dependencies=[Depends(require_workspace_permission("documents:create"))])
-async def preview_blocks(
+def preview_blocks(
     body: PreviewBlocksRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

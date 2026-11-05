@@ -146,7 +146,7 @@ def test_erase_subject_resolves_and_delegates(monkeypatch):
     monkeypatch.setattr(gdpr_service, "erase_data_subject", _fake_erase_subject)
 
     req = verticals.VerticalGdprEraseSubjectRequest(external_id=SHOP, subject_id="cust-42")
-    result = _run(verticals.gdpr_erase_subject(vertical="shopify", request=req, db=db, _auth=None))
+    result = verticals.gdpr_erase_subject(vertical="shopify", request=req, db=db, _auth=None)
 
     # Delegated to gdpr_service with the RESOLVED workspace (not the shop).
     assert seen["workspace_id"] == "ws-abc"
@@ -171,7 +171,7 @@ def test_erase_workspace_resolves_and_delegates(monkeypatch):
     monkeypatch.setattr(gdpr_service, "erase_workspace", _fake_erase_ws)
 
     req = verticals.VerticalGdprEraseRequest(external_id=SHOP)
-    result = _run(verticals.gdpr_erase_workspace(vertical="shopify", request=req, db=db, _auth=None))
+    result = verticals.gdpr_erase_workspace(vertical="shopify", request=req, db=db, _auth=None)
 
     assert seen["workspace_id"] == "ws-abc"
     assert seen["requested_by"] == "shopify-webhook:demo.myshopify.com"
@@ -192,11 +192,9 @@ def test_export_resolves_and_delegates(monkeypatch):
 
     monkeypatch.setattr(gdpr_service, "export_workspace", _fake_export)
 
-    resp = _run(
-        verticals.gdpr_export_workspace(
+    resp = verticals.gdpr_export_workspace(
             vertical="shopify", external_id=SHOP, customer_id="cust-42", db=db, _auth=None
         )
-    )
 
     assert seen["workspace_id"] == "ws-abc"
     assert seen["requested_by"] == "shopify-webhook:demo.myshopify.com"
@@ -227,7 +225,7 @@ def test_erase_subject_unknown_shop_404s(monkeypatch):
 
     req = verticals.VerticalGdprEraseSubjectRequest(external_id="ghost.myshopify.com", subject_id="x")
     with pytest.raises(HTTPException) as ei:
-        _run(verticals.gdpr_erase_subject(vertical="shopify", request=req, db=db, _auth=None))
+        verticals.gdpr_erase_subject(vertical="shopify", request=req, db=db, _auth=None)
     assert ei.value.status_code == 404
     assert called["n"] == 0
 
@@ -244,16 +242,14 @@ def test_erase_workspace_unknown_shop_404s(monkeypatch):
 
     req = verticals.VerticalGdprEraseRequest(external_id="ghost.myshopify.com")
     with pytest.raises(HTTPException) as ei:
-        _run(verticals.gdpr_erase_workspace(vertical="shopify", request=req, db=db, _auth=None))
+        verticals.gdpr_erase_workspace(vertical="shopify", request=req, db=db, _auth=None)
     assert ei.value.status_code == 404
 
 
 def test_export_unknown_shop_404s():
     db = _FakeDb(None)
     with pytest.raises(HTTPException) as ei:
-        _run(
-            verticals.gdpr_export_workspace(
+        verticals.gdpr_export_workspace(
                 vertical="shopify", external_id="ghost.myshopify.com", customer_id=None, db=db, _auth=None
             )
-        )
     assert ei.value.status_code == 404

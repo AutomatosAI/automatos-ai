@@ -647,7 +647,7 @@ async def create_social_post(
 
 
 @router.get("/posts/{post_id}")
-async def get_social_post(
+def get_social_post(
     post_id: UUID,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -684,7 +684,7 @@ async def update_social_post(
 
 
 @router.post("/posts/{post_id}/submit", dependencies=[CAN_UPDATE])
-async def submit_social_post(
+def submit_social_post(
     post_id: UUID,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -727,7 +727,7 @@ def approve_social_post(  # a plain def (F105): it awaits nothing, and its write
 
 
 @router.post("/posts/{post_id}/request-changes", dependencies=[CAN_REVIEW])
-async def request_changes_social_post(
+def request_changes_social_post(
     post_id: UUID,
     body: RequestChangesRequest,
     db: Session = Depends(get_db),
@@ -743,7 +743,7 @@ async def request_changes_social_post(
 
 
 @router.post("/posts/{post_id}/reject", dependencies=[CAN_REVIEW])
-async def reject_social_post(
+def reject_social_post(
     post_id: UUID,
     body: Optional[RejectRequest] = None,
     db: Session = Depends(get_db),
@@ -760,7 +760,7 @@ async def reject_social_post(
 
 
 @router.post("/posts/{post_id}/schedule", dependencies=[CAN_UPDATE])
-async def schedule_social_post(
+def schedule_social_post(
     post_id: UUID,
     body: ScheduleRequest,
     db: Session = Depends(get_db),
@@ -776,7 +776,7 @@ async def schedule_social_post(
 
 
 @router.post("/posts/{post_id}/unschedule", dependencies=[CAN_UPDATE])
-async def unschedule_social_post(
+def unschedule_social_post(
     post_id: UUID,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -830,19 +830,26 @@ async def render_social_post(
 
 
 @router.get("/posts/{post_id}/media/{file_name}")
-async def get_social_post_media(
+def get_social_post_media(  # a plain def (F105): the lookup and the storage open are synchronous
     post_id: UUID,
     file_name: str,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
-    """A rendered file of the caller's post, streamed from storage (D9)."""
+    """A rendered file of the caller's post, streamed from storage (D9).
+
+    F105: the post's lookup is the request's last use of the database, so its transaction
+    ends before the file streams. FastAPI closes the ``get_db`` session (the Socials gate's
+    too) only when the response ends: a long video held a pooled connection idle in
+    transaction for the whole download.
+    """
     post = _load(db, ctx, post_id)
     if not media_store.valid_file_name(file_name):
         raise HTTPException(status_code=404, detail=MEDIA_NOT_FOUND)
     key = media_store.media_key(post.workspace_id, post.id, file_name)
+    db.rollback()
     try:
-        stored = await asyncio.to_thread(media_store.MediaStore().open, key)
+        stored = media_store.MediaStore().open(key)
     except Exception as exc:  # noqa: BLE001 — storage is down: say so, never a 500 trace
         logger.error("[Socials] opening %s failed: %s", key, exc, exc_info=True)
         raise HTTPException(status_code=503, detail=MEDIA_STORAGE_UNAVAILABLE) from exc
@@ -878,7 +885,7 @@ def list_social_post_media(
 
 
 @router.get("/usage")
-async def get_socials_usage(
+def get_socials_usage(
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
@@ -952,7 +959,7 @@ async def list_social_footage_sources(
 
 
 @router.get("/sources", dependencies=[CAN_READ_SOURCES])
-async def search_social_sources(
+def search_social_sources(
     kind: Optional[str] = Query(None, description="deliverable, report, document, url or metric; every kind when omitted"),
     q: Optional[str] = Query(None, max_length=post_sources.SEARCH_QUERY_MAX_CHARS),
     limit: int = Query(post_sources.SEARCH_DEFAULT_LIMIT, ge=1, le=post_sources.SEARCH_MAX_LIMIT),

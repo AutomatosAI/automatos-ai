@@ -179,7 +179,7 @@ class OnboardingResetRequest(BaseModel):
 
 
 @router.post("/current/onboarding/reset")
-async def reset_current_onboarding(
+def reset_current_onboarding(
     payload: OnboardingResetRequest = Body(default_factory=OnboardingResetRequest),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -255,7 +255,7 @@ def _workspace_checklist_counts(db: Session, workspace: Workspace) -> dict[str, 
 
 
 @router.get("/current/onboarding/checklist")
-async def get_current_onboarding_checklist(
+def get_current_onboarding_checklist(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -294,7 +294,7 @@ class ChecklistUpdateRequest(BaseModel):
     "/current/onboarding/checklist",
     dependencies=[Depends(require_workspace_permission("workspace:manage"))],
 )
-async def update_current_onboarding_checklist(
+def update_current_onboarding_checklist(
     payload: ChecklistUpdateRequest = Body(default_factory=ChecklistUpdateRequest),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -330,7 +330,7 @@ async def update_current_onboarding_checklist(
 
 
 @router.get("/current/integrations")
-async def get_integrations(
+def get_integrations(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -352,7 +352,7 @@ async def get_integrations(
 
 
 @router.put("/current/integrations", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def save_integrations(
+def save_integrations(
     payload: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -412,7 +412,7 @@ _ALLOWED_PROVIDERS = frozenset(_byok_slugs())
 
 
 @router.get("/current/byok-preferences")
-async def get_byok_preferences(
+def get_byok_preferences(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -426,7 +426,7 @@ async def get_byok_preferences(
 
 
 @router.put("/current/byok-preferences", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def save_byok_preferences(
+def save_byok_preferences(
     payload: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -464,7 +464,7 @@ async def save_byok_preferences(
 
 
 @router.put("/current/voice-live", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def save_voice_live_settings(
+def save_voice_live_settings(
     payload: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -515,7 +515,7 @@ async def save_voice_live_settings(
 
 
 @router.put("/current/socials", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def save_socials_settings(
+def save_socials_settings(
     payload: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -908,8 +908,58 @@ def _merge_orchestrator(existing: Dict[str, Any], payload: Dict[str, Any]) -> Di
 
 # ── What Automatos Knows (Memory Stats) ─────────────────────────────
 
+def _get_memory_stats_breakdown(db: Session, MemoryShortTerm, workspace_id, total: int):
+    """Returns (by_type, by_level, agents_with_memories) for the workspace's short-term memories."""
+    by_type = dict(
+        db.query(MemoryShortTerm.content_type, func.count(MemoryShortTerm.id))
+        .filter(MemoryShortTerm.workspace_id == workspace_id)
+        .group_by(MemoryShortTerm.content_type)
+        .all()
+    )
+
+    promoted = (
+        db.query(func.count(MemoryShortTerm.id))
+        .filter(
+            MemoryShortTerm.workspace_id == workspace_id,
+            MemoryShortTerm.promoted_to_l3.is_(True),
+        )
+        .scalar() or 0
+    )
+    by_level = {"short_term": total - promoted, "promoted_to_durable": promoted}
+
+    agents_with_memories = (
+        db.query(func.count(func.distinct(MemoryShortTerm.agent_id)))
+        .filter(
+            MemoryShortTerm.workspace_id == workspace_id,
+            MemoryShortTerm.agent_id.isnot(None),
+        )
+        .scalar() or 0
+    )
+    return by_type, by_level, agents_with_memories
+
+
+def _get_memory_stats_recent(MemoryShortTerm, base) -> list:
+    """The 5 most recent memories (content preview only)."""
+    recent_rows = (
+        base.order_by(desc(MemoryShortTerm.created_at))
+        .limit(5)
+        .all()
+    )
+    recent = []
+    for m in recent_rows:
+        content_preview = str(m.content)[:120] if m.content else ""
+        recent.append({
+            "id": str(m.id),
+            "type": m.content_type,
+            "level": "promoted_to_durable" if m.promoted_to_l3 else "short_term",
+            "preview": content_preview,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+        })
+    return recent
+
+
 @router.get("/current/memory-stats")
-async def get_memory_stats(
+def get_memory_stats(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -937,30 +987,8 @@ async def get_memory_stats(
 
         total = base.count()
 
-        by_type = dict(
-            db.query(MemoryShortTerm.content_type, func.count(MemoryShortTerm.id))
-            .filter(MemoryShortTerm.workspace_id == workspace_id)
-            .group_by(MemoryShortTerm.content_type)
-            .all()
-        )
-
-        promoted = (
-            db.query(func.count(MemoryShortTerm.id))
-            .filter(
-                MemoryShortTerm.workspace_id == workspace_id,
-                MemoryShortTerm.promoted_to_l3.is_(True),
-            )
-            .scalar() or 0
-        )
-        by_level = {"short_term": total - promoted, "promoted_to_durable": promoted}
-
-        agents_with_memories = (
-            db.query(func.count(func.distinct(MemoryShortTerm.agent_id)))
-            .filter(
-                MemoryShortTerm.workspace_id == workspace_id,
-                MemoryShortTerm.agent_id.isnot(None),
-            )
-            .scalar() or 0
+        by_type, by_level, agents_with_memories = _get_memory_stats_breakdown(
+            db, MemoryShortTerm, workspace_id, total
         )
 
         yesterday = datetime.utcnow() - timedelta(hours=24)
@@ -969,21 +997,7 @@ async def get_memory_stats(
         )
 
         # 5 most recent memories (content preview only)
-        recent_rows = (
-            base.order_by(desc(MemoryShortTerm.created_at))
-            .limit(5)
-            .all()
-        )
-        recent = []
-        for m in recent_rows:
-            content_preview = str(m.content)[:120] if m.content else ""
-            recent.append({
-                "id": str(m.id),
-                "type": m.content_type,
-                "level": "promoted_to_durable" if m.promoted_to_l3 else "short_term",
-                "preview": content_preview,
-                "created_at": m.created_at.isoformat() if m.created_at else None,
-            })
+        recent = _get_memory_stats_recent(MemoryShortTerm, base)
 
         return {
             "total_memories": total,

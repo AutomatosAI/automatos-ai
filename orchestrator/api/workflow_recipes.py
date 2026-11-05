@@ -228,8 +228,23 @@ def _enrich_steps_with_agents(steps: Optional[list], db: Session) -> Optional[li
     return enriched
 
 
+def _list_workflow_recipes_sorted(query, sort_by: str):
+    """Apply the requested sort order to the recipe query."""
+    if sort_by == 'popularity':
+        return query.order_by(WorkflowRecipe.popularity.desc())
+    if sort_by == 'created_at':
+        return query.order_by(WorkflowRecipe.created_at.desc())
+    if sort_by == 'use_count':
+        return query.order_by(WorkflowRecipe.use_count.desc())
+    if sort_by == 'average_rating':
+        return query.order_by(WorkflowRecipe.average_rating.desc())
+    if sort_by == 'name':
+        return query.order_by(WorkflowRecipe.name.asc())
+    return query
+
+
 @router.get("")
-async def list_workflow_recipes(
+def list_workflow_recipes(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     is_featured: Optional[bool] = None,
     is_public: Optional[bool] = True,
@@ -277,16 +292,7 @@ async def list_workflow_recipes(
         total = query.count()
 
         # Apply sorting
-        if sort_by == 'popularity':
-            query = query.order_by(WorkflowRecipe.popularity.desc())
-        elif sort_by == 'created_at':
-            query = query.order_by(WorkflowRecipe.created_at.desc())
-        elif sort_by == 'use_count':
-            query = query.order_by(WorkflowRecipe.use_count.desc())
-        elif sort_by == 'average_rating':
-            query = query.order_by(WorkflowRecipe.average_rating.desc())
-        elif sort_by == 'name':
-            query = query.order_by(WorkflowRecipe.name.asc())
+        query = _list_workflow_recipes_sorted(query, sort_by)
 
         # Apply pagination
         recipes = query.offset(skip).limit(limit).all()
@@ -303,8 +309,53 @@ async def list_workflow_recipes(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _get_recipe_stats_dashboard_executions(db: Session, recipe_ids: list):
+    """Returns (total_executions, status_breakdown) for the given recipes."""
+    # Execution stats
+    total_executions = 0
+    status_breakdown = {"completed": 0, "failed": 0, "running": 0, "pending": 0}
+    if recipe_ids:
+        exec_q = db.query(RecipeExecution).filter(
+            RecipeExecution.recipe_id.in_(recipe_ids),
+        )
+        total_executions = exec_q.count()
+
+        status_rows = db.query(
+            RecipeExecution.status,
+            sa_func.count(RecipeExecution.id),
+        ).filter(
+            RecipeExecution.recipe_id.in_(recipe_ids),
+        ).group_by(RecipeExecution.status).all()
+
+        for status_val, cnt in status_rows:
+            if status_val in status_breakdown:
+                status_breakdown[status_val] = cnt
+    return total_executions, status_breakdown
+
+
+def _get_recipe_stats_dashboard_top(base_q) -> list:
+    """Top recipes by use_count."""
+    top_recipes_orm = base_q.order_by(
+        WorkflowRecipe.use_count.desc()
+    ).limit(10).all()
+
+    top_recipes = []
+    for r in top_recipes_orm:
+        top_recipes.append({
+            "id": r.id,
+            "template_id": r.template_id,
+            "name": r.name,
+            "use_count": r.use_count or 0,
+            "success_rate": r.success_rate or 0.0,
+            "quality_score": r.quality_score,
+            "steps_count": len(r.steps) if r.steps else 0,
+            "last_used_at": r.last_used_at.isoformat() if r.last_used_at else None,
+        })
+    return top_recipes
+
+
 @router.get("/stats/dashboard")
-async def get_recipe_stats_dashboard(
+def get_recipe_stats_dashboard(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -337,42 +388,10 @@ async def get_recipe_stats_dashboard(
         recipe_ids = [r.id for r in base_q.with_entities(WorkflowRecipe.id).all()]
 
         # Execution stats
-        total_executions = 0
-        status_breakdown = {"completed": 0, "failed": 0, "running": 0, "pending": 0}
-        if recipe_ids:
-            exec_q = db.query(RecipeExecution).filter(
-                RecipeExecution.recipe_id.in_(recipe_ids),
-            )
-            total_executions = exec_q.count()
-
-            status_rows = db.query(
-                RecipeExecution.status,
-                sa_func.count(RecipeExecution.id),
-            ).filter(
-                RecipeExecution.recipe_id.in_(recipe_ids),
-            ).group_by(RecipeExecution.status).all()
-
-            for status_val, cnt in status_rows:
-                if status_val in status_breakdown:
-                    status_breakdown[status_val] = cnt
+        total_executions, status_breakdown = _get_recipe_stats_dashboard_executions(db, recipe_ids)
 
         # Top recipes by use_count
-        top_recipes_orm = base_q.order_by(
-            WorkflowRecipe.use_count.desc()
-        ).limit(10).all()
-
-        top_recipes = []
-        for r in top_recipes_orm:
-            top_recipes.append({
-                "id": r.id,
-                "template_id": r.template_id,
-                "name": r.name,
-                "use_count": r.use_count or 0,
-                "success_rate": r.success_rate or 0.0,
-                "quality_score": r.quality_score,
-                "steps_count": len(r.steps) if r.steps else 0,
-                "last_used_at": r.last_used_at.isoformat() if r.last_used_at else None,
-            })
+        top_recipes = _get_recipe_stats_dashboard_top(base_q)
 
         return {
             "overview": {
@@ -412,8 +431,54 @@ def get_workflow_recipe(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _create_workflow_recipe_build(db: Session, ctx: RequestContext, recipe_data: Dict[str, Any]) -> WorkflowRecipe:
+    """Build (not persist) the recipe from the request body, applying defaults."""
+    # Apply execution_config defaults if not provided
+    # Timeouts in seconds (executor normalises legacy ms values automatically)
+    execution_config = recipe_data.get('execution_config') or {
+        'mode': 'sequential',
+        'max_retries': 1,
+        'timeout_per_step': 300,
+        'total_timeout': 600,
+        'auto_learning': True,
+    }
+
+    # Ensure webhook_id in schedule_config for trigger/webhook types
+    schedule_config = recipe_data.get('schedule_config')
+    if schedule_config and schedule_config.get('type') in ('trigger', 'webhook'):
+        if 'webhook_id' not in schedule_config:
+            schedule_config['webhook_id'] = uuid4().hex
+
+    # Create recipe (validation happens after assignment)
+    recipe = WorkflowRecipe(
+        workspace_id=ctx.workspace_id,
+        template_id=recipe_data['template_id'],
+        name=recipe_data['name'],
+        description=recipe_data['description'],
+        template_definition=recipe_data['template_definition'],
+        tags=recipe_data.get('tags', []),
+        steps=recipe_data['steps'],
+        inputs=recipe_data.get('inputs'),
+        outputs=recipe_data.get('outputs'),
+        execution_config=execution_config,
+        schedule_config=schedule_config,
+        recommended_agents=recipe_data.get('recommended_agents', []),
+        required_tools=recipe_data.get('required_tools', []),
+        is_public=recipe_data.get('is_public', True),
+        is_featured=recipe_data.get('is_featured', False),
+        is_system=False,  # User-created recipes are never system recipes
+        preview_image=recipe_data.get('preview_image'),
+        documentation_url=recipe_data.get('documentation_url'),
+        version=recipe_data.get('version', '1.0'),
+        created_by=recipe_data.get('created_by', ctx.user.email if ctx.user and ctx.user.email else "anonymous"),
+        # F133: the person who made it; its later edits are checked against them.
+        created_by_user_id=_creator_pk(db, ctx),
+    )
+    return recipe
+
+
 @router.post("", dependencies=[Depends(require_workspace_permission("playbooks:create"))])
-async def create_workflow_recipe(
+def create_workflow_recipe(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     recipe_data: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db)
@@ -459,47 +524,7 @@ async def create_workflow_recipe(
                 detail=f"Recipe with ID '{recipe_data['template_id']}' already exists"
             )
 
-        # Apply execution_config defaults if not provided
-        # Timeouts in seconds (executor normalises legacy ms values automatically)
-        execution_config = recipe_data.get('execution_config') or {
-            'mode': 'sequential',
-            'max_retries': 1,
-            'timeout_per_step': 300,
-            'total_timeout': 600,
-            'auto_learning': True,
-        }
-
-        # Ensure webhook_id in schedule_config for trigger/webhook types
-        schedule_config = recipe_data.get('schedule_config')
-        if schedule_config and schedule_config.get('type') in ('trigger', 'webhook'):
-            if 'webhook_id' not in schedule_config:
-                schedule_config['webhook_id'] = uuid4().hex
-
-        # Create recipe (validation happens after assignment)
-        recipe = WorkflowRecipe(
-            workspace_id=ctx.workspace_id,
-            template_id=recipe_data['template_id'],
-            name=recipe_data['name'],
-            description=recipe_data['description'],
-            template_definition=recipe_data['template_definition'],
-            tags=recipe_data.get('tags', []),
-            steps=recipe_data['steps'],
-            inputs=recipe_data.get('inputs'),
-            outputs=recipe_data.get('outputs'),
-            execution_config=execution_config,
-            schedule_config=schedule_config,
-            recommended_agents=recipe_data.get('recommended_agents', []),
-            required_tools=recipe_data.get('required_tools', []),
-            is_public=recipe_data.get('is_public', True),
-            is_featured=recipe_data.get('is_featured', False),
-            is_system=False,  # User-created recipes are never system recipes
-            preview_image=recipe_data.get('preview_image'),
-            documentation_url=recipe_data.get('documentation_url'),
-            version=recipe_data.get('version', '1.0'),
-            created_by=recipe_data.get('created_by', ctx.user.email if ctx.user and ctx.user.email else "anonymous"),
-            # F133: the person who made it; its later edits are checked against them.
-            created_by_user_id=_creator_pk(db, ctx),
-        )
+        recipe = _create_workflow_recipe_build(db, ctx, recipe_data)
 
         # Validate steps structure
         is_valid, error = recipe.validate_steps()
@@ -542,9 +567,73 @@ async def create_workflow_recipe(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _update_workflow_recipe_fields(recipe: WorkflowRecipe, recipe_id: str, recipe_data: Dict[str, Any],
+                                   db: Session, ctx: RequestContext) -> None:
+    """Set the edit's fields on the recipe, validating steps, execution and schedule as they change."""
+    # Ensure webhook_id in schedule_config for trigger/webhook types
+    if 'schedule_config' in recipe_data:
+        sc = recipe_data['schedule_config']
+        if sc and sc.get('type') in ('trigger', 'webhook') and 'webhook_id' not in sc:
+            # Preserve existing webhook_id on update — generating a new one
+            # breaks any external automation (JIRA, GitHub, etc.) already
+            # configured to POST to the old URL.
+            existing_wh = (recipe.schedule_config or {}).get('webhook_id')
+            sc['webhook_id'] = existing_wh or uuid4().hex
+
+    # Update fields if provided
+    updatable_fields = [
+        'name', 'description', 'tags',
+        'template_definition', 'steps', 'inputs', 'outputs',
+        'execution_config', 'schedule_config',
+        'recommended_agents', 'required_tools',
+        'is_public', 'is_featured',
+        'preview_image', 'documentation_url', 'version', 'changelog'
+    ]
+
+    for field in updatable_fields:
+        if field in recipe_data:
+            setattr(recipe, field, recipe_data[field])
+
+    # Validate steps if updated
+    if 'steps' in recipe_data:
+        is_valid, error = recipe.validate_steps()
+        if not is_valid:
+            logger.warning(f"[update_recipe] Steps validation failed for {recipe_id}: {error}")
+            raise HTTPException(status_code=400, detail=f"Invalid steps: {error}")
+
+        _check_step_agents(db, ctx.workspace_id, recipe.steps)
+
+    # Validate execution_config if updated
+    if 'execution_config' in recipe_data:
+        is_valid, error = recipe.validate_execution_config()
+        if not is_valid:
+            logger.warning(f"[update_recipe] execution_config validation failed for {recipe_id}: {error} | data: {recipe_data.get('execution_config')}")
+            raise HTTPException(status_code=400, detail=f"Invalid execution_config: {error}")
+
+    # Validate schedule_config if updated
+    if 'schedule_config' in recipe_data:
+        _explicit_schedule(recipe, db, ctx.workspace_id)
+
+
+def _update_workflow_recipe_trigger(recipe: WorkflowRecipe, db: Session, ctx: RequestContext) -> None:
+    """Register the edited schedule's trigger; old subscriptions go only once the new one exists."""
+    new_sub_id = _auto_register_trigger(recipe, ctx.workspace_id, db)
+    if new_sub_id:
+        # New subscription created — deactivate old ones (except the new one)
+        _cleanup_trigger_subscriptions(recipe.id, db)
+        # Re-activate the newly created one (cleanup may have caught it)
+        new_sub = db.query(TriggerSubscription).filter(
+            TriggerSubscription.composio_subscription_id == new_sub_id,
+            TriggerSubscription.workflow_id == recipe.id,
+        ).first()
+        if new_sub:
+            new_sub.is_active = True
+    db.commit()
+
+
 @router.put("/{recipe_id}", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
 @edits_it_by_number_too  # F292: by the number the list shows, steps as the read gives them
-async def update_workflow_recipe(
+def update_workflow_recipe(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     recipe_data: Dict[str, Any] = Body(...),
@@ -572,49 +661,7 @@ async def update_workflow_recipe(
                 detail="System recipes cannot be modified"
             )
 
-        # Ensure webhook_id in schedule_config for trigger/webhook types
-        if 'schedule_config' in recipe_data:
-            sc = recipe_data['schedule_config']
-            if sc and sc.get('type') in ('trigger', 'webhook') and 'webhook_id' not in sc:
-                # Preserve existing webhook_id on update — generating a new one
-                # breaks any external automation (JIRA, GitHub, etc.) already
-                # configured to POST to the old URL.
-                existing_wh = (recipe.schedule_config or {}).get('webhook_id')
-                sc['webhook_id'] = existing_wh or uuid4().hex
-
-        # Update fields if provided
-        updatable_fields = [
-            'name', 'description', 'tags',
-            'template_definition', 'steps', 'inputs', 'outputs',
-            'execution_config', 'schedule_config',
-            'recommended_agents', 'required_tools',
-            'is_public', 'is_featured',
-            'preview_image', 'documentation_url', 'version', 'changelog'
-        ]
-
-        for field in updatable_fields:
-            if field in recipe_data:
-                setattr(recipe, field, recipe_data[field])
-
-        # Validate steps if updated
-        if 'steps' in recipe_data:
-            is_valid, error = recipe.validate_steps()
-            if not is_valid:
-                logger.warning(f"[update_recipe] Steps validation failed for {recipe_id}: {error}")
-                raise HTTPException(status_code=400, detail=f"Invalid steps: {error}")
-
-            _check_step_agents(db, ctx.workspace_id, recipe.steps)
-
-        # Validate execution_config if updated
-        if 'execution_config' in recipe_data:
-            is_valid, error = recipe.validate_execution_config()
-            if not is_valid:
-                logger.warning(f"[update_recipe] execution_config validation failed for {recipe_id}: {error} | data: {recipe_data.get('execution_config')}")
-                raise HTTPException(status_code=400, detail=f"Invalid execution_config: {error}")
-
-        # Validate schedule_config if updated
-        if 'schedule_config' in recipe_data:
-            _explicit_schedule(recipe, db, ctx.workspace_id)
+        _update_workflow_recipe_fields(recipe, recipe_id, recipe_data, db, ctx)
 
         recipe.updated_at = datetime.now()
         db.commit()
@@ -623,18 +670,7 @@ async def update_workflow_recipe(
         # Re-register trigger if schedule_config changed
         # Only deactivate old subscriptions if new registration succeeds
         if 'schedule_config' in recipe_data:
-            new_sub_id = _auto_register_trigger(recipe, ctx.workspace_id, db)
-            if new_sub_id:
-                # New subscription created — deactivate old ones (except the new one)
-                _cleanup_trigger_subscriptions(recipe.id, db)
-                # Re-activate the newly created one (cleanup may have caught it)
-                new_sub = db.query(TriggerSubscription).filter(
-                    TriggerSubscription.composio_subscription_id == new_sub_id,
-                    TriggerSubscription.workflow_id == recipe.id,
-                ).first()
-                if new_sub:
-                    new_sub.is_active = True
-            db.commit()
+            _update_workflow_recipe_trigger(recipe, db, ctx)
 
         # Sync cron scheduler
         _sync_cron_schedule(recipe)
@@ -753,7 +789,7 @@ def record_recipe_usage(
 
 
 @router.get("/categories/list")
-async def list_recipe_categories(
+def list_recipe_categories(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -785,7 +821,7 @@ async def list_recipe_categories(
 
 
 @router.get("/featured/list")
-async def list_featured_recipes(
+def list_featured_recipes(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     limit: int = Query(10, ge=1, le=50),
     db: Session = Depends(get_db)
@@ -1056,7 +1092,7 @@ def get_recipe_execution_detail(
 # ===================================================================
 
 @router.post("/{recipe_id}/executions/{execution_id}/cancel", dependencies=[Depends(require_workspace_permission("playbooks:execute"))])
-async def cancel_execution(
+def cancel_execution(
     recipe_id: str,
     execution_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1328,12 +1364,101 @@ def list_recipe_executions(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _submit_recipe_user_id(db: Session, ctx: RequestContext) -> Optional[int]:
+    """Database user id of the submitter (by Clerk id, else email), or None."""
+    # Look up database user ID
+    from core.models.core import User as UserModel
+    user_id_int = None
+    if ctx.user and ctx.user.id:
+        user = db.query(UserModel).filter(UserModel.clerk_user_id == ctx.user.id).first()
+        if not user and ctx.user.email:
+            user = db.query(UserModel).filter(UserModel.email == ctx.user.email).first()
+        if user:
+            user_id_int = user.id
+    return user_id_int
+
+
+def _submit_recipe_trust(db: Session, user_id_int: Optional[int]):
+    """Returns (total_approved, is_trusted): trusted after 5+ approved marketplace agents or recipes."""
+    # Check if user is trusted (5+ approved marketplace items - agents OR recipes)
+    from core.models.core import Agent
+    approved_agent_count = db.query(Agent).filter(
+        Agent.original_creator_id == user_id_int,
+        Agent.owner_type == 'marketplace',
+        Agent.is_approved == True
+    ).count() if user_id_int else 0
+
+    approved_recipe_count = db.query(WorkflowRecipe).filter(
+        WorkflowRecipe.original_creator_id == user_id_int,
+        WorkflowRecipe.owner_type == 'marketplace',
+        WorkflowRecipe.is_approved == True
+    ).count() if user_id_int else 0
+
+    total_approved = approved_agent_count + approved_recipe_count
+    is_trusted = total_approved >= 5
+    return total_approved, is_trusted
+
+
+def _submit_recipe_clone(
+    workspace_recipe: WorkflowRecipe,
+    recipe_data: Dict[str, Any],
+    ctx: RequestContext,
+    user_id_int: Optional[int],
+    is_trusted: bool,
+) -> WorkflowRecipe:
+    """Marketplace copy of the workspace recipe (not yet persisted)."""
+    marketplace_recipe = WorkflowRecipe(
+        template_id=f"marketplace-{workspace_recipe.template_id}-{datetime.now().timestamp()}",
+        name=workspace_recipe.name,
+        description=workspace_recipe.description,
+        template_definition=workspace_recipe.template_definition,
+        tags=workspace_recipe.tags,
+        steps=workspace_recipe.steps,
+        inputs=workspace_recipe.inputs,
+        outputs=workspace_recipe.outputs,
+        execution_config=workspace_recipe.execution_config,
+        schedule_config=workspace_recipe.schedule_config,
+        recommended_agents=workspace_recipe.recommended_agents,
+        required_tools=workspace_recipe.required_tools,
+        preview_image=workspace_recipe.preview_image,
+        documentation_url=workspace_recipe.documentation_url,
+        version=workspace_recipe.version or '1.0',
+
+        # Marketplace ownership
+        owner_type='marketplace',
+        owner_id='marketplace',
+        workspace_id=None,
+
+        # Creator tracking
+        original_creator_id=user_id_int,
+        created_by_user_id=user_id_int,
+        cloned_from_id=workspace_recipe.id,
+
+        # Approval
+        is_approved=is_trusted,
+        marketplace_category=recipe_data.get('category') or (workspace_recipe.tags[0] if workspace_recipe.tags else 'General'),
+        marketplace_icon=recipe_data.get('icon') or workspace_recipe.marketplace_icon,
+
+        # Visibility
+        is_public=True,
+        is_featured=False,
+        is_system=False,
+
+        # Stats
+        install_count=0,
+        use_count=0,
+
+        created_by=(ctx.user.email if ctx.user and ctx.user.email else "system")
+    )
+    return marketplace_recipe
+
+
 # ===================================================================
 # MARKETPLACE ENDPOINTS
 # ===================================================================
 
 @router.post("/submit", dependencies=[Depends(require_workspace_permission("playbooks:create"))])
-async def submit_recipe_to_marketplace(
+def submit_recipe_to_marketplace(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     recipe_data: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db)
@@ -1363,31 +1488,10 @@ async def submit_recipe_to_marketplace(
             raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found in workspace")
 
         # Look up database user ID
-        from core.models.core import User as UserModel
-        user_id_int = None
-        if ctx.user and ctx.user.id:
-            user = db.query(UserModel).filter(UserModel.clerk_user_id == ctx.user.id).first()
-            if not user and ctx.user.email:
-                user = db.query(UserModel).filter(UserModel.email == ctx.user.email).first()
-            if user:
-                user_id_int = user.id
+        user_id_int = _submit_recipe_user_id(db, ctx)
 
         # Check if user is trusted (5+ approved marketplace items - agents OR recipes)
-        from core.models.core import Agent
-        approved_agent_count = db.query(Agent).filter(
-            Agent.original_creator_id == user_id_int,
-            Agent.owner_type == 'marketplace',
-            Agent.is_approved == True
-        ).count() if user_id_int else 0
-
-        approved_recipe_count = db.query(WorkflowRecipe).filter(
-            WorkflowRecipe.original_creator_id == user_id_int,
-            WorkflowRecipe.owner_type == 'marketplace',
-            WorkflowRecipe.is_approved == True
-        ).count() if user_id_int else 0
-
-        total_approved = approved_agent_count + approved_recipe_count
-        is_trusted = total_approved >= 5
+        total_approved, is_trusted = _submit_recipe_trust(db, user_id_int)
 
         logger.info(f"User approval status - User ID: {user_id_int}, Approved items: {total_approved}, Is trusted: {is_trusted}")
 
@@ -1404,49 +1508,7 @@ async def submit_recipe_to_marketplace(
             )
 
         # Clone to marketplace
-        marketplace_recipe = WorkflowRecipe(
-            template_id=f"marketplace-{workspace_recipe.template_id}-{datetime.now().timestamp()}",
-            name=workspace_recipe.name,
-            description=workspace_recipe.description,
-            template_definition=workspace_recipe.template_definition,
-            tags=workspace_recipe.tags,
-            steps=workspace_recipe.steps,
-            inputs=workspace_recipe.inputs,
-            outputs=workspace_recipe.outputs,
-            execution_config=workspace_recipe.execution_config,
-            schedule_config=workspace_recipe.schedule_config,
-            recommended_agents=workspace_recipe.recommended_agents,
-            required_tools=workspace_recipe.required_tools,
-            preview_image=workspace_recipe.preview_image,
-            documentation_url=workspace_recipe.documentation_url,
-            version=workspace_recipe.version or '1.0',
-
-            # Marketplace ownership
-            owner_type='marketplace',
-            owner_id='marketplace',
-            workspace_id=None,
-
-            # Creator tracking
-            original_creator_id=user_id_int,
-            created_by_user_id=user_id_int,
-            cloned_from_id=workspace_recipe.id,
-
-            # Approval
-            is_approved=is_trusted,
-            marketplace_category=recipe_data.get('category') or (workspace_recipe.tags[0] if workspace_recipe.tags else 'General'),
-            marketplace_icon=recipe_data.get('icon') or workspace_recipe.marketplace_icon,
-
-            # Visibility
-            is_public=True,
-            is_featured=False,
-            is_system=False,
-
-            # Stats
-            install_count=0,
-            use_count=0,
-
-            created_by=(ctx.user.email if ctx.user and ctx.user.email else "system")
-        )
+        marketplace_recipe = _submit_recipe_clone(workspace_recipe, recipe_data, ctx, user_id_int, is_trusted)
 
         db.add(marketplace_recipe)
         db.commit()
@@ -1643,7 +1705,7 @@ webhook_router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 
 
 @webhook_router.get("/recipe/{webhook_id}")
-async def recipe_webhook_verify(
+def recipe_webhook_verify(
     webhook_id: str,
     db: Session = Depends(get_db),
 ):

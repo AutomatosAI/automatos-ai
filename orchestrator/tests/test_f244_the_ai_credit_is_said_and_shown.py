@@ -201,11 +201,11 @@ def test_the_agents_page_list_carries_why_each_agent_cannot_run(shop):
         unavailable: str | None = None
 
     @with_unavailable
-    async def endpoint(ctx=None, db=None):
+    def endpoint(ctx=None, db=None):
         return [Row(id=shop.analyst, configuration={}), Row(id=999999, configuration={"runtime": "cli"})]
 
     shop.failed_for_credit(5, OUT_OF_CREDIT_TEXT)
-    rows = asyncio.run(endpoint(ctx=NS(workspace_id=shop.ws), db=shop.db))
+    rows = endpoint(ctx=NS(workspace_id=shop.ws), db=shop.db)
     assert rows[0].unavailable == CREDIT_OUT and rows[1].unavailable is not None
 
 

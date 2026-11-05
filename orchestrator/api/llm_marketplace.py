@@ -380,8 +380,23 @@ def _apply_sort(query, sort_by: Optional[str]):
 
 # ── Endpoints ─────────────────────────────────────────────────────────
 
+def _browse_catalog_counts(db, provider):
+    """Active-model counts per serving provider and per vendor (vendor counts honour the provider filter)."""
+    provider_counts = dict(
+        db.query(LLMModel.serving_provider, func.count(LLMModel.id))
+        .filter(LLMModel.status == "active")
+        .group_by(LLMModel.serving_provider)
+        .all()
+    )
+    vendor_query = db.query(LLMModel.provider, func.count(LLMModel.id)).filter(LLMModel.status == "active")
+    if provider:
+        vendor_query = vendor_query.filter(LLMModel.serving_provider == registry.normalize_slug(provider))
+    vendor_counts = dict(vendor_query.group_by(LLMModel.provider).all())
+    return provider_counts, vendor_counts
+
+
 @router.get("/catalog", response_model=CatalogOut)
-async def browse_catalog(
+def browse_catalog(
     provider: Optional[str] = Query(None, description="Serving provider slug (openrouter, nvidia, openai…)"),
     vendor: Optional[str] = Query(None, description="Vendor (moonshotai, deepseek, openai…)"),
     category: Optional[str] = Query(None),
@@ -410,16 +425,8 @@ async def browse_catalog(
     total = query.count()
     models = _apply_sort(query, sort_by).offset(offset).limit(limit).all()
 
-    provider_counts = dict(
-        db.query(LLMModel.serving_provider, func.count(LLMModel.id))
-        .filter(LLMModel.status == "active")
-        .group_by(LLMModel.serving_provider)
-        .all()
-    )
-    vendor_query = db.query(LLMModel.provider, func.count(LLMModel.id)).filter(LLMModel.status == "active")
-    if provider:
-        vendor_query = vendor_query.filter(LLMModel.serving_provider == registry.normalize_slug(provider))
-    vendor_counts = dict(vendor_query.group_by(LLMModel.provider).all())
+    provider_counts, vendor_counts = _browse_catalog_counts(db, provider)
+
 
     installed = _get_installed_ids(db, ctx.workspace_id)
     available = _get_available_providers(db, ctx.workspace_id)
@@ -439,7 +446,7 @@ async def browse_catalog(
 
 
 @router.get("/models", response_model=List[LLMModelOut])
-async def browse_models(
+def browse_models(
     provider: Optional[str] = Query(None, description="Serving provider slug"),
     vendor: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
@@ -468,7 +475,7 @@ async def browse_models(
 
 
 @router.get("/installed", response_model=List[LLMModelOut])
-async def get_installed_models(
+def get_installed_models(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -495,7 +502,7 @@ async def get_installed_models(
 
 
 @router.get("/installed-ids")
-async def get_installed_ids(
+def get_installed_ids(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -517,7 +524,7 @@ async def get_installed_ids(
 
 
 @router.get("/models/{model_id:path}", response_model=LLMModelOut)
-async def get_model_detail(
+def get_model_detail(
     model_id: str,
     provider: Optional[str] = Query(None, description="Serving provider slug"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -532,7 +539,7 @@ async def get_model_detail(
 
 
 @router.post("/models/{model_id:path}/install", response_model=InstallResult, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def install_model(
+def install_model(
     model_id: str,
     provider: Optional[str] = Query(None, description="Serving provider slug — the route to install"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -572,7 +579,7 @@ async def install_model(
 
 
 @router.post("/models/{model_id:path}/uninstall", response_model=InstallResult, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def uninstall_model(
+def uninstall_model(
     model_id: str,
     provider: Optional[str] = Query(None, description="Serving provider slug — the route to remove"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -600,7 +607,7 @@ async def uninstall_model(
 
 
 @router.get("/compare", response_model=CompareOut)
-async def compare_models(
+def compare_models(
     ids: str = Query(..., description="Comma-separated model_ids or provider:model_id route keys"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -628,7 +635,7 @@ async def compare_models(
 
 
 @router.get("/categories", response_model=List[Dict[str, Any]])
-async def list_categories(db: Session = Depends(get_db)):
+def list_categories(db: Session = Depends(get_db)):
     """List available model categories with counts."""
     rows = (
         db.query(LLMModel.category, func.count(LLMModel.id))
@@ -640,7 +647,7 @@ async def list_categories(db: Session = Depends(get_db)):
 
 
 @router.get("/providers", response_model=List[Dict[str, Any]])
-async def list_providers(db: Session = Depends(get_db)):
+def list_providers(db: Session = Depends(get_db)):
     """Serving providers with route counts."""
     rows = (
         db.query(LLMModel.serving_provider, func.count(LLMModel.id))
@@ -656,14 +663,14 @@ async def list_providers(db: Session = Depends(get_db)):
 
 
 @router.get("/sync/status")
-async def sync_status(db: Session = Depends(get_db)):
+def sync_status(db: Session = Depends(get_db)):
     """When each syncable provider's catalogue was last refreshed."""
     from core.services.provider_catalog_sync import ProviderCatalogSync, SYNCABLE_PROVIDERS
     return {"last_synced": ProviderCatalogSync(db).last_synced(), "syncable": list(SYNCABLE_PROVIDERS)}
 
 
 @router.post("/sync/{provider}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def sync_provider(
+def sync_provider(
     provider: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

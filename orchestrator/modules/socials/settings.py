@@ -273,7 +273,7 @@ def socials_state(settings: Optional[Dict[str, Any]]) -> Dict[str, bool]:
     }
 
 
-async def require_socials_enabled(
+def require_socials_enabled(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> RequestContext:

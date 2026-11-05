@@ -122,7 +122,7 @@ def _ask(body: dict) -> list:
     ctx = NS(workspace_id=WS, user=NS(id="owner@prd266.test", system_role="user"))
 
     async def _run() -> list:
-        response = await chat.stream_chat(request=ChatRequest(**body), ctx=ctx, db=NS())
+        response = await chat.stream_chat(request=ChatRequest(**body), ctx=ctx, db=NS(rollback=lambda: None))
         return [chunk async for chunk in response.body_iterator]
 
     return asyncio.run(_run())

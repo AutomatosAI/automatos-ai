@@ -432,14 +432,14 @@ async def test_revoke_racing_resolution_is_a_noop(ws, ctx):
     db.add(grant)
 
     # First revoke wins (granted→revoked).
-    res = await revoke_approval(grant.id, ctx, db)
+    res = revoke_approval(grant.id, ctx, db)
     assert grant.status == GrantStatus.REVOKED.value
     assert res["grant"]["status"] == GrantStatus.REVOKED.value
     first_revoker = grant.revoked_by
 
     # The racing second revoke loses the CAS — 422, resolution unchanged.
     with pytest.raises(HTTPException) as ei:
-        await revoke_approval(grant.id, ctx, db)
+        revoke_approval(grant.id, ctx, db)
     assert ei.value.status_code == 422
     assert grant.status == GrantStatus.REVOKED.value      # still revoked, once
     assert grant.revoked_by == first_revoker              # loser did not overwrite

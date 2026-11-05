@@ -342,7 +342,7 @@ async def import_git_repository(
 
 
 @router.get("/sources", response_model=List[SkillSourceResponse])
-async def list_skill_sources(
+def list_skill_sources(
     source_type: Optional[str] = Query(None, description="Filter by source type"),
     status: Optional[str] = Query(None, description="Filter by status"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -374,7 +374,7 @@ async def list_skill_sources(
 
 
 @router.get("/sources/{source_id}", response_model=SkillSourceResponse)
-async def get_skill_source(
+def get_skill_source(
     source_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -401,7 +401,7 @@ async def get_skill_source(
 
 
 @router.post("/sources/{source_id}/update", response_model=Dict[str, Any], dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def update_git_repository(
+def update_git_repository(
     source_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -444,7 +444,7 @@ async def update_git_repository(
 
 
 @router.post("/sources/{source_id}/rollback", response_model=Dict[str, Any], dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def rollback_git_repository(
+def rollback_git_repository(
     source_id: int,
     commit_sha: str = Query(..., description="Commit SHA to rollback to"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -486,7 +486,7 @@ async def rollback_git_repository(
 
 
 @router.delete("/sources/{source_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def deactivate_skill_source(
+def deactivate_skill_source(
     source_id: int,
     deactivate_skills: bool = Query(False, description="Also deactivate associated skills"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -529,8 +529,42 @@ async def deactivate_skill_source(
 # Skill Management Endpoints
 # ============================================================================
 
+def _list_skills_query(db, ctx, category, source, search, tags):
+    """Base filtered Skill query for list_skills (visibility + filters)."""
+    # Marketplace endpoint: only surface system-owned skills (workspace_id IS NULL).
+    # Workspace-owned skills (forks, custom) are listed via /workspaces/{id}/skills,
+    # which already shadows marketplace originals when a fork exists. Admins see all.
+    # PRD-174 F043: shared admin check — super_admin ⊇ admin when the plane is on.
+    from core.auth.roles import caller_is_admin
+    is_admin = caller_is_admin(ctx.user)
+    query = db.query(Skill).filter(Skill.is_active == True)
+    if not is_admin:
+        query = query.filter(Skill.workspace_id.is_(None))
+
+    # Apply filters
+    if category:
+        query = query.filter(Skill.category == category)
+        
+    if source:
+        query = query.filter(Skill.skill_source == source)
+        
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.filter(
+            (Skill.name.ilike(search_pattern)) |
+            (Skill.description.ilike(search_pattern))
+        )
+        
+    if tags:
+        tag_list = [t.strip() for t in tags.split(",")]
+        # PostgreSQL JSON contains check
+        for tag in tag_list:
+            query = query.filter(Skill.tags.contains([tag]))
+    return query
+
+
 @router.get("", response_model=List[EnhancedSkillResponse])
-async def list_skills(
+def list_skills(
     category: Optional[str] = Query(None),
     source: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
@@ -548,35 +582,7 @@ async def list_skills(
         GET /api/v1/skills?search=security&tags=authentication,authorization
     """
     try:
-        # Marketplace endpoint: only surface system-owned skills (workspace_id IS NULL).
-        # Workspace-owned skills (forks, custom) are listed via /workspaces/{id}/skills,
-        # which already shadows marketplace originals when a fork exists. Admins see all.
-        # PRD-174 F043: shared admin check — super_admin ⊇ admin when the plane is on.
-        from core.auth.roles import caller_is_admin
-        is_admin = caller_is_admin(ctx.user)
-        query = db.query(Skill).filter(Skill.is_active == True)
-        if not is_admin:
-            query = query.filter(Skill.workspace_id.is_(None))
-
-        # Apply filters
-        if category:
-            query = query.filter(Skill.category == category)
-        
-        if source:
-            query = query.filter(Skill.skill_source == source)
-        
-        if search:
-            search_pattern = f"%{search}%"
-            query = query.filter(
-                (Skill.name.ilike(search_pattern)) |
-                (Skill.description.ilike(search_pattern))
-            )
-        
-        if tags:
-            tag_list = [t.strip() for t in tags.split(",")]
-            # PostgreSQL JSON contains check
-            for tag in tag_list:
-                query = query.filter(Skill.tags.contains([tag]))
+        query = _list_skills_query(db, ctx, category, source, search, tags)
         
         # Get total count before pagination
         total = query.count()
@@ -615,7 +621,7 @@ async def list_skills(
 
 
 @router.get("/{skill_id}", response_model=EnhancedSkillResponse)
-async def get_skill_details(
+def get_skill_details(
     skill_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -660,8 +666,43 @@ async def get_skill_details(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _get_skill_content_load(skill_loader, skill, level, resource_path, db):
+    """Load skill content for the requested level; returns (content, estimated_tokens)."""
+    content = ""
+    estimated_tokens = 0
+
+    if level == 1:
+        # Level 1: Metadata
+        metadata = skill_loader.load_skill_metadata(skill.name, db=db)
+        if metadata:
+            content = str(metadata)
+            estimated_tokens = 50  # Rough estimate for metadata
+
+    elif level == 2:
+        # Level 2: Core content
+        core_content = skill_loader.load_skill_core(skill.name, db=db)
+        if core_content:
+            content = core_content
+            from modules.agents.services.skill_loader import estimate_tokens
+            estimated_tokens = estimate_tokens(content)
+
+    elif level == 3:
+        # Level 3: Resource
+        if not resource_path:
+            raise HTTPException(status_code=400, detail="resource_path required for level 3")
+
+        resource_content = skill_loader.load_skill_resource(skill.name, resource_path, db=db)
+        if resource_content:
+            content = resource_content
+            from modules.agents.services.skill_loader import estimate_tokens
+            estimated_tokens = estimate_tokens(content)
+        else:
+            raise HTTPException(status_code=404, detail=f"Resource not found: {resource_path}")
+    return content, estimated_tokens
+
+
 @router.get("/{skill_id}/content", response_model=SkillContentResponse)
-async def get_skill_content(
+def get_skill_content(
     skill_id: int,
     level: int = Query(2, ge=1, le=3, description="Load level: 1=metadata, 2=core, 3=resource"),
     resource_path: Optional[str] = Query(None, description="Resource path for level 3"),
@@ -684,37 +725,7 @@ async def get_skill_content(
             raise HTTPException(status_code=404, detail="Skill not found")
 
         skill_loader = get_skill_loader(db)
-        content = ""
-        estimated_tokens = 0
-        
-        if level == 1:
-            # Level 1: Metadata
-            metadata = skill_loader.load_skill_metadata(skill.name, db=db)
-            if metadata:
-                content = str(metadata)
-                estimated_tokens = 50  # Rough estimate for metadata
-        
-        elif level == 2:
-            # Level 2: Core content
-            core_content = skill_loader.load_skill_core(skill.name, db=db)
-            if core_content:
-                content = core_content
-                from modules.agents.services.skill_loader import estimate_tokens
-                estimated_tokens = estimate_tokens(content)
-        
-        elif level == 3:
-            # Level 3: Resource
-            if not resource_path:
-                raise HTTPException(status_code=400, detail="resource_path required for level 3")
-            
-            resource_content = skill_loader.load_skill_resource(skill.name, resource_path, db=db)
-            if resource_content:
-                content = resource_content
-                from modules.agents.services.skill_loader import estimate_tokens
-                estimated_tokens = estimate_tokens(content)
-            else:
-                raise HTTPException(status_code=404, detail=f"Resource not found: {resource_path}")
-        
+        content, estimated_tokens = _get_skill_content_load(skill_loader, skill, level, resource_path, db)
         # Get available files
         files_available = []
         if hasattr(skill, 'files'):
@@ -737,7 +748,7 @@ async def get_skill_content(
 
 
 @router.post("/admin/cleanup-old-mappings", dependencies=[Depends(require_workspace_permission("workspace:manage"))])  # Admin endpoint to avoid route conflicts
-async def cleanup_old_skill_mappings(
+def cleanup_old_skill_mappings(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -789,7 +800,7 @@ async def cleanup_old_skill_mappings(
 
 
 @router.delete("/{skill_id}", dependencies=[Depends(require_workspace_permission("agents:delete"))])
-async def deactivate_skill(
+def deactivate_skill(
     skill_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -841,8 +852,39 @@ async def deactivate_skill(
 # Agent-Skill Assignment Endpoints
 # ============================================================================
 
+def _get_agent_skills_build(agent):
+    """Per-skill responses and combined token estimate for an agent."""
+    skills_out = []
+    total_tokens = 0
+    for skill in agent.skills:
+        est = len(skill.prompt_template or "") // 4 if skill.prompt_template else 0
+        total_tokens += est
+        skills_out.append(
+            EnhancedSkillResponse(
+                id=skill.id,
+                name=skill.name,
+                description=skill.description,
+                skill_type=skill.skill_type,
+                category=getattr(skill, 'category', None) or skill.skill_type,
+                skill_version=skill.skill_version,
+                skill_source=skill.skill_source,
+                git_repo_url=skill.git_repo_url,
+                git_commit_sha=skill.git_commit_sha,
+                filesystem_path=skill.filesystem_path,
+                tags=skill.tags or [],
+                is_active=skill.is_active,
+                created_at=skill.created_at,
+                updated_at=skill.updated_at,
+                last_sync_at=skill.last_sync_at,
+                files=[],
+                estimated_tokens=est,
+            )
+        )
+    return skills_out, total_tokens
+
+
 @router.get("/agents/{agent_id}/skills", response_model=AgentSkillsResponse)
-async def get_agent_skills(
+def get_agent_skills(
     agent_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -864,33 +906,7 @@ async def get_agent_skills(
 
         TOKEN_WARNING_THRESHOLD = 15_000
 
-        skills_out = []
-        total_tokens = 0
-        for skill in agent.skills:
-            est = len(skill.prompt_template or "") // 4 if skill.prompt_template else 0
-            total_tokens += est
-            skills_out.append(
-                EnhancedSkillResponse(
-                    id=skill.id,
-                    name=skill.name,
-                    description=skill.description,
-                    skill_type=skill.skill_type,
-                    category=getattr(skill, 'category', None) or skill.skill_type,
-                    skill_version=skill.skill_version,
-                    skill_source=skill.skill_source,
-                    git_repo_url=skill.git_repo_url,
-                    git_commit_sha=skill.git_commit_sha,
-                    filesystem_path=skill.filesystem_path,
-                    tags=skill.tags or [],
-                    is_active=skill.is_active,
-                    created_at=skill.created_at,
-                    updated_at=skill.updated_at,
-                    last_sync_at=skill.last_sync_at,
-                    files=[],
-                    estimated_tokens=est,
-                )
-            )
-
+        skills_out, total_tokens = _get_agent_skills_build(agent)
         warning = None
         if total_tokens > TOKEN_WARNING_THRESHOLD:
             warning = (
@@ -912,8 +928,32 @@ async def get_agent_skills(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _assign_skills_to_agent_resolve(db, ctx, skill_ids):
+    """Load the requested skills the caller may attach; 400 if any is missing."""
+    # Verify skills exist. PRD-172 F002: only global skills (workspace_id
+    # IS NULL) or skills owned by the caller's workspace are attachable —
+    # never another workspace's private SKILL.md (prompt-injection /
+    # exfiltration vector). Super-admins may attach any skill.
+    skill_query = db.query(Skill).filter(
+        Skill.id.in_(skill_ids),
+        Skill.is_active == True
+    )
+    if not _is_super_admin(ctx):
+        skill_query = skill_query.filter(
+            or_(
+                Skill.workspace_id.is_(None),
+                Skill.workspace_id == ctx.workspace_id,
+            )
+        )
+    skills = skill_query.all()
+
+    if len(skills) != len(skill_ids):
+        raise HTTPException(status_code=400, detail="One or more skills not found or inactive")
+    return skills
+
+
 @router.post("/agents/{agent_id}/skills", dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def assign_skills_to_agent(
+def assign_skills_to_agent(
     agent_id: int,
     skill_ids: List[int],
     replace: bool = Query(False, description="Replace existing skills instead of adding"),
@@ -940,26 +980,7 @@ async def assign_skills_to_agent(
         # another tenant's agent.
         _assert_agent_in_workspace(agent, ctx)
 
-        # Verify skills exist. PRD-172 F002: only global skills (workspace_id
-        # IS NULL) or skills owned by the caller's workspace are attachable —
-        # never another workspace's private SKILL.md (prompt-injection /
-        # exfiltration vector). Super-admins may attach any skill.
-        skill_query = db.query(Skill).filter(
-            Skill.id.in_(skill_ids),
-            Skill.is_active == True
-        )
-        if not _is_super_admin(ctx):
-            skill_query = skill_query.filter(
-                or_(
-                    Skill.workspace_id.is_(None),
-                    Skill.workspace_id == ctx.workspace_id,
-                )
-            )
-        skills = skill_query.all()
-
-        if len(skills) != len(skill_ids):
-            raise HTTPException(status_code=400, detail="One or more skills not found or inactive")
-
+        skills = _assign_skills_to_agent_resolve(db, ctx, skill_ids)
         # Assign skills
         if replace:
             agent.skills = skills
@@ -1001,7 +1022,7 @@ async def assign_skills_to_agent(
 
 
 @router.delete("/agents/{agent_id}/skills", dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def remove_skills_from_agent(
+def remove_skills_from_agent(
     agent_id: int,
     skill_ids: List[int] = Query(..., description="Skill IDs to remove"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1045,7 +1066,7 @@ async def remove_skills_from_agent(
 # ============================================================================
 
 @router.post("/recommend", response_model=List[SkillRecommendation], dependencies=[Depends(require_workspace_permission("agents:read"))])
-async def recommend_skills(
+def recommend_skills(
     request: SkillRecommendationRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)

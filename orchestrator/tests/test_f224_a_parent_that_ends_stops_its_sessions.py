@@ -252,7 +252,7 @@ def test_switching_a_heartbeat_off_stops_its_session(db_session, seed_workspace,
     others_beat = _ticket(db_session, ws, other, "heartbeat", f"agent:{other.id}")
     db_session.commit()
 
-    out = asyncio.run(toggle_heartbeat(agent.id, ctx=SimpleNamespace(workspace_id=ws), db=db_session))
+    out = toggle_heartbeat(agent.id, ctx=SimpleNamespace(workspace_id=ws), db=db_session)
     assert out["enabled"] is False
     db_session.refresh(beat)
     db_session.refresh(others_beat)

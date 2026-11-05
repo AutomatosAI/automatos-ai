@@ -300,7 +300,7 @@ def test_the_payload_refuses_any_other_mode():
 def test_the_get_echoes_the_mode_or_its_effective_default(block, echoed):
     import api.heartbeat as heartbeat_api
 
-    got = asyncio.run(heartbeat_api.get_agent_heartbeat_config(AGENT, ctx=NS(workspace_id=WS), db=_route_db(block)))
+    got = heartbeat_api.get_agent_heartbeat_config(AGENT, ctx=NS(workspace_id=WS), db=_route_db(block))
 
     assert got["mode"] == echoed
 

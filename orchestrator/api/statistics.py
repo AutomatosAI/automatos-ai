@@ -36,7 +36,7 @@ router = APIRouter(
 SYSTEM_START_TIME = time.time()
 
 @router.get("/agents/statistics", response_model=AgentStatistics)
-async def get_agent_statistics(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def get_agent_statistics(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get comprehensive agent statistics for dashboard"""
     try:
         # Basic agent counts - scoped to workspace
@@ -121,7 +121,7 @@ async def get_system_metrics(ctx: RequestContext = Depends(get_request_context_h
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/skills/statistics")
-async def get_skill_statistics(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def get_skill_statistics(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get skill-related statistics"""
     try:
         # Skills by category - scoped to workspace
@@ -174,7 +174,7 @@ async def get_skill_statistics(ctx: RequestContext = Depends(get_request_context
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/patterns/statistics")
-async def get_pattern_statistics(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def get_pattern_statistics(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get pattern-related statistics"""
     try:
         # Patterns by type - scoped to workspace
@@ -224,7 +224,7 @@ async def get_pattern_statistics(ctx: RequestContext = Depends(get_request_conte
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/performance/statistics")
-async def get_performance_statistics(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+def get_performance_statistics(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get performance-related statistics"""
     try:
         # Recent executions (last 24 hours)

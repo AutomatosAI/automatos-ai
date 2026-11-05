@@ -9,6 +9,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, Request, status
 from sqlalchemy import text
+from starlette.concurrency import run_in_threadpool
 
 from config import config
 from core.auth.bearer_registry import (
@@ -740,21 +741,31 @@ def require_task_context(required_scope: str) -> Callable:
     Purely additive: existing Clerk/env callers behave exactly as before. Wired
     only into ``api/board_tasks.py``; the shared dependency is not modified, so
     SDK-key acceptance does not leak to the other routers.
+
+    F105: the SDK key's lookups run in the threadpool, never on the event loop; the
+    log context is set on the request's own context.
     """
 
     async def _dep(request: Request) -> RequestContext:
         token = _get_bearer_token(request)
         if token and token.startswith(("ak_pub_", "ak_srv_")):
-            db = SessionLocal()
-            try:
-                return _resolve_sdk_key_context(
-                    request, db, required_scope=required_scope
-                )
-            finally:
-                db.close()
+            context = await run_in_threadpool(_sdk_key_context_in_own_session, request, required_scope)
+            _enrich_log_context(context)
+            return context
         return await get_request_context_hybrid(request)
 
     return _dep
+
+
+def _sdk_key_context_in_own_session(request: Request, required_scope: str) -> RequestContext:
+    """``_resolve_sdk_key_context`` on a session of its own, always closed (threadpool)."""
+    db = SessionLocal()
+    try:
+        return _resolve_sdk_key_context(
+            request, db, required_scope=required_scope
+        )
+    finally:
+        db.close()
 
 
 @resolve_registered_bearers
@@ -764,6 +775,11 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
     - Clerk JWT (Authorization: Bearer <jwt>) if Clerk JWKS is configured
     - API key (x-api-key) when ORCHESTRATOR_API_KEY/AUTOMATOS_API_KEY is set
     - Dev fallback (anonymous) when auth isn't configured
+
+    F105: every lane below is synchronous work (the Clerk token check, then the
+    workspace, membership and operator reads on a session of its own), so it runs in
+    the threadpool (``_resolve_request_context``), never on the event loop. The log
+    context is set here, on the request's own context, as the device lane sets it.
     """
 
     # Skip auth for OPTIONS requests (CORS preflight) - handled by CORS middleware
@@ -775,7 +791,13 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
             user=UserContext(),
             auth_type="anonymous"
         )
+    context = await run_in_threadpool(_resolve_request_context, request)
+    _enrich_log_context(context)
+    return context
 
+
+def _resolve_request_context(request: Request) -> RequestContext:
+    """The Clerk, API-key and anonymous lanes, in that order, on one session (threadpool)."""
     workspace_id = _get_workspace_id_from_request(request)
 
     # Check for admin "__all__" sentinel before UUID parsing discards it
@@ -791,163 +813,193 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
         # 1) Clerk JWT
         bearer = _get_bearer_token(request)
         if bearer:
-            clerk = get_clerk_auth()
-            claims = clerk.verify_token(bearer)
-            if claims:
-                info = clerk.extract_user_info(claims)
-                clerk_uid = info.get("clerk_user_id")
-
-                # Stamp last-seen before any branch below returns, so the admin
-                # console counts admin "__all__" calls as activity too.
-                _touch_last_seen(db, clerk_uid)
-
-                # Determine admin status
-                system_role = info.get("system_role") or info.get("role") or "user"
-                is_admin = system_role in ("admin", "super_admin")
-
-                # Admin "__all__" sentinel: aggregate across all workspaces (no filter)
-                if admin_all_workspaces and is_admin:
-                    # Resolve admin's own workspace for the UserContext, but return
-                    # workspace_id=None so endpoints return unfiltered (all workspaces)
-                    admin_home_ws = _resolve_workspace_for_clerk_user(
-                        db, clerk_user_id=clerk_uid,
-                        org_id=info.get("org_id"),
-                        email=info.get("email"),
-                        name=info.get("name"),
-                    )
-                    user = UserContext(
-                        id=info.get("clerk_user_id") or info.get("email"),
-                        email=info.get("email"),
-                        role=info.get("role") or "user",
-                        system_role=system_role,
-                        clerk_user_id=info.get("clerk_user_id"),
-                        org_id=info.get("org_id"),
-                        raw_claims=claims,
-                    )
-                    # workspace_id=None tells endpoints to skip workspace filter
-                    result = RequestContext(workspace_id=admin_home_ws, user=user, auth_type="clerk", admin_all_workspaces=True)
-                    _enrich_log_context(result)
-                    return result
-
-                # If client sent a workspace ID via header, verify the user has access
-                if workspace_id:
-                    if not _workspace_exists(db, workspace_id):
-                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
-
-                    # Admin bypass: admins can access any workspace
-                    if not is_admin and not _user_has_workspace_access(db, clerk_uid, workspace_id):
-                        logger.warning("Access denied: user %s tried to access workspace %s", clerk_uid, workspace_id)
-                        # Fall through to resolver instead of blocking -- user may have a stale
-                        # localStorage value from the old shared-workspace bug
-                        workspace_id = None
-
-                resolved = workspace_id or _resolve_workspace_for_clerk_user(
-                    db,
-                    clerk_user_id=clerk_uid,
-                    org_id=info.get("org_id"),
-                    email=info.get("email"),
-                    name=info.get("name"),
-                )
-                if not resolved:
-                    pending_token = _get_pending_invitation_token(db, info.get("email"))
-                    if pending_token:
-                        raise HTTPException(
-                            status_code=status.HTTP_409_CONFLICT,
-                            detail={
-                                "code": "pending_invitation",
-                                "redirect": f"/accept-invitation?token={pending_token}",
-                                "token": pending_token,
-                                "message": "Accept your pending invitation before continuing.",
-                            },
-                        )
-                    logger.warning("Auth failed: Workspace not resolved for user %s", info.get("email"))
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Workspace not resolved. Ensure client sends X-Workspace-ID or user has a workspace.",
-                    )
-                if not _workspace_exists(db, resolved):
-                    logger.warning("Auth failed: Workspace %s does not exist", resolved)
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
-                _assert_workspace_usable(db, resolved, is_admin=is_admin)
-
-                user = UserContext(
-                    id=info.get("clerk_user_id") or info.get("email"),
-                    email=info.get("email"),
-                    role=info.get("role") or "user",
-                    system_role=info.get("system_role") or info.get("role") or "user",
-                    clerk_user_id=info.get("clerk_user_id"),
-                    org_id=info.get("org_id"),
-                    raw_claims=claims,
-                )
-                result = RequestContext(workspace_id=resolved, user=user, auth_type="clerk")
-                _enrich_log_context(result)
-                return result
-
-            # If a bearer token is present but invalid, treat as unauthorized.
-            logger.warning("Auth failed: Invalid or expired Clerk token")
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+            return _clerk_context(db, bearer, workspace_id, admin_all_workspaces)
 
         # 2) API key
         provided_key = _get_api_key(request)
         if provided_key:
-            expected = config.ORCHESTRATOR_API_KEY
-            if expected and _hmac.compare_digest(provided_key, expected):
-                user = UserContext(id="api_key", email=None, role="admin", system_role="admin")
-                resolved = workspace_id
-                if not resolved:
-                    # Prefer env default if provided; otherwise resolve from DB.
-                    resolved = _parse_uuid(config.DEFAULT_WORKSPACE_ID) or _resolve_workspace_for_clerk_user(
-                        db, clerk_user_id=None, org_id=None
-                    )
-                if not resolved:
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace not resolved")
-                if not _workspace_exists(db, resolved):
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
-                # API keys are admin-equivalent (system_role="admin" above) — bypass disabled gate
-                _assert_workspace_usable(db, resolved, is_admin=True)
-                result = RequestContext(
-                    workspace_id=resolved, user=user, auth_type="api_key", api_key_id="env"
-                )
-                _enrich_log_context(result)
-                return result
-
-            logger.warning("Auth failed: Invalid API key provided")
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+            return _api_key_context(db, provided_key, workspace_id)
 
         # 3) Dev fallback
-        if require_auth:
-            logger.warning("Auth failed: Authentication required but no credentials provided (REQUIRE_AUTH=true)")
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
-
-        # Keep noisy warnings down unless explicitly enabled
-        if config.AUTH_DEBUG:
-            logger.info(
-                "Auth note: No credentials, using anonymous context (REQUIRE_AUTH=false)."
-            )
-
-        # Anonymous requests (only reachable when REQUIRE_AUTH is explicitly disabled)
-        resolved = workspace_id or _resolve_workspace_for_clerk_user(db, clerk_user_id=None, org_id=None)
-        if not resolved:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Workspace not resolved. Send X-Workspace-ID header or configure DEFAULT_WORKSPACE_ID.",
-            )
-        _assert_workspace_usable(db, resolved, is_admin=False)
-        # PRD-209 local edition: there is exactly one operator and it is their
-        # machine — the anonymous local session is the instance's SUPER admin
-        # (there is no platform above the operator of a self-hosted instance:
-        # system settings, credentials, admin analytics all belong to them).
-        # In saas, the anonymous dev-fallback remains a plain user.
-        if config.AUTH_EDITION == "local":
-            # PRD-233 S6: bind the operator's seeded users row (email-keyed; see
-            # _local_operator_user_context for why `id` is the email, never the
-            # PK). A missing row keeps PRD-209's email-only lane — never a 500.
-            anon_user = _local_operator_user_context(db) or \
-                UserContext(email=config.LOCAL_OPERATOR_EMAIL, system_role="super_admin")
-        else:
-            anon_user = UserContext()
-        result = RequestContext(workspace_id=resolved, user=anon_user, auth_type="anonymous")
-        _enrich_log_context(result)
-        return result
+        return _anonymous_context(db, workspace_id, require_auth)
     finally:
         db.close()
+
+
+def _clerk_context(db, bearer: str, workspace_id: Optional[UUID], admin_all_workspaces: bool) -> RequestContext:
+    """1) A Clerk JWT: the user's context in the workspace they may use, or 401."""
+    clerk = get_clerk_auth()
+    claims = clerk.verify_token(bearer)
+    if not claims:
+        # If a bearer token is present but invalid, treat as unauthorized.
+        logger.warning("Auth failed: Invalid or expired Clerk token")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+
+    info = clerk.extract_user_info(claims)
+    clerk_uid = info.get("clerk_user_id")
+
+    # Stamp last-seen before any branch below returns, so the admin
+    # console counts admin "__all__" calls as activity too.
+    _touch_last_seen(db, clerk_uid)
+
+    # Determine admin status
+    system_role = info.get("system_role") or info.get("role") or "user"
+    is_admin = system_role in ("admin", "super_admin")
+
+    # Admin "__all__" sentinel: aggregate across all workspaces (no filter)
+    if admin_all_workspaces and is_admin:
+        return _clerk_all_workspaces_context(db, claims, info, clerk_uid, system_role)
+
+    resolved = _clerk_workspace(db, info, clerk_uid, workspace_id, is_admin)
+
+    user = UserContext(
+        id=info.get("clerk_user_id") or info.get("email"),
+        email=info.get("email"),
+        role=info.get("role") or "user",
+        system_role=info.get("system_role") or info.get("role") or "user",
+        clerk_user_id=info.get("clerk_user_id"),
+        org_id=info.get("org_id"),
+        raw_claims=claims,
+    )
+    result = RequestContext(workspace_id=resolved, user=user, auth_type="clerk")
+    _enrich_log_context(result)
+    return result
+
+
+def _clerk_all_workspaces_context(db, claims: dict, info: dict, clerk_uid: Optional[str],
+                                  system_role: str) -> RequestContext:
+    """An admin's ``X-Workspace-ID: __all__``: every workspace, unfiltered."""
+    # Resolve admin's own workspace for the UserContext, but return
+    # workspace_id=None so endpoints return unfiltered (all workspaces)
+    admin_home_ws = _resolve_workspace_for_clerk_user(
+        db, clerk_user_id=clerk_uid,
+        org_id=info.get("org_id"),
+        email=info.get("email"),
+        name=info.get("name"),
+    )
+    user = UserContext(
+        id=info.get("clerk_user_id") or info.get("email"),
+        email=info.get("email"),
+        role=info.get("role") or "user",
+        system_role=system_role,
+        clerk_user_id=info.get("clerk_user_id"),
+        org_id=info.get("org_id"),
+        raw_claims=claims,
+    )
+    # workspace_id=None tells endpoints to skip workspace filter
+    result = RequestContext(workspace_id=admin_home_ws, user=user, auth_type="clerk", admin_all_workspaces=True)
+    _enrich_log_context(result)
+    return result
+
+
+def _clerk_workspace(db, info: dict, clerk_uid: Optional[str], workspace_id: Optional[UUID],
+                     is_admin: bool) -> UUID:
+    """The workspace a Clerk user's request runs in: the one it names if they may use it,
+    else theirs; 409 for a pending invitation, 400 when none resolves or it is gone,
+    403 when it is disabled (admins excepted)."""
+    # If client sent a workspace ID via header, verify the user has access
+    if workspace_id:
+        if not _workspace_exists(db, workspace_id):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
+
+        # Admin bypass: admins can access any workspace
+        if not is_admin and not _user_has_workspace_access(db, clerk_uid, workspace_id):
+            logger.warning("Access denied: user %s tried to access workspace %s", clerk_uid, workspace_id)
+            # Fall through to resolver instead of blocking -- user may have a stale
+            # localStorage value from the old shared-workspace bug
+            workspace_id = None
+
+    resolved = workspace_id or _resolve_workspace_for_clerk_user(
+        db,
+        clerk_user_id=clerk_uid,
+        org_id=info.get("org_id"),
+        email=info.get("email"),
+        name=info.get("name"),
+    )
+    if not resolved:
+        pending_token = _get_pending_invitation_token(db, info.get("email"))
+        if pending_token:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "pending_invitation",
+                    "redirect": f"/accept-invitation?token={pending_token}",
+                    "token": pending_token,
+                    "message": "Accept your pending invitation before continuing.",
+                },
+            )
+        logger.warning("Auth failed: Workspace not resolved for user %s", info.get("email"))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Workspace not resolved. Ensure client sends X-Workspace-ID or user has a workspace.",
+        )
+    if not _workspace_exists(db, resolved):
+        logger.warning("Auth failed: Workspace %s does not exist", resolved)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
+    _assert_workspace_usable(db, resolved, is_admin=is_admin)
+    return resolved
+
+
+def _api_key_context(db, provided_key: str, workspace_id: Optional[UUID]) -> RequestContext:
+    """2) The instance's env API key: an admin-equivalent context, or 401."""
+    expected = config.ORCHESTRATOR_API_KEY
+    if expected and _hmac.compare_digest(provided_key, expected):
+        user = UserContext(id="api_key", email=None, role="admin", system_role="admin")
+        resolved = workspace_id
+        if not resolved:
+            # Prefer env default if provided; otherwise resolve from DB.
+            resolved = _parse_uuid(config.DEFAULT_WORKSPACE_ID) or _resolve_workspace_for_clerk_user(
+                db, clerk_user_id=None, org_id=None
+            )
+        if not resolved:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace not resolved")
+        if not _workspace_exists(db, resolved):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
+        # API keys are admin-equivalent (system_role="admin" above) — bypass disabled gate
+        _assert_workspace_usable(db, resolved, is_admin=True)
+        result = RequestContext(
+            workspace_id=resolved, user=user, auth_type="api_key", api_key_id="env"
+        )
+        _enrich_log_context(result)
+        return result
+
+    logger.warning("Auth failed: Invalid API key provided")
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+
+
+def _anonymous_context(db, workspace_id: Optional[UUID], require_auth: bool) -> RequestContext:
+    """3) No credential: 401 when auth is required, else the anonymous context."""
+    if require_auth:
+        logger.warning("Auth failed: Authentication required but no credentials provided (REQUIRE_AUTH=true)")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    # Keep noisy warnings down unless explicitly enabled
+    if config.AUTH_DEBUG:
+        logger.info(
+            "Auth note: No credentials, using anonymous context (REQUIRE_AUTH=false)."
+        )
+
+    # Anonymous requests (only reachable when REQUIRE_AUTH is explicitly disabled)
+    resolved = workspace_id or _resolve_workspace_for_clerk_user(db, clerk_user_id=None, org_id=None)
+    if not resolved:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Workspace not resolved. Send X-Workspace-ID header or configure DEFAULT_WORKSPACE_ID.",
+        )
+    _assert_workspace_usable(db, resolved, is_admin=False)
+    # PRD-209 local edition: there is exactly one operator and it is their
+    # machine — the anonymous local session is the instance's SUPER admin
+    # (there is no platform above the operator of a self-hosted instance:
+    # system settings, credentials, admin analytics all belong to them).
+    # In saas, the anonymous dev-fallback remains a plain user.
+    if config.AUTH_EDITION == "local":
+        # PRD-233 S6: bind the operator's seeded users row (email-keyed; see
+        # _local_operator_user_context for why `id` is the email, never the
+        # PK). A missing row keeps PRD-209's email-only lane — never a 500.
+        anon_user = _local_operator_user_context(db) or \
+            UserContext(email=config.LOCAL_OPERATOR_EMAIL, system_role="super_admin")
+    else:
+        anon_user = UserContext()
+    result = RequestContext(workspace_id=resolved, user=anon_user, auth_type="anonymous")
+    _enrich_log_context(result)
+    return result

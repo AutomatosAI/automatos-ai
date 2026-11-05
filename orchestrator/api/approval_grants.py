@@ -106,7 +106,7 @@ def _audit(db: Session, ctx: RequestContext, action: str, grant: ApprovalGrant) 
 
 
 @router.get("")
-async def list_grants(
+def list_grants(
     status: Optional[str] = None,
     kind: Optional[str] = None,
     ctx: RequestContext = Depends(require_workspace_answerer),
@@ -281,7 +281,7 @@ def _cas_resolve_grant(
 
 @router.post("/{grant_id}/deny")
 @remembers_the_decision(DECLINED)  # P256-FIX-N13-4: a decline is remembered too
-async def deny_approval(
+def deny_approval(
     grant_id: int,
     ctx: RequestContext = Depends(require_workspace_answerer),
     db: Session = Depends(get_db),
@@ -323,7 +323,7 @@ async def deny_approval(
 
 
 @router.post("/{grant_id}/revoke")
-async def revoke_approval(
+def revoke_approval(
     grant_id: int,
     ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),

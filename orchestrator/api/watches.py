@@ -66,7 +66,7 @@ def _event_to_dict(event: WatchEvent) -> Dict[str, Any]:
     "",
     dependencies=[Depends(require_workspace_permission("missions:read"))],
 )
-async def list_watches(
+def list_watches(
     status: Optional[str] = Query(
         None, description="Filter by exact watch status (e.g. 'watching')"
     ),
@@ -101,7 +101,7 @@ async def list_watches(
     "/{watch_id}",
     dependencies=[Depends(require_workspace_permission("missions:read"))],
 )
-async def get_watch(
+def get_watch(
     watch_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -129,7 +129,7 @@ async def get_watch(
     "/{watch_id}/cancel",
     dependencies=[Depends(require_workspace_permission("missions:update"))],
 )
-async def cancel_watch(
+def cancel_watch(
     watch_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

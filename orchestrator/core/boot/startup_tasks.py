@@ -5,7 +5,8 @@ fire-and-forget from ``main.py`` whose failures were only ``logger.warning``-ed.
 Extracted here they are importable + unit-testable, and on failure they now also
 fire ``record_error(subsystem="startup")`` so a failed boot seed surfaces on the
 ERRORS-by-subsystem dashboard tile instead of dying silently. The action-index
-warm-up (#927) and the output-budget load (#836) follow the same contract.
+warm-up (#927), the output-budget load (#836) and the first-turn module load
+(F105) follow the same contract.
 
 Every function here is *self-guarding*: it never raises, so launching it with a
 bare ``create_task`` cannot leave an unretrieved task exception.
@@ -19,12 +20,21 @@ loop held every request and made APScheduler miss its jobs.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import logging
 from typing import Set
 
 from core.utils.exception_telemetry import record_error
 
 logger = logging.getLogger(__name__)
+
+# Modules a chat turn imports on first use: the knowledge-graph section's graph service
+# (modules/context/sections/graph_context.py) and the platform actions' executor, with its
+# handler modules (modules/tools/execution/exec_platform.py).
+FIRST_TURN_MODULES = (
+    "modules.knowledge.graph_service",
+    "modules.tools.discovery.platform_executor",
+)
 
 # Long-lived refresh tasks, held so the loop does not drop them.
 _refreshers: Set["asyncio.Task[None]"] = set()
@@ -119,6 +129,34 @@ async def warm_action_index_on_startup() -> None:
     except Exception as exc:
         logger.warning("#927: warming the action index failed (non-fatal): %s", exc, exc_info=True)
         record_error(subsystem="startup", operation="warm_action_index", error=exc)
+
+
+def _load_first_turn_modules() -> None:
+    """The tiktoken encoding and ``FIRST_TURN_MODULES``, each loaded once per process."""
+    from core.context_guard import get_tokenizer
+
+    get_tokenizer()
+    for name in FIRST_TURN_MODULES:
+        importlib.import_module(name)
+
+
+async def warm_first_turn_on_startup() -> None:
+    """Load what a worker's first chat turn would otherwise load on the event loop (F105).
+
+    A self-hosted install's loop watchdog caught them on 4 Nov: the first platform
+    action's ``import modules.tools.discovery.platform_executor`` (its ~100 handler
+    modules, 12.4 s), the knowledge-graph section's first ``import
+    modules.knowledge.graph_service`` (networkx and graphify, 3.9 s) and the context
+    guard's tiktoken encoding. Each is a once-per-process cost, so every worker pays it
+    here, in a worker thread, before its first turn does. Non-fatal: any failure is
+    logged + recorded.
+    """
+    try:
+        await asyncio.to_thread(_load_first_turn_modules)
+        logger.info("F105: first-turn modules loaded (tokenizer, %s)", ", ".join(FIRST_TURN_MODULES))
+    except Exception as exc:
+        logger.warning("F105: loading the first-turn modules failed (non-fatal): %s", exc, exc_info=True)
+        record_error(subsystem="startup", operation="warm_first_turn", error=exc)
 
 
 async def warm_output_budgets_on_startup() -> None:

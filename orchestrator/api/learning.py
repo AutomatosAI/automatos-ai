@@ -35,7 +35,7 @@ class FeedbackProcessRequest(BaseModel):
 router = APIRouter(prefix="/api/learning", tags=["🧠 Learning"])
 
 @router.post("/feedback", dependencies=[Depends(require_workspace_permission("agents:execute"))])
-async def submit_feedback(
+def submit_feedback(
     request: FeedbackRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -64,7 +64,7 @@ async def submit_feedback(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/feedback/process", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def process_feedback(
+def process_feedback(
     request: FeedbackProcessRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -91,7 +91,7 @@ async def process_feedback(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/insights/aggregate")
-async def aggregate_insights(
+def aggregate_insights(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     period: Optional[str] = "last_30_days",
     db: Session = Depends(get_db)
@@ -131,7 +131,7 @@ async def aggregate_insights(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/effectiveness-report")
-async def effectiveness_report(
+def effectiveness_report(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):

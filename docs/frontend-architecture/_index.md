@@ -5,34 +5,27 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/DESIGN_SYSTEM.md](frontend/DESIGN_SYSTEM.md)
-- [frontend/app/accept-invitation/page.tsx](frontend/app/accept-invitation/page.tsx)
-- [frontend/app/reset-password/page.tsx](frontend/app/reset-password/page.tsx)
-- [frontend/app/sso-callback/page.tsx](frontend/app/sso-callback/page.tsx)
-- [frontend/components/auth/sign-in-form.tsx](frontend/components/auth/sign-in-form.tsx)
+- [frontend/app/layout.tsx](frontend/app/layout.tsx)
+- [frontend/components/__tests__/theme-choice-opt-in.test.tsx](frontend/components/__tests__/theme-choice-opt-in.test.tsx)
+- [frontend/components/marketplace/themes/install-use.tsx](frontend/components/marketplace/themes/install-use.tsx)
 - [frontend/components/providers.tsx](frontend/components/providers.tsx)
-- [frontend/components/shared/empty-state.tsx](frontend/components/shared/empty-state.tsx)
-- [frontend/components/shared/index.ts](frontend/components/shared/index.ts)
-- [frontend/components/shared/page-header.tsx](frontend/components/shared/page-header.tsx)
-- [frontend/components/ui/dialog.tsx](frontend/components/ui/dialog.tsx)
-- [frontend/components/ui/glossary-tooltip.tsx](frontend/components/ui/glossary-tooltip.tsx)
-- [frontend/components/ui/input.tsx](frontend/components/ui/input.tsx)
-- [frontend/components/ui/select.tsx](frontend/components/ui/select.tsx)
-- [frontend/components/ui/tabs.tsx](frontend/components/ui/tabs.tsx)
+- [frontend/components/settings/themes/__tests__/appearance-tab.test.tsx](frontend/components/settings/themes/__tests__/appearance-tab.test.tsx)
+- [frontend/components/settings/themes/__tests__/install-signature.test.tsx](frontend/components/settings/themes/__tests__/install-signature.test.tsx)
+- [frontend/components/settings/themes/__tests__/scan-report.test.ts](frontend/components/settings/themes/__tests__/scan-report.test.ts)
+- [frontend/components/settings/themes/__tests__/theme-fixtures.tsx](frontend/components/settings/themes/__tests__/theme-fixtures.tsx)
+- [frontend/components/settings/themes/choose-install.tsx](frontend/components/settings/themes/choose-install.tsx)
+- [frontend/components/settings/themes/installed-list.tsx](frontend/components/settings/themes/installed-list.tsx)
+- [frontend/components/settings/themes/installed-row.tsx](frontend/components/settings/themes/installed-row.tsx)
+- [frontend/components/settings/themes/scan-report.tsx](frontend/components/settings/themes/scan-report.tsx)
+- [frontend/components/settings/themes/theme-labels.ts](frontend/components/settings/themes/theme-labels.ts)
 - [frontend/components/ui/theme-toggle.tsx](frontend/components/ui/theme-toggle.tsx)
-- [frontend/components/workflows/json-schema-editor.tsx](frontend/components/workflows/json-schema-editor.tsx)
-- [frontend/components/workflows/playbook-step-progress.tsx](frontend/components/workflows/playbook-step-progress.tsx)
-- [frontend/components/workflows/theater/theater-step-execution.tsx](frontend/components/workflows/theater/theater-step-execution.tsx)
-- [frontend/hooks/use-studio-theme.ts](frontend/hooks/use-studio-theme.ts)
-- [frontend/lib/design-utils.ts](frontend/lib/design-utils.ts)
-- [frontend/lib/glossary.ts](frontend/lib/glossary.ts)
-- [frontend/lib/studio-menu.ts](frontend/lib/studio-menu.ts)
-- [frontend/middleware.ts](frontend/middleware.ts)
-- [frontend/next.config.js](frontend/next.config.js)
-- [frontend/package-lock.json](frontend/package-lock.json)
-- [frontend/package.json](frontend/package.json)
+- [frontend/hooks/use-global-search.ts](frontend/hooks/use-global-search.ts)
+- [frontend/hooks/use-installed-themes.ts](frontend/hooks/use-installed-themes.ts)
+- [frontend/lib/theme-host/__tests__/choice-sync.test.tsx](frontend/lib/theme-host/__tests__/choice-sync.test.tsx)
+- [frontend/lib/theme-host/choice-sync.ts](frontend/lib/theme-host/choice-sync.ts)
+- [frontend/scripts/__tests__/frontend-ci-lane-paths.test.ts](frontend/scripts/__tests__/frontend-ci-lane-paths.test.ts)
 - [frontend/tailwind.config.ts](frontend/tailwind.config.ts)
-- [orchestrator/alembic/versions/add_clerk_invitation_id.py](orchestrator/alembic/versions/add_clerk_invitation_id.py)
+- [orchestrator/services/themes/review_stage.py](orchestrator/services/themes/review_stage.py)
 
 </details>
 
@@ -40,171 +33,144 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This document describes the technical architecture of the Automatos AI frontend application, including its Next.js structure, state management patterns, component hierarchies, and the "Studio" rebrand design system. The frontend serves as the primary interface for managing autonomous agents, complex workflows (Playbooks), and multi-agent coordination (Missions).
+The frontend is the Next.js application layer for Automatos AI. Its root layout resolves appearance settings before rendering and wraps application content in shared client-side providers, including authentication, workspace, theme, and React Query providers [frontend/app/layout.tsx:33-70]()[frontend/components/providers.tsx:92-140](). This parent page maps the main frontend concerns and points to child pages for implementation details.
+
+Sources: [frontend/app/layout.tsx:33-70](), [frontend/components/providers.tsx:92-140]()
 
 ---
 
-## Next.js Application Structure
+## 19.1. Application Structure
 
-The frontend is built with **Next.js** using the App Router. It features a dual-shell architecture that supports both a "Classic" glassmorphic look and a high-editorial "Studio" theme [frontend/components/providers.tsx:93-94](). The `next.config.js` file defines build configurations, security headers, and redirects [frontend/next.config.js:13-122]().
+The application’s root entry point is `RootLayout`, which reads cookies and resolves the initial UI style and theme boot before rendering the document [frontend/app/layout.tsx:33-52](). It then mounts `Providers` around the page content [frontend/app/layout.tsx:53-70](). `Providers` composes the shared authentication, role, appearance, query, workspace, and theme-host boundaries [frontend/components/providers.tsx:92-140]().
 
-### Project Layout
+For details on App Router pages, layout hierarchy, middleware, `next.config`, providers, and package tooling, see [Application Structure](#19.1).
 
-```
-frontend/
-├── app/                          # Next.js App Router pages
-│   ├── globals.css              # Design system tokens & themes [frontend/app/globals.css:1-236]()
-│   └── assignments/             # Mission & Playbook hub [frontend/app/assignments/page.tsx]()
-├── components/                   # React components
-│   ├── layout/                  # MainLayout, Sidebar, StudioHeader [frontend/components/layout/main-layout.tsx:1-30]()
-│   ├── assignments/             # Studio-specific workforce components [frontend/components/assignments/studio/assignments-hub.tsx:1-41]()
-│   └── ui/                      # Shadcn/ui primitives [frontend/tailwind.config.ts:38-42]()
-├── hooks/                       # Theme detection & API hooks [frontend/hooks/use-studio-theme.ts:1-43]()
-├── lib/                         # Menu definitions & API client [frontend/lib/studio-menu.ts:1-72]()
-└── contexts/                    # RBAC and workspace contexts [frontend/components/providers.tsx:89-100]()
-```
-
-**Sources:** [frontend/app/globals.css:1-236](), [frontend/components/layout/main-layout.tsx:1-30](), [frontend/lib/studio-menu.ts:1-72](), [frontend/next.config.js:13-122]()
-
-### Theme & Layout Orchestration
-
-The `Providers` component wraps the entire application, providing context for authentication, theming, and data fetching [frontend/components/providers.tsx:76-114](). It includes a `ThemeProvider` that supports `light`, `dark`, `matte`, and `studio` themes, with the `studio` theme being activated via a URL flag and persisted in local storage [frontend/components/providers.tsx:90-94](), [frontend/hooks/use-studio-theme.ts:16-26]().
-
-**Sources:** [frontend/components/providers.tsx:76-114](), [frontend/hooks/use-studio-theme.ts:16-26]()
-
----
-
-## State Management & Data Fetching
-
-The application uses **TanStack React Query** for server state management, configured with a 1-minute default `staleTime` [frontend/components/providers.tsx:78-85](). Client-side state is managed using a combination of React Context and Zustand stores.
-
-### State Architecture Diagram
+**Diagram: From the Application Shell to Its Code Entities**
 
 ```mermaid
-graph TB
-    subgraph "Frontend Application"
-        UI["UI Components"]
-        Hooks["React Query Hooks<br/>(e.g., useMissions, usePlaybooks)"]
-        ZustandStores["Zustand Stores<br/>(Client-side state)"]
-    end
+graph TD
+    RootLayout["RootLayout"]
+    layoutFile["frontend/app/layout.tsx"]
+    Providers["Providers"]
+    providersFile["frontend/components/providers.tsx"]
+    QueryClientProvider["QueryClientProvider"]
+    WorkspaceProvider["WorkspaceProvider"]
+    AuthBoundary["AuthBoundary"]
 
-    subgraph "Data Flow"
-        UI --> Hooks
-        Hooks --> QueryClient["QueryClient<br/>(staleTime: 1m)"]
-        QueryClient --> APIClient["API Client<br/>(Clerk token, ws header)"]
-        APIClient --> BackendAPI["Backend API<br/>(FastAPI)"]
-        UI --> ZustandStores
-    end
-
-    subgraph "Context Providers"
-        AuthBoundary["AuthBoundary<br/>(ClerkProvider / LocalAuthProvider)"]
-        RoleProvider["RoleProvider<br/>(RBAC context)"]
-        ThemeProvider["ThemeProvider<br/>(Theme context)"]
-        WorkspaceProvider["WorkspaceProvider<br/>(Workspace ID context)"]
-    end
-
-    AuthBoundary --> RoleProvider
-    RoleProvider --> ThemeProvider
-    ThemeProvider --> WorkspaceProvider
-    WorkspaceProvider --> QueryClient
-    WorkspaceProvider --> UI
+    RootLayout --> layoutFile
+    RootLayout --> Providers
+    Providers --> providersFile
+    Providers --> AuthBoundary
+    Providers --> QueryClientProvider
+    Providers --> WorkspaceProvider
 ```
 
-**Sources:** [frontend/components/providers.tsx:78-113](), [frontend/hooks/use-studio-theme.ts:1-43](), [frontend/lib/api-client.ts]()
-
-### Authentication Editions
-
-The frontend supports two authentication modes defined in `AuthBoundary` [frontend/components/providers.tsx:29-75]():
-*   **SaaS Edition:** Uses **Clerk** for JWT management and user profiles [frontend/components/providers.tsx:33-74](). The `middleware.ts` file uses `clerkMiddleware` to protect routes [frontend/middleware.ts:20-23]().
-*   **Local Edition:** Uses `LocalAuthProvider`, a no-op token getter for self-hosted environments [frontend/components/providers.tsx:30-32](). In this edition, `middleware.ts` acts as a pass-through, making all routes public [frontend/middleware.ts:27-27]().
-
-**Sources:** [frontend/components/providers.tsx:29-75](), [frontend/middleware.ts:1-33]()
+Sources: [frontend/app/layout.tsx:33-70](), [frontend/components/providers.tsx:34-40](), [frontend/components/providers.tsx:92-140]()
 
 ---
 
-## UI Component Patterns
+## 19.2. State Management & Hooks
 
-### Studio Design System
+The shared provider tree creates a React Query `QueryClient` with a one-minute default query `staleTime` and one retry, then provides it to the application [frontend/components/providers.tsx:99-107](). Workspace and UI-style state are also exposed through providers in that tree [frontend/components/providers.tsx:121-137](). Theme choice synchronization uses React Query-related hooks and workspace context, connecting server-held choices to the active UI style [frontend/lib/theme-host/choice-sync.ts:13-20]()[frontend/lib/theme-host/choice-sync.ts:56-64]().
 
-The "Studio" theme introduces an editorial-first design language characterized by:
-*   **Typography:** Serif headlines (`Tiempos Headline`) paired with Mono detail surfaces (`JetBrains Mono`) [frontend/tailwind.config.ts:17-30]().
-*   **Editorial Headers:** The `PageHeader` component supports an `eyebrow` (mono uppercase) and a `lede` (relaxed paragraph) to establish context [frontend/components/shared/page-header.tsx:38-86]().
-*   **Color Palette:** A "Cream Paper" aesthetic using CSS variables like `--background` and `--primary` (near-black) [frontend/app/globals.css:210-225]().
-*   **Shadcn/ui:** The project leverages Shadcn/ui primitives for consistent and accessible UI components [frontend/package.json:51-77]().
+For the React Query hooks catalog, query key conventions, `wsScope`, stores, cache invalidation, and optimistic updates, see [State Management & Hooks](#19.2).
 
-**Sources:** [frontend/tailwind.config.ts:17-30](), [frontend/components/shared/page-header.tsx:38-86](), [frontend/app/globals.css:210-225](), [frontend/package.json:51-77]()
+Sources: [frontend/components/providers.tsx:99-107](), [frontend/components/providers.tsx:121-137](), [frontend/lib/theme-host/choice-sync.ts:13-20](), [frontend/lib/theme-host/choice-sync.ts:56-64]()
 
-### Navigation Mapping
+---
 
-The navigation system uses a single source of truth in `STUDIO_MENU_PRIMARY`, grouping routes into `OPERATIONS`, `WORKFORCE`, and `WORKSPACE` [frontend/lib/studio-menu.ts:55-72](). The `resolveActiveMenuId` function maps current pathnames to active menu items [frontend/lib/studio-menu.ts:105-125]().
+## 19.3. API Client
+
+The provider tree selects an authentication boundary based on the configured edition: SaaS uses `ClerkProvider` and `ClerkApiClientProvider`, while local mode uses `LocalAuthProvider` [frontend/components/providers.tsx:29-40]()[frontend/components/providers.tsx:76-79](). Frontend components also call `apiClient`; for example, global search requests task and agent results through it [frontend/hooks/use-global-search.ts:106-110]()[frontend/hooks/use-global-search.ts:124-133]().
+
+For `apiClient` implementation details, authentication injection, workspace headers, and error handling, see [API Client](#19.3).
+
+**Diagram: Authentication Boundary and API Call Sites**
 
 ```mermaid
-graph LR
-    subgraph "Natural Language Concepts"
-        Operations["Daily Operations"]
-        Workforce["Agent & Capability Management"]
-        WorkspaceAdmin["Workspace Administration"]
-    end
+graph TD
+    Providers["Providers"]
+    AuthBoundary["AuthBoundary"]
+    ClerkProvider["ClerkProvider"]
+    ClerkApiClientProvider["ClerkApiClientProvider"]
+    LocalAuthProvider["LocalAuthProvider"]
+    globalSearch["frontend/hooks/use-global-search.ts"]
+    apiClient["apiClient"]
+    request["apiClient.request"]
 
-    subgraph "Frontend Code Entities (lib/studio-menu.ts)"
-        Chat["id: 'chat'<br/>href: '/chat'"]
-        CommandCentre["id: 'cmd'<br/>href: '/command-center'"]
-        Assignments["id: 'assign'<br/>href: '/assignments'"]
-        Deliverables["id: 'deliv'<br/>href: '/deliverables'"]
-
-        AgentManagement["id: 'agents'<br/>href: '/agents'"]
-        ToolsIntegrations["id: 'tools'<br/>href: '/tools'"]
-        KnowledgeBase["id: 'kb'<br/>href: '/documents'"]
-        Marketplace["id: 'market'<br/>href: '/marketplace'"]
-
-        TeamManagement["id: 'team'<br/>href: '/team'"]
-        Analytics["id: 'analytics'<br/>href: '/analytics'"]
-        WorkspaceAdminPage["id: 'admin'<br/>href: '/admin/workspaces'"]
-    end
-
-    Operations --> Chat
-    Operations --> CommandCentre
-    Operations --> Assignments
-    Operations --> Deliverables
-
-    Workforce --> AgentManagement
-    Workforce --> ToolsIntegrations
-    Workforce --> KnowledgeBase
-    Workforce --> Marketplace
-
-    WorkspaceAdmin --> TeamManagement
-    WorkspaceAdmin --> Analytics
-    WorkspaceAdmin --> WorkspaceAdminPage
-
-    style Chat fill:#fff,stroke:#333,stroke-width:2px
-    style CommandCentre fill:#fff,stroke:#333,stroke-width:2px
-    style Assignments fill:#fff,stroke:#333,stroke-width:2px
-    style Deliverables fill:#fff,stroke:#333,stroke-width:2px
-    style AgentManagement fill:#fff,stroke:#333,stroke-width:2px
-    style ToolsIntegrations fill:#fff,stroke:#333,stroke-width:2px
-    style KnowledgeBase fill:#fff,stroke:#333,stroke-width:2px
-    style Marketplace fill:#fff,stroke:#333,stroke-width:2px
-    style TeamManagement fill:#fff,stroke:#333,stroke-width:2px
-    style Analytics fill:#fff,stroke:#333,stroke-width:2px
-    style WorkspaceAdminPage fill:#fff,stroke:#333,stroke-width:2px
+    Providers --> AuthBoundary
+    AuthBoundary --> ClerkProvider
+    ClerkProvider --> ClerkApiClientProvider
+    AuthBoundary --> LocalAuthProvider
+    globalSearch --> apiClient
+    apiClient --> request
 ```
 
-**Sources:** [frontend/lib/studio-menu.ts:55-72](), [frontend/lib/studio-menu.ts:105-125]()
+Sources: [frontend/components/providers.tsx:29-40](), [frontend/components/providers.tsx:76-79](), [frontend/hooks/use-global-search.ts:106-110](), [frontend/hooks/use-global-search.ts:124-133]()
 
 ---
 
-## Child Pages
+## 19.4. Design System & UI Components
 
-For deep technical details on specific frontend subsystems, refer to the following child pages:
+Tailwind configuration defines the frontend’s content paths, class-based dark mode, font families, and semantic color tokens [frontend/tailwind.config.ts:3-33]()[frontend/tailwind.config.ts:46-105](). Appearance selection distinguishes the Style axis (Classic, Studio, and installed themes) from the Tone axis (Light, Dark, System) in `ThemeToggle` [frontend/components/ui/theme-toggle.tsx:94-119]()[frontend/components/ui/theme-toggle.tsx:135-163]().
 
-*   [Application Structure](#19.1) — Next.js App router, page components, and layout hierarchy.
-*   [State Management](#19.2) — React Query hooks, query keys with `wsScope`, and optimistic updates.
-*   [API Client](#19.3) — `apiClient` implementation, authentication injection, and workspace context.
-*   [UI Component Patterns & Design System](#19.4) — Shared components (StatsBar, page-header, item-card, empty-state), Shadcn/ui primitives, Tailwind theme, premium icons and icon registry, glossary tooltips, DESIGN_SYSTEM.md.
-*   [Navigation & Layout](#19.5) — Sidebar navigation, role-based filtering, and page context tracking.
-*   [Settings UI](#19.6) — SettingsPanel and its tabs: System, LLM models, system LLM, credentials, channels, webhooks, notifications, API keys, session mode, widget SDK, icons.
-*   Play — not part of core since PRD-261 A-19. Play is an installed theme like any other (`automatos/play`): the theme kit builds and releases its package, and the kit's `themes/play/README.md` describes its pages, looks, fonts and Auto. How core hosts any theme: [CSS layer model](../theme-host/css-layer-model.md), [placement slots](../theme-host/placement-reach.md), [SDK surface map](../theme-host/sdk-surface-map.md) and [the mobile block](../theme-host/mobile.md).
+For shared components, Tailwind theme, Shadcn/ui, premium icons and icon registry, glossary tooltips, and Studio versus Classic themes, see [Design System & UI Components](#19.4).
 
-**Sources:** [frontend/components/providers.tsx:1-114]()
+Sources: [frontend/tailwind.config.ts:3-33](), [frontend/tailwind.config.ts:46-105](), [frontend/components/ui/theme-toggle.tsx:94-119](), [frontend/components/ui/theme-toggle.tsx:135-163]()
+
+---
+
+## 19.5. Navigation & Layout
+
+The shared provider tree mounts `GlobalSearch` alongside the page content [frontend/components/providers.tsx:127-140](). The global search hook defines core navigation results, including routes for Agents, Chat, Analytics, Marketplace, Settings, and Command Center [frontend/hooks/use-global-search.ts:36-55](). It can also add pages from the active theme’s navigation registry [frontend/hooks/use-global-search.ts:60-66]().
+
+For sidebars, headers, mobile navigation, profile menus, role-based filtering, and Studio menu configuration, see [Navigation & Layout](#19.5).
+
+Sources: [frontend/components/providers.tsx:127-140](), [frontend/hooks/use-global-search.ts:36-55](), [frontend/hooks/use-global-search.ts:60-66]()
+
+---
+
+## 19.6. Settings Panels
+
+The supplied frontend files show theme management as one settings area: `InstalledList` loads installed themes and the active choice, then renders `InstalledRow` entries [frontend/components/settings/themes/installed-list.tsx:35-67](). Rows display theme status and expose management actions such as setting a default, reviewing an update, rolling back, and uninstalling [frontend/components/settings/themes/installed-row.tsx:46-74]()[frontend/components/settings/themes/installed-row.tsx:99-133]().
+
+For the `SettingsPanel` and its system settings, LLM models, API keys, webhooks, channels, notifications, widget SDK, session mode, and Composio deny-list tabs, see [Settings Panels](#19.6).
+
+Sources: [frontend/components/settings/themes/installed-list.tsx:35-67](), [frontend/components/settings/themes/installed-row.tsx:46-74](), [frontend/components/settings/themes/installed-row.tsx:99-133]()
+
+---
+
+## 19.7. Looks, Theme Host & Play Shell
+
+`RootLayout` resolves the initial theme boot and passes the resulting style, tone, and installed theme into `Providers` [frontend/app/layout.tsx:45-51]()[frontend/app/layout.tsx:67-69](). The layout renders `ThemeImportMap` and `ThemeBootScripts` in the document head [frontend/app/layout.tsx:59-65](). Within the provider tree, `ThemeHostProvider` and `ThemeLookRuntime` wrap application content [frontend/components/providers.tsx:131-138](). Theme selection is handled through `useChooseStyle`, which stores choices through the theme-choice synchronization flow [frontend/lib/theme-host/choice-sync.ts:5-12]().
+
+For the PRD-261 looks token store and presets, look editor, theme-host loader, import maps, `theme-sdk` `defineTheme`, safe mode, and Play shell, see [Looks, Theme Host & Play Shell](#19.7).
+
+**Diagram: Theme Choice from User Interface to Theme Runtime**
+
+```mermaid
+graph TD
+    ThemeToggle["ThemeToggle"]
+    toggleFile["frontend/components/ui/theme-toggle.tsx"]
+    useChooseStyle["useChooseStyle"]
+    choiceSync["frontend/lib/theme-host/choice-sync.ts"]
+    RootLayout["RootLayout"]
+    themeBoot["createThemeBootResolver"]
+    ThemeImportMap["ThemeImportMap"]
+    ThemeBootScripts["ThemeBootScripts"]
+    ThemeHostProvider["ThemeHostProvider"]
+    ThemeLookRuntime["ThemeLookRuntime"]
+
+    ThemeToggle --> toggleFile
+    toggleFile --> useChooseStyle
+    useChooseStyle --> choiceSync
+    RootLayout --> themeBoot
+    RootLayout --> ThemeImportMap
+    RootLayout --> ThemeBootScripts
+    RootLayout --> ThemeHostProvider
+    ThemeHostProvider --> ThemeLookRuntime
+```
+
+Sources: [frontend/components/ui/theme-toggle.tsx:99-119](), [frontend/lib/theme-host/choice-sync.ts:5-12](), [frontend/app/layout.tsx:45-65](), [frontend/components/providers.tsx:131-138]()
 
 ---

@@ -232,10 +232,10 @@ def test_the_session_token_config_never_carries_the_workspace_name(edition, monk
     monkeypatch.setattr(session_mod, "WIDGET_TOKEN_SECRET", secrets.token_hex(32))  # throwaway, per run
     monkeypatch.setattr(session_mod, "ApiKeyService", NS(validate_api_key=lambda db, raw_key: key_record))
 
-    response = asyncio.run(session_mod.exchange_session_token(
+    response = session_mod.exchange_session_token(
         request=session_mod.SessionTokenRequest(api_key="throwaway-test-key"),
         db=_db(site=None, workspace=workspace),
-    ))
+    )
     assert response.widget_config == {"ai_disclosure": _notice("You are chatting with an AI assistant.")}
     _assert_no_leak(response.widget_config)
 

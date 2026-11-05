@@ -35,7 +35,7 @@ The Marketplace API serves as the bridge between global community assets and pri
 - **Discovery**: Filtering and searching across multiple entity types (Agents, Recipes, LLMs, Plugins, Skills). [orchestrator/api/marketplace_plugins.py:169-180](), [orchestrator/api/llm_marketplace.py:212-225]()
 - **Installation (Cloning)**: The process of deep-copying a marketplace template into a workspace-private instance. [orchestrator/api/llm_marketplace.py:265-275]()
 - **Plugin Management**: Browsing and enabling specialized agent capabilities via manifest-driven plugins. [orchestrator/api/marketplace_plugins.py:1-10]()
-- **LLM Selection**: Browsing and comparing 400+ models from providers like OpenAI, Anthropic, and OpenRouter. [orchestrator/api/llm_marketplace.py:1-7]()
+- **LLM Selection**: Browsing and comparing 600+ models across 7+ providers, including OpenAI, Anthropic, and OpenRouter. [orchestrator/api/llm_marketplace.py:1-7]()
 
 ---
 
@@ -113,7 +113,7 @@ Lists skills that can be injected into agents within a specific workspace. [fron
 The Marketplace UI implements complex client-side and server-side filtering:
 1. **Category Normalization**: For agents, legacy categories are mapped to a unified system via `normalizeCategory`. [frontend/components/marketplace/marketplace-agents-tab.tsx:39-45]()
 2. **LLM Comparison**: Users can select multiple models to compare costs (input/output) and capabilities (vision, tools, streaming). [frontend/components/marketplace/marketplace-llms-tab.tsx:183-184](), [frontend/components/marketplace/llm-model-card.tsx:154-155]()
-3. **Tool Pagination**: The tools marketplace handles high-volume data (1000+ apps) with a 40-item pagination strategy. [frontend/components/marketplace/marketplace-tools-tab.tsx:77-79]()
+3. **Tool Pagination**: The tools marketplace handles high-volume data (1,500+ tools) with a 40-item pagination strategy. [frontend/components/marketplace/marketplace-tools-tab.tsx:77-79]()
 
 ### Marketplace Tool Execution Flow
 

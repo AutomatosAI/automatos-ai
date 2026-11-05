@@ -162,7 +162,7 @@ def test_run_now_on_103s_failed_card_says_why_and_changes_nothing(workspace, new
     pb = _failed_card_of_103(new_session, workspace)
 
     with pytest.raises(HTTPException) as refused:
-        asyncio.run(run_task_now(pb.card, ctx=ctx, db=new_session()))
+        run_task_now(pb.card, ctx=ctx, db=new_session())
 
     assert (refused.value.status_code, refused.value.detail) == (409, _words(pb.playbook))   # night: ran, failed again
     card = new_session().execute(text("SELECT status, source_id FROM board_tasks WHERE id = :i"),

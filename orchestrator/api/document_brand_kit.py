@@ -206,7 +206,7 @@ def get_brand_board(
 
 
 @router.get("/brand-kit/suggestions")
-async def get_brand_kit_suggestions(
+def get_brand_kit_suggestions(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -315,7 +315,7 @@ async def upload_brand_logo(
 
 
 @router.get("/brand-kit/logo")
-async def stream_brand_logo(
+def stream_brand_logo(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -324,7 +324,7 @@ async def stream_brand_logo(
 
 
 @router.delete("/brand-kit/logo", dependencies=[_MANAGE])
-async def delete_brand_logo_endpoint(
+def delete_brand_logo_endpoint(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -346,7 +346,7 @@ async def upload_brand_logo_mark(
 
 
 @router.get("/brand-kit/logo-mark")
-async def stream_brand_logo_mark(
+def stream_brand_logo_mark(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -355,7 +355,7 @@ async def stream_brand_logo_mark(
 
 
 @router.delete("/brand-kit/logo-mark", dependencies=[_MANAGE])
-async def delete_brand_logo_mark_endpoint(
+def delete_brand_logo_mark_endpoint(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -470,7 +470,7 @@ async def upload_brand_font(
 
 
 @router.get("/brand-kit/fonts/{font_id}")
-async def stream_brand_font(
+def stream_brand_font(
     font_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -488,7 +488,7 @@ async def stream_brand_font(
 
 
 @router.delete("/brand-kit/fonts/{font_id}", dependencies=[_MANAGE])
-async def delete_brand_font(
+def delete_brand_font(
     font_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

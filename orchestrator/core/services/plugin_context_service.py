@@ -15,7 +15,6 @@ already loaded via the skills path). Non-materialized plugins are loaded
 via this service.
 """
 
-import asyncio
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -151,37 +150,6 @@ class PluginContextService:
 
         header = "# Loaded Plugin Skills\n\nFull content for the most relevant plugins:\n"
         return header + "\n\n".join(sections)
-
-    def build_tier2_content_sync(
-        self,
-        plugin_rows: List[Tuple[Any, Any]],
-        task_context: Optional[str] = None,
-        max_plugins: int = 2,
-    ) -> str:
-        """Synchronous wrapper around build_tier2_content for agent_factory.
-
-        If a running event loop exists, schedules as a task on it.
-        Otherwise creates a new loop.
-        """
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop and loop.is_running():
-            # We're inside an async context (e.g. FastAPI) — create a future
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                result = pool.submit(
-                    asyncio.run,
-                    self.build_tier2_content(plugin_rows, task_context, max_plugins),
-                ).result(timeout=30)
-            return result
-        else:
-            return asyncio.run(
-                self.build_tier2_content(plugin_rows, task_context, max_plugins)
-            )
 
     # ------------------------------------------------------------------
     # Internal

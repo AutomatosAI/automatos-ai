@@ -117,7 +117,7 @@ def test_the_marketplace_detail_says_what_a_cli_copy_could_not_call(monkeypatch)
 
     item = _marketplace_agent()
     monkeypatch.setattr(marketplace, "_find_marketplace_item", lambda db, kind, item_id, approved_only: item)
-    detail = asyncio.run(marketplace.get_item(331, type="agent", ctx=None, db=_NoToolsDB()))
+    detail = marketplace.get_item(331, type="agent", ctx=None, db=_NoToolsDB())
     (gap,) = detail.dependencies["session_tool_gaps"]
     assert (gap["kind"], gap["skill"], gap["tools"]) == ("skill", "quote-cards", ["workspace_html_to_png"])
     assert not [name for name in gap["tools"] if name.endswith("_social_post")]
@@ -134,5 +134,5 @@ def test_gaps_that_cannot_be_read_leave_the_detail_as_it_was(monkeypatch):
     item = _marketplace_agent()
     monkeypatch.setattr(marketplace, "_find_marketplace_item", lambda db, kind, item_id, approved_only: item)
     monkeypatch.setattr(agent_tools, "skill_gaps", broken)
-    detail = asyncio.run(marketplace.get_item(331, type="agent", ctx=None, db=_NoToolsDB()))
+    detail = marketplace.get_item(331, type="agent", ctx=None, db=_NoToolsDB())
     assert "session_tool_gaps" not in detail.dependencies and detail.name == "Social Media Director"

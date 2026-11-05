@@ -5,179 +5,122 @@
 
 The following files were used as context for generating this wiki page:
 
-- [orchestrator/api/chat.py](orchestrator/api/chat.py)
 - [orchestrator/api/routing.py](orchestrator/api/routing.py)
-- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
-- [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
-- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
+- [orchestrator/channels/base.py](orchestrator/channels/base.py)
+- [orchestrator/channels/primitive_heartbeat.py](orchestrator/channels/primitive_heartbeat.py)
 - [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
-- [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
-- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
-- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
+- [orchestrator/core/security/workspace_scope.py](orchestrator/core/security/workspace_scope.py)
 - [orchestrator/scripts/setup_jira_trigger.py](orchestrator/scripts/setup_jira_trigger.py)
-- [orchestrator/services/heartbeat_service.py](orchestrator/services/heartbeat_service.py)
-- [orchestrator/services/page_context.py](orchestrator/services/page_context.py)
-- [orchestrator/tests/test_prd221_page_context.py](orchestrator/tests/test_prd221_page_context.py)
-- [orchestrator/tests/test_prd221_page_prior_tools.py](orchestrator/tests/test_prd221_page_prior_tools.py)
+- [orchestrator/tests/test_channel_adapter_contract.py](orchestrator/tests/test_channel_adapter_contract.py)
+- [orchestrator/tests/test_f149_a_message_runs_only_its_own_workspaces_agents.py](orchestrator/tests/test_f149_a_message_runs_only_its_own_workspaces_agents.py)
 
 </details>
 
 
 
-The Universal Router is Automatos AI's intelligent message routing system that determines which agent or workflow should handle an incoming request. It implements a tiered routing strategy that progressively escalates from fast, deterministic rules to semantic similarity and LLM-based classification, ensuring optimal routing accuracy while minimizing latency and cost.
+The Universal Router selects a destination for an incoming request using a tiered strategy: explicit overrides and deterministic matches are considered before semantic and LLM classification. Its public entry point is `UniversalRouter.route()`, which returns a `RoutingDecision` or no decision when routing cannot resolve the request [orchestrator/core/routing/engine.py:4-15]()[orchestrator/core/routing/engine.py:59-95](). Workspace boundary security (`F149`) is strictly enforced so that a message only executes agents and playbooks within its own workspace [orchestrator/core/security/workspace_scope.py:1-11](). This page summarizes how routing fits together; implementation details are covered in the child pages.
 
-For information about complexity assessment (which precedes routing), see [Complexity Assessment (AutoBrain)](#9.2). For context assembly after routing, see [Context Service](#4).
+Sources: [orchestrator/core/routing/engine.py:4-15](), [orchestrator/core/routing/engine.py:59-95](), [orchestrator/core/security/workspace_scope.py:1-11]()
 
----
+## 10.1 Routing Architecture
 
-## Routing Architecture
+A request enters routing as a `RequestEnvelope`. Channel adapters translate platform messages into envelopes, call `UniversalRouter.route()`, and use the resulting decision to proceed with execution or return a no-route fallback [orchestrator/channels/base.py:114-123]()[orchestrator/channels/base.py:135-170](). The routing API exposes recent decisions and correction status for inspection [orchestrator/api/routing.py:64-79]()[orchestrator/api/routing.py:107-155]().
 
-The Universal Router operates on a normalized input (`RequestEnvelope`) and produces a routing decision (`RoutingDecision`) by evaluating the request through a series of tiers until a match is found. For details, see [Routing Architecture](#10.1).
-
-### High-Level Flow
-
-```mermaid
-graph TB
-    Input["RequestEnvelope core/models/routing.py"]
-    Router["UniversalRouter.route core/routing/engine.py"]
-    
-    Input --> Router
-    
-    Router --> T0["Tier 0: User Override<br/>_tier0_override"]
-    T0 -->|Hit| Decision
-    T0 -->|Miss| T1
-    
-    T1["Tier 1: Cache Lookup<br/>_tier1_cache"]
-    T1 -->|Hit| Decision
-    T1 -->|Miss| T2a
-    
-    T2a["Tier 2a: Routing Rules<br/>_tier2a_rules"]
-    T2a -->|Hit| Decision
-    T2a -->|Miss| T2b
-    
-    T2b["Tier 2b: Trigger Subscription<br/>_tier2b_trigger_subscription"]
-    T2b -->|Hit| Decision
-    T2b -->|Miss| T2_5
-    
-    T2_5["Tier 2.5: Semantic Similarity<br/>_tier2_5_semantic"]
-    T2_5 -->|High Score| Decision
-    T2_5 -->|Ambiguous| Candidates
-    
-    Candidates["Semantic Candidates"] --> T3
-    T2_5 -->|No Match| T2c
-    
-    T2c["Tier 2c: Intent Classifier<br/>_tier2c_intent_classifier"]
-    T2c -->|Hit| Decision
-    T2c -->|Miss| T3
-    
-    T3["Tier 3: LLM Classification<br/>_classify_with_llm"]
-    T3 -->|Classified| Decision
-    T3 -->|Failed| Unrouted
-    
-    Decision["RoutingDecision core/models/routing.py"]
-    Unrouted["UnroutedEvent core/models/routing.py"]
-    
-    Decision --> Log["RoutingDecisionRecord routing_decisions"]
-    Unrouted --> UnroutedTable["UnroutedEvent unrouted_events"]
-```
-
-**Sources:** [orchestrator/core/routing/engine.py:79-163](), [orchestrator/core/models/routing.py:35-42]()
-
----
-
-### Natural Language to Code Entity Mapping
-
-To bridge natural language routing intent and underlying system implementations, the router maps conversational entry points directly to concrete engine execution methods and data models:
+**Diagram: From incoming message to routing decision**
 
 ```mermaid
 graph LR
     subgraph "NaturalLanguageSpace"
-        NL_Override["Explicit Agent/Workflow Pick"]
-        NL_Cache["Repeated Query / Fast Path"]
-        NL_Rule["Webhook or Pattern Match"]
-        NL_Semantic["Capability Match"]
-        NL_LLM["Complex Unstructured Prompt"]
+        M["Incoming platform message"]
+        C["Channel message"]
     end
-
     subgraph "CodeEntitySpace"
-        CE_T0["UniversalRouter._tier0_override"]
-        CE_T1["RoutingCache / _tier1_cache"]
-        CE_T2a["RoutingRule / _tier2a_rules"]
-        CE_T25["IntentClassifier / _tier2_5_semantic"]
-        CE_T3["UniversalRouter._classify_with_llm"]
+        B["BaseChannelAdapter.handle_message()"]
+        E["RequestEnvelope"]
+        R["UniversalRouter.route()"]
+        D["RoutingDecision"]
+        X["Agent execution or no-route fallback"]
     end
-
-    NL_Override --> CE_T0
-    NL_Cache --> CE_T1
-    NL_Rule --> CE_T2a
-    NL_Semantic --> CE_T25
-    NL_LLM --> CE_T3
+    M --> B
+    C --> B
+    B --> E
+    E --> R
+    R --> D
+    D --> X
 ```
 
-**Sources:** [orchestrator/core/routing/engine.py:95-158](), [orchestrator/core/routing/cache.py:43]()
+Sources: [orchestrator/channels/base.py:114-123](), [orchestrator/channels/base.py:135-170](), [orchestrator/core/routing/engine.py:59-95]()
 
----
+For details on envelope fields, ingestors, decision records, and logging, see [Routing Architecture](#10.1).
 
-## Tier 0: User Overrides
+## 10.2 Overrides, Cache & Rules
 
-When the user explicitly selects an agent or workflow, routing bypasses all other tiers. This is handled by `_tier0_override` in the routing engine. In the Chat API, if `agentId` is provided in the `ChatRequest`, it sets the `override_agent_id` in the envelope.
+The engine documents a progression from Tier 0 user overrides and Tier 1 cache lookup through source-pattern rules, trigger subscriptions, semantic similarity, intent matching, and LLM classification [orchestrator/core/routing/engine.py:4-15](). `UniversalRouter` accepts an optional `RoutingCache`; its final route also applies safety checks such as `_chat_never_routes_to_a_session` and `_chat_never_routes_to_a_refused_model` [orchestrator/core/routing/engine.py:59-74]()[orchestrator/core/routing/engine.py:87-133]().
 
-**Confidence:** Always 1.0 (user decision is authoritative). For details, see [Tier 0: User Overrides](#10.2).
+**Diagram: Tiered routing path**
 
-**Sources:** [orchestrator/core/routing/engine.py:169-184](), [orchestrator/api/chat.py:60-71]()
+```mermaid
+flowchart TD
+    E["RequestEnvelope"] --> T0["Tier 0: user override"]
+    T0 --> T1["Tier 1: RoutingCache lookup"]
+    T1 --> T2A["Tier 2a: routing_rules table"]
+    T2A --> T2B["Tier 2b: TriggerSubscription"]
+    T2B --> T25["Tier 2.5: semantic similarity"]
+    T25 --> T2C["Tier 2c: IntentClassifier keyword matching"]
+    T2C --> T3["Tier 3: LLM classification"]
+    T3 --> D["RoutingDecision or no route"]
+    D --> G["Chat-specific route checks"]
+```
 
----
+Sources: [orchestrator/core/routing/engine.py:4-15](), [orchestrator/core/routing/engine.py:59-95]()
 
-## Tier 1: Cache Lookup
+For details on overrides, cache behavior, source-pattern rules, and trigger subscriptions, see [Overrides, Cache & Rules](#10.2).
 
-The `RoutingCache` stores recent routing decisions in Redis, keyed by workspace, content hash, and source. For details, see [Tier 1: Cache Lookup](#10.3).
+## 10.3 Semantic & LLM Classification
 
-**Sources:** [orchestrator/core/routing/cache.py:43](), [orchestrator/core/routing/engine.py:103-107]()
+When earlier tiers do not resolve a request, the documented strategy includes semantic similarity on agent embeddings and LLM classification, with semantic candidates available to the latter [orchestrator/core/routing/engine.py:9-15](). The router initializes an `IntentClassifier` and imports `ContextMode` and `ContextService`, connecting routing to intent matching and context construction [orchestrator/core/routing/engine.py:31-46]()[orchestrator/core/routing/engine.py:71-75]().
 
----
+**Diagram: Natural-language request and classification code entities**
 
-## Tier 2: Rule-Based Routing
+```mermaid
+graph LR
+    subgraph "NaturalLanguageSpace"
+        Q["Incoming request content"]
+        I["Request intent"]
+    end
+    subgraph "CodeEntitySpace"
+        E["RequestEnvelope"]
+        U["UniversalRouter"]
+        IC["IntentClassifier"]
+        CM["ContextMode.ROUTER"]
+        RD["RoutingDecision"]
+    end
+    Q --> E
+    E --> U
+    U --> IC
+    U --> CM
+    IC --> RD
+    CM --> RD
+```
 
-Workspace admins can define routing rules in the `routing_rules` table. This tier includes source pattern matching, trigger subscriptions, and intent keyword classification. For details, see [Tier 2: Rule-Based Routing](#10.4).
+Sources: [orchestrator/core/routing/engine.py:31-46](), [orchestrator/core/routing/engine.py:59-95]()
 
-**Sources:** [orchestrator/core/routing/engine.py:109-122](), [orchestrator/api/routing.py:41-104]()
+For details on semantic candidates, classification prompts, and orchestrate mode, see [Semantic & LLM Classification](#10.3).
 
----
+## 10.4 Intent Classification & Smart Tool Router
 
-## Tier 2.5: Semantic Similarity
+The router includes `IntentClassifier` as part of its routing machinery, and the tier plan places intent keyword matching after semantic similarity and before LLM classification [orchestrator/core/routing/engine.py:4-15]()[orchestrator/core/routing/engine.py:71-75](). This parent page treats chatbot intent classification and smart tool selection as related but distinct routing concerns; their integration and delegation behavior are documented in the child page.
 
-This tier uses agent embeddings to find the best match via cosine similarity against agent capabilities, descriptions, and skills. For details, see [Tier 2.5: Semantic Similarity](#10.5).
+Sources: [orchestrator/core/routing/engine.py:4-15](), [orchestrator/core/routing/engine.py:71-75]()
 
-**Sources:** [orchestrator/core/routing/engine.py:123-136](), [orchestrator/core/models/composio_cache.py:33]()
+For details on chatbot intent classification, smart tool routing, personality, registry filtering, and delegation, see [Intent Classification & Smart Tool Router](#10.4).
 
----
+## 10.5 Routing Corrections & Learning
 
-## Tier 3: LLM Classification
+The routing API defines a correction request containing a `request_id` and `correct_agent_id`, and its module describes endpoints for recording corrections and inspecting routing decisions [orchestrator/api/routing.py:1-6]()[orchestrator/api/routing.py:82-85](). Decision responses include correction status and the corrected agent identifier, providing an observable link between a routing outcome and feedback [orchestrator/api/routing.py:64-79]().
 
-When all previous tiers fail, the router uses an LLM to classify the request using the `ROUTER` context mode and semantic hints. For details, see [Tier 3: LLM Classification](#10.6).
+Sources: [orchestrator/api/routing.py:1-6](), [orchestrator/api/routing.py:64-85]()
 
-**Sources:** [orchestrator/core/routing/engine.py:148-158]()
-
----
-
-## Routing Corrections & Learning
-
-Users can correct routing decisions via API endpoints. This updates records and automatically adjusts cache entries after repeated corrections. For details, see [Routing Corrections & Learning](#10.7).
-
-**Sources:** [orchestrator/api/routing.py:82-85](), [orchestrator/core/routing/cache.py:112-152]()
-
----
-
-## Child Pages
-
-For deep dives into specific components, refer to the following child pages:
-
-- [Routing Architecture](#10.1) — RequestEnvelope, RoutingDecision, routing_decisions table, ingestors, decision logging
-- [Tier 0: User Overrides](#10.2) — Explicit agent_id or workflow_id from UI, confidence=1.0, skips all other tiers
-- [Tier 1: Cache Lookup](#10.3) — RoutingCache with normalized content hash, workspace-scoped fast lookups, cache stats endpoints
-- [Tier 2: Rule-Based Routing](#10.4) — Routing rules with source_pattern, TriggerSubscription for webhooks, intent keywords, harness routing rules
-- [Tier 2.5: Semantic Similarity](#10.5) — Cosine similarity on agent embeddings, DIRECT_ROUTE threshold, candidate shortlisting, agent re-indexing
-- [Tier 3: LLM Classification](#10.6) — LLM with all agents + semantic hints, agent selection or orchestrate mode
-- [Routing Corrections & Learning](#10.7) — User corrections, cache auto-update after repeated corrections, continuous improvement loop
+For details on user corrections, cache updates, semantic reindexing, and the improvement loop, see [Routing Corrections & Learning](#10.5).
 
 ---

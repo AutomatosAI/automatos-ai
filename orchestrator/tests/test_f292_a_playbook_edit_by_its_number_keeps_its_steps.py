@@ -28,7 +28,7 @@ DISPATCH = "Generate the content for Tom's Monday Dispatch Checklist."
 def _edit(cafe, address, data):
     from api.workflow_recipes import update_workflow_recipe
 
-    return asyncio.run(update_workflow_recipe(address, ctx=cafe.ctx, recipe_data=data, db=cafe.db))
+    return update_workflow_recipe(address, ctx=cafe.ctx, recipe_data=data, db=cafe.db)
 
 
 def _as_auto_adds_them(cafe, playbook):

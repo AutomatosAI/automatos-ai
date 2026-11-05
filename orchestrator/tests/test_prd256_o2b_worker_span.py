@@ -185,6 +185,41 @@ def test_a_handler_failure_leaves_its_type_not_its_message(traced_worker):
     assert not [t for t in texts if secret in t]
 
 
+def test_a_returned_5xx_marks_the_span_failed_and_a_4xx_does_not(traced_worker):
+    """#1310: the canvas routes return a failure as a 500 rather than raising. OpenTelemetry's
+    HTTP conventions mark a server span with a 5xx as an error, with the status code as its
+    error.type and no message text (#1107); a 404 or a 409 is the caller's and stays unset."""
+    from opentelemetry.trace import StatusCode
+    from starlette.responses import JSONResponse
+    from starlette.testclient import TestClient
+
+    worker_http, exporter = traced_worker
+    secret = "SECRET-VALUE-8"
+    app = worker_http.build_app(_worker())
+
+    def answering(status):
+        async def route(request):
+            return JSONResponse({"error": f"/workspaces/{WS}/{secret}.canvas failed"}, status_code=status)
+        return route
+
+    for status in (500, 503, 404, 409):
+        app.add_route(f"/answer/{status}", answering(status), methods=["GET"])
+
+    with TestClient(app) as client:
+        for status in (500, 503, 404, 409):
+            assert client.get(f"/answer/{status}").status_code == status
+    spans = {s.attributes["http.status_code"]: s for s in _server_spans(exporter)}
+    for status in (500, 503):
+        assert spans[status].status.status_code == StatusCode.ERROR
+        assert spans[status].status.description == str(status)   # its error.type, as the API keeps it
+        assert spans[status].attributes["error.type"] == str(status) and spans[status].events == ()
+    for status in (404, 409):
+        assert spans[status].status.status_code == StatusCode.UNSET
+        assert "error.type" not in spans[status].attributes
+    texts = [str(v) for s in spans.values() for v in (s.status.description, *s.attributes.values())]
+    assert not [t for t in texts if secret in t]
+
+
 def test_the_sampler_ratio_never_raises(traced_worker):
     import worker_otel
 

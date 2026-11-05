@@ -5,26 +5,19 @@
 
 The following files were used as context for generating this wiki page:
 
-- [orchestrator/alembic/versions/prd206_chat_summary.py](orchestrator/alembic/versions/prd206_chat_summary.py)
 - [orchestrator/consumers/chatbot/integration.py](orchestrator/consumers/chatbot/integration.py)
+- [orchestrator/consumers/chatbot/prompt_analyzer.py](orchestrator/consumers/chatbot/prompt_analyzer.py)
 - [orchestrator/consumers/chatbot/smart_memory.py](orchestrator/consumers/chatbot/smart_memory.py)
 - [orchestrator/consumers/chatbot/smart_orchestrator.py](orchestrator/consumers/chatbot/smart_orchestrator.py)
 - [orchestrator/modules/context/sections/memory.py](orchestrator/modules/context/sections/memory.py)
 - [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)
-- [orchestrator/modules/memory/recall_ranking.py](orchestrator/modules/memory/recall_ranking.py)
-- [orchestrator/modules/memory/thread_checkpoint.py](orchestrator/modules/memory/thread_checkpoint.py)
 - [orchestrator/modules/memory/unified_memory_service.py](orchestrator/modules/memory/unified_memory_service.py)
-- [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
-- [orchestrator/services/memory_archival_job.py](orchestrator/services/memory_archival_job.py)
-- [orchestrator/services/memory_jobs.py](orchestrator/services/memory_jobs.py)
+- [orchestrator/tests/test_f155_a_widget_turn_recalls_only_its_agents_memories.py](orchestrator/tests/test_f155_a_widget_turn_recalls_only_its_agents_memories.py)
 - [orchestrator/tests/test_l3_distill_input.py](orchestrator/tests/test_l3_distill_input.py)
 - [orchestrator/tests/test_memory_restart_and_isolation.py](orchestrator/tests/test_memory_restart_and_isolation.py)
 - [orchestrator/tests/test_memory_single_write_path.py](orchestrator/tests/test_memory_single_write_path.py)
 - [orchestrator/tests/test_memory_stored_sse.py](orchestrator/tests/test_memory_stored_sse.py)
 - [orchestrator/tests/test_p2w1_semantic_l2_recall.py](orchestrator/tests/test_p2w1_semantic_l2_recall.py)
-- [orchestrator/tests/test_prd197_substrate.py](orchestrator/tests/test_prd197_substrate.py)
-- [orchestrator/tests/test_prd206_recall_ranking.py](orchestrator/tests/test_prd206_recall_ranking.py)
-- [orchestrator/tests/test_prd206_thread_checkpoint.py](orchestrator/tests/test_prd206_thread_checkpoint.py)
 - [orchestrator/tests/test_recall_relevance_floor.py](orchestrator/tests/test_recall_relevance_floor.py)
 - [orchestrator/tests/test_smart_orchestrator_store_exchange.py](orchestrator/tests/test_smart_orchestrator_store_exchange.py)
 - [orchestrator/tests/test_unified_memory.py](orchestrator/tests/test_unified_memory.py)
@@ -34,89 +27,68 @@ The following files were used as context for generating this wiki page:
 
 
 
-The `SmartMemoryManager` provides intelligent memory management for chatbot interactions within the Automatos AI platform. It orchestrates two-tier memory retrieval (global workspace memories + agent-specific memories), performs smart storage classification via distillation, and handles daily activity logging. This system acts as a high-level manager between the chat interface and the `UnifiedMemoryService`.
+The `SmartMemoryManager` (`orchestrator/consumers/chatbot/smart_memory.py`) provides intelligent memory management for chatbot interactions in Automatos AI [orchestrator/consumers/chatbot/smart_memory.py:1-13](). It orchestrates two-tier memory retrieval (global workspace memories + agent-specific memories), performs smart storage classification via distillation using canonical write contracts (`modules.memory.write_contract`), and handles caching and background persistence [orchestrator/consumers/chatbot/smart_memory.py:6-12](). This system acts as the high-level manager bridging the chat interface and the `UnifiedMemoryService` (`orchestrator/modules/memory/unified_memory_service.py`) [orchestrator/consumers/chatbot/smart_memory.py:78-100]().
 
 For lower-level memory storage operations, see [UnifiedMemoryService](3.2). For prompt assembly with memory injection, see [Context Service](4).
 
+Sources:
+- [orchestrator/consumers/chatbot/smart_memory.py:1-13]()
+- [orchestrator/consumers/chatbot/smart_memory.py:78-100]()
+- [orchestrator/modules/memory/unified_memory_service.py:1-21]()
+
 ---
 
-## Architecture Overview
+## Architecture & Data Flow
 
-The `SmartMemoryManager` is the primary interface used by the `SmartChatOrchestrator` to interact with the multi-layered memory system. It abstracts the complexity of searching across different `MemoryNamespace` scopes and handles the logic for extracting user-specific facts like names and preferences.
+The `SmartMemoryManager` is the primary interface used by the `SmartChatOrchestrator` (`orchestrator/consumers/chatbot/smart_orchestrator.py`) to interact with the multi-layered memory system [orchestrator/consumers/chatbot/smart_orchestrator.py:114-161](). It abstracts the complexity of searching across different namespaces and handles the logic for extracting user-specific facts like names and preferences [orchestrator/consumers/chatbot/smart_memory.py:66-76]().
 
-### System Data Flow
+### Diagram: Natural Language Space to Code Entity Space (Retrieval & Orchestration)
 
 ```mermaid
 graph TB
-    subgraph "Chat Layer"
-        SmartOrchestrator["SmartChatOrchestrator"]
-        WidgetChat["Widget Chat<br/>(isolated mode)"]
+    subgraph NaturalLanguageSpace["NaturalLanguageSpace"]
+        UserQuery[""User Chat Query & Transcript""]
+        ChatIntent[""Intent & Context Analysis""]
     end
-    
-    subgraph "SmartMemoryManager"
-        SMM["SmartMemoryManager"]
-        RetrieveMemories["retrieve_memories()<br/>Two-tier search"]
-        StoreExchange["store_exchange()<br/>Distillation + storage"]
-        Distill["_distill_durable_facts()<br/>LLM Fact Extraction"]
-        ClassifyTier["_classify_memory_tier()<br/>global | agent"]
-        Cache["In-memory cache<br/>_cache_ttl=120s"]
-    end
-    
-    subgraph "Memory Storage - L3"
-        UnifiedMemory["UnifiedMemoryService"]
-        SearchLT["search_long_term()"]
-        StoreTwoTier["store_two_tier()"]
-        DurableStore["DurableMemoryStore<br/>(Qdrant)"]
-    end
-    
-    subgraph "Memory Namespaces"
-        GlobalNS["Global Tier<br/>mem:ws:{workspace_id}"]
-        AgentNS["Agent Tier<br/>mem:ws:{workspace_id}:agent:{agent_id}"]
-    end
-    
-    SmartOrchestrator --> RetrieveMemories
-    SmartOrchestrator --> StoreExchange
-    
-    RetrieveMemories --> Cache
-    Cache -->|Miss| SearchLT
-    
-    StoreExchange --> Distill
-    Distill --> ClassifyTier
-    ClassifyTier --> StoreTwoTier
-    
-    SearchLT --> UnifiedMemory
-    StoreTwoTier --> UnifiedMemory
-    
-    UnifiedMemory --> DurableStore
-    
-    DurableStore --> GlobalNS
-    DurableStore --> AgentNS
-```
 
-**Sources:**
-- [orchestrator/consumers/chatbot/smart_memory.py:63-85]()
-- [orchestrator/modules/memory/unified_memory_service.py:161-196]()
-- [orchestrator/consumers/chatbot/smart_orchestrator.py:148-154]()
+    subgraph CodeEntitySpace["CodeEntitySpace"]
+        SOC["SmartChatOrchestrator.prepare_request()<br/>orchestrator/consumers/chatbot/smart_orchestrator.py"]
+        SMM["SmartMemoryManager.retrieve_memories()<br/>orchestrator/consumers/chatbot/smart_memory.py"]
+        Cache["SmartMemoryManager._cache<br/>(MemoryCache Dict)"]
+        UMS["UnifiedMemoryService.search_long_term()<br/>orchestrator/modules/memory/unified_memory_service.py"]
+    end
+
+    UserQuery --> ChatIntent
+    ChatIntent --> SOC
+    SOC --> SMM
+    SMM --> Cache
+    Cache -->|Miss| UMS
+```
+Sources:
+- [orchestrator/consumers/chatbot/smart_orchestrator.py:167-188]()
+- [orchestrator/consumers/chatbot/smart_memory.py:66-99]()
+- [orchestrator/consumers/chatbot/smart_memory.py:142-166]()
 
 ---
 
 ## Core Classes and Data Structures
 
 ### UserContext
-A dataclass that holds extracted user facts from memories. This is used to personalize the system prompt by identifying names and preferences.
+A dataclass that holds extracted user facts from memories (`orchestrator/consumers/chatbot/smart_memory.py`) [orchestrator/consumers/chatbot/smart_memory.py:42-55](). This is used to personalize the system prompt by identifying names and preferences [orchestrator/consumers/chatbot/smart_memory.py:70-74]().
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | `Optional[str]` | User's name extracted from memories |
-| `preferences` | `List[str]` | User preferences ("I prefer...", "I like...") |
+| `preferences` | `List[str]` | User preferences (`"I prefer..."`, `"I like..."`) |
 | `facts` | `List[str]` | General facts about the user |
 | `recent_topics` | `List[str]` | Recently discussed topics |
+| `last_interaction` | `Optional[datetime]` | Timestamp of the previous session |
 
-**Sources:**
-- [orchestrator/consumers/chatbot/smart_memory.py:40-52]()
+Sources:
+- [orchestrator/consumers/chatbot/smart_memory.py:42-55]()
 
 ### MemoryResult
-The unified return type for retrieval operations, containing both raw data and processed context.
+The unified return type for retrieval operations (`orchestrator/consumers/chatbot/smart_memory.py`), containing both raw data and processed context [orchestrator/consumers/chatbot/smart_memory.py:57-64]().
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -125,129 +97,98 @@ The unified return type for retrieval operations, containing both raw data and p
 | `formatted_context` | `str` | LLM-ready formatted string |
 | `retrieval_time_ms` | `float` | Query execution time |
 
-**Sources:**
-- [orchestrator/consumers/chatbot/smart_memory.py:55-61]()
+Sources:
+- [orchestrator/consumers/chatbot/smart_memory.py:57-64]()
 
 ---
 
-## Two-Tier Memory Retrieval
+## Two-Tier Memory Retrieval and Widget Mode
 
-The system performs parallel searches across two distinct tiers to provide both general user context and agent-specific patterns.
+The system performs parallel or scoped searches across two distinct tiers to provide both general user context and agent-specific patterns.
 
 ### Retrieval Logic
-1. **Global Tier**: Searches memories scoped to the `workspace_id`. These contain facts about the user that apply across all agents.
-2. **Agent Tier**: Searches memories scoped to the `workspace_id` AND `agent_id`. These contain patterns specific to how the user interacts with a particular agent.
+1. **Global Tier**: Searches memories scoped to the `workspace_id` (`orchestrator/modules/memory/unified_memory_service.py`). These contain facts about the user that apply across all agents.
+2. **Agent Tier**: Searches memories scoped to the `workspace_id` AND `agent_id` (`orchestrator/modules/memory/unified_memory_service.py`). These contain patterns specific to how the user interacts with a particular agent.
 
-### Retrieval Sequence
+### Diagram: Natural Language Space to Code Entity Space (Two-Tier Retrieval Execution)
 
 ```mermaid
-sequenceDiagram
-    participant Orchestrator as "SmartChatOrchestrator"
-    participant SMM as "SmartMemoryManager"
-    participant Cache as "Memory Cache"
-    participant UMS as "UnifiedMemoryService"
-    participant Durable as "DurableMemoryStore"
-    
-    Orchestrator->>SMM: retrieve_memories(ws_id, agent_id, query)
-    SMM->>Cache: Check key: {ws_id}:{agent_id}:{viewer_id}:{query}
-    
-    alt Cache Hit
-        Cache-->>SMM: Return MemoryResult
-    else Cache Miss
-        par Global Search
-            SMM->>UMS: search_long_term(ws_id, query, agent_id=None)
-            UMS->>Durable: search(user_id=mem:ws:{ws_id})
-        and Agent Search
-            SMM->>UMS: search_long_term(ws_id, query, agent_id=agent_id)
-            UMS->>Durable: search(user_id=mem:ws:{ws_id}:agent:{aid})
-        end
-        
-        Durable-->>SMM: Raw memory lists
-        SMM->>SMM: _extract_user_context()
-        SMM->>SMM: rank_memories() (Composite Scoring)
-        SMM->>Cache: Update cache
+graph TB
+    subgraph NaturalLanguageSpace["NaturalLanguageSpace"]
+        NLQuery[""Agent Chat Input / Prompt Search""]
+        NLWidget[""Widget Mode Isolation""]
     end
-    
-    SMM-->>Orchestrator: MemoryResult
+
+    subgraph CodeEntitySpace["CodeEntitySpace"]
+        Retrieve["SmartMemoryManager.retrieve_memories()<br/>orchestrator/consumers/chatbot/smart_memory.py"]
+        GlobalSearch["UnifiedMemoryService.search_long_term(agent_id=None)<br/>orchestrator/modules/memory/unified_memory_service.py"]
+        AgentSearch["UnifiedMemoryService.search_long_term(agent_id=agent_id)<br/>orchestrator/modules/memory/unified_memory_service.py"]
+        WidgetCheck["SmartMemoryManager.retrieve_memories(widget_mode=True)<br/>orchestrator/consumers/chatbot/smart_memory.py"]
+    end
+
+    NLQuery --> Retrieve
+    Retrieve --> WidgetCheck
+    WidgetCheck -->|False| GlobalSearch
+    WidgetCheck --> AgentSearch
 ```
 
-**Sources:**
-- [orchestrator/consumers/chatbot/smart_memory.py:151-240]()
-- [orchestrator/modules/memory/recall_ranking.py:91-119]()
+Sources:
+- [orchestrator/consumers/chatbot/smart_memory.py:157-193]()
+- [orchestrator/modules/memory/unified_memory_service.py:111-121]()
 
 ### Widget Mode Isolation
-When `widget_mode` is enabled, the `SmartMemoryManager` strictly restricts retrieval to the **Agent Tier** only. This prevents external widget users from accessing global workspace memories.
+When `widget_mode` is enabled, `SmartMemoryManager.retrieve_memories()` restricts retrieval to the **Agent Tier** only, preventing external widget users from accessing global workspace memories (`orchestrator/consumers/chatbot/smart_memory.py`). This is crucial for maintaining privacy and relevance in embedded contexts. The `MemorySection` also skips the `ContextRouter` and daily logs in widget mode, ensuring only agent-specific memories are recalled (`orchestrator/modules/context/sections/memory.py`).
 
-**Sources:**
-- [orchestrator/consumers/chatbot/smart_memory.py:157-158]()
-- [orchestrator/consumers/chatbot/smart_memory.py:190-193]()
+Sources:
+- [orchestrator/consumers/chatbot/smart_memory.py:157-193]()
+- [orchestrator/modules/context/sections/memory.py:95-103]()
 
 ---
 
-## Memory Storage & Distillation
+## Memory Storage, Distillation, and Write Contracts
 
 The system uses a distillation pattern to ensure only durable, high-value facts reach the L3 memory layer, rather than raw interaction logs.
 
-### Distillation Process
-Before storage, the conversation turn is sent to a low-cost LLM tier (`MEMORY_DISTILL_MODEL`) to extract typed facts.
-* **Taxonomy**: Facts are categorized into types like `user_fact`, `preference`, `business_fact`, `procedure`, `tool_outcome`, or `task_learning`.
-* **Importance**: The LLM assigns an importance score between `0` and `1`.
-* **Filtering**: If no durable facts are found, the L3 write is skipped entirely.
+### Distillation and Write Contract
+Before storage, conversation exchanges are processed to extract typed facts using canonical schemas defined in `modules.memory.write_contract` [orchestrator/consumers/chatbot/smart_memory.py:26-36]():
+* **Taxonomy**: Facts are categorized into types such as `user_fact`, `preference`, `business_fact`, `procedure`, `tool_outcome`, or `task_learning` (`orchestrator/consumers/chatbot/smart_memory.py`).
+* **Importance**: Scores are assigned to filter noise (`0.0` to `1.0`).
+* **Exclusion Validation**: Checks ensure transient or excluded statements are dropped (`orchestrator/consumers/chatbot/smart_memory.py`).
 
-**Sources:**
-- [orchestrator/consumers/chatbot/smart_memory.py:441-490]()
-- [orchestrator/modules/memory/write_contract.py:32-36]()
-- [orchestrator/tests/test_l3_distill_input.py:7-16]()
+Sources:
+- [orchestrator/consumers/chatbot/smart_memory.py:26-36]()
+- [orchestrator/consumers/chatbot/smart_memory.py:102-111]()
 
 ### Tier Selection Rules
-The `_classify_memory_tier()` method determines if a fact belongs to the `global` workspace namespace or the `agent` namespace.
-* **Agent Tier**: Used for explicit agent-scoped instructions (e.g., "Always cc this channel when using this agent").
-* **Global Tier**: The default for all other facts to prevent redundant multi-namespace writing.
+The `_classify_memory_tier()` method determines if a memory belongs to the `global` workspace namespace or the `agent` namespace (`orchestrator/consumers/chatbot/smart_memory.py`) [orchestrator/consumers/chatbot/smart_memory.py:112-141]().
+* **Agent Tier**: Selected when strong agent-scoped instructions are present (e.g., `"always cc"`, `"default channel"`, `"for this agent"`) [orchestrator/consumers/chatbot/smart_memory.py:132-137]().
+* **Global Tier**: The default single workspace namespace for all other exchanges, avoiding double-writing [orchestrator/consumers/chatbot/smart_memory.py:116-140]().
 
-**Sources:**
-- [orchestrator/consumers/chatbot/smart_memory.py:109-137]()
-
----
-
-## Composite Recall Ranking
-
-Memories are not just ranked by semantic similarity. The `recall_ranking` module applies a composite score to prioritize memories that are more relevant to the current user context.
-
-### Scoring Factors
-The final score is calculated as: `semantic × recency-decay × importance × pin-boost × same-page × same-project`.
-
-| Factor | Logic |
-| :--- | :--- |
-| **Recency** | Score halves per `half_life_days` (default 30). |
-| **Importance** | Maps [0, 1] importance to a [0.5, 1.5] multiplier. |
-| **Pin Boost** | Multiplies score by 2.0 if the memory is pinned. |
-| **Context Boost** | Multiplies by 1.15 if the memory matches the current page or project. |
-
-**Sources:**
-- [orchestrator/modules/memory/recall_ranking.py:51-88]()
-- [orchestrator/tests/test_prd206_recall_ranking.py:53-69]()
+Sources:
+- [orchestrator/consumers/chatbot/smart_memory.py:112-141]()
+- [orchestrator/tests/test_memory_stored_sse.py:109-132]()
 
 ---
 
-## Integration with Chat Orchestrator
+## Chat Orchestrator Integration & SSE Status
 
-The `SmartChatOrchestrator` uses the `SmartMemoryManager` during the `prepare_request` phase to fetch context and the `store_exchange` phase to persist learnings.
+The `SmartChatOrchestrator` uses `SmartMemoryManager` during the `prepare_request` phase to fetch context and the `store_exchange` phase to persist learnings (`orchestrator/consumers/chatbot/smart_orchestrator.py`) [orchestrator/consumers/chatbot/smart_orchestrator.py:148-188]().
 
-### Preparation Phase
-1. Calls `retrieve_memories` to get relevant context.
-2. Inject `MemorySection` into the `ContextService`.
-3. The `ContextRouter` may also be used for richer temporal or knowledge-based queries.
+### Preparation & Background Storage
+1. Calls `retrieve_memories()` to obtain relevant context during request preparation (`orchestrator/consumers/chatbot/smart_orchestrator.py`) [orchestrator/consumers/chatbot/smart_orchestrator.py:167-188]().
+2. Injects memory bundles into the `ContextService` prompt assembly pipeline via components like `MemorySection` (`orchestrator/modules/context/sections/memory.py`) [orchestrator/modules/context/sections/memory.py:36-74]().
+3. Persists exchanges asynchronously in background tasks via `_spawn_background()` in `SmartChatOrchestrator` (`orchestrator/consumers/chatbot/smart_orchestrator.py`) [orchestrator/consumers/chatbot/smart_orchestrator.py:36-53]() to prevent blocking real-time streaming responses [orchestrator/consumers/chatbot/smart_orchestrator.py:39-43](). This ensures that memory writes do not delay the user's response.
+4. Integrates with `SmartChatIntegration` (`orchestrator/consumers/chatbot/integration.py`) as a drop-in component for `StreamingChatService` [orchestrator/consumers/chatbot/integration.py:33-68]().
+5. Tracks honest memory storage state via `_last_tier` and `_last_l3_facts_stored` to govern SSE `memory_stored` events (`orchestrator/consumers/chatbot/smart_memory.py`) [orchestrator/consumers/chatbot/smart_memory.py:82-88]().
 
-**Sources:**
-- [orchestrator/consumers/chatbot/smart_orchestrator.py:161-205]()
-- [orchestrator/modules/context/sections/memory.py:75-101]()
-- [orchestrator/modules/memory/context_router.py:107-126]()
-
-### Storage Phase
-After the assistant response is generated, `store_exchange` is called in a fire-and-forget background task to avoid blocking the user response.
-
-**Sources:**
-- [orchestrator/consumers/chatbot/smart_orchestrator.py:36-51]()
-- [orchestrator/consumers/chatbot/smart_orchestrator.py:375-400]()
+Sources:
+- [orchestrator/consumers/chatbot/smart_orchestrator.py:36-53]()
+- [orchestrator/consumers/chatbot/smart_orchestrator.py:148-188]()
+- [orchestrator/consumers/chatbot/integration.py:33-141]()
+- [orchestrator/modules/context/sections/memory.py:36-74]()
+- [orchestrator/consumers/chatbot/smart_memory.py:82-88]()
+- [orchestrator/tests/test_memory_stored_sse.py:58-87]()
+- [orchestrator/tests/test_smart_orchestrator_store_exchange.py:92-143]()
+- [orchestrator/tests/test_memory_single_write_path.py:112-165]()
 
 ---

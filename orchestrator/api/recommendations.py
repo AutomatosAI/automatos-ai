@@ -29,7 +29,7 @@ class RecommendationRequest(BaseModel):
 router = APIRouter(prefix="/api/recommendations", tags=["🎯 Recommendations"])
 
 @router.post("/generate", dependencies=[Depends(require_workspace_permission("agents:read"))])
-async def generate_recommendations(
+def generate_recommendations(
     request: RecommendationRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)

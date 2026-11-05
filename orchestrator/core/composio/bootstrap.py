@@ -48,6 +48,9 @@ SEEDED_ITEM_TYPE = "agent"
 # long window would silently postpone the next boot's sync.
 RUNNING_SYNC_FRESH_MINUTES = 10
 BACKGROUND_THREAD_NAME = "composio-catalog-bootstrap"
+# The boot log's reason for a failed sync that has none for people: the sync's own
+# logger.exception carries the error just above it.
+FAILED_SYNC_DETAIL_IN_LOG = "the error is logged above"
 
 # {APP_NAME: (cache_id, logo_url)} — the seeder lookup, materialised once.
 Catalog = Dict[str, Tuple[int, Optional[str]]]
@@ -99,14 +102,19 @@ def catalog_app_count(db) -> int:
     return int(db.query(func.count(ComposioAppCache.id)).scalar() or 0)
 
 
-def _sync_in_flight(db) -> bool:
+def in_flight_sync_job(db) -> Optional[ComposioSyncJob]:
+    """The catalogue sync already running, if any: a 'running' job younger than
+    ``RUNNING_SYNC_FRESH_MINUTES``.
+
+    The boot stage and ``POST /api/tools/sync`` both ask it, so neither starts a
+    second sync over one in flight (a boot sync and a Sync click, or two clicks).
+    """
     cutoff = datetime.utcnow() - timedelta(minutes=RUNNING_SYNC_FRESH_MINUTES)
-    row = (
-        db.query(ComposioSyncJob.id)
+    return (
+        db.query(ComposioSyncJob)
         .filter(ComposioSyncJob.status == "running", ComposioSyncJob.started_at >= cutoff)
         .first()
     )
-    return row is not None
 
 
 def _load_catalog(db, names: Sequence[str]) -> Catalog:
@@ -195,6 +203,8 @@ def run_catalog_sync_and_rebind() -> Dict[str, Any]:
     try:
         result = MetadataSyncService(db).run_full_sync()
         rebound = rebind_seeded_agents(db)
+        if result.get("status") == "failed":
+            return _report_failed_sync(result, rebound)
         logger.info(
             "[PRD-233 S2] Composio catalogue sync finished: apps=%s actions=%s errors=%s; "
             "seeded agents re-bound=%d",
@@ -211,6 +221,28 @@ def run_catalog_sync_and_rebind() -> Dict[str, Any]:
         return {"status": "failed", "error": str(exc)}
     finally:
         db.close()
+
+
+def _report_failed_sync(result: Dict[str, Any], rebound: int) -> Dict[str, Any]:
+    """Log and record a sync that ran but failed, e.g. because Composio rejected the key.
+
+    The job row already says ``failed``; the boot log must too, never "finished:
+    apps=0" (4 Nov 2026: an invalid COMPOSIO_KEY read as a finished, empty sync).
+    """
+    reason = result.get("error") or FAILED_SYNC_DETAIL_IN_LOG
+    logger.warning(
+        "[PRD-233 S2] Composio catalogue sync failed (job %s): %s; seeded agents re-bound=%d",
+        result.get("job_id"),
+        reason,
+        rebound,
+    )
+    record_error(
+        subsystem="startup",
+        operation="composio_catalog_sync",
+        error=RuntimeError(reason),
+        extra={"job_id": result.get("job_id"), "errors_count": result.get("errors_count")},
+    )
+    return {"status": "failed", "sync": result, "rebound": rebound, "error": reason}
 
 
 def _start_daemon_thread(target: Callable[[], Any]) -> None:
@@ -246,7 +278,7 @@ def ensure_catalog_on_boot(
                         rebound,
                     )
                 return {"status": "ready", "apps_cached": apps_cached, "rebound": rebound}
-            if _sync_in_flight(db):
+            if in_flight_sync_job(db) is not None:
                 logger.info("[PRD-233 S2] Composio catalogue sync already in flight — not starting another")
                 return {"status": "in_flight", "apps_cached": 0}
         finally:

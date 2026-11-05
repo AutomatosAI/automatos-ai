@@ -8,161 +8,162 @@ The following files were used as context for generating this wiki page:
 - [frontend/components/agents/agent-configuration-modal.tsx](frontend/components/agents/agent-configuration-modal.tsx)
 - [frontend/components/agents/agent-configuration.tsx](frontend/components/agents/agent-configuration.tsx)
 - [frontend/components/agents/agent-details-modal.tsx](frontend/components/agents/agent-details-modal.tsx)
+- [frontend/components/agents/agent-management.tsx](frontend/components/agents/agent-management.tsx)
 - [frontend/components/agents/agent-performance.tsx](frontend/components/agents/agent-performance.tsx)
 - [frontend/components/agents/agent-roster.tsx](frontend/components/agents/agent-roster.tsx)
 - [frontend/components/agents/agent-skills.tsx](frontend/components/agents/agent-skills.tsx)
 - [frontend/components/agents/agent-status-control-modal.tsx](frontend/components/agents/agent-status-control-modal.tsx)
 - [frontend/components/agents/create-agent-modal.tsx](frontend/components/agents/create-agent-modal.tsx)
 - [frontend/components/agents/create-skill-modal.tsx](frontend/components/agents/create-skill-modal.tsx)
-- [frontend/components/agents/model-selector.tsx](frontend/components/agents/model-selector.tsx)
 - [frontend/components/agents/skill-configuration-modal.tsx](frontend/components/agents/skill-configuration-modal.tsx)
+- [frontend/components/documents/document-management.tsx](frontend/components/documents/document-management.tsx)
+- [frontend/components/tools/tools-dashboard.tsx](frontend/components/tools/tools-dashboard.tsx)
+- [frontend/components/workflows/active-workflows-panel.tsx](frontend/components/workflows/active-workflows-panel.tsx)
+- [frontend/components/workflows/workflow-management.tsx](frontend/components/workflows/workflow-management.tsx)
 - [frontend/hooks/use-agent-api.ts](frontend/hooks/use-agent-api.ts)
-- [frontend/hooks/use-model-api.ts](frontend/hooks/use-model-api.ts)
 - [frontend/lib/agent-constants.ts](frontend/lib/agent-constants.ts)
 - [orchestrator/alembic/versions/add_job_title_to_agents.py](orchestrator/alembic/versions/add_job_title_to_agents.py)
-- [orchestrator/alembic/versions/prd140_permission_bypass_log.py](orchestrator/alembic/versions/prd140_permission_bypass_log.py)
-- [orchestrator/alembic/versions/prd140_team_lead_enabled.py](orchestrator/alembic/versions/prd140_team_lead_enabled.py)
-- [orchestrator/api/agent_endpoints.py](orchestrator/api/agent_endpoints.py)
 - [orchestrator/api/agents.py](orchestrator/api/agents.py)
-- [orchestrator/core/models/__init__.py](orchestrator/core/models/__init__.py)
-- [orchestrator/core/models/core.py](orchestrator/core/models/core.py)
-- [orchestrator/core/security/__init__.py](orchestrator/core/security/__init__.py)
-- [orchestrator/core/security/bypass_audit.py](orchestrator/core/security/bypass_audit.py)
-- [orchestrator/core/security/hierarchy_permissions.py](orchestrator/core/security/hierarchy_permissions.py)
-- [orchestrator/core/security/url_validator.py](orchestrator/core/security/url_validator.py)
-- [orchestrator/core/services/auto_cadence.py](orchestrator/core/services/auto_cadence.py)
-- [orchestrator/modules/tools/execution/exec_platform.py](orchestrator/modules/tools/execution/exec_platform.py)
-- [orchestrator/scripts/check_hierarchy_gate.py](orchestrator/scripts/check_hierarchy_gate.py)
-- [orchestrator/tests/security/test_hierarchy_permissions.py](orchestrator/tests/security/test_hierarchy_permissions.py)
 
 </details>
 
 
 
 ## Purpose and Scope
+Agent configuration in Automatos AI encompasses the operational settings, resource allocations, and behavioral parameters that define how an AI agent functions within a workspace. This includes model selection via the **Model Configuration** system, capability management through **Skills** and **Plugins**, runtime validation (such as PRD-234 session mode checks), and autonomous behavior settings like **Heartbeat** intervals. Configuration is primarily managed via `AgentConfigurationModal` in the frontend and persisted in the `agents` table's `configuration` and `model_config` columns in the backend `[orchestrator/alembic/versions/add_job_title_to_agents.py:20-21]`, `[frontend/components/agents/agent-configuration-modal.tsx:98-115]`.
 
-Agent configuration in Automatos AI encompasses operational settings, resource allocations, behavioral parameters, and organizational hierarchy (`reports_to` relationships and team lead roles) that define how an AI agent functions within a workspace [orchestrator/core/models/core.py:175-220](). This includes model selection via the **Model Configuration** system, capability management through **Skills** and **Plugins**, and hierarchical permissions governed by `core/security/hierarchy_permissions.py` [orchestrator/core/security/hierarchy_permissions.py:1-36](). Configuration is managed via the `AgentConfigurationModal` in the frontend and persisted in the `agents` table columns in the backend [frontend/components/agents/agent-configuration-modal.tsx:73-94]().
-
-Sources: `[orchestrator/core/models/core.py:175-220]`, `[orchestrator/core/security/hierarchy_permissions.py:1-36]`, `[frontend/components/agents/agent-configuration-modal.tsx:73-94]()`
+Sources: `[orchestrator/alembic/versions/add_job_title_to_agents.py:20-21]`, `[frontend/components/agents/agent-configuration-modal.tsx:98-115]`
 
 ---
 
-## Configuration Architecture
+## Configuration Architecture & Runtime Validation
 
-Agent configuration bridges high-level user intent with low-level LLM parameters, capability assignments, and security boundaries.
+Agent configuration bridges high-level user intent with low-level LLM parameters and system resource limits. Before configuration updates are committed to the database via the API router (`/api/agents/{id}`), the backend executes strict runtime validation `[orchestrator/api/agents.py:38-55]`.
+
+### Runtime Validation (`_reject_invalid_runtime`)
+When configuration payloads include runtime parameters (such as `runtime: cli` for session mode), `_reject_invalid_runtime` validates the configuration against the server environment (`CLI_RUNTIME_ENABLED`), ensuring session-scoped agents conform to expected provider and model shapes before dispatch `[orchestrator/api/agents.py:38-55]`. Additionally, background re-indexing via `_reindex_agent_embedding` triggers semantic updates asynchronously `[orchestrator/api/agents.py:61-89]`.
 
 ### Data Flow and Entity Mapping
 
-The following diagram illustrates the flow of configuration data from the UI components to the database entities.
+The following diagram maps natural language configuration requests to code entities across the stack:
 
 Title: "Agent Configuration Data Flow"
 ```mermaid
 graph TD
     subgraph "Frontend_Components"
-        ACM["AgentConfigurationModal [agent-configuration-modal.tsx]"]
-        MS["ModelSelector [model-selector.tsx]"]
-        Hook["useUpdateAgentConfig [use-agent-api.ts]"]
+        AgentConfigurationModal["AgentConfigurationModal"]
+        ModelSelector["ModelSelector"]
+        useUpdateAgentConfig["useUpdateAgentConfig"]
     end
 
     subgraph "Backend_Services"
-        Router["AgentRouter [/api/agents] [orchestrator/api/agents.py]"]
-        Model["AgentModel [core/models/core.py]"]
-        SkillsTable["agent_skills [core/models/core.py]"]
+        AgentsRouter["orchestrator/api/agents.py"]
+        RejectRuntime["_reject_invalid_runtime()"]
+        AgentModel["Agent (DB Model)"]
+        AgentSkills["agent_skills (DB Table)"]
     end
 
-    ACM --> Hook
-    Hook -->|PATCH /api/agents/{id}| Router
-    Router -->|Update configuration/model_config| Model
-    ACM -->|Skill Assignment| SkillsTable
-    MS -->|Update model_config| Router
+    AgentConfigurationModal --> useUpdateAgentConfig
+    useUpdateAgentConfig -->|"PATCH /api/agents/{id}"| AgentsRouter
+    AgentsRouter --> RejectRuntime
+    RejectRuntime -->|"Valid Config"| AgentModel
+    AgentConfigurationModal -->|"Skill Assignment"| AgentSkills
+    ModelSelector -->|"Update model_config"| AgentsRouter
 ```
-Sources: `[frontend/components/agents/agent-configuration-modal.tsx:111-120]()`, `[frontend/hooks/use-agent-api.ts:42-43]()`, `[orchestrator/core/models/core.py:175-220]()`, `[orchestrator/api/agents.py:33-35]()`
-
----
-
-## Hierarchy, Reporting Lines & Team Lead Controls (PRD-140)
-
-Automatos AI organizes agents into structural reporting lines using `reports_to_id` and team lead privileges. The security and hierarchy system dictates which actor may modify subordinate agents or tasks.
-
-### Hierarchy & Authorization Guard (`can_actor_modify`)
-
-The permission engine in `core/security/hierarchy_permissions.py` validates whether an executing actor agent has authority over a target agent or resource [orchestrator/core/security/hierarchy_permissions.py:112-127]().
-
-- **Actor Gate**: Anonymous, cross-workspace, or inactive actors are immediately denied [orchestrator/core/security/hierarchy_permissions.py:131-150]().
-- **System Bypass**: Narrowed system bypass checks `is_system_agent` and verifies the name against `SYSTEM_BYPASS_ALLOWLIST` (e.g., `"Auto"`, `"Auto CTO"`, `"HARNESS"`) [orchestrator/core/security/hierarchy_permissions.py:151-157]().
-- **Subtree Scoping**: Non-system actors are restricted to modifying agents within their reporting subtree (`reports_to_id` traversal up to `MAX_SUBTREE_DEPTH`) [orchestrator/core/security/hierarchy_permissions.py:76-79]().
-
-### Natural Language to Code Entity Space: Hierarchy Enforcement
-
-Title: "Hierarchy Enforcement Mapping"
-```mermaid
-graph TD
-    subgraph "Natural_Language_Space"
-        NL1["Make Agent A report to Team Lead B"]
-        NL2["Authorize Agent modifying subordinate settings"]
-    end
-
-    subgraph "Code_Entity_Space"
-        DBCol["Agent.reports_to_id [core/models/core.py]"]
-        Guard["can_actor_modify() [hierarchy_permissions.py]"]
-        Result["PermissionDecision [hierarchy_permissions.py]"]
-        Bypass["SYSTEM_BYPASS_ALLOWLIST [hierarchy_permissions.py]"]
-    end
-
-    NL1 --> DBCol
-    NL2 --> Guard
-    Guard --> Result
-    Guard --> Bypass
-```
-Sources: `[orchestrator/core/security/hierarchy_permissions.py:68-157]`, `[orchestrator/core/models/core.py:175-220]()`
+Sources: `[frontend/components/agents/agent-configuration-modal.tsx:111-120]`, `[frontend/hooks/use-agent-api.ts:42-43]`, `[orchestrator/alembic/versions/add_job_title_to_agents.py:20-21]`, `[orchestrator/api/agents.py:38-55]`
 
 ---
 
 ## Configuration Modal Tabs
 
-The `AgentConfigurationModal` organizes agent settings into structured operational tabs [frontend/components/agents/agent-configuration-modal.tsx:105-175]().
+`AgentConfigurationModal` is the central hub for modifying an existing agent, organizing settings into logical tabs `[frontend/components/agents/agent-configuration-modal.tsx:105-175]`:
 
 ### 1. General Settings
-- **Name & Description**: Basic identification strings [orchestrator/core/models/core.py:180-182]().
-- **Agent Type/Category**: Mapped via `CATEGORY_TO_DB_MAP` to internal types [frontend/lib/agent-constants.ts:48-65]().
-- **Status**: Controls lifecycle state (`active`, `idle`, `maintenance`) [frontend/components/agents/agent-roster.tsx:164-168]().
-- **Tags & Runtime**: Comma-separated tag normalization and runtime configuration validation via `_reject_invalid_runtime` [orchestrator/api/agents.py:36-52]().
+This tab handles basic identity and lifecycle metadata:
+- **Name & Description**: Basic identification strings `[orchestrator/alembic/versions/add_job_title_to_agents.py:20-21]`.
+- **Agent Type/Category**: Mapped via `CATEGORY_TO_DB_MAP` to internal types like `code_architect` or `data_analyst` `[frontend/lib/agent-constants.ts:48-65]`.
+- **Status**: Controls whether the agent is `active`, `idle`, or `maintenance` `[frontend/components/agents/agent-roster.tsx:164-168]`.
 
 ### 2. Model Configuration (PRD-15)
-Managed via `ModelSelector`, defining the LLM provider, model ID, temperature, and context window limits [orchestrator/core/models/core.py:55-83]().
+Managed via the `ModelSelector` component, this section defines the LLM model profile:
+- **Provider**: Selection of LLM service (`openai`, `anthropic`, `openrouter`, etc.) `[frontend/components/agents/agent-roster.tsx:156-157]`.
+- **Model ID**: Specific model version identifier `[frontend/components/agents/agent-roster.tsx:174-188]`.
+- **Hyperparameters**: Temperature, context window limits, and max output tokens `[frontend/components/agents/create-agent-modal.tsx:82-83]`.
 
 ### 3. Resources & Priority
-- **Priority Level**: Options include `low`, `medium`, `high`, and `critical` [orchestrator/core/models/core.py:22-26]().
-- **Max Concurrent Tasks & Resource Limits**: Enforces execution caps (`memory_mb`, `cpu_percent`) [frontend/components/agents/agent-configuration-modal.tsx:81-89]().
+Defines execution constraints within the orchestrator:
+- **Priority Level**: Options include `low`, `medium`, `high`, and `critical` `[frontend/components/workflows/workflow-management.tsx:108-112]`.
+- **Max Concurrent Tasks**: Limits simultaneous operations `[frontend/components/agents/agent-configuration-modal.tsx:81]`.
+- **Resource Limits**: Configures `memory_mb`, `cpu_percent`, and `network_bandwidth` constraints `[frontend/components/agents/agent-configuration-modal.tsx:85-89]`.
 
-### 4. Skills, Plugins & Tools
-- **Skills**: Granular abilities mapped via `agent_skills` with individual priority weights [orchestrator/core/models/core.py:31-36]().
-- **Plugins**: Workspace-enabled integrations assigned through `AgentAssignedPlugin` [orchestrator/api/agents.py:15-16]().
-- **Tools**: Resolved via `_resolve_tool_ids_to_app_names` using `EntityManager` validation [orchestrator/api/agents.py:139-167]().
+### 4. Skills & Plugins (PRD-42/PRD-71)
+Agents gain capabilities through:
+- **Skills**: Granular technical abilities linked via the `agent_skills` join table containing a per-attachment `priority` field `[orchestrator/core/models/core.py:37-42]()`.
+- **Plugins**: Workspace-enabled integrations assigned via `AgentAssignedPlugin` `[frontend/components/agents/agent-configuration-modal.tsx:129-133]`.
+
+Sources: `[frontend/components/agents/agent-configuration-modal.tsx:73-94]`, `[frontend/lib/agent-constants.ts:48-65]`, `[frontend/components/agents/agent-roster.tsx:156-188]`, `[frontend/components/workflows/workflow-management.tsx:108-112]`, `[frontend/components/agents/create-agent-modal.tsx:82-83]`, `[orchestrator/core/models/core.py:37-42]()`
+
+---
+
+## Tools and Integrations
+
+Tools are assigned to agents by linking them to connected workspace applications. The backend resolves incoming tool IDs into app names using `EntityManager` and `_resolve_tool_ids_to_app_names` to ensure only permitted tools are assigned `[orchestrator/api/agents.py:142-176]`.
+
+### Tool Resolution Logic (`_resolve_tool_ids_to_app_names`)
+When an agent configuration is saved with `tool_ids`, the backend executes `_resolve_tool_ids_to_app_names`:
+1. **Connection Validation**: `EntityManager.get_entity_by_workspace` and `get_entity_connections` verify active application statuses (`active`, `added`, `pending`) `[orchestrator/api/agents.py:152-162]`.
+2. **ID Mapping**: Incoming frontend stable hashes (negative integers computed by `_stable_tool_id`) and database IDs (`ComposioAppCache.id`) are mapped to `app_name` strings `[orchestrator/api/agents.py:91-102]`, `[orchestrator/api/agents.py:171-176]`.
+3. **Persistence**: Resolved app assignments are stored for the agent execution loop.
 
 Title: "Tool Assignment Sequence"
 ```mermaid
 sequenceDiagram
-    participant UI as AgentConfigurationModal
-    participant Hook as useUpdateAgentConfig [use-agent-api.ts]
-    participant API as /api/agents/{id} [orchestrator/api/agents.py]
-    participant EM as EntityManager [entity_manager.py]
+    participant UI as "AgentConfigurationModal"
+    participant Hook as "useUpdateAgentConfig"
+    participant API as "orchestrator/api/agents.py"
+    participant EM as "EntityManager"
 
-    UI->>Hook: Update tool selection
-    Hook->>API: PATCH request with tool_ids
-    API->>EM: get_entity_connections(workspace_id)
-    EM-->>API: List of active app_names
-    API->>API: _resolve_tool_ids_to_app_names()
-    API-->>UI: Success Response
+    UI->>Hook: "Update tool selection"
+    Hook->>API: "PATCH /api/agents/{id} with tool_ids"
+    API->>EM: "get_entity_connections(workspace_id)"
+    EM-->>API: "List of active app_names"
+    API->>API: "_resolve_tool_ids_to_app_names()"
+    API-->>UI: "Success Response"
 ```
-Sources: `[frontend/components/agents/agent-configuration-modal.tsx:73-175]`, `[orchestrator/api/agents.py:36-167]`, `[orchestrator/core/models/core.py:22-83]()`
+Sources: `[orchestrator/api/agents.py:91-176]`, `[frontend/hooks/use-agent-api.ts:42-43]`
 
 ---
 
-## Semantic Re-indexing & Persistence
+## Heartbeat Configuration (PRD-55)
 
-When agent metadata changes, backend hooks trigger fire-and-forget background embedding updates via `_reindex_agent_embedding` [orchestrator/api/agents.py:58-86](). Frontend mutations utilize React Query (`useAgentConfig`, `useUpdateAgentConfig`) with `formInitializedRef` safeguards to prevent background polling synchronization overwrites [frontend/hooks/use-agent-api.ts:77-218](), `[frontend/components/agents/agent-configuration-modal.tsx:180-192]()`.
+The Heartbeat system permits agents to perform proactive background checks and autonomous routines, configured via `AgentConfigurationModal` `[frontend/components/agents/agent-configuration-modal.tsx:155-171]`:
 
-Sources: `[orchestrator/api/agents.py:58-86]`, `[frontend/hooks/use-agent-api.ts:77-218]`, `[frontend/components/agents/agent-configuration-modal.tsx:180-192]()`
+| Setting | Type | Description |
+|---------|------|-------------|
+| `enabled` | boolean | Activates the proactive background execution loop. |
+| `interval_minutes` | integer | Frequency of heartbeat execution ticks. |
+| `inherit_active_hours` | boolean | Respects workspace-wide operating hours if true. |
+| `active_hours_start/end` | string | Defines active scheduling window (e.g., `08:00` - `20:00`). |
+| `auto_act` | boolean | Enables autonomous tool execution during heartbeats. |
+| `report_to` | string | Destination routing target for results (e.g., `orchestrator`). |
+
+Sources: `[frontend/components/agents/agent-configuration-modal.tsx:155-171]`
+
+---
+
+## Persona, Voice, and Persistence
+
+Agents can be assigned personas and voice profiles to customize behavior and output style:
+- **Predefined Personas**: System-seeded templates providing role prompts and suggested temperatures `[frontend/components/agents/create-agent-modal.tsx:44-54]`.
+- **Custom Personas**: User-authored system prompts `[frontend/components/agents/agent-configuration-modal.tsx:142-145]`.
+- **Voice Profiles**: Text-to-speech parameter bindings `[frontend/components/agents/create-agent-modal.tsx:51-52]`.
+
+### React Query Integration
+The frontend relies on TanStack React Query hooks for state synchronization:
+- **`useAgentConfig(agentId)`**: Fetched via query key `agentConfig` `[frontend/hooks/use-agent-api.ts:82]`.
+- **`useUpdateAgentConfig()`**: Mutation hook triggering cache invalidation `[frontend/hooks/use-agent-api.ts:45]`.
+- **`formInitializedRef`**: A `useRef` guard inside `AgentConfigurationModal` preventing background polling intervals from overwriting active user edits `[frontend/components/agents/agent-configuration-modal.tsx:178-182]`.
+
+Sources: `[frontend/hooks/use-agent-api.ts:45-82]`, `[frontend/components/agents/agent-configuration-modal.tsx:140-192]`, `[frontend/components/agents/create-agent-modal.tsx:44-54]`
 
 ---

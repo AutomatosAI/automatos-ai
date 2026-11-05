@@ -135,7 +135,7 @@ class RevokeResponse(BaseModel):
     status_code=201,
     dependencies=[Depends(require_workspace_permission("workspace:manage")), Depends(STEP_UP)],
 )
-async def create_api_key(
+def create_api_key(
     body: ApiKeyCreateRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -184,7 +184,7 @@ async def create_api_key(
 
 
 @router.get("", response_model=List[ApiKeyListItem])
-async def list_api_keys(
+def list_api_keys(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -197,7 +197,7 @@ async def list_api_keys(
 
 
 @router.delete("/{key_id}", response_model=RevokeResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def revoke_api_key(
+def revoke_api_key(
     key_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

@@ -161,7 +161,7 @@ def require_workspace_permission(permission: str) -> Callable:
     """Dependency factory: 403 unless the caller's workspace role grants
     ``permission`` (matrix + wildcards in ``modules/policy/roles.py``)."""
 
-    async def _dep(
+    def _dep(
         request: Request,
         ctx: RequestContext = Depends(get_request_context_hybrid),
         db=Depends(get_db),

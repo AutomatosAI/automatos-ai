@@ -5,16 +5,25 @@
 
 The following files were used as context for generating this wiki page:
 
-- [.github/workflows/test.yml](.github/workflows/test.yml)
+- [.env.example](.env.example)
+- [.grype.yaml](.grype.yaml)
 - [docker-compose.yml](docker-compose.yml)
-- [frontend/.dockerignore](frontend/.dockerignore)
 - [frontend/Dockerfile](frontend/Dockerfile)
-- [infrastructure/.env.example](infrastructure/.env.example)
-- [infrastructure/railway-manifest.json](infrastructure/railway-manifest.json)
 - [orchestrator/Dockerfile](orchestrator/Dockerfile)
-- [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
-- [orchestrator/requirements.in](orchestrator/requirements.in)
-- [orchestrator/tests/test_dockerfile_prod_parity.py](orchestrator/tests/test_dockerfile_prod_parity.py)
+- [orchestrator/requirements-dev.lock](orchestrator/requirements-dev.lock)
+- [orchestrator/requirements-dev.txt](orchestrator/requirements-dev.txt)
+- [orchestrator/requirements.lock](orchestrator/requirements.lock)
+- [orchestrator/tests/test_prd262_agent_opt_worker_image.py](orchestrator/tests/test_prd262_agent_opt_worker_image.py)
+- [orchestrator/tests/test_prd262_media_render_esbuild.py](orchestrator/tests/test_prd262_media_render_esbuild.py)
+- [orchestrator/tests/test_prd262_media_render_stages.py](orchestrator/tests/test_prd262_media_render_stages.py)
+- [services/agent-opt-worker/Dockerfile](services/agent-opt-worker/Dockerfile)
+- [services/agent-opt-worker/overrides.txt](services/agent-opt-worker/overrides.txt)
+- [services/agent-opt-worker/requirements.in](services/agent-opt-worker/requirements.in)
+- [services/agent-opt-worker/requirements.lock](services/agent-opt-worker/requirements.lock)
+- [services/media-render/Dockerfile](services/media-render/Dockerfile)
+- [services/media-render/requirements.lock](services/media-render/requirements.lock)
+- [services/media-render/tests/test_image_esbuild.py](services/media-render/tests/test_image_esbuild.py)
+- [services/workspace-worker/requirements.lock](services/workspace-worker/requirements.lock)
 
 </details>
 
@@ -22,121 +31,136 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This document covers the containerization, orchestration, and deployment infrastructure for Automatos AI. It explains the Docker multi-stage build process, the modular Docker Compose architecture mirroring a 19-service production topology, environment variable configuration, and production deployment strategies on platforms like Railway.
+This page maps Automatos AI’s deployment surface at a high level: container images, local Compose environments, configuration, data services, CI/CD, production deployment, and Kubernetes. The Compose configuration distinguishes production images from the development setup, which uses separate development stages and source mounts [docker-compose.yml:25-28]().
 
-**Related Pages:**
-- For Dockerfiles of specific components, see [Docker Containerization](#20.1)
-- For modular service definitions and health checks, see [Docker Compose Setup](#20.2)
-- For required secrets and API keys, see [Environment Variables](#20.3)
-- For pgvector and migrations, see [Database Setup](#20.4)
-- For pub/sub and session storage, see [Redis & Vector Store Configuration](#20.5)
-- For scaling and monitoring, see [Production Deployment & CI/CD](#20.6)
+For implementation and operational details, follow the child pages below.
 
----
+**Related Child Pages**
+- For application Dockerfiles, entrypoints, and production-parity testing, see [Docker Containerization](#20.1).
+- For Compose services, profiles, health checks, and local environment defaults, see [Docker Compose & Environments](#20.2).
+- For secrets and service configuration, see [Environment Variables](#20.3).
+- For PostgreSQL, migrations, and Redis, see [Database & Redis Setup](#20.4).
+- For GitHub Actions and deployment automation, see [CI/CD & Automation Scripts](#20.5).
+- For Railway topology and production operations, see [Production Deployment](#20.6).
+- For Helm and Kind-based deployment, see [Kubernetes & Helm Chart](#20.7).
 
-## System Overview
+Sources: [docker-compose.yml:25-28]()
 
-Automatos AI uses a highly modular, containerized architecture. While a single `docker-compose.yml` exists for quick starts, the production infrastructure is divided into functional groups (Core, Data, Monitoring, Voice, Memory, Landing) to allow independent scaling and management.
+## System Architecture & Production Topology
 
-### Infrastructure Topology
-The following diagram maps the production service groups to their respective code entities and data stores, including the local S3-compatible storage layer.
+The local Compose configuration names backend, frontend, and workspace-worker as application services, alongside data services such as PostgreSQL, Redis, and MinIO. Qdrant (durable memory) runs in the default stack, and optional Compose profiles extend it with search, media, voice, or database administration components [docker-compose.yml:30-36](), [docker-compose.yml:52-78](). The diagrams connect those deployment terms to file and service names used in the repository.
+
+### Diagram: Compose Services and Container Definitions
 
 ```mermaid
-graph TB
-    subgraph "Core_Group_(AutomatosAI/automatos-ai)"
-        API["automatos-ai-api<br/>orchestrator/main.py<br/>Port 8000"]
-        UI["automotas-ai-frontend<br/>frontend/server.js<br/>Port 3000"]
-        WorkWorker["agent-workspace-worker<br/>services/workspace-worker"]
-        OptWorker["agent-opt-worker<br/>services/agent-opt-worker"]
-    end
-    
-    subgraph "Data_Group"
-        PG["automatos-ai-pgvector<br/>pgvector/pgvector:pg16<br/>Port 5432"]
-        Redis["Redis<br/>redis:7-alpine<br/>Port 6379"]
-        Qdrant["Qdrant<br/>qdrant/qdrant:latest<br/>Port 6333"]
-        MinIO["automatos_minio<br/>cgr.dev/chainguard/minio<br/>Port 9000"]
-    end
-    
-    subgraph "Monitoring_Group"
-        Prom["prometheus"]
-        Grafana["grafana"]
-        Loki["loki"]
-    end
+graph LR
+    Compose["docker-compose.yml"]
+    Backend["backend"]
+    Frontend["frontend"]
+    Worker["workspace-worker"]
+    Postgres["postgres"]
+    Redis["redis"]
+    MinIO["minio"]
+    BackendImage["orchestrator/Dockerfile"]
+    FrontendImage["frontend/Dockerfile"]
+    WorkerImage["services/workspace-worker/Dockerfile"]
 
-    subgraph "External_Services"
-        Clerk["Clerk Auth"]
-        LLM["LLM Providers<br/>(OpenAI/Anthropic)"]
-    end
-    
-    UI -->|"HTTP/SSE"| API
-    API -->|"SQL"| PG
-    API -->|"Pub/Sub"| Redis
-    API -->|"Vector API"| Qdrant
-    API -->|"S3 API"| MinIO
-    WorkWorker -->|"Task Queue"| Redis
-    API -->|"JWT/Auth"| Clerk
-    API -->|"API Calls"| LLM
+    Compose --> Backend
+    Compose --> Frontend
+    Compose --> Worker
+    Compose --> Postgres
+    Compose --> Redis
+    Compose --> MinIO
+    Backend --> BackendImage
+    Frontend --> FrontendImage
+    Worker --> WorkerImage
 ```
-**Sources:** [docker-compose.yml:26-133](), [infrastructure/railway-manifest.json:68-235]()
 
----
+Sources: [docker-compose.yml:30-36](), [docker-compose.yml:52-78](), [orchestrator/Dockerfile:1-12](), [frontend/Dockerfile:1-10]()
 
-## Docker Containerization
+### Diagram: Environment Configuration to Compose Services
 
-The Automatos AI platform leverages multi-stage Dockerfiles for its core components: `orchestrator` (backend), `frontend`, `workspace-worker`, and `agent-opt-worker`. This approach optimizes image size, build times, and security by separating build-time dependencies from runtime environments. Production parity tests, such as `test_dockerfile_prod_parity.py`, ensure that local development configurations do not inadvertently ship to production, especially concerning build arguments and default values [orchestrator/tests/test_dockerfile_prod_parity.py:1-102](). Each Dockerfile also includes a `.dockerignore` file to exclude unnecessary files from the build context, further reducing image size and build times [frontend/.dockerignore:1-15]().
+```mermaid
+graph LR
+    EnvFile[".env"]
+    EnvExample[".env.example"]
+    Compose["docker-compose.yml"]
+    PostgresConfig["POSTGRES_PASSWORD"]
+    RedisConfig["REDIS_PASSWORD"]
+    ApiConfig["API_KEY"]
+    FrontendConfig["NEXT_PUBLIC_API_URL"]
+    Postgres["postgres"]
+    Backend["backend"]
+    Frontend["frontend"]
+
+    EnvExample --> EnvFile
+    EnvFile --> Compose
+    Compose --> PostgresConfig
+    Compose --> RedisConfig
+    Compose --> ApiConfig
+    EnvFile --> FrontendConfig
+    PostgresConfig --> Postgres
+    RedisConfig --> Backend
+    ApiConfig --> Backend
+    FrontendConfig --> Frontend
+```
+
+Sources: [.env.example:4-9](), [.env.example:15-42](), [docker-compose.yml:46-50]()
+
+## 20.1 Docker Containerization
+
+The backend Dockerfile describes separate build stages for dependency installation, development, compilation, and production [orchestrator/Dockerfile:5-12](). The frontend Dockerfile describes development, production-build, and runtime-oriented stages [frontend/Dockerfile:5-10](). Other service images and entrypoint behavior are covered in the child page.
 
 For details, see [Docker Containerization](#20.1).
 
-**Sources:** [orchestrator/Dockerfile:1-184](), [frontend/Dockerfile:1-133](), [orchestrator/tests/test_dockerfile_prod_parity.py:1-102](), [frontend/.dockerignore:1-15]()
+Sources: [orchestrator/Dockerfile:5-12](), [frontend/Dockerfile:5-10]()
 
----
+## 20.2 Docker Compose & Environments
 
-## Docker Compose Setup
+`docker-compose.yml` is the unified Compose configuration. It documents the default services (Qdrant, for memory, among them) and the optional profiles `all`, `search`, `media`, and `voice`, as well as a core override that can omit the workspace worker [docker-compose.yml:52-78](). Published ports default to loopback through `BIND_ADDRESS`; the configuration also describes separate publish-address settings for the API and web app [docker-compose.yml:10-19]().
 
-The `docker-compose.yml` file provides a comprehensive local development environment, defining various services essential for the Automatos AI platform. This includes core data stores like `postgres` (with `pgvector` support), `redis` for caching and pub/sub, and `minio` as a local S3-compatible object store [docker-compose.yml:26-111](). A `qdrant` service in the default stack holds durable and field memory, and `envs/api.defaults` points the backend at it (`QDRANT_URL=http://qdrant:6333`). Each service is configured with health checks to ensure proper startup and operation, and volumes are used for data persistence. The `docker-entrypoint.sh` script for the backend handles database migrations before application startup, ensuring schema alignment [orchestrator/Dockerfile:119-131]().
+For details, see [Docker Compose & Environments](#20.2).
 
-For details, see [Docker Compose Setup](#20.2).
+Sources: [docker-compose.yml:10-19](), [docker-compose.yml:52-78]()
 
-**Sources:** [docker-compose.yml:1-442](), [orchestrator/Dockerfile:119-131]()
+## 20.3 Environment Variables
 
----
-
-## Environment Variables
-
-Configuration across the Automatos AI platform is managed through environment variables. The `infrastructure/.env.example` file serves as a template, outlining all configurable variables, including required secrets like `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, and various API keys [infrastructure/.env.example:1-231](). These variables are categorized for clarity, covering global settings, database connections, LLM providers, security, and integration-specific keys. The system also uses `envs/*.defaults` files to set default values for local development, which can be overridden by the `.env` file or explicit `environment` settings in `docker-compose.yml` [docker-compose.yml:158-159](). Sensitive information is explicitly marked as `[REQUIRED]` and should not be committed to version control.
+`.env.example` groups settings for PostgreSQL, Redis, API access, frontend URLs, LLM providers, integrations, authentication, and object storage [\.env.example:12-42](), [\.env.example:44-70](), [\.env.example:92-124](). The Compose configuration requires non-placeholder values for `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, and `API_KEY` [docker-compose.yml:46-50]().
 
 For details, see [Environment Variables](#20.3).
 
-**Sources:** [infrastructure/.env.example:1-231](), [docker-compose.yml:158-159]()
+Sources: [.env.example:12-42](), [.env.example:44-70](), [.env.example:92-124](), [docker-compose.yml:46-50]()
 
----
+## 20.4 Database & Redis Setup
 
-## Database Setup
+The Compose configuration uses a PostgreSQL 16 image with `pgvector` and mounts the database data directory to the `postgres_data` volume [docker-compose.yml:86-100](). Redis is named among the default Compose services [docker-compose.yml:52-55](). Migrations, seed data, and Redis behavior are covered in the child page.
 
-Automatos AI utilizes PostgreSQL with the `pgvector` extension for its primary data storage and vector embeddings. The `postgres` service in `docker-compose.yml` uses the `pgvector/pgvector:pg16` image, ensuring vector capabilities are available out-of-the-box [docker-compose.yml:31](). Database schema management is handled by Alembic, with migrations applied automatically at backend startup via `alembic upgrade heads` [orchestrator/Dockerfile:131](). The `scripts/init_test_db.py` script is used in CI environments to initialize a fresh database schema for testing [orchestrator/tests/test.yml:109-110](). Seed data and schema initialization are part of the application's boot process, ensuring a consistent starting state.
+For details, see [Database & Redis Setup](#20.4).
 
-For details, see [Database Setup](#20.4).
+Sources: [docker-compose.yml:52-55](), [docker-compose.yml:86-100]()
 
-**Sources:** [docker-compose.yml:31](), [orchestrator/Dockerfile:131](), [orchestrator/tests/test.yml:109-110]()
+## 20.5 CI/CD & Automation Scripts
 
----
+CI/CD and automation scripts are a separate part of the deployment landscape. The supplied container configuration describes production images as the images used by the local Compose application services, and notes that CI publishes their image names [docker-compose.yml:25-36](). Workflow and automation details belong in the child page.
 
-## Redis & Vector Store Configuration
+For details, see [CI/CD & Automation Scripts](#20.5).
 
-Redis is a critical component for caching, session management, and real-time communication via Pub/Sub channels. The `RedisClient` in `orchestrator/core/redis/client.py` manages connection pooling and provides methods for publishing and subscribing to messages, crucial for real-time workflow updates [orchestrator/core/redis/client.py:13-120](). The `docker-compose.yml` configures Redis with a password and disables dangerous commands like `FLUSHDB` and `FLUSHALL` for security [docker-compose.yml:61-62](). For vector storage, the platform supports `pgvector` (default) and a `Qdrant` service, in the default stack, for durable and field memory. S3 Vectors backend is also supported for cloud-based vector storage.
+Sources: [docker-compose.yml:25-36]()
 
-For details, see [Redis & Vector Store Configuration](#20.5).
+## 20.6 Production Deployment
 
-**Sources:** [orchestrator/core/redis/client.py:13-120](), [docker-compose.yml:61-62](), [docker-compose.yml:123-133]()
+Production deployment concerns include how application images and supporting services are run outside the local Compose environment. The backend Dockerfile states that its final production stage is also used by Railway builds [orchestrator/Dockerfile:23-29](). For deployment topology, scaling, monitoring, and operational guidance, see the child page.
 
----
+For details, see [Production Deployment](#20.6).
 
-## Production Deployment & CI/CD
+Sources: [orchestrator/Dockerfile:23-29]()
 
-The Automatos AI platform is deployed to production using Railway, with its topology defined in `infrastructure/railway-manifest.json`. This manifest organizes services into logical groups like `core`, `data`, `voice`, and `monitoring`, specifying their repositories, build configurations (e.g., `builder: DOCKERFILE`), and environment variables [infrastructure/railway-manifest.json:12-228](). GitHub Actions workflows, such as `test.yml`, enforce code quality and reliability by running comprehensive test suites, including a coverage ratchet to maintain code coverage standards [orchestrator/tests/test.yml:1-144](). The `import-linter` tool is used to enforce architectural boundaries and prevent unwanted dependencies between modules [orchestrator/requirements-dev.txt](). Scaling and disaster recovery scripts are part of the operational toolkit, ensuring high availability and performance.
+## 20.7 Kubernetes & Helm Chart
 
-For details, see [Production Deployment & CI/CD](#20.6).
+Kubernetes and Helm deployment are covered by the child page. This parent page provides the deployment map; consult that page for the chart, local cluster manifests, and Kubernetes verification details.
 
-**Sources:** [infrastructure/railway-manifest.json:12-228](), [orchestrator/tests/test.yml:1-144](), [orchestrator/requirements-dev.txt]()
+For details, see [Kubernetes & Helm Chart](#20.7).
+
+Sources: [docker-compose.yml:25-36]()
 
 ---

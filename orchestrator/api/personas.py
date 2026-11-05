@@ -165,7 +165,7 @@ def _persona_to_summary(p) -> PersonaSummaryOut:
 # ===================================================================
 
 @router.get("/personas", response_model=None)
-async def list_personas(
+def list_personas(
     category: Optional[str] = Query(None, description="Filter by category"),
     scope: Optional[str] = Query(None, description="Filter by scope: all, global, workspace"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -214,7 +214,7 @@ async def list_personas(
 
 
 @router.get("/personas/{persona_id}", response_model=PersonaOut)
-async def get_persona(
+def get_persona(
     persona_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -245,7 +245,7 @@ async def get_persona(
 
 
 @router.post("/workspaces/{workspace_id}/personas", status_code=201, response_model=PersonaOut, dependencies=[Depends(require_workspace_permission("agents:create"))])
-async def create_workspace_persona(
+def create_workspace_persona(
     workspace_id: UUID,
     body: CreatePersonaBody,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -291,8 +291,25 @@ async def create_workspace_persona(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _update_workspace_persona_fields(persona, body: UpdatePersonaBody) -> None:
+    """Set the fields the edit provides on the persona; the others keep their values."""
+    # Apply updates (only set provided fields)
+    if body.name is not None:
+        persona.name = body.name
+    if body.description is not None:
+        persona.description = body.description
+    if body.system_prompt is not None:
+        persona.system_prompt = body.system_prompt
+    if body.voice_description is not None:
+        persona.voice_description = body.voice_description
+    if body.category is not None:
+        persona.category = body.category
+    if body.suggested_temperature is not None:
+        persona.suggested_temperature = body.suggested_temperature
+
+
 @router.put("/workspaces/{workspace_id}/personas/{persona_id}", response_model=PersonaOut, dependencies=[Depends(require_workspace_permission("agents:update"))])
-async def update_workspace_persona(
+def update_workspace_persona(
     workspace_id: UUID,
     persona_id: UUID,
     body: UpdatePersonaBody,
@@ -318,19 +335,7 @@ async def update_workspace_persona(
                 detail="Persona not found or not a workspace persona",
             )
 
-        # Apply updates (only set provided fields)
-        if body.name is not None:
-            persona.name = body.name
-        if body.description is not None:
-            persona.description = body.description
-        if body.system_prompt is not None:
-            persona.system_prompt = body.system_prompt
-        if body.voice_description is not None:
-            persona.voice_description = body.voice_description
-        if body.category is not None:
-            persona.category = body.category
-        if body.suggested_temperature is not None:
-            persona.suggested_temperature = body.suggested_temperature
+        _update_workspace_persona_fields(persona, body)
 
         db.commit()
         db.refresh(persona)
@@ -346,7 +351,7 @@ async def update_workspace_persona(
 
 
 @router.delete("/workspaces/{workspace_id}/personas/{persona_id}", dependencies=[Depends(require_workspace_permission("agents:delete"))])
-async def delete_workspace_persona(
+def delete_workspace_persona(
     workspace_id: UUID,
     persona_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),

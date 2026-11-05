@@ -91,8 +91,8 @@ def test_a_role_change_never_makes_an_owner(cafe):
                           {"ws": str(cafe.ws), "user": editor}).scalar()
     with patch.object(team_api, "_resolve_internal_user_id", return_value=cafe.owner), \
             pytest.raises(HTTPException) as refused:
-        asyncio.run(team_api.update_member_role(workspace_id=str(cafe.ws), member_id=row, ctx=NS(), db=cafe.db,
-                                                request=team_api.UpdateMemberRoleRequest(role="owner")))
+        team_api.update_member_role(workspace_id=str(cafe.ws), member_id=row, ctx=NS(), db=cafe.db,
+                                                request=team_api.UpdateMemberRoleRequest(role="owner"))
     assert (refused.value.status_code, refused.value.detail) == (
         400, "A workspace has one owner: make them an admin, editor or viewer.")
     assert _owners(cafe) == 1
@@ -110,7 +110,7 @@ def test_an_owner_invitation_stored_before_the_fix_is_not_accepted(cafe):
     clerk_user = {"clerk_user_id": f"user_{uuid4().hex[:8]}", "email": "cofounder@example.com"}
     with patch.object(team_api, "_verify_clerk_user_only", return_value=clerk_user), \
             pytest.raises(HTTPException) as refused:
-        asyncio.run(team_api.accept_invitation(payload=team_api.AcceptInvitationRequest(token=invitation.token),
-                                               request=NS(), db=cafe.db))
+        team_api.accept_invitation(payload=team_api.AcceptInvitationRequest(token=invitation.token),
+                                               request=NS(), db=cafe.db)
     assert refused.value.status_code == 400
     assert _owners(cafe) == 1

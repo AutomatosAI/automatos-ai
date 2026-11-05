@@ -5,188 +5,237 @@
 
 The following files were used as context for generating this wiki page:
 
-- [orchestrator/core/services/skill_l3_execution.py](orchestrator/core/services/skill_l3_execution.py)
-- [orchestrator/modules/agents/services/skill_portability.py](orchestrator/modules/agents/services/skill_portability.py)
-- [orchestrator/modules/context/__init__.py](orchestrator/modules/context/__init__.py)
-- [orchestrator/modules/context/budget.py](orchestrator/modules/context/budget.py)
-- [orchestrator/modules/context/modes.py](orchestrator/modules/context/modes.py)
-- [orchestrator/modules/context/planning.py](orchestrator/modules/context/planning.py)
-- [orchestrator/modules/context/sections/__init__.py](orchestrator/modules/context/sections/__init__.py)
-- [orchestrator/modules/context/sections/agent_roster.py](orchestrator/modules/context/sections/agent_roster.py)
-- [orchestrator/modules/context/sections/composio.py](orchestrator/modules/context/sections/composio.py)
-- [orchestrator/modules/context/sections/field_memory.py](orchestrator/modules/context/sections/field_memory.py)
+- [orchestrator/modules/context/result.py](orchestrator/modules/context/result.py)
 - [orchestrator/modules/context/sections/identity.py](orchestrator/modules/context/sections/identity.py)
-- [orchestrator/modules/context/sections/planning_history.py](orchestrator/modules/context/sections/planning_history.py)
-- [orchestrator/modules/context/sections/planning_knowledge.py](orchestrator/modules/context/sections/planning_knowledge.py)
-- [orchestrator/modules/context/sections/playbook_context.py](orchestrator/modules/context/sections/playbook_context.py)
-- [orchestrator/modules/context/sections/plugins.py](orchestrator/modules/context/sections/plugins.py)
 - [orchestrator/modules/context/sections/skills.py](orchestrator/modules/context/sections/skills.py)
 - [orchestrator/modules/context/sections/task_context.py](orchestrator/modules/context/sections/task_context.py)
+- [orchestrator/modules/context/service.py](orchestrator/modules/context/service.py)
 - [orchestrator/modules/tools/discovery/actions_skills.py](orchestrator/modules/tools/discovery/actions_skills.py)
-- [orchestrator/modules/tools/discovery/handlers_skill_runtime.py](orchestrator/modules/tools/discovery/handlers_skill_runtime.py)
-- [orchestrator/tests/test_context/test_modes.py](orchestrator/tests/test_context/test_modes.py)
-- [orchestrator/tests/test_context/test_service.py](orchestrator/tests/test_context/test_service.py)
-- [orchestrator/tests/test_identity_section.py](orchestrator/tests/test_identity_section.py)
-- [orchestrator/tests/test_p2w1_agent_skills_repair.py](orchestrator/tests/test_p2w1_agent_skills_repair.py)
-- [orchestrator/tests/test_prd164_planning_pack.py](orchestrator/tests/test_prd164_planning_pack.py)
-- [orchestrator/tests/test_prd179_field_read.py](orchestrator/tests/test_prd179_field_read.py)
+- [orchestrator/scripts/eval/tool_routing/eval_seed.yaml](orchestrator/scripts/eval/tool_routing/eval_seed.yaml)
+- [orchestrator/scripts/eval/tool_routing/eval_set.jsonl](orchestrator/scripts/eval/tool_routing/eval_set.jsonl)
+- [orchestrator/scripts/eval/tool_routing/seed_eval_set.py](orchestrator/scripts/eval/tool_routing/seed_eval_set.py)
+- [orchestrator/scripts/skill_signal_report.py](orchestrator/scripts/skill_signal_report.py)
+- [orchestrator/tests/test_auto_prompt_prefix_is_turn_stable.py](orchestrator/tests/test_auto_prompt_prefix_is_turn_stable.py)
+- [orchestrator/tests/test_context/__init__.py](orchestrator/tests/test_context/__init__.py)
+- [orchestrator/tests/test_context/conftest.py](orchestrator/tests/test_context/conftest.py)
+- [orchestrator/tests/test_context/test_budget_manager.py](orchestrator/tests/test_context/test_budget_manager.py)
+- [orchestrator/tests/test_context/test_identity_section.py](orchestrator/tests/test_context/test_identity_section.py)
+- [orchestrator/tests/test_context/test_memory_section.py](orchestrator/tests/test_context/test_memory_section.py)
+- [orchestrator/tests/test_context/test_prompt_caching.py](orchestrator/tests/test_context/test_prompt_caching.py)
+- [orchestrator/tests/test_f155_a_widget_turn_is_told_where_it_is.py](orchestrator/tests/test_f155_a_widget_turn_is_told_where_it_is.py)
+- [orchestrator/tests/test_f155_widget_born_work_remembers_as_a_widget_turn.py](orchestrator/tests/test_f155_widget_born_work_remembers_as_a_widget_turn.py)
 - [orchestrator/tests/test_prd202_s2_trigger_activation.py](orchestrator/tests/test_prd202_s2_trigger_activation.py)
-- [orchestrator/tests/test_skills_section.py](orchestrator/tests/test_skills_section.py)
+- [orchestrator/tests/test_prd263_skill_hash_in_context_trace.py](orchestrator/tests/test_prd263_skill_hash_in_context_trace.py)
+- [orchestrator/tests/test_prd263_skill_signal_report.py](orchestrator/tests/test_prd263_skill_signal_report.py)
 
 </details>
 
 
 
-## Purpose and Scope
+The **Section Priority System** is the `ContextService` mechanism designed to protect critical agent context (such as identity, active tasks, and foundational instructions) from being dropped when system prompts encounter tight token budget constraints. By assigning a strict priority rank (1 through 10) to each context section, the system delegates budget management to `TokenBudgetManager` [orchestrator/modules/context/budget.py:64-147](), which selectively trims lower-priority sections while guaranteeing that high-priority components always render in full.
 
-The Section Priority System governs how the unified context assembly pipeline (`ContextService`) prioritizes, allocates token budgets for, and trims prompt sections. By assigning a discrete priority integer (1 to 10) to each concrete section class inheriting from `BaseSection` [orchestrator/modules/context/sections/base.py:10-25](), the system ensures that critical context—such as agent identity and active task instructions—is never omitted or degraded under strict prompt length constraints, while trimmable background memory or chat history is safely pruned first.
-
-Sources: `[orchestrator/modules/context/budget.py:1-20]()`, `[orchestrator/modules/context/sections/base.py:1-25]()`
+Sources: [orchestrator/modules/context/service.py:29-34](), [orchestrator/modules/context/budget.py:64-147]()
 
 ---
 
-## Priority Tier Structure
+## Overview
 
-The priority system organizes sections into distinct importance tiers. Lower numeric values represent higher priority (Priority 1 being the most critical).
+Every context section inherits from `BaseSection` [orchestrator/modules/context/sections/base.py:30-50]() and declares a numeric `priority` attribute. When prompt assembly runs across various execution modes (`CHATBOT`, `TASK_EXECUTION`, `HEARTBEAT`, etc.), sections are evaluated against the mode's available token budget. If truncation is required, sections are dropped in **reverse priority order** (where higher numerical values represent lower importance), ensuring critical guidance remains intact.
+
+### Diagram: Natural Language Space to Code Entity Space Bridge
 
 ```mermaid
 graph TB
-    subgraph "Natural Language: Critical Tier (P1-P2)"
-        Identity["IdentitySection<br/>priority=1"]
-        Task["TaskContextSection<br/>priority=2"]
+    subgraph "Natural Language Space"
+        P1["Identity & Role"]
+        P2["Task & Mission"]
+        P3["Tools Catalog"]
+        P4["Skills & Instructions"]
+        P5["Platform Actions"]
     end
-
-    subgraph "Natural Language: Important Tier (P3-P5)"
-        Tools["ToolsSection<br/>priority=3"]
-        Skills["SkillsSection<br/>priority=4"]
-        Actions["PlatformActionsSection<br/>priority=5"]
-    end
-
-    subgraph "Natural Language: Trimmable Tier (P6-P10)"
-        Memory["MemorySection<br/>priority=6"]
-        Datetime["DatetimeContextSection<br/>priority=8"]
-        Conv["ConversationSection<br/>priority=9"]
-        Custom["CustomSection<br/>priority=10"]
-    end
-
+    
     subgraph "Code Entity Space"
-        Registry["SECTION_REGISTRY<br/>orchestrator/modules/context/sections/__init__.py"]
-        Manager["TokenBudgetManager.allocate()<br/>orchestrator/modules/context/budget.py"]
+        E1["IdentitySection (priority: 1)"]
+        E2["TaskContextSection (priority: 2)"]
+        E3["ToolsSection (priority: 3)"]
+        E4["SkillsSection (priority: 4)"]
+        E5["PlatformActionsSection (priority: 5)"]
     end
 
-    Identity --> Manager
-    Task --> Manager
-    Tools --> Manager
-    Skills --> Manager
-    Actions --> Manager
-    Memory --> Manager
-    Datetime --> Manager
-    Conv --> Manager
-    Custom --> Manager
-    Registry --> Manager
+    P1 --> E1
+    P2 --> E2
+    P3 --> E3
+    P4 --> E4
+    P5 --> E5
 ```
+Sources: [orchestrator/modules/context/budget.py:1-64](), [orchestrator/modules/context/sections/base.py:10-30](), [orchestrator/modules/context/sections/skills.py:62-62](), [orchestrator/modules/context/sections/tools.py:41-45](), [orchestrator/modules/context/sections/platform_actions.py:60-72]()
 
-Sources: `[orchestrator/modules/context/sections/__init__.py:31-51]`, `[orchestrator/modules/context/budget.py:51-147]()`
+---
+
+## Priority Tier Breakdown
+
+The system organizes context into three functional tiers according to operational necessity:
+
+1.  **Critical Tier (Priorities 1–2):** Fundamental context like agent identity (`IdentitySection`) [orchestrator/modules/context/sections/identity.py:76-78]() and task/recipe instructions (`TaskContextSection` [orchestrator/modules/context/sections/task_context.py:27-28](), `PlaybookContextSection`) that are **never dropped** under budget pressure.
+2.  **Important Tier (Priorities 3–5):** Capabilities, tools (`ToolsSection`), core skills (`SkillsSection`) [orchestrator/modules/context/sections/skills.py:62-62](), and platform actions (`PlatformActionsSection`). Retained whenever possible but subject to progressive disclosure or token trimming.
+3.  **Trimmable Tier (Priorities 6–10):** Supplementary context like memories (`MemorySection`), temporal info (`DatetimeContextSection`), conversation history (`ConversationSection`), and custom metadata (`CustomSection`) that are safely pruned when budgets are exceeded.
+
+### Diagram: Priority Tier Fallback Hierarchy
+
+```mermaid
+graph TB
+    subgraph "Critical Tier - Never Dropped"
+        P1["IdentitySection (P1)"]
+        P2["TaskContextSection (P2)"]
+    end
+    
+    subgraph "Important Tier - High Priority"
+        P3["ToolsSection (P3)"]
+        P4["SkillsSection (P4)"]
+        P5["PlatformActionsSection (P5)"]
+    end
+    
+    subgraph "Trimmable Tier - Dropped if Over Budget"
+        P6["MemorySection (P6)"]
+        P8["DatetimeContextSection (P8)"]
+        P9["ConversationSection (P9)"]
+        P10["CustomSection (P10)"]
+    end
+    
+    Budget["TokenBudgetManager.allocate()"]
+    
+    P1 --> Budget
+    P2 --> Budget
+    P3 --> Budget
+    P4 --> Budget
+    P5 --> Budget
+    P6 --> Budget
+    P8 --> Budget
+    P9 --> Budget
+    P10 --> Budget
+    
+    Budget -->|Fits| FullPrompt["ContextResult Full"]
+    Budget -->|Exceeds| Trim["Drop P10->P6"]
+    
+    Trim --> TrimmedPrompt["ContextResult Guaranteed"]
+```
+Sources: [orchestrator/modules/context/budget.py:53-145](), [orchestrator/modules/context/sections/base.py:1-30](), [orchestrator/modules/context/sections/tools.py:41-45](), [orchestrator/modules/context/sections/platform_actions.py:60-72]()
 
 ---
 
 ## Section Priority Registry
 
-The `SECTION_REGISTRY` maps section name strings (declared in `ModeConfig.sections`) to their concrete implementation classes [orchestrator/modules/context/sections/__init__.py:31-51]().
+The registry maps section identifiers to their concrete implementations and default token limits:
 
-| Priority | Section Name | Class Name | Default Max Tokens | Role & Description |
+| Priority | Section Name | Class | Max Tokens (Default) | Purpose |
 | :--- | :--- | :--- | :--- | :--- |
-| **1** | `identity` | `IdentitySection` | `None` | Agent name, role, persona, and response formatting [orchestrator/modules/context/sections/identity.py:68-71]() |
-| **2** | `task_context` | `TaskContextSection` | `1500` | Current task description and board metadata [orchestrator/modules/context/sections/task_context.py:26-28]() |
-| **2** | `playbook_context` | `PlaybookContextSection` | `None` | Current recipe step and execution context [orchestrator/modules/context/sections/__init__.py:45-45]() |
-| **2** | `mission_context` | `MissionContextSection` | `None` | Goal decomposition and DAG task graph context [orchestrator/modules/context/sections/__init__.py:38-38]() |
-| **2** | `onboarding` | `OnboardingSection` | `None` | Mission Zero onboarding flow for new workspaces [orchestrator/modules/context/sections/__init__.py:39-39]() |
-| **2** | `planning_history` | `PlanningHistorySection` | `None` | Seeded failures for compounding learning [orchestrator/modules/context/modes.py:23-24]() |
-| **3** | `tools` | `ToolsSection` | `None` | Manages tool loading declarations [orchestrator/modules/context/sections/__init__.py:43-43]() |
-| **4** | `skills` | `SkillsSection` | `None` | Trigger-based skill activation: L1 metadata always, L2 on demand [orchestrator/modules/context/sections/skills.py:44-48]() |
-| **5** | `platform_actions` | `PlatformActionsSection` | `None` | Descriptions of internal platform capabilities [orchestrator/modules/context/sections/__init__.py:36-36]() |
-| **6** | `memory` | `MemorySection` | `None` | User memories, session context, and daily logs [orchestrator/modules/context/sections/__init__.py:37-37]() |
-| **8** | `datetime_context` | `DatetimeContextSection` | `None` | Current system date and time [orchestrator/modules/context/sections/__init__.py:46-46]() |
-| **9** | `conversation` | `ConversationSection` | `None` | Formatting hints for message history [orchestrator/modules/context/sections/__init__.py:49-49]() |
-| **10** | `custom` | `CustomSection` | `None` | Arbitrary key-value metadata [orchestrator/modules/context/sections/__init__.py:50-50]() |
+| **1** | `identity` | `IdentitySection` | None | Agent name, role, persona, and response formatting |
+| **2** | `task_context` | `TaskContextSection` | 1500 | Current task description and board metadata |
+| **2** | `playbook_context` | `PlaybookContextSection` | - | Current recipe step and execution context |
+| **2** | `mission_context` | `MissionContextSection` | - | Goal decomposition and DAG task graph context |
+| **2** | `onboarding` | `OnboardingSection` | - | Mission Zero onboarding flow for new workspaces |
+| **2** | `planning_history` | `PlanningHistorySection` | - | Seeded failures for compounding learning |
+| **3** | `tools` | `ToolsSection` | None | Manages tool schemas and tool loading |
+| **4** | `skills` | `SkillsSection` | None | Trigger-based skill activation: L1 metadata always, L2 on demand |
+| **5** | `platform_actions` | `PlatformActionsSection` | Configurable | Descriptions of internal platform execution capabilities |
+| **6** | `memory` | `MemorySection` | Configurable | User memories, session context, and daily logs |
+| **8** | `datetime_context`| `DatetimeContextSection` | - | Current system date and time |
+| **9** | `conversation` | `ConversationSection` | - | Formatting hints for message history |
+| **10** | `custom` | `CustomSection` | - | Arbitrary key-value metadata |
 
-Sources: `[orchestrator/modules/context/sections/__init__.py:31-51]`, `[orchestrator/modules/context/sections/identity.py:68-71]`, `[orchestrator/modules/context/sections/task_context.py:26-28]`, `[orchestrator/modules/context/sections/skills.py:44-48]()`
+Sources: [orchestrator/modules/context/sections/__init__.py:33-55](), [orchestrator/modules/context/budget.py:1-64](), [orchestrator/modules/context/sections/tools.py:41-52](), [orchestrator/modules/context/sections/platform_actions.py:60-72]()
 
 ---
 
 ## Token Budget Allocation Algorithm
 
-When context sections are rendered, `TokenBudgetManager.allocate()` processes them against the available token budget via a deterministic 3-step algorithm [orchestrator/modules/context/budget.py:64-147]().
+`TokenBudgetManager.allocate()` executes prompt budgeting via a three-phase pipeline [orchestrator/modules/context/budget.py:64-147]():
+
+1.  **Per-Section Capping:** Each rendered section string is truncated against its defined `max_tokens` limit [orchestrator/modules/context/budget.py:86-94]() to prevent resource monopolization.
+2.  **Priority-Based Dropping:** Sections are evaluated in descending order of priority number. If the aggregate token count exceeds the allocated target, lower-priority sections are dropped iteratively [orchestrator/modules/context/budget.py:98-115](). Priorities 1 and 2 are explicitly guarded and exempt from removal [orchestrator/modules/context/budget.py:117-145]().
+3.  **Order Preservation:** Surviving sections are re-sorted to preserve their original relative declaration order before final prompt aggregation [orchestrator/modules/context/budget.py:146-164]().
+
+Sources: [orchestrator/modules/context/budget.py:64-147]()
+
+---
+
+## Code Entity Mapping
+
+### Diagram: Context Assembly Class Architecture
 
 ```mermaid
-graph TB
-    subgraph "TokenBudgetManager Execution Flow"
-        Start["RenderedSections List"] --> Step1["Step 1: Apply max_tokens Caps<br/>truncate_to_token_budget()"]
-        Step1 --> Step2["Step 2: Check total_tokens <= available"]
-        Step2 -->|"Yes"| ReturnAll["Return Capped Sections"]
-        Step2 -->|"No"| Step3["Step 3: Sort by priority descending<br/>Drop lowest priority numbers first"]
-        Step3 --> CheckProtected["Guard: Skip dropping if priority <= 2"]
-        CheckProtected --> Finalize["Rebuild included list preserving order"]
-    end
+classDiagram
+    class ContextService {
+        +build_context(mode, agent, workspace_id)
+    }
+    class TokenBudgetManager {
+        +allocate(sections, budget)
+    }
+    class BaseSection {
+        <<abstract>>
+        +str name
+        +int priority
+        +int max_tokens
+        +render(ctx)
+    }
+    class IdentitySection {
+        +priority = 1
+        +render(ctx)
+    }
+    class ToolsSection {
+        +priority = 3
+        +load_tools()
+    }
+    class SkillsSection {
+        +priority = 4
+        +_build(ctx)
+    }
+    class PlatformActionsSection {
+        +priority = 5
+        +render(ctx)
+    }
+
+    ContextService --> TokenBudgetManager : uses
+    ContextService ..> BaseSection : instantiates
+    BaseSection <|-- IdentitySection
+    BaseSection <|-- ToolsSection
+    BaseSection <|-- SkillsSection
+    BaseSection <|-- PlatformActionsSection
 ```
-
-### 1. Per-Section Capping
-Each `RenderedSection` is checked against its defined `max_tokens` limit. If exceeded, `truncate_to_token_budget()` truncates content on clean token boundaries without appending truncation artifacts [orchestrator/modules/context/budget.py:77-105]().
-
-### 2. Priority-Based Dropping
-If the cumulative token count exceeds `budget.available_for_sections`, sections are sorted by priority in descending order (highest numeric value = lowest priority) [orchestrator/modules/context/budget.py:112-117](). Sections are dropped one by one until the budget is satisfied. However, **Priority 1 and 2 sections are permanently exempt** and will never be dropped [orchestrator/modules/context/budget.py:121-125]().
-
-### 3. Order Preservation
-Once trimmable sections are filtered out, the remaining sections are reconstructed into their original relative order to preserve logical narrative flow for the LLM [orchestrator/modules/context/budget.py:136-137]().
-
-Sources: `[orchestrator/modules/context/budget.py:51-147]()`
+Sources: [orchestrator/modules/context/sections/base.py:1-30](), [orchestrator/modules/context/sections/tools.py:41-52](), [orchestrator/modules/context/sections/platform_actions.py:60-72]()
 
 ---
 
 ## Mode-Specific Budget Configurations
 
-Token budgets and constraints vary by `ContextMode` as defined in `DEFAULT_BUDGETS` [orchestrator/modules/context/budget.py:154-195](). Total context size is typically 128,000 tokens, with dynamic reservations for response generation and message history.
+Budgets are allocated per `ContextMode` configuration parameters [orchestrator/modules/context/budget.py:154-203]() by subtracting reserved token counts for message history and response generation from the total model context window.
 
-| ContextMode | Total Budget | Reserved (Response) | Reserved (Messages) | Tool Loading Strategy |
-| :--- | :--- | :--- | :--- | :--- |
-| `CHATBOT` | 128,000 | 4,096 | 60,000 | `filtered` [orchestrator/modules/context/modes.py:133-133]() |
-| `TASK_EXECUTION` | 128,000 | 4,096 | 20,000 | `full` [orchestrator/modules/context/modes.py:146-146]() |
-| `HEARTBEAT_ORCHESTRATOR`| 128,000 | 2,048 | 0 | `dispatcher_only` [orchestrator/modules/context/modes.py:157-157]() |
-| `HEARTBEAT_AGENT` | 128,000 | 4,096 | 0 | `full` [orchestrator/modules/context/modes.py:170-170]() |
-| `RECIPE` | 128,000 | 4,096 | 10,000 | `full` |
-| `NL2SQL` | 128,000 | 2,048 | 2,000 | `none` |
+| Mode | Total Budget | Reserved (Response) | Reserved (Messages) |
+| :--- | :--- | :--- | :--- |
+| `CHATBOT` | 128,000 | 4,096 | 60,000 |
+| `TASK_EXECUTION` | 128,000 | 4,096 | 20,000 |
+| `HEARTBEAT_AGENT`| 128,000 | 4,096 | 0 |
+| `COORDINATOR` | 131,072 | 4,096 | 0 |
 
-Sources: `[orchestrator/modules/context/budget.py:154-195]`, `[orchestrator/modules/context/modes.py:122-171]()`
+Sources: [orchestrator/modules/context/budget.py:154-203](), [orchestrator/modules/context/modes.py:112-170]()
 
 ---
 
-## Critical Section Implementation Details
+## Implementation Details
 
 ### Identity Protection
-`IdentitySection` operates at Priority 1 (`priority = 1`) [orchestrator/modules/context/sections/identity.py:69-69](). In `CHATBOT` mode (`personality=True`), it invokes `AutomatosPersonality.get_base_system_prompt()` to inject conversational profiles, platform skills, and action response styles [orchestrator/modules/context/sections/identity.py:136-165](). In other modes, it renders concise agent metadata and formatting rules [orchestrator/modules/context/sections/identity.py:87-120]().
+`IdentitySection` [orchestrator/modules/context/sections/identity.py:76-78]() handles core agent metadata and `CHATBOT` persona configurations. When `personality=True` is requested, it delegates to personality prompt generators to bundle platform skills, tool interaction rules, and self-learning directives. Given its Priority 1 assignment, these attributes are immune to pruning. The `_build_chatbot_identity` method [orchestrator/modules/context/sections/identity.py:131-164]() is responsible for constructing the full chatbot personality prompt.
 
-### Task and Mission Context
-`TaskContextSection` runs at Priority 2 (`priority = 2`) [orchestrator/modules/context/sections/task_context.py:27-28]() to supply task execution instructions, status data, board names, and dependency context handling protocols [orchestrator/modules/context/sections/task_context.py:42-88]().
+Sources: [orchestrator/modules/context/sections/base.py:1-30](), [orchestrator/modules/context/modes.py:112-170](), [orchestrator/modules/context/sections/identity.py:76-78](), [orchestrator/modules/context/sections/identity.py:131-164]()
 
 ### Trigger-Based Skill Activation
-`SkillsSection` operates at Priority 4 (`priority = 4`) [orchestrator/modules/context/sections/skills.py:45-45](). It splits attached skills into core always-on definitions (such as `platform-management`) and optional L1 metadata entries [orchestrator/modules/context/sections/skills.py:76-95](). Non-core skills require the agent to explicitly call `platform_load_skill` to pull full bodies into context [orchestrator/modules/tools/discovery/actions_skills.py:29-56]().
+`SkillsSection` [orchestrator/modules/context/sections/skills.py:53-67]() (Priority 4) implements progressive disclosure. Only core operational skills inject their full L2 body every turn, while all other attached skills contribute solely their L1 metadata (name and description), requiring the agent to explicitly call `platform_load_skill` [orchestrator/modules/tools/discovery/actions_skills.py:29-57]() when matched against a task. The `_build` method [orchestrator/modules/context/sections/skills.py:86-139]() manages the rendering of core skill bodies and L1 metadata. The `SKILL_BODIES_KEY` [orchestrator/modules/context/sections/skills.py:39-40]() is used to record the content hash of served skill bodies for context tracing.
 
-```mermaid
-graph TB
-    subgraph "Code Entity Architecture"
-        Service["ContextService.build_context()<br/>orchestrator/modules/context/service.py"]
-        Config["ModeConfig<br/>orchestrator/modules/context/modes.py"]
-        Reg["SECTION_REGISTRY<br/>orchestrator/modules/context/sections/__init__.py"]
-        SecBase["BaseSection.render()<br/>orchestrator/modules/context/sections/base.py"]
-        BudgetMgr["TokenBudgetManager.allocate()<br/>orchestrator/modules/context/budget.py"]
-    end
+Sources: [orchestrator/modules/context/sections/skills.py:53-67](), [orchestrator/modules/context/sections/skills.py:86-139](), [orchestrator/modules/tools/discovery/actions_skills.py:29-57](), [orchestrator/modules/context/sections/skills.py:39-40]()
 
-    Service --> Config
-    Config --> Reg
-    Reg --> SecBase
-    SecBase --> BudgetMgr
-```
+### Platform Actions Catalog
+`PlatformActionsSection` [orchestrator/modules/context/sections/platform_actions.py:60-72]() (Priority 5) renders catalog markdown for `platform_execute` actions. When semantic tool routing is active (`config.SEMANTIC_TOOL_ROUTING`), it queries `ActionSemanticIndex` [orchestrator/modules/tools/discovery/action_semantic_index.py:113-137]() to filter and render only top-K relevant actions based on the current context query, falling back gracefully to the full catalog if indexing fails. The `_routed` method [orchestrator/modules/context/sections/platform_actions.py:138-153]() handles the logic for graph routing and semantic filtering. The `ActionRegistry` [orchestrator/modules/tools/discovery/action_registry.py:119-129]() is used to manage and retrieve `ActionDefinition` objects.
 
-Sources: `[orchestrator/modules/context/sections/identity.py:55-165]`, `[orchestrator/modules/context/sections/task_context.py:18-88]`, `[orchestrator/modules/context/sections/skills.py:36-124]`, `[orchestrator/modules/tools/discovery/actions_skills.py:29-56]`, `[orchestrator/modules/context/budget.py:51-147]()`
+Sources: [orchestrator/modules/context/sections/platform_actions.py:60-132](), [orchestrator/modules/tools/discovery/action_semantic_index.py:113-137](), [orchestrator/modules/context/sections/platform_actions.py:138-153](), [orchestrator/modules/tools/discovery/action_registry.py:119-129]()
 
 ---

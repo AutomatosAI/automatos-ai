@@ -5,173 +5,239 @@
 
 The following files were used as context for generating this wiki page:
 
+- [docs/PRDS/128-UNIFIED-NOTIFICATION-SYSTEM.md](docs/PRDS/128-UNIFIED-NOTIFICATION-SYSTEM.md)
+- [docs/PRDS/129-WORKSPACE-OUTPUTS-HUB.md](docs/PRDS/129-WORKSPACE-OUTPUTS-HUB.md)
 - [frontend/components/agents/skills/skill-editor-modal.tsx](frontend/components/agents/skills/skill-editor-modal.tsx)
 - [frontend/components/agents/skills/workspace-skills-tab.tsx](frontend/components/agents/skills/workspace-skills-tab.tsx)
 - [frontend/components/knowledge/memory-tab.tsx](frontend/components/knowledge/memory-tab.tsx)
 - [frontend/hooks/use-skills-api.ts](frontend/hooks/use-skills-api.ts)
+- [orchestrator/alembic/versions/prd128_notifications.py](orchestrator/alembic/versions/prd128_notifications.py)
 - [orchestrator/api/admin_plugins.py](orchestrator/api/admin_plugins.py)
 - [orchestrator/api/agent_plugins.py](orchestrator/api/agent_plugins.py)
 - [orchestrator/api/personas.py](orchestrator/api/personas.py)
 - [orchestrator/api/rag_feedback.py](orchestrator/api/rag_feedback.py)
 - [orchestrator/api/workspace_plugins.py](orchestrator/api/workspace_plugins.py)
 - [orchestrator/api/workspace_skills.py](orchestrator/api/workspace_skills.py)
+- [orchestrator/core/auth/workspace_agent.py](orchestrator/core/auth/workspace_agent.py)
+- [orchestrator/core/seeds/marketplace_personas.py](orchestrator/core/seeds/marketplace_personas.py)
+- [orchestrator/core/seeds/seed_shopify_agents.py](orchestrator/core/seeds/seed_shopify_agents.py)
 - [orchestrator/core/services/marketplace_s3.py](orchestrator/core/services/marketplace_s3.py)
 - [orchestrator/core/services/plugin_upload_service.py](orchestrator/core/services/plugin_upload_service.py)
-- [orchestrator/core/services/skill_l3_execution.py](orchestrator/core/services/skill_l3_execution.py)
-- [orchestrator/modules/agents/services/skill_portability.py](orchestrator/modules/agents/services/skill_portability.py)
-- [orchestrator/modules/context/sections/identity.py](orchestrator/modules/context/sections/identity.py)
-- [orchestrator/modules/context/sections/skills.py](orchestrator/modules/context/sections/skills.py)
-- [orchestrator/modules/context/sections/task_context.py](orchestrator/modules/context/sections/task_context.py)
-- [orchestrator/modules/tools/discovery/actions_skills.py](orchestrator/modules/tools/discovery/actions_skills.py)
-- [orchestrator/modules/tools/discovery/handlers_skill_runtime.py](orchestrator/modules/tools/discovery/handlers_skill_runtime.py)
-- [orchestrator/tests/test_identity_section.py](orchestrator/tests/test_identity_section.py)
-- [orchestrator/tests/test_p2w1_agent_skills_repair.py](orchestrator/tests/test_p2w1_agent_skills_repair.py)
-- [orchestrator/tests/test_prd202_s2_trigger_activation.py](orchestrator/tests/test_prd202_s2_trigger_activation.py)
-- [orchestrator/tests/test_skills_section.py](orchestrator/tests/test_skills_section.py)
+- [orchestrator/tests/test_prd251w1_rvw1_persona_tenancy.py](orchestrator/tests/test_prd251w1_rvw1_persona_tenancy.py)
 
 </details>
 
 
 
-This page describes the architecture and implementation of plugins and skills in Automatos AI. These systems allow agents to be enhanced with reusable prompt-based knowledge, specialized methodologies, and executable tool schemas, featuring trigger-based progressive disclosure and workspace-level portability.
+## Purpose & Scope
 
----
+This page describes how Automatos AI makes plugins and skills available to agents: plugin assignment, workspace-level skill enablement, skill prompt loading, L1/L3 skill execution, security checks, and the boundaries between marketplace items and workspace-owned copies. It focuses on the supplied implementation references for the agent-plugin API, workspace-skills API, workspace plugin enablement, admin plugin management, `WorkspaceSkillsTab`, and backend service wrappers. [orchestrator/api/agent_plugins.py:1-9](), [orchestrator/api/workspace_skills.py:1-16](), [orchestrator/api/admin_plugins.py:1-13](), [frontend/components/agents/skills/workspace-skills-tab.tsx:1-45]()
 
-## Overview
-
-Automatos AI utilizes two primary mechanisms for extending agent capabilities:
-
-1.  **Plugins**: Packaged bundles of knowledge and tools distributed via the Marketplace. They contain metadata, executable commands, and security scan records that can be enabled at the workspace level and assigned to specific agents [orchestrator/core/models/marketplace_plugins.py:50-120](), [orchestrator/api/agent_plugins.py:6-9]().
-2.  **Skills**: Atomic units of capability. Skills can be "materialized" from plugins, forked from the marketplace, or created directly within a workspace [frontend/components/agents/skills/workspace-skills-tab.tsx:4-7](). Under PRD-202 S2, non-core skills utilize a token-efficient L1 metadata catalog with on-demand L2 loading via tools [orchestrator/modules/context/sections/skills.py:2-20]().
-
-**Sources:** [orchestrator/api/agent_plugins.py:1-9](), [orchestrator/core/models/marketplace_plugins.py:50-120](), [frontend/components/agents/skills/workspace-skills-tab.tsx:4-7](), [orchestrator/modules/context/sections/skills.py:2-20]()
+Sources: [orchestrator/api/agent_plugins.py:1-9](), [orchestrator/api/workspace_skills.py:1-16](), [orchestrator/api/admin_plugins.py:1-13](), [frontend/components/agents/skills/workspace-skills-tab.tsx:1-45]()
 
 ---
 
 ## Plugin Lifecycle & Management
 
-The plugin system follows a multi-tier enablement and security validation flow.
+Plugins and skills have related but distinct assignment paths. The plugin API exposes agent-level plugin assignments; the workspace-skills API exposes skills that a workspace has enabled or owns. The supplied agent-plugin endpoint requires that assigned plugins be enabled for the agent’s workspace. [orchestrator/api/agent_plugins.py:144-192](), [orchestrator/api/workspace_skills.py:132-148]()
 
 ### 1. Admin Upload & Security Scanning
-Plugins can be uploaded as multipart `.zip` archives via the admin API (`POST /api/admin/plugins/upload`) [orchestrator/api/admin_plugins.py:139-148](). The upload invokes `PluginUploadService`, `MarketplaceS3Service`, and `PluginScanService` to execute static pattern checks and LLM-based risk assessments [orchestrator/api/admin_plugins.py:166-173](). Findings are categorized by severity (e.g., `critical`, `high`, `medium`, `low`) [orchestrator/api/workspace_skills.py:38-39]().
 
-### 2. Workspace Enablement
-Workspace owners or admins enable approved marketplace plugins via `POST /api/workspaces/{workspace_id}/plugins`, creating a `WorkspaceEnabledPlugin` association record [orchestrator/api/workspace_plugins.py:136-190]().
+The admin plugin router exposes `POST /api/admin/plugins/upload` via `upload_plugin`. It requires admin access, accepts a ZIP upload (`UploadFile`), rejects missing filenames and non-ZIP files, and enforces a 10 MB size limit. [orchestrator/api/admin_plugins.py:43-63](), [orchestrator/api/admin_plugins.py:139-163]()
 
-### 3. Agent Assignment
-Agents are assigned enabled plugins via `PUT /api/agents/{agent_id}/plugins` [orchestrator/api/agent_plugins.py:128-135](). This endpoint validates that all requested plugins are enabled for the agent's workspace, deduplicates plugin identifiers while preserving sequence-based priority, and writes `AgentAssignedPlugin` records [orchestrator/api/agent_plugins.py:154-193]().
+The handler constructs `MarketplaceS3Service`, `PluginScanService`, and `PluginUploadService`, then delegates the upload to `upload_service.upload_plugin`. A successful response returns a `PluginUploadOut` structure containing plugin and scan identifiers, slug, name, version, security status, approval status, and a `scanning` status. [orchestrator/api/admin_plugins.py:165-192](), [orchestrator/core/services/plugin_upload_service.py:80-125]()
 
-**Sources:** [orchestrator/api/admin_plugins.py:139-193](), [orchestrator/api/workspace_plugins.py:136-190](), [orchestrator/api/agent_plugins.py:128-193]()
+### 2. Workspace Enablement & Agent Assignment
 
----
+`PUT /api/agents/{agent_id}/plugins` is implemented by `update_agent_plugins`. The route requires the `agents:update` workspace permission and `caller_owns_agent`; the latter delegates workspace ownership validation to `workspace_agent_or_404`. [orchestrator/api/agent_plugins.py:67-80](), [orchestrator/api/agent_plugins.py:144-154]()
 
-## Skill Architecture & Trigger-Based Activation
+The handler checks that the agent exists and that its workspace matches the request context when the agent has a workspace. It derives the effective workspace ID from the agent or request context, removes duplicate plugin IDs while preserving order, and queries `WorkspaceEnabledPlugin` to confirm all requested plugins are enabled for the workspace. [orchestrator/api/agent_plugins.py:164-190]()
 
-Skills support rich portability, fork-on-edit semantics, and token-optimized progressive disclosure.
+`GET /api/agents/{agent_id}/plugins`, implemented by `list_agent_plugins`, joins `AgentAssignedPlugin` to `MarketplacePlugin`, orders the results by assignment priority, and returns plugin metadata including version, skill and command counts, token estimate, priority, and assignment timestamp. [orchestrator/api/agent_plugins.py:86-117](), [orchestrator/api/agent_plugins.py:120-135]()
 
-### 1. Skill Origins & Fork-on-Edit Semantics
-Workspace skills can originate from the marketplace or be workspace-owned (`origin='workspace'`, including user creations and forks) [frontend/components/agents/skills/workspace-skills-tab.tsx:56](). Editing a marketplace skill automatically forks it into a workspace-owned record, recording lineage in metadata (`forked_from_skill_id`) while preserving the immutable marketplace original [orchestrator/modules/tools/discovery/actions_skills.py:10-14]().
-
-### 2. Progressive Disclosure (L1 vs L2 Activation)
-Per PRD-202 S2, `SkillsSection` optimizes token consumption each turn:
-- **L1 Metadata Only**: All attached non-core skills contribute only their name and description (~50-100 tokens) plus a trigger instruction informing the model that it can load the full body on demand [orchestrator/modules/context/sections/skills.py:6-11]().
-- **Core Always-On L2**: Only the designated core set (defined by `config.SKILL_CORE_ALWAYS_ON`, defaulting to `platform-management`) renders its full L2 body every turn [orchestrator/modules/context/sections/skills.py:12-14]().
-- **On-Demand Loading**: The model executes `platform_load_skill` (or `load_skill`) to pull a skill's full instructions into context during a specific turn [orchestrator/modules/tools/discovery/actions_skills.py:29-56]().
-
-**Sources:** [frontend/components/agents/skills/workspace-skills-tab.tsx:56](), [orchestrator/modules/tools/discovery/actions_skills.py:10-56](), [orchestrator/modules/context/sections/skills.py:6-14]()
+Sources: [orchestrator/api/admin_plugins.py:43-63](), [orchestrator/api/admin_plugins.py:139-192](), [orchestrator/api/agent_plugins.py:67-80](), [orchestrator/api/agent_plugins.py:86-135](), [orchestrator/api/agent_plugins.py:144-190](), [orchestrator/core/services/plugin_upload_service.py:80-125]()
 
 ---
 
-## Technical Data Flow
+## Skill Architecture & Progressive Disclosure
 
-The following diagrams illustrate the transition from Natural Language interactions to Code Entity execution for plugins and skills.
+Skills participate in prompt assembly via progressive disclosure levels designed to optimize token usage while retaining full capability on demand. [orchestrator/modules/context/sections/skills.py:4-19]()
 
-### Plugin Assignment & Workspace Validation Flow
-Title: Agent Plugin Assignment Logic
+### 1. Progressive Disclosure Levels
+
+- **L1 — Metadata catalog:** Each attached non-core skill contributes metadata (name and description) rather than its full body. The section instructs the agent to load the body when a task matches the skill description. [orchestrator/modules/context/sections/skills.py:6-14](), [orchestrator/modules/context/sections/skills.py:99-112]()
+- **L2 — Full skill instructions:** Skills in the core always-on set contribute their full bodies during section rendering. The authoritative configuration is governed by system settings. [orchestrator/modules/context/sections/skills.py:32-39](), [orchestrator/modules/context/sections/skills.py:53-58]()
+- **L2 on demand — `platform_load_skill`:** This read-permission platform action retrieves a named skill’s full `SKILL.md` body for the current turn. [orchestrator/modules/tools/discovery/actions_skills.py:26-57]()
+- **L3 — Bundled script execution:** `platform_run_skill_script` is a write-permission action for running a skill’s bundled script through a sandboxed workspace worker. Only script output enters context, not the script source. [orchestrator/modules/tools/discovery/actions_skills.py:59-89]()
+- **L3 enablement:** `platform_set_skill_script_execution` is an admin-only, confirmation-required write action. Script execution remains inert until explicitly enabled for the workspace, which re-runs the security scanner and refuses skills with critical findings. [orchestrator/modules/tools/discovery/actions_skills.py:91-124]()
+
+### 2. Workspace Skills, Security Scanning & Forking
+
+`GET /api/workspaces/{workspace_id}/skills` lists enabled marketplace skills and active workspace-owned skills. The response distinguishes `origin='marketplace'` (read-only catalog item) from `origin='workspace'` (forked or user-created, editable). The endpoint verifies workspace access prior to execution. [orchestrator/api/workspace_skills.py:49-53](), [orchestrator/api/workspace_skills.py:63-79](), [orchestrator/api/workspace_skills.py:132-148]()
+
+The workspace-skills API invokes `plugin_security_scanner.quick_scan()` on edits: critical findings block saving, while high-severity findings issue warnings requiring explicit acknowledgment via `acknowledge_warnings`. [orchestrator/api/workspace_skills.py:14-15](), [orchestrator/api/workspace_skills.py:94-110]()
+
+Editing a marketplace skill triggers fork-on-edit behavior: an edit creates a workspace-owned copy, records lineage in `skill_metadata.forked_from_skill_id`, migrates agent assignments to the fork, and drops the marketplace junction while leaving the original catalog item untouched. [orchestrator/modules/tools/discovery/actions_skills.py:10-14]()
+
+Sources: [orchestrator/modules/context/sections/skills.py:4-39](), [orchestrator/modules/context/sections/skills.py:53-112](), [orchestrator/modules/tools/discovery/actions_skills.py:10-124](), [orchestrator/api/workspace_skills.py:14-15](), [orchestrator/api/workspace_skills.py:49-79](), [orchestrator/api/workspace_skills.py:94-148]()
+
+---
+
+## Technical Data Flow & Diagrams
+
+### Plugin Assignment: User Intent to Assignment Records
+
+The diagram bridges user-facing interactions in `WorkspaceSkillsTab` and plugin selection to backend route validation and database insertion across `AgentAssignedPlugin` and `WorkspaceEnabledPlugin`.
+
+Title: "Plugin Assignment and Workspace Validation Flow"
+
 ```mermaid
 graph TD
-    subgraph "NaturalLanguageSpace"
-        User["User selects plugins in UI"]
-        UI["workspace-plugins-tab.tsx"]
+    subgraph NaturalLanguageSpace["Natural Language Space"]
+        User["User selects items for an agent"]
+        WorkspaceLibrary["WorkspaceSkillsTab"]
     end
 
-    subgraph "API_Layer"
-        EP["PUT /api/agents/{agent_id}/plugins"]
-        Val["WorkspaceEnabledPlugin Check"]
+    subgraph API_Layer["API Layer"]
+        Route["PUT /api/agents/{agent_id}/plugins"]
+        Permission["require_workspace_permission agents:update"]
+        Ownership["caller_owns_agent"]
+        Validation["WorkspaceEnabledPlugin validation"]
     end
 
-    subgraph "Code_Entity_Space"
-        AAP["AgentAssignedPlugin Model"]
-        WEP["WorkspaceEnabledPlugin Model"]
-        MP["MarketplacePlugin Model"]
+    subgraph CodeEntitySpace["Code Entity Space"]
+        RequestBody["UpdateAgentPluginsBody.plugin_ids"]
+        Assignment["AgentAssignedPlugin"]
+        WorkspaceEnablement["WorkspaceEnabledPlugin"]
+        Plugin["MarketplacePlugin"]
     end
 
-    User --> UI
-    UI --> EP
-    EP --> Val
-    Val --> WEP
-    WEP --> AAP
-    AAP --> MP
+    User --> WorkspaceLibrary
+    WorkspaceLibrary --> Route
+    Route --> Permission
+    Permission --> Ownership
+    Ownership --> Validation
+    RequestBody --> Validation
+    Validation --> WorkspaceEnablement
+    Validation --> Assignment
+    Assignment --> Plugin
 ```
-**Sources:** [orchestrator/api/agent_plugins.py:128-193](), [frontend/components/agents/skills/workspace-skills-tab.tsx:4-7]()
 
-### Progressive Skill Context Assembly Flow
-Title: Skill to Prompt Progressive Disclosure Pipeline
+Sources: [frontend/components/agents/skills/workspace-skills-tab.tsx:65-105](), [orchestrator/api/agent_plugins.py:36-38](), [orchestrator/api/agent_plugins.py:144-190]()
+
+### Skill Activation: Task Intent to Context Entities
+
+This diagram illustrates how user tasks leverage progressive disclosure and tool invocations to resolve skill bodies or run scripts.
+
+Title: "Skill Activation and Execution Path"
+
 ```mermaid
 graph TD
-    subgraph "NaturalLanguageSpace"
-        Intent["User requests growth hacking task"]
-        SkillQuery["Model identifies skill match"]
+    subgraph NaturalLanguageSpace["Natural Language Space"]
+        Task["User task matches skill description"]
+        Catalog["Available Skills metadata"]
+        RequestBody["Need detailed instructions"]
+        ScriptIntent["Need bundled helper output"]
     end
 
-    subgraph "Code_Entity_Space"
-        Agent["core.models.core.Agent"]
-        Skill["core.models.core.Skill"]
-        Assoc["agent_skills Association Table"]
+    subgraph ContextEntities["Context and Skill Entities"]
+        AgentSkills["agent.skills"]
+        Section["SkillsSection.render"]
+        Core["SKILL_CORE_ALWAYS_ON"]
+        SkillBody["SKILL.md body"]
     end
 
-    subgraph "Execution_Layer"
-        Sec["SkillsSection.render()"]
-        Tool["platform_load_skill Action"]
-        Prompt["Assembled LLM Prompt"]
+    subgraph ToolEntities["Skill Tool Entities"]
+        LoadAction["platform_load_skill"]
+        RunAction["platform_run_skill_script"]
+        EnableAction["platform_set_skill_script_execution"]
+        Worker["sandboxed workspace worker"]
     end
 
-    Intent --> Agent
-    Agent --> Assoc
-    Assoc --> Skill
-    Skill --> Sec
-    Sec -- "L1 Metadata Catalog" --> Prompt
-    SkillQuery --> Tool
-    Tool -- "L2 Full Body on Demand" --> Prompt
+    AgentSkills --> Section
+    Section --> Core
+    Core --> SkillBody
+    Section --> Catalog
+    Task --> Catalog
+    Catalog --> RequestBody
+    RequestBody --> LoadAction
+    LoadAction --> SkillBody
+    ScriptIntent --> RunAction
+    RunAction --> Worker
+    EnableAction --> RunAction
 ```
-**Sources:** [orchestrator/modules/context/sections/skills.py:36-125](), [orchestrator/modules/tools/discovery/actions_skills.py:29-56](), [core/models/core.py:31-36]()
+
+Sources: [orchestrator/modules/context/sections/skills.py:86-139](), [orchestrator/modules/tools/discovery/actions_skills.py:26-124]()
+
+### Workspace Skill Portability: Marketplace Origin to Workspace Copy
+
+This diagram depicts how marketplace items are listed, enabled, and forked into workspace-owned copies when edited.
+
+Title: "Workspace Skill Fork and Assignment Lineage"
+
+```mermaid
+graph LR
+    subgraph NaturalLanguageSpace["Natural Language Space"]
+        Browse["Browse workspace skills"]
+        Edit["Edit marketplace skill"]
+        Use["Assign skill to an agent"]
+    end
+
+    subgraph CodeEntitySpace["Code Entity Space"]
+        ListRoute["GET /api/workspaces/{workspace_id}/skills"]
+        MarketplaceOrigin["origin marketplace"]
+        WorkspaceOrigin["origin workspace"]
+        ForkLineage["skill_metadata.forked_from_skill_id"]
+        AgentSkills["agent_skills assignment"]
+        MarketplaceJunction["WorkspaceEnabledSkill"]
+    end
+
+    Browse --> ListRoute
+    ListRoute --> MarketplaceOrigin
+    ListRoute --> WorkspaceOrigin
+    Edit --> MarketplaceOrigin
+    MarketplaceOrigin --> ForkLineage
+    ForkLineage --> WorkspaceOrigin
+    WorkspaceOrigin --> AgentSkills
+    MarketplaceJunction --> MarketplaceOrigin
+    Use --> AgentSkills
+```
+
+Sources: [orchestrator/api/workspace_skills.py:63-79](), [orchestrator/api/workspace_skills.py:132-148](), [orchestrator/modules/tools/discovery/actions_skills.py:10-14]()
 
 ---
 
 ## Data Model Reference
 
-### Association Tables & Models
+| Entity or response | Role | Relevant fields |
+|---|---|---|
+| `UpdateAgentPluginsBody` | Agent-plugin assignment request | `plugin_ids` [orchestrator/api/agent_plugins.py:36-38]() |
+| `AgentPluginOut` | Plugin assignment response | `plugin_id`, `slug`, `version`, `priority`, `assigned_at` [orchestrator/api/agent_plugins.py:40-54]() |
+| `AgentAssignedPlugin` | Agent-to-plugin assignment record joined by list endpoint | `agent_id`, `plugin_id`, `priority` [orchestrator/api/agent_plugins.py:108-132]() |
+| `WorkspaceEnabledPlugin` | Workspace plugin enablement checked during assignment | `workspace_id`, `plugin_id` [orchestrator/api/agent_plugins.py:157-190]() |
+| `MarketplacePlugin` | Marketplace plugin details returned by list endpoint | `id`, `slug`, `name`, `version`, counts, token estimate [orchestrator/api/agent_plugins.py:94-132]() |
+| `WorkspaceSkillOut` | Skill available to a workspace | `skill_id`, `origin`, `forked_from_skill_id`, `assigned_agent_count` [orchestrator/api/workspace_skills.py:63-79]() |
+| `Skill` | Skill records queried for active workspace-owned skills | `workspace_id`, `is_active`, `name`, `prompt_template`, `skill_metadata` [orchestrator/api/workspace_skills.py:169-182]() |
 
-| Model / Table | File Reference | Purpose |
-| :--- | :--- | :--- |
-| `agent_skills` | [orchestrator/core/models/core.py:31-36]() | Many-to-many link between agents and skills, carrying attachment `priority` and unique constraints. |
-| `AgentAssignedPlugin` | [orchestrator/api/agent_plugins.py:79-102]() | Links agents to marketplace plugins with priority and timestamp tracking. |
-| `WorkspaceEnabledPlugin` | [orchestrator/api/workspace_plugins.py:85-99]() | Tracks which marketplace plugins are enabled within a specific workspace. |
-| `MarketplacePlugin` | [orchestrator/core/models/marketplace_plugins.py:50-120]() | Central marketplace catalog table containing slug, version, risk scores, and counts. |
-| `PluginSecurityScan` | [orchestrator/api/admin_plugins.py:36]() | Stores static and LLM security scan results, findings, and verdicts for uploaded plugins. |
-
-**Sources:** [orchestrator/core/models/core.py:31-36](), [orchestrator/api/agent_plugins.py:79-102](), [orchestrator/api/workspace_plugins.py:85-99](), [orchestrator/core/models/marketplace_plugins.py:50-120](), [orchestrator/api/admin_plugins.py:36]()
+Sources: [orchestrator/api/agent_plugins.py:36-64](), [orchestrator/api/agent_plugins.py:94-132](), [orchestrator/api/agent_plugins.py:157-190](), [orchestrator/api/workspace_skills.py:63-83](), [orchestrator/api/workspace_skills.py:169-182]()
 
 ---
 
-## Key Functions & Endpoints
+## Key Functions & APIs Reference
 
-- `upload_plugin(...)`: Admin endpoint handling `.zip` multipart uploads, size checks, and security scans [orchestrator/api/admin_plugins.py:139-181]().
-- `update_agent_plugins(...)`: Replaces an agent's plugin assignments and validates workspace enablement [orchestrator/api/agent_plugins.py:128-193]().
-- `list_workspace_skills(...)`: Aggregates forked workspace-owned skills and enabled marketplace skills with usage counts [orchestrator/api/workspace_skills.py:132-183]().
-- `SkillsSection.render(...)`: Assembles prompt context using L1 metadata for non-core skills and L2 bodies for core always-on skills [orchestrator/modules/context/sections/skills.py:50-125]().
-- `platform_load_skill(...)`: Action definition allowing agents to dynamically pull skill bodies on demand [orchestrator/modules/tools/discovery/actions_skills.py:29-56]().
+| Symbol | Responsibility |
+|---|---|
+| `upload_plugin` | Admin-only plugin ZIP upload; validates file size and structure, delegating to S3 and scanning services. [orchestrator/api/admin_plugins.py:139-192]() |
+| `list_agent_plugins` | Lists an agent’s plugin assignments with marketplace metadata, ordered by assignment priority. [orchestrator/api/agent_plugins.py:86-135]() |
+| `update_agent_plugins` | Replaces an agent’s plugin assignments after workspace, permission, and enablement validation. [orchestrator/api/agent_plugins.py:144-190]() |
+| `list_workspace_skills` | Lists workspace-owned and enabled marketplace skills, including assignment counts. [orchestrator/api/workspace_skills.py:132-182]() |
+| `SkillsSection.render` | Renders skill context, skips widget turns, and handles section rendering errors safely. [orchestrator/modules/context/sections/skills.py:67-80]() |
+| `platform_load_skill` | On-demand skill body loading action definition. [orchestrator/modules/tools/discovery/actions_skills.py:26-57]() |
+| `platform_run_skill_script` | L3 bundled script execution action via sandboxed worker. [orchestrator/modules/tools/discovery/actions_skills.py:59-89]() |
+| `platform_set_skill_script_execution` | Admin-only workspace execution gate for L3 script capabilities. [orchestrator/modules/tools/discovery/actions_skills.py:91-124]() |
+| `PluginUploadService` | Coordinates ZIP extraction, manifest validation, security scans, and record persistence. [orchestrator/core/services/plugin_upload_service.py:80-125]() |
+| `MarketplaceS3Service` | Manages object storage operations for marketplace plugin archives on S3/MinIO. [orchestrator/core/services/marketplace_s3.py:26-92]() |
 
-**Sources:** [orchestrator/api/admin_plugins.py:139-181](), [orchestrator/api/agent_plugins.py:128-193](), [orchestrator/api/workspace_skills.py:132-183](), [orchestrator/modules/context/sections/skills.py:50-125](), [orchestrator/modules/tools/discovery/actions_skills.py:29-56]()
+Sources: [orchestrator/api/admin_plugins.py:139-192](), [orchestrator/api/agent_plugins.py:86-190](), [orchestrator/api/workspace_skills.py:132-182](), [orchestrator/modules/context/sections/skills.py:67-80](), [orchestrator/modules/tools/discovery/actions_skills.py:26-124](), [orchestrator/core/services/plugin_upload_service.py:80-125](), [orchestrator/core/services/marketplace_s3.py:26-92]()
 
 ---

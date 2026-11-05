@@ -483,7 +483,7 @@ async def test_the_questions_tab_lists_the_hold_with_the_tickets_cascade(quiet):
     _ticket(db)
     await svc.record_events(db, HOST, TICKET, [_hold("r1")])
 
-    res = await list_grants(status="pending", kind="question", ctx=SimpleNamespace(workspace_id=WS, user_id=1), db=db)
+    res = list_grants(status="pending", kind="question", ctx=SimpleNamespace(workspace_id=WS, user_id=1), db=db)
 
     assert len(res["grants"]) == 1
     row = res["grants"][0]
