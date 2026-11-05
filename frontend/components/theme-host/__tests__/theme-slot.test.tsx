@@ -544,7 +544,8 @@ describe("app/chat/layout.tsx under a theme that registered a /chat page (the fi
     expect(screen.queryByTestId(THEME_CHAT)).toBeNull()
   })
 
-  it.each(['repo=projects%2Fsite', 'ticket=42&repo=x&runtime=1', 'mode=plan&from=assignments'])(
+  // SDK 1.5.0: `agent` too, a theme's link to a session agent, whose Claude Code session opens in the core chat's canvas.
+  it.each(['repo=projects%2Fsite', 'ticket=42&repo=x&runtime=1', 'mode=plan&from=assignments', 'agent=7', 'ticket=612&agent=3'])(
     'keeps the existing chat page for ?%s under the theme',
     (search) => {
       underTheme()
