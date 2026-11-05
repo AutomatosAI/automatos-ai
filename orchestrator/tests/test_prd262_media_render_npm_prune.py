@@ -2,11 +2,11 @@
 
 About 75 MB of the js stage's tree is never loaded by `hyperframes render`, `check`
 or `snapshot`, the three commands the service runs: Hyperframes' preview studio,
-skills and font-localising CLI, prettier and giget (declared, never imported),
-WebDriver BiDi (chromium-bidi, zod, its protocol: Firefox or protocol
-'webDriverBiDi' only), devtools-protocol (types only), puppeteer-core's sources and
-browser bundle, and every source map, type declaration and Markdown file. This
-suite pins:
+skills and font-localising CLI, giget (declared, never imported; prettier was too,
+until Hyperframes 0.8.220 dropped it as a dependency outright), WebDriver BiDi
+(chromium-bidi, zod, its protocol: Firefox or protocol 'webDriverBiDi' only),
+devtools-protocol (types only), puppeteer-core's sources and browser bundle, and
+every source map, type declaration and Markdown file. This suite pins:
 
 - js/prune.txt, the list, against what the CLI loads;
 - the js stage deleting it in the RUN that runs `npm ci`, with `rm -r` so a path a
@@ -33,13 +33,12 @@ LOCK = json.loads((MEDIA_RENDER / "js" / "package-lock.json").read_text())
 TRACE_STEP = "Render, check and snapshot never load the pruned npm paths (Node's module loading traced)"
 SIZE_STEP = "The image is at most 1.30 GB on disk (amd64)"
 
-# What render, check and snapshot never load (hyperframes 0.8.62's cli.js, read 19 Oct).
+# What render, check and snapshot never load (hyperframes 0.8.220's cli.js, read 5 Nov).
 PRUNED = (
     "hyperframes/dist/studio",
     "hyperframes/dist/skills",
     "hyperframes/dist/fontLocalizeCli.js",
     "hyperframes/bin/hyperframes-localize-fonts.mjs",
-    "prettier",
     "giget",
     "chromium-bidi",
     "zod",
