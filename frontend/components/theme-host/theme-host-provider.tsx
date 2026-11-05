@@ -400,6 +400,7 @@ export function ThemeHostProvider({ children }: { children: ReactNode }) {
       slots: state.active?.slots ?? null,
       pages: state.active?.pages ?? null,
       routes: state.active?.routes ?? null,
+      sdkRange: state.active?.manifest.sdkRange ?? null,
       reportRenderFailure,
     }),
     [state, reportRenderFailure],

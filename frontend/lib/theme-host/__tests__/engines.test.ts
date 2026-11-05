@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { satisfiesSdkRange } from '../engines'
+import { asksForSdk, satisfiesSdkRange } from '../engines'
 
 const HOST = '1.0.0'
 
@@ -30,5 +30,23 @@ describe('PRD-261 A-01 — satisfiesSdkRange', () => {
     expect(satisfiesSdkRange('^1.2.3', '1.4.0')).toBe(true)
     expect(satisfiesSdkRange('^1.4.0', '1.4.2')).toBe(true)
     expect(satisfiesSdkRange('^1.4.3', '1.4.2')).toBe(false)
+  })
+})
+
+describe('SDK 1.5.0 — asksForSdk: the SDK a theme was built against is that version or newer', () => {
+  it.each(['^1.5.0', '1.5.0', '^1.5.2', '1.6.0', '^2.0.0'])('%s asks for 1.5.0 or newer', (range) => {
+    expect(asksForSdk(range, '1.5.0')).toBe(true)
+  })
+
+  it.each(['^1.4.0', '1.4.9', '^1.0.0', '^0.9.0'])('%s was built against an older SDK', (range) => {
+    expect(asksForSdk(range, '1.5.0')).toBe(false)
+  })
+
+  it.each([undefined, null, 1, '', '*', '>=1.5.0', '~1.5.0', ' ^1.5.0'])('reads %j as no answer (false)', (range) => {
+    expect(asksForSdk(range, '1.5.0')).toBe(false)
+  })
+
+  it('is false for a version that is not MAJOR.MINOR.PATCH', () => {
+    expect(asksForSdk('^1.5.0', '1.5')).toBe(false)
   })
 })

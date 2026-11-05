@@ -8,6 +8,7 @@
  * mission's ticket (D4) Auto discusses the mission; its plan is decided on the
  * mission's page, so nothing is re-queued from the chat.
  */
+import { asksForSdk } from '@/lib/theme-host/engines'
 import type { BoardTask } from '@/types/board'
 import type { ChatMessage } from '@/types'
 
@@ -56,13 +57,17 @@ export function discussionLabel(discussion: Pick<Discussion, 'number' | 'ticketI
 }
 
 /** An installed theme's own chat on screen (components/chatbot/discussion-bar.tsx), by the theme's
- * name (its theme.json `name`, from the active theme's registry entry); null when there is none to show. */
+ * name (its theme.json `name`, from the active theme's registry entry); null when there is none to show.
+ * `sdkRange`: the theme's `engines.sdk` (the theme host's), null or absent when unknown. */
 export interface ThemeChatOnScreen {
   readonly themeName: string | null
+  readonly sdkRange?: string | null
 }
 
 /** Where the hint says the chat is when the theme's name is unknown. */
 const UNNAMED_THEME_CHAT = "this theme's chat"
+/** The SDK whose chat controller lets a theme's chat pick who answers (HostChatController.chooseAgent). */
+const AGENT_CHOICE_SDK = '1.5.0'
 
 /** "Play's chat" under Play, "HUD's chat" under HUD; the neutral words without a name. */
 function themeChatPlace(themeName: string | null): string {
@@ -72,9 +77,11 @@ function themeChatPlace(themeName: string | null): string {
 
 /** The line under the bar on an agent's ticket: the chat answers as Auto, so it says how to
  * ask the ticket's agent instead. `themeChat`: an installed theme's own chat is on screen, or null
- * for the core's. A theme's message box has no agent picker (installed Play's, PRD-260 M67; a
- * picker there is decision F3), so the way there is Studio. The words are M67's, naming the active
- * theme's chat. Null on a mission's ticket or with no agent. */
+ * for the core's. A theme built on an SDK before 1.5.0 has no way to pick an agent in its message
+ * box (installed Play's, PRD-260 M67; a picker there is decision F3), so the way there is Studio:
+ * M67's words, naming the active theme's chat. A theme built on 1.5.0 or later may offer the pick
+ * (chooseAgent), which the host can't see, so its hint offers both. Null on a mission's ticket or
+ * with no agent. */
 export function discussionHint(
   discussion: Pick<Discussion, 'agentName' | 'missionId'>,
   themeChat: ThemeChatOnScreen | null,
@@ -82,8 +89,10 @@ export function discussionHint(
   const agent = discussion.agentName
   if (!agent || discussion.missionId) return null
   if (!themeChat) return `You are talking to Auto. To ask ${agent} instead, pick them in the message box.`
-  const place = themeChatPlace(themeChat.themeName)
-  return `You are talking to Auto in ${place}. To ask ${agent}, switch to Studio from the theme menu.`
+  const asAuto = `You are talking to Auto in ${themeChatPlace(themeChat.themeName)}.`
+  const studio = 'switch to Studio from the theme menu.'
+  if (!asksForSdk(themeChat.sdkRange, AGENT_CHOICE_SDK)) return `${asAuto} To ask ${agent}, ${studio}`
+  return `${asAuto} To ask ${agent}, pick them there if it offers agents, or ${studio}`
 }
 
 // The brief Auto proposes comes in one fenced block (services/page_context.py).

@@ -409,6 +409,20 @@ describe('PRD-261 A-04b seam — ThemeHostProvider hands the theme\'s pages and 
   })
 })
 
+describe("SDK 1.5.0 seam — ThemeHostProvider names the active theme's engines.sdk", () => {
+  function SdkRangeProbe() {
+    return <p>{`sdk ${useThemeHost()?.sdkRange ?? 'none'}`}</p>
+  }
+
+  it("hands on the loaded theme's engines.sdk (the Discuss bar's hint reads it), and none before it runs", async () => {
+    const loaded = okResult() as Extract<ThemeLoadResult, { ok: true }>
+    mocks.loadThemeForStyle.mockResolvedValue({ ...loaded, manifest: { ...MANIFEST, sdkRange: '^1.5.0' } })
+    render(<ThemeHostProvider><SdkRangeProbe /></ThemeHostProvider>)
+    expect(screen.getByText('sdk none')).toBeInTheDocument()
+    expect(await screen.findByText('sdk ^1.5.0')).toBeInTheDocument()
+  })
+})
+
 describe('PRD-261 seam — a warn revocation of the running theme', () => {
   it('keeps the theme active and shows the warning with the maintainer\'s reason', async () => {
     const loaded = okResult() as Extract<ThemeLoadResult, { ok: true }>
