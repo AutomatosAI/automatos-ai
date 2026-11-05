@@ -36,12 +36,16 @@ import type {
  * the theme's events, then useStreamHandlers and useChatActions.
  * useChatController composes all of them for a theme that needs nothing in
  * between.
+ *
+ * SDK 1.5.0: the agent the owner picked and Plan go to useChatWithReceipts
+ * as Studio's chat passes them (selectedAgentId, planMode), so the turn goes
+ * to that agent, or plans, and the AI label names who answers.
  */
 
 const UNWIRED: ChatStreamHandlers = { onData: () => undefined, onChatNamed: () => undefined }
 
 /** The stream for the conversation on screen; its parts and the new chat's name go to the handlers connected. */
-export function useChatStream({ view, onChatIdAssigned }: ChatStreamOptions): ChatStream {
+export function useChatStream({ view, onChatIdAssigned, selectedAgentId, planMode }: ChatStreamOptions): ChatStream {
   const pageContext = usePageContext()
   // useChat takes its callbacks before the turn exists; the ref hands the parts and the new chat's name on.
   const handlers = useRef<ChatStreamHandlers>(UNWIRED)
@@ -50,6 +54,8 @@ export function useChatStream({ view, onChatIdAssigned }: ChatStreamOptions): Ch
     initialMessages: view.messages,
     initialAwaitingReply: view.awaitingReply,
     pageContext,
+    selectedAgentId: selectedAgentId ?? null,
+    planMode: planMode ?? false,
     onData: (part: unknown) => handlers.current.onData(part),
     onChatIdUpdate: (chatId: string) => {
       handlers.current.onChatNamed(chatId)

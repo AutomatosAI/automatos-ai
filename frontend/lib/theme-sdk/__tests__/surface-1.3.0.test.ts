@@ -92,8 +92,8 @@ describe('SDK 1.4.0 — the 1.3.0 surface unchanged', () => {
 })
 
 describe('SDK 1.4.0 — a 1.3.0 theme on this host', () => {
-  it('is admitted: the host is 1.4.0, and ^1.3.0 accepts it', () => {
-    expect(Runtime.SDK_VERSION).toBe('1.4.0')
+  it('is admitted: the host is 1.5.0 (1.5.0 adds fields only, no name), and ^1.3.0 accepts it', () => {
+    expect(Runtime.SDK_VERSION).toBe('1.5.0')
     expect(satisfiesSdkRange('^1.3.0', Runtime.SDK_VERSION)).toBe(true)
   })
 

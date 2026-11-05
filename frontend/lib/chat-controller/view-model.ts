@@ -122,6 +122,10 @@ export interface ChatStreamOptions {
   readonly view: ChatConversationView
   /** The backend named this new chat: the screen keeps it (useChatConversation's adopt). */
   readonly onChatIdAssigned?: (chatId: string) => void
+  /** The agent the owner picked to answer (sent as `agentId`, named by the AI label); null or absent: Auto. */
+  readonly selectedAgentId?: number | null
+  /** Plan: research and strategy, nothing run (sent as `planMode`, as Studio's Plan button sends it). */
+  readonly planMode?: boolean
 }
 
 /** The stream and the conversation the screen shows. */

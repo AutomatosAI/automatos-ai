@@ -25,6 +25,10 @@
  * SDK 1.4.0 (PRD-268 K17): each message's `knownParts`, its text, brief@1, suggestion@1 and reply_chips@1 parts
  * checked and frozen (internal/message-parts.ts), so a theme that owns /chat finds the day's brief by its part.
  *
+ * SDK 1.5.0: who answers and Plan (internal/chat-partner.ts): the conversation's `agentId` and `chooseAgent`, which
+ * refuses a session agent as Studio's selector does, and `planMode` and `setPlanMode` on the host's own Plan switch;
+ * the controller sends both with the next message.
+ *
  * A component calls it one way for its whole life: switching throws, instead of React's hook-order
  * error. Only a conversation the first call handed out opens a stream (it carries the host's own
  * state under a private symbol); a hand-made object is refused. Everything returned is a frozen,
@@ -56,6 +60,7 @@ import { useFreshDraftStore } from '@/stores/fresh-draft-store'
 
 import type { WithdrawOffer } from './host-cards/chat-cards'
 import { gatedByAiLabel } from './internal/ai-label-gate'
+import { useChatPartner } from './internal/chat-partner'
 import type { Brief } from './internal/proactive-shapes'
 import {
   type OpenedConversation,
@@ -318,6 +323,19 @@ export interface HostChatController {
   readonly retry: () => boolean
   /** Keeps the reply being written, then stops the turn (here and on the server). */
   readonly stop: () => void
+  /** The agent the next message goes to, an id from pages/agents' useAgents; null for Auto, as each conversation starts (SDK 1.5.0). */
+  readonly agentId: number | null
+  /**
+   * Picks who answers the next message: an agent of the roster, or null for Auto (true). False, and nothing changes,
+   * for a session agent (`configuration.runtime` 'cli': it is never a chat partner, as in Studio; link to
+   * `/chat?agent=<id>` to open its session), for an id the roster doesn't have, and while the roster loads. Anything
+   * but a whole number or null throws (SDK 1.5.0).
+   */
+  readonly chooseAgent: (id: number | null) => boolean
+  /** Plan is on: the next message asks for research and a plan, nothing is run. The host's switch, Studio's own (SDK 1.5.0). */
+  readonly planMode: boolean
+  /** Turns Plan on or off for this chat and Studio's alike (on turns Mission mode off); anything but true or false throws (SDK 1.5.0). */
+  readonly setPlanMode: (on: boolean) => void
 }
 
 /** A conversation in a list. */
@@ -383,11 +401,14 @@ function useOpenConversation(
   opened: OpenedConversation,
   options: HostChatControllerOptions | undefined,
 ): HostChatController {
+  const { agentId, chooseAgent, planMode, setPlanMode } = useChatPartner()
   const core = useCoreChatController({
     view: opened.view,
     onChatIdAssigned: opened.adopt,
     onData: options?.onData,
     onEvent: options?.onEvent,
+    selectedAgentId: agentId,
+    planMode,
   })
   const planningMissionId = useMissionStore((s) => s.activePlanningMissionId)
   const { shown, looseApprovals } = useHostTurn(core, opened.view)
@@ -412,8 +433,15 @@ function useOpenConversation(
         send,
         retry,
         stop,
+        agentId,
+        chooseAgent,
+        planMode,
+        setPlanMode,
       }),
-    [conversation, shown, status, streaming, errorCode, suggestion, planningMissionId, looseApprovals, approvalWaiting, send, retry, stop],
+    [
+      conversation, shown, status, streaming, errorCode, suggestion, planningMissionId, looseApprovals, approvalWaiting,
+      send, retry, stop, agentId, chooseAgent, planMode, setPlanMode,
+    ],
   )
 }
 

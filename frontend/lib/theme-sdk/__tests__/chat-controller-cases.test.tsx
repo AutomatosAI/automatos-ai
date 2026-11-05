@@ -47,6 +47,15 @@ vi.mock('@/lib/auth-hooks', () => ({
   useClerk: () => ({ signOut: async () => undefined }),
 }))
 vi.mock('@/components/workspace-provider', () => ({ useWorkspace: () => ({ workspace: null }), useWorkspaceOptional: () => null }))
+// SDK 1.5.0: the roster chooseAgent reads (the host's useAgents, the cache Studio's selector reads).
+const roster = vi.hoisted(() => [
+  { id: 3, name: 'Words', configuration: { runtime: 'api' } },
+  { id: 9, name: 'Claude Code', configuration: { runtime: 'cli' } },
+])
+vi.mock('@/hooks/use-agent-api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/use-agent-api')>()),
+  useAgents: () => ({ data: roster }),
+}))
 vi.mock('@/lib/chat/use-chat-with-receipts', async () => {
   const { useState } = await import('react')
   return {
@@ -73,6 +82,7 @@ vi.mock('@/lib/chat/use-chat-with-receipts', async () => {
 import { CONVERSATION_GONE } from '@/lib/chat-controller/view-model'
 import { CHAT_HREF } from '@/lib/ticket-links'
 import { useChatSessionStore } from '@/stores/chat-session-store'
+import { useMissionStore } from '@/stores/mission-store'
 
 import {
   DRAFT_LINK,
@@ -118,6 +128,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks()
+  useMissionStore.setState({ isPlanMode: false, isMissionMode: false })
   window.localStorage.clear()
   Object.assign(chat, { options: null, status: 'idle', messages: null, mounts: 0 })
   forgetPage()
@@ -352,5 +363,48 @@ describe("a theme's draft link (Play's ?draft=, a Deliverable's Ask Auto about t
     expect(await screen.findByText(BAKE)).toBeInTheDocument()
     expect(nav.replace).toHaveBeenCalledWith(CHAT_HREF)
     expect(seen.onScreen?.draft).toBeNull()
+  })
+})
+
+describe('who answers, and Plan (SDK 1.5.0)', () => {
+  it("the page's pick reaches the stream as the agent, and a new conversation starts on Auto again", async () => {
+    renderPage()
+    const draft = await shownChat(null)
+    expect(chat.options).toMatchObject({ selectedAgentId: null, planMode: false })
+    act(() => {
+      expect(draft.chooseAgent(3)).toBe(true)
+    })
+    await waitFor(() => expect(seen.chat?.agentId).toBe(3))
+    expect(chat.options?.selectedAgentId).toBe(3)
+    nameNewChat('new-1')
+    await shownChat('new-1')
+    expect(chat.options?.selectedAgentId).toBe(3)
+    expect(chat.mounts).toBe(1)
+    act(() => store().newDraft())
+    const fresh = await shownChat(null)
+    expect(fresh.agentId).toBeNull()
+    expect(chat.options?.selectedAgentId).toBeNull()
+  })
+
+  it('a session agent is refused: the stream keeps Auto', async () => {
+    renderPage()
+    const draft = await shownChat(null)
+    act(() => {
+      expect(draft.chooseAgent(9)).toBe(false)
+    })
+    expect(seen.chat?.agentId).toBeNull()
+    expect(chat.options?.selectedAgentId).toBeNull()
+  })
+
+  it("Plan is the host's own switch: set from the theme, Studio's store has it; set in Studio, the theme sees it", async () => {
+    renderPage()
+    const draft = await shownChat(null)
+    act(() => draft.setPlanMode(true))
+    await waitFor(() => expect(seen.chat?.planMode).toBe(true))
+    expect(useMissionStore.getState().isPlanMode).toBe(true)
+    expect(chat.options?.planMode).toBe(true)
+    act(() => useMissionStore.getState().setPlanMode(false))
+    await waitFor(() => expect(seen.chat?.planMode).toBe(false))
+    expect(chat.options?.planMode).toBe(false)
   })
 })
