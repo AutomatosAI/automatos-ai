@@ -105,14 +105,16 @@ RUN find /install -type f -path '*/site-packages/*' \( -name '*.c' -o -name '*.c
 # scipy keeps the subpackages the code reaches, and no others (PRD-262, the 19 Oct
 # breakdown's row #17, about 29 MB). Nothing in the app imports scipy but
 # core/math/probability_theory.py (Student's t, from scipy.special); it is in the lock
-# for datasketch, which graphify's dedup runs (MinHashLSH integrates with
-# scipy.integrate.quad; WeightedMinHash takes scipy.sparse), and graspologic-native,
-# which never imports it, and networkx's pagerank reaches scipy.sparse. Those import
-# _lib, constants, integrate, linalg, optimize, sparse, spatial and special when they
-# load, and none of these imports a deleted one when it loads: only solve_bvp, qmc_quad,
-# differential_evolution, shgo and RotationSpline do, inside the function, and nothing
-# calls them. A kept subpackage missing fails the build. scipy is in the first half of
-# the lock; scripts/ci/image_scipy.py runs every scipy path of the code in the image.
+# for graphifyy's dedup (its own datasketch-compatible MinHash/LSH, scipy-free since
+# GHSA-pcc4-rvhr-2pr8 dropped datasketch from the lock) and graspologic-native, which
+# never imports it, and networkx's pagerank reaches scipy.sparse. `integrate` was kept
+# only for datasketch's scipy.integrate.quad and has no live reason left, but moving it
+# to PRUNED is a separate, unverified change. Those import _lib, constants, integrate,
+# linalg, optimize, sparse, spatial and special when they load, and none of these
+# imports a deleted one when it loads: only solve_bvp, qmc_quad, differential_evolution,
+# shgo and RotationSpline do, inside the function, and nothing calls them. A kept
+# subpackage missing fails the build. scipy is in the first half of the lock;
+# scripts/ci/image_scipy.py runs every scipy path of the code in the image.
 RUN scipy=/install/stable/lib/python3.11/site-packages/scipy && \
     for kept in _lib constants integrate linalg optimize sparse spatial special; do \
         test -d "$scipy/$kept" || { echo "scipy has no $kept" >&2; exit 1; }; \
