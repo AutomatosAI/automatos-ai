@@ -1,7 +1,7 @@
-"""GO-2026-4337 and GO-2026-6612: the image's esbuild is built with a patched Go.
+"""GO-2026-6612: the image's esbuild is built with a patched Go.
 
-Hyperframes requires esbuild ^0.25.12, and npm's 0.25.12 binary was built with Go
-1.23.12. The Dockerfile's esbuild stage builds the same version from source on Go's
+Hyperframes requires esbuild ^0.28.2, and npm's 0.28.2 binary was built with Go
+1.26.5. The Dockerfile's esbuild stage builds the same version from source on Go's
 patched 1.26 line, and the js stage puts it where npm put its own, with
 esbuild/bin/esbuild hard-linked to it. This reads the Go release each esbuild
 binary in the js tree records in its build info, and runs it through esbuild's
