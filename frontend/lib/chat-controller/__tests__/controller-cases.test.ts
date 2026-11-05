@@ -81,7 +81,7 @@ const ROOT_STALE_MS = 60_000
 const HISTORY_KEY = [...CHAT_HISTORY_QUERY_PREFIX, 'controller-cases']
 const HISTORY_LIMIT = 20
 
-function renderController(view: ChatConversationView = STORED) {
+function renderController(view: ChatConversationView = STORED, partner: { selectedAgentId?: number | null; planMode?: boolean } = {}) {
   const events: string[] = []
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: ROOT_STALE_MS, retry: false } } })
   const wrapper = ({ children }: { readonly children: ReactNode }) => createElement(QueryClientProvider, { client }, children)
@@ -91,7 +91,7 @@ function renderController(view: ChatConversationView = STORED) {
     () => {
       // A chat-history list beside the chat, as Conversations and Recent sit beside it (P260-FX-10).
       useQuery({ queryKey: HISTORY_KEY, queryFn: () => api.getChatHistory(HISTORY_LIMIT) })
-      return useChatController({ view, onEvent, onData })
+      return useChatController({ view, onEvent, onData, ...partner })
     },
     { wrapper },
   )
@@ -359,5 +359,21 @@ describe("a turn's end and what the server sends besides", () => {
     expect(api.getChatMessages).toHaveBeenCalledWith(CHAT_ID)
     expect(hook.result.current.streaming).toBe(false)
     expect(posts).toEqual([])
+  })
+})
+
+describe('who answers, and Plan, on the wire (SDK 1.5.0)', () => {
+  it("sends no agent and no Plan for Auto, as Studio's chat sends none", async () => {
+    const hook = renderController()
+    await ask(hook, ASK)
+    expect(posts[0]).not.toHaveProperty('agentId')
+    expect(posts[0]).not.toHaveProperty('planMode')
+  })
+
+  it('sends the agent the owner picked as agentId, and Plan as planMode, in the body useChat posts', async () => {
+    const hook = renderController(STORED, { selectedAgentId: 7, planMode: true })
+    await ask(hook, ASK)
+    expect(posts[0]).toMatchObject({ id: CHAT_ID, agentId: 7, planMode: true })
+    expect(posts[0].message?.parts?.[0]?.text).toBe(ASK)
   })
 })

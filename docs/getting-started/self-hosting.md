@@ -1581,9 +1581,14 @@ in **Analytics → LLM & Costs**, where it is booked as *Claude Code ·
 Subscription* at $0 beside the paid and free API routes (input, output and
 cache-read tokens, per model). A resumed session reports only what the new
 turn added, never its history. No dollar figures: on a subscription there is
-nothing to invent. Limits are Claude Code's own — when a session reports one,
-the ticket blocks with the reset time. Overage is controlled in your Anthropic
-account, not here.
+nothing to invent. Limits are Claude Code's own. When a session hits one,
+whether Claude Code exits or holds the turn on "continuing automatically at
+9am", the host ends the session at once, puts the ticket back in the queue and
+claims no Claude tickets until the reset time. Meanwhile your Claude agents
+read "paused: claude usage limit, resumes ~09:00 (host …)". If you sign the
+host's `claude` in to another account before then, restart the host and it
+claims again straight away. Overage is controlled in your Anthropic account,
+not here.
 
 ### The terms this design stays inside
 

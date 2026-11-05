@@ -6,7 +6,7 @@
  * theme-neutral copies (no raw core message, no store), a forged or switched call refused, and the list, New chat
  * and receipt names, the live receipts on a stream part (liveReceiptsOf, W-A5) included. The browser proof is e2e/browser/specs/sdk-chat.spec.ts (fixtures/hello-a11b).
  */
-import { renderHook } from '@testing-library/react'
+import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { PAGE_AI_LABEL, WIDGET_AI_LABEL, useAiLabelStore } from '@/lib/ai-label/store'
@@ -22,6 +22,9 @@ const host = vi.hoisted(() => ({
   core: null as unknown,
   freshDrafts: 0,
   planning: null as string | null,
+  planMode: false,
+  setPlanMode: (_on: boolean) => undefined,
+  roster: undefined as unknown[] | undefined,
   activeChatId: null as string | null,
   list: { status: 'loading' } as unknown,
   listLimits: [] as unknown[],
@@ -45,9 +48,11 @@ vi.mock('@/stores/fresh-draft-store', () => ({
   useFreshDraftStore: (select: (state: { freshDrafts: number }) => unknown) => select({ freshDrafts: host.freshDrafts }),
 }))
 vi.mock('@/stores/mission-store', () => ({
-  useMissionStore: (select: (state: { activePlanningMissionId: string | null }) => unknown) =>
-    select({ activePlanningMissionId: host.planning }),
+  useMissionStore: (select: (state: Record<string, unknown>) => unknown) =>
+    select({ activePlanningMissionId: host.planning, isPlanMode: host.planMode, setPlanMode: host.setPlanMode }),
 }))
+// SDK 1.5.0: chooseAgent reads the host's roster, the cache Studio's selector reads.
+vi.mock('@/hooks/use-agent-api', () => ({ useAgents: () => ({ data: host.roster }) }))
 vi.mock('@/stores/chat-session-store', () => ({
   useChatSessionStore: (select: (state: { session: { activeChatId: string | null } }) => unknown) =>
     select({ session: { activeChatId: host.activeChatId } }),
@@ -153,6 +158,9 @@ afterEach(() => {
   host.core = null
   host.freshDrafts = 0
   host.planning = null
+  host.planMode = false
+  host.setPlanMode = () => undefined
+  host.roster = undefined
   host.activeChatId = null
   host.list = { status: 'loading' }
   host.listLimits.length = 0
@@ -194,7 +202,14 @@ describe("PRD-261 A-11b — useChatController(conversation): one conversation's 
     const onData = vi.fn()
     const onEvent = vi.fn()
     openChat(coreView(), { onData, onEvent })
-    expect(lastOf(host.controllerOptions)).toEqual({ view: STORED_VIEW, onChatIdAssigned: adopt, onData, onEvent })
+    expect(lastOf(host.controllerOptions)).toEqual({
+      view: STORED_VIEW,
+      onChatIdAssigned: adopt,
+      onData,
+      onEvent,
+      selectedAgentId: null,
+      planMode: false,
+    })
   })
 
   it('copies each message for a theme: words, receipts, Deliverables, cards, tickets, stopped', () => {
@@ -316,6 +331,79 @@ describe("PRD-261 A-11b — useChatController(conversation): one conversation's 
       initialProps: { open: false },
     })
     expect(() => rerender({ open: true })).toThrow('for the life of a component')
+  })
+})
+
+describe('SDK 1.5.0 — useChatController(conversation): who answers, and Plan', () => {
+  const WORDS = { id: 3, name: 'Words', configuration: { runtime: 'api' } }
+  const SCOUT = { id: 5, name: 'Scout', configuration: null }
+  const SESSION = { id: 9, name: 'Claude Code', configuration: { runtime: 'cli' } }
+
+  it('starts on Auto with Plan as the host has it, and sends neither until picked', () => {
+    host.roster = [WORDS, SESSION]
+    const { result } = openChat()
+    expect(result.current).toMatchObject({ agentId: null, planMode: false })
+    expect(lastOf(host.controllerOptions)).toMatchObject({ selectedAgentId: null, planMode: false })
+  })
+
+  it("picks an agent of the roster for the next message, and Auto again with null", () => {
+    host.roster = [WORDS, SCOUT, SESSION]
+    const { result } = openChat()
+    let picked = false
+    act(() => {
+      picked = result.current.chooseAgent(3)
+    })
+    expect(picked).toBe(true)
+    expect(result.current.agentId).toBe(3)
+    expect(lastOf(host.controllerOptions)).toMatchObject({ selectedAgentId: 3 })
+    act(() => {
+      picked = result.current.chooseAgent(5)
+    })
+    expect(picked).toBe(true)
+    expect(lastOf(host.controllerOptions)).toMatchObject({ selectedAgentId: 5 })
+    act(() => {
+      picked = result.current.chooseAgent(null)
+    })
+    expect(picked).toBe(true)
+    expect(result.current.agentId).toBeNull()
+    expect(lastOf(host.controllerOptions)).toMatchObject({ selectedAgentId: null })
+    expect(Object.isFrozen(result.current)).toBe(true)
+  })
+
+  it("refuses a session agent (runtime: cli), as Studio's selector does, an id the roster lacks, and any pick while it loads", () => {
+    host.roster = [WORDS, SESSION]
+    const { result, rerender } = openChat()
+    expect(result.current.chooseAgent(9)).toBe(false)
+    expect(result.current.chooseAgent(77)).toBe(false)
+    host.roster = undefined
+    rerender()
+    expect(result.current.chooseAgent(3)).toBe(false)
+    expect(result.current.agentId).toBeNull()
+    expect(lastOf(host.controllerOptions)).toMatchObject({ selectedAgentId: null })
+  })
+
+  it('throws for an id that is not a whole number above zero, or null', () => {
+    host.roster = [WORDS]
+    const { result } = openChat()
+    for (const bad of [0, -3, 3.5, Number.NaN, '3', undefined, { id: 3 }]) {
+      expect(() => result.current.chooseAgent(bad as unknown as number)).toThrow(TypeError)
+    }
+    expect(result.current.agentId).toBeNull()
+  })
+
+  it("reads Plan from the host's switch and sets it there, refusing anything but true or false", () => {
+    const setPlanMode = vi.fn()
+    host.setPlanMode = setPlanMode
+    host.planMode = true
+    const { result } = openChat()
+    expect(result.current.planMode).toBe(true)
+    expect(lastOf(host.controllerOptions)).toMatchObject({ planMode: true })
+    result.current.setPlanMode(false)
+    expect(setPlanMode).toHaveBeenCalledWith(false)
+    for (const bad of ['on', 1, null, undefined]) {
+      expect(() => result.current.setPlanMode(bad as unknown as boolean)).toThrow(TypeError)
+    }
+    expect(setPlanMode).toHaveBeenCalledTimes(1)
   })
 })
 

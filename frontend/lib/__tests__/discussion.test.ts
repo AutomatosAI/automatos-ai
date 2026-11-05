@@ -54,6 +54,24 @@ describe("the bar's hint (PRD-260 M67)", () => {
     )
   })
 
+  it("keeps M67's words for a theme built on an SDK before 1.5.0, or one whose SDK is unknown", () => {
+    const discussion = discussionOf(ticket())
+    for (const sdkRange of ['^1.4.0', '1.4.0', '^1.0.0', null, undefined]) {
+      expect(discussionHint(discussion, { themeName: 'HUD', sdkRange })).toBe(
+        "You are talking to Auto in HUD's chat. To ask Words, switch to Studio from the theme menu.",
+      )
+    }
+  })
+
+  it.each(['^1.5.0', '1.5.0', '^1.6.0'])(
+    'offers the theme chat’s own pick beside Studio for a theme built on SDK 1.5.0 or later (%s)',
+    (sdkRange) => {
+      expect(discussionHint(discussionOf(ticket()), { themeName: 'HUD', sdkRange })).toBe(
+        "You are talking to Auto in HUD's chat. To ask Words, pick them there if it offers agents, or switch to Studio from the theme menu.",
+      )
+    },
+  )
+
   it("is null on a mission's ticket and on a ticket with no agent", () => {
     expect(discussionHint(discussionOf(ticket({ type: 'mission', mission_id: 'run-9' })), { themeName: 'Play' })).toBeNull()
     expect(discussionHint(discussionOf(ticket({ assignee: undefined })), null)).toBeNull()

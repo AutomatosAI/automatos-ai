@@ -16,7 +16,12 @@
  * PRD-268 US-W06: in any chat, while the server offers calibration and the person hasn't answered, the consent line
  * (calibration-offer.tsx) sits above the composer in the pinned suggestion's place, so one line, and one ink primary,
  * is above the box at a time; the pinned suggestion is back once the consent line is answered.
+ *
+ * SDK 1.5.0: while a `/chat?agent=<id>` link waits to be picked (components/chatbot/agent-link.tsx), it picks that
+ * agent through the composer's own `onAgentChange` (chat.tsx handleAgentChange), once; a session agent opens its
+ * Claude Code session as a pick in the box does. Without a link it draws nothing more.
  */
+import { AgentFromLink, usePendingAgentLink } from '@/components/chatbot/agent-link'
 import {
   MultimodalInput as ComposerInput,
   type MultimodalInputProps,
@@ -28,8 +33,12 @@ import { useReplyChipsSent } from './reply-chip-event'
 export function MultimodalInput(props: MultimodalInputProps) {
   useReplyChipsSent(props.chatId, props.status, props.sendMessage)
   const offered = useCalibrationOffered()
+  const agentLink = usePendingAgentLink()
   return (
     <>
+      {agentLink && props.onAgentChange ? (
+        <AgentFromLink link={agentLink} chatId={props.chatId} onAgentChange={props.onAgentChange} />
+      ) : null}
       <CalibrationOffer chatId={props.chatId} />
       {offered ? null : <PinnedSuggestion chatId={props.chatId} />}
       <ComposerInput {...props} />

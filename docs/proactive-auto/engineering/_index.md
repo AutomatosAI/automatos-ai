@@ -100,8 +100,8 @@ copy here:
 
 Three facts the theme-host pages don't spell out:
 
-- The SDK is at **1.4.0** and the host contract at **1.1.0** (`orchestrator/services/themes/contract.py`). PRD-268
-  didn't bump the host contract.
+- PRD-268 took the SDK to **1.4.0**; the host contract stayed at **1.1.0** (`orchestrator/services/themes/contract.py`).
+  The SDK's current version is `SDK_VERSION` there.
 - The approval cards' data carries an optional `approval_view` (`ApprovalViewData`, cards area, 1.3.0). A theme places
   `ToolApproval` and `MissionApproval` and never redraws them.
 - `HostChatMessage.knownParts` reads `text`, `brief@1`, `suggestion@1` and `reply_chips@1`. The host also posts

@@ -128,6 +128,16 @@ describe('PRD-261 A-12d — useAgents', () => {
     expect(cached).toEqual(ROSTER)
   })
 
+  it("carries each agent's configuration, so a theme tells a session agent (runtime 'cli') apart, frozen (SDK 1.5.0)", () => {
+    const session: RosterAgent = { ...ADA, id: 43, name: 'Claude Code', configuration: { runtime: 'cli' } }
+    const chat: RosterAgent = { ...ADA, id: 44, name: 'Words', configuration: { runtime: null } }
+    host.agents = hostQuery([{ ...session, configuration: { runtime: 'cli' } }, { ...chat }, ...cachedRoster()])
+    const roster = renderHook(() => useAgents()).result.current.data as RosterAgent[]
+    expect(roster.map((agent) => agent.configuration?.runtime ?? null)).toEqual(['cli', null, null, null])
+    expect(roster.filter((agent) => agent.configuration?.runtime === 'cli').map((agent) => agent.id)).toEqual([43])
+    expect(Object.isFrozen(roster[0].configuration)).toBe(true)
+  })
+
   it('passes the first load through with null data, and a failure as its message', () => {
     host.agents = hostQuery(undefined, { isLoading: true, isInitialLoading: true, isFetching: true, status: 'loading' })
     expect(renderHook(() => useAgents()).result.current).toMatchObject({ data: null, isLoading: true, isFetching: true })

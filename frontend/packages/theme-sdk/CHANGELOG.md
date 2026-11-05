@@ -2,7 +2,29 @@
 
 What each version of the SDK's types added. A `1.x` only adds: a theme built against an older `1.x` keeps working on
 a newer host. The host refuses a theme whose `engines.sdk` its version does not meet, so a theme that uses a name
-below asks for the version that added it (`^1.4.0` for the 1.4.0 names).
+below asks for the version that added it (`^1.5.0` for what 1.5.0 added).
+
+## 1.5.0
+
+Themes talk to individual agents and use Plan. No name is added (fields only), and the host contract stays 1.1.0.
+
+- **chat:** `HostChatController` gains who answers and Plan, as Studio's chat has them:
+  - `agentId` (`number | null`): the agent the next message goes to; null is Auto, as every conversation starts.
+  - `chooseAgent(id)`: picks an agent of the roster (`pages/agents`' `useAgents`) for this conversation, or Auto with
+    null, and returns true. It returns false, changing nothing, for a session agent (`configuration.runtime` 'cli'),
+    which is never a chat partner (Studio opens its Claude Code session instead), for an id the roster doesn't have,
+    and while the roster loads. Anything but a whole number or null throws a TypeError.
+  - `planMode` and `setPlanMode(on)`: Plan (research and a plan, nothing run), the host's own switch, the one
+    Studio's Plan button and a `/chat?mode=plan` link set; turning it on turns Mission mode off. Anything but true or
+    false throws a TypeError.
+  The next message goes with both, and the host's AI label names the agent while it answers.
+- **pages/agents:** `RosterAgent.configuration` (`{ runtime?: string | null } | null`, optional), which the roster
+  already carried: `runtime` 'cli' marks a session agent.
+- **A link, not a name:** `/chat?agent=<id>` (`HostLink`, `useHostRouter`) opens the host's own chat with that agent
+  picked, as a pick in Studio's message box: a session agent's Claude Code session opens in the chat's canvas. The
+  link keeps the host's chat page under a theme that owns `/chat`.
+
+Fakes that build a `HostChatController` (a harness's sample data) add the four fields.
 
 ## 1.4.0
 

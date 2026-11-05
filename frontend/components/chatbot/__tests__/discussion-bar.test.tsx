@@ -50,6 +50,7 @@ vi.mock('@/stores/chat-session-store', async () => {
 vi.mock('../rebrief-dialog', () => ({ RebriefDialog: () => <div data-testid="rebrief-dialog" /> }))
 
 import { DiscussionBar } from '../discussion-bar'
+import { ThemeHostContext } from '@/components/theme-host/theme-host-context'
 import { useDiscussionStore } from '@/stores/discussion-store'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 
@@ -142,6 +143,8 @@ describe('DiscussionBar', () => {
 const STUDIO_HINT = 'You are talking to Auto. To ask Words instead, pick them in the message box.'
 const PLAY_HINT = "You are talking to Auto in Play's chat. To ask Words, switch to Studio from the theme menu."
 const HUD_HINT = "You are talking to Auto in HUD's chat. To ask Words, switch to Studio from the theme menu."
+const HUD_HINT_1_5 =
+  "You are talking to Auto in HUD's chat. To ask Words, pick them there if it offers agents, or switch to Studio from the theme menu."
 
 describe("DiscussionBar's hint (PRD-260 M67)", () => {
   it("under Play, never sends the owner to an agent picker Play's message box doesn't have", () => {
@@ -157,6 +160,19 @@ describe("DiscussionBar's hint (PRD-260 M67)", () => {
     render(<DiscussionBar />)
     expect(screen.getByText(HUD_HINT)).toBeInTheDocument()
     expect(screen.queryByText(/Play's chat/)).toBeNull()
+  })
+
+  it("reads the theme's engines.sdk from the theme host: a theme built on SDK 1.5.0 may offer the pick itself", () => {
+    look.play = true
+    look.name = 'HUD'
+    const host = { status: 'active', reason: null, frame: null, slots: null, sdkRange: '^1.5.0', reportRenderFailure: () => {} } as const
+    render(
+      <ThemeHostContext.Provider value={host}>
+        <DiscussionBar />
+      </ThemeHostContext.Provider>,
+    )
+    expect(screen.getByText(HUD_HINT_1_5)).toBeInTheDocument()
+    expect(screen.queryByText(HUD_HINT)).toBeNull()
   })
 
   it("keeps Studio's hint under Studio, and under Play below 1024 px where /chat is the core's chat (D7)", () => {

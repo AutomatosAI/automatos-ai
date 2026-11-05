@@ -30,11 +30,24 @@ _RESETS = re.compile(
     r"resets?(?:\s+at)?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?(?:\s*\(([^)]+)\))?", re.IGNORECASE
 )
 
+# Claude Code does not always exit at its limit: it parks the turn on "Usage limit
+# reached · continuing automatically at 9am · esc to cancel" and waits for the window
+# to reopen, holding the ticket and a session slot for hours. The session watches its
+# output for this line and ends at once (5 Nov 2026: two sessions sat parked for 4 h).
+_PARKED = re.compile(r"\blimit\b.{0,160}?continuing\s+automatically\s+at\s+\d", re.IGNORECASE | re.DOTALL)
+# A terminal's escape sequences (colour, cursor moves): read as a space.
+_ESCAPES = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])")
+
 RECHECK_SECONDS = 15 * 60
 
 
 def is_usage_limit(text: str) -> bool:
-    return bool(text) and bool(_LIMIT.search(text))
+    return bool(text) and bool(_LIMIT.search(text) or is_parked(text))
+
+
+def is_parked(text: str) -> bool:
+    """The CLI is holding its turn until its usage window reopens."""
+    return bool(text) and bool(_PARKED.search(_ESCAPES.sub(" ", text)))
 
 
 def resets_at(text: str, now: datetime) -> Optional[datetime]:

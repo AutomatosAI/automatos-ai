@@ -15,6 +15,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { MessagesSquare, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useThemeHost } from '@/components/theme-host/theme-host-context'
 import { useBoardTask } from '@/hooks/use-board-tasks'
 import { useActiveTheme, useThemeLayout } from '@/hooks/use-studio-theme'
 import {
@@ -92,13 +93,15 @@ function EndButton({ onEnd }: { onEnd: () => void }) {
 
 /** The theme's own chat, when it is what /chat shows: the active theme owns /chat and its layout
  * renders it (PRD-260 D7, the ThemeSlot page entry in app/chat/layout.tsx, PRD-261 A-04b), read
- * from the same width source, useThemeLayout (P260-FX-25; PRD-261 A-02b). Its message box has no
- * agent picker, so the hint differs there, and names the theme by its entry's name. */
+ * from the same width source, useThemeLayout (P260-FX-25; PRD-261 A-02b). Its message box may have
+ * no agent picker, so the hint differs there, names the theme by its entry's name, and reads the SDK
+ * the theme was built against (its engines.sdk, from the theme host) to know whether it can have one. */
 function useThemeChatOnScreen(): ThemeChatOnScreen | null {
   const theme = useActiveTheme()
   const layout = useThemeLayout()
+  const sdkRange = useThemeHost()?.sdkRange ?? null
   if (theme === null || layout !== 'theme' || !theme.ownsPages.includes(CHAT_ROUTE)) return null
-  return { themeName: theme.name }
+  return { themeName: theme.name, sdkRange }
 }
 
 /** `/chat?ticket=<id>` without `repo` (with it, the link opens a session's canvas)

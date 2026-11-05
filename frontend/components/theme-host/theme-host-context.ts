@@ -22,6 +22,11 @@ export interface ThemeHostContextValue {
    */
   readonly pages?: ReadonlyMap<string, unknown> | null
   readonly routes?: ReadonlyMap<string, unknown> | null
+  /**
+   * The active theme's `engines.sdk` (its checked manifest's), the SDK it was built against, or null with no active
+   * theme; optional as `pages` is. The Discuss bar's hint reads it (lib/discussion.ts, SDK 1.5.0).
+   */
+  readonly sdkRange?: string | null
   /** Called by the frame slot's boundary when the frame throws while drawing. */
   readonly reportRenderFailure: (error: unknown) => void
 }

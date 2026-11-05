@@ -31,3 +31,18 @@ export function satisfiesSdkRange(range: unknown, hostVersion: string): boolean 
   const wanted = versionOf(caret)
   return wanted[0] === host[0] && notNewer(wanted, host)
 }
+
+/**
+ * Whether a theme's range asks for `version` or newer: the version it states (exact, or a caret's floor) is no older.
+ * A theme built against an SDK names that SDK's version, so a range that asks for 1.5.0 or newer was built with the
+ * 1.5.0 names. False for a range the host refuses, and for a `version` that isn't MAJOR.MINOR.PATCH.
+ */
+export function asksForSdk(range: unknown, version: string): boolean {
+  const floorMatch = VERSION.exec(version)
+  const statedMatch = typeof range === 'string' ? (VERSION.exec(range) ?? CARET_RANGE.exec(range)) : null
+  if (floorMatch === null || statedMatch === null) return false
+  const stated = versionOf(statedMatch)
+  const floor = versionOf(floorMatch)
+  if (stated[0] !== floor[0]) return stated[0] > floor[0]
+  return notNewer(floor, stated)
+}

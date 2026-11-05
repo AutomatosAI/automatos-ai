@@ -299,7 +299,9 @@ draws its children alone and disables nothing. The SDK's chat (EUAI-11b): Send a
 called, and return false, sending nothing, only when no page label is mounted
 (`frontend/lib/theme-sdk/internal/ai-label-gate.ts`): a theme that opens a chat in its frame on a page with no
 label starts no turn. A hidden label is still on screen, in the host's layer, so it never stops a turn. Auto's
-widget's label never clears a theme's chat. Stop always runs.
+widget's label never clears a theme's chat. Stop always runs. Since SDK 1.5.0 a theme's chat can pick the agent that
+answers (`chooseAgent`); the label then names that agent while it answers, as in Studio's chat (the controller hands
+the pick to `useChatWithReceipts`, which publishes it to the label store).
 
 ### Guaranteed at run time, and what stays a review rule
 

@@ -16,7 +16,9 @@ import path from 'path'
 import { describe, expect, it } from 'vitest'
 
 import type * as Declared from '../../../packages/theme-sdk/index'
+import type * as RuntimeChat from '../chat'
 import * as Runtime from '../index'
+import type * as RuntimeAgents from '../pages/agents'
 
 interface SurfaceFile {
   readonly area: string
@@ -42,6 +44,23 @@ type ModuleLoader = () => Promise<unknown>
  * declaration, this line is a tsc error and the baselined tsc gate fails.
  */
 const RUNTIME_AS_DECLARED: typeof Declared = Runtime
+
+/** True only when A and B are assignable both ways: a field the runtime adds and the declaration lacks fails it too. */
+type SameShape<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
+
+/** SDK 1.5.0's fields on the chat controller. */
+type PartnerFields = 'agentId' | 'chooseAgent' | 'planMode' | 'setPlanMode'
+
+/**
+ * SDK 1.5.0's fields, declared exactly as they run: the controller has the same fields as at runtime, the agent choice
+ * and Plan typed alike, and the roster agent (configuration included) is the same shape. RUNTIME_AS_DECLARED alone lets
+ * the runtime carry a field the declarations lack; these lines don't.
+ */
+const CONTROLLER_DECLARED_AS_IT_RUNS: [
+  SameShape<keyof Declared.HostChatController, keyof RuntimeChat.HostChatController>,
+  SameShape<Pick<Declared.HostChatController, PartnerFields>, Pick<RuntimeChat.HostChatController, PartnerFields>>,
+] = [true, true]
+const ROSTER_AGENT_DECLARED_AS_IT_RUNS: SameShape<Declared.RosterAgent, RuntimeAgents.RosterAgent> = true
 
 const FRONTEND = path.resolve(__dirname, '../../..')
 const SDK_DIR = path.join(FRONTEND, 'lib/theme-sdk')
@@ -196,6 +215,11 @@ describe('PRD-261 A-10b — each area is declared as it runs', () => {
 
   it("holds the host's module to the declared types (tsc proves the fit; this proves it is the same module)", () => {
     expect(RUNTIME_AS_DECLARED).toBe(Runtime)
+  })
+
+  it("declares SDK 1.5.0's controller and roster agent with exactly the runtime's fields (tsc proves the shape)", () => {
+    expect(CONTROLLER_DECLARED_AS_IT_RUNS).toEqual([true, true])
+    expect(ROSTER_AGENT_DECLARED_AS_IT_RUNS).toBe(true)
   })
 })
 

@@ -27,6 +27,11 @@ export interface RosterAgent {
   readonly premium_icon: string | null
   /** Why the agent cannot run now (no AI credit, no CLI host online); absent or null when it can. */
   readonly unavailable?: string | null
+  /**
+   * The agent's settings a theme may read (SDK 1.5.0): `runtime` 'cli' marks a session agent, the person's own Claude
+   * Code session, which a chat never talks to (chat's `chooseAgent` refuses it; `/chat?agent=<id>` opens its session).
+   */
+  readonly configuration?: { readonly runtime?: string | null } | null
   readonly created_at: string
   readonly updated_at: string
 }

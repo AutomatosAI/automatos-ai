@@ -102,6 +102,30 @@ def test_limit_output_mid_turn_is_a_usage_limit_not_an_error(short_tmp, fake_hom
     assert payload["status"] == "usage_limit" and payload["resets_at"] == out.resets_at
 
 
+def test_claude_codes_parked_line_is_a_limit_and_its_warning_is_not():
+    for said in ("\x1b[38;2;153;153;153m●\x1b[3GUsage limit reached · continuing automatically at 9am · esc to cancel",
+                 "⚠ Usage limit reached · limit resets 9am\r\x1b[1B\x1b[39m    Continuing automatically at 9am · Esc",
+                 "5-hour limit reached · continuing automatically at 3pm"):
+        assert usage_limit.is_parked(said) and usage_limit.is_usage_limit(said), said
+    for said in ("Approaching usage limit · resets at 9am", "We are continuing automatically at 10 tomorrow.", ""):
+        assert not usage_limit.is_parked(said), said
+
+
+def test_a_session_parked_at_its_limit_ends_at_once_as_a_pause(short_tmp, fake_home, env_clean, monkeypatch):
+    """5 Nov 2026: Claude Code parked two turns on "continuing automatically at 9am" and
+    the host waited out its 4 h session timeout, holding both tickets and both slots."""
+    workdir = short_tmp / "ws" / "repo"
+    workdir.mkdir(parents=True)
+    monkeypatch.setenv("FAKE_CLAUDE_SCENARIO", "usage-limit-parked")
+    started = time.monotonic()
+    _, out = _run(short_tmp, _ticket(workdir))
+    assert time.monotonic() - started < 60                      # not the 120 s session timeout
+    assert out.status == "usage_limit", out.error
+    assert out.exit_reason == "parked_at_limit"
+    assert out.error.startswith("paused: claude usage limit, resumes ~")
+    assert datetime.fromisoformat(out.resets_at).hour == 9      # Claude Code's "resets 9am (Europe/Berlin)"
+
+
 def test_a_normal_non_zero_exit_still_errors(short_tmp, fake_home, env_clean, monkeypatch):
     workdir = short_tmp / "ws" / "repo"
     workdir.mkdir(parents=True)

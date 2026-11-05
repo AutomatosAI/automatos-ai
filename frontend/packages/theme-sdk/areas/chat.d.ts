@@ -16,6 +16,12 @@
  *
  * SDK 1.4.0: each message's `knownParts`, its text, brief@1, suggestion@1 and reply_chips@1 parts, checked and
  * frozen, so a theme that owns /chat finds the day's brief by its part. A part of any other type is left out.
+ *
+ * SDK 1.5.0: who answers and Plan, on the controller. `agentId` and `chooseAgent(id)` pick an agent of the roster
+ * (pages/agents' useAgents) for this conversation, or Auto with null; a session agent (`configuration.runtime` 'cli')
+ * is refused, as Studio refuses it, and a theme opens one with `HostLink href="/chat?agent=<id>"`: the host's chat,
+ * with that agent's Claude Code session. `planMode` and `setPlanMode(on)` are the host's Plan switch, the one Studio's
+ * Plan button and `/chat?mode=plan` set. The next message goes with both.
  */
 
 import type { WithdrawOffer } from './cards'
@@ -271,6 +277,19 @@ export interface HostChatController {
   readonly retry: () => boolean
   /** Keeps the reply being written, then stops the turn (here and on the server). */
   readonly stop: () => void
+  /** The agent the next message goes to, an id from pages/agents' useAgents; null for Auto, as each conversation starts (SDK 1.5.0). */
+  readonly agentId: number | null
+  /**
+   * Picks who answers the next message: an agent of the roster, or null for Auto (true). False, and nothing changes,
+   * for a session agent (`configuration.runtime` 'cli': it is never a chat partner, as in Studio; link to
+   * `/chat?agent=<id>` to open its session), for an id the roster doesn't have, and while the roster loads. Anything
+   * but a whole number or null throws (SDK 1.5.0).
+   */
+  readonly chooseAgent: (id: number | null) => boolean
+  /** Plan is on: the next message asks for research and a plan, nothing is run. The host's switch, Studio's own (SDK 1.5.0). */
+  readonly planMode: boolean
+  /** Turns Plan on or off for this chat and Studio's alike (on turns Mission mode off); anything but true or false throws (SDK 1.5.0). */
+  readonly setPlanMode: (on: boolean) => void
 }
 
 /** A conversation in a list. */

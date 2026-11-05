@@ -12,8 +12,12 @@ export interface Turn {
   readonly end: () => void
 }
 
-/** The body useChat posts: the words of the message are its first part's text. */
-export type ChatPost = { readonly message?: { readonly parts?: ReadonlyArray<{ readonly text?: string }> } }
+/** The body useChat posts: the words of the message are its first part's text; the agent picked and Plan, when set. */
+export type ChatPost = {
+  readonly message?: { readonly parts?: ReadonlyArray<{ readonly text?: string }> }
+  readonly agentId?: number
+  readonly planMode?: boolean
+}
 
 export type Refusal = { readonly status: number; readonly body: string }
 

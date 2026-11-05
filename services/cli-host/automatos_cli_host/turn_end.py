@@ -51,6 +51,9 @@ EXIT_GRACE_AFTER_SESSION_END_SECONDS = 30.0
 COMPLETED = "completed"
 EXITED_BEFORE_STOP = "exited_before_stop"
 UNGATED_EXIT = "ungated_exit"
+# F083: the CLI parked its turn at its usage limit and the host ended it;
+# ``session._collect`` reports the pause and its reset time.
+PARKED_AT_LIMIT = "parked_at_limit"
 
 
 def is_gated(preset: Any) -> bool:
@@ -135,6 +138,8 @@ def describe(reason: str, *, cli: str, returncode: Optional[int], tail: str, sta
         return ("host_stopped", stopped_by_host) if stopped_by_host else ("cancelled", "cancelled by the operator")
     if reason == "timeout":
         return "error", f"session exceeded {int(session_timeout)} s"
+    if reason == PARKED_AT_LIMIT:
+        return "error", f"{cli} stopped at its usage limit. Last output:\n{tail}"
     if reason == NO_SESSION_START:
         return "error", (
             f"{cli} did not start a session within {int(startup_window)} s — "
@@ -155,6 +160,7 @@ def describe(reason: str, *, cli: str, returncode: Optional[int], tail: str, sta
 
 __all__ = [
     "COMPLETED", "EXITED_BEFORE_STOP", "EXIT_GRACE_AFTER_SESSION_END_SECONDS", "GATED_TIERS", "UNGATED_EXIT",
-    "EXITED_BEFORE_SESSION", "HOOKS_CUT_OFF", "NO_SESSION_START", "USAGE_REFUSED", "cause_in_tail", "describe",
+    "EXITED_BEFORE_SESSION", "HOOKS_CUT_OFF", "NO_SESSION_START", "PARKED_AT_LIMIT", "USAGE_REFUSED", "cause_in_tail",
+    "describe",
     "exit_reason", "is_gated", "sign_in_failure", "startup_timeout", "usage_error",
 ]

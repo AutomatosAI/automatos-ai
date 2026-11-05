@@ -59,6 +59,11 @@ vi.mock('@/hooks/use-missions-api', () => ({
   useCreateMission: () => ({ mutate: missions.create, isLoading: false }),
   useMission: () => ({ data: undefined, isLoading: true }),
 }))
+// SDK 1.5.0: the controller reads the roster for chooseAgent; the page here never picks, so it answers empty.
+vi.mock('@/hooks/use-agent-api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/use-agent-api')>()),
+  useAgents: () => ({ data: [] }),
+}))
 vi.mock('@/lib/chat/use-chat-with-receipts', () => ({
   useChatWithReceipts: (options: Record<string, any>) => {
     chat.options = options

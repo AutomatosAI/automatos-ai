@@ -105,6 +105,20 @@ describe('the chat controller: the stream', () => {
     expect(result.current.status).toBe('streaming')
   })
 
+  it('sends to Auto with Plan off unless told: no agent, no Plan (SDK 1.5.0)', () => {
+    render(STORED)
+    expect(chat.options).toMatchObject({ selectedAgentId: null, planMode: false })
+  })
+
+  it("hands the stream the agent the owner picked and Plan, as Studio's chat does (SDK 1.5.0)", () => {
+    type Partner = { readonly view: ChatConversationView; readonly selectedAgentId: number | null; readonly planMode: boolean }
+    const picked: Partner = { view: STORED, selectedAgentId: 7, planMode: true }
+    const { rerender } = renderHook((props: Partner) => useChatController(props), { initialProps: picked })
+    expect(chat.options).toMatchObject({ id: 'c1', selectedAgentId: 7, planMode: true })
+    rerender({ ...picked, selectedAgentId: null, planMode: false })
+    expect(chat.options).toMatchObject({ selectedAgentId: null, planMode: false })
+  })
+
   it("hands each data part to the theme first, then files the turn's Deliverable under the reply being written", () => {
     chat.messages = [HELLO, PARTIAL]
     chat.status = 'streaming'

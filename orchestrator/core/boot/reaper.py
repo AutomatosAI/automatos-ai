@@ -86,15 +86,25 @@ def _is_stale(ts: Optional[datetime], cutoff: datetime) -> bool:
     return _coerce_aware(ts) < cutoff
 
 
+def _lease_is_live(lease_until: Optional[datetime], now: datetime) -> bool:
+    """True while the ticket's claim is leased: its executor is alive and renewing it, so it
+    is no orphan of this restart. A CLI host's session renews the lease with every events
+    batch (PRD-161); an expired lease is the dispatcher's sweeper's to requeue."""
+    return lease_until is not None and _coerce_aware(lease_until) > now
+
+
 async def _reap_board_tasks(db, cutoff: datetime, now: datetime) -> int:
     """An orphaned ticket is a failed run (F175's rule, night 6 #1078/#1091 closed
     'done'): the one completion writer closes it 'failed' with the reason, tells
-    the owner and writes its report. A ticket no longer in progress is left alone."""
+    the owner and writes its report. A ticket no longer in progress is left alone,
+    and so is one whose lease is live (5 Nov: a uvicorn worker that respawned ran this
+    sweep and failed two morning tickets whose Claude sessions were still running)."""
     from api.board_tasks import finalize_board_task_run
 
     rows = db.query(BoardTask).filter(BoardTask.status == "in_progress").all()
     stale = [(r.id, str(r.workspace_id), r.assigned_agent_id)
-             for r in rows if _is_stale(r.started_at or r.updated_at, cutoff)]
+             for r in rows
+             if _is_stale(r.started_at or r.updated_at, cutoff) and not _lease_is_live(r.lease_until, now)]
     closed = []
     for task_id, workspace_id, agent_id in stale:
         try:
