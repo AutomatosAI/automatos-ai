@@ -239,6 +239,7 @@ def test_aggregate_count_includes_playbook_surface(monkeypatch):
         BoardTask: [SimpleNamespace(
             id=1, status="in_progress", started_at=OLD, updated_at=OLD,
             completed_at=None, error_message=None, workspace_id=None, assigned_agent_id=None,
+            lease_until=None,
         )],
         WorkflowExecution: [SimpleNamespace(
             id=2, status="running", started_at=OLD_NAIVE,
@@ -270,6 +271,7 @@ def test_playbook_surface_failure_does_not_abort_others(monkeypatch):
             BoardTask: [SimpleNamespace(
                 id=1, status="in_progress", started_at=OLD, updated_at=OLD,
                 completed_at=None, error_message=None, workspace_id=None, assigned_agent_id=None,
+                lease_until=None,
             )],
             WorkflowExecution: [SimpleNamespace(
                 id=2, status="running", started_at=OLD_NAIVE,
