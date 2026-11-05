@@ -3,76 +3,165 @@ Channel Manager (PRD-55 US-019)
 ================================
 Manages the lifecycle of all channel adapters.
 
-On startup, ``start_all()`` loads every active ``ChannelConnection``
-from the database and spins up the matching adapter.  Individual
-adapters can be started / stopped at runtime (e.g. when a user
-adds or removes a connection through the UI).
+``reconcile()`` makes the running adapters match a desired set (connection
+id -> ``AdapterSpec``): it starts the missing ones, stops the unwanted ones
+and restarts one whose spec changed. ``channels.polling`` feeds it the
+active polling-mode rows, on the one worker that owns channel polling, at
+boot and on a tick.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Dict, Optional
+import time
+from dataclasses import dataclass
+from typing import Any, Callable, Collection, Dict, Mapping, Optional, Tuple
 
 from .base import BaseChannelAdapter
 
 logger = logging.getLogger(__name__)
 
+#: A connection whose adapter failed to start is tried again after this long, at
+#: once when its spec changes, or when someone acts on it (``retry``). A revoked
+#: token is then not retried, and logged, on every tick.
+START_RETRY_SECONDS = 120
+
+
+@dataclass(frozen=True)
+class AdapterSpec:
+    """What a connection's adapter is built from: ``_create_adapter``'s inputs.
+
+    The config-change check is equality of these three fields against the spec
+    the running adapter was started with: the rows are read for the desired set
+    anyway, so it costs a dict comparison and no extra query.
+    """
+
+    workspace_id: str
+    platform: str
+    config: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class ReconcileReport:
+    """What one ``reconcile()`` pass changed, as connection ids."""
+
+    started: Tuple[str, ...] = ()
+    restarted: Tuple[str, ...] = ()
+    stopped: Tuple[str, ...] = ()
+    failed: Tuple[str, ...] = ()
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.started or self.restarted or self.stopped or self.failed)
+
 
 class ChannelManager:
     """Manages all active channel adapters."""
 
-    def __init__(self):
+    def __init__(self, clock: Callable[[], float] = time.monotonic):
         self._adapters: Dict[str, BaseChannelAdapter] = {}  # connection_id -> adapter
+        self._specs: Dict[str, AdapterSpec] = {}  # connection_id -> the running adapter's spec
+        self._failures: Dict[str, Tuple[AdapterSpec, float]] = {}  # last failed start: spec, when
+        self._owns_polling = False
+        self._clock = clock
+
+    # ------------------------------------------------------------------
+    # Polling ownership
+    # ------------------------------------------------------------------
+
+    @property
+    def owns_polling(self) -> bool:
+        """True on the worker that runs this process's polling adapters
+        (``channels.polling`` decides at boot); False on every other worker."""
+        return self._owns_polling
+
+    def take_polling_ownership(self) -> None:
+        self._owns_polling = True
+
+    def release_polling_ownership(self) -> None:
+        """At shutdown: a request still in flight must not start adapters again."""
+        self._owns_polling = False
+
+    def running_ids(self) -> Tuple[str, ...]:
+        """The connection ids this worker runs an adapter for."""
+        return tuple(self._adapters)
 
     # ------------------------------------------------------------------
     # Bulk lifecycle
     # ------------------------------------------------------------------
 
-    async def start_all(self):
-        """Load active POLLING-mode connections from DB and start their
-        adapters at boot.
+    async def reconcile(
+        self,
+        desired: Mapping[str, AdapterSpec],
+        *,
+        retry: Collection[str] = (),
+    ) -> ReconcileReport:
+        """Make the running adapters match ``desired`` (connection id -> spec).
 
-        Webhook-mode rows are intentionally skipped — the platform POSTs
-        directly to ``/api/webhooks/ws/{workspace_key}`` and no in-process
-        adapter is needed. Starting a polling adapter for a webhook-mode
-        bot would conflict on Telegram (409 on getUpdates) and waste a
-        connection slot on every other platform.
+        Stops the adapters ``desired`` lacks, then starts each wanted one that
+        is not running, or runs with another spec (a restart, through
+        ``start_adapter``). A failed start waits ``START_RETRY_SECONDS`` unless
+        its spec changed or ``retry`` names it. Callers serialise passes
+        (``channels.polling`` holds a lock around each).
         """
-        from core.database.database import SessionLocal
-
-        db = SessionLocal()
-        try:
-            from core.models.channels import ChannelConnection
-
-            connections = (
-                db.query(ChannelConnection)
-                .filter(
-                    ChannelConnection.status == "active",
-                    ChannelConnection.mode == "polling",
-                )
-                .all()
-            )
-
-            for conn in connections:
-                await self.start_adapter(
-                    connection_id=str(conn.id),
-                    workspace_id=str(conn.workspace_id),
-                    platform=conn.platform,
-                    config=conn.config or {},
-                )
+        stopped = await self._stop_unwanted(desired)
+        started, restarted, failed = await self._start_wanted(desired, retry)
+        report = ReconcileReport(started=started, restarted=restarted, stopped=stopped, failed=failed)
+        if report.changed:
             logger.info(
-                "[ChannelManager] start_all: launched %d polling adapter(s); "
-                "webhook-mode rows skipped",
-                len(connections),
+                "[ChannelManager] reconcile: started=%d restarted=%d stopped=%d failed=%d",
+                len(started), len(restarted), len(stopped), len(failed),
             )
-        except Exception as e:
-            logger.error("[ChannelManager] Failed to load connections: %s", e)
-        finally:
-            db.close()
+        return report
 
-    async def stop_all(self):
-        """Stop all running adapters."""
+    async def _stop_unwanted(self, desired: Mapping[str, AdapterSpec]) -> Tuple[str, ...]:
+        unwanted = tuple(conn_id for conn_id in self._adapters if conn_id not in desired)
+        for conn_id in unwanted:
+            try:
+                await self.stop_adapter(conn_id)
+            except Exception:
+                # stop_adapter dropped it before stopping: it is no longer ours to run.
+                logger.exception("[ChannelManager] Error stopping %s", conn_id)
+        self._failures = {conn_id: failure for conn_id, failure in self._failures.items() if conn_id in desired}
+        return unwanted
+
+    async def _start_wanted(
+        self,
+        desired: Mapping[str, AdapterSpec],
+        retry: Collection[str],
+    ) -> Tuple[Tuple[str, ...], Tuple[str, ...], Tuple[str, ...]]:
+        started, restarted, failed = [], [], []
+        for conn_id, spec in desired.items():
+            was_running = conn_id in self._adapters
+            if was_running and self._specs.get(conn_id) == spec:
+                continue
+            if conn_id not in retry and self._waiting_to_retry(conn_id, spec):
+                continue
+            if await self._try_start(conn_id, spec):
+                self._failures.pop(conn_id, None)
+                (restarted if was_running else started).append(conn_id)
+            else:
+                self._failures[conn_id] = (spec, self._clock())
+                failed.append(conn_id)
+        return tuple(started), tuple(restarted), tuple(failed)
+
+    async def _try_start(self, conn_id: str, spec: AdapterSpec) -> bool:
+        try:
+            return await self.start_adapter(conn_id, spec.workspace_id, spec.platform, dict(spec.config))
+        except Exception:
+            # start_adapter catches the new adapter's failure; this is the old one's stop on a restart.
+            logger.exception("[ChannelManager] Could not start %s", conn_id)
+            return False
+
+    def _waiting_to_retry(self, conn_id: str, spec: AdapterSpec) -> bool:
+        failure = self._failures.get(conn_id)
+        if failure is None or failure[0] != spec:
+            return False
+        return self._clock() - failure[1] < START_RETRY_SECONDS
+
+    async def stop_all(self) -> Tuple[str, ...]:
+        """Stop all running adapters. Returns the connection ids it stopped."""
+        stopped = tuple(self._adapters)
         for conn_id, adapter in list(self._adapters.items()):
             try:
                 await adapter.stop()
@@ -80,6 +169,9 @@ class ChannelManager:
             except Exception as e:
                 logger.error("[ChannelManager] Error stopping %s: %s", conn_id, e)
         self._adapters.clear()
+        self._specs.clear()
+        self._failures.clear()
+        return stopped
 
     # ------------------------------------------------------------------
     # Single-adapter lifecycle
@@ -92,9 +184,13 @@ class ChannelManager:
         platform: str,
         config: dict,
     ) -> bool:
-        """Start (or restart) a specific adapter. Returns True on success."""
+        """Start (or restart) a specific adapter. Returns True on success.
+
+        A restart stops and drops the old adapter first, so a failed restart
+        leaves nothing that reads as running.
+        """
         if connection_id in self._adapters:
-            await self._adapters[connection_id].stop()
+            await self.stop_adapter(connection_id)
 
         adapter = self._create_adapter(connection_id, workspace_id, platform, config)
         if adapter is None:
@@ -103,6 +199,7 @@ class ChannelManager:
         try:
             await adapter.start()
             self._adapters[connection_id] = adapter
+            self._specs[connection_id] = AdapterSpec(workspace_id, platform, dict(config))
             logger.info(
                 "[ChannelManager] Started %s adapter for connection %s",
                 platform,
@@ -116,6 +213,7 @@ class ChannelManager:
     async def stop_adapter(self, connection_id: str):
         """Stop a specific adapter by connection ID."""
         adapter = self._adapters.pop(connection_id, None)
+        self._specs.pop(connection_id, None)
         if adapter:
             await adapter.stop()
 
@@ -176,14 +274,18 @@ class ChannelManager:
     def is_running(self, connection_id: str) -> bool:
         """True iff a polling adapter for ``connection_id`` is loaded.
 
-        Consults both the legacy ``_adapters`` dict (TelegramAdapter,
-        SlackAdapter, …) and the new per-driver state in
-        ``channels.drivers.*`` — either is authoritative. Used by
-        ``GET /api/channels`` to reconcile the DB-stored status column
-        with reality.
+        Consults this worker's ``_adapters`` dict (TelegramAdapter,
+        SlackAdapter, …), the running set the polling worker publishes
+        (``channels.polling_status``: on any other worker the dict is
+        empty, so without it this answered False for every channel), and
+        the per-driver state in ``channels.drivers.*`` — any is
+        authoritative. Used by ``GET /api/channels`` and Auto's list tool
+        to report a running channel as active.
         """
         legacy = self._adapters.get(connection_id)
         if legacy is not None and getattr(legacy, "is_running", False):
+            return True
+        if self._running_on_polling_worker(connection_id):
             return True
         # Ask every registered driver — cheap dict lookups, no I/O.
         # Each driver is isolated: one failing check must not hide a
@@ -209,6 +311,21 @@ class ChannelManager:
                     exc_info=True,
                 )
         return False
+
+    @staticmethod
+    def _running_on_polling_worker(connection_id: str) -> bool:
+        """The shared running set, isolated like each driver below (issue #1075):
+        a Redis error must not hide a channel a driver still reports."""
+        try:
+            from channels import polling_status
+
+            return polling_status.is_running(connection_id)
+        except Exception:
+            logger.warning(
+                "[ChannelManager] Failed to read the polling worker's running set",
+                exc_info=True,
+            )
+            return False
 
     def get_status(self) -> dict:
         """Return a status snapshot of all managed adapters."""

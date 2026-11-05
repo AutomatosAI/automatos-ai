@@ -90,9 +90,9 @@ The platform defines its microservices in `docker-compose.yml`, supporting pre-b
 | `workspace-worker`| `automatos_workspace_worker` | Filesystem sandboxed execution worker for Code Canvas and terminal sessions [docker-compose.yml:1-269]() |
 
 ### Compose Profiles
-- **Default**: Runs `postgres`, `redis`, `minio`, `backend`, `frontend`, and `workspace-worker` (plus `minio-volume-owner`) [docker-compose.yml:52-66]()
+- **Default**: Runs `postgres`, `redis`, `minio`, `qdrant`, `backend`, `frontend`, and `workspace-worker` (plus `minio-volume-owner`) [docker-compose.yml:52-66]()
 - **Core (`CORE=1`)**: Runs without the workspace-worker [docker-compose.yml:72-78]()
-- **Memory (`--profile memory`)**: Adds `qdrant` durable memory [docker-compose.yml:68]()
+- **Memory**: `qdrant` durable memory runs in the default stack; memory also needs an embeddings key in Settings → API Keys [docker-compose.yml:68]()
 - **Search (`--profile search`)**: Adds `searxng` web search engine [docker-compose.yml:69]()
 - **Media (`--profile media`)**: Adds `media-render` for socials rendering [docker-compose.yml:70-71]()
 - **Voice (`--profile voice`)**: Adds `voice-tts` for Auto's server voice [docker-compose.yml:71-72]()

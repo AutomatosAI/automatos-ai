@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, text
 
-from core.database.database import get_db
+from core.database.database import end_open_transaction, get_db
 from core.models import Document, DocumentUploadResponse, DocumentResponse
 from modules.rag import DocumentManager, DocumentStatus, DocumentType
 import logging
@@ -356,6 +356,10 @@ def download_document_by_id(
     mode=redirect: returns 302 redirect. The request itself needs the caller's auth
     headers, so a plain <a href> to this route is refused in SaaS: fetch with apiClient.
     A plain ``def``: the lookup and the storage calls are synchronous (threadpool).
+
+    F105: the request's session (the permission gate's too) is done once the row is
+    read, so its transaction ends there, before object storage is asked and before a
+    local file streams; FastAPI closes the session only when the response ends.
     """
     doc = (
         db.query(Document)
@@ -366,6 +370,8 @@ def download_document_by_id(
         raise HTTPException(status_code=404, detail="Document not found")
 
     filename = doc.original_filename or doc.filename
+    db.expunge(doc)  # its fields as read, for the link and the file, with no session behind them
+    end_open_transaction(db)
     # S3 first (services.document_downloads: the key from file_path, a pre-signed link).
     link = stored_object_link(doc, filename, mode)
     if link is not None:
@@ -386,15 +392,21 @@ def download_document_by_id(
 def download_document(
     path: str = Query(..., description="Full path to a document in this workspace's folder"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
 ):
     """
     Download a file from this workspace's own folder under the documents root
     (``<root>/<workspace_id>/``, services.document_downloads). A path anywhere else,
     reached through ``..`` or a symlink included, answers 404 like a missing file.
 
+    F105: ``db`` is the permission gate's own session (FastAPI hands one ``get_db``
+    per request); its transaction ends before the file streams, so its pooled
+    connection is not held for the whole download.
+
     Returns:
         FileResponse with the document
     """
+    end_open_transaction(db)
     requested_path = workspace_file(path, ctx.workspace_id)
     if requested_path is None:
         raise HTTPException(status_code=404, detail="Document not found")

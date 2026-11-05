@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# PRD-262 US-040: the five-container core stack, and the six-container default an old .env keeps.
+# PRD-262 US-040: the core stack without the workspace worker, and the default an old .env keeps.
 #
 # smoke-images.yml's smoke-images-pr job runs this after its boot smoke, on the images that
 # job built and tagged (AUTOMATOS_IMAGE_TAG), so make up pulls and builds nothing. Three
 # stacks, one after the other, each with the real make and Docker:
 #   1. the default from an .env written before W5 (the keys .env.example had then, the
 #      three secrets filled as its QUICKSTART said, no AUTOMATOS_IMAGE_TAG, no
-#      COMPOSE_FILE or COMPOSE_PROFILES): `make up` starts six containers, the workspace
-#      worker among them;
+#      COMPOSE_FILE or COMPOSE_PROFILES): `make up` starts the default seven containers,
+#      the workspace worker and qdrant (memory) among them;
 #   2. on that running stack, `make up CORE=1`: the worker an earlier make up started is
-#      stopped and removed, and five run;
+#      stopped and removed, and the core six run;
 #   3. after `down -v`, a fresh core stack: `make up CORE=1` on a checkout with no .env.
-#      docker compose config shows the five services (and minio-volume-owner, the
+#      docker compose config shows the six services (and minio-volume-owner, the
 #      one-shot that runs before MinIO and exits, PRD-262 US-041) and the backend's
-#      workspaces volume mounted writable (docker-compose.core.yml); five containers
+#      workspaces volume mounted writable (docker-compose.core.yml); six containers
 #      run; /health/ready answers 200; a workspace endpoint answers 503 "Workspace worker not running"
 #      (orchestrator/core/workspace_client.py). Then the worker starts, the endpoint lists
 #      the deliverables folder, a file planted there before the stack started keeps its
@@ -41,11 +41,11 @@ ENV_FILE=".env"
 CORE_FILES="docker-compose.yml:docker-compose.core.yml"
 # docker-compose.yml's container_name values and named volumes all start with this.
 STACK_NAME_PATTERN='^automatos_'
-SIX="automatos_backend automatos_frontend automatos_minio automatos_postgres automatos_redis automatos_workspace_worker"
-FIVE="automatos_backend automatos_frontend automatos_minio automatos_postgres automatos_redis"
-# The core override's services: the five, and the one-shot that re-owns MinIO's volume and
-# exits before MinIO starts (PRD-262 US-041), so it never counts as running.
-CORE_SERVICES="backend frontend minio minio-volume-owner postgres redis"
+DEFAULT_RUNNING="automatos_backend automatos_frontend automatos_minio automatos_postgres automatos_qdrant automatos_redis automatos_workspace_worker"
+CORE_RUNNING="automatos_backend automatos_frontend automatos_minio automatos_postgres automatos_qdrant automatos_redis"
+# The core override's services: the core six, and the one-shot that re-owns MinIO's volume
+# and exits before MinIO starts (PRD-262 US-041), so it never counts as running.
+CORE_SERVICES="backend frontend minio minio-volume-owner postgres qdrant redis"
 # What the backend answers a workspace call with when the worker is not there
 # (core/workspace_client.py WORKER_NOT_RUNNING).
 NOT_RUNNING="Workspace worker not running or unreachable"
@@ -95,7 +95,7 @@ expect_running() {
 }
 
 # docker compose on docker-compose.yml alone, where the worker has no profile, so it
-# reaches all six; with stand-in secrets, which these commands never use.
+# reaches all seven; with stand-in secrets, which these commands never use.
 whole_stack() {
   env "${UNUSED_SECRETS[@]}" docker compose -f docker-compose.yml "$@"
 }
@@ -158,19 +158,19 @@ EOF
   [ -s "$ENV_FILE" ] || fail "could not write the pre-W5 .env"
 }
 
-# 1. The default stack from an .env written before W5: six containers.
-check_an_old_env_starts_six() {
+# 1. The default stack from an .env written before W5: all seven containers.
+check_an_old_env_starts_the_default() {
   write_env_before_w5
   echo "make up with an .env written before W5 (AUTOMATOS_IMAGE_TAG=${AUTOMATOS_IMAGE_TAG})..."
   make up > "${OUT_DIR}/make-up-old-env.log" 2>&1 || { cat "${OUT_DIR}/make-up-old-env.log" >&2; fail "make up failed on an .env written before W5"; }
-  expect_running "$SIX" "make up from an .env written before W5"
+  expect_running "$DEFAULT_RUNNING" "make up from an .env written before W5"
 }
 
-# 2. make up CORE=1 on the running six: the worker goes, five stay.
-check_core_replaces_a_running_six() {
-  echo "make up CORE=1 on the running six-container stack..."
-  make up CORE=1 > "${OUT_DIR}/make-up-core-switch.log" 2>&1 || { cat "${OUT_DIR}/make-up-core-switch.log" >&2; fail "make up CORE=1 failed on a running six-container stack"; }
-  expect_running "$FIVE" "make up CORE=1 after make up"
+# 2. make up CORE=1 on the running default: the worker goes, the core six stay.
+check_core_replaces_a_running_default() {
+  echo "make up CORE=1 on the running default stack..."
+  make up CORE=1 > "${OUT_DIR}/make-up-core-switch.log" 2>&1 || { cat "${OUT_DIR}/make-up-core-switch.log" >&2; fail "make up CORE=1 failed on a running default stack"; }
+  expect_running "$CORE_RUNNING" "make up CORE=1 after make up"
 }
 
 # The file the worker must leave alone, owned by someone other than the worker's user.
@@ -186,7 +186,7 @@ plant_owner_probe() {
   echo "planted ${PROBE} (owner ${probe_owner}) in a folder owned by ${folder_owner}"
 }
 
-# docker compose itself says the override does what it should: five services and the
+# docker compose itself says the override does what it should: the core six and the
 # MinIO one-shot, and the backend's workspaces volume writable, so Docker can create the
 # deliverables folder's mount point inside it on a fresh volume.
 check_core_config() {
@@ -209,13 +209,13 @@ call_workspace_files() {
   grep -qF "$2" "$3" || fail "the workspace endpoint's answer does not say '${2}'"
 }
 
-# 3. A fresh core stack: five containers, ready, the worker's error; then the worker.
+# 3. A fresh core stack: six containers, ready, the worker's error; then the worker.
 check_a_fresh_core_stack() {
   plant_owner_probe
   check_core_config
   echo "make up CORE=1 on a fresh checkout (no .env, no volumes)..."
   make up CORE=1 > "${OUT_DIR}/make-up-core.log" 2>&1 || { cat "${OUT_DIR}/make-up-core.log" >&2; fail "make up CORE=1 failed"; }
-  expect_running "$FIVE" "make up CORE=1"
+  expect_running "$CORE_RUNNING" "make up CORE=1"
   python3 "$BOOT_TOOL" --label core --container automatos_backend --url "ready=${API_BASE}/health/ready" \
     --timeout "$MAX_WAIT_SECONDS" --out "$BOOTS_FILE" || fail "/health/ready did not answer 200 within ${MAX_WAIT_SECONDS}s"
   call_workspace_files 503 "$NOT_RUNNING" "${OUT_DIR}/files-without-worker.json"
@@ -244,13 +244,13 @@ main() {
   refuse_existing_stack
   trap finish EXIT
   use_deliverables "$OLD_STACK_DIR"
-  check_an_old_env_starts_six
-  check_core_replaces_a_running_six
+  check_an_old_env_starts_the_default
+  check_core_replaces_a_running_default
   whole_stack logs -t --no-color > "${OUT_DIR}/compose.log" 2>&1 || true
   teardown
   check_a_fresh_core_stack
   outcome="pass"
-  echo "OK: an .env from before W5 started six containers; make up CORE=1 stopped the worker and ran five;" \
+  echo "OK: an .env from before W5 started all seven containers; make up CORE=1 stopped the worker and ran six;" \
     "a fresh core stack answered /health/ready 200 and 'Workspace worker not running', and the worker" \
     "started later left the deliverables folder's owners alone and wrote there as its owner"
 }

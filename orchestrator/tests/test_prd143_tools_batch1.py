@@ -334,7 +334,23 @@ def test_configure_channel_not_found_fails_closed():
     assert "not found" in out["error"].lower()
 
 
+def _record_polling_changes(monkeypatch):
+    """The handlers hand a written row to the worker that owns channel polling
+    (channels.polling); they start and stop no adapter in their own worker."""
+    import channels.polling as polling  # before the manager stub: polling imports the real one
+
+    applied = []
+
+    async def _apply(channel_id):
+        applied.append(channel_id)
+        return False
+
+    monkeypatch.setattr(polling, "apply_polling_change", _apply)
+    return applied
+
+
 def test_start_channel_workspace_scoped(monkeypatch):
+    applied = _record_polling_changes(monkeypatch)
     manager = _stub_channel_manager(monkeypatch)
     db = _TextDB(row=_channel_row())
     out = _run(start_channel(db, _WS, {"channel_id": "ch-1"}))
@@ -342,13 +358,15 @@ def test_start_channel_workspace_scoped(monkeypatch):
     assert out["status"] == "started"
     sql, params = db.calls[0]
     assert "workspace_id = :ws_id" in sql and params["ws_id"] == str(_WS)
-    (args, _kwargs) = manager.start_calls[0]
-    assert args[1] == str(_WS), "adapter must start under the caller workspace"
-    update_sql, _ = db.calls[1]
-    assert "'active'" in update_sql
+    update_sql, update_params = db.calls[1]
+    assert "'active'" in update_sql and update_params == {"id": "ch-1"}
+    assert db.committed is True
+    assert applied == ["ch-1"], "the polling worker must be told to start it"
+    assert manager.start_calls == [], "no adapter may start in the tool's own worker"
 
 
 def test_stop_channel_workspace_scoped(monkeypatch):
+    applied = _record_polling_changes(monkeypatch)
     manager = _stub_channel_manager(monkeypatch)
     db = _TextDB(row=_channel_row())
     out = _run(stop_channel(db, _WS, {"channel_id": "ch-1"}))
@@ -356,9 +374,11 @@ def test_stop_channel_workspace_scoped(monkeypatch):
     assert out["status"] == "stopped"
     sql, params = db.calls[0]
     assert "workspace_id = :ws_id" in sql and params["ws_id"] == str(_WS)
-    assert manager.stop_calls, "must stop the adapter via ChannelManager"
-    update_sql, _ = db.calls[1]
-    assert "'inactive'" in update_sql
+    update_sql, update_params = db.calls[1]
+    assert "'inactive'" in update_sql and update_params == {"id": "ch-1"}
+    assert db.committed is True
+    assert applied == ["ch-1"], "the polling worker must be told to stop it"
+    assert manager.stop_calls == [], "no adapter may stop in the tool's own worker"
 
 
 # ---------------------------------------------------------------------------

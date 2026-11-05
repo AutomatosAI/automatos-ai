@@ -116,8 +116,8 @@ or `edge` when that is a rebuild of it), and writes it to `.env` as
 On a checkout with your own changes it builds only the images whose folder you
 changed and pulls the rest.
 
-The first run downloads about 1.3 GB (the whole stack, compressed, amd64;
-1.28 GB on arm64): about a minute at 200 Mbit/s, three to four at 50 Mbit/s,
+The first run downloads about 1.4 GB (the whole stack, compressed, amd64;
+1.36 GB on arm64): about a minute at 200 Mbit/s, three to four at 50 Mbit/s,
 plus unpacking and the first boot. CI times `make up` to a working UI on every
 main publish against a 150-second bar. Updates download only the layers that
 changed.
@@ -348,8 +348,13 @@ A tunnel or proxy on this machine is invisible to that check, so behind one run
   and the native platform tools keep working (PRD-233 S2). Web access is
   **not** one of these: `platform_web_fetch` needs no key, and `platform_web_search` works with
   your OpenRouter key or a SearXNG container as well as with Composio.
-- **Durable memory (mem0) and field memory (Qdrant)** are not in the default
-  stack; the backend degrades cleanly without them.
+- **Memory needs an embeddings key.** Durable and field memory run on the
+  Qdrant container the default stack starts, but writing a memory needs an
+  embedding provider: an OpenRouter key in **Settings → API Keys** (or the key of
+  the provider chosen under Settings → System Settings → Embeddings), then
+  `docker compose restart backend` so memory picks it up. Until then,
+  **Knowledge → Memory** shows *Unavailable* and says why.
+  To turn memory off, set `QDRANT_URL=` (empty) in `envs/api.local`.
 
 ## Optional: database GUI
 

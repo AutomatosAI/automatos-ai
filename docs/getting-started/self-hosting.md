@@ -22,9 +22,9 @@ disagree, the file wins — open an issue.
 | Need | Notes |
 |---|---|
 | Docker Engine 25 or later with Docker Compose 2.24.4 or later: Docker Desktop (macOS / Windows) or Docker Engine (Linux) | Check with `docker version --format '{{.Server.Version}}'` and `docker compose version --short`. The compose file probes each service every second while it starts (healthcheck `start_interval`), which Compose refuses on an engine older than 25, and it uses Compose v2 syntax (`${VAR:?…}` required variables, optional `env_file` entries), so the old `docker-compose` v1 binary is not supported. `make up` checks both versions first and stops, naming this floor, on an older Docker. A Linux distribution's own `docker.io` package can be older: install from Docker's repository (docs.docker.com/engine/install). |
-| Disk | The first `make up` downloads about 1.33 GB of images on amd64 and 1.28 GB on arm64, compressed: the API 521 MB, the workspace worker 507 MB and the web app 94 MB (CI's measurement, 16 Oct 2026), Postgres 159 MB, MinIO 64 MB and Redis 16 MB (the digests `docker-compose.yml` pins), less about 30 MB of base layers the API and the worker share. Docker unpacks what it downloads, so the images take more disk than that; `make status` shows the figure on your machine. `make up CORE=1` leaves out the worker and its image (§1b). Your data volumes come on top and grow with use. |
+| Disk | The first `make up` downloads about 1.41 GB of images on amd64 and 1.36 GB on arm64, compressed: the API 521 MB, the workspace worker 507 MB and the web app 94 MB (CI's measurement, 16 Oct 2026), Postgres 159 MB, Qdrant 75 MB, MinIO 64 MB and Redis 16 MB (the digests `docker-compose.yml` pins; Qdrant's read from its manifest on 4 Nov 2026), less about 30 MB of base layers the API and the worker share. Docker unpacks what it downloads, so the images take more disk than that; `make status` shows the figure on your machine. `make up CORE=1` leaves out the worker and its image (§1b). Your data volumes come on top and grow with use. |
 | Git | to clone and to pull updates. `git clone --depth 1` fetches only the current commit, under 80 MB, where the full history is about 700 MB; `git pull` updates a shallow clone as usual, and `git fetch --unshallow` fetches the history if you ever want it. |
-| Free ports | 3000, 8000, 5432, 6379, 9000, 9001 by default — every one is overridable (§4). |
+| Free ports | 3000, 8000, 5432, 6379, 6333, 9000, 9001 by default — every one is overridable (§4). |
 | Windows | The stack runs under Docker Desktop. `make` is not installed on Windows: §1b lists the commands behind every `make` target. The smooth path is everything inside WSL2: §1a has the recipe, and [SETUP.md](../../SETUP.md) walks through it step by step. Session mode runs inside WSL2, or natively on Windows 10 1809 or later (§1a). |
 
 Nothing else. No cloud account, no identity provider, no AWS.
@@ -184,7 +184,7 @@ docker compose up -d --no-build --remove-orphans
 docker image prune -f
 docker builder prune -f --filter until=168h
 
-# make up CORE=1: the core five (postgres, redis, minio, backend, frontend), without the
+# make up CORE=1: the core six (postgres, redis, minio, qdrant, backend, frontend), without the
 # workspace worker. Every compose command reads docker-compose.core.yml too, through COMPOSE_FILE.
 export COMPOSE_FILE=docker-compose.yml:docker-compose.core.yml   # PowerShell: $env:COMPOSE_FILE="docker-compose.yml;docker-compose.core.yml"
 python3 scripts/stack_images.py up   # the same tag; gets the backend and frontend images only
@@ -263,9 +263,9 @@ they tell a running session host to pick up the new code
 which stamps it on every image it builds as `org.opencontainers.image.revision`,
 the label CI's images carry too. A build without it is stamped `unknown`.
 
-**The core stack, five containers.** `make up CORE=1` runs postgres, redis,
-minio, the backend and the frontend, and leaves out the workspace worker and
-its image: `docker-compose.core.yml` puts the worker behind a profile of its
+**The core stack, without the worker.** `make up CORE=1` runs postgres, redis,
+minio, qdrant, the backend and the frontend, six containers, and leaves out the
+workspace worker and its image: `docker-compose.core.yml` puts the worker behind a profile of its
 own, and `make` passes that file to every compose command through
 `COMPOSE_FILE`. Without the worker, agents' workspace tools, the Deliverables
 file browser and Code Canvas answer *Workspace worker not running*; the rest
@@ -273,10 +273,11 @@ works as before. A worker an earlier `make up` started is stopped and removed,
 and its files stay in the `automatos_workspaces_data` volume. To start it
 later, name it with the same two files:
 `docker compose -f docker-compose.yml -f docker-compose.core.yml up -d workspace-worker`,
-or run `make up` without `CORE=1`, which brings back all six. Plain
-`docker compose up` always runs six, whatever your `.env` holds: no key turns the
+or run `make up` without `CORE=1`, which brings back all seven. Plain
+`docker compose up` always runs seven, whatever your `.env` holds: no key turns the
 worker off. `make build CORE=1` still builds all three images and then runs
-five; `make dev` always runs six.
+six; `make dev` always runs seven. Memory (qdrant) stays in the core stack: it is
+small, and the backend is pointed at it by default.
 
 ### The tag `make up` picks
 
@@ -459,7 +460,7 @@ marketplace skill you can enable per agent; re-import later to pick up updates.
 
 ## 3. What runs where
 
-`make up` and plain `docker compose up` start the default stack: six
+`make up` and plain `docker compose up` start the default stack: seven
 long-running containers, and `minio-volume-owner`, a one-shot that runs before
 MinIO and exits. Nothing in it needs the internet after the images are pulled,
 except the LLM provider you chose (and Composio, if you add a key).
@@ -470,12 +471,13 @@ except the LLM provider you chose (and Composio, if you add a key).
 | `redis` | `automatos_redis` | `redis:7-alpine` | 6379 (`REDIS_PORT`) | Cache, pub/sub, queues. `FLUSHDB`, `FLUSHALL` and `DEBUG` are disabled; 256 MB `allkeys-lru`. Compose sets the backend's `REDIS_URL` to this service, so a `REDIS_URL` for a hosted Redis in `orchestrator/.env` is not picked up inside the container. |
 | `minio-volume-owner` | `automatos_minio_volume_owner` | `redis:7-alpine`, the same image as `redis` | none, and no network | One-shot, before MinIO starts: when root owns MinIO's volume, as on an install made while MinIO still ran as root, it re-owns the volume to uid 65532 once, says so in its log and exits; otherwise it exits at once. It runs as root with only the capabilities `chown` needs. MinIO starts only after it succeeds. |
 | `minio` | `automatos_minio` | `cgr.dev/chainguard/minio` (Chainguard's maintained MinIO build) | 9000 API (`MINIO_PORT`), 9001 console (`MINIO_CONSOLE_PORT`) | S3-compatible object store for documents, generated outputs, plugin packages and images. Runs as the image's own user, uid 65532, never root. The backend creates the documents bucket (`S3_DOCUMENTS_BUCKET`, default `automatos-ai`) and the others the first time it uses them. |
+| `qdrant` | `automatos_qdrant` | `qdrant/qdrant` | 6333 (`QDRANT_PORT`) | Durable (L3) and field memory. `envs/api.defaults` points the backend at it (`QDRANT_URL=http://qdrant:6333`). Writing a memory needs an embeddings key in **Settings → API Keys**: OpenRouter's, or the key of the provider chosen under Settings → System Settings → Embeddings; until there is one, **Knowledge → Memory** says so. Your own Qdrant: `QDRANT_URL` in `envs/api.local`; memory off: `QDRANT_URL=` (empty) there. |
 | `backend` | `automatos_backend` | `ghcr.io/automatosai/automatos-api`, pulled: CI's build of `./orchestrator` (`production` target); `make build` builds it here | 8000 (`API_PORT`) | The FastAPI API, as CI builds and scans it: the code is inside the image and nothing reloads. `make dev` runs the `development` target instead, with the source bind-mounted and served by `uvicorn --reload`. |
 | `frontend` | `automatos_frontend` | `ghcr.io/automatosai/automatos-frontend`, pulled: CI's build of `./frontend` (`production` target); built here when `.env` changes its `NEXT_PUBLIC_*` values (§1b) | 3000 (`FRONTEND_PORT`) | The Next.js UI (the standalone server). Starts once the backend health check passes. `make dev` runs the `development` target instead (`npm run dev`, source bind-mounted). |
 | `workspace-worker` | `automatos_workspace_worker` | `ghcr.io/automatosai/automatos-workspace-worker`, pulled: CI's build of `./services/workspace-worker` | none — port 8081 stays inside the compose network | The Code Canvas runtime: the container in which agents read, write and run things, confined to your workspace directory (§5). |
 
 **The core stack.** An override file runs the default stack without the
-workspace worker, five containers instead of six (§1b, §5):
+workspace worker, six containers instead of seven (§1b, §5):
 
 | Override | Command | Leaves out | Profile that brings it back |
 |---|---|---|---|
@@ -488,10 +490,13 @@ but `media` and `voice` pull a published image.
 | Profile | Service | Container | Image / build | Host port (variable) | What it does |
 |---|---|---|---|---|---|
 | `all` | `adminer` | `automatos_adminer` | `adminer` | 8080 (`ADMINER_PORT`) | Database GUI, pre-pointed at `postgres`. |
-| `memory` | `qdrant` | `automatos_qdrant` | `qdrant/qdrant` | 6333 (`QDRANT_PORT`) | Durable and field memory. Also set `QDRANT_URL=http://qdrant:6333` in `envs/api.local`; without it the backend keeps memory off (§9). |
 | `search` | `searxng` | `automatos_searxng` | `searxng/searxng` | 8888 (`SEARXNG_PORT`) | Web search for agents, with no key. Also set `SEARXNG_URL=http://searxng:8080` in `.env` ([§7a](#7a-web-access-for-agents-prd-240)). |
 | `media` | `media-render` | `automatos_media_render` | built here from `./services/media-render`; nothing publishes it | none — port 8090 stays inside the compose network | Renders a Socials post (a template, your brand kit, the Kokoro voice and the music) into an MP4 or PNG: `docker compose --profile media up -d media-render`, which builds it the first time. See [Media rendering](#7b-media-rendering-the-media-profile). |
 | `voice` | `voice-tts` | `automatos_voice_tts` | built here from `./services/voice-tts`; nothing publishes it | none — port 8100 stays inside the compose network | Auto's server voice: Kokoro speaks Auto's replies as MP3 for the phone and the web quick-ask. `docker compose --profile voice up -d voice-tts`, which builds it the first time, then `VOICE_TTS_URL=http://voice-tts:8100` in `.env`. See [Auto's server voice](#7c-autos-server-voice-the-voice-profile). |
+
+Memory used to be an optional profile of its own. It is in the default stack
+now and that profile is gone: an `.env` or a command that still names it starts
+the default stack, memory included.
 
 Every third-party image above is pinned by digest in `docker-compose.yml`, and
 Dependabot moves the pins once a week. The CI test
@@ -500,11 +505,11 @@ Dependabot moves the pins once a week. The CI test
 override.
 
 Named volumes: `automatos_postgres_data`, `automatos_redis_data`,
-`automatos_minio_data`, `automatos_backend_logs`, `automatos_workspaces_data`,
-and `backend_data`, which holds the auto-generated credential-encryption key
-(`CREDENTIAL_KEY_FILE` in `envs/api.defaults`), uploaded documents and the local
-copy of generated documents (object storage keeps theirs). The `memory` profile
-adds `automatos_qdrant_data`, the `search` profile `searxng_cache`. Your
+`automatos_minio_data`, `automatos_qdrant_data` (memory), `automatos_backend_logs`,
+`automatos_workspaces_data`, and `backend_data`, which holds the auto-generated
+credential-encryption key (`CREDENTIAL_KEY_FILE` in `envs/api.defaults`), uploaded
+documents and the local copy of generated documents (object storage keeps theirs).
+The `search` profile adds `searxng_cache`. Your
 workspace's directory is a **bind mount** of a host folder, not a volume (§5).
 `automatos_workspaces_data` holds the files of every other workspace on the
 stack (a second or a test workspace), so they survive recreating the
@@ -525,8 +530,8 @@ You should not need to open the last three for a standard install.
 ## 4. First boot — what happens and how long it takes
 
 1. **Images.** `make up` pulls the app images CI built, scanned and published
-   for your commit (§1b). The whole default stack is about 1.33 GB compressed on
-   amd64 and 1.28 GB on arm64 (measured 16 Oct 2026; the target is under 1 GB),
+   for your commit (§1b). The whole default stack is about 1.41 GB compressed on
+   amd64 and 1.36 GB on arm64 (§1; the target is under 1 GB),
    so the download is the slow part: about a minute at 200 Mbit/s, three to four
    at 50 Mbit/s, plus unpacking. CI times `make up` to a working UI on every
    main publish against a 150-second bar. A later update downloads only the
@@ -538,7 +543,8 @@ You should not need to open the last three for a standard install.
    `POSTGRES_PASSWORD` — this password is baked into the volume at that moment
    (see §10). `minio-volume-owner` checks MinIO's volume and exits (§3), then
    MinIO starts; the backend creates the documents bucket the first time it
-   stores a file.
+   stores a file. Qdrant starts beside them, before the backend; the backend
+   creates its memory collections the first time memory is used.
    While a service starts, Docker probes its health every second
    (`start_interval: 1s` in `docker-compose.yml`, Docker Engine 25 or later), so
    a service that waits on another starts within a second or two of it being
@@ -565,8 +571,16 @@ You should not need to open the last three for a standard install.
      failure);
    - ensure the local workspace (`DEFAULT_WORKSPACE_ID`, named *Local
      Workspace*) and the operator user exist;
-   - start `uvicorn`. The application then runs its own boot stages,
-     including the Composio catalogue bootstrap (§7).
+   - start `uvicorn` with as many worker processes as the machine affords:
+     `WEB_CONCURRENCY=0` (`envs/api.defaults`: size the workers to this machine)
+     is one per CPU and per 4 GB of memory the container may use (Docker
+     Desktop's VM settings count), at most 4, at least 1, and the log says
+     `uvicorn workers: N (…)`. One worker is one
+     event loop, so on a bigger machine a slow request no longer holds up the
+     rest. Pin a number with `WEB_CONCURRENCY=2` in `envs/api.local` (1 runs one
+     process, as before). The application then runs its own boot stages in each
+     worker, including the Composio catalogue bootstrap (§7); seeds and the
+     scheduler run in one of them.
 4. **Frontend** starts after the backend's health check passes. The check
    probes every second while the backend starts, so the backend turns healthy
    about a second after it first answers `/health`, and compose starts the
@@ -662,7 +676,7 @@ profile and its files live **on your machine**:
   groups, the worker takes your uid and keeps its own group.
 - **Running without it.** `make up CORE=1` (or
   `docker compose -f docker-compose.yml -f docker-compose.core.yml up -d`) runs
-  the five other containers and not the worker (§1b). Code Canvas, the
+  the six other containers and not the worker (§1b). Code Canvas, the
   Deliverables file browser and agents' workspace tools then answer *Workspace
   worker not running*.
 - Limits and knobs: the service is capped at 2 CPUs and 2 GB;
@@ -1032,7 +1046,6 @@ hidden locally by an explicit list (`frontend/lib/auth-edition.ts`,
 | Team, invitations, Workspace Admin, plan/trial pills, plugin moderation | Multi-tenant and commercial machinery of the hosted edition. |
 | Settings → Webhooks, Channels, Widget SDK | Inbound webhooks and channel callbacks need a public URL; the widget embed needs the hosted loader. |
 | The community hub | **Themes, agents, Playbooks, packages and plugins shipped.** Marketplace → **Sync with Automatos Cloud** pulls what Automatos Cloud lists, only when an owner or admin presses the button: themes only in versions an Automatos key signed, agents, Playbooks, packages and plugins as **Reviewed on Automatos Cloud** (never Official), each shown with what it will use before it is added. It is pull only and sends no account, workspace or install id, and `AUTOMATOS_CLOUD_URL=` (empty) turns it off ([Sync with Automatos Cloud](../community-marketplace/sync-with-automatos-cloud.md)). On the hosted edition the Marketplace is public at `/marketplace`, browsable signed out. The seeded catalogue is local and offline. Pulling needs no account and nothing is paywalled; publishing happens on the hosted edition, with a free account, and passes review. |
-| Durable memory and field memory (Qdrant) | Off by default: `QDRANT_URL` is empty in `envs/api.defaults`, so the backend attempts no writes and schedules no probe (PRD-238 S10). Switch it on with `docker compose --profile memory up -d` and `QDRANT_URL=http://qdrant:6333` in `envs/api.local`, or point that variable at your own Qdrant. |
 | S3 Vectors RAG | Hosted-only; local RAG runs on pgvector (`S3_VECTORS_ENABLED=false`). Never enable it against MinIO. |
 | Auto Live voice (Retell) | The switch and the Retell credentials live in the hosted edition's system settings; nothing in the local stack configures them. |
 | Loki / Prometheus / log relay, the agent-opt worker | Hosted telemetry and prompt-optimisation services — silenced by empty URLs in `envs/api.defaults`. |
@@ -1101,7 +1114,7 @@ your checkout and ran the backend from your source. The first `git pull && make 
 after that change differs in four ways. Your data stays where it is.
 
 - **`make up` pulls instead of building.** It downloads the images CI published
-  for your commit (§1b; about 1.33 GB the first time, §1) and builds only one CI
+  for your commit (§1b; about 1.41 GB the first time, §1) and builds only one CI
   has not published. The images your checkout built stay on disk under their old
   names, `<folder>-backend`, `<folder>-frontend` and `<folder>-workspace-worker`,
   where `<folder>` is the directory you cloned into; with the default name,
@@ -1127,8 +1140,24 @@ after that change differs in four ways. Your data stays where it is.
   at once. Your buckets and objects stay as they were. Plain `docker compose up`
   does the same, so it needs no `make`.
 
-An `.env` written before the change still runs all six containers; `make up CORE=1`
-runs five (§3).
+An `.env` written before the change still runs all seven containers; `make up CORE=1`
+runs six (§3).
+
+### Memory on by default, and the worker count
+
+From November 2026 the first `git pull && make up` changes two defaults:
+
+- **Memory is on.** Qdrant joins the default stack (about 75 MB to download once)
+  and `envs/api.defaults` sets `QDRANT_URL=http://qdrant:6333`. An install that
+  already ran it through the old memory profile and `QDRANT_URL` in
+  `envs/api.local` keeps its memories: the volume is the same,
+  `automatos_qdrant_data`, and the `envs/api.local` line still wins. The old
+  profile's name can stay in `.env`'s `COMPOSE_PROFILES` or go; it starts
+  nothing extra. To keep memory off, set `QDRANT_URL=` (empty) in `envs/api.local`.
+- **The backend sizes its worker count** (`WEB_CONCURRENCY=0`, §4): up to 4
+  processes where it ran 1, each with its own copy of the app in memory. An
+  older backend image reads that 0 as one process, as before. To keep one, set
+  `WEB_CONCURRENCY=1` in `envs/api.local`.
 
 ## 11. Stopping and resetting
 
@@ -1137,8 +1166,8 @@ docker compose down          # stop; data stays in the named volumes
 docker compose down -v       # stop and delete every named volume
 ```
 
-`down -v` removes Postgres, Redis, MinIO, backend logs and `backend_data`
-(the credential-encryption key). It does **not** touch the bind-mounted
+`down -v` removes Postgres, Redis, MinIO, Qdrant (memory), backend logs and
+`backend_data` (the credential-encryption key). It does **not** touch the bind-mounted
 `AUTOMATOS_WORKSPACE_DIR` — delete that folder yourself if you want the
 agents' files gone too. Removing `backend_data` alone, while keeping the
 database, makes every API key stored through the UI undecryptable; keep the
@@ -1146,12 +1175,14 @@ two together.
 
 ## 11a. Backing up
 
-An install's state is in five places, and a backup needs all five:
+An install's state is in six places, and a backup needs all six:
 
 - **the database** (`pg_dump`, consistent while the stack runs);
 - **`backend_data`**: the credential-encryption key (`.credential_key`) and the
   stored brand files;
 - **MinIO**: documents, brand logos, generated media;
+- **Qdrant** (`automatos_qdrant_data`): durable and field memory, what Auto and the
+  agents remember; copy the volume while the stack is stopped;
 - **`.env`**: the database opens only with its `POSTGRES_PASSWORD`;
 - **your deliverables folder** (`AUTOMATOS_WORKSPACE_DIR`), a bind mount that is in
   no volume.
@@ -1308,7 +1339,7 @@ nothing, so it has no build cache to keep.
 "unused" to Docker, so `docker volume prune` would delete your data. Only
 `make reset` removes data, and it asks first.
 
-On a small machine, `make up CORE=1` runs five containers instead of six and
+On a small machine, `make up CORE=1` runs six containers instead of seven and
 never downloads the workspace worker's image; Code Canvas, the Deliverables
 file browser and agents' workspace tools need the worker (§1b, §5).
 

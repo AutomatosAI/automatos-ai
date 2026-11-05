@@ -128,6 +128,14 @@ class DurableMemoryStore:
         """True when a Qdrant URL is configured (durable memory is on)."""
         return self._enabled
 
+    def embeddings_ready(self) -> bool:
+        """True when this store's embedder has a real provider; False when no key was found and it
+        fell back to the degraded stand-in, which refuses to embed, so nothing can be added or found.
+        Loads the provider as the first add or search would (a settings and key-store read: call it
+        off the event loop). The embedder keeps what it loaded, so a key added later needs a restart."""
+        self._embedder._ensure_provider()
+        return not getattr(self._embedder.provider, "is_degraded", False)
+
     #: What a disabled store answers, per operation shape.
     _DISABLED_ADD = {"success": False, "skipped": True, "error": "durable memory not configured (QDRANT_URL empty)"}
 

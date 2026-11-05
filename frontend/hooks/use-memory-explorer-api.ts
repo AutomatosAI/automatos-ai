@@ -53,6 +53,8 @@ export interface MemoryHealthResponse {
     hit_rate: number
   }
   health_status: 'healthy' | 'degraded' | 'unavailable'
+  /** Why memory is not working, in words to show the owner (e.g. no embeddings key); null when it works. */
+  reason?: string | null
 }
 
 export interface MemoryStatsResponse {

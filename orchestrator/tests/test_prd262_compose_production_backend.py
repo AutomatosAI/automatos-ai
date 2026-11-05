@@ -9,8 +9,9 @@ and healthcheck mounts.
 TESTER's night and test tooling keeps what it needs on the production-stage backend
 (PRD-262 §9-Q1, FR-13): backend_data at /app/data, the backend_logs named volume at
 /app/logs, both /workspaces mounts, and its env_file, envs/api.defaults plus the
-optional envs/api.local. The worker count comes from WEB_CONCURRENCY=1 in
-envs/api.defaults (US-029), so compose sets no command of its own.
+optional envs/api.local. The worker count comes from WEB_CONCURRENCY=0 in
+envs/api.defaults (US-029), which the entrypoint sizes to the machine, so compose sets
+no command of its own.
 
 Static reads of the compose files, the Makefile, the Dockerfile, envs/api.defaults and
 the docs that say how to run the stack. The running stack is checked by the smoke
@@ -119,11 +120,12 @@ def test_the_production_backend_keeps_both_env_files_with_api_local_last(base):
 
 def test_the_image_command_runs_and_web_concurrency_sets_the_workers(base):
     """No compose command or entrypoint: the production CMD starts uvicorn with no worker
-    flag, so WEB_CONCURRENCY=1 from envs/api.defaults sets the count (PRD-262 US-029)."""
+    flag, so WEB_CONCURRENCY=0 from envs/api.defaults, which the entrypoint sizes to the
+    machine, sets the count (PRD-262 US-029), and envs/api.local can still pin a number."""
     backend = base["services"]["backend"]
     assert "command" not in backend and "entrypoint" not in backend
     assert "WEB_CONCURRENCY" not in (backend.get("environment") or {})
-    assert "WEB_CONCURRENCY=1" in _API_DEFAULTS.read_text(encoding="utf-8").splitlines()
+    assert "WEB_CONCURRENCY=0" in _API_DEFAULTS.read_text(encoding="utf-8").splitlines()
     production = _stage_cmd("production")
     assert "--reload" not in production and "--workers" not in production, production
 

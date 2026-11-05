@@ -42,10 +42,18 @@ AUTOMATOS_MIGRATE_ON_BOOT=true
 
 # uvicorn's worker processes (PRD-262 US-029). uvicorn reads WEB_CONCURRENCY when
 # the command names no --workers; the production image defaults to 4 (Railway's).
-# One worker locally: one app import, one process's memory. A single process has
-# no manager, so a worker that dies ends the container, and restart:
-# unless-stopped brings it back. The development stage's --reload ignores it.
-WEB_CONCURRENCY=1
+# 0 = size the workers to this machine: orchestrator/docker-entrypoint.sh
+# resolves it before uvicorn starts to one worker per CPU and per 4 GB of memory
+# the container may use (Docker Desktop's VM limits count), at most 4, at least 1,
+# and logs `uvicorn workers: N` (`auto` means the same there). One
+# worker is one event loop, so a call that blocks it stalls every request: 4 CPUs
+# and 16 GB run 4, 8 GB runs 2. Each worker imports the app and holds its own
+# memory. A number, not a word, because uvicorn int()s it: an older backend image
+# reads 0 as one process. Pin a number from 1 up in envs/api.local (1 runs one
+# process as before; a single process has no manager, so a worker that dies ends
+# the container, and restart: unless-stopped brings it back). The development
+# stage's --reload runs one process whatever this says.
+WEB_CONCURRENCY=0
 
 # uvicorn reads every CLI option from UVICORN_<OPTION> (--timeout-graceful-shutdown
 # here). The browser's SSE streams (notifications, board events) never close, so
@@ -166,12 +174,15 @@ S3_VECTORS_ENABLED=false
 # -----------------------------------------------------------------------------
 # Memory & vectors
 # -----------------------------------------------------------------------------
-# Durable (L3) memory and field memory run on Qdrant. It does NOT start by
-# default; with QDRANT_URL empty the backend keeps both features honestly OFF
-# (no writes attempted, no health probe, one boot log line — PRD-238 S10).
-# To switch memory on:   docker compose --profile memory up -d
-# and set in envs/api.local:   QDRANT_URL=http://qdrant:6333
-QDRANT_URL=
+# [ACTIVE] Durable (L3) memory and field memory run on Qdrant, which the default
+# stack starts (the qdrant service in docker-compose.yml). Writing a memory also
+# needs an embeddings key in Settings → API Keys: OpenRouter's, or the key of the
+# provider chosen under Settings → System Settings → Embeddings (see
+# PLATFORM_KEY_WORKSPACE_ID above); until there is one, Knowledge → Memory says so.
+# Your own Qdrant: QDRANT_URL in envs/api.local. Memory off: QDRANT_URL= (empty) in
+# envs/api.local; the backend then keeps both features honestly off (no writes
+# attempted, no health probe, one boot log line — PRD-238 S10).
+QDRANT_URL=http://qdrant:6333
 # mem0 is legacy (the durable store replaced it); left for operators who run one.
 MEM0_API_URL=http://mem0-server:8765
 # MEM0_API_KEY: set it in envs/api.local if you run your own mem0 (.env values are

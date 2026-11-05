@@ -1,12 +1,14 @@
-"""PRD-262 US-040: a five-container core stack.
+"""PRD-262 US-040: a core stack without the workspace worker.
 
 ``docker-compose.yml`` keeps the workspace worker in the default stack with no profile, so
-the default stays six containers for every ``.env``, old or new. ``docker-compose.core.yml``
-(``make up CORE=1``) puts the worker behind a ``workspace`` profile and runs the core five:
-postgres, redis, minio, backend and frontend. This suite checks, from the files alone:
+the default stays seven containers for every ``.env``, old or new: postgres, redis, minio,
+qdrant (memory, in the default stack since memory went on by default), backend, frontend
+and the worker. ``docker-compose.core.yml`` (``make up CORE=1``) puts the worker behind a
+``workspace`` profile and runs the core six, memory included. This suite checks, from the
+files alone:
 
-* the default six and the override's five; the backend's dependency on the worker is
-  ``required: false`` while the datastores stay required;
+* the default seven and the override's six; the backend's dependency on the worker is
+  ``required: false`` while the datastores stay required, and it starts after qdrant;
 * the override mounts the workspaces volume writable in the backend, in the place of the
   read-only mount: Docker must create the deliverables folder's mount point inside that
   volume, which it cannot do on a read-only mount of a fresh volume;
@@ -14,7 +16,7 @@ postgres, redis, minio, backend and frontend. This suite checks, from the files 
   ``USER``, so a fresh volume is uid 1000 whichever service mounts it first, and
   prod-image-parity reads that owner inside the built image;
 * the Makefile: ``CORE=1`` exports ``COMPOSE_FILE`` with the override, and ``make up`` and
-  ``make build`` first remove a worker an earlier six-container run started;
+  ``make build`` first remove a worker an earlier default-stack run started;
 * ``scripts/stack_images.py``: a ``COMPOSE_FILE`` naming the override leaves the worker's
   image alone (not pulled, re-tagged or built), unless ``COMPOSE_PROFILES`` turns its
   profile on;
@@ -52,8 +54,8 @@ DOCKERFILE = (_REPO / "orchestrator" / "Dockerfile").read_text(encoding="utf-8")
 GUIDE = (_REPO / "docs" / "getting-started" / "self-hosting.md").read_text(encoding="utf-8")
 
 DATASTORES = {"postgres", "redis", "minio"}
-FIVE = DATASTORES | {"backend", "frontend"}
-SIX = FIVE | {"workspace-worker"}
+CORE_STACK = DATASTORES | {"qdrant", "backend", "frontend"}
+DEFAULT_STACK = CORE_STACK | {"workspace-worker"}
 CORE_FILES = "docker-compose.yml:docker-compose.core.yml"
 LOCAL_ROOT = "/workspaces/${DEFAULT_WORKSPACE_ID:-00000000-0000-0000-0000-0000000000c1}"
 _CONTINUATION = re.compile(r"\\[ \t]*\n")
@@ -129,21 +131,22 @@ def _mounts(volumes: list) -> dict:
 # --------------------------------------------------------------------------- compose
 
 
-def test_the_default_stack_is_six_with_the_worker_and_no_env_key_turns_it_off():
-    assert _running(BASE["services"]) == SIX
+def test_the_default_stack_is_seven_with_the_worker_and_memory_and_no_env_key_turns_either_off():
+    assert _running(BASE["services"]) == DEFAULT_STACK
     assert "profiles" not in BASE["services"]["workspace-worker"]
+    assert "profiles" not in BASE["services"]["qdrant"], "memory is on by default, not behind a profile"
     keys = {line.split("=", 1)[0] for line in (_REPO / ".env.example").read_text(encoding="utf-8").splitlines()
             if re.match(r"^[A-Z_]+=", line)}
     assert not keys & {"COMPOSE_PROFILES", "COMPOSE_FILE"}, "the core stack is an override, not an .env key"
 
 
-def test_the_core_override_runs_the_five_and_touches_only_the_worker_and_one_mount():
+def test_the_core_override_runs_the_core_six_and_touches_only_the_worker_and_one_mount():
     assert set(CORE) == {"services"}
     assert set(CORE["services"]) == {"workspace-worker", "backend"}
     assert CORE["services"]["workspace-worker"] == {"profiles": [stack.WORKER_PROFILE]}
     assert set(CORE["services"]["backend"]) == {"volumes"}
     merged = {name: {**(body or {}), **(CORE["services"].get(name) or {})} for name, body in BASE["services"].items()}
-    assert _running(merged) == FIVE
+    assert _running(merged) == CORE_STACK, "memory stays in the core stack"
 
 
 def test_the_backend_starts_without_the_worker_and_still_waits_for_the_datastores():
@@ -151,6 +154,7 @@ def test_the_backend_starts_without_the_worker_and_still_waits_for_the_datastore
     assert depends["workspace-worker"] == {"condition": "service_started", "required": False}
     for name in DATASTORES:
         assert depends[name] == {"condition": "service_healthy"}, f"{name} stays a required dependency"
+    assert depends["qdrant"] == {"condition": "service_started"}, "memory's store starts first"
 
 
 def test_the_core_backend_mounts_the_workspaces_volume_writable_in_place_of_the_read_only_one():
@@ -372,21 +376,22 @@ def test_smoke_images_pr_runs_the_core_smoke_on_the_images_it_built():
 
 
 def test_the_smoke_expects_the_stacks_compose_defines_and_the_clients_message():
-    names = {name: BASE["services"][name]["container_name"] for name in SIX}
-    assert _shell_value("SIX") == " ".join(sorted(names.values()))
-    assert _shell_value("FIVE") == " ".join(sorted(names[name] for name in FIVE))
+    names = {name: BASE["services"][name]["container_name"] for name in DEFAULT_STACK}
+    assert _shell_value("DEFAULT_RUNNING") == " ".join(sorted(names.values()))
+    assert _shell_value("CORE_RUNNING") == " ".join(sorted(names[name] for name in CORE_STACK))
     assert _one_shots(BASE["services"]) == {"minio-volume-owner"}
-    assert _shell_value("CORE_SERVICES") == " ".join(sorted(FIVE | _one_shots(BASE["services"])))
+    assert _shell_value("CORE_SERVICES") == " ".join(sorted(CORE_STACK | _one_shots(BASE["services"])))
     assert _shell_value("CORE_FILES") == CORE_FILES
     assert _shell_value("NOT_RUNNING") == WORKER_NOT_RUNNING
 
 
 def test_the_smoke_runs_the_old_env_the_switch_and_a_fresh_core_stack_in_that_order():
     main = re.search(r"^main\(\) \{\n(.*?)^\}", SCRIPT, re.M | re.S).group(1).split()
-    order = ["check_an_old_env_starts_six", "check_core_replaces_a_running_six", "teardown", "check_a_fresh_core_stack"]
+    order = ["check_an_old_env_starts_the_default", "check_core_replaces_a_running_default", "teardown",
+             "check_a_fresh_core_stack"]
     assert [main.index(step) for step in order] == sorted(main.index(step) for step in order)
     fresh = re.search(r"^check_a_fresh_core_stack\(\) \{\n(.*?)^\}", SCRIPT, re.M | re.S).group(1)
-    for step in ("plant_owner_probe", "check_core_config", "make up CORE=1", 'expect_running "$FIVE"',
+    for step in ("plant_owner_probe", "check_core_config", "make up CORE=1", 'expect_running "$CORE_RUNNING"',
                  "call_workspace_files 503", "up -d --no-build --wait", "call_workspace_files 200",
                  '[ "$owner" = "$probe_owner" ]', '[ "$owner" = "$folder_owner" ]'):
         assert step in fresh, step

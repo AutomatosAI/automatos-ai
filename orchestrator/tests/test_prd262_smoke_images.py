@@ -20,8 +20,9 @@ modes and ``images.yml``'s tags. The lane itself runs only in CI:
   both arches pass, for the images the merge job publishes;
 * the script empties the Docker cache before make up, never builds in an image mode,
   times the boots while make up runs, and asserts the backend's worker count:
-  envs/api.defaults' WEB_CONCURRENCY, or the pull-request variant's 2 (PRD-262 US-029:
-  the production CMD names no --workers);
+  envs/api.defaults' WEB_CONCURRENCY (``0``: the count the entrypoint sized for the
+  runner and logged), or the pull-request variant's 2 (PRD-262 US-029: the production
+  CMD names no --workers);
 * outside CI, the pull refuses to empty the host's image cache unless told it may.
 """
 from __future__ import annotations

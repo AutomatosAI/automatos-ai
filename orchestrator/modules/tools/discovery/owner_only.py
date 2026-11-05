@@ -29,6 +29,8 @@ import logging
 import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
 
+from starlette.concurrency import run_in_threadpool
+
 from modules.tools.discovery.agent_binding import names_the_agent_alone
 from modules.tools.discovery.said_instructions import as_the_owner_said
 from modules.tools.discovery.send_words import LEAVES_THE_WORKSPACE, READ_WORDS, makes_or_times_a_message, slug_words
@@ -247,17 +249,26 @@ def asks_the_owner_first(run_cleared: Execute) -> Execute:
     its handler only on their click. Every other check of the call (the role gates before,
     the hierarchy check, the rate limit and the destructive backstop inside) comes first,
     so a call the owner could not run anyway is refused, not asked about. A caller-supplied
-    signer is always dropped, and an instruction the owner did not give (P256-FIX-N13-7)."""
+    signer is always dropped, and an instruction the owner did not give (P256-FIX-N13-7).
+    F105: what reads the owner's words, the board and the grants runs in FastAPI's
+    threadpool while the call waits for it; the handler still runs on the loop."""
     @functools.wraps(run_cleared)
     async def wrapped(self: Any, action_name: str, params: Any, caller_context: Any, cleared: Any,
                       handler: Execute) -> Dict[str, Any]:
-        params = as_the_owner_said(getattr(self, "db", None), getattr(self, "workspace_id", None), action_name,
-                                   _without_a_signer(params), caller_context)
-        if isinstance(params, dict) and human_driven(caller_context) and is_owner_only(
-                action_name, params, db=getattr(self, "db", None), workspace_id=getattr(self, "workspace_id", None)):
+        params, owner_only = await run_in_threadpool(
+            _as_asked, getattr(self, "db", None), getattr(self, "workspace_id", None), action_name, params,
+            caller_context)
+        if owner_only:
             handler = _on_the_click(action_name, params, caller_context, handler, _gate_claim(cleared))
         return await run_cleared(self, action_name, params, caller_context, cleared, handler)
     return wrapped
+
+
+def _as_asked(db: Any, workspace_id: Any, action_name: str, params: Any, caller_context: Any) -> Tuple[Any, bool]:
+    """The call's params as the owner said them, and whether only their click may run it."""
+    params = as_the_owner_said(db, workspace_id, action_name, _without_a_signer(params), caller_context)
+    return params, bool(isinstance(params, dict) and human_driven(caller_context) and is_owner_only(
+        action_name, params, db=db, workspace_id=workspace_id))
 
 
 def _on_the_click(action: str, asked: Dict[str, Any], caller_context: Any, handler: Execute,
@@ -269,18 +280,33 @@ def _on_the_click(action: str, asked: Dict[str, Any], caller_context: Any, handl
     refused before the card (P256-FIX-N17-2), read from ``params``: only the call as its
     handler gets it names the chat the owner's words are in."""
     async def on_the_click(db: Any, workspace_id: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-        from modules.tools.discovery.mission_create_checks import refused_before_the_mission_card
-
-        grant = None
-        if not names_the_agent_alone(action, asked):
-            grant = _the_click(db, workspace_id, action, asked) or _claimed_at_the_gate(db, workspace_id, action, gate)
-        if grant is None:
-            return (refused_before_the_mission_card(db, workspace_id, action, params)
-                    or platform_ask(db, workspace_id, action, asked, caller_context))
-        clicker = _clicker(grant)
+        clicked = await run_in_threadpool(_the_owners_yes, db, workspace_id, action, asked, gate)
+        if clicked is None:
+            return await run_in_threadpool(_refused_or_asked, db, workspace_id, action, params, asked, caller_context)
+        grant, clicker = clicked
         signed = {**params, CLICKED_BY: clicker} if clicker else params
-        return after_the_click(db, grant, await handler(db, workspace_id, signed))
+        return await run_in_threadpool(after_the_click, db, grant, await handler(db, workspace_id, signed))
     return on_the_click
+
+
+def _the_owners_yes(db: Any, workspace_id: Any, action: str, asked: Dict[str, Any],
+                    gate: Optional[int]) -> Optional[Tuple[Any, Optional[str]]]:
+    """The owner's click on this exact call and who made it, or None: the ask stands."""
+    grant = None
+    if not names_the_agent_alone(action, asked):
+        grant = _the_click(db, workspace_id, action, asked) or _claimed_at_the_gate(db, workspace_id, action, gate)
+    if grant is None:
+        return None
+    return grant, _clicker(grant)
+
+
+def _refused_or_asked(db: Any, workspace_id: Any, action: str, params: Dict[str, Any], asked: Dict[str, Any],
+                      caller_context: Any) -> Dict[str, Any]:
+    """With no click: the refusal of a mission the click would refuse, else the ask."""
+    from modules.tools.discovery.mission_create_checks import refused_before_the_mission_card
+
+    return (refused_before_the_mission_card(db, workspace_id, action, params)
+            or platform_ask(db, workspace_id, action, asked, caller_context))
 
 
 def asks_before_a_send(execute_tool: Execute) -> Execute:

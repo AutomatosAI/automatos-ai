@@ -11,6 +11,7 @@ tests feed it recorded shapes instead of Docker:
   received; with ``--log`` it keeps the output and counts registry rate limits (429);
 * ``workers`` reads ``docker top``: the production command runs 4 uvicorn workers
   without ``--reload``; the development stage's ``--reload`` and a wrong count fail;
+  ``--expect 0`` (or ``auto``) expects the count the entrypoint logged (``uvicorn workers: N``);
 * ``images`` passes a pulled image whose ``RepoDigests`` holds the GHCR index digest,
   and fails a locally built one, a ``local-*`` tag, a compose-built image, an app image
   also present under another tag, and a missing or wrong revision label; a source build
@@ -310,6 +311,42 @@ def test_the_workers_command_reads_docker_top_with_wide_output(monkeypatch, tmp_
     assert calls == [("top", "automatos_backend", "-eo", "pid,ppid,args", "-ww")]
     assert json.loads(out.read_text())["workers"] == 4
     assert tool.main(["workers", "--container", "automatos_backend", "--expect", "2", "--out", str(out)]) == 1
+
+
+# The entrypoint's line for WEB_CONCURRENCY=0 (orchestrator/docker-entrypoint.sh).
+SIZED_LOG = ("🚀 Starting Backend Application\n"
+             "👷 uvicorn workers: 4 (WEB_CONCURRENCY=0, sized here: 4 CPUs, 16 GB of memory; "
+             "one per CPU and per 4 GB, at most 4)\nINFO:     Started parent process [7]\n")
+
+
+@pytest.mark.parametrize("sized", ["0", "auto"])
+def test_expect_zero_expects_the_count_the_entrypoint_logged(monkeypatch, tmp_path, sized):
+    """envs/api.defaults' WEB_CONCURRENCY=0: the count depends on the runner, so the smoke
+    holds uvicorn to the number the entrypoint sized and logged."""
+    calls = []
+    answers = {"logs": SIZED_LOG, "top": PRODUCTION_TOP}
+    monkeypatch.setattr(tool, "docker_text", lambda *args: calls.append(args) or answers[args[0]])
+    out = tmp_path / "processes.json"
+    assert tool.main(["workers", "--container", "automatos_backend", "--expect", sized, "--out", str(out)]) == 0
+    assert ("logs", "automatos_backend") in calls
+    assert json.loads(out.read_text())["expected_workers"] == 4
+    answers["logs"] = SIZED_LOG.replace("workers: 4", "workers: 2")
+    assert tool.main(["workers", "--container", "automatos_backend", "--expect", sized, "--out", str(out)]) == 1
+
+
+def test_expect_zero_fails_when_the_log_names_no_count(monkeypatch, tmp_path):
+    answers = {"logs": "🚀 Starting Backend Application\n", "top": PRODUCTION_TOP}
+    monkeypatch.setattr(tool, "docker_text", lambda *args: answers[args[0]])
+    out = tmp_path / "processes.json"
+    assert tool.main(["workers", "--container", "automatos_backend", "--expect", "0", "--out", str(out)]) == 1
+    assert json.loads(out.read_text())["failures"] == [
+        f"the backend's log names no worker count (`{tool.LOGGED_WORKERS.pattern}`)"]
+
+
+def test_the_last_logged_count_wins():
+    """A restarted backend logs again; the newest boot's count is the one running."""
+    assert tool.logged_workers(SIZED_LOG + SIZED_LOG.replace("workers: 4", "workers: 3")) == 3
+    assert tool.logged_workers("no count here") is None
 
 
 # --------------------------------------------------------------------------- images

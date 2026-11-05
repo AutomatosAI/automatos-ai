@@ -145,7 +145,7 @@ Sources: [docker-compose.yml:83-114]()
 
 ### Qdrant (Vector Store)
 
-Qdrant is an optional, opt-in service for durable (L3) and field memory [docker-compose.yml:116-117](). It is enabled via the `memory` profile: `docker compose --profile memory up -d` [docker-compose.yml:118]().
+Qdrant holds durable (L3) and field memory. It is in the default stack, and `envs/api.defaults` sets `QDRANT_URL=http://qdrant:6333`; writing a memory also needs an embeddings key (Settings → API Keys). `QDRANT_URL=` (empty) in `envs/api.local` turns memory off.
 
 Sources: [docker-compose.yml:116-133]()
 
@@ -255,9 +255,8 @@ Sources: [docker-compose.yml:42,72,102,131,249](), [orchestrator/Dockerfile:108]
 
 ### Launch Commands
 
-- **Standard (six containers)**: `make up`, which pulls the images CI published for the commit and starts the stack; plain `docker compose up -d` runs the tag in `.env` ([self-hosting.md §1b](../getting-started/self-hosting.md#1b-the-commands-behind-make)).
-- **Core (five containers, no workspace worker)**: `make up CORE=1`, or `docker compose -f docker-compose.yml -f docker-compose.core.yml up -d`.
-- **With Qdrant (Memory Profile)**: `docker compose --profile memory up -d` [docker-compose.yml:118]().
+- **Standard (seven containers, memory included)**: `make up`, which pulls the images CI published for the commit and starts the stack; plain `docker compose up -d` runs the tag in `.env` ([self-hosting.md §1b](../getting-started/self-hosting.md#1b-the-commands-behind-make)).
+- **Core (six containers, no workspace worker)**: `make up CORE=1`, or `docker compose -f docker-compose.yml -f docker-compose.core.yml up -d`.
 - **Development Mode**: `make dev` (`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`) uses the `development` target in the Dockerfile for hot-reloading, with the source mounted [orchestrator/Dockerfile:91-131]().
 
 ### `docker-entrypoint.sh`

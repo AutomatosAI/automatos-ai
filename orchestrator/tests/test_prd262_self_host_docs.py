@@ -193,6 +193,16 @@ def test_the_core_override_leaves_out_what_its_table_says():
     assert _services(BASE_FILE, CORE_FILE) == DEFAULT - _core_leaves_out()
 
 
+def test_memory_is_in_the_default_stack_and_the_old_memory_profile_still_starts_it():
+    """Memory went on by default: qdrant has no profile. An .env with COMPOSE_PROFILES=memory, or
+    `--profile memory`, from when it was opt-in names a profile no service has; compose must still
+    start the default stack, not refuse it."""
+    assert "qdrant" in DEFAULT and not BASE["qdrant"].get("profiles")
+    assert "memory" not in PROFILES, "§3 must not list the memory profile any more"
+    assert _services(BASE_FILE, profiles=("memory",)) == DEFAULT
+    assert _services(BASE_FILE, CORE_FILE, profiles=("memory",)) == DEFAULT - _core_leaves_out()
+
+
 def test_the_documented_profile_brings_the_worker_back_to_the_core_stack():
     (row,) = CORE_ROWS
     assert _services(BASE_FILE, CORE_FILE, profiles=(_code(row["Profile that brings it back"]),)) == DEFAULT
@@ -225,17 +235,20 @@ def test_section_10_says_what_w5_changes_for_an_existing_install():
 
 
 def test_the_first_download_is_the_measured_one():
-    """§8, 16 Oct: the default first pull is 1,330 MB on amd64 and 1,284 MB on arm64."""
+    """§8, 16 Oct: the default first pull was 1,330 MB on amd64 and 1,284 MB on arm64. Qdrant joined
+    the default stack with memory on by default: its pinned digest is 74.8 MB on amd64 and 74.2 MB
+    on arm64 (the manifests' layers, 4 Nov 2026), so 1.41 GB and 1.36 GB."""
     disk = next(line for line in _section(GUIDE, "1. Prerequisites").splitlines() if line.startswith("| Disk |"))
-    assert "1.33 GB" in disk and "1.28 GB" in disk and "make up CORE=1" in disk
-    assert "1.33 GB" in _read("SETUP.md") and "1.28 GB" in _read("QUICKSTART.md")
+    assert "1.41 GB" in disk and "1.36 GB" in disk and "Qdrant 75 MB" in disk and "make up CORE=1" in disk
+    assert "1.41 GB" in _read("SETUP.md") and "1.36 GB" in _read("QUICKSTART.md")
 
 
 @pytest.mark.parametrize("name", SELF_HOST_DOCS)
 def test_no_self_host_doc_describes_what_no_longer_starts(name):
     text = _read(name)
     assert "minio-init" not in text, "MinIO's bucket comes from the backend; minio-init is long gone"
-    assert "3.7 GB" not in text, "the images measured 1.33 GB to download on 16 Oct (§8)"
+    assert "3.7 GB" not in text, "the images measure 1.41 GB to download (§1)"
+    assert "QDRANT_URL` is empty in `envs/api.defaults`" not in text, "memory is on by default (§3)"
 
 
 def test_the_compose_files_header_lists_what_starts():

@@ -1,23 +1,25 @@
 # =============================================================================
-# The core stack: five containers, without the workspace worker (PRD-262 US-040)
+# The core stack: six containers, without the workspace worker (PRD-262 US-040)
 # =============================================================================
 #   make up CORE=1
 #   docker compose -f docker-compose.yml -f docker-compose.core.yml up -d     # without make
 #
-# postgres, redis, minio, backend and frontend. The workspace worker (the Code Canvas
-# runtime) is the default stack's sixth container; this override puts it behind a
-# `workspace` profile, so a smaller machine runs and downloads five. Without it, agents'
-# workspace tools, the Deliverables file browser and Code Canvas answer "Workspace worker
-# not running" (orchestrator/core/workspace_client.py); everything else works as before.
-# Start it later with the same two files, naming it (that turns its profile on):
+# postgres, redis, minio, qdrant, backend and frontend. The workspace worker (the Code
+# Canvas runtime) is the default stack's seventh container and its largest image; this
+# override puts it behind a `workspace` profile, so a smaller machine runs and downloads
+# six. Without it, agents' workspace tools, the Deliverables file browser and Code Canvas
+# answer "Workspace worker not running" (orchestrator/core/workspace_client.py);
+# everything else works as before. Memory stays: qdrant is small, and without it
+# envs/api.defaults' QDRANT_URL would point the backend at a host that is not there.
+# Start the worker later with the same two files, naming it (that turns its profile on):
 #   docker compose -f docker-compose.yml -f docker-compose.core.yml up -d workspace-worker
-# or run `make up` without CORE=1, the default six.
+# or run `make up` without CORE=1, the default seven.
 #
 # An override, not COMPOSE_PROFILES=workspace in .env.example. A --profile flag replaces
 # COMPOSE_PROFILES instead of adding to it, so every documented
-# `docker compose --profile all|search|memory|media up` would start without the worker;
+# `docker compose --profile all|search|media|voice up` would start without the worker;
 # and an .env written before this file existed lacks the key, so an upgrade would lose
-# the worker with no error. docker-compose.yml alone keeps all six, whatever the .env.
+# the worker with no error. docker-compose.yml alone keeps all seven, whatever the .env.
 #
 # Railway never reads this file.
 # =============================================================================

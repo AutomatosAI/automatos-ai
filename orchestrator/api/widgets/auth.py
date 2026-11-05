@@ -17,12 +17,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional
+from typing import Any, Callable, List, Optional, Tuple
 from uuid import UUID
 
 import jwt
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from core.auth.hybrid import _extract_origin
 from core.database.database import get_db
@@ -111,6 +112,10 @@ async def widget_auth(
     4. Check the request origin against the key's ``allowed_domains``.
     5. Populate ``request.state`` and return :class:`WidgetAuthContext`.
 
+    F105: it stays async (the key's rate-limit count is), and what reads the
+    database (the key's stored limit, the raw key's validation and the checks
+    on its row) runs in FastAPI's threadpool, never on the event loop.
+
     Raises:
         HTTPException 401: Missing / invalid / expired credentials.
         HTTPException 403: Origin not in the key's allowed domains.
@@ -137,40 +142,69 @@ async def widget_auth(
     # ----- 1. Try JWT session token first --------------------------------
     jwt_payload = _try_jwt(token)
     if jwt_payload is not None:
-        try:
-            workspace_id = UUID(jwt_payload["workspace_id"])
-            api_key_id = UUID(jwt_payload["api_key_id"])
-            permissions: List[str] = jwt_payload.get("permissions", [])
-        except (KeyError, ValueError) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Malformed widget session token: {exc}",
-            )
+        return await _jwt_context(request, db, jwt_payload, workspace_header)
 
-        # If both header and JWT carry a workspace, they must agree.
-        if workspace_header and UUID(workspace_header) != workspace_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Workspace mismatch between token and header",
-            )
+    # ----- 2. Fall back to raw API key validation (3. its origin) ---------
+    ctx, stored_limit = await run_in_threadpool(
+        _api_key_context, request, db, token, (token_preview, origin_for_log), workspace_header,
+    )
 
-        from api.widgets.rate_limit import note_key_limit, stored_key_limit
+    from api.widgets.rate_limit import note_key_limit
 
-        await note_key_limit(api_key_id, stored_key_limit(db, api_key_id))
-        default_agent_id = jwt_payload.get("default_agent_id")
-        ctx = WidgetAuthContext(
-            workspace_id=workspace_id,
-            api_key_id=api_key_id,
-            permissions=permissions,
-            default_agent_id=int(default_agent_id) if default_agent_id else None,
-            team=jwt_payload.get("team"),
+    await note_key_limit(ctx.api_key_id, stored_limit)
+    request.state.workspace_id = ctx.workspace_id
+    request.state.api_key_id = ctx.api_key_id
+    request.state.permissions = ctx.permissions
+    return ctx
+
+
+async def _jwt_context(
+    request: Request, db: Session, jwt_payload: dict, workspace_header: Optional[str],
+) -> WidgetAuthContext:
+    """The context a widget session token carries. Its key's stored limit is read
+    in FastAPI's threadpool (F105)."""
+    try:
+        workspace_id = UUID(jwt_payload["workspace_id"])
+        api_key_id = UUID(jwt_payload["api_key_id"])
+        permissions: List[str] = jwt_payload.get("permissions", [])
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Malformed widget session token: {exc}",
+        ) from exc
+
+    # If both header and JWT carry a workspace, they must agree.
+    if workspace_header and UUID(workspace_header) != workspace_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Workspace mismatch between token and header",
         )
-        request.state.workspace_id = workspace_id
-        request.state.api_key_id = api_key_id
-        request.state.permissions = permissions
-        return ctx
 
-    # ----- 2. Fall back to raw API key validation -------------------------
+    from api.widgets.rate_limit import note_key_limit, stored_key_limit
+
+    await note_key_limit(api_key_id, await run_in_threadpool(stored_key_limit, db, api_key_id))
+    default_agent_id = jwt_payload.get("default_agent_id")
+    ctx = WidgetAuthContext(
+        workspace_id=workspace_id,
+        api_key_id=api_key_id,
+        permissions=permissions,
+        default_agent_id=int(default_agent_id) if default_agent_id else None,
+        team=jwt_payload.get("team"),
+    )
+    request.state.workspace_id = workspace_id
+    request.state.api_key_id = api_key_id
+    request.state.permissions = permissions
+    return ctx
+
+
+def _api_key_context(
+    request: Request, db: Session, token: str, previews: Tuple[str, str], workspace_header: Optional[str],
+) -> Tuple[WidgetAuthContext, Optional[int]]:
+    """A raw API key's context and its stored per-minute limit, in FastAPI's
+    threadpool (F105): validating the key reads its row and commits its last use,
+    and every check after reads the row. ``previews``: the token's and the
+    origin's log-safe forms."""
+    token_preview, origin_for_log = previews
     api_key_record = ApiKeyService.validate_api_key(db, token)
     if api_key_record is None:
         logger.warning(
@@ -183,6 +217,29 @@ async def widget_auth(
             detail="Invalid or expired API key",
         )
 
+    _check_origin(request, api_key_record, origin_for_log)
+
+    # If a workspace header was provided, it must match the key's workspace.
+    if workspace_header:
+        if UUID(workspace_header) != api_key_record.workspace_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Workspace mismatch between API key and header",
+            )
+
+    permissions = api_key_record.permissions or []
+    ctx = WidgetAuthContext(
+        workspace_id=api_key_record.workspace_id,
+        api_key_id=api_key_record.id,
+        permissions=permissions,
+        default_agent_id=api_key_record.default_agent_id,
+        team=getattr(api_key_record, "team", None),
+    )
+    return ctx, getattr(api_key_record, "rate_limit_requests", None)
+
+
+def _check_origin(request: Request, api_key_record: Any, origin_for_log: str) -> None:
+    """The raw key's domain / origin check: a 403 when the origin may not use it."""
     # ----- 3. Domain / origin check ---------------------------------------
     # P2-13 (PRD-194 S3): public keys fail CLOSED on a missing origin. An
     # ak_pub_ key ships in page HTML by design — its entire security model is
@@ -213,30 +270,6 @@ async def widget_auth(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Origin not allowed for this API key",
         )
-
-    # If a workspace header was provided, it must match the key's workspace.
-    if workspace_header:
-        if UUID(workspace_header) != api_key_record.workspace_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Workspace mismatch between API key and header",
-            )
-
-    from api.widgets.rate_limit import note_key_limit
-
-    await note_key_limit(api_key_record.id, getattr(api_key_record, "rate_limit_requests", None))
-    permissions = api_key_record.permissions or []
-    ctx = WidgetAuthContext(
-        workspace_id=api_key_record.workspace_id,
-        api_key_id=api_key_record.id,
-        permissions=permissions,
-        default_agent_id=api_key_record.default_agent_id,
-        team=getattr(api_key_record, "team", None),
-    )
-    request.state.workspace_id = api_key_record.workspace_id
-    request.state.api_key_id = api_key_record.id
-    request.state.permissions = permissions
-    return ctx
 
 
 # ---------------------------------------------------------------------------

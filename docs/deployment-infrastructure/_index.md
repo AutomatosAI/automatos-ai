@@ -48,7 +48,7 @@ Sources: [docker-compose.yml:25-28]()
 
 ## System Architecture & Production Topology
 
-The local Compose configuration names backend, frontend, and workspace-worker as application services, alongside data services such as PostgreSQL, Redis, and MinIO. Optional Compose profiles extend the stack with memory, search, media, voice, or database administration components [docker-compose.yml:30-36](), [docker-compose.yml:52-78](). The diagrams connect those deployment terms to file and service names used in the repository.
+The local Compose configuration names backend, frontend, and workspace-worker as application services, alongside data services such as PostgreSQL, Redis, and MinIO. Qdrant (durable memory) runs in the default stack, and optional Compose profiles extend it with search, media, voice, or database administration components [docker-compose.yml:30-36](), [docker-compose.yml:52-78](). The diagrams connect those deployment terms to file and service names used in the repository.
 
 ### Diagram: Compose Services and Container Definitions
 
@@ -117,7 +117,7 @@ Sources: [orchestrator/Dockerfile:5-12](), [frontend/Dockerfile:5-10]()
 
 ## 20.2 Docker Compose & Environments
 
-`docker-compose.yml` is the unified Compose configuration. It documents default and optional profiles, including `all`, `memory`, `search`, `media`, and `voice`, as well as a core override that can omit the workspace worker [docker-compose.yml:52-78](). Published ports default to loopback through `BIND_ADDRESS`; the configuration also describes separate publish-address settings for the API and web app [docker-compose.yml:10-19]().
+`docker-compose.yml` is the unified Compose configuration. It documents the default services (Qdrant, for memory, among them) and the optional profiles `all`, `search`, `media`, and `voice`, as well as a core override that can omit the workspace worker [docker-compose.yml:52-78](). Published ports default to loopback through `BIND_ADDRESS`; the configuration also describes separate publish-address settings for the API and web app [docker-compose.yml:10-19]().
 
 For details, see [Docker Compose & Environments](#20.2).
 

@@ -53,7 +53,7 @@ The default stack is documented as including `postgres`, `redis`, `minio`, `back
 | `minio-volume-owner` | One-shot volume-owner service; runs before MinIO and exits. | [docker-compose.yml:52-56]() |
 | `redis` | Included in the default stack. Its detailed service configuration is outside the provided Compose excerpt. | [docker-compose.yml:52-55]() |
 | `adminer` | Database GUI enabled through the `all` profile. | [docker-compose.yml:67-68]() |
-| `qdrant` | Durable-memory service enabled through the `memory` profile; the comments also call out `QDRANT_URL`. | [docker-compose.yml:68-69]() |
+| `qdrant` | Durable-memory service in the default stack; `QDRANT_URL` (`http://qdrant:6333` in `envs/api.defaults`) points the backend at it. | [docker-compose.yml:68-69]() |
 | `searxng` | Web-search service enabled through the `search` profile; the comments also call out `SEARXNG_URL`. | [docker-compose.yml:69-70]() |
 | `media-render` | Socials media renderer enabled through the `media` profile. Without that profile, rendering a post reports that the media profile is needed. | [docker-compose.yml:70-71]() |
 | `voice-tts` | Server voice service enabled through the `voice` profile; the documented URL is `http://voice-tts:8100`. | [docker-compose.yml:72-72]() |
@@ -77,14 +77,13 @@ flowchart LR
     Default --> Frontend["frontend"]
     Default --> Worker["workspace-worker"]
     Default --> Owner["minio-volume-owner"]
+    Default --> Qdrant["qdrant"]
     Compose --> Profiles["Compose profiles"]
     Profiles --> All["all"]
-    Profiles --> Memory["memory"]
     Profiles --> Search["search"]
     Profiles --> Media["media"]
     Profiles --> Voice["voice"]
     All --> Adminer["adminer"]
-    Memory --> Qdrant["qdrant"]
     Search --> Searxng["searxng"]
     Media --> MediaRender["media-render"]
     Voice --> VoiceTts["voice-tts"]
@@ -100,7 +99,7 @@ Sources: [docker-compose.yml:52-80]()
 
 The default configuration includes `workspace-worker`; the comments explicitly state that no environment key disables it. A five-container core option is available through `make up CORE=1` or by combining `docker-compose.yml` with `docker-compose.core.yml`. That override places `workspace-worker` behind a `workspace` profile, leaving `postgres`, `redis`, `minio`, `backend`, and `frontend` as the core services. [docker-compose.yml:73-79]()
 
-The optional profiles documented in the Compose comments are `all`, `memory`, `search`, `media`, and `voice`. These add `adminer`, `qdrant`, `searxng`, `media-render`, and `voice-tts`, respectively. [docker-compose.yml:67-72]()
+The optional profiles documented in the Compose comments are `all`, `search`, `media`, and `voice`. These add `adminer`, `searxng`, `media-render`, and `voice-tts`, respectively; `qdrant` (memory) runs in the default stack. [docker-compose.yml:67-72]()
 
 ### Health checks and engine requirements
 

@@ -1291,6 +1291,12 @@ class Config:
     COORDINATOR_ARCHIVE_AFTER_DAYS: int = int(os.getenv("COORDINATOR_ARCHIVE_AFTER_DAYS", "30"))
     COORDINATOR_ARCHIVE_BATCH_SIZE: int = int(os.getenv("COORDINATOR_ARCHIVE_BATCH_SIZE", "50"))
     CHANNELS_ENABLED: bool = os.getenv("CHANNELS_ENABLED", "true").lower() == "true"
+    # One worker (the scheduler's) owns every polling-mode channel adapter
+    # (channels/polling.py). It re-reads channel_connections this often, so a bot
+    # connected, stopped or re-configured through another worker starts, stops or
+    # restarts within one interval (a change that reaches the owner applies at once).
+    # Each pass is one small query and one Redis pipeline. Floor 5 s.
+    CHANNEL_POLLING_RECONCILE_SECONDS: int = max(5, int(os.getenv("CHANNEL_POLLING_RECONCILE_SECONDS", "15")))
     # PRD-264 EUAI-03 (EU AI Act Art. 50(1)): a channel bot's reply carries "AI
     # assistant for {principal}." on first contact with a person and again once
     # this many hours have passed since the last notice. The last-notice time

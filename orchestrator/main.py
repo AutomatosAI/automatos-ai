@@ -551,19 +551,6 @@ async def _boot_phase_2_extensions(app_instance: "FastAPI") -> "DeferredInitResu
     else:
         result.scheduler_started = True  # disabled by config — not a failure
 
-    # PRD-55: Start ChannelManager
-    if config.CHANNELS_ENABLED:
-        try:
-            from channels.manager import get_channel_manager
-            channel_mgr = get_channel_manager()
-            await channel_mgr.start_all()
-            result.channels_connected = True
-            logger.info("ChannelManager started successfully")
-        except Exception as e:
-            logger.warning(f"ChannelManager failed to start (non-fatal): {e}")
-    else:
-        result.channels_connected = True  # disabled by config — not a failure
-
     # Mark remaining flags that don't have dedicated init yet
     result.skills_loaded = True
     result.tools_synced = True
@@ -626,7 +613,13 @@ async def _boot_phase_2_stage(app_instance: "FastAPI", report: "BootstrapReport"
     logger.info("Phase 2: loading extensions...")
 
     async def _run_phase_2():
-        app_instance.state.deferred_init = await _boot_phase_2_extensions(app_instance)
+        from dataclasses import replace
+
+        from channels.polling import start_channel_polling
+
+        deferred = await _boot_phase_2_extensions(app_instance)
+        # PRD-55: channel polling after the scheduler, whose lock decides the one worker that polls
+        app_instance.state.deferred_init = replace(deferred, channels_connected=await start_channel_polling())
 
     await run_stage(report, BootstrapStage.SCHEDULER_INIT, _run_phase_2)
 
@@ -822,14 +815,11 @@ async def lifespan(app: FastAPI):
 
     await _stop_board_dispatch(app)
 
-    # PRD-55: Stop ChannelManager
+    # PRD-55: stop this worker's channel pollers (only the polling worker runs any)
     if config.CHANNELS_ENABLED:
-        try:
-            from channels.manager import get_channel_manager
-            await get_channel_manager().stop_all()
-            logger.info("ChannelManager stopped")
-        except Exception:
-            pass
+        from channels.polling import stop_channel_polling
+
+        await stop_channel_polling()
 
     # Shutdown Dashboard Services (PRD-06)
     await shutdown_dashboard(app)

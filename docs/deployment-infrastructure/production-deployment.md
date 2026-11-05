@@ -54,7 +54,7 @@ flowchart LR
         Frontend["frontend"]
         WorkspaceWorker["workspace-worker"]
         Postgres["postgres"]
-        OptionalServices["adminer qdrant searxng media-render voice-tts"]
+        OptionalServices["adminer searxng media-render voice-tts"]
     end
 
     subgraph "Code entity space"
@@ -80,7 +80,7 @@ Sources: [docker-compose.yml:52-80](), [orchestrator/Dockerfile:1-13](), [fronte
 
 ### Worker profiles and supporting services
 
-The Compose default includes `workspace-worker`; the `core` override places it behind a `workspace` profile, allowing the backend and frontend to run without it. In that configuration, workspace tools, the Deliverables file browser, and Code Canvas require the worker and report that it is unavailable when the worker is not running. The `memory`, `search`, `media`, and `voice` profiles enable Qdrant, SearXNG, media rendering, and voice TTS respectively. [docker-compose.yml:52-80]()
+The Compose default includes `workspace-worker`; the `core` override places it behind a `workspace` profile, allowing the backend and frontend to run without it. In that configuration, workspace tools, the Deliverables file browser, and Code Canvas require the worker and report that it is unavailable when the worker is not running. Qdrant (memory) runs by default; the `search`, `media`, and `voice` profiles enable SearXNG, media rendering, and voice TTS respectively. [docker-compose.yml:52-80]()
 
 The FutureAGI agent optimization worker is a separate container image. Its Dockerfile creates a `worker` user, exposes port `8080`, starts `uvicorn main:app`, and documents that startup requires `AGENT_OPT_WORKER_TOKEN`. The file describes the worker as an isolated service called by the API with `X-Internal-Token`; it does not establish that this worker is part of the shown Compose profiles or a Railway topology. [services/agent-opt-worker/Dockerfile:1-36]()
 
