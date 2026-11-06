@@ -63,11 +63,16 @@ def test_gdpr_export_bundles_sql_and_derived(monkeypatch):
         gdpr_service, "_export_durable_memory",
         lambda workspace_id, subject_id=None: [{"id": "m1", "text": "durable"}],
     )
+    monkeypatch.setattr(
+        gdpr_service, "_export_workspace_settings",
+        lambda db, workspace_id: {"name": "ws", "settings": {"brand_kit": {}}},
+    )
 
     bundle = gdpr_service.export_workspace(_FakeSession(), ws)
 
     assert bundle["workspace_id"] == str(ws)
-    assert bundle["format"] == "automatos.gdpr.export/v1"
+    assert bundle["format"] == "automatos.gdpr.export/v2"  # PRD-273 US-273-04
+    assert bundle["workspace"] == {"name": "ws", "settings": {"brand_kit": {}}}
     assert bundle["sql"]["agents"] == [{"id": 1}]
     assert bundle["derived"]["field_memory"] == [{"key": "fact", "value": "x"}]
     assert bundle["derived"]["durable_memory"] == [{"id": "m1", "text": "durable"}]
@@ -84,6 +89,7 @@ def test_gdpr_export_is_audited(monkeypatch):
     monkeypatch.setattr(gdpr_service, "_export_sql_tables", lambda db, ws: {})
     monkeypatch.setattr(gdpr_service, "_export_field_memory", lambda ws, subject_id=None: [])
     monkeypatch.setattr(gdpr_service, "_export_durable_memory", lambda ws, subject_id=None: [])
+    monkeypatch.setattr(gdpr_service, "_export_workspace_settings", lambda db, ws: None)
     monkeypatch.setattr(gdpr_service, "_audit_gdpr", lambda db, ws, action, **kw: calls.append(action))
 
     gdpr_service.export_workspace(_FakeSession(), uuid4())
