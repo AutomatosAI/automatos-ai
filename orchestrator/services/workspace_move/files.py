@@ -10,7 +10,8 @@ bytes share one entry. ``files/index.jsonl`` says which row has which file.
 Only objects under the workspace's own prefix (``workspaces/<id>/``) in the documents bucket
 are read. A file that is missing, unreadable, outside that prefix or over
 ``WORKSPACE_EXPORT_MAX_FILE_MB`` is not carried; the manifest lists it under
-``skipped_files`` with the reason, and its row still moves.
+``skipped_files`` with the reason, and its row still moves. A deleted Deliverable's row moves
+with its ``deleted_at``; its file does not.
 """
 from __future__ import annotations
 
@@ -55,7 +56,8 @@ _DOCUMENTS_SQL = text(
     "SELECT id, file_path, COALESCE(original_filename, filename) AS name FROM documents WHERE workspace_id = :ws"
 ).bindparams(bindparam("ws", type_=PGUUID(as_uuid=True)))
 _DELIVERABLES_SQL = text(
-    "SELECT id, storage_type, file_path, file_name AS name FROM deliverables WHERE workspace_id = :ws"
+    "SELECT id, storage_type, file_path, file_name AS name FROM deliverables "
+    "WHERE workspace_id = :ws AND deleted_at IS NULL"
 ).bindparams(bindparam("ws", type_=PGUUID(as_uuid=True)))
 
 Opener = Callable[[], Optional[BinaryIO]]

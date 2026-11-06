@@ -7,6 +7,9 @@ The columns are the table's own, read from ``information_schema`` at export time
 * **derived** ones: those its rule names, and every pgvector or tsvector column. The target
   rebuilds them with its own embeddings.
 
+Inside the JSON values it keeps, every key whose name looks like a secret is removed at any
+depth, and so are the keys its rule names (a Playbook trigger's webhook id and secret).
+
 The rows are the workspace's: ``workspace_id`` equal to it, or, for a table without that
 column, a ``parent`` row that is the workspace's (``agent_skills`` of the workspace's agents).
 The query is SQLAlchemy Core with the workspace bound as a parameter; identifiers come from
@@ -26,7 +29,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.types import String
 
-from services.workspace_move.rules import DERIVED_COLUMN_TYPES, TableRule, looks_secret
+from services.workspace_move.rules import DERIVED_COLUMN_TYPES, TableRule, looks_secret, scrubbed
 from services.workspace_move.schema import ColumnInfo, SchemaView
 
 WORKSPACE_COLUMN = "workspace_id"
@@ -101,10 +104,11 @@ def workspace_select(schema: SchemaView, plan: TablePlan, workspace_id: UUID | s
     return select(*(own.c[name] for name in names)).where(own.c[link].in_(parent_ids))
 
 
-def redacted(row: Mapping[str, Any], rule: TableRule) -> Dict[str, Any]:
-    """The row with the keys its rule removes from JSON columns taken out (a new dict)."""
-    out = dict(row)
-    for name, keys in rule.redacted_keys.items():
+def redacted(row: Mapping[str, Any], rule: Optional[TableRule]) -> Dict[str, Any]:
+    """The row (a new dict) with every secret-looking key removed from its JSON values, at any
+    depth (``rules.scrubbed``), and the keys its rule names removed from their columns."""
+    out = {name: scrubbed(value) if isinstance(value, (Mapping, list)) else value for name, value in row.items()}
+    for name, keys in (rule.redacted_keys.items() if rule is not None else ()):
         value = out.get(name)
         if isinstance(value, Mapping):
             out[name] = {key: item for key, item in value.items() if key not in keys}

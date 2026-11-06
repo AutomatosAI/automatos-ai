@@ -105,6 +105,8 @@ def test_no_secret_column_or_planted_secret_in_any_part(db_session, workspace):
     assert teams["dropped"] == {"prd273_api_key": "secret"}
     (playbook,) = _lines(zf, "sql/workflow_recipes.jsonl")
     assert playbook["schedule_config"] == {"type": "webhook"}
+    writer = next(row for row in _lines(zf, "sql/agents.jsonl") if row["id"] == workspace.writer_id)
+    assert writer["configuration"] == {"tone": "plain", "tools": {"search": {}}}
 
 
 def test_workspace_and_auto_carry_the_settings_and_the_agent_rows_soul(db_session, workspace):
@@ -138,7 +140,12 @@ def test_the_bundles_validate_and_name_what_the_agents_reference(db_session, wor
 
 
 def test_files_are_carried_once_by_hash_and_the_index_names_every_row(db_session, workspace):
+    deleted = db_session.execute(text(
+        "INSERT INTO deliverables (workspace_id, source_type, artifact_type, title, storage_type, file_path, deleted_at) "
+        "VALUES (:ws, 'tool', 'document', 'Old', 'generated', 'generated/old.pdf', now()) RETURNING id"),
+        {"ws": workspace.workspace_id}).scalar()
     zf, result = _export(db_session, workspace)
+    assert str(deleted) in {str(row["id"]) for row in _lines(zf, "sql/deliverables.jsonl")}  # the row moves
     plan_sha, invoice_sha = hashlib.sha256(DOCUMENT_BYTES).hexdigest(), hashlib.sha256(OTHER_BYTES).hexdigest()
     assert zf.read(f"files/{plan_sha}") == DOCUMENT_BYTES and zf.read(f"files/{invoice_sha}") == OTHER_BYTES
     assert len([name for name in zf.namelist() if name.startswith("files/") and name != "files/index.jsonl"]) == 2
@@ -146,7 +153,7 @@ def test_files_are_carried_once_by_hash_and_the_index_names_every_row(db_session
     assert sorted((line["table"], line["sha256"]) for line in index) == sorted(
         [("documents", plan_sha), ("documents", plan_sha), ("deliverables", invoice_sha)])
     skipped = _manifest(zf)["skipped_files"]
-    assert [entry["reason"] for entry in skipped] == ["not in this workspace's storage"]
+    assert [entry["reason"] for entry in skipped] == ["not in this workspace's storage"]  # not the deleted one
     assert result.summary["files"] == 3 and result.summary["skipped_files"] == 1
 
 
@@ -173,6 +180,8 @@ def test_a_passphrase_seals_every_part_but_the_manifest(db_session, workspace):
     assert manifest["encryption"]["cipher"] == "AES-256-GCM" and manifest["encryption"]["kdf"] == "scrypt"
     with pytest.raises(WrongPassphrase):
         key_from_manifest("not the passphrase at all", manifest["encryption"])
+    with pytest.raises(ValueError):  # a file may not make its reader run scrypt at any cost it likes
+        key_from_manifest(PASSPHRASE, {**manifest["encryption"], "n": 2 ** 30})
     key = key_from_manifest(PASSPHRASE, manifest["encryption"])
     for name, record in manifest["parts"].items():
         sealed = zf.read(name)

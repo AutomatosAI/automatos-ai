@@ -44,8 +44,8 @@ _MOVED = (
     moved("teams", AGENTS, "The workspace's agent teams."),
     moved("routing_rules", AGENTS, "Which agent or Playbook an incoming message goes to."),
     moved("workflow_recipes", AGENTS, "The workspace's Playbooks; bundles/playbooks.jsonl carries their portable form. "
-          "A trigger's webhook id is its URL's only key, so it stays behind.",
-          redacted_keys=MappingProxyType({"schedule_config": ("webhook_id",)})),
+          "A trigger's webhook id (its URL's only key) and signing secret stay behind.",
+          redacted_keys=MappingProxyType({"schedule_config": ("webhook_id", "webhook_secret")})),
     moved("workflows", AGENTS, "Workflow definitions api/workflows.py still serves."),
     moved("patterns", AGENTS, "Coordination patterns the workspace defined (api/patterns.py)."),
     moved("voice_profiles", AGENTS, "The voices the workspace's agents speak with."),

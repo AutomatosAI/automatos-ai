@@ -85,12 +85,11 @@ def _run_async(coro) -> Any:
 
 def _exported_row(table: str, row: Mapping[str, Any]) -> dict:
     """One row as the export carries it: without the columns ``EXPORT_REDACTED_COLUMNS`` names for
-    its table, nor any whose name looks like a secret, nor the JSON keys its rule removes (a
-    Playbook trigger's webhook id)."""
+    its table, nor any whose name looks like a secret, nor a secret-looking key inside a JSON value,
+    nor the JSON keys its rule removes (a Playbook trigger's webhook id and secret)."""
     redacted = EXPORT_REDACTED_COLUMNS.get(table, ())
     kept = {column: value for column, value in row.items() if column not in redacted and not looks_secret(column)}
-    rule = TABLE_RULES.get(table)
-    return without_redacted_keys(kept, rule) if rule is not None else kept
+    return without_redacted_keys(kept, TABLE_RULES.get(table))
 
 
 def _export_sql_tables(db: Any, workspace_id: UUID | str) -> Dict[str, List[dict]]:
@@ -121,11 +120,11 @@ def _export_sql_tables(db: Any, workspace_id: UUID | str) -> Dict[str, List[dict
 def _export_workspace_settings(db: Any, workspace_id: UUID | str) -> Optional[dict]:
     """PRD-273 US-273-04: the workspace's name and allow-listed settings, as a move's
     ``workspace.json`` carries them; None when the workspace is gone."""
-    from services.workspace_move.auto_part import workspace_document
+    from services.workspace_move.auto_part import WorkspaceGone, workspace_document
 
     try:
         return workspace_document(db, workspace_id)
-    except LookupError:
+    except WorkspaceGone:
         return None
 
 

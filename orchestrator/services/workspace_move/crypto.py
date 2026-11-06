@@ -36,10 +36,14 @@ KEY_BYTES = 32
 SALT_BYTES = 16
 NONCE_BYTES = 12
 TAG_BYTES = 16
-# scrypt's cost: 2^15 x 8 x 1 takes about 32 MiB and a fraction of a second, once per file.
-SCRYPT_N = 2 ** 15
+# scrypt's cost: 2^17 x 8 x 1 takes 128 MiB and about half a second, once per file; a file
+# that asks a reader for more than the caps is refused before scrypt runs.
+SCRYPT_N = 2 ** 17
 SCRYPT_R = 8
 SCRYPT_P = 1
+MAX_SCRYPT_N = 2 ** 20
+MAX_SCRYPT_R = 16
+MAX_SCRYPT_P = 4
 KEY_CHECK_TEXT = b"automatos.workspace/v1 key check"
 KEY_CHECK_AAD = b"manifest.json#check"
 DEFLATE_LEVEL = 6
@@ -84,10 +88,13 @@ def new_file_key(passphrase: str) -> FileKey:
 
 
 def key_from_manifest(passphrase: str, block: Dict[str, Any]) -> FileKey:
-    """The key a manifest's ``encryption`` block describes; WrongPassphrase when the check fails."""
+    """The key a manifest's ``encryption`` block describes; WrongPassphrase when the check fails,
+    ValueError when the block asks for a cost over the caps."""
     salt = base64.b64decode(block["salt"])
-    key = FileKey(key=_derive(passphrase, salt, int(block["n"]), int(block["r"]), int(block["p"])),
-                  salt=salt, n=int(block["n"]), r=int(block["r"]), p=int(block["p"]))
+    n, r, p = int(block["n"]), int(block["r"]), int(block["p"])
+    if not (1 < n <= MAX_SCRYPT_N and 0 < r <= MAX_SCRYPT_R and 0 < p <= MAX_SCRYPT_P):
+        raise ValueError("The file asks for a key derivation over this install's limits.")
+    key = FileKey(key=_derive(passphrase, salt, n, r, p), salt=salt, n=n, r=r, p=p)
     check = base64.b64decode(block["check"])
     try:
         AESGCM(key.key).decrypt(check[:NONCE_BYTES], check[NONCE_BYTES:], KEY_CHECK_AAD)

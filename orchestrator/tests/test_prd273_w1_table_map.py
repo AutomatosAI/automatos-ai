@@ -19,10 +19,10 @@ import pytest
 from sqlalchemy import text
 
 from services.workspace_move.auto_part import (
-    ALLOWED_SETTINGS_KEYS, NEVER_SETTINGS_KEYS, ORCHESTRATOR_DROPPED_KEYS, allowed_settings,
+    ALLOWED_SETTINGS_KEYS, NEVER_SETTINGS_KEYS, ORCHESTRATOR_DROPPED_KEYS, ORCHESTRATOR_KEYS, allowed_settings,
 )
 from services.workspace_move.rules import (
-    AUTO, BOARD, CATEGORIES, DEFAULT_CATEGORIES, looks_secret, resolve_categories,
+    AUTO, BOARD, CATEGORIES, DEFAULT_CATEGORIES, looks_secret, resolve_categories, scrubbed,
 )
 from services.workspace_move.schema import read_schema, unclassified_tables, unnamed_secret_columns
 from services.workspace_move.table_map import SECRET_TABLES, TABLE_RULES, rule_for
@@ -68,17 +68,24 @@ def test_what_never_moves_is_not_moved_and_the_secret_tables_are_named():
 
 def test_a_moved_tables_secret_columns_are_named():
     assert TABLE_RULES["agent_tool_assignments"].secret_columns == ("credential_id",)
-    assert TABLE_RULES["workflow_recipes"].redacted_keys["schedule_config"] == ("webhook_id",)
+    assert TABLE_RULES["workflow_recipes"].redacted_keys["schedule_config"] == ("webhook_id", "webhook_secret")
     assert "embedding" in TABLE_RULES["knowledge_items"].derived_columns
 
 
 def test_secret_looking_names():
     for name in ("encrypted_key", "token_hash", "pairing_code_hash", "expo_push_token", "token", "push_key",
-                 "credential_id", "secrets", "api_key", "webhook_url", "private_key"):
+                 "credential_id", "secrets", "api_key", "webhook_url", "private_key", "webhook_secret",
+                 "access_token", "client_secret", "dsn"):
         assert looks_secret(name), name
     for name in ("tokens_used", "token_budget_estimate", "content_hash", "key_fingerprint", "token_rotated_at",
-                 "name", "workspace_id", "estimated_tokens"):
+                 "name", "workspace_id", "estimated_tokens", "max_tokens", "encrypted"):
         assert not looks_secret(name), name
+
+
+def test_secret_looking_keys_are_scrubbed_from_json_at_any_depth():
+    stored = {"tone": "plain", "api_key": "k", "steps": [{"name": "s", "auth": {"access_token": "t", "scope": "r"}}]}
+    assert scrubbed(stored) == {"tone": "plain", "steps": [{"name": "s", "auth": {"scope": "r"}}]}
+    assert stored["api_key"] == "k" and scrubbed("text") == "text"
 
 
 def test_categories_default_without_the_board_and_auto_always():
@@ -92,8 +99,9 @@ def test_categories_default_without_the_board_and_auto_always():
 def test_the_settings_allow_list():
     stored = {
         "brand_kit": {"primary_color": "#123456"},
-        "orchestrator": {"communication_style": "direct", "llm": {"model_id": "m"}, "model": "m", "custom_soul": "s"},
-        "voice_live": {"voice": "v"}, "push": {"digest": True},
+        "orchestrator": {"communication_style": "direct", "llm": {"model_id": "m"}, "model": "m", "custom_soul": "s",
+                         "added_later": "x"},
+        "voice_live": {"voice": "v", "api_key": "k"}, "push": {"digest": True},
         "byok_overrides": {"openai": "a-key"}, "integrations": {"slack": {"token": "t"}}, "power_mode": True,
     }
     kept = allowed_settings(stored)
@@ -101,10 +109,18 @@ def test_the_settings_allow_list():
     assert kept["orchestrator"] == {"communication_style": "direct", "custom_soul": "s"}
     assert not set(ORCHESTRATOR_DROPPED_KEYS) & set(kept["orchestrator"])
     assert not set(NEVER_SETTINGS_KEYS) & set(kept) and "power_mode" not in kept
+    assert kept["voice_live"] == {"voice": "v"}
     assert "llm" in stored["orchestrator"]  # the stored settings are not changed
     kept["brand_kit"]["primary_color"] = "#000000"
     assert stored["brand_kit"]["primary_color"] == "#123456"
     assert allowed_settings(None) == {}
+
+
+def test_the_orchestrator_keys_are_the_ones_the_settings_save_writes():
+    from api.workspaces import _ORCHESTRATOR_FIELDS
+
+    assert set(ORCHESTRATOR_KEYS) == {*_ORCHESTRATOR_FIELDS, "heartbeat", "harness"}
+    assert not set(ORCHESTRATOR_DROPPED_KEYS) & set(ORCHESTRATOR_KEYS)
 
 
 # --------------------------------------------------------------------------- the guard, on Postgres

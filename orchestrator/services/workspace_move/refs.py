@@ -13,10 +13,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterator, Mapping, Tuple
 from uuid import UUID
 
-from sqlalchemy import column, select, table
+from sqlalchemy import String, bindparam, cast, column, or_, select, table
 from sqlalchemy.orm import Session
 
-from services.workspace_move.rows import TablePlan, workspace_select
+from services.workspace_move.rows import WORKSPACE_COLUMN, TablePlan, workspace_select
 from services.workspace_move.schema import SchemaView
 
 REFS_PREFIX = "refs/"
@@ -57,12 +57,18 @@ def _rows(db: Session, schema: SchemaView, plans: Mapping[str, TablePlan], refer
           workspace_id: UUID | str) -> Iterator[Dict[str, Any]]:
     """The target rows any of ``references`` names, with their id and natural key."""
     first = references[0]
-    target = table(first.target, column(TARGET_KEY), *(column(key) for key in first.keys))
+    scoped = WORKSPACE_COLUMN in schema.column_names(first.target)
+    extra = (column(WORKSPACE_COLUMN),) if scoped else ()
+    target = table(first.target, column(TARGET_KEY), *(column(key) for key in first.keys), *extra)
     named = [workspace_select(schema, plans[ref.source], workspace_id, (ref.column,)) for ref in references]
     wanted = named[0].union(*named[1:]) if len(named) > 1 else named[0]
     statement = select(target.c[TARGET_KEY], *(target.c[key] for key in first.keys)).where(
         target.c[TARGET_KEY].in_(select(wanted.subquery().c[0]))
     )
+    if scoped:  # an install-level row, or the workspace's own: never another workspace's
+        own = bindparam("ref_ws", str(workspace_id), type_=String(), unique=True)
+        statement = statement.where(or_(target.c[WORKSPACE_COLUMN].is_(None),
+                                        cast(target.c[WORKSPACE_COLUMN], String()) == own))
     for row in db.execute(statement).mappings():
         yield dict(row)
 

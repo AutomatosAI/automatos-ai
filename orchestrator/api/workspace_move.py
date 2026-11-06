@@ -47,7 +47,7 @@ NO_STORAGE = "This install has no object storage to hold the export file."
 BUSY = "This workspace already has an export in progress."
 NOT_FOUND = "No such export."
 GONE = "This download link has been used or has expired. Start a new export."
-UNREADABLE = "The export file could not be read. Start a new export."
+UNREADABLE = "The export file could not be read just now. Try the download again."
 PERSONAL_DATA = "The file holds personal data: memories, chats and documents. Keep it safe."
 
 
@@ -142,6 +142,7 @@ def download_export(
         body = storage.open_body(key)
     except (BotoCoreError, ClientError) as unreadable:
         logger.exception("[workspace-move] the file of export %s could not be read", job_id)
+        jobs.release_download(db, ctx.workspace_id, job_id)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=UNREADABLE) from unreadable
     headers = {"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"}
     if size is not None:

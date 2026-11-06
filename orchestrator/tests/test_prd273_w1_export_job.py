@@ -187,6 +187,34 @@ def test_a_failed_export_says_so_and_uploads_nothing(world, maker, monkeypatch):
     assert client.get(f"/api/workspace-move/export/{job_id}/file").status_code == 410
 
 
+def test_a_download_that_cannot_open_the_file_keeps_the_link(world, maker, monkeypatch):
+    from botocore.exceptions import EndpointConnectionError
+
+    client = _client(world, maker, monkeypatch)
+    job_id = client.post("/api/workspace-move/export", json={}).json()["id"]
+    opener = storage.open_body
+
+    def unreachable(key):
+        raise EndpointConnectionError(endpoint_url="http://storage.invalid")
+
+    monkeypatch.setattr(storage, "open_body", unreachable)
+    assert client.get(f"/api/workspace-move/export/{job_id}/file").status_code == 503
+    assert _job(world, job_id).status == "ready"
+    monkeypatch.setattr(storage, "open_body", opener)
+    assert client.get(f"/api/workspace-move/export/{job_id}/file").status_code == 200
+
+
+def test_a_failure_after_the_upload_deletes_the_file(world, maker, monkeypatch):
+    def unrecorded(*args, **kwargs):
+        raise RuntimeError("the summary would not serialise")
+
+    monkeypatch.setattr(jobs, "_record_ready", unrecorded)
+    client = _client(world, maker, monkeypatch)
+    job_id = client.post("/api/workspace-move/export", json={}).json()["id"]
+    assert _job(world, job_id).status == "failed"
+    assert world.store.objects == {} and world.store.deleted == [storage.export_key(world.ws, job_id)]
+
+
 def test_the_passphrase_is_never_stored_and_the_file_is_sealed(world, maker, monkeypatch):
     client = _client(world, maker, monkeypatch)
     job_id = client.post("/api/workspace-move/export", json={"passphrase": PASSPHRASE}).json()["id"]

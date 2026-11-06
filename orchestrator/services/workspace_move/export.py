@@ -111,7 +111,7 @@ def write_workspace_file(db: Session, workspace_id: UUID | str, out: BinaryIO, *
                          categories: Optional[Tuple[str, ...]] = None, passphrase: Optional[str] = None,
                          exported_by: Optional[str] = None, now: Optional[datetime] = None) -> ExportResult:
     """Write the workspace to ``out`` (a seekable binary file). Raises ValueError on an unknown
-    category, LookupError when the workspace does not exist, writer.ExportTooLarge over the
+    category, auto_part.WorkspaceGone when the workspace does not exist, writer.ExportTooLarge over the
     size cap; any failure leaves ``out`` closed for the caller to delete."""
     chosen = resolve_categories(categories)
     workspace_id = UUID(str(workspace_id))

@@ -6,8 +6,9 @@ caller): the workspace's settings (a brand kit, an Orchestrator block with a sta
 model, BYOK keys and integrations), Auto's agent row with its real soul, a second agent with a
 global and a workspace skill, an enabled global skill, a team, a chat with a message, a
 short-term memory, three documents (two with the same bytes, one outside the workspace's
-storage), a generated Deliverable, a board ticket, a Playbook with a webhook trigger, and rows
-of NOT_MOVED tables: a user API key, an SDK key, a paired machine. Every secret is a fresh
+storage), a generated Deliverable, a board ticket, a Playbook with a webhook trigger (its id and
+signing secret), an agent configuration holding a pasted key, and rows of NOT_MOVED tables: a user
+API key, an SDK key, a paired machine. Every secret is a fresh
 random value, listed in ``Seeded.secrets``; ``files`` is what each object holds.
 """
 from __future__ import annotations
@@ -68,11 +69,14 @@ def _settings(seeded: Seeded) -> dict:
 
 
 def _agents(db, ws: uuid.UUID, seeded: Seeded) -> None:
+    pasted = _secret()
+    seeded.secrets.append(pasted)
     auto = Agent(name="Auto", agent_type="system", workspace_id=ws, slug=f"auto-{ws}", is_system_agent=True,
                  custom_persona_prompt=AUTO_SOUL, use_custom_persona=True,
                  configuration={"personality_mode": "custom", "proactive_level": "notify"})
     writer = Agent(name="Writer", agent_type="custom", workspace_id=ws, custom_persona_prompt="You write.",
-                   use_custom_persona=True, model_config={"model_id": "anthropic/claude-haiku-5-5", "provider": "anthropic"})
+                   use_custom_persona=True, model_config={"model_id": "anthropic/claude-haiku-5-5", "provider": "anthropic"},
+                   configuration={"tone": "plain", "tools": {"search": {"api_key": pasted}}})
     shared = Skill(name=seeded.global_skill, skill_type="prompt", workspace_id=None)
     own = Skill(name=f"own-{uuid.uuid4().hex[:8]}", skill_type="prompt", workspace_id=ws)
     db.add_all([auto, writer, shared, own])
@@ -85,14 +89,14 @@ def _agents(db, ws: uuid.UUID, seeded: Seeded) -> None:
 
 
 def _playbook(db, ws: uuid.UUID, seeded: Seeded) -> None:
-    webhook = _secret()
-    seeded.secrets.append(webhook)
+    webhook, signing = _secret(), _secret()
+    seeded.secrets.extend([webhook, signing])
     playbook = WorkflowTemplate(
         template_id=f"prd273-{uuid.uuid4().hex[:10]}", name="Weekly digest", description="Every Monday.",
         workspace_id=ws, owner_type="workspace", template_definition={}, created_by="test",
         steps=[{"step_id": "s1", "order": 1, "type": "agent", "agent_id": seeded.writer_id,
                 "prompt_template": "Write the digest."}],
-        schedule_config={"type": "webhook", "webhook_id": webhook},
+        schedule_config={"type": "webhook", "webhook_id": webhook, "webhook_secret": signing},
     )
     db.add(playbook)
     db.flush()

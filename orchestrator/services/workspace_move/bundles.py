@@ -94,15 +94,19 @@ def _lines(lines: Iterable[Optional[Dict[str, Any]]]) -> Iterable[Dict[str, Any]
 
 def write_bundles(db: Session, writer: Any, workspace_id: UUID | str,
                   workspace_name: str) -> Tuple[Mapping[int, str], List[Dict[str, Any]]]:
-    """Write both bundle parts; (agent id -> externalId, the rows that have no bundle)."""
+    """Write both bundle parts; (agent id -> externalId of its bundle, the rows that have no bundle).
+    The agents' lines are held while the Playbooks are written: one small dict per agent."""
     publisher = fitted_publisher(workspace_name or "")
     unbundled: List[Dict[str, Any]] = []
     agents = _agent_rows(db, workspace_id)
-    agent_ids = {row.id: external_id(AGENT_TYPE, workspace_id, row.id) for row in agents}
     bodies = agent_bodies(db, agents)
-    writer.write_rows(AGENTS_PART, _lines(
-        _line(AGENT_TYPE, row, agent_ids[row.id], publisher, bodies[row.id], unbundled) for row in agents
-    ))
+    lines = [line for line in (
+        _line(AGENT_TYPE, row, external_id(AGENT_TYPE, workspace_id, row.id), publisher, bodies[row.id], unbundled)
+        for row in agents
+    ) if line is not None]
+    writer.write_rows(AGENTS_PART, lines)
+    # A Playbook step names an agent by its bundle only when that bundle is in the file.
+    agent_ids = {line["source_id"]: line["bundle"]["externalId"] for line in lines}
     writer.write_rows(PLAYBOOKS_PART, _lines(
         _line(PLAYBOOK_TYPE, row, external_id(PLAYBOOK_TYPE, workspace_id, row.id), publisher,
               playbook_body(row, agent_ids), unbundled)

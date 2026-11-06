@@ -36,6 +36,7 @@ from core.models.workspace_move import (
     ACTIVE_STATUSES, DOWNLOADED, EXPIRED, EXPORT, FAILED, QUEUED, READY, RUNNING, WorkspaceMoveJob,
 )
 from services.workspace_move import storage
+from services.workspace_move.auto_part import WorkspaceGone
 from services.workspace_move.export import ExportResult, write_workspace_file
 from services.workspace_move.manifest import file_name
 from services.workspace_move.rules import resolve_categories
@@ -54,6 +55,8 @@ FAILED_GENERIC = "The export failed. The server log has the details."
 FAILED_GONE = "The workspace no longer exists."
 FAILED_STORAGE = "Object storage is not configured on this install."
 FAILED_STALE = "The export stopped before it finished (the server restarted). Start it again."
+# The partial unique index that keeps one queued or running export per workspace.
+ACTIVE_INDEX = "uq_workspace_move_jobs_active"
 # The updates here are statements over rows, not edits of loaded objects; a session re-reads a job.
 _NO_SYNC = {"synchronize_session": False}
 
@@ -130,9 +133,11 @@ def start_export(db: Session, workspace_id: UUID | str, *, categories: Optional[
     db.add(job)
     try:
         db.commit()
-    except IntegrityError as busy:
+    except IntegrityError as conflict:
         db.rollback()
-        raise ExportBusy("This workspace already has an export in progress.") from busy
+        if getattr(getattr(conflict.orig, "diag", None), "constraint_name", None) != ACTIVE_INDEX:
+            raise
+        raise ExportBusy("This workspace already has an export in progress.") from conflict
     _audit(db, workspace_id, AUDIT_EXPORT, requested_by, job_id=str(job.id), categories=list(chosen),
            encrypted=encrypted)
     return job
@@ -174,7 +179,7 @@ def _failure_message(failure: BaseException) -> str:
 
     if isinstance(failure, ExportTooLarge):
         return str(failure)
-    if isinstance(failure, LookupError):
+    if isinstance(failure, WorkspaceGone):
         return FAILED_GONE
     if isinstance(failure, StorageNotConfigured):
         return FAILED_STORAGE
@@ -201,22 +206,40 @@ def _record_ready(db: Session, job: WorkspaceMoveJob, result: ExportResult, size
         storage.delete(key)
 
 
+def _delete_uploaded(key: Optional[str]) -> None:
+    """Delete a file uploaded for a job that did not reach ready; a failure is logged (the file
+    has no recorded key, so nothing else would delete it)."""
+    if key is None:
+        return
+    try:
+        storage.delete(key)
+    except Exception:
+        logger.exception("[workspace-move] the file %s of a failed export could not be deleted", key)
+
+
+def _run_claimed(db: Session, job: WorkspaceMoveJob, passphrase: Optional[str]) -> None:
+    """Write, upload and record a running job; on any failure, record it failed and delete what
+    was uploaded."""
+    job_id, workspace_id, key = job.id, job.workspace_id, None
+    try:
+        result, size, key = _write_and_upload(job, passphrase)
+        _record_ready(db, job, result, size, key)
+    except Exception as failure:
+        logger.exception("[workspace-move] export %s of workspace %s failed", job_id, workspace_id)
+        db.rollback()
+        _delete_uploaded(key)
+        _finish(db, job_id, status=FAILED, error=_failure_message(failure))
+        return
+    logger.info("[workspace-move] export %s ready: %d bytes", job_id, size)
+
+
 def run_export(job_id: UUID, passphrase: Optional[str] = None) -> None:
     """The background task: write, upload and record one export. Never raises."""
     db = _open_session()
     try:
         job = _claim_run(db, job_id)
-        if job is None:
-            return
-        try:
-            result, size, key = _write_and_upload(job, passphrase)
-        except Exception as failure:
-            logger.exception("[workspace-move] export %s of workspace %s failed", job_id, job.workspace_id)
-            db.rollback()
-            _finish(db, job_id, status=FAILED, error=_failure_message(failure))
-            return
-        _record_ready(db, job, result, size, key)
-        logger.info("[workspace-move] export %s ready: %d bytes", job_id, size)
+        if job is not None:
+            _run_claimed(db, job, passphrase)
     except Exception:
         logger.exception("[workspace-move] export %s could not be recorded", job_id)
     finally:
@@ -250,6 +273,18 @@ def claim_download(db: Session, workspace_id: UUID | str, job_id: UUID, *, user_
         raise ExportGone(EXPIRED if job.status == READY else job.status)
     _audit(db, workspace_id, AUDIT_DOWNLOAD, user_id, job_id=str(job.id))
     return row.storage_key, row.file_name, row.size_bytes
+
+
+def release_download(db: Session, workspace_id: UUID | str, job_id: UUID) -> None:
+    """Give a claimed download back (its file could not be opened), so the link works again."""
+    db.execute(
+        update(WorkspaceMoveJob)
+        .where(WorkspaceMoveJob.id == job_id, WorkspaceMoveJob.workspace_id == workspace_id,
+               WorkspaceMoveJob.status == DOWNLOADED, WorkspaceMoveJob.storage_key.isnot(None))
+        .values(status=READY, downloaded_at=None),
+        execution_options=_NO_SYNC,
+    )
+    db.commit()
 
 
 def discard_file(job_id: UUID, *, status: Optional[str] = None,
@@ -324,5 +359,5 @@ def register(scheduler: Any) -> bool:
 
 __all__ = [
     "ExportBusy", "ExportGone", "ExportNotFound", "claim_download", "discard_file", "get_job", "register",
-    "run_export", "start_export", "sweep_exports",
+    "release_download", "run_export", "start_export", "sweep_exports",
 ]

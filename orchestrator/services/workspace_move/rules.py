@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Mapping, Optional, Tuple
+from typing import Any, Mapping, Optional, Tuple
 
 # §5.2's categories, in the order an import writes them (§5.4 step 6).
 AUTO = "auto"
@@ -37,9 +37,13 @@ DEFAULT_CATEGORIES: Tuple[str, ...] = tuple(category for category in CATEGORIES 
 # drops every such column a rule does not already name, so a column added later (or one
 # only Automatos Cloud's schema has) never leaves by default; the guard test fails until
 # its rule names it.
+# The same test runs on every key inside a JSON value of an exported row (``scrubbed``), so a
+# secret kept in a JSON field (a Playbook trigger's ``webhook_secret``) never leaves either.
 SECRET_COLUMN_NAME = re.compile(
-    r"(^|_)(encrypted|secret|secrets|password|passphrase|private_key|api_key|key_hash|token_hash|"
-    r"code_hash|push_key|credential_id|webhook_key|webhook_id|webhook_url)(_|$)|(^|_)token$"
+    r"(^|_)(encrypted_[a-z0-9_]+|secret|secrets|password|passphrase|private_key|secret_key|access_key|"
+    r"signing_key|hmac_key|api_key|key_hash|token_hash|code_hash|push_key|credential_id|webhook_key|"
+    r"webhook_id|webhook_url|webhook_secret|client_secret|connection_string|dsn|bearer|jwt|cookie)(_|$)"
+    r"|(^|_)token$"
 )
 # Column types the target rebuilds from the data (pgvector, full-text search).
 DERIVED_COLUMN_TYPES = frozenset({"vector", "tsvector"})
@@ -89,6 +93,16 @@ def looks_secret(column: str) -> bool:
     return SECRET_COLUMN_NAME.search(column) is not None
 
 
+def scrubbed(value: Any) -> Any:
+    """``value`` (a JSON value) with every object key that looks like a secret removed, at any
+    depth; a new value, the given one untouched."""
+    if isinstance(value, Mapping):
+        return {key: scrubbed(item) for key, item in value.items() if not (isinstance(key, str) and looks_secret(key))}
+    if isinstance(value, list):
+        return [scrubbed(item) for item in value]
+    return value
+
+
 def resolve_categories(requested: Optional[Tuple[str, ...]]) -> Tuple[str, ...]:
     """The categories an export writes: the requested ones (the defaults when None) plus
     the always-on ones, in §5.4's order. Raises ValueError on an unknown category."""
@@ -103,5 +117,5 @@ def resolve_categories(requested: Optional[Tuple[str, ...]]) -> Tuple[str, ...]:
 __all__ = [
     "AGENTS", "ALWAYS_ON", "AUTO", "BOARD", "CATEGORIES", "CHATS", "DEFAULT_CATEGORIES", "DELIVERABLES",
     "DERIVED_COLUMN_TYPES", "KNOWLEDGE", "MEMORY", "SECRET_COLUMN_NAME", "TableRule", "child",
-    "looks_secret", "moved", "not_moved", "resolve_categories",
+    "looks_secret", "moved", "not_moved", "resolve_categories", "scrubbed",
 ]
