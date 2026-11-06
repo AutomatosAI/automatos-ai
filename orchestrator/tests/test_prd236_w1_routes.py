@@ -365,7 +365,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # it — marketplace_cloud_items, a new table only; the guard follows it.
     cloud_bundles = (versions / "prd270_w2_cloud_bundles.py").read_text()
     assert 'down_revision = "prd270_w1_cloud_sync"' in cloud_bundles
-    assert 'EXPECTED_HEAD = "prd270_w2_cloud_bundles"' in guard
+    # 2026-11-06 (PRD-273 W1 Move a workspace, export): prd273_w1_workspace_move_jobs chains onto
+    # it — workspace_move_jobs, a new table only; the guard follows it.
+    move_jobs = (versions / "prd273_w1_workspace_move_jobs.py").read_text()
+    assert 'down_revision = "prd270_w2_cloud_bundles"' in move_jobs
+    assert 'EXPECTED_HEAD = "prd273_w1_workspace_move_jobs"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

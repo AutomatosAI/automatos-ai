@@ -299,10 +299,11 @@ class TestTick:
         assert asyncio.run(sr.start_schedule_reconcile(fake)) is True
         # PRD-251B (US-B205): the leader also hosts the Socials plan tick, PRD-251C (US-C402)
         # the reads of published posts' numbers, PRD-266 (US-010e) Expo's push receipts and
-        # (US-013) the daily digest, and PRD-268 (§6.2) the proactive_runs prune.
+        # (US-013) the daily digest, PRD-268 (§6.2) the proactive_runs prune, and PRD-273 the
+        # sweep that deletes expired workspace export files.
         assert fake.added == [
             sr.RECONCILE_JOB_ID, "socials_plan_tick", "socials_results_tick", "push_receipts_tick", "daily_digest_tick",
-            "proactive_runs_prune",
+            "proactive_runs_prune", "workspace_export_sweep",
         ]
         assert passes == [fake]
 
