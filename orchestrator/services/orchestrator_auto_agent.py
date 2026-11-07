@@ -6,6 +6,11 @@ truth for both. This module reads that row's model_config as the LLM block the
 routes return, and writes a save's LLM and configuration fields to it. Moved out of
 api/workspaces.py (PRD-263 PR-1E-a) so the save route fits the 50-line function
 rule. Since 19 Oct 2026 a save writes only that row (``sync_auto_llm``).
+
+Auto's soul is that row's ``custom_persona_prompt`` and nothing else: the chat's personality
+block reads it (``is_workspace_auto``, modules/context/sections/identity.py) and Settings shows
+it. Until 7 Nov 2026 a save also kept a copy in ``settings.orchestrator.custom_soul``, which the
+chat read instead, and the two drifted (alembic ``auto_soul_one_source_20261107``).
 """
 from __future__ import annotations
 
@@ -19,6 +24,9 @@ from core.models import Agent
 
 logger = logging.getLogger(__name__)
 
+# A workspace's Auto row (core/seeds/seed_auto_agent), and the mode a hand-written soul is.
+AUTO_SLUG = "auto-{workspace_id}"
+CUSTOM_MODE = "custom"
 # The fields a save also writes to the Auto agent's configuration, and GET reads back.
 AUTO_CONFIG_FIELDS = ("communication_style", "proactive_level", "thinking_level")
 # The Auto agent's model_config keys a save writes from the payload's llm.
@@ -92,3 +100,29 @@ def sync_auto_configuration(auto_agent: Agent, payload: Dict[str, Any]) -> None:
 
     auto_agent.configuration = {**(auto_agent.configuration or {}), **fields}
     flag_modified(auto_agent, "configuration")
+
+
+def is_workspace_auto(agent: Any) -> bool:
+    """True for a workspace's own Auto row: a system agent whose slug is ``auto-<workspace_id>``.
+    Its custom_persona_prompt is Auto's soul, which the chat's personality block and Settings →
+    Orchestrator both read; every other agent keeps its persona as its own section."""
+    workspace_id = getattr(agent, "workspace_id", None)
+    return (
+        workspace_id is not None
+        and getattr(agent, "is_system_agent", False) is True
+        and getattr(agent, "slug", None) == AUTO_SLUG.format(workspace_id=workspace_id)
+    )
+
+
+def mark_soul_custom(agent: Any) -> None:
+    """A soul written on Auto's row outside Settings (Auto's own platform_update_agent, the
+    persona route) is a hand-written one, so the row's personality_mode says ``custom``, as a
+    Settings save of a custom soul does. Settings → Orchestrator then shows the soul the chat
+    speaks with, not a preset's name over it. An empty prompt is no soul (the chat falls back to a
+    preset), so it changes no mode; any other agent is left as it is."""
+    if not is_workspace_auto(agent) or not str(getattr(agent, "custom_persona_prompt", None) or "").strip():
+        return
+    from sqlalchemy.orm.attributes import flag_modified
+
+    agent.configuration = {**(agent.configuration or {}), "personality_mode": CUSTOM_MODE}
+    flag_modified(agent, "configuration")

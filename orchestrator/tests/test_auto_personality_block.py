@@ -12,7 +12,7 @@ from consumers.chatbot.personality import AutomatosPersonality
 
 @pytest.mark.parametrize("mode", ["friendly", "professional", "technical"])
 def test_no_template_placeholder_reaches_the_prompt(mode):
-    settings = {"personality_mode": mode, "custom_soul": "", "communication_style": "balanced"}
+    settings = {"personality_mode": mode, "communication_style": "balanced"}
     prompt = AutomatosPersonality.get_base_system_prompt(agent_name="Auto", orchestrator_settings=settings)
     assert not any(slot in prompt for slot in ("{agent_name}", "{agent_role}", "{tools_list}"))
     assert "**My personality:**" in prompt

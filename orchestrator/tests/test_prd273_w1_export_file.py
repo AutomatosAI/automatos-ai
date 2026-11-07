@@ -116,6 +116,7 @@ def test_workspace_and_auto_carry_the_settings_and_the_agent_rows_soul(db_sessio
     assert settings["settings"]["brand_kit"]["primary_color"] == "#1F6FEB"
     assert set(settings["settings"]) == {"brand_kit", "orchestrator", "voice_live", "push"}
     assert "llm" not in settings["settings"]["orchestrator"] and "model" not in settings["settings"]["orchestrator"]
+    assert "custom_soul" not in settings["settings"]["orchestrator"]  # Auto's soul travels as its row only
     auto = json.loads(zf.read("auto.json"))["agent"]
     assert auto["custom_persona_prompt"] == AUTO_SOUL and auto["use_custom_persona"] is True
     assert auto["source_agent_id"] == workspace.auto_id and auto["configuration"]["proactive_level"] == "notify"

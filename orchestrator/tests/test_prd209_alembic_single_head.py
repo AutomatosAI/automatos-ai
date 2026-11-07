@@ -153,7 +153,10 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # rows a Sync with Automatos Cloud wrote.
 # 2026-11-06 (PRD-273 W1 Move a workspace, export): prd273_w1_workspace_move_jobs chains onto
 # prd270_w2_cloud_bundles — workspace_move_jobs (a new table only): a workspace's export jobs.
-EXPECTED_HEAD = "prd273_w1_workspace_move_jobs"
+# 2026-11-07 (Auto's soul, one source): auto_soul_one_source_20261107 chains onto
+# prd273_w1_workspace_move_jobs — a data migration only: a workspace's custom settings soul moves
+# onto its Auto agent row and settings.orchestrator.custom_soul goes; no table changes.
+EXPECTED_HEAD = "auto_soul_one_source_20261107"
 
 
 def _literal(node: ast.AST):

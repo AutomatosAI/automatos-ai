@@ -135,7 +135,7 @@ IdentitySection, SectionContext = _load_sections_isolated()
 @pytest.fixture(autouse=True)
 def _runtime_personality_stub():
     """identity.py imports ``consumers.chatbot.personality`` LAZILY inside its
-    chatbot render path (render() and _get_personality_block), so the stub must
+    chatbot render path (render() → _build_chatbot_identity), so the stub must
     be live during this file's test phase — not just at import time. Installing
     it here (after collection) keeps the fake out of sibling modules' collection,
     and restoring per-test keeps it from bleeding into their test phase. The

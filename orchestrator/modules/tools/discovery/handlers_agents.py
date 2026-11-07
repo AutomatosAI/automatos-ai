@@ -427,12 +427,14 @@ def _apply_persona_org_and_tag_fields(agent: Any, params: Dict[str, Any],
                                        reports_to_provided: bool, manager_id: Optional[int]) -> List[str]:
     """System prompt, team/job_title/reports_to_id (#831) and tags; return the change log."""
     from services.agent_org_fields import normalized_team_or_none
+    from services.orchestrator_auto_agent import mark_soul_custom
 
     changes: List[str] = []
     system_prompt = params.get("system_prompt")
     if system_prompt is not None:
         agent.custom_persona_prompt = system_prompt
         agent.use_custom_persona = True
+        mark_soul_custom(agent)  # Auto's own row: Settings shows the soul the chat now speaks with
         changes.append("system prompt updated")
 
     team = params.get("team")

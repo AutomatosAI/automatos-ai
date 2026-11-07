@@ -7,9 +7,9 @@ allow-listed too), the voice and push settings. A secret-looking key inside any 
 removed. ``byok_overrides`` and ``integrations`` carry keys and connections and never leave,
 and neither does any key added later until it is named here.
 
-Auto's soul is its agent row (slug ``auto-{workspace_id}``, a system agent), the row the
-Orchestrator settings page reads: ``settings['orchestrator']['custom_soul']`` can be stale on
-Automatos Cloud, so ``auto.json`` reads the row. ``source_agent_id`` names the row in
+Auto's soul is its agent row (slug ``auto-{workspace_id}``, a system agent), its only copy since
+``auto_soul_one_source_20261107`` moved the settings soul onto it, so ``auto.json`` reads the row and
+a ``custom_soul`` key still left in settings never leaves. ``source_agent_id`` names the row in
 ``sql/agents.jsonl``, so an import maps it (and every row naming it) to the target's own Auto.
 The GDPR export (``services/gdpr_service.py``) carries the same ``workspace.json``.
 """
@@ -32,7 +32,7 @@ ORCHESTRATOR_DROPPED_KEYS = ("llm", "model")
 # writes (its ``_ORCHESTRATOR_FIELDS``, heartbeat and HARNESS). A key added there later stays behind
 # until it is named here; a test holds the two lists together.
 ORCHESTRATOR_KEYS = (
-    "personality_mode", "custom_soul", "communication_style", "proactive_level", "thinking_level",
+    "personality_mode", "communication_style", "proactive_level", "thinking_level",
     "preferred_channel", "heartbeat", "harness",
 )
 # Named so the guard test can prove they never travel; any unnamed key stays behind as well.

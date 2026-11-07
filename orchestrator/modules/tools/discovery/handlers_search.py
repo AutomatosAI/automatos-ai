@@ -9,6 +9,8 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from modules.tools.discovery.memory_off import off_when_nothing_is_found
+
 logger = logging.getLogger(__name__)
 
 
@@ -47,6 +49,7 @@ def _bounded(raw: Any, default: int, top: int) -> int:
         return default
 
 
+@off_when_nothing_is_found("total")  # no embedding provider: memory is off, not empty
 async def search_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Search durable memories by query: the workspace's own, then its first agents'.
 
@@ -133,6 +136,7 @@ async def _asking_persons_rules(workspace_id: str, params: Dict[str, Any]) -> Tu
         return [], {"standing_rules_unavailable": True}
 
 
+@off_when_nothing_is_found("total")  # no embedding provider: memory is off, not empty
 async def browse_memories(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Browse/search durable memories. F325 (night 9b): one that names an agent's report
     or output as where a fact came from is left out, and the answer says how many were.

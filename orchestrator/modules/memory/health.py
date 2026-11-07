@@ -5,8 +5,9 @@ provider. The local edition's default stack runs Qdrant and points the backend a
 so the usual gap there is the provider: with no key the embedding manager falls back to
 its degraded stand-in, which refuses to embed, and nothing can be stored or found. The
 tile said only "Unavailable", or "Degraded" with nothing stored, and never why; the
-``reason`` here says what to do. ``GET /api/v1/memory/health`` (api/memory_stats.py)
-answers with ``memory_status`` and ``search_effectiveness``.
+``reason`` here says what to do, and ``reason_code`` names it (``no_embedding_provider``: memory
+and knowledge search are off). ``GET /api/v1/memory/health`` (api/memory_stats.py) answers with
+``memory_status`` and ``search_effectiveness``.
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from config import config
+from core.llm.embedding_status import NO_EMBEDDING_PROVIDER, OWNER_SENTENCE
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +30,9 @@ UNAVAILABLE = "unavailable"
 
 NO_STORE = "Memory is off on this install: no memory store is configured (QDRANT_URL is empty)."
 STORE_DOWN = "The memory store is not answering, so nothing can be remembered or recalled right now."
-NO_EMBEDDINGS = (
-    "Memory needs an embeddings key. Add the key for your embedding provider (OpenRouter, unless "
-    "Settings → System Settings → Embeddings names another) in Settings → API Keys, then restart "
-    "the backend so memory picks it up."
-)
+NO_EMBEDDINGS = OWNER_SENTENCE
+# Each reason's code, for clients that act on it (7 Nov 2026).
+REASON_CODES = {NO_STORE: "no_memory_store", STORE_DOWN: "memory_store_down", NO_EMBEDDINGS: NO_EMBEDDING_PROVIDER}
 
 _SEARCHES_SQL = text(
     "SELECT COUNT(*) AS total_searches, SUM(CASE WHEN had_results THEN 1 ELSE 0 END) AS hits "
@@ -40,8 +40,12 @@ _SEARCHES_SQL = text(
 )
 
 
+def _unavailable(reason: str) -> Dict[str, Optional[str]]:
+    return {"health_status": UNAVAILABLE, "reason": reason, "reason_code": REASON_CODES[reason]}
+
+
 async def memory_status(service: Optional[Any], reachable: bool, total: int) -> Dict[str, Optional[str]]:
-    """``health_status`` and ``reason`` for the memory health report.
+    """``health_status``, ``reason`` and ``reason_code`` for the memory health report.
 
     ``service`` is the UnifiedMemoryService, None when it is not configured or did not start;
     ``reachable`` says whether listing the workspace's memories answered; ``total`` is how many
@@ -49,12 +53,12 @@ async def memory_status(service: Optional[Any], reachable: bool, total: int) -> 
     searches use, and reads settings and the key store, so it runs in a thread.
     """
     if not config.QDRANT_URL:
-        return {"health_status": UNAVAILABLE, "reason": NO_STORE}
+        return _unavailable(NO_STORE)
     if service is None or not reachable:
-        return {"health_status": UNAVAILABLE, "reason": STORE_DOWN}
+        return _unavailable(STORE_DOWN)
     if not await asyncio.to_thread(service._durable.embeddings_ready):
-        return {"health_status": UNAVAILABLE, "reason": NO_EMBEDDINGS}
-    return {"health_status": HEALTHY if total > 0 else DEGRADED, "reason": None}
+        return _unavailable(NO_EMBEDDINGS)
+    return {"health_status": HEALTHY if total > 0 else DEGRADED, "reason": None, "reason_code": None}
 
 
 def search_effectiveness(db: Session, workspace_id: Any) -> Dict[str, Any]:

@@ -12,7 +12,7 @@ from consumers.chatbot.owner_is_you import owner_is_you
 from consumers.chatbot.personality import AutomatosPersonality
 from consumers.chatbot.service import atom_identity_clause
 
-SETTINGS = {"personality_mode": "friendly", "custom_soul": "", "communication_style": "balanced"}
+SETTINGS = {"personality_mode": "friendly", "communication_style": "balanced"}
 NAMELESS_OPENING = "You are Auto, a capable AI assistant. You're ready to help.\n\n## Who You Are\n"
 CLAUSE = ("When a document, card or tool note names Gerard, that is the person you are talking to: say 'you' and "
           "'your', never 'Gerard' or a third-person pronoun, except inside a draft addressed to someone else.")

@@ -46,22 +46,23 @@ def test_view_merges_stored_fields_over_the_defaults_key_by_key():
     assert ws._ORCHESTRATOR_DEFAULTS["harness"] == {"schedule": "weekly", "mode": "report_only"}
 
 
-def test_merge_writes_the_six_fields_and_merges_heartbeat_and_harness():
-    existing = {"custom_soul": "kept", "heartbeat": {"interval_minutes": 60}, "harness": {"enabled": False}}
+def test_merge_writes_the_five_fields_and_merges_heartbeat_and_harness():
+    existing = {"model": "kept", "heartbeat": {"interval_minutes": 60}, "harness": {"enabled": False}}
     payload = {
         "personality_mode": "technical", "llm": {"model_id": "m"}, "unknown": 1,
+        "custom_soul": "a soul",  # 7 Nov 2026: the Auto row's, never written to the settings
         "heartbeat": {"enabled": True}, "harness": {"enabled": True, "disabled": False, "mode": "propose"},
     }
     merged = ws._merge_orchestrator(existing, payload)
 
     # PR-1E-b: the payload's retired keys are not written; the stored one is not rewritten.
     assert merged == {
-        "custom_soul": "kept",
+        "model": "kept",
         "heartbeat": {"interval_minutes": 60, "enabled": True},
         "harness": {"enabled": False, "mode": "propose"},
         "personality_mode": "technical",
     }
-    assert existing == {"custom_soul": "kept", "heartbeat": {"interval_minutes": 60}, "harness": {"enabled": False}}
+    assert existing == {"model": "kept", "heartbeat": {"interval_minutes": 60}, "harness": {"enabled": False}}
 
 
 def test_validation_accepts_the_modes_that_exist_and_the_weekly_schedule():

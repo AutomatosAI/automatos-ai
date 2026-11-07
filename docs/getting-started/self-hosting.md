@@ -450,6 +450,19 @@ there is also what embeddings use (`PLATFORM_KEY_WORKSPACE_ID` in
 document uploads index with it; without any embedding provider an upload is
 accepted but its processing ends `failed`.
 
+**Memory and knowledge search need an embedding provider key: OpenRouter by
+default.** The embedding provider is *Settings → System Settings → Embeddings*
+(`openrouter` unless changed), so an install whose only key is Anthropic,
+DeepSeek or NVIDIA runs its agents but cannot embed: the backend falls back to a
+stand-in that refuses to, and memory (storing and recalling), knowledge search
+and tool ranking are off. Add `OPENROUTER_API_KEY` (or the key of the embedding
+provider you set) and restart the backend; the embedding manager reads its key
+once per process. Until then **Settings → Orchestrator → What Auto depends on**
+shows *Memory and knowledge search: needs setup* (reason code
+`no_embedding_provider`, also in `GET /api/v1/memory/health` and on Knowledge →
+Memory), and Auto answers that memory is off on this install, not that it is
+empty.
+
 **Skills.** A fresh install ships the platform's 12 built-in skills (Auto's
 platform skill and the Socials and design skills). For more, start with the free
 baseline library of 140+ skills: in **Marketplace → Capabilities** press *Import from

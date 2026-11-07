@@ -92,10 +92,10 @@ def test_the_executor_refuses_the_dropbox_tool_before_any_gate_or_handler(owner_
 def test_the_persona_answers_a_question_and_does_a_request():
     from consumers.chatbot import personality
     from core.seeds import seed_auto_agent as seed
-    from modules.context.sections.identity import _PERSONALITY_MAP
 
     line = "when you ask how, where or whether, I answer that first and offer to do it"
-    assert line in personality._FRIENDLY_PERSONALITY and line in _PERSONALITY_MAP["friendly"]
+    # The identity section's mirrored copy of the presets went with its settings-soul reader (7 Nov 2026).
+    assert line in personality._FRIENDLY_PERSONALITY
     prompt = personality.AutomatosPersonality.get_base_system_prompt()
     assert "asked how, where or whether, I answer the question, offer to do it, and change nothing" in prompt
     assert line in prompt

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace as NS
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from consumers.chatbot.atom_prompt import atom_memory_block
 from consumers.chatbot.smart_memory import SmartMemoryManager
@@ -39,8 +39,10 @@ def test_the_chat_memory_block_says_a_remembered_figure_is_not_todays():
 
 
 def test_no_memory_is_still_no_block():
+    """Memory works and recalled nothing: no block (memory off has its own note, 7 Nov 2026)."""
     with patch.object(MemorySection, "_try_context_router", return_value=None), \
-            patch.object(MemorySection, "_build_from_smart_memory", return_value=""):
+            patch.object(MemorySection, "_build_from_smart_memory", return_value=""), \
+            patch("modules.context.sections.memory.store_cannot_embed", AsyncMock(return_value=False)):
         assert asyncio.run(MemorySection().render(_ctx())) == ""
 
 

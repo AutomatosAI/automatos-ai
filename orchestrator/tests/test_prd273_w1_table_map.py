@@ -106,7 +106,7 @@ def test_the_settings_allow_list():
     }
     kept = allowed_settings(stored)
     assert set(kept) == set(ALLOWED_SETTINGS_KEYS)
-    assert kept["orchestrator"] == {"communication_style": "direct", "custom_soul": "s"}
+    assert kept["orchestrator"] == {"communication_style": "direct"}  # a legacy custom_soul stays behind
     assert not set(ORCHESTRATOR_DROPPED_KEYS) & set(kept["orchestrator"])
     assert not set(NEVER_SETTINGS_KEYS) & set(kept) and "power_mode" not in kept
     assert kept["voice_live"] == {"voice": "v"}
