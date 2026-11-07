@@ -1062,6 +1062,24 @@ class Config:
         os.getenv("AUDIT_RETENTION_SWEEP_INTERVAL_SECONDS", "86400")
     )
 
+    # PRD-273 — Move a workspace: the export (services/workspace_move/). The file holds
+    # personal data, so its download link works once and expires after this many hours;
+    # the file is deleted on download or expiry.
+    WORKSPACE_EXPORT_LINK_TTL_HOURS: int = max(1, int(os.getenv("WORKSPACE_EXPORT_LINK_TTL_HOURS", "24")))
+    # The largest single document or Deliverable file an export carries; a bigger one is
+    # listed in the manifest's skipped_files and its row still moves.
+    WORKSPACE_EXPORT_MAX_FILE_MB: int = max(1, int(os.getenv("WORKSPACE_EXPORT_MAX_FILE_MB", "512")))
+    # The most data (uncompressed) one export holds; over it the export fails clearly.
+    WORKSPACE_EXPORT_MAX_TOTAL_MB: int = max(1, int(os.getenv("WORKSPACE_EXPORT_MAX_TOTAL_MB", "20480")))
+    # Rows read from the database per fetch while a table streams into the file.
+    WORKSPACE_EXPORT_BATCH_ROWS: int = max(1, int(os.getenv("WORKSPACE_EXPORT_BATCH_ROWS", "1000")))
+    # A queued or running export older than this is taken as dead (its server restarted),
+    # so the workspace can export again.
+    WORKSPACE_EXPORT_JOB_TIMEOUT_MINUTES: int = max(1, int(os.getenv("WORKSPACE_EXPORT_JOB_TIMEOUT_MINUTES", "180")))
+    # Where the export file is written before it goes to object storage; empty = the
+    # system's temporary directory. Point it at a volume with room for a large workspace.
+    WORKSPACE_EXPORT_TEMP_DIR: str = os.getenv("WORKSPACE_EXPORT_TEMP_DIR", "")
+
     # PRD-185 S2 — per-lane telemetry canary. The type-poison outage S1 repaired
     # went unseen for ~2 months because nothing alarmed on "organic tool-execution
     # rows/day = 0". This canary counts production (telemetry_source='production')

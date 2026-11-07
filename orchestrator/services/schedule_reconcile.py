@@ -103,4 +103,7 @@ async def start_schedule_reconcile(scheduler: Any) -> bool:
     from services.proactive import retention as proactive_retention
 
     proactive_retention.register(scheduler)  # PRD-268 §6.2: proactive_runs keeps 90 days, pruned on the leader
+    from services.workspace_move import jobs as workspace_move_jobs
+
+    workspace_move_jobs.register(scheduler)  # PRD-273: expired export files are deleted on the leader
     return True

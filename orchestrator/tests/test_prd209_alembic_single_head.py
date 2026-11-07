@@ -151,7 +151,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-10-31 (PRD-270 W2 Cloud bundles, US-270-11a): prd270_w2_cloud_bundles chains onto
 # prd270_w1_cloud_sync — marketplace_cloud_items (a new table only): which local marketplace
 # rows a Sync with Automatos Cloud wrote.
-EXPECTED_HEAD = "prd270_w2_cloud_bundles"
+# 2026-11-06 (PRD-273 W1 Move a workspace, export): prd273_w1_workspace_move_jobs chains onto
+# prd270_w2_cloud_bundles — workspace_move_jobs (a new table only): a workspace's export jobs.
+EXPECTED_HEAD = "prd273_w1_workspace_move_jobs"
 
 
 def _literal(node: ast.AST):

@@ -41,7 +41,8 @@ LOCAL_ID_PREFIX = "a"
 # The step keys whose null travels as null (the format allows it); any other null key is left out.
 NULLABLE_STEP_KEYS = tuple(key for key in STEP_KEYS if STEP_SPEC["fields"][key].get("nullable"))
 
-_COLUMNS = (
+# The columns a bundle reads (public: PRD-273's workspace export reads the same).
+PLAYBOOK_BUNDLE_COLUMNS = (
     WorkflowRecipe.id, WorkflowRecipe.template_id, WorkflowRecipe.cloned_from_id, WorkflowRecipe.original_creator_id,
     WorkflowRecipe.name, WorkflowRecipe.description, WorkflowRecipe.marketplace_category,
     WorkflowRecipe.marketplace_icon, WorkflowRecipe.tags, WorkflowRecipe.version, WorkflowRecipe.steps,
@@ -90,10 +91,17 @@ def exported_playbooks(db: Session, agent_items: Iterable[ExportedItem]) -> List
     return [item for item in items if item is not None]
 
 
+def playbook_body(row: Any, agent_items: Mapping[int, str]) -> Dict[str, Any]:
+    """The playbook object of ``row``'s bundle (``row`` carries ``PLAYBOOK_BUNDLE_COLUMNS``), its
+    steps' agents named by ``agent_items`` (agent id -> externalId of a bundled agent), else by the
+    step's own agent name. PRD-273's workspace export bundles a workspace's Playbooks with it."""
+    return _body(row, _AgentRefs({}, agent_items))
+
+
 def _approved_rows(db: Session) -> List[Any]:
     """K9's Playbooks, seeded ones included, newest first (the id breaks a tie)."""
     return (
-        db.query(*_COLUMNS)
+        db.query(*PLAYBOOK_BUNDLE_COLUMNS)
         .filter(
             WorkflowRecipe.owner_type == MARKETPLACE_OWNER, WorkflowRecipe.is_approved.is_(True),
             WorkflowRecipe.is_public.is_(True), WorkflowRecipe.is_system.isnot(True),
@@ -213,4 +221,4 @@ def _name(value: Any) -> Optional[str]:
     return (value.strip() or None) if isinstance(value, str) else None
 
 
-__all__ = ["exported_playbooks"]
+__all__ = ["PLAYBOOK_BUNDLE_COLUMNS", "exported_playbooks", "playbook_body"]
