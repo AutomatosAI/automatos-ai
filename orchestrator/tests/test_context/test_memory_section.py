@@ -9,6 +9,13 @@ from modules.context.sections.base import SectionContext
 from modules.context.sections.memory import MemorySection
 
 
+@pytest.fixture(autouse=True)
+def _the_store_can_embed(monkeypatch):
+    """These tests are about recall, so the store has an embedding provider. With none, the
+    section adds the Memory Is Off block (tests/test_memory_off_is_said_not_empty.py)."""
+    monkeypatch.setattr("modules.context.sections.memory.store_cannot_embed", AsyncMock(return_value=False))
+
+
 @pytest.fixture
 def memory():
     return MemorySection()

@@ -7,7 +7,9 @@ Proven here:
   ``model_route`` (Auto's model resolves through the check-in's own ``heartbeat_llm``,
   with a key; unset or keyless needs setting up), ``web_search`` (the
   engine ``resolve_backend`` names for the workspace; none, or switched off, needs setting
-  up) and ``push`` (always on SaaS; on a local install once the operator agreed); and for
+  up), ``push`` (always on SaaS; on a local install once the operator agreed) and
+  ``embeddings`` (memory and knowledge search have an embedding provider; the degraded
+  stand-in, with no key, needs setting up, 7 Nov 2026); and for
   each, a probe that does not answer within ``READINESS_PROBE_TIMEOUT_SECONDS`` reads
   ``not_checked``, without the check waiting for it;
 * **the runner** (``services.readiness.service``): a probe that raises needs setting up
@@ -51,14 +53,14 @@ MANIFEST = ORCH / "reports" / "route-manifest.json"
 CONFIG_SURFACE = ORCH / "reports" / "config-surface.json"
 READINESS = "/api/readiness"
 CHECK = "/api/readiness/check"
-ITEM_IDS = ["core", "model_route", "web_search", "push"]
+ITEM_IDS = ["core", "model_route", "web_search", "push", "embeddings"]
 SHORT_TIMEOUT = 0.05
 HANG_SECONDS = 5.0
 WHERE = "db.internal.example:5432"
 LIMIT = 2
 DETAILS = [i.CORE_READY, i.CORE_DOWN, i.MODEL_READY, i.MODEL_UNSET, i.MODEL_NO_KEY, i.SEARCH_OPENROUTER,
            i.SEARCH_COMPOSIO, i.SEARCH_SEARXNG, i.SEARCH_NONE, i.SEARCH_OFF, i.PUSH_READY, i.PUSH_UNANSWERED,
-           i.PUSH_DECLINED, i.NOT_ANSWERED, i.UNREADABLE]
+           i.PUSH_DECLINED, i.EMBEDDINGS_READY, i.EMBEDDINGS_NONE, i.NOT_ANSWERED, i.UNREADABLE]
 
 
 def _item(item_id: str) -> Item:
@@ -207,6 +209,37 @@ def test_push_needs_setup_on_a_local_install_not_agreed(monkeypatch, local):
     assert probes.push(None, uuid.uuid4()) == Finding("needs_setup", "push_declined", fix="fix_answer_push")
 
 
+def _platform_embedder(monkeypatch, provider):
+    """The platform's embedding manager, loading ``provider`` as its first embed would."""
+    from core.llm import embedding_manager
+
+    manager = NS(provider=None, loads=[])
+    manager._ensure_provider = lambda: manager.loads.append(1) or setattr(manager, "provider", provider)
+    monkeypatch.setattr(embedding_manager, "get_embedding_manager", lambda: manager)
+    return manager
+
+
+def test_embeddings_are_ready_with_a_real_provider(monkeypatch):
+    manager = _platform_embedder(monkeypatch, NS(is_degraded=False))
+
+    assert probes.embeddings(None, uuid.uuid4()) == Finding("ready", "embeddings_ready")
+    assert manager.loads == [1]
+
+
+def test_no_embedding_provider_says_memory_and_knowledge_search_are_off(monkeypatch):
+    """7 Nov 2026: with no key the manager falls back to the degraded stand-in, and memory was
+    silently off. The item says so, with the reason code and the fix."""
+    from core.llm.clients.base import DeterministicEmbeddingProvider
+
+    _platform_embedder(monkeypatch, DeterministicEmbeddingProvider(dimension=8))
+
+    finding = probes.embeddings(None, uuid.uuid4())
+
+    assert finding == Finding("needs_setup", "no_embedding_provider", fix="fix_add_key")
+    assert STRINGS["en"][finding.detail].startswith("Memory and knowledge search are off: no embedding provider.")
+    assert FIXES[finding.fix].href == "/settings?tab=api-keys"
+
+
 @pytest.fixture
 def hanging(monkeypatch):
     """What every probe reads hangs past a short timeout (the database, Auto's model, the
@@ -230,6 +263,7 @@ def hanging(monkeypatch):
     monkeypatch.setattr(probes, "heartbeat_llm", after_the_hang(NS(config=NS(api_key="a-test-key"))))
     monkeypatch.setattr(probes.search, "resolve_backend", after_the_hang("openrouter"))
     monkeypatch.setattr(probes.consent, "consent_state", after_the_hang(NS(agreed=True, answered=True)))
+    monkeypatch.setattr(probes, "provider_ready", after_the_hang(True))
     yield
     release.set()
 
@@ -328,7 +362,7 @@ def test_readiness_is_v1_with_every_server_item_and_what_needs_it(saas, sessions
     assert [item["id"] for item in body["items"]] == ITEM_IDS
     assert {item["id"]: item["needed_by"] for item in body["items"]} == {
         "core": ["brief", "voice", "push", "check_in"], "model_route": ["brief", "check_in"],
-        "web_search": ["voice"], "push": ["push"]}
+        "web_search": ["voice"], "push": ["push"], "embeddings": ["check_in"]}
     assert len(sessions) == len(ITEM_IDS)  # each probe on its own session, each closed
 
 
@@ -379,7 +413,7 @@ def probed(monkeypatch, sessions) -> list:
 
     findings = {"core": Finding("ready", "core_ready", where=WHERE), "model_route": Finding("ready", "model_ready"),
                 "web_search": Finding("needs_setup", "search_none", fix="fix_add_key"),
-                "push": Finding("ready", "push_ready")}
+                "push": Finding("ready", "push_ready"), "embeddings": Finding("ready", "embeddings_ready")}
     monkeypatch.setattr(probes, "ITEMS", tuple(Item(item.id, item.needed_by, probe(item.id, findings[item.id]))
                                               for item in probes.ITEMS))
     return asked

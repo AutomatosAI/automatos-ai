@@ -11,6 +11,10 @@
 * ``push`` — the Expo push path: always on SaaS (the platform's own project); on a local
   install only once its operator agreed (``services.push.consent``, read strictly, so a
   read that fails is not a "no").
+* ``embeddings`` — memory and knowledge search can embed: the platform's embedding manager
+  (``core.llm.embedding_manager``) has a real provider, not the degraded stand-in it falls
+  back to with no key (7 Nov 2026: memory was silently off on a self-hosted install). A
+  check-in's field memory embeds too. Loading it reads settings and the key store.
 
 Each runs on its own session, opened and closed by the runner. A probe returns what it
 found; an error it cannot place escapes to the runner, which logs it and reads the item as
@@ -28,6 +32,7 @@ from sqlalchemy.orm import Session
 
 from api.system_health_checks import _database
 from config import config
+from core.llm.embedding_status import provider_ready
 from services import web_search as search
 from services.proactive.runner import heartbeat_llm
 from services.push import consent
@@ -103,9 +108,19 @@ def push(db: Session, workspace_id: UUID) -> Finding:
     return Finding(NEEDS_SETUP, i.PUSH_DECLINED if state.answered else i.PUSH_UNANSWERED, fix=i.ANSWER_PUSH)
 
 
+def embeddings(db: Session, workspace_id: UUID) -> Finding:
+    """Memory and knowledge search can embed: there is an embedding provider with a key."""
+    from core.llm.embedding_manager import get_embedding_manager  # its clients load only when probed
+
+    if provider_ready(get_embedding_manager()):
+        return Finding(READY, i.EMBEDDINGS_READY)
+    return Finding(NEEDS_SETUP, i.EMBEDDINGS_NONE, fix=i.ADD_KEY)
+
+
 ITEMS = (
     Item(i.CORE, (i.FOR_BRIEF, i.FOR_VOICE, i.FOR_PUSH, i.FOR_CHECK_IN), core),
     Item(i.MODEL_ROUTE, (i.FOR_BRIEF, i.FOR_CHECK_IN), model_route),
     Item(i.WEB_SEARCH, (i.FOR_VOICE,), web_search),
     Item(i.PUSH, (i.FOR_PUSH,), push),
+    Item(i.EMBEDDINGS, (i.FOR_CHECK_IN,), embeddings),
 )

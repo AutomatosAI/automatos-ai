@@ -15,6 +15,8 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from core.llm.embedding_status import NO_EMBEDDING_PROVIDER
+
 READY = "ready"
 NOT_CHECKED = "not_checked"
 NEEDS_SETUP = "needs_setup"
@@ -25,6 +27,7 @@ CORE = "core"
 MODEL_ROUTE = "model_route"
 WEB_SEARCH = "web_search"
 PUSH = "push"
+EMBEDDINGS = "embeddings"  # memory and knowledge search (7 Nov 2026)
 
 # What an item is needed by.
 FOR_BRIEF = "brief"
@@ -47,6 +50,8 @@ SEARCH_OFF = "search_off"
 PUSH_READY = "push_ready"
 PUSH_UNANSWERED = "push_unanswered"
 PUSH_DECLINED = "push_declined"
+EMBEDDINGS_READY = "embeddings_ready"
+EMBEDDINGS_NONE = NO_EMBEDDING_PROVIDER  # the reason code the memory tile and Auto's tools use too
 NOT_ANSWERED = "not_answered"
 UNREADABLE = "unreadable"
 

@@ -25,12 +25,30 @@ import logging
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from core.llm.embedding_status import MEMORY_OFF, store_cannot_embed
 from modules.context.earlier_conversations import labels_the_bundle  # P256-FIX-N13-5 (F412)
 from modules.context.remembered_figures import labels_what_is_remembered  # F316 (night 9b)
 from modules.context.sections.base import BaseSection, SectionContext
 from services.contested_facts import RULES_OUTRANK_DOCUMENTS  # P256-FIX-N13-3 (F410)
 
 logger = logging.getLogger(__name__)
+
+MEMORY_OFF_HEADING = "## Memory Is Off"
+
+
+async def memory_off_note() -> str:
+    """The Memory Is Off block when the memory store has no embedding provider, else ''.
+
+    7 Nov 2026: with no embedding key nothing was ever stored, recall found nothing, and Auto told
+    its owner "my memory is empty". Now its context says memory is off on this install, and why."""
+    try:
+        from modules.memory.unified_memory_service import get_unified_memory_service
+
+        store = getattr(get_unified_memory_service(), "_durable", None)
+    except Exception:  # noqa: BLE001 — logged; the turn goes on without the note
+        logger.exception("MemorySection: the memory service did not start; no memory-off note")
+        return ""
+    return f"{MEMORY_OFF_HEADING}\n{MEMORY_OFF}" if await store_cannot_embed(store) else ""
 
 
 class MemorySection(BaseSection):
@@ -58,9 +76,23 @@ class MemorySection(BaseSection):
         from config import config
         self.max_tokens = config.MEMORY_SECTION_MAX_TOKENS
 
-    @labels_what_is_remembered  # F316 (night 9b): a remembered figure is never today's
     async def render(self, ctx: SectionContext) -> str:
-        """Return formatted memory + daily-log block for the system prompt."""
+        """Return the formatted memory + daily-log block for the system prompt, then, on a chat
+        turn that asked memory something (never a widget's), the Memory Is Off block when the
+        store has no embedding provider (7 Nov 2026), outside the remembered-figure rule."""
+        recalled = await self._recalled(ctx)
+        if ctx.kwargs.get("skip_memory") or not self._asks_memory(ctx):
+            return recalled
+        return "\n\n".join(part for part in (recalled, await memory_off_note()) if part)
+
+    def _asks_memory(self, ctx: SectionContext) -> bool:
+        """A chat turn (not a widget's, not autonomous work) with something to recall by."""
+        chat_turn = not (ctx.widget_mode or self._autonomous(ctx))
+        return chat_turn and bool(ctx.kwargs.get("query") or self._extract_query(ctx))
+
+    @labels_what_is_remembered  # F316 (night 9b): a remembered figure is never today's
+    async def _recalled(self, ctx: SectionContext) -> str:
+        """The recalled memory + daily-log block; '' on any failure."""
         try:
             # Skip memory if the caller explicitly opted out
             if ctx.kwargs.get("skip_memory"):

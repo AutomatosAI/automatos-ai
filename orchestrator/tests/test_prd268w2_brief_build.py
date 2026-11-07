@@ -247,7 +247,8 @@ def schedule(monkeypatch):
 @pytest.fixture
 def checks(monkeypatch):
     """Hold a readiness check per workspace: ``hold(ws)`` the default (Auto's model needs setting
-    up; web search, needed by voice only, too; push, needed by push only, unanswered), or
+    up; web search, needed by voice only, too; push, needed by push only, unanswered; embeddings,
+    needed by check-ins only, off), or
     ``hold(ws, ready=True)`` with every item ready."""
     from services.readiness import items as i
     from services.readiness import service
@@ -258,7 +259,9 @@ def checks(monkeypatch):
     default = {i.CORE: i.Finding(i.READY, i.CORE_READY),
                i.MODEL_ROUTE: i.Finding(i.NEEDS_SETUP, i.MODEL_UNSET, fix=i.CHOOSE_MODEL),
                i.WEB_SEARCH: i.Finding(i.NEEDS_SETUP, i.SEARCH_NONE, fix=i.ADD_KEY),
-               i.PUSH: i.Finding(i.NOT_CHECKED, i.NOT_ANSWERED)}
+               i.PUSH: i.Finding(i.NOT_CHECKED, i.NOT_ANSWERED),
+               # needed by check-ins only, so never a brief row
+               i.EMBEDDINGS: i.Finding(i.NEEDS_SETUP, i.EMBEDDINGS_NONE, fix=i.ADD_KEY)}
 
     def hold(ws, ready=False):
         findings = {item.id: i.Finding(i.READY, i.CORE_READY) if ready else default[item.id] for item in ITEMS}

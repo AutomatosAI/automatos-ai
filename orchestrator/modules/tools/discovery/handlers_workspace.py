@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
+from modules.tools.discovery.memory_off import NOT_SAVED, memory_is_off, memory_off_answer, off_when_nothing_is_found
 from modules.tools.discovery.memory_owner import owned_by_the_driver
 from modules.tools.discovery.memory_source import defaults_the_source_type
 from modules.tools.discovery.memory_write import memory_metadata, memory_params_refusal, owner_turns, rule_answer
@@ -63,6 +64,7 @@ async def get_workspace_info(db: Session, workspace_id: UUID, params: Dict[str, 
     }
 
 
+@off_when_nothing_is_found("total_memories")  # no embedding provider: memory is off, not empty
 async def get_memory_stats(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Get memory stats from Mem0 -- global + per-agent memories."""
     from modules.memory.unified_memory_service import get_unified_memory_service
@@ -209,6 +211,8 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         )
 
         if result.get("error"):
+            if await memory_is_off(service):  # no embedding provider: say memory is off, not a raw error
+                return memory_off_answer(NOT_SAVED)
             # F103: the model must not tell the owner "noted" over a lost write.
             return {"success": False, "error": f"Memory NOT saved — {result['error']}. Tell the owner it was not stored."}
 

@@ -82,17 +82,22 @@ def test_no_embeddings_key_is_unavailable_and_says_to_add_one(monkeypatch):
     assert body["health_status"] == "unavailable"
     assert body["reason"] == health.NO_EMBEDDINGS
     assert "Settings → API Keys" in body["reason"] and "embeddings key" in body["reason"]
+    # 7 Nov 2026: it says what is off, and names it with the reason code readiness uses too.
+    assert body["reason"].startswith("Memory and knowledge search are off: no embedding provider.")
+    assert body["reason_code"] == "no_embedding_provider"
     assert body["search_effectiveness"] == {"total_searches": 0, "hits": 0, "hit_rate": 0}
 
 
 def test_memory_off_says_the_store_is_not_configured(monkeypatch):
     body = _health(monkeypatch, None, qdrant_url="")
-    assert (body["health_status"], body["reason"]) == ("unavailable", health.NO_STORE)
+    assert (body["health_status"], body["reason"], body["reason_code"]) == ("unavailable", health.NO_STORE,
+                                                                          "no_memory_store")
 
 
 def test_a_store_that_does_not_answer_says_so(monkeypatch):
     body = _health(monkeypatch, _service(ready=True), listing_fails=True)
-    assert (body["health_status"], body["reason"]) == ("unavailable", health.STORE_DOWN)
+    assert (body["health_status"], body["reason"], body["reason_code"]) == ("unavailable", health.STORE_DOWN,
+                                                                          "memory_store_down")
     assert body["mem0_available"] is False
 
 
@@ -100,6 +105,7 @@ def test_a_working_store_has_no_reason(monkeypatch):
     assert _health(monkeypatch, _service(ready=True))["health_status"] == "degraded"
     body = _health(monkeypatch, _service(ready=True), items=[_MEMORY])
     assert (body["health_status"], body["reason"], body["total_memories"]) == ("healthy", None, 1)
+    assert body["reason_code"] is None
 
 
 # --------------------------------------------------------------------------- the store's own embedder

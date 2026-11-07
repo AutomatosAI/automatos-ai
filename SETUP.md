@@ -201,6 +201,21 @@ To make the agents think, the person adds **one model key** in
 - **NVIDIA** (build.nvidia.com): hosted open models at no charge under NVIDIA's
   trial terms; then *Marketplace → LLMs → NVIDIA*, sync, add a model.
 
+**Memory and knowledge search need an embedding provider key too: OpenRouter by
+default.** Auto's memory, document search and tool ranking turn text into vectors
+through the embedding provider in *Settings → System Settings → Embeddings*
+(OpenRouter unless changed). An Anthropic, DeepSeek or NVIDIA key alone runs the
+agents but not embeddings: without an OpenRouter key (or the key of whichever
+embedding provider is set) memory and knowledge search are **off**, nothing is
+remembered, and uploads end `failed`. Add the OpenRouter key in **Settings → API
+Keys**, then restart the backend (`docker compose restart backend`) so memory
+picks it up.
+
+*Check:* **Settings → Orchestrator → What Auto depends on** shows *Memory and
+knowledge search: ready*. While no embedding key is found it shows *needs setup*:
+"Memory and knowledge search are off: no embedding provider", and Auto says
+memory is off on this install rather than that it is empty.
+
 Then try the seeded **Two-minute brief** Playbook.
 
 ---
