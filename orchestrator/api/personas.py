@@ -26,6 +26,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_agent import workspace_agent_or_404
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
+from services.orchestrator_auto_agent import mark_soul_custom
 
 logger = logging.getLogger(__name__)
 
@@ -455,6 +456,8 @@ def set_agent_persona(
         agent.persona_id = body.persona_id
         agent.custom_persona_prompt = body.custom_prompt
         agent.use_custom_persona = body.use_custom
+        if body.use_custom:
+            mark_soul_custom(agent)  # Auto's own row: Settings shows the soul the chat speaks with
 
         db.commit()
         db.refresh(agent)

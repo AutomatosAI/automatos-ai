@@ -365,7 +365,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # it — marketplace_cloud_items, a new table only; the guard follows it.
     cloud_bundles = (versions / "prd270_w2_cloud_bundles.py").read_text()
     assert 'down_revision = "prd270_w1_cloud_sync"' in cloud_bundles
-    assert 'EXPECTED_HEAD = "prd270_w2_cloud_bundles"' in guard
+    # 2026-11-07 (Auto's soul, one source): auto_soul_one_source_20261107 chains onto it — a
+    # data migration only (the settings soul onto the Auto row); the guard follows it.
+    one_soul = (versions / "auto_soul_one_source_20261107.py").read_text()
+    assert 'down_revision = "prd270_w2_cloud_bundles"' in one_soul
+    assert 'EXPECTED_HEAD = "auto_soul_one_source_20261107"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

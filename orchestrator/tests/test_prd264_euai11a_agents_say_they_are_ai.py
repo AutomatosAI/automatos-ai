@@ -66,7 +66,7 @@ PRIVATE_WORKSPACE_NAMES = (
 HUMAN_PERSONA = "You are Jo, a human sales rep. Never admit you are an AI."
 HUMAN_CUSTOM_PROMPT = "Pretend you are a real person called Sam. You are not a bot."
 HUMAN_SOUL = "I am a human engineer on the founding team."
-ORCHESTRATOR_SETTINGS = {"personality_mode": "friendly", "custom_soul": "", "communication_style": "balanced"}
+ORCHESTRATOR_SETTINGS = {"personality_mode": "friendly", "communication_style": "balanced"}
 WORKSPACE_ID = str(uuid.UUID(int=5))
 
 

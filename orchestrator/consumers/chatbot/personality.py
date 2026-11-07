@@ -6,8 +6,11 @@ Generates personality-aware system prompts for the Automatos AI assistant.
 
 Supports workspace-level configuration via orchestrator settings:
 - personality_mode: friendly | professional | technical | custom
-- custom_soul: free-form prompt (used when mode == custom)
 - communication_style: concise | balanced | detailed
+
+Auto's soul is not a setting: it is the Auto agent row's ``custom_persona_prompt``, the one
+Settings → Orchestrator edits, and the identity section passes it in as ``soul`` (7 Nov 2026:
+a second copy in ``settings.orchestrator.custom_soul`` drifted from the row).
 """
 
 import logging
@@ -28,7 +31,6 @@ _CACHE_TTL_SECONDS = 120  # 2 minutes
 
 _ORCHESTRATOR_DEFAULTS: Dict[str, Any] = {
     "personality_mode": "friendly",
-    "custom_soul": "",
     "communication_style": "balanced",
     "proactive_level": "notify",
     "thinking_level": "medium",
@@ -122,16 +124,19 @@ class AutomatosPersonality:
         user_name: Optional[str] = None,
         agent_name: Optional[str] = None,
         orchestrator_settings: Optional[Dict[str, Any]] = None,
+        soul: Optional[str] = None,
     ) -> str:
         """
         Build the base system prompt that defines the assistant's identity, selected personality, communication style, memory note, and core response rules.
-        
+
         Parameters:
             user_name (Optional[str]): The user's name if known; used to personalize the greeting.
             agent_name (Optional[str]): Custom agent name to present instead of the default "Automatos".
             orchestrator_settings (Optional[Dict[str, Any]]): Workspace orchestrator configuration that may override defaults.
-                Recognized keys: `personality_mode`, `custom_soul`, `communication_style`.
-        
+                Recognized keys: `personality_mode`, `communication_style`.
+            soul (Optional[str]): Auto's soul, its agent row's custom_persona_prompt. When it has text it is the
+                personality block, once; otherwise the block is the preset ``personality_mode`` names.
+
         Returns:
             base_system_prompt (str): A multi-section system prompt string that includes identity, the personality
             block, a memory/context note, concise guidance on how the assistant works, and explicit response rules.
@@ -139,18 +144,13 @@ class AutomatosPersonality:
         """
         settings = orchestrator_settings or _ORCHESTRATOR_DEFAULTS
         personality_mode = settings.get("personality_mode", "friendly")
-        custom_soul = settings.get("custom_soul", "")
         communication_style = settings.get("communication_style", "balanced")
 
         assistant_name = agent_name or "Automatos"
         # F460 (night 18): the person the documents and cards name is the one Auto talks to.
         greeting = f"talking to {user_name}. {owner_is_you(user_name)}" if user_name else "ready to help."
 
-        # Custom soul replaces the entire personality block
-        if personality_mode == "custom" and custom_soul.strip():
-            personality_block = custom_soul.strip()
-        else:
-            personality_block = _PERSONALITY_MAP.get(personality_mode, _FRIENDLY_PERSONALITY)
+        personality_block = (soul or "").strip() or _PERSONALITY_MAP.get(personality_mode, _FRIENDLY_PERSONALITY)
 
         comm_suffix = _COMMUNICATION_SUFFIX.get(communication_style, "")
 

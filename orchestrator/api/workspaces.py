@@ -572,7 +572,7 @@ _VALID_NOTIFICATION_CHANNELS = {"in_app", "webhook", "telegram", "slack"}
 
 _ORCHESTRATOR_DEFAULTS = {
     "personality_mode": "friendly",
-    "custom_soul": "",
+    "custom_soul": "",  # the Auto row's soul (_resolve_persona_view), never a stored setting
     "communication_style": "balanced",
     "proactive_level": "notify",
     "thinking_level": "medium",
@@ -597,10 +597,10 @@ _ORCHESTRATOR_VOCABULARIES = {
     "proactive_level": _VALID_PROACTIVE_LEVELS,
     "thinking_level": _VALID_THINKING_LEVELS,
 }
-# The top-level fields a save writes to workspace.settings.orchestrator.
+# The top-level fields a save writes to workspace.settings.orchestrator. Never custom_soul: the
+# soul is the Auto row's custom_persona_prompt only (7 Nov 2026, alembic auto_soul_one_source_20261107).
 _ORCHESTRATOR_FIELDS = (
-    "personality_mode", "custom_soul", "communication_style", "proactive_level", "thinking_level",
-    "preferred_channel",
+    "personality_mode", "communication_style", "proactive_level", "thinking_level", "preferred_channel",
 )
 
 # Personality preset base voices — the doctrine-FREE tone strings; legacy GET
@@ -700,14 +700,10 @@ def get_orchestrator_settings(
         auto_agent = _get_or_seed_auto_agent(db, ctx.workspace_id)
         if auto_agent:
             result["llm"] = auto_llm_view(auto_agent.model_config or {})
-            # Persona / Soul — read from Auto agent configuration. Single-source
-            # read-side detection (P226-RVW-5): a stored personality_mode wins;
-            # only rows without one fall through to legacy preset-by-text match
-            # against the doctrine-FREE base voices. Empty dict = keep defaults.
+            # Persona / Soul — the Auto row's, the chat's one source (P226-RVW-5: a stored
+            # personality_mode wins; empty dict = keep defaults).
             agent_cfg = auto_agent.configuration or {}
-            result.update(
-                _resolve_persona_view(agent_cfg.get("personality_mode"), auto_agent.custom_persona_prompt)
-            )
+            result.update(_resolve_persona_view(agent_cfg.get("personality_mode"), auto_agent.custom_persona_prompt))
 
             # Configuration (thinking, proactive, communication style)
             result.update({key: agent_cfg[key] for key in AUTO_CONFIG_FIELDS if agent_cfg.get(key)})
@@ -798,8 +794,8 @@ def save_orchestrator_settings(
 
     logger.info("Updated orchestrator settings for workspace %s", workspace.id)
 
-    # Return merged result with defaults, and the LLM from the Auto agent
-    return {"status": "saved", "orchestrator": {**_orchestrator_view(settings), **_saved_llm(db, ctx.workspace_id)}}
+    # Return merged result with defaults, and the soul and LLM from the Auto agent
+    return {"status": "saved", "orchestrator": {**_orchestrator_view(settings), **_saved_auto(db, ctx.workspace_id)}}
 
 
 def _orchestrator_view(settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -814,15 +810,16 @@ def _orchestrator_view(settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def _saved_llm(db: Session, workspace_id) -> Dict[str, Any]:
-    """``{"llm": ...}`` for the PUT response, from the Auto agent's model_config;
-    {} when it has none or cannot be read (the save itself has already committed)."""
+def _saved_auto(db: Session, workspace_id) -> Dict[str, Any]:
+    """The Auto agent's side of the PUT response: its soul and mode, and ``llm`` from its
+    model_config when it has one; {} when it cannot be read (the save has already committed)."""
     try:
         auto_agent = _get_or_seed_auto_agent(db, workspace_id)
-        if auto_agent and auto_agent.model_config:
-            return {"llm": auto_llm_view(auto_agent.model_config)}
+        mode = (auto_agent.configuration or {}).get("personality_mode")
+        llm = {"llm": auto_llm_view(auto_agent.model_config)} if auto_agent.model_config else {}
+        return {**_resolve_persona_view(mode, auto_agent.custom_persona_prompt), **llm}
     except Exception:
-        logger.exception("Failed to read the Auto agent's LLM config for workspace %s", workspace_id)
+        logger.exception("Failed to read the Auto agent's soul and LLM config for workspace %s", workspace_id)
     return {}
 
 

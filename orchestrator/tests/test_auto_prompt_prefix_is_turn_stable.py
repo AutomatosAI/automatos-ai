@@ -9,7 +9,7 @@ import inspect
 
 from consumers.chatbot.personality import AutomatosPersonality
 
-SETTINGS = {"personality_mode": "friendly", "custom_soul": "", "communication_style": "balanced"}
+SETTINGS = {"personality_mode": "friendly", "communication_style": "balanced"}
 
 
 def test_the_base_prompt_takes_nothing_that_moves_per_turn():

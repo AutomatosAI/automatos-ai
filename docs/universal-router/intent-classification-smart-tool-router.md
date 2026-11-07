@@ -187,20 +187,20 @@ Sources: [orchestrator/consumers/chatbot/intent_classifier.py:23-46](), [orchest
 
 ## 3. Personality Layer (`AutomatosPersonality`)
 
-`AutomatosPersonality` builds a system prompt with an assistant identity, a selected personality block, communication-style guidance, and memory/context instructions. Workspace orchestrator settings include `personality_mode`, `custom_soul`, `communication_style`, `proactive_level`, and `thinking_level`. [orchestrator/consumers/chatbot/personality.py:1-11](), [orchestrator/consumers/chatbot/personality.py:29-36](), [orchestrator/consumers/chatbot/personality.py:113-138]()
+`AutomatosPersonality` builds a system prompt with an assistant identity, a selected personality block, communication-style guidance, and memory/context instructions. Workspace orchestrator settings include `personality_mode`, `communication_style`, `proactive_level`, and `thinking_level`; Auto's soul is its agent row's `custom_persona_prompt`, not a setting. [orchestrator/consumers/chatbot/personality.py:1-11](), [orchestrator/consumers/chatbot/personality.py:29-36](), [orchestrator/consumers/chatbot/personality.py:113-138]()
 
 ### Workspace Settings and Prompt Assembly
 
 `load_orchestrator_settings(workspace_id)` starts from `_ORCHESTRATOR_DEFAULTS`, checks a per-workspace cache with a 120-second TTL, and loads the workspace’s `settings["orchestrator"]` values when needed. The source states that defaults are returned if no orchestrator configuration is present and that only successful database loads are cached. [orchestrator/consumers/chatbot/personality.py:22-35](), [orchestrator/consumers/chatbot/personality.py:38-70]()
 
-`AutomatosPersonality.get_base_system_prompt()` accepts an optional user name, agent name, and settings dictionary. It uses the supplied agent name or `"Automatos"`, selects a custom soul when `personality_mode` is `"custom"` and the soul is non-empty, otherwise chooses a preset with a friendly fallback, and appends the communication-style suffix. [orchestrator/consumers/chatbot/personality.py:113-155]()
+`AutomatosPersonality.get_base_system_prompt()` accepts an optional user name, agent name, and settings dictionary. It uses the supplied agent name or `"Automatos"`, uses the `soul` it is given (Auto's row's persona, passed by the identity section) as the personality block when it has text, otherwise chooses the preset `personality_mode` names with a friendly fallback, and appends the communication-style suffix. [orchestrator/consumers/chatbot/personality.py:113-155]()
 
 | Setting or mode | Prompt behavior |
 |---|---|
 | `friendly` | Uses a warm, approachable personality block that favors action when asked to do something. [orchestrator/consumers/chatbot/personality.py:77-84]() |
 | `professional` | Uses a polished, structured, enterprise-appropriate block that flags risks and dependencies. [orchestrator/consumers/chatbot/personality.py:85-92]() |
 | `technical` | Uses a precise, developer-focused block that leads with code, data, and specifics. [orchestrator/consumers/chatbot/personality.py:93-99]() |
-| `custom` | Uses the trimmed `custom_soul` text when it is non-empty. [orchestrator/consumers/chatbot/personality.py:149-153]() |
+| `custom` | Auto's soul is the trimmed text on its agent row; for Auto the row's persona is the personality block in every mode, said once. [orchestrator/modules/context/sections/identity.py]() |
 | `concise` | Adds an instruction to keep responses short and direct. [orchestrator/consumers/chatbot/personality.py:105-110]() |
 | `balanced` | Adds no communication-style suffix. [orchestrator/consumers/chatbot/personality.py:105-110]() |
 | `detailed` | Adds an instruction to provide thorough explanations with examples and context. [orchestrator/consumers/chatbot/personality.py:105-110]() |

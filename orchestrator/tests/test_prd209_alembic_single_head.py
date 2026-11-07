@@ -151,7 +151,10 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-10-31 (PRD-270 W2 Cloud bundles, US-270-11a): prd270_w2_cloud_bundles chains onto
 # prd270_w1_cloud_sync — marketplace_cloud_items (a new table only): which local marketplace
 # rows a Sync with Automatos Cloud wrote.
-EXPECTED_HEAD = "prd270_w2_cloud_bundles"
+# 2026-11-07 (Auto's soul, one source): auto_soul_one_source_20261107 chains onto
+# prd270_w2_cloud_bundles — a data migration only: a workspace's custom settings soul moves onto
+# its Auto agent row and settings.orchestrator.custom_soul goes; no table changes.
+EXPECTED_HEAD = "auto_soul_one_source_20261107"
 
 
 def _literal(node: ast.AST):
