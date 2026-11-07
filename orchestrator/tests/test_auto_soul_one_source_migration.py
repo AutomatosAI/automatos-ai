@@ -39,8 +39,8 @@ mig = _migration()
 
 # ── the pure rules ──────────────────────────────────────────────────────────
 
-def test_the_migration_chains_onto_the_cloud_bundles_head():
-    assert (mig.revision, mig.down_revision) == ("auto_soul_one_source_20261107", "prd270_w2_cloud_bundles")
+def test_the_migration_chains_onto_the_workspace_move_jobs_head():
+    assert (mig.revision, mig.down_revision) == ("auto_soul_one_source_20261107", "prd273_w1_workspace_move_jobs")
 
 
 @pytest.mark.parametrize("orchestrator, soul", [
