@@ -118,6 +118,7 @@ from .credits import CreditBalance, CreditLedgerEntry  # noqa: F401  # PRD-265: 
 from .billing import BillingAccount, BillingEvent  # noqa: F401  # PRD-265 W2: subscriptions + provider events
 from .proactive import ProactiveCalibration, ProactivePersonSettings, ProactiveRun, ProactiveSuggestion  # noqa: F401  # PRD-268 W1: suggestions, runs, person settings; W3: calibrations
 from .marketplace_cloud import CLOUD_ITEM_TYPES, MARKETPLACE_CLOUD_SYNC_ROW_ID, MarketplaceCloudItem, MarketplaceCloudSync  # noqa: F401  # PRD-270: the Sync's status row (W1), the rows it wrote (W2)
+from .workspace_move import WorkspaceMoveJob  # noqa: F401  # PRD-273: a workspace's export (and import) jobs
 
 # PRD-38.4: SDK API Keys (safe — standalone table, no FK deps on workspaces)
 try:

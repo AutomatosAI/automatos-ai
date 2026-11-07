@@ -1,5 +1,5 @@
 {
-  "route_count": 1016,
+  "route_count": 1019,
   "routes": [
     {
       "method": "GET",
@@ -3816,6 +3816,18 @@
     {
       "method": "GET",
       "path": "/api/workflows/{workflow_id}/status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace-move/export"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace-move/export/{job_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace-move/export/{job_id}/file"
     },
     {
       "method": "GET",

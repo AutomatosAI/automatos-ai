@@ -39,17 +39,23 @@ from types import MappingProxyType
 from typing import Any, Dict, List, Mapping, Optional
 from uuid import UUID
 
-from core.models.mobile_devices import SECRET_COLUMNS as MOBILE_DEVICE_SECRET_COLUMNS
+from services.workspace_move.rows import redacted as without_redacted_keys
+from services.workspace_move.rules import looks_secret
+from services.workspace_move.table_map import SECRET_TABLES, TABLE_RULES
 
 logger = logging.getLogger(__name__)
 
-EXPORT_FORMAT = "automatos.gdpr.export/v1"
+# PRD-273 US-273-04: v2 leaves out the secret tables and columns and carries the workspace's
+# allow-listed settings (the brand kit, the Orchestrator block, voice and push).
+EXPORT_FORMAT = "automatos.gdpr.export/v2"
 
-# PRD-266 K16: columns an export never carries, by table — secrets the server keeps for itself.
-# A phone's hashes and push key (W1's SECRET_COLUMNS) and its Expo token (anyone holding it can
-# push to that phone). A later table adds a line here.
+# PRD-266 K16, PRD-273 §5.6: columns an export never carries, by table — secrets the server keeps
+# for itself, named once in PRD-273's table map (``services/workspace_move/table_map.py``): a
+# phone's hashes, push key and Expo token (anyone holding it can push to that phone), a paired
+# machine's hashes, an invitation's token, a site's secrets, a credential link. A column whose
+# name looks like a secret (``rules.SECRET_COLUMN_NAME``) is left out too, named or not.
 EXPORT_REDACTED_COLUMNS: Mapping[str, tuple[str, ...]] = MappingProxyType({
-    "mobile_devices": (*MOBILE_DEVICE_SECRET_COLUMNS, "expo_push_token"),
+    table: rule.secret_columns for table, rule in TABLE_RULES.items() if rule.secret_columns
 })
 
 
@@ -78,13 +84,18 @@ def _run_async(coro) -> Any:
 # ---------------------------------------------------------------------------
 
 def _exported_row(table: str, row: Mapping[str, Any]) -> dict:
-    """One row as the export carries it: without the columns ``EXPORT_REDACTED_COLUMNS`` names for its table."""
+    """One row as the export carries it: without the columns ``EXPORT_REDACTED_COLUMNS`` names for
+    its table, nor any whose name looks like a secret, nor a secret-looking key inside a JSON value,
+    nor the JSON keys its rule removes (a Playbook trigger's webhook id and secret)."""
     redacted = EXPORT_REDACTED_COLUMNS.get(table, ())
-    return {column: value for column, value in row.items() if column not in redacted}
+    kept = {column: value for column, value in row.items() if column not in redacted and not looks_secret(column)}
+    return without_redacted_keys(kept, TABLE_RULES.get(table))
 
 
 def _export_sql_tables(db: Any, workspace_id: UUID | str) -> Dict[str, List[dict]]:
-    """Read every ``workspace_id``-scoped SQL table into plain rows (portable)."""
+    """Read every ``workspace_id``-scoped SQL table into plain rows (portable), less the tables that
+    hold nothing but secrets and connections (PRD-273 §5.6: credentials, API keys, channel and
+    Composio connections)."""
     from sqlalchemy import text
     from services.workspace_purge import _discover_scoped_tables
 
@@ -94,7 +105,7 @@ def _export_sql_tables(db: Any, workspace_id: UUID | str) -> Dict[str, List[dict
     except Exception:
         logger.warning("[gdpr] scoped-table discovery failed", exc_info=True)
         return out
-    for tbl in tables:
+    for tbl in (table for table in tables if table not in SECRET_TABLES):
         try:
             rows = db.execute(
                 text(f'SELECT * FROM "{tbl}" WHERE workspace_id::text = :ws'),
@@ -104,6 +115,17 @@ def _export_sql_tables(db: Any, workspace_id: UUID | str) -> Dict[str, List[dict
         except Exception:
             logger.warning("[gdpr] export read failed for table %s", tbl, exc_info=True)
     return out
+
+
+def _export_workspace_settings(db: Any, workspace_id: UUID | str) -> Optional[dict]:
+    """PRD-273 US-273-04: the workspace's name and allow-listed settings, as a move's
+    ``workspace.json`` carries them; None when the workspace is gone."""
+    from services.workspace_move.auto_part import WorkspaceGone, workspace_document
+
+    try:
+        return workspace_document(db, workspace_id)
+    except WorkspaceGone:
+        return None
 
 
 def _export_field_memory(workspace_id: UUID | str, subject_id: Optional[str] = None) -> List[dict]:
@@ -228,6 +250,7 @@ def export_workspace(db: Any, workspace_id: UUID | str, *, requested_by: str = "
         "workspace_id": str(workspace_id),
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "requested_by": requested_by,
+        "workspace": _export_workspace_settings(db, workspace_id),
         "sql": _export_sql_tables(db, workspace_id),
         "derived": {
             "field_memory": _export_field_memory(workspace_id),

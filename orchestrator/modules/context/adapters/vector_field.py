@@ -23,7 +23,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, AsyncIterator, Optional
 
 from config import config
 from core.llm.embedding_manager import EmbeddingManager
@@ -48,6 +48,10 @@ logger = logging.getLogger(__name__)
 # Single shared collection for all field memory. Per-mission isolation
 # is enforced via the ``field_id`` payload filter.
 SHARED_COLLECTION = "field_memory"
+# Points per scroll request, and the payload keys a GDPR export carries (key, value, strength,
+# provenance; never the vector).
+SCROLL_PAGE = 256
+EXPORT_KEYS = ("key", "value", "strength", "agent_id", "mission_id", "task_id", "created_at")
 
 
 @dataclass(frozen=True)
@@ -268,36 +272,31 @@ class VectorFieldSharedContext(SharedContextPort):
     async def export_workspace(self, workspace_id: str, limit: int = 10000) -> list[dict[str, Any]]:
         """GDPR export — return every field-memory pattern for a workspace as
         plain dicts (key/value/strength/provenance), portable JSON."""
-        await self.ensure_shared_collection()
         out: list[dict[str, Any]] = []
+        async for page in self.scroll_workspace(str(workspace_id), page_size=min(SCROLL_PAGE, limit)):
+            out.extend({key: pl.get(key) for key in EXPORT_KEYS} for pl in page)
+            if len(out) >= limit:
+                break
+        return out[:limit]
+
+    async def scroll_workspace(self, workspace_id: str, page_size: int = SCROLL_PAGE) -> AsyncIterator[list[dict[str, Any]]]:
+        """Every field-memory pattern of a workspace, a page of payloads at a time, without vectors
+        and without a cap (PRD-273's workspace export streams them all)."""
+        await self.ensure_shared_collection()
         next_offset: Any = None
-        scanned = 0
-        while scanned < limit:
+        while True:
             points, next_offset = await self._client.scroll(
                 collection_name=SHARED_COLLECTION,
                 scroll_filter=self._workspace_filter(str(workspace_id)),
-                limit=min(256, limit - scanned),
+                limit=page_size,
                 offset=next_offset,
                 with_payload=True,
                 with_vectors=False,
             )
-            if not points:
-                break
-            for p in points:
-                pl = p.payload or {}
-                out.append({
-                    "key": pl.get("key"),
-                    "value": pl.get("value"),
-                    "strength": pl.get("strength"),
-                    "agent_id": pl.get("agent_id"),
-                    "mission_id": pl.get("mission_id"),
-                    "task_id": pl.get("task_id"),
-                    "created_at": pl.get("created_at"),
-                })
-                scanned += 1
-            if next_offset is None:
-                break
-        return out
+            if points:
+                yield [p.payload or {} for p in points]
+            if not points or next_offset is None:
+                return
 
     async def _count_by_filter(self, flt) -> int:
         """Best-effort count of points matching a filter (for erasure reporting)."""

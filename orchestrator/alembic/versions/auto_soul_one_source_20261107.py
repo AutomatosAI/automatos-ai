@@ -33,7 +33,7 @@ The downgrade does nothing: the soul stays on the row, which is where it belongs
 the second copy would bring the drift back.
 
 Revision ID: auto_soul_one_source_20261107
-Revises: prd270_w2_cloud_bundles
+Revises: prd273_w1_workspace_move_jobs
 Create Date: 2026-11-07
 """
 from __future__ import annotations
@@ -46,7 +46,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "auto_soul_one_source_20261107"
-down_revision = "prd270_w2_cloud_bundles"
+down_revision = "prd273_w1_workspace_move_jobs"
 branch_labels = None
 depends_on = None
 

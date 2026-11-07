@@ -33,7 +33,8 @@ ACTIVE = "active"
 SHARED_PERSONA_SCOPE = "global"
 WORKSPACE_PERSONA_SCOPE = "workspace"
 
-_COLUMNS = (
+# The columns a bundle reads (public: PRD-273's workspace export reads the same).
+AGENT_BUNDLE_COLUMNS = (
     Agent.id, Agent.public_id, Agent.cloned_from_id, Agent.original_creator_id, Agent.slug, Agent.name,
     Agent.description, Agent.agent_type, Agent.tags, Agent.marketplace_category, Agent.marketplace_icon,
     Agent.version, Agent.custom_persona_prompt, Agent.use_custom_persona, Agent.persona_id, Agent.model_config,
@@ -61,26 +62,35 @@ def exported_agents(db: Session) -> List[ExportedItem]:
     if not lineages:
         return []
     rows = [lineage.newest for lineage in lineages]
-    ids = [row.id for row in rows]
-    parts = _Parts(
-        skills=_skills(db, ids), apps=_apps(db, ids), plugins=_plugins(db, ids),
-        personas=_shared_personas(db, (row.persona_id for row in rows)),
-    )
+    bodies = agent_bodies(db, rows)
     names = publisher_names(db, (row.original_creator_id for row in rows))
     items = (
         exported_item(ITEM_TYPE, lineage, envelope(
             ITEM_TYPE, lineage, publisher_name(names, lineage.newest.original_creator_id),
-            _body(lineage.newest, parts),
+            bodies[lineage.newest.id],
         ))
         for lineage in lineages
     )
     return [item for item in items if item is not None]
 
 
+def agent_bodies(db: Session, rows: Sequence[Any]) -> Dict[int, Dict[str, Any]]:
+    """The agent object of each row's bundle, by agent id: ``rows`` carry ``AGENT_BUNDLE_COLUMNS``. PRD-273's
+    workspace export bundles a workspace's own agents with it, as this export does Cloud's."""
+    if not rows:
+        return {}
+    ids = [row.id for row in rows]
+    parts = _Parts(
+        skills=_skills(db, ids), apps=_apps(db, ids), plugins=_plugins(db, ids),
+        personas=_shared_personas(db, (row.persona_id for row in rows)),
+    )
+    return {row.id: _body(row, parts) for row in rows}
+
+
 def _exportable_rows(db: Session) -> List[Any]:
     """K9's agents, newest first (the id breaks a tie), less the ones a local edition seeds."""
     rows = (
-        db.query(*_COLUMNS)
+        db.query(*AGENT_BUNDLE_COLUMNS)
         .filter(
             Agent.owner_type == MARKETPLACE_OWNER, Agent.is_approved.is_(True), Agent.status == ACTIVE,
             Agent.is_system_agent.isnot(True), Agent.required_role.is_(None),
@@ -167,4 +177,4 @@ def _shared_personas(db: Session, persona_ids: Iterable[Any]) -> Dict[Any, str]:
     return {row.id: row.slug for row in rows}
 
 
-__all__ = ["exported_agents"]
+__all__ = ["AGENT_BUNDLE_COLUMNS", "agent_bodies", "exported_agents"]

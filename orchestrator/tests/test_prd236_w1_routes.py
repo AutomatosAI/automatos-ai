@@ -365,10 +365,14 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # it — marketplace_cloud_items, a new table only; the guard follows it.
     cloud_bundles = (versions / "prd270_w2_cloud_bundles.py").read_text()
     assert 'down_revision = "prd270_w1_cloud_sync"' in cloud_bundles
-    # 2026-11-07 (Auto's soul, one source): auto_soul_one_source_20261107 chains onto it — a
+    # 2026-11-06 (PRD-273 W1 Move a workspace, export): prd273_w1_workspace_move_jobs chains onto
+    # it — workspace_move_jobs, a new table only.
+    move_jobs = (versions / "prd273_w1_workspace_move_jobs.py").read_text()
+    assert 'down_revision = "prd270_w2_cloud_bundles"' in move_jobs
+    # 2026-11-07 (Auto's soul, one source): auto_soul_one_source_20261107 chains onto that — a
     # data migration only (the settings soul onto the Auto row); the guard follows it.
     one_soul = (versions / "auto_soul_one_source_20261107.py").read_text()
-    assert 'down_revision = "prd270_w2_cloud_bundles"' in one_soul
+    assert 'down_revision = "prd273_w1_workspace_move_jobs"' in one_soul
     assert 'EXPECTED_HEAD = "auto_soul_one_source_20261107"' in guard
 
 

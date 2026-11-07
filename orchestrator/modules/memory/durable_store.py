@@ -26,7 +26,7 @@ import logging
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 from config import config
 from core.llm.embedding_manager import EmbeddingManager
@@ -50,6 +50,8 @@ from modules.memory.retired import leaves_out_retired, retired_metadata, unretir
 logger = logging.getLogger(__name__)
 
 # P256-FIX-N14-4: what ``delete_in_workspace`` found.
+# Points per scroll request.
+SCROLL_PAGE = 256
 DELETED = "deleted"
 NOT_FOUND = "not_found"
 NOT_THEIRS = "not_theirs"
@@ -539,26 +541,36 @@ class DurableMemoryStore:
 
     async def export_workspace(self, workspace_id: str, limit: int = 10000) -> List[Dict]:
         """GDPR export — every durable memory for a workspace, portable dicts."""
-        if not self._enabled:
-            return []
-        await self.ensure_collection()
         out: List[Dict] = []
+        async for page in self.scroll_workspace(workspace_id, page_size=min(SCROLL_PAGE, limit)):
+            out.extend(self._item_from_payload(point_id, payload) for point_id, payload in page)
+            if len(out) >= limit:
+                break
+        return out[:limit]
+
+    async def scroll_workspace(
+        self, workspace_id: str, page_size: int = SCROLL_PAGE,
+    ) -> AsyncIterator[List[Tuple[str, Dict]]]:
+        """Every durable memory of a workspace, a page of ``(point id, payload)`` at a time, without
+        vectors and without a cap (PRD-273's workspace export streams them all). Nothing when
+        durable memory is off in this edition."""
+        if not self._enabled:
+            return
+        await self.ensure_collection()
         next_offset: Any = None
-        while len(out) < limit:
+        while True:
             points, next_offset = await self._client.scroll(
                 collection_name=self._collection,
                 scroll_filter=self._workspace_filter(workspace_id),
-                limit=min(256, limit - len(out)),
+                limit=page_size,
                 offset=next_offset,
                 with_payload=True,
                 with_vectors=False,
             )
-            if not points:
-                break
-            out.extend(self._item_from_payload(p.id, p.payload) for p in points)
-            if next_offset is None:
-                break
-        return out
+            if points:
+                yield [(str(p.id), p.payload or {}) for p in points]
+            if not points or next_offset is None:
+                return
 
     async def _count_by_filter(self, flt: Filter) -> int:
         try:
