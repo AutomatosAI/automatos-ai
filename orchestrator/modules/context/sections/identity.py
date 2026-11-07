@@ -107,10 +107,7 @@ class IdentitySection(BaseSection):
         Auto's soul is its row's persona (7 Nov 2026): it is the base prompt's
         personality block, and is not appended again as a persona section.
         """
-        from consumers.chatbot.personality import (
-            AutomatosPersonality,
-            load_orchestrator_settings,
-        )
+        from consumers.chatbot.personality import AutomatosPersonality
         from services.orchestrator_auto_agent import is_workspace_auto
 
         agent_name = ctx.kwargs.get("agent_name")
@@ -118,14 +115,7 @@ class IdentitySection(BaseSection):
             agent_name = getattr(ctx.agent, "name", "Agent") if ctx.agent else "Agent"
 
         user_name = ctx.kwargs.get("_user_name") or ctx.kwargs.get("user_name")
-
-        orch_settings: Dict[str, Any] = ctx.kwargs.get("orchestrator_settings", {})
-        if not orch_settings:
-            try:
-                orch_settings = load_orchestrator_settings(ctx.workspace_id)
-            except Exception:
-                logger.debug("Could not load orchestrator settings for %s", ctx.workspace_id)
-                orch_settings = {}
+        orch_settings = self._orchestrator_settings(ctx)
 
         # F155: a widget turn is not told Auto's owner-facing platform skill (what
         # the owner can have built, installed and connected) or to learn into
@@ -173,6 +163,21 @@ class IdentitySection(BaseSection):
 
         # No max_tokens truncation — the full chatbot personality is essential
         return "\n".join(parts)
+
+    @staticmethod
+    def _orchestrator_settings(ctx: SectionContext) -> Dict[str, Any]:
+        """The turn's orchestrator settings (mode, communication style): the caller's, else the
+        workspace's (cached ``load_orchestrator_settings``), else {}."""
+        from consumers.chatbot.personality import load_orchestrator_settings
+
+        settings: Dict[str, Any] = ctx.kwargs.get("orchestrator_settings", {})
+        if settings:
+            return settings
+        try:
+            return load_orchestrator_settings(ctx.workspace_id)
+        except Exception:
+            logger.exception("Could not load orchestrator settings for %s; using the defaults", ctx.workspace_id)
+            return {}
 
     @staticmethod
     def _get_persona_text(agent: Any) -> str:
