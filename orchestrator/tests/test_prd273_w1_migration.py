@@ -1,6 +1,6 @@
 """PRD-273 W1 — prd273_w1_workspace_move_jobs: the workspace_move_jobs table.
 
-* The revision chains onto ``prd270_w2_cloud_bundles`` and is the one head.
+* The revision chains onto ``prd270_w2_cloud_bundles`` and sits under the one head.
 * Its upgrade is one CREATE TABLE IF NOT EXISTS and two CREATE INDEX IF NOT EXISTS, writing no
   row; its downgrade drops the table and nothing else.
 * The model (``core.models.workspace_move.WorkspaceMoveJob``) and the DDL declare the same
@@ -86,13 +86,20 @@ def _parents(down) -> list:
     return list(down) if isinstance(down, (list, tuple)) else [down] if down else []
 
 
-def test_the_revision_chains_onto_the_base_head_and_is_the_one_head():
+def test_the_revision_chains_onto_the_base_head_and_sits_under_the_one_head():
     constants = _constants()
     assert (constants["revision"], constants["down_revision"]) == (REVISION, BASE_HEAD)
     revisions = _revisions()
-    heads = set(revisions) - {parent for down in revisions.values() for parent in _parents(down)}
-    assert heads == {REVISION}
     assert [rev for rev, down in revisions.items() if BASE_HEAD in _parents(down)] == [REVISION]
+    heads = set(revisions) - {parent for down in revisions.values() for parent in _parents(down)}
+    assert len(heads) == 1
+    seen, todo = set(), list(heads)
+    while todo:
+        current = todo.pop()
+        if current not in seen:
+            seen.add(current)
+            todo.extend(_parents(revisions.get(current)))
+    assert REVISION in seen
 
 
 def test_the_upgrade_creates_one_table_and_two_indexes_and_the_downgrade_drops_it():
