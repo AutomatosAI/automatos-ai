@@ -92,6 +92,13 @@ def test_a_working_store_that_recalls_nothing_adds_no_block(memory):
     assert _render() == ""
 
 
+def test_a_switched_off_store_is_not_called_off_for_want_of_a_provider(memory):
+    """No QDRANT_URL: memory is off for another reason, which the tools already word."""
+    memory(ready=False)._durable.enabled = False
+
+    assert _render() == ""
+
+
 def test_a_widget_visitor_is_never_told(memory):
     memory(ready=False)
 

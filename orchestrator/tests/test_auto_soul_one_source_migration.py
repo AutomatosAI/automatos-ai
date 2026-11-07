@@ -3,8 +3,9 @@
 A workspace in ``custom`` mode whose ``settings.orchestrator.custom_soul`` differs from its Auto
 row (slug ``auto-<workspace_id>``, a system agent) gets that soul on the row, with
 ``use_custom_persona`` and ``personality_mode = 'custom'``. ``custom_soul`` then leaves every
-workspace that has an Auto row. When the two are equal, or the mode is not custom, the row is not
-written. A workspace with no Auto row is left as it is. A second run writes nothing.
+workspace that has an Auto row. When the row already speaks with that soul in custom mode, or the
+settings mode is not custom, the row is not written; the same text under a preset mode gets its
+mode fixed, so Settings shows it. A workspace with no Auto row is left as it is. A second run writes nothing.
 
 The pure rules are tested on their own; the upgrade runs against the real schema in
 ``db_session``'s transaction, rolled back after (rows other tests left are not asserted on).
@@ -55,11 +56,16 @@ def test_only_a_custom_modes_non_empty_soul_is_copied(orchestrator, soul):
     assert mig.soul_to_copy(orchestrator) == soul
 
 
-def test_a_row_speaks_with_the_soul_only_with_the_same_text_in_use():
-    assert mig.row_speaks_with(HEARD, f"  {HEARD}\n", True)
-    assert not mig.row_speaks_with(HEARD, SHOWN, True)
-    assert not mig.row_speaks_with(HEARD, HEARD, False)
-    assert not mig.row_speaks_with(HEARD, None, True)
+def test_a_row_speaks_with_the_soul_only_with_the_same_text_in_use_in_custom_mode():
+    custom = {"personality_mode": "custom"}
+    assert mig.row_speaks_with(HEARD, f"  {HEARD}\n", True, custom)
+    assert not mig.row_speaks_with(HEARD, SHOWN, True, custom)
+    assert not mig.row_speaks_with(HEARD, HEARD, False, custom)
+    assert not mig.row_speaks_with(HEARD, HEARD, None, custom)
+    assert not mig.row_speaks_with(HEARD, None, True, custom)
+    # The same text under a preset mode: Settings would show the preset, so the mode is written.
+    assert not mig.row_speaks_with(HEARD, HEARD, True, {"personality_mode": "friendly"})
+    assert not mig.row_speaks_with(HEARD, HEARD, True, None)
 
 
 def test_the_setting_is_removed_into_a_new_dict_and_every_other_key_kept():
@@ -102,13 +108,14 @@ def _auto(db, ws, prompt, *, use_custom=True, mode="custom", slug=None, system=T
 
 @pytest.fixture
 def world(db_session, seed_workspace, monkeypatch):
-    """Six workspaces: drifted, equal, preset mode, no Auto row, only a namesake row, no setting.
-    ``run()`` runs the upgrade on db_session's connection."""
+    """Seven workspaces: drifted, equal, equal text under a preset mode, preset mode, no Auto row,
+    only a namesake row, no setting. ``run()`` runs the upgrade on db_session's connection."""
     ws = {key: seed_workspace(name=f"soul-{key}") for key in
-          ("drifted", "equal", "preset", "no_auto", "namesake", "untouched")}
+          ("drifted", "equal", "same_text", "preset", "no_auto", "namesake", "untouched")}
     _set_settings(db_session, ws["drifted"], {"orchestrator": {"personality_mode": "custom", "custom_soul": HEARD,
                                                                "thinking_level": "high"}, "brand_kit": {"a": 1}})
     _set_settings(db_session, ws["equal"], {"orchestrator": {"personality_mode": "custom", "custom_soul": HEARD}})
+    _set_settings(db_session, ws["same_text"], {"orchestrator": {"personality_mode": "custom", "custom_soul": HEARD}})
     _set_settings(db_session, ws["preset"], {"orchestrator": {"personality_mode": "friendly", "custom_soul": HEARD}})
     _set_settings(db_session, ws["no_auto"], {"orchestrator": {"personality_mode": "custom", "custom_soul": HEARD}})
     _set_settings(db_session, ws["namesake"], {"orchestrator": {"personality_mode": "custom", "custom_soul": HEARD}})
@@ -116,6 +123,7 @@ def world(db_session, seed_workspace, monkeypatch):
     rows = {
         "drifted": _auto(db_session, ws["drifted"], SHOWN, mode="friendly"),
         "equal": _auto(db_session, ws["equal"], HEARD),
+        "same_text": _auto(db_session, ws["same_text"], HEARD, mode="friendly"),
         "preset": _auto(db_session, ws["preset"], SHOWN, mode="friendly"),
         "namesake": _auto(db_session, ws["namesake"], SHOWN, mode="friendly", system=False),
         "untouched": _auto(db_session, ws["untouched"], SHOWN),
@@ -136,9 +144,18 @@ def _row(db, agent_id):
     return agent.custom_persona_prompt, agent.use_custom_persona, (agent.configuration or {}).get("personality_mode")
 
 
+def _settings(db, ws):
+    return db.execute(text("SELECT settings FROM workspaces WHERE id = CAST(:id AS uuid)"), {"id": ws}).scalar() or {}
+
+
 def _orchestrator(db, ws):
-    settings = db.execute(text("SELECT settings FROM workspaces WHERE id = CAST(:id AS uuid)"), {"id": ws}).scalar()
-    return (settings or {}).get("orchestrator")
+    return _settings(db, ws).get("orchestrator")
+
+
+def _configuration(db, agent_id):
+    from core.models.core import Agent
+
+    return db.get(Agent, agent_id).configuration
 
 
 def test_a_drifted_soul_moves_onto_the_row_and_the_setting_goes(world):
@@ -147,7 +164,18 @@ def test_a_drifted_soul_moves_onto_the_row_and_the_setting_goes(world):
     run()
 
     assert _row(db, rows["drifted"]) == (HEARD, True, "custom")
-    assert _orchestrator(db, ws["drifted"]) == {"personality_mode": "custom", "thinking_level": "high"}
+    assert _configuration(db, rows["drifted"]) == {"personality_mode": "custom", "thinking_level": "low"}
+    assert _settings(db, ws["drifted"]) == {"orchestrator": {"personality_mode": "custom", "thinking_level": "high"},
+                                            "brand_kit": {"a": 1}}
+
+
+def test_the_same_text_under_a_preset_mode_is_marked_custom_so_settings_shows_it(world):
+    db, ws, rows, run = world
+
+    run()
+
+    assert _row(db, rows["same_text"]) == (HEARD, True, "custom")
+    assert _orchestrator(db, ws["same_text"]) == {"personality_mode": "custom"}
 
 
 def test_an_equal_soul_or_a_preset_mode_leaves_the_row_and_drops_the_setting(world):

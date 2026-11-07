@@ -13,10 +13,11 @@ This migration moves what users have been hearing onto the row, once:
 
 1. For each workspace whose ``settings.orchestrator`` holds ``personality_mode = 'custom'`` and a
    non-empty ``custom_soul`` that its Auto row (slug ``auto-<workspace_id>``, a system agent)
-   does not already speak with (the same text, stripped, with ``use_custom_persona`` true), the
-   row gets that soul, ``use_custom_persona = true`` and ``configuration.personality_mode =
-   'custom'``, so Settings shows the soul the chat used. Each copy is logged with the row's id
-   and both lengths (never the text).
+   does not already speak with in custom mode (the same text, stripped, ``use_custom_persona``
+   true and ``configuration.personality_mode = 'custom'``), the row gets that soul,
+   ``use_custom_persona = true`` and ``personality_mode = 'custom'``, so Settings shows the soul
+   the chat used. The row's previous text is overwritten, not kept. Each copy is logged with the
+   row's id and both lengths (never the text).
 2. ``custom_soul`` is then removed from the orchestrator settings of every workspace that has an
    Auto row, whatever its mode: nothing reads it any more.
 
@@ -25,7 +26,8 @@ removing the setting would delete the only copy of its soul. It is logged.
 
 Idempotent: once the key is gone a second run finds no workspace and writes nothing. No DDL: a
 database ``create_all`` built has both tables, and a database without them is left as it is.
-The rows are locked (``FOR UPDATE``) until the migration's transaction ends.
+The rows are locked (``FOR NO KEY UPDATE``: other writers wait, foreign-key inserts that only
+reference them do not) until the migration's transaction ends.
 
 The downgrade does nothing: the soul stays on the row, which is where it belongs, and restoring
 the second copy would bring the drift back.
@@ -59,11 +61,11 @@ TAG = "[auto_soul_one_source]"
 
 _WORKSPACES_WITH_A_SOUL = sa.text(
     "SELECT id, settings FROM workspaces "
-    "WHERE (settings::jsonb -> 'orchestrator' -> 'custom_soul') IS NOT NULL ORDER BY id FOR UPDATE"
+    "WHERE (settings::jsonb -> 'orchestrator' -> 'custom_soul') IS NOT NULL ORDER BY id FOR NO KEY UPDATE"
 )
 _AUTO_ROW = sa.text(
     "SELECT id, custom_persona_prompt, use_custom_persona, configuration FROM agents "
-    "WHERE slug = :slug AND is_system_agent IS TRUE AND workspace_id = CAST(:ws AS uuid) FOR UPDATE"
+    "WHERE slug = :slug AND is_system_agent IS TRUE AND workspace_id = CAST(:ws AS uuid) FOR NO KEY UPDATE"
 )
 
 
@@ -85,9 +87,11 @@ def soul_to_copy(orchestrator: Any) -> Optional[str]:
     return soul if isinstance(soul, str) and soul.strip() else None
 
 
-def row_speaks_with(soul: str, prompt: Optional[str], use_custom_persona: Optional[bool]) -> bool:
-    """True when the row already carries ``soul`` (stripped) and uses it. Pure."""
-    return use_custom_persona is True and (prompt or "").strip() == soul.strip()
+def row_speaks_with(soul: str, prompt: Optional[str], use_custom_persona: Optional[bool], configuration: Any) -> bool:
+    """True when the row already carries ``soul`` (stripped), uses it, and says it is custom, so
+    Settings shows it: nothing to write. Pure."""
+    mode = configuration.get(MODE_KEY) if isinstance(configuration, Mapping) else None
+    return use_custom_persona is True and mode == CUSTOM_MODE and (prompt or "").strip() == soul.strip()
 
 
 def without_soul(settings: Any) -> Optional[Dict[str, Any]]:
@@ -121,9 +125,8 @@ def _json_type(bind, table: str, column: str) -> str:
     return "jsonb" if row and row[0] == "jsonb" else "json"
 
 
-def _copy_soul(bind, workspace_id: str, row: Any, soul: str) -> None:
+def _copy_soul(bind, workspace_id: str, row: Any, soul: str, config_type: str) -> None:
     """Step 1 for one workspace: the settings soul onto its Auto row, in custom mode."""
-    config_type = _json_type(bind, "agents", "configuration")
     bind.execute(sa.text(
         "UPDATE agents SET custom_persona_prompt = :soul, use_custom_persona = TRUE, "
         f"configuration = CAST(:configuration AS {config_type}) WHERE id = :id"
@@ -132,7 +135,7 @@ def _copy_soul(bind, workspace_id: str, row: Any, soul: str) -> None:
                 row.id, len((row.custom_persona_prompt or "").strip()), len(soul.strip()))
 
 
-def _move_one(bind, workspace_id: str, settings: Any, settings_type: str) -> str:
+def _move_one(bind, workspace_id: str, settings: Any, types: Mapping[str, str]) -> str:
     """One workspace: copy its soul when the row differs, then drop the setting. Returns what it did."""
     row = bind.execute(_AUTO_ROW, {"slug": AUTO_SLUG.format(workspace_id=workspace_id), "ws": workspace_id}).first()
     if row is None:
@@ -140,13 +143,14 @@ def _move_one(bind, workspace_id: str, settings: Any, settings_type: str) -> str
                        TAG, workspace_id)
         return "no_auto_row"
     soul = soul_to_copy(settings.get(ORCHESTRATOR_KEY) if isinstance(settings, Mapping) else None)
-    copied = soul is not None and not row_speaks_with(soul, row.custom_persona_prompt, row.use_custom_persona)
+    copied = soul is not None and not row_speaks_with(soul, row.custom_persona_prompt, row.use_custom_persona,
+                                                      _decoded(row.configuration))
     if copied:
-        _copy_soul(bind, workspace_id, row, soul)
+        _copy_soul(bind, workspace_id, row, soul, types["configuration"])
     cleaned = without_soul(settings)
     if cleaned is not None:
         bind.execute(sa.text(
-            f"UPDATE workspaces SET settings = CAST(:settings AS {settings_type}) WHERE id = CAST(:id AS uuid)"
+            f"UPDATE workspaces SET settings = CAST(:settings AS {types['settings']}) WHERE id = CAST(:id AS uuid)"
         ), {"settings": json.dumps(cleaned), "id": workspace_id})
     return "copied" if copied else "removed"
 
@@ -156,10 +160,11 @@ def upgrade() -> None:
     if not _has_tables(bind):
         logger.info("%s no workspaces or agents table: nothing to move", TAG)
         return
-    settings_type = _json_type(bind, "workspaces", "settings")
+    types = {"settings": _json_type(bind, "workspaces", "settings"),
+             "configuration": _json_type(bind, "agents", "configuration")}
     counts: Dict[str, int] = {"copied": 0, "removed": 0, "no_auto_row": 0}
     for workspace_id, raw in bind.execute(_WORKSPACES_WITH_A_SOUL).fetchall():
-        counts[_move_one(bind, str(workspace_id), _decoded(raw), settings_type)] += 1
+        counts[_move_one(bind, str(workspace_id), _decoded(raw), types)] += 1
     logger.info("%s souls copied onto the Auto row: %d; setting removed only: %d; no Auto row (left): %d",
                 TAG, counts["copied"], counts["removed"], counts["no_auto_row"])
 

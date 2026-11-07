@@ -209,21 +209,32 @@ def test_push_needs_setup_on_a_local_install_not_agreed(monkeypatch, local):
     assert probes.push(None, uuid.uuid4()) == Finding("needs_setup", "push_declined", fix="fix_answer_push")
 
 
-def _platform_embedder(monkeypatch, provider):
-    """The platform's embedding manager, loading ``provider`` as its first embed would."""
+def _embedders(monkeypatch, provider, store_ready=True):
+    """The platform's embedding manager, loading ``provider`` as its first embed would, and the
+    memory store, whose own embedder is ready or not."""
     from core.llm import embedding_manager
+    from modules.memory import unified_memory_service
 
     manager = NS(provider=None, loads=[])
     manager._ensure_provider = lambda: manager.loads.append(1) or setattr(manager, "provider", provider)
     monkeypatch.setattr(embedding_manager, "get_embedding_manager", lambda: manager)
+    memory = NS(_durable=NS(embeddings_ready=lambda: store_ready))
+    monkeypatch.setattr(unified_memory_service, "get_unified_memory_service", lambda: memory)
     return manager
 
 
 def test_embeddings_are_ready_with_a_real_provider(monkeypatch):
-    manager = _platform_embedder(monkeypatch, NS(is_degraded=False))
+    manager = _embedders(monkeypatch, NS(is_degraded=False))
 
     assert probes.embeddings(None, uuid.uuid4()) == Finding("ready", "embeddings_ready")
     assert manager.loads == [1]
+
+
+def test_a_memory_store_that_loaded_no_provider_needs_setup_too(monkeypatch):
+    """Each embedder loads its provider once: a key added after the store's loaded is not yet memory's."""
+    _embedders(monkeypatch, NS(is_degraded=False), store_ready=False)
+
+    assert probes.embeddings(None, uuid.uuid4()) == Finding("needs_setup", "no_embedding_provider", fix="fix_add_key")
 
 
 def test_no_embedding_provider_says_memory_and_knowledge_search_are_off(monkeypatch):
@@ -231,7 +242,7 @@ def test_no_embedding_provider_says_memory_and_knowledge_search_are_off(monkeypa
     silently off. The item says so, with the reason code and the fix."""
     from core.llm.clients.base import DeterministicEmbeddingProvider
 
-    _platform_embedder(monkeypatch, DeterministicEmbeddingProvider(dimension=8))
+    _embedders(monkeypatch, DeterministicEmbeddingProvider(dimension=8))
 
     finding = probes.embeddings(None, uuid.uuid4())
 
@@ -263,7 +274,7 @@ def hanging(monkeypatch):
     monkeypatch.setattr(probes, "heartbeat_llm", after_the_hang(NS(config=NS(api_key="a-test-key"))))
     monkeypatch.setattr(probes.search, "resolve_backend", after_the_hang("openrouter"))
     monkeypatch.setattr(probes.consent, "consent_state", after_the_hang(NS(agreed=True, answered=True)))
-    monkeypatch.setattr(probes, "provider_ready", after_the_hang(True))
+    monkeypatch.setattr(probes, "can_embed", after_the_hang(True))
     yield
     release.set()
 

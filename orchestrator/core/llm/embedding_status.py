@@ -49,10 +49,11 @@ def provider_ready(manager: Any) -> bool:
 
 async def store_cannot_embed(store: Optional[Any]) -> bool:
     """True when ``store`` (the durable memory store: ``embeddings_ready``) is known to have no
-    embedding provider, so nothing can be stored in it or recalled from it. No store says nothing,
+    embedding provider, so nothing can be stored in it or recalled from it. No store, or a store
+    switched off (``enabled`` false: no QDRANT_URL, which callers word themselves), says nothing,
     and neither does a check that fails (logged): only a provider known to be missing is "off".
     The check reads settings and the key store the first time, so it runs in a thread."""
-    if store is None:
+    if store is None or getattr(store, "enabled", True) is False:
         return False
     try:
         return not await asyncio.to_thread(store.embeddings_ready)

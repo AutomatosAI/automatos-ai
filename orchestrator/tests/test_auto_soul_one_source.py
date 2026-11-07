@@ -114,6 +114,18 @@ def test_a_non_auto_agent_keeps_its_own_persona_section():
     assert personality._FRIENDLY_PERSONALITY in prompt
 
 
+def test_a_non_auto_agent_in_a_custom_workspace_never_speaks_with_autos_soul():
+    """It used to get the settings soul (Auto's) as its personality block; now the preset."""
+    shop = SimpleNamespace(id=9, name="Shop helper", slug=f"shop-helper-{WS_ID}", is_system_agent=False,
+                           workspace_id=WS_ID, use_custom_persona=True, custom_persona_prompt="Talk about beans.",
+                           persona=None, description=None)
+
+    prompt = _chat_prompt(shop, {**CUSTOM, "custom_soul": STALE_SOUL})
+
+    assert STALE_SOUL not in prompt and ROW_SOUL not in prompt
+    assert personality._FRIENDLY_PERSONALITY in prompt and "Talk about beans." in prompt
+
+
 def test_no_settings_key_carries_a_soul_any_more():
     """load_orchestrator_settings reads only the keys its defaults name."""
     assert "custom_soul" not in personality._ORCHESTRATOR_DEFAULTS
@@ -207,6 +219,14 @@ def test_a_soul_auto_writes_on_its_own_row_is_shown_as_custom(monkeypatch):
     assert row.configuration == {"personality_mode": "custom", "thinking_level": "high"}
     assert workspaces_api._resolve_persona_view(row.configuration["personality_mode"], row.custom_persona_prompt) == {
         "personality_mode": "custom", "custom_soul": ROW_SOUL}
+
+
+def test_an_empty_prompt_on_autos_row_changes_no_mode():
+    row = _auto_row(soul="   ", mode="friendly", configuration={"personality_mode": "friendly"})
+
+    mark_soul_custom(row)
+
+    assert row.configuration == {"personality_mode": "friendly"}
 
 
 def test_another_agents_prompt_changes_no_mode():

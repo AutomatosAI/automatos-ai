@@ -12,9 +12,11 @@
   install only once its operator agreed (``services.push.consent``, read strictly, so a
   read that fails is not a "no").
 * ``embeddings`` — memory and knowledge search can embed: the platform's embedding manager
-  (``core.llm.embedding_manager``) has a real provider, not the degraded stand-in it falls
-  back to with no key (7 Nov 2026: memory was silently off on a self-hosted install). A
-  check-in's field memory embeds too. Loading it reads settings and the key store.
+  (``core.llm.embedding_manager``, knowledge search) and the memory store's own both have a
+  real provider, not the degraded stand-in they fall back to with no key (7 Nov 2026: memory
+  was silently off on a self-hosted install). Each loads its provider once, so a key added
+  after one loaded reads "needs setup" until a restart, as memory itself does. A check-in's
+  field memory embeds too. Loading them reads settings and the key store.
 
 Each runs on its own session, opened and closed by the runner. A probe returns what it
 found; an error it cannot place escapes to the runner, which logs it and reads the item as
@@ -108,11 +110,17 @@ def push(db: Session, workspace_id: UUID) -> Finding:
     return Finding(NEEDS_SETUP, i.PUSH_DECLINED if state.answered else i.PUSH_UNANSWERED, fix=i.ANSWER_PUSH)
 
 
+def can_embed() -> bool:
+    """Knowledge search's embedder and the memory store's own both have a provider."""
+    from core.llm.embedding_manager import get_embedding_manager  # loaded only when probed
+    from modules.memory.unified_memory_service import get_unified_memory_service
+
+    return provider_ready(get_embedding_manager()) and get_unified_memory_service()._durable.embeddings_ready()
+
+
 def embeddings(db: Session, workspace_id: UUID) -> Finding:
     """Memory and knowledge search can embed: there is an embedding provider with a key."""
-    from core.llm.embedding_manager import get_embedding_manager  # its clients load only when probed
-
-    if provider_ready(get_embedding_manager()):
+    if can_embed():
         return Finding(READY, i.EMBEDDINGS_READY)
     return Finding(NEEDS_SETUP, i.EMBEDDINGS_NONE, fix=i.ADD_KEY)
 

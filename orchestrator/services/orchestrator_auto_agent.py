@@ -118,8 +118,9 @@ def mark_soul_custom(agent: Any) -> None:
     """A soul written on Auto's row outside Settings (Auto's own platform_update_agent, the
     persona route) is a hand-written one, so the row's personality_mode says ``custom``, as a
     Settings save of a custom soul does. Settings → Orchestrator then shows the soul the chat
-    speaks with, not a preset's name over it. Any other agent is left as it is."""
-    if not is_workspace_auto(agent):
+    speaks with, not a preset's name over it. An empty prompt is no soul (the chat falls back to a
+    preset), so it changes no mode; any other agent is left as it is."""
+    if not is_workspace_auto(agent) or not str(getattr(agent, "custom_persona_prompt", None) or "").strip():
         return
     from sqlalchemy.orm.attributes import flag_modified
 
