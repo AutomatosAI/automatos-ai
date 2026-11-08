@@ -333,6 +333,11 @@ class ContextRouter:
     to fetch and inject into the system prompt.
     """
 
+    def __init__(self, service: Any = None) -> None:
+        # The memory service to fetch from; None means the process's own
+        # (get_unified_memory_service). An eval or a test hands in its own.
+        self._service = service
+
     def analyze_query(self, query: str) -> ContextSignals:
         """
         Classify a user query into context signals.
@@ -539,7 +544,7 @@ class ContextRouter:
         """The session, long-term, L2 and daily-log fetches, run concurrently."""
         from modules.memory.unified_memory_service import get_unified_memory_service
 
-        service = get_unified_memory_service()
+        service = self._service or get_unified_memory_service()
         plan = self._fetch_plan(signals, conversation_id)
         session_task = (
             self._safe_fetch("L1 session", service.get_session(workspace_id, conversation_id))
