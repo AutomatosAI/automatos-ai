@@ -1,0 +1,52 @@
+suite: API data volume
+templates:
+  - templates/api-data-pvc.yaml
+set:
+  existingSecret: automatos-secrets
+tests:
+  - it: creates a claim that outlives the release
+    release:
+      name: demo
+    asserts:
+      - isKind:
+          of: PersistentVolumeClaim
+      - equal:
+          path: metadata.name
+          value: demo-automatos-api-data
+      - equal:
+          path: metadata.annotations["helm.sh/resource-policy"]
+          value: keep
+      - equal:
+          path: spec.accessModes
+          value: ["ReadWriteOnce"]
+  - it: takes the size and the storage class from values
+    set:
+      api:
+        data:
+          size: 25Gi
+          storageClass: fast
+    asserts:
+      - equal:
+          path: spec.resources.requests.storage
+          value: 25Gi
+      - equal:
+          path: spec.storageClassName
+          value: fast
+  - it: takes the access modes from values
+    set:
+      api:
+        data:
+          accessModes:
+            - ReadWriteMany
+    asserts:
+      - equal:
+          path: spec.accessModes
+          value: ["ReadWriteMany"]
+  - it: creates no claim when data is off
+    set:
+      api:
+        data:
+          enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
