@@ -11,8 +11,19 @@ so forward both and open http://localhost:3000:
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "automatos.fullname" . }}-frontend 3000:3000
 {{- end }}
 {{- if eq .Values.edition.authEdition "local" }}
+{{- $remoteAccess := index (.Values.config | default dict) "LOCAL_REMOTE_ACCESS" | default "off" | toString | trim | lower }}
+{{- if eq $remoteAccess "paired" }}
+
+Local edition, paired mode: every browser and phone pairs once with a one-time code.
+Mint the first code:
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "automatos.fullname" . }}-api -- python -m scripts.mint_pairing_code
+{{- else if eq $remoteAccess "open" }}
+
+Local edition, open mode: there is no pairing. Anyone who can reach the API or the web app is the operator.
+{{- else }}
 
 Local edition: there is no login. Anyone who can reach the web app is the admin.
+{{- end }}
 {{- end }}
 {{- if .Values.sessionMode.enabled }}
 
