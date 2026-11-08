@@ -60,6 +60,39 @@ def subject_overlap(a: str, b: str) -> float:
     return len(ta & tb) / len(ta | tb)
 
 
+def _words(s: str) -> List[str]:
+    return "".join(c if c.isalnum() else " " for c in s.lower()).split()
+
+
+_ARTICLES = frozenset({"the", "a", "an"})
+
+
+def _is_subject(words: List[str], start: int, end: int) -> bool:
+    """The span is what the sentence is about: it opens it ("Acme does …", "The Midnight
+    Garden arrangement …") or owns something ("Bloom's brand voice": ``_words`` splits
+    the possessive into "bloom", "s")."""
+    opens = start == 0 or (start == 1 and words[0] in _ARTICLES)
+    owns = end < len(words) and words[end] == "s"
+    return opens or owns
+
+
+def _one_value_slot(a_text: str, b_text: str) -> bool:
+    """Word by word, the texts each say something different in exactly one place, and
+    that place is a value, not the subject (#1438).
+
+    A span added on one side only ("…now") is elaboration and does not count, so
+    "staging" → "production now" is one slot. "The owner of Bloom is Mia Chen. Mia …" →
+    "The owner of Initech is Aiko Hooli. Aiko …" is three: different subjects, both kept.
+    "Acme does not want …" → "Initech does not want …" is one slot, but the subject's.
+    """
+    wa, wb = _words(a_text), _words(b_text)
+    slots = [op for op in SequenceMatcher(None, wa, wb, autojunk=False).get_opcodes() if op[0] == "replace"]
+    if len(slots) != 1:
+        return False
+    _, i1, i2, j1, j2 = slots[0]
+    return not (_is_subject(wa, i1, i2) or _is_subject(wb, j1, j2))
+
+
 def _mutually_divergent(a_text: str, b_text: str) -> bool:
     """True when each text asserts a meaningful token the other lacks.
 
@@ -137,11 +170,20 @@ def is_contradiction(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
     truths. Text similarity is deliberately NOT used as the upper bound: a
     minimal-pair contradiction ("…staging" vs "…production") is near-identical
     textually yet still a contradiction.
+
+    #1438: and the different value sits in ONE slot that is not the subject. Facts
+    written to one template about different subjects ("The owner of Bloom is Mia
+    Chen" / "The owner of Initech is Aiko Hooli"; "Acme does not want …" / "Initech
+    does not want …") share most words and each has words the other lacks, so they
+    passed as a contradiction and the older was deleted. Now both are kept. Where the
+    rule cannot tell (two slots changed at once; a sentence that opens with its value,
+    "Alice is on call" / "Bob is on call"), both are kept too: a stale fact stays
+    rather than a true one being deleted.
     """
     ta, tb = _text(a), _text(b)
     if subject_overlap(ta, tb) < DEFAULT_SUBJECT_OVERLAP:
         return False
-    return _mutually_divergent(ta, tb)
+    return _mutually_divergent(ta, tb) and _one_value_slot(ta, tb)
 
 
 def resolve_contradiction(a: Dict[str, Any], b: Dict[str, Any]) -> Supersession:
