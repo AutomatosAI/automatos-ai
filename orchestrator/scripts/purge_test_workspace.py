@@ -94,7 +94,8 @@ def main(argv: list[str] | None = None) -> int:
         db.close()
 
     result = purge_workspace_sync(args.workspace_id)
-    # #1431: a purge that stopped (skipped_reason) rolled back, so nothing it counted was deleted.
+    # #1431: a purge that stopped (skipped_reason) rolled back its database rows. S3 objects and
+    # the Clerk user go before the database step, so the counts it reports for them may be real.
     purged = not result.skipped_reason
     payload = {"workspace_id": str(args.workspace_id), "slug": row.slug, "purged": purged, **_result_dict(result)}
     print(json.dumps(payload, default=str))
