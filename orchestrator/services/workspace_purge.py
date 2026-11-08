@@ -84,12 +84,18 @@ class PurgeResult:
     rows_deleted: Dict[str, int] = field(default_factory=dict)
     workspace_row_deleted: bool = False
     skipped_reason: Optional[str] = None
+    durable_memory_deleted: int = 0
+    field_memory_deleted: int = 0
+    memory_erase_errors: int = 0
 
     def to_dict(self) -> dict:
         return {
             "workspace_id": self.workspace_id,
             "s3_objects_deleted": self.s3_objects_deleted,
             "s3_errors": self.s3_errors,
+            "durable_memory_deleted": self.durable_memory_deleted,
+            "field_memory_deleted": self.field_memory_deleted,
+            "memory_erase_errors": self.memory_erase_errors,
             "clerk_user_deleted": self.clerk_user_deleted,
             "clerk_user_id": self.clerk_user_id,
             "rows_deleted": self.rows_deleted,
@@ -150,6 +156,32 @@ def _purge_workspace_s3(workspace_id: UUID, result: "PurgeResult") -> None:
         "S3 purge for ws=%s: deleted=%d errors=%d (s3://%s/%s)",
         workspace_id, result.s3_objects_deleted, result.s3_errors, bucket, prefix,
     )
+
+
+def _erase_workspace_memories(workspace_id: UUID, result: "PurgeResult") -> None:
+    """Delete the workspace's durable (L3) and field memories in Qdrant, counting into ``result`` (#1432).
+
+    The same erasers the GDPR workspace erasure uses (``gdpr_service._erase_durable_memory``
+    and ``_erase_field_memory``), so every purge path erases memory alike: before this, the
+    admin delete and ``purge_test_workspace.py`` deleted the SQL rows and left the memories,
+    unreachable but stored. A failure is counted in ``memory_erase_errors`` and logged, never
+    hidden; with no Qdrant configured there is nothing to erase.
+    """
+    if not config.QDRANT_URL:
+        return
+    from modules.context.adapters.vector_field import VectorFieldSharedContext
+    from modules.memory.unified_memory_service import UnifiedMemoryService
+
+    erasers = (
+        ("durable_memory_deleted", lambda: UnifiedMemoryService().erase_workspace_memories(str(workspace_id))),
+        ("field_memory_deleted", lambda: VectorFieldSharedContext().erase_workspace(str(workspace_id))),
+    )
+    for count_field, erase in erasers:
+        try:
+            setattr(result, count_field, int(asyncio.run(erase()) or 0))
+        except Exception:
+            logger.exception("Memory erase (%s) failed for workspace %s", count_field, workspace_id)
+            result.memory_erase_errors += 1
 
 
 def _owner_has_nothing_left(db: Session, owner_id: Optional[int], workspace_id: UUID) -> bool:
@@ -404,8 +436,9 @@ def purge_workspace_sync(workspace_id: UUID) -> PurgeResult:
         owner_leaves = _owner_has_nothing_left(db, owner_id, workspace_id)
         clerk_uid = _resolve_owner_clerk_id(db, owner_id) if owner_leaves else None
 
-        # 1) S3
+        # 1) S3, and the workspace's memories in Qdrant (#1432)
         _purge_workspace_s3(workspace_id, result)
+        _erase_workspace_memories(workspace_id, result)
 
         # 2) Clerk (best-effort, never blocks DB cleanup)
         if clerk_uid:
