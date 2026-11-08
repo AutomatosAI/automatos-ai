@@ -146,6 +146,31 @@ def _export_durable_memory(workspace_id: UUID | str, subject_id: Optional[str] =
     return _run_async(svc.export_workspace_memories(str(workspace_id)))
 
 
+def _close_workspace(workspace_id: UUID | str) -> bool:
+    """Mark the workspace deleted, as the admin delete does, before anything is erased (#1442).
+
+    The purge refuses a workspace that was not soft-deleted first, and closing it
+    first also stops new writes landing while the stores are erased. Idempotent: a
+    workspace already closed keeps its ``deleted_at``. False when there is no
+    such workspace.
+    """
+    from sqlalchemy import text
+
+    from core.database.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text("UPDATE workspaces SET deleted_at = COALESCE(deleted_at, NOW()), is_active = false "
+                 "WHERE id = :id RETURNING id"),
+            {"id": str(workspace_id)},
+        ).fetchone()
+        db.commit()
+        return row is not None
+    finally:
+        db.close()
+
+
 def _purge_sql(workspace_id: UUID | str) -> Dict[str, Any]:
     """Reuse the self-maintaining workspace purge for the SQL + S3 legs."""
     from services.workspace_purge import purge_workspace_sync
@@ -172,6 +197,10 @@ def _erase_subject_sql(db: Any, workspace_id: UUID | str, subject_id: str) -> Di
 
 
 def _erase_field_memory(workspace_id: UUID | str, subject_id: Optional[str] = None) -> int:
+    from config import config as _config
+
+    if not getattr(_config, "QDRANT_URL", ""):
+        return 0  # field memory is off in this edition: nothing to erase, not a failure (#1442)
     from modules.context.adapters.vector_field import VectorFieldSharedContext
 
     svc = VectorFieldSharedContext()
@@ -271,10 +300,21 @@ def erase_workspace(db: Any, workspace_id: UUID | str, *, requested_by: str) -> 
     This is the ``erase_workspace`` entrypoint the future Shopify webhook and the
     admin purge path call. SQL (incl. S3 objects + learned-edge tables) via the
     self-maintaining purge; derived stores via their workspace erasers.
+
+    #1442: the workspace is closed (soft-deleted) first, since the purge refuses a
+    live one. ``complete`` is true only when every step ran: ``failed`` names any
+    step that raised, an SQL purge that did not delete the workspace row, and S3
+    objects it could not delete.
     """
+    closed = _safe(lambda: _close_workspace(workspace_id), "close")
     field_deleted = _safe(lambda: _erase_field_memory(workspace_id), "field_memory")
     durable_deleted = _safe(lambda: _erase_durable_memory(workspace_id), "durable_memory")
     sql_result = _safe(lambda: _purge_sql(workspace_id), "sql") or {}
+    failed = _failed_steps(
+        {"close": closed, "field_memory": field_deleted, "durable_memory": durable_deleted}, sql_result,
+    )
+    if failed:
+        logger.error("[gdpr] workspace erasure incomplete ws=%s failed=%s", workspace_id, failed)
 
     result = {
         "workspace_id": str(workspace_id),
@@ -285,7 +325,8 @@ def erase_workspace(db: Any, workspace_id: UUID | str, *, requested_by: str) -> 
             "field_memory_deleted": field_deleted or 0,
             "durable_memory_deleted": durable_deleted or 0,
         },
-        "complete": True,
+        "failed": failed,
+        "complete": not failed,
     }
     _audit_gdpr(
         db, workspace_id, "gdpr:erasure",
@@ -294,8 +335,21 @@ def erase_workspace(db: Any, workspace_id: UUID | str, *, requested_by: str) -> 
         field_memory_deleted=field_deleted or 0,
         durable_memory_deleted=durable_deleted or 0,
         sql_rows=sql_result.get("rows_deleted"),
+        failed=failed,
+        complete=not failed,
     )
     return result
+
+
+def _failed_steps(steps: Mapping[str, Any], sql_result: Mapping[str, Any]) -> List[str]:
+    """The erasure steps that did not do their job (#1442): a step ``_safe`` caught raising
+    (None), an SQL purge that left the workspace row, and S3 objects left behind."""
+    failed = [name for name, outcome in steps.items() if outcome is None]
+    if not sql_result.get("workspace_row_deleted"):
+        failed.append("sql")
+    if sql_result.get("s3_errors"):
+        failed.append("s3")
+    return failed
 
 
 def erase_data_subject(
