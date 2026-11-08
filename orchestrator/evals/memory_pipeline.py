@@ -173,20 +173,34 @@ def offline_service() -> Any:
     return service_over(InMemoryVectors(), HashEmbedder(), "eval_memory", OFFLINE_DIMENSION, bootstrapped=True)
 
 
+class OpenRouterEmbedder:
+    """Embeddings straight from OpenRouter's endpoint. Not the platform's provider, which
+    records every call as LLM usage in the configured database, for its default workspace:
+    an eval never writes usage or cost rows."""
+
+    def __init__(self, model: str, api_key: str, base_url: str, dimension: int) -> None:
+        from openai import AsyncOpenAI
+
+        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        self._model, self._dimension = model, dimension
+
+    async def generate_embedding(self, text: str) -> List[float]:
+        # As the platform's provider does: the model's native vector (Qwen3-Embedding-8B: 4096),
+        # cut to the store's dimension (core/llm/clients/openrouter_embedding.py).
+        response = await self._client.embeddings.create(model=self._model, input=[text])
+        return list(response.data[0].embedding)[: self._dimension]
+
+
 def live_service(model: str, dimension: int) -> Tuple[Any, Callable[[], Any]]:
     """The configured Qdrant and OpenRouter embeddings, in a collection made for this run.
     Returns the service and the coroutine function that drops the collection."""
     from config import config
-    from core.llm.clients.base import EmbeddingConfig, EmbeddingProvider
-    from core.llm.clients.openrouter_embedding import OpenRouterEmbeddingProvider
     from core.qdrant import QdrantRestClient
 
     if not (config.QDRANT_URL and config.OPENROUTER_API_KEY):
         raise SystemExit("--live needs QDRANT_URL and OPENROUTER_API_KEY")
     client = QdrantRestClient(url=config.QDRANT_URL, api_key=config.QDRANT_API_KEY or None, timeout=30)
-    embedder = OpenRouterEmbeddingProvider(EmbeddingConfig(
-        provider=EmbeddingProvider.OPENROUTER, model=model, dimension=dimension, api_key=config.OPENROUTER_API_KEY,
-    ))
+    embedder = OpenRouterEmbedder(model, config.OPENROUTER_API_KEY, config.OPENROUTER_BASE_URL, dimension)
     collection = f"eval_memory_{uuid.uuid4().hex[:12]}"
     return (service_over(client, embedder, collection, dimension, bootstrapped=False),
             lambda: client.delete_collection(collection))

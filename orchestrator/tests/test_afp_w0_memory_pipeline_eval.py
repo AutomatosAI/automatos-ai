@@ -139,3 +139,12 @@ def test_live_says_what_it_needs(monkeypatch, missing):
     monkeypatch.setattr(config, missing, "")
     with pytest.raises(SystemExit, match="--live needs"):
         mp.live_service(mp.LIVE_EMBEDDING_MODEL, mp.LIVE_DIMENSION)
+
+
+def test_live_embeddings_never_go_through_the_usage_tracker():
+    """The platform's embedding provider records each call as LLM usage in the configured
+    database; the eval's own embedder calls OpenRouter directly and records nothing."""
+    import inspect
+
+    source = inspect.getsource(mp.OpenRouterEmbedder) + inspect.getsource(mp.live_service)
+    assert "record_embedding_usage" not in source and "OpenRouterEmbeddingProvider" not in source
