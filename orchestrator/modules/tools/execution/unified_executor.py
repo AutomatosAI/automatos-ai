@@ -583,6 +583,19 @@ class UnifiedToolExecutor:
         )
         return {"success": False, "permission_denied": True, "error": WIDGET_REFUSAL, "tool": tool_name}
 
+    def _lean_gate(self, tool_name: str, parameters: Any, trace: str) -> Optional[Dict[str, Any]]:
+        """The refusal for a lean agent's turn calling what its tool groups do not grant
+        (core.security.lean_grants); None when the call may run."""
+        from core.security.lean_grants import LEAN_REFUSAL, lean_may_call, lean_turn
+
+        if not lean_turn():
+            return None
+        effective_name = self._resolve_effective_call(tool_name, parameters)[0]
+        if lean_may_call(effective_name):
+            return None
+        logger.warning("[tool-trace %s] lean turn refused '%s' (resolved '%s'): not granted", trace, tool_name, effective_name)
+        return {"success": False, "permission_denied": True, "error": LEAN_REFUSAL, "tool": tool_name}
+
     def _resolve_effective_call(
         self, tool_name: str, parameters: Any
     ) -> tuple:
@@ -913,7 +926,7 @@ class UnifiedToolExecutor:
 
             # F155: a public widget turn runs only what its key's scopes grant,
             # judged on the resolved action (platform_execute's included).
-            _widget_block = self._widget_gate(tool_name, parameters, trace)
+            _widget_block = self._widget_gate(tool_name, parameters, trace) or self._lean_gate(tool_name, parameters, trace)
             if _widget_block is not None:
                 return _widget_block
 

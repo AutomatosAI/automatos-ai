@@ -44,6 +44,7 @@ class SmartChatIntegration:
         agent_name: Optional[str] = None,
         widget_mode: bool = False,
         db_session: Any = None,
+        lean: bool = False,
     ):
         """
         Initialize the smart chat integration.
@@ -54,6 +55,7 @@ class SmartChatIntegration:
             agent_name: Agent name for personalization
             widget_mode: When True, restrict memory to agent-only (no global workspace memories)
             db_session: Optional DB session for ContextService (PRD-80)
+            lean: A lean agent's turn (consumers.chatbot.lean_turn)
         """
         self.orchestrator = SmartChatOrchestrator(
             workspace_id=workspace_id,
@@ -61,6 +63,7 @@ class SmartChatIntegration:
             agent_name=agent_name,
             widget_mode=widget_mode,
             db_session=db_session,
+            lean=lean,
         )
         self.workspace_id = workspace_id
         self.agent_id = agent_id

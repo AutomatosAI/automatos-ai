@@ -66,7 +66,9 @@ def system_prompt_with_rules(llm_messages: List[Dict[str, Any]], kit: Optional[D
 
 
 def _owners_turn(chat: Any) -> bool:
-    return bool(getattr(chat, "workspace_id", None)) and not getattr(chat, "widget_mode", False)
+    """A turn the brand kit applies to: the workspace's own, not a widget visitor's or a lean agent's."""
+    return (bool(getattr(chat, "workspace_id", None)) and not getattr(chat, "widget_mode", False)
+            and getattr(chat, "_lean_actions", None) is None)
 
 
 def autos_prompt_carries_the_brand_kit(prepare: Prepare) -> Prepare:

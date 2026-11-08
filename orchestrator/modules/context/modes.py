@@ -22,6 +22,7 @@ class ContextMode(str, Enum):
     COORDINATOR = "coordinator"
     PLANNING = "planning"
     CHECK_IN = "check_in"
+    LEAN = "lean"
 
 
 # PRD-229: ``ask_orchestrator`` (a worker asks the orchestrator a clarification)
@@ -256,5 +257,14 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
         tool_loading="read_only",
         personality=False,
         max_tokens=12000,
+    ),
+    # Lean turns: the agent's own identity (no Auto personality or platform skill), what
+    # it recalls, the date, the owner's standing rules and the conversation. Its tools are
+    # the ones its session tool groups grant, passed in by the chat turn (consumers.chatbot.lean_turn).
+    ContextMode.LEAN: ModeConfig(
+        sections=["identity", "memory", "datetime_context", "conversation", "standing_rules"],
+        tool_loading="none",
+        personality=False,
+        max_tokens=None,
     ),
 }
