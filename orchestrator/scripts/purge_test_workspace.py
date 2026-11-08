@@ -94,9 +94,11 @@ def main(argv: list[str] | None = None) -> int:
         db.close()
 
     result = purge_workspace_sync(args.workspace_id)
-    payload = {"workspace_id": str(args.workspace_id), "slug": row.slug, "purged": True, **_result_dict(result)}
+    # #1431: a purge that stopped (skipped_reason) rolled back, so nothing it counted was deleted.
+    purged = not result.skipped_reason
+    payload = {"workspace_id": str(args.workspace_id), "slug": row.slug, "purged": purged, **_result_dict(result)}
     print(json.dumps(payload, default=str))
-    return EXIT_OK
+    return EXIT_OK if purged else EXIT_ERROR
 
 
 if __name__ == "__main__":
