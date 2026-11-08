@@ -172,7 +172,11 @@ def test_a_proposal_applied_changes_the_plan_and_one_ignored_changes_nothing(ins
 
 
 def test_the_health_route_lists_the_items_and_another_workspace_is_404(insights):
-    plan = _create_plan(insights, cadence=[{"channels": ["linkedin", "tiktok"], "format": "image", "days": EVERY_DAY, "time": "09:00"}])
+    # The route reads the real clock, so the plan runs around today: with the shared body's fixed
+    # dates (12 Oct to 8 Nov 2026) it had no upcoming slots from 8 Nov, and bank_low never showed.
+    today = datetime.now(UTC).date()
+    plan = _create_plan(insights, starts_on=str(today - timedelta(days=7)), ends_on=str(today + timedelta(days=60)),
+                        cadence=[{"channels": ["linkedin", "tiktok"], "format": "image", "days": EVERY_DAY, "time": "09:00"}])
     answer = insights.client.get(f"/api/socials/plans/{plan['id']}/health")
     assert answer.status_code == 200, answer.text
     assert [item["id"] for item in answer.json()["items"]] == ["channel_missing", "bank_low", "cap_close", "no_video"]
