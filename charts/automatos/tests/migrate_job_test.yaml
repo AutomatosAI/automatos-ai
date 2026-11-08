@@ -4,6 +4,38 @@ templates:
 set:
   existingSecret: automatos-secrets
 tests:
+  - it: writes no files on the API's data volume, so it gets neither the mount nor the paths
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DOCUMENT_STORAGE_DIR
+            value: /app/data/documents
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DOCUMENT_UPLOAD_DIR
+            value: /app/data/uploads
+      - notExists:
+          path: spec.template.spec.containers[0].volumeMounts
+  - it: gets the object storage credentials from the Secret, like the API
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: automatos-secrets
+                key: AWS_ACCESS_KEY_ID
+                optional: true
+  - it: stops on a name in config that the chart also sets
+    set:
+      config:
+        AWS_ACCESS_KEY_ID: visible
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.AWS_ACCESS_KEY_ID: move it to the Secret"
   - it: runs `docker-entrypoint.sh migrate` as a pre-install/pre-upgrade hook
     asserts:
       - isKind:
