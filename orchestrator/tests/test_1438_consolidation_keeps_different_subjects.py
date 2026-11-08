@@ -28,8 +28,8 @@ DIFFERENT_SUBJECTS = [
      "Initech Aiko is billed annually on the enterprise plan; the subscription renews every year on March 3rd."),
     ("Northstar has 9 consultants: 3 partners, 2 senior consultants, and 4 analysts.",
      "Initech has 19 consultants: 7 partners, 5 senior consultants, and 9 analysts."),
-    ("The innkeeper of the Silver Kettle is Jory Hobb, who was pulled out of a collapsed shaft by the watch.",
-     "The innkeeper of the Golden Goose is Merrick Ironside, who was pulled out of a collapsed shaft by the watch."),
+    ("The account manager for the Leeds office is Jory Hobb, who joined from the Bristol team last spring.",
+     "The account manager for the Glasgow office is Priya Nair, who joined from the Bristol team last spring."),
     # one slot, but the subject's: it opens the sentence, or owns what follows
     ("Acme does not want any AI-written content published externally without a human review.",
      "Initech does not want any AI-written content published externally without a human review."),
