@@ -7,6 +7,16 @@ metadata:
     app.kubernetes.io/component: api
 spec:
   replicas: {{ .Values.api.replicas }}
+  {{- if include "automatos.apiDataSingleAttach" . }}
+  # Stop the old pod first: the new one can't attach the volume until the old one has let
+  # go. Not type: Recreate, which Helm 4's server-side apply can't change a live Deployment
+  # to: the defaulted rollingUpdate block stays, and the API server refuses the pair.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  {{- end }}
   selector:
     matchLabels:
       {{- include "automatos.selectorLabels" (dict "ctx" $ "component" "api") | nindent 6 }}
@@ -40,6 +50,13 @@ spec:
           env:
             {{- include "automatos.apiEnv" . | nindent 12 }}
             {{- include "automatos.otelEnv" (dict "ctx" . "service" "automatos-api") | nindent 12 }}
+            {{- if .Values.api.data.enabled }}
+            # The API pods only: the migration Job writes no files here.
+            - name: DOCUMENT_UPLOAD_DIR
+              value: /app/data/uploads
+            - name: DOCUMENT_STORAGE_DIR
+              value: /app/data/documents
+            {{- end }}
             # Last, so a `config` entry of the same name cannot turn it off.
             - name: AUTOMATOS_SKIP_MIGRATIONS
               value: "true"
@@ -68,6 +85,10 @@ spec:
             - name: workspaces
               mountPath: /workspaces
               readOnly: true
+            {{- if .Values.api.data.enabled }}
+            - name: data
+              mountPath: /app/data
+            {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -78,6 +99,11 @@ spec:
         - name: workspaces
           persistentVolumeClaim:
             claimName: {{ include "automatos.workspacesClaim" . }}
+        {{- if .Values.api.data.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "automatos.apiDataClaim" . }}
+        {{- end }}
       {{- with .Values.api.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

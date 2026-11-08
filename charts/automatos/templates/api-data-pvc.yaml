@@ -1,0 +1,21 @@
+{{- if .Values.api.data.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "automatos.apiDataClaim" . }}
+  labels:
+    {{- include "automatos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+  annotations:
+    # Uploads and documents outlive the release: `helm uninstall` leaves this claim behind.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    {{- toYaml .Values.api.data.accessModes | nindent 4 }}
+  {{- with .Values.api.data.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.api.data.size }}
+{{- end }}
