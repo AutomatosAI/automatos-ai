@@ -25,7 +25,7 @@ import pytest
 WS, OTHER_WS = str(uuid.UUID(int=1)), str(uuid.UUID(int=2))
 AUTO, OTHER_AGENT = 21, 22
 
-WORKSPACE_FACT = "Old Weir sold the chapel's Vigil Bell to Corvus Marle to mend the roof."
+WORKSPACE_FACT = "Acme moved its invoicing from Xero to the new billing tool in October."
 AGENT_FACT = "Auto answers the owner in short paragraphs."
 OTHER_AGENT_FACT = "The brand designer prefers teal."
 OTHER_WS_FACT = "Another business closes on Fridays."
@@ -93,26 +93,26 @@ def _texts(rows):
 
 def test_an_agents_search_that_asks_for_the_workspace_reads_both_namespaces(memory):
     service, _ = memory
-    rows = asyncio.run(service.search_long_term(WS, "the chapel bell", agent_id=AUTO, include_workspace=True))
+    rows = asyncio.run(service.search_long_term(WS, "Acme invoicing", agent_id=AUTO, include_workspace=True))
     assert _texts(rows) == {WORKSPACE_FACT, AGENT_FACT}
 
 
 def test_an_agents_search_that_does_not_ask_stays_on_its_own_namespace(memory):
     """The widget lane (F155) and every other caller keep today's agent-only read."""
     service, _ = memory
-    rows = asyncio.run(service.search_long_term(WS, "the chapel bell", agent_id=AUTO))
+    rows = asyncio.run(service.search_long_term(WS, "Acme invoicing", agent_id=AUTO))
     assert _texts(rows) == {AGENT_FACT}
 
 
 def test_a_search_with_no_agent_reads_the_workspace_namespace_only(memory):
     service, _ = memory
-    rows = asyncio.run(service.search_long_term(WS, "the chapel bell", include_workspace=True))
+    rows = asyncio.run(service.search_long_term(WS, "Acme invoicing", include_workspace=True))
     assert _texts(rows) == {WORKSPACE_FACT}
 
 
 def test_one_query_one_embedding(memory):
     service, client = memory
-    asyncio.run(service.search_long_term(WS, "the chapel bell", agent_id=AUTO, include_workspace=True))
+    asyncio.run(service.search_long_term(WS, "Acme invoicing", agent_id=AUTO, include_workspace=True))
     assert len(client.filters) == 1 and service._durable._embedder.generate_embedding.await_count == 1
 
 
@@ -120,8 +120,8 @@ def test_one_query_one_embedding(memory):
 
 
 @pytest.mark.parametrize("query", [
-    "Who has the chapel bell now?",
-    "We are starting a new session after last time. Catch me up on the story so far.",   # read as temporal
+    "Where does Acme do its invoicing now?",
+    "We are starting a new session after last time. Catch me up on where things stand.",   # read as temporal
 ])
 def test_a_chat_turn_recalls_the_workspaces_distilled_facts(memory, query):
     from modules.memory.context_router import ContextRouter

@@ -84,6 +84,194 @@ tests:
             name: workspaces
             mountPath: /workspaces
             readOnly: true
+  - it: keeps the API's files on a volume, and points the document settings at it
+    release:
+      name: demo
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: data
+            mountPath: /app/data
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: data
+            persistentVolumeClaim:
+              claimName: demo-automatos-api-data
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DOCUMENT_UPLOAD_DIR
+            value: /app/data/uploads
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DOCUMENT_STORAGE_DIR
+            value: /app/data/documents
+  - it: stops the old pod first when the volume attaches to one node at a time
+    asserts:
+      - equal:
+          path: spec.strategy
+          value:
+            type: RollingUpdate
+            rollingUpdate:
+              maxSurge: 0
+              maxUnavailable: 1
+  - it: stops the old pod first on ReadWriteOncePod too
+    set:
+      api:
+        data:
+          accessModes:
+            - ReadWriteOncePod
+    asserts:
+      - equal:
+          path: spec.strategy.rollingUpdate.maxSurge
+          value: 0
+  - it: stops the old pod first when ReadWriteOnce is one of several modes
+    set:
+      api:
+        data:
+          accessModes:
+            - ReadWriteOnce
+            - ReadWriteMany
+    asserts:
+      - equal:
+          path: spec.strategy.rollingUpdate.maxSurge
+          value: 0
+  - it: refuses a second replica on a single-attach volume
+    set:
+      api:
+        replicas: 2
+    asserts:
+      - failedTemplate:
+          errorPattern: api.replicas above 1 needs api.data.accessModes
+  - it: allows a second replica on ReadWriteMany
+    set:
+      api:
+        replicas: 2
+        data:
+          accessModes:
+            - ReadWriteMany
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 2
+  - it: allows a second replica with data off
+    set:
+      api:
+        replicas: 2
+        data:
+          enabled: false
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 2
+  - it: refuses object storage credentials in config, naming where they go
+    set:
+      config:
+        AWS_ACCESS_KEY_ID: visible
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.AWS_ACCESS_KEY_ID: move it to the Secret"
+  - it: refuses the secret key in config too
+    set:
+      config:
+        AWS_SECRET_ACCESS_KEY: visible
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.AWS_SECRET_ACCESS_KEY: move it to the Secret"
+  - it: refuses the upload path in config while data is on
+    set:
+      config:
+        DOCUMENT_UPLOAD_DIR: /elsewhere
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.DOCUMENT_UPLOAD_DIR: api.data sets this"
+  - it: refuses the storage path in config while data is on
+    set:
+      config:
+        DOCUMENT_STORAGE_DIR: /elsewhere
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.DOCUMENT_STORAGE_DIR: api.data sets this"
+  - it: takes the document paths from config once data is off
+    set:
+      api:
+        data:
+          enabled: false
+      config:
+        DOCUMENT_STORAGE_DIR: /elsewhere
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DOCUMENT_STORAGE_DIR
+            value: /elsewhere
+  - it: renders with an empty config
+    set:
+      config: null
+    asserts:
+      - isKind:
+          of: Deployment
+  - it: rolls as usual on ReadWriteMany storage
+    set:
+      api:
+        data:
+          accessModes:
+            - ReadWriteMany
+    asserts:
+      - notExists:
+          path: spec.strategy
+  - it: leaves the volume, the settings and the strategy out when data is off
+    set:
+      api:
+        data:
+          enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: data
+            mountPath: /app/data
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DOCUMENT_STORAGE_DIR
+            value: /app/data/documents
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DOCUMENT_UPLOAD_DIR
+            value: /app/data/uploads
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: data
+            persistentVolumeClaim:
+              claimName: RELEASE-NAME-automatos-api-data
+      - notExists:
+          path: spec.strategy
+  - it: takes the object storage credentials from the Secret, as optional keys
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: automatos-secrets
+                key: AWS_ACCESS_KEY_ID
+                optional: true
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: automatos-secrets
+                key: AWS_SECRET_ACCESS_KEY
+                optional: true
   - it: passes extra config through as env
     set:
       config:

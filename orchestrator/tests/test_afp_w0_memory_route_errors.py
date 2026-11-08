@@ -26,7 +26,7 @@ def _with_service(monkeypatch, service):
     monkeypatch.setattr(widget_memory, "_get_memory_service", lambda: service)
 
 
-def _store(content="Mira runs the Prancing Pony", **kwargs):
+def _store(content="Acme renews its enterprise plan every March", **kwargs):
     body = widget_memory.MemoryCreate(content=content, **kwargs)
     return asyncio.run(widget_memory.store_memory(body=body, ctx=CTX))
 
@@ -95,7 +95,7 @@ def test_every_route_says_memory_off_when_the_install_has_no_durable_memory(monk
     calls = [
         _store,
         lambda: asyncio.run(widget_memory.list_memories(ctx=CTX, limit=10)),
-        lambda: asyncio.run(widget_memory.search_memories(q="Mira", ctx=CTX, limit=5)),
+        lambda: asyncio.run(widget_memory.search_memories(q="Acme", ctx=CTX, limit=5)),
         lambda: asyncio.run(widget_memory.delete_memory(memory_id="m1", ctx=CTX)),
     ]
     for call in calls:
@@ -116,7 +116,7 @@ def test_a_failed_read_is_a_503_not_an_empty_answer(monkeypatch):
     _with_service(monkeypatch, NS(get_all_memories=boom, search_long_term=boom, delete_memory=boom))
     calls = [
         lambda: asyncio.run(widget_memory.list_memories(ctx=CTX, limit=10)),
-        lambda: asyncio.run(widget_memory.search_memories(q="Mira", ctx=CTX, limit=5)),
+        lambda: asyncio.run(widget_memory.search_memories(q="Acme", ctx=CTX, limit=5)),
         lambda: asyncio.run(widget_memory.delete_memory(memory_id="m1", ctx=CTX)),
     ]
     for call in calls:
@@ -125,13 +125,13 @@ def test_a_failed_read_is_a_503_not_an_empty_answer(monkeypatch):
 
 
 def test_search_keeps_the_score_and_list_does_not(monkeypatch):
-    row = {"id": "m1", "memory": "Mira runs the Prancing Pony", "metadata": {"tags": ["npc"]}, "score": 0.8}
+    row = {"id": "m1", "memory": "Acme renews its enterprise plan every March", "metadata": {"tags": ["client"]}, "score": 0.8}
 
     async def rows(**_):
         return [row]
 
     _with_service(monkeypatch, NS(get_all_memories=rows, search_long_term=rows))
-    found = asyncio.run(widget_memory.search_memories(q="innkeeper", ctx=CTX, limit=5)).results[0]
+    found = asyncio.run(widget_memory.search_memories(q="renewal", ctx=CTX, limit=5)).results[0]
     listed = asyncio.run(widget_memory.list_memories(ctx=CTX, limit=10)).memories[0]
-    assert (found.score, found.tags, found.content) == (0.8, ["npc"], row["memory"])
-    assert (listed.score, listed.tags) == (None, ["npc"])
+    assert (found.score, found.tags, found.content) == (0.8, ["client"], row["memory"])
+    assert (listed.score, listed.tags) == (None, ["client"])
