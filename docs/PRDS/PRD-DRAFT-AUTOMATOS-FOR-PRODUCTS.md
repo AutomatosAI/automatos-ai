@@ -143,10 +143,15 @@ rolling every die:
 - **The model followed the host app's contract:** 6 directives, all valid, no invented dice rolls.
 - **Turn cost:** 34,000–45,000 prompt tokens per turn; 9.9 s median to the first word; about $0.004 per turn by
   Automatos's own per-agent accounting (176 model calls for 20 chats).
-- **Memory stored 46 facts:** about 30 repeat the per-turn app context; four are instructions stored as facts ("The
-  AI assistant should end the scene by asking…"); about eight are the story facts that mattered.
+- **Memory stored 46 facts:** about 30 repeat the per-turn app context; four turned the harness's per-turn framing
+  ("The AI assistant should end the scene by asking…") into standing instructions, which is what distillation is
+  meant to do with an owner's instructions (PRD-256), so a product's framing needs the app-context block (§5.4);
+  about eight are the story facts that mattered. Restated facts had not been folded yet: consolidation
+  (`run_sleep_time_consolidation`) runs hourly and the run lasted about 20 minutes.
 - **A new-session "story so far" recalled nothing:** the memory section injected ~0 tokens and the agent recapped a
-  different, earlier chat.
+  different, earlier chat. The cause (found in Wave 0, #1434): a chat turn's long-term recall read only the turn's
+  agent namespace, while distillation files facts in the workspace's (PRD-159 S5). Every chat turn has an agent,
+  Auto included, so no chat turn's router recall reached a distilled fact.
 
 ## 5. Design
 
@@ -212,9 +217,10 @@ story worlds, the feed product's per-run results.
 A workspace or agent picks a **memory profile**: the distillation prompt's fact types and examples. `general` is
 today's. The others are named by domain (`story`, `incident`, `case`, …) and are data, seeded like personas. For every
 profile, distillation:
-- ignores the app context block (§5.4);
-- never stores instructions to the assistant as facts;
-- merges a fact that restates a stored one instead of adding it.
+- ignores the app context block (§5.4), so a product's per-turn framing never becomes a standing instruction;
+- keeps the owner's own standing instructions as today (PRD-256);
+- leaves restated facts to consolidation, which already folds near-duplicates (`run_sleep_time_consolidation`);
+  the Wave 0 eval measures whether they survive it.
 
 Alongside distillation, an explicit write: `POST /api/memory` gains optional `subject`, `type`, `name` and `audience`
 (§5.8). A product that knows its facts (a game's `[remember]`, an incident tool's timeline) writes them directly, and a
@@ -226,8 +232,8 @@ failed store returns an error, not 201.
 
 A `resume` intent (the spike's "story so far", or "catch me up"): recall the subject's L3 facts ranked by recency and
 importance, plus the last session summary (`modules/memory/resume_context.py` and `GET /api/memory/resume` exist and
-are the starting point). Fix the routing seen in the spike, where a temporal reading sent the query to layers that
-returned nothing.
+are the starting point). The spike's empty recall was not the temporal reading but the namespace: a chat turn read
+only its agent's facts. Fixed in Wave 0 (#1434); the eval checks the `resume` intent on top of it.
 
 ### 5.8 Need-to-know: facts limited to the agents allowed to know them
 
@@ -244,13 +250,13 @@ widget lane becomes one use of the general rule.
 Each wave is its own branch and PR, opened as a draft and not merged until this PRD is approved. The order is a
 recommendation (§8-Q1).
 
-### Wave 0: measure on main, and fix what Auto already suffers from (one PR)
+### Wave 0: measure on main, and fix what Auto already suffers from (three PRs)
 
 - An eval in `orchestrator/evals/` (beside `orchestrator/evals/proactive/`): a 400-fact fixture (half of them look-alikes), recall turns,
   continuity and distillation checks. It is the acceptance test for Waves 3–5 and reports the numbers in §4.6 on main.
-- Distillation stops storing instructions to the assistant as facts, and merges restated facts.
-- The `resume` intent recalls stored facts; the temporal misroute is fixed.
-- `POST /api/memory` returns an error when the store fails.
+  It also measures whether restated facts survive consolidation, and the `resume` intent's recall.
+- `POST /api/memory` returns an error when the store fails, and nothing is kept in process memory (#1433).
+- A chat turn's long-term recall reads the workspace's facts as well as its agent's (#1434).
 
 ### Wave 1: headless access (one or two PRs)
 
@@ -276,8 +282,10 @@ recommendation (§8-Q1).
 
 ## 7. Rollout
 
-- Every wave ships behind a flag in `orchestrator/config.py`, off by default, and changes nothing for the owner's
-  Auto until enabled.
+- Wave 0 fixes behaviour the platform already promises (a store that says when it failed, recall that reads the
+  workspace's facts), so it ships unflagged.
+- Waves 1–5 add capabilities. Each ships behind a flag in `orchestrator/config.py`, off by default, and changes
+  nothing for the owner's Auto until enabled.
 - Both editions: the local edition needs Waves 1–4 for self-hosted products; Wave 5 matters most to the hosted
   edition, and its billing waits on §8-Q2.
 - The security-feed product and the game-master app are the first two products and the reference tests; Shopify moves onto Wave 5's
