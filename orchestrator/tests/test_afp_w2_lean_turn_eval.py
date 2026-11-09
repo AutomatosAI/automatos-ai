@@ -32,3 +32,19 @@ def test_live_needs_a_model():
 
     with pytest.raises(SystemExit):
         lean_turn.main(["--live"])
+
+
+def test_the_live_run_checks_the_facts_the_question_needs_were_recalled():
+    from evals import lean_turn
+
+    block = "\n".join(text for memory_id, text in lean_turn.MEMORIES if memory_id in ("due-date", "plan"))
+    assert lean_turn.recalled(block) == ["due-date", "plan"]
+    assert not set(lean_turn.RECALL_GOLD) <= set(lean_turn.recalled(block))  # move-date is missing
+    assert lean_turn.recalled("") == []
+
+
+def test_the_live_embedder_passes_the_memory_stores_health_check():
+    from core.llm.embedding_status import provider_ready
+    from evals.memory_pipeline import OpenRouterEmbedder
+
+    assert provider_ready(OpenRouterEmbedder("any/model", "not-a-key", "http://127.0.0.1:9", 8))
