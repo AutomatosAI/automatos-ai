@@ -1,4 +1,4 @@
-"""Memory-consolidation eval: what folding keeps, and what it loses (#1430 Wave 0).
+"""Memory-consolidation eval: what folding keeps, and what it loses (PRD-274 Wave 0).
 
 Consolidation (``UnifiedMemoryService.run_sleep_time_consolidation``, PRD-159 S4, on the
 hourly memory job) plans over a workspace's first 200 long-term rows: near-duplicates
