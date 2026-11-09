@@ -178,12 +178,15 @@ def test_an_answer_never_carries_an_exceptions_text_or_a_sign_in_id():
 
 
 def test_a_purge_that_raises_records_no_exception_text(new_session, monkeypatch):
-    from services import workspace_purge
+    from services import gdpr_service, workspace_purge
 
     def _boom(*args, **kwargs):
         raise RuntimeError("connection to 10.0.0.5 refused")
 
     monkeypatch.setattr(workspace_purge, "_build_s3_client", lambda: None)
+    # The memories erase cleanly, so the purge reaches the SQL step that raises.
+    monkeypatch.setattr(gdpr_service, "_erase_durable_memory", lambda ws, subject_id=None: 0)
+    monkeypatch.setattr(gdpr_service, "_erase_field_memory", lambda ws, subject_id=None: 0)
     monkeypatch.setattr(workspace_purge, "_discover_scoped_tables", _boom)
     ws = _shop_workspace(new_session, active=False)
     try:
