@@ -21,6 +21,12 @@ on:
   pull_request:
     branches:
       - main
+    # A PR that changes only markdown has nothing to analyse (#1455). Only the
+    # PR is filtered: CodeQL compares a PR with main's last analysis, so every
+    # push to main is analysed. CodeQL is not a required check, so a skipped
+    # run blocks no merge. docs/ is not ignored whole: it holds .py and .html.
+    paths-ignore:
+      - "**/*.md"
   schedule:
     # Mondays 03:17 UTC — off the hour to avoid the scheduling stampede.
     - cron: "17 3 * * 1"
