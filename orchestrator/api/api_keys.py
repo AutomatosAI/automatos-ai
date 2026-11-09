@@ -60,12 +60,20 @@ VALID_PERMISSIONS = [
 # ── Pydantic schemas ─────────────────────────────────────────────────
 
 
+IP_ALLOWLIST_REFUSAL = (
+    "allowed_ips is not supported yet: a key's IP allow-list is not enforced. "
+    "Leave it out, and keep the key secret on your own server."
+)
+
+
 class ApiKeyCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255, description="Human-readable key name")
     key_type: str = Field("server", description="'public' or 'server'")
     permissions: List[str] = Field(default_factory=list, description="Granted permission scopes")
     allowed_domains: Optional[List[str]] = Field(None, description="Origins allowed (required for public keys)")
-    allowed_ips: Optional[List[str]] = Field(None, description="IP allowlist")
+    allowed_ips: Optional[List[str]] = Field(
+        None, description="Not supported yet: a key's IP allow-list is not enforced, so a non-empty list is refused"
+    )
     rate_limit_requests: Optional[int] = Field(None, ge=1, description="Max requests per minute")
     rate_limit_tokens: Optional[int] = Field(None, ge=1, description="Max tokens per minute")
     default_agent_id: Optional[int] = Field(None, description="Lock this key to a specific agent ID")
@@ -77,6 +85,15 @@ class ApiKeyCreateRequest(BaseModel):
     def validate_key_type(cls, v: str) -> str:
         if v not in ("public", "server"):
             raise ValueError("key_type must be 'public' or 'server'")
+        return v
+
+    @field_validator("allowed_ips")
+    @classmethod
+    def refuse_allowed_ips(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        """A key's IP allow-list is not enforced yet, so one is never accepted: a key that
+        claimed to work only from listed addresses would work from anywhere."""
+        if v:
+            raise ValueError(IP_ALLOWLIST_REFUSAL)
         return v
 
     @field_validator("permissions")
@@ -166,7 +183,6 @@ def create_api_key(
         key_type=body.key_type,
         permissions=body.permissions,
         allowed_domains=body.allowed_domains,
-        allowed_ips=body.allowed_ips,
         rate_limit_requests=body.rate_limit_requests,
         rate_limit_tokens=body.rate_limit_tokens,
         default_agent_id=body.default_agent_id,
