@@ -10,7 +10,7 @@
  * (components/widgets/EmailWidget/EmailViewer.tsx).
  */
 import { describe, expect, it } from 'vitest'
-import { sanitizeHtml } from '../page'
+import { sanitizeHtml } from '../sanitize-html'
 
 describe('sanitizeHtml', () => {
   it('strips an ordinary <script> block', () => {
