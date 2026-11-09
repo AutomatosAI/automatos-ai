@@ -307,8 +307,7 @@ def erase_workspace(db: Any, workspace_id: UUID | str, *, requested_by: str) -> 
     objects it could not delete.
     """
     closed = _safe(lambda: _close_workspace(workspace_id), "close")
-    field_deleted = _safe(lambda: _erase_field_memory(workspace_id), "field_memory")
-    durable_deleted = _safe(lambda: _erase_durable_memory(workspace_id), "durable_memory")
+    field_deleted, durable_deleted = _erase_memories_once_closed(workspace_id, closed)
     sql_result = _purge_unless_memories_remain(workspace_id, field_deleted, durable_deleted)
     failed = _failed_steps(
         {"close": closed, "field_memory": field_deleted, "durable_memory": durable_deleted}, sql_result,
@@ -339,6 +338,18 @@ def erase_workspace(db: Any, workspace_id: UUID | str, *, requested_by: str) -> 
         complete=not failed,
     )
     return result
+
+
+def _erase_memories_once_closed(workspace_id: UUID | str, closed: Any) -> tuple:
+    """Both memory stores' erase counts, run only once the workspace is closed (CodeRabbit on
+    #1443): erasing a live workspace's memories leaves it half erased when the purge then
+    refuses it. When the close failed (None) neither runs, both count as not done, and the
+    retry, which closes it again, erases them."""
+    if closed is None:
+        logger.warning("[gdpr] memories of ws=%s left for the retry: the workspace could not be closed", workspace_id)
+        return None, None
+    return (_safe(lambda: _erase_field_memory(workspace_id), "field_memory"),
+            _safe(lambda: _erase_durable_memory(workspace_id), "durable_memory"))
 
 
 def _purge_unless_memories_remain(workspace_id: UUID | str, field_deleted: Any, durable_deleted: Any) -> Dict[str, Any]:

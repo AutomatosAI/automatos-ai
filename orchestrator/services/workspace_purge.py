@@ -158,14 +158,28 @@ def _purge_workspace_s3(workspace_id: UUID, result: "PurgeResult") -> None:
     )
 
 
-# Why a purge stopped (``PurgeResult.skipped_reason``). The erase routes pass on the first
-# three as they are (api/gdpr.py); any other reason reaches the caller as "failed".
+# Why a purge stopped (``PurgeResult.skipped_reason``). The erase routes pass on all but
+# PURGE_RAISED as they are (api/gdpr.py); any other reason reaches the caller as "failed".
 WORKSPACE_NOT_FOUND = "workspace_not_found"
 NOT_SOFT_DELETED = "not_soft_deleted"
 # A memory store could not be erased: nothing past the memories ran.
 MEMORY_ERASE_FAILED = "memory_erase_failed"
 # The purge raised: the detail is in its log line, never in the result (CodeQL).
 PURGE_RAISED = "exception"
+# Some of the workspace's S3 objects could not be deleted: nothing past S3 ran.
+S3_DELETE_FAILED = "s3_delete_failed"
+
+
+def _s3_purged(workspace_id: UUID, result: "PurgeResult") -> bool:
+    """The workspace's S3 objects deleted, counted into ``result``; False (``S3_DELETE_FAILED``)
+    when some could not be (CodeRabbit on #1443): deleting the row then would leave those
+    objects where no retry could find them, so the purge stops and a rerun finishes it."""
+    _purge_workspace_s3(workspace_id, result)
+    if not result.s3_errors:
+        return True
+    result.skipped_reason = S3_DELETE_FAILED
+    logger.error("Purge of %s held: %d S3 delete(s) failed; rerun it to finish", workspace_id, result.s3_errors)
+    return False
 
 
 def _erase_workspace_memories(workspace_id: UUID, result: "PurgeResult") -> bool:
@@ -455,8 +469,7 @@ def purge_workspace_sync(workspace_id: UUID) -> PurgeResult:
         clerk_uid = _resolve_owner_clerk_id(db, owner_id) if owner_leaves else None
 
         # 1) S3, and the workspace's memories in Qdrant (#1432)
-        _purge_workspace_s3(workspace_id, result)
-        if not _erase_workspace_memories(workspace_id, result):
+        if not (_s3_purged(workspace_id, result) and _erase_workspace_memories(workspace_id, result)):
             return result  # held: the row stays, soft-deleted, so a rerun erases what is left
 
         # 2) Clerk (best-effort, never blocks DB cleanup)

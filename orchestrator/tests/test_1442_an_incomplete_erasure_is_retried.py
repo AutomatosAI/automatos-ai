@@ -200,3 +200,63 @@ def test_a_purge_that_raises_records_no_exception_text(new_session, monkeypatch)
         assert result.skipped_reason == "exception" and "10.0.0.5" not in str(result.to_dict())
     finally:
         _drop(new_session, ws)
+
+
+def test_a_workspace_that_could_not_be_closed_keeps_its_memories_for_the_retry(monkeypatch):
+    """CodeRabbit on #1443: erasing a live workspace's memories left it half erased once the
+    purge refused it. When the close fails, no store is touched and the erasure is incomplete."""
+    from services import gdpr_service
+
+    touched = []
+
+    def _close_fails(ws):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(gdpr_service, "_close_workspace", _close_fails)
+    monkeypatch.setattr(gdpr_service, "_erase_field_memory", lambda ws, subject_id=None: touched.append("field"))
+    monkeypatch.setattr(gdpr_service, "_erase_durable_memory", lambda ws, subject_id=None: touched.append("durable"))
+    monkeypatch.setattr(gdpr_service, "_purge_sql", lambda ws: touched.append("sql") or {})
+    monkeypatch.setattr(gdpr_service, "_audit_gdpr", lambda db, ws, action, **kw: None)
+    result = gdpr_service.erase_workspace(None, "ws-1", requested_by="user:1")
+    assert touched == [] and result["complete"] is False
+    assert result["failed"][:3] == ["close", "field_memory", "durable_memory"]
+
+
+def test_a_failed_s3_delete_holds_the_purge_and_a_rerun_finishes_it(new_session, monkeypatch):
+    """CodeRabbit on #1443: deleting the row after a failed S3 delete left those objects where no
+    retry could find them. The purge stops after S3, before the memories, the sign-in and the rows."""
+    from services import workspace_purge
+
+    attempts = {"s3_fails": 1}
+    memories = []
+
+    def _s3(workspace_id, result):
+        if attempts["s3_fails"]:
+            attempts["s3_fails"] -= 1
+            result.s3_errors = 2
+
+    monkeypatch.setattr(workspace_purge, "_purge_workspace_s3", _s3)
+    monkeypatch.setattr(workspace_purge, "_erase_workspace_memories", lambda ws, result: memories.append(ws) or True)
+    ws = _shop_workspace(new_session, active=False)
+    try:
+        from sqlalchemy import text
+
+        s = new_session()
+        s.execute(text("UPDATE workspaces SET deleted_at = now() WHERE id = CAST(:id AS uuid)"), {"id": ws})
+        s.commit()
+        s.close()
+        held = workspace_purge.purge_workspace_sync(ws)
+        assert held.skipped_reason == workspace_purge.S3_DELETE_FAILED and not held.workspace_row_deleted
+        assert memories == [] and _exists(new_session, ws)
+        rerun = workspace_purge.purge_workspace_sync(ws)
+        assert rerun.workspace_row_deleted and not _exists(new_session, ws) and len(memories) == 1
+    finally:
+        _drop(new_session, ws)
+
+
+def test_the_answer_passes_the_s3_hold_on_as_itself():
+    from api.gdpr import public_erasure
+    from services.workspace_purge import S3_DELETE_FAILED
+
+    answer = public_erasure({"complete": False, "sql": {"skipped_reason": S3_DELETE_FAILED, "s3_errors": 2}})
+    assert answer["sql"]["skipped_reason"] == S3_DELETE_FAILED
