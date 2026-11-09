@@ -470,8 +470,9 @@ async def browse_memories(
             "search_query": query,
         }
     except Exception as e:
+        # CodeQL py/stack-trace-exposure: the exception's text stays in the server log.
         logger.error("Memory browse failed: %s", e, exc_info=True)
-        return {"success": False, "error": str(e)[:200], "memories": []}
+        return {"success": False, "error": "Memory browse failed", "memories": []}
 
 
 @admin_router.delete("/{memory_id}")
@@ -491,8 +492,9 @@ async def delete_memory(
     try:
         return await forget(memory_id, ctx.workspace_id, subject_of(resolve_user_pk(db, ctx)))
     except Exception as e:
+        # CodeQL py/stack-trace-exposure: the exception's text stays in the server log.
         logger.error("Memory delete failed: %s", e, exc_info=True)
-        return {"success": False, "error": str(e)[:200]}
+        return {"success": False, "error": "Memory delete failed"}
 
 
 @router.get("/health")
@@ -875,8 +877,9 @@ async def consolidate_memories(
     try:
         targets = await _find_targets(service, ctx.workspace_id, db, body.memory_ids)
     except Exception as e:
+        # CodeQL py/stack-trace-exposure: the exception's text stays in the server log.
         logger.error("Failed to fetch memories for consolidation: %s", e, exc_info=True)
-        return {"success": False, "error": str(e)[:200]}
+        return {"success": False, "error": "Failed to fetch memories for consolidation"}
     if len(targets) < 2:
         return {"success": False, "error": f"Found only {len(targets)} of {len(body.memory_ids)} memories"}
 
@@ -896,8 +899,9 @@ async def consolidate_memories(
             metadata={"source": "consolidation", "merged_from": len(targets)},
         )
     except Exception as e:
+        # CodeQL py/stack-trace-exposure: the exception's text stays in the server log.
         logger.error("Failed to store consolidated memory: %s", e, exc_info=True)
-        return {"success": False, "error": f"Failed to store: {str(e)[:200]}"}
+        return {"success": False, "error": "Failed to store consolidated memory"}
 
     deleted = await _delete_originals(service, str(ctx.workspace_id), targets)
 
