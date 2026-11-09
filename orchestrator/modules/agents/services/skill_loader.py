@@ -215,6 +215,27 @@ class LRUCache:
         self.cache.clear()
 
 
+def _resolve_and_validate_source_name(
+    git_url: str, source_name: Optional[str]
+) -> Tuple[Optional[str], Optional[str]]:
+    """Generate a source name from the URL when one wasn't given, then validate it.
+
+    Returns (source_name, None) on success, or (None, error_message) on failure.
+
+    CodeQL py/path-injection, py/command-line-injection: source_name becomes
+    a directory name (SKILLS_BASE_DIR/source_name) that is then passed to
+    `git -C <dir>` for every clone/pull/checkout/rev-parse.
+    """
+    if not source_name:
+        repo_name = extract_repo_name(git_url)
+        source_name = f"git-{repo_name}"
+
+    is_valid, error_msg = _secure_validate_source_name(source_name)
+    if not is_valid:
+        return None, error_msg
+    return source_name, None
+
+
 # ============================================================================
 # Main SkillLoader Class
 # ============================================================================
@@ -292,95 +313,38 @@ class SkillLoader:
                     "status": "error",
                     "error": error_msg
                 }
-            
-            # 2. Generate source name
-            if not source_name:
-                repo_name = extract_repo_name(git_url)
-                source_name = f"git-{repo_name}"
 
-            # CodeQL py/path-injection, py/command-line-injection: source_name becomes
-            # a directory name (SKILLS_BASE_DIR/source_name) that is then passed to
-            # `git -C <dir>` for every clone/pull/checkout/rev-parse below.
-            is_valid, error_msg = _secure_validate_source_name(source_name)
-            if not is_valid:
-                logger.error(f"Invalid source name: {error_msg}")
-                return {
-                    "status": "error",
-                    "error": error_msg
-                }
+            # 2. Generate + validate source name
+            source_name, name_error = _resolve_and_validate_source_name(git_url, source_name)
+            if name_error:
+                logger.error(f"Invalid source name: {name_error}")
+                return {"status": "error", "error": name_error}
 
             # 3. Check if source already exists
             existing_source = db.query(SkillSource).filter(
                 SkillSource.source_name == source_name
             ).first()
-            
+
             if existing_source:
                 return {
                     "status": "error",
                     "error": f"Source '{source_name}' already exists. Use update_git_repository() instead."
                 }
-            
-            # 4. Clone repository
-            local_path = os.path.join(SkillLoaderConfig.SKILLS_BASE_DIR, source_name)
-            
-            logger.info(f"Cloning {git_url} to {local_path}...")
-            
-            clone_result = self._git_clone(git_url, local_path, branch)
-            
-            if not clone_result["success"]:
-                return {
-                    "status": "error",
-                    "error": f"Git clone failed: {clone_result['error']}"
-                }
-            
-            commit_sha = clone_result["commit_sha"]
-            
-            # 5. Create SkillSource record
-            skill_source = SkillSource(
-                source_name=source_name,
-                source_type="git",
-                git_url=git_url,
-                git_branch=branch,
-                git_commit_sha=commit_sha,
-                local_cache_path=local_path,
-                auto_update=auto_update,
-                status="syncing"
-            )
-            
-            db.add(skill_source)
-            db.flush()  # Get ID
-            
-            # 6. Index repository
-            index_result = self._index_repository(db, skill_source.id, local_path)
 
-            # 6b. Clear caches so new/updated skills are served immediately
-            self.clear_caches()
+            # 4-6. Clone, create the SkillSource record, and index its skills
+            clone_outcome = self._clone_and_create_git_source(db, git_url, source_name, branch, auto_update)
+            if clone_outcome["status"] == "error":
+                return clone_outcome
 
-            # 7. Update source with results
-            skill_source.skills_discovered = len(index_result["skills"])
-            skill_source.status = "active"
-            skill_source.last_sync_at = datetime.now()
-            skill_source.last_sync_status = "success"
-            
-            db.commit()
-            
-            # 8. Log audit
-            execution_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
-            self._log_audit(
-                db=db,
-                source_id=skill_source.id,
-                action="sync",
-                status="success",
-                action_details={
-                    "git_url": git_url,
-                    "commit_sha": commit_sha,
-                    "skills_discovered": len(index_result["skills"])
-                },
-                execution_time_ms=execution_time_ms
-            )
-            
+            skill_source = clone_outcome["skill_source"]
+            index_result = clone_outcome["index_result"]
+            commit_sha = clone_outcome["commit_sha"]
+
+            # 7. Log audit
+            self._log_git_repository_added(db, skill_source, git_url, commit_sha, index_result, start_time)
+
             logger.info(f"Successfully added Git repository: {source_name} ({len(index_result['skills'])} skills)")
-            
+
             return {
                 "status": "success",
                 "source_id": skill_source.id,
@@ -389,18 +353,95 @@ class SkillLoader:
                 "skills": index_result["skills"],
                 "commit_sha": commit_sha
             }
-            
+
         except Exception as e:
             logger.error(f"Error adding Git repository: {e}", exc_info=True)
-            
+
             if db:
                 db.rollback()
-            
+
             return {
                 "status": "error",
                 "error": str(e)
             }
-    
+
+    def _clone_and_create_git_source(
+        self,
+        db: Session,
+        git_url: str,
+        source_name: str,
+        branch: str,
+        auto_update: bool,
+    ) -> Dict[str, Any]:
+        """Clone the repo, create its SkillSource row, and index its skills.
+
+        Returns {"status": "error", "error": ...} on clone failure, or
+        {"status": "success", "skill_source": ..., "index_result": ..., "commit_sha": ...}.
+        """
+        local_path = os.path.join(SkillLoaderConfig.SKILLS_BASE_DIR, source_name)
+        logger.info(f"Cloning {git_url} to {local_path}...")
+
+        clone_result = self._git_clone(git_url, local_path, branch)
+        if not clone_result["success"]:
+            return {
+                "status": "error",
+                "error": f"Git clone failed: {clone_result['error']}"
+            }
+
+        commit_sha = clone_result["commit_sha"]
+        skill_source = SkillSource(
+            source_name=source_name,
+            source_type="git",
+            git_url=git_url,
+            git_branch=branch,
+            git_commit_sha=commit_sha,
+            local_cache_path=local_path,
+            auto_update=auto_update,
+            status="syncing"
+        )
+        db.add(skill_source)
+        db.flush()  # Get ID
+
+        index_result = self._index_repository(db, skill_source.id, local_path)
+        self.clear_caches()  # new/updated skills are served immediately
+
+        skill_source.skills_discovered = len(index_result["skills"])
+        skill_source.status = "active"
+        skill_source.last_sync_at = datetime.now()
+        skill_source.last_sync_status = "success"
+        db.commit()
+
+        return {
+            "status": "success",
+            "skill_source": skill_source,
+            "index_result": index_result,
+            "commit_sha": commit_sha,
+        }
+
+    def _log_git_repository_added(
+        self,
+        db: Session,
+        skill_source: SkillSource,
+        git_url: str,
+        commit_sha: str,
+        index_result: Dict[str, Any],
+        start_time: datetime,
+    ) -> None:
+        """Write the sync audit entry for a newly added Git repository source."""
+        execution_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+        self._log_audit(
+            db=db,
+            source_id=skill_source.id,
+            action="sync",
+            status="success",
+            action_details={
+                "git_url": git_url,
+                "commit_sha": commit_sha,
+                "skills_discovered": len(index_result["skills"])
+            },
+            execution_time_ms=execution_time_ms
+        )
+
     def update_git_repository(
         self,
         source_name: str,
