@@ -1,4 +1,4 @@
-"""Reading `hyperframes check --json` (0.8.62) into the job report.
+"""Reading `hyperframes check --json` (0.8.220) into the job report.
 
 The CLI prints one JSON envelope: ``ok`` plus a section each for lint, runtime,
 layout, motion and contrast, every section with its counts and findings. A
