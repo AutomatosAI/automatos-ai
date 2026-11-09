@@ -390,7 +390,7 @@ class UnifiedMemoryService:
             query: Natural-language search query.
             agent_id: Optional agent scope.
             limit: Maximum results to return.
-            include_workspace: With an agent, also read the workspace namespace, where facts are filed (#1430 W0).
+            include_workspace: With an agent, also read the workspace namespace, where facts are filed (PRD-274 Wave 0).
 
         Returns:
             List of memory item dicts (may be empty on failure).

@@ -1,4 +1,4 @@
-"""#1430 Wave 0 (Automatos for products): a chat turn's long-term recall reads the workspace's facts.
+"""PRD-274 Wave 0 (Automatos for products): a chat turn's long-term recall reads the workspace's facts.
 
 Distillation files an exchange's durable facts in the WORKSPACE namespace (``mem:{ws}``):
 PRD-159 S5 retired the double write to the workspace and the agent namespaces, keeping one
