@@ -17,6 +17,7 @@ A system agent (Auto, the CTO) is never lean: its turn is the platform's own.
 """
 from __future__ import annotations
 
+import dataclasses
 import functools
 import logging
 from typing import Any, AsyncGenerator, Callable, Dict, List, Mapping, Optional
@@ -167,14 +168,23 @@ def offers_a_lean_turn_its_grants(get_tools: Callable[..., Any]) -> Callable[...
 
 def a_lean_turns_prompt(prepare: Callable[..., Any]) -> Callable[..., Any]:
     """Wrap ``StreamingChatService._prepare_messages``: a lean turn's model call carries its
-    granted tools (the LEAN mode loads none) and their descriptions."""
+    granted tools (the LEAN mode loads none) and their descriptions, and the request's app
+    context (consumers.chatbot.lean_request) for this turn only; the turn's trace keeps the
+    app context's size, never its words."""
     @functools.wraps(prepare)
     async def wrapped(chat: Any, *args: Any, **kwargs: Any) -> Any:
+        from consumers.chatbot.lean_request import NOTHING_ASKED, with_app_context, with_app_context_size
+
         llm_messages, use_tools, orchestrated = await prepare(chat, *args, **kwargs)
         if not lean_turn_of(chat):
             return llm_messages, use_tools, orchestrated
         all_tools = kwargs.get("all_tools", args[3] if len(args) > 3 else None) or []
-        return with_granted_actions(llm_messages, all_tools), all_tools or None, orchestrated
+        app_context = getattr(chat, "_lean_request", NOTHING_ASKED).app_context
+        llm_messages = with_app_context(with_granted_actions(llm_messages, all_tools), app_context)
+        if app_context and dataclasses.is_dataclass(orchestrated):
+            trace = with_app_context_size(getattr(orchestrated, "context_trace", None), app_context)
+            orchestrated = dataclasses.replace(orchestrated, context_trace=trace)
+        return llm_messages, all_tools or None, orchestrated
     return wrapped
 
 

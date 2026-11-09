@@ -15,7 +15,7 @@ no client's turn fails over it; left out, the turn is exactly as before.
 """
 
 import re
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, field_validator
 
@@ -80,7 +80,12 @@ class ChatRequest(BaseModel):
     messages: Optional[List[ChatMessageRequest]] = None
     # PRD-180 S3 (F035): the per-message model selector was a placebo — nothing
     # ever read the chosen model. Field removed; the model resolves via the Auto
-    # tier / the selected agent's own config, never a client-picked override.
+    # tier / the selected agent's own config. The one exception is a lean agent's turn
+    # (Wave 2): ``model`` picks from that agent's own allow-list, and the turn answers on it.
+    model: Optional[str] = None
+    # A lean agent's turn: what the host app knows, JSON or text, for this turn's prompt only
+    # (never stored). Both are refused (422) for any other agent: consumers.chatbot.lean_request.
+    appContext: Optional[Union[Dict[str, Any], List[Any], str]] = None
     selectedVisibilityType: Optional[str] = "private"
     context: Optional[dict] = None
     # PRD: Unified Agent-Chat System
