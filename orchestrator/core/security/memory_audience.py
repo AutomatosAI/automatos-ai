@@ -1,4 +1,4 @@
-"""Need-to-know: a fact limited to the agents allowed to know it (PRD draft "Automatos for products", §5.8).
+"""Need-to-know: a fact limited to the agents allowed to know it (PRD-274, "Automatos for products", §5.8).
 
 A durable fact may carry ``metadata.audience``: a short list of labels (``["finance"]``,
 ``["operator"]``). An agent may carry ``configuration.audience``. An agent reads a labelled fact

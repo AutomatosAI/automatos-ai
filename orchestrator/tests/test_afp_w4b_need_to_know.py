@@ -1,5 +1,5 @@
 """Wave 4b: need-to-know. A fact labelled with an audience is read only by agents whose labels
-meet it (PRD draft "Automatos for products", §5.8).
+meet it (PRD-274, "Automatos for products", §5.8).
 
 The rule is held at the durable store by the run's reader (a context variable an agent's run
 sets): every read leaves out what the reader may not see, the caches key on the reader, a
