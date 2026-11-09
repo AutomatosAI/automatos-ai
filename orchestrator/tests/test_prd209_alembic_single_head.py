@@ -160,7 +160,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # auto_soul_one_source_20261107 — memory_profiles (a new table only): what distillation keeps, by domain.
 # 2026-11-09 (Automatos for products, Wave 1): run_callbacks_20261109 chains onto that —
 # workspace_signing_secrets and run_callbacks (new tables only): signed completion callbacks.
-EXPECTED_HEAD = "run_callbacks_20261109"
+# 2026-11-09 (Automatos for products, Wave 1): execute_idempotency_20261109 chains onto that —
+# one partial unique index on board_tasks: an API run's Idempotency-Key files one ticket.
+EXPECTED_HEAD = "execute_idempotency_20261109"
 
 
 def _literal(node: ast.AST):

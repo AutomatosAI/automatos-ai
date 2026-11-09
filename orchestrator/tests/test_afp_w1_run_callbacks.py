@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 
 from api.agent_execute import AgentRunRequest, execute_agent
 from core.security.web_access import OutboundTarget
@@ -91,7 +91,7 @@ def _ctx(ws):
 def _run(new_session, ws, agent_id, url=HOOK):
     s = new_session()
     try:
-        return execute_agent(agent_id, AgentRunRequest(input="Draft Acme's renewal reminder.", callback_url=url),
+        return execute_agent(agent_id, AgentRunRequest(input="Draft Acme's renewal reminder.", callback_url=url), Response(),
                              ctx=_ctx(ws), db=s)
     finally:
         s.close()

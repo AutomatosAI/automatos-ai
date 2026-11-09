@@ -381,7 +381,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # workspace_signing_secrets and run_callbacks, new tables only; the guard follows it.
     callbacks = (versions / "run_callbacks_20261109.py").read_text()
     assert 'down_revision = "memory_profiles_20261109"' in callbacks
-    assert 'EXPECTED_HEAD = "run_callbacks_20261109"' in guard
+    # 2026-11-09 (Automatos for products, Wave 1): execute_idempotency_20261109 chains onto that —
+    # one partial unique index on board_tasks, no table and no row changed; the guard follows it.
+    idempotency = (versions / "execute_idempotency_20261109.py").read_text()
+    assert 'down_revision = "run_callbacks_20261109"' in idempotency
+    assert 'EXPECTED_HEAD = "execute_idempotency_20261109"' in guard
 
 
 def test_orm_row_is_keyed_by_route():
