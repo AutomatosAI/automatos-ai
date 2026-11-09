@@ -550,16 +550,17 @@ class UnifiedMemoryService:
         every namespace (workspace-wide, per-agent, per-recipe, daily) carries
         the workspace tag, so no namespace enumeration is needed. ``db`` is
         accepted for signature stability with the GDPR service but unused.
-        Returns the number of memories deleted.
+        Returns the number of memories deleted: 0 when durable memory is off
+        (no ``QDRANT_URL``). A failed delete raises (#1442): an erasure that
+        reported 0 here was indistinguishable from one that found nothing.
         """
+        if not self.is_durable_configured:
+            return 0
         try:
             total = await self._durable.erase_workspace(str(workspace_id))
         except Exception:
-            logger.error(
-                "[UnifiedMemoryService] durable erase failed for ws=%s",
-                workspace_id, exc_info=True,
-            )
-            return 0
+            logger.exception("[UnifiedMemoryService] durable erase failed for ws=%s", workspace_id)
+            raise
         logger.warning("[UnifiedMemoryService] GDPR erased %d durable memories for ws=%s", total, workspace_id)
         return total
 
@@ -571,15 +572,16 @@ class UnifiedMemoryService:
         wide). ``db`` is accepted for signature stability with the GDPR service
         but unused. Returns the number of memories erased (0 when the subject has
         only untagged pre-tag history, which the GDPR service reports as a caveat,
-        never as erased)."""
+        never as erased). 0 when durable memory is off; a failed delete raises (#1442)."""
+        if not self.is_durable_configured:
+            return 0
         try:
             total = await self._durable.erase_subject(str(workspace_id), str(subject_id))
         except Exception:
-            logger.error(
-                "[UnifiedMemoryService] durable subject erase failed subject=%s ws=%s",
-                subject_id, workspace_id, exc_info=True,
+            logger.exception(
+                "[UnifiedMemoryService] durable subject erase failed subject=%s ws=%s", subject_id, workspace_id,
             )
-            return 0
+            raise
         logger.warning(
             "[UnifiedMemoryService] GDPR subject-erased %d durable memor(ies) subject=%s ws=%s",
             total, subject_id, workspace_id,
