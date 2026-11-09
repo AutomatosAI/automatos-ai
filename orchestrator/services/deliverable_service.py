@@ -248,6 +248,38 @@ class DeliverableService:
             file_path, title, file_type, storage_type, preview_url, preview_type, inferred_type
         )
 
+        return self._upsert_and_log_deliverable(
+            file_path=file_path,
+            source_type=source_type,
+            source_id=source_id,
+            agent_id=agent_id,
+            agent_name=agent_name,
+            inferred_type=inferred_type,
+            summary=summary,
+            storage_type=storage_type,
+            file_size_bytes=file_size_bytes,
+            extra=extra,
+            status=status,
+            fields=fields,
+        )
+
+    def _upsert_and_log_deliverable(
+        self,
+        *,
+        file_path: str,
+        source_type: str,
+        source_id: Optional[str],
+        agent_id: Optional[int],
+        agent_name: Optional[str],
+        inferred_type: str,
+        summary: Optional[str],
+        storage_type: str,
+        file_size_bytes: Optional[int],
+        extra: Optional[Dict[str, Any]],
+        status: str,
+        fields: Dict[str, Optional[str]],
+    ) -> Dict[str, Any]:
+        """Run the upsert, log the outcome, and shape register()'s response envelope."""
         try:
             deliverable_id, was_insert = self._upsert_deliverable_row({
                 "workspace_id": str(self.workspace_id),
