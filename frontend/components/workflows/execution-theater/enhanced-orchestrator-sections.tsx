@@ -69,7 +69,7 @@ function getImpactColor(impact: LearningInsight['impact']) {
 interface MetricsOverviewCardProps {
   metrics: OrchestrationMetrics
   isExecuting: boolean
-  historicalData: unknown
+  historicalData: any
   executionOptions: ExecutionOption[]
   selectedExecutionId: string | null
   selectedExecution: ExecutionOption | null | undefined
