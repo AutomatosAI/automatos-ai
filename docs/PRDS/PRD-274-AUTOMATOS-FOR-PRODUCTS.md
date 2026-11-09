@@ -48,8 +48,9 @@ None of this is specific to one product. Each capability below names the other u
   a time to first token close to the model's own.
 - A product hands in per-turn **app context** (its live state) that the agent sees and memory never stores.
 - Automatos remembers **the people a product serves** (end users), per end user, with consent, retention and erasure.
-- What counts as a durable fact follows the product's domain (**memory profiles**). Instructions and app context are
-  never stored as facts, and a fact is stored once.
+- What counts as a durable fact follows the product's domain (**memory profiles**). A product's per-turn framing and
+  app context are never stored as facts; the owner's own standing instructions are kept, as today (PRD-256). A
+  restated fact may sit beside the original until the hourly consolidation folds it.
 - "Catch me up" or "where were we" after a break recalls from the stored facts.
 - In a workspace with several agents, a fact can be limited to the agents allowed to know it (**need-to-know**).
 - Auto, for the owner, behaves exactly as today unless a wave says otherwise.
@@ -73,7 +74,8 @@ None of this is specific to one product. Each capability below names the other u
 - **Verticals** already do find-or-create: `POST /api/verticals/{v}/provision` (`api/verticals.py`) runs
   `provision_vertical` (`integrations/provisioning.py`): find or create the workspace for an external id, seed the
   agent roster, mint a key. Each vertical registers a `VerticalProvisioner` in code and has its own internal key in
-  config (`SHOPIFY_INTERNAL_API_KEY`). Shopify is the only one.
+  config (`SHOPIFY_INTERNAL_API_KEY`). Two are registered: Shopify, and BudStacks (`integrations/budstacks/`), whose
+  re-provision keeps the existing key (`reuse_existing_key`) because its app stores the key it was given.
 
 ### 4.2 Keys
 
@@ -149,8 +151,9 @@ the agent emitted:
   (`run_sleep_time_consolidation`) runs hourly and the run lasted about 20 minutes.
 - **A new-session "catch me up" recalled nothing:** the memory section injected ~0 tokens and the agent recapped a
   different, earlier chat. The cause (found in Wave 0, #1434): a chat turn's long-term recall read only the turn's
-  agent namespace, while distillation files facts in the workspace's (PRD-159 S5). Every chat turn has an agent,
-  Auto included, so no chat turn's router recall reached a distilled fact.
+  agent namespace, while distillation files facts in the workspace's by default (PRD-159 S5). Every chat turn has an
+  agent, Auto included, so no chat turn's router recall reached a workspace-tier fact; the few distilled to the
+  agent's own tier were reachable.
 
 ## 5. Design
 
@@ -295,7 +298,8 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
 ### Wave 5: sub-tenants (next)
 
 - The product record (§8-3), find-or-create by external id with roster seeding, list, guarded purge; billed to the
-  product's owner workspace (§8-2); Shopify moved onto it last.
+  product's owner workspace (§8-2). Both registered verticals move onto it last, each keeping its behaviour: Shopify's
+  re-provision mints a key, BudStacks' keeps the existing one.
 
 ## 7. Rollout
 
