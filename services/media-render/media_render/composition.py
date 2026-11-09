@@ -55,7 +55,11 @@ _CSS_IMAGE_SET = re.compile(r"image-set\(([^)]*)\)", re.IGNORECASE)
 _CSS_STRING = re.compile(r"\"([^\"]*)\"|'([^']*)'")
 # Where a filled-in value would be run rather than shown: a <script> body, or an
 # on* attribute inside a tag (the browser decodes the attribute's entities first).
-_SCRIPT_BODY = re.compile(r"<script\b[^>]*>(.*?)</script\s*>", re.IGNORECASE | re.DOTALL)
+# CodeQL py/bad-tag-filter: </script\s*> only matched a closing tag with pure
+# whitespace before '>' — a browser's tokenizer treats </script FOO> as the
+# real close too (anything after "script" that is not a letter ends the tag
+# name). [^>]* matches any such form, not just whitespace.
+_SCRIPT_BODY = re.compile(r"<script\b[^>]*>(.*?)</script\b[^>]*>", re.IGNORECASE | re.DOTALL)
 _TAG = re.compile(r"<[A-Za-z][^<>]*>")
 _EVENT_HANDLER = re.compile(r"""\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)""", re.IGNORECASE)
 

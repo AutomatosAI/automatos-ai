@@ -575,11 +575,15 @@ class GenericDataExtractor:
         if not html:
             return ""
         try:
-            # Remove style and script tags with their content
-            text = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
-            text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL | re.IGNORECASE)
+            # Remove style and script tags with their content. CodeQL py/bad-tag-filter:
+            # a bare "</style>"/"</script>" only matches a closing tag with nothing else
+            # before '>' — a browser's tokenizer also closes on "</script foo>"; [^>]*
+            # after \b matches that too, so the tag's own source text can't survive into
+            # this plain-text preview.
+            text = re.sub(r'<style\b[^>]*>.*?</style\b[^>]*>', '', html, flags=re.DOTALL | re.IGNORECASE)
+            text = re.sub(r'<script\b[^>]*>.*?</script\b[^>]*>', '', text, flags=re.DOTALL | re.IGNORECASE)
             # Remove head section
-            text = re.sub(r'<head[^>]*>.*?</head>', '', text, flags=re.DOTALL | re.IGNORECASE)
+            text = re.sub(r'<head\b[^>]*>.*?</head\b[^>]*>', '', text, flags=re.DOTALL | re.IGNORECASE)
             # Replace common block elements with newlines
             text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
             text = re.sub(r'</p>', '\n', text, flags=re.IGNORECASE)
