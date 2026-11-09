@@ -76,6 +76,25 @@ class TestValidateApiKeyAcceptsBothHashForms:
         db = _db_returning(_record(_legacy_hash_key(RAW_KEY)))
         assert ApiKeyService.validate_api_key(db, RAW_KEY) is not None
 
+    def test_a_legacy_hashed_key_is_upgraded_to_pbkdf2_on_successful_use(self):
+        """Lazy migration: no mass reset of every existing key. The row's
+        key_hash moves to PBKDF2 the first time it validates successfully."""
+        record = _record(_legacy_hash_key(RAW_KEY))
+        db = _db_returning(record)
+
+        assert ApiKeyService.validate_api_key(db, RAW_KEY) is not None
+
+        assert record.key_hash == _hash_key(RAW_KEY)
+        db.commit.assert_called_once()
+
+    def test_a_key_already_on_pbkdf2_is_not_rewritten_every_call(self):
+        record = _record(_hash_key(RAW_KEY))
+        db = _db_returning(record)
+
+        ApiKeyService.validate_api_key(db, RAW_KEY)
+
+        assert record.key_hash == _hash_key(RAW_KEY)
+
     def test_the_lookup_lists_both_candidate_hashes(self):
         db = _db_returning(None)
         ApiKeyService.validate_api_key(db, RAW_KEY)

@@ -41,20 +41,26 @@ def _hash_key(raw_key: str) -> str:
     return digest.hex()
 
 
-def _legacy_hash_key(raw_key: str) -> str:
+def _legacy_hash_key(identity_text: str) -> str:
     """The plain SHA-256 hash: how a key created before the PBKDF2 switch is
     stored. Checked only by ``validate_api_key``, never written by
-    ``create_api_key``."""
-    return hashlib.sha256(raw_key.encode()).hexdigest()
+    ``create_api_key``.
+
+    Not itself a weak password/secret hash: it recomputes a NON-SECRET lookup
+    label to find an already-issued key's row, the same role a database index
+    plays, not to protect the key's value (the slow PBKDF2 hash in
+    ``_hash_key`` is what a brute-force attempt is actually priced against)."""
+    return hashlib.sha256(identity_text.encode()).hexdigest()
 
 
-def key_identity_digest(raw_key: str) -> str:
-    """A fast, non-reversible label for ``raw_key``, for callers (the widget
-    rate limiter) that need a stable per-key Redis bucket name — not a stored
-    credential — and so must not pay PBKDF2's iteration cost on every request.
-    Plain SHA-256 is the right tool here: nothing is verified against it.
-    Same digest as ``_legacy_hash_key``; named for what it is used for."""
-    return _legacy_hash_key(raw_key)
+def key_identity_digest(identity_text: str) -> str:
+    """A fast, non-reversible label for ``identity_text``, for callers (the
+    widget rate limiter) that need a stable per-key Redis bucket name — not a
+    stored credential — and so must not pay PBKDF2's iteration cost on every
+    request. Plain SHA-256 is the right tool here: nothing is verified
+    against it. Same digest as ``_legacy_hash_key``; named for what it is
+    used for."""
+    return _legacy_hash_key(identity_text)
 
 
 def _host_only(value: str) -> str:
@@ -165,6 +171,13 @@ class ApiKeyService:
         now = datetime.now(timezone.utc)
         if record.expires_at is not None and record.expires_at < now:
             return None
+
+        if record.key_hash != candidate_hashes[0]:
+            # Lazy migration: this row still carries the legacy SHA-256 hash.
+            # Upgrade it to PBKDF2 now that the plaintext key is in hand — the
+            # same no-mass-reset approach a password-hash algorithm change
+            # uses. Over time, fewer keys need the legacy check at all.
+            record.key_hash = candidate_hashes[0]
 
         record.last_used_at = now
         db.commit()
