@@ -17,8 +17,10 @@ A system agent (Auto, the CTO) is never lean: its turn is the platform's own.
 """
 from __future__ import annotations
 
+import dataclasses
+import functools
 import logging
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, AsyncGenerator, Callable, Dict, List, Mapping, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -124,20 +126,95 @@ def offered_names(surface: List[Dict[str, Any]]) -> List[str]:
     return names
 
 
-def with_granted_actions(llm_messages: List[Dict[str, Any]], surface: List[Dict[str, Any]],
-                        *, is_super_admin: bool) -> List[Dict[str, Any]]:
+def with_granted_actions(llm_messages: List[Dict[str, Any]], surface: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """``llm_messages`` with the offered platform actions described at the end of the
-    system prompt (the dispatcher names them; this says what each takes). A new list."""
+    system prompt (the dispatcher names them; this says what each takes). A new list.
+    The surface was already filtered for the caller, so every action it offers is described."""
     from modules.tools.discovery.action_registry import get_action_registry
 
     actions = [name for name in offered_names(surface) if name.startswith("platform_")]
     if not actions:
         return llm_messages
     summary = get_action_registry().build_filtered_prompt_summary(
-        actions, exclude_admin=True, include_super_admin=is_super_admin,
+        actions, exclude_admin=True, include_super_admin=True,
     )
     block = f"{GRANTED_ACTIONS_HEADING}\nCall these through platform_execute.\n\n{summary}".strip()
     first = llm_messages[0] if llm_messages else {}
     if first.get("role") == "system" and isinstance(first.get("content"), str):
         return [{**first, "content": f"{first['content']}\n\n{block}"}, *llm_messages[1:]]
     return [{"role": "system", "content": block}, *llm_messages]
+
+
+# --- the chat turn's hooks -------------------------------------------------------------------
+# ``StreamingChatService`` marks a lean agent's turn with its grants (``_lean_actions``) and the
+# executor's gate (core.security.lean_grants); each step below is a wrapper on the service
+# method it changes, so the turn's own long function is not touched.
+
+def lean_turn_of(chat: Any) -> bool:
+    """``chat``'s current turn is a lean agent's."""
+    return getattr(chat, "_lean_actions", None) is not None
+
+
+def offers_a_lean_turn_its_grants(get_tools: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap ``StreamingChatService._get_tools``: a lean turn is offered its grants, nothing else."""
+    @functools.wraps(get_tools)
+    async def wrapped(chat: Any, *args: Any, **kwargs: Any) -> List[Dict[str, Any]]:
+        if not lean_turn_of(chat):
+            return await get_tools(chat, *args, **kwargs)
+        return lean_tool_surface(chat._lean_actions, is_super_admin=bool(kwargs.get("is_super_admin")),
+                                 db=getattr(chat, "db", None))
+    return wrapped
+
+
+def a_lean_turns_prompt(prepare: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap ``StreamingChatService._prepare_messages``: a lean turn's model call carries its
+    granted tools (the LEAN mode loads none) and their descriptions, and the request's app
+    context (consumers.chatbot.lean_request) for this turn only; the turn's trace keeps the
+    app context's size, never its words."""
+    @functools.wraps(prepare)
+    async def wrapped(chat: Any, *args: Any, **kwargs: Any) -> Any:
+        from consumers.chatbot.lean_request import NOTHING_ASKED, with_app_context, with_app_context_size
+
+        llm_messages, use_tools, orchestrated = await prepare(chat, *args, **kwargs)
+        if not lean_turn_of(chat):
+            return llm_messages, use_tools, orchestrated
+        all_tools = kwargs.get("all_tools", args[3] if len(args) > 3 else None) or []
+        app_context = getattr(chat, "_lean_request", NOTHING_ASKED).app_context
+        llm_messages = with_app_context(with_granted_actions(llm_messages, all_tools), app_context)
+        if app_context and dataclasses.is_dataclass(orchestrated):
+            trace = with_app_context_size(getattr(orchestrated, "context_trace", None), app_context)
+            orchestrated = dataclasses.replace(orchestrated, context_trace=trace)
+        return llm_messages, all_tools or None, orchestrated
+    return wrapped
+
+
+def no_pinned_documents_on_a_lean_turn(inject: Callable[..., None]) -> Callable[..., None]:
+    """Wrap ``StreamingChatService._inject_pinned_documents``: not on a lean turn."""
+    @functools.wraps(inject)
+    def wrapped(chat: Any, *args: Any, **kwargs: Any) -> None:
+        if not lean_turn_of(chat):
+            inject(chat, *args, **kwargs)
+    return wrapped
+
+
+def no_app_search_on_a_lean_turn(inject: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap ``StreamingChatService._inject_composio_tools``: a lean turn runs no per-turn app
+    search, so it is offered no Composio action; its tools stay as they are."""
+    @functools.wraps(inject)
+    async def wrapped(chat: Any, llm_messages: Any, use_tools: Any, *args: Any, **kwargs: Any) -> Any:
+        if lean_turn_of(chat):
+            return use_tools, None
+        return await inject(chat, llm_messages, use_tools, *args, **kwargs)
+    return wrapped
+
+
+def no_prefetch_on_a_lean_turn(prefetch: Callable[..., AsyncGenerator[Any, None]]) -> Callable[..., Any]:
+    """Wrap ``StreamingChatService._retrieval_first``: a lean turn searches nothing before its
+    first call; its agent searches with its granted tools when it needs to."""
+    @functools.wraps(prefetch)
+    async def wrapped(chat: Any, *args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:
+        if lean_turn_of(chat):
+            return
+        async for frame in prefetch(chat, *args, **kwargs):
+            yield frame
+    return wrapped

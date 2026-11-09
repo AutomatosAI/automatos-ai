@@ -84,9 +84,7 @@ async def lean_request(agent: Any) -> Dict[str, Any]:
     started = time.perf_counter()
     built = await _build(ContextMode.LEAN, agent)
     surface = lean_turn.lean_tool_surface(lean_turn.granted_names(agent), is_super_admin=False)
-    messages = lean_turn.with_granted_actions(
-        [{"role": "system", "content": built.system_prompt}, *built.messages], surface, is_super_admin=False,
-    )
+    messages = lean_turn.with_granted_actions([{"role": "system", "content": built.system_prompt}, *built.messages], surface)
     prep_ms = (time.perf_counter() - started) * 1000
     tools_block = messages[0]["content"][len(built.system_prompt):]
     own = "\n".join([PERSONA, DESCRIPTION, built.memory_context or "", tools_block])

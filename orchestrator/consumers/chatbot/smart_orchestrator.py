@@ -130,7 +130,6 @@ class SmartChatOrchestrator:
         agent_name: Optional[str] = None,
         widget_mode: bool = False,
         db_session: Any = None,
-        lean: bool = False,
     ):
         """
         Initialize the orchestrator.
@@ -141,15 +140,12 @@ class SmartChatOrchestrator:
             agent_name: Agent name for personalization
             widget_mode: When True, restrict memory to agent-only
             db_session: Optional DB session for ContextService
-            lean: A lean agent's turn: the context is built in the LEAN mode
-                (consumers.chatbot.lean_turn), not CHATBOT.
         """
         self.workspace_id = workspace_id
         self.agent_id = agent_id
         self.agent_name = agent_name or "Automatos"
         self.widget_mode = widget_mode
         self._db_session = db_session
-        self.lean = lean
 
         # Components
         self.classifier = get_intent_classifier()
@@ -244,7 +240,7 @@ class SmartChatOrchestrator:
         agent = self._load_agent()
 
         context = await ContextService(self._db_session).build_context(
-            mode=ContextMode.LEAN if getattr(self, "lean", False) else ContextMode.CHATBOT,
+            mode=ContextMode.CHATBOT,
             agent=agent,
             workspace_id=self.workspace_id,
             messages=messages,

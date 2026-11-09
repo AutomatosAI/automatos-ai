@@ -146,3 +146,24 @@ def test_only_a_lean_turn_has_a_requested_model():
     asked = lr.LeanRequest(model=lr.TurnModel("openrouter", "acme/fast-1"))
     assert spoken_model._requested_model(SimpleNamespace(_lean_actions=[], _lean_request=asked)) == asked.model
     assert spoken_model._requested_model(SimpleNamespace(_lean_actions=None, _lean_request=asked)) is None
+
+
+def test_a_lean_turns_prompt_carries_the_app_context_and_its_trace_the_size():
+    from dataclasses import dataclass
+
+    from consumers.chatbot import lean_turn
+
+    @dataclass
+    class Orchestrated:
+        context_trace: dict
+
+    @lean_turn.a_lean_turns_prompt
+    async def prepare(chat, messages, agent_runtime, agent_ctx, all_tools, *rest, **kwargs):
+        return [{"role": "system", "content": "You are Quill."}, {"role": "user", "content": "hi"}], None, \
+            Orchestrated({"mode": "lean"})
+
+    chat = SimpleNamespace(_lean_actions=[], _lean_request=lr.LeanRequest(app_context='{"cart": 3}'))
+    llm_messages, _, orchestrated = asyncio.run(prepare(chat, [], None, {}, [], "chat"))
+    assert lr.APP_CONTEXT_HEADING in llm_messages[0]["content"] and llm_messages[1] == {"role": "user", "content": "hi"}
+    assert orchestrated.context_trace == {"mode": "lean", "app_context_chars": 11}
+    assert '{"cart": 3}' not in str(orchestrated.context_trace)
