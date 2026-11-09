@@ -1,6 +1,6 @@
 """Lean turns: a runtime profile for agents that answer inside another product.
 
-PRD draft "Automatos for products", Wave 2 (§5.3). An agent's ``configuration`` names
+PRD-274, "Automatos for products", Wave 2 (§5.3). An agent's ``configuration`` names
 its ``runtime_profile``: ``full`` (today's turn, and the default) or ``lean``. With
 ``LEAN_TURNS_ENABLED`` on, a lean agent's chat turn:
 

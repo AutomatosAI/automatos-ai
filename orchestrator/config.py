@@ -2262,7 +2262,7 @@ class Config:
     # direct Anthropic id, never OpenRouter's dotted twin). Empty model or provider = off:
     # spoken turns use the agent's model too. A workspace that cannot reach it (no key for
     # the provider, a policy block) answers on the agent's model.
-    # Lean turns (PRD draft "Automatos for products", Wave 2): an agent whose configuration says
+    # Lean turns (PRD-274, "Automatos for products", Wave 2): an agent whose configuration says
     # runtime_profile "lean" answers with its own identity, its memory recall, the owner's standing
     # rules and only the tools its session tool groups grant; Auto's personality, platform skill,
     # the knowledge prefetch and the per-turn app searches stay out. Off by default: until it is on,
