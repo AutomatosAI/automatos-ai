@@ -158,8 +158,14 @@ def _purge_workspace_s3(workspace_id: UUID, result: "PurgeResult") -> None:
     )
 
 
-# A purge that stops because a memory store could not be erased: nothing past the memories ran.
+# Why a purge stopped (``PurgeResult.skipped_reason``). The erase routes pass on the first
+# three as they are (api/gdpr.py); any other reason reaches the caller as "failed".
+WORKSPACE_NOT_FOUND = "workspace_not_found"
+NOT_SOFT_DELETED = "not_soft_deleted"
+# A memory store could not be erased: nothing past the memories ran.
 MEMORY_ERASE_FAILED = "memory_erase_failed"
+# The purge raised: the detail is in its log line, never in the result (CodeQL).
+PURGE_RAISED = "exception"
 
 
 def _erase_workspace_memories(workspace_id: UUID, result: "PurgeResult") -> bool:
@@ -431,14 +437,14 @@ def purge_workspace_sync(workspace_id: UUID) -> PurgeResult:
         ).fetchone()
 
         if not ws:
-            result.skipped_reason = "workspace_not_found"
+            result.skipped_reason = WORKSPACE_NOT_FOUND
             logger.info("Purge skipped — workspace %s not found", workspace_id)
             return result
 
         if ws.deleted_at is None:
             # Defensive: callers MUST soft-delete first. Refuse to purge a live
             # workspace even if a buggy admin path tries to call us directly.
-            result.skipped_reason = "not_soft_deleted"
+            result.skipped_reason = NOT_SOFT_DELETED
             logger.error("Purge refused — workspace %s is not soft-deleted", workspace_id)
             return result
 
@@ -482,7 +488,7 @@ def purge_workspace_sync(workspace_id: UUID) -> PurgeResult:
     except Exception as exc:  # noqa: BLE001
         db.rollback()
         logger.exception("Workspace purge failed for %s: %s", workspace_id, exc)
-        result.skipped_reason = "exception"  # the detail is in the log above, never in the result (CodeQL)
+        result.skipped_reason = PURGE_RAISED  # the detail is in the log above, never in the result (CodeQL)
         return result
     finally:
         db.close()
