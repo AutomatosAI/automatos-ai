@@ -52,6 +52,18 @@ class UserContext:
 del UserContext.role
 
 
+def clerk_user(info: Dict[str, Any], claims: Dict[str, Any]) -> UserContext:
+    """The principal of a verified Clerk token; ``info`` is ``extract_user_info(claims)``."""
+    return UserContext(
+        id=info.get("clerk_user_id") or info.get("email"),
+        email=info.get("email"),
+        system_role=info.get("system_role") or info.get("role") or "user",
+        clerk_user_id=info.get("clerk_user_id"),
+        org_id=info.get("org_id"),
+        raw_claims=claims,
+    )
+
+
 @dataclass(frozen=True)
 class RequestContext:
     """

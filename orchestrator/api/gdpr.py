@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.workspace_admin import require_workspace_admin
+from core.auth.workspace_eraser import require_workspace_eraser
 from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -51,13 +52,14 @@ def export_my_workspace(
 @router.post("/erase")
 def erase_my_workspace(
     body: Dict[str, Any] = Body(default_factory=dict),
-    ctx: RequestContext = Depends(require_workspace_admin),
+    ctx: RequestContext = Depends(require_workspace_eraser),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Erase this whole workspace across every store (irreversible).
 
     Requires ``{"confirm_workspace_id": "<this workspace id>"}`` to guard against
-    an accidental fire.
+    an accidental fire. An erasure that answered 503 left the workspace closed; its
+    owner may call this again to finish it (``core/auth/workspace_eraser.py``).
     """
     confirm = str(body.get("confirm_workspace_id") or "")
     if confirm != str(ctx.workspace_id):
