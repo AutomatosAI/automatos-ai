@@ -112,7 +112,7 @@ Lanes marked non-required in their workflow file still run and still report. Tre
 
 ## Security
 
-Report vulnerabilities privately, as [SECURITY.md](SECURITY.md) describes. Never in a public issue.
+Report vulnerabilities privately, as [SECURITY.md](SECURITY.md) describes. Never in a public issue. If you found it while working on the code, the fix goes in the advisory's private fork, not a public branch ([SECURITY.md](SECURITY.md#if-you-find-one-while-working-on-the-code)).
 
 ---
 

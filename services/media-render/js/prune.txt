@@ -12,7 +12,6 @@ hyperframes/dist/skills
 hyperframes/dist/fontLocalizeCli.js
 hyperframes/bin/hyperframes-localize-fonts.mjs
 # Dependencies Hyperframes declares but its bundled cli.js never imports.
-prettier
 giget
 # WebDriver BiDi: puppeteer-core imports it only for Firefox or protocol
 # 'webDriverBiDi'; Hyperframes drives Chrome over CDP.

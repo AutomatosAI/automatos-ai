@@ -18,7 +18,7 @@
 # id=s/<service-id>-<path> (PRD-262 §10).
 
 # uv from its own image, in a named stage so the tag@digest pin sits on a FROM line.
-FROM ghcr.io/astral-sh/uv:0.13.4@sha256:9f130421e930bfbdc563c00740466603f8723158e90297d07957c2294640262b AS uv
+FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
 
 # Kokoro v1.0 (Apache-2.0 weights) from its GitHub release: the fp32 model media-render
 # runs and the voices file, all 54 voices in nine languages. The build fails unless each
