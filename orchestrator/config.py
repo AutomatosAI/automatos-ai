@@ -2268,6 +2268,9 @@ class Config:
     # the knowledge prefetch and the per-turn app searches stay out. Off by default: until it is on,
     # every agent takes today's full turn whatever its profile says.
     LEAN_TURNS_ENABLED: bool = os.getenv("LEAN_TURNS_ENABLED", "false").strip().lower() == "true"
+    # A lean turn's app context (POST /api/chat appContext): what the host app knows, in the system
+    # prompt for that turn only, never stored. Longer than this many characters is refused (422).
+    APP_CONTEXT_MAX_CHARS: int = int(os.getenv("APP_CONTEXT_MAX_CHARS", "8000"))
     SPOKEN_MODE_MODEL: str = os.getenv("SPOKEN_MODE_MODEL", "claude-haiku-5-5").strip()
     SPOKEN_MODE_PROVIDER: str = os.getenv("SPOKEN_MODE_PROVIDER", "anthropic").strip().lower()
     # Auto's server voice (services/voice-tts): POST /api/voice/speech streams a reply

@@ -53,6 +53,7 @@ from consumers.chatbot.tool_summary import SKIPPED_SUMMARY, tool_result_summary
 from consumers.chatbot.tool_cut import TOOL_RESULT_TOKEN_BUDGET as _TOOL_RESULT_TOKEN_BUDGET, logs_what_the_cut_keeps
 from consumers.chatbot.tool_router import get_tool_router
 from consumers.chatbot.lean_turn import lean_grant_for, lean_tool_surface, with_granted_actions  # Wave 2
+from consumers.chatbot.lean_request import NOTHING_ASKED, with_app_context, with_app_context_size
 from consumers.chatbot.turn_timing import first_token, start as start_turn_clock, with_first_token
 
 # Import from modules — SINGLE SOURCE for tool schemas
@@ -2406,6 +2407,7 @@ class StreamingChatService:
         page_context: Optional[Dict[str, Any]] = None,
         spoken_mode: bool = False,
         locale: Optional[str] = None,  # the person's checked BCP 47 tag (api.chat_models), pt-BR
+        lean_request: Any = None,  # a lean turn's model and app context (consumers.chatbot.lean_request)
     ) -> AsyncGenerator[str, None]:
         """Stream a chat response produced by the specified agent.
 
@@ -2426,6 +2428,7 @@ class StreamingChatService:
         self._reply_locale = locale  # read by reply_locale.replies_in_the_persons_locale; None: none named
         complexity_assessment = full_path_for_documents(complexity_assessment, self._document_turn, force_text_only)
         self._lean_actions = lean_grant_for(getattr(self, "db", None), agent_id)  # None unless a lean agent's
+        self._lean_request = lean_request or NOTHING_ASKED
         start_turn_clock(self)
         # F155: every tool call of a widget turn carries the widget surface, so the
         # gates treat it as a visitor's whatever caller context the call built.
@@ -2688,6 +2691,7 @@ class StreamingChatService:
             if self._is_lean_turn():  # Wave 2: the granted tools only, each described in the prompt
                 use_tools = all_tools or None
                 llm_messages = with_granted_actions(llm_messages, all_tools, is_super_admin=is_super_admin)
+                llm_messages = with_app_context(llm_messages, self._lean_request.app_context)  # this call only
 
             # PRD-223 S0.3: badge any attachments that failed to load BEFORE
             # the model starts answering — the user must learn the truth at
@@ -2983,9 +2987,9 @@ class StreamingChatService:
                 retrieval_context=self._turn_retrieval_context(latest_text),
                 # PRD-201 S1: persist the assembly trace for this turn;
                 # PRD-221 S3: including the sanitized page context the turn saw.
-                context_trace=with_first_token(merge_into_trace(
+                context_trace=with_app_context_size(with_first_token(merge_into_trace(
                     getattr(orchestrated, "context_trace", None), page_context
-                ), self),
+                ), self), getattr(self, "_lean_request", NOTHING_ASKED).app_context),
             )
             if f187_verdict is not None:
                 f187_verdict.log(getattr(_saved, "id", None))
