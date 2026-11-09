@@ -285,11 +285,13 @@ async def stream_workflow_execution(
     except GeneratorExit:
         logger.info(f"🔌 SSE stream closed by client for execution {execution_id}")
     except Exception as e:
+        # CodeQL py/stack-trace-exposure: the exception's text (e) stays in the
+        # server log; the client's SSE event carries a fixed message.
         logger.error(f"❌ SSE stream error for execution {execution_id}: {e}", exc_info=True)
         # Send error event before closing
         error_event = {
             "type": "error",
-            "message": str(e),
+            "message": "A streaming error occurred",
             "timestamp": datetime.now().isoformat()
         }
         try:
@@ -463,11 +465,13 @@ async def stream_workflow_as_aisdk(
     except GeneratorExit:
         logger.info(f"🔌 AI SDK stream closed by client for execution {execution_id}")
     except Exception as e:
+        # CodeQL py/stack-trace-exposure: the exception's text (e) stays in the
+        # server log; the client's data-stream events carry a fixed message.
         logger.error(f"❌ AI SDK stream error for execution {execution_id}: {e}", exc_info=True)
-        text = f"❌ Stream error: {str(e)}\\n"
+        text = "❌ Stream error occurred\\n"
         try:
             yield f'0:{json.dumps(text)}\n'
-            err_json = json.dumps({"message": str(e)})
+            err_json = json.dumps({"message": "A streaming error occurred"})
             yield f'e:{err_json}\n'
         except Exception:
             pass
