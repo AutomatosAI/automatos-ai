@@ -286,7 +286,14 @@ async def create_task(
     api/board_task_create.py."""
     from api.board_task_create import created_ticket_answer, new_ticket_columns
 
-    columns = new_ticket_columns(db, ctx.workspace_id, await request.json())
+    task = file_ticket(db, ctx, new_ticket_columns(db, ctx.workspace_id, await request.json()))
+    return {**created_ticket_answer(db, task), **card_assignment_warning(db, task)}
+
+
+def file_ticket(db: Session, ctx: RequestContext, columns: Dict[str, Any]) -> BoardTask:
+    """Files a ticket with checked ``columns`` and, when it is created assigned to an agent,
+    hands it to the dispatch loop. The board's create route and an agent's
+    ``POST /api/agents/{id}/execute`` both file through here."""
     task = BoardTask(
         workspace_id=ctx.workspace_id,
         created_by_type="user",
@@ -322,7 +329,7 @@ async def create_task(
         db.commit()  # F118: the wake rides this commit
 
     logger.info("[BoardTasks] Created task %d in workspace %s", task.id, ctx.workspace_id)
-    return {**created_ticket_answer(db, task), **card_assignment_warning(db, task)}
+    return task
 
 
 @router.get("")

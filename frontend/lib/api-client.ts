@@ -1675,13 +1675,6 @@ class ApiClient {
     return this.request(`/api/system/agent/${agentId}/status`)
   }
 
-  async executeSystemAgent(agentId: string, data: any) {
-    return this.request(`/api/system/agent/${agentId}/execute`, {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-  }
-
   async getSystemPerformanceBaseline() {
     return this.request('/api/system/performance-baseline')
   }
