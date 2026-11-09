@@ -37,6 +37,7 @@ from services.board_consent import (  # PRD-234: a human's board action is the a
     consent_for_created_ticket, record_operator_consent,
 )
 from services.board_dispatcher import RUN_ID_KEY, notify_task_available
+from services.run_callbacks import sends_run_callback
 from services.ticket_redo import RUN_NOW, SENT_BACK, SENT_BACK_WITHOUT_A_NOTE, redo_again, with_correction
 from services.brand_hooks import a_cards_answer_is_on_brand  # brand kit at generation (night 9b)
 from services.ticket_verdict import record_approval
@@ -1654,6 +1655,7 @@ def ending_summary(task: Any) -> Optional[str]:
 @a_social_card_has_its_post  # F380: a social ticket is done only when its post exists and has rendered
 @a_cards_document_links_open_in_the_app  # F380: a generated file is linked by its Deliverable
 @a_cards_claims_taken_out_are_noted  # N15-CI: what the claim check took out of the agent's text is in the note
+@sends_run_callback  # PRD-274 W1: a run an API caller started reports its ending
 async def finalize_board_task_run(
     db: Session,
     *,

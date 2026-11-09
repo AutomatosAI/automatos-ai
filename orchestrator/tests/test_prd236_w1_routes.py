@@ -377,7 +377,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # memory_profiles, a new table only; the guard follows it.
     profiles = (versions / "memory_profiles_20261109.py").read_text()
     assert 'down_revision = "auto_soul_one_source_20261107"' in profiles
-    assert 'EXPECTED_HEAD = "memory_profiles_20261109"' in guard
+    # 2026-11-09 (Automatos for products, Wave 1): run_callbacks_20261109 chains onto that —
+    # workspace_signing_secrets and run_callbacks, new tables only; the guard follows it.
+    callbacks = (versions / "run_callbacks_20261109.py").read_text()
+    assert 'down_revision = "memory_profiles_20261109"' in callbacks
+    assert 'EXPECTED_HEAD = "run_callbacks_20261109"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

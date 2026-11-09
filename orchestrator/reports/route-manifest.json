@@ -1,5 +1,5 @@
 {
-  "route_count": 1022,
+  "route_count": 1024,
   "routes": [
     {
       "method": "GET",
@@ -3032,6 +3032,14 @@
     {
       "method": "POST",
       "path": "/api/v1/billing/webhooks/stripe"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/callbacks/signing-secret"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/callbacks/signing-secret/rotate"
     },
     {
       "method": "GET",

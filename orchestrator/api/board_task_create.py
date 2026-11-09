@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -84,10 +84,13 @@ def created_ticket_answer(db: Session, task: BoardTask) -> Dict[str, Any]:
 
 
 
-def file_ticket(db: Session, ctx: RequestContext, columns: Dict[str, Any]) -> BoardTask:
+def file_ticket(db: Session, ctx: RequestContext, columns: Dict[str, Any],
+                attach: Optional[Callable[[Session, BoardTask], None]] = None) -> BoardTask:
     """Files a ticket with checked ``columns`` and, when it is created assigned to an agent,
     hands it to the dispatch loop. The board's create route and an agent's
-    ``POST /api/agents/{id}/execute`` (``api.agent_execute``) both file through here."""
+    ``POST /api/agents/{id}/execute`` (``api.agent_execute``) both file through here. ``attach``
+    adds rows that belong to the ticket (a run's callback) in the same commit, before the
+    dispatch loop can claim it."""
     task = BoardTask(
         workspace_id=ctx.workspace_id,
         created_by_type="user",
@@ -97,6 +100,8 @@ def file_ticket(db: Session, ctx: RequestContext, columns: Dict[str, Any]) -> Bo
     )
     db.add(task)
     db.flush()  # the id the notice carries
+    if attach is not None:
+        attach(db, task)
 
     # PRD-180 S1 (F090): push the new card to subscribed Command Centres.
     # F118: a NOTIFY is delivered when its transaction commits — issue it before the commit
