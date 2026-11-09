@@ -5,7 +5,7 @@
 # PRD-262 US-007: Node.js 24 (LTS until April 2028) comes from the official image.
 # It gets its own stage so the tag@digest pin sits on a FROM line, which is the
 # only place an updater reads (it never reads a bare `COPY --from=<image>`).
-FROM node:24-trixie-slim@sha256:54f84b4cf8432b21aaffd5d3ce8d41e12cea0d10d33c09d2f3c9879d49d6b446 AS node
+FROM node:24-trixie-slim@sha256:0820eaa85e07d0490446dd01d14707e17e6108a36988cf374899cd057eb3812d AS node
 
 # Node, stripped. The same stage, byte for byte, in services/workspace-worker/Dockerfile
 # and services/media-render/Dockerfile, so the two images share one node layer on a host.
@@ -26,7 +26,7 @@ FROM node AS npm
 RUN rm -rf /usr/local/lib/node_modules/npm/docs /usr/local/lib/node_modules/npm/man
 
 # PRD-262 US-044: uv from its own image, in a named stage for the same reason.
-FROM ghcr.io/astral-sh/uv:0.13.6@sha256:af22a52f5eafef3d78e551599d405c02df61919d18028f0cea8eda93bc9986d0 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
 
 # PRD-262 US-044: requirements.lock in three parts: claude-agent-sdk alone, psycopg2
 # alone (the psycopg2 stage below builds it from source, PRD-262 row 27) and everything

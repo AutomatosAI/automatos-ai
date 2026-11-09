@@ -11,13 +11,15 @@ It checks:
 - every ``PRUNED`` subpackage is gone and every ``KEPT`` one imports (none of them imports
   a pruned one when it loads);
 - every path by which the code reaches scipy runs, through the importers' own entry
-  points: datasketch (imported whole, as graphify's dedup imports it, and MinHashLSH,
-  which integrates with scipy.integrate.quad), graphify's dedup of near-identical
-  entities, networkx's pagerank (scipy.sparse) through the code graph's PageRankRanker,
-  the Knowledge Graph's chain as modules/knowledge/graph_service.py runs it (build,
-  Leiden through graspologic-native, cohesion, god nodes, surprising connections), and
-  core/math/probability_theory.py's Student's t (scipy.special.stdtrit), whose value it
-  compares with the tables';
+  points: graphify's dedup of near-identical entities (graphifyy 0.9.70's own
+  datasketch-compatible MinHash/LSH, not scipy — datasketch itself left the lock with
+  the GHSA-pcc4-rvhr-2pr8 bump, and nothing replaced its scipy.integrate.quad use, so
+  KEPT no longer has a live reason for `integrate`; left in place, unverified below, as
+  the smaller change), networkx's pagerank (scipy.sparse) through the code graph's
+  PageRankRanker, the Knowledge Graph's chain as modules/knowledge/graph_service.py
+  runs it (build, Leiden through graspologic-native, cohesion, god nodes, surprising
+  connections), and core/math/probability_theory.py's Student's t
+  (scipy.special.stdtrit), whose value it compares with the tables';
 - none of it loaded a pruned subpackage, or graphify.extract, the one graphify module
   that imports the tree-sitter grammars pybuild leaves out (PRD-262 row #11).
 
@@ -67,22 +69,6 @@ def subpackage_problems() -> List[str]:
         except ImportError as error:
             problems.append(f"scipy.{name} does not import: {error}")
     return problems
-
-
-def datasketch_problems() -> List[str]:
-    """graphify's dedup imports datasketch whole; MinHashLSH picks its bands with scipy.integrate.quad."""
-    import datasketch
-
-    near, far = datasketch.MinHash(num_perm=128), datasketch.MinHash(num_perm=128)
-    for word in "the knowledge graph keeps one node per entity".split():
-        near.update(word.encode())
-    for word in "an unrelated sentence about the weather".split():
-        far.update(word.encode())
-    lsh = datasketch.MinHashLSH(threshold=0.5, num_perm=128)
-    lsh.insert("near", near)
-    lsh.insert("far", far)
-    found = lsh.query(near)
-    return [] if found == ["near"] else [f"MinHashLSH found {found}, not ['near']"]
 
 
 def dedup_problems() -> List[str]:
@@ -150,7 +136,7 @@ def loaded_problems() -> List[str]:
 
 
 CHECKS: Tuple[Tuple[str, Callable[[], List[str]]], ...] = (
-    ("subpackages", subpackage_problems), ("datasketch", datasketch_problems), ("graphify dedup", dedup_problems),
+    ("subpackages", subpackage_problems), ("graphify dedup", dedup_problems),
     ("code graph pagerank", pagerank_problems), ("Knowledge Graph", knowledge_graph_problems),
     ("Student's t", statistics_problems), ("never loaded", loaded_problems),
 )

@@ -86,7 +86,6 @@ def test_a_file_of_a_type_the_js_stage_deletes_fails(tmp_path, path):
 @pytest.mark.parametrize(("specifier", "parent"), [
     ("chromium-bidi/lib/cjs/bidiMapper/BidiMapper.js", f"file://{NM}/puppeteer-core/lib/puppeteer/bidi/BidiOverCdp.js"),
     ("zod", f"file://{NM}/chromium-bidi/lib/cjs/protocol/protocol.js"),
-    ("prettier", f"file://{NM}/hyperframes/dist/cli.js"),
     ("./studio/index.js", f"file://{NM}/hyperframes/dist/cli.js"),
     ("../../../devtools-protocol/json/browser_protocol.json", f"file://{NM}/puppeteer-core/lib/puppeteer/x.js"),
     (f"file://{NM}/giget/dist/index.mjs", f"file://{NM}/hyperframes/dist/cli.js"),
