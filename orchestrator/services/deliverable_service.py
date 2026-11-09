@@ -36,7 +36,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 from urllib.parse import quote
 from uuid import UUID
 
@@ -170,6 +170,30 @@ def _humanize_basename(file_path: str) -> str:
     return cleaned.title() if cleaned else base
 
 
+def _validate_register_artifact_type(
+    file_path: str, artifact_type: Optional[str]
+) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """Infer the artifact type and refuse blog_post/report (PRD-129/133 guard).
+
+    Blog posts live in ``blog_posts`` (BlogService), reports in
+    ``agent_reports`` (ReportService). The Outputs view already surfaces
+    both — callers must write to the native service, never register() here.
+
+    Returns (inferred_type, None) on success, or (inferred_type, error_response).
+    """
+    inferred_type = artifact_type or _infer_artifact_type(file_path)
+    if inferred_type in ("blog_post", "report"):
+        return inferred_type, {
+            "success": False,
+            "error": (
+                f"register() refuses artifact_type='{inferred_type}'. "
+                "Blog posts and reports are written by their native "
+                "services and surfaced via v_workspace_outputs."
+            ),
+        }
+    return inferred_type, None
+
+
 class DeliverableService:
     """Service for managing deliverables (agent outputs) in a workspace."""
 
@@ -216,22 +240,69 @@ class DeliverableService:
         if not file_path:
             return {"success": False, "error": "file_path is required"}
 
-        inferred_type = artifact_type or _infer_artifact_type(file_path)
+        inferred_type, type_error = _validate_register_artifact_type(file_path, artifact_type)
+        if type_error:
+            return type_error
 
-        # Guard against reintroducing the PRD-129/133 double-write. Blog posts
-        # live in ``blog_posts`` (BlogService), reports in ``agent_reports``
-        # (ReportService). The Outputs view already surfaces both — callers
-        # must write to the native service, never register() here.
-        if inferred_type in ("blog_post", "report"):
+        fields = self._derive_register_fields(
+            file_path, title, file_type, storage_type, preview_url, preview_type, inferred_type
+        )
+
+        try:
+            deliverable_id, was_insert = self._upsert_deliverable_row({
+                "workspace_id": str(self.workspace_id),
+                "source_type": source_type,
+                "source_id": source_id,
+                "agent_id": agent_id,
+                "agent_name": agent_name,
+                "artifact_type": inferred_type,
+                "title": fields["final_title"],
+                "summary": summary,
+                "storage_type": storage_type,
+                "file_path": file_path,
+                "file_name": fields["file_name"],
+                "file_type": fields["file_type"],
+                "file_size_bytes": file_size_bytes,
+                "preview_url": fields["preview_url"],
+                "preview_type": fields["preview_type"],
+                "extra": json.dumps(extra or {}),
+                "status": status,
+            })
+
+            logger.info(
+                "[DeliverableService] %s deliverable %s (%s) path=%s",
+                "Registered" if was_insert else "Updated",
+                deliverable_id, inferred_type, file_path,
+            )
+
             return {
-                "success": False,
-                "error": (
-                    f"register() refuses artifact_type='{inferred_type}'. "
-                    "Blog posts and reports are written by their native "
-                    "services and surfaced via v_workspace_outputs."
-                ),
+                "success": True,
+                "deliverable_id": deliverable_id,
+                "created": was_insert,
+                "artifact_type": inferred_type,
+                "title": fields["final_title"],
             }
+        except Exception as exc:
+            self.db.rollback()
+            logger.error(
+                "[DeliverableService] register() failed path=%s: %s",
+                file_path, exc, exc_info=True,
+            )
+            # CodeQL py/stack-trace-exposure: exc's text (a DB error, a path, ...) stops
+            # at the server log; the caller gets a fixed, generic message.
+            return {"success": False, "error": "register failed"}
 
+    def _derive_register_fields(
+        self,
+        file_path: str,
+        title: Optional[str],
+        file_type: Optional[str],
+        storage_type: str,
+        preview_url: Optional[str],
+        preview_type: Optional[str],
+        inferred_type: str,
+    ) -> Dict[str, Optional[str]]:
+        """Fill in title/file_name/file_type/preview_url/preview_type defaults."""
         final_title = title or _humanize_basename(file_path)
         file_name = os.path.basename(file_path)
         if file_type is None:
@@ -246,93 +317,61 @@ class DeliverableService:
             if preview_type is None:
                 preview_type = "image" if inferred_type == "image" else "file"
 
-        try:
-            result = self.db.execute(
-                text("""
-                    INSERT INTO deliverables (
-                        workspace_id, source_type, source_id,
-                        agent_id, agent_name,
-                        artifact_type, title, summary,
-                        storage_type, file_path, file_name, file_type, file_size_bytes,
-                        preview_url, preview_type,
-                        extra, status, created_at, updated_at
-                    ) VALUES (
-                        :workspace_id, :source_type, :source_id,
-                        :agent_id, :agent_name,
-                        :artifact_type, :title, :summary,
-                        :storage_type, :file_path, :file_name, :file_type, :file_size_bytes,
-                        :preview_url, :preview_type,
-                        CAST(:extra AS JSONB), :status, NOW(), NOW()
-                    )
-                    ON CONFLICT (workspace_id, file_path)
-                        WHERE deleted_at IS NULL
-                    DO UPDATE SET
-                        source_type     = EXCLUDED.source_type,
-                        source_id       = EXCLUDED.source_id,
-                        agent_id        = COALESCE(EXCLUDED.agent_id, deliverables.agent_id),
-                        agent_name      = COALESCE(EXCLUDED.agent_name, deliverables.agent_name),
-                        artifact_type   = EXCLUDED.artifact_type,
-                        title           = EXCLUDED.title,
-                        summary         = COALESCE(EXCLUDED.summary, deliverables.summary),
-                        storage_type    = EXCLUDED.storage_type,
-                        file_name       = EXCLUDED.file_name,
-                        file_type       = EXCLUDED.file_type,
-                        file_size_bytes = COALESCE(EXCLUDED.file_size_bytes, deliverables.file_size_bytes),
-                        preview_url     = COALESCE(EXCLUDED.preview_url, deliverables.preview_url),
-                        preview_type    = COALESCE(EXCLUDED.preview_type, deliverables.preview_type),
-                        extra           = deliverables.extra || EXCLUDED.extra,
-                        status          = EXCLUDED.status,
-                        updated_at      = NOW()
-                    RETURNING id, (xmax = 0) AS inserted
-                """),
-                {
-                    "workspace_id": str(self.workspace_id),
-                    "source_type": source_type,
-                    "source_id": source_id,
-                    "agent_id": agent_id,
-                    "agent_name": agent_name,
-                    "artifact_type": inferred_type,
-                    "title": final_title,
-                    "summary": summary,
-                    "storage_type": storage_type,
-                    "file_path": file_path,
-                    "file_name": file_name,
-                    "file_type": file_type,
-                    "file_size_bytes": file_size_bytes,
-                    "preview_url": preview_url,
-                    "preview_type": preview_type,
-                    "extra": json.dumps(extra or {}),
-                    "status": status,
-                },
-            )
-            row = result.fetchone()
-            self.db.commit()
+        return {
+            "final_title": final_title,
+            "file_name": file_name,
+            "file_type": file_type,
+            "preview_url": preview_url,
+            "preview_type": preview_type,
+        }
 
-            deliverable_id = str(row[0]) if row else None
-            was_insert = bool(row[1]) if row else False
-
-            logger.info(
-                "[DeliverableService] %s deliverable %s (%s) path=%s",
-                "Registered" if was_insert else "Updated",
-                deliverable_id, inferred_type, file_path,
-            )
-
-            return {
-                "success": True,
-                "deliverable_id": deliverable_id,
-                "created": was_insert,
-                "artifact_type": inferred_type,
-                "title": final_title,
-            }
-        except Exception as exc:
-            self.db.rollback()
-            logger.error(
-                "[DeliverableService] register() failed path=%s: %s",
-                file_path, exc, exc_info=True,
-            )
-            # CodeQL py/stack-trace-exposure: exc's text (a DB error, a path, ...) stops
-            # at the server log; the caller gets a fixed, generic message.
-            return {"success": False, "error": "register failed"}
+    def _upsert_deliverable_row(self, params: Dict[str, Any]) -> Tuple[Optional[str], bool]:
+        """Run the idempotent INSERT ... ON CONFLICT upsert; return (id, was_insert)."""
+        result = self.db.execute(
+            text("""
+                INSERT INTO deliverables (
+                    workspace_id, source_type, source_id,
+                    agent_id, agent_name,
+                    artifact_type, title, summary,
+                    storage_type, file_path, file_name, file_type, file_size_bytes,
+                    preview_url, preview_type,
+                    extra, status, created_at, updated_at
+                ) VALUES (
+                    :workspace_id, :source_type, :source_id,
+                    :agent_id, :agent_name,
+                    :artifact_type, :title, :summary,
+                    :storage_type, :file_path, :file_name, :file_type, :file_size_bytes,
+                    :preview_url, :preview_type,
+                    CAST(:extra AS JSONB), :status, NOW(), NOW()
+                )
+                ON CONFLICT (workspace_id, file_path)
+                    WHERE deleted_at IS NULL
+                DO UPDATE SET
+                    source_type     = EXCLUDED.source_type,
+                    source_id       = EXCLUDED.source_id,
+                    agent_id        = COALESCE(EXCLUDED.agent_id, deliverables.agent_id),
+                    agent_name      = COALESCE(EXCLUDED.agent_name, deliverables.agent_name),
+                    artifact_type   = EXCLUDED.artifact_type,
+                    title           = EXCLUDED.title,
+                    summary         = COALESCE(EXCLUDED.summary, deliverables.summary),
+                    storage_type    = EXCLUDED.storage_type,
+                    file_name       = EXCLUDED.file_name,
+                    file_type       = EXCLUDED.file_type,
+                    file_size_bytes = COALESCE(EXCLUDED.file_size_bytes, deliverables.file_size_bytes),
+                    preview_url     = COALESCE(EXCLUDED.preview_url, deliverables.preview_url),
+                    preview_type    = COALESCE(EXCLUDED.preview_type, deliverables.preview_type),
+                    extra           = deliverables.extra || EXCLUDED.extra,
+                    status          = EXCLUDED.status,
+                    updated_at      = NOW()
+                RETURNING id, (xmax = 0) AS inserted
+            """),
+            params,
+        )
+        row = result.fetchone()
+        self.db.commit()
+        deliverable_id = str(row[0]) if row else None
+        was_insert = bool(row[1]) if row else False
+        return deliverable_id, was_insert
 
     # ------------------------------------------------------------------
     # list_deliverables
@@ -438,47 +477,8 @@ class DeliverableService:
             data = self._row_to_dict(row)
 
             if include_content:
-                # Blog posts store content inline in blog_posts.content — no
-                # workspace round-trip needed. Side-effect: also fixes the
-                # historic "blog posts render empty" bug caused by NULL
-                # blog_posts.file_path when BlogService._write_content failed.
-                if data["artifact_type"] == "blog_post":
-                    blog_row = self.db.execute(
-                        text("SELECT content FROM blog_posts WHERE id = :id"),
-                        {"id": deliverable_id},
-                    ).fetchone()
-                    data["content_url"] = data.get("preview_url")
-                    data["content"] = (blog_row[0] if blog_row else "") or ""
-                    data["content_truncated"] = False
-                elif data["storage_type"] == "workspace" and data["file_path"]:
-                    # Always compute content_url fresh — older rows may have
-                    # preview_url pointing at /files/content which is JSON, not binary.
-                    data["content_url"] = _workspace_file_url(
-                        self.workspace_id, data["file_path"]
-                    )
-
-                    if data["artifact_type"] in STREAMED_ARTIFACT_TYPES:
-                        # Images and videos stream via URL, never inline.
-                        data["content"] = None
-                    else:
-                        ws_client = WorkspaceClient(str(self.workspace_id))
-                        file_result = await ws_client.read_file(data["file_path"])
-                        if file_result.get("success"):
-                            content = file_result.get("content", "") or ""
-                            # Cap inline content to prevent OOM on huge files —
-                            # caller can hit content_url for the full stream.
-                            if len(content.encode("utf-8", errors="ignore")) > MAX_INLINE_CONTENT_BYTES:
-                                truncated = content.encode("utf-8", errors="ignore")[
-                                    :MAX_INLINE_CONTENT_BYTES
-                                ].decode("utf-8", errors="ignore")
-                                data["content"] = truncated
-                                data["content_truncated"] = True
-                            else:
-                                data["content"] = content
-                                data["content_truncated"] = False
-                        else:
-                            data["content"] = None
-                            data["content_error"] = file_result.get("error", "Could not read file")
+                content_fields = await self._load_deliverable_content(data, deliverable_id)
+                data = {**data, **content_fields}
 
             return {"success": True, "deliverable": data}
         except Exception as exc:
@@ -488,6 +488,59 @@ class DeliverableService:
             )
             # CodeQL py/stack-trace-exposure: exc's text stays server-side (logged above).
             return {"success": False, "error": "get failed"}
+
+    async def _load_deliverable_content(self, data: Dict[str, Any], deliverable_id: str) -> Dict[str, Any]:
+        """Compute the content fields for include_content=True, to merge into the result."""
+        if data["artifact_type"] == "blog_post":
+            return self._blog_post_content_fields(deliverable_id, data)
+        if data["storage_type"] == "workspace" and data["file_path"]:
+            return await self._workspace_file_content_fields(data)
+        return {}
+
+    def _blog_post_content_fields(self, deliverable_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Blog posts store content inline in blog_posts.content — no workspace round-trip
+        needed. Side-effect: also fixes the historic "blog posts render empty" bug caused
+        by NULL blog_posts.file_path when BlogService._write_content failed.
+        """
+        blog_row = self.db.execute(
+            text("SELECT content FROM blog_posts WHERE id = :id"),
+            {"id": deliverable_id},
+        ).fetchone()
+        return {
+            "content_url": data.get("preview_url"),
+            "content": (blog_row[0] if blog_row else "") or "",
+            "content_truncated": False,
+        }
+
+    async def _workspace_file_content_fields(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Read a workspace-stored file's content (capped), or its stream-only URL."""
+        # Always compute content_url fresh — older rows may have preview_url
+        # pointing at /files/content which is JSON, not binary.
+        content_url = _workspace_file_url(self.workspace_id, data["file_path"])
+
+        if data["artifact_type"] in STREAMED_ARTIFACT_TYPES:
+            # Images and videos stream via URL, never inline.
+            return {"content_url": content_url, "content": None}
+
+        ws_client = WorkspaceClient(str(self.workspace_id))
+        file_result = await ws_client.read_file(data["file_path"])
+        if not file_result.get("success"):
+            return {
+                "content_url": content_url,
+                "content": None,
+                "content_error": file_result.get("error", "Could not read file"),
+            }
+        content = file_result.get("content", "") or ""
+        return {"content_url": content_url, **self._capped_content_fields(content)}
+
+    @staticmethod
+    def _capped_content_fields(content: str) -> Dict[str, Any]:
+        """Cap inline content to prevent OOM on huge files — caller can hit content_url."""
+        encoded = content.encode("utf-8", errors="ignore")
+        if len(encoded) > MAX_INLINE_CONTENT_BYTES:
+            truncated = encoded[:MAX_INLINE_CONTENT_BYTES].decode("utf-8", errors="ignore")
+            return {"content": truncated, "content_truncated": True}
+        return {"content": content, "content_truncated": False}
 
     # ------------------------------------------------------------------
     # get_stats
@@ -504,96 +557,14 @@ class DeliverableService:
         ``clean_render_rate`` is ``None``, never a fabricated 100%.
         """
         try:
-            total = self.db.execute(
-                text("""
-                    SELECT COUNT(*)
-                    FROM v_workspace_outputs
-                    WHERE workspace_id = :workspace_id
-                      AND deleted_at IS NULL
-                """),
-                {"workspace_id": str(self.workspace_id)},
-            ).scalar() or 0
-
-            by_type_rows = self.db.execute(
-                text("""
-                    SELECT artifact_type, COUNT(*) AS cnt
-                    FROM v_workspace_outputs
-                    WHERE workspace_id = :workspace_id
-                      AND deleted_at IS NULL
-                    GROUP BY artifact_type
-                    ORDER BY cnt DESC
-                """),
-                {"workspace_id": str(self.workspace_id)},
-            ).fetchall()
-
-            by_agent_rows = self.db.execute(
-                text("""
-                    SELECT
-                        o.agent_id,
-                        COALESCE(o.agent_name, a.name, 'Unknown') AS agent_name,
-                        COUNT(*) AS cnt
-                    FROM v_workspace_outputs o
-                    LEFT JOIN agents a ON a.id = o.agent_id
-                    WHERE o.workspace_id = :workspace_id
-                      AND o.deleted_at IS NULL
-                    GROUP BY o.agent_id, COALESCE(o.agent_name, a.name, 'Unknown')
-                    ORDER BY cnt DESC
-                """),
-                {"workspace_id": str(self.workspace_id)},
-            ).fetchall()
-
+            total = self._count_outputs()
+            by_type_rows = self._count_outputs_by_type()
+            by_agent_rows = self._count_outputs_by_agent()
             # P2-09 S4 — clean-render rate + template-lane coverage over the
             # rendered Deliverables (rows carrying `extra.render`).
-            render_row = self.db.execute(
-                text("""
-                    SELECT
-                        COUNT(*) AS rendered_total,
-                        COUNT(*) FILTER (
-                            WHERE COALESCE((extra->'render'->>'unresolved_count')::int, 0) = 0
-                              AND COALESCE((extra->'render'->>'unknown_count')::int, 0) = 0
-                        ) AS rendered_clean,
-                        COUNT(*) FILTER (
-                            WHERE extra->'render'->>'template_lane' = 'block'
-                        ) AS lane_block,
-                        COUNT(*) FILTER (
-                            WHERE extra->'render'->>'template_lane' = 'legacy'
-                        ) AS lane_legacy
-                    FROM v_workspace_outputs
-                    WHERE workspace_id = :workspace_id
-                      AND deleted_at IS NULL
-                      AND (extra -> 'render') IS NOT NULL
-                """),
-                {"workspace_id": str(self.workspace_id)},
-            ).fetchone()
+            render_row = self._render_quality_row()
 
-            rendered_total = int(render_row.rendered_total or 0) if render_row else 0
-            rendered_clean = int(render_row.rendered_clean or 0) if render_row else 0
-            clean_render_rate = (
-                rendered_clean / rendered_total if rendered_total else None
-            )
-
-            return {
-                "success": True,
-                "total": total,
-                "by_type": {r.artifact_type: r.cnt for r in by_type_rows},
-                "by_agent": [
-                    {
-                        "agent_id": r.agent_id,
-                        "agent_name": r.agent_name,
-                        "count": r.cnt,
-                    }
-                    for r in by_agent_rows
-                ],
-                "clean_render_rate": clean_render_rate,
-                "render": {
-                    "total": rendered_total,
-                    "clean": rendered_clean,
-                    "by_lane": {
-                        "block": int(render_row.lane_block or 0) if render_row else 0,
-                        "legacy": int(render_row.lane_legacy or 0) if render_row else 0,
-                    },
-                },
-            }
+            return self._build_stats_response(total, by_type_rows, by_agent_rows, render_row)
         except Exception as exc:
             logger.error(
                 "[DeliverableService] get_stats() failed: %s",
@@ -609,6 +580,106 @@ class DeliverableService:
                 "clean_render_rate": None,
                 "render": {"total": 0, "clean": 0, "by_lane": {"block": 0, "legacy": 0}},
             }
+
+    def _count_outputs(self) -> int:
+        """Total non-deleted outputs in the workspace."""
+        return self.db.execute(
+            text("""
+                SELECT COUNT(*)
+                FROM v_workspace_outputs
+                WHERE workspace_id = :workspace_id
+                  AND deleted_at IS NULL
+            """),
+            {"workspace_id": str(self.workspace_id)},
+        ).scalar() or 0
+
+    def _count_outputs_by_type(self) -> Any:
+        """Non-deleted output counts grouped by artifact_type, most common first."""
+        return self.db.execute(
+            text("""
+                SELECT artifact_type, COUNT(*) AS cnt
+                FROM v_workspace_outputs
+                WHERE workspace_id = :workspace_id
+                  AND deleted_at IS NULL
+                GROUP BY artifact_type
+                ORDER BY cnt DESC
+            """),
+            {"workspace_id": str(self.workspace_id)},
+        ).fetchall()
+
+    def _count_outputs_by_agent(self) -> Any:
+        """Non-deleted output counts grouped by agent, most prolific first."""
+        return self.db.execute(
+            text("""
+                SELECT
+                    o.agent_id,
+                    COALESCE(o.agent_name, a.name, 'Unknown') AS agent_name,
+                    COUNT(*) AS cnt
+                FROM v_workspace_outputs o
+                LEFT JOIN agents a ON a.id = o.agent_id
+                WHERE o.workspace_id = :workspace_id
+                  AND o.deleted_at IS NULL
+                GROUP BY o.agent_id, COALESCE(o.agent_name, a.name, 'Unknown')
+                ORDER BY cnt DESC
+            """),
+            {"workspace_id": str(self.workspace_id)},
+        ).fetchall()
+
+    def _render_quality_row(self) -> Any:
+        """Rendered-document totals: clean count and template-lane split."""
+        return self.db.execute(
+            text("""
+                SELECT
+                    COUNT(*) AS rendered_total,
+                    COUNT(*) FILTER (
+                        WHERE COALESCE((extra->'render'->>'unresolved_count')::int, 0) = 0
+                          AND COALESCE((extra->'render'->>'unknown_count')::int, 0) = 0
+                    ) AS rendered_clean,
+                    COUNT(*) FILTER (
+                        WHERE extra->'render'->>'template_lane' = 'block'
+                    ) AS lane_block,
+                    COUNT(*) FILTER (
+                        WHERE extra->'render'->>'template_lane' = 'legacy'
+                    ) AS lane_legacy
+                FROM v_workspace_outputs
+                WHERE workspace_id = :workspace_id
+                  AND deleted_at IS NULL
+                  AND (extra -> 'render') IS NOT NULL
+            """),
+            {"workspace_id": str(self.workspace_id)},
+        ).fetchone()
+
+    @staticmethod
+    def _build_stats_response(total: int, by_type_rows: Any, by_agent_rows: Any, render_row: Any) -> Dict[str, Any]:
+        """Assemble the get_stats() success envelope from its four query results."""
+        rendered_total = int(render_row.rendered_total or 0) if render_row else 0
+        rendered_clean = int(render_row.rendered_clean or 0) if render_row else 0
+        clean_render_rate = (
+            rendered_clean / rendered_total if rendered_total else None
+        )
+
+        return {
+            "success": True,
+            "total": total,
+            "by_type": {r.artifact_type: r.cnt for r in by_type_rows},
+            "by_agent": [
+                {
+                    "agent_id": r.agent_id,
+                    "agent_name": r.agent_name,
+                    "count": r.cnt,
+                }
+                for r in by_agent_rows
+            ],
+            "clean_render_rate": clean_render_rate,
+            "render": {
+                "total": rendered_total,
+                "clean": rendered_clean,
+                "by_lane": {
+                    "block": int(render_row.lane_block or 0) if render_row else 0,
+                    "legacy": int(render_row.lane_legacy or 0) if render_row else 0,
+                },
+            },
+        }
 
     # ------------------------------------------------------------------
     # soft_delete
@@ -691,60 +762,10 @@ class DeliverableService:
         target_table = "agent_reports" if source_type == "heartbeat" else "deliverables"
         try:
             if target_table == "agent_reports":
-                # agent_reports has its own source_type semantics baked into
-                # heartbeat_result_id — we retain any row tied to a heartbeat.
-                rank_sql = text("""
-                    WITH ranked AS (
-                        SELECT id,
-                               ROW_NUMBER() OVER (
-                                   PARTITION BY COALESCE(agent_id, 0)
-                                   ORDER BY created_at DESC
-                               ) AS rn
-                          FROM agent_reports
-                         WHERE workspace_id        = :workspace_id
-                           AND heartbeat_result_id IS NOT NULL
-                           AND deleted_at          IS NULL
-                    )
-                    UPDATE agent_reports
-                       SET deleted_at = NOW(), updated_at = NOW()
-                     WHERE id IN (SELECT id FROM ranked WHERE rn > :keep)
-                    RETURNING id
-                """)
-                result = self.db.execute(
-                    rank_sql,
-                    {
-                        "workspace_id": str(self.workspace_id),
-                        "keep": keep_per_agent,
-                    },
-                )
+                pruned_ids = self._prune_old_agent_report_heartbeats(keep_per_agent)
             else:
-                rank_sql = text("""
-                    WITH ranked AS (
-                        SELECT id,
-                               ROW_NUMBER() OVER (
-                                   PARTITION BY COALESCE(agent_id, 0)
-                                   ORDER BY created_at DESC
-                               ) AS rn
-                          FROM deliverables
-                         WHERE workspace_id = :workspace_id
-                           AND source_type  = :source_type
-                           AND deleted_at   IS NULL
-                    )
-                    UPDATE deliverables
-                       SET deleted_at = NOW(), updated_at = NOW()
-                     WHERE id IN (SELECT id FROM ranked WHERE rn > :keep)
-                    RETURNING id
-                """)
-                result = self.db.execute(
-                    rank_sql,
-                    {
-                        "workspace_id": str(self.workspace_id),
-                        "source_type": source_type,
-                        "keep": keep_per_agent,
-                    },
-                )
+                pruned_ids = self._prune_old_deliverables(source_type, keep_per_agent)
 
-            pruned_ids = [str(r.id) for r in result.fetchall()]
             self.db.commit()
 
             logger.info(
@@ -765,6 +786,71 @@ class DeliverableService:
             )
             # CodeQL py/stack-trace-exposure: exc's text stays server-side (logged above).
             return {"success": False, "error": "retention failed"}
+
+    def _prune_old_agent_report_heartbeats(self, keep_per_agent: int) -> list[str]:
+        """Soft-delete heartbeat agent_reports beyond keep_per_agent per agent.
+
+        agent_reports has its own source_type semantics baked into
+        heartbeat_result_id — we retain any row tied to a heartbeat.
+        Returns the pruned row ids (not yet committed).
+        """
+        rank_sql = text("""
+            WITH ranked AS (
+                SELECT id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY COALESCE(agent_id, 0)
+                           ORDER BY created_at DESC
+                       ) AS rn
+                  FROM agent_reports
+                 WHERE workspace_id        = :workspace_id
+                   AND heartbeat_result_id IS NOT NULL
+                   AND deleted_at          IS NULL
+            )
+            UPDATE agent_reports
+               SET deleted_at = NOW(), updated_at = NOW()
+             WHERE id IN (SELECT id FROM ranked WHERE rn > :keep)
+            RETURNING id
+        """)
+        result = self.db.execute(
+            rank_sql,
+            {
+                "workspace_id": str(self.workspace_id),
+                "keep": keep_per_agent,
+            },
+        )
+        return [str(r.id) for r in result.fetchall()]
+
+    def _prune_old_deliverables(self, source_type: str, keep_per_agent: int) -> list[str]:
+        """Soft-delete deliverables of source_type beyond keep_per_agent per agent.
+
+        Returns the pruned row ids (not yet committed).
+        """
+        rank_sql = text("""
+            WITH ranked AS (
+                SELECT id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY COALESCE(agent_id, 0)
+                           ORDER BY created_at DESC
+                       ) AS rn
+                  FROM deliverables
+                 WHERE workspace_id = :workspace_id
+                   AND source_type  = :source_type
+                   AND deleted_at   IS NULL
+            )
+            UPDATE deliverables
+               SET deleted_at = NOW(), updated_at = NOW()
+             WHERE id IN (SELECT id FROM ranked WHERE rn > :keep)
+            RETURNING id
+        """)
+        result = self.db.execute(
+            rank_sql,
+            {
+                "workspace_id": str(self.workspace_id),
+                "source_type": source_type,
+                "keep": keep_per_agent,
+            },
+        )
+        return [str(r.id) for r in result.fetchall()]
 
     # ------------------------------------------------------------------
     # helpers
