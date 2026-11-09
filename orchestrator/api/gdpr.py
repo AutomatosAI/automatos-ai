@@ -70,15 +70,38 @@ def erase_my_workspace(
     return erasure_answer([erase_workspace(db, ctx.workspace_id, requested_by=_actor_ref(ctx))])
 
 
+# A purge's own reasons for stopping; any other (an exception's text) is "failed" to the caller,
+# the detail being in the server log (workspace_purge logs it).
+_PUBLIC_SKIP_REASONS = {"workspace_not_found": "workspace_not_found", "not_soft_deleted": "not_soft_deleted"}
+_PUBLIC_SQL_COUNTS = ("workspace_row_deleted", "s3_objects_deleted", "s3_errors")
+
+
+def public_erasure(result: Dict[str, Any]) -> Dict[str, Any]:
+    """An erasure's result as a route answers it: the counts, what failed and whether it is
+    complete; never an exception's text or an internal sign-in id."""
+    sql = result.get("sql") or {}
+    reason = sql.get("skipped_reason")
+    public_sql = {key: sql.get(key) for key in _PUBLIC_SQL_COUNTS}
+    public_sql["rows_deleted"] = {str(t): int(n) for t, n in (sql.get("rows_deleted") or {}).items()}
+    public_sql["skipped_reason"] = None if reason is None else _PUBLIC_SKIP_REASONS.get(reason, "failed")
+    return {
+        "workspace_id": str(result.get("workspace_id")), "erased_at": result.get("erased_at"),
+        "requested_by": result.get("requested_by"), "sql": public_sql,
+        "derived": dict(result.get("derived") or {}), "failed": list(result.get("failed") or []),
+        "complete": bool(result.get("complete")),
+    }
+
+
 def erasure_answer(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     """What an erase route answers (#1442): one workspace's result as it is, several as
     ``{"complete", "workspaces"}``. An erasure that is not complete is a 503 carrying that
     answer, so the caller (Shopify's ``shop/redact`` retries) asks again; the workspace is
     already closed, and the retry finds it and finishes the job."""
-    answer = results[0] if len(results) == 1 else {
-        "complete": all(r.get("complete") for r in results), "workspaces": results,
+    public = [public_erasure(r) for r in results]
+    answer = public[0] if len(public) == 1 else {
+        "complete": all(r["complete"] for r in public), "workspaces": public,
     }
-    if not answer.get("complete"):
+    if not answer["complete"]:
         raise HTTPException(status_code=503, detail=answer)
     return answer
 

@@ -159,3 +159,19 @@ def test_an_unknown_shop_is_still_a_404(new_session, erasure):
     with pytest.raises(HTTPException) as refused:
         _redact(new_session)
     assert refused.value.status_code == 404
+
+
+def test_an_answer_never_carries_an_exceptions_text_or_a_sign_in_id():
+    from api.gdpr import erasure_answer
+
+    stopped = {"workspace_id": "ws-1", "complete": False, "failed": ["sql"], "derived": {},
+               "sql": {"skipped_reason": "exception: connection to 10.0.0.5 refused (password=…)",
+                       "clerk_user_id": "user_2abc", "rows_deleted": {"agents": 3}}}
+    with pytest.raises(HTTPException) as refused:
+        erasure_answer([stopped])
+    detail = refused.value.detail
+    assert detail["sql"]["skipped_reason"] == "failed" and "clerk_user_id" not in detail["sql"]
+    assert "10.0.0.5" not in str(detail) and detail["sql"]["rows_deleted"] == {"agents": 3}
+    kept = erasure_answer([{**stopped, "complete": True, "failed": [],
+                            "sql": {"skipped_reason": None, "workspace_row_deleted": True}}])
+    assert kept["sql"]["skipped_reason"] is None and kept["sql"]["workspace_row_deleted"] is True
