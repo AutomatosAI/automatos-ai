@@ -7,6 +7,7 @@ import logging
 from typing import Any, Dict, Optional
 from uuid import UUID
 
+from core.security.ssh_host_keys import apply_trust_on_first_use_policy
 from modules.tools.execution.agent_request import marks_an_agent_request
 
 logger = logging.getLogger(__name__)
@@ -239,7 +240,7 @@ async def execute_ssh(
         import paramiko
 
         ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        apply_trust_on_first_use_policy(ssh)
 
         connect_kwargs = {
             "hostname": host,

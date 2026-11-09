@@ -33,6 +33,9 @@ from core.builtin_skills import builtin_skill_paths, read_seed
 from core.security.git_sanitizer import (
     validate_git_url as _secure_validate_git_url,
     validate_branch as _secure_validate_branch,
+    validate_source_name as _secure_validate_source_name,
+    validate_commit_sha as _secure_validate_commit_sha,
+    validate_skill_path as _secure_validate_skill_path,
     build_git_clone_cmd,
 )
 
@@ -294,7 +297,18 @@ class SkillLoader:
             if not source_name:
                 repo_name = extract_repo_name(git_url)
                 source_name = f"git-{repo_name}"
-            
+
+            # CodeQL py/path-injection, py/command-line-injection: source_name becomes
+            # a directory name (SKILLS_BASE_DIR/source_name) that is then passed to
+            # `git -C <dir>` for every clone/pull/checkout/rev-parse below.
+            is_valid, error_msg = _secure_validate_source_name(source_name)
+            if not is_valid:
+                logger.error(f"Invalid source name: {error_msg}")
+                return {
+                    "status": "error",
+                    "error": error_msg
+                }
+
             # 3. Check if source already exists
             existing_source = db.query(SkillSource).filter(
                 SkillSource.source_name == source_name
@@ -512,10 +526,16 @@ class SkillLoader:
             
             if not source:
                 return {"status": "error", "error": f"Source '{source_name}' not found"}
-            
+
+            # CodeQL py/command-line-injection: commit_sha is caller-supplied and
+            # goes straight into `git checkout <commit_sha>` below.
+            is_valid, error_msg = _secure_validate_commit_sha(commit_sha)
+            if not is_valid:
+                return {"status": "error", "error": f"Invalid commit SHA: {error_msg}"}
+
             # 2. Git checkout
             logger.info(f"Rolling back {source_name} to {commit_sha}")
-            
+
             checkout_result = self._git_checkout(source.local_cache_path, commit_sha)
             
             if not checkout_result["success"]:
@@ -1090,10 +1110,17 @@ class SkillLoader:
             if not skill or not skill.filesystem_path:
                 logger.warning(f"Skill not found or no filesystem path: {skill_name}")
                 return None
-            
+
+            # CodeQL py/path-injection: resource_path is caller-supplied; it must
+            # resolve inside the skill's own filesystem_path, never escape it.
+            is_valid, error_msg = _secure_validate_skill_path(resource_path, skill.filesystem_path)
+            if not is_valid:
+                logger.warning(f"Rejected resource path for {skill_name}: {error_msg}")
+                return None
+
             # Construct full path
             full_path = Path(skill.filesystem_path) / resource_path
-            
+
             if not full_path.exists():
                 logger.warning(f"Resource not found: {full_path}")
                 return None

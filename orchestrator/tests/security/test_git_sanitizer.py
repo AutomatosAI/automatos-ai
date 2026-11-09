@@ -12,6 +12,8 @@ import pytest
 from core.security.git_sanitizer import (
     validate_git_url,
     validate_branch,
+    validate_commit_sha,
+    validate_source_name,
     build_git_clone_cmd,
 )
 
@@ -248,3 +250,94 @@ class TestBuildGitCloneCmd:
     def test_returns_list_not_string(self):
         cmd = build_git_clone_cmd("https://github.com/x/y", "/tmp/dest")
         assert isinstance(cmd, list)
+
+
+# ============================================================================
+# Commit SHA Validation (CodeQL py/command-line-injection)
+# ============================================================================
+
+class TestValidateCommitSha:
+    """Test validate_commit_sha rejects anything that is not a plain hex SHA."""
+
+    def test_accepts_full_sha(self):
+        ok, err = validate_commit_sha("a" * 40)
+        assert ok is True
+        assert err is None
+
+    def test_accepts_short_sha(self):
+        ok, err = validate_commit_sha("abc1234")
+        assert ok is True
+
+    def test_rejects_leading_dash(self):
+        ok, err = validate_commit_sha("-upload-pack=evil")
+        assert ok is False
+
+    def test_rejects_shell_metacharacters(self):
+        ok, err = validate_commit_sha("abc1234;rm -rf /")
+        assert ok is False
+
+    def test_rejects_uppercase(self):
+        ok, err = validate_commit_sha("ABC1234")
+        assert ok is False
+
+    def test_rejects_too_short(self):
+        ok, err = validate_commit_sha("abc12")
+        assert ok is False
+
+    def test_rejects_empty_string(self):
+        ok, err = validate_commit_sha("")
+        assert ok is False
+
+    def test_rejects_none(self):
+        ok, err = validate_commit_sha(None)
+        assert ok is False
+
+
+# ============================================================================
+# Source Name Validation (CodeQL py/path-injection, py/command-line-injection)
+# ============================================================================
+
+class TestValidateSourceName:
+    """Test validate_source_name: it becomes a directory under SKILLS_BASE_DIR
+    and is passed to `git -C <dir>` for every clone/pull/checkout afterward."""
+
+    def test_accepts_simple_name(self):
+        ok, err = validate_source_name("git-my-repo")
+        assert ok is True
+        assert err is None
+
+    def test_accepts_dots_and_underscores(self):
+        ok, err = validate_source_name("my_repo.v2")
+        assert ok is True
+
+    def test_rejects_path_traversal(self):
+        ok, err = validate_source_name("../../etc/passwd")
+        assert ok is False
+
+    def test_rejects_forward_slash(self):
+        ok, err = validate_source_name("foo/bar")
+        assert ok is False
+
+    def test_rejects_backslash(self):
+        ok, err = validate_source_name("foo\\bar")
+        assert ok is False
+
+    def test_rejects_leading_dash(self):
+        ok, err = validate_source_name("-upload-pack=evil")
+        assert ok is False
+
+    def test_rejects_leading_dot(self):
+        ok, err = validate_source_name(".hidden")
+        assert ok is False
+
+    def test_rejects_empty_string(self):
+        ok, err = validate_source_name("")
+        assert ok is False
+
+    def test_rejects_none(self):
+        ok, err = validate_source_name(None)
+        assert ok is False
+
+    def test_rejects_too_long(self):
+        ok, err = validate_source_name("a" * 200)
+        assert ok is False

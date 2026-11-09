@@ -117,6 +117,28 @@ def validate_commit_sha(sha: str) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
+# A source name becomes a directory name under SkillLoaderConfig.SKILLS_BASE_DIR
+# and is then passed to `git -C <dir>` (clone target, pull, checkout, rev-parse).
+# It must never contain a path separator or traversal sequence: alnum, dot,
+# underscore and hyphen only, must not start with a dot or dash, bounded length.
+_SOURCE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$")
+
+
+def validate_source_name(name: str) -> Tuple[bool, Optional[str]]:
+    """Validate a skill-source name used to build a local clone directory.
+
+    Returns (True, None) on success or (False, reason) on failure.
+    """
+    if not name or not isinstance(name, str):
+        return False, "Source name is required"
+    name = name.strip()
+    if ".." in name or "/" in name or "\\" in name:
+        return False, "Source name must not contain a path separator or '..'"
+    if not _SOURCE_NAME_PATTERN.match(name):
+        return False, "Source name contains invalid characters"
+    return True, None
+
+
 def validate_skill_path(path: str, base_dir: str) -> Tuple[bool, Optional[str]]:
     """Validate that a skill file path does not escape the base directory.
 
