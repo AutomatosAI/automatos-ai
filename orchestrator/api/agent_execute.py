@@ -63,8 +63,7 @@ def _runnable_agent(db: Session, workspace_id: Any, agent_id: int) -> Any:
 def execute_agent(agent_id: int, body: AgentRunRequest, ctx: RequestContext = Depends(get_request_context_hybrid),
                   db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Files the run as a ticket assigned to the agent and answers with its id; the board runs it."""
-    from api.board_task_create import new_ticket_columns
-    from api.board_tasks import file_ticket
+    from api.board_task_create import file_ticket, new_ticket_columns
 
     agent = _runnable_agent(db, ctx.workspace_id, agent_id)
     columns = new_ticket_columns(db, ctx.workspace_id, {

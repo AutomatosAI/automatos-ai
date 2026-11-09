@@ -33,7 +33,7 @@ from core.utils.exception_telemetry import record_error
 from core.utils.background_tasks import launch_guarded
 from core.cli_runtime import RUNTIME_API, RUNTIME_CLI, runtime_kind_of  # PRD-234 S1a
 from services.board_consent import (  # PRD-234: a human's board action is the approval
-    WHY_ASSIGNED_BY_HAND, WHY_CREATED_AND_ASSIGNED, WHY_MOVED_TO_IN_PROGRESS, WHY_RUN_NOW, actor_ref as _operator_ref,
+    WHY_ASSIGNED_BY_HAND, WHY_MOVED_TO_IN_PROGRESS, WHY_RUN_NOW, actor_ref as _operator_ref,
     consent_for_created_ticket, record_operator_consent,
 )
 from services.board_dispatcher import RUN_ID_KEY, notify_task_available
@@ -44,7 +44,6 @@ from core.services.ticket_reasons import MOVED_BY_YOU, SPEND_HOLD_KEY, with_revi
 from services.board_task_view import board_dict, enrich_with_agents
 from services.session_capability_gaps import card_assignment_warning  # F430: what a CLI agent cannot call
 from services.ticket_numbers import ticket_label, ticket_number, title_or_number  # PRD-252 R4
-from services.board_sla import PRIORITY_SLA_HOURS
 from services.board_events import board_event_stream, notify_board_event
 from services.board_cancel import UNCANCELLABLE
 from services.board_drag_rules import (  # PRD-252 R6
@@ -147,10 +146,6 @@ def board_review_mode(value: Any) -> Optional[str]:
 _NON_EXECUTABLE_SOURCE_TYPES = frozenset(
     {"recipe", "orchestration", "orchestration_task"}
 )
-
-# Priority → SLA deadline hours: the shared table (services.board_sla), so the
-# scheduled-task lane files tickets with the same deadlines this route stamps.
-_PRIORITY_SLA_HOURS = PRIORITY_SLA_HOURS
 
 
 # ── Auto-report creation (mirrors heartbeat_service._auto_create_report) ───
@@ -284,52 +279,10 @@ async def create_task(
     """Create a new board task. F276: the answer is the ticket as the board lists
     it, with its number (#0042); what a request may file is checked in
     api/board_task_create.py."""
-    from api.board_task_create import created_ticket_answer, new_ticket_columns
+    from api.board_task_create import created_ticket_answer, file_ticket, new_ticket_columns
 
     task = file_ticket(db, ctx, new_ticket_columns(db, ctx.workspace_id, await request.json()))
     return {**created_ticket_answer(db, task), **card_assignment_warning(db, task)}
-
-
-def file_ticket(db: Session, ctx: RequestContext, columns: Dict[str, Any]) -> BoardTask:
-    """Files a ticket with checked ``columns`` and, when it is created assigned to an agent,
-    hands it to the dispatch loop. The board's create route and an agent's
-    ``POST /api/agents/{id}/execute`` both file through here."""
-    task = BoardTask(
-        workspace_id=ctx.workspace_id,
-        created_by_type="user",
-        created_by_id=ctx.user.clerk_user_id or ctx.user.id,
-        sla_deadline=datetime.now(timezone.utc) + timedelta(hours=_PRIORITY_SLA_HOURS.get(columns["priority"], 24)),
-        **columns,
-    )
-    db.add(task)
-    db.flush()  # the id the notice carries
-
-    # PRD-180 S1 (F090): push the new card to subscribed Command Centres.
-    # F118: a NOTIFY is delivered when its transaction commits — issue it before the commit
-    # (after it, the request's closing rollback drops it).
-    notify_board_event(
-        db, workspace_id=ctx.workspace_id, task_id=task.id, status=task.status,
-        event="task_created",
-    )
-    db.commit()
-    db.refresh(task)
-
-    # PRD-161: assignment = immediate dispatch via the board loop (Q39/Q40).
-    # A created-as-assigned task notifies the claimant; the dispatch loop claims
-    # it (FOR UPDATE SKIP LOCKED) and runs it — no inline launch, no heartbeat wait.
-    if task.status == "assigned" and task.assigned_agent_id and task.source_type != "recipe":
-        # PRD-234 D16: the operator created AND assigned it — on the local edition
-        # that is the approval; recorded before the dispatcher can claim the row.
-        consent_for_created_ticket(
-            db, workspace_id=ctx.workspace_id, task=task,
-            actor=_operator_ref(ctx), why=WHY_CREATED_AND_ASSIGNED,
-        )
-        _note_no_host_for_cli(db, task)
-        notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
-        db.commit()  # F118: the wake rides this commit
-
-    logger.info("[BoardTasks] Created task %d in workspace %s", task.id, ctx.workspace_id)
-    return task
 
 
 @router.get("")
