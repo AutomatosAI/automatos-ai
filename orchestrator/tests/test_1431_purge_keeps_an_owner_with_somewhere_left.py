@@ -32,8 +32,10 @@ def engine():  # conftest's new_session binds to it
 
 @pytest.fixture
 def purge(monkeypatch):
-    """The purge with S3 off and Clerk recorded; yields the Clerk ids it deleted."""
-    from services import workspace_purge
+    """The purge with S3 off, the memory stores erased cleanly and Clerk recorded; yields the
+    Clerk ids it deleted. A failed memory erase holds the purge (#1432), so these tests say the
+    erase worked: they are about the owner's account, not about Qdrant."""
+    from services import gdpr_service, workspace_purge
 
     deleted = []
 
@@ -42,6 +44,8 @@ def purge(monkeypatch):
         return True
 
     monkeypatch.setattr(workspace_purge, "_build_s3_client", lambda: None)
+    monkeypatch.setattr(gdpr_service, "_erase_durable_memory", lambda ws, subject_id=None: 0)
+    monkeypatch.setattr(gdpr_service, "_erase_field_memory", lambda ws, subject_id=None: 0)
     monkeypatch.setattr(workspace_purge, "_delete_clerk_user", delete_clerk_user)
     return workspace_purge.purge_workspace_sync, deleted
 

@@ -19,6 +19,10 @@ is empty, when the agent runs on it already, when the policy blocks it, when no 
 provider is open to the workspace (a BYO-key-only provider in this edition, or no key at all), or
 when the agent runs on the workspace's own key and the spoken model would run on the platform's.
 
+A lean turn's request may name its model instead, from the agent's allow-list
+(``consumers.chatbot.lean_request``). It moves the same way, held to the agent's policy (not
+Auto's seat), and stays on the agent's own model for the same reasons, said once at info.
+
 Every turn logs the model it answers on: the id, never the person's words.
 """
 from __future__ import annotations
@@ -33,7 +37,7 @@ from config import config
 logger = logging.getLogger(__name__)
 
 TURN_MODEL_LOG = "[chat] turn model=%s spoken=%s"
-STAYS_LOG = "[spoken] %s not used (%s): the turn answers on the agent's model %s"
+STAYS_LOG = "[%s] %s not used (%s): the turn answers on the agent's model %s"
 # The spoken model is held to Auto's seat: the quick ask and Auto Live both talk to Auto.
 ORCHESTRATOR_SEAT = True
 
@@ -64,7 +68,15 @@ async def spoken_turn_runtime(factory: Any, runtime: Any, workspace_id: Any) -> 
     """``runtime`` on the spoken model, for one spoken turn: a copy whose manager calls and books
     that model on the key that pays for it. ``runtime`` itself when the turn can't use it (off,
     already on it, or the reason logged once at info)."""
-    wanted = spoken_model()
+    return await runtime_on(factory, runtime, workspace_id, spoken_model(),
+                            orchestrator_seat=ORCHESTRATOR_SEAT, label="spoken")
+
+
+async def runtime_on(factory: Any, runtime: Any, workspace_id: Any, wanted: Any, *,
+                     orchestrator_seat: bool, label: str) -> Any:
+    """``runtime`` on ``wanted`` (a provider and model) for one turn, by the factory's rules and
+    the model policy for ``orchestrator_seat``; ``runtime`` itself when there is none, it runs
+    on it already, or the reason it can't is logged once at info under ``label``."""
     if wanted is None:
         return runtime
     provider, model = factory._resolve_provider_for_model(wanted.provider, wanted.model)
@@ -72,26 +84,26 @@ async def spoken_turn_runtime(factory: Any, runtime: Any, workspace_id: Any) -> 
     if model == agent_model:
         return runtime
     workspace = factory._effective_workspace(workspace_id, runtime)
-    reason = _policy_refusal(factory, workspace, provider, model)
+    reason = _policy_refusal(factory, workspace, provider, model, orchestrator_seat)
     resolved = None if reason else await _spoken_key(factory, runtime, provider, workspace)
     reason = reason or _key_refusal(runtime, provider, resolved)
     if reason:
-        logger.info(STAYS_LOG, model, reason, agent_model)
+        logger.info(STAYS_LOG, label, model, reason, agent_model)
         return runtime
     manager = _spoken_manager(factory, runtime, provider, model, resolved, workspace)
     return dataclasses.replace(runtime, llm_manager=manager, is_byok=resolved.is_byok,
                                resolved_provider=resolved.provider or provider)
 
 
-def _policy_refusal(factory: Any, workspace: Any, provider: str, model: str) -> Optional[str]:
-    """Why the spoken model may not answer in this workspace, or None when it may."""
+def _policy_refusal(factory: Any, workspace: Any, provider: str, model: str, orchestrator_seat: bool) -> Optional[str]:
+    """Why the model may not answer in this workspace, or None when it may."""
     from core.llm.model_policy import check_model_for_agent
     from core.llm.providers import enum_for
 
     if enum_for(provider) is None:
         return f"{provider} has no chat client"
     allowed, reason = check_model_for_agent(
-        factory.db_session, workspace, model, orchestrator_seat=ORCHESTRATOR_SEAT, provider=provider,
+        factory.db_session, workspace, model, orchestrator_seat=orchestrator_seat, provider=provider,
     )
     return None if allowed else reason
 
@@ -134,11 +146,13 @@ def _spoken_manager(factory: Any, runtime: Any, provider: str, model: str, resol
 
 class TurnAgents:
     """The turn's agent factory: everything is the service's own factory's, except that the agent
-    it activates answers on the turn's model (the spoken model on a spoken turn), and says which."""
+    it activates answers on the turn's model (a lean request's model, else the spoken model on a
+    spoken turn), and says which."""
 
-    def __init__(self, factory: Any, *, spoken: bool) -> None:
+    def __init__(self, factory: Any, *, spoken: bool, requested: Any = None) -> None:
         self._factory = factory
         self._spoken = spoken
+        self._requested = requested
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._factory, name)
@@ -147,10 +161,21 @@ class TurnAgents:
         runtime = await self._factory.activate_agent(agent_id, **kwargs)
         if runtime is None:
             return None
-        if self._spoken:
+        if self._requested is not None:
+            runtime = await self._on_the_requested_model(runtime, kwargs.get("workspace_id"))
+        elif self._spoken:
             runtime = await self._on_the_spoken_model(runtime, kwargs.get("workspace_id"))
         logger.info(TURN_MODEL_LOG, model_of(runtime), str(self._spoken).lower())
         return runtime
+
+    async def _on_the_requested_model(self, runtime: Any, workspace_id: Any) -> Any:
+        try:
+            return await runtime_on(self._factory, runtime, workspace_id, self._requested,
+                                    orchestrator_seat=False, label="requested")
+        except Exception:  # a lookup that failed keeps the turn on the agent's own model
+            logger.exception("[requested] the requested model could not be set up; the turn answers on %s",
+                             model_of(runtime))
+            return runtime
 
     async def _on_the_spoken_model(self, runtime: Any, workspace_id: Any) -> Any:
         try:
@@ -170,7 +195,8 @@ def answers_on_the_turns_model(turn: Stream) -> Stream:
     async def wrapped(chat: Any, *args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:
         factory = getattr(chat, "agent_factory", None)
         if factory is not None:
-            chat.agent_factory = TurnAgents(factory, spoken=bool(kwargs.get("spoken_mode")))
+            chat.agent_factory = TurnAgents(factory, spoken=bool(kwargs.get("spoken_mode")),
+                                            requested=_requested_model(chat))
         try:
             async for chunk in turn(chat, *args, **kwargs):
                 yield chunk
@@ -180,6 +206,14 @@ def answers_on_the_turns_model(turn: Stream) -> Stream:
     return wrapped
 
 
+def _requested_model(chat: Any) -> Any:
+    """A lean turn's requested model (consumers.chatbot.lean_request); None on any other turn."""
+    if getattr(chat, "_lean_actions", None) is None:
+        return None
+    return getattr(getattr(chat, "_lean_request", None), "model", None)
+
+
 __all__ = [
-    "SpokenModel", "TurnAgents", "answers_on_the_turns_model", "model_of", "spoken_model", "spoken_turn_runtime",
+    "SpokenModel", "TurnAgents", "answers_on_the_turns_model", "model_of", "runtime_on", "spoken_model",
+    "spoken_turn_runtime",
 ]

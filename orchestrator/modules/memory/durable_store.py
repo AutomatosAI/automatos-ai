@@ -45,6 +45,7 @@ from core.qdrant import (
 )
 from core.qdrant_writes import is_timeout, upsert_retrying_a_timeout_once
 from modules.memory.injection_filter import STATED_BY_KEY, deletable_by
+from core.security.memory_audience import for_its_reader, labels_what_its_reader_writes
 from modules.memory.retired import leaves_out_retired, retired_metadata, unretired
 
 logger = logging.getLogger(__name__)
@@ -249,6 +250,7 @@ class DurableMemoryStore:
 
     # ── Write ───────────────────────────────────────────────────
 
+    @labels_what_its_reader_writes  # Wave 4b: a labelled agent's write carries its labels
     async def add(
         self,
         messages: List[Dict[str, str]],
@@ -318,6 +320,7 @@ class DurableMemoryStore:
 
     # ── Read ────────────────────────────────────────────────────
 
+    @for_its_reader  # Wave 4b: nothing labelled for agents the run's reader is not
     @leaves_out_retired  # P256-FIX-N15-9: a rule the owner replaced is never recalled
     async def search(
         self,
@@ -413,6 +416,7 @@ class DurableMemoryStore:
         flt = Filter(must=[*self._namespace_filter(user_id).must, *exact], should=should or None)
         return await self._scroll(flt, limit)
 
+    @for_its_reader  # Wave 4b: nor listed for them
     @leaves_out_retired  # P256-FIX-N15-9: nor listed (the rules, the Memory page, Auto's browse)
     async def _scroll(self, flt: Filter, limit: int) -> List[Dict]:
         """The memories ``flt`` matches, up to ``limit`` (unscored, scroll order)."""

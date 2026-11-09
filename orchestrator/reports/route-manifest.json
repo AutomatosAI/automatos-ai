@@ -1,5 +1,5 @@
 {
-  "route_count": 1019,
+  "route_count": 1020,
   "routes": [
     {
       "method": "GET",
@@ -3148,6 +3148,10 @@
     {
       "method": "GET",
       "path": "/api/v1/memory/layers"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/profiles"
     },
     {
       "method": "GET",

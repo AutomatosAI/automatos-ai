@@ -2268,6 +2268,17 @@ class Config:
     # the knowledge prefetch and the per-turn app searches stay out. Off by default: until it is on,
     # every agent takes today's full turn whatever its profile says.
     LEAN_TURNS_ENABLED: bool = os.getenv("LEAN_TURNS_ENABLED", "false").strip().lower() == "true"
+    # A lean turn's app context (POST /api/chat appContext): what the host app knows, in the system
+    # prompt for that turn only, never stored. Longer than this many characters is refused (422).
+    APP_CONTEXT_MAX_CHARS: int = int(os.getenv("APP_CONTEXT_MAX_CHARS", "8000"))
+    # Memory profiles (Wave 4): an agent's or workspace's memory_profile says what distillation
+    # keeps as a fact in its domain (modules/memory/memory_profiles.py). Off by default: until it
+    # is on, every distillation is the general one, as before.
+    MEMORY_PROFILES_ENABLED: bool = os.getenv("MEMORY_PROFILES_ENABLED", "false").strip().lower() == "true"
+    # Need-to-know (Wave 4b): a memory labelled with an audience is read only by agents whose own
+    # configuration.audience meets it (core/security/memory_audience.py). Off by default: until it is on,
+    # no run has a reader, so nothing is filtered and nothing is labelled by its writer.
+    MEMORY_AUDIENCE_ENABLED: bool = os.getenv("MEMORY_AUDIENCE_ENABLED", "false").strip().lower() == "true"
     SPOKEN_MODE_MODEL: str = os.getenv("SPOKEN_MODE_MODEL", "claude-haiku-5-5").strip()
     SPOKEN_MODE_PROVIDER: str = os.getenv("SPOKEN_MODE_PROVIDER", "anthropic").strip().lower()
     # Auto's server voice (services/voice-tts): POST /api/voice/speech streams a reply
