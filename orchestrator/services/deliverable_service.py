@@ -330,7 +330,9 @@ class DeliverableService:
                 "[DeliverableService] register() failed path=%s: %s",
                 file_path, exc, exc_info=True,
             )
-            return {"success": False, "error": f"register failed: {exc}"}
+            # CodeQL py/stack-trace-exposure: exc's text (a DB error, a path, ...) stops
+            # at the server log; the caller gets a fixed, generic message.
+            return {"success": False, "error": "register failed"}
 
     # ------------------------------------------------------------------
     # list_deliverables
@@ -394,7 +396,8 @@ class DeliverableService:
                     "limit": limit, "offset": offset}
         except Exception as exc:
             logger.error("[DeliverableService] list_deliverables() failed: %s", exc, exc_info=True)
-            return {"success": False, "error": f"list failed: {exc}", "deliverables": [], "total": 0,
+            # CodeQL py/stack-trace-exposure: exc's text stays server-side (logged above).
+            return {"success": False, "error": "list failed", "deliverables": [], "total": 0,
                     "limit": limit, "offset": offset}
 
     # ------------------------------------------------------------------
@@ -483,7 +486,8 @@ class DeliverableService:
                 "[DeliverableService] get_deliverable(%s) failed: %s",
                 deliverable_id, exc, exc_info=True,
             )
-            return {"success": False, "error": f"get failed: {exc}"}
+            # CodeQL py/stack-trace-exposure: exc's text stays server-side (logged above).
+            return {"success": False, "error": "get failed"}
 
     # ------------------------------------------------------------------
     # get_stats
@@ -595,9 +599,10 @@ class DeliverableService:
                 "[DeliverableService] get_stats() failed: %s",
                 exc, exc_info=True,
             )
+            # CodeQL py/stack-trace-exposure: exc's text stays server-side (logged above).
             return {
                 "success": False,
-                "error": f"stats failed: {exc}",
+                "error": "stats failed",
                 "total": 0,
                 "by_type": {},
                 "by_agent": [],
@@ -660,7 +665,8 @@ class DeliverableService:
                 "[DeliverableService] soft_delete(%s) failed: %s",
                 deliverable_id, exc, exc_info=True,
             )
-            return {"success": False, "error": f"delete failed: {exc}"}
+            # CodeQL py/stack-trace-exposure: exc's text stays server-side (logged above).
+            return {"success": False, "error": "delete failed"}
 
     # ------------------------------------------------------------------
     # retention — prune old heartbeat reports
@@ -757,7 +763,8 @@ class DeliverableService:
                 "[DeliverableService] apply_retention() failed: %s",
                 exc, exc_info=True,
             )
-            return {"success": False, "error": f"retention failed: {exc}"}
+            # CodeQL py/stack-trace-exposure: exc's text stays server-side (logged above).
+            return {"success": False, "error": "retention failed"}
 
     # ------------------------------------------------------------------
     # helpers
