@@ -1369,8 +1369,12 @@ async def serve_export(file_path: str, ctx = Depends(get_request_context_hybrid)
     from pathlib import Path as _Path
     safe_base = _Path("exports").resolve()
     requested = (safe_base / file_path).resolve()
-    # Prevent path traversal
-    if not str(requested).startswith(str(safe_base)):
+    # CodeQL py/path-injection: a bare startswith() string compare is bypassed by a
+    # sibling directory sharing the same text prefix (e.g. "exports-other"), and
+    # file_path is a {file_path:path} converter so it can contain "..". resolve()
+    # plus is_relative_to() is the guard this codebase already uses for the
+    # equivalent document routes (services/document_downloads.py).
+    if not requested.is_relative_to(safe_base):
         raise HTTPException(status_code=403, detail="Access denied")
     if not requested.is_file():
         raise HTTPException(status_code=404, detail="File not found")
