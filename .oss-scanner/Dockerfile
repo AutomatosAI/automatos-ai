@@ -7,7 +7,7 @@
 
 # Node 24, the version the frontend CI lane runs, from the official image. It gets
 # its own stage so the tag@digest pin sits on a FROM line (PRD-262 US-007).
-FROM node:24-bookworm@sha256:e7add2a490bb17d97b485b8641bd88455fff7839ade0f5eba493c3508124d413 AS node
+FROM node:24-bookworm@sha256:8fa96264f302f58bbb13aa7339c541547b56975766ce956c875da149452a3e40 AS node
 
 FROM python:3.11-bookworm@sha256:84fa927127b46670e768371d1ad1be271d57ba93a6fbb3479045c7c6c452432f
 

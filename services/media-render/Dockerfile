@@ -42,7 +42,7 @@ ARG MEDIA_ASSETS=fetch
 # PRD-262 US-007: Node.js 24 (LTS until April 2028) comes from the official image.
 # It gets its own stage so the tag@digest pin sits on a FROM line, which is the
 # only place an updater reads (it never reads a bare `COPY --from=<image>`).
-FROM node:24-trixie-slim@sha256:54f84b4cf8432b21aaffd5d3ce8d41e12cea0d10d33c09d2f3c9879d49d6b446 AS node
+FROM node:24-trixie-slim@sha256:0820eaa85e07d0490446dd01d14707e17e6108a36988cf374899cd057eb3812d AS node
 
 # Node, stripped. The same stage, byte for byte, in services/workspace-worker/Dockerfile
 # and services/media-render/Dockerfile, so the two images share one node layer on a host.
@@ -58,7 +58,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # uv from its own image, in a named stage for the same reason (as the worker's, US-044).
-FROM ghcr.io/astral-sh/uv:0.13.6@sha256:af22a52f5eafef3d78e551599d405c02df61919d18028f0cea8eda93bc9986d0 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
 
 # The media assets, fetched, at the paths the media assets image carries them
 # (scripts/ci/media_assets.py): /kokoro/<release>/<file> and /music/<id>.<ext>.
@@ -107,7 +107,7 @@ RUN cd /opt/kokoro && sha256sum -c SHA256SUMS \
 # Go checksum database. The js stage puts the binary where npm put its own and
 # fails the build unless esbuild's JavaScript API accepts it, which it does only
 # when the binary's version is the locked package's.
-FROM golang:1.26.10-trixie@sha256:a050dcceee6eb9bf110151662dfac7662f3bec40927c7dee48731e3d92083d42 AS esbuild
+FROM golang:1.26.10-trixie@sha256:fd9a91f0ece5664556f4851d06dce5e5b505a71166dffd385a03ba9d200b6983 AS esbuild
 RUN CGO_ENABLED=0 GOTOOLCHAIN=local GOBIN=/out go install -trimpath -buildvcs=false \
         -ldflags='-s -w -buildid=' github.com/evanw/esbuild/cmd/esbuild@v0.25.12 \
     && /out/esbuild --version
