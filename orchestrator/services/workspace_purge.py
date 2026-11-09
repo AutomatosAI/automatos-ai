@@ -175,16 +175,15 @@ def _erase_workspace_memories(workspace_id: UUID, result: "PurgeResult") -> bool
     """
     if not config.QDRANT_URL:
         return True  # nothing to erase
-    from modules.context.adapters.vector_field import VectorFieldSharedContext
-    from modules.memory.unified_memory_service import UnifiedMemoryService
+    from services import gdpr_service  # imported here: gdpr_service imports this module
 
     erasers = (
-        ("durable_memory_deleted", lambda: UnifiedMemoryService().erase_workspace_memories(str(workspace_id))),
-        ("field_memory_deleted", lambda: VectorFieldSharedContext().erase_workspace(str(workspace_id))),
+        ("durable_memory_deleted", gdpr_service._erase_durable_memory),
+        ("field_memory_deleted", gdpr_service._erase_field_memory),
     )
     for count_field, erase in erasers:
         try:
-            setattr(result, count_field, int(asyncio.run(erase()) or 0))
+            setattr(result, count_field, int(erase(workspace_id) or 0))
         except Exception:
             logger.exception("Memory erase (%s) failed for workspace %s", count_field, workspace_id)
             result.memory_erase_errors += 1
