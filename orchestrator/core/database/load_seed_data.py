@@ -230,6 +230,19 @@ def _seed_personas() -> None:
         logger.exception("Error loading personas")
 
 
+def _seed_memory_profiles() -> None:
+    """Memory profiles: what distillation keeps as a fact, by domain."""
+    try:
+        from core.seeds.seed_memory_profiles import seed_memory_profiles
+        from core.database.database import get_db_session
+
+        with get_db_session() as db:
+            created, updated = seed_memory_profiles(db)
+        logger.info("Memory profiles: %d created, %d updated", created, updated)
+    except Exception:
+        logger.exception("Error loading memory profiles")
+
+
 def _seed_marketplace_agents() -> None:
     """Marketplace catalog (PRD-209 local first-run; PRD-233 S3 owns the curated refresh).
 
@@ -319,6 +332,7 @@ _ALL_SECTIONS = (
     _seed_claude_list_prices,
     _seed_skills_and_patterns,
     _seed_personas,
+    _seed_memory_profiles,
     _seed_marketplace_agents,
     _seed_shopify_agents,
     _seed_packages,

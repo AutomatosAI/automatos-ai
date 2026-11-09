@@ -610,7 +610,11 @@ class SmartMemoryManager:
               NOTHING on failure (no raw-exchange fallback) — the L2 transcript
               still preserves the verbatim turn.
         """
-        prompt = self._build_distill_prompt(user_message, assistant_response)
+        from modules.memory.memory_profiles import distillation_profile, with_profile
+
+        # Wave 4: the agent's (else the workspace's) memory profile says what counts as a fact here.
+        profile = await distillation_profile(workspace_id, agent_id)
+        prompt = with_profile(self._build_distill_prompt(user_message, assistant_response), profile)
         try:
             # Imported here (not at module top) so tests can monkeypatch
             # ``core.llm.create_llm_manager`` and have it take effect per call.
