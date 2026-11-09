@@ -97,19 +97,18 @@ RUN cd /opt/kokoro && sha256sum -c SHA256SUMS \
     && rm SHA256SUMS
 
 # esbuild's binary, built from the source of the version js/package-lock.json locks.
-# Hyperframes requires esbuild ^0.25.12, and npm's 0.25.12 binary was built with Go
-# 1.23.12, whose standard library carries GO-2026-4337 (crypto/tls, fixed in 1.24.13,
-# 1.25.7 and 1.26) and GO-2026-6612 (net/http, fixed in 1.26.9). No esbuild release
-# is built with Go 1.26.9 or later yet (0.28.2, the newest, ships Go 1.26.5), so the
-# same 0.25.12 source is built here with esbuild's own release flags (its Makefile:
-# no cgo, -trimpath, -s -w, no build id or VCS stamp) on Go's patched 1.26 line,
-# the line esbuild itself builds on. `go install` checks every module against the
-# Go checksum database. The js stage puts the binary where npm put its own and
+# Hyperframes requires esbuild ^0.28.2, and npm's 0.28.2 binary was built with Go
+# 1.26.5, whose standard library carries GO-2026-6612 (net/http, fixed in 1.26.9).
+# No esbuild release is built with Go 1.26.9 or later yet, so the same 0.28.2
+# source is built here with esbuild's own release flags (its Makefile: no cgo,
+# -trimpath, -s -w, no build id or VCS stamp) on Go's patched 1.26 line, the line
+# esbuild itself builds on. `go install` checks every module against the Go
+# checksum database. The js stage puts the binary where npm put its own and
 # fails the build unless esbuild's JavaScript API accepts it, which it does only
 # when the binary's version is the locked package's.
 FROM golang:1.26.10-trixie@sha256:a050dcceee6eb9bf110151662dfac7662f3bec40927c7dee48731e3d92083d42 AS esbuild
 RUN CGO_ENABLED=0 GOTOOLCHAIN=local GOBIN=/out go install -trimpath -buildvcs=false \
-        -ldflags='-s -w -buildid=' github.com/evanw/esbuild/cmd/esbuild@v0.25.12 \
+        -ldflags='-s -w -buildid=' github.com/evanw/esbuild/cmd/esbuild@v0.28.2 \
     && /out/esbuild --version
 
 # Hyperframes pinned EXACTLY (Apache-2.0), and GSAP for each composition's one
