@@ -87,8 +87,10 @@ class MemoryNamespace:
 
     def cache_key(self, agent_id: Optional[int], query_hash: str, with_workspace: bool = False) -> str:
         """Cache key for L3 search results; ``with_workspace`` marks a search that also read the workspace."""
+        from core.security.memory_audience import reader_key
+
         scope = (str(agent_id) if agent_id is not None else "global") + ("+workspace" if with_workspace else "")
-        return f"mem:cache:{self.workspace_id}:{scope}:{query_hash}"
+        return f"mem:cache:{self.workspace_id}:{scope}{reader_key()}:{query_hash}"  # Wave 4b: per reader
 
     def cache_pattern(self) -> str:
         """Pattern to match all cache keys for this workspace (for invalidation)."""

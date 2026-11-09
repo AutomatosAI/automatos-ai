@@ -151,8 +151,11 @@ class SmartMemoryManager:
         the Q7 private-scope guard filters per viewer, so two users sharing a
         cache entry would leak one user's private rows to the other — and the
         lane (F182): a widget's agent-only lookup, or autonomous work's lookup
-        without chat transcripts, is never served a chat turn's result."""
-        return f"{workspace_id}:{agent_id}:{viewer_subject_id}:{lane}:{query[:50]}"
+        without chat transcripts, is never served a chat turn's result. And the run's
+        memory reader (Wave 4b): a labelled agent's lookup is never another reader's."""
+        from core.security.memory_audience import reader_key
+
+        return f"{workspace_id}:{agent_id}:{viewer_subject_id}:{lane}{reader_key()}:{query[:50]}"
 
     async def retrieve_memories(
         self,

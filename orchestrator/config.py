@@ -2275,6 +2275,10 @@ class Config:
     # keeps as a fact in its domain (modules/memory/memory_profiles.py). Off by default: until it
     # is on, every distillation is the general one, as before.
     MEMORY_PROFILES_ENABLED: bool = os.getenv("MEMORY_PROFILES_ENABLED", "false").strip().lower() == "true"
+    # Need-to-know (Wave 4b): a memory labelled with an audience is read only by agents whose own
+    # configuration.audience meets it (core/security/memory_audience.py). Off by default: until it is on,
+    # no run has a reader, so nothing is filtered and nothing is labelled by its writer.
+    MEMORY_AUDIENCE_ENABLED: bool = os.getenv("MEMORY_AUDIENCE_ENABLED", "false").strip().lower() == "true"
     SPOKEN_MODE_MODEL: str = os.getenv("SPOKEN_MODE_MODEL", "claude-haiku-5-5").strip()
     SPOKEN_MODE_PROVIDER: str = os.getenv("SPOKEN_MODE_PROVIDER", "anthropic").strip().lower()
     # Auto's server voice (services/voice-tts): POST /api/voice/speech streams a reply

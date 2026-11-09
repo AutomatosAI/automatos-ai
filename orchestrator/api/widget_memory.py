@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -50,6 +50,17 @@ class MemoryCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=10000, description="Memory text content")
     metadata: Optional[Dict[str, Any]] = Field(default=None, description="Arbitrary metadata")
     tags: Optional[List[str]] = Field(default=None, description="Tags for categorisation")
+
+    @field_validator("metadata")
+    @classmethod
+    def _audience_is_labels(cls, value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Wave 4b: ``metadata.audience`` limits the memory to the agents with one of its labels."""
+        from core.security.memory_audience import AUDIENCE_KEY, audience_errors
+
+        errors = audience_errors((value or {}).get(AUDIENCE_KEY), f"metadata.{AUDIENCE_KEY}")
+        if errors:
+            raise ValueError(errors[0])
+        return value
 
 
 class MemoryItem(BaseModel):

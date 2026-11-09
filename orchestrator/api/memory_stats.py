@@ -22,6 +22,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.auth.super_admin import require_super_admin
 from api.memory_standing_rules import lists_the_viewers_rules
+from core.security.memory_audience import one_audience_only, shared_audience
 
 logger = logging.getLogger(__name__)
 
@@ -777,6 +778,7 @@ async def get_memory_layers(
     return result
 
 
+@one_audience_only  # Wave 4b: never one merged memory from memories for different audiences
 async def _find_targets(service, workspace_id, db: Session, memory_ids: List[str]) -> List[Dict]:
     """The requested memories, read across every tier of the workspace."""
     agent_ids = _get_agent_ids(workspace_id, db)
@@ -893,7 +895,7 @@ async def consolidate_memories(
         await service.store_long_term(
             workspace_id=str(ctx.workspace_id),
             content=merged_content,
-            metadata={"source": "consolidation", "merged_from": len(targets)},
+            metadata={"source": "consolidation", "merged_from": len(targets), **shared_audience(targets)},
         )
     except Exception as e:
         logger.error("Failed to store consolidated memory: %s", e, exc_info=True)
