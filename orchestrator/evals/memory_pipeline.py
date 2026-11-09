@@ -40,6 +40,7 @@ import math
 import re
 import sys
 import uuid
+from types import SimpleNamespace
 from dataclasses import replace
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -178,11 +179,18 @@ class OpenRouterEmbedder:
     records every call as LLM usage in the configured database, for its default workspace:
     an eval never writes usage or cost rows."""
 
+    # The memory store's health check (core.llm.embedding_status.provider_ready) asks the
+    # embedder for its provider: this one is real, never the degraded stand-in.
+    provider = SimpleNamespace(is_degraded=False)
+
     def __init__(self, model: str, api_key: str, base_url: str, dimension: int) -> None:
         from openai import AsyncOpenAI
 
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self._model, self._dimension = model, dimension
+
+    def _ensure_provider(self) -> None:
+        """The health check's hook: nothing to load, the provider is this embedder."""
 
     async def generate_embedding(self, text: str) -> List[float]:
         # As the platform's provider does: the model's native vector (Qwen3-Embedding-8B: 4096),
