@@ -44,6 +44,15 @@ interface MemoryActivity {
   itemCount?: number
 }
 
+// CodeQL js/identity-replacement: the inline chain used to end in
+// .replace('_', '_'), replacing "_" with itself — dead code. The memory
+// kind's raw name ("working_memory", "short_term", "collective_memory", ...)
+// keeps the underscore for a multi-word kind, so stripping only the
+// "_memory" suffix is already the whole transform.
+export function memoryActivityType(rawType: string): MemoryActivity['type'] {
+  return rawType.replace('_memory', '') as MemoryActivity['type']
+}
+
 interface CommunicationEvent {
   id: string
   timestamp: string
@@ -266,7 +275,7 @@ export function EnhancedOrchestratorView({
               memActivities.push({
                 id: `mem_${agentId}_${type}`,
                 timestamp: execution.created_at,
-                type: type.replace('_memory', '').replace('_', '_') as MemoryActivity['type'],
+                type: memoryActivityType(type),
                 action: 'retrieve',
                 agentId: parseInt(agentId),
                 agentName: `Agent ${agentId}`,
