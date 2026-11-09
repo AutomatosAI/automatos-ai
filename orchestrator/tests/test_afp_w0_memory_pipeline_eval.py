@@ -1,4 +1,4 @@
-"""#1430 Wave 0: the memory-pipeline eval's self-tests (evals/memory_pipeline.py).
+"""PRD-274 Wave 0: the memory-pipeline eval's self-tests (evals/memory_pipeline.py).
 
 The eval runs ``evals.memory_recall``'s corpus and gold set through the real chat-turn
 path: the distillation write into a workspace, then ``ContextRouter.retrieve_context``

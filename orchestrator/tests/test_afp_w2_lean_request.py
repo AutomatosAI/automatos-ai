@@ -1,5 +1,5 @@
 """Wave 2, PR B: a lean turn's request may pick its model from the agent's allow-list and
-send app context for that turn's prompt only (PRD draft "Automatos for products", §5.3–5.4).
+send app context for that turn's prompt only (PRD-274, "Automatos for products", §5.3–5.4).
 
 Both are refused (422) before the message is saved for any agent that is not lean, a model
 off the list, and app context over ``APP_CONTEXT_MAX_CHARS``. The model moves the turn the

@@ -1,4 +1,4 @@
-"""Memory-pipeline eval: recall through the real chat-turn path (#1430 Wave 0).
+"""Memory-pipeline eval: recall through the real chat-turn path (PRD-274 Wave 0).
 
 ``evals.memory_recall`` (PRD-185 S10) scores a retriever over a labelled corpus with an
 offline bag-of-words proxy. It never runs the path a chat turn takes, which is where
