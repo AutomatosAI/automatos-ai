@@ -8,7 +8,7 @@ Replaces Redis pubsub + WebSocket architecture from PRD-28.
 Based on successful PRD-27 chat SSE implementation.
 """
 
-from typing import AsyncGenerator, Dict, Any, Optional, List
+from typing import AsyncGenerator, Dict, Any, Optional, List, Tuple
 from datetime import datetime
 import asyncio
 import json
@@ -331,6 +331,71 @@ def format_execution_log(
     }
 
 
+def _format_stage_event_chunks(event_type: str, data: Dict[str, Any], event: Dict[str, Any]) -> List[str]:
+    """Format a stage_start / stage_complete event into its text + data chunks."""
+    stage_num = data.get("stage", "?")
+    stage_name = data.get("stage_name", "Unknown")
+    prefix = "⚡ Stage" if event_type == "stage_start" else "✓ Completed Stage"
+    text = f"{prefix} {stage_num}: {stage_name}\\n"
+    return [f'0:{json.dumps(text)}\n', f'd:{json.dumps(event)}\n']
+
+
+def _format_execution_log_chunks(data: Dict[str, Any], event: Dict[str, Any]) -> List[str]:
+    """Format an execution_log event's message (with level emoji) + data chunks."""
+    level = data.get("level", "INFO")
+    message = data.get("message", "")
+    emoji = {"INFO": "ℹ️", "DEBUG": "🔍", "WARNING": "⚠️", "ERROR": "❌"}.get(level, "•")
+    text = f"{emoji} {message}\\n"
+    return [f'0:{json.dumps(text)}\n', f'd:{json.dumps(event)}\n']
+
+
+def _format_subtask_update_chunks(data: Dict[str, Any], event: Dict[str, Any]) -> List[str]:
+    """Format a subtask_update event's status text + data chunks."""
+    description = data.get("description", "Task")
+    status = data.get("status", "running")
+    if status == "completed":
+        text = f"✓ {description}\\n"
+    elif status == "failed":
+        text = f"✗ {description}\\n"
+    else:
+        text = f"⋯ {description}\\n"
+    return [f'0:{json.dumps(text)}\n', f'd:{json.dumps(event)}\n']
+
+
+def _format_error_event_chunks(event: Dict[str, Any]) -> List[str]:
+    """Format an error event's text chunk + error-protocol chunk."""
+    error_msg = event.get("message", "Unknown error")
+    text = f"❌ Error: {error_msg}\\n"
+    error_data = json.dumps({"message": error_msg, "details": event.get("data", {})})
+    return [f'0:{json.dumps(text)}\n', f'e:{error_data}\n']
+
+
+def _format_stream_event_chunks(event: Dict[str, Any]) -> Tuple[List[str], bool]:
+    """Format one workflow stream event into AI SDK data-stream chunks.
+
+    Returns the ordered chunks to yield and whether the caller should stop
+    streaming after them (true for workflow_complete and error events).
+    """
+    event_type = event.get("type", "")
+    data = event.get("data", {})
+
+    if event_type in ("stage_start", "stage_complete"):
+        return _format_stage_event_chunks(event_type, data, event), False
+    if event_type == "execution_log":
+        return _format_execution_log_chunks(data, event), False
+    if event_type == "subtask_update":
+        return _format_subtask_update_chunks(data, event), False
+    if event_type == "workflow_complete":
+        text = "✅ Workflow execution completed!\\n"
+        return [f'0:{json.dumps(text)}\n', f'd:{json.dumps(event)}\n'], True
+    if event_type == "token":
+        content = event.get("content", "")
+        return [f'0:{json.dumps(content)}\n'], False
+    if event_type == "error":
+        return _format_error_event_chunks(event), True
+    return [f'd:{json.dumps(event)}\n'], False
+
+
 async def stream_workflow_as_aisdk(
     execution_id: int
 ) -> AsyncGenerator[str, None]:
@@ -367,93 +432,16 @@ async def stream_workflow_as_aisdk(
             try:
                 # Wait for next event with SHORT timeout for responsiveness
                 event = await asyncio.wait_for(queue.get(), timeout=5.0)
-                event_type = event.get("type", "")
-                
-                # Handle different event types with appropriate formatting
-                if event_type == "stage_start":
-                    # Stage start - send as text delta for smooth progress display
-                    stage_num = event.get("data", {}).get("stage", "?")
-                    stage_name = event.get("data", {}).get("stage_name", "Unknown")
-                    text = f"⚡ Stage {stage_num}: {stage_name}\\n"
-                    yield f'0:{json.dumps(text)}\n'
-                    await asyncio.sleep(0)  # Flush immediately
-                    yield f'd:{json.dumps(event)}\n'
-                    await asyncio.sleep(0)  # Flush immediately
-                
-                elif event_type == "stage_complete":
-                    # Stage complete - send as text delta
-                    stage_num = event.get("data", {}).get("stage", "?")
-                    stage_name = event.get("data", {}).get("stage_name", "Unknown")
-                    text = f"✓ Completed Stage {stage_num}: {stage_name}\\n"
-                    yield f'0:{json.dumps(text)}\n'
+
+                # Format by event type, then stream the resulting chunks —
+                # each yield flushes immediately via the sleep(0) after it.
+                chunks, should_stop = _format_stream_event_chunks(event)
+                for chunk in chunks:
+                    yield chunk
                     await asyncio.sleep(0)
-                    yield f'd:{json.dumps(event)}\n'
-                    await asyncio.sleep(0)
-                
-                elif event_type == "execution_log":
-                    # Logs - send message as text delta, details as data
-                    log_data = event.get("data", {})
-                    level = log_data.get("level", "INFO")
-                    message = log_data.get("message", "")
-                    
-                    # Format log message for text stream
-                    emoji = {"INFO": "ℹ️", "DEBUG": "🔍", "WARNING": "⚠️", "ERROR": "❌"}.get(level, "•")
-                    text = f"{emoji} {message}\\n"
-                    yield f'0:{json.dumps(text)}\n'
-                    await asyncio.sleep(0)
-                    yield f'd:{json.dumps(event)}\n'
-                    await asyncio.sleep(0)
-                
-                elif event_type == "subtask_update":
-                    # Subtask updates - brief text + full data
-                    subtask_data = event.get("data", {})
-                    description = subtask_data.get("description", "Task")
-                    status = subtask_data.get("status", "running")
-                    
-                    if status == "completed":
-                        text = f"✓ {description}\\n"
-                    elif status == "failed":
-                        text = f"✗ {description}\\n"
-                    else:
-                        text = f"⋯ {description}\\n"
-                    
-                    yield f'0:{json.dumps(text)}\n'
-                    await asyncio.sleep(0)
-                    yield f'd:{json.dumps(event)}\n'
-                    await asyncio.sleep(0)
-                
-                elif event_type == "workflow_complete":
-                    # Workflow completion
-                    text = "✅ Workflow execution completed!\\n"
-                    yield f'0:{json.dumps(text)}\n'
-                    await asyncio.sleep(0)
-                    yield f'd:{json.dumps(event)}\n'
-                    await asyncio.sleep(0)
-                    # Break after completion
+                if should_stop:
                     break
-                
-                elif event_type == "token":
-                    # Direct token streaming (if available)
-                    content = event.get("content", "")
-                    yield f'0:{json.dumps(content)}\n'
-                    await asyncio.sleep(0)
-                
-                elif event_type == "error":
-                    # Error event
-                    error_msg = event.get("message", "Unknown error")
-                    text = f"❌ Error: {error_msg}\\n"
-                    yield f'0:{json.dumps(text)}\n'
-                    await asyncio.sleep(0)
-                    error_data = json.dumps({"message": error_msg, "details": event.get("data", {})})
-                    yield f'e:{error_data}\n'
-                    await asyncio.sleep(0)
-                    break
-                    
-                else:
-                    # All other events - send as data payload only
-                    yield f'd:{json.dumps(event)}\n'
-                    await asyncio.sleep(0)
-                
+
             except asyncio.TimeoutError:
                 # Keep-alive heartbeat - more frequent for better responsiveness
                 yield 'd:{"type":"heartbeat"}\n'
