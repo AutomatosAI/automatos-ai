@@ -11,7 +11,7 @@ Qdrant field memory, and durable memory). Every action is audited there.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -67,8 +67,20 @@ def erase_my_workspace(
         )
     from services.gdpr_service import erase_workspace
 
-    result = erase_workspace(db, ctx.workspace_id, requested_by=_actor_ref(ctx))
-    return result
+    return erasure_answer([erase_workspace(db, ctx.workspace_id, requested_by=_actor_ref(ctx))])
+
+
+def erasure_answer(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """What an erase route answers (#1442): one workspace's result as it is, several as
+    ``{"complete", "workspaces"}``. An erasure that is not complete is a 503 carrying that
+    answer, so the caller (Shopify's ``shop/redact`` retries) asks again; the workspace is
+    already closed, and the retry finds it and finishes the job."""
+    answer = results[0] if len(results) == 1 else {
+        "complete": all(r.get("complete") for r in results), "workspaces": results,
+    }
+    if not answer.get("complete"):
+        raise HTTPException(status_code=503, detail=answer)
+    return answer
 
 
 @router.post("/erase-subject")

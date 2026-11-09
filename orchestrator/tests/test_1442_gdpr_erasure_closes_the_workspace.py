@@ -92,8 +92,11 @@ def test_a_step_that_raises_makes_the_erasure_incomplete(new_session, gdpr, monk
     ws = _live_workspace(new_session)
     try:
         result = gdpr.erase_workspace(None, ws, requested_by="user:9")
-        assert result["complete"] is False and result["failed"] == ["durable_memory"]
-        assert not _still_there(new_session, ws)  # the other stores were still erased
+        assert result["complete"] is False and result["failed"] == ["durable_memory", "sql"]
+        assert result["derived"]["field_memory_deleted"] == 3  # the other memory store was still erased
+        # The SQL purge waits for the memories: the row stays, closed, for the retry to find
+        # (test_1442_an_incomplete_erasure_is_retried.py finishes the job).
+        assert _still_there(new_session, ws)
     finally:
         _drop(new_session, ws)
 

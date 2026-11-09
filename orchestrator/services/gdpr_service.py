@@ -309,7 +309,7 @@ def erase_workspace(db: Any, workspace_id: UUID | str, *, requested_by: str) -> 
     closed = _safe(lambda: _close_workspace(workspace_id), "close")
     field_deleted = _safe(lambda: _erase_field_memory(workspace_id), "field_memory")
     durable_deleted = _safe(lambda: _erase_durable_memory(workspace_id), "durable_memory")
-    sql_result = _safe(lambda: _purge_sql(workspace_id), "sql") or {}
+    sql_result = _purge_unless_memories_remain(workspace_id, field_deleted, durable_deleted)
     failed = _failed_steps(
         {"close": closed, "field_memory": field_deleted, "durable_memory": durable_deleted}, sql_result,
     )
@@ -339,6 +339,16 @@ def erase_workspace(db: Any, workspace_id: UUID | str, *, requested_by: str) -> 
         complete=not failed,
     )
     return result
+
+
+def _purge_unless_memories_remain(workspace_id: UUID | str, field_deleted: Any, durable_deleted: Any) -> Dict[str, Any]:
+    """The SQL and S3 purge, which deletes the workspace row: only once both memory stores are
+    erased (#1442). When one failed the row stays, closed, so the caller's retry finds the
+    workspace and erases what is left; deleting it first would strand those memories."""
+    if field_deleted is None or durable_deleted is None:
+        logger.warning("[gdpr] SQL purge held for ws=%s until its memories are erased", workspace_id)
+        return {}
+    return _safe(lambda: _purge_sql(workspace_id), "sql") or {}
 
 
 def _failed_steps(steps: Mapping[str, Any], sql_result: Mapping[str, Any]) -> List[str]:
