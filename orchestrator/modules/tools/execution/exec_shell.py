@@ -176,27 +176,36 @@ def _resolve_stored_ssh_credential(
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Look up a stored SSH credential and return its connection field overrides.
 
+    Through the credential store (CodeRabbit on #1448: this read a ``StoredCredential``
+    model that does not exist, so a stored credential never worked): the credential must
+    be this workspace's, and the store refuses an inactive or expired one and audits the
+    access. Another workspace's credential is "not found", as a missing one is.
+
     Returns (fields, None) on success, or (None, error_response) on failure.
     """
+    from core.credentials.service import CredentialNotFoundError, CredentialStore, CredentialValidationError
+
+    not_found = {"success": False, "error": f"Credential {credential_id} not found", "tool": tool_name}
     try:
-        from core.models.credentials import StoredCredential
-        cred = executor.db.query(StoredCredential).filter(
-            StoredCredential.id == credential_id,
-            StoredCredential.workspace_id == workspace_id,
-        ).first()
-        if not cred or not cred.decrypted_data:
-            return None, {"success": False, "error": f"Credential {credential_id} not found", "tool": tool_name}
-        cred_data = cred.decrypted_data
-        return {
+        store = CredentialStore(executor.db)
+        cred = store.get_credential(int(credential_id))
+        if cred is None or str(cred.workspace_id) != str(workspace_id):
+            return None, not_found
+        cred_data = store.get_decrypted_credential(cred.id, service_name="ssh_execute")
+    except (CredentialNotFoundError, ValueError):
+        return None, not_found
+    except CredentialValidationError as refused:  # inactive or expired: the store's own words
+        return None, {"success": False, "error": str(refused), "tool": tool_name}
+    except Exception:  # noqa: BLE001 — logged, and reported as a clear lookup failure
+        logger.exception("[ssh_execute] Credential lookup failed for credential %s", credential_id)
+        return None, {"success": False, "error": "Credential lookup failed", "tool": tool_name}
+    return {
             "password": cred_data.get("password"),
             "private_key": cred_data.get("private_key"),
             "username": cred_data.get("username"),
             "host": cred_data.get("host"),
             "port": cred_data.get("port"),
         }, None
-    except Exception as e:  # noqa: BLE001 — logged, and reported as a clear lookup failure
-        logger.warning(f"[ssh_execute] Credential lookup failed: {e}")
-        return None, {"success": False, "error": f"Credential lookup failed: {e}", "tool": tool_name}
 
 
 def _connect_ssh_client(
@@ -229,7 +238,11 @@ def _connect_ssh_client(
     elif password:
         connect_kwargs["password"] = password
 
-    ssh.connect(**connect_kwargs)
+    try:
+        ssh.connect(**connect_kwargs)
+    except Exception:
+        ssh.close()  # a failed connect never leaves the client open (CodeRabbit on #1448)
+        raise
     return ssh
 
 
@@ -239,13 +252,13 @@ def _run_ssh_command(
     """Run command over an open SSH connection and shape the success result."""
     import time
 
-    _stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
-
-    exit_code = stdout.channel.recv_exit_status()
-    stdout_text = stdout.read().decode("utf-8", errors="replace")
-    stderr_text = stderr.read().decode("utf-8", errors="replace")
-
-    ssh.close()
+    try:
+        _stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
+        exit_code = stdout.channel.recv_exit_status()
+        stdout_text = stdout.read().decode("utf-8", errors="replace")
+        stderr_text = stderr.read().decode("utf-8", errors="replace")
+    finally:
+        ssh.close()  # closed whether the command ran or raised (a read timeout included)
 
     duration_ms = int((time.time() - t0) * 1000)
 

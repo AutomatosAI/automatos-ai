@@ -107,9 +107,10 @@ _TELEMETRY_TITLE_MARKERS: Tuple[str, ...] = (
 # around an optional "#" (r"\bpass\s*#?\s*\d+\b") — on a title of "pass" plus
 # many spaces and no digit, that backtracks quadratically (20k spaces took
 # ~2.7s, 40k ~9.7s, 80k timed out; confirmed before writing this fix). One
-# character class covers both whitespace and "#", so there is only one
-# quantifier to backtrack, not two.
-_NUMBERED_PASS_RE = re.compile(r"\bpass[\s#]*\d+\b")
+# "#" sits between the two \s* in one alternative, so they can never trade the same
+# characters, and a title with "##" (e.g. "Pricing pass##3.pdf") is not matched, as
+# before the fix (CodeRabbit on #1448).
+_NUMBERED_PASS_RE = re.compile(r"\bpass(?:\s*#\s*|\s*)\d+\b")
 
 
 def title_is_telemetry(title: Optional[str]) -> bool:

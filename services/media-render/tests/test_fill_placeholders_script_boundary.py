@@ -47,3 +47,17 @@ def test_a_normal_closing_tag_still_works():
     text = '<script>{{num}}</script><p>{{word}}</p>'
     result = fill_placeholders(text, {"num": 3, "word": "hello"}, "t")
     assert result == '<script>3</script><p>hello</p>'
+
+
+def test_a_false_closing_tag_inside_the_script_does_not_end_it():
+    """CodeRabbit on #1448: with ``</script\\b``, "</script-x>" (which a browser does not
+    read as a close: the tag name runs on through the hyphen) ended the protected span
+    early, and a string value then filled a template literal later in the same script,
+    where ``${...}`` runs. The span now reaches the real close, so the value is refused."""
+    import pytest
+
+    from media_render.validate import BundleError
+
+    text = '<script>const s="</script-x>"; const x=`{{word}}`;</script>'
+    with pytest.raises(BundleError, match="inside a .script. or an event handler"):
+        fill_placeholders(text, {"word": "${alert(1)}"}, "t")

@@ -77,7 +77,7 @@ def test_a_long_run_of_spaces_after_pass_resolves_at_once():
     must resolve in well under a second regardless of length."""
     import time
 
-    title = "pass" + (" " * 50_000)  # no digit at the end: never matches
+    title = "pass" + (" " * 50_000) + "x"  # not stripped away, and no digit: never matches
     started = time.perf_counter()
     result = title_is_telemetry(title)
     elapsed = time.perf_counter() - started

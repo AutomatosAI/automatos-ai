@@ -111,8 +111,8 @@ def validate_commit_sha(sha: str) -> Tuple[bool, Optional[str]]:
     """
     if not sha or not isinstance(sha, str):
         return False, "Commit SHA is required"
-    sha = sha.strip()
-    if not _COMMIT_SHA_PATTERN.match(sha):
+    # The caller passes this value to git as it is: judge the whole of it (fullmatch, no strip).
+    if not _COMMIT_SHA_PATTERN.fullmatch(sha):
         return False, f"Invalid commit SHA format: {sha!r}"
     return True, None
 
@@ -120,8 +120,10 @@ def validate_commit_sha(sha: str) -> Tuple[bool, Optional[str]]:
 # A source name becomes a directory name under SkillLoaderConfig.SKILLS_BASE_DIR
 # and is then passed to `git -C <dir>` (clone target, pull, checkout, rev-parse).
 # It must never contain a path separator or traversal sequence: alnum, dot,
-# underscore and hyphen only, must not start with a dot or dash, bounded length.
-_SOURCE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$")
+# underscore and hyphen only, must not start with a dot or dash, and at most 100
+# characters: SkillSource.source_name is String(100) (CodeRabbit on #1448).
+_SOURCE_NAME_MAX = 100
+_SOURCE_NAME_PATTERN = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,%d}" % (_SOURCE_NAME_MAX - 1))
 
 
 def validate_source_name(name: str) -> Tuple[bool, Optional[str]]:
@@ -131,11 +133,12 @@ def validate_source_name(name: str) -> Tuple[bool, Optional[str]]:
     """
     if not name or not isinstance(name, str):
         return False, "Source name is required"
-    name = name.strip()
+    # The caller uses the value it passed (path, git -C, the DB row), so the whole value is
+    # judged, never a stripped copy; fullmatch, as $ would let a trailing newline through.
     if ".." in name or "/" in name or "\\" in name:
         return False, "Source name must not contain a path separator or '..'"
-    if not _SOURCE_NAME_PATTERN.match(name):
-        return False, "Source name contains invalid characters"
+    if not _SOURCE_NAME_PATTERN.fullmatch(name):
+        return False, f"Source name must be letters, digits, '.', '_' or '-', at most {_SOURCE_NAME_MAX} characters"
     return True, None
 
 

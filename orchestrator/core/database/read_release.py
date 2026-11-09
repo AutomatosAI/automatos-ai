@@ -40,8 +40,8 @@ _TRACKED = "f105_tracked"                # on a session: its transaction began u
 # already took ~0.1s, 30 timed out. Comments are now skipped one at a time in
 # a plain loop below — each single-comment match is a lazy scan to a fixed
 # literal, O(n) with no repetition-vs-repetition ambiguity to backtrack over.
-_LEADING_BLOCK_COMMENT = re.compile(r"\A/\*.*?\*/\s*", re.DOTALL)
-_LEADING_LINE_COMMENT = re.compile(r"\A--[^\n]*\n\s*")
+_LEADING_BLOCK_COMMENT = re.compile(r"/\*.*?\*/\s*", re.DOTALL)  # matched at a position (.match(s, pos))
+_LEADING_LINE_COMMENT = re.compile(r"--[^\n]*\n\s*")
 _READ_VERB = re.compile(r"\A(?:SELECT|SHOW)\b", re.IGNORECASE)
 _LOCKS_OR_WRITES = re.compile(
     # F119: pg_notify is delivered at COMMIT — a transaction holding one is not
@@ -53,20 +53,17 @@ _LOCKS_OR_WRITES = re.compile(
 
 
 def _past_leading_comments(statement: str) -> str:
-    """``statement`` with every leading ``/* ... */`` or ``-- ...`` comment
-    removed, one at a time. Each iteration strictly shortens ``rest`` (both
-    comment patterns have a minimum width > 0), so this always terminates."""
-    rest = statement
+    """``statement`` with every leading ``/* ... */`` or ``-- ...`` comment removed.
+    The comments are matched at a moving position and the statement is sliced once
+    (CodeRabbit on #1448: slicing after each comment copied the rest every time,
+    quadratic in the number of comments). Each match is at least two characters
+    wide, so the position always advances and this always terminates."""
+    pos = 0
     while True:
-        block = _LEADING_BLOCK_COMMENT.match(rest)
-        if block:
-            rest = rest[block.end():]
-            continue
-        line = _LEADING_LINE_COMMENT.match(rest)
-        if line:
-            rest = rest[line.end():]
-            continue
-        return rest
+        comment = _LEADING_BLOCK_COMMENT.match(statement, pos) or _LEADING_LINE_COMMENT.match(statement, pos)
+        if comment is None:
+            return statement[pos:]
+        pos = comment.end()
 
 
 def is_plain_read(statement: str) -> bool:

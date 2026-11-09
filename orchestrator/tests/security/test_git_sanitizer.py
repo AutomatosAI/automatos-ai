@@ -341,3 +341,16 @@ class TestValidateSourceName:
     def test_rejects_too_long(self):
         ok, err = validate_source_name("a" * 200)
         assert ok is False
+
+    def test_the_limit_is_the_columns(self):
+        """SkillSource.source_name is String(100): 100 fits, 101 does not (CodeRabbit on #1448)."""
+        assert validate_source_name("a" * 100)[0] is True
+        assert validate_source_name("a" * 101)[0] is False
+
+    def test_the_whole_value_is_judged_never_a_stripped_copy(self):
+        """The caller uses the value it passed (path, git -C, the DB row): a trailing space or
+        newline is refused, not stripped and passed (CodeRabbit on #1448)."""
+        for name in ("repo ", " repo", "repo\n"):
+            assert validate_source_name(name)[0] is False, repr(name)
+        for sha in ("abc1234\n", " abc1234", "abc1234 "):
+            assert validate_commit_sha(sha)[0] is False, repr(sha)
