@@ -175,3 +175,25 @@ def test_an_answer_never_carries_an_exceptions_text_or_a_sign_in_id():
     kept = erasure_answer([{**stopped, "complete": True, "failed": [],
                             "sql": {"skipped_reason": None, "workspace_row_deleted": True}}])
     assert kept["sql"]["skipped_reason"] is None and kept["sql"]["workspace_row_deleted"] is True
+
+
+def test_a_purge_that_raises_records_no_exception_text(new_session, monkeypatch):
+    from services import workspace_purge
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("connection to 10.0.0.5 refused")
+
+    monkeypatch.setattr(workspace_purge, "_build_s3_client", lambda: None)
+    monkeypatch.setattr(workspace_purge, "_discover_scoped_tables", _boom)
+    ws = _shop_workspace(new_session, active=False)
+    try:
+        from sqlalchemy import text
+
+        s = new_session()
+        s.execute(text("UPDATE workspaces SET deleted_at = now() WHERE id = CAST(:id AS uuid)"), {"id": ws})
+        s.commit()
+        s.close()
+        result = workspace_purge.purge_workspace_sync(ws)
+        assert result.skipped_reason == "exception" and "10.0.0.5" not in str(result.to_dict())
+    finally:
+        _drop(new_session, ws)

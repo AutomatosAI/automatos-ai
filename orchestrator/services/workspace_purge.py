@@ -412,7 +412,7 @@ def purge_workspace_sync(workspace_id: UUID) -> PurgeResult:
     except Exception as exc:  # noqa: BLE001
         db.rollback()
         logger.exception("Workspace purge failed for %s: %s", workspace_id, exc)
-        result.skipped_reason = f"exception: {exc}"
+        result.skipped_reason = "exception"  # the detail is in the log above, never in the result (CodeQL)
         return result
     finally:
         db.close()
