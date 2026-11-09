@@ -58,6 +58,7 @@ from consumers.chatbot.lean_turn import (  # Wave 2: a lean agent's turn, step b
 )
 from consumers.chatbot.turn_timing import keeps_the_turns_timing, records_the_first_token
 from consumers.chatbot.lean_request import NOTHING_ASKED
+from core.security.memory_audience import memory_reader, reader_for_agent_id
 
 # Import from modules — SINGLE SOURCE for tool schemas
 # Async-native entries: the chat hot path must never bridge the narrowing
@@ -2437,6 +2438,7 @@ class StreamingChatService:
         complexity_assessment = full_path_for_documents(complexity_assessment, self._document_turn, force_text_only)
         self._lean_actions = lean_grant_for(getattr(self, "db", None), agent_id)  # None unless a lean agent's
         self._lean_request = lean_request or NOTHING_ASKED
+        reader = reader_for_agent_id(getattr(self, "db", None), agent_id)  # Wave 4b: what it may recall
         # F155: every tool call of a widget turn carries the widget surface, so the
         # gates treat it as a visitor's whatever caller context the call built.
         # PRD-251B US-B106 (B3): what this workspace is not shown (Socials while it
@@ -2445,7 +2447,7 @@ class StreamingChatService:
                 ask_scope(LANE_CHAT, workspace_id=getattr(self, "workspace_id", None)), \
                 turn_surface(WIDGET if self.widget_mode else None, self.widget_scopes, self.widget_team,
                              self.widget_agent_lock), \
-                self._hidden_action_scope(agent_id), lean_grants(self._lean_actions):
+                self._hidden_action_scope(agent_id), lean_grants(self._lean_actions), memory_reader(reader):
             async for chunk in self._stream_response_with_agent_scoped(
                 chat_id, messages, agent_id, user_id,
                 use_orchestrator_llm=use_orchestrator_llm, skip_composio=skip_composio,
