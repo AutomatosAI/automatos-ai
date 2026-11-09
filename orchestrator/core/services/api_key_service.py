@@ -2,8 +2,16 @@
 API Key Management Service.
 
 Handles creation, validation, revocation, and listing of SDK API keys.
-Keys are stored as SHA-256 hashes — the plaintext key is returned exactly
-once at creation time and never persisted.
+A new key is stored as a PBKDF2-HMAC-SHA256 hash; the plaintext key is
+returned exactly once at creation time and never persisted.
+
+CodeQL py/weak-sensitive-data-hashing: a plain SHA-256 of a password-class
+secret is too fast to brute-force at scale. A key's own plaintext is never
+stored, so an existing SHA-256 hash cannot be rehashed into PBKDF2 — only the
+plaintext key owner could do that, by rotating it. ``validate_api_key``
+therefore checks the new hash first, then the legacy SHA-256 hash, so a key
+created before this change keeps working; ``create_api_key`` only ever
+writes the new one.
 """
 
 from __future__ import annotations
@@ -19,10 +27,34 @@ from sqlalchemy.orm import Session
 
 from core.models.sdk_api_keys import SdkApiKey
 
+# Fixed, purpose-bound salt: the same key always gives the same hash (it is looked
+# up by it), and a stored hash is slow to test guesses against. A key is
+# high-entropy (secrets.token_hex(32)); the cost (tens of ms) is paid once per
+# validated request.
+_FINGERPRINT_SALT = b"automatos/sdk-api-key/v1"
+_FINGERPRINT_ITERATIONS = 100_000
+
 
 def _hash_key(raw_key: str) -> str:
-    """Return the hex-encoded SHA-256 digest of *raw_key*."""
+    """The key's PBKDF2-HMAC-SHA256 hash, hex: the form every new key is stored as."""
+    digest = hashlib.pbkdf2_hmac("sha256", raw_key.encode(), _FINGERPRINT_SALT, _FINGERPRINT_ITERATIONS)
+    return digest.hex()
+
+
+def _legacy_hash_key(raw_key: str) -> str:
+    """The plain SHA-256 hash: how a key created before the PBKDF2 switch is
+    stored. Checked only by ``validate_api_key``, never written by
+    ``create_api_key``."""
     return hashlib.sha256(raw_key.encode()).hexdigest()
+
+
+def key_identity_digest(raw_key: str) -> str:
+    """A fast, non-reversible label for ``raw_key``, for callers (the widget
+    rate limiter) that need a stable per-key Redis bucket name — not a stored
+    credential — and so must not pay PBKDF2's iteration cost on every request.
+    Plain SHA-256 is the right tool here: nothing is verified against it.
+    Same digest as ``_legacy_hash_key``; named for what it is used for."""
+    return _legacy_hash_key(raw_key)
 
 
 def _host_only(value: str) -> str:
@@ -40,7 +72,7 @@ def _host_only(value: str) -> str:
 
 
 class ApiKeyService:
-    """Manages SDK API keys with SHA-256 hashing."""
+    """Manages SDK API keys, hashed with PBKDF2-HMAC-SHA256 (legacy SHA-256 keys still validate)."""
 
     # ------------------------------------------------------------------
     # Create
@@ -114,11 +146,13 @@ class ApiKeyService:
         Returns ``None`` when the key is unknown, revoked, or expired.
         On success the ``last_used_at`` timestamp is bumped.
         """
-        key_hash = _hash_key(key)
+        # Checks both forms: a key created before the PBKDF2 switch is still
+        # stored under its SHA-256 hash and must keep validating.
+        candidate_hashes = (_hash_key(key), _legacy_hash_key(key))
 
         record: Optional[SdkApiKey] = (
             db.query(SdkApiKey)
-            .filter(SdkApiKey.key_hash == key_hash)
+            .filter(SdkApiKey.key_hash.in_(candidate_hashes))
             .first()
         )
 
