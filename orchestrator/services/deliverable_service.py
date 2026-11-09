@@ -247,25 +247,14 @@ class DeliverableService:
         fields = self._derive_register_fields(
             file_path, title, file_type, storage_type, preview_url, preview_type, inferred_type
         )
-
-        return self._upsert_and_log_deliverable(
-            file_path=file_path,
-            source_type=source_type,
-            source_id=source_id,
-            agent_id=agent_id,
-            agent_name=agent_name,
-            inferred_type=inferred_type,
-            summary=summary,
-            storage_type=storage_type,
-            file_size_bytes=file_size_bytes,
-            extra=extra,
-            status=status,
-            fields=fields,
+        params = self._build_register_params(
+            file_path, source_type, source_id, agent_id, agent_name, inferred_type,
+            summary, storage_type, file_size_bytes, extra, status, fields,
         )
+        return self._upsert_and_log_deliverable(params)
 
-    def _upsert_and_log_deliverable(
+    def _build_register_params(
         self,
-        *,
         file_path: str,
         source_type: str,
         source_id: Optional[str],
@@ -279,46 +268,50 @@ class DeliverableService:
         status: str,
         fields: Dict[str, Optional[str]],
     ) -> Dict[str, Any]:
+        """Assemble the bound-parameter dict for the deliverables upsert."""
+        return {
+            "workspace_id": str(self.workspace_id),
+            "source_type": source_type,
+            "source_id": source_id,
+            "agent_id": agent_id,
+            "agent_name": agent_name,
+            "artifact_type": inferred_type,
+            "title": fields["final_title"],
+            "summary": summary,
+            "storage_type": storage_type,
+            "file_path": file_path,
+            "file_name": fields["file_name"],
+            "file_type": fields["file_type"],
+            "file_size_bytes": file_size_bytes,
+            "preview_url": fields["preview_url"],
+            "preview_type": fields["preview_type"],
+            "extra": json.dumps(extra or {}),
+            "status": status,
+        }
+
+    def _upsert_and_log_deliverable(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Run the upsert, log the outcome, and shape register()'s response envelope."""
         try:
-            deliverable_id, was_insert = self._upsert_deliverable_row({
-                "workspace_id": str(self.workspace_id),
-                "source_type": source_type,
-                "source_id": source_id,
-                "agent_id": agent_id,
-                "agent_name": agent_name,
-                "artifact_type": inferred_type,
-                "title": fields["final_title"],
-                "summary": summary,
-                "storage_type": storage_type,
-                "file_path": file_path,
-                "file_name": fields["file_name"],
-                "file_type": fields["file_type"],
-                "file_size_bytes": file_size_bytes,
-                "preview_url": fields["preview_url"],
-                "preview_type": fields["preview_type"],
-                "extra": json.dumps(extra or {}),
-                "status": status,
-            })
+            deliverable_id, was_insert = self._upsert_deliverable_row(params)
 
             logger.info(
                 "[DeliverableService] %s deliverable %s (%s) path=%s",
                 "Registered" if was_insert else "Updated",
-                deliverable_id, inferred_type, file_path,
+                deliverable_id, params["artifact_type"], params["file_path"],
             )
 
             return {
                 "success": True,
                 "deliverable_id": deliverable_id,
                 "created": was_insert,
-                "artifact_type": inferred_type,
-                "title": fields["final_title"],
+                "artifact_type": params["artifact_type"],
+                "title": params["title"],
             }
         except Exception as exc:
             self.db.rollback()
             logger.error(
                 "[DeliverableService] register() failed path=%s: %s",
-                file_path, exc, exc_info=True,
+                params["file_path"], exc, exc_info=True,
             )
             # CodeQL py/stack-trace-exposure: exc's text (a DB error, a path, ...) stops
             # at the server log; the caller gets a fixed, generic message.
