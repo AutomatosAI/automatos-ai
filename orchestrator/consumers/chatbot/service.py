@@ -52,6 +52,12 @@ from consumers.chatbot.streaming import get_streaming_handler
 from consumers.chatbot.tool_summary import SKIPPED_SUMMARY, tool_result_summary
 from consumers.chatbot.tool_cut import TOOL_RESULT_TOKEN_BUDGET as _TOOL_RESULT_TOKEN_BUDGET, logs_what_the_cut_keeps
 from consumers.chatbot.tool_router import get_tool_router
+from consumers.chatbot.lean_turn import (  # Wave 2: a lean agent's turn, step by step
+    a_lean_turns_prompt, lean_grant_for, no_app_search_on_a_lean_turn, no_pinned_documents_on_a_lean_turn,
+    no_prefetch_on_a_lean_turn, offers_a_lean_turn_its_grants,
+)
+from consumers.chatbot.turn_timing import keeps_the_turns_timing, records_the_first_token
+from consumers.chatbot.lean_request import NOTHING_ASKED
 
 # Import from modules — SINGLE SOURCE for tool schemas
 # Async-native entries: the chat hot path must never bridge the narrowing
@@ -792,6 +798,7 @@ class StreamingChatService:
     # Tool source — SINGLE SOURCE OF TRUTH
     # ─────────────────────────────────────────────────────────────────────
 
+    @offers_a_lean_turn_its_grants
     async def _get_tools(
         self,
         agent_id: int,
@@ -833,6 +840,7 @@ class StreamingChatService:
 
     @autos_prompt_carries_the_brand_kit  # F337 (night 10): the brand kit's rules end Auto's system prompt
     @replies_in_the_persons_locale  # the turn's locale (pt-BR) names the language variant Auto replies in
+    @a_lean_turns_prompt  # Wave 2: a lean turn's granted tools, described
     async def _prepare_messages(
         self,
         messages: List[Dict[str, Any]],
@@ -1137,6 +1145,7 @@ class StreamingChatService:
     # owns description+persona injection for both chatbot and non-chatbot
     # modes — see modules/context/sections/identity.py.
 
+    @no_pinned_documents_on_a_lean_turn
     def _inject_pinned_documents(
         self, llm_messages: List[Dict[str, Any]], chat_id: Optional[str]
     ) -> None:
@@ -1177,6 +1186,7 @@ class StreamingChatService:
     # Composio per-action tool injection
     # ─────────────────────────────────────────────────────────────────────
 
+    @no_app_search_on_a_lean_turn
     async def _inject_composio_tools(
         self,
         llm_messages: List[Dict[str, Any]],
@@ -1366,6 +1376,7 @@ class StreamingChatService:
     # (PRD-142 W3-S4 / G6: one tool loop, shared with agent_factory).
     # ─────────────────────────────────────────────────────────────────────
 
+    @records_the_first_token
     async def _stream_llm_call(self, llm_manager, messages, tools):
         """PRD-238 S2: run one LLM call and yield its text/reasoning deltas as
         stream frames while it runs; the last item is ``{"_response": resp}``.
@@ -1401,6 +1412,7 @@ class StreamingChatService:
     @reads_the_waiting_asks  # F439 (night 16): "did it run?" names the cards still waiting for the click
     @reads_what_the_team_found  # F317 (night 9b): the cards that already answer, by number
     @fills_the_named_template  # F351 (night 10b): a template the owner names gets its fields and the rules
+    @no_prefetch_on_a_lean_turn  # Wave 2: none of the automatic reads on a lean agent's turn
     async def _retrieval_first(self, latest_text: str, llm_messages: List[Dict[str, Any]], agent_runtime,
                                chat_id: str, prefetched: List[Tuple[str, Dict[str, Any]]]) -> AsyncGenerator[str, None]:
         """F085-A: search the documents for a question (N17-11: or a drafting turn)
@@ -2403,6 +2415,7 @@ class StreamingChatService:
         page_context: Optional[Dict[str, Any]] = None,
         spoken_mode: bool = False,
         locale: Optional[str] = None,  # the person's checked BCP 47 tag (api.chat_models), pt-BR
+        lean_request: Any = None,  # a lean turn's model and app context (consumers.chatbot.lean_request)
     ) -> AsyncGenerator[str, None]:
         """Stream a chat response produced by the specified agent.
 
@@ -2413,6 +2426,7 @@ class StreamingChatService:
         and it stops if they reach the workspace's credit balance.
         """
         from core.llm.usage_context import LANE_CHAT, usage_scope
+        from core.security.lean_grants import lean_grants
         from core.security.surface import WIDGET, turn_surface
         from services.credits.asks import ask_scope
 
@@ -2421,6 +2435,8 @@ class StreamingChatService:
         self._document_turn = not self.widget_mode and about_a_document(messages)
         self._reply_locale = locale  # read by reply_locale.replies_in_the_persons_locale; None: none named
         complexity_assessment = full_path_for_documents(complexity_assessment, self._document_turn, force_text_only)
+        self._lean_actions = lean_grant_for(getattr(self, "db", None), agent_id)  # None unless a lean agent's
+        self._lean_request = lean_request or NOTHING_ASKED
         # F155: every tool call of a widget turn carries the widget surface, so the
         # gates treat it as a visitor's whatever caller context the call built.
         # PRD-251B US-B106 (B3): what this workspace is not shown (Socials while it
@@ -2429,7 +2445,7 @@ class StreamingChatService:
                 ask_scope(LANE_CHAT, workspace_id=getattr(self, "workspace_id", None)), \
                 turn_surface(WIDGET if self.widget_mode else None, self.widget_scopes, self.widget_team,
                              self.widget_agent_lock), \
-                self._hidden_action_scope(agent_id):
+                self._hidden_action_scope(agent_id), lean_grants(self._lean_actions):
             async for chunk in self._stream_response_with_agent_scoped(
                 chat_id, messages, agent_id, user_id,
                 use_orchestrator_llm=use_orchestrator_llm, skip_composio=skip_composio,
@@ -2460,6 +2476,7 @@ class StreamingChatService:
 
     @keeps_one_answer_on_screen  # FX-017: the turn records what each streamed call put on the screen
     @answers_on_the_turns_model  # a spoken turn answers on the spoken model; every turn logs its model
+    @keeps_the_turns_timing  # the saved reply's trace says when the first token came
     async def _stream_response_with_agent_scoped(
         self,
         chat_id: str,

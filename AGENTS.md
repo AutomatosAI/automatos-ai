@@ -104,6 +104,7 @@ CI checks these on the lines your change touches.
 
 - **No secrets anywhere:** not in code, tests, fixtures, docs or config. gitleaks scans every push. Use environment variables through `config.py`.
 - **If you come across a secret,** stop. Don't copy it into a prompt, a file or a message. Report it the way [SECURITY.md](SECURITY.md) describes. The value is burned and must be rotated.
+- **If you find a vulnerability,** don't fix it in a public branch, pull request or issue. Report it privately and make the fix in the advisory's private fork, as [SECURITY.md](SECURITY.md#if-you-find-one-while-working-on-the-code) describes.
 - **Every new endpoint is authenticated and authorised** with the existing request-context and workspace-permission dependencies.
 - **Every query is scoped to the caller's workspace.** Tenant isolation is a hard rule.
 - **Shell, deserialisation and TLS:**

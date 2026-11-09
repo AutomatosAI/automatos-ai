@@ -85,9 +85,9 @@ class MemoryNamespace:
 
     # --- L3 Cache (Redis) namespaces ---
 
-    def cache_key(self, agent_id: Optional[int], query_hash: str) -> str:
-        """Cache key for L3 durable-store search results cached in Redis."""
-        scope = str(agent_id) if agent_id is not None else "global"
+    def cache_key(self, agent_id: Optional[int], query_hash: str, with_workspace: bool = False) -> str:
+        """Cache key for L3 search results; ``with_workspace`` marks a search that also read the workspace."""
+        scope = (str(agent_id) if agent_id is not None else "global") + ("+workspace" if with_workspace else "")
         return f"mem:cache:{self.workspace_id}:{scope}:{query_hash}"
 
     def cache_pattern(self) -> str:
@@ -376,29 +376,32 @@ class UnifiedMemoryService:
         query: str,
         agent_id: Optional[int] = None,
         limit: int = 5,
+        include_workspace: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Search L3 long-term memory (durable store semantic search).
 
         Checks Redis cache first (5-min TTL). On cache miss, queries the
         durable store and caches the result. Cache key:
-        ``mem:cache:{workspace_id}:{agent_id|global}:{sha256(query)[:16]}``
+        ``mem:cache:{workspace_id}:{agent_id|global}[+workspace]:{sha256(query)[:16]}``
 
         Args:
             workspace_id: Workspace scope.
             query: Natural-language search query.
             agent_id: Optional agent scope.
             limit: Maximum results to return.
+            include_workspace: With an agent, also read the workspace namespace, where facts are filed (PRD-274 Wave 0).
 
         Returns:
             List of memory item dicts (may be empty on failure).
         """
         ns = self.namespace(workspace_id)
         user_id = ns.resolve(agent_id)
+        also = (ns.workspace(),) if include_workspace and agent_id is not None else ()
 
         # --- Check Redis cache first ---
         query_hash = hashlib.sha256(query.encode()).hexdigest()[:16]
-        cache_key = ns.cache_key(agent_id, query_hash)
+        cache_key = ns.cache_key(agent_id, query_hash, with_workspace=bool(also))
         cached = await self._get_cached_search(cache_key)
         if cached is not None:
             logger.debug(
@@ -409,7 +412,7 @@ class UnifiedMemoryService:
 
         # --- Cache miss: query the durable store ---
         try:
-            results = await self._durable.search(query=query, user_id=user_id, limit=limit, workspace_id=workspace_id)
+            results = await self._durable.search(query=query, user_id=user_id, limit=limit, workspace_id=workspace_id, also_namespaces=also)
             logger.debug(
                 "[UnifiedMemoryService] search_long_term user_id=%s query=%r → %d results",
                 user_id,
@@ -545,16 +548,17 @@ class UnifiedMemoryService:
         every namespace (workspace-wide, per-agent, per-recipe, daily) carries
         the workspace tag, so no namespace enumeration is needed. ``db`` is
         accepted for signature stability with the GDPR service but unused.
-        Returns the number of memories deleted.
+        Returns the number of memories deleted: 0 when durable memory is off
+        (no ``QDRANT_URL``). A failed delete raises (#1442): an erasure that
+        reported 0 here was indistinguishable from one that found nothing.
         """
+        if not self.is_durable_configured:
+            return 0
         try:
             total = await self._durable.erase_workspace(str(workspace_id))
         except Exception:
-            logger.error(
-                "[UnifiedMemoryService] durable erase failed for ws=%s",
-                workspace_id, exc_info=True,
-            )
-            return 0
+            logger.exception("[UnifiedMemoryService] durable erase failed for ws=%s", workspace_id)
+            raise
         logger.warning("[UnifiedMemoryService] GDPR erased %d durable memories for ws=%s", total, workspace_id)
         return total
 
@@ -566,15 +570,16 @@ class UnifiedMemoryService:
         wide). ``db`` is accepted for signature stability with the GDPR service
         but unused. Returns the number of memories erased (0 when the subject has
         only untagged pre-tag history, which the GDPR service reports as a caveat,
-        never as erased)."""
+        never as erased). 0 when durable memory is off; a failed delete raises (#1442)."""
+        if not self.is_durable_configured:
+            return 0
         try:
             total = await self._durable.erase_subject(str(workspace_id), str(subject_id))
         except Exception:
-            logger.error(
-                "[UnifiedMemoryService] durable subject erase failed subject=%s ws=%s",
-                subject_id, workspace_id, exc_info=True,
+            logger.exception(
+                "[UnifiedMemoryService] durable subject erase failed subject=%s ws=%s", subject_id, workspace_id,
             )
-            return 0
+            raise
         logger.warning(
             "[UnifiedMemoryService] GDPR subject-erased %d durable memor(ies) subject=%s ws=%s",
             total, subject_id, workspace_id,

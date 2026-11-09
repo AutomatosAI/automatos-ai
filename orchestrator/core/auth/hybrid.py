@@ -18,7 +18,7 @@ from core.auth.bearer_registry import (
     resolve_registered_bearers,
 )
 from core.auth.clerk import get_clerk_auth
-from core.auth.dependencies import RequestContext, UserContext
+from core.auth.dependencies import RequestContext, UserContext, clerk_user
 from core.auth.personal_workspace import insert_personal_workspace, seed_new_workspace
 from core.auth.user_link import ensure_user_row
 from core.database.database import SessionLocal
@@ -851,17 +851,7 @@ def _clerk_context(db, bearer: str, workspace_id: Optional[UUID], admin_all_work
         return _clerk_all_workspaces_context(db, claims, info, clerk_uid, system_role)
 
     resolved = _clerk_workspace(db, info, clerk_uid, workspace_id, is_admin)
-
-    user = UserContext(
-        id=info.get("clerk_user_id") or info.get("email"),
-        email=info.get("email"),
-        role=info.get("role") or "user",
-        system_role=info.get("system_role") or info.get("role") or "user",
-        clerk_user_id=info.get("clerk_user_id"),
-        org_id=info.get("org_id"),
-        raw_claims=claims,
-    )
-    result = RequestContext(workspace_id=resolved, user=user, auth_type="clerk")
+    result = RequestContext(workspace_id=resolved, user=clerk_user(info, claims), auth_type="clerk")
     _enrich_log_context(result)
     return result
 

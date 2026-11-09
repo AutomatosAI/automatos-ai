@@ -65,6 +65,9 @@ class _FakeQuery:
     def first(self):
         return self._workspace
 
+    def all(self):  # #1442: shop/redact reads every workspace the shop has had
+        return [self._workspace] if self._workspace is not None else []
+
 
 class _FakeDb:
     def __init__(self, workspace):

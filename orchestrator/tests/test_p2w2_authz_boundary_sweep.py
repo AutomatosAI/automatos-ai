@@ -12,7 +12,9 @@ route (POST/PUT/PATCH/DELETE) must be classified **exactly one** way:
     relaxed);
 (c) ``require_workspace_admin``-gated (PRD-185 S12 — classified, never relaxed), or
     ``require_workspace_answerer``-gated (PRD-266 D16: the approval-grant verbs an
-    owner, admin or editor may take; revoke stays workspace-admin);
+    owner, admin or editor may take; revoke stays workspace-admin), or
+    ``require_workspace_eraser``-gated (#1443: the workspace-admin gate, plus a closed
+    workspace's owner finishing its erasure; the erase route only, pinned below);
 (d) own non-hybrid auth (widget plane key auth, HMAC/secret webhooks, the
     Shopify machine lane) — enumerated explicitly, and structurally proven to
     NOT ride the shared hybrid dependency;
@@ -283,6 +285,10 @@ PENDING_BLOCKS = {
     "PENDING_SIBLING_PRS": PENDING_SIBLING_PRS,
 }
 
+# #1443: the one route a closed workspace's owner may reach, to finish an erasure that
+# answered 503. Any other route carrying require_workspace_eraser fails the sweep.
+WORKSPACE_ERASER_ROUTES = {("POST", "/api/v1/gdpr/erase")}
+
 # The PRD-143 obs tier modules that serve mutating routes — their su lock is
 # classified and additionally asserted per-route (never relaxed).
 SU_LOCKED_ENDPOINT_MODULES = {
@@ -402,6 +408,8 @@ def test_manifest_sweep_no_unclassified_mutating_routes(app_records):
             buckets.append("workspace-admin")
         if rec["wsanswer"]:
             buckets.append("workspace-answerer")
+        if rec["wseraser"]:
+            buckets.append("workspace-eraser")
         if key in OWN_AUTH_ROUTES:
             buckets.append("own-auth")
         if key in PUBLIC_BY_DESIGN:
@@ -425,6 +433,12 @@ def test_manifest_sweep_no_unclassified_mutating_routes(app_records):
                 failures.append(
                     f"{key[0]} {key[1]} classified {bucket} but rides the "
                     "shared hybrid dependency"
+                )
+        elif bucket == "workspace-eraser":
+            if key not in WORKSPACE_ERASER_ROUTES:
+                failures.append(
+                    f"{key[0]} {key[1]} carries require_workspace_eraser, which only "
+                    "the erase route may (WORKSPACE_ERASER_ROUTES)"
                 )
         elif bucket == "admin-in-handler":
             if not rec["admin_in_handler"]:

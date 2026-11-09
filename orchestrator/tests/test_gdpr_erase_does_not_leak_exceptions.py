@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from api import gdpr as gdpr_api  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.workspace_admin import require_workspace_admin  # noqa: E402
+from core.auth.workspace_eraser import require_workspace_eraser  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 
 WS = uuid.uuid4()
@@ -35,8 +36,9 @@ def _client() -> TestClient:
     app.include_router(gdpr_api.router)
     user = UserContext(id="u-admin", email="admin@example.test", system_role="user",
                        clerk_user_id="clerk_admin")
-    app.dependency_overrides[require_workspace_admin] = lambda: RequestContext(
-        workspace_id=WS, user=user, auth_type="clerk")
+    admin = lambda: RequestContext(workspace_id=WS, user=user, auth_type="clerk")  # noqa: E731
+    app.dependency_overrides[require_workspace_admin] = admin
+    app.dependency_overrides[require_workspace_eraser] = admin  # the erase route's own caller check (#1442)
     app.dependency_overrides[get_db] = lambda: object()
     return TestClient(app, raise_server_exceptions=False)
 

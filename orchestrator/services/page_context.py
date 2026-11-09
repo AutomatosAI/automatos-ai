@@ -209,11 +209,22 @@ def merge_into_trace(
     return {**(trace or {}), "page_context": sanitized}
 
 
+# #1444: marks the preamble part, so the person's own words can be told from it. The model reads
+# the part; memory, distillation and the turn's search queries take the person's text alone.
+PAGE_CONTEXT_PART = "page_context"
+
+
+def is_page_context_part(part: Any) -> bool:
+    """True for the preamble part ``inject_page_preamble`` adds (#1444)."""
+    return isinstance(part, dict) and bool(part.get(PAGE_CONTEXT_PART))
+
+
 def inject_page_preamble(message_history: List[dict], sanitized: Dict[str, Any]) -> List[dict]:
     """Return history with an ephemeral preamble part on the last user message.
 
     Entries are rebuilt, never mutated (ORM-JSONB flush trap — PRD-220).
-    Empty context returns the history unchanged.
+    Empty context returns the history unchanged. The part is marked
+    (``PAGE_CONTEXT_PART``) so it is never remembered as the person's words (#1444).
     """
     text = render_page_preamble(sanitized)
     if not text:
@@ -223,7 +234,7 @@ def inject_page_preamble(message_history: List[dict], sanitized: Dict[str, Any])
         if entry.get("role") != "user":
             continue
         parts = entry.get("parts") if isinstance(entry.get("parts"), list) else []
-        hint = {"type": "text", "text": text}
+        hint = {"type": "text", "text": text, PAGE_CONTEXT_PART: True}
         rebuilt = {**entry, "parts": [*parts, hint]}
         return [*message_history[:i], rebuilt, *message_history[i + 1:]]
     return message_history

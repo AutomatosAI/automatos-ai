@@ -74,6 +74,8 @@ _MOVED = (
     moved("memory_short_term", MEMORY, "Short-term memory (L2); durable and field memory travel in memory/."),
     moved("proactive_calibrations", MEMORY, "What each person taught Auto's check-ins."),
     moved("social_voice_examples", MEMORY, "Drafts and the approved text Auto learns the brand voice from."),
+    moved("memory_profiles", MEMORY, "The workspace's own memory profiles (what distillation keeps, by domain); "
+          "the seeded ones are the platform's and have no workspace."),
     # ── Chats ───────────────────────────────────────────────────────────────
     moved("chats", CHATS, "Chats; the Auto thread becomes the target's Auto thread."),
     moved("messages", CHATS, "The chats' messages."),

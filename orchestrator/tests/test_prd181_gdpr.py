@@ -114,6 +114,7 @@ def test_gdpr_erasure_cascade(monkeypatch):
         return {"rows_deleted": {"agents": 3, "board_tasks": 1}, "workspace_row_deleted": True}
 
     monkeypatch.setattr(gdpr_service, "_purge_sql", _fake_purge)
+    monkeypatch.setattr(gdpr_service, "_close_workspace", lambda ws: True)
 
     def _fake_field(workspace_id, subject_id=None):
         ran["field"] = (str(workspace_id), subject_id)
@@ -145,6 +146,7 @@ def test_erasure_is_audited(monkeypatch):
 
     calls: List[Dict[str, Any]] = []
     monkeypatch.setattr(gdpr_service, "_purge_sql", lambda ws: {"rows_deleted": {}, "workspace_row_deleted": True})
+    monkeypatch.setattr(gdpr_service, "_close_workspace", lambda ws: True)
     monkeypatch.setattr(gdpr_service, "_erase_field_memory", lambda ws, subject_id=None: 0)
     monkeypatch.setattr(gdpr_service, "_erase_durable_memory", lambda ws, subject_id=None: 0)
     monkeypatch.setattr(gdpr_service, "_audit_gdpr", lambda db, ws, action, **kw: calls.append({"action": action, **kw}))
