@@ -1,4 +1,4 @@
-"""Seed the platform's memory profiles (PRD draft "Automatos for products", Wave 4, §5.6).
+"""Seed the platform's memory profiles (PRD-274, "Automatos for products", Wave 4, §5.6).
 
 A profile says what distillation keeps as a durable fact in one domain
 (``core.models.memory_profiles``). ``general`` is today's prompt unchanged; the others name a

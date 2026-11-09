@@ -1,4 +1,4 @@
-"""Memory profiles: what distillation keeps as a fact, by domain (PRD draft "Automatos for products", §5.6).
+"""Memory profiles: what distillation keeps as a fact, by domain (PRD-274, "Automatos for products", §5.6).
 
 A profile is the part of the distillation prompt that says what counts as a durable fact here:
 its ``focus`` (one paragraph on what to keep), what to ``keep`` and what to ``skip``, and worked

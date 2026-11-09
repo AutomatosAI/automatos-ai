@@ -1,6 +1,6 @@
 """Memory profiles: what distillation keeps as a fact, by domain (9 Nov 2026).
 
-PRD draft "Automatos for products", Wave 4 (§5.6). One new table:
+PRD-274, "Automatos for products", Wave 4 (§5.6). One new table:
 
 * ``memory_profiles``: a profile's slug, name, description, focus, what to keep and skip, and
   worked examples. A seeded profile has no workspace (``core/seeds/seed_memory_profiles.py``
