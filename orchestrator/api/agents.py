@@ -45,12 +45,13 @@ def _reject_invalid_runtime(configuration) -> None:
     untouched.
     """
     from config import config as _cfg
+    from consumers.chatbot.lean_turn import profile_errors
     from core.cli_runtime import validate_runtime_configuration
 
     reject_unknown_tool_groups(configuration)  # #942: an unknown session tool group is a 422
     errors = validate_runtime_configuration(
         configuration, cli_enabled=bool(getattr(_cfg, "CLI_RUNTIME_ENABLED", False))
-    )
+    ) + profile_errors(configuration)  # Wave 2: runtime_profile is full or lean
     if errors:
         raise HTTPException(status_code=400, detail={"errors": errors})
 
