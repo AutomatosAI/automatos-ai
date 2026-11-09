@@ -45,6 +45,7 @@ if str(ORCH) not in sys.path:
 from fastapi.routing import APIRoute  # noqa: E402
 
 import api.api_keys as api_keys_api  # noqa: E402
+import api.run_callbacks as run_callbacks_api  # noqa: E402
 import api.team as team_api  # noqa: E402
 import api.themes_files as files_api  # noqa: E402
 import api.themes_import as import_api  # noqa: E402
@@ -69,12 +70,15 @@ STEP_UP_ROUTES = {
     ("PUT", "/api/themes/settings"),
 }
 # PRD-261 A-07f (Gerard D1-d, #1157): the routes that grant a person or a key rights here.
+# PRD-274 W1: and the two that read or replace the secret a callback's receiver trusts.
 ACCOUNT_STEP_UP_ROUTES = {
     ROLE_CHANGE,
     ("POST", "/api/workspaces/{workspace_id}/team/invite"),
     ("POST", "/api/api-keys"),
+    ("GET", "/api/v1/callbacks/signing-secret"),
+    ("POST", "/api/v1/callbacks/signing-secret/rotate"),
 }
-ACCOUNT_ROUTERS = (team_api.router, api_keys_api.router)
+ACCOUNT_ROUTERS = (team_api.router, api_keys_api.router, run_callbacks_api.router)
 INSTALL_ROLE_ROUTES = {
     ("POST", "/api/themes/import"),
     ("POST", "/api/themes/installs/{install_id}/update"),
