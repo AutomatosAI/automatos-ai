@@ -67,7 +67,14 @@ def erase_my_workspace(
         )
     from services.gdpr_service import erase_workspace
 
-    result = erase_workspace(db, ctx.workspace_id, requested_by=_actor_ref(ctx))
+    try:
+        result = erase_workspace(db, ctx.workspace_id, requested_by=_actor_ref(ctx))
+    except Exception:
+        # CodeQL py/stack-trace-exposure: the service's own exception text (a DB
+        # error, a store's internals) must never reach this irreversible-erase
+        # response; it is already logged with its trace.
+        logger.exception("[gdpr] erase_workspace failed for ws=%s", ctx.workspace_id)
+        raise HTTPException(status_code=500, detail="Workspace erasure failed") from None
     return result
 
 
@@ -90,7 +97,14 @@ def erase_subject(
         raise HTTPException(status_code=422, detail="subject_id is required")
     from services.gdpr_service import erase_data_subject
 
-    result = erase_data_subject(
-        db, workspace_id=ctx.workspace_id, subject_id=subject_id, requested_by=_actor_ref(ctx)
-    )
+    try:
+        result = erase_data_subject(
+            db, workspace_id=ctx.workspace_id, subject_id=subject_id, requested_by=_actor_ref(ctx)
+        )
+    except Exception:
+        # CodeQL py/stack-trace-exposure: see erase_my_workspace above.
+        logger.exception(
+            "[gdpr] erase_data_subject failed for ws=%s subject=%s", ctx.workspace_id, subject_id
+        )
+        raise HTTPException(status_code=500, detail="Subject erasure failed") from None
     return result
