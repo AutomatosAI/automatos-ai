@@ -80,7 +80,6 @@ None of this is specific to one product. Each capability below names the other u
   (`core/auth/hybrid.py` from line 625, which says why: changing the shared dependency "would make every endpoint
   accept SDK keys"). A server key cannot call `POST /api/chat`, the memory routes, Playbooks or documents.
 - The `X-API-Key` lane is the instance's own `ORCHESTRATOR_API_KEY` only (admin-equivalent, `_api_key_context`).
-- On a key, `rate_limit_requests` only logs; `rate_limit_tokens` and `allowed_ips` are never read.
 
 ### 4.3 The chat turn
 
