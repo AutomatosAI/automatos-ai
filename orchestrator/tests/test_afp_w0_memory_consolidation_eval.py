@@ -1,4 +1,4 @@
-"""#1430 Wave 0: the memory-consolidation eval's self-tests (evals/memory_consolidation.py).
+"""PRD-274 Wave 0: the memory-consolidation eval's self-tests (evals/memory_consolidation.py).
 
 The eval files facts and their restatements in a workspace, runs the real
 ``run_sleep_time_consolidation`` once and counts, per fact, the rows left. These tests
