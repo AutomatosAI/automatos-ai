@@ -95,7 +95,7 @@ def test_health_is_open_and_every_other_path_needs_the_token(settings):
             assert health.status == 200
             body = await health.json()
             assert body["status"] == "healthy" and body["service"] == "media-render"
-            assert body["versions"]["hyperframes"] == "0.8.62"
+            assert body["versions"]["hyperframes"] == "0.8.220"
             for method, path in (
                 ("POST", "/render"),
                 ("GET", "/render/0123"),

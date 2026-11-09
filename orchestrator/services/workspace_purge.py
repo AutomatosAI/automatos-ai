@@ -136,6 +136,44 @@ def _purge_s3_prefix(client, bucket: str, prefix: str) -> tuple[int, int]:
     return deleted, errors
 
 
+def _purge_workspace_s3(workspace_id: UUID, result: "PurgeResult") -> None:
+    """Delete the workspace's S3 prefix, counting into ``result``; skipped without storage."""
+    s3 = _build_s3_client()
+    # Match the fallback used elsewhere (see modules/documents/generation_service.py)
+    bucket = getattr(config, "S3_DOCUMENTS_BUCKET", None) or "automatos-ai"
+    if not (s3 and bucket):
+        logger.info("S3 purge skipped — no AWS creds or bucket configured")
+        return
+    prefix = f"workspaces/{workspace_id}/"
+    result.s3_objects_deleted, result.s3_errors = _purge_s3_prefix(s3, bucket, prefix)
+    logger.info(
+        "S3 purge for ws=%s: deleted=%d errors=%d (s3://%s/%s)",
+        workspace_id, result.s3_objects_deleted, result.s3_errors, bucket, prefix,
+    )
+
+
+def _owner_has_nothing_left(db: Session, owner_id: Optional[int], workspace_id: UUID) -> bool:
+    """True when purging ``workspace_id`` leaves its owner with no workspace at all (#1431).
+
+    Another workspace they own, or one they are a member of, keeps their account (their
+    sign-in and their users row). Never on the local edition: its users are the install's
+    operator, whose main workspace often has no ``owner_id``, so an ownership count alone
+    found "nothing left" and the purge tried to delete the operator.
+    """
+    if not owner_id or config.AUTH_EDITION == "local":
+        return False
+    elsewhere = db.execute(
+        text(
+            "SELECT 1 FROM workspaces WHERE owner_id = :oid AND id <> CAST(:ws AS uuid) "
+            "UNION ALL "
+            "SELECT 1 FROM workspace_members WHERE user_id = :oid AND workspace_id <> CAST(:ws AS uuid) "
+            "LIMIT 1"
+        ),
+        {"oid": owner_id, "ws": str(workspace_id)},
+    ).fetchone()
+    return elsewhere is None
+
+
 def _resolve_owner_clerk_id(db: Session, owner_id: Optional[int]) -> Optional[str]:
     if not owner_id:
         return None
@@ -361,21 +399,13 @@ def purge_workspace_sync(workspace_id: UUID) -> PurgeResult:
             return result
 
         owner_id = ws.owner_id
-        clerk_uid = _resolve_owner_clerk_id(db, owner_id)
+        # #1431: the owner's account goes only when they have nothing left: decided once,
+        # before the Clerk step, so the sign-in and the users row share one answer.
+        owner_leaves = _owner_has_nothing_left(db, owner_id, workspace_id)
+        clerk_uid = _resolve_owner_clerk_id(db, owner_id) if owner_leaves else None
 
         # 1) S3
-        s3 = _build_s3_client()
-        # Match the fallback used elsewhere (see modules/documents/generation_service.py)
-        bucket = getattr(config, "S3_DOCUMENTS_BUCKET", None) or "automatos-ai"
-        if s3 and bucket:
-            prefix = f"workspaces/{workspace_id}/"
-            result.s3_objects_deleted, result.s3_errors = _purge_s3_prefix(s3, bucket, prefix)
-            logger.info(
-                "S3 purge for ws=%s: deleted=%d errors=%d (s3://%s/%s)",
-                workspace_id, result.s3_objects_deleted, result.s3_errors, bucket, prefix,
-            )
-        else:
-            logger.info("S3 purge skipped — no AWS creds or bucket configured")
+        _purge_workspace_s3(workspace_id, result)
 
         # 2) Clerk (best-effort, never blocks DB cleanup)
         if clerk_uid:
@@ -391,16 +421,10 @@ def purge_workspace_sync(workspace_id: UUID) -> PurgeResult:
         wd = db.execute(text("DELETE FROM workspaces WHERE id = :id"), {"id": str(workspace_id)})
         result.workspace_row_deleted = bool(wd.rowcount)
 
-        # 5) Owner user row (only if no other workspaces remain owned by them).
-        # Re-check after the workspace row is gone so the lookup is accurate.
-        if owner_id:
-            other = db.execute(
-                text("SELECT 1 FROM workspaces WHERE owner_id = :oid LIMIT 1"),
-                {"oid": owner_id},
-            ).fetchone()
-            if not other:
-                db.execute(text("DELETE FROM users WHERE id = :id"), {"id": owner_id})
-                result.rows_deleted["users"] = 1
+        # 5) Owner user row, only when they have nothing left (see _owner_has_nothing_left).
+        if owner_leaves:
+            db.execute(text("DELETE FROM users WHERE id = :id"), {"id": owner_id})
+            result.rows_deleted["users"] = 1
 
         db.commit()
         logger.warning(

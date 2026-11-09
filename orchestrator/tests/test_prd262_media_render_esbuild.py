@@ -5,7 +5,7 @@ Criticals in the Go standard library of esbuild's binary, go1.23.12, at
 /opt/media-render/js/node_modules/esbuild/bin/esbuild and
 @esbuild/linux-<arch>/bin/esbuild: GO-2026-4337 (crypto/tls, fixed in 1.24.13,
 1.25.7, 1.26) and GO-2026-6612 (net/http, fixed in 1.26.9). Hyperframes requires
-esbuild ^0.25.12, and no esbuild release is built with Go 1.26.9 or later yet, so
+esbuild ^0.28.2, and no esbuild release is built with Go 1.26.9 or later yet, so
 the Dockerfile's esbuild stage builds the locked version from source on Go's
 patched 1.26 line and the js stage swaps it in. This suite pins that definition:
 

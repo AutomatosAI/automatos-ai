@@ -3,7 +3,8 @@
 ``scripts/ci/backend_test_plan.py`` gives every test file to exactly one shard, so
 the shards together run every test the single job ran: none is skipped, none runs
 twice. A PR that only touches the frontend, the docs or a top-level markdown file
-runs only the test files that name what it touched; anything else runs them all.
+runs only the test files that name the folder it touched, and the ones that read the
+whole tracked tree; anything else runs them all.
 """
 from __future__ import annotations
 
@@ -73,28 +74,65 @@ def test_a_change_outside_the_selectable_paths_runs_every_test(paths):
 def test_a_frontend_and_readme_change_runs_the_tests_that_name_them():
     scope = plan.scope(["frontend/app/page.tsx", "README.md", ""], TEST_FILES)
 
-    assert scope == {"mode": "select", "keywords": ["README", "frontend"]}
+    assert scope == {"mode": "select", "keywords": ["README", "frontend/app/"]}
     selected = plan.select(TEST_FILES, scope["keywords"])
     assert selected and len(selected) < len(TEST_FILES)
-    assert all("frontend" in TEST_FILES[name] or "README" in TEST_FILES[name] for name in selected)
+    assert all("frontend" in TEST_FILES[name] or "README" in TEST_FILES[name] or plan.WHOLE_TREE.search(TEST_FILES[name])
+               for name in selected)
 
 
-def test_another_workflow_runs_the_tests_that_name_github():
-    assert plan.scope([".github/workflows/codeql.yml"], TEST_FILES)["keywords"] == [".github"]
+def test_another_workflow_runs_the_tests_that_name_its_folder():
+    assert plan.scope([".github/workflows/codeql.yml"], TEST_FILES)["keywords"] == [".github/workflows/"]
 
 
 def test_a_change_no_test_names_runs_none():
     files = {"tests/test_a.py": "frontend", "tests/test_b.py": "docs"}
 
-    assert plan.scope(["graphify-out/GRAPH_REPORT.md"], files) == {"mode": "none", "keywords": ["graphify-out"]}
+    assert plan.scope(["graphify-out/GRAPH_REPORT.md"], files) == {"mode": "none", "keywords": ["graphify-out/"]}
     assert plan.scope([], files)["mode"] == "none"
 
 
 def test_select_takes_only_the_files_naming_a_keyword():
     files = {"tests/test_a.py": 'ROOT / "frontend" / "x.ts"', "tests/test_b.py": "nothing", "tests/test_c.py": "README.md"}
 
-    assert plan.select(files, ["frontend", "README"]) == ["tests/test_a.py", "tests/test_c.py"]
+    assert plan.select(files, ["frontend/", "README"]) == ["tests/test_a.py", "tests/test_c.py"]
     assert plan.select(files, []) == sorted(files)
+
+
+# #1455: a PRD-only change ran the 102 test files that say "docs" (/docs routes, docstrings).
+def test_a_folder_is_named_as_a_path_to_it_or_a_parent_not_as_a_word():
+    files = {
+        "tests/test_joined.py": '_ROOT / "docs" / "PRDS" / "PRD-143-OBS-TIER-MANIFEST.md"',
+        "tests/test_string.py": 'MANIFEST = "docs/PRDS/PRD-152.md"',
+        "tests/test_parent.py": 'DOCS = REPO / "docs"\nfor path in DOCS.rglob("*.md"): ...',
+        "tests/test_relative.py": 'Path("../docs/PRDS")',
+        "tests/test_sibling.py": 'GUIDE = REPO / "docs" / "getting-started" / "self-hosting.md"',
+        "tests/test_route.py": '"""The API docs stay up."""\nclient.get("/docs")',
+        "tests/test_longer.py": '"docs/PRDS-archive/x.md"',
+    }
+
+    assert plan.scope(["docs/PRDS/PRD-274-AUTOMATOS-FOR-PRODUCTS.md"], files)["keywords"] == ["docs/PRDS/"]
+    assert plan.select(files, ["docs/PRDS/"]) == [
+        "tests/test_joined.py", "tests/test_parent.py", "tests/test_relative.py", "tests/test_string.py"]
+
+
+def test_a_test_reading_the_whole_tracked_tree_runs_for_any_change():
+    files = {
+        "tests/test_listed.py": '["git", "ls-files"]',
+        "tests/test_grepped.py": '["git", "grep", "-l", name, "--", "."]',
+        "tests/test_helper.py": '_git_grep("-n", "-F", *patterns)',
+        "tests/test_other.py": "nothing",
+    }
+
+    assert plan.select(files, ["e2e/browser/"]) == ["tests/test_grepped.py", "tests/test_helper.py", "tests/test_listed.py"]
+
+
+def test_a_prd_change_runs_a_fraction_of_the_tests_that_say_docs():
+    selected = plan.select(TEST_FILES, ["docs/PRDS/"])
+
+    assert "tests/test_prd143_boundary_sweep.py" in selected  # _REPO_ROOT / "docs" / "PRDS" / ...
+    assert "tests/test_prd262_dead_weight_retired.py" in selected  # git grep over every tracked file
+    assert len(selected) * 3 < len([name for name, source in TEST_FILES.items() if "docs" in source])
 
 
 def test_durations_come_from_the_gaps_between_result_lines():
