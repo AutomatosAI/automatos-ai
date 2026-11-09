@@ -194,7 +194,7 @@ def _resolve_stored_ssh_credential(
             "host": cred_data.get("host"),
             "port": cred_data.get("port"),
         }, None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — logged, and reported as a clear lookup failure
         logger.warning(f"[ssh_execute] Credential lookup failed: {e}")
         return None, {"success": False, "error": f"Credential lookup failed: {e}", "tool": tool_name}
 
