@@ -18,7 +18,7 @@ voice lines are spoken here with Kokoro, and the mix is made here with ffmpeg.
 
 Every version is pinned. The build records them in `/opt/media-render/versions.json`, and `/health` serves them.
 
-- **Hyperframes 0.8.62** (Apache-2.0) runs on Node 24, copied from the official `node:24-trixie-slim` image (pinned by tag and digest in the Dockerfile's `node` stage). It is installed with `npm ci` from `js/package-lock.json`, so its own dependencies are locked too, and its `node_modules/.bin` is on `PATH`. The runtime carries the node binary alone, without npm, stripped of its symbol tables in the `node-stripped` stage (PRD-262 #22). The worker carries the same stage byte for byte, so on a host with both images the node layer can be shared.
+- **Hyperframes 0.8.220** (Apache-2.0) runs on Node 24, copied from the official `node:24-trixie-slim` image (pinned by tag and digest in the Dockerfile's `node` stage). It is installed with `npm ci` from `js/package-lock.json`, so its own dependencies are locked too, and its `node_modules/.bin` is on `PATH`. The runtime carries the node binary alone, without npm, stripped of its symbol tables in the `node-stripped` stage (PRD-262 #22). The worker carries the same stage byte for byte, so on a host with both images the node layer can be shared.
 - **chrome-headless-shell** is installed at build time at `/opt/chrome`, so a render never downloads it:
   - on amd64, the build Hyperframes manages;
   - on arm64, the headless shell of the `playwright-core` that `js/package-lock.json` pins.

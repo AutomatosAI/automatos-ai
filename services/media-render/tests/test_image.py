@@ -20,7 +20,7 @@ from media_render.config import ESPEAK_DATA_PATH_LIMIT, HYPERFRAMES_OFF_SWITCHES
 from media_render.versions import SERVICE_VERSION, read_versions
 from media_render.voices_build import load_catalogue, voice_names
 
-HYPERFRAMES_PIN = "0.8.62"
+HYPERFRAMES_PIN = "0.8.220"
 # PRD-262 US-053: the js stage's locked tree, and the py stage's venv.
 JS_TREE = Path("/opt/media-render/js/node_modules")
 VENV = "/opt/venv"

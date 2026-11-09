@@ -19,7 +19,7 @@
 # The production stage copies this stage's node binary, which is built against
 # musl for Alpine 3.24, so the alpine3.24 suffix here and alpine:3.24 below name
 # the same release: bump them together.
-FROM node:24-alpine3.24@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS base
+FROM node:24-alpine3.24@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS base
 
 WORKDIR /app
 
