@@ -567,7 +567,11 @@ class UnifiedToolExecutor:
 
     def _widget_gate(self, tool_name: str, parameters: Any, trace: str) -> Optional[Dict[str, Any]]:
         """The refusal for a widget turn calling what its key's scopes do not
-        grant (core.security.widget_scopes); None when the call may run."""
+        grant (core.security.widget_scopes), or for a lean agent's turn calling
+        what its tool groups do not (``_lean_gate``); None when the call may run."""
+        lean_refusal = self._lean_gate(tool_name, parameters, trace)
+        if lean_refusal is not None:
+            return lean_refusal
         from core.security.surface import widget_scopes, widget_turn
 
         if not widget_turn():
@@ -926,7 +930,7 @@ class UnifiedToolExecutor:
 
             # F155: a public widget turn runs only what its key's scopes grant,
             # judged on the resolved action (platform_execute's included).
-            _widget_block = self._widget_gate(tool_name, parameters, trace) or self._lean_gate(tool_name, parameters, trace)
+            _widget_block = self._widget_gate(tool_name, parameters, trace)
             if _widget_block is not None:
                 return _widget_block
 

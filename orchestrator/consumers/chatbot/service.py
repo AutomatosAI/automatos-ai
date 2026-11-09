@@ -52,8 +52,11 @@ from consumers.chatbot.streaming import get_streaming_handler
 from consumers.chatbot.tool_summary import SKIPPED_SUMMARY, tool_result_summary
 from consumers.chatbot.tool_cut import TOOL_RESULT_TOKEN_BUDGET as _TOOL_RESULT_TOKEN_BUDGET, logs_what_the_cut_keeps
 from consumers.chatbot.tool_router import get_tool_router
-from consumers.chatbot.lean_turn import lean_grant_for, lean_tool_surface, with_granted_actions  # Wave 2
-from consumers.chatbot.turn_timing import first_token, start as start_turn_clock, with_first_token
+from consumers.chatbot.lean_turn import (  # Wave 2: a lean agent's turn, step by step
+    a_lean_turns_prompt, lean_grant_for, no_app_search_on_a_lean_turn, no_pinned_documents_on_a_lean_turn,
+    no_prefetch_on_a_lean_turn, offers_a_lean_turn_its_grants,
+)
+from consumers.chatbot.turn_timing import keeps_the_turns_timing, records_the_first_token
 
 # Import from modules — SINGLE SOURCE for tool schemas
 # Async-native entries: the chat hot path must never bridge the narrowing
@@ -794,6 +797,7 @@ class StreamingChatService:
     # Tool source — SINGLE SOURCE OF TRUTH
     # ─────────────────────────────────────────────────────────────────────
 
+    @offers_a_lean_turn_its_grants
     async def _get_tools(
         self,
         agent_id: int,
@@ -833,6 +837,7 @@ class StreamingChatService:
     # Message preparation
     # ─────────────────────────────────────────────────────────────────────
 
+    @a_lean_turns_prompt  # Wave 2: a lean turn's granted tools, described
     @autos_prompt_carries_the_brand_kit  # F337 (night 10): the brand kit's rules end Auto's system prompt
     @replies_in_the_persons_locale  # the turn's locale (pt-BR) names the language variant Auto replies in
     async def _prepare_messages(
@@ -872,7 +877,6 @@ class StreamingChatService:
             agent_name=agent_runtime.metadata.name,
             widget_mode=self.widget_mode,
             db_session=self.db,
-            lean=self._is_lean_turn(),
         )
         # PRD-233 S6: seed the greeting with the driving human's name from their
         # users row. IdentitySection already renders the ``user_name`` kwarg the
@@ -1140,6 +1144,7 @@ class StreamingChatService:
     # owns description+persona injection for both chatbot and non-chatbot
     # modes — see modules/context/sections/identity.py.
 
+    @no_pinned_documents_on_a_lean_turn
     def _inject_pinned_documents(
         self, llm_messages: List[Dict[str, Any]], chat_id: Optional[str]
     ) -> None:
@@ -1180,6 +1185,7 @@ class StreamingChatService:
     # Composio per-action tool injection
     # ─────────────────────────────────────────────────────────────────────
 
+    @no_app_search_on_a_lean_turn
     async def _inject_composio_tools(
         self,
         llm_messages: List[Dict[str, Any]],
@@ -1369,6 +1375,7 @@ class StreamingChatService:
     # (PRD-142 W3-S4 / G6: one tool loop, shared with agent_factory).
     # ─────────────────────────────────────────────────────────────────────
 
+    @records_the_first_token
     async def _stream_llm_call(self, llm_manager, messages, tools):
         """PRD-238 S2: run one LLM call and yield its text/reasoning deltas as
         stream frames while it runs; the last item is ``{"_response": resp}``.
@@ -1398,6 +1405,7 @@ class StreamingChatService:
             yield item
         yield {"_response": await task}
 
+    @no_prefetch_on_a_lean_turn  # Wave 2: none of the automatic reads on a lean agent's turn
     @its_reads_are_receipted  # PRD-256 US-001: the automatic reads fold into one read receipt
     @grounds_the_cards  # F241 (night 8): the turn says which cards the owner named, and the call for each
     @answers_what_needs_you  # F307 (night 9): "what needs me?" reads the board's Needs you first
@@ -2426,7 +2434,6 @@ class StreamingChatService:
         self._reply_locale = locale  # read by reply_locale.replies_in_the_persons_locale; None: none named
         complexity_assessment = full_path_for_documents(complexity_assessment, self._document_turn, force_text_only)
         self._lean_actions = lean_grant_for(getattr(self, "db", None), agent_id)  # None unless a lean agent's
-        start_turn_clock(self)
         # F155: every tool call of a widget turn carries the widget surface, so the
         # gates treat it as a visitor's whatever caller context the call built.
         # PRD-251B US-B106 (B3): what this workspace is not shown (Socials while it
@@ -2446,10 +2453,6 @@ class StreamingChatService:
             ):
                 yield chunk
 
-    def _is_lean_turn(self) -> bool:
-        """This turn is a lean agent's (consumers.chatbot.lean_turn)."""
-        return getattr(self, "_lean_actions", None) is not None
-
     def _hidden_action_scope(self, agent_id: int):
         """PRD-251B US-B106: the turn's scope for the action categories its workspace is
         not shown (Socials while it is off for it), read once for the turn. A workspace
@@ -2468,6 +2471,7 @@ class StreamingChatService:
                 logger.debug("[chat] the turn's workspace could not be resolved for its tool scope", exc_info=True)
         return hidden_scope(hidden_categories_for_workspace(getattr(self, "workspace_id", None), getattr(self, "db", None)))
 
+    @keeps_the_turns_timing  # the saved reply's trace says when the first token came
     @keeps_one_answer_on_screen  # FX-017: the turn records what each streamed call put on the screen
     @answers_on_the_turns_model  # a spoken turn answers on the spoken model; every turn logs its model
     async def _stream_response_with_agent_scoped(
@@ -2631,9 +2635,7 @@ class StreamingChatService:
                 _complexity = Complexity.ATOM
             agent_ctx = await self._load_agent_context(agent_runtime)
             all_tools = []
-            if self._is_lean_turn():
-                all_tools = lean_tool_surface(self._lean_actions, is_super_admin=is_super_admin, db=self.db)
-            elif _complexity != Complexity.ATOM:
+            if _complexity != Complexity.ATOM:
                 all_tools = await self._get_tools(
                     agent_id,
                     agent_ctx.get("skill_tools"),
@@ -2685,10 +2687,6 @@ class StreamingChatService:
                 spoken_mode=spoken_mode,
             )
 
-            if self._is_lean_turn():  # Wave 2: the granted tools only, each described in the prompt
-                use_tools = all_tools or None
-                llm_messages = with_granted_actions(llm_messages, all_tools, is_super_admin=is_super_admin)
-
             # PRD-223 S0.3: badge any attachments that failed to load BEFORE
             # the model starts answering — the user must learn the truth at
             # the same moment the model does (the model-facing marker is
@@ -2701,8 +2699,7 @@ class StreamingChatService:
                 await asyncio.sleep(0)
 
             # PRD-157 S5: keep the chat's pinned documents always in context.
-            if not self._is_lean_turn():
-                self._inject_pinned_documents(llm_messages, chat_id)
+            self._inject_pinned_documents(llm_messages, chat_id)
 
             if orchestrated:
                 logger.info(
@@ -2765,7 +2762,7 @@ class StreamingChatService:
 
             # Inject Composio per-action tools (never on a widget turn: they act
             # on the owner's connected apps, F155)
-            if _complexity != Complexity.ATOM and not (self.widget_mode or self._is_lean_turn()):
+            if _complexity != Complexity.ATOM and not self.widget_mode:
                 use_tools, _composio_result = await self._inject_composio_tools(
                     llm_messages, use_tools, latest_text,
                     agent_id, agent_runtime, skip_composio, complexity_assessment,
@@ -2795,7 +2792,7 @@ class StreamingChatService:
             # block. The dispatcher enum is byte-identical between turns so the
             # cached prefix survives; the steer still reaches the model, it just
             # costs only its own few hundred tokens instead of a ~34k re-read.
-            if use_tools and not self._is_lean_turn():
+            if use_tools:
                 from modules.tools.turn_narrowing import narrowed_actions_prompt_line
 
                 _narrow_line = narrowed_actions_prompt_line()
@@ -2806,7 +2803,7 @@ class StreamingChatService:
             # documents is searched before the model's first call; the passages
             # that clear the floor go in last, after every cache-stable block.
             _prefetched: List[Tuple[str, Dict[str, Any]]] = []
-            if not (force_text_only or self._is_lean_turn()):
+            if not force_text_only:
                 async for _frame in self._retrieval_first(latest_text, llm_messages, agent_runtime, chat_id, _prefetched):
                     yield _frame
 
@@ -2823,7 +2820,7 @@ class StreamingChatService:
             streamed_rounds: List[Any] = []
             reasoning_log: List[str] = []
             response = None
-            async for item in first_token(self, self._stream_llm_call(agent_runtime.llm_manager, llm_messages, use_tools)):
+            async for item in self._stream_llm_call(agent_runtime.llm_manager, llm_messages, use_tools):
                 if isinstance(item, dict) and "_response" in item:
                     response = item["_response"]
                 else:
@@ -2983,9 +2980,9 @@ class StreamingChatService:
                 retrieval_context=self._turn_retrieval_context(latest_text),
                 # PRD-201 S1: persist the assembly trace for this turn;
                 # PRD-221 S3: including the sanitized page context the turn saw.
-                context_trace=with_first_token(merge_into_trace(
+                context_trace=merge_into_trace(
                     getattr(orchestrated, "context_trace", None), page_context
-                ), self),
+                ),
             )
             if f187_verdict is not None:
                 f187_verdict.log(getattr(_saved, "id", None))
