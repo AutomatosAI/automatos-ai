@@ -205,9 +205,15 @@ class DurableMemoryStore:
 
     @classmethod
     def _namespaces_filter(cls, user_id: str, also: Tuple[str, ...]) -> Filter:
-        """``user_id``'s namespace, or it and ``also``'s in one match (PRD-274 Wave 0)."""
+        """``user_id``'s namespace, or it and ``also``'s in one match (PRD-274 Wave 0). Every
+        ``also`` namespace must be of ``user_id``'s workspace (tenant isolation): a ValueError
+        otherwise, before any query runs."""
         if not also:
             return cls._namespace_filter(user_id)
+        home = workspace_from_namespace(user_id)
+        strangers = [ns for ns in also if home is None or workspace_from_namespace(ns) != home]
+        if strangers:
+            raise ValueError(f"also_namespaces must be of {user_id}'s workspace, not {strangers}")
         return Filter(must=[
             FieldCondition(key="namespace", match=MatchAny(any=[user_id, *also])),
         ])
