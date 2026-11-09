@@ -128,9 +128,11 @@ def get_agent_success_rate(ctx: RequestContext = Depends(get_request_context_hyb
             "sources": {"workflows": wf_total, "missions": m_total},
         }
 
-    except Exception as e:
-        logger.error(f"Error calculating success rate: {e}")
-        return {"value": 0, "trend": 0, "total_executions": 0, "successful_executions": 0, "error": str(e)}
+    except Exception:
+        # CodeQL py/stack-trace-exposure: the exception's text stays in the server log.
+        logger.exception("Error calculating success rate")
+        return {"value": 0, "trend": 0, "total_executions": 0, "successful_executions": 0,
+                "error": "Could not calculate success rate"}
 
 
 @ws_router.get("/slos")
@@ -874,15 +876,16 @@ def get_system_load_trend(ctx: RequestContext = Depends(get_request_context_hybr
             "trend_data": trend_data
         }
         
-    except Exception as e:
-        logger.error(f"Error getting system load: {e}")
+    except Exception:
+        # CodeQL py/stack-trace-exposure: the exception's text stays in the server log.
+        logger.exception("Error getting system load")
         return {
             "current_load": 0,
             "level": "unknown",
             "color": "gray",
             "memory_usage": 0,
             "trend_data": [],
-            "error": str(e)
+            "error": "Could not read system load"
         }
 
 def _get_error_rate_by_agent_type_executed(db, ws):
@@ -1054,15 +1057,16 @@ def get_queue_depth(ctx: RequestContext = Depends(get_request_context_hybrid), d
             "sources": {"workflows": pending_workflows, "missions": active_missions},
         }
         
-    except Exception as e:
-        logger.error(f"Error getting queue depth: {e}")
+    except Exception:
+        # CodeQL py/stack-trace-exposure: the exception's text stays in the server log.
+        logger.exception("Error getting queue depth")
         return {
             "total_pending": 0,
             "high_priority": 0,
             "normal_priority": 0,
             "average_wait_time": 0,
             "trend": "unknown",
-            "error": str(e)
+            "error": "Could not read queue depth"
         }
 
 @router.get("/dashboard/efficiency-score")
@@ -1078,14 +1082,15 @@ def get_efficiency_score(ctx: RequestContext = Depends(get_request_context_hybri
             agent_utilisation(db, ws),
             completion_rate(db, ws, datetime.now() - timedelta(hours=24)),
         )
-    except Exception as e:
+    except Exception:
+        # CodeQL py/stack-trace-exposure: the exception's text stays in the server log.
         logger.exception("Error calculating efficiency score")
         return {
             "score": 0,
             "grade": "N/A",
             "color": "gray",
             "breakdown": {},
-            "error": str(e)
+            "error": "Could not calculate efficiency score"
         }
 
 # ==== NEW PERFORMANCE ANALYTICS ENHANCEMENTS ====

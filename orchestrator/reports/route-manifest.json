@@ -1,5 +1,5 @@
 {
-  "route_count": 1019,
+  "route_count": 1022,
   "routes": [
     {
       "method": "GET",
@@ -3148,6 +3148,18 @@
     {
       "method": "GET",
       "path": "/api/v1/memory/profiles"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/profiles"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/memory/profiles/{slug}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/memory/profiles/{slug}"
     },
     {
       "method": "GET",

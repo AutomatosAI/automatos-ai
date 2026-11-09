@@ -305,12 +305,21 @@ def gdpr_erase_subject(
 
     from services.gdpr_service import erase_data_subject
 
-    result = erase_data_subject(
-        db,
-        workspace_id=workspace.id,
-        subject_id=request.subject_id,
-        requested_by=_webhook_actor(vertical, request.external_id),
-    )
+    try:
+        result = erase_data_subject(
+            db,
+            workspace_id=workspace.id,
+            subject_id=request.subject_id,
+            requested_by=_webhook_actor(vertical, request.external_id),
+        )
+    except Exception:
+        # CodeQL py/stack-trace-exposure: never echo the service's own exception
+        # text back to this webhook caller; it is already logged with its trace.
+        logger.exception(
+            "[PRD-183 GDPR] erase-subject failed vertical=%s external_id=%s workspace=%s",
+            vertical, request.external_id, workspace.id,
+        )
+        raise HTTPException(status_code=500, detail="Subject erasure failed") from None
     logger.info(
         "[PRD-183 GDPR] erase-subject vertical=%s external_id=%s workspace=%s subject=%s",
         vertical, request.external_id, workspace.id, request.subject_id,
@@ -340,7 +349,15 @@ def gdpr_erase_workspace(
 
     workspaces = _workspaces_to_erase(db, vertical, request.external_id)
     actor = _webhook_actor(vertical, request.external_id)
-    results = [erase_workspace(db, workspace.id, requested_by=actor) for workspace in workspaces]
+    try:
+        results = [erase_workspace(db, workspace.id, requested_by=actor) for workspace in workspaces]
+    except Exception:
+        # CodeQL py/stack-trace-exposure: see gdpr_erase_subject above. A 500 is retried too.
+        logger.exception(
+            "[PRD-183 GDPR] erase-workspace failed vertical=%s external_id=%s workspaces=%s",
+            vertical, request.external_id, [str(w.id) for w in workspaces],
+        )
+        raise HTTPException(status_code=500, detail="Workspace erasure failed") from None
     logger.info(
         "[PRD-183 GDPR] erase-workspace vertical=%s external_id=%s workspaces=%s complete=%s",
         vertical, request.external_id, [str(w.id) for w in workspaces], [r.get("complete") for r in results],

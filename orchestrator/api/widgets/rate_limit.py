@@ -56,7 +56,7 @@ from uuid import UUID, uuid4
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from config import config
-from core.services.api_key_service import _hash_key
+from core.services.api_key_service import key_identity_digest
 
 logger = logging.getLogger(__name__)
 
@@ -255,10 +255,11 @@ def _bucket(api_key: str, client_ip: str) -> tuple[str, int, Optional[str]]:
     """``(identifier, limit, session_key_id)`` for a request."""
     if not api_key:
         return f"ip:{client_ip}", config.WIDGET_RATE_LIMIT_PUBLIC_PER_WINDOW, None
-    # The canonical key-identity derivation (core/services/api_key_service.
-    # _hash_key — the same digest sdk_api_keys stores as key_hash): no key
-    # material lands in Redis.
-    digest = _hash_key(api_key)[:32]
+    # A fast, non-reversible per-key label (core/services/api_key_service.
+    # key_identity_digest): no key material lands in Redis. Not the stored
+    # credential hash — that one (PBKDF2) is deliberately slow, which this
+    # per-request bucket lookup cannot afford.
+    digest = key_identity_digest(api_key)[:32]
     session_key_id = _session_key_id(api_key)
     if session_key_id:
         return f"session:{digest}", config.WIDGET_RATE_LIMIT_PUBLIC_PER_WINDOW, session_key_id
