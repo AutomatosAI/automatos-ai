@@ -103,7 +103,13 @@ _TELEMETRY_TITLE_MARKERS: Tuple[str, ...] = (
 # F065 (night 3 pre-launch): these slipped the markers above and full graph
 # rebuilds re-extracted them. Number-aware on purpose: a bare "pass" would also
 # match "passport", "password", "compass" and "passion fruit".
-_NUMBERED_PASS_RE = re.compile(r"\bpass\s*#?\s*\d+\b")
+# CodeQL py/polynomial-redos: the separator used to be two adjacent \s* groups
+# around an optional "#" (r"\bpass\s*#?\s*\d+\b") — on a title of "pass" plus
+# many spaces and no digit, that backtracks quadratically (20k spaces took
+# ~2.7s, 40k ~9.7s, 80k timed out; confirmed before writing this fix). One
+# character class covers both whitespace and "#", so there is only one
+# quantifier to backtrack, not two.
+_NUMBERED_PASS_RE = re.compile(r"\bpass[\s#]*\d+\b")
 
 
 def title_is_telemetry(title: Optional[str]) -> bool:

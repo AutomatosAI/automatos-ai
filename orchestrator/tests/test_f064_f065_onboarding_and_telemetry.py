@@ -66,3 +66,21 @@ def test_numbered_passes_are_telemetry_but_words_containing_pass_are_not():
     for title in ("Passport renewal checklist", "Rotate the admin password", "Compass roasting notes",
                   "Passion fruit syrup supplier"):
         assert not title_is_telemetry(title), title
+
+
+def test_a_long_run_of_spaces_after_pass_resolves_at_once():
+    """CodeQL py/polynomial-redos #234: the old separator was two adjacent
+    \\s* groups around an optional "#" (r"\\bpass\\s*#?\\s*\\d+\\b") — a title
+    of "pass" plus many spaces and no digit backtracked quadratically (20k
+    spaces took ~2.7s, 40k ~9.7s, confirmed before the fix). A title is
+    arbitrary agent/job output text, not bounded to a short phrase, so this
+    must resolve in well under a second regardless of length."""
+    import time
+
+    title = "pass" + (" " * 50_000)  # no digit at the end: never matches
+    started = time.perf_counter()
+    result = title_is_telemetry(title)
+    elapsed = time.perf_counter() - started
+
+    assert result is False
+    assert elapsed < 1.0, f"took {elapsed:.2f}s — looks like it regressed to backtracking"
