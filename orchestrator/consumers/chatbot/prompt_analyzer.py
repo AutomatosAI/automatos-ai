@@ -280,14 +280,28 @@ Let's get stuff done! What can I help you with?"""
         return msg.get('content', '')
     
     def extract_latest_user_text(self, messages: List[Dict[str, Any]]) -> str:
-        """Extract the latest user message text."""
+        """Extract the latest user message text: the person's own words.
+
+        #1444: the page-context preamble part is left out. This text is what the
+        turn remembers and distils, and what its tool and knowledge searches use.
+        """
         for msg in reversed(messages):
             if msg.get('role') != 'user':
                 continue
-            content = self._extract_message_content(msg)
+            content = self._extract_message_content(_without_page_context(msg))
             if content:
                 return content
         return ''
+
+
+def _without_page_context(msg: Dict[str, Any]) -> Dict[str, Any]:
+    """The message without the page-context preamble part (a new dict; ``msg`` is untouched)."""
+    from services.page_context import is_page_context_part
+
+    parts = msg.get('parts')
+    if not parts:
+        return msg
+    return {**msg, 'parts': [part for part in parts if not is_page_context_part(part)]}
 
 
 # Module-level instance for easy access

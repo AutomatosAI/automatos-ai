@@ -51,8 +51,10 @@ from typing import Dict, Hashable, Iterable, List, Optional
 
 ROOT = Path(__file__).resolve().parents[3]
 GRAPHS = ROOT / "orchestrator" / "tests" / "fixtures" / "leiden_graphs.py"
-# The clustering Railway ran, at the versions its [leiden] lock installed.
-PINNED = {"graphifyy": "0.8.31", "graspologic": "3.3.0", "graspologic-native": "1.3.1", "networkx": "3.1"}
+# graphifyy, graspologic-native and networkx track orchestrator/requirements.lock
+# (requirements-leiden-partitions.in's header); graspologic and its own resolution stay
+# as Railway's [leiden] lock installed them.
+PINNED = {"graphifyy": "0.9.70", "graspologic": "3.3.0", "graspologic-native": "1.3.1", "networkx": "3.4.2"}
 
 
 def load_graphs() -> ModuleType:
