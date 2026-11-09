@@ -342,6 +342,109 @@ async def get_recent_memories(
     ]
 
 
+def _coerce_browse_sort_key(item: Dict[str, Any]) -> str:
+    """Coerce created_at (ISO string or unix timestamp) into a comparable string.
+
+    Mem0 (L3) occasionally returns unix-int timestamps while L2 always
+    returns ISO strings — this makes the two sortable together.
+    """
+    v = item.get("created_at")
+    if v is None:
+        return ""
+    if isinstance(v, (int, float)):
+        try:
+            return datetime.utcfromtimestamp(v).isoformat()
+        except (ValueError, OSError, OverflowError):
+            return ""
+    return str(v)
+
+
+async def _browse_l3_memories(
+    service: Any,
+    ctx: RequestContext,
+    db: Session,
+    tier_scope: str,
+    content_type_list: Optional[List[str]],
+    limit: int,
+    query: Optional[str],
+) -> List[Dict[str, Any]]:
+    """Fetch and shape L3 (Mem0) memories for /browse, or [] when out of scope."""
+    if tier_scope not in ("all", "l3") or content_type_list:
+        # Mem0 has no content_type concept; if the caller explicitly asked
+        # for specific content types, skip Mem0 and query L2 only.
+        return []
+    agent_ids = _get_agent_ids(ctx.workspace_id, db)
+    logger.info("[browse] L3 scan workspace=%s", ctx.workspace_id)
+    scoped_items = await _fetch_all_scoped_memories(
+        service, str(ctx.workspace_id), agent_ids,
+        limit=limit, query=query,
+    )
+    return [
+        {
+            "id": str(m.get("id", "")),
+            "content": m.get("memory") or m.get("content", ""),
+            "score": m.get("score"),
+            "metadata": m.get("metadata") or m.get("metadata_"),
+            "created_at": m.get("created_at"),
+            "updated_at": m.get("updated_at"),
+            "tier": scope_tier,
+            "layer": "l3",
+            "content_type": None,
+        }
+        for scope_tier, m in scoped_items
+    ]
+
+
+async def _browse_l2_memories(
+    service: Any,
+    ctx: RequestContext,
+    tier_scope: str,
+    content_type_list: Optional[List[str]],
+    limit: int,
+    query: Optional[str],
+) -> List[Dict[str, Any]]:
+    """Fetch and shape L2 (Postgres short-term) memories for /browse, or [] when out of scope."""
+    if tier_scope not in ("all", "l2"):
+        return []
+    logger.info(
+        "[browse] L2 scan workspace=%s content_types=%s",
+        ctx.workspace_id, content_type_list,
+    )
+    l2_rows = await service.list_short_term_by_type(
+        workspace_id=str(ctx.workspace_id),
+        content_types=content_type_list,
+        limit=limit,
+        query=query,
+    )
+    return [
+        {
+            "id": row.get("id", ""),
+            "content": row.get("content", ""),
+            "score": None,
+            "metadata": row.get("metadata") or {},
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("last_accessed_at"),
+            "tier": "short_term",
+            "layer": "l2",
+            "content_type": row.get("content_type"),
+            "importance": row.get("importance"),
+        }
+        for row in l2_rows
+    ]
+
+
+def _log_browse_result(memories: List[Dict[str, Any]]) -> None:
+    """Log the shape of the /browse response: the first row, or the empty case."""
+    if memories:
+        logger.info(
+            "[browse] Returning %d memories, first: id=%s layer=%s content=%s",
+            len(memories), memories[0].get("id"), memories[0].get("layer"),
+            str(memories[0].get("content", ""))[:60],
+        )
+    else:
+        logger.warning("[browse] Returning 0 memories")
+
+
 @router.get("/browse")
 @lists_the_viewers_rules  # P256-FIX-N14-4: the viewer's standing rules first, by the ids delete takes
 async def browse_memories(
@@ -379,89 +482,22 @@ async def browse_memories(
             ct.strip() for ct in content_type.split(",") if ct.strip()
         ]
 
-    all_results: List[Dict[str, Any]] = []
-
     try:
-        # --- L3 (Mem0) ---
-        if tier_scope in ("all", "l3") and not content_type_list:
-            # Mem0 has no content_type concept; if the caller explicitly asked
-            # for specific content types, skip Mem0 and query L2 only.
-            agent_ids = _get_agent_ids(ctx.workspace_id, db)
-            logger.info("[browse] L3 scan workspace=%s", ctx.workspace_id)
-            scoped_items = await _fetch_all_scoped_memories(
-                service, str(ctx.workspace_id), agent_ids,
-                limit=limit, query=query,
-            )
-            all_results.extend(
-                {
-                    "id": str(m.get("id", "")),
-                    "content": m.get("memory") or m.get("content", ""),
-                    "score": m.get("score"),
-                    "metadata": m.get("metadata") or m.get("metadata_"),
-                    "created_at": m.get("created_at"),
-                    "updated_at": m.get("updated_at"),
-                    "tier": scope_tier,
-                    "layer": "l3",
-                    "content_type": None,
-                }
-                for scope_tier, m in scoped_items
-            )
-
-        # --- L2 (Postgres short-term) — PRD-131d ---
-        if tier_scope in ("all", "l2"):
-            logger.info(
-                "[browse] L2 scan workspace=%s content_types=%s",
-                ctx.workspace_id, content_type_list,
-            )
-            l2_rows = await service.list_short_term_by_type(
-                workspace_id=str(ctx.workspace_id),
-                content_types=content_type_list,
-                limit=limit,
-                query=query,
-            )
-            all_results.extend(
-                {
-                    "id": row.get("id", ""),
-                    "content": row.get("content", ""),
-                    "score": None,
-                    "metadata": row.get("metadata") or {},
-                    "created_at": row.get("created_at"),
-                    "updated_at": row.get("last_accessed_at"),
-                    "tier": "short_term",
-                    "layer": "l2",
-                    "content_type": row.get("content_type"),
-                    "importance": row.get("importance"),
-                }
-                for row in l2_rows
-            )
-
+        # L3 (Mem0) and L2 (Postgres short-term, PRD-131d) are fetched
+        # independently; each helper returns [] when out of tier scope.
+        all_results: List[Dict[str, Any]] = []
+        all_results.extend(
+            await _browse_l3_memories(service, ctx, db, tier_scope, content_type_list, limit, query)
+        )
+        all_results.extend(
+            await _browse_l2_memories(service, ctx, tier_scope, content_type_list, limit, query)
+        )
         logger.info("[browse] Collected %d memories (L2+L3)", len(all_results))
 
         # Sort by created_at DESC and truncate to caller's limit.
-        # Mem0 (L3) occasionally returns unix-int timestamps while L2 always
-        # returns ISO strings — coerce to a comparable string form.
-        def _sort_key(x: Dict[str, Any]) -> str:
-            v = x.get("created_at")
-            if v is None:
-                return ""
-            if isinstance(v, (int, float)):
-                try:
-                    return datetime.utcfromtimestamp(v).isoformat()
-                except (ValueError, OSError, OverflowError):
-                    return ""
-            return str(v)
-
-        all_results.sort(key=_sort_key, reverse=True)
+        all_results.sort(key=_coerce_browse_sort_key, reverse=True)
         memories = all_results[:limit]
-
-        if memories:
-            logger.info(
-                "[browse] Returning %d memories, first: id=%s layer=%s content=%s",
-                len(memories), memories[0].get("id"), memories[0].get("layer"),
-                str(memories[0].get("content", ""))[:60],
-            )
-        else:
-            logger.warning("[browse] Returning 0 memories")
+        _log_browse_result(memories)
 
         return {
             "success": True,
@@ -471,8 +507,9 @@ async def browse_memories(
             "search_query": query,
         }
     except Exception as e:
+        # CodeQL py/stack-trace-exposure: the exception's text stays in the server log.
         logger.error("Memory browse failed: %s", e, exc_info=True)
-        return {"success": False, "error": str(e)[:200], "memories": []}
+        return {"success": False, "error": "Memory browse failed", "memories": []}
 
 
 @admin_router.delete("/{memory_id}")
@@ -492,8 +529,9 @@ async def delete_memory(
     try:
         return await forget(memory_id, ctx.workspace_id, subject_of(resolve_user_pk(db, ctx)))
     except Exception as e:
+        # CodeQL py/stack-trace-exposure: the exception's text stays in the server log.
         logger.error("Memory delete failed: %s", e, exc_info=True)
-        return {"success": False, "error": str(e)[:200]}
+        return {"success": False, "error": "Memory delete failed"}
 
 
 @router.get("/health")
@@ -877,8 +915,9 @@ async def consolidate_memories(
     try:
         targets = await _find_targets(service, ctx.workspace_id, db, body.memory_ids)
     except Exception as e:
+        # CodeQL py/stack-trace-exposure: the exception's text stays in the server log.
         logger.error("Failed to fetch memories for consolidation: %s", e, exc_info=True)
-        return {"success": False, "error": str(e)[:200]}
+        return {"success": False, "error": "Failed to fetch memories for consolidation"}
     if len(targets) < 2:
         return {"success": False, "error": f"Found only {len(targets)} of {len(body.memory_ids)} memories"}
 
@@ -898,8 +937,9 @@ async def consolidate_memories(
             metadata={"source": "consolidation", "merged_from": len(targets), **shared_audience(targets)},
         )
     except Exception as e:
+        # CodeQL py/stack-trace-exposure: the exception's text stays in the server log.
         logger.error("Failed to store consolidated memory: %s", e, exc_info=True)
-        return {"success": False, "error": f"Failed to store: {str(e)[:200]}"}
+        return {"success": False, "error": "Failed to store consolidated memory"}
 
     deleted = await _delete_originals(service, str(ctx.workspace_id), targets)
 

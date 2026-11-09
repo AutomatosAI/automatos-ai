@@ -212,6 +212,9 @@ class TestRegister:
         out = svc.register(file_path="outputs/chart.png")
         assert out["success"] is False
         db.rollback.assert_called_once()
+        # CodeQL py/stack-trace-exposure: the exception's own text must not
+        # reach the caller — only the server log (exc_info=True above) sees it.
+        assert "boom" not in out["error"]
 
     def test_register_does_not_call_workspace_client(self):
         """register() must never hit WorkspaceClient — size is passed in."""
@@ -296,6 +299,8 @@ class TestListDeliverables:
         assert out["success"] is False
         assert out["deliverables"] == []
         assert out["total"] == 0
+        # CodeQL py/stack-trace-exposure: no exception text in the response.
+        assert "db down" not in out["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +317,18 @@ class TestGetDeliverable:
         out = await svc.get_deliverable("00000000-0000-0000-0000-000000000000")
         assert out["success"] is False
         assert "not found" in out["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_get_handles_exception_without_leaking_it(self):
+        """CodeQL py/stack-trace-exposure: exc's own text (a DB error, a path, ...)
+        must stay server-side (logged with exc_info=True), never in the response."""
+        db = MagicMock()
+        db.execute.side_effect = RuntimeError("secret-internal-detail")
+        svc = DeliverableService(db, WORKSPACE_ID)
+
+        out = await svc.get_deliverable(str(uuid4()))
+        assert out["success"] is False
+        assert "secret-internal-detail" not in out["error"]
 
     @pytest.mark.asyncio
     async def test_get_without_content(self):
@@ -433,6 +450,8 @@ class TestGetStats:
         assert out["total"] == 0
         assert out["by_type"] == {}
         assert out["clean_render_rate"] is None
+        # CodeQL py/stack-trace-exposure: no exception text in the response.
+        assert "oops" not in out["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -508,6 +527,8 @@ class TestSoftDelete:
         out = svc.soft_delete("some-id")
         assert out["success"] is False
         db.rollback.assert_called_once()
+        # CodeQL py/stack-trace-exposure: a fixed message, not the exception's own text.
+        assert out["error"] == "delete failed"
 
 
 # ---------------------------------------------------------------------------
@@ -555,6 +576,8 @@ class TestApplyRetention:
         out = svc.apply_retention(source_type="heartbeat")
         assert out["success"] is False
         db.rollback.assert_called_once()
+        # CodeQL py/stack-trace-exposure: no exception text in the response.
+        assert "boom" not in out["error"]
 
 
 # ---------------------------------------------------------------------------

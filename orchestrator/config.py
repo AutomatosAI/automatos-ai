@@ -2754,26 +2754,6 @@ class Config:
             return False
 
         return True
-    
-    def print_config(self, show_secrets: bool = False) -> None:
-        """Print current configuration (masks secrets by default)."""
-        print("=" * 60)
-        print("AUTOMATOS AI CONFIGURATION")
-        print("=" * 60)
-
-        print(f"Environment: {self.ENVIRONMENT}")
-        print(f"Database: {self.POSTGRES_DB}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}")
-        print(f"Redis: {self.REDIS_HOST}:{self.REDIS_PORT if self.REDIS_HOST else 'Not configured'}")
-        print(f"LLM Provider: {self.LLM_PROVIDER} ({self.LLM_MODEL})")
-
-        if show_secrets:
-            print(f"OpenAI Key: {self.OPENAI_API_KEY[:10]}..." if self.OPENAI_API_KEY else "Not set")
-            print(f"Anthropic Key: {self.ANTHROPIC_API_KEY[:10]}..." if self.ANTHROPIC_API_KEY else "Not set")
-        else:
-            print(f"OpenAI Key: {'Set' if self.OPENAI_API_KEY else 'Not set'}")
-            print(f"Anthropic Key: {'Set' if self.ANTHROPIC_API_KEY else 'Not set'}")
-
-        print("=" * 60)
 
 # Singleton instance
 config = Config()
