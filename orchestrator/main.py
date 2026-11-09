@@ -46,6 +46,7 @@ from core.models import Base
 import integrations.budstacks  # noqa: F401 — self-registers the budstacks VerticalProvisioner
 from api.agents import router as agents_router
 from api.agent_execute import router as agent_execute_router
+from api.run_callbacks import router as run_callbacks_router
 from api.workflows import router as workflows_router
 from api.workflow_templates import router as workflow_templates_router
 from api.workflow_recipes import router as workflow_recipes_router, webhook_router as recipe_webhook_router
@@ -1228,6 +1229,7 @@ async def api_tracking_middleware(request, call_next):
 # Include API routers
 app.include_router(agents_router)
 app.include_router(agent_execute_router)  # PRD-274 Wave 1: a run of one agent, filed as a board ticket
+app.include_router(run_callbacks_router)  # PRD-274 Wave 1: the callback signing secret
 app.include_router(models_router)  # PRD-15: Model management
 app.include_router(widget_workflows_router)  # US-014: Widget workflow control (pause/resume/cancel) — must be before workflows_router to avoid /{id} catch-all
 app.include_router(workflows_router)

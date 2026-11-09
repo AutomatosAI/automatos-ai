@@ -120,6 +120,7 @@ from .proactive import ProactiveCalibration, ProactivePersonSettings, ProactiveR
 from .marketplace_cloud import CLOUD_ITEM_TYPES, MARKETPLACE_CLOUD_SYNC_ROW_ID, MarketplaceCloudItem, MarketplaceCloudSync  # noqa: F401  # PRD-270: the Sync's status row (W1), the rows it wrote (W2)
 from .workspace_move import WorkspaceMoveJob  # noqa: F401  # PRD-273: a workspace's export (and import) jobs
 from .memory_profiles import MemoryProfile  # noqa: F401  # what distillation keeps, by domain (Wave 4)
+from .run_callbacks import RunCallback, WorkspaceSigningSecret  # noqa: F401  # PRD-274 W1: signed completion callbacks
 
 # PRD-38.4: SDK API Keys (safe — standalone table, no FK deps on workspaces)
 try:
