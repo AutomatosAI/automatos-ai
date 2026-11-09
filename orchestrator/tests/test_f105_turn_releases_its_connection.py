@@ -82,10 +82,30 @@ def test_a_raw_write_or_a_lock_counts_as_writing(engine, statement):
 def test_only_a_plain_select_is_a_read():
     assert is_plain_read("SELECT users.clerk_user_id FROM users WHERE users.id = %(id)s")
     assert is_plain_read("  /* ping */ SELECT 1")
+    assert is_plain_read("-- note\nSELECT 1")
+    assert is_plain_read("/* a */ /* b */ -- c\nSELECT 1")
     assert not is_plain_read("SELECT * FROM board_tasks FOR UPDATE SKIP LOCKED")
     assert not is_plain_read("SELECT set_config('app.ws', 'c1', true)")
     assert not is_plain_read("WITH moved AS (DELETE FROM t RETURNING *) SELECT * FROM moved")
     assert not is_plain_read("UPDATE agents SET status = 'active'")
+
+
+def test_many_leading_comments_that_never_reach_select_resolve_at_once():
+    """CodeQL py/redos #235: the old single regex
+    (r"^\\s*(?:/\\*.*?\\*/\\s*|--[^\\n]*\\n\\s*)*(?:SELECT|SHOW)\\b") backtracked
+    exponentially once SELECT/SHOW was never found — 20 repeated "/* x */ "
+    blocks already took ~0.1s, 30 timed out. ``before_cursor_execute`` runs
+    this on every statement the app executes, so this is checked for real
+    time, not just a boolean result."""
+    import time
+
+    statement = "/* x */ " * 5_000 + "not actually a select"
+    started = time.perf_counter()
+    result = is_plain_read(statement)
+    elapsed = time.perf_counter() - started
+
+    assert result is False
+    assert elapsed < 1.0, f"took {elapsed:.2f}s — looks like it regressed to backtracking"
 
 
 def test_concurrent_read_only_turns_with_slow_model_calls_do_not_run_the_pool_dry(engine):
