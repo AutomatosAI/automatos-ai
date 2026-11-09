@@ -54,6 +54,11 @@ _CONTEXT_BUDGET_WEIGHTS: Dict[str, float] = {
 _USABLE_WINDOW_FRACTION = 0.80
 
 
+async def _nothing() -> None:
+    """A skipped layer's fetch: gathered beside the real ones, it answers None."""
+    return None
+
+
 # ---------------------------------------------------------------------------
 # ContextSignals — output of query analysis
 # ---------------------------------------------------------------------------
@@ -461,143 +466,32 @@ class ContextRouter:
         All layer fetches are concurrent via ``asyncio.gather``.
         Any single-layer failure is logged and skipped — never breaks the bundle.
         """
-        from modules.memory.unified_memory_service import get_unified_memory_service
-
-        service = get_unified_memory_service()
-        signals = self.analyze_query(query)
-
-        budgets = self._compute_budgets(context_window)
-        budget_session = budgets["session"]
-        budget_long_term = budgets["long_term"]
-        budget_temporal = budgets["temporal"]
-        budget_daily = budgets["daily"]
-        budget_awareness = budgets["awareness"]
-
-        # ----- Determine which fetches to launch -----
-        fetch_session = (
-            conversation_id is not None
-            and (signals.is_session_continuation or not any([
-                signals.is_temporal,
-                signals.is_knowledge_query,
-                signals.is_live_data,
-            ]))
-        )
-        # PRD-159 S3: operational memories (tool_outcome / task_learning /
-        # playbook_pattern / …) live in L3 and must be recallable for ANY
-        # query — including temporal ("why did the deploy mission fail?") and
-        # knowledge queries — not gated behind the temporal-regex signal. The
-        # server-side relevance floor in search_long_term keeps irrelevant junk
-        # out instead of this coarse signal gate. Live-data queries (weather,
-        # prices) still skip memory.
-        fetch_long_term = not signals.is_live_data
-        fetch_temporal = signals.is_temporal and signals.temporal_window is not None
-        # PRD-187 S3: L2 recall is ALWAYS-ON. Temporal queries keep the
-        # window'd listing; every other non-live-data turn gets semantic L2
-        # recall — "what did we learn about the Shopify sync?" matched zero
-        # rows by construction under the old ILIKE-behind-a-temporal-regex.
-        fetch_l2_semantic = not fetch_temporal and not signals.is_live_data
-        # Daily logs on default path (no strong signal)
-        fetch_daily = not any([
-            signals.is_temporal,
-            signals.is_personal_fact,
-            signals.is_session_continuation,
-            signals.is_knowledge_query,
-            signals.is_live_data,
-        ])
-
-        # ----- Launch concurrent fetches -----
-        async def _noop():
-            return None
-
-        session_task = (
-            self._safe_fetch("L1 session", service.get_session(workspace_id, conversation_id))
-            if fetch_session else _noop()
-        )
-        long_term_task = (
-            self._safe_fetch("L3 long-term", service.search_long_term(workspace_id, query, agent_id=agent_id, limit=5))
-            if fetch_long_term else _noop()
-        )
-        if fetch_temporal:
-            temporal_task = self._safe_fetch(
-                "L2 temporal",
-                service.search_short_term(workspace_id, query, days=self._window_days(signals.temporal_window)),
-            )
-        elif fetch_l2_semantic:
-            temporal_task = self._safe_fetch(
-                "L2 semantic",
-                service.search_short_term_semantic(workspace_id, query),
-            )
-        else:
-            temporal_task = _noop()
-        daily_task = (
-            self._safe_fetch("daily logs", service.get_all_daily_logs(workspace_id, limit=10))
-            if fetch_daily else _noop()
-        )
-
-        session_result, lt_result, temporal_result, daily_result = await asyncio.gather(
-            session_task, long_term_task, temporal_task, daily_task,
-        )
-
-        # ----- Assemble bundle with budget constraints -----
-
-        # Session summary
-        session_text = ""
-        if session_result is not None:
-            raw_summary = getattr(session_result, "summary", "") or ""
-            exchange_count = getattr(session_result, "exchange_count", 0)
-            if raw_summary:
-                session_text = self._truncate_to_budget(
-                    f"Conversation so far ({exchange_count} exchanges):\n{raw_summary}",
-                    budget_session,
-                )
-
         # PRD-185 S11 chokepoint: sub-floor and noise-typed rows (heartbeat
         # digests, playbook summaries) never reach the prompt — re-asserted
         # here over BOTH memory lists, whatever their source path.
         from config import config as _cfg
         from modules.memory.injection_filter import filter_injectable_memories
 
-        _floor = _cfg.MEMORY_RELEVANCE_FLOOR
-
-        # Long-term memories
-        lt_memories: List[Dict[str, Any]] = lt_result if isinstance(lt_result, list) else []
-        lt_memories = filter_injectable_memories(lt_memories, floor=_floor)
-        kept_lt, lt_text = self._memories_to_text(lt_memories, budget_long_term)
-
+        signals = self.analyze_query(query)
+        budgets = self._compute_budgets(context_window)
+        session_result, lt_result, temporal_result, daily_result = await self._fetch_layers(
+            signals, workspace_id, agent_id, query, conversation_id,
+        )
+        session_text = self._session_text(session_result, budgets["session"])
+        floor = _cfg.MEMORY_RELEVANCE_FLOOR
+        lt_memories = filter_injectable_memories(lt_result if isinstance(lt_result, list) else [], floor=floor)
+        kept_lt, lt_text = self._memories_to_text(lt_memories, budgets["long_term"])
         # L2 results (temporal window'd listing, or the always-on semantic recall)
-        temporal_memories: List[Dict[str, Any]] = temporal_result if isinstance(temporal_result, list) else []
-        temporal_memories = filter_injectable_memories(temporal_memories, floor=_floor)
-        kept_temporal, temporal_text = self._memories_to_text(temporal_memories, budget_temporal)
-
-        # Daily logs
-        daily_text = ""
-        if daily_result and isinstance(daily_result, list):
-            daily_lines: List[str] = []
-            for mem in daily_result:
-                content = mem.get("memory") or mem.get("content") or ""
-                if content:
-                    daily_lines.append(f"- {content}")
-            daily_text = self._truncate_to_budget("\n".join(daily_lines), budget_daily)
-
-        # Knowledge awareness (dynamic per-workspace capability map)
-        awareness_text = ""
-        if signals.is_knowledge_query or signals.is_live_data:
-            try:
-                awareness_text = await self.build_knowledge_awareness(workspace_id)
-            except Exception:
-                logger.warning(
-                    "[ContextRouter] build_knowledge_awareness failed, using fallback",
-                    exc_info=True,
-                )
-                awareness_text = self._build_fallback_awareness(signals)
-            awareness_text = self._truncate_to_budget(awareness_text, budget_awareness)
-
-        # Total token estimate
+        temporal_memories = filter_injectable_memories(
+            temporal_result if isinstance(temporal_result, list) else [], floor=floor,
+        )
+        kept_temporal, temporal_text = self._memories_to_text(temporal_memories, budgets["temporal"])
+        daily_text = self._daily_text(daily_result, budgets["daily"])
+        awareness_text = await self._awareness_text(signals, workspace_id, budgets["awareness"])
         total_tokens = sum(
             self._estimate_tokens(t)
             for t in (session_text, lt_text, temporal_text, daily_text, awareness_text)
         )
-
         return ContextBundle(
             session_summary=session_text,
             long_term_memories=tuple(kept_lt),
@@ -607,6 +501,100 @@ class ContextRouter:
             total_tokens_estimate=total_tokens,
             signals=signals,
         )
+
+    @staticmethod
+    def _fetch_plan(signals: ContextSignals, conversation_id: Optional[str]) -> Dict[str, bool]:
+        """Which layers a turn fetches, from its signals."""
+        fetch_temporal = signals.is_temporal and signals.temporal_window is not None
+        return {
+            "session": conversation_id is not None and (
+                signals.is_session_continuation
+                or not any([signals.is_temporal, signals.is_knowledge_query, signals.is_live_data])
+            ),
+            # PRD-159 S3: operational memories (tool_outcome / task_learning /
+            # playbook_pattern / …) live in L3 and must be recallable for ANY
+            # query — including temporal ("why did the deploy mission fail?") and
+            # knowledge queries — not gated behind the temporal-regex signal. The
+            # server-side relevance floor in search_long_term keeps irrelevant junk
+            # out instead of this coarse signal gate. Live-data queries (weather,
+            # prices) still skip memory.
+            "long_term": not signals.is_live_data,
+            "temporal": fetch_temporal,
+            # PRD-187 S3: L2 recall is ALWAYS-ON. Temporal queries keep the
+            # window'd listing; every other non-live-data turn gets semantic L2
+            # recall — "what did we learn about the Shopify sync?" matched zero
+            # rows by construction under the old ILIKE-behind-a-temporal-regex.
+            "l2_semantic": not fetch_temporal and not signals.is_live_data,
+            # Daily logs on default path (no strong signal)
+            "daily": not any([
+                signals.is_temporal, signals.is_personal_fact, signals.is_session_continuation,
+                signals.is_knowledge_query, signals.is_live_data,
+            ]),
+        }
+
+    async def _fetch_layers(
+        self, signals: ContextSignals, workspace_id: str, agent_id: int, query: str,
+        conversation_id: Optional[str],
+    ) -> Tuple[Any, Any, Any, Any]:
+        """The session, long-term, L2 and daily-log fetches, run concurrently."""
+        from modules.memory.unified_memory_service import get_unified_memory_service
+
+        service = get_unified_memory_service()
+        plan = self._fetch_plan(signals, conversation_id)
+        session_task = (
+            self._safe_fetch("L1 session", service.get_session(workspace_id, conversation_id))
+            if plan["session"] else _nothing()
+        )
+        # PRD-274 Wave 0: an agent's chat turn reads the workspace's distilled facts
+        # too (PRD-159 S5 files them in the workspace namespace), not only its own.
+        long_term_task = (
+            self._safe_fetch("L3 long-term", service.search_long_term(
+                workspace_id, query, agent_id=agent_id, limit=5, include_workspace=True,
+            ))
+            if plan["long_term"] else _nothing()
+        )
+        if plan["temporal"]:
+            temporal_task = self._safe_fetch(
+                "L2 temporal",
+                service.search_short_term(workspace_id, query, days=self._window_days(signals.temporal_window)),
+            )
+        elif plan["l2_semantic"]:
+            temporal_task = self._safe_fetch("L2 semantic", service.search_short_term_semantic(workspace_id, query))
+        else:
+            temporal_task = _nothing()
+        daily_task = (
+            self._safe_fetch("daily logs", service.get_all_daily_logs(workspace_id, limit=10))
+            if plan["daily"] else _nothing()
+        )
+        return await asyncio.gather(session_task, long_term_task, temporal_task, daily_task)
+
+    def _session_text(self, session_result: Any, budget: int) -> str:
+        """The L1 session summary, within its budget ('' when there is none)."""
+        if session_result is None:
+            return ""
+        raw_summary = getattr(session_result, "summary", "") or ""
+        if not raw_summary:
+            return ""
+        exchange_count = getattr(session_result, "exchange_count", 0)
+        return self._truncate_to_budget(f"Conversation so far ({exchange_count} exchanges):\n{raw_summary}", budget)
+
+    def _daily_text(self, daily_result: Any, budget: int) -> str:
+        """The daily logs as a bullet list, within their budget."""
+        if not (daily_result and isinstance(daily_result, list)):
+            return ""
+        lines = [f"- {c}" for c in ((m.get("memory") or m.get("content") or "") for m in daily_result) if c]
+        return self._truncate_to_budget("\n".join(lines), budget)
+
+    async def _awareness_text(self, signals: ContextSignals, workspace_id: str, budget: int) -> str:
+        """Knowledge awareness (dynamic per-workspace capability map), for knowledge and live-data turns."""
+        if not (signals.is_knowledge_query or signals.is_live_data):
+            return ""
+        try:
+            text = await self.build_knowledge_awareness(workspace_id)
+        except Exception:
+            logger.warning("[ContextRouter] build_knowledge_awareness failed, using fallback", exc_info=True)
+            text = self._build_fallback_awareness(signals)
+        return self._truncate_to_budget(text, budget)
 
     # ------------------------------------------------------------------
     # Private helpers
