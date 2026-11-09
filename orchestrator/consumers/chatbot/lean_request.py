@@ -1,6 +1,6 @@
 """What a lean turn's request may add: a model from the agent's allow-list, and app context.
 
-PRD draft "Automatos for products", Wave 2 (§5.3, §5.4). On ``POST /api/chat`` a request
+PRD-274, "Automatos for products", Wave 2 (§5.3, §5.4). On ``POST /api/chat`` a request
 naming a lean agent (``consumers.chatbot.lean_turn``) may also send:
 
 - ``model``: the model this turn answers on, one of the agent's

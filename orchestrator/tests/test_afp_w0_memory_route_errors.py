@@ -1,4 +1,4 @@
-"""#1430 Wave 0 (Automatos for products): /api/memory says when memory was not kept.
+"""PRD-274 Wave 0 (Automatos for products): /api/memory says when memory was not kept.
 
 Before: a refused store (``{"success": False}``) answered 201 with an invented id,
 and a raised store, or an install with no durable memory, "stored" the memory in a

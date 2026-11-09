@@ -206,7 +206,7 @@ class DurableMemoryStore:
 
     @classmethod
     def _namespaces_filter(cls, user_id: str, also: Tuple[str, ...]) -> Filter:
-        """``user_id``'s namespace, or it and ``also``'s in one match (#1430 Wave 0)."""
+        """``user_id``'s namespace, or it and ``also``'s in one match (PRD-274 Wave 0)."""
         if not also:
             return cls._namespace_filter(user_id)
         return Filter(must=[

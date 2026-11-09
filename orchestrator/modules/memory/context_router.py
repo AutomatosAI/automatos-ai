@@ -550,7 +550,7 @@ class ContextRouter:
             self._safe_fetch("L1 session", service.get_session(workspace_id, conversation_id))
             if plan["session"] else _nothing()
         )
-        # #1430 Wave 0: an agent's chat turn reads the workspace's distilled facts
+        # PRD-274 Wave 0: an agent's chat turn reads the workspace's distilled facts
         # too (PRD-159 S5 files them in the workspace namespace), not only its own.
         long_term_task = (
             self._safe_fetch("L3 long-term", service.search_long_term(

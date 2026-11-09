@@ -10,7 +10,7 @@ When the store is not configured or a call fails, the route says so with a 503
 and a code (``memory_off``, ``memory_store_failed``, ``memory_unavailable``).
 It never answers from an in-process copy: an earlier fallback kept "stored"
 memories in a per-process dict, lost on restart and invisible to other workers,
-and answered 201 for them (#1430, Wave 0).
+and answered 201 for them (PRD-274, Wave 0).
 
 Prefix: /api/memory
 """

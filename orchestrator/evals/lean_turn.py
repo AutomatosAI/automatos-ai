@@ -1,6 +1,6 @@
 """Lean-turn eval: a lean agent's prompt overhead and time to first token (Wave 2, §5.3).
 
-The PRD draft "Automatos for products" sets two targets for a lean turn:
+PRD-274 ("Automatos for products") sets two targets for a lean turn:
   * **prompt overhead within 2,000 tokens** of the agent's own context: what the
     platform adds beyond the agent's persona, description, recalled memory and the
     descriptions of the tools it is granted;
