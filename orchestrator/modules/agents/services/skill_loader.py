@@ -305,31 +305,10 @@ class SkillLoader:
             raise ValueError("Database session required")
         
         try:
-            # 1. Validate Git URL
-            is_valid, error_msg = validate_git_url(git_url)
-            if not is_valid:
-                logger.error(f"Invalid Git URL: {error_msg}")
-                return {
-                    "status": "error",
-                    "error": error_msg
-                }
-
-            # 2. Generate + validate source name
-            source_name, name_error = _resolve_and_validate_source_name(git_url, source_name)
-            if name_error:
-                logger.error(f"Invalid source name: {name_error}")
-                return {"status": "error", "error": name_error}
-
-            # 3. Check if source already exists
-            existing_source = db.query(SkillSource).filter(
-                SkillSource.source_name == source_name
-            ).first()
-
-            if existing_source:
-                return {
-                    "status": "error",
-                    "error": f"Source '{source_name}' already exists. Use update_git_repository() instead."
-                }
+            # 1-3. Validate the URL/source name and check for a name clash
+            source_name, validation_error = self._validate_new_git_source(db, git_url, source_name)
+            if validation_error:
+                return validation_error
 
             # 4-6. Clone, create the SkillSource record, and index its skills
             clone_outcome = self._clone_and_create_git_source(db, git_url, source_name, branch, auto_update)
@@ -364,6 +343,35 @@ class SkillLoader:
                 "status": "error",
                 "error": str(e)
             }
+
+    def _validate_new_git_source(
+        self, db: Session, git_url: str, source_name: Optional[str]
+    ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+        """Validate the URL and source name, and check for a name clash.
+
+        Returns (resolved_source_name, None) on success, or
+        (None, error_response_dict) on failure.
+        """
+        is_valid, error_msg = validate_git_url(git_url)
+        if not is_valid:
+            logger.error(f"Invalid Git URL: {error_msg}")
+            return None, {"status": "error", "error": error_msg}
+
+        source_name, name_error = _resolve_and_validate_source_name(git_url, source_name)
+        if name_error:
+            logger.error(f"Invalid source name: {name_error}")
+            return None, {"status": "error", "error": name_error}
+
+        existing_source = db.query(SkillSource).filter(
+            SkillSource.source_name == source_name
+        ).first()
+        if existing_source:
+            return None, {
+                "status": "error",
+                "error": f"Source '{source_name}' already exists. Use update_git_repository() instead."
+            }
+
+        return source_name, None
 
     def _clone_and_create_git_source(
         self,
