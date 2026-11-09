@@ -373,7 +373,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # data migration only (the settings soul onto the Auto row); the guard follows it.
     one_soul = (versions / "auto_soul_one_source_20261107.py").read_text()
     assert 'down_revision = "prd273_w1_workspace_move_jobs"' in one_soul
-    assert 'EXPECTED_HEAD = "auto_soul_one_source_20261107"' in guard
+    # 2026-11-09 (Automatos for products, Wave 4): memory_profiles_20261109 chains onto that —
+    # memory_profiles, a new table only; the guard follows it.
+    profiles = (versions / "memory_profiles_20261109.py").read_text()
+    assert 'down_revision = "auto_soul_one_source_20261107"' in profiles
+    assert 'EXPECTED_HEAD = "memory_profiles_20261109"' in guard
 
 
 def test_orm_row_is_keyed_by_route():
