@@ -1,7 +1,8 @@
-# PRD-DRAFT: Automatos for products — the platform layer other products run on
+# PRD-274: Automatos for products — the platform layer other products run on
 
-**Status:** Draft for Gerard's review, 8 Nov 2026 (Dave). No number yet: Gerard assigns one. Nothing in it merges,
-and no wave starts on `main`, until it is approved. Every §8 recommendation is the default unless Gerard changes it.
+**Status:** Approved, 9 Nov 2026 (Gerard): numbered PRD-274, with every §8 recommendation decided as recommended.
+Written by Dave, 8 Nov 2026. Waves 0, 2 and 4 are built as draft PRs stacked on this one (§6); Waves 1, 3 and 5
+start next.
 
 **Why now:** external tools built to run *on* Automatos have independently hit the same missing layer.
 - **One uses Automatos through its API as a machine customer.** Its platform requirements include a server key that
@@ -47,8 +48,9 @@ None of this is specific to one product. Each capability below names the other u
   a time to first token close to the model's own.
 - A product hands in per-turn **app context** (its live state) that the agent sees and memory never stores.
 - Automatos remembers **the people a product serves** (end users), per end user, with consent, retention and erasure.
-- What counts as a durable fact follows the product's domain (**memory profiles**). Instructions and app context are
-  never stored as facts, and a fact is stored once.
+- What counts as a durable fact follows the product's domain (**memory profiles**). A product's per-turn framing and
+  app context are never stored as facts; the owner's own standing instructions are kept, as today (PRD-256). A
+  restated fact may sit beside the original until the hourly consolidation folds it.
 - "Catch me up" or "where were we" after a break recalls from the stored facts.
 - In a workspace with several agents, a fact can be limited to the agents allowed to know it (**need-to-know**).
 - Auto, for the owner, behaves exactly as today unless a wave says otherwise.
@@ -60,7 +62,7 @@ None of this is specific to one product. Each capability below names the other u
 - **A new third-party integration path.** Integrations still go through Composio; nothing here weakens the deny list.
 - **Product-specific logic in core.** A product's rules (its domain logic, a monitoring service's matching, a shop's catalogue)
   stay in the product. Automatos proposes; the product disposes, and stays the authority over its own state.
-- **Billing design.** Who pays for a product's sub-tenant workspaces is a decision (§8-Q2), not designed here.
+- **Billing design.** Who pays for a product's sub-tenant workspaces is decided (§8-2: the product's owner workspace); the metering design is Wave 5's.
 
 ## 4. What exists today
 
@@ -72,7 +74,8 @@ None of this is specific to one product. Each capability below names the other u
 - **Verticals** already do find-or-create: `POST /api/verticals/{v}/provision` (`api/verticals.py`) runs
   `provision_vertical` (`integrations/provisioning.py`): find or create the workspace for an external id, seed the
   agent roster, mint a key. Each vertical registers a `VerticalProvisioner` in code and has its own internal key in
-  config (`SHOPIFY_INTERNAL_API_KEY`). Shopify is the only one.
+  config (`SHOPIFY_INTERNAL_API_KEY`). Two are registered: Shopify, and BudStacks (`integrations/budstacks/`), whose
+  re-provision keeps the existing key (`reuse_existing_key`) because its app stores the key it was given.
 
 ### 4.2 Keys
 
@@ -80,8 +83,6 @@ None of this is specific to one product. Each capability below names the other u
   (`core/auth/hybrid.py` from line 625, which says why: changing the shared dependency "would make every endpoint
   accept SDK keys"). A server key cannot call `POST /api/chat`, the memory routes, Playbooks or documents.
 - The `X-API-Key` lane is the instance's own `ORCHESTRATOR_API_KEY` only (admin-equivalent, `_api_key_context`).
-- `POST /api/widgets/auth` treats an empty permission list as unrestricted, against PRD-195's "empty = deny".
-  `rate_limit_requests` only logs; `rate_limit_tokens` and `allowed_ips` are never read.
 
 ### 4.3 The chat turn
 
@@ -150,8 +151,9 @@ the agent emitted:
   (`run_sleep_time_consolidation`) runs hourly and the run lasted about 20 minutes.
 - **A new-session "catch me up" recalled nothing:** the memory section injected ~0 tokens and the agent recapped a
   different, earlier chat. The cause (found in Wave 0, #1434): a chat turn's long-term recall read only the turn's
-  agent namespace, while distillation files facts in the workspace's (PRD-159 S5). Every chat turn has an agent,
-  Auto included, so no chat turn's router recall reached a distilled fact.
+  agent namespace, while distillation files facts in the workspace's by default (PRD-159 S5). Every chat turn has an
+  agent, Auto included, so no chat turn's router recall reached a workspace-tier fact; the few distilled to the
+  agent's own tier were reachable.
 
 ## 5. Design
 
@@ -246,10 +248,9 @@ widget lane becomes one use of the general rule.
 
 ## 6. User stories
 
-Each wave is its own branch and PR, opened as a draft and not merged until this PRD is approved. The order is a
-recommendation (§8-Q1).
+Each wave is its own branch and PR, opened as a draft and merged after this PRD. The order is §8-1's.
 
-### Wave 0: measure on main, and fix what Auto already suffers from (four PRs)
+### Wave 0: measure on main, and fix what Auto already suffers from (built)
 
 - `POST /api/memory` returns an error when the store fails, and nothing is kept in process memory (#1433).
 - A chat turn's long-term recall reads the workspace's facts as well as its agent's (#1434).
@@ -260,57 +261,77 @@ recommendation (§8-Q1).
   It found that consolidation deleted true facts about different subjects phrased alike: #1438, fixed on `main` in
   #1439.
 
-### Wave 1: headless access (one or two PRs)
+### Wave 1: headless access (next)
 
 - Server keys on the named routes of §5.2, each with a declared scope; empty permissions deny; idempotency keys;
   per-key limits and ceiling enforced.
+- The per-request model allow-list moves onto the product's key (§8-5); until then a lean agent's own
+  `model_allow_list` is the only one (Wave 2).
+- A lean turn's `model` and app context on the headless chat route (§8-10).
+- Signed completion callbacks with the run id, and a real `POST /api/agents/{id}/execute` in place of the fixed
+  response (§8-8).
 
-### Wave 2: lean turns and app context (one or two PRs)
+### Wave 2: lean turns and app context (built)
 
-- `runtime_profile: lean` on agents; the per-request model allow-list; the `context` block, never stored.
-- Acceptance: the eval's agent turn meets §5.3's targets on main.
+- `runtime_profile: lean` on agents: the agent's own identity, memory and the owner's standing rules, only the tools
+  its tool groups grant (the executor refuses the rest), no Composio apps (§8-9) (#1446).
+- A per-request `model` from the agent's allow-list, and an `appContext` block in that turn's prompt only, never
+  stored (#1451).
+- Acceptance, met in `evals/lean_turn.py` with live memory recall: 346 tokens of platform overhead (target 2,000),
+  and the first token 430 ms after the model's own (target 1.5 s).
 
-### Wave 3: end-user memory and the memory write API (one or two PRs)
+### Wave 3: end-user memory and the memory write API (next)
 
-- The end-user subject, consent record, retention and erasure; the extended `POST /api/memory`.
+- The end-user subject, asserted by the product's server key (§8-6), consent record, retention and erasure; the
+  extended `POST /api/memory`.
 
-### Wave 4: memory profiles and need-to-know (one or two PRs)
+### Wave 4: memory profiles and need-to-know (built)
 
-- Profiles as seeded data; `audience` labels on facts and agents; F155's lane re-expressed on the general rule.
+- Profiles as seeded data (`general`, `customer`, `incident`, `case`) in `memory_profiles`, picked per agent or
+  workspace (#1452). In `evals/memory_profiles.py` the incident profile keeps all of an incident's timeline where
+  `general` kept 70%, and the case profile stops general legal background being kept as a case fact.
+- Workspace-defined profiles (§8-7): the create route, on the table #1452 already has.
+- `audience` labels on facts and agents, held at the durable store by the run's reader; Auto and the owner's own
+  pages read everything (§8-11); consolidation never crosses audiences (#1453). F155's stricter widget rule stays,
+  with the labels on top of it.
 
-### Wave 5: sub-tenants (one or two PRs)
+### Wave 5: sub-tenants (next)
 
-- The product record, find-or-create by external id with roster seeding, list, guarded purge; Shopify moved onto it.
+- The product record (§8-3), find-or-create by external id with roster seeding, list, guarded purge; billed to the
+  product's owner workspace (§8-2). Both registered verticals move onto it last, each keeping its behaviour: Shopify's
+  re-provision mints a key, BudStacks' keeps the existing one.
 
 ## 7. Rollout
 
 - Wave 0 fixes behaviour the platform already promises (a store that says when it failed, recall that reads the
   workspace's facts), so it ships unflagged.
 - Waves 1–5 add capabilities. Each ships behind a flag in `orchestrator/config.py`, off by default, and changes
-  nothing for the owner's Auto until enabled.
+  nothing for the owner's Auto until enabled: `LEAN_TURNS_ENABLED` (Wave 2), `MEMORY_PROFILES_ENABLED` and
+  `MEMORY_AUDIENCE_ENABLED` (Wave 4).
 - Both editions: the local edition needs Waves 1–4 for self-hosted products; Wave 5 matters most to the hosted
-  edition, and its billing waits on §8-Q2.
+  edition.
 - The external tools above are the first products and the reference tests; Shopify moves onto Wave 5's product
   record last.
 
-## 8. Decisions for Gerard (each recommendation stands unless you change it)
+## 8. Decisions (decided 9 Nov 2026, Gerard: each as recommended)
 
-1. **Order.** Wave 0 first because it improves Auto for every owner and builds the eval the rest is measured by (rec)
-   vs headless access first because a machine customer is blocked on it.
-2. **Who pays for a product's sub-tenant workspaces** (hosted): the product's owner workspace, rolled up (rec) vs each
-   sub-tenant on its own plan vs credits drawn from the product.
-3. **Products as data vs code.** A product record created by an admin (rec) vs a `VerticalProvisioner` in code per
-   product, as today.
-4. **The AI disclosure on lean turns.** Kept on every turn a person reads, with the product able to render it in its
-   own words (rec) vs off for machine turns only vs as today.
-5. **Per-request model choice.** From an allow-list on the product's key (rec) vs the agent's `model_config` only vs
-   free choice.
-6. **End-user identity.** Asserted by the product's server key, the product being responsible for consent (rec) vs
-   Automatos-issued end-user tokens.
-7. **Memory profiles.** A small seeded set (`general`, `customer`, `incident`, `case`) plus workspace-defined ones (rec)
-   vs seeded only.
+1. **Order.** Wave 0 first: it improves Auto for every owner and builds the eval the rest is measured by. (Not:
+   headless access first.)
+2. **Who pays for a product's sub-tenant workspaces** (hosted): the product's owner workspace, rolled up. (Not: each
+   sub-tenant on its own plan, or credits drawn from the product.)
+3. **Products as data.** A product record created by an admin. (Not: a `VerticalProvisioner` in code per product.)
+4. **The AI disclosure on lean turns.** Kept on every turn a person reads; the product may render it in its own words.
+5. **Per-request model choice.** From an allow-list on the product's key. (Not: the agent's `model_config` only, or
+   free choice.)
+6. **End-user identity.** Asserted by the product's server key; the product is responsible for consent. (Not:
+   Automatos-issued end-user tokens.)
+7. **Memory profiles.** A small seeded set (`general`, `customer`, `incident`, `case`) plus workspace-defined ones.
 8. **Signed completion callbacks with the run id, and the fake `POST /api/agents/{id}/execute`** (a route that
-   returns a fixed response). In Wave 1 (rec: they are machine-customer basics) vs a separate PRD.
+   returns a fixed response): in Wave 1, as machine-customer basics.
+9. **Composio apps on lean turns.** Not offered until a product needs them: they need the per-turn app search, the
+   main latency cost.
+10. **`model` and app context on the widget chat route.** Not added there; they arrive with Wave 1's headless routes.
+11. **Need-to-know and Auto.** Auto (and every system agent) reads every audience, as the owner's own pages do.
 
 ## 9. Later
 

@@ -1,4 +1,4 @@
-"""Lean turns (PRD draft "Automatos for products", Wave 2, §5.3).
+"""Lean turns (PRD-274, "Automatos for products", Wave 2, §5.3).
 
 A lean agent's chat turn assembles only its own identity, what it recalls, the date,
 the owner's standing rules and the conversation; it is offered only the tools its
