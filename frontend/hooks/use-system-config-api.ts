@@ -317,26 +317,6 @@ export function useTestSystemRoute() {
   })
 }
 
-// Execute system agent
-export function useExecuteSystemAgent() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: ({ agentId, data }: { agentId: string; data: any }) =>
-      apiClient.executeSystemAgent(agentId, data),
-    onSuccess: (data, variables) => {
-      queryClient.invalidateQueries({ queryKey: systemConfigQueryKeys.agentStatus(variables.agentId) })
-      queryClient.invalidateQueries({ queryKey: systemConfigQueryKeys.agentStatistics })
-      toast.success('System agent executed successfully!')
-      return data
-    },
-    onError: (error) => {
-      toast.error(`Failed to execute system agent: ${error.message}`)
-      throw error
-    },
-  })
-}
-
 // Update system learning state
 export function useUpdateSystemLearningState() {
   const queryClient = useQueryClient()

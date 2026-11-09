@@ -1,5 +1,5 @@
 {
-  "route_count": 1023,
+  "route_count": 1022,
   "routes": [
     {
       "method": "GET",
@@ -2684,10 +2684,6 @@
     {
       "method": "GET",
       "path": "/api/system/agent-types"
-    },
-    {
-      "method": "POST",
-      "path": "/api/system/agent/{agent_id}/execute"
     },
     {
       "method": "GET",

@@ -330,9 +330,9 @@ class _FakeReq:
 #     _dispatch_on_assign and the _should_dispatch_on_assign predicate are gone.
 
 def test_create_with_assignee_notifies_dispatch(monkeypatch):
-    from api import board_tasks as bt
+    from api import board_task_create, board_tasks as bt
     notifies = []
-    monkeypatch.setattr(bt, "notify_task_available", lambda db, **kw: notifies.append(kw))
+    monkeypatch.setattr(board_task_create, "notify_task_available", lambda db, **kw: notifies.append(kw))
 
     ctx = _ns(workspace_id=_WS_ID, user=_ns(clerk_user_id="u1", id=1))
     db = _FakeSession(agent=_ns(id=7))
