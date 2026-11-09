@@ -61,3 +61,15 @@ def test_a_false_closing_tag_inside_the_script_does_not_end_it():
     text = '<script>const s="</script-x>"; const x=`{{word}}`;</script>'
     with pytest.raises(BundleError, match="inside a .script. or an event handler"):
         fill_placeholders(text, {"word": "${alert(1)}"}, "t")
+
+
+def test_a_run_of_unclosed_end_tags_is_scanned_in_linear_time():
+    """CodeQL py/polynomial-redos on #1448: the end tag's tail ([^>]*) used to scan to the end
+    of the text from every "</script " without a '>'. It stops at the next '<' now."""
+    import time
+
+    from media_render.composition import _SCRIPT_BODY
+
+    started = time.perf_counter()
+    assert not list(_SCRIPT_BODY.finditer("<script>" + "</script " * 40_000))
+    assert time.perf_counter() - started < 0.5

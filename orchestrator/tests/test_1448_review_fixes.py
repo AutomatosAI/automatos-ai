@@ -145,7 +145,19 @@ def test_the_email_preview_ends_a_tag_only_where_a_browser_does():
     import re
 
     source = inspect.getsource(__import__("modules.tools.formatting.schema_detector", fromlist=["x"]))
-    pattern = re.compile(r"<script\b[^>]*>.*?</script(?=[\t\n\f\r />])[^>]*>", re.DOTALL | re.IGNORECASE)
-    assert r"</script(?=[\t\n\f\r />])[^>]*>" in source and r"</script\b[^>]*>" not in source
+    pattern = re.compile(r"<script\b[^>]*>.*?</script(?=[\t\n\f\r />])[^<>]*>", re.DOTALL | re.IGNORECASE)
+    assert r"</script(?=[\t\n\f\r />])[^<>]*>" in source and r"</script\b[^>]*>" not in source
     stripped = pattern.sub("", '<script>var s = "</script-x>"; leak();</script><p>Hello</p>')
     assert stripped == "<p>Hello</p>"
+
+
+def test_unclosed_end_tags_are_linear_not_quadratic():
+    """CodeQL py/polynomial-redos on #1448: [^>]* after "</script " scanned to the end of the
+    text from every unclosed fragment. Stopping at '<' keeps a 40,000-fragment run fast."""
+    import re
+    import time
+
+    pattern = re.compile(r"<script\b[^>]*>(.*?)</script(?=[\t\n\f\r />])[^<>]*>", re.IGNORECASE | re.DOTALL)
+    started = time.perf_counter()
+    assert not list(pattern.finditer("<script>" + "</script " * 40_000))
+    assert time.perf_counter() - started < 0.5

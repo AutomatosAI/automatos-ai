@@ -61,7 +61,9 @@ _CSS_STRING = re.compile(r"\"([^\"]*)\"|'([^']*)'")
 # name). [^>]* matches any such form, not just whitespace.
 # The end tag's name ends only at whitespace, '/' or '>' (CodeRabbit on #1448): with \b,
 # "</script-x>" (which closes nothing) ended the span early and left the rest unprotected.
-_SCRIPT_BODY = re.compile(r"<script\b[^>]*>(.*?)</script(?=[\t\n\f\r />])[^>]*>", re.IGNORECASE | re.DOTALL)
+# The rest of the end tag stops at the next '<' (CodeQL py/polynomial-redos): [^>]* scanned to
+# the end of the text from every "</script " that had no '>', quadratic in their number.
+_SCRIPT_BODY = re.compile(r"<script\b[^>]*>(.*?)</script(?=[\t\n\f\r />])[^<>]*>", re.IGNORECASE | re.DOTALL)
 _TAG = re.compile(r"<[A-Za-z][^<>]*>")
 _EVENT_HANDLER = re.compile(r"""\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)""", re.IGNORECASE)
 

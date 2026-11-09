@@ -580,11 +580,13 @@ class GenericDataExtractor:
             # before '>' — a browser's tokenizer also closes on "</script foo>"; [^>]*
             # after the name matches that too, so the tag's own source text can't survive into
             # this plain-text preview. The name ends only at whitespace, '/' or '>' (the HTML
-            # tokenizer's rule; \b also stopped at "</script-x>", which closes nothing).
-            text = re.sub(r'<style\b[^>]*>.*?</style(?=[\t\n\f\r />])[^>]*>', '', html, flags=re.DOTALL | re.IGNORECASE)
-            text = re.sub(r'<script\b[^>]*>.*?</script(?=[\t\n\f\r />])[^>]*>', '', text, flags=re.DOTALL | re.IGNORECASE)
+            # tokenizer's rule; \b also stopped at "</script-x>", which closes nothing). The rest
+            # of the end tag stops at the next '<', so a run of unclosed "</script " fragments
+            # is linear, not quadratic (CodeQL py/polynomial-redos).
+            text = re.sub(r'<style\b[^>]*>.*?</style(?=[\t\n\f\r />])[^<>]*>', '', html, flags=re.DOTALL | re.IGNORECASE)
+            text = re.sub(r'<script\b[^>]*>.*?</script(?=[\t\n\f\r />])[^<>]*>', '', text, flags=re.DOTALL | re.IGNORECASE)
             # Remove head section
-            text = re.sub(r'<head\b[^>]*>.*?</head(?=[\t\n\f\r />])[^>]*>', '', text, flags=re.DOTALL | re.IGNORECASE)
+            text = re.sub(r'<head\b[^>]*>.*?</head(?=[\t\n\f\r />])[^<>]*>', '', text, flags=re.DOTALL | re.IGNORECASE)
             # Replace common block elements with newlines
             text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
             text = re.sub(r'</p>', '\n', text, flags=re.IGNORECASE)
