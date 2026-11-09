@@ -58,7 +58,7 @@ def records_the_first_token(stream_llm_call: Stream) -> Stream:
 
 class _TimedChats:
     """The turn's chat service: the service's own, except that an assistant message's
-    ``context_trace`` carries the turn's ``first_token_ms`` (and any other stamp the turn adds)."""
+    ``context_trace`` carries the turn's ``first_token_ms``."""
 
     def __init__(self, chats: Any, chat: Any) -> None:
         self._chats = chats
@@ -69,10 +69,7 @@ class _TimedChats:
 
     def save_message(self, *args: Any, **kwargs: Any) -> Any:
         if kwargs.get("role") == "assistant" and "context_trace" in kwargs:
-            trace = with_first_token(kwargs["context_trace"], self._chat)
-            for stamp in getattr(self._chat, "_trace_stamps", ()):
-                trace = stamp(trace)
-            kwargs = {**kwargs, "context_trace": trace}
+            kwargs = {**kwargs, "context_trace": with_first_token(kwargs["context_trace"], self._chat)}
         return self._chats.save_message(*args, **kwargs)
 
 

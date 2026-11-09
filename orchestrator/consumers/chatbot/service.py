@@ -837,9 +837,9 @@ class StreamingChatService:
     # Message preparation
     # ─────────────────────────────────────────────────────────────────────
 
-    @a_lean_turns_prompt  # Wave 2: a lean turn's granted tools, described
     @autos_prompt_carries_the_brand_kit  # F337 (night 10): the brand kit's rules end Auto's system prompt
     @replies_in_the_persons_locale  # the turn's locale (pt-BR) names the language variant Auto replies in
+    @a_lean_turns_prompt  # Wave 2: a lean turn's granted tools, described
     async def _prepare_messages(
         self,
         messages: List[Dict[str, Any]],
@@ -1405,13 +1405,13 @@ class StreamingChatService:
             yield item
         yield {"_response": await task}
 
-    @no_prefetch_on_a_lean_turn  # Wave 2: none of the automatic reads on a lean agent's turn
     @its_reads_are_receipted  # PRD-256 US-001: the automatic reads fold into one read receipt
     @grounds_the_cards  # F241 (night 8): the turn says which cards the owner named, and the call for each
     @answers_what_needs_you  # F307 (night 9): "what needs me?" reads the board's Needs you first
     @reads_the_waiting_asks  # F439 (night 16): "did it run?" names the cards still waiting for the click
     @reads_what_the_team_found  # F317 (night 9b): the cards that already answer, by number
     @fills_the_named_template  # F351 (night 10b): a template the owner names gets its fields and the rules
+    @no_prefetch_on_a_lean_turn  # Wave 2: none of the automatic reads on a lean agent's turn
     async def _retrieval_first(self, latest_text: str, llm_messages: List[Dict[str, Any]], agent_runtime,
                                chat_id: str, prefetched: List[Tuple[str, Dict[str, Any]]]) -> AsyncGenerator[str, None]:
         """F085-A: search the documents for a question (N17-11: or a drafting turn)
@@ -2471,9 +2471,9 @@ class StreamingChatService:
                 logger.debug("[chat] the turn's workspace could not be resolved for its tool scope", exc_info=True)
         return hidden_scope(hidden_categories_for_workspace(getattr(self, "workspace_id", None), getattr(self, "db", None)))
 
-    @keeps_the_turns_timing  # the saved reply's trace says when the first token came
     @keeps_one_answer_on_screen  # FX-017: the turn records what each streamed call put on the screen
     @answers_on_the_turns_model  # a spoken turn answers on the spoken model; every turn logs its model
+    @keeps_the_turns_timing  # the saved reply's trace says when the first token came
     async def _stream_response_with_agent_scoped(
         self,
         chat_id: str,
