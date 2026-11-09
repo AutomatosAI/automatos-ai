@@ -72,7 +72,8 @@ def erase_my_workspace(
 
 # A purge's own reasons for stopping; any other (an exception's text) is "failed" to the caller,
 # the detail being in the server log (workspace_purge logs it).
-_PUBLIC_SKIP_REASONS = {"workspace_not_found": "workspace_not_found", "not_soft_deleted": "not_soft_deleted"}
+_PUBLIC_SKIP_REASONS = {"workspace_not_found": "workspace_not_found", "not_soft_deleted": "not_soft_deleted",
+                        "memory_erase_failed": "memory_erase_failed"}
 _PUBLIC_SQL_COUNTS = ("workspace_row_deleted", "s3_objects_deleted", "s3_errors")
 
 
