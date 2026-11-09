@@ -107,6 +107,230 @@ const getAgentName = (executionData: any, agentId: number): string => {
   return subtask?.selected_agent?.agent_name || `Agent ${agentId}`
 }
 
+// --- loadExecutionData helpers -------------------------------------------
+// Pure data-derivation steps, extracted so loadExecutionData itself stays a
+// short orchestration of "fetch, derive, setState" (code-shape ratchet).
+
+function buildMemoryActivitiesFromRetrieval(execution: any): MemoryActivity[] {
+  const memActivities: MemoryActivity[] = []
+  const memData = execution.input_data.memory_retrieval
+
+  Object.entries(memData.agent_memories || {}).forEach(([agentId, memories]: [string, any]) => {
+    ;['working_memory', 'short_term', 'long_term'].forEach(type => {
+      const items = memories[type] || []
+      if (items.length > 0) {
+        memActivities.push({
+          id: `mem_${agentId}_${type}`,
+          timestamp: execution.created_at,
+          type: memoryActivityType(type),
+          action: 'retrieve',
+          agentId: parseInt(agentId),
+          agentName: `Agent ${agentId}`,
+          content: `Retrieved ${items.length} ${type.replace('_', ' ')} items`,
+          itemCount: items.length,
+          relevance: 0.85
+        })
+      }
+    })
+  })
+
+  if (memData.collective_memories?.length > 0) {
+    memActivities.push({
+      id: 'mem_collective',
+      timestamp: execution.created_at,
+      type: 'collective',
+      action: 'retrieve',
+      content: `Retrieved ${memData.collective_memories.length} collective memory items`,
+      itemCount: memData.collective_memories.length,
+      relevance: 0.9
+    })
+  }
+
+  return memActivities
+}
+
+function synthesizeMemoryActivitiesFromSubtasks(execution: any, subtasks: any[]): MemoryActivity[] {
+  return subtasks
+    .filter((task: any) => task.selected_agent)
+    .map((task: any, index: number) => ({
+      id: `mem_subtask_${index}`,
+      timestamp: execution.completed_at || execution.started_at || new Date().toISOString(),
+      type: 'working',
+      action: 'retrieve',
+      agentId: task.selected_agent.agent_id,
+      agentName: task.selected_agent.agent_name || `Agent ${task.selected_agent.agent_id}`,
+      content: `Replaying context for subtask: ${task.description?.substring(0, 60)}...`,
+      relevance: 0.8,
+      itemCount: 1
+    }))
+}
+
+// Extract memory activities from execution data, falling back to a
+// subtask-derived synthesis when no memory records were found.
+function deriveMemoryActivities(execution: any, subtasks: any[]): MemoryActivity[] {
+  let generated: MemoryActivity[] = execution?.input_data?.memory_retrieval
+    ? buildMemoryActivitiesFromRetrieval(execution)
+    : []
+
+  if (generated.length === 0 && subtasks.length > 0) {
+    generated = synthesizeMemoryActivitiesFromSubtasks(execution, subtasks)
+  }
+
+  return generated
+}
+
+function buildCommunicationsFromLogs(execution: any): CommunicationEvent[] {
+  const commEvents: CommunicationEvent[] = []
+  execution.orchestrator_logs.forEach((log: string, index: number) => {
+    if (log.includes('Message') || log.includes('communication')) {
+      commEvents.push({
+        id: `comm_${index}`,
+        timestamp: execution.created_at,
+        fromAgent: 'Orchestrator',
+        toAgent: 'Agents',
+        messageType: 'coordination',
+        priority: 'normal',
+        content: log,
+        status: 'sent'
+      })
+    }
+  })
+  return commEvents
+}
+
+function synthesizeCommunicationsFromSubtasks(execution: any, subtasks: any[]): CommunicationEvent[] {
+  const synthesizedComms: CommunicationEvent[] = []
+  subtasks.forEach((task: any, index: number) => {
+    if (!task.selected_agent) {
+      return
+    }
+    synthesizedComms.push({
+      id: `comm_assign_${index}`,
+      timestamp: execution.started_at || new Date().toISOString(),
+      fromAgent: 'Orchestrator',
+      toAgent: task.selected_agent.agent_name || `Agent ${task.selected_agent.agent_id}`,
+      messageType: 'query',
+      priority: task.priority === 'high' ? 'high' : 'normal',
+      content: `Task assigned: ${task.description?.substring(0, 60)}...`,
+      status: 'sent'
+    })
+
+    if (task.execution_result) {
+      synthesizedComms.push({
+        id: `comm_result_${index}`,
+        timestamp: execution.completed_at || new Date().toISOString(),
+        fromAgent: task.selected_agent.agent_name || `Agent ${task.selected_agent.agent_id}`,
+        toAgent: 'Orchestrator',
+        messageType: 'response',
+        priority: task.execution_result.status === 'completed' ? 'normal' : 'high',
+        content: `Task completed: ${task.execution_result.status} (${task.execution_result.tokens_used || 0} tokens)`,
+        status: 'sent'
+      })
+    }
+  })
+  return synthesizedComms
+}
+
+// Extract communication events from execution logs, falling back to a
+// subtask-derived synthesis when no log-based events were found.
+function deriveCommunications(execution: any, subtasks: any[]): CommunicationEvent[] {
+  let generated: CommunicationEvent[] = execution?.orchestrator_logs
+    ? buildCommunicationsFromLogs(execution)
+    : []
+
+  if (generated.length === 0 && subtasks.length > 0) {
+    generated = synthesizeCommunicationsFromSubtasks(execution, subtasks)
+  }
+
+  return generated
+}
+
+// Extract learning insights, or null when the execution carries none (the
+// caller leaves prior learningInsights state untouched in that case).
+function deriveLearningInsights(execution: any): LearningInsight[] | null {
+  if (!execution?.input_data?.learning_system?.updates) {
+    return null
+  }
+
+  const insights: LearningInsight[] = []
+  const learning = execution.input_data.learning_system.updates
+
+  if (learning.agent_performance_updates) {
+    Object.entries(learning.agent_performance_updates).forEach(([agentId, update]: [string, any]) => {
+      insights.push({
+        id: `learn_agent_${agentId}`,
+        timestamp: execution.created_at,
+        type: 'optimization',
+        category: 'Performance',
+        description: `Agent ${agentId} performance updated: Success rate ${(update.success_rate * 100).toFixed(1)}%`,
+        impact: update.success_rate > 0.8 ? 'high' : 'medium',
+        confidence: update.confidence || 0.75
+      })
+    })
+  }
+
+  if (learning.workflow_pattern_updates?.pattern_recorded) {
+    insights.push({
+      id: 'learn_pattern',
+      timestamp: execution.created_at,
+      type: 'pattern',
+      category: 'Workflow',
+      description: 'New workflow pattern recorded for future optimization',
+      impact: 'medium',
+      confidence: 0.8
+    })
+  }
+
+  return insights
+}
+
+// Aggregate metrics from the execution's subtasks, or the all-zero shape
+// when there are none.
+function deriveOrchestrationMetrics(
+  execution: any,
+  subtasks: any[],
+  memoryActivityCount: number,
+  communicationCount: number
+): OrchestrationMetrics {
+  if (subtasks.length === 0) {
+    return {
+      totalTasks: 0,
+      completedTasks: 0,
+      activeAgents: 0,
+      memoryOperations: 0,
+      messagesExchanged: 0,
+      patternsLearned: 0,
+      avgResponseTime: 0,
+      successRate: 0,
+      tokenUsage: 0,
+      estimatedCost: 0
+    }
+  }
+
+  const completedSubtasks = subtasks.filter((t: any) => t.execution_result?.status === 'completed')
+  const uniqueAgents = new Set(subtasks.map((t: any) => t.selected_agent?.agent_id).filter(Boolean))
+  const totalTokens = subtasks.reduce((sum: number, task: any) =>
+    sum + (task.execution_result?.tokens_used || 0), 0)
+  const successRate = subtasks.length > 0 ? completedSubtasks.length / subtasks.length : 0
+  const avgTime = subtasks.length > 0
+    ? subtasks.reduce((sum: number, t: any) => sum + (t.execution_result?.execution_time_ms || 0), 0) / subtasks.length
+    : 0
+  const estimatedCost = totalTokens * 0.00001
+
+  return {
+    totalTasks: subtasks.length,
+    completedTasks: completedSubtasks.length,
+    activeAgents: uniqueAgents.size,
+    memoryOperations: memoryActivityCount,
+    messagesExchanged: communicationCount,
+    patternsLearned: execution.input_data?.memory_consolidation?.results?.patterns_extracted || 0,
+    avgResponseTime: avgTime,
+    successRate,
+    tokenUsage: totalTokens,
+    estimatedCost
+  }
+}
+
 export function EnhancedOrchestratorView({ 
   workflowId, 
   executionId,
@@ -256,198 +480,25 @@ export function EnhancedOrchestratorView({
   const loadExecutionData = async (execId: string) => {
     try {
       setIsLoading(true)
-      
+
       // Get execution details
       const execution = await apiClient.getWorkflowExecution(execId.toString()) as any
-
-      // Extract memory activities from execution data
       const subtasks = execution?.output_data?.subtasks || []
-      let generatedMemoryActivities: MemoryActivity[] = []
-      if (execution?.input_data?.memory_retrieval) {
-        const memActivities: MemoryActivity[] = []
-        const memData = execution.input_data.memory_retrieval
-        
-        // Process agent memories
-        Object.entries(memData.agent_memories || {}).forEach(([agentId, memories]: [string, any]) => {
-          ['working_memory', 'short_term', 'long_term'].forEach(type => {
-            const items = memories[type] || []
-            if (items.length > 0) {
-              memActivities.push({
-                id: `mem_${agentId}_${type}`,
-                timestamp: execution.created_at,
-                type: memoryActivityType(type),
-                action: 'retrieve',
-                agentId: parseInt(agentId),
-                agentName: `Agent ${agentId}`,
-                content: `Retrieved ${items.length} ${type.replace('_', ' ')} items`,
-                itemCount: items.length,
-                relevance: 0.85
-              })
-            }
-          })
-        })
-        
-        // Process collective memories
-        if (memData.collective_memories?.length > 0) {
-          memActivities.push({
-            id: 'mem_collective',
-            timestamp: execution.created_at,
-            type: 'collective',
-            action: 'retrieve',
-            content: `Retrieved ${memData.collective_memories.length} collective memory items`,
-            itemCount: memData.collective_memories.length,
-            relevance: 0.9
-          })
-        }
-        
-        generatedMemoryActivities = memActivities
-      }
 
-      // Extract communication events from execution logs
-      let generatedCommunications: CommunicationEvent[] = []
-      if (execution?.orchestrator_logs) {
-        const commEvents: CommunicationEvent[] = []
-        execution.orchestrator_logs.forEach((log: string, index: number) => {
-          if (log.includes('Message') || log.includes('communication')) {
-            commEvents.push({
-              id: `comm_${index}`,
-              timestamp: execution.created_at,
-              fromAgent: 'Orchestrator',
-              toAgent: 'Agents',
-              messageType: 'coordination',
-              priority: 'normal',
-              content: log,
-              status: 'sent'
-            })
-          }
-        })
-        generatedCommunications = commEvents
-      }
+      const generatedMemoryActivities = deriveMemoryActivities(execution, subtasks)
+      const generatedCommunications = deriveCommunications(execution, subtasks)
 
-      // Extract learning insights
-      if (execution?.input_data?.learning_system?.updates) {
-        const insights: LearningInsight[] = []
-        const learning = execution.input_data.learning_system.updates
-        
-        if (learning.agent_performance_updates) {
-          Object.entries(learning.agent_performance_updates).forEach(([agentId, update]: [string, any]) => {
-            insights.push({
-              id: `learn_agent_${agentId}`,
-              timestamp: execution.created_at,
-              type: 'optimization',
-              category: 'Performance',
-              description: `Agent ${agentId} performance updated: Success rate ${(update.success_rate * 100).toFixed(1)}%`,
-              impact: update.success_rate > 0.8 ? 'high' : 'medium',
-              confidence: update.confidence || 0.75
-            })
-          })
-        }
-        
-        if (learning.workflow_pattern_updates?.pattern_recorded) {
-          insights.push({
-            id: 'learn_pattern',
-            timestamp: execution.created_at,
-            type: 'pattern',
-            category: 'Workflow',
-            description: 'New workflow pattern recorded for future optimization',
-            impact: 'medium',
-            confidence: 0.8
-          })
-        }
-        
+      const insights = deriveLearningInsights(execution)
+      if (insights) {
         setLearningInsights(insights)
-      }
-
-      // Fallback: if no memory/communication records were found, synthesize them from subtasks
-      if (generatedMemoryActivities.length === 0 && subtasks.length > 0) {
-        generatedMemoryActivities = subtasks
-          .filter((task: any) => task.selected_agent)
-          .map((task: any, index: number) => ({
-            id: `mem_subtask_${index}`,
-            timestamp: execution.completed_at || execution.started_at || new Date().toISOString(),
-            type: 'working',
-            action: 'retrieve',
-            agentId: task.selected_agent.agent_id,
-            agentName: task.selected_agent.agent_name || `Agent ${task.selected_agent.agent_id}`,
-            content: `Replaying context for subtask: ${task.description?.substring(0, 60)}...`,
-            relevance: 0.8,
-            itemCount: 1
-          }))
-      }
-
-      if (generatedCommunications.length === 0 && subtasks.length > 0) {
-        const synthesizedComms: CommunicationEvent[] = []
-        subtasks.forEach((task: any, index: number) => {
-          if (!task.selected_agent) {
-            return
-          }
-          synthesizedComms.push({
-            id: `comm_assign_${index}`,
-            timestamp: execution.started_at || new Date().toISOString(),
-            fromAgent: 'Orchestrator',
-            toAgent: task.selected_agent.agent_name || `Agent ${task.selected_agent.agent_id}`,
-            messageType: 'query',
-            priority: task.priority === 'high' ? 'high' : 'normal',
-            content: `Task assigned: ${task.description?.substring(0, 60)}...`,
-            status: 'sent'
-          })
-
-          if (task.execution_result) {
-            synthesizedComms.push({
-              id: `comm_result_${index}`,
-              timestamp: execution.completed_at || new Date().toISOString(),
-              fromAgent: task.selected_agent.agent_name || `Agent ${task.selected_agent.agent_id}`,
-              toAgent: 'Orchestrator',
-              messageType: 'response',
-              priority: task.execution_result.status === 'completed' ? 'normal' : 'high',
-              content: `Task completed: ${task.execution_result.status} (${task.execution_result.tokens_used || 0} tokens)`,
-              status: 'sent'
-            })
-          }
-        })
-        generatedCommunications = synthesizedComms
       }
 
       setMemoryActivities(generatedMemoryActivities.slice(0, 50))
       setCommunications(generatedCommunications.slice(0, 50))
 
-      if (subtasks.length > 0) {
-        const completedSubtasks = subtasks.filter((t: any) => t.execution_result?.status === 'completed')
-        const uniqueAgents = new Set(subtasks.map((t: any) => t.selected_agent?.agent_id).filter(Boolean))
-        const totalTokens = subtasks.reduce((sum: number, task: any) =>
-          sum + (task.execution_result?.tokens_used || 0), 0)
-        const successRate = subtasks.length > 0 ? completedSubtasks.length / subtasks.length : 0
-        const avgTime = subtasks.length > 0
-          ? subtasks.reduce((sum: number, t: any) => sum + (t.execution_result?.execution_time_ms || 0), 0) / subtasks.length
-          : 0
-        const estimatedCost = totalTokens * 0.00001
-
-        setMetrics({
-          totalTasks: subtasks.length,
-          completedTasks: completedSubtasks.length,
-          activeAgents: uniqueAgents.size,
-          memoryOperations: generatedMemoryActivities.length,
-          messagesExchanged: generatedCommunications.length,
-          patternsLearned: execution.input_data?.memory_consolidation?.results?.patterns_extracted || 0,
-          avgResponseTime: avgTime,
-          successRate,
-          tokenUsage: totalTokens,
-          estimatedCost
-        })
-      } else {
-        setMetrics({
-          totalTasks: 0,
-          completedTasks: 0,
-          activeAgents: 0,
-          memoryOperations: 0,
-          messagesExchanged: 0,
-          patternsLearned: 0,
-          avgResponseTime: 0,
-          successRate: 0,
-          tokenUsage: 0,
-          estimatedCost: 0
-        })
-      }
+      setMetrics(deriveOrchestrationMetrics(
+        execution, subtasks, generatedMemoryActivities.length, generatedCommunications.length
+      ))
 
       setHistoricalData({ execution })
     } catch (error) {
