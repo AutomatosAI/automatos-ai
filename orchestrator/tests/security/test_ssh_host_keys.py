@@ -4,9 +4,6 @@ Covers the trust-on-first-use policy: a never-seen host key is recorded and
 persisted, and a second client loading the same known_hosts file sees it.
 """
 
-import importlib
-from unittest.mock import MagicMock
-
 import paramiko
 import pytest
 
