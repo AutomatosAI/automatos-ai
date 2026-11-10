@@ -11,14 +11,19 @@ Anthropic fetches. The Messages API answers 400 to an ``image_url`` block, and t
 block that is empty or only whitespace, so a blank text block is left out.
 """
 
+import asyncio
 import base64
+import dataclasses
 import json
 import logging
-from typing import Dict, Any, List, Optional
+import threading
+import time
+from typing import Awaitable, Callable, Dict, Any, List, Optional
 
 import httpx
 
 from config import config
+from .anthropic_stream import AnthropicStreamInterrupted, read_stream, spent
 from .base import BaseLLMProvider, LLMResponse, accepts_sampling_params, request_max_tokens, run_blocking
 from .image_blocks import decoded_image
 from .shared_clients import shared_client
@@ -44,6 +49,14 @@ _HTTPS = "https://"
 # What the model reads where an image couldn't be sent: it says so, never guesses (PRD-223 S0.3).
 _IMAGE_LEFT_OUT = ("[IMAGE UNAVAILABLE] An image was attached here, but it could not be shown to you ({why}). "
                    "Do not guess what it shows; say you could not see it.")
+# The values of ANTHROPIC_STREAMING that let a listened-to call stream (``streams_now``); any
+# other value, "off" included, answers whole.
+_STREAM_ALL, _STREAM_SPOKEN, _STREAM_QUICK_ASK = "all", "spoken", "quick-ask"
+# The end of a stream's text on the queue between the reader thread and the event loop.
+_END = object()
+_MS = 1000
+_NO_KEY = ("Anthropic API key not configured. Cannot generate response. "
+           "Please configure 'development_anthropic' credential or set ANTHROPIC_API_KEY env var.")
 
 
 def _left_out(why: str) -> Dict[str, Any]:
@@ -223,6 +236,25 @@ def _usage_dict(usage: Any) -> Dict[str, int]:
     }
 
 
+def _ended(task: "asyncio.Future[Any]") -> None:
+    """Read a finished stream producer's exception, so one nobody awaits any more (its caller
+    was cancelled, or its listener raised) never warns "exception was never retrieved"."""
+    if not task.cancelled() and task.exception() is not None:
+        logger.debug("[anthropic] a stream nobody waits for ended with %s", type(task.exception()).__name__)
+
+
+def _log_retry(model: str, exc: AnthropicStreamInterrupted) -> None:
+    """A stream that broke before any text is asked again whole: its first attempt's tokens are
+    booked nowhere, so they are logged here under a tag a search finds."""
+    fresh, cache_read, cache_write = spent(exc.partial_response)
+    logger.warning("[anthropic] stream retried=true model=%s why=%s input=%s cache_read=%s cache_write=%s",
+                   model, exc.why, fresh, cache_read, cache_write)
+
+
+def _ms(start: float, end: Optional[float]) -> Optional[int]:
+    return None if end is None else int((end - start) * _MS)
+
+
 class AnthropicProvider(BaseLLMProvider):
     """Anthropic Claude provider implementation"""
     
@@ -368,11 +400,7 @@ class AnthropicProvider(BaseLLMProvider):
 
     async def generate_response(self, messages: List[Dict[str, str]], tools: List[Dict] = None) -> LLMResponse:
         """Generate response using Anthropic API without blocking the event loop"""
-        if self.client is None:
-            raise ValueError(
-                "Anthropic API key not configured. Cannot generate response. "
-                "Please configure 'development_anthropic' credential or set ANTHROPIC_API_KEY env var."
-            )
+        self._require_client()
 
         from core.llm.request_scope import is_headless_run
 
@@ -394,6 +422,102 @@ class AnthropicProvider(BaseLLMProvider):
         except Exception as e:
             logger.error(f"Anthropic API error: {e}")
             raise
+
+    def _require_client(self) -> None:
+        """Fail a call clearly when no API key was configured (the client is built without one)."""
+        if self.client is None:
+            raise ValueError(_NO_KEY)
+
+    def streams_now(self) -> bool:
+        """Whether a listened-to call streams now (``ANTHROPIC_STREAMING``): every call on "all", a
+        spoken turn's on "spoken", a quick ask's on "quick-ask"; never a headless agent run, whose
+        request is the beta one (context editing, the memory tool)."""
+        from core.llm.request_scope import QUICK_ASK, is_headless_run, spoken_turn
+
+        if is_headless_run():
+            return False
+        mode, surface = config.ANTHROPIC_STREAMING, spoken_turn()
+        return mode == _STREAM_ALL or (mode == _STREAM_SPOKEN and bool(surface)) or (
+            mode == _STREAM_QUICK_ASK and surface == QUICK_ASK)
+
+    @property
+    def stream_response(self) -> Optional[Callable[..., Awaitable[LLMResponse]]]:
+        """The streamed call, ``stream_response(messages, tools, on_delta=...)``, when this call
+        streams (``streams_now``); None when it answers whole. A caller that picks the stream by
+        looking for this attribute (``LLMManager.generate_response``) therefore finds none while
+        ``ANTHROPIC_STREAMING`` is off or does not cover the turn, and calls ``generate_response``
+        as it did before the stream existed."""
+        return self._stream_response if self.streams_now() else None
+
+    async def _stream_response(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict]] = None,
+                               on_delta: Optional[Callable[[str, str], Awaitable[None]]] = None) -> LLMResponse:
+        """Generate with the SDK's streaming helper, handing each text delta to
+        ``on_delta("text", text)`` as it arrives, and return the ``LLMResponse``
+        ``generate_response`` would: built by the same ``_llm_response`` from the SDK's
+        accumulated message. ``streamed`` is True when text went to ``on_delta``.
+
+        A stream that breaks before any text is asked again whole, once (an overload sent as a
+        stream event gets no SDK retry); one that breaks after text raises
+        ``AnthropicStreamInterrupted``, because a second attempt would say the opening twice.
+        The stream closes its own response, never the client: the client may be shared with
+        other calls (``LLM_CLIENT_REUSE``).
+        """
+        self._require_client()
+        started = time.monotonic()
+        first_text: Optional[float] = None
+
+        async def _heard(text: str) -> None:
+            nonlocal first_text
+            first_text = first_text if first_text is not None else time.monotonic()
+            if on_delta is not None:
+                await on_delta("text", text)
+
+        try:
+            response = await self._read_live(messages, tools, _heard)
+        except AnthropicStreamInterrupted as exc:
+            if first_text is not None:
+                raise
+            _log_retry(self.config.model, exc)
+            return await self.generate_response(messages, tools)
+        logger.info("[anthropic] stream model=%s first_text_ms=%s total_ms=%s retried=false", self.config.model,
+                    _ms(started, first_text), _ms(started, time.monotonic()))
+        return dataclasses.replace(response, streamed=first_text is not None and on_delta is not None)
+
+    async def _read_live(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict]],
+                         heard: Callable[[str], Awaitable[None]]) -> LLMResponse:
+        """One stream, read in a worker thread; each text delta crosses to the event loop through
+        a queue and goes to ``heard`` in the order it came. Returns the reader's reply, or raises
+        what it raised. On the way out (also when cancelled, or when ``heard`` raises) the reader
+        is told to stop and is NOT waited for: it sees that at its next stream event and closes
+        its response, which can be as late as the SDK's read timeout on a stalled connection."""
+        system_message, turns = self._convert_messages_to_anthropic_format(messages)
+        cache_prefix = self._extract_cache_prefix(messages)
+        loop, handoff, stop = asyncio.get_running_loop(), asyncio.Queue(), threading.Event()
+
+        def _open() -> Any:  # runs in the worker thread: this call's budget is read there (F196)
+            return self.client.messages.stream(
+                **self._request_kwargs(system_message, turns, cache_prefix, tools, False))
+
+        def _emit(text: str) -> None:
+            try:
+                loop.call_soon_threadsafe(handoff.put_nowait, text)
+            except RuntimeError:  # the loop is closed (an Auto Live call that ended): nobody listens
+                stop.set()
+
+        async def _produce() -> Optional[LLMResponse]:
+            try:
+                return await run_blocking(read_stream, _open, _emit, stop.is_set, self._llm_response)
+            finally:
+                loop.call_soon_threadsafe(handoff.put_nowait, _END)
+
+        producer = asyncio.ensure_future(_produce())
+        producer.add_done_callback(_ended)
+        try:
+            while (text := await handoff.get()) is not _END:
+                await heard(text)
+            return await producer
+        finally:
+            stop.set()
 
     def _request_kwargs(self, system_message: Any, user_messages: List[Dict[str, Any]],
                         cache_prefix: Optional[str], tools: Optional[List[Dict]], headless: bool) -> Dict[str, Any]:
@@ -451,12 +575,8 @@ class AnthropicProvider(BaseLLMProvider):
 
     def generate_response_sync(self, messages: List[Dict[str, str]]) -> LLMResponse:
         """Generate response using Anthropic API (synchronous)"""
-        if self.client is None:
-            raise ValueError(
-                "Anthropic API key not configured. Cannot generate response. "
-                "Please configure 'development_anthropic' credential or set ANTHROPIC_API_KEY env var."
-            )
-        
+        self._require_client()
+
         try:
             system_message, user_messages = self._convert_messages_to_anthropic_format(messages)
             

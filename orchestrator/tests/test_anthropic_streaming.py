@@ -1,4 +1,5 @@
-"""Anthropic streaming (voice latency B): the switch and the spoken-surface flag (B-1).
+"""Anthropic streaming (voice latency B): the switch and the spoken-surface flag (B-1), and the
+client's streamed call (B-2).
 
 ``ANTHROPIC_STREAMING`` chooses which turns' Anthropic calls hand their text over as it is
 generated: ``off`` (the default), ``quick-ask``, ``spoken`` or ``all``. The client knows a turn's
@@ -13,13 +14,32 @@ surface from a context variable (``core.llm.request_scope``), set where the turn
   without an agent factory is marked and put back the same way.
 * Auto Live marks its turn ``live`` around its frame loop and puts the flag back in a ``finally``.
 
-DB-free: no database, model, SDK or socket.
+B-2, ``AnthropicProvider.stream_response`` and ``streams_now``:
+
+* Text reaches the listener as it comes, and the reply is the one the whole call returns (text,
+  tool calls, stop reason, usage with the cache counts, model) but for ``streamed``. The request
+  is the whole call's request, with this call's budget.
+* A refusal before the stream opens is the SDK's own error. A stream that breaks before any text
+  is asked again whole, once; after text it fails the call with one fixed sentence that says
+  nothing of the provider's. A reader nobody listens to any more stops and closes its stream.
+* ``streams_now`` follows ``ANTHROPIC_STREAMING`` and the turn's surface; a headless run never
+  streams. The client offers ``stream_response`` only to a call that streams: to any other it is
+  None, so a caller that looks for it answers whole. The B-2 cases below run with the switch on
+  ``all`` (``_the_switch_lets_every_call_stream``); a case about another value sets its own.
+
+The stand-ins are in ``tests/helpers_anthropic_stream.py``. The same call through the real SDK,
+over recorded server-sent events, is ``tests/test_anthropic_streaming_real_sdk.py``.
+
+No database, no model, no SDK call and no socket.
 """
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import inspect
 import json
+import logging
+import threading
 from pathlib import Path
 from types import SimpleNamespace as NS
 
@@ -28,7 +48,15 @@ import pytest
 from config import config
 from consumers.chatbot import spoken_model as sm
 from core.llm import request_scope
+from core.llm.clients.anthropic_client import AnthropicProvider
+from core.llm.clients.anthropic_stream import INTERRUPTED, NO_STOP_REASON, AnthropicStreamInterrupted, read_stream
 from core.llm.request_scope import LIVE, QUICK_ASK, set_spoken_turn, spoken_turn
+from tests.helpers_anthropic_stream import (
+    CACHED_PREFIX, CALL_BUDGET, CLIENT_LOGGER, CONFIG_MAX_TOKENS, DROPPED, FAILOVER_MODEL, MESSAGES, MODEL,
+    OVERLOADED, STREAM_LOGGER, SYSTEM, TOOL_INPUT, TOOLS, USAGE_AS_BOOKED, WAIT_SECONDS, FakeStream,
+    FakeStreamManager, ProviderError, Refused, interrupted_call, lines_of, listener, provider_on, reply_message,
+    streamed_call, text_of, tool_call,
+)
 
 ORCH = Path(__file__).resolve().parents[1]
 AUTO = 337
@@ -174,3 +202,427 @@ def test_auto_live_marks_its_turn():
     assert source[frames:put_back].rstrip().endswith("finally:")
     assert voice_retell.set_spoken_turn is request_scope.set_spoken_turn
     assert voice_retell.LIVE == LIVE
+
+
+# =========================================================================== B-2: the streamed call
+
+@pytest.fixture(autouse=True)
+def _the_switch_lets_every_call_stream(monkeypatch):
+    """The client offers its streamed call only when ``ANTHROPIC_STREAMING`` covers the call; the
+    code default is ``off``. A test about another value sets it itself, after this."""
+    monkeypatch.setattr(config, "ANTHROPIC_STREAMING", "all")
+
+
+def _text_only():
+    return reply_message(text_of("You have three open tasks."))
+
+
+def _text_then_a_tool():
+    return reply_message(text_of("Let me check that."), tool_call("toolu_1"), stop_reason="tool_use")
+
+
+def _two_tools_and_no_text():
+    return reply_message(tool_call("toolu_1"), tool_call("toolu_2", "platform_list_people"), stop_reason="tool_use")
+
+
+def _text_events(message):
+    return [text_of(block.text) for block in message.content if block.type == "text"]
+
+
+# --------------------------------------------------------------------------- text, reply, request
+
+
+def test_text_reaches_the_listener_as_it_comes():
+    stream = FakeStream([text_of("You have "), text_of("three open tasks.")], _text_only())
+    provider = provider_on(stream)
+
+    response, heard = streamed_call(provider)
+
+    assert heard == [("text", "You have "), ("text", "three open tasks.")]
+    assert response.content == "You have three open tasks."
+    assert response.streamed is True
+    assert stream.exited is True
+    provider.client.messages.create.assert_not_called()
+
+
+@pytest.mark.parametrize("final", [_text_only, _text_then_a_tool, _two_tools_and_no_text])
+def test_the_streamed_reply_is_the_reply_the_whole_call_returns(final):
+    message = final()
+    whole = asyncio.run(provider_on(whole=message).generate_response(MESSAGES, TOOLS))
+
+    streamed, heard = streamed_call(provider_on(FakeStream(_text_events(message), message)), tools=TOOLS)
+
+    assert dataclasses.replace(streamed, streamed=False) == whole
+    assert streamed.streamed is bool(heard) and whole.streamed is False
+    assert (streamed.model, streamed.provider, streamed.finish_reason) == (MODEL, "anthropic", message.stop_reason)
+    assert streamed.usage == USAGE_AS_BOOKED
+    calls = [block for block in message.content if block.type == "tool_use"]
+    assert [call["function"]["arguments"] for call in streamed.tool_calls or []] == [
+        json.dumps(TOOL_INPUT) for _ in calls]
+    assert [call["id"] for call in streamed.tool_calls or []] == [block.id for block in calls]
+
+
+def test_a_round_of_tool_calls_only_is_not_marked_streamed():
+    message = _two_tools_and_no_text()
+
+    response, heard = streamed_call(provider_on(FakeStream([], message)), tools=TOOLS)
+
+    assert heard == []
+    assert response.streamed is False
+    assert response.finish_reason == "tool_use"
+    assert [call["function"]["name"] for call in response.tool_calls] == [
+        "platform_list_tasks", "platform_list_people"]
+
+
+def test_usage_carries_the_cache_counts():
+    response, _ = streamed_call(provider_on(FakeStream([text_of("ok")], reply_message(text_of("ok")))))
+
+    assert response.usage["prompt_tokens"] == 1010
+    assert response.usage["completion_tokens"] == 5
+    assert response.usage["cache_read_tokens"] == 900
+    assert response.usage["cache_write_tokens"] == 100
+
+
+def test_text_nobody_listens_to_is_read_and_not_marked_streamed():
+    provider = provider_on(FakeStream([text_of("ok")], reply_message(text_of("ok"))))
+
+    response = asyncio.run(provider.stream_response(MESSAGES, None, on_delta=None))
+
+    assert (response.content, response.streamed) == ("ok", False)
+
+
+def test_the_streamed_request_is_the_whole_calls_request():
+    from core.llm.prompt_cache import count_cache_breakpoints
+
+    message = _text_only()
+    provider = provider_on(FakeStream(_text_events(message), message), whole=message)
+
+    asyncio.run(provider.generate_response(MESSAGES, TOOLS))
+    streamed_call(provider, tools=TOOLS)
+
+    sent = provider.client.messages.stream.call_args.kwargs
+    assert sent == provider.client.messages.create.call_args.kwargs
+    assert provider.client.messages.stream.call_args.args == ()
+    assert (sent["model"], sent["max_tokens"]) == (MODEL, CONFIG_MAX_TOKENS)
+    assert [block["text"] for block in sent["system"]] == [CACHED_PREFIX, SYSTEM[len(CACHED_PREFIX):]]
+    assert count_cache_breakpoints(sent["system"]) == 1 and "cache_control" in sent["system"][0]
+    assert sent["messages"] == [{"role": "user", "content": "What is open?"}]
+    assert [tool["name"] for tool in sent["tools"]] == ["platform_list_tasks"]
+    assert "temperature" not in sent and "stream" not in sent
+
+
+def test_a_streamed_request_sends_this_calls_budget():
+    from core.llm.output_budget import call_budget
+
+    provider = provider_on(FakeStream([text_of("ok")], reply_message(text_of("ok"))))
+
+    async def run():
+        with call_budget(CALL_BUDGET):
+            await provider.stream_response(MESSAGES, None, on_delta=None)
+
+    asyncio.run(run())
+
+    assert provider.client.messages.stream.call_args.kwargs["max_tokens"] == CALL_BUDGET   # not the config's
+
+
+def test_thinking_and_tool_json_events_are_not_text():
+    events = [NS(type="message_start"), NS(type="thinking", thinking="The owner wants the list."),
+              NS(type="input_json", partial_json='{"status"'),
+              NS(type="content_block_delta", delta=NS(type="text_delta", text="raw")),
+              NS(type="text", text=""), NS(type="message_delta"), NS(type="message_stop")]
+
+    response, heard = streamed_call(provider_on(FakeStream(events, _text_then_a_tool())), tools=TOOLS)
+
+    assert heard == []
+    assert response.streamed is False
+    assert response.reasoning is None
+
+
+def test_a_call_with_no_key_fails_clearly_whole_and_streamed():
+    provider = provider_on()
+    provider.client = None
+
+    for call in (provider.generate_response(MESSAGES), provider.stream_response(MESSAGES)):
+        with pytest.raises(ValueError, match="Anthropic API key not configured"):
+            asyncio.run(call)
+    with pytest.raises(ValueError, match="Anthropic API key not configured"):
+        provider.generate_response_sync(MESSAGES)
+
+
+# --------------------------------------------------------------------------- refusals and breaks
+
+
+def test_a_refusal_before_the_stream_opens_is_the_sdks_own_error():
+    refusal = Refused("rate limited")
+    stream = FakeStream([text_of("never read")], _text_only())
+    provider = provider_on(stream, refusal=refusal)
+    heard, on_delta = listener()
+
+    with pytest.raises(Refused) as caught:
+        asyncio.run(provider.stream_response(MESSAGES, None, on_delta=on_delta))
+
+    assert caught.value is refusal
+    assert heard == [] and stream.read == 0
+    provider.client.messages.create.assert_not_called()
+
+
+def test_a_stream_that_breaks_before_any_text_is_asked_again_whole(caplog):
+    caplog.set_level(logging.INFO)
+    stream = FakeStream([RuntimeError(DROPPED)], snapshot=reply_message(stop_reason=None))
+    provider = provider_on(stream, whole=_text_only())
+
+    response, heard = streamed_call(provider)
+
+    assert heard == []
+    assert (response.content, response.streamed) == ("You have three open tasks.", False)
+    assert provider.client.messages.create.call_count == 1
+    assert provider.client.messages.stream.call_count == 1
+    (retry,) = lines_of(caplog, CLIENT_LOGGER)
+    assert retry == (f"[anthropic] stream retried=true model={MODEL} why=RuntimeError "
+                     "input=10 cache_read=900 cache_write=100")
+    assert stream.exited is True
+
+
+def test_a_stream_that_breaks_after_text_fails_the_call():
+    stream = FakeStream([text_of("You have "), RuntimeError(DROPPED)],
+                         snapshot=reply_message(text_of("You have "), stop_reason=None))
+    provider = provider_on(stream, whole=_text_only())
+
+    error, heard = interrupted_call(provider)
+
+    assert heard == [("text", "You have ")]
+    assert str(error) == INTERRUPTED and error.why == "RuntimeError"
+    assert error.partial_response.content == "You have "
+    assert error.partial_response.usage == USAGE_AS_BOOKED
+    assert isinstance(error.__cause__, RuntimeError) and str(error.__cause__) == DROPPED
+    provider.client.messages.create.assert_not_called()
+    assert stream.exited is True
+
+
+def test_a_stream_that_ends_with_no_stop_reason_is_interrupted():
+    cut_short = reply_message(text_of("You have "), stop_reason=None)
+    provider = provider_on(FakeStream([text_of("You have ")], cut_short))
+
+    error, heard = interrupted_call(provider)
+
+    assert heard == [("text", "You have ")]
+    assert error.why == NO_STOP_REASON and error.__cause__ is None
+    assert error.partial_response.content == "You have "
+    provider.client.messages.create.assert_not_called()
+
+
+def test_the_interruption_says_nothing_of_the_providers(caplog, monkeypatch):
+    from consumers.chatbot.turn_errors import describe_turn_error
+    from core.llm import failover
+    from core.llm.manager import LLMManager
+
+    caplog.set_level(logging.WARNING, logger=STREAM_LOGGER)
+    monkeypatch.setattr(config, "LLM_FAILOVER_MODEL", FAILOVER_MODEL)
+    cause = ProviderError(OVERLOADED)
+    stream = FakeStream([text_of("You have "), cause], snapshot=reply_message(text_of("You have "), stop_reason=None))
+
+    error, _ = interrupted_call(provider_on(stream))
+
+    assert str(error) == INTERRUPTED
+    said = describe_turn_error(error).message
+    assert INTERRUPTED in said
+    assert "{" not in said and "request_id" not in said and "req_" not in said
+    assert LLMManager._is_retriable_model_error(object.__new__(LLMManager), error) is False
+    assert failover.failover_for(error, MODEL) is None
+    assert failover.failover_for(Refused("rate limited"), MODEL) == FAILOVER_MODEL   # the failover is set
+    assert error.__cause__ is cause
+    (line,) = lines_of(caplog, STREAM_LOGGER)
+    assert line == (f"[anthropic] stream interrupted why=ProviderError detail={OVERLOADED} "
+                    "input=10 cache_read=900 cache_write=100")
+
+
+def test_an_error_that_could_quote_the_model_is_logged_by_its_name_only(caplog):
+    """The SDK raises a plain ValueError that quotes the tool JSON the model wrote."""
+    caplog.set_level(logging.DEBUG)
+    quoted = 'Unable to parse tool parameter JSON from model. JSON: {"to": "sam@example.com"'
+    stream = FakeStream([text_of("Sending. "), ValueError(quoted)],
+                         snapshot=reply_message(text_of("Sending. "), stop_reason=None))
+
+    error, _ = interrupted_call(provider_on(stream))
+
+    (line,) = lines_of(caplog, STREAM_LOGGER)
+    assert line == "[anthropic] stream interrupted why=ValueError detail=- input=10 cache_read=900 cache_write=100"
+    assert "sam@example.com" not in caplog.text and "Sending." not in caplog.text
+    assert str(error.__cause__) == quoted
+
+
+@pytest.mark.parametrize("snapshot, to_response", [
+    (AssertionError(), AnthropicProvider._llm_response),
+    (reply_message(stop_reason=None), lambda message: (_ for _ in ()).throw(TypeError("not a message"))),
+], ids=["the snapshot asserts", "the reply cannot be built"])
+def test_a_bad_snapshot_never_masks_the_interruption(snapshot, to_response, caplog):
+    caplog.set_level(logging.WARNING, logger=STREAM_LOGGER)
+    stream = FakeStream([RuntimeError(DROPPED)], snapshot=snapshot)
+
+    with pytest.raises(AnthropicStreamInterrupted) as caught:
+        read_stream(lambda: FakeStreamManager(stream), lambda text: None, lambda: False, to_response)
+
+    assert caught.value.partial_response is None
+    assert str(caught.value) == INTERRUPTED
+    assert lines_of(caplog, STREAM_LOGGER) == [
+        "[anthropic] stream interrupted why=RuntimeError detail=- input=None cache_read=None cache_write=None"]
+    assert stream.exited is True
+
+
+# --------------------------------------------------------------------------- a reader nobody hears
+
+
+async def _until(condition):
+    async def poll():
+        while not condition():
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(poll(), WAIT_SECONDS)
+
+
+def test_a_cancelled_reader_closes_its_stream():
+    """The provider only: a real turn's Stop never cancels this coroutine, so this does not prove
+    Stop end to end."""
+    more = threading.Event()
+    stream = FakeStream([text_of("You have "), more, text_of("three "), text_of("open tasks.")], _text_only())
+    provider = provider_on(stream)
+
+    async def run():
+        first = asyncio.Event()
+
+        async def on_delta(kind, text):
+            first.set()
+
+        call = asyncio.ensure_future(provider.stream_response(MESSAGES, None, on_delta=on_delta))
+        await asyncio.wait_for(first.wait(), WAIT_SECONDS)
+        call.cancel()
+        outcomes = await asyncio.wait_for(asyncio.gather(call, return_exceptions=True), WAIT_SECONDS)
+        while_the_reader_waits = (stream.exited, stream.read)
+        more.set()
+        await _until(lambda: stream.exited)
+        return outcomes, while_the_reader_waits
+
+    try:
+        (outcome,), while_the_reader_waits = asyncio.run(run())
+    finally:
+        more.set()
+
+    assert isinstance(outcome, asyncio.CancelledError)
+    assert while_the_reader_waits == (False, 1)       # the call ended without waiting for its thread
+    assert stream.exited is True and stream.read == 2   # one more event, then closed: not read to its end
+
+
+def test_a_closed_loop_stops_the_reader():
+    """``_emit`` sets the stop flag when the loop it hands text to is closed (an ended Auto Live call)."""
+    stop = threading.Event()
+    stream = FakeStream([text_of("You have "), text_of("three "), text_of("open tasks.")], _text_only())
+
+    answer = read_stream(lambda: FakeStreamManager(stream), lambda text: stop.set(), stop.is_set,
+                         AnthropicProvider._llm_response)
+
+    assert answer is None
+    assert stream.exited is True and stream.read == 2
+
+
+def test_the_client_tells_its_reader_to_stop_when_the_loop_is_closed():
+    source = inspect.getsource(AnthropicProvider._read_live)
+    handed_over = source.index("loop.call_soon_threadsafe(handoff.put_nowait, text)")
+    closed = source.index("except RuntimeError:")
+
+    assert handed_over < closed < source.index("stop.set()")
+    assert "await producer" in source.split("finally:")[-2]     # awaited on the normal path only
+    assert source.split("finally:")[-1].strip() == "stop.set()"   # the way out never waits for the thread
+
+
+# --------------------------------------------------------------------------- the switch, per surface
+
+NO_SURFACES, ONLY_QUICK_ASK, BOTH_SPOKEN = (), (QUICK_ASK,), (QUICK_ASK, LIVE)
+EVERY_TURN = (NO_SURFACE, QUICK_ASK, LIVE)
+
+
+def _streams_now(surface, *, headless=False):
+    async def run():
+        set_spoken_turn(surface)
+        if not headless:
+            return provider_on().streams_now()
+        with request_scope.headless_run():
+            return provider_on().streams_now()
+
+    return asyncio.run(run())
+
+
+@pytest.mark.parametrize("mode, streams_on", [
+    ("off", NO_SURFACES), ("quick-ask", ONLY_QUICK_ASK), ("spoken", BOTH_SPOKEN), ("all", EVERY_TURN),
+    ("on", NO_SURFACES), ("", NO_SURFACES), ("QUICK-ASK", NO_SURFACES),
+])
+def test_streams_now_follows_the_switch(monkeypatch, mode, streams_on):
+    monkeypatch.setattr(config, "ANTHROPIC_STREAMING", mode)
+
+    assert {surface for surface in EVERY_TURN if _streams_now(surface)} == set(streams_on)
+    assert [_streams_now(surface, headless=True) for surface in EVERY_TURN] == [False, False, False]
+
+
+def _offered(surface, *, headless=False):
+    """What a caller that looks for the client's ``stream_response`` finds, on this surface."""
+    async def run():
+        set_spoken_turn(surface)
+        if not headless:
+            return getattr(provider_on(), "stream_response", None)
+        with request_scope.headless_run():
+            return getattr(provider_on(), "stream_response", None)
+
+    return asyncio.run(run())
+
+
+@pytest.mark.parametrize("mode, streams_on", [
+    ("off", NO_SURFACES), ("quick-ask", ONLY_QUICK_ASK), ("spoken", BOTH_SPOKEN), ("all", EVERY_TURN),
+    ("on", NO_SURFACES), ("", NO_SURFACES),
+])
+def test_the_client_offers_its_stream_only_to_a_call_that_streams(monkeypatch, mode, streams_on):
+    monkeypatch.setattr(config, "ANTHROPIC_STREAMING", mode)
+
+    assert {surface for surface in EVERY_TURN if _offered(surface) is not None} == set(streams_on)
+    assert [_offered(surface, headless=True) for surface in EVERY_TURN] == [None, None, None]
+
+
+def test_with_the_switch_off_a_listened_call_opens_no_stream(monkeypatch):
+    """The manager picks the stream with ``getattr(provider, "stream_response", None)``: with the
+    switch off it finds none and asks whole, as before the stream existed."""
+    monkeypatch.setattr(config, "ANTHROPIC_STREAMING", "off")
+    message = _text_only()
+    provider = provider_on(FakeStream(_text_events(message), message), whole=message)
+
+    async def run():
+        set_spoken_turn(QUICK_ASK)
+        stream = getattr(provider, "stream_response", None)
+        return stream, await provider.generate_response(MESSAGES, None)
+
+    stream, response = asyncio.run(run())
+
+    assert stream is None
+    assert (response.content, response.streamed) == ("You have three open tasks.", False)
+    provider.client.messages.create.assert_called_once()
+    provider.client.messages.stream.assert_not_called()
+
+
+def test_the_stream_the_client_offers_is_the_streamed_call(monkeypatch):
+    monkeypatch.setattr(config, "ANTHROPIC_STREAMING", "quick-ask")
+    stream = FakeStream([text_of("You have "), text_of("three open tasks.")], _text_only())
+    provider = provider_on(stream)
+    heard, on_delta = listener()
+
+    async def run():
+        set_spoken_turn(QUICK_ASK)
+        return await provider.stream_response(MESSAGES, None, on_delta=on_delta)
+
+    response = asyncio.run(run())
+
+    assert heard == [("text", "You have "), ("text", "three open tasks.")]
+    assert response.streamed is True
+    provider.client.messages.create.assert_not_called()
+
+
+def test_read_stream_needs_no_sdk():
+    source = (ORCH / "core" / "llm" / "clients" / "anthropic_stream.py").read_text(encoding="utf-8")
+
+    assert "import anthropic" not in source and "from anthropic" not in source
