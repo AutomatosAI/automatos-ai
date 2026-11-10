@@ -27,6 +27,8 @@ from core.models import Agent
 from core.models.core import RecipeExecution
 from core.models.composio import TriggerSubscription, ComposioEntity
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.scopes import PLAYBOOKS_EXECUTE
+from core.auth.server_key_gate import require_workspace_permission_or_server_key
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from api.playbook_address import edits_it_by_number_too, playbook_at, run_of
@@ -847,10 +849,10 @@ def list_featured_recipes(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{recipe_id}/execute", dependencies=[Depends(require_workspace_permission("playbooks:execute"))])
+@router.post("/{recipe_id}/execute")
 async def execute_recipe(
     recipe_id: str,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(require_workspace_permission_or_server_key("playbooks:execute", PLAYBOOKS_EXECUTE)),
     body: Dict[str, Any] = Body(default={}),
     db: Session = Depends(get_db)
 ):

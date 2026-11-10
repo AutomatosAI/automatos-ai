@@ -77,8 +77,8 @@ def start_run_row(db: Session, ctx: Any, playbook: Any, input_data: Dict[str, An
         status="pending",
         input_data=input_data,
         current_step=0,
-        triggered_by=ctx.user.email if ctx.user else "anonymous",
-        execution_metadata=metadata if wants is None else {**metadata, WAIT_FOR_ME: wants},
+        triggered_by=_starter(ctx),
+        execution_metadata={**metadata, **_key_of(ctx), **({} if wants is None else {WAIT_FOR_ME: wants})},
     )
     db.add(execution)
     playbook.use_count = (playbook.use_count or 0) + 1
@@ -86,6 +86,24 @@ def start_run_row(db: Session, ctx: Any, playbook: Any, input_data: Dict[str, An
     db.commit()
     _make_its_card(db, playbook, execution)
     return execution_id
+
+
+def _starter(ctx: Any) -> str:
+    """Who started the run: a person's email, or ``api_key`` for a product's server key (PRD-274
+    W1), whose input is then never read as the owner's words (``services.playbook_given``)."""
+    from core.auth.server_key_gate import API_KEY_FILER, is_server_key
+
+    if is_server_key(ctx):
+        return API_KEY_FILER
+    return ctx.user.email if ctx.user else "anonymous"
+
+
+def _key_of(ctx: Any) -> Dict[str, Any]:
+    """The run's metadata naming the server key that started it (``sdk:<key id>``); none for a person.
+    The key's token limit counts the run's usage by it (``services.key_limits``)."""
+    from core.auth.server_key_gate import KEY_RUN_METADATA, is_server_key
+
+    return {KEY_RUN_METADATA: ctx.user.id} if is_server_key(ctx) else {}
 
 
 def _make_its_card(db: Session, playbook: Any, execution: Any) -> None:

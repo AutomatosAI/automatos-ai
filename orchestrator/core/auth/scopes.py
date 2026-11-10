@@ -24,3 +24,8 @@ AGENTS_EXECUTE = "agents:execute"
 # workspace's memory. It reads only facts no audience limits and none private to a person.
 MEMORY_READ = "memory:read"
 MEMORY_WRITE = "memory:write"
+# A server key starts a Playbook (POST /api/workflow-recipes/{id}/execute) and writes a Deliverable
+# (POST /api/documents/generate). A run it starts is an outside product's input, never the owner's
+# words (services/playbook_given.TRIGGER_STARTS).
+PLAYBOOKS_EXECUTE = "playbooks:execute"
+DOCUMENTS_WRITE = "documents:write"
