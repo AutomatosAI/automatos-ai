@@ -33,6 +33,7 @@ import logging
 from typing import Any, AsyncGenerator, Callable, Optional
 
 from config import config
+from core.monitoring import turn_clock
 
 logger = logging.getLogger(__name__)
 
@@ -159,12 +160,14 @@ class TurnAgents:
 
     async def activate_agent(self, agent_id: int, **kwargs: Any) -> Any:
         runtime = await self._factory.activate_agent(agent_id, **kwargs)
+        turn_clock.mark(turn_clock.MARK_AGENT)
         if runtime is None:
             return None
         if self._requested is not None:
             runtime = await self._on_the_requested_model(runtime, kwargs.get("workspace_id"))
         elif self._spoken:
             runtime = await self._on_the_spoken_model(runtime, kwargs.get("workspace_id"))
+        turn_clock.mark(turn_clock.MARK_TURN_MODEL)
         logger.info(TURN_MODEL_LOG, model_of(runtime), str(self._spoken).lower())
         return runtime
 

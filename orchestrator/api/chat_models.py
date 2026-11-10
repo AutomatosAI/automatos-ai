@@ -12,12 +12,18 @@ setting). Auto is told to reply in that variant (``consumers.chatbot.reply_local
 turn and a typed one alike; without it the model picked the variant itself, and from Lisbon a
 Brazilian speaker got European Portuguese. A value that is not a tag is dropped, never a 422, so
 no client's turn fails over it; left out, the turn is exactly as before.
+
+``turnRef``: a voice turn's reference, built by the phone (``vt-<send time>-<count>``), so the
+turn's timing line and its speech requests can be read together (``core.monitoring.turn_clock``).
+A value that does not fit ``core.monitoring.turn_ref.REF_PATTERN`` is dropped, never a 422.
 """
 
 import re
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, field_validator
+
+from core.monitoring.turn_ref import clean_ref
 
 # A language, then up to two subtags (``pt-BR``, ``zh-Hant-TW``); RFC 5646 §4.4.1 recommends
 # at most 35 characters for a tag.
@@ -99,10 +105,18 @@ class ChatRequest(BaseModel):
     # The person's language and region (BCP 47, ``pt-BR``): the variant Auto replies in.
     locale: Optional[str] = None
 
+    # A voice turn's reference from the phone: it joins the turn's timing to its speech requests.
+    turnRef: Optional[str] = None
+
     @field_validator("locale", mode="before")
     @classmethod
     def _not_a_tag_is_dropped(cls, value: Any) -> Optional[str]:
         return clean_locale(value)
+
+    @field_validator("turnRef", mode="before")
+    @classmethod
+    def _not_a_ref_is_dropped(cls, value: Any) -> Optional[str]:
+        return clean_ref(value)
 
 
 __all__ = ["ChatMessageRequest", "ChatRequest", "MessagePart", "clean_locale"]

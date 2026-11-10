@@ -31,6 +31,7 @@ from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.auth.principal import resolve_user_pk
 from core.models.core import User
+from core.monitoring import turn_clock
 from core.session_queue import get_session_queue
 from core.utils.timestamps import utc_iso
 from services.board_events import notify_chat_event
@@ -354,6 +355,7 @@ async def _produce_turn(turn: _Turn):
     try:
         service = StreamingChatService(task_db, workspace_id=turn.workspace_id)
         async with get_session_queue().acquire(f"{turn.workspace_id}:{turn.chat_id}"):
+            turn_clock.mark(turn_clock.MARK_LOCKED)
             messages = turn_history(ChatService(task_db), turn.chat_id, turn.message, turn.page_context,
                                     turn.message_id)
             async for chunk in _turn_chunks(service, task_db, turn, messages):
@@ -382,7 +384,8 @@ def _after_the_turn(workspace_id: Any, chat_id: str, user_id: int, message_id: A
 
 
 # Endpoints
-@router.post("", dependencies=[Depends(require_workspace_permission("agents:execute"))])
+@router.post("", dependencies=[Depends(turn_clock.arrives), Depends(require_workspace_permission("agents:execute")),
+                               Depends(turn_clock.authorised)])  # the turn's clock: before auth, and after it
 async def stream_chat(
     request: ChatRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -402,10 +405,14 @@ async def stream_chat(
     saved = chat_service.save_message(
         chat_id=chat_id, role="user", parts=[part.dict() for part in parts], workspace_id=ctx.workspace_id,
     )
+    turn_clock.mark(turn_clock.MARK_SAVED)
     page_ctx = sanitize_page_context(request.context)
     history = turn_history(chat_service, chat_id, current_msg, page_ctx)  # the lane's read; the turn reads again
+    turn_clock.mark(turn_clock.MARK_HISTORY)
     message_text = _message_text(parts)
     lane = await _turn_lane(db, ctx, request, message_text, len(history), said_before(history))
+    turn_clock.mark(turn_clock.MARK_ROUTED)
+    turn_clock.note(ref=request.turnRef)
     logger.info("[chat] agent_id=%s answers the turn", lane.agent_id)
     # The request-scoped ``db`` is never handed to the turn: FastAPI closes it when the
     # response ends, which may be before the turn does.
