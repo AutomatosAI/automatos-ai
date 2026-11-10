@@ -1726,6 +1726,10 @@ class BoardTask(Base):
     __table_args__ = (
         Index('uq_board_tasks_workspace_seq', 'workspace_id', 'workspace_seq', unique=True,
               postgresql_where=text('workspace_seq IS NOT NULL')),
+        # PRD-274 W1: an API run's Idempotency-Key files one ticket per workspace, even when two
+        # requests race (api/agent_execute.py).
+        Index('uq_board_tasks_api_idempotency', 'workspace_id', 'source_id', unique=True,
+              postgresql_where=text("source_type = 'api' AND source_id IS NOT NULL")),
         {'extend_existing': True},
     )
 
