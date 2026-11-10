@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -209,18 +210,22 @@ def _item(m: Dict[str, Any], ws: str, with_score: bool = False) -> MemoryItem:
 # ---------------------------------------------------------------------------
 
 
-def _for_reader(ctx: RequestContext, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """What the caller may read: everything for a person, as before; for a server key, only facts
-    no audience limits and none private to a person."""
-    if not is_server_key(ctx):
-        return rows
-    return [m for m in rows if not audience_of(m) and visible_to_viewer(m, None)]
+async def _for_reader(db: Session, ctx: RequestContext, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """What the caller may read. A server key: only facts no audience limits and none private to a
+    person (PRD-274 W1). A member: the workspace's memories and only their own private ones (PRD-206
+    Q7); a caller who isn't a known person sees no private ones."""
+    if is_server_key(ctx):
+        return [m for m in rows if not audience_of(m) and visible_to_viewer(m, None)]
+    user_pk = await run_in_threadpool(_internal_user_id, db, ctx)
+    viewer = f"user:{user_pk}" if user_pk is not None else None
+    return [m for m in rows if visible_to_viewer(m, viewer)]
 
 
 @router.get("", response_model=MemoryListResponse)
 async def list_memories(
     ctx: RequestContext = Depends(request_context_or_server_key(MEMORY_READ)),
     limit: int = Query(50, ge=1, le=200, description="Max items to return"),
+    db: Session = Depends(get_db),
 ) -> MemoryListResponse:
     """List memories for the current workspace."""
     ws = _ws_key(ctx.workspace_id)
@@ -230,7 +235,7 @@ async def list_memories(
     except Exception as exc:
         logger.exception("[widget_memory] Memory list failed for workspace %s", ws)
         raise _unavailable(MEMORY_UNAVAILABLE) from exc
-    items = [_item(m, ws) for m in _for_reader(ctx, raw)]
+    items = [_item(m, ws) for m in await _for_reader(db, ctx, raw)]
     return MemoryListResponse(memories=items, total=len(items))
 
 
@@ -290,6 +295,7 @@ async def search_memories(
     q: str = Query(..., min_length=1, description="Search query"),
     ctx: RequestContext = Depends(request_context_or_server_key(MEMORY_READ)),
     limit: int = Query(20, ge=1, le=100, description="Max results"),
+    db: Session = Depends(get_db),
 ) -> MemorySearchResponse:
     """Search memories by query within the current workspace."""
     ws = _ws_key(ctx.workspace_id)
@@ -299,7 +305,7 @@ async def search_memories(
     except Exception as exc:
         logger.exception("[widget_memory] Memory search failed for workspace %s", ws)
         raise _unavailable(MEMORY_UNAVAILABLE) from exc
-    items = [_item(m, ws, with_score=True) for m in _for_reader(ctx, raw)]
+    items = [_item(m, ws, with_score=True) for m in await _for_reader(db, ctx, raw)]
     return MemorySearchResponse(query=q, results=items, total=len(items))
 
 

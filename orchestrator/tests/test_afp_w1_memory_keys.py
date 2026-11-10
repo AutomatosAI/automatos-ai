@@ -121,9 +121,14 @@ def test_a_key_lists_and_searches_only_what_no_audience_limits_and_nothing_priva
     assert str(ctx.workspace_id) == workspace
 
 
-def test_a_member_reads_as_before(workspace, store):
-    listed = asyncio.run(widget_memory.list_memories(ctx=_member(workspace), limit=50))
-    assert [m.id for m in listed.memories] == ["plain", "legacy", "limited", "private"]
+def test_a_member_reads_every_fact_but_another_persons_private_one(new_session, workspace, store):
+    """A member isn't filtered by audience; a private fact is its owner's alone (PRD-206 Q7, #1472)."""
+    s = new_session()
+    try:
+        listed = asyncio.run(widget_memory.list_memories(ctx=_member(workspace), limit=50, db=s))
+    finally:
+        s.close()
+    assert [m.id for m in listed.memories] == ["plain", "legacy", "limited"]
 
 
 def test_what_a_key_stores_says_which_key_and_no_caller_can_say_so(new_session, workspace, store, unlimited):
