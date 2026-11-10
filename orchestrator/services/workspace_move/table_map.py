@@ -76,6 +76,9 @@ _MOVED = (
     moved("social_voice_examples", MEMORY, "Drafts and the approved text Auto learns the brand voice from."),
     moved("memory_profiles", MEMORY, "The workspace's own memory profiles (what distillation keeps, by domain); "
           "the seeded ones are the platform's and have no workspace."),
+    moved("end_users", MEMORY, "A product's end users and the consent recorded for them; their memories travel "
+          "in memory/ with the rest. The key that recorded it stays behind, as keys do.",
+          secret_columns=("api_key_id",)),
     # ── Chats ───────────────────────────────────────────────────────────────
     moved("chats", CHATS, "Chats; the Auto thread becomes the target's Auto thread."),
     moved("messages", CHATS, "The chats' messages."),
