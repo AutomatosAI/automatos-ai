@@ -10,6 +10,10 @@ Two ways to drive a real ``AnthropicProvider`` without a network:
 
 ``streamed_call`` and ``interrupted_call`` run one streamed call and give back what the listener
 heard beside the reply (or the error).
+
+``manager_on`` puts either provider inside a real ``LLMManager`` (B-3: the manager asks the
+provider whether a call streams). ``sdk_provider_in_rounds`` answers a turn's model calls, one
+recorded round (``recorded_round``) each, in order.
 """
 from __future__ import annotations
 
@@ -135,6 +139,21 @@ def provider_on(stream=None, whole=None, *, refusal=None):
     return made
 
 
+def manager_on(provider, monkeypatch):
+    """A real ``LLMManager`` around ``provider``, built the way
+    ``tests/test_prd238_w2_two_channels.py`` builds it (no ``__init__``, so no settings read). The
+    routing, the owner-words rewrite, the Screen report and the opening gate are the real ones;
+    what is stubbed is the bookkeeping around a call: the usage row, the credit gate and the
+    credit-outage note, which read the database."""
+    from core.llm.manager import LLMManager
+
+    made = object.__new__(LLMManager)
+    made.provider, made.config = provider, provider.config
+    for bookkeeping in ("_ensure_provider_initialized", "_track_usage", "_credit_gate", "_note_success"):
+        monkeypatch.setattr(made, bookkeeping, lambda *args, **kwargs: None, raising=False)
+    return made
+
+
 def listener():
     heard = []
 
@@ -242,4 +261,58 @@ def sdk_provider(events=A_WHOLE_STREAM):
     made.client = anthropic.Anthropic(api_key="test-key", http_client=httpx.Client(
         transport=httpx.MockTransport(answer)), max_retries=0)
     made.requests = requests
+    return made
+
+
+# --------------------------------------------------------------------------- a turn's rounds, recorded
+
+
+def _tool_events(index, tool):
+    """One tool call's events at content block ``index``; ``tool`` is (id, name, input)."""
+    call_id, name, tool_input = tool
+    return (
+        ("content_block_start", {"type": "content_block_start", "index": index, "content_block": {
+            "type": "tool_use", "id": call_id, "name": name, "input": {}}}),
+        ("content_block_delta", {"type": "content_block_delta", "index": index, "delta": {
+            "type": "input_json_delta", "partial_json": json.dumps(tool_input)}}),
+        _block_stops(index),
+    )
+
+
+def recorded_round(*pieces, tool=None):
+    """One model round as recorded server-sent events: its text in the ``pieces`` given, then
+    (``tool``: id, name, input) one tool call. It ends ``tool_use`` with a call, else ``end_turn``."""
+    text = (_TEXT_OPENS, *(_text_delta(piece) for piece in pieces), _block_stops(0)) if pieces else ()
+    call = _tool_events(1 if pieces else 0, tool) if tool else ()
+    ends = ("message_delta", {"type": "message_delta", "usage": {"output_tokens": SDK_OUTPUT_TOKENS}, "delta": {
+        "stop_reason": "tool_use" if tool else "end_turn", "stop_sequence": None}})
+    return (_MESSAGE_START, *text, *call, ends, ("message_stop", {"type": "message_stop"}))
+
+
+NOT_SCRIPTED = {"type": "error", "error": {"type": "invalid_request_error", "message": "not scripted"}}
+
+
+def sdk_provider_in_rounds(*rounds):
+    """A real ``AnthropicProvider`` on the real SDK client over a mock transport: the n-th
+    streamed request is answered with the n-th recorded round. A request past the script, or a
+    whole (not streamed) one, is refused (400), so a turn that asks more than was scripted, or
+    that does not stream, fails. ``made.requests`` keeps the bodies; ``made.unasked`` the rounds
+    nobody asked for."""
+    import anthropic
+
+    unasked, requests = list(rounds), []
+
+    def answer(request):
+        body = json.loads(request.content)
+        requests.append(body)
+        if not body.get("stream") or not unasked:
+            return httpx.Response(400, json=NOT_SCRIPTED)
+        return httpx.Response(200, headers={"content-type": "text/event-stream"},
+                              content=sse_bytes(unasked.pop(0)))
+
+    made = AnthropicProvider.__new__(AnthropicProvider)  # bypass _initialize_client
+    made.config = LLMConfig(provider=LLMProvider.ANTHROPIC, model=MODEL, max_tokens=CALL_BUDGET, temperature=0.7)
+    made.client = anthropic.Anthropic(api_key="test-key", http_client=httpx.Client(
+        transport=httpx.MockTransport(answer)), max_retries=0)
+    made.requests, made.unasked = requests, unasked
     return made

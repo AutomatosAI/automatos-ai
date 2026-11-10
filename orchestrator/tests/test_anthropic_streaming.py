@@ -27,6 +27,9 @@ B-2, ``AnthropicProvider.stream_response`` and ``streams_now``:
   None, so a caller that looks for it answers whole. The B-2 cases below run with the switch on
   ``all`` (``_the_switch_lets_every_call_stream``); a case about another value sets its own.
 
+The manager's choice between the two calls (B-3) is ``tests/test_anthropic_streaming_manager.py``,
+and a whole spoken turn ``tests/test_anthropic_streaming_spoken_turn.py``.
+
 The stand-ins are in ``tests/helpers_anthropic_stream.py``. The same call through the real SDK,
 over recorded server-sent events, is ``tests/test_anthropic_streaming_real_sdk.py``.
 
@@ -586,7 +589,7 @@ def test_the_client_offers_its_stream_only_to_a_call_that_streams(monkeypatch, m
 
 
 def test_with_the_switch_off_a_listened_call_opens_no_stream(monkeypatch):
-    """The manager picks the stream with ``getattr(provider, "stream_response", None)``: with the
+    """The manager's choice (``live_stream``) looks for the client's ``stream_response``: with the
     switch off it finds none and asks whole, as before the stream existed."""
     monkeypatch.setattr(config, "ANTHROPIC_STREAMING", "off")
     message = _text_only()
