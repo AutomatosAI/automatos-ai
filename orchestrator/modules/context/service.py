@@ -48,6 +48,7 @@ from modules.context.planning import (
     trim_to_tokens,
 )
 from modules.context.ai_identity_rule import with_rule_for_mode
+from modules.context.lean_mode import builds_a_lean_turn_in_lean_mode
 from modules.context.result import ContextResult
 from modules.context.sections import SECTION_REGISTRY, SectionContext
 from core.observability.tracer import fire_assembly_trace
@@ -125,6 +126,7 @@ class ContextService:
     def __init__(self, db_session: Any = None) -> None:
         self._db_session = db_session
 
+    @builds_a_lean_turn_in_lean_mode  # Wave 2: a lean agent's chat turn is built in the LEAN mode
     async def build_context(
         self,
         mode: ContextMode,

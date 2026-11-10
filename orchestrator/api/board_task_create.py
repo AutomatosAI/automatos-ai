@@ -20,18 +20,28 @@ told where a new card goes. A card that carries an action for the owner to appro
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import logging
+from datetime import datetime, timedelta, timezone
+from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from api.board_tasks import (
-    USER_CREATABLE_SOURCE_TYPES, VALID_PRIORITIES, VALID_REVIEW_MODES, _agent_id_of, _one_of, _text_of,
+    USER_CREATABLE_SOURCE_TYPES, VALID_PRIORITIES, VALID_REVIEW_MODES, _agent_id_of, _note_no_host_for_cli, _one_of,
+    _text_of,
 )
+from core.auth.dependencies import RequestContext
 from core.models import Agent
 from core.models.core import BoardTask
+from services.board_consent import WHY_CREATED_AND_ASSIGNED, actor_ref, consent_for_created_ticket
+from services.board_dispatcher import notify_task_available
+from services.board_events import notify_board_event
+from services.board_sla import PRIORITY_SLA_HOURS
 from services.board_task_view import board_dict
 from services.ticket_numbers import ticket_number
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_PRIORITY = "medium"
 DEFAULT_REVIEW_MODE = "auto"
@@ -71,6 +81,54 @@ def created_ticket_answer(db: Session, task: BoardTask) -> Dict[str, Any]:
     """What the create answers: the new ticket as the board lists it, with its
     number (#0042), so nobody lists the board to learn it."""
     return board_dict(task, ticket_number(db, task))
+
+
+
+def file_ticket(db: Session, ctx: RequestContext, columns: Dict[str, Any],
+                attach: Optional[Callable[[Session, BoardTask], None]] = None) -> BoardTask:
+    """Files a ticket with checked ``columns`` and, when it is created assigned to an agent,
+    hands it to the dispatch loop. The board's create route and an agent's
+    ``POST /api/agents/{id}/execute`` (``api.agent_execute``) both file through here. ``attach``
+    adds rows that belong to the ticket (a run's callback) in the same commit, before the
+    dispatch loop can claim it."""
+    task = BoardTask(
+        workspace_id=ctx.workspace_id,
+        created_by_type="user",
+        created_by_id=ctx.user.clerk_user_id or ctx.user.id,
+        sla_deadline=datetime.now(timezone.utc) + timedelta(hours=PRIORITY_SLA_HOURS.get(columns["priority"], 24)),
+        **columns,
+    )
+    db.add(task)
+    db.flush()  # the id the notice carries
+    if attach is not None:
+        attach(db, task)
+
+    # PRD-180 S1 (F090): push the new card to subscribed Command Centres.
+    # F118: a NOTIFY is delivered when its transaction commits — issue it before the commit
+    # (after it, the request's closing rollback drops it).
+    notify_board_event(
+        db, workspace_id=ctx.workspace_id, task_id=task.id, status=task.status,
+        event="task_created",
+    )
+    db.commit()
+    db.refresh(task)
+
+    # PRD-161: assignment = immediate dispatch via the board loop (Q39/Q40).
+    # A created-as-assigned task notifies the claimant; the dispatch loop claims
+    # it (FOR UPDATE SKIP LOCKED) and runs it — no inline launch, no heartbeat wait.
+    if task.status == "assigned" and task.assigned_agent_id and task.source_type != "recipe":
+        # PRD-234 D16: the operator created AND assigned it — on the local edition
+        # that is the approval; recorded before the dispatcher can claim the row.
+        consent_for_created_ticket(
+            db, workspace_id=ctx.workspace_id, task=task,
+            actor=actor_ref(ctx), why=WHY_CREATED_AND_ASSIGNED,
+        )
+        _note_no_host_for_cli(db, task)
+        notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
+        db.commit()  # F118: the wake rides this commit
+
+    logger.info("[BoardTasks] Created task %d in workspace %s", task.id, ctx.workspace_id)
+    return task
 
 
 def _assignee(db: Session, workspace_id: Any, raw: Any) -> Optional[int]:

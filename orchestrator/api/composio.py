@@ -283,8 +283,12 @@ async def test_linkedin_upload_init(ctx: RequestContext = Depends(get_request_co
                 "org_urn": org_urn,
                 "credential_found": True,
             }
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    except Exception:
+        # CodeQL py/stack-trace-exposure: the exception's own text (an internal
+        # URL, a library version, ...) stays server-side; this is a smoke test,
+        # but still a workspace-scoped diagnostic endpoint, not a crash report.
+        logger.exception("[composio] LinkedIn upload-init smoke test failed for ws=%s", ctx.workspace_id)
+        return {"ok": False, "error": "LinkedIn upload-init failed"}
 
 
 

@@ -45,6 +45,7 @@ from core.qdrant import (
 )
 from core.qdrant_writes import is_timeout, upsert_retrying_a_timeout_once
 from modules.memory.injection_filter import STATED_BY_KEY, deletable_by
+from core.security.memory_audience import for_its_reader, labels_what_its_reader_writes
 from modules.memory.retired import leaves_out_retired, retired_metadata, unretired
 
 logger = logging.getLogger(__name__)
@@ -203,6 +204,21 @@ class DurableMemoryStore:
             FieldCondition(key="namespace", match=MatchValue(value=user_id)),
         ])
 
+    @classmethod
+    def _namespaces_filter(cls, user_id: str, also: Tuple[str, ...]) -> Filter:
+        """``user_id``'s namespace, or it and ``also``'s in one match (PRD-274 Wave 0). Every
+        ``also`` namespace must be of ``user_id``'s workspace (tenant isolation): a ValueError
+        otherwise, before any query runs."""
+        if not also:
+            return cls._namespace_filter(user_id)
+        home = workspace_from_namespace(user_id)
+        strangers = [ns for ns in also if home is None or workspace_from_namespace(ns) != home]
+        if strangers:
+            raise ValueError(f"also_namespaces must be of {user_id}'s workspace, not {strangers}")
+        return Filter(must=[
+            FieldCondition(key="namespace", match=MatchAny(any=[user_id, *also])),
+        ])
+
     @staticmethod
     def _workspace_filter(workspace_id: str) -> Filter:
         return Filter(must=[
@@ -234,6 +250,7 @@ class DurableMemoryStore:
 
     # ── Write ───────────────────────────────────────────────────
 
+    @labels_what_its_reader_writes  # Wave 4b: a labelled agent's write carries its labels
     async def add(
         self,
         messages: List[Dict[str, str]],
@@ -303,6 +320,7 @@ class DurableMemoryStore:
 
     # ── Read ────────────────────────────────────────────────────
 
+    @for_its_reader  # Wave 4b: nothing labelled for agents the run's reader is not
     @leaves_out_retired  # P256-FIX-N15-9: a rule the owner replaced is never recalled
     async def search(
         self,
@@ -310,8 +328,14 @@ class DurableMemoryStore:
         user_id: str,
         limit: int = 5,
         workspace_id: Optional[str] = None,
+        also_namespaces: Tuple[str, ...] = (),
     ) -> List[Dict]:
-        """Semantic search within a namespace, floor-filtered (PRD-159 S3)."""
+        """Semantic search within a namespace, floor-filtered (PRD-159 S3).
+
+        ``also_namespaces`` widens the one query to more namespaces of the same
+        workspace (an agent's chat turn reads the workspace's facts too): one
+        embedding, one ranked list.
+        """
         if not self._enabled:
             return []
         await self.ensure_collection()
@@ -321,57 +345,56 @@ class DurableMemoryStore:
         # a raise still propagates to the caller unchanged.
         seam_t0 = time.perf_counter()
         try:
-            query_embedding = await self._embedder.generate_embedding(query)
-            response = await self._client.query_points(
-                collection_name=self._collection,
-                query=query_embedding,
-                query_filter=self._namespace_filter(user_id),
-                limit=max(limit, 1),
-            )
-            results = [
-                self._item_from_payload(hit.id, hit.payload, score=hit.score)
-                for hit in response.points
-            ]
-            results = filter_by_relevance_floor(results, config.MEMORY_RELEVANCE_FLOOR)
+            results = await self._query(query, self._namespaces_filter(user_id, tuple(also_namespaces)), limit)
         except Exception:
-            from core.observability.substrate_metrics import (
-                SEAM_MEMORY,
-                STATUS_ERROR,
-                record_substrate_search_nowait,
-            )
-
-            record_substrate_search_nowait(
-                seam=SEAM_MEMORY,
-                workspace_id=workspace_id,
-                candidates=0,
-                latency_ms=(time.perf_counter() - seam_t0) * 1000.0,
-                status=STATUS_ERROR,
-                query=query,
-            )
+            self._record_search(workspace_id, query, seam_t0, None)
             raise
         logger.debug(
             "[Durable] search namespace=%s query=%r → %d results",
             user_id, query[:60], len(results),
         )
         returned = results[:limit]
+        self._record_search(workspace_id, query, seam_t0, returned)
+        return returned
 
+    async def _query(self, query: str, query_filter: Filter, limit: int) -> List[Dict]:
+        """The ranked rows matching ``query_filter``, above the relevance floor."""
+        query_embedding = await self._embedder.generate_embedding(query)
+        response = await self._client.query_points(
+            collection_name=self._collection,
+            query=query_embedding,
+            query_filter=query_filter,
+            limit=max(limit, 1),
+        )
+        results = [self._item_from_payload(hit.id, hit.payload, score=hit.score) for hit in response.points]
+        return filter_by_relevance_floor(results, config.MEMORY_RELEVANCE_FLOOR)
+
+    @staticmethod
+    def _record_search(workspace_id: Optional[str], query: str, seam_t0: float,
+                       returned: Optional[List[Dict]]) -> None:
+        """PRD-197 S4: one search's substrate metric; ``returned`` None records an error."""
         from core.observability.substrate_metrics import (
             SEAM_MEMORY,
             STATUS_EMPTY,
+            STATUS_ERROR,
             STATUS_HIT,
             record_substrate_search_nowait,
         )
 
+        latency_ms = (time.perf_counter() - seam_t0) * 1000.0
+        if returned is None:
+            record_substrate_search_nowait(seam=SEAM_MEMORY, workspace_id=workspace_id, candidates=0,
+                                           latency_ms=latency_ms, status=STATUS_ERROR, query=query)
+            return
         record_substrate_search_nowait(
             seam=SEAM_MEMORY,
             workspace_id=workspace_id,
             candidates=len(returned),
-            latency_ms=(time.perf_counter() - seam_t0) * 1000.0,
+            latency_ms=latency_ms,
             status=STATUS_HIT if returned else STATUS_EMPTY,
             query=query,
             top_score=float(returned[0].get("score") or 0.0) if returned else 0.0,
         )
-        return returned
 
     async def get_all(
         self,
@@ -393,6 +416,7 @@ class DurableMemoryStore:
         flt = Filter(must=[*self._namespace_filter(user_id).must, *exact], should=should or None)
         return await self._scroll(flt, limit)
 
+    @for_its_reader  # Wave 4b: nor listed for them
     @leaves_out_retired  # P256-FIX-N15-9: nor listed (the rules, the Memory page, Auto's browse)
     async def _scroll(self, flt: Filter, limit: int) -> List[Dict]:
         """The memories ``flt`` matches, up to ``limit`` (unscored, scroll order)."""

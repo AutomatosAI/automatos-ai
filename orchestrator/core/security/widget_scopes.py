@@ -100,7 +100,7 @@ def widget_tool_surface(tools: Optional[List[Dict[str, Any]]], scopes: Iterable[
     for schema in tools or []:
         name = ((schema or {}).get("function") or {}).get("name", "")
         if name == "platform_execute":
-            dispatcher = _narrowed_dispatcher(schema, actions)
+            dispatcher = narrowed_dispatcher(schema, actions)
             if dispatcher is not None:
                 surface.append(dispatcher)
         elif name in allowed:
@@ -108,7 +108,7 @@ def widget_tool_surface(tools: Optional[List[Dict[str, Any]]], scopes: Iterable[
     return surface
 
 
-def _narrowed_dispatcher(schema: Dict[str, Any], actions: List[str]) -> Optional[Dict[str, Any]]:
+def narrowed_dispatcher(schema: Dict[str, Any], actions: List[str]) -> Optional[Dict[str, Any]]:
     """A copy of the dispatcher whose action enum holds only ``actions`` (and
     only those it already offered, when it carried an enum); None when none
     is left."""

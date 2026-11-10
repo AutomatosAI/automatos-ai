@@ -29,6 +29,7 @@ import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
+import { sanitizeHtml } from './sanitize-html'
 
 // ===================================================================
 // Types
@@ -95,21 +96,6 @@ function formatDate(iso: string): string {
     month: 'short',
     day: 'numeric',
   })
-}
-
-/**
- * Basic HTML sanitiser -- strips <script> tags and inline event handlers.
- * For production you'd want DOMPurify; this covers the obvious XSS vectors.
- */
-function sanitizeHtml(html: string): string {
-  let clean = html
-  // Remove <script>...</script> blocks (incl. multi-line)
-  clean = clean.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script\s*>/gi, '')
-  // Remove on* event attributes (double- and single-quoted, or unquoted)
-  clean = clean.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-  // Remove javascript: hrefs
-  clean = clean.replace(/href\s*=\s*["']?\s*javascript\s*:/gi, 'href="')
-  return clean
 }
 
 // ===================================================================

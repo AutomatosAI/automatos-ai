@@ -156,7 +156,11 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-11-07 (Auto's soul, one source): auto_soul_one_source_20261107 chains onto
 # prd273_w1_workspace_move_jobs — a data migration only: a workspace's custom settings soul moves
 # onto its Auto agent row and settings.orchestrator.custom_soul goes; no table changes.
-EXPECTED_HEAD = "auto_soul_one_source_20261107"
+# 2026-11-09 (Automatos for products, Wave 4): memory_profiles_20261109 chains onto
+# auto_soul_one_source_20261107 — memory_profiles (a new table only): what distillation keeps, by domain.
+# 2026-11-09 (Automatos for products, Wave 1): run_callbacks_20261109 chains onto that —
+# workspace_signing_secrets and run_callbacks (new tables only): signed completion callbacks.
+EXPECTED_HEAD = "run_callbacks_20261109"
 
 
 def _literal(node: ast.AST):

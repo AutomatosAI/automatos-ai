@@ -349,8 +349,11 @@ class CredentialTester:
             return {'success': False, 'message': 'SSH connections to private/internal networks are not allowed'}
         
         try:
+            from core.security.ssh_host_keys import apply_trust_on_first_use_policy
+
             ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
+            # CodeQL py/paramiko-missing-host-key-validation: trust on first use, as exec_shell.
+            apply_trust_on_first_use_policy(ssh)
             
             if auth_method == 'password' and password:
                 ssh.connect(host, port=int(port), username=username, password=password)

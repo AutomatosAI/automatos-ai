@@ -6,7 +6,7 @@ could quietly lose:
 
 - the GPL boundary: phonemizer and espeak-ng (GPL-3.0, pulled in by kokoro-onnx)
   are never imported by, or a dependency of, the orchestrator (PRD-251 D3, Traps);
-- Hyperframes pinned exactly at 0.8.62 on Node 24 (PRD-262 US-007), from the js
+- Hyperframes pinned exactly at 0.8.220 on Node 24 (PRD-262 US-007), from the js
   stage's lock (US-053), with telemetry, global skill installs and update checks
   switched off before npm ci and in the runtime;
 - the Kokoro files hash-checked at build in the kokoro stage, and the espeak data
@@ -30,7 +30,7 @@ MEDIA_RENDER = ROOT / "services" / "media-render"
 DOCKERFILE = (MEDIA_RENDER / "Dockerfile").read_text()
 JS_PACKAGE = json.loads((MEDIA_RENDER / "js" / "package.json").read_text())
 JS_LOCK = json.loads((MEDIA_RENDER / "js" / "package-lock.json").read_text())
-HYPERFRAMES_PIN = "0.8.62"
+HYPERFRAMES_PIN = "0.8.220"
 
 GPL_MODULES = ("phonemizer", "espeakng_loader", "kokoro_onnx", "misaki")
 GPL_DISTRIBUTIONS = ("phonemizer", "espeakng-loader", "espeakng_loader", "kokoro-onnx", "kokoro_onnx", "misaki")

@@ -151,8 +151,11 @@ class SmartMemoryManager:
         the Q7 private-scope guard filters per viewer, so two users sharing a
         cache entry would leak one user's private rows to the other — and the
         lane (F182): a widget's agent-only lookup, or autonomous work's lookup
-        without chat transcripts, is never served a chat turn's result."""
-        return f"{workspace_id}:{agent_id}:{viewer_subject_id}:{lane}:{query[:50]}"
+        without chat transcripts, is never served a chat turn's result. And the run's
+        memory reader (Wave 4b): a labelled agent's lookup is never another reader's."""
+        from core.security.memory_audience import reader_key
+
+        return f"{workspace_id}:{agent_id}:{viewer_subject_id}:{lane}{reader_key()}:{query[:50]}"
 
     async def retrieve_memories(
         self,
@@ -610,7 +613,11 @@ class SmartMemoryManager:
               NOTHING on failure (no raw-exchange fallback) — the L2 transcript
               still preserves the verbatim turn.
         """
-        prompt = self._build_distill_prompt(user_message, assistant_response)
+        from modules.memory.memory_profiles import distillation_profile, with_profile
+
+        # Wave 4: the agent's (else the workspace's) memory profile says what counts as a fact here.
+        profile = await distillation_profile(workspace_id, agent_id)
+        prompt = with_profile(self._build_distill_prompt(user_message, assistant_response), profile)
         try:
             # Imported here (not at module top) so tests can monkeypatch
             # ``core.llm.create_llm_manager`` and have it take effect per call.

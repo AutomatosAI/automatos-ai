@@ -1,5 +1,5 @@
 {
-  "route_count": 1019,
+  "route_count": 1024,
   "routes": [
     {
       "method": "GET",
@@ -2686,10 +2686,6 @@
       "path": "/api/system/agent-types"
     },
     {
-      "method": "POST",
-      "path": "/api/system/agent/{agent_id}/execute"
-    },
-    {
       "method": "GET",
       "path": "/api/system/agent/{agent_id}/status"
     },
@@ -3039,6 +3035,14 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/callbacks/signing-secret"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/callbacks/signing-secret/rotate"
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/cli-hosts"
     },
     {
@@ -3148,6 +3152,22 @@
     {
       "method": "GET",
       "path": "/api/v1/memory/layers"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/profiles"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/profiles"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/memory/profiles/{slug}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/memory/profiles/{slug}"
     },
     {
       "method": "GET",

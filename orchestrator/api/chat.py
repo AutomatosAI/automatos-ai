@@ -114,6 +114,22 @@ def _explicitly_chosen_agent(db: Session, workspace_id, agent_id: int) -> int:
     return agent_id
 
 
+def _checked_lean_request(db: Session, ctx: RequestContext, request: ChatRequest) -> Any:
+    """Wave 2: the request's model and app context, checked against the agent it names before
+    anything is saved; a 422 saying why when they cannot be used (consumers.chatbot.lean_request)."""
+    from consumers.chatbot.lean_request import LeanRequestRefused, checked_lean_request
+    from core.models.core import Agent
+
+    agent = None
+    if request.agentId and (request.model or request.appContext):
+        _explicitly_chosen_agent(db, ctx.workspace_id, request.agentId)
+        agent = db.query(Agent).filter(Agent.id == request.agentId).first()
+    try:
+        return checked_lean_request(agent, request.model, request.appContext)
+    except LeanRequestRefused as refused:
+        raise HTTPException(status_code=422, detail=str(refused)) from None
+
+
 def get_default_agent_id(db: Session, workspace_id) -> int:
     """Return the workspace's Auto agent (per-workspace system agent).
 
@@ -289,6 +305,7 @@ class _Turn:
     page_context: Any
     spoken_mode: bool
     locale: Optional[str] = None  # the person's checked BCP 47 tag (pt-BR); None: none named
+    lean_request: Any = None  # a lean agent's model and app context (consumers.chatbot.lean_request)
 
 
 async def _turn_chunks(service: StreamingChatService, task_db: Session, turn: _Turn, messages: List[Dict[str, Any]]):
@@ -317,7 +334,7 @@ async def _turn_chunks(service: StreamingChatService, task_db: Session, turn: _T
         # PRD-221 S3/S4: the sanitized reference set rides into the turn's context_trace and the page-prior action exposure.
         page_context=turn.page_context,
         # PRD-266 US-007a (D32): the reply is heard (the app's quick-ask voice); Auto is told so.
-        spoken_mode=turn.spoken_mode,
+        spoken_mode=turn.spoken_mode, lean_request=turn.lean_request,
     )
     if turn.spoken_mode:
         # The prompt alone is no guarantee (modules.voice.spoken_style): the text is speechified too.
@@ -378,6 +395,7 @@ async def stream_chat(
     # owner/admin of the workspace (the chat threads the driving user) or for a
     # super admin — core.security.driving_user; no "workspace has an admin" fallback.
     user_id = get_user_id(db, ctx)
+    lean_request = _checked_lean_request(db, ctx, request)  # refused before the message is saved
     current_msg = _current_message(request)
     parts = _message_parts(current_msg)
     chat_id = _open_chat(db, chat_service, request, ctx, user_id, parts)
@@ -396,6 +414,7 @@ async def stream_chat(
         message_id=getattr(saved, "id", None), lane=lane, locale=request.locale,
         message_text=message_text, mission_mode=bool(request.missionMode), plan_mode=bool(request.planMode),
         is_super_admin=_is_super_admin(ctx), page_context=page_ctx, spoken_mode=request.spokenMode,
+        lean_request=lean_request,
     )
     # F105 (4 Nov): and it is done with here. Ending its transaction gives the pooled
     # connection back now (as api/voice_speech.py's speak does), instead of it sitting idle

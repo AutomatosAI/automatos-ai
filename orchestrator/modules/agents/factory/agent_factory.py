@@ -28,6 +28,7 @@ from core.llm.defaults import DEFAULT_MAX_OUTPUT_TOKENS
 from core.llm.key_resolver import ResolvedKey, resolve_provider_key  # noqa: F401  # ResolvedKey: re-exported
 from core.models import Agent, Base, PriorityLevel, Skill
 from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
+from core.security.memory_audience import reads_memory_as_its_agent
 from modules.agents.factory.answer_check import said_plainly  # F297
 from core.llm.taken_out import reports_the_claims_it_took_out  # N15-CI: the owner is told what was taken out
 from core.observability.genai import traced_agent_run
@@ -1103,6 +1104,7 @@ class AgentFactory:
         return None
 
     @traced_agent_run  # PRD-256 O4: one invoke_agent span per run, linked to its request
+    @reads_memory_as_its_agent  # Wave 4b: the run reads (and writes) memory as its agent
     async def execute_with_prompt(
         self,
         agent: Union[int, AgentRuntime],

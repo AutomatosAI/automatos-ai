@@ -1,10 +1,9 @@
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload, subqueryload
 from sqlalchemy import and_, or_, func, text
 from sqlalchemy.exc import SQLAlchemyError
-import time
 import logging
 
 from core.database.database import get_db
@@ -45,12 +44,17 @@ def _reject_invalid_runtime(configuration) -> None:
     untouched.
     """
     from config import config as _cfg
+    from consumers.chatbot.lean_request import allow_list_errors
+    from consumers.chatbot.lean_turn import profile_errors
+    from core.security.memory_audience import AUDIENCE_KEY, audience_errors
+    from modules.memory.memory_profiles import slug_errors
     from core.cli_runtime import validate_runtime_configuration
 
     reject_unknown_tool_groups(configuration)  # #942: an unknown session tool group is a 422
     errors = validate_runtime_configuration(
         configuration, cli_enabled=bool(getattr(_cfg, "CLI_RUNTIME_ENABLED", False))
-    )
+    ) + profile_errors(configuration) + allow_list_errors(configuration) + slug_errors(configuration) \
+        + audience_errors((configuration or {}).get(AUDIENCE_KEY), f"configuration.{AUDIENCE_KEY}")  # Waves 2, 4
     if errors:
         raise HTTPException(status_code=400, detail={"errors": errors})
 
@@ -893,36 +897,6 @@ def get_agent_status(agent_id: int, ctx: RequestContext = Depends(get_request_co
         raise
     except Exception as e:
         logger.error(f"Error getting agent status: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@router.post("/{agent_id}/execute", dependencies=[Depends(require_workspace_permission("agents:execute"))])
-def execute_agent(agent_id: int, execution_data: dict = Body(default_factory=dict), ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
-    """Execute an agent with given parameters"""
-    try:
-        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
-        if not agent:
-            raise HTTPException(status_code=404, detail="Agent not found")
-            
-        if agent.status != "active":
-            raise HTTPException(status_code=400, detail="Agent must be active to execute")
-            
-        # Generate execution ID and simulate execution start
-        execution_id = f"exec_{agent_id}_{int(time.time())}"
-        
-        return {
-            "execution_id": execution_id,
-            "agent_id": agent_id,
-            "agent_name": agent.name,
-            "status": "started",
-            "parameters": execution_data,
-            "started_at": "2025-08-01T12:57:03Z",
-            "estimated_duration": "5-10 minutes",
-            "message": f"Execution started for agent {agent.name}"
-        }
-    except HTTPException:
-        raise  
-    except Exception as e:
-        logger.error(f"Error executing agent: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{agent_id:int}", response_model=AgentDetailResponse)

@@ -11,7 +11,7 @@ Qdrant field memory, and durable memory). Every action is audited there.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.workspace_admin import require_workspace_admin
+from core.auth.workspace_eraser import require_workspace_eraser
 from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -51,13 +52,14 @@ def export_my_workspace(
 @router.post("/erase")
 def erase_my_workspace(
     body: Dict[str, Any] = Body(default_factory=dict),
-    ctx: RequestContext = Depends(require_workspace_admin),
+    ctx: RequestContext = Depends(require_workspace_eraser),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Erase this whole workspace across every store (irreversible).
 
     Requires ``{"confirm_workspace_id": "<this workspace id>"}`` to guard against
-    an accidental fire.
+    an accidental fire. An erasure that answered 503 left the workspace closed; its
+    owner may call this again to finish it (``core/auth/workspace_eraser.py``).
     """
     confirm = str(body.get("confirm_workspace_id") or "")
     if confirm != str(ctx.workspace_id):
@@ -67,8 +69,55 @@ def erase_my_workspace(
         )
     from services.gdpr_service import erase_workspace
 
-    result = erase_workspace(db, ctx.workspace_id, requested_by=_actor_ref(ctx))
-    return result
+    try:
+        result = erase_workspace(db, ctx.workspace_id, requested_by=_actor_ref(ctx))
+    except Exception:
+        # CodeQL py/stack-trace-exposure: the service's own exception text (a DB
+        # error, a store's internals) must never reach this irreversible-erase
+        # response; it is already logged with its trace.
+        logger.exception("[gdpr] erase_workspace failed for ws=%s", ctx.workspace_id)
+        raise HTTPException(status_code=500, detail="Workspace erasure failed") from None
+    return erasure_answer([result])  # #1442: an incomplete erasure is a 503 the caller retries
+
+
+_PUBLIC_SQL_COUNTS = ("workspace_row_deleted", "s3_objects_deleted", "s3_errors")
+
+
+def public_erasure(result: Dict[str, Any]) -> Dict[str, Any]:
+    """An erasure's result as a route answers it: the counts, what failed and whether it is
+    complete; never an exception's text or an internal sign-in id."""
+    # A purge's own reasons for stopping pass as they are; any other is "failed" to the caller,
+    # the detail being in the server log (workspace_purge logs it).
+    from services.workspace_purge import (
+        MEMORY_ERASE_FAILED, NOT_SOFT_DELETED, S3_DELETE_FAILED, WORKSPACE_NOT_FOUND,
+    )
+
+    sql = result.get("sql") or {}
+    reason = sql.get("skipped_reason")
+    public_sql = {key: sql.get(key) for key in _PUBLIC_SQL_COUNTS}
+    public_sql["rows_deleted"] = {str(t): int(n) for t, n in (sql.get("rows_deleted") or {}).items()}
+    public_reasons = (WORKSPACE_NOT_FOUND, NOT_SOFT_DELETED, MEMORY_ERASE_FAILED, S3_DELETE_FAILED)
+    public_sql["skipped_reason"] = None if reason is None else (reason if reason in public_reasons else "failed")
+    return {
+        "workspace_id": str(result.get("workspace_id")), "erased_at": result.get("erased_at"),
+        "requested_by": result.get("requested_by"), "sql": public_sql,
+        "derived": dict(result.get("derived") or {}), "failed": list(result.get("failed") or []),
+        "complete": bool(result.get("complete")),
+    }
+
+
+def erasure_answer(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """What an erase route answers (#1442): one workspace's result as it is, several as
+    ``{"complete", "workspaces"}``. An erasure that is not complete is a 503 carrying that
+    answer, so the caller (Shopify's ``shop/redact`` retries) asks again; the workspace is
+    already closed, and the retry finds it and finishes the job."""
+    public = [public_erasure(r) for r in results]
+    answer = public[0] if len(public) == 1 else {
+        "complete": all(r["complete"] for r in public), "workspaces": public,
+    }
+    if not answer["complete"]:
+        raise HTTPException(status_code=503, detail=answer)
+    return answer
 
 
 @router.post("/erase-subject")
@@ -90,7 +139,14 @@ def erase_subject(
         raise HTTPException(status_code=422, detail="subject_id is required")
     from services.gdpr_service import erase_data_subject
 
-    result = erase_data_subject(
-        db, workspace_id=ctx.workspace_id, subject_id=subject_id, requested_by=_actor_ref(ctx)
-    )
+    try:
+        result = erase_data_subject(
+            db, workspace_id=ctx.workspace_id, subject_id=subject_id, requested_by=_actor_ref(ctx)
+        )
+    except Exception:
+        # CodeQL py/stack-trace-exposure: see erase_my_workspace above.
+        logger.exception(
+            "[gdpr] erase_data_subject failed for ws=%s subject=%s", ctx.workspace_id, subject_id
+        )
+        raise HTTPException(status_code=500, detail="Subject erasure failed") from None
     return result

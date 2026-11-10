@@ -34,7 +34,15 @@ _WROTE = "f105_wrote"                    # on a connection: this transaction wro
 _CONNECTIONS = "f105_connections"        # on a session: the connections its transaction uses
 _TRACKED = "f105_tracked"                # on a session: its transaction began under these listeners
 
-_PLAIN_READ = re.compile(r"^\s*(?:/\*.*?\*/\s*|--[^\n]*\n\s*)*(?:SELECT|SHOW)\b", re.IGNORECASE | re.DOTALL)
+#  CodeQL py/redos: a single regex repeating "block comment OR line comment"
+# (r"^\s*(?:/\*.*?\*/\s*|--[^\n]*\n\s*)*(?:SELECT|SHOW)\b") backtracks
+# exponentially once SELECT/SHOW is never found: 20 repeated "/* x */ " blocks
+# already took ~0.1s, 30 timed out. Comments are now skipped one at a time in
+# a plain loop below — each single-comment match is a lazy scan to a fixed
+# literal, O(n) with no repetition-vs-repetition ambiguity to backtrack over.
+_LEADING_BLOCK_COMMENT = re.compile(r"/\*.*?\*/\s*", re.DOTALL)  # matched at a position (.match(s, pos))
+_LEADING_LINE_COMMENT = re.compile(r"--[^\n]*\n\s*")
+_READ_VERB = re.compile(r"\A(?:SELECT|SHOW)\b", re.IGNORECASE)
 _LOCKS_OR_WRITES = re.compile(
     # F119: pg_notify is delivered at COMMIT — a transaction holding one is not
     # read-only; releasing it (a rollback) drops the notice. F200: the try-lock
@@ -44,9 +52,24 @@ _LOCKS_OR_WRITES = re.compile(
 )
 
 
+def _past_leading_comments(statement: str) -> str:
+    """``statement`` with every leading ``/* ... */`` or ``-- ...`` comment removed.
+    The comments are matched at a moving position and the statement is sliced once
+    (CodeRabbit on #1448: slicing after each comment copied the rest every time,
+    quadratic in the number of comments). Each match is at least two characters
+    wide, so the position always advances and this always terminates."""
+    pos = 0
+    while True:
+        comment = _LEADING_BLOCK_COMMENT.match(statement, pos) or _LEADING_LINE_COMMENT.match(statement, pos)
+        if comment is None:
+            return statement[pos:]
+        pos = comment.end()
+
+
 def is_plain_read(statement: str) -> bool:
     """True only for a SELECT/SHOW that neither locks nor writes."""
-    return bool(_PLAIN_READ.match(statement or "")) and not _LOCKS_OR_WRITES.search(statement)
+    text = _past_leading_comments((statement or "").lstrip())
+    return bool(_READ_VERB.match(text)) and not _LOCKS_OR_WRITES.search(statement or "")
 
 
 @event.listens_for(Engine, "begin")
