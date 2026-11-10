@@ -46,7 +46,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_PRIORITY = "medium"
 DEFAULT_REVIEW_MODE = "auto"
 DEFAULT_SOURCE_TYPE = "user"
-API_KEY_FILER = "api_key"
 NO_SUCH_AGENT = "Assigned agent not found in workspace"
 # F293: the columns that hold finished work, which no new card starts in.
 FINISHED_COLUMNS = {"review": "Review", "done": "Done"}
@@ -136,7 +135,7 @@ def file_ticket(db: Session, ctx: RequestContext, columns: Dict[str, Any],
 def _filer_type(ctx: RequestContext) -> str:
     """Who filed it: a person ("user"), or a product's server key ("api_key", PRD-274 W1). A
     key's input is never the owner's own words (``created_by_type == "user"`` means that)."""
-    from core.auth.server_key_gate import is_server_key
+    from core.auth.server_key_gate import API_KEY_FILER, is_server_key
 
     return API_KEY_FILER if is_server_key(ctx) else DEFAULT_SOURCE_TYPE
 
