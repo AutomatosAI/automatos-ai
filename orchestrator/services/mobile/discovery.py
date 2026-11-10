@@ -23,7 +23,8 @@ app binary can talk to hosted Studio and to a self-hosted install alike:
   from config on every call (``CONFIGURED_CAPABILITIES``): ``tts`` only with ``VOICE_TTS_URL``,
   so a phone never asks a server with no voice for one; ``suggestion_push`` only while
   ``SUGGESTION_PUSH_ENABLED`` is on (PRD-268 K9, K20: it ships off); ``calibration`` only while
-  ``CALIBRATION_ENABLED`` is on (PRD-268 K15, K21: it ships off).
+  ``CALIBRATION_ENABLED`` is on (PRD-268 K15, K21: it ships off); ``turn_timing`` only while
+  ``CHAT_TURN_TIMING_ENABLED`` is on, so turning it off also stops phones sending ``turnRef``.
 
 Names and capabilities only, never a secret: the publishable key is the one key in the body,
 and it is public by design (the web app ships it in its bundle). A misconfigured address or
@@ -37,6 +38,7 @@ from types import MappingProxyType
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from config import config
+from core.monitoring import turn_clock
 from modules.voice.speech import is_configured as voice_tts_configured
 from services.calibration.switch import calibration_enabled
 from services.mobile.remote_access import MODE_PAIRED
@@ -74,6 +76,9 @@ PUBLISHABLE_KEY_SETTING = "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"
 # (PRD-268 US-C24); the app opens its approval sheet from a card or a push only when this is listed.
 # calibration: Auto says back what it thinks it knows from the titles of the person's recent work,
 # after their consent, once per workspace (PRD-268 US-C22b); listed only while it is switched on.
+# turn_timing: this server times its chat turns (core/monitoring/turn_clock.py), so a phone may
+# send ``turnRef`` on a voice turn's chat request and on that reply's speech requests; listed
+# only while CHAT_TURN_TIMING_ENABLED is true.
 CAPABILITY_ROUTES: Mapping[str, Tuple[str, str]] = MappingProxyType({
     "approval_view": ("GET", "/api/v1/approval-grants/{grant_id}/view"),
     "brief": ("POST", "/api/proactive/brief/open"),
@@ -87,6 +92,7 @@ CAPABILITY_ROUTES: Mapping[str, Tuple[str, str]] = MappingProxyType({
     "suggestion_push": ("POST", "/api/v1/mobile/devices"),
     "suggestions": ("GET", "/api/proactive/suggestions"),
     "tts": ("POST", "/api/voice/speech"),
+    "turn_timing": ("POST", "/api/chat"),
     "voice_live": ("POST", "/api/voice/web-call"),
 })
 # The capabilities this build implements that need the server set up for them, each with the
@@ -95,6 +101,7 @@ CONFIGURED_CAPABILITIES: Mapping[str, Callable[[], bool]] = MappingProxyType({
     "calibration": calibration_enabled,
     "suggestion_push": suggestion_push_enabled,
     "tts": voice_tts_configured,
+    "turn_timing": turn_clock.enabled,
 })
 
 

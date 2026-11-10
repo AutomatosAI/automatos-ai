@@ -8,6 +8,8 @@ token, with ``X-Workspace-ID``), and the permission ``POST /api/chat`` asks for
 
 * ``POST /api/voice/speech`` ``{"text", "voice", "speed"}`` -> 200 ``audio/mpeg``, streamed
   through from voice-tts as it speaks, with ``Cache-Control: no-store`` and ``X-Voice-Id``.
+  An optional ``turnRef`` names the chat turn the sentence belongs to on the usage line, with
+  ``wait_ms``, the time before voice-tts was asked (``CHAT_TURN_TIMING_ENABLED``).
   Every refusal is ``{"code", "detail"}`` (``modules/voice/speech.py`` lists them). Each
   workspace may have ``VOICE_TTS_RATE_PER_MINUTE`` sentences spoken a minute, counted in the
   shared Redis window (``RateLimitStore``); past it, 429 ``tts_busy``.
@@ -36,6 +38,7 @@ from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
+from core.monitoring import turn_clock
 from modules.voice import speech, speech_client
 from modules.voice.speech import TTS_BAD_REQUEST, TTS_BUSY, TTS_TOO_LONG, SpeechRefused
 
@@ -93,7 +96,9 @@ async def _within_rate(workspace_id: str) -> None:
                             retry_after=reset_seconds)
 
 
-@router.post(SPEECH_ROUTE, dependencies=[Depends(require_workspace_permission(SPEECH_PERMISSION))])
+# turn_clock.arrives is first: the usage line's wait_ms counts from before auth and the permission read.
+@router.post(SPEECH_ROUTE, dependencies=[Depends(turn_clock.arrives),
+                                         Depends(require_workspace_permission(SPEECH_PERMISSION))])
 async def speak(
     request: Request,
     ctx: RequestContext = Depends(get_request_context_hybrid),

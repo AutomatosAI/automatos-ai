@@ -106,9 +106,9 @@ Sources: `orchestrator/core/models/__init__.py`
 
 ## 3. Services Layer (`services/mobile`)
 
-The documented `services.mobile.discovery` module builds the discovery document returned by `GET /.well-known/automatos.json`. It derives edition and pairing details from configuration, obtains URLs through `services.mobile.urls`, reads Expo push consent through `services.push.consent`, and conditionally advertises configured capabilities such as TTS, suggestion push, and calibration. [orchestrator/services/mobile/discovery.py:1-25](), [orchestrator/services/mobile/discovery.py:39-45]()
+The documented `services.mobile.discovery` module builds the discovery document returned by `GET /.well-known/automatos.json`. It derives edition and pairing details from configuration, obtains URLs through `services.mobile.urls`, reads Expo push consent through `services.push.consent`, and conditionally advertises configured capabilities such as TTS, suggestion push, calibration, and turn timing. [orchestrator/services/mobile/discovery.py:1-25](), [orchestrator/services/mobile/discovery.py:39-45]()
 
-The discovery capability map includes mobile push registration, digest preferences, an on-demand digest request, mobile theme retrieval, spoken mode, live voice, TTS, brief, suggestions, readiness, approval view, and calibration. The map is an advertisement contract: it associates capability names with route methods and paths. [orchestrator/services/mobile/discovery.py:57-98]()
+The discovery capability map includes mobile push registration, digest preferences, an on-demand digest request, mobile theme retrieval, spoken mode, live voice, TTS, brief, suggestions, readiness, approval view, calibration, and turn timing (`turn_timing`, listed only while `CHAT_TURN_TIMING_ENABLED` is true: a phone then sends `turnRef` on a voice turn's chat and speech requests). The map is an advertisement contract: it associates capability names with route methods and paths. [orchestrator/services/mobile/discovery.py:57-98]()
 
 | Component | Documented responsibility |
 |---|---|

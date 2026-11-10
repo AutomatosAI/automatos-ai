@@ -17,7 +17,8 @@
 * ``capabilities`` is ``CAPABILITY_ROUTES``'s names once every one that needs setup has it
   (``tts`` needs ``VOICE_TTS_URL``: ``test_voice_tts_speech.py``; ``suggestion_push`` needs
   ``SUGGESTION_PUSH_ENABLED``: ``test_prd268w2_suggestion_push_rules.py``; ``calibration`` needs
-  ``CALIBRATION_ENABLED``: ``test_prd268w3_calibration_routes.py``), and the live app (a clean subprocess,
+  ``CALIBRATION_ENABLED``: ``test_prd268w3_calibration_routes.py``; ``turn_timing`` needs
+  ``CHAT_TURN_TIMING_ENABLED``, here), and the live app (a clean subprocess,
   the ``test_prd261_c1_wire.py`` probe) serves every mapped route, and serves the discovery
   route once, from ``api.well_known``, with no request-context dependency.
 * The route is a plain ``def``, registered by ``RouterSpec``, listed in the route manifest, and
@@ -57,6 +58,7 @@ from api import well_known  # noqa: E402
 from config import HOSTED_PUBLIC_API_HOST, config  # noqa: E402
 from core.auth import hybrid  # noqa: E402
 from core.auth.dependencies import RequestContext  # noqa: E402
+from core.monitoring import turn_clock  # noqa: E402
 from services.mobile import discovery  # noqa: E402
 from services.push import consent  # noqa: E402
 
@@ -68,7 +70,8 @@ CLERK_HOST = "clerk.prd266.test"
 PUBLISHABLE_KEY = "pk_live_" + base64.b64encode(f"{CLERK_HOST}$".encode()).decode()
 # The names §4.1 gives capabilities; a build lists the ones it implements.
 KNOWN_CAPABILITIES = {"push", "spoken_mode", "voice_live", "mobile_theme", "report_content", "digest", "digest_now",
-                      "tts", "brief", "suggestions", "readiness", "suggestion_push", "approval_view", "calibration"}
+                      "tts", "brief", "suggestions", "readiness", "suggestion_push", "approval_view", "calibration",
+                      "turn_timing"}
 SECRET_MARKERS = ("KEY", "SECRET", "TOKEN", "PASSWORD", "PRIVATE", "DSN")
 PUBLIC_KEY_SETTING = "CLERK_PUBLISHABLE_KEY"
 
@@ -305,10 +308,11 @@ def test_no_secret_setting_appears_in_the_body(client, saas, planted_secrets, mo
 def test_capabilities_are_the_mapped_names_and_only_known_ones(client, saas, monkeypatch, edition):
     monkeypatch.setattr(config, "AUTH_EDITION", edition)
     # Every capability that needs setup has it: Auto's server voice is configured, and the
-    # suggestion push and calibration are switched on.
+    # suggestion push, calibration and turn timing are switched on.
     monkeypatch.setattr(config, "VOICE_TTS_URL", "http://voice-tts:8100")
     monkeypatch.setattr(config, "SUGGESTION_PUSH_ENABLED", True)
     monkeypatch.setattr(config, "CALIBRATION_ENABLED", True)
+    monkeypatch.setattr(config, "CHAT_TURN_TIMING_ENABLED", True)
 
     capabilities = _document(client)["capabilities"]
 
@@ -324,6 +328,23 @@ def test_mobile_theme_is_listed_on_the_mobile_theme_route(client, saas, monkeypa
 
     assert "mobile_theme" in _document(client)["capabilities"]
     assert discovery.CAPABILITY_ROUTES["mobile_theme"] == ("GET", "/api/themes/mobile/{install_id}")
+
+
+@pytest.mark.parametrize("edition", ["saas", "local"])
+def test_turn_timing_is_listed_only_while_chat_turn_timing_is_on(client, saas, monkeypatch, edition):
+    """Voice-latency A-3: a phone sends ``turnRef`` only to a server that lists ``turn_timing``,
+    so the server's switch is also the phones' off switch."""
+    monkeypatch.setattr(config, "AUTH_EDITION", edition)
+
+    monkeypatch.setattr(config, "CHAT_TURN_TIMING_ENABLED", False)
+    assert "turn_timing" not in _document(client)["capabilities"]
+    assert "turn_timing" not in discovery.offered_capabilities()
+
+    monkeypatch.setattr(config, "CHAT_TURN_TIMING_ENABLED", True)
+    assert "turn_timing" in _document(client)["capabilities"]
+    assert "turn_timing" in discovery.offered_capabilities()
+    assert discovery.CAPABILITY_ROUTES["turn_timing"] == ("POST", "/api/chat")
+    assert discovery.CONFIGURED_CAPABILITIES["turn_timing"] is turn_clock.enabled
 
 
 _PROBE = """
