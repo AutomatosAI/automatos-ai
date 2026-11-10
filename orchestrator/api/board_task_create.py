@@ -120,10 +120,13 @@ def file_ticket(db: Session, ctx: RequestContext, columns: Dict[str, Any],
     if task.status == "assigned" and task.assigned_agent_id and task.source_type != "recipe":
         # PRD-234 D16: the operator created AND assigned it — on the local edition
         # that is the approval; recorded before the dispatcher can claim the row.
-        consent_for_created_ticket(
-            db, workspace_id=ctx.workspace_id, task=task,
-            actor=actor_ref(ctx), why=WHY_CREATED_AND_ASSIGNED,
-        )
+        # PRD-274 W1: a server key is not the operator; its ticket meets the
+        # workspace's approval policy (always_ask holds it for the owner).
+        if task.created_by_type != API_KEY_FILER:
+            consent_for_created_ticket(
+                db, workspace_id=ctx.workspace_id, task=task,
+                actor=actor_ref(ctx), why=WHY_CREATED_AND_ASSIGNED,
+            )
         _note_no_host_for_cli(db, task)
         notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
         db.commit()  # F118: the wake rides this commit
