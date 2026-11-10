@@ -22,7 +22,8 @@ so the contract is the refusals as much as the audio:
   voice-tts, and with the switch false the line is the one it was;
 * the voice list is voice-tts's, cached, and checked before it is passed on;
 * discovery lists ``tts`` only while ``VOICE_TTS_URL`` is set, and the routes are mounted and in the
-  route manifest.
+  route manifest; ``tts_first_clause`` (voice-latency E-12) needs ``VOICE_TTS_URL`` and
+  ``VOICE_TTS_FIRST_CLAUSE`` both, and ``spoken_unit_ends`` needs ``SPOKEN_MODE_UNIT_ENDS``.
 
 Through the real router with the request context and the session overridden and voice-tts behind
 httpx's MockTransport: no database, no Redis (a fake), no network.
@@ -679,7 +680,42 @@ def test_discovery_lists_tts_only_while_voice_tts_url_is_set(monkeypatch, editio
     assert discovery.CAPABILITY_ROUTES["tts"] == ("POST", SPEECH)
     monkeypatch.setattr(config, "SUGGESTION_PUSH_ENABLED", True)  # the other capabilities that need setup
     monkeypatch.setattr(config, "CALIBRATION_ENABLED", True)
+    monkeypatch.setattr(config, "CHAT_TURN_TIMING_ENABLED", True)
+    monkeypatch.setattr(config, "SPOKEN_MODE_UNIT_ENDS", True)
+    monkeypatch.setattr(config, "VOICE_TTS_FIRST_CLAUSE", True)
     assert discovery.offered_capabilities() == sorted(discovery.CAPABILITY_ROUTES)
+
+
+@pytest.mark.parametrize("edition", ["saas", "local"])
+def test_discovery_lists_tts_first_clause_only_with_a_voice_and_its_switch(monkeypatch, edition):
+    """Voice-latency E-12: the clause cut is for the server voice, so the name needs both."""
+    monkeypatch.setattr(config, "AUTH_EDITION", edition)
+    monkeypatch.setattr(config, "VOICE_TTS_URL", URL)
+    monkeypatch.setattr(config, "VOICE_TTS_FIRST_CLAUSE", False)  # the default
+    assert "tts_first_clause" not in discovery.offered_capabilities()
+    assert "tts" in discovery.offered_capabilities()
+
+    monkeypatch.setattr(config, "VOICE_TTS_URL", "")
+    monkeypatch.setattr(config, "VOICE_TTS_FIRST_CLAUSE", True)
+    assert "tts_first_clause" not in discovery.offered_capabilities()
+
+    monkeypatch.setattr(config, "VOICE_TTS_URL", URL)
+    assert "tts_first_clause" in discovery.offered_capabilities()
+    assert discovery.CAPABILITY_ROUTES["tts_first_clause"] == ("POST", SPEECH)
+    assert discovery.CONFIGURED_CAPABILITIES["tts_first_clause"] is discovery.first_clause_enabled
+
+
+@pytest.mark.parametrize("edition", ["saas", "local"])
+def test_discovery_lists_spoken_unit_ends_only_while_its_switch_is_on(monkeypatch, edition):
+    """Voice-latency E-12: it needs no voice, only ``SPOKEN_MODE_UNIT_ENDS``."""
+    monkeypatch.setattr(config, "AUTH_EDITION", edition)
+    monkeypatch.setattr(config, "VOICE_TTS_URL", "")
+    monkeypatch.setattr(config, "SPOKEN_MODE_UNIT_ENDS", False)  # the default
+    assert "spoken_unit_ends" not in discovery.offered_capabilities()
+
+    monkeypatch.setattr(config, "SPOKEN_MODE_UNIT_ENDS", True)
+    assert "spoken_unit_ends" in discovery.offered_capabilities()
+    assert discovery.CAPABILITY_ROUTES["spoken_unit_ends"] == ("POST", "/api/chat")
 
 
 def test_the_router_is_mounted_and_both_routes_are_in_the_route_manifest():
@@ -696,4 +732,5 @@ def test_the_settings_are_on_the_config_surface():
     names = set(json.loads((ORCH / "reports" / "config-surface.json").read_text(encoding="utf-8"))["settings"])
 
     assert {"VOICE_TTS_URL", "VOICE_TTS_TOKEN", "VOICE_TTS_TIMEOUT_SECONDS", "VOICE_TTS_CONNECT_TIMEOUT_SECONDS",
-            "VOICE_TTS_DEFAULT_VOICE", "VOICE_TTS_RATE_PER_MINUTE"} <= names
+            "VOICE_TTS_DEFAULT_VOICE", "VOICE_TTS_RATE_PER_MINUTE", "VOICE_TTS_FIRST_CLAUSE",
+            "SPOKEN_MODE_UNIT_ENDS"} <= names

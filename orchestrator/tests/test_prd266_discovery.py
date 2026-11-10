@@ -18,7 +18,9 @@
   (``tts`` needs ``VOICE_TTS_URL``: ``test_voice_tts_speech.py``; ``suggestion_push`` needs
   ``SUGGESTION_PUSH_ENABLED``: ``test_prd268w2_suggestion_push_rules.py``; ``calibration`` needs
   ``CALIBRATION_ENABLED``: ``test_prd268w3_calibration_routes.py``; ``turn_timing`` needs
-  ``CHAT_TURN_TIMING_ENABLED``, here), and the live app (a clean subprocess,
+  ``CHAT_TURN_TIMING_ENABLED``, here; ``spoken_unit_ends`` needs ``SPOKEN_MODE_UNIT_ENDS``, here;
+  ``tts_first_clause`` needs ``VOICE_TTS_URL`` and ``VOICE_TTS_FIRST_CLAUSE``:
+  ``test_voice_tts_speech.py``), and the live app (a clean subprocess,
   the ``test_prd261_c1_wire.py`` probe) serves every mapped route, and serves the discovery
   route once, from ``api.well_known``, with no request-context dependency.
 * The route is a plain ``def``, registered by ``RouterSpec``, listed in the route manifest, and
@@ -71,7 +73,7 @@ PUBLISHABLE_KEY = "pk_live_" + base64.b64encode(f"{CLERK_HOST}$".encode()).decod
 # The names §4.1 gives capabilities; a build lists the ones it implements.
 KNOWN_CAPABILITIES = {"push", "spoken_mode", "voice_live", "mobile_theme", "report_content", "digest", "digest_now",
                       "tts", "brief", "suggestions", "readiness", "suggestion_push", "approval_view", "calibration",
-                      "turn_timing"}
+                      "turn_timing", "spoken_unit_ends", "tts_first_clause"}
 SECRET_MARKERS = ("KEY", "SECRET", "TOKEN", "PASSWORD", "PRIVATE", "DSN")
 PUBLIC_KEY_SETTING = "CLERK_PUBLISHABLE_KEY"
 
@@ -308,11 +310,13 @@ def test_no_secret_setting_appears_in_the_body(client, saas, planted_secrets, mo
 def test_capabilities_are_the_mapped_names_and_only_known_ones(client, saas, monkeypatch, edition):
     monkeypatch.setattr(config, "AUTH_EDITION", edition)
     # Every capability that needs setup has it: Auto's server voice is configured, and the
-    # suggestion push, calibration and turn timing are switched on.
+    # suggestion push, calibration, turn timing, unit ends and the first clause are switched on.
     monkeypatch.setattr(config, "VOICE_TTS_URL", "http://voice-tts:8100")
     monkeypatch.setattr(config, "SUGGESTION_PUSH_ENABLED", True)
     monkeypatch.setattr(config, "CALIBRATION_ENABLED", True)
     monkeypatch.setattr(config, "CHAT_TURN_TIMING_ENABLED", True)
+    monkeypatch.setattr(config, "SPOKEN_MODE_UNIT_ENDS", True)
+    monkeypatch.setattr(config, "VOICE_TTS_FIRST_CLAUSE", True)
 
     capabilities = _document(client)["capabilities"]
 
@@ -345,6 +349,45 @@ def test_turn_timing_is_listed_only_while_chat_turn_timing_is_on(client, saas, m
     assert "turn_timing" in discovery.offered_capabilities()
     assert discovery.CAPABILITY_ROUTES["turn_timing"] == ("POST", "/api/chat")
     assert discovery.CONFIGURED_CAPABILITIES["turn_timing"] is turn_clock.enabled
+
+
+def test_the_two_first_audio_switches_ship_off():
+    """Voice-latency E-12: with neither set, discovery lists neither name."""
+    assert config.SPOKEN_MODE_UNIT_ENDS is False
+    assert config.VOICE_TTS_FIRST_CLAUSE is False
+
+
+@pytest.mark.parametrize("edition", ["saas", "local"])
+def test_spoken_unit_ends_is_listed_only_while_its_switch_is_on(client, saas, monkeypatch, edition):
+    """Voice-latency E-12: a phone ends a sentence at the end of the text so far only on a
+    server that lists ``spoken_unit_ends``; the switch ships off, so the name is absent."""
+    monkeypatch.setattr(config, "AUTH_EDITION", edition)
+
+    monkeypatch.setattr(config, "SPOKEN_MODE_UNIT_ENDS", False)
+    assert "spoken_unit_ends" not in _document(client)["capabilities"]
+    assert "spoken_unit_ends" not in discovery.offered_capabilities()
+
+    monkeypatch.setattr(config, "SPOKEN_MODE_UNIT_ENDS", True)
+    assert "spoken_unit_ends" in _document(client)["capabilities"]
+    assert "spoken_unit_ends" in discovery.offered_capabilities()
+    assert discovery.CAPABILITY_ROUTES["spoken_unit_ends"] == ("POST", "/api/chat")
+    assert discovery.CONFIGURED_CAPABILITIES["spoken_unit_ends"] is discovery.spoken_unit_ends_enabled
+
+
+@pytest.mark.parametrize("edition", ["saas", "local"])
+def test_with_both_first_audio_switches_off_the_document_lists_what_it_did(client, saas, monkeypatch, edition):
+    """Voice-latency E-12: off is the document as it was, less nothing and plus nothing."""
+    monkeypatch.setattr(config, "AUTH_EDITION", edition)
+    monkeypatch.setattr(config, "VOICE_TTS_URL", "http://voice-tts:8100")
+    monkeypatch.setattr(config, "SUGGESTION_PUSH_ENABLED", True)
+    monkeypatch.setattr(config, "CALIBRATION_ENABLED", True)
+    monkeypatch.setattr(config, "CHAT_TURN_TIMING_ENABLED", True)
+    monkeypatch.setattr(config, "SPOKEN_MODE_UNIT_ENDS", False)
+    monkeypatch.setattr(config, "VOICE_TTS_FIRST_CLAUSE", False)
+
+    capabilities = _document(client)["capabilities"]
+
+    assert capabilities == sorted(set(discovery.CAPABILITY_ROUTES) - {"spoken_unit_ends", "tts_first_clause"})
 
 
 _PROBE = """

@@ -2281,6 +2281,11 @@ class Config:
     MEMORY_AUDIENCE_ENABLED: bool = os.getenv("MEMORY_AUDIENCE_ENABLED", "false").strip().lower() == "true"
     SPOKEN_MODE_MODEL: str = os.getenv("SPOKEN_MODE_MODEL", "claude-haiku-5-5").strip()
     SPOKEN_MODE_PROVIDER: str = os.getenv("SPOKEN_MODE_PROVIDER", "anthropic").strip().lower()
+    # Discovery lists `spoken_unit_ends` while this is true. A phone that knows the name then
+    # speaks a sentence as soon as a spoken turn's text so far ends at its terminator, without
+    # waiting for the whitespace the next unit brings. false = the name is not listed and phones
+    # cut sentences as before.
+    SPOKEN_MODE_UNIT_ENDS: bool = os.getenv("SPOKEN_MODE_UNIT_ENDS", "false").strip().lower() == "true"
     # A chat turn's clock (core/monitoring/turn_clock.py): where the time went between the
     # request and the reply, as one `chat_turn_timing` log line and a `timing` key on the
     # reply's trace. Ids and numbers only. false = no turn is timed: no clock, no line, no key.
@@ -2304,6 +2309,10 @@ class Config:
     VOICE_TTS_CONNECT_TIMEOUT_SECONDS: float = float(os.getenv("VOICE_TTS_CONNECT_TIMEOUT_SECONDS", "2"))
     VOICE_TTS_DEFAULT_VOICE: str = os.getenv("VOICE_TTS_DEFAULT_VOICE", "af_heart").strip()
     VOICE_TTS_RATE_PER_MINUTE: int = int(os.getenv("VOICE_TTS_RATE_PER_MINUTE", "60"))
+    # Discovery lists `tts_first_clause` while this is true and VOICE_TTS_URL is set. A phone
+    # that knows the name then asks for the first clause of a long first sentence as its own
+    # speech request, so the first audio is a shorter synthesis. false = no clause cut.
+    VOICE_TTS_FIRST_CLAUSE: bool = os.getenv("VOICE_TTS_FIRST_CLAUSE", "false").strip().lower() == "true"
     # The ONE public host (PRD-258 US-003; it was defined twice): Retell's
     # custom-LLM socket + events webhook (arming builds the agent's URLs from
     # it) and the channels' inbound webhook URLs (PRD-142 W3-S5 / G7). Railway
