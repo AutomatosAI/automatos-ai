@@ -1044,7 +1044,7 @@ _policy_plane_on = bool(getattr(_app_config, "POLICY_PLANE_ENABLED", False))
 
 limiter = Limiter(
     key_func=_get_real_client_ip,
-    default_limits=["60/minute"],
+    default_limits=[f"{_app_config.APP_RATE_LIMIT_PER_MINUTE}/minute"],
     swallow_errors=not _policy_plane_on,  # F040: fail CLOSED when the plane is on
 )
 app.state.limiter = limiter
@@ -1365,6 +1365,10 @@ except Exception as e:
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)
+
+# PRD-274 W1: the routes a server key reaches limit per IP inside their gate, after it knows who calls.
+from core.auth.server_key_ip_limit import exempt_server_key_routes  # noqa: E402
+exempt_server_key_routes(limiter, app.routes)
 
 
 # Exports directory served through authenticated endpoint instead of open StaticFiles mount.
