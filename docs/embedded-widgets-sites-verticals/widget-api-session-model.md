@@ -156,7 +156,7 @@ Each key can have a list of `permissions` [orchestrator/core/models/sdk_api_keys
 ### Domain and IP Restrictions
 `SdkApiKey` records include `allowed_domains` and `allowed_ips` fields [orchestrator/core/models/sdk_api_keys.py:61-62]().
 - **`allowed_domains`**: For `public` keys, requests are only permitted from origins matching these domains. This is a critical security measure to prevent unauthorized embedding [orchestrator/api/widgets/auth.py:181-184](). The `_extract_origin` helper extracts the hostname from the request's `Origin` header, and `_host_only` normalizes domain patterns for matching [orchestrator/api/widgets/auth.py:28, orchestrator/core/services/api_key_service.py:29-39]().
-- **`allowed_ips`**: An optional IP allowlist can restrict access to specific IP addresses.
+- **`allowed_ips`**: Not supported yet. Nothing enforces a key's IP allow-list, so `POST /api/api-keys` refuses a non-empty list (422) rather than store a restriction that would not apply.
 
 ### API Key Management Endpoints
 The `/api/api-keys` router [orchestrator/api/api_keys.py:26]() provides CRUD operations for SDK API keys:
