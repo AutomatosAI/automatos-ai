@@ -29,3 +29,6 @@ MEMORY_WRITE = "memory:write"
 # words (services/playbook_given.TRIGGER_STARTS).
 PLAYBOOKS_EXECUTE = "playbooks:execute"
 DOCUMENTS_WRITE = "documents:write"
+# A server key chats with a lean agent (POST /api/chat, api/chat_server_key.py), as its own
+# service user. Not "chat": that scope is the widget's, and would grant this by accident.
+AGENTS_CHAT = "agents:chat"
