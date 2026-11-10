@@ -2,7 +2,7 @@ name: gitleaks
 
 # PRD-173 (F012 + F092, W3 slice) — secret-scanning lane.
 #
-# Scans the FULL git history for committed secrets on every PR to main (and on
+# Scans the FULL git history for committed secrets on every PR, whatever its base (and on
 # push to main). fetch-depth: 0 pulls the entire history so the scan covers
 # every commit — which is what makes it (a) the enforcement that keeps the next
 # F012-class artifact out at the PR, and (b) the verification gate for the F012
@@ -19,9 +19,9 @@ on:
   push:
     branches:
       - main
+  # Any base branch, so a PR stacked on another PR is scanned too, and is not left without
+  # this required check when GitHub retargets it to main (a retarget is not a new run).
   pull_request:
-    branches:
-      - main
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

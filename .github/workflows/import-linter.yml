@@ -19,9 +19,9 @@ on:
     branches:
       - main
       - "ralph/**"
+  # Any base branch, so a PR stacked on another PR is checked too, and is not left without
+  # this required check when GitHub retargets it to main (a retarget is not a new run).
   pull_request:
-    branches:
-      - main
 
 jobs:
   import-linter:
