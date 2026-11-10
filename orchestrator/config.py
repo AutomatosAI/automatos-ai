@@ -2281,6 +2281,16 @@ class Config:
     MEMORY_AUDIENCE_ENABLED: bool = os.getenv("MEMORY_AUDIENCE_ENABLED", "false").strip().lower() == "true"
     SPOKEN_MODE_MODEL: str = os.getenv("SPOKEN_MODE_MODEL", "claude-haiku-5-5").strip()
     SPOKEN_MODE_PROVIDER: str = os.getenv("SPOKEN_MODE_PROVIDER", "anthropic").strip().lower()
+    # A chat turn's clock (core/monitoring/turn_clock.py): where the time went between the
+    # request and the reply, as one `chat_turn_timing` log line and a `timing` key on the
+    # reply's trace. Ids and numbers only. false = no turn is timed: no clock, no line, no key.
+    CHAT_TURN_TIMING_ENABLED: bool = os.getenv("CHAT_TURN_TIMING_ENABLED", "true").strip().lower() == "true"
+    # The per-stage times of a turn (agent context, tools, context, apps, knowledge) are taken
+    # by wrapping five of the turn's methods for its length. false = those five are left alone
+    # and the stages are absent; the marks, the line and the trace key stay.
+    CHAT_TURN_TIMING_STAGES_ENABLED: bool = (
+        os.getenv("CHAT_TURN_TIMING_STAGES_ENABLED", "true").strip().lower() == "true"
+    )
     # Auto's server voice (services/voice-tts): POST /api/voice/speech streams a reply
     # as MP3 for the phone and the web quick-ask (modules/voice/speech.py). Empty URL =
     # off: the route answers 503 tts_off and discovery does not list `tts`, so clients
