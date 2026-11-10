@@ -13,6 +13,9 @@ other route starts accepting keys (``core/auth/hybrid.py`` says why that matters
   (``services.key_limits``). Over either is a 429.
 * **A publishable key** (``ak_pub_``) is refused: it lives in a browser, so anyone can read it.
 * **Anyone else** goes through ``require_workspace_permission(permission)`` exactly as before.
+* **With the policy plane on,** these routes are exempt from slowapi's per-IP limit and limit in
+  here instead: a server key by its own limits, anyone else by the same per-IP limit, and failed
+  keys per IP before any lookup (``core.auth.server_key_ip_limit``).
 
 The dependency carries the permission marker, so the authz sweep classifies the route as gated, and
 the key scope marker, so a test can list which routes keys reach.
@@ -27,6 +30,7 @@ from starlette.concurrency import run_in_threadpool
 from core.auth.bearer_registry import bearer_token
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import _sdk_key_context_in_own_session, get_request_context_hybrid
+from core.auth.server_key_ip_limit import limit_this_caller, note_failed_key, refuse_after_failed_keys
 from core.auth.workspace_permission import PERMISSION_MARKER_ATTR, require_workspace_permission
 from core.database.database import get_db
 
@@ -44,11 +48,14 @@ def require_workspace_permission_or_server_key(permission: str, key_scope: str) 
     member_gate = require_workspace_permission(permission)
 
     async def _dep(request: Request, db: Any = Depends(get_db)) -> RequestContext:
+        """A publishable key is refused; a server key goes through its scope and limits; anyone
+        else meets the per-IP limit, then the member gate."""
         token = bearer_token(request)
         if token and token.startswith(PUBLISHABLE_KEY_PREFIX):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=PUBLISHABLE_KEY_REFUSED)
         if token and token.startswith(SERVER_KEY_PREFIX):
             return await run_in_threadpool(_server_key_context, request, key_scope)
+        await run_in_threadpool(limit_this_caller, request)
         ctx = await get_request_context_hybrid(request)
         return await run_in_threadpool(member_gate, request, ctx=ctx, db=db)
 
@@ -62,7 +69,14 @@ def _server_key_context(request: Request, key_scope: str) -> RequestContext:
     """The key's context once its scope and its per-key limits allow the request (threadpool)."""
     from services.key_limits import enforce_on_own_session
 
-    return enforce_on_own_session(_sdk_key_context_in_own_session(request, key_scope))
+    refuse_after_failed_keys(request)
+    try:
+        ctx = _sdk_key_context_in_own_session(request, key_scope)
+    except HTTPException as refused:
+        if refused.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN):
+            note_failed_key(request)
+        raise
+    return enforce_on_own_session(ctx)
 
 
 def is_server_key(ctx: Any) -> bool:
