@@ -15,8 +15,8 @@ from __future__ import annotations
 # Board task read access for SDK keys (PRD-09 Slice 2 — read-only board).
 TASKS_READ = "tasks:read"
 
-# NOTE: ``tasks:write`` / ``tasks:execute`` (board write-back and the
-# agent-launching / approval actions) are introduced in Slice 3, where the
-# write-vs-execute split is designed alongside the mutation endpoints. They are
-# intentionally NOT defined yet — a mintable scope that gates nothing would be a
-# misleading half-state.
+# PRD-274 Wave 1: a product's server key may file a ticket (POST /api/v1/tasks) and start an
+# agent's run (POST /api/agents/{id}/execute). Each route declares its scope through
+# core/auth/server_key_gate.py; a key without it is refused.
+TASKS_WRITE = "tasks:write"
+AGENTS_EXECUTE = "agents:execute"

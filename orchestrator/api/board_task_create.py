@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_PRIORITY = "medium"
 DEFAULT_REVIEW_MODE = "auto"
 DEFAULT_SOURCE_TYPE = "user"
+API_KEY_FILER = "api_key"
 NO_SUCH_AGENT = "Assigned agent not found in workspace"
 # F293: the columns that hold finished work, which no new card starts in.
 FINISHED_COLUMNS = {"review": "Review", "done": "Done"}
@@ -93,7 +94,7 @@ def file_ticket(db: Session, ctx: RequestContext, columns: Dict[str, Any],
     dispatch loop can claim it."""
     task = BoardTask(
         workspace_id=ctx.workspace_id,
-        created_by_type="user",
+        created_by_type=_filer_type(ctx),
         created_by_id=ctx.user.clerk_user_id or ctx.user.id,
         sla_deadline=datetime.now(timezone.utc) + timedelta(hours=PRIORITY_SLA_HOURS.get(columns["priority"], 24)),
         **columns,
@@ -130,6 +131,14 @@ def file_ticket(db: Session, ctx: RequestContext, columns: Dict[str, Any],
     logger.info("[BoardTasks] Created task %d in workspace %s", task.id, ctx.workspace_id)
     return task
 
+
+
+def _filer_type(ctx: RequestContext) -> str:
+    """Who filed it: a person ("user"), or a product's server key ("api_key", PRD-274 W1). A
+    key's input is never the owner's own words (``created_by_type == "user"`` means that)."""
+    from core.auth.server_key_gate import is_server_key
+
+    return API_KEY_FILER if is_server_key(ctx) else DEFAULT_SOURCE_TYPE
 
 def _assignee(db: Session, workspace_id: Any, raw: Any) -> Optional[int]:
     """The agent the ticket is given to, one of this workspace's; None for none."""

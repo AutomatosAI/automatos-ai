@@ -15,6 +15,10 @@ Repeating the request (same agent, input and callback URL) answers 200 with the 
 ``Idempotent-Replayed: true``. The same key on a different request is a 409. A key never expires:
 it names its ticket for good.
 
+A signed-in member whose role grants ``agents:execute`` may call it, and so may a product's
+server key listing ``agents:execute`` (``core.auth.server_key_gate``, PRD-274 §5.2); the run is then
+the key's workspace's, and its ticket says a key filed it.
+
 A plain ``def``: FastAPI runs it in its threadpool, off the event loop.
 """
 from __future__ import annotations
@@ -28,8 +32,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
-from core.auth.hybrid import get_request_context_hybrid
-from core.auth.workspace_permission import require_workspace_permission
+from core.auth.scopes import AGENTS_EXECUTE
+from core.auth.server_key_gate import require_workspace_permission_or_server_key
 from core.database.database import get_db
 from services.run_callbacks import URL_MAX, CallbackUrlRefused, check_callback_url, new_callback
 
@@ -76,11 +80,11 @@ def _runnable_agent(db: Session, workspace_id: Any, agent_id: int) -> Any:
     return agent
 
 
-@router.post("/{agent_id}/execute", status_code=status.HTTP_202_ACCEPTED,
-             dependencies=[Depends(require_workspace_permission("agents:execute"))])
+@router.post("/{agent_id}/execute", status_code=status.HTTP_202_ACCEPTED)
 def execute_agent(agent_id: int, body: AgentRunRequest, response: Response,
                   idempotency_key: Annotated[Optional[str], Header(alias=IDEMPOTENCY_HEADER)] = None,
-                  ctx: RequestContext = Depends(get_request_context_hybrid),
+                  ctx: RequestContext = Depends(require_workspace_permission_or_server_key(
+                      "agents:execute", AGENTS_EXECUTE)),
                   db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Files the run as a ticket assigned to the agent and answers with its id; the board runs it.
     A repeat of a request with the same ``Idempotency-Key`` answers with the run it started."""
