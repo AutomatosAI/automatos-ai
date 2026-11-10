@@ -680,6 +680,9 @@ class Config:
     WIDGET_RATE_LIMIT_WINDOW_SECONDS: int = int(os.getenv("WIDGET_RATE_LIMIT_WINDOW_SECONDS", "60"))
     WIDGET_RATE_LIMIT_PUBLIC_PER_WINDOW: int = int(os.getenv("WIDGET_RATE_LIMIT_PUBLIC_PER_WINDOW", "30"))
     WIDGET_RATE_LIMIT_SERVER_PER_WINDOW: int = int(os.getenv("WIDGET_RATE_LIMIT_SERVER_PER_WINDOW", "1000"))
+    # The header a proxy in front sets to the caller's address (hosted on Railway: X-Real-IP). Every
+    # per-IP limit reads it when set; unset, the first X-Forwarded-For hop (core/security/client_ip.py).
+    CLIENT_IP_HEADER: str = os.getenv("CLIENT_IP_HEADER", "")
     WIDGET_CHAT_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CHAT_IP_LIMIT_PER_WINDOW", "30"))
     WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW", "10"))
     # PRD-264 EUAI-10 (D16): the public detection route GET /api/public/provenance/{sha256}
