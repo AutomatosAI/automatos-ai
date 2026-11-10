@@ -56,11 +56,11 @@ def get_credential_store(db: Session = Depends(get_db)) -> CredentialStore:
 
 
 def get_client_ip(request: Request) -> str:
-    """Extract client IP from request"""
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    """The caller's address (``core.security.client_ip``): ``CLIENT_IP_HEADER`` when the deployment
+    names one, else the first X-Forwarded-For hop, else the socket peer."""
+    from core.security.client_ip import client_ip
+
+    return client_ip(request)
 
 
 def _check_credential_workspace(cred, ctx: RequestContext) -> None:

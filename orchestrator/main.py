@@ -1017,6 +1017,8 @@ from api.widgets.rate_limit import WidgetRateLimitMiddleware
 
 app.add_middleware(WidgetCORSMiddleware)
 app.add_middleware(WidgetRateLimitMiddleware)
+from core.security.client_ip import TrustedClientAddressMiddleware  # noqa: E402
+app.add_middleware(TrustedClientAddressMiddleware)  # outermost so far: the widget limiter sees the caller
 
 # Rate limiting (US-017)
 # PRD-174 F040 — the limiter was constructed but SlowAPIMiddleware was never
@@ -1025,16 +1027,14 @@ app.add_middleware(WidgetRateLimitMiddleware)
 # swallow_errors=False means a limiter that can't evaluate (storage error) raises
 # instead of waving the request through. A gate that can't decide must deny.
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from core.security.rate_limit_middleware import RouteTreeSlowAPIMiddleware  # PRD-262 US-008
 
 def _get_real_client_ip(request) -> str:
-    """Extract real client IP, respecting X-Forwarded-For behind reverse proxy."""
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return get_remote_address(request)
+    """The caller's address, read as every other limit reads it (core.security.client_ip)."""
+    from core.security.client_ip import client_ip
+
+    return client_ip(request)
 
 # F040 fix is gated on the policy-plane flag so flag-OFF is byte-for-byte today's
 # behaviour (limiter constructed but inert). swallow_errors follows the flag:
