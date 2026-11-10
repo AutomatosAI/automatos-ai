@@ -152,6 +152,61 @@ def test_a_server_key_starts_a_run_its_ticket_says_a_key_filed(new_session, work
         s.close()
 
 
+
+class _Body:
+    def __init__(self, body):
+        self._body = body
+
+    async def json(self):
+        return self._body
+
+
+def _grants(new_session, task_id):
+    s = new_session()
+    try:
+        return s.execute(text("SELECT count(*) FROM approval_grants WHERE subject_type = 'board_task' AND subject_id = :t"), {"t": str(task_id)}).scalar()
+    finally:
+        s.close()
+
+
+def test_a_server_key_files_a_ticket_and_its_ticket_says_a_key_filed(new_session, workspace):
+    from api.board_tasks import create_task
+    from core.models import BoardTask
+
+    ws, agent_id = workspace
+    ctx = _pass(_request(_mint(new_session, ws, permissions=(TASKS_WRITE,))["key"]), "missions:create", TASKS_WRITE)
+    s = new_session()
+    try:
+        answer = asyncio.run(create_task(_Body({"title": "Renew Acme", "assigned_agent_id": agent_id}), ctx=ctx, db=s))
+        task = s.get(BoardTask, answer["id"])
+        assert (str(task.workspace_id), task.created_by_type, task.created_by_id) == (ws, "api_key", ctx.user.id)
+        assert task.status == "assigned"
+    finally:
+        s.close()
+
+
+def test_a_server_key_is_not_the_operator_so_its_ticket_gets_no_operator_consent(new_session, workspace):
+    """On the local edition, filing and assigning a ticket is the operator's consent (PRD-234
+    D16). A key's ticket meets the workspace's approval policy instead."""
+    from api.board_task_create import file_ticket, new_ticket_columns
+    from services.board_consent import creation_is_consent
+
+    ws, agent_id = workspace
+    assert creation_is_consent()  # the test edition is local
+    key_ctx = _pass(_request(_mint(new_session, ws, permissions=(TASKS_WRITE,))["key"]), "missions:create", TASKS_WRITE)
+    operator = SimpleNamespace(workspace_id=uuid.UUID(ws), auth_type="clerk",
+                               user=SimpleNamespace(id="u-1", clerk_user_id="clerk_owner", email=None))
+    filed = {}
+    for name, ctx in (("key", key_ctx), ("operator", operator)):
+        s = new_session()
+        try:
+            columns = new_ticket_columns(s, ws, {"title": f"Renew Acme ({name})", "assigned_agent_id": agent_id})
+            filed[name] = file_ticket(s, ctx, columns).id
+        finally:
+            s.close()
+    assert _grants(new_session, filed["key"]) == 0 and _grants(new_session, filed["operator"]) == 1
+
+
 def test_the_named_routes_carry_the_gate_and_tasks_write_can_be_minted():
     from fastapi.routing import APIRoute, iter_route_contexts
 
