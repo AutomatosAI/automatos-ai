@@ -522,44 +522,6 @@ def get_agent_status(
         logger.error(f"Error getting agent status: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/agent/{agent_id}/execute", dependencies=[Depends(require_workspace_permission("agents:execute"))])
-def execute_agent(
-    agent_id: int, 
-    execution_data: dict = {}, 
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    """Execute an agent with given parameters"""
-    import time
-    try:
-        from core.models import Agent
-        
-        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
-        if not agent:
-            raise HTTPException(status_code=404, detail="Agent not found")
-            
-        if agent.status != "active":
-            raise HTTPException(status_code=400, detail="Agent must be active to execute")
-            
-        # Generate execution ID and simulate execution start
-        execution_id = f"exec_{agent_id}_{int(time.time())}"
-        
-        return {
-            "execution_id": execution_id,
-            "agent_id": agent_id,
-            "agent_name": agent.name,
-            "status": "started",
-            "parameters": execution_data,
-            "started_at": "2025-08-01T12:57:03Z",
-            "estimated_duration": "5-10 minutes",
-            "message": f"Execution started for agent {agent.name}"
-        }
-    except HTTPException:
-        raise  
-    except Exception as e:
-        logger.error(f"Error executing agent: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
 @router.get("/performance-baseline")
 def get_performance_baseline(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """

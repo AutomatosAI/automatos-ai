@@ -15,6 +15,7 @@ class TestContextMode:
         "router", "orchestrator_stage", "nl2sql",
         "coordinator", "planning",
         "check_in",  # PRD-268 US-C02c
+        "lean",  # Automatos for products, Wave 2: lean turns
     }
 
     def test_all_expected_modes_exist(self):

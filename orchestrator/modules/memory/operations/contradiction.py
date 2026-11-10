@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
+from core.security.memory_audience import plans_each_audience_apart
+
 # Similarity at/above this is a near-duplicate (merge); a contradiction is high
 # subject-overlap with a conflicting value, handled separately.
 DEFAULT_DUP_THRESHOLD = 0.82
@@ -214,6 +216,7 @@ def select_promotions(
     return out
 
 
+@plans_each_audience_apart  # Wave 4b: facts for different agents are never merged or superseded
 def plan_consolidation(
     memories: List[Dict[str, Any]],
     *,

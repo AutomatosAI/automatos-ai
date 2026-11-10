@@ -217,4 +217,10 @@ DEFAULT_BUDGETS: dict[ContextMode, TokenBudget] = {
         reserved_for_response=800,
         reserved_for_messages=0,
     ),
+    # Lean turns: a conversation like CHATBOT's; what is lean is the sections, not the window.
+    ContextMode.LEAN: TokenBudget(
+        total=128_000,
+        reserved_for_response=4_096,
+        reserved_for_messages=60_000,
+    ),
 }

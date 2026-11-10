@@ -45,6 +45,8 @@ from core.models import Base
 # Import API routers
 import integrations.budstacks  # noqa: F401 — self-registers the budstacks VerticalProvisioner
 from api.agents import router as agents_router
+from api.agent_execute import router as agent_execute_router
+from api.run_callbacks import router as run_callbacks_router
 from api.workflows import router as workflows_router
 from api.workflow_templates import router as workflow_templates_router
 from api.workflow_recipes import router as workflow_recipes_router, webhook_router as recipe_webhook_router
@@ -59,6 +61,7 @@ from api.analytics import router as analytics_router
 from api.workflow_history import router as workflow_history_router
 from api.memory_stats import router as memory_stats_router
 from api.memory_stats import admin_router as memory_stats_admin_router  # PRD-77: delete/consolidate stay super-admin (PRD-143 S7)
+from api.memory_profiles import router as memory_profiles_router  # Wave 4: the memory profiles a workspace can pick
 from api.context_policy import router as context_policy_router
 from api.codegraph import router as codegraph_router  # PRD-11: New CodeGraph implementation
 from api.github_webhooks import router as github_webhooks_router  # GitHub PR automation
@@ -1225,6 +1228,8 @@ async def api_tracking_middleware(request, call_next):
 
 # Include API routers
 app.include_router(agents_router)
+app.include_router(agent_execute_router)  # PRD-274 Wave 1: a run of one agent, filed as a board ticket
+app.include_router(run_callbacks_router)  # PRD-274 Wave 1: the callback signing secret
 app.include_router(models_router)  # PRD-15: Model management
 app.include_router(widget_workflows_router)  # US-014: Widget workflow control (pause/resume/cancel) — must be before workflows_router to avoid /{id} catch-all
 app.include_router(workflows_router)
@@ -1242,6 +1247,7 @@ app.include_router(cache_router)  # Cache management and monitoring
 app.include_router(system_router)
 app.include_router(memory_stats_router)  # PRD-77 memory explorer reads (/browse, /health, /stats/real) — workspace-scoped, member-visible
 app.include_router(memory_stats_admin_router)  # PRD-77 memory mutations (delete/consolidate) — super-admin only (PRD-143 S7 obs tier)
+app.include_router(memory_profiles_router)  # Wave 4: GET /api/v1/memory/profiles, workspace-scoped, member-visible
 app.include_router(widget_memory_router)  # US-013: Widget memory panel (/api/memory)
 app.include_router(analytics_router)
 app.include_router(workflow_history_router)
@@ -1369,8 +1375,12 @@ async def serve_export(file_path: str, ctx = Depends(get_request_context_hybrid)
     from pathlib import Path as _Path
     safe_base = _Path("exports").resolve()
     requested = (safe_base / file_path).resolve()
-    # Prevent path traversal
-    if not str(requested).startswith(str(safe_base)):
+    # CodeQL py/path-injection: a bare startswith() string compare is bypassed by a
+    # sibling directory sharing the same text prefix (e.g. "exports-other"), and
+    # file_path is a {file_path:path} converter so it can contain "..". resolve()
+    # plus is_relative_to() is the guard this codebase already uses for the
+    # equivalent document routes (services/document_downloads.py).
+    if not requested.is_relative_to(safe_base):
         raise HTTPException(status_code=403, detail="Access denied")
     if not requested.is_file():
         raise HTTPException(status_code=404, detail="File not found")

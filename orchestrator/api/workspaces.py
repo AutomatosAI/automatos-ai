@@ -1005,6 +1005,8 @@ def get_memory_stats(
             "recent": recent,
         }
     except Exception as e:
-        logger.error("Failed to get memory stats for workspace %s: %s", workspace_id, e)
-        return {"total_memories": 0, "by_type": {}, "by_level": {}, "recent": [], "error": str(e)}
+        # CodeQL py/stack-trace-exposure: the exception's text stays in the server log.
+        logger.error("Failed to get memory stats for workspace %s: %s", workspace_id, e, exc_info=True)
+        return {"total_memories": 0, "by_type": {}, "by_level": {}, "recent": [],
+                "error": "Could not read memory stats"}
 

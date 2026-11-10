@@ -230,15 +230,16 @@ def get_live_progress(
         
         return _get_live_progress_payload(execution)
 
-    except Exception as e:
-        logger.error(f"Error fetching live progress: {e}")
+    except Exception:
+        # CodeQL py/stack-trace-exposure: the exception's text stays in the server log.
+        logger.exception("Error fetching live progress")
         return {
             "status": "error",
             "progress": 0,
             "metrics": {},
             "memory_activities": [],
             "communications": [],
-            "error": str(e)
+            "error": "Could not fetch live progress"
         }
 
 def _store_event_memory_operation(input_data: Dict[str, Any], event_data: Dict[str, Any]) -> None:

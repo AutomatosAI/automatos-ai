@@ -4,7 +4,9 @@ The hand-rolled ``_require_workspace_admin`` in ``api/gdpr.py`` (a role-string
 check, different semantics from the canonical membership-row check) is deleted:
 all three GDPR routes now depend on the ONE ``require_workspace_admin`` (PRD-185
 S12), the same gate the governance + approval-grant surfaces use. Pinned here:
-the local helper is gone and every route carries the canonical dependency.
+the local helper is gone and every route carries the canonical dependency, the
+erase route through ``require_workspace_eraser`` (#1443), which is that gate plus a
+closed workspace's owner finishing its erasure.
 
 Pure: route-table introspection (the PRD-196 S2 wiring-test shape) — no DB.
 """
@@ -24,6 +26,7 @@ _conftest._restore_real_app_modules()
 
 from api import gdpr as gdpr_api  # noqa: E402
 from core.auth.workspace_admin import require_workspace_admin  # noqa: E402
+from core.auth.workspace_eraser import require_workspace_eraser  # noqa: E402
 
 
 def _dependant_calls(dependant) -> set:
@@ -41,17 +44,18 @@ def test_hand_rolled_admin_helper_is_gone():
 
 def test_every_gdpr_route_carries_canonical_admin_gate():
     expected = {
-        ("/api/v1/gdpr/export", "GET"),
-        ("/api/v1/gdpr/erase", "POST"),
-        ("/api/v1/gdpr/erase-subject", "POST"),
+        ("/api/v1/gdpr/export", "GET"): require_workspace_admin,
+        ("/api/v1/gdpr/erase", "POST"): require_workspace_eraser,
+        ("/api/v1/gdpr/erase-subject", "POST"): require_workspace_admin,
     }
     seen = set()
     for route in gdpr_api.router.routes:
         for method in route.methods or ():
             key = (route.path, method)
             if key in expected:
-                assert require_workspace_admin in _dependant_calls(route.dependant), (
-                    f"{method} {route.path} is not gated by the canonical require_workspace_admin"
+                gate = expected[key]
+                assert gate in _dependant_calls(route.dependant), (
+                    f"{method} {route.path} is not gated by {gate.__name__}"
                 )
                 seen.add(key)
-    assert seen == expected, f"missing routes: {expected - seen}"
+    assert seen == set(expected), f"missing routes: {set(expected) - seen}"

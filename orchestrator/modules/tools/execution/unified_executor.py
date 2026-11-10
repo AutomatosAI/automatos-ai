@@ -567,7 +567,11 @@ class UnifiedToolExecutor:
 
     def _widget_gate(self, tool_name: str, parameters: Any, trace: str) -> Optional[Dict[str, Any]]:
         """The refusal for a widget turn calling what its key's scopes do not
-        grant (core.security.widget_scopes); None when the call may run."""
+        grant (core.security.widget_scopes), or for a lean agent's turn calling
+        what its tool groups do not (``_lean_gate``); None when the call may run."""
+        lean_refusal = self._lean_gate(tool_name, parameters, trace)
+        if lean_refusal is not None:
+            return lean_refusal
         from core.security.surface import widget_scopes, widget_turn
 
         if not widget_turn():
@@ -582,6 +586,19 @@ class UnifiedToolExecutor:
             trace, tool_name, effective_name,
         )
         return {"success": False, "permission_denied": True, "error": WIDGET_REFUSAL, "tool": tool_name}
+
+    def _lean_gate(self, tool_name: str, parameters: Any, trace: str) -> Optional[Dict[str, Any]]:
+        """The refusal for a lean agent's turn calling what its tool groups do not grant
+        (core.security.lean_grants); None when the call may run."""
+        from core.security.lean_grants import LEAN_REFUSAL, lean_may_call, lean_turn
+
+        if not lean_turn():
+            return None
+        effective_name = self._resolve_effective_call(tool_name, parameters)[0]
+        if lean_may_call(effective_name):
+            return None
+        logger.warning("[tool-trace %s] lean turn refused '%s' (resolved '%s'): not granted", trace, tool_name, effective_name)
+        return {"success": False, "permission_denied": True, "error": LEAN_REFUSAL, "tool": tool_name}
 
     def _resolve_effective_call(
         self, tool_name: str, parameters: Any
