@@ -689,7 +689,7 @@ class LLMManager:
             return await failover.answer_on_failover(self, target, messages, tools)
 
     def _call_failed(self, exc: Exception, start: float, budget: Optional[int]) -> None:
-        self._track_usage(None, start, status="error")
+        self._track_usage(getattr(exc, "partial_response", None), start, status="error")
         self._remember_refusal(exc)
         self._note_refusal(exc, budget)
 

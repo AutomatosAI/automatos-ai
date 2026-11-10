@@ -27,6 +27,13 @@ B-2, ``AnthropicProvider.stream_response`` and ``streams_now``:
   None, so a caller that looks for it answers whole. The B-2 cases below run with the switch on
   ``all`` (``_the_switch_lets_every_call_stream``); a case about another value sets its own.
 
+B-4, a failed call's row in the usage ledger (``LLMManager._call_failed``):
+
+* A stream that broke after text is booked as an error with what it had spent: the input and
+  cache tokens, and the output count so far (a lower bound). The ask's running cost counts them.
+* Any other failed call books zeros, as before: a whole call that raised, a refusal before the
+  stream opened, and a broken stream that left no readable snapshot.
+
 The manager's choice between the two calls (B-3) is ``tests/test_anthropic_streaming_manager.py``,
 and a whole spoken turn ``tests/test_anthropic_streaming_spoken_turn.py``.
 
@@ -54,11 +61,12 @@ from core.llm import request_scope
 from core.llm.clients.anthropic_client import AnthropicProvider
 from core.llm.clients.anthropic_stream import INTERRUPTED, NO_STOP_REASON, AnthropicStreamInterrupted, read_stream
 from core.llm.request_scope import LIVE, QUICK_ASK, set_spoken_turn, spoken_turn
+from core.llm.usage_counts import UsageCounts
 from tests.helpers_anthropic_stream import (
     CACHED_PREFIX, CALL_BUDGET, CLIENT_LOGGER, CONFIG_MAX_TOKENS, DROPPED, FAILOVER_MODEL, MESSAGES, MODEL,
     OVERLOADED, STREAM_LOGGER, SYSTEM, TOOL_INPUT, TOOLS, USAGE_AS_BOOKED, WAIT_SECONDS, FakeStream,
     FakeStreamManager, ProviderError, Refused, interrupted_call, lines_of, listener, provider_on, reply_message,
-    streamed_call, text_of, tool_call,
+    streamed_call, text_of, tool_call, usage_counts as sdk_usage,
 )
 
 ORCH = Path(__file__).resolve().parents[1]
@@ -629,3 +637,90 @@ def test_read_stream_needs_no_sdk():
     source = (ORCH / "core" / "llm" / "clients" / "anthropic_stream.py").read_text(encoding="utf-8")
 
     assert "import anthropic" not in source and "from anthropic" not in source
+
+
+# =========================================================================== B-4: a failed call's row
+
+OUTPUT_SO_FAR = 1
+BOOKED_FOR_THE_BROKEN_STREAM = UsageCounts(input_tokens=1010, output_tokens=OUTPUT_SO_FAR, cache_read_tokens=900,
+                                           cache_write_tokens=100)
+NOTHING_BOOKED = UsageCounts()
+
+
+def _cut_short_after_one_token():
+    """What the SDK had accumulated when the stream broke: the input and cache counts of
+    ``message_start`` and one output token (the real count only arrives at the end)."""
+    spent_so_far = NS(**{**vars(sdk_usage()), "output_tokens": OUTPUT_SO_FAR})
+    return NS(content=[text_of("You have ")], usage=spent_so_far, model=MODEL, stop_reason=None)
+
+
+def _broken_after_text(snapshot):
+    return provider_on(FakeStream([text_of("You have "), RuntimeError(DROPPED)], snapshot=snapshot))
+
+
+def _a_whole_call_that_raises():
+    provider = provider_on()
+    provider.client.messages.create.side_effect = RuntimeError(DROPPED)
+    return provider
+
+
+def _refused_before_the_stream_opens():
+    return provider_on(FakeStream([text_of("never read")], _text_only()), refusal=Refused("rate limited"))
+
+
+def _failed_call(provider, monkeypatch, raised, *, listened=True):
+    """One call that fails, through a real ``LLMManager`` (no ``__init__``, so no settings read)
+    with its real ``_call_failed`` and ``_track_usage``: (the error, the rows it would write as
+    (counts, status), the counts noted against the ask's running cost). What is stubbed reads the
+    database: the usage row's write, the ask-cost note and the credit gate."""
+    from core.llm.manager import LLMManager
+
+    monkeypatch.setattr(config, "LLM_FAILOVER_MODEL", "")
+    manager = object.__new__(LLMManager)
+    manager.provider, manager.config = provider, provider.config
+    manager._tracking_ctx, manager.service_name = {}, "chat"
+    rows, noted = [], []
+    for unread in ("_ensure_provider_initialized", "_credit_gate"):
+        monkeypatch.setattr(manager, unread, lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr(manager, "_record_usage", lambda counts, latency_ms, status: rows.append((counts, status)))
+    monkeypatch.setattr(manager, "_note_ask_cost", noted.append)
+    _heard, on_delta = listener()
+
+    with pytest.raises(raised) as caught:
+        asyncio.run(manager.generate_response(MESSAGES, None, on_delta=on_delta if listened else None))
+    return caught.value, rows, noted
+
+
+def test_a_broken_streams_tokens_are_on_its_error_row(monkeypatch):
+    provider = _broken_after_text(_cut_short_after_one_token())
+
+    error, rows, noted = _failed_call(provider, monkeypatch, AnthropicStreamInterrupted)
+
+    assert str(error) == INTERRUPTED
+    assert error.partial_response.usage["prompt_tokens"] == 1010
+    assert error.partial_response.usage["completion_tokens"] == OUTPUT_SO_FAR
+    assert rows == [(BOOKED_FOR_THE_BROKEN_STREAM, "error")]
+    assert noted == [BOOKED_FOR_THE_BROKEN_STREAM]       # the ask's running cost counts them
+    provider.client.messages.create.assert_not_called()    # not asked again: text was heard
+
+
+@pytest.mark.parametrize("failing, listened, raised", [
+    (_a_whole_call_that_raises, False, RuntimeError),
+    (_refused_before_the_stream_opens, True, Refused),
+    (lambda: _broken_after_text(AssertionError()), True, AnthropicStreamInterrupted),
+], ids=["a whole call raises", "refused before the stream opens", "a broken stream with no snapshot"])
+def test_any_other_failed_call_books_zeros_as_before(monkeypatch, failing, listened, raised):
+    error, rows, noted = _failed_call(failing(), monkeypatch, raised, listened=listened)
+
+    assert type(error) is raised
+    assert getattr(error, "partial_response", None) is None
+    assert rows == [(NOTHING_BOOKED, "error")]
+    assert noted == [NOTHING_BOOKED]
+
+
+def test_the_failure_path_books_what_the_error_carries():
+    from core.llm.manager import LLMManager
+
+    source = inspect.getsource(LLMManager._call_failed)
+
+    assert 'self._track_usage(getattr(exc, "partial_response", None), start, status="error")' in source
