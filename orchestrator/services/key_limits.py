@@ -7,8 +7,9 @@ limits its owner may set when minting it, both per minute, and until now neither
   widget plane already uses (``api.widgets.rate_limit.RateLimitStore``). The platform's ceiling,
   ``SERVER_KEY_REQUESTS_PER_MINUTE``, applies to every server key; a key's own limit can only
   lower it.
-* **Tokens** (``rate_limit_tokens``): the tokens the key's runs used in the last minute, from the
-  usage ledger (``llm_usage``, ``execution_id = 'board_task:<id>'`` for each ticket the key filed).
+* **Tokens** (``rate_limit_tokens``): the tokens the key used in the last minute, from the usage
+  ledger (``llm_usage``): ``board_task:<id>`` for each ticket it filed, and ``chat:<id>`` for each
+  chat its service user owns (its headless chat turns).
   At or over the limit, the key starts no new work until the minute rolls on. A run already going
   is not stopped.
 
@@ -38,10 +39,14 @@ _TOKENS_LAST_MINUTE = text("""
     FROM llm_usage u
     WHERE u.workspace_id = CAST(:ws AS uuid)
       AND u.created_at > now() - make_interval(secs => :window)
-      AND u.execution_id IN (
-          SELECT 'board_task:' || t.id FROM board_tasks t
-          WHERE t.workspace_id = CAST(:ws AS uuid)
-            AND t.created_by_type = :filer AND t.created_by_id = :by)
+      AND (u.execution_id IN (
+              SELECT 'board_task:' || t.id FROM board_tasks t
+              WHERE t.workspace_id = CAST(:ws AS uuid)
+                AND t.created_by_type = :filer AND t.created_by_id = :by)
+           OR u.execution_id IN (
+              SELECT 'chat:' || c.id::text FROM chats c
+              JOIN sdk_api_keys k ON k.service_user_id = c.user_id
+              WHERE k.id = CAST(:key AS uuid)))
 """)
 
 
@@ -66,10 +71,12 @@ def limits_for(db: Any, key_id: Any) -> KeyLimits:
     return KeyLimits(requests=requests, tokens=own_tokens if own_tokens and own_tokens > 0 else None)
 
 
-def tokens_last_minute(db: Any, workspace_id: Any, key_principal: str) -> int:
-    """Tokens the runs this key filed used in the last minute."""
+def tokens_last_minute(db: Any, workspace_id: Any, key_principal: str, key_id: Any) -> int:
+    """Tokens the key used in the last minute: its tickets' runs, and its chat turns (the chats its
+    service user owns, ``api.chat_server_key``)."""
     return int(db.execute(_TOKENS_LAST_MINUTE, {"ws": str(workspace_id), "window": WINDOW_SECONDS,
-                                                "filer": API_KEY_FILER, "by": key_principal}).scalar() or 0)
+                                                "filer": API_KEY_FILER, "by": key_principal,
+                                                "key": str(key_id)}).scalar() or 0)
 
 
 def enforce_key_limits(db: Any, ctx: Any, store: Any = None) -> None:
@@ -85,7 +92,7 @@ def enforce_key_limits(db: Any, ctx: Any, store: Any = None) -> None:
         raise _over(f"This key's limit of {limit} requests a minute is reached", reset)
     if limits.tokens is None:
         return
-    used = tokens_last_minute(db, ctx.workspace_id, principal)
+    used = tokens_last_minute(db, ctx.workspace_id, principal, ctx.api_key_id)
     if used >= limits.tokens:
         logger.warning("[key_limits] %s used %d of %d tokens this minute", principal, used, limits.tokens)
         raise _over(f"This key's limit of {limits.tokens} tokens a minute is reached", WINDOW_SECONDS)

@@ -385,7 +385,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # one partial unique index on board_tasks, no table and no row changed; the guard follows it.
     idempotency = (versions / "execute_idempotency_20261109.py").read_text()
     assert 'down_revision = "run_callbacks_20261109"' in idempotency
-    assert 'EXPECTED_HEAD = "execute_idempotency_20261109"' in guard
+    # 2026-11-10 (Automatos for products, Wave 1): server_key_chat_20261110 chains onto that —
+    # two nullable columns on sdk_api_keys, no row changed; the guard follows it.
+    key_chat = (versions / "server_key_chat_20261110.py").read_text()
+    assert 'down_revision = "execute_idempotency_20261109"' in key_chat
+    assert 'EXPECTED_HEAD = "server_key_chat_20261110"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

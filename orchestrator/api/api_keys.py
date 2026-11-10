@@ -8,7 +8,7 @@ Keys are shown in full exactly once on creation, then only as masked prefixes.
 
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,7 +19,7 @@ from core.auth.dependencies import RequestContext
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.step_up import require_step_up
 from core.auth.hybrid import get_request_context_hybrid
-from core.auth.scopes import MEMORY_READ, MEMORY_WRITE, TASKS_READ, TASKS_WRITE
+from core.auth.scopes import AGENTS_CHAT, MEMORY_READ, MEMORY_WRITE, TASKS_READ, TASKS_WRITE
 from core.database.database import get_db
 from core.services.api_key_service import ApiKeyService
 from config import config
@@ -57,6 +57,7 @@ VALID_PERMISSIONS = [
     TASKS_WRITE,  # PRD-274 W1: a server key files a ticket (core/auth/server_key_gate.py)
     MEMORY_READ,  # PRD-274 W1: a server key reads and stores the workspace's memory
     MEMORY_WRITE,
+    AGENTS_CHAT,  # PRD-274 W1: a server key chats with a lean agent (api/chat_server_key.py)
 ]
 
 
@@ -82,6 +83,20 @@ class ApiKeyCreateRequest(BaseModel):
     default_agent_id: Optional[int] = Field(None, description="Lock this key to a specific agent ID")
     team: Optional[str] = Field(None, max_length=100, description="Lock this key to a specific team for document scoping")
     expires_at: Optional[datetime] = Field(None, description="Expiration timestamp (UTC)")
+    model_allow_list: Optional[List[Dict[str, str]]] = Field(None, description=(
+        "PRD-274: models a request through this key may ask a lean agent for, as [{provider, model_id}]; "
+        "each must be on the agent's own list too"))
+
+    @field_validator("model_allow_list")
+    @classmethod
+    def validate_model_allow_list(cls, v: Optional[List[Dict[str, str]]]) -> Optional[List[Dict[str, str]]]:
+        """The same shape an agent's ``configuration.model_allow_list`` takes."""
+        from consumers.chatbot.lean_request import MODEL_ALLOW_LIST_KEY, allow_list_errors
+
+        errors = allow_list_errors({MODEL_ALLOW_LIST_KEY: v}) if v is not None else []
+        if errors:
+            raise ValueError("; ".join(errors))
+        return v
 
     @field_validator("key_type")
     @classmethod
@@ -120,6 +135,7 @@ class ApiKeyCreateResponse(BaseModel):
     rate_limit_tokens: Optional[int] = None
     default_agent_id: Optional[int] = None
     team: Optional[str] = None
+    model_allow_list: Optional[List[Dict[str, str]]] = None
     expires_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
@@ -191,6 +207,7 @@ def create_api_key(
         default_agent_id=body.default_agent_id,
         team=body.team,
         expires_at=body.expires_at,
+        model_allow_list=body.model_allow_list,
     )
 
     logger.info(
