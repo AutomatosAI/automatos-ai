@@ -2296,6 +2296,13 @@ class Config:
     CHAT_TURN_TIMING_STAGES_ENABLED: bool = (
         os.getenv("CHAT_TURN_TIMING_STAGES_ENABLED", "true").strip().lower() == "true"
     )
+    # One Anthropic SDK client per key (core/llm/clients/shared_clients.py), kept for five
+    # minutes, in place of a new client and HTTP pool for every provider object. It reaches
+    # every Anthropic call in the worker, not only spoken turns. false = a client per
+    # provider, as before. KEEPALIVE is how long the shared client's pool keeps an idle
+    # connection, read only while REUSE is true; 0 = the SDK's own pool (5 seconds).
+    LLM_CLIENT_REUSE: bool = os.getenv("LLM_CLIENT_REUSE", "false").strip().lower() == "true"
+    LLM_CLIENT_KEEPALIVE_SECONDS: float = float(os.getenv("LLM_CLIENT_KEEPALIVE_SECONDS", "0"))
     # Auto's server voice (services/voice-tts): POST /api/voice/speech streams a reply
     # as MP3 for the phone and the web quick-ask (modules/voice/speech.py). Empty URL =
     # off: the route answers 503 tts_off and discovery does not list `tts`, so clients

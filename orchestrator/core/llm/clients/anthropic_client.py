@@ -16,10 +16,13 @@ import json
 import logging
 from typing import Dict, Any, List, Optional
 
+import httpx
+
 from config import config
 from .base import BaseLLMProvider, LLMResponse, accepts_sampling_params, request_max_tokens, run_blocking
 from .image_blocks import decoded_image
-from core.llm.anthropic_workspace import workspace_for_key, workspace_headers
+from .shared_clients import shared_client
+from core.llm.anthropic_workspace import CACHE_SECONDS, workspace_for_key, workspace_headers
 
 try:
     import anthropic
@@ -32,6 +35,10 @@ logger = logging.getLogger(__name__)
 _ANTHROPIC_IMAGES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
 # The content blocks that carry an image: OpenAI's ``image_url`` and Anthropic's own ``image``.
 _IMAGE_BLOCKS = frozenset({"image", "image_url"})
+# The SDK's own connection-pool numbers (anthropic DEFAULT_CONNECTION_LIMITS), kept when
+# LLM_CLIENT_KEEPALIVE_SECONDS lengthens the pool's idle time.
+_POOL_CONNECTIONS = 1000
+_POOL_KEPT_ALIVE = 100
 # The only links sent as a URL source: Anthropic fetches the image from outside.
 _HTTPS = "https://"
 # What the model reads where an image couldn't be sent: it says so, never guesses (PRD-223 S0.3).
@@ -236,6 +243,14 @@ class AnthropicProvider(BaseLLMProvider):
             )
             self.client = None  # Will fail gracefully on first use
         else:
+            self.client = self._client_for(api_key)
+
+    def _client_for(self, api_key: str) -> Any:
+        """The SDK client for this key: a new one, or with ``LLM_CLIENT_REUSE`` on the one
+        kept for (SDK class, key, base URL, keep-alive). Never close it: it may be shared."""
+        keepalive = config.LLM_CLIENT_KEEPALIVE_SECONDS if config.LLM_CLIENT_REUSE else 0.0
+
+        def build() -> Any:
             client_kwargs = {"api_key": api_key}
             if self.config.base_url:
                 client_kwargs["base_url"] = self.config.base_url
@@ -243,10 +258,20 @@ class AnthropicProvider(BaseLLMProvider):
             headers = workspace_headers(workspace_for_key(api_key))
             if headers:
                 client_kwargs["default_headers"] = headers
-
-            self.client = anthropic.Anthropic(**client_kwargs)
+            if keepalive > 0:
+                # The SDK's own pool numbers; only the idle time differs (its default is 5 s).
+                client_kwargs["http_client"] = anthropic.DefaultHttpxClient(limits=httpx.Limits(
+                    max_connections=_POOL_CONNECTIONS, max_keepalive_connections=_POOL_KEPT_ALIVE,
+                    keepalive_expiry=keepalive))
+            client = anthropic.Anthropic(**client_kwargs)
             logger.info(f"Initialized Anthropic client with model: {self.config.model}")
-    
+            return client
+
+        if not config.LLM_CLIENT_REUSE:
+            return build()
+        return shared_client(build, anthropic.Anthropic, api_key, self.config.base_url or "", keepalive,
+                             keep_seconds=CACHE_SECONDS)
+
     def _convert_messages_to_anthropic_format(self, messages: List[Dict[str, Any]]) -> tuple:
         """
         Convert OpenAI-style messages to Anthropic format.
