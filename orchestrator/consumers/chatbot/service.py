@@ -56,6 +56,7 @@ from consumers.chatbot.lean_turn import (  # Wave 2: a lean agent's turn, step b
     a_lean_turns_prompt, lean_grant_for, no_app_search_on_a_lean_turn, no_pinned_documents_on_a_lean_turn,
     no_prefetch_on_a_lean_turn, offers_a_lean_turn_its_grants,
 )
+from consumers.chatbot.turn_embeddings import embeds_each_text_once  # voice latency D-3
 from consumers.chatbot.turn_timing import keeps_the_turns_timing, records_the_first_token
 from consumers.chatbot.lean_request import NOTHING_ASKED
 from core.security.memory_audience import memory_reader, reader_for_agent_id
@@ -2479,6 +2480,7 @@ class StreamingChatService:
     @keeps_one_answer_on_screen  # FX-017: the turn records what each streamed call put on the screen
     @answers_on_the_turns_model  # a spoken turn answers on the spoken model; every turn logs its model
     @keeps_the_turns_timing  # the saved reply's trace says when the first token came
+    @embeds_each_text_once  # TURN_EMBED_ONCE: one embedding per text for the turn's lookups
     async def _stream_response_with_agent_scoped(
         self,
         chat_id: str,

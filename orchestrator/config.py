@@ -2303,6 +2303,11 @@ class Config:
     # connection, read only while REUSE is true; 0 = the SDK's own pool (5 seconds).
     LLM_CLIENT_REUSE: bool = os.getenv("LLM_CLIENT_REUSE", "false").strip().lower() == "true"
     LLM_CLIENT_KEEPALIVE_SECONDS: float = float(os.getenv("LLM_CLIENT_KEEPALIVE_SECONDS", "0"))
+    # A chat turn embeds each text once (core/llm/embed_once.py): memory, the knowledge search
+    # and the owner's-documents leg share one embedding of the same text for the turn's
+    # length, so fewer embedding calls are made and booked. false = every embed call is made,
+    # as before. Remove the switch once the count of reused calls has been read on a live server.
+    TURN_EMBED_ONCE: bool = os.getenv("TURN_EMBED_ONCE", "false").strip().lower() == "true"
     # Auto's server voice (services/voice-tts): POST /api/voice/speech streams a reply
     # as MP3 for the phone and the web quick-ask (modules/voice/speech.py). Empty URL =
     # off: the route answers 503 tts_off and discovery does not list `tts`, so clients
