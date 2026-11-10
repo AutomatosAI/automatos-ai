@@ -20,3 +20,7 @@ TASKS_READ = "tasks:read"
 # core/auth/server_key_gate.py; a key without it is refused.
 TASKS_WRITE = "tasks:write"
 AGENTS_EXECUTE = "agents:execute"
+# A server key reads (GET /api/memory, /api/memory/search) and stores (POST /api/memory) the
+# workspace's memory. It reads only facts no audience limits and none private to a person.
+MEMORY_READ = "memory:read"
+MEMORY_WRITE = "memory:write"
