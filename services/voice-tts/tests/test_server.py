@@ -176,6 +176,27 @@ def test_the_text_is_never_logged(settings, tmp_path, caplog):
     assert "Nightingale" not in caplog.text
 
 
+def test_the_log_line_says_when_the_first_pcm_was_ready_and_how_long_it_plays(settings, tmp_path, caplog):
+    async def go():
+        async with _client(settings, tmp_path) as client:
+            body = {"text": "The first answer. The second answer follows."}
+            response = await client.post("/speak", json=body, headers=AUTH)
+            assert response.status == 200
+            await response.read()
+
+    with caplog.at_level(logging.DEBUG):
+        _run(go())
+    lines = [record.getMessage() for record in caplog.records if record.getMessage().startswith("speak ok:")]
+    assert len(lines) == 1
+    line = lines[0]
+    assert "first_pcm_s=" in line
+    # "The first answer." is 17 characters; FakeEngine's 100 bytes are 50 samples at 24 kHz.
+    assert " first_chars=17 " in line
+    assert line.endswith(" first_audio_s=0.002")
+    assert "The first answer" not in caplog.text
+    assert "follows" not in caplog.text
+
+
 # --------------------------------------------------------------------------- warming and busy
 
 

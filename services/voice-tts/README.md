@@ -25,7 +25,7 @@ The orchestrator reaches it at `VOICE_TTS_URL` through `POST /api/voice/speech` 
 | 500 | `tts_failed` | Kokoro, espeak-ng or LAME failed before any audio went out. Once audio has gone out, a failure ends the stream cleanly instead. |
 
 - **Speed** is clamped to 0.8–1.2. Null means 1.0.
-- **The text is never logged.** One line per answer gives the voice, the number of characters and sentences, the speed, the seconds to the first byte and in total, and the bytes. kokoro-onnx would log each text's phonemes at DEBUG, so its logger is held at WARNING. A library's error message or traceback can carry the text, so a failure is logged by its exception type and the voice alone.
+- **The text is never logged.** One line per answer gives the voice, the number of characters and sentences, the speed, the seconds to the first byte and in total, and the bytes. The line ends with three numbers about the first piece that had something to say: `first_pcm_s` (seconds from the request's start until its PCM was ready, including any leading pieces skipped as unsayable), `first_chars` (its length) and `first_audio_s` (the seconds it plays for). From these, `first_pcm_s / first_audio_s` is the synthesis speed against real time and `first_byte_s - first_pcm_s` is the encoder's start. kokoro-onnx would log each text's phonemes at DEBUG, so its logger is held at WARNING. A library's error message or traceback can carry the text, so a failure is logged by its exception type and the voice alone.
 - **No token, no voice.** Boot refuses an empty `VOICE_TTS_TOKEN` in every environment. `VOICE_TTS_ALLOW_NO_TOKEN=true` opens `/speak` on a developer's own machine only. `make env` generates the token for compose.
 
 ### How an answer streams
