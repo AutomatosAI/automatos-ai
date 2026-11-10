@@ -164,7 +164,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # one partial unique index on board_tasks: an API run's Idempotency-Key files one ticket.
 # 2026-11-10 (Automatos for products, Wave 1): server_key_chat_20261110 chains onto that —
 # sdk_api_keys.model_allow_list and service_user_id (new nullable columns): headless chat turns.
-EXPECTED_HEAD = "server_key_chat_20261110"
+# 2026-11-10 (Automatos for products, Wave 3): end_users_20261110 chains onto that —
+# end_users (a new table only): a product's end users and the consent recorded for them.
+EXPECTED_HEAD = "end_users_20261110"
 
 
 def _literal(node: ast.AST):

@@ -57,6 +57,11 @@ class MemoryNamespace:
         """Agent-specific memories (L3 per-agent)."""
         return f"mem:{self.workspace_id}:agent:{agent_id}"
 
+    def end_user(self, end_user_id: str) -> str:
+        """A product's end user's memories (PRD-274 W3, §8-17): inside the workspace's tenant
+        boundary, asserted by one of its server keys, never read by another end user."""
+        return f"mem:{self.workspace_id}:end_user:{end_user_id}"
+
     def recipe(self, recipe_id: Union[int, str]) -> str:
         """Recipe learnings (L3 per-recipe)."""
         return f"mem:{self.workspace_id}:recipe:{recipe_id}"
