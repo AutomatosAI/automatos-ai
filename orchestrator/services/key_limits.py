@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 WINDOW_SECONDS = 60
 LIMITER_LABEL = "server key limiter"
-BUCKET = "server-key:{key_id}"
+BUCKET = "server-key:{principal}"  # the key's principal, sdk:<key row id>
 
 _TOKENS_LAST_MINUTE = text("""
     SELECT COALESCE(SUM(u.total_tokens), 0)
@@ -77,16 +77,17 @@ def enforce_key_limits(db: Any, ctx: Any, store: Any = None) -> None:
     from api.widgets.rate_limit import RateLimitStore
 
     limits = limits_for(db, ctx.api_key_id)
+    principal = ctx.user.id  # sdk:<key row id>: names the key without its secret
     allowed, limit, _remaining, reset = (store or RateLimitStore()).check(
-        BUCKET.format(key_id=ctx.api_key_id), limits.requests, WINDOW_SECONDS, label=LIMITER_LABEL)
+        BUCKET.format(principal=principal), limits.requests, WINDOW_SECONDS, label=LIMITER_LABEL)
     if not allowed:
-        logger.warning("[key_limits] key %s over %d requests a minute", ctx.api_key_id, limit)
+        logger.warning("[key_limits] %s over %d requests a minute", principal, limit)
         raise _over(f"This key's limit of {limit} requests a minute is reached", reset)
     if limits.tokens is None:
         return
-    used = tokens_last_minute(db, ctx.workspace_id, ctx.user.id)
+    used = tokens_last_minute(db, ctx.workspace_id, principal)
     if used >= limits.tokens:
-        logger.warning("[key_limits] key %s used %d of %d tokens this minute", ctx.api_key_id, used, limits.tokens)
+        logger.warning("[key_limits] %s used %d of %d tokens this minute", principal, used, limits.tokens)
         raise _over(f"This key's limit of {limits.tokens} tokens a minute is reached", WINDOW_SECONDS)
 
 
