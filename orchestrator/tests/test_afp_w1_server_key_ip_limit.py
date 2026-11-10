@@ -3,8 +3,9 @@
 With the policy plane on, slowapi limits every route per client IP. The routes a server key reaches
 are exempted from it and limit inside their gate instead: a server key that authenticates meets its
 own limits, never the IP's; anyone else meets the same per-IP limit for that route; and keys that
-fail are counted per IP, so past the limit the next one is refused before it is looked up. With
-the plane off, nothing here runs. Real keys on the real database; the window is a fake.
+fail are counted per IP after their lookup, past the limit answered 429. A valid key is never
+counted or held back by failures from its address. With the plane off, nothing here runs. Real keys
+on the real database; the window is a fake.
 """
 from __future__ import annotations
 
@@ -48,7 +49,7 @@ def workspace(new_session):
 
 
 class _Window:
-    """One shared fake window: check() counts and answers, recent() only reads."""
+    """One shared fake window: check() counts and answers, as RateLimitStore does."""
 
     def __init__(self):
         self.seen = {}
@@ -57,9 +58,6 @@ class _Window:
         count = self.seen.get(key_id, 0)
         self.seen[key_id] = count + 1
         return (count < limit, limit, max(0, limit - count - 1), 30)
-
-    def recent(self, key_id, window=None):
-        return self.seen.get(key_id, 0)
 
 
 @pytest.fixture
@@ -125,18 +123,30 @@ def test_anyone_else_meets_the_per_ip_limit_for_the_route(window, plane, monkeyp
     assert _status(lambda: asyncio.run(_gate()(_request(ip="198.51.100.9"), db=None))) == 401  # another address
 
 
-def test_failed_keys_are_counted_per_address_and_then_refused_before_any_lookup(window, plane, monkeypatch):
-    looked_up = []
-    real = gate._sdk_key_context_in_own_session
-
-    def counting(request, scope):
-        looked_up.append(1)
-        return real(request, scope)
-
-    monkeypatch.setattr(gate, "_sdk_key_context_in_own_session", counting)
+def test_failed_keys_are_counted_per_address_and_refused_past_the_limit(window, plane):
     made_up = "ak_srv_" + "0" * 40
     answers = [_status(lambda: asyncio.run(_gate()(_request(made_up), db=None))) for _ in range(4)]
-    assert answers == [401, 401, 429, 429] and len(looked_up) == 2
+    assert answers == [401, 401, 429, 429]
+    assert _status(lambda: asyncio.run(_gate()(_request(made_up, ip="198.51.100.9"), db=None))) == 401
+
+
+def test_a_valid_key_is_never_held_back_by_failures_from_its_address(new_session, workspace, window, plane):
+    made_up = "ak_srv_" + "0" * 40
+    for _ in range(3):
+        _status(lambda: asyncio.run(_gate()(_request(made_up), db=None)))  # the address is over its failures
+    token = _server_key(new_session, workspace)
+    assert _status(lambda: asyncio.run(_gate()(_request(token), db=None))) == 200
+
+
+def test_a_valid_key_without_the_routes_scope_is_not_counted_as_a_failure(new_session, workspace, window, plane):
+    from core.services.api_key_service import ApiKeyService
+
+    s = new_session()
+    other = ApiKeyService.create_api_key(s, uuid.UUID(workspace), "acme reader", key_type="server",
+                                         permissions=["tasks:read"])["key"]
+    s.close()
+    assert [_status(lambda: asyncio.run(_gate()(_request(other), db=None))) for _ in range(3)] == [403, 403, 403]
+    assert not any(k.startswith(ip_limit.FAILED_KEY_BUCKET) for k in window.seen)
 
 
 def test_with_the_plane_off_nothing_here_runs(window, monkeypatch):
@@ -144,8 +154,7 @@ def test_with_the_plane_off_nothing_here_runs(window, monkeypatch):
 
     monkeypatch.setattr(config, "POLICY_PLANE_ENABLED", False)
     ip_limit.limit_this_caller(_request())
-    ip_limit.note_failed_key(_request())
-    ip_limit.refuse_after_failed_keys(_request())
+    ip_limit.limit_failed_key(_request())
     assert window.seen == {}
 
 

@@ -10,8 +10,9 @@ caller is known:
 * **A server key that authenticates** meets its per-key limits, not the IP's.
 * **Anyone else** (members, the anonymous local lane) meets the same per-IP limit as slowapi's, for
   that route.
-* **A key that fails to authenticate** is counted against its IP; over the limit, the next attempt
-  is refused before the key is looked up. A made-up ``ak_srv_`` prefix never skips the IP limit.
+* **A key that fails to authenticate** is counted against its IP after its lookup, and past the
+  limit it is answered with a 429. A made-up ``ak_srv_`` prefix never skips the IP limit, and a
+  valid key is never counted or held back by failures from its address (review on #1470).
 
 With the plane off, slowapi isn't running and neither is any of this, as before.
 """
@@ -82,17 +83,17 @@ def limit_this_caller(request: Request, store: Any = None) -> None:
         raise _refused(TOO_MANY, reset)
 
 
-def refuse_after_failed_keys(request: Request, store: Any = None) -> None:
-    """Before a key is looked up: refused when this address has sent too many keys that failed."""
-    if plane_on() and _store(store).recent(_bucket(request, FAILED_KEY_BUCKET), WINDOW_SECONDS) >= per_minute():
-        raise _refused(TOO_MANY_FAILED_KEYS, WINDOW_SECONDS)
-
-
-def note_failed_key(request: Request, store: Any = None) -> None:
-    """A key that failed to authenticate counts against its address."""
-    if plane_on():
-        _store(store).check(_bucket(request, FAILED_KEY_BUCKET), per_minute(), WINDOW_SECONDS, quiet=True,
-                            label=LIMITER_LABEL)
+def limit_failed_key(request: Request, store: Any = None) -> None:
+    """A key that failed to authenticate (it doesn't exist, is revoked or expired) counts against
+    its address; past the limit the answer is a 429, not the 401. Only a failed key is counted, after
+    its lookup, so a valid key, even one without the route's scope, is never counted or held back
+    by someone else's failures from the same address."""
+    if not plane_on():
+        return
+    allowed, _limit, _remaining, reset = _store(store).check(
+        _bucket(request, FAILED_KEY_BUCKET), per_minute(), WINDOW_SECONDS, label=LIMITER_LABEL)
+    if not allowed:
+        raise _refused(TOO_MANY_FAILED_KEYS, reset)
 
 
 def exempt_server_key_routes(limiter: Any, routes: Iterable[Any]) -> List[str]:

@@ -182,23 +182,6 @@ class RateLimitStore:
             return (False, limit, 0, reset_seconds)
         return (True, limit, max(0, limit - count - 1), reset_seconds)
 
-    def recent(self, key_id: str, window: Optional[int] = None) -> int:
-        """How many marks *key_id* has in the window, adding none (PRD-274 W1: a failed-key count
-        read before a key is looked up). Redis unreachable counts as none: fail open, as ``check``."""
-        window = window or config.WIDGET_RATE_LIMIT_WINDOW_SECONDS
-        try:
-            redis = self._redis_factory()
-            if redis is None:
-                return 0
-            key = f"{_KEY_PREFIX}:{key_id}"
-            pipe = redis.pipeline()
-            pipe.zremrangebyscore(key, 0, time.time() - window)
-            pipe.zcard(key)
-            return int(pipe.execute()[1])
-        except Exception:  # noqa: BLE001 — logged; a count that can't be read fails open, as check does
-            logger.warning("[rate_limit] a recent count was unavailable; counted as none", exc_info=True)
-            return 0
-
 
 # ---------------------------------------------------------------------------
 # Per-key identity and the stored per-key limit (F155)
