@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text, func, or_
 from pydantic import BaseModel
 
+from config import config
 from core.database.database import SessionLocal, get_db
 from consumers.chatbot import ChatService, StreamingChatService
 from consumers.chatbot.chat_history import ChatCursorNotFound, history_row
@@ -339,7 +340,8 @@ async def _turn_chunks(service: StreamingChatService, task_db: Session, turn: _T
     )
     if turn.spoken_mode:
         # The prompt alone is no guarantee (modules.voice.spoken_style): the text is speechified too.
-        reply = spoken_text_frames(reply, service.streaming_handler.format_aisdk_text)
+        handler = service.streaming_handler  # B-5: a narration frame names the text the phone was sent
+        reply = spoken_text_frames(reply, handler.format_aisdk_text, handler.narration_frame if config.SPOKEN_MODE_NARRATION_AS_SPOKEN else None)
     async for chunk in reply:
         yield chunk
 

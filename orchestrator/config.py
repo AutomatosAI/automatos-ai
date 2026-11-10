@@ -2281,6 +2281,12 @@ class Config:
     MEMORY_AUDIENCE_ENABLED: bool = os.getenv("MEMORY_AUDIENCE_ENABLED", "false").strip().lower() == "true"
     SPOKEN_MODE_MODEL: str = os.getenv("SPOKEN_MODE_MODEL", "claude-haiku-5-5").strip()
     SPOKEN_MODE_PROVIDER: str = os.getenv("SPOKEN_MODE_PROVIDER", "anthropic").strip().lower()
+    # A spoken turn's narration and retraction frames carry the speechified text the client was
+    # sent for that round (modules/voice/spoken_stream.py), so a phone can take it out by exact
+    # match, and the round's open text is spoken as the frame passes. No such frame exists on a
+    # spoken Anthropic turn until ANTHROPIC_STREAMING lets it stream. false = the frames pass
+    # unchanged, as before.
+    SPOKEN_MODE_NARRATION_AS_SPOKEN: bool = os.getenv("SPOKEN_MODE_NARRATION_AS_SPOKEN", "true").strip().lower() == "true"
     # Anthropic calls hand their text to a listening caller as it is generated
     # (core/llm/clients/anthropic_client.py): "off" (or any unknown value) = every call answers
     # whole, as before 10 Nov 2026; "quick-ask" = turns sent to POST /api/chat with spokenMode
