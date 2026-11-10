@@ -56,6 +56,7 @@ These rules fail CI or fail review.
 - **Editions.** Anything hosted-only is gated by `AUTH_EDITION` / `isSaaS`, never by role.
 - **No blocking work on the event loop.** A route that touches the database without awaiting anything is a plain `def`, which FastAPI runs in its threadpool. It is never `async def` over a synchronous session.
 - **Integrations go through Composio,** using the workspace's own connection. Add no new third-party API clients, and no new keys in Settings. Never weaken the Composio deny list (`orchestrator/core/composio/deny_list.py`).
+  - **One exception: a partner pack** ([PRD-275](docs/PRDS/PRD-275-PARTNER-TOOL-PACKS.md), `orchestrator/modules/tools/partner/`). It gives an agent read-only tools on a partner's own API, from a pack an operator installs, with the key in the workspace's credential store. A partner's API is reached through a pack, never through a new client written beside it.
 
 ### Canonical terms
 
