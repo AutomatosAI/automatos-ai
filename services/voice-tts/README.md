@@ -8,8 +8,8 @@ The orchestrator reaches it at `VOICE_TTS_URL` through `POST /api/voice/speech` 
 
 | Route | Auth | Answer |
 |---|---|---|
-| `GET /healthz` | none | 200 `{"ready": bool}`. `ready` is true once the model has loaded. The model loads in the background when the service starts. |
-| `GET /readyz` | none | 200 `{"ready": true}` once the model has loaded, 503 until then. Railway's health check uses this, so a deploy takes traffic only once it can speak. |
+| `GET /healthz` | none | 200 `{"ready": bool}`. `ready` is true once the model has loaded and warmed up. The model loads in the background when the service starts. |
+| `GET /readyz` | none | 200 `{"ready": true}` once the model has loaded and spoken one warm-up sentence (`VOICE_TTS_WARM_UP`), 503 until then. Railway's health check uses this, so a deploy takes traffic only once it can speak at its normal speed. |
 | `GET /voices` | none | `{"default": "<id>", "voices": [{"id", "name", "accent", "gender"}]}`. These are the voices the image holds: American English first, then British, then the other languages, each group by id. |
 | `POST /speak` | `Authorization: Bearer <VOICE_TTS_TOKEN>` | `{"text": str, "voice": str \| null, "speed": float \| null}` returns 200 `audio/mpeg` streamed, with `X-Voice-Id` and `Cache-Control: no-store`. |
 
@@ -20,7 +20,7 @@ The orchestrator reaches it at `VOICE_TTS_URL` through `POST /api/voice/speech` 
 | 401 | `unauthorized` | The token is missing or wrong. The compare is constant-time (`hmac.compare_digest`). |
 | 422 | `tts_bad_request` | The body is not the object above, the text is empty once trimmed, the voice is not one `/voices` lists, the speed is not a finite number, or the text has nothing Kokoro can say. |
 | 413 | `tts_too_long` | The text is over `VOICE_TTS_MAX_CHARS` (500) once trimmed. |
-| 503 | `tts_warming` | The model is still loading. |
+| 503 | `tts_warming` | The model is still loading or warming up. |
 | 429 | `tts_busy` | All `VOICE_TTS_MAX_CONCURRENT` slots are held. The request is refused at once, never queued: the caller falls back to the device voice. |
 | 500 | `tts_failed` | Kokoro, espeak-ng or LAME failed before any audio went out. Once audio has gone out, a failure ends the stream cleanly instead. |
 
@@ -125,6 +125,7 @@ These are estimates; the first `images.yml` build reports the real size.
 | `VOICE_TTS_MP3_KBPS` | `64` | The MP3's constant bitrate: an MPEG-2 Layer III rate, 8–160. |
 | `VOICE_TTS_SENTENCE_PAUSE_SECONDS` | `0.25` | Silence between sentences. |
 | `VOICE_TTS_ENCODE_TIMEOUT_SECONDS` | `30` | The longest LAME may take to accept PCM or to write the next frames. |
+| `VOICE_TTS_WARM_UP` | `true` | Once the model has loaded, the service speaks one sentence of about 100 characters in the default voice and drops the audio, and only then reports ready. The first request after a deploy then does not pay onnxruntime's first run. A deploy's ready time grows by one synthesis. A warm-up that fails is logged by its exception type and the service still turns ready. One that hangs leaves `/readyz` at 503, so Railway keeps the previous deploy serving. Any value but `true` switches it off: ready as soon as the model has loaded. |
 | `VOICE_TTS_KOKORO_MODEL`, `VOICE_TTS_KOKORO_VOICES`, `VOICE_TTS_ESPEAK_DATA_PATH`, `VOICE_TTS_LAME_BIN` | the image's paths | The image's layout. |
 | `ENVIRONMENT`, `LOG_LEVEL`, `LOG_RELAY_ENABLED`, `SERVICE_NAME` | | Logging (`automatos_logging.py`, a copy of `services/shared/automatos_logging.py`). |
 
