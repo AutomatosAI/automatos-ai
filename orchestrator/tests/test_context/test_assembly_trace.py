@@ -5,16 +5,22 @@ hands back, and that the tracer seam emits a span only when tracing is ON while
 the trace record itself is produced regardless.
 """
 
+import asyncio
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 _ORCH = Path(__file__).resolve().parent.parent.parent
 if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
+from modules.context.budget import TokenBudget, TokenBudgetManager
+from modules.context.modes import ContextMode
 from modules.context.result import ContextResult
+from modules.context.service import ContextService, _Assembly
 import core.observability.tracer as tracer_mod
 
 
@@ -93,3 +99,101 @@ def test_fire_assembly_trace_swallows_tracer_faults():
     with patch.object(tracer_mod, "get_tracer", return_value=boom):
         # Must not raise into the build.
         tracer_mod.fire_assembly_trace(trace={"mode": "chatbot"}, workspace_id="ws")
+
+
+# --- voice-latency D-5: each section's render time on the chat trace ---
+
+_SLOW_RENDER_S = 0.06  # a little over the 50 ms the assertions ask for
+_SLOW_RENDER_FLOOR_MS = 50
+
+
+class _FakeSection:
+    """A section as ``_render_sections`` reads one: name, priority, max_tokens, render()."""
+
+    max_tokens = None
+
+    def __init__(self, name: str, priority: int, content: str = "", wait_s: float = 0.0, fails: bool = False):
+        self.name = name
+        self.priority = priority
+        self._content = content
+        self._wait_s = wait_s
+        self._fails = fails
+
+    async def render(self, ctx):
+        if self._wait_s:
+            await asyncio.sleep(self._wait_s)
+        if self._fails:
+            raise RuntimeError("section source down")
+        return self._content
+
+
+def _is_a_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _chat_trace_sections(rendered, included, trimmed_names, budget) -> dict:
+    """The ``sections`` of the trace ``_result`` builds, keyed by section name."""
+    assembly = _Assembly(
+        rendered=rendered, included=included, trimmed_names=trimmed_names, budget=budget,
+        system_prompt="identity", cacheable_prefix=None, prompt_tokens=1, tools=[], tool_choice="auto",
+    )
+    result = ContextService._result(
+        ContextMode.CHATBOT, SimpleNamespace(kwargs={}), assembly, [], 1, 1.0, "claude-opus-4-8", [],
+    )
+    return {s["name"]: s for s in result.to_assembly_trace()["sections"]}
+
+
+@pytest.mark.asyncio
+async def test_each_section_carries_its_own_render_time():
+    sections = [
+        _FakeSection("identity", 1, "You are Auto."),
+        _FakeSection("memory", 5, "What you know.", wait_s=_SLOW_RENDER_S),
+    ]
+    rendered = await ContextService._render_sections(sections, SimpleNamespace(kwargs={}))
+    by_name = {s.name: s for s in rendered}
+
+    assert _is_a_number(by_name["identity"].render_ms)
+    assert _is_a_number(by_name["memory"].render_ms)
+    assert by_name["memory"].render_ms >= _SLOW_RENDER_FLOOR_MS
+    assert 0 <= by_name["identity"].render_ms < by_name["memory"].render_ms
+
+    budget = TokenBudget(total=100_000, reserved_for_response=0, reserved_for_messages=0)
+    trace = _chat_trace_sections(rendered, rendered, [], budget)
+    assert trace["memory"]["render_ms"] == by_name["memory"].render_ms
+    assert trace["identity"]["render_ms"] == by_name["identity"].render_ms
+    assert all(_is_a_number(s["render_ms"]) for s in trace.values())
+
+
+@pytest.mark.asyncio
+async def test_a_section_that_raises_still_has_a_render_time():
+    sections = [_FakeSection("business_graph", 5, wait_s=_SLOW_RENDER_S, fails=True)]
+    (failed,) = await ContextService._render_sections(sections, SimpleNamespace(kwargs={}))
+
+    assert failed.content == ""
+    assert _is_a_number(failed.render_ms)
+    assert failed.render_ms >= _SLOW_RENDER_FLOOR_MS
+
+
+@pytest.mark.asyncio
+async def test_a_section_the_budgeter_trimmed_keeps_its_real_render_time():
+    sections = [
+        _FakeSection("identity", 1, "You are Auto."),
+        _FakeSection("business_graph", 5, "word " * 2000, wait_s=_SLOW_RENDER_S),
+    ]
+    rendered = await ContextService._render_sections(sections, SimpleNamespace(kwargs={}))
+    budget = TokenBudget(total=100, reserved_for_response=0, reserved_for_messages=0)
+    included, trimmed_names = TokenBudgetManager().allocate(rendered, budget)
+    assert trimmed_names == ["business_graph"]  # the budgeter dropped the slow one
+
+    trace = _chat_trace_sections(rendered, included, trimmed_names, budget)
+    assert trace["business_graph"]["trimmed"] is True
+    assert trace["business_graph"]["render_ms"] >= _SLOW_RENDER_FLOOR_MS
+
+
+def test_a_trace_with_render_times_survives_json():
+    import json
+
+    result = _result()
+    sections = [{**s, "render_ms": 12.3} for s in result.sections]
+    trace = ContextResult(system_prompt="identity", mode="chatbot", sections=sections).to_assembly_trace()
+    assert json.loads(json.dumps(trace))["sections"][0]["render_ms"] == 12.3
