@@ -17,6 +17,7 @@ A system agent (Auto, the CTO) is never lean: its turn is the platform's own.
 """
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import functools
 import logging
@@ -73,15 +74,19 @@ def granted_names(agent: Any) -> List[str]:
 
 
 def lean_grant_for(db: Any, agent_id: Any) -> Optional[List[str]]:
-    """The turn's grants when ``agent_id`` is a lean agent; None for any other turn."""
+    """The turn's grants when ``agent_id`` is a lean agent; None for any other turn. The tools
+    of the partner packs the agent lists (PRD-275) are grants too."""
     from config import config
 
     if not getattr(config, "LEAN_TURNS_ENABLED", False):
         return None
     from core.models import Agent
+    from modules.tools.partner.offer import partner_tool_names
 
     agent = db.query(Agent).filter(Agent.id == agent_id).first() if db is not None else None
-    return granted_names(agent) if agent is not None and is_lean(agent) else None
+    if agent is None or not is_lean(agent):
+        return None
+    return [*granted_names(agent), *partner_tool_names(db, agent)]
 
 
 def lean_tool_surface(granted: List[str], *, is_super_admin: bool, db: Any = None) -> List[Dict[str, Any]]:
@@ -156,13 +161,23 @@ def lean_turn_of(chat: Any) -> bool:
 
 
 def offers_a_lean_turn_its_grants(get_tools: Callable[..., Any]) -> Callable[..., Any]:
-    """Wrap ``StreamingChatService._get_tools``: a lean turn is offered its grants, nothing else."""
+    """Wrap ``StreamingChatService._get_tools``: a lean turn is offered its grants, nothing else.
+    Its granted partner tools (PRD-275) are workspace data, read on a session of their own, off
+    the event loop."""
     @functools.wraps(get_tools)
     async def wrapped(chat: Any, *args: Any, **kwargs: Any) -> List[Dict[str, Any]]:
         if not lean_turn_of(chat):
             return await get_tools(chat, *args, **kwargs)
-        return lean_tool_surface(chat._lean_actions, is_super_admin=bool(kwargs.get("is_super_admin")),
-                                 db=getattr(chat, "db", None))
+        from modules.tools.partner.offer import granted_partner_schemas, partner_tools_enabled
+        from modules.tools.partner.store import on_own_session
+
+        surface = lean_tool_surface(chat._lean_actions, is_super_admin=bool(kwargs.get("is_super_admin")),
+                                    db=getattr(chat, "db", None))
+        if not partner_tools_enabled():
+            return surface
+        agent_id = kwargs.get("agent_id", args[0] if args else None)
+        partner = await asyncio.to_thread(on_own_session, granted_partner_schemas, agent_id, chat._lean_actions)
+        return [*surface, *partner]
     return wrapped
 
 

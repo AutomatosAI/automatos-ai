@@ -48,6 +48,7 @@ def _reject_invalid_runtime(configuration) -> None:
     from consumers.chatbot.lean_turn import profile_errors
     from core.security.memory_audience import AUDIENCE_KEY, audience_errors
     from modules.memory.memory_profiles import slug_errors
+    from modules.tools.partner.offer import partner_pack_errors
     from core.cli_runtime import validate_runtime_configuration
 
     reject_unknown_tool_groups(configuration)  # #942: an unknown session tool group is a 422
@@ -55,6 +56,7 @@ def _reject_invalid_runtime(configuration) -> None:
         configuration, cli_enabled=bool(getattr(_cfg, "CLI_RUNTIME_ENABLED", False))
     ) + profile_errors(configuration) + allow_list_errors(configuration) + slug_errors(configuration) \
         + audience_errors((configuration or {}).get(AUDIENCE_KEY), f"configuration.{AUDIENCE_KEY}")  # Waves 2, 4
+    errors = errors + partner_pack_errors(configuration)  # PRD-275: partner_packs is a list of pack names
     if errors:
         raise HTTPException(status_code=400, detail={"errors": errors})
 

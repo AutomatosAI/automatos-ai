@@ -17,6 +17,7 @@ modules/tools/
 ├── discovery/                the platform actions Auto executes: ActionRegistry plus
 │                             actions_<domain>.py / handlers_<domain>.py pairs
 ├── builtin/                  built-in tools (scratchpad)
+├── partner/                  partner tools: read-only tools on a partner's own API, from a pack (PRD-275)
 ├── capabilities/ services/ sync/   capability filtering, supporting services, the Composio catalogue sync
 ├── formatting/               result_formatter — the standard result shape for LLMs and the UI
 ├── widget_callback.py
@@ -26,7 +27,7 @@ modules/tools/
 ## Where an agent's tools come from
 
 `get_tools_for_agent(agent_id, workspace_id)` (exported from `modules.tools`)
-is the single source of truth for an agent's tool schemas. Three sources feed
+is the single source of truth for an agent's tool schemas. Four sources feed
 it:
 
 1. **Platform actions** — `platform_*` operations Auto runs against the
@@ -40,6 +41,9 @@ it:
    (`registry/`), including the built-ins.
 3. **Composio tools** — third-party app actions from the Composio catalogue
    (`composio_apps_cache`), bound per agent — when Composio is available.
+4. **Partner tools** — the tools of the partner packs the agent's
+   `configuration.partner_packs` lists, when `PARTNER_TOOLS_ENABLED` is on
+   (below).
 
 ## Composio availability — the degrade seam (PRD-233 S2)
 
@@ -71,6 +75,36 @@ explicitly instead of failing open:
 
 Regression rule: the router's access gate stays fail-closed. Do not add a
 second place that decides whether Composio is on.
+
+## Partner tools (PRD-275)
+
+`partner/` gives an agent read-only tools on a partner's own HTTP API. The one
+exception to "integrations go through Composio" (AGENTS.md): for a partner's
+API, write a pack; never add a client.
+
+- **A pack is data.** A JSON document (`partner/pack.py`) declares tools, each
+  a few GET operations: a path template, scalar parameters, the fields of the
+  answer to keep and two caps. No host, no key, no method.
+- **Installed per workspace.** `PUT /api/partner-packs/{name}` stores the pack
+  as a `workspace_tool_config` row (`tool_id` `partner:<name>`) beside one of
+  the workspace's `generic_api` credentials: the base URL, the key and how the
+  key is sent.
+- **Granted per agent.** Only an agent whose `configuration.partner_packs`
+  lists the pack is offered its tools (`partner/offer.py`, on
+  `_get_tools_for_agent_core` and on a lean turn's grants), and the grant is
+  read again when a call runs.
+- **Run on the executor's seam.** `partner/runner.py` wraps
+  `UnifiedToolExecutor.execute_tool`: the executor's own gates, then the
+  arguments are checked, the key is read through the credential store, one GET
+  goes through `core/security/web_access.py` (pinned address, no redirects,
+  bytes capped), the answer is cut to the pack's fields, and one `partner_call`
+  row is written to the credential's audit log.
+- **The key never leaves the server.** It is not in the tool's schema, its
+  result, a log line, the telemetry row or the audit row.
+
+Regression rule: a pack has no method field and the client sends only GET. A
+change that lets a pack, an argument or a redirect choose the method, the host
+or the header needs the maintainer's approval first.
 
 ## Adding a platform action
 
