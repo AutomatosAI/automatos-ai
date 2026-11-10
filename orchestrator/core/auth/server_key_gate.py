@@ -70,11 +70,14 @@ def request_context_or_server_key(key_scope: str) -> Callable:
     ``get_request_context_hybrid`` exactly as before. A publishable key is refused."""
 
     async def _dep(request: Request) -> RequestContext:
+        """A publishable key is refused; a server key goes through its scope and limits; anyone
+        else meets the per-IP limit, then signs in as before."""
         token = bearer_token(request)
         if token and token.startswith(PUBLISHABLE_KEY_PREFIX):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=PUBLISHABLE_KEY_REFUSED)
         if token and token.startswith(SERVER_KEY_PREFIX):
             return await run_in_threadpool(_server_key_context, request, key_scope)
+        await run_in_threadpool(limit_this_caller, request)
         return await get_request_context_hybrid(request)
 
     setattr(_dep, KEY_SCOPE_MARKER_ATTR, key_scope)
