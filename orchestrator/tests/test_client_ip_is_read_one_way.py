@@ -78,6 +78,13 @@ def test_the_middleware_gives_the_scope_the_callers_address(railway):
     assert _through_the_middleware(_scope([("X-Forwarded-For", FORGED)])) == ("10.0.0.5", 4321)
 
 
+@pytest.mark.parametrize("junk", ["garbage", "1.2.3.4:80", "203.0.113.20\r\nX-Evil: 1", "999.1.1.1"])
+def test_a_configured_header_that_is_not_an_ip_falls_back_to_the_peer(railway, junk):
+    scope = _scope([("X-Forwarded-For", FORGED), ("X-Real-IP", junk)])
+    assert client_ip(Request(scope)) == "10.0.0.5"
+    assert _through_the_middleware(scope) == ("10.0.0.5", 4321)
+
+
 def test_unset_the_middleware_leaves_the_scope_as_it_is(unset):
     assert _through_the_middleware(_scope([("X-Real-IP", "203.0.113.20")])) == ("10.0.0.5", 4321)
 

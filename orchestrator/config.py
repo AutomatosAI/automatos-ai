@@ -682,6 +682,9 @@ class Config:
     WIDGET_RATE_LIMIT_SERVER_PER_WINDOW: int = int(os.getenv("WIDGET_RATE_LIMIT_SERVER_PER_WINDOW", "1000"))
     # The header a proxy in front sets to the caller's address (hosted on Railway: X-Real-IP). Every
     # per-IP limit reads it when set; unset, the first X-Forwarded-For hop (core/security/client_ip.py).
+    # It is trusted from every caller, so set it only where every request comes through a proxy that
+    # overwrites it: no direct, TCP-proxy or private-network callers (on Railway, *.railway.internal
+    # skips the edge and a caller there can send its own). Check that a forged one is replaced first.
     CLIENT_IP_HEADER: str = os.getenv("CLIENT_IP_HEADER", "")
     # PRD-274 W1: requests a minute any server key may make on the routes named for it
     # (services/key_limits.py); a key's own rate_limit_requests can only lower it.
