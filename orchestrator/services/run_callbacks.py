@@ -14,7 +14,8 @@ review, failed or cancelled), its ending is POSTed there once, with the run id:
 * **Retried, then recorded.** Up to three attempts (``BACKOFF_SECONDS``); a 2xx delivers; a 4xx
   other than 429 is the receiver's answer and is not retried. The outcome stays on the
   ``run_callbacks`` row. Attempts are made in this process: a restart mid-retry leaves the row
-  ``pending``.
+  ``pending``, and a scheduled job re-sends it once its ticket has been over a while
+  (``schedules_the_resend``).
 """
 from __future__ import annotations
 
@@ -28,7 +29,7 @@ import secrets
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 
 logger = logging.getLogger(__name__)
@@ -301,3 +302,51 @@ def _record(db: Any, task_id: int, outcome: Outcome) -> None:
         callback.delivered_at = datetime.now(timezone.utc)
     db.commit()
     logger.info("[run_callbacks] ticket %s: callback %s after %d attempt(s)", task_id, outcome.status, outcome.attempts)
+
+
+# ── Re-sending what a restart left pending ─────────────────────────────────────────────────
+
+RESEND_JOB_ID = "run_callbacks_resend"
+RESEND_EVERY_SECONDS = 600
+RESEND_AFTER_SECONDS = 300  # a ticket ended this long ago with its callback still pending was cut off
+RESEND_BATCH = 50
+ENDED = ("done", "review", "failed", "cancelled")
+
+
+def schedules_the_resend(start: Callable[..., Any]) -> Callable[..., Any]:
+    """Wraps ``UnifiedScheduler.start``: once the shared scheduler runs, it re-sends, every
+    ``RESEND_EVERY_SECONDS``, callbacks whose delivery a restart cut off (attempts are in-process)."""
+
+    @functools.wraps(start)
+    def started(self: Any, *args: Any, **kwargs: Any) -> Any:
+        result = start(self, *args, **kwargs)
+        scheduler = getattr(self, "_scheduler", None)
+        if scheduler is not None:
+            scheduler.add_job(resend_pending_callbacks, "interval", seconds=RESEND_EVERY_SECONDS,
+                              id=RESEND_JOB_ID, replace_existing=True, max_instances=1)
+        return result
+
+    return started
+
+
+async def resend_pending_callbacks() -> int:
+    """Delivers each callback still pending well after its ticket ended; how many it tried."""
+    task_ids = await asyncio.to_thread(_on_own_session, _stale_pending)
+    for task_id in task_ids:
+        await deliver_run_callback(task_id)
+    if task_ids:
+        logger.info("[run_callbacks] re-sent %d callback(s) a restart left pending", len(task_ids))
+    return len(task_ids)
+
+
+def _stale_pending(db: Any) -> List[int]:
+    from datetime import timedelta
+
+    from core.models.core import BoardTask
+    from core.models.run_callbacks import PENDING, RunCallback
+
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=RESEND_AFTER_SECONDS)
+    rows = (db.query(RunCallback.task_id).join(BoardTask, BoardTask.id == RunCallback.task_id)
+            .filter(RunCallback.status == PENDING, BoardTask.status.in_(ENDED), BoardTask.completed_at < cutoff)
+            .order_by(BoardTask.completed_at).limit(RESEND_BATCH).all())
+    return [row[0] for row in rows]
