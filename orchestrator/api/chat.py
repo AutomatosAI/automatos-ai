@@ -25,7 +25,7 @@ from consumers.chatbot.turn_errors import CODE_SESSION_AGENT_TERMINAL, TurnError
 from consumers.chatbot.turn_notes import note_an_unanswered_turn, save_turn_note
 from api.chat_dispatch import TurnLane, auto_lane, chosen_agent_lane, response_headers, said_before, spoken_skips_apps
 from api.chat_models import ChatMessageRequest, ChatRequest, MessagePart
-from api.chat_turn_history import turn_history
+from api.chat_turn_history import spoken_window, turn_history
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
@@ -357,7 +357,7 @@ async def _produce_turn(turn: _Turn):
         async with get_session_queue().acquire(f"{turn.workspace_id}:{turn.chat_id}"):
             turn_clock.mark(turn_clock.MARK_LOCKED)
             messages = turn_history(ChatService(task_db), turn.chat_id, turn.message, turn.page_context,
-                                    turn.message_id)
+                                    turn.message_id, recent=spoken_window(turn.spoken_mode))
             async for chunk in _turn_chunks(service, task_db, turn, messages):
                 yield chunk
     finally:
@@ -407,7 +407,9 @@ async def stream_chat(
     )
     turn_clock.mark(turn_clock.MARK_SAVED)
     page_ctx = sanitize_page_context(request.context)
-    history = turn_history(chat_service, chat_id, current_msg, page_ctx)  # the lane's read; the turn reads again
+    window = spoken_window(request.spokenMode)  # voice latency C-4: a spoken turn's recent messages
+    history = ([] if request.agentId and window  # a chosen agent's lane reads none of it
+               else turn_history(chat_service, chat_id, current_msg, page_ctx, recent=window))  # the turn reads again
     turn_clock.mark(turn_clock.MARK_HISTORY)
     message_text = _message_text(parts)
     lane = await _turn_lane(db, ctx, request, message_text, len(history), said_before(history))

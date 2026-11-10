@@ -2291,6 +2291,11 @@ class Config:
     # typed per-app tools, scope message or hint lines; the generic composio_execute tool
     # stays. false = spoken turns search connected apps like typed ones, as before.
     SPOKEN_MODE_SKIP_COMPOSIO: bool = os.getenv("SPOKEN_MODE_SKIP_COMPOSIO", "false").strip().lower() == "true"
+    # A spoken turn (POST /api/chat with spokenMode) reads this many of its chat's newest messages
+    # (api/chat_turn_history.py), not the whole chat twice: a quick-ask lands in the person's typed
+    # chat, which can be long. Its own setting, not Auto Live's VOICE_LIVE_TURN_HISTORY_MESSAGES.
+    # 0 (or under 4) = spoken turns read and send the whole chat, as before.
+    SPOKEN_MODE_HISTORY_MESSAGES: int = int(os.getenv("SPOKEN_MODE_HISTORY_MESSAGES", "0"))
     # A chat turn's clock (core/monitoring/turn_clock.py): where the time went between the
     # request and the reply, as one `chat_turn_timing` log line and a `timing` key on the
     # reply's trace. Ids and numbers only. false = no turn is timed: no clock, no line, no key.
