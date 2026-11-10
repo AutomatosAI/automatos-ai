@@ -23,7 +23,7 @@ from consumers.chatbot import ChatService, StreamingChatService
 from consumers.chatbot.chat_history import ChatCursorNotFound, history_row
 from consumers.chatbot.turn_errors import CODE_SESSION_AGENT_TERMINAL, TurnError
 from consumers.chatbot.turn_notes import note_an_unanswered_turn, save_turn_note
-from api.chat_dispatch import TurnLane, auto_lane, chosen_agent_lane, response_headers, said_before
+from api.chat_dispatch import TurnLane, auto_lane, chosen_agent_lane, response_headers, said_before, spoken_skips_apps
 from api.chat_models import ChatMessageRequest, ChatRequest, MessagePart
 from api.chat_turn_history import turn_history
 from core.auth.hybrid import get_request_context_hybrid
@@ -329,7 +329,7 @@ async def _turn_chunks(service: StreamingChatService, task_db: Session, turn: _T
         })
     reply = service.stream_response_with_agent(
         chat_id=turn.chat_id, messages=messages, agent_id=lane.agent_id, user_id=turn.user_id,
-        skip_composio=lane.skip_composio, complexity_assessment=lane.assessment,
+        skip_composio=spoken_skips_apps(lane.skip_composio, turn.spoken_mode), complexity_assessment=lane.assessment,
         mission_mode=turn.mission_mode, plan_mode=turn.plan_mode, suggest_mission=lane.suggest_mission,
         is_super_admin=turn.is_super_admin, locale=turn.locale,  # locale: the variant Auto replies in (pt-BR)
         # PRD-221 S3/S4: the sanitized reference set rides into the turn's context_trace and the page-prior action exposure.

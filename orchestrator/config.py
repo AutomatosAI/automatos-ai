@@ -2286,6 +2286,11 @@ class Config:
     # waiting for the whitespace the next unit brings. false = the name is not listed and phones
     # cut sentences as before.
     SPOKEN_MODE_UNIT_ENDS: bool = os.getenv("SPOKEN_MODE_UNIT_ENDS", "false").strip().lower() == "true"
+    # A spoken turn (POST /api/chat with spokenMode) skips the connected-apps (Composio) search
+    # before its first model call (consumers/chatbot/spoken_apps.py), as Auto Live does: no
+    # typed per-app tools, scope message or hint lines; the generic composio_execute tool
+    # stays. false = spoken turns search connected apps like typed ones, as before.
+    SPOKEN_MODE_SKIP_COMPOSIO: bool = os.getenv("SPOKEN_MODE_SKIP_COMPOSIO", "false").strip().lower() == "true"
     # A chat turn's clock (core/monitoring/turn_clock.py): where the time went between the
     # request and the reply, as one `chat_turn_timing` log line and a `timing` key on the
     # reply's trace. Ids and numbers only. false = no turn is timed: no clock, no line, no key.

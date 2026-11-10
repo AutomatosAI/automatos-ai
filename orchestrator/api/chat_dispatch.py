@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from consumers.chatbot.auto import Action, AutoBrain, ComplexityAssessment, apply_assign_bias, is_deferred_phrasing
 from consumers.chatbot.clash_card import clashed_card, said_before
 from consumers.chatbot.handoffs import PLATFORM_HINT, needs_no_apps, with_card_directive
+from consumers.chatbot.spoken_apps import spoken_skips_apps  # voice latency C-2
 
 logger = logging.getLogger(__name__)
 
@@ -127,4 +128,7 @@ def response_headers(assessment: Optional[ComplexityAssessment]) -> Dict[str, st
     return headers
 
 
-__all__ = ["TurnLane", "auto_lane", "chosen_agent_lane", "lane_for", "response_headers", "said_before"]
+__all__ = [
+    "TurnLane", "auto_lane", "chosen_agent_lane", "lane_for", "response_headers", "said_before",
+    "spoken_skips_apps",
+]
