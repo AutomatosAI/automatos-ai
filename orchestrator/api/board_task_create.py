@@ -32,6 +32,7 @@ from api.board_tasks import (
     _text_of,
 )
 from core.auth.dependencies import RequestContext
+from core.auth.server_key_gate import API_KEY_FILER
 from core.models import Agent
 from core.models.core import BoardTask
 from services.board_consent import WHY_CREATED_AND_ASSIGNED, actor_ref, consent_for_created_ticket
@@ -46,7 +47,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_PRIORITY = "medium"
 DEFAULT_REVIEW_MODE = "auto"
 DEFAULT_SOURCE_TYPE = "user"
-API_KEY_FILER = "api_key"
 NO_SUCH_AGENT = "Assigned agent not found in workspace"
 # F293: the columns that hold finished work, which no new card starts in.
 FINISHED_COLUMNS = {"review": "Review", "done": "Done"}
