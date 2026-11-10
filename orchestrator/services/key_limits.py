@@ -92,6 +92,7 @@ def enforce_key_limits(db: Any, ctx: Any, store: Any = None) -> None:
 
 
 def _over(detail: str, retry_after: int) -> HTTPException:
+    """The 429 for a key over a limit, with when to retry."""
     return HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=detail,
                          headers={"Retry-After": str(max(1, int(retry_after)))})
 

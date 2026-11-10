@@ -683,6 +683,9 @@ class Config:
     # PRD-274 W1: requests a minute any server key may make on the routes named for it
     # (services/key_limits.py); a key's own rate_limit_requests can only lower it.
     SERVER_KEY_REQUESTS_PER_MINUTE: int = int(os.getenv("SERVER_KEY_REQUESTS_PER_MINUTE", "600"))
+    # The per-IP limit every route gets while the policy plane is on (main.py, slowapi), and the one
+    # the routes a server key reaches apply to their other callers (core/auth/server_key_ip_limit.py).
+    APP_RATE_LIMIT_PER_MINUTE: int = int(os.getenv("APP_RATE_LIMIT_PER_MINUTE", "60"))
     WIDGET_CHAT_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CHAT_IP_LIMIT_PER_WINDOW", "30"))
     WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW", "10"))
     # PRD-264 EUAI-10 (D16): the public detection route GET /api/public/provenance/{sha256}
