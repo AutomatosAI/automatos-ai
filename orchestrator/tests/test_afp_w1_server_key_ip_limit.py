@@ -162,5 +162,8 @@ def test_slowapi_exempts_exactly_the_routes_a_server_key_reaches():
     from main import limiter
 
     assert {"api.agent_execute.execute_agent", "api.board_tasks.create_task"} <= limiter._exempt_routes
+    assert {"api.widget_memory.list_memories", "api.widget_memory.search_memories",
+            "api.widget_memory.store_memory"} <= limiter._exempt_routes
+    assert "api.widget_memory.delete_memory" not in limiter._exempt_routes
     assert "api.board_tasks.list_tasks" not in limiter._exempt_routes
     assert "api.agents.list_agents" not in limiter._exempt_routes

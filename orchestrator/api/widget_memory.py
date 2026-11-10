@@ -12,6 +12,11 @@ It never answers from an in-process copy: an earlier fallback kept "stored"
 memories in a per-process dict, lost on restart and invisible to other workers,
 and answered 201 for them (PRD-274, Wave 0).
 
+PRD-274 Wave 1 (§5.2): a product's server key may list and search (``memory:read``) and store
+(``memory:write``) the workspace's memory through these routes (``core.auth.server_key_gate``).
+A key reads only what no audience limits (need-to-know, Wave 4) and nothing private to a person.
+What a key stores carries ``written_by: sdk:<key id>``. Deleting and resuming stay with people.
+
 Prefix: /api/memory
 """
 
@@ -27,9 +32,14 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.scopes import MEMORY_READ, MEMORY_WRITE
+from core.auth.server_key_gate import (
+    is_server_key, request_context_or_server_key, require_workspace_permission_or_server_key,
+)
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
-from modules.memory.injection_filter import without_server_keys
+from core.security.memory_audience import audience_of
+from modules.memory.injection_filter import WRITTEN_BY_KEY, visible_to_viewer, without_server_keys
 
 logger = logging.getLogger(__name__)
 
@@ -199,9 +209,17 @@ def _item(m: Dict[str, Any], ws: str, with_score: bool = False) -> MemoryItem:
 # ---------------------------------------------------------------------------
 
 
+def _for_reader(ctx: RequestContext, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """What the caller may read: everything for a person, as before; for a server key, only facts
+    no audience limits and none private to a person."""
+    if not is_server_key(ctx):
+        return rows
+    return [m for m in rows if not audience_of(m) and visible_to_viewer(m, None)]
+
+
 @router.get("", response_model=MemoryListResponse)
 async def list_memories(
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(request_context_or_server_key(MEMORY_READ)),
     limit: int = Query(50, ge=1, le=200, description="Max items to return"),
 ) -> MemoryListResponse:
     """List memories for the current workspace."""
@@ -212,7 +230,7 @@ async def list_memories(
     except Exception as exc:
         logger.exception("[widget_memory] Memory list failed for workspace %s", ws)
         raise _unavailable(MEMORY_UNAVAILABLE) from exc
-    items = [_item(m, ws) for m in raw]
+    items = [_item(m, ws) for m in _for_reader(ctx, raw)]
     return MemoryListResponse(memories=items, total=len(items))
 
 
@@ -270,7 +288,7 @@ async def resume_context(
 @router.get("/search", response_model=MemorySearchResponse)
 async def search_memories(
     q: str = Query(..., min_length=1, description="Search query"),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(request_context_or_server_key(MEMORY_READ)),
     limit: int = Query(20, ge=1, le=100, description="Max results"),
 ) -> MemorySearchResponse:
     """Search memories by query within the current workspace."""
@@ -281,14 +299,14 @@ async def search_memories(
     except Exception as exc:
         logger.exception("[widget_memory] Memory search failed for workspace %s", ws)
         raise _unavailable(MEMORY_UNAVAILABLE) from exc
-    items = [_item(m, ws, with_score=True) for m in raw]
+    items = [_item(m, ws, with_score=True) for m in _for_reader(ctx, raw)]
     return MemorySearchResponse(query=q, results=items, total=len(items))
 
 
-@router.post("", response_model=MemoryItem, status_code=201, dependencies=[Depends(require_workspace_permission("knowledge:create"))])
+@router.post("", response_model=MemoryItem, status_code=201)
 async def store_memory(
     body: MemoryCreate,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(require_workspace_permission_or_server_key("knowledge:create", MEMORY_WRITE)),
 ) -> MemoryItem:
     """Store a new memory in the current workspace.
 
@@ -301,6 +319,8 @@ async def store_memory(
     metadata = without_server_keys(body.metadata)  # P256-FIX-N14-4: owner and stated_by are the server's
     if body.tags:
         metadata["tags"] = body.tags
+    if is_server_key(ctx):
+        metadata[WRITTEN_BY_KEY] = ctx.user.id  # sdk:<key id>, never the caller's say
     try:
         result = await service.store_long_term(workspace_id=ws, content=body.content, metadata=metadata or None)
     except Exception as exc:

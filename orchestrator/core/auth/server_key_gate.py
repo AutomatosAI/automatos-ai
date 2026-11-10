@@ -65,6 +65,26 @@ def require_workspace_permission_or_server_key(permission: str, key_scope: str) 
     return _dep
 
 
+def request_context_or_server_key(key_scope: str) -> Callable:
+    """For a read route any signed-in caller may use: a server key listing ``key_scope``, or
+    ``get_request_context_hybrid`` exactly as before. A publishable key is refused."""
+
+    async def _dep(request: Request) -> RequestContext:
+        """A publishable key is refused; a server key goes through its scope and limits; anyone
+        else meets the per-IP limit, then signs in as before."""
+        token = bearer_token(request)
+        if token and token.startswith(PUBLISHABLE_KEY_PREFIX):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=PUBLISHABLE_KEY_REFUSED)
+        if token and token.startswith(SERVER_KEY_PREFIX):
+            return await run_in_threadpool(_server_key_context, request, key_scope)
+        await run_in_threadpool(limit_this_caller, request)
+        return await get_request_context_hybrid(request)
+
+    setattr(_dep, KEY_SCOPE_MARKER_ATTR, key_scope)
+    _dep.__name__ = f"request_context_or_server_key_{key_scope.replace(':', '_')}"
+    return _dep
+
+
 def _server_key_context(request: Request, key_scope: str) -> RequestContext:
     """The key's context once its scope and its per-key limits allow the request (threadpool)."""
     from services.key_limits import enforce_on_own_session

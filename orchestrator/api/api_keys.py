@@ -19,7 +19,7 @@ from core.auth.dependencies import RequestContext
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.step_up import require_step_up
 from core.auth.hybrid import get_request_context_hybrid
-from core.auth.scopes import TASKS_READ, TASKS_WRITE
+from core.auth.scopes import MEMORY_READ, MEMORY_WRITE, TASKS_READ, TASKS_WRITE
 from core.database.database import get_db
 from core.services.api_key_service import ApiKeyService
 from config import config
@@ -55,6 +55,8 @@ VALID_PERMISSIONS = [
     # with the board auth gate in core/auth/hybrid.py.
     TASKS_READ,
     TASKS_WRITE,  # PRD-274 W1: a server key files a ticket (core/auth/server_key_gate.py)
+    MEMORY_READ,  # PRD-274 W1: a server key reads and stores the workspace's memory
+    MEMORY_WRITE,
 ]
 
 
