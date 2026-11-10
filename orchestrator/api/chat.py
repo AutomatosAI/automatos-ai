@@ -24,7 +24,7 @@ from consumers.chatbot import ChatService, StreamingChatService
 from consumers.chatbot.chat_history import ChatCursorNotFound, history_row
 from consumers.chatbot.turn_errors import CODE_SESSION_AGENT_TERMINAL, TurnError
 from consumers.chatbot.turn_notes import note_an_unanswered_turn, save_turn_note
-from api.chat_dispatch import TurnLane, auto_lane, chosen_agent_lane, response_headers, said_before, spoken_skips_apps
+from api.chat_dispatch import TurnLane, apps_skipped, auto_lane, chosen_agent_lane, response_headers, said_before
 from api.chat_models import ChatMessageRequest, ChatRequest, MessagePart
 from api.chat_turn_history import spoken_window, turn_history
 from core.auth.hybrid import get_request_context_hybrid
@@ -308,6 +308,7 @@ class _Turn:
     spoken_mode: bool
     locale: Optional[str] = None  # the person's checked BCP 47 tag (pt-BR); None: none named
     lean_request: Any = None  # a lean agent's model and app context (consumers.chatbot.lean_request)
+    agent_chosen: bool = False  # the person chose the agent (agentId): no app-name check (C-3)
 
 
 async def _turn_chunks(service: StreamingChatService, task_db: Session, turn: _Turn, messages: List[Dict[str, Any]]):
@@ -328,9 +329,11 @@ async def _turn_chunks(service: StreamingChatService, task_db: Session, turn: _T
         yield service.streaming_handler.format_aisdk_data("mission-suggestion", {
             "goal": turn.message_text, "complexity": lane.assessment.complexity.value, "agent_id": lane.agent_id,
         })
+    skips_apps = await apps_skipped(lane, spoken=turn.spoken_mode, agent_chosen=turn.agent_chosen,
+                                    workspace_id=turn.workspace_id, text=turn.message_text)  # voice latency C-2, C-3
     reply = service.stream_response_with_agent(
         chat_id=turn.chat_id, messages=messages, agent_id=lane.agent_id, user_id=turn.user_id,
-        skip_composio=spoken_skips_apps(lane.skip_composio, turn.spoken_mode), complexity_assessment=lane.assessment,
+        skip_composio=skips_apps, complexity_assessment=lane.assessment,
         mission_mode=turn.mission_mode, plan_mode=turn.plan_mode, suggest_mission=lane.suggest_mission,
         is_super_admin=turn.is_super_admin, locale=turn.locale,  # locale: the variant Auto replies in (pt-BR)
         # PRD-221 S3/S4: the sanitized reference set rides into the turn's context_trace and the page-prior action exposure.
@@ -425,7 +428,7 @@ async def stream_chat(
         message_id=getattr(saved, "id", None), lane=lane, locale=request.locale,
         message_text=message_text, mission_mode=bool(request.missionMode), plan_mode=bool(request.planMode),
         is_super_admin=_is_super_admin(ctx), page_context=page_ctx, spoken_mode=request.spokenMode,
-        lean_request=lean_request,
+        lean_request=lean_request, agent_chosen=bool(request.agentId),
     )
     # F105 (4 Nov): and it is done with here. Ending its transaction gives the pooled
     # connection back now (as api/voice_speech.py's speak does), instead of it sitting idle

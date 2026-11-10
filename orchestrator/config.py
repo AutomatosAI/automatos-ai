@@ -2304,6 +2304,11 @@ class Config:
     # typed per-app tools, scope message or hint lines; the generic composio_execute tool
     # stays. false = spoken turns search connected apps like typed ones, as before.
     SPOKEN_MODE_SKIP_COMPOSIO: bool = os.getenv("SPOKEN_MODE_SKIP_COMPOSIO", "false").strip().lower() == "true"
+    # A spoken turn that SPOKEN_MODE_SKIP_COMPOSIO skipped runs the connected-apps search after
+    # all when the person's words name an app Auto may use ("check my Gmail"): Auto's own lane
+    # only, never with agentId or on a hand-off; the name check is bounded at 0.5 s
+    # (consumers/chatbot/spoken_apps.py). false = naming an app does not bring the typed tools back.
+    SPOKEN_MODE_APPS_WHEN_NAMED: bool = os.getenv("SPOKEN_MODE_APPS_WHEN_NAMED", "false").strip().lower() == "true"
     # A spoken turn (POST /api/chat with spokenMode) reads this many of its chat's newest messages
     # (api/chat_turn_history.py), not the whole chat twice: a quick-ask lands in the person's typed
     # chat, which can be long. Its own setting, not Auto Live's VOICE_LIVE_TURN_HISTORY_MESSAGES.

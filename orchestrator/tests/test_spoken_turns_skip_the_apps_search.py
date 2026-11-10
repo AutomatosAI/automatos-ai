@@ -120,7 +120,7 @@ def test_the_spoken_rule_logs_one_line_and_only_when_it_is_the_reason(switch_on,
 
 def test_the_route_reaches_the_rule_through_the_dispatch_module():
     assert chat_dispatch.spoken_skips_apps is spoken_apps.spoken_skips_apps
-    assert chat.spoken_skips_apps is spoken_apps.spoken_skips_apps
+    assert chat.apps_skipped is spoken_apps.apps_skipped  # C-3: the route asks through apps_skipped
     assert "spoken_skips_apps" in chat_dispatch.__all__
 
 
