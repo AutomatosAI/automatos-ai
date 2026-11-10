@@ -41,6 +41,7 @@ from modules.tools.execution.direct_contract import missing_on_a_direct_call  # 
 from modules.tools.execution.refused_calls import says_why_it_refused  # P256-FIX-N17-10 (F449)
 from modules.tools.discovery.owner_only import asks_before_a_send  # PRD-256 US-004
 from modules.tools.discovery.check_in_lane import platform_actions_only_in_a_check_in  # PRD-268 US-C02b
+from modules.tools.partner.runner import runs_partner_tools  # PRD-275
 from modules.memory.tool_outcome_capture import capture_tool_outcome
 from core.observability.tracer import fire_tool_trace
 from core.database.session_health import rollback_if_aborted
@@ -883,6 +884,7 @@ class UnifiedToolExecutor:
     @decodes_nested_params  # F321 (night 9b): params sent as JSON text run as the object they hold
     @asks_before_a_send  # PRD-256 US-004: a Composio send from a person's chat waits for their click
     @says_why_it_refused  # P256-FIX-N17-10 (F449): its refusals carry the owner's reason
+    @runs_partner_tools  # PRD-275: a tool of a partner pack the calling agent lists runs on this seam
     async def execute_tool(
         self,
         tool_name: str,

@@ -1,5 +1,5 @@
 {
-  "route_count": 1024,
+  "route_count": 1027,
   "routes": [
     {
       "method": "GET",
@@ -2092,6 +2092,18 @@
     {
       "method": "GET",
       "path": "/api/openrouter/sync/history"
+    },
+    {
+      "method": "GET",
+      "path": "/api/partner-packs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/partner-packs/{name}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/partner-packs/{name}"
     },
     {
       "method": "GET",
