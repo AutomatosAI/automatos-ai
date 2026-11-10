@@ -8,6 +8,7 @@ Over either is a 429 with ``Retry-After``. Real database, real keys.
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 
 import pytest
@@ -40,7 +41,7 @@ def workspace(new_session):
     s.close()
     yield ws
     s = new_session.sweep()
-    for table in ("llm_usage", "board_tasks", "sdk_api_keys"):
+    for table in ("llm_usage", "board_tasks", "recipe_executions", "workflow_recipes", "sdk_api_keys"):
         s.execute(text(f"DELETE FROM {table} WHERE workspace_id = CAST(:id AS uuid)"), {"id": ws})  # noqa: S608
     s.execute(text("DELETE FROM workspaces WHERE id = CAST(:id AS uuid)"), {"id": ws})
     s.commit()
@@ -100,6 +101,29 @@ def _ticket_with_usage(new_session, ws, filed_by, tokens, seconds_ago=0):
     s.close()
 
 
+def _run_with_usage(new_session, ws, started_by, tokens, *, by_key=True):
+    """A Playbook run (``exec-…``) with its usage, started by a key (``sdk:<id>``) or a person."""
+    from core.auth.server_key_gate import API_KEY_FILER, KEY_RUN_METADATA
+
+    s = new_session()
+    recipe_id = s.execute(text(
+        "INSERT INTO workflow_recipes (template_id, name, description, owner_type, template_definition, "
+        "created_at, updated_at, created_by, workspace_id) VALUES (:tid, 'p', '', 'workspace', '{}', now(), now(), "
+        "'t', CAST(:ws AS uuid)) RETURNING id"), {"tid": f"t-{uuid.uuid4().hex[:8]}", "ws": ws}).scalar()
+    run_id = f"exec-{uuid.uuid4().hex[:12]}"
+    s.execute(text(
+        "INSERT INTO recipe_executions (execution_id, recipe_id, workspace_id, status, started_at, triggered_by, "
+        "execution_metadata) VALUES (:ex, :rid, CAST(:ws AS uuid), 'running', now(), :by, CAST(:meta AS jsonb))"),
+        {"ex": run_id, "rid": recipe_id, "ws": ws, "by": API_KEY_FILER if by_key else started_by,
+         "meta": json.dumps({KEY_RUN_METADATA: started_by} if by_key else {})})
+    s.execute(text(
+        "INSERT INTO llm_usage (workspace_id, model_id, provider, tier, execution_id, input_tokens, output_tokens, "
+        "total_tokens, input_cost, output_cost, total_cost, created_at) VALUES (CAST(:ws AS uuid), 'm', 'p', 'direct', "
+        ":ex, 0, :t, :t, 0, 0, 0, now())"), {"ws": ws, "ex": run_id, "t": tokens})
+    s.commit()
+    s.close()
+
+
 def _enforce(new_session, ctx, store):
     s = new_session()
     try:
@@ -139,6 +163,20 @@ def test_over_its_tokens_a_minute_a_key_starts_no_new_work(new_session, workspac
         _enforce(new_session, ctx, _Window())
     assert over.value.status_code == 429 and "1000 tokens a minute" in over.value.detail
     assert over.value.headers["Retry-After"] == str(key_limits.WINDOW_SECONDS)
+
+
+def test_the_playbook_runs_a_key_starts_count_against_its_tokens(new_session, workspace, ceiling):
+    ctx, _ = _ctx(new_session, workspace, rate_limit_tokens=1000)
+    other, _ = _ctx(new_session, workspace, rate_limit_tokens=1000)
+    _ticket_with_usage(new_session, workspace, ctx.user.id, 300)
+    _run_with_usage(new_session, workspace, ctx.user.id, 500)
+    _run_with_usage(new_session, workspace, other.user.id, 5000)                          # another key's run
+    _run_with_usage(new_session, workspace, "priya@example.com", 5000, by_key=False)  # a person's run
+    _enforce(new_session, ctx, _Window())
+    _run_with_usage(new_session, workspace, ctx.user.id, 200)
+    with pytest.raises(HTTPException) as over:
+        _enforce(new_session, ctx, _Window())
+    assert over.value.status_code == 429 and "1000 tokens a minute" in over.value.detail
 
 
 def test_a_key_with_no_token_limit_is_not_counted(new_session, workspace, ceiling):

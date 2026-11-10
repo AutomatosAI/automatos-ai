@@ -39,6 +39,7 @@ PUBLISHABLE_KEY_PREFIX = "ak_pub_"
 KEY_SCOPE_MARKER_ATTR = "_server_key_scope"
 SDK_KEY_AUTH_TYPE = "sdk_key"
 API_KEY_FILER = "api_key"  # created_by_type of a ticket a server key filed
+KEY_RUN_METADATA = "api_key"  # a Playbook run's execution_metadata naming the key that started it
 PUBLISHABLE_KEY_REFUSED = "A publishable key can't call this route: use a server key, kept on your own server"
 
 
