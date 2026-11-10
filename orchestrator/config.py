@@ -2281,6 +2281,13 @@ class Config:
     MEMORY_AUDIENCE_ENABLED: bool = os.getenv("MEMORY_AUDIENCE_ENABLED", "false").strip().lower() == "true"
     SPOKEN_MODE_MODEL: str = os.getenv("SPOKEN_MODE_MODEL", "claude-haiku-5-5").strip()
     SPOKEN_MODE_PROVIDER: str = os.getenv("SPOKEN_MODE_PROVIDER", "anthropic").strip().lower()
+    # Anthropic calls hand their text to a listening caller as it is generated
+    # (core/llm/clients/anthropic_client.py): "off" (or any unknown value) = every call answers
+    # whole, as before 10 Nov 2026; "quick-ask" = turns sent to POST /api/chat with spokenMode
+    # (the phone's and the web's voice turns); "spoken" = those and Auto Live
+    # calls; "all" = every chat turn, typed and widgets too. A call nobody listens to (no
+    # on_delta) and a headless agent run never stream.
+    ANTHROPIC_STREAMING: str = os.getenv("ANTHROPIC_STREAMING", "off").strip().lower()
     # Discovery lists `spoken_unit_ends` while this is true. A phone that knows the name then
     # speaks a sentence as soon as a spoken turn's text so far ends at its terminator, without
     # waiting for the whitespace the next unit brings. false = the name is not listed and phones
