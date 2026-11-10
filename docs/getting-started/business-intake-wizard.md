@@ -157,7 +157,7 @@ Sources: `[orchestrator/core/models/business_profiles.py:20-61]`, `[orchestrator
 ## Key Components and Functions
 
 ### FirecrawlClient
-Defined in `[orchestrator/modules/intake/firecrawl_client.py:32-191]`, this wrapper handles cloud requests to `https://api.firecrawl.dev/v1`. Core methods include `map()` for URL enumeration and `scrape()` for markdown and schema-guided extractions.
+Defined in `[orchestrator/modules/intake/firecrawl_client.py:32-191]`, this wrapper handles cloud requests to `https://api.firecrawl.dev/v2`. Core methods include `map()` for URL enumeration and `scrape()` for markdown and schema-guided extractions.
 
 Sources: `[orchestrator/modules/intake/firecrawl_client.py:32-191]`
 
