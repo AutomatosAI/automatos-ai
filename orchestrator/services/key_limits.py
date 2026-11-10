@@ -8,10 +8,11 @@ limits its owner may set when minting it, both per minute, and until now neither
   ``SERVER_KEY_REQUESTS_PER_MINUTE``, applies to every server key; a key's own limit can only
   lower it.
 * **Tokens** (``rate_limit_tokens``): the tokens the key used in the last minute, from the usage
-  ledger (``llm_usage``): ``board_task:<id>`` for each ticket it filed, and ``chat:<id>`` for each
-  chat its service user owns (its headless chat turns).
-  At or over the limit, the key starts no new work until the minute rolls on. A run already going
-  is not stopped.
+  ledger (``llm_usage``): ``board_task:<id>`` for each ticket it filed, the run's own id
+  (``exec-…``) for each Playbook run it started (``triggered_by = 'api_key'``, the key in
+  ``execution_metadata``), and ``chat:<id>`` for each chat its service user owns (its headless chat
+  turns). At or over the limit, the key starts no new work until the minute rolls on. A run already
+  going is not stopped.
 
 Over either limit is a 429 with ``Retry-After``. If Redis can't be reached, the request count
 fails open, as the widget limiter does, and is logged loudly; the token count is a database read
@@ -26,7 +27,7 @@ from typing import Any, Optional
 from fastapi import HTTPException, status
 from sqlalchemy import text
 
-from core.auth.server_key_gate import API_KEY_FILER
+from core.auth.server_key_gate import API_KEY_FILER, KEY_RUN_METADATA
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,11 @@ _TOKENS_LAST_MINUTE = text("""
       AND (u.execution_id IN (
               SELECT 'board_task:' || t.id FROM board_tasks t
               WHERE t.workspace_id = CAST(:ws AS uuid)
-                AND t.created_by_type = :filer AND t.created_by_id = :by)
+                AND t.created_by_type = :filer AND t.created_by_id = :by
+              UNION ALL
+              SELECT e.execution_id FROM recipe_executions e
+              WHERE e.workspace_id = CAST(:ws AS uuid)
+                AND e.triggered_by = :filer AND e.execution_metadata ->> :run_key = :by)
            OR u.execution_id IN (
               SELECT 'chat:' || c.id::text FROM chats c
               JOIN sdk_api_keys k ON k.service_user_id = c.user_id
@@ -72,11 +77,11 @@ def limits_for(db: Any, key_id: Any) -> KeyLimits:
 
 
 def tokens_last_minute(db: Any, workspace_id: Any, key_principal: str, key_id: Any) -> int:
-    """Tokens the key used in the last minute: its tickets' runs, and its chat turns (the chats its
-    service user owns, ``api.chat_server_key``)."""
+    """Tokens the key used in the last minute: the tickets it filed, the Playbook runs it started,
+    and its chat turns (the chats its service user owns, ``api.chat_server_key``)."""
     return int(db.execute(_TOKENS_LAST_MINUTE, {"ws": str(workspace_id), "window": WINDOW_SECONDS,
-                                                "filer": API_KEY_FILER, "by": key_principal,
-                                                "key": str(key_id)}).scalar() or 0)
+                                                "filer": API_KEY_FILER, "run_key": KEY_RUN_METADATA,
+                                                "by": key_principal, "key": str(key_id)}).scalar() or 0)
 
 
 def enforce_key_limits(db: Any, ctx: Any, store: Any = None) -> None:

@@ -33,7 +33,6 @@ NO_STEPS = "This playbook has no steps to run. Add a step, then run it again."
 WAIT_FOR_ME_IS_TRUE_OR_FALSE = "wait_for_me must be true or false"
 RUN_BUTTON_RUN = "recipe_direct"
 RUN_CARD = "recipe"
-STARTED_BY_KEY = "api_key"  # PRD-274 W1: the run metadata naming the server key that started it
 
 logger = logging.getLogger(__name__)
 
@@ -100,10 +99,11 @@ def _starter(ctx: Any) -> str:
 
 
 def _key_of(ctx: Any) -> Dict[str, Any]:
-    """The run's metadata naming the server key that started it (``sdk:<key id>``); none for a person."""
-    from core.auth.server_key_gate import is_server_key
+    """The run's metadata naming the server key that started it (``sdk:<key id>``); none for a person.
+    The key's token limit counts the run's usage by it (``services.key_limits``)."""
+    from core.auth.server_key_gate import KEY_RUN_METADATA, is_server_key
 
-    return {STARTED_BY_KEY: ctx.user.id} if is_server_key(ctx) else {}
+    return {KEY_RUN_METADATA: ctx.user.id} if is_server_key(ctx) else {}
 
 
 def _make_its_card(db: Session, playbook: Any, execution: Any) -> None:
