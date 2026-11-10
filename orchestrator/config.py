@@ -2309,6 +2309,14 @@ class Config:
     # only, never with agentId or on a hand-off; the name check is bounded at 0.5 s
     # (consumers/chatbot/spoken_apps.py). false = naming an app does not bring the typed tools back.
     SPOKEN_MODE_APPS_WHEN_NAMED: bool = os.getenv("SPOKEN_MODE_APPS_WHEN_NAMED", "false").strip().lower() == "true"
+    # A spoken turn with no agentId (POST /api/chat with spokenMode) is classified by the tiers
+    # that cost no model call: the hand-off table, the onboarding pin, the cache and the regex
+    # fast paths. The decision engine and the Tier 3 completion are not asked; a turn no tier
+    # matched runs with no assessment, as Auto Live's do (consumers/chatbot/spoken_lane.py). It
+    # gives up the light path for general questions, role-based hand-offs and mission cards by
+    # voice, so some turns get slower: turn it on only after measuring. false = spoken turns run
+    # the full AutoBrain, as before.
+    SPOKEN_MODE_SKIP_CLASSIFIER: bool = os.getenv("SPOKEN_MODE_SKIP_CLASSIFIER", "false").strip().lower() == "true"
     # A spoken turn (POST /api/chat with spokenMode) reads this many of its chat's newest messages
     # (api/chat_turn_history.py), not the whole chat twice: a quick-ask lands in the person's typed
     # chat, which can be long. Its own setting, not Auto Live's VOICE_LIVE_TURN_HISTORY_MESSAGES.

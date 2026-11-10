@@ -286,6 +286,7 @@ async def _turn_lane(db: Session, ctx: RequestContext, request: ChatRequest, mes
     return await auto_lane(
         db, ctx.workspace_id, auto_agent_id=get_default_agent_id(db, ctx.workspace_id),
         message_text=message_text, history_length=history_length, before=before,
+        spoken=bool(getattr(request, "spokenMode", False)),  # voice latency C-1 (a caller's request may have none)
     )
 
 

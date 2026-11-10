@@ -26,6 +26,7 @@ from consumers.chatbot.auto import Action, AutoBrain, ComplexityAssessment, appl
 from consumers.chatbot.clash_card import clashed_card, said_before
 from consumers.chatbot.handoffs import PLATFORM_HINT, needs_no_apps, with_card_directive
 from consumers.chatbot.spoken_apps import apps_skipped, spoken_skips_apps  # voice latency C-2, C-3
+from consumers.chatbot.spoken_lane import SpokenAutoBrain, is_unclassified, skips_the_classifier  # voice latency C-1
 
 logger = logging.getLogger(__name__)
 
@@ -96,10 +97,22 @@ def lane_for(auto_agent_id: int, assessment: ComplexityAssessment, message_text:
 
 async def auto_lane(
     db: Session, workspace_id: Any, *, auto_agent_id: int, message_text: str, history_length: int,
-    before: str = "",
+    before: str = "", spoken: bool = False,
 ) -> TurnLane:
-    """No agent chosen: AutoBrain classifies the message and Auto answers on its lane."""
-    assessment = await AutoBrain(db, str(workspace_id)).assess(message_text, history_length)
+    """No agent chosen: AutoBrain classifies the message and Auto answers on its lane.
+
+    Voice latency C-1: a ``spoken`` turn, while ``SPOKEN_MODE_SKIP_CLASSIFIER`` is true, runs only
+    the tiers that cost no model call. One no tier matched carries no assessment (the shape Auto
+    Live and ``agentId`` turns run), unless the lane rewrote it (a named teammate's ticket, "answer
+    it here"): that verdict is kept, with memory left to the turn's intent."""
+    unclassifiable = skips_the_classifier(spoken)
+    brain = (SpokenAutoBrain if unclassifiable else AutoBrain)(db, str(workspace_id))
+    assessment = await brain.assess(message_text, history_length)
+    if unclassifiable and is_unclassified(assessment):
+        if assessment.action == Action.RESPOND and not assessment.context_directive:
+            logger.info("[Auto] spoken turn, no tier matched: Auto answers unclassified: agent_id=%s", auto_agent_id)
+            return TurnLane(agent_id=auto_agent_id)
+        assessment = dataclasses.replace(assessment, needs_memory=True)  # no verdict said to skip memory
     logger.info(
         "[Auto] Complexity=%s action=%s tool_hints=%s reasoning=%s",
         assessment.complexity.value, assessment.action.value, assessment.tool_hints, assessment.reasoning,
