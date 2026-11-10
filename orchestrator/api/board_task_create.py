@@ -32,6 +32,7 @@ from api.board_tasks import (
     _text_of,
 )
 from core.auth.dependencies import RequestContext
+from core.auth.server_key_gate import API_KEY_FILER
 from core.models import Agent
 from core.models.core import BoardTask
 from services.board_consent import WHY_CREATED_AND_ASSIGNED, actor_ref, consent_for_created_ticket
@@ -138,7 +139,7 @@ def file_ticket(db: Session, ctx: RequestContext, columns: Dict[str, Any],
 def _filer_type(ctx: RequestContext) -> str:
     """Who filed it: a person ("user"), or a product's server key ("api_key", PRD-274 W1). A
     key's input is never the owner's own words (``created_by_type == "user"`` means that)."""
-    from core.auth.server_key_gate import API_KEY_FILER, is_server_key
+    from core.auth.server_key_gate import is_server_key
 
     return API_KEY_FILER if is_server_key(ctx) else DEFAULT_SOURCE_TYPE
 
