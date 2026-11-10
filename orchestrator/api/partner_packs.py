@@ -7,15 +7,17 @@ installs a pack, or replaces the one of that name, with the credential its calls
 ``PARTNER_TOOLS_ENABLED`` is off. Plain ``def`` routes: FastAPI runs them in its threadpool,
 off the event loop.
 
-Installing a pack offers it to no agent. An agent is offered a pack's tools when its
-``configuration.partner_packs`` lists the pack (``PUT /api/agents/{id}``).
+Installing a pack names the agents that may use it (``agents``); none means it is offered to
+no one. An agent is offered a pack's tools when the install allows it *and* its
+``configuration.partner_packs`` lists the pack (``PUT /api/agents/{id}``). So whoever may edit
+an agent cannot give it a partner's records the workspace's managers did not allow.
 """
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
@@ -24,7 +26,9 @@ from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from modules.tools.partner.offer import partner_tools_enabled, taken_names
 from modules.tools.partner.pack import PackError, full_tool_name, parse_pack
-from modules.tools.partner.store import InstalledPack, install_pack, installed_packs, remove_pack
+from modules.tools.partner.store import (
+    MAX_AGENTS_PER_PACK, InstalledPack, install_pack, installed_packs, remove_pack,
+)
 
 router = APIRouter(prefix="/api/partner-packs", tags=["partner-packs"])
 
@@ -33,10 +37,12 @@ NOT_FOUND, UNPROCESSABLE = 404, 422
 
 
 class InstallRequest(BaseModel):
-    """A pack, and the id of the workspace's ``generic_api`` credential its calls use."""
+    """A pack, the id of the workspace's ``generic_api`` credential its calls use, and the
+    agents that may use it (none: the pack is offered to no one)."""
 
     pack: Dict[str, Any]
     credential_id: int
+    agents: List[int] = Field(default_factory=list, max_length=MAX_AGENTS_PER_PACK)
 
 
 def _require_on() -> None:
@@ -48,7 +54,7 @@ def _described(installed: InstalledPack) -> Dict[str, Any]:
     pack = installed.pack
     return {
         "name": pack.name, "title": pack.title, "version": pack.version, "description": pack.description,
-        "credential_id": installed.credential_id,
+        "credential_id": installed.credential_id, "agents": list(installed.agents),
         "tools": [{"name": full_tool_name(pack.name, tool), "description": tool.description, "scope": tool.scope,
                    "operations": [operation.name for operation in tool.operations]} for tool in pack.tools],
     }
@@ -75,7 +81,7 @@ def install_partner_pack(name: str, body: InstallRequest,
         clashes = taken_names(db, pack)
         if clashes:
             raise PackError(f"These tool names are already tools of the platform's own: {clashes}.")
-        return _described(install_pack(db, ctx.workspace_id, pack, body.credential_id))
+        return _described(install_pack(db, ctx.workspace_id, pack, body.credential_id, body.agents))
     except PackError as refused:
         raise HTTPException(status_code=UNPROCESSABLE, detail=str(refused)) from None
 

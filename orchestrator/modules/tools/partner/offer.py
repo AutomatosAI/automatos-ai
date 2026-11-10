@@ -1,9 +1,10 @@
 """Partner tools: which agents are offered which tools (PRD-275).
 
 A pack installed in a workspace is offered to an agent only when the agent's
-``configuration.partner_packs`` lists it, so Auto and every other agent keep the tools they
-had. The grant is read again when a call runs (``runner.resolve``): offering a tool is not
-what lets it run.
+``configuration.partner_packs`` lists it *and* the install allows that agent
+(``store.may_use``), so Auto and every other agent keep the tools they had, and an agent
+someone edits to list a pack gets nothing the manager who installed it did not allow. Both
+are read again when a call runs (``runner.resolve``): offering a tool is not what lets it run.
 
 Three places read this module, each on its own seam so no long function is touched:
 
@@ -23,7 +24,7 @@ import re
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from modules.tools.partner.pack import PACK_NAME, PartnerPack, full_tool_name, pack_schemas
-from modules.tools.partner.store import installed_packs, same_workspace
+from modules.tools.partner.store import installed_packs, may_use, same_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +81,9 @@ def schema_name(schema: Any) -> Optional[str]:
     return function.get("name") if isinstance(function, Mapping) else None
 
 
-def _schemas_for(db: Any, workspace_id: Any, names: Iterable[str]) -> Schemas:
-    return [schema for installed in installed_packs(db, workspace_id, names)
+def _schemas_for(db: Any, workspace_id: Any, names: Iterable[str], agent_id: Any) -> Schemas:
+    """The tools of the named packs the workspace installed for ``agent_id``."""
+    return [schema for installed in installed_packs(db, workspace_id, names) if may_use(installed, agent_id)
             for schema in pack_schemas(installed.pack)]
 
 
@@ -108,7 +110,8 @@ def with_partner_tools(tools: Schemas, db: Any, agent_id: Any, workspace_id: Any
         return tools
     taken = {schema_name(schema) for schema in tools}
     fresh: Schemas = []
-    for schema in _read(db, f"agent {agent_id}'s partner tools", lambda: _schemas_for(db, workspace_id, names), []):
+    for schema in _read(db, f"agent {agent_id}'s partner tools",
+                        lambda: _schemas_for(db, workspace_id, names, agent_id), []):
         if schema_name(schema) not in taken:
             taken.add(schema_name(schema))
             fresh.append(schema)
@@ -127,13 +130,12 @@ def offers_partner_tools(core: Callable[..., Schemas]) -> Callable[..., Schemas]
 
 
 def _agent_schemas(db: Any, agent: Any) -> Schemas:
-    """The tools of the packs the agent lists and its own workspace has installed."""
+    """The tools of the packs the agent lists and its own workspace installed for it."""
     names = packs_named(getattr(agent, "configuration", None))
-    workspace_id = getattr(agent, "workspace_id", None)
+    workspace_id, agent_id = getattr(agent, "workspace_id", None), getattr(agent, "id", None)
     if not names or workspace_id is None:
         return []
-    return _read(db, f"agent {getattr(agent, 'id', None)}'s partner tools",
-                 lambda: _schemas_for(db, workspace_id, names), [])
+    return _read(db, f"agent {agent_id}'s partner tools", lambda: _schemas_for(db, workspace_id, names, agent_id), [])
 
 
 def partner_tool_names(db: Any, agent: Any) -> List[str]:

@@ -77,8 +77,9 @@ def _credential(session, workspace: str, type_id: int, name: str) -> int:
 
 @pytest.fixture
 def seeded(new_session):
-    """Two workspaces. The first has an agent that lists the pack, an agent that does not, a
-    ``generic_api`` credential and a credential of another type; the second has its own credential."""
+    """Two workspaces. The first has an agent that lists the pack, an agent that does not, an agent an
+    editor made to list it, a ``generic_api`` credential and a credential of another type; the second
+    has its own agent and credential."""
     from sqlalchemy import text
 
     ours, theirs = str(uuid.uuid4()), str(uuid.uuid4())
@@ -88,14 +89,17 @@ def seeded(new_session):
                   {"id": workspace, "name": name})
     agents = [s.execute(text("INSERT INTO agents (name, agent_type, workspace_id, status, configuration) VALUES "
                              "(:name, 'custom', CAST(:w AS uuid), 'active', CAST(:c AS json)) RETURNING id"),
-                        {"name": name, "w": ours, "c": json.dumps(configuration)}).scalar()
-              for name, configuration in (("Partner Ops", {"partner_packs": ["acme"]}), ("Writer", {}))]
+                        {"name": name, "w": workspace, "c": json.dumps(configuration)}).scalar()
+              for name, workspace, configuration in (
+                  ("Partner Ops", ours, {"partner_packs": ["acme"]}), ("Writer", ours, {}),
+                  ("Editor's Ops", ours, {"partner_packs": ["acme"]}), ("Their Ops", theirs, {"partner_packs": ["acme"]}))]
     s.commit()
     api_type, made_api = _credential_type(s, store.CREDENTIAL_TYPE)
     other_type, made_other = _credential_type(s, "prd275_other_type")
     tag = ours[:8]
     seed = SimpleNamespace(
-        ours=ours, theirs=theirs, lists_it=agents[0], does_not=agents[1],
+        ours=ours, theirs=theirs, lists_it=agents[0], does_not=agents[1], not_allowed=agents[2],
+        their_agent=agents[3],
         credential=_credential(s, ours, api_type, f"acme-{tag}"),
         wrong_type=_credential(s, ours, other_type, f"other-{tag}"),
         their_credential=_credential(s, theirs, api_type, f"theirs-{tag}"),
@@ -150,7 +154,7 @@ def test_a_pack_installs_only_with_this_workspaces_own_generic_api_credential(ne
 
 def test_only_an_agent_of_the_workspace_that_lists_the_pack_resolves_its_tools(new_session, seeded):
     s = new_session()
-    store.install_pack(s, seeded.ours, parse_pack(PACK), seeded.credential)
+    store.install_pack(s, seeded.ours, parse_pack(PACK), seeded.credential, [seeded.lists_it])
     assert granted_packs(s, seeded.lists_it, seeded.ours) == ("acme",)
     assert granted_packs(s, seeded.does_not, seeded.ours) == ()
     assert granted_packs(s, seeded.lists_it, seeded.theirs) == ()            # the agent is not that workspace's
@@ -160,6 +164,9 @@ def test_only_an_agent_of_the_workspace_that_lists_the_pack_resolves_its_tools(n
     assert runner.resolve(s, seeded.ours, seeded.does_not, TOOL) is None
     assert runner.resolve(s, seeded.theirs, seeded.lists_it, TOOL) is None
     assert runner.resolve(s, seeded.ours, seeded.lists_it, "acme_delete_orders") is None
+    # An agent an editor made to list the pack: the install does not name it, so it resolves nothing.
+    assert granted_packs(s, seeded.not_allowed, seeded.ours) == ("acme",)
+    assert runner.resolve(s, seeded.ours, seeded.not_allowed, TOOL) is None
     s.close()
 
 
@@ -168,9 +175,26 @@ def test_the_tool_list_carries_a_listed_agents_partner_tools(new_session, seeded
 
     monkeypatch.setattr(config, "PARTNER_TOOLS_ENABLED", True, raising=False)
     s = new_session()
-    store.install_pack(s, seeded.ours, parse_pack(PACK), seeded.credential)
+    store.install_pack(s, seeded.ours, parse_pack(PACK), seeded.credential, [seeded.lists_it])
     assert [schema_name(schema) for schema in with_partner_tools([], s, seeded.lists_it, seeded.ours)] == [TOOL]
     assert with_partner_tools([], s, seeded.does_not, seeded.ours) == []
+    assert with_partner_tools([], s, seeded.not_allowed, seeded.ours) == []
+    s.close()
+
+
+def test_a_pack_is_installed_only_for_this_workspaces_own_agents(new_session, seeded):
+    s = new_session()
+    for agents in ([seeded.their_agent], [seeded.lists_it, 2_000_000_000]):
+        with pytest.raises(PackError, match="not this workspace's agents"):
+            store.install_pack(s, seeded.ours, parse_pack(PACK), seeded.credential, agents)
+    assert store.installed_packs(s, seeded.ours) == []
+    installed = store.install_pack(s, seeded.ours, parse_pack(PACK), seeded.credential,
+                                   [seeded.not_allowed, seeded.lists_it, seeded.lists_it])
+    assert installed.agents == tuple(sorted((seeded.lists_it, seeded.not_allowed)))
+    assert store.installed_packs(s, seeded.ours)[0].agents == installed.agents       # kept as installed
+    assert runner.resolve(s, seeded.ours, seeded.not_allowed, TOOL) is not None       # allowed, so it resolves
+    store.install_pack(s, seeded.ours, parse_pack(PACK), seeded.credential)          # reinstalled for no one
+    assert runner.resolve(s, seeded.ours, seeded.lists_it, TOOL) is None
     s.close()
 
 
