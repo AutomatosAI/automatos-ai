@@ -34,6 +34,7 @@ from modules.tools.discovery.owner_only import the_card_decides
 from modules.tools.execution.owner_reasons import OWNER_REASON, intent_gate_error, intent_refused
 from modules.tools.formatting.result_formatter import ToolResultFormatter
 from modules.tools.discovery.signal_recorder import ToolSignal, get_tool_signal_recorder
+from modules.tools.partner.offer import offers_partner_tools  # PRD-275
 from core.database.database import SessionLocal
 from core.composio.client import composio_available, composio_unavailable_reason
 
@@ -940,6 +941,7 @@ def _resolve_workspace_admin(
     return is_admin
 
 
+@offers_partner_tools  # PRD-275: the tools of the partner packs the agent lists join its tools
 def _get_tools_for_agent_core(
     *,
     agent_id: Optional[int],
