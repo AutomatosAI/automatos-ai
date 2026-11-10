@@ -205,8 +205,8 @@ stored as memory, and not returned in history.
 **Who else:** support that remembers a customer across visits, tutors that remember a student, coaches, companion
 apps, a returning shopper.
 
-A memory **subject** for end users: `MemoryNamespace` gains `end_user(product_id, end_user_id)`, written only when a
-server key asserts the end user (a widget visitor without that assertion stays as F154 has it). Consent is the
+A memory **subject** for end users: `MemoryNamespace` gains `end_user(workspace, end_user_id)` (§8-17), written only
+when a server key asserts the end user (a widget visitor without that assertion stays as F154 has it). Consent is the
 product's responsibility and recorded per subject; retention is set per product; one call erases an end user's
 memories (GDPR). Recall for an end user's turn reads that subject plus the workspace tier, never another end user's.
 
@@ -365,12 +365,13 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
     words; a ticket a key files gets no operator consent and meets the workspace's approval policy.
 16. **Memory delete and resume stay with people until Wave 3,** when a key's end users have their own scope.
 
-### Open question for Wave 3
+### Decided for Wave 3 (10 Nov 2026, Dave)
 
-17. **The end-user subject's scope.** §5.5 names it `end_user(product_id, end_user_id)`, but the product record
-    arrives in Wave 5. *Recommendation:* scope it by workspace, `(workspace, end_user_id)`, asserted by a server key
-    of that workspace, so Wave 3 does not wait for Wave 5; each product customer becomes its own workspace in Wave 5,
-    so no product id is needed.
+17. **The end-user subject is scoped by workspace,** `(workspace, end_user_id)`, asserted by a server key of that
+    workspace: `mem:{ws}:end_user:{id}`, inside the tenant boundary the store and its namespace guard already keep.
+    Consent and retention hang off the key until Wave 5's product record, then move onto it. (Not: `(product_id,
+    end_user_id)` across a product's workspaces, which would break the tenant boundary and wait on Wave 5.) §5.5 is
+    read this way.
 
 ## 9. Later
 
