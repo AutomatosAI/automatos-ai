@@ -104,10 +104,12 @@ def _db(role):
 def test_representative_route_wiring_and_semantics(story, module, path_re, perm, allowed_role):
     # 1) Wiring: the decorator carries the exact permission string.
     src = (_ORCH / module).read_text(encoding="utf-8")
+    # PRD-274 W1: a route a product's server key also reaches carries the same permission
+    # first, in require_workspace_permission_or_server_key(perm, scope).
     pattern = re.compile(
         r"@\w+\.(?:get|post|put|patch|delete)\(\s*\n?\s*" + path_re
-        + r"[^@]*?require_workspace_permission\(\""
-        + re.escape(perm) + r"\"\)",
+        + r"[^@]*?require_workspace_permission(?:_or_server_key)?\(\s*\""
+        + re.escape(perm) + r"\"\s*[,)]",
         re.S,
     )
     assert pattern.search(src), (
