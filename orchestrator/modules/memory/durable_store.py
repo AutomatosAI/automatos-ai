@@ -405,6 +405,19 @@ class DurableMemoryStore:
         """Every memory in a namespace (unscored, scroll order)."""
         return await self._scroll(self._namespace_filter(user_id), limit)
 
+    async def get_one(self, memory_id: str, user_id: str) -> Optional[Dict]:
+        """The memory ``memory_id`` when it belongs to the namespace ``user_id``, else None. One
+        point read by id, so it is found however many the namespace holds (a scroll's order is
+        the point ids', not the newest first). A store that can't be read raises."""
+        if not self._enabled or not _is_point_id(memory_id):
+            return None
+        await self.ensure_collection()
+        points = await self._client.retrieve(self._collection, ids=[memory_id], with_payload=True)
+        payload = (points[0].payload or {}) if points else {}
+        if not points or payload.get("namespace") != user_id:
+            return None
+        return self._item_from_payload(points[0].id, payload)
+
     async def get_where_any(self, user_id: str, any_of: Dict[str, List[str]], limit: int = 100,
                             where: Optional[Dict[str, str]] = None) -> List[Dict]:
         """PRD-256 FX-015: the namespace's memories whose payload matches at least one of

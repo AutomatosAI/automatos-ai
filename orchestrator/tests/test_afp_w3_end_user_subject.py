@@ -73,6 +73,10 @@ class _Store:
         self.calls.append(("search", user_id, tuple(also_namespaces)))
         return [dict(r, score=0.8) for r in ROWS]
 
+    async def get_one(self, memory_id, user_id):
+        self.calls.append(("get", user_id, memory_id))
+        return next((dict(r) for r in ROWS if r["id"] == memory_id), None)
+
     async def delete(self, memory_ids, user_id, workspace_id=None):
         self.calls.append(("delete", user_id, tuple(memory_ids)))
         return True
@@ -226,10 +230,10 @@ def test_a_key_deletes_only_a_fact_it_wrote_and_a_member_any(new_session, worksp
     theirs = {"id": "theirs", "memory": "y", "metadata": {"written_by": other.user.id}}
     owners = {"id": "owners", "memory": "z", "metadata": {}}
 
-    async def rows(user_id, limit=100, workspace_id=None):
-        return [dict(mine), dict(theirs), dict(owners)]
+    async def one(memory_id, user_id):  # read by id: found however many facts the end user has
+        return next((dict(r) for r in (mine, theirs, owners) if r["id"] == memory_id), None)
 
-    monkeypatch.setattr(store, "get_all_memories_scoped", rows)
+    monkeypatch.setattr(store, "get_one", one)
     done = _call(new_session, eum.delete_end_user_memory, memory_id="mine", end_user_id="player-7", ctx=key)
     assert done["deleted"] is True
     for memory_id in ("theirs", "owners", "missing"):
@@ -240,3 +244,40 @@ def test_a_key_deletes_only_a_fact_it_wrote_and_a_member_any(new_session, worksp
     namespace = f"mem:{workspace}:end_user:player-7"
     assert [c for c in store.calls if c[0] == "delete"] == [("delete", namespace, ("mine",)),
                                                            ("delete", namespace, ("owners",))]
+
+
+def test_a_store_that_cant_be_read_is_a_503_for_a_key_not_a_404(new_session, workspace, store, monkeypatch):
+    key = _key(new_session, workspace)
+    _call(new_session, eum.record_consent, eum.EndUserConsent(consent=True), end_user_id="player-7", ctx=key)
+
+    async def down(memory_id, user_id):
+        raise ConnectionError("qdrant unreachable")
+
+    monkeypatch.setattr(store, "get_one", down)
+    with pytest.raises(HTTPException) as unavailable:
+        _call(new_session, eum.delete_end_user_memory, memory_id="mine", end_user_id="player-7", ctx=key)
+    assert unavailable.value.status_code == 503
+    assert not [c for c in store.calls if c[0] == "delete"]
+
+
+def test_the_store_reads_one_fact_by_id_and_only_from_its_namespace():
+    from modules.memory.durable_store import DurableMemoryStore
+
+    fact_id, namespace = str(uuid.uuid4()), "mem:ws:end_user:player-7"
+    point = SimpleNamespace(id=fact_id, payload={"namespace": namespace, "content": "x",
+                                                 "metadata": {"written_by": "sdk:k1"}})
+    asked = []
+
+    async def retrieve(collection, ids, with_payload=True):
+        asked.append(tuple(ids))
+        return [point] if ids == [fact_id] else []
+
+    durable = object.__new__(DurableMemoryStore)
+    durable._enabled, durable._bootstrap_done, durable._collection = True, True, "memories"
+    durable._client = SimpleNamespace(retrieve=retrieve)
+    found = asyncio.run(durable.get_one(fact_id, namespace))
+    assert (found["id"], found["metadata"]) == (fact_id, {"written_by": "sdk:k1"})
+    assert asyncio.run(durable.get_one(fact_id, "mem:ws:end_user:player-8")) is None  # another end user's
+    assert asyncio.run(durable.get_one(str(uuid.uuid4()), namespace)) is None          # no such fact
+    assert asyncio.run(durable.get_one("not-a-uuid", namespace)) is None               # never sent to Qdrant
+    assert len(asked) == 3

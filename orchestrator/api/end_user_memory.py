@@ -193,9 +193,6 @@ async def erase_end_user(end_user_id: str = END_USER_ID,
     return {"end_user_id": end_user_id, "erased": True, "memories_deleted": erased}
 
 
-DELETE_LOOKUP_MAX = 200  # a key's own write is looked for among the end user's newest facts
-
-
 @router.delete("/{end_user_id}/memories/{memory_id}")
 async def delete_end_user_memory(memory_id: str, end_user_id: str = END_USER_ID,
                                  ctx: RequestContext = Depends(require_workspace_permission_or_server_key(
@@ -224,9 +221,8 @@ NOT_THIS_KEYS = "No such memory of this end user that this caller may delete."
 
 
 async def _written_by_this_key(service: Any, ctx: RequestContext, namespace: str, memory_id: str) -> bool:
-    """Whether the end user's fact ``memory_id`` names this key as its writer."""
-    rows = await service.get_all_memories_scoped(user_id=namespace, limit=DELETE_LOOKUP_MAX,
-                                                 workspace_id=str(ctx.workspace_id))
-    row = next((m for m in rows if str(m.get("id")) == memory_id), None)
+    """Whether the end user's fact ``memory_id`` names this key as its writer. The fact is read by
+    its id, however many the end user has; a store that can't be read raises (the route's 503)."""
+    row = await service._durable.get_one(memory_id, namespace)
     metadata = (row or {}).get("metadata") or {}
     return row is not None and metadata.get(WRITTEN_BY_KEY) == ctx.user.id
