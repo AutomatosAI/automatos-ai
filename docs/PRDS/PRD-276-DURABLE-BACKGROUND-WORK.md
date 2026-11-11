@@ -123,12 +123,12 @@ One new table, `jobs`:
 
 | Column | Purpose |
 |---|---|
-| `id` (uuid), `kind` (text), `workspace_id` (uuid, nullable for platform jobs) | What the job is, and its tenant |
+| `id` (uuid), `kind` (text), `workspace_id` (uuid, nullable for platform jobs; references `workspaces` `ON DELETE CASCADE`, a backstop to §6.8's purge) | What the job is, and its tenant |
 | `payload` (jsonb) | The handler's input: ids, never large blobs |
 | `status` | `queued` (including a failed job waiting for its next attempt), `running`, `done`, `dead` (its attempts used up) |
 | `run_at`, `attempts`, `max_attempts` | When it may run next, and the retry budget |
 | `lease_until`, `claimed_by`, `claim_id` (uuid, new on every claim) | PRD-161's lease, generalised, and the token that fences a stale worker (§6.3) |
-| `idempotency_key` | A second queue with the same key is a no-op. Unique on (`kind`, `workspace_id`, `idempotency_key`), with a platform job's empty `workspace_id` treated as one value, so two workspaces using their own ids (a ticket number, a slot) never collide |
+| `idempotency_key` | A second queue with the same key is a no-op. Unique on (`kind`, `workspace_id`, `idempotency_key`) `NULLS NOT DISTINCT` (Postgres 15+), so a platform job's empty `workspace_id` counts as one value and two workspaces using their own ids (a ticket number, a slot) never collide |
 | `last_error`, `created_at`, `updated_at`, `finished_at` | What happened |
 
 ```python
@@ -180,7 +180,12 @@ This is PRD-161's dispatch loop, generalised to any `kind` [T: the primitives it
 
 ### 6.4 The scheduler queues; it never runs
 
-- **Every timed job becomes `enqueue(kind, key=f"{schedule_id}:{slot}")`,** where the key is unique per `kind`.
+- **Every timed job becomes one `enqueue`,** in the transaction that moves its schedule's cursor (below), with a key unique per (`kind`, `workspace_id`) as §6.2 has it:
+
+  ```python
+  enqueue(db, kind, payload, workspace_id=schedule.workspace_id, key=f"{schedule_id}:{slot}")
+  ```
+
   - **`schedule_id`** is the schedule's own stable identity: `playbook:<id>` for a Playbook schedule, `heartbeat:<agent id>`, `scheduled_task:<id>`, or `platform` for a platform job such as metering. Those rows belong to a workspace, so two schedules, in one workspace or two, never share a key.
   - **`slot`** is the scheduled time the tick is for, not the time it ran.
   - Two schedulers firing the same schedule's same slot queue one job, so a duplicate tick is harmless.
@@ -229,7 +234,7 @@ This is PRD-161's dispatch loop, generalised to any `kind` [T: the primitives it
 
 ### 6.8 Tenancy, erasure, moving a workspace, and dead jobs
 
-- **Erasure:** `jobs` and `job_schedules` rows carry a `workspace_id` and ids in their payloads. Deleting the rows doesn't stop a handler that has already loaded a workspace's data, so erasure goes in three steps:
+- **Erasure:** `jobs` and `job_schedules` rows carry a `workspace_id` and ids in their payloads. Both reference `workspaces` `ON DELETE CASCADE`, so no row outlives its workspace even if a purge step is skipped. Deleting the rows doesn't stop a handler that has already loaded a workspace's data, so erasure goes in three steps:
   1. **Closing a workspace stops new work.** A purge acts only on a workspace that is already soft-deleted (`deleted_at` set; `services/workspace_purge.py`) [T]. The claim query skips the jobs of a soft-deleted workspace, and the scheduler queues none for it.
   2. **Every send happens under the fence.** Just before anything leaves Automatos (a callback, a message), the handler opens a short transaction:
      - it locks its job row (`FOR UPDATE`, with its `claim_id` on a `running` job) and checks that its workspace is live;
@@ -238,12 +243,14 @@ This is PRD-161's dispatch loop, generalised to any `kind` [T: the primitives it
      The send is bounded by its own timeout (10 s for a run callback today, `TIMEOUT_SECONDS` in `services/run_callbacks.py`) [T], well inside the lease. A handler that paused until its lease expired fails the fence, because the sweep cleared its `claim_id`, so it sends nothing.
   3. **The purge's barrier is deleting the job rows.** The purge deletes the workspace's `jobs` and `job_schedules` rows first. That `DELETE` waits for any row lock a send holds. So once it has committed, no handler of the workspace is mid-send, and any later fence matches no row. Only then does the purge erase the workspace's data.
   - **The cost:** a send holds one connection and one row lock for at most its timeout. That's acceptable for bounded sends. A handler whose send could run long splits it into bounded steps.
+  - **Sizing:** a worker's database pool is at least the sum of its kinds' concurrency, since every send in flight holds a connection.
+  - **Renewal during a send:** the lease renewal runs in its own transaction and would wait on the send's row lock. It doesn't need to run: each kind's lease outlasts its send timeout (60 s against 10 s for a run callback), and renewal resumes once the send commits.
   - **Erasing one person's data** (`services/gdpr_service.py`) leaves jobs in place. A payload carries ids only, so a handler that re-reads erased rows finds nothing and sends nothing. One window remains: a send already under its fence when the erasure commits may finish with data it read a moment before. It is bounded by the send's timeout, and is stated in §9.
 - **Moving a workspace (PRD-273):** both tables are classified `not_moved` in `services/workspace_move/table_map.py`. The table map's guard requires every new table to be classified.
   - A move is an export to a file and an import on another install. The source workspace keeps running, and its queued and running jobs finish there. The new install rebuilds its schedules from the rows it imported.
   - Pending work is lost only if the owner then closes the source. So the export summary says how many of the workspace's jobs are queued or running, and closing a workspace with live jobs asks the owner to confirm. Once it is closed, its jobs stop as described under Erasure.
 - **A dead job has a way back:**
-  - a route lists a workspace's `dead` jobs, gated by workspace permission;
+  - a route lists a workspace's `dead` jobs, gated by `workspace:manage` (a retry can send to systems outside Automatos again);
   - a retry action re-queues one with its attempts reset, and clearing it deletes it;
   - who is told when a job dies is §11's question.
 
