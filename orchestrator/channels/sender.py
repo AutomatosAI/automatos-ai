@@ -192,14 +192,18 @@ def _route_for(
     return _Route(connection_id=connection_id, config=config, target=target)
 
 
-def _driver_kwargs(driver: ChannelDriver, route: _Route, workspace_id: str, text: str, notice: ChannelNotice) -> dict:
+def _driver_kwargs(driver: ChannelDriver, route: _Route, workspace_id: str, text: str, notice: ChannelNotice,
+                   delivery_id: Optional[str] = None) -> dict:
     """The driver's ``send`` arguments, with the AI notice where the driver wants it.
 
     A person-facing driver gets the notice as the text's first paragraph. A
     driver whose receiver is a system (``AI_NOTICE_IN_PAYLOAD``, the generic
-    webhook) gets it as the ``ai_disclosure`` payload field instead.
+    webhook) gets it as the ``ai_disclosure`` payload field instead. A driver that
+    ``ACCEPTS_DELIVERY_ID`` gets the delivery's id, when there is one.
     """
     kwargs = {"workspace_id": workspace_id, "config": route.config, "target": route.target}
+    if delivery_id and driver.ACCEPTS_DELIVERY_ID:
+        kwargs = {**kwargs, "delivery_id": delivery_id}
     if driver.AI_NOTICE_IN_PAYLOAD:
         return {**kwargs, "text": text, "ai_disclosure": notice.text}
     return {**kwargs, "text": notice.apply(text)}
@@ -217,6 +221,7 @@ async def send_to_channel(
     text: str,
     target: Optional[str] = None,
     in_reply_to: Optional[str] = None,
+    delivery_id: Optional[str] = None,
 ) -> SendResult:
     """Send ``text`` to the workspace's connected ``platform``.
 
@@ -230,6 +235,8 @@ async def send_to_channel(
     carries "AI assistant for {principal}." on first contact with the target,
     after the idle gap, and when ``in_reply_to`` (the message being answered)
     asks whether it is a human. Nothing else calls a driver's ``send``.
+    ``delivery_id`` names one delivery across its retries, for a driver whose
+    receiver can drop one it has seen (PRD-276 W1b).
     """
     ws_str = str(workspace_id)
 
@@ -255,7 +262,7 @@ async def send_to_channel(
         person_id=route.target or "", inbound_text=in_reply_to,
     )
     try:
-        result = await driver.send(**_driver_kwargs(driver, route, ws_str, text, notice))
+        result = await driver.send(**_driver_kwargs(driver, route, ws_str, text, notice, delivery_id))
     except Exception as exc:  # noqa: BLE001 — never raise to caller
         logger.exception(
             "channel sender: driver %s.send raised for ws=%s", platform, ws_str,

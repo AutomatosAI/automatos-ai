@@ -271,3 +271,23 @@ def test_only_a_worker_role_process_starts_the_worker(monkeypatch):
 
     assert asyncio.run(boot("api")) is False and asyncio.run(boot("api,worker,scheduler")) is True
     assert calls == [True, True]
+
+
+def test_a_kinds_scrub_keys_last_only_until_the_job_ends(new_session, workspaces):
+    sealed = "test_prd276.sealed"
+    job_handler(sealed, backoff=(0,), max_attempts=2, scrub=("contact",))(lambda job: None)
+    try:
+        ws = workspaces()
+        payload = lambda job_id: _do(new_session, lambda s: s.execute(  # noqa: E731
+            text("SELECT payload FROM jobs WHERE id = :id"), {"id": job_id}).scalar())
+        done = _do(new_session, queue.enqueue, sealed, {"contact": "sealed", "ref": 1}, workspace_id=ws, key="a")
+        dies = _do(new_session, queue.enqueue, sealed, {"contact": "sealed", "ref": 2}, workspace_id=ws, key="b")
+        first = {j.id: j for j in _claim(new_session, sealed)}
+        _do(new_session, queue.complete, first[done])
+        _do(new_session, queue.fail, first[dies], "boom")
+        assert payload(done) == {"ref": 1} and payload(dies) == {"contact": "sealed", "ref": 2}  # requeued: kept
+        (last,) = _claim(new_session, sealed)
+        _do(new_session, queue.fail, last, "boom")
+        assert _row(new_session, dies)[0] == "dead" and payload(dies) == {"ref": 2}
+    finally:
+        forget(sealed)

@@ -32,6 +32,7 @@ from .base import (
 logger = logging.getLogger(__name__)
 
 _HTTP_TIMEOUT = 15.0
+DELIVERY_HEADER = "X-Automatos-Delivery"  # the same on every retry of one delivery
 
 
 def _payload(text: str, ai_disclosure: Optional[str]) -> dict[str, Any]:
@@ -42,7 +43,7 @@ def _payload(text: str, ai_disclosure: Optional[str]) -> dict[str, Any]:
     return body
 
 
-async def post_webhook(url: str, payload: dict[str, Any]) -> SendResult:
+async def post_webhook(url: str, payload: dict[str, Any], *, delivery_id: Optional[str] = None) -> SendResult:
     """POST ``payload`` as JSON to ``url``: the driver's HTTP call, timeout and failure mapping.
 
     A network failure answers ``ok=False``, retryable, with an ``error`` that quotes
@@ -51,14 +52,16 @@ async def post_webhook(url: str, payload: dict[str, Any]) -> SendResult:
     ``WebhookDriver.send`` posts through it; so does the moderation post
     (``services/content_reports/moderation.py``), which is not a channel message
     and so never goes through ``channels.sender.send_to_channel`` (PRD-264 EUAI-03).
+    A ``delivery_id`` goes out as ``X-Automatos-Delivery``, so the receiver can drop a retry it has seen.
     """
     started = time.monotonic()
+    headers = {"Content-Type": "application/json", **({DELIVERY_HEADER: delivery_id} if delivery_id else {})}
     try:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
             resp = await client.post(
                 url,
                 json=payload,
-                headers={"Content-Type": "application/json"},
+                headers=headers,
             )
     except Exception as exc:  # noqa: BLE001
         return SendResult(
@@ -81,6 +84,7 @@ class WebhookDriver(ChannelDriver):
     # PRD-264 EUAI-03: the receiver is a system, so the AI notice travels as
     # payload fields (ai_generated, ai_disclosure), not as a text prefix.
     AI_NOTICE_IN_PAYLOAD = True
+    ACCEPTS_DELIVERY_ID = True  # PRD-276 W1b: the receiver can drop a retry it has seen
     # Webhook here is a misnomer for "outbound HTTP POST" — we keep the
     # mode label so the UI treats it like the other webhook channels
     # (no polling to start).
@@ -105,13 +109,15 @@ class WebhookDriver(ChannelDriver):
         target: Optional[str],
         text: str,
         ai_disclosure: Optional[str] = None,
+        delivery_id: Optional[str] = None,
     ) -> SendResult:
         """POST ``text`` as JSON, marked ``ai_generated: true``; the AI notice,
-        when the channel sender says one is due, rides as ``ai_disclosure``."""
+        when the channel sender says one is due, rides as ``ai_disclosure``, and
+        the delivery's id, when there is one, as ``X-Automatos-Delivery``."""
         url = str(target or config.get("webhook_url") or "").strip()
         if not url:
             raise DriverNotConfigured("Webhook driver requires webhook_url in config or target")
-        return await post_webhook(url, _payload(text, ai_disclosure))
+        return await post_webhook(url, _payload(text, ai_disclosure), delivery_id=delivery_id)
 
     async def install_webhook(
         self,

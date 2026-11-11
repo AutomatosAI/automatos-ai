@@ -17,7 +17,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import text
 
-from core.jobs.registry import JobKind, kind_of
+from core.jobs.registry import JobKind, kind_of, scrub_of
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +127,8 @@ _RENEW = text("UPDATE jobs SET lease_until = clock_timestamp() + make_interval(s
               "updated_at = clock_timestamp() WHERE id = :id AND status = 'running' AND claim_id = :claim_id RETURNING id")
 _HOLD = text("SELECT id FROM jobs WHERE id = :id AND status = 'running' AND claim_id = :claim_id FOR UPDATE")
 _COMPLETE = text("UPDATE jobs SET status = 'done', finished_at = clock_timestamp(), lease_until = NULL, "
-                 "updated_at = clock_timestamp() WHERE id = :id AND status = 'running' AND claim_id = :claim_id RETURNING id")
+                 "payload = payload - CAST(:scrub AS text[]), updated_at = clock_timestamp() "
+                 "WHERE id = :id AND status = 'running' AND claim_id = :claim_id RETURNING id")
 
 
 def renew(db: Any, job: Job, lease_seconds: int) -> bool:
@@ -153,9 +154,10 @@ def fence(db: Any, job: Job, extend_seconds: int) -> bool:
 
 
 def complete(db: Any, job: Job, *, commit: bool = True) -> bool:
-    """Marks the job done; False when the claim was lost (nothing written). A handler finishing under
-    its own fence passes ``commit=False`` and commits with its own writes."""
-    row = db.execute(_COMPLETE, {"id": job.id, "claim_id": job.claim_id}).first()
+    """Marks the job done, its kind's ``scrub`` keys removed; False when the claim was lost (nothing
+    written). A handler finishing under its own fence passes ``commit=False`` and commits with its
+    own writes."""
+    row = db.execute(_COMPLETE, {"id": job.id, "claim_id": job.claim_id, "scrub": scrub_of(job.kind)}).first()
     if commit:
         db.commit()
     return row is not None
@@ -166,7 +168,7 @@ def fail(db: Any, job: Job, error: str) -> bool:
     used up. False when the claim was lost (nothing written). Commits."""
     spec = kind_of(job.kind)
     params = {"id": job.id, "claim_id": job.claim_id, "error": (error or "")[:ERROR_MAX],
-              "delay": spec.delay_after(job.attempts)}
+              "delay": spec.delay_after(job.attempts), "scrub": list(spec.scrub)}
     row = db.execute(_FAIL, params).first()
     db.commit()
     return row is not None
@@ -178,6 +180,7 @@ _FAIL = text("""
         finished_at = CASE WHEN attempts >= max_attempts THEN clock_timestamp() END,
         run_at = CASE WHEN attempts >= max_attempts THEN run_at
                       ELSE clock_timestamp() + make_interval(secs => :delay) END,
+        payload = CASE WHEN attempts >= max_attempts THEN payload - CAST(:scrub AS text[]) ELSE payload END,
         claim_id = NULL, lease_until = NULL, last_error = :error, updated_at = clock_timestamp()
     WHERE id = :id AND status = 'running' AND claim_id = :claim_id RETURNING id
 """)
@@ -189,6 +192,7 @@ _EXPIRE = text("""
         finished_at = CASE WHEN attempts >= max_attempts THEN clock_timestamp() END,
         run_at = CASE WHEN attempts >= max_attempts THEN run_at
                       ELSE clock_timestamp() + make_interval(secs => :delay) END,
+        payload = CASE WHEN attempts >= max_attempts THEN payload - CAST(:scrub AS text[]) ELSE payload END,
         claim_id = NULL, lease_until = NULL, last_error = :error, updated_at = clock_timestamp()
     WHERE id = :id AND status = 'running' RETURNING id
 """)
@@ -203,7 +207,7 @@ def sweep_expired(db: Any, limit: int = 100) -> int:
                       {"limit": limit}).all()
     for job_id, kind, attempts in rows:
         delay = _delay_or_default(kind, attempts)
-        db.execute(_EXPIRE, {"id": job_id, "error": LEASE_EXPIRED, "delay": delay})
+        db.execute(_EXPIRE, {"id": job_id, "error": LEASE_EXPIRED, "delay": delay, "scrub": scrub_of(kind)})
     db.commit()
     if rows:
         logger.warning("[jobs] swept %d job(s) whose lease ran out", len(rows))

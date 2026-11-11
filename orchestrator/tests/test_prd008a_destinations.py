@@ -103,7 +103,7 @@ def test_dispatch_telegram_delegates_to_sender(monkeypatch):
 
     captured = {}
 
-    async def fake_sender(*, db, workspace_id, platform, text, target=None):
+    async def fake_sender(*, db, workspace_id, platform, text, target=None, delivery_id=None):
         captured.update(
             platform=platform, text=text, target=target,
             workspace_id=str(workspace_id),
@@ -136,7 +136,7 @@ def test_dispatch_slack_passes_explicit_channel_id_as_target(monkeypatch):
 
     captured = {}
 
-    async def fake_sender(*, db, workspace_id, platform, text, target=None):
+    async def fake_sender(*, db, workspace_id, platform, text, target=None, delivery_id=None):
         captured.update(target=target)
         return SendResult(ok=True, latency_ms=42)
 
@@ -159,7 +159,7 @@ def test_dispatch_webhook_passes_url_as_target(monkeypatch):
 
     captured = {}
 
-    async def fake_sender(*, db, workspace_id, platform, text, target=None):
+    async def fake_sender(*, db, workspace_id, platform, text, target=None, delivery_id=None):
         captured.update(platform=platform, target=target)
         return SendResult(ok=True, latency_ms=1)
 
@@ -181,7 +181,7 @@ def test_dispatch_failure_propagates_retryable_flag(monkeypatch):
     from channels.drivers import SendResult
     from services.destinations import dispatcher as disp_mod
 
-    async def fake_sender(*, db, workspace_id, platform, text, target=None):
+    async def fake_sender(*, db, workspace_id, platform, text, target=None, delivery_id=None):
         return SendResult(
             ok=False, latency_ms=5,
             error="bot says no", retryable=True,
