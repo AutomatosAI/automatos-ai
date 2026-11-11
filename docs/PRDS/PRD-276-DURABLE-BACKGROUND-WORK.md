@@ -3,7 +3,7 @@
 **Status:** Proposed, for decision. Written 11 Nov 2026 by Dave. No code is changed by this PRD.
 **Maintainer approval:** needed, from Gerard. §10 lists the decisions, each with a recommendation.
 **The PRD number is provisional** until the maintainer confirms it.
-**Grounded on:** `main @ 2e3c99286`. Labels: **[T]** read in code at that commit; **[I]** inferred; **[?]** not known from the repository.
+**Grounded on:** `main @ 2e3c99286`. Labels: **[T]** read in code at that commit; **[R]** read from the hosted Railway project on 11 Nov 2026; **[I]** inferred; **[?]** not known.
 
 ## 1. Why
 
@@ -60,7 +60,7 @@ None of these is a bug in the PR that met it. They are what this design costs.
 | A paired CLI host (`services/cli-host`) | Tickets for `runtime: cli` agents | The **same** `FOR UPDATE SKIP LOCKED` claim and lease as the dispatcher, with a runtime filter (`services/cli_host_service.py`, PRD-234) [T] |
 | `agent-opt-worker`, `media-render`, `voice-tts` | Their own work | HTTP calls from the API with an internal token [T for `agent-opt-worker`; I for the rest] |
 
-Railway's replica count for the API isn't set in the manifest (`infrastructure/railway-manifest.json`, generated 9 Apr 2026, `"replicas": null`). Whether hosted runs more than one API container is **[?]**.
+Hosted runs **one** API container today: `automatos-ai-api` has one replica, in `europe-west4` [R] (the repository's manifest, `infrastructure/railway-manifest.json`, says `"replicas": null`). So the cross-container problems below (§5, #1482) are what a second replica would bring, not what happens now.
 
 ### 4.2 Background work in the API process (counts from a grep at the commit above, excluding tests) [T]
 
@@ -85,8 +85,8 @@ Railway's replica count for the API isn't set in the manifest (`infrastructure/r
 - **LISTEN/NOTIFY fan-out** for the live UI (`services/board_events.py`, the `board_events` channel). Its own docstring says it "buys latency, not correctness".
 - **The board as a queue for more than one consumer:** the CLI host claims through the dispatcher's own claim (PRD-234). PRD-161's primitives already generalise.
 - **Advisory locks** in 14 modules, including the boot leader (`core/database/boot_lock.py`). That lock covers seeding at boot only and is released afterwards.
-- **A pluggable task runner** (`core/task_runner/`, PRD-56): `TASK_RUNNER_BACKEND` = `local`, `queued` (Redis, for the workspace worker) or `kubernetes`, with `local` as the default (`TASK_RUNNER_BACKEND` in `config.py`). The hosted API has the setting; its value is [?].
-- **A persistent scheduler job store when Redis is configured:** `UnifiedScheduler.start` uses APScheduler's `RedisJobStore` when `REDIS_URL` is set, and memory otherwise (`UnifiedScheduler.start` in `services/scheduler.py`). The hosted API sets `REDIS_URL` (the manifest's env keys) [I].
+- **A pluggable task runner** (`core/task_runner/`, PRD-56): `TASK_RUNNER_BACKEND` = `local`, `queued` (Redis, for the workspace worker) or `kubernetes`, with `local` as the default (`TASK_RUNNER_BACKEND` in `config.py`). Hosted sets it to `queued` [R].
+- **A persistent scheduler job store when Redis is configured:** `UnifiedScheduler.start` uses APScheduler's `RedisJobStore` when `REDIS_URL` is set, and memory otherwise (`UnifiedScheduler.start` in `services/scheduler.py`). The hosted API sets `REDIS_URL` [R], so hosted's scheduler uses the Redis job store.
 
 ### 4.4 Two copies of the same retry loop [T]
 
@@ -99,7 +99,7 @@ Railway's replica count for the API isn't set in the manifest (`infrastructure/r
 |---|---|---|
 | Deploy or crash during a Playbook run | The run dies. At the next boot, a run in flight for longer than `BOOT_REAPER_STALE_MINUTES` (30 by default) is marked failed (`core/boot/reaper.py`) [T] | The job's lease runs out, and another worker runs it again, or resumes from its last finished step if the handler supports that (§9) |
 | Deploy during a callback's retries | The callback stays pending; #1481's job resends it 5 to 15 minutes later | The delivery job is still queued; a worker sends it at the next backoff step |
-| Two API containers | Each container's scheduler owns its own `/tmp` lock, so timed jobs run once per container. Both read and write one shared `RedisJobStore`, which APScheduler 3.x doesn't support across processes [I] | One scheduler across containers (§6.4); duplicate ticks are harmless (idempotency key) |
+| Two API containers (hosted runs one today, §4.1) | Each container's scheduler owns its own `/tmp` lock, so timed jobs run once per container. Both read and write one shared `RedisJobStore`, which APScheduler 3.x doesn't support across processes [I] | One scheduler across containers (§6.4); duplicate ticks are harmless (idempotency key) |
 | A restart while the API sends its reply to an inbound chat-platform webhook (`api/webhooks.py`, `asyncio.create_task`) [T] | Lost: the webhook was already answered, so nothing sends it again [I] | Queued in the webhook's own transaction; sent once a worker is free |
 | A slow LLM job in the API process | Holds a uvicorn worker's event loop and memory while requests wait | Runs in a worker; the API stays responsive (§6.1) |
 
@@ -298,9 +298,9 @@ Waves 1a, 1b and 2 each stand on their own. Wave 1a is the largest, and lands wi
 
 1. **The backing store.** *Recommendation:* a `jobs` table in Postgres, generalised from PRD-161: no new dependency, and jobs are queued in the same transaction.
    - **Alternatives:** a Postgres queue library (`procrastinate`, `pgqueuer`), which is a new dependency and needs an issue under AGENTS.md; or Redis (ARQ), which can't queue in the same transaction.
-2. **Hosted topology.** Does hosted run, or plan to run, more than one API container? Should hosted have a worker service? *Recommendation:* one worker service, with replicas allowed, and the API unchanged.
+2. **Hosted topology.** Hosted runs one API container today [R]. Is a second planned? Should hosted have a worker service? *Recommendation:* one worker service, with replicas allowed, and the API unchanged.
 3. **One scheduler across containers,** using a Postgres advisory lock, `job_schedules` cursors and APScheduler's memory job store. Should a plain tick loop over the cursors replace APScheduler, now that it is only a timer? *Recommendation:* the lock and cursors in Wave 2; keep APScheduler until the cursors have run a while, then decide.
-4. **The workspace worker's Redis queue** (`TASK_RUNNER_BACKEND=queued`). Keep it as it is, or move its intake onto `jobs`? *Recommendation:* keep it in this PRD; it is a separate isolated consumer and works. What does hosted set `TASK_RUNNER_BACKEND` to?
+4. **The workspace worker's Redis queue** (`TASK_RUNNER_BACKEND=queued`). Keep it as it is, or move its intake onto `jobs`? *Recommendation:* keep it in this PRD; it is a separate isolated consumer and works. Hosted uses it: `TASK_RUNNER_BACKEND=queued` [R].
 5. **Board tasks as a kind of job** (Wave 4), or keep PRD-161's own columns? *Recommendation:* decide in Wave 4, once Waves 1 to 3 have shown `jobs` working.
 6. **#1481 and #1482 in the meantime.** #1481 is merged. *Recommendation:* keep its resend job until Wave 1b deletes it, and close #1482 in favour of this PRD's Waves 1 and 2.
 7. **The backend behind an interface, with switching triggers written down** (§12). *Recommendation:*
@@ -314,10 +314,9 @@ Waves 1a, 1b and 2 each stand on their own. Wave 1a is the largest, and lands wi
 
 - **Playbook runs and side effects:** should a step that has a side effect (a send, a post, a write to another system) record that it finished, so a retried run skips it? That is the difference between "retry" and "resume" in §9.
 - **Who sees a dead job:** the workspace owner (as today for a failed run), an operator view, or both? §6.8 gives them a list and a retry; this question is who is told.
-- **Credit metering** (`services/credits/jobs.py`) spends money. A missed tick is caught up by the next (§6.4).
-  - **Can two overlapping runs double-debit?** `_pending` selects waiting calls without locking them (`services/credits/meter.py`) [T], so it depends on how `meter_call` marks a call charged [?].
-  - **Today** one scheduler per container and `max_instances=1` stop overlap within a container. Wave 2's per-slot key stops two schedulers queueing the same slot, but not a slow run overlapping the next slot's.
-  - Settle this before Wave 2 moves metering: a conditional "mark charged", or a concurrency of 1 for the `credits.meter` kind.
+- **Credit metering** (`services/credits/jobs.py`) spends money. **Settled: two overlapping runs can't double-debit** [T].
+  - `meter_call` writes each debit through the ledger's one writer, `record` (`services/credits/ledger.py`). It locks the workspace's balance row, then checks whether that usage row's debit is already in the ledger, and does nothing if it is. A unique key on (`source_type`, `source_ref`, `bucket`) backs the check.
+  - So a missed tick is caught up by the next (`latest`, §6.4), and an overlapping run changes nothing. Wave 2 moves metering with no extra guard; a concurrency of 1 for `credits.meter` would only save repeated work.
 
 ## 12. Notes: scale, and a path off Postgres
 
