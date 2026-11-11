@@ -86,6 +86,15 @@ def workspace_from_namespace(user_id: str) -> Optional[str]:
     return parts[1] if len(parts) > 1 and parts[1] else None
 
 
+def _made_before(created_at: Any, cutoff: datetime) -> bool:
+    """A point's ``created_at`` (an ISO time, as ``add`` writes it) is before ``cutoff``; False when unreadable."""
+    try:
+        made = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return (made if made.tzinfo else made.replace(tzinfo=timezone.utc)) < cutoff
+
+
 def _is_point_id(memory_id: Any) -> bool:
     """Whether ``memory_id`` is a point id this store writes (a UUID): anything else is no
     memory of any workspace, and is never sent to Qdrant, which refuses it."""
@@ -564,6 +573,28 @@ class DurableMemoryStore:
             count, subject_id, workspace_id,
         )
         return count
+
+    async def prune_older_than(self, user_id: str, cutoff: datetime) -> int:
+        """Deletes the memories in one exact namespace made before ``cutoff`` (an end user's retention,
+        PRD-274 W3), retired ones too; how many. Read in pages straight from the store, so neither the
+        run's reader nor the retired filter leaves an old one out. A memory with no readable
+        ``created_at`` is kept."""
+        if not self._enabled:
+            return 0
+        await self.ensure_collection()
+        old: List[Any] = []
+        offset: Any = None
+        while True:
+            points, offset = await self._client.scroll(
+                collection_name=self._collection, scroll_filter=self._namespace_filter(user_id),
+                limit=SCROLL_PAGE, offset=offset, with_payload=["created_at"], with_vectors=False)
+            old.extend(p.id for p in points if _made_before((p.payload or {}).get("created_at"), cutoff))
+            if not points or offset is None:
+                break
+        if old:
+            await self._client.delete(collection_name=self._collection, points_selector=old)
+            logger.info("[Durable] Pruned %d memor(ies) older than %s in namespace=%s", len(old), cutoff, user_id)
+        return len(old)
 
     async def erase_namespace(self, user_id: str) -> int:
         """Delete every memory in one exact namespace (e.g. a deleted
