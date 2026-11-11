@@ -130,6 +130,8 @@ _NOT_MOVED = (
     not_moved("cloud_documents", "Sync state of a cloud-drive connection; the documents themselves move."),
     not_moved("cloud_sync_jobs", _TELEMETRY),
     not_moved("approval_grants", "Approvals are decisions made on this install (§5.3)."),
+    not_moved("jobs", "Work queued on this install finishes here; the new install rebuilds its schedules "
+              "from what it imports (PRD-276 §6.8)."),
     not_moved("credit_ledger", _BILLING),
     not_moved("credit_balances", _BILLING),
     not_moved("billing_accounts", _BILLING),

@@ -47,6 +47,8 @@ import integrations.budstacks  # noqa: F401 — self-registers the budstacks Ver
 from api.agents import router as agents_router
 from api.agent_execute import router as agent_execute_router
 from api.end_user_memory import router as end_user_memory_router
+from api.jobs import router as jobs_router
+from core.jobs.worker import also_starts_the_job_worker
 from api.run_callbacks import router as run_callbacks_router
 from api.partner_packs import router as partner_packs_router
 from api.workflows import router as workflows_router
@@ -629,6 +631,7 @@ async def _boot_phase_2_stage(app_instance: "FastAPI", report: "BootstrapReport"
     await run_stage(report, BootstrapStage.SCHEDULER_INIT, _run_phase_2)
 
 
+@also_starts_the_job_worker  # PRD-276: a worker-role process runs the job queue beside board dispatch
 def _start_board_dispatch(app_instance: "FastAPI", trust_passed: bool) -> None:
     """PRD-161: the board dispatch spine (single claim/lease/requeue loop).
 
@@ -1232,6 +1235,7 @@ async def api_tracking_middleware(request, call_next):
 app.include_router(agents_router)
 app.include_router(agent_execute_router)  # PRD-274 Wave 1: a run of one agent, filed as a board ticket
 app.include_router(end_user_memory_router)  # PRD-274 Wave 3: a product's end users and their memories
+app.include_router(jobs_router)  # PRD-276: a workspace's dead jobs, retried or cleared
 app.include_router(run_callbacks_router)  # PRD-274 Wave 1: the callback signing secret
 app.include_router(partner_packs_router)  # PRD-275: a workspace's partner packs (404 unless PARTNER_TOOLS_ENABLED)
 app.include_router(models_router)  # PRD-15: Model management

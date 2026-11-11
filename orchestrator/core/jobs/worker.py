@@ -1,0 +1,139 @@
+"""The worker loop (PRD-276 §6.3): claim due jobs, run their handlers, renew leases, record outcomes.
+
+PRD-161's dispatch loop, generalised to any registered kind. Each tick sweeps expired leases, then
+claims, for each kind, as many jobs as the kind's concurrency leaves room for in this process, and
+runs each as its own task. A running job's lease is renewed every third of its length; a handler that
+raises is logged, recorded, and its job goes back in the queue at the kind's next delay, or dead.
+Database work runs off the event loop. Wave 1a polls (``JOBS_POLL_SECONDS``); with no kind
+registered a tick does nothing at all.
+"""
+from __future__ import annotations
+
+import asyncio
+import functools
+import logging
+import os
+import socket
+from collections import defaultdict
+from typing import Any, Callable, Dict, Optional, Set
+
+from core.jobs import queue
+from core.jobs.registry import JobKind, kind_of, registered
+
+logger = logging.getLogger(__name__)
+
+PRUNE_EVERY_TICKS = 1800  # about an hour at the default poll
+WORKER_ROLE = "worker"
+
+
+def on_own_session(work: Callable[..., Any], *args: Any) -> Any:
+    """``work(db, *args)`` on a session of its own, always closed (threadpool)."""
+    from core.database.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        return work(db, *args)
+    finally:
+        db.close()
+
+
+class JobWorker:
+    """Runs the registered kinds' jobs in this process."""
+
+    def __init__(self, worker_id: Optional[str] = None) -> None:
+        self.worker_id = worker_id or f"{socket.gethostname()}:{os.getpid()}"
+        self._inflight: Dict[str, Set[asyncio.Task]] = defaultdict(set)
+        self._ticks = 0
+
+    def inflight(self) -> int:
+        return sum(len(tasks) for tasks in self._inflight.values())
+
+    async def tick(self) -> int:
+        """One pass: sweep, then claim and start what fits. Answers how many jobs it started."""
+        kinds = registered()
+        if not kinds:
+            return 0
+        await asyncio.to_thread(on_own_session, queue.sweep_expired)
+        started = 0
+        for kind in kinds:
+            spec = kind_of(kind)
+            room = spec.concurrency - len(self._inflight[kind])
+            jobs = await asyncio.to_thread(on_own_session, queue.claim, spec, self.worker_id, room) if room > 0 else []
+            for job in jobs:
+                task = asyncio.create_task(self._run(spec, job))
+                self._inflight[kind].add(task)
+                task.add_done_callback(self._inflight[kind].discard)
+                started += 1
+        return started
+
+    async def _run(self, spec: JobKind, job: queue.Job) -> None:
+        renewing = asyncio.create_task(self._keep_renewed(spec, job))
+        try:
+            await spec.handler(job)
+        except Exception as exc:  # noqa: BLE001 — logged, recorded, and the attempt is failed below
+            logger.exception("[jobs] %s %s failed on attempt %d", job.kind, job.id, job.attempts)
+            _record(job, exc)
+            renewing.cancel()
+            await asyncio.to_thread(on_own_session, queue.fail, job, f"{type(exc).__name__}: {exc}")
+            return
+        renewing.cancel()
+        if not await asyncio.to_thread(on_own_session, queue.complete, job):
+            logger.info("[jobs] %s %s was finished by its handler or lost its claim", job.kind, job.id)
+
+    async def _keep_renewed(self, spec: JobKind, job: queue.Job) -> None:
+        while True:
+            await asyncio.sleep(max(1.0, spec.lease_seconds / 3))
+            if not await asyncio.to_thread(on_own_session, queue.renew, job, spec.lease_seconds):
+                logger.warning("[jobs] %s %s lost its claim; its handler's fenced writes will refuse", job.kind, job.id)
+                return
+
+    async def run(self, stop: asyncio.Event, poll_seconds: float, retention_days: int) -> None:
+        """Ticks until ``stop`` is set; prunes finished jobs about once an hour."""
+        logger.info("[jobs] worker %s started", self.worker_id)
+        while not stop.is_set():
+            try:
+                await self.tick()
+                self._ticks += 1
+                if self._ticks % PRUNE_EVERY_TICKS == 0:
+                    await asyncio.to_thread(on_own_session, queue.prune, retention_days)
+            except Exception:  # noqa: BLE001 — logged; the next tick tries again
+                logger.exception("[jobs] worker tick failed")
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=poll_seconds)
+            except asyncio.TimeoutError:
+                continue
+
+
+def _record(job: queue.Job, exc: Exception) -> None:
+    try:
+        from core.utils.exception_telemetry import record_error
+
+        record_error(subsystem="jobs", operation=job.kind, error=exc, workspace_id=job.workspace_id)
+    except Exception:  # noqa: BLE001 — telemetry never stops the retry
+        logger.warning("[jobs] could not record the failure of %s", job.id, exc_info=True)
+
+
+def roles() -> Set[str]:
+    """This process's roles (``PROCESS_ROLES``, §6.1): all three by default."""
+    from config import config
+
+    return {r.strip() for r in str(config.PROCESS_ROLES).split(",") if r.strip()}
+
+
+def also_starts_the_job_worker(start_board_dispatch: Callable[..., None]) -> Callable[..., None]:
+    """Wraps ``main._start_board_dispatch``: after it, a process with the ``worker`` role starts the job
+    worker the same way, once trust passed, unless ``JOBS_ENABLED`` is off."""
+
+    @functools.wraps(start_board_dispatch)
+    def started(app_instance: Any, trust_passed: bool) -> None:
+        start_board_dispatch(app_instance, trust_passed)
+        from config import config
+
+        if not (trust_passed and config.JOBS_ENABLED and WORKER_ROLE in roles()):
+            return
+        app_instance.state.job_worker_stop = asyncio.Event()
+        app_instance.state.job_worker_task = asyncio.create_task(JobWorker().run(
+            app_instance.state.job_worker_stop, float(config.JOBS_POLL_SECONDS), int(config.JOBS_RETENTION_DAYS)))
+        logger.info("Job worker started (PRD-276)")
+
+    return started

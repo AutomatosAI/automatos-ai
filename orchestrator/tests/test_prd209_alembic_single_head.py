@@ -170,7 +170,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # chats.end_user_id (a new nullable column) and its partial index: an end user's conversations.
 # 2026-11-11 (Automatos for products, Wave 3): end_users_erasing_20261111 chains onto that —
 # end_users.erasing_at (a new nullable column): an erase that has started stops their writes.
-EXPECTED_HEAD = "end_users_erasing_20261111"
+# 2026-11-11 (Durable background work, Wave 1a): jobs_20261111 chains onto that —
+# jobs (a new table only): the durable job queue.
+EXPECTED_HEAD = "jobs_20261111"
 
 
 def _literal(node: ast.AST):
