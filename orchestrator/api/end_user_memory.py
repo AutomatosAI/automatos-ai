@@ -11,6 +11,7 @@ responsible for consent (§8-6) and records it here before anything is stored fo
 | ``GET /{end_user_id}/memories``: list | ``knowledge:read`` | ``memory:read`` |
 | ``GET /{end_user_id}/memories/search``: their facts and the workspace's | ``knowledge:read`` | ``memory:read`` |
 | ``DELETE /{end_user_id}``: erase them (GDPR) | ``knowledge:delete`` | ``memory:write`` |
+| ``DELETE /{end_user_id}/memories/{id}``: one fact (a key: only one it wrote) | ``knowledge:delete`` | ``memory:write`` |
 
 Reads leave out anything private to a person and, for a key, anything an audience limits (as
 ``GET /api/memory`` does). A store needs a consent record first. What a key stores names the key
@@ -190,3 +191,38 @@ async def erase_end_user(end_user_id: str = END_USER_ID,
 
     await run_in_threadpool(_forget)
     return {"end_user_id": end_user_id, "erased": True, "memories_deleted": erased}
+
+
+@router.delete("/{end_user_id}/memories/{memory_id}")
+async def delete_end_user_memory(memory_id: str, end_user_id: str = END_USER_ID,
+                                 ctx: RequestContext = Depends(require_workspace_permission_or_server_key(
+                                     "knowledge:delete", MEMORY_WRITE)),
+                                 db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Deletes one of the end user's facts. A member may delete any; a key only one it wrote
+    (``written_by``), so a product can never delete what the owner or another key stored."""
+    await run_in_threadpool(_known, db, ctx, end_user_id)
+    service = _service_or_503()
+    namespace = _namespace(ctx, end_user_id)
+    try:
+        if is_server_key(ctx) and not await _written_by_this_key(service, ctx, namespace, memory_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=NOT_THIS_KEYS)
+        deleted = await service._durable.delete([memory_id], user_id=namespace, workspace_id=str(ctx.workspace_id))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("[end_user_memory] delete failed for workspace %s", ctx.workspace_id)
+        raise _unavailable(MEMORY_UNAVAILABLE) from exc
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=NOT_THIS_KEYS)
+    return {"end_user_id": end_user_id, "id": memory_id, "deleted": True}
+
+
+NOT_THIS_KEYS = "No such memory of this end user that this caller may delete."
+
+
+async def _written_by_this_key(service: Any, ctx: RequestContext, namespace: str, memory_id: str) -> bool:
+    """Whether the end user's fact ``memory_id`` names this key as its writer. The fact is read by
+    its id, however many the end user has; a store that can't be read raises (the route's 503)."""
+    row = await service._durable.get_one(memory_id, namespace)
+    metadata = (row or {}).get("metadata") or {}
+    return row is not None and metadata.get(WRITTEN_BY_KEY) == ctx.user.id
