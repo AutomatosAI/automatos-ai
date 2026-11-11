@@ -23,7 +23,7 @@ Today no tool can do that safely:
 
 - An operator installs a **pack**: a JSON file that declares read-only tools on one partner's API.
 - The partner's base URL and key live in the workspace's credential store. **The server adds the key**; the model never sees it.
-- Only an agent the owner names is offered a pack's tools.
+- Only an agent the workspace's managers name at install is offered a pack's tools.
 - Every call is a GET to the partner's own host, with every guardrail in §5 enforced in code and tested.
 - Every call that reads the key leaves an audit row: the tool, the partner's status code, how long it took.
 
@@ -85,12 +85,12 @@ The format and its checks are in `modules/tools/partner/pack.py`.
 ### 4.2 Installing a pack and granting it
 
 1. The operator creates a credential of the existing type `generic_api`: base URL, API key, and how the key is sent (`bearer`, or `header` with a header name that ends in `Key` or `Token`). `POST /api/credentials/`.
-2. `PUT /api/partner-packs/{name}` with the pack and the credential's id. For workspace managers (`workspace:manage`), as creating the credential is.
-3. The owner adds the pack's name to an agent: `configuration.partner_packs: ["acme"]`, through `PUT /api/agents/{id}`.
+2. `PUT /api/partner-packs/{name}` with the pack, the credential's id and the agents that may use it (`agents: [12, 31]`). For workspace managers (`workspace:manage`), as creating the credential is.
+3. The pack's name is added to each of those agents: `configuration.partner_packs: ["acme"]`, through `PUT /api/agents/{id}`.
 
-Installing a pack offers it to no one. Auto and every other agent keep the tools they had.
+An agent is offered a pack's tools only when **both** hold: the install names the agent, and the agent lists the pack. Installing a pack for no agents offers it to no one. Auto and every other agent keep the tools they had.
 
-**Who may grant a pack:** whoever may create or edit the agent. Installing needs `workspace:manage`; granting needs the agent routes' own permission, `agents:create` or `agents:update` [T] (§10-5).
+**Who may grant a pack:** the workspace's managers, at install (§10-5, decided). Editing an agent needs only `agents:create` or `agents:update`, which an editor holds [T]; listing a pack on an agent the install does not name gives it nothing. An editor cannot reach a partner's records a manager did not allow.
 
 | Route | What it does |
 |---|---|
@@ -127,7 +127,7 @@ Each is enforced in code and has a test in `orchestrator/tests/test_prd275_partn
 | **One deadline** | 30 seconds for the whole call, however slowly the partner answers. |
 | **The key stays hidden** | Sent in a header the server writes. Never in the URL, a result, a log line, the telemetry row or the audit row. |
 | **Only a key header** | The credential may name `bearer`, or a header whose name ends in `Key` or `Token`. It cannot name a header that changes the request: a method override, a forwarded address, `Host`. |
-| **Per-agent grant** | Checked when a tool is offered and again when it runs. |
+| **Per-agent grant** | The install names the agents, and each agent lists the pack; both are checked when a tool is offered and again when it runs. |
 | **Workspace isolation** | A pack, its credential and its agent must share one workspace. Another workspace's credential is "not found". |
 
 ## 6. The exception to "Integrations go through Composio"
@@ -177,5 +177,5 @@ AGENTS.md carries the exception in the same pull request.
 2. **Private partner addresses on a self-hosted install:** keep refusing, or add an operator allow-list in `config.py` (local edition only)? *Recommendation:* decide when a real install needs it.
 3. **A recent sign-in (step-up) to install a pack,** as for minting an API key? *Recommendation:* no; creating the credential, the more sensitive step, has none.
 4. **The PRD number.**
-5. **Who may grant a pack to an agent:** anyone who may create or edit the agent (as built), or workspace managers only? *Recommendation:* as built.
+5. **Who may grant a pack to an agent:** decided, workspace managers only. The install names the agents that may use the pack, so editing an agent (`agents:update`, which an editor holds) cannot give it a partner's records.
 6. **A rate limit on partner calls,** per workspace or per credential, before the flag goes on for hosted workspaces? *Recommendation:* yes before hosted use; not needed for a single self-hosted install.
