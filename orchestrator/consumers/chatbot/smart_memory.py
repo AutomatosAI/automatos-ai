@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 # (modules/memory/write_contract) alongside scope defaults and the exclusion
 # validator; re-exported here because this module and its tests are the
 # historical import site.
+from core.security.end_user_turn import shared_with_no_end_user
 from modules.memory.write_contract import (  # noqa: F401  (re-export)
     DEFAULT_FACT_TYPE,
     MEMORY_FACT_TYPES,
@@ -816,6 +817,7 @@ class SmartMemoryManager:
 
         return ". ".join(parts)
 
+    @shared_with_no_end_user(False)  # PRD-274 W3: an end user's turn adds nothing to the daily log
     async def store_daily_summary(
         self,
         workspace_id: str,
