@@ -306,7 +306,7 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
     running writes nothing more for them, and a failed erase is finished by the next one.
 - Retention: once a day, each end user's facts made before their `retention_days`, retired ones too, their
   messages sent before it, and their conversations left empty are deleted
-  (`services/end_user_retention.py`; #1488, #TBD).
+  (`services/end_user_retention.py`; #1488, #1489).
 - Still to come: "where were we" per end user (§5.7), and cleaning up a key's service user (the follow-up below).
 
 ### Wave 4: memory profiles and need-to-know (built)
