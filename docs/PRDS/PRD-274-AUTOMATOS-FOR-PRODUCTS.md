@@ -302,7 +302,8 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
   - it recalls their facts, the workspace tier and the agent's own, never another end user's, with the caches,
     the private-row guard and the standing rules keyed on them (#1485);
   - each conversation is one end user's (`chats.end_user_id`), and erasing them deletes their conversations and
-    those conversations' sessions (#1487).
+    those conversations' sessions (#1487). The erase marks them first (`end_users.erasing_at`), so a turn still
+    running writes nothing more for them, and a failed erase is finished by the next one.
 - Still to come: the retention sweep (`end_users.retention_days`), "where were we" per end user (§5.7), and
   cleaning up a key's service user (the follow-up below).
 
