@@ -238,8 +238,9 @@ This is PRD-161's dispatch loop, generalised to any `kind` [T: the primitives it
   1. **Closing a workspace stops new work.** A purge acts only on a workspace that is already soft-deleted (`deleted_at` set; `services/workspace_purge.py`) [T]. The claim query skips the jobs of a soft-deleted workspace, and the scheduler queues none for it.
   2. **Every send happens under the fence.** Just before anything leaves Automatos (a callback, a message), the handler opens a short transaction:
      - it locks its job row (`FOR UPDATE`, with its `claim_id` on a `running` job) and checks that its workspace is live;
-     - in the same transaction, it extends its lease to cover the send: `lease_until = greatest(lease_until, now() + send timeout + margin)`;
-     - it re-reads what it sends, sends it, records the outcome, then commits.
+     - it re-reads what it sends;
+     - immediately before the send, it extends its lease from the wall clock, not the transaction's start: `lease_until = greatest(lease_until, clock_timestamp() + send timeout + margin)`. Postgres's `now()` is when the transaction began, so time spent waiting for the row lock would otherwise eat into the lease; the margin covers the moments between the extension and the send;
+     - it sends, records the outcome and, in the same statement, refreshes the lease again from `clock_timestamp()` by the kind's `lease_seconds`, then commits. So a job whose send wasn't its last step always leaves the transaction with a full lease, however long the lock wait, the send or the commit took.
 
      The send is bounded by its own timeout (10 s for a run callback today, `TIMEOUT_SECONDS` in `services/run_callbacks.py`) [T]. What makes a handler lose the job is the sweep clearing its `claim_id`, not the lease's end alone: a lease that has expired but not yet been swept still matches the fence, and its holder is still the only one (§6.3). A handler that paused until the sweep had cleared its `claim_id` fails the fence, so it sends nothing.
   3. **The purge's barrier is deleting the job rows.** The purge deletes the workspace's `jobs` and `job_schedules` rows first. That `DELETE` waits for any row lock a send holds. So once it has committed, no handler of the workspace is mid-send, and any later fence matches no row. Only then does the purge erase the workspace's data.
