@@ -58,6 +58,7 @@ from consumers.chatbot.lean_turn import (  # Wave 2: a lean agent's turn, step b
 )
 from consumers.chatbot.turn_timing import keeps_the_turns_timing, records_the_first_token
 from consumers.chatbot.lean_request import NOTHING_ASKED
+from core.security.end_user_turn import turn_subject
 from core.security.memory_audience import memory_reader, reader_for_agent_id
 
 # Import from modules — SINGLE SOURCE for tool schemas
@@ -1280,7 +1281,8 @@ class StreamingChatService:
         the widget's user_id only owns the chat row.
         """
         person = None if self.widget_mode else user_id
-        self._viewer_subject_id = f"user:{person}" if person else None
+        # PRD-274 W3: an end user's turn reads as the end user, not the key's shared service user
+        self._viewer_subject_id = turn_subject(f"user:{person}" if person else None)
         self._driving_user_id = person
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1350,7 +1352,7 @@ class StreamingChatService:
         # and subject-erase works on the Clerk-less `local` edition. Reserved
         # namespaces for the other lanes (``shopper:``, ``channel:``)
         # are DEFERRED to when those lanes' memory writes go live (Gerard's call).
-        subject_id = f"user:{user_id}" if user_id else None
+        subject_id = turn_subject(f"user:{user_id}" if user_id else None)  # PRD-274 W3: the end user's
 
         # F154: a widget turn is an anonymous visitor's, so it stores no memory.
         if not (latest_text and full_response and smart_chat) or self.widget_mode:

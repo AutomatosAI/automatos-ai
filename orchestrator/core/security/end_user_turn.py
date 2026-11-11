@@ -16,8 +16,20 @@ path (as ``core.security.memory_audience`` holds the reader):
   (``memory_short_term``) and so no ``mem:{ws}:l2`` mirror, and no daily log. The Context Router reads
   those on every chat turn of the workspace. The end user's conversation stays in their chat.
 
+What the turn **reads** is theirs and the workspace's, never another end user's:
+
+- **The turn's subject is theirs** (``turn_subject``): the private-row guard and the standing rules
+  read as the end user, not as the key's service user, whom every end user of the key shares.
+- **Wherever it reads the workspace tier, it reads theirs with it** (``reads_its_end_users_memory`` on
+  the durable store's ``search``): the two-tier recall's workspace search, and any search that widens
+  to the workspace. An agent's own namespace is read as it is.
+- **What they own is in their namespace** (``owned_reads_go_to_its_end_user`` on ``get_where_any``):
+  a read of the rows the end user owns (their standing rules) reads their namespace.
+- The memory caches key on the end user too (``end_user_key``), and the memory section reads no
+  other conversation and no daily log on their turn (``modules.context.sections.memory``).
+
 Nothing sets the end user yet: until a server key's chat turn names one, no turn is an end user's and
-every write goes where it always has.
+every read and write goes where it always has.
 """
 from __future__ import annotations
 
@@ -75,6 +87,12 @@ def end_user_turn(end_user: Optional[EndUser]) -> Iterator[None]:
             pass
 
 
+def turn_subject(person: Optional[str]) -> Optional[str]:
+    """The turn's data subject: the end user's on their turn, else ``person`` (``user:{users.id}``)."""
+    end_user = _end_user.get()
+    return person if end_user is None else end_user.subject
+
+
 def end_user_key() -> str:
     """The turn's end user for a cache key: empty on a turn that is no end user's."""
     end_user = _end_user.get()
@@ -110,6 +128,47 @@ def writes_to_its_end_user(add: Callable[..., Awaitable[Any]]) -> Callable[..., 
         bound = signature.bind(*args, **kwargs)
         bound.arguments.update(routed(end_user, bound.arguments["user_id"], bound.arguments.get("metadata")))
         return await add(*bound.args, **bound.kwargs)
+
+    return wrapped
+
+
+def reads_its_end_users_memory(search: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+    """Wrap the durable store's ``search``: during an end user's turn, a search that reads the
+    workspace's namespace reads theirs with it (one query, one ranked list)."""
+    signature = inspect.signature(search)
+
+    @functools.wraps(search)
+    async def wrapped(*args: Any, **kwargs: Any) -> Any:
+        end_user = _end_user.get()
+        if end_user is None:
+            return await search(*args, **kwargs)
+        bound = signature.bind(*args, **kwargs)
+        workspace = f"{NAMESPACE_PREFIX}{end_user.workspace_id}"
+        also = tuple(bound.arguments.get("also_namespaces") or ())
+        if workspace in (bound.arguments["user_id"], *also) and end_user.namespace not in also:
+            bound.arguments["also_namespaces"] = (*also, end_user.namespace)
+        return await search(*bound.args, **bound.kwargs)
+
+    return wrapped
+
+
+def owned_reads_go_to_its_end_user(read: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+    """Wrap the durable store's ``get_where_any``: during an end user's turn, a read of the rows the
+    end user owns (``where`` names their subject as owner) reads their namespace, where those rows are."""
+    signature = inspect.signature(read)
+
+    @functools.wraps(read)
+    async def wrapped(*args: Any, **kwargs: Any) -> Any:
+        end_user = _end_user.get()
+        if end_user is None:
+            return await read(*args, **kwargs)
+        bound = signature.bind(*args, **kwargs)
+        where = bound.arguments.get("where") or {}
+        if any(key.endswith(OWNER_KEY) and value == end_user.subject for key, value in where.items()):
+            if not _in_workspace(bound.arguments["user_id"], end_user.workspace_id):
+                raise ValueError(f"an end user's turn reads only its own workspace, not {bound.arguments['user_id']}")
+            bound.arguments["user_id"] = end_user.namespace
+        return await read(*bound.args, **bound.kwargs)
 
     return wrapped
 

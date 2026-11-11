@@ -153,10 +153,12 @@ class SmartMemoryManager:
         cache entry would leak one user's private rows to the other — and the
         lane (F182): a widget's agent-only lookup, or autonomous work's lookup
         without chat transcripts, is never served a chat turn's result. And the run's
-        memory reader (Wave 4b): a labelled agent's lookup is never another reader's."""
+        memory reader (Wave 4b): a labelled agent's lookup is never another reader's. And the turn's
+        end user (PRD-274 W3): their lookup reads their own facts, never served to another's."""
+        from core.security.end_user_turn import end_user_key
         from core.security.memory_audience import reader_key
 
-        return f"{workspace_id}:{agent_id}:{viewer_subject_id}:{lane}{reader_key()}:{query[:50]}"
+        return f"{workspace_id}:{agent_id}:{viewer_subject_id}:{lane}{reader_key()}{end_user_key()}:{query[:50]}"
 
     async def retrieve_memories(
         self,
