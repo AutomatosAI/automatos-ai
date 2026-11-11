@@ -134,8 +134,8 @@ One new table, `jobs`:
 ```python
 from core.jobs import enqueue
 
-enqueue(db, "run_callback.deliver", {"task_id": task.id},
-        workspace_id=task.workspace_id, key=f"run_callback:{task.id}")
+enqueue(db, "run_callback.deliver", {"task_id": task.id, "run_id": run_id},
+        workspace_id=task.workspace_id, key=f"run_callback:{task.id}:{run_id}")
 db.commit()  # the job exists only if the ticket's write committed
 ```
 
@@ -167,7 +167,11 @@ This is PRD-161's dispatch loop, generalised to any `kind` [T: the primitives it
   - A worker whose update matches no row has lost the job. It stops, logs, and writes nothing more, so it can never requeue or complete a newer claim.
   - PRD-161 already fences renewals by run (F209: `runtime_ref->>'run_id'` in `renew_lease`) [T]. Here every write is fenced, not just renewals.
 - **A handler's own writes:** fencing protects the job's row, not what the handler writes elsewhere (a callback marked delivered, a run's step results).
-  - The handler gets `job.claim_id`. Its final write is conditional on the claim still being held: in one transaction it updates its own rows and marks the job done, fenced by `claim_id`.
+  - The handler gets `job.claim_id`. Its final write is one transaction that **takes the fence first**:
+    1. it locks the job row with `SELECT … FROM jobs WHERE id = :id AND status = 'running' AND claim_id = :claim_id FOR UPDATE`;
+    2. no row means the claim is lost, so the transaction rolls back with nothing written;
+    3. otherwise it writes its own rows and marks the job done, then commits.
+  - The row lock also keeps the sweep from expiring the claim while that transaction runs. So a stale worker can never commit its own writes after losing the job.
   - Any other side write must be idempotent (§9).
 - **A handler re-scopes by workspace:** it re-loads every row it acts on from the payload's ids, filtered by the job's `workspace_id`, and never trusts the ids alone. A stale or crafted payload can't act on another tenant.
 - **Failure:** a handler that raises is logged with `logger.exception` and recorded through `record_error` under `subsystem="jobs"`. The job then goes back in the queue at its next delay (§6.2). Once its attempts are used up it becomes `dead`, and the owner is told where a person should know (callbacks, Playbook runs).
@@ -225,8 +229,14 @@ This is PRD-161's dispatch loop, generalised to any `kind` [T: the primitives it
 
 ### 6.8 Tenancy, erasure, moving a workspace, and dead jobs
 
-- **Erasure:** `jobs` and `job_schedules` rows carry a `workspace_id` and ids in their payloads. Erasing a workspace (`services/workspace_purge.py`, `services/gdpr_service.py`) deletes its jobs and cursors, so no handler later runs against erased data.
-- **Moving a workspace (PRD-273):** both tables are classified `not_moved` in `services/workspace_move/table_map.py`. They are this install's work in flight, and the new install rebuilds its schedules from the moved rows. The table map's guard requires every new table to be classified.
+- **Erasure:** `jobs` and `job_schedules` rows carry a `workspace_id` and ids in their payloads. Deleting the rows doesn't stop a handler that has already loaded a workspace's data, so erasure goes in three steps:
+  1. **Closing a workspace stops new work.** A purge acts only on a workspace that is already soft-deleted (`deleted_at` set; `services/workspace_purge.py`) [T]. The claim query skips the jobs of a soft-deleted workspace, and the scheduler queues none for it.
+  2. **A running handler stops itself.** When it re-loads its rows (§6.3), and again just before anything leaves Automatos (a callback, a message), a handler checks that its workspace is live. A closed one ends the handler as `dead`, with nothing sent.
+  3. **The purge waits for what is still running.** It deletes the workspace's queued jobs and cursors first. While any of its jobs is still `running` with a live lease, it stops with a `skipped_reason` (the purge result already has one, `services/workspace_purge.py`) [T], and the admin runs it again. A running job is bounded by its lease, so the wait is short.
+  - **Erasing one person's data** (`services/gdpr_service.py`) leaves jobs in place. A payload carries ids only, so a handler that re-loads erased rows finds nothing and ends without acting.
+- **Moving a workspace (PRD-273):** both tables are classified `not_moved` in `services/workspace_move/table_map.py`. The table map's guard requires every new table to be classified.
+  - A move is an export to a file and an import on another install. The source workspace keeps running, and its queued and running jobs finish there. The new install rebuilds its schedules from the rows it imported.
+  - Pending work is lost only if the owner then closes the source. So the export summary says how many of the workspace's jobs are queued or running, and closing a workspace with live jobs asks the owner to confirm. Once it is closed, its jobs stop as described under Erasure.
 - **A dead job has a way back:**
   - a route lists a workspace's `dead` jobs, gated by workspace permission;
   - a retry action re-queues one with its attempts reset, and clearing it deletes it;
@@ -254,7 +264,7 @@ This is PRD-161's dispatch loop, generalised to any `kind` [T: the primitives it
 |---|---|---|
 | **0** | This PRD decided (§10) | — |
 | **1a** | `core/jobs`:<br>• the table, `enqueue` and `enqueue_now`, and the handler registry;<br>• fenced claims and the worker loop under the default `PROCESS_ROLES`;<br>• retention, erasure, `not_moved`, and the dead-job route and retry | Tests:<br>• a stale worker's completion after the sweep, before a new claim, matches no row;<br>• a job whose lease keeps expiring becomes `dead` at its limit;<br>• two workspaces queue the same key, and each gets its job;<br>• erasing a workspace deletes its jobs |
-| **1b** | Run callbacks and widget destinations moved onto `core/jobs`; the resend job and both retry loops deleted | Tests:<br>• a worker is killed mid-delivery, and the retry carries the same delivery id;<br>• a test receiver that drops repeated ids records one effect for two deliveries |
+| **1b** | Run callbacks and widget destinations moved onto `core/jobs`; the resend job and both retry loops deleted. **Cutover:** in the same deploy, a one-time step queues a `run_callback.deliver` job for every `run_callbacks` row still `pending`. It uses the same key as a new callback, so a callback the old path is also sending can't be queued twice, and the resend job goes only once that step has run | Tests:<br>• a worker is killed mid-delivery, and the retry carries the same delivery id;<br>• a test receiver that drops repeated ids records one effect for two deliveries;<br>• a callback left `pending` before the cutover is queued once and delivered |
 | **2** | The scheduler queues only, behind the advisory lock; keys of `schedule_id` plus slot; `job_schedules` cursors with each kind's catch-up policy; memory job store | Tests:<br>• two schedulers: each schedule's slot is queued once;<br>• two schedules with the same slot each queue their own job;<br>• a scheduler stopped across three slots queues them by each kind's policy on start-up |
 | **3** | Playbook runs as `playbook.run` jobs through `PlaybookEngine.launch`; inbound webhook replies as jobs; the reaper's `RecipeExecution` surface replaced by the lease | A restart during a run: the run is retried, not failed |
 | **4** | `PROCESS_ROLES` split on hosted (§6.7): a worker service; the board dispatch loop moves to the worker role; the decision on board tasks as jobs (§10-5) | The API's event loop stays free while runs execute (`core/loop_watchdog.py` reports no stalls under load) |
@@ -280,7 +290,7 @@ Waves 1a, 1b and 2 each stand on their own. Wave 1a is the largest, and lands wi
 6. **#1481 and #1482 in the meantime.** #1481 is merged. *Recommendation:* keep its resend job until Wave 1b deletes it, and close #1482 in favour of this PRD's Waves 1 and 2.
 7. **The backend behind an interface, with switching triggers written down** (§12). *Recommendation:*
    - `enqueue` and `@job_handler` are the only way in, and Postgres is the one backend for now;
-   - jobs get their own schema, with an optional `JOBS_DATABASE_URL`;
+   - jobs get their own schema in the business database. A separate jobs database (`JOBS_DATABASE_URL`) comes only with the outbox relay (§12.4), never before it;
    - queue metrics from Wave 1a;
    - the outbox relay to a broker is the planned next step, built only when a trigger is met.
 8. **The PRD number.**
@@ -315,7 +325,7 @@ Written after a review question: if hosted served hundreds or thousands of custo
 | Pressure | What it looks like | First response |
 |---|---|---|
 | Write churn on one hot table | Dead rows, autovacuum lag, index bloat on `jobs` | Short retention for `done` rows; tune autovacuum for the table |
-| Sharing the main database | Queue writes slow the app's own reads and writes | Its own schema from Wave 1a, and an optional `JOBS_DATABASE_URL` that moves it to its own Postgres. Queueing in the same transaction then needs the outbox (§12.4) |
+| Sharing the main database | Queue writes slow the app's own reads and writes | Its own schema in the same database from Wave 1a. A separate database (`JOBS_DATABASE_URL`) only together with the outbox relay (§12.4): separate commits without it could leave a business write with no job |
 | `NOTIFY` at high rates | `NOTIFY` takes a lock as each transaction commits, so commits contend at thousands of notifies a second [I] | Coalesce notifies, or poll on a short interval |
 | Connections | Every worker replica holds a pool | A pooler, and a fixed pool size per worker |
 
