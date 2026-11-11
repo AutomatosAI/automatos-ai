@@ -10,10 +10,22 @@ import asyncio
 
 import pytest
 
-from core.security.end_user_turn import EndUser, current_end_user, end_user_key, end_user_turn, routed
+from core.security.end_user_turn import ERASED, EndUser, current_end_user, end_user_key, end_user_turn, routed
 
 WS = "11111111-1111-1111-1111-111111111111"
 PLAYER = EndUser(WS, "player-7")
+
+
+@pytest.fixture(autouse=True)
+def consent(monkeypatch):
+    """The end user's consent, as the write checks it before and after: on record unless a test says."""
+    answers = []
+
+    async def consented(end_user):
+        return answers.pop(0) if answers else True
+
+    monkeypatch.setattr("core.security.end_user_turn._consented", consented)
+    return answers
 
 
 def _captured_add():
@@ -85,3 +97,28 @@ def test_the_cache_key_names_the_end_user_only_on_their_turn():
         with end_user_turn(None):
             assert end_user_key() == ""
     assert current_end_user() is None
+
+
+def test_no_write_is_made_once_their_erase_has_started(consent):
+    store, seen = _captured_add()
+    consent.append(False)
+    with end_user_turn(PLAYER):
+        answer = asyncio.run(store.add([{"role": "user", "content": "x"}], user_id=f"mem:{WS}", workspace_id=WS))
+    assert answer == {"success": False, "skipped": ERASED} and seen == {}
+
+
+def test_a_write_their_erase_overtook_is_taken_back(consent):
+    store, seen = _captured_add()
+    deleted = []
+
+    async def delete(memory_ids, user_id, workspace_id=None):
+        deleted.append((tuple(memory_ids), user_id))
+        return True
+
+    store.delete = delete
+    consent.extend([True, False])  # on record before the write; erasing once it landed
+    with end_user_turn(PLAYER):
+        answer = asyncio.run(store.add([{"role": "user", "content": "x"}], user_id=f"mem:{WS}", workspace_id=WS))
+    assert seen["user_id"] == f"mem:{WS}:end_user:player-7"
+    assert deleted == [(("existing",), f"mem:{WS}:end_user:player-7")] and answer["skipped"] == ERASED
+

@@ -58,7 +58,7 @@ from consumers.chatbot.lean_turn import (  # Wave 2: a lean agent's turn, step b
 )
 from consumers.chatbot.turn_timing import keeps_the_turns_timing, records_the_first_token
 from consumers.chatbot.lean_request import NOTHING_ASKED
-from core.security.end_user_turn import turn_subject
+from core.security.end_user_turn import end_user_turn, turn_subject
 from core.security.memory_audience import memory_reader, reader_for_agent_id
 
 # Import from modules — SINGLE SOURCE for tool schemas
@@ -282,9 +282,11 @@ class ChatService:
         visibility: str = "private",
         workspace_id: Optional[uuid.UUID] = None,
         widget_key_id: Optional[uuid.UUID] = None,
+        end_user_id: Optional[str] = None,
     ) -> Chat:
         """Create a new chat session scoped to a workspace. A widget passes
-        the key that starts it (F155)."""
+        the key that starts it (F155); a server key's turn for an end user, the
+        end user it is for (PRD-274 W3), saved with the chat in one commit."""
         chat = Chat(
             id=uuid.uuid4(),
             user_id=user_id,
@@ -292,6 +294,7 @@ class ChatService:
             title=title,
             visibility=visibility,
             widget_key_id=widget_key_id,
+            end_user_id=end_user_id,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
         )
@@ -2449,7 +2452,8 @@ class StreamingChatService:
                 ask_scope(LANE_CHAT, workspace_id=getattr(self, "workspace_id", None)), \
                 turn_surface(WIDGET if self.widget_mode else None, self.widget_scopes, self.widget_team,
                              self.widget_agent_lock), \
-                self._hidden_action_scope(agent_id), lean_grants(self._lean_actions), memory_reader(reader):
+                self._hidden_action_scope(agent_id), lean_grants(self._lean_actions), memory_reader(reader), \
+                end_user_turn(getattr(self._lean_request, "end_user", None)):  # PRD-274 W3: whose turn it is
             async for chunk in self._stream_response_with_agent_scoped(
                 chat_id, messages, agent_id, user_id,
                 use_orchestrator_llm=use_orchestrator_llm, skip_composio=skip_composio,
