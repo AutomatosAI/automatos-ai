@@ -145,21 +145,28 @@ def test_erasing_an_end_user_deletes_their_conversations_and_sessions(new_sessio
     erased = _service(monkeypatch, redis)
     key, theirs, kept = _setup(new_session, ws, person)
     done = _erase(new_session, key, "shopper-7")
-    assert done == {"end_user_id": "shopper-7", "erased": True, "memories_deleted": 2, "chats_deleted": 2,
-                    "sessions_cleared": True}
+    assert done == {"end_user_id": "shopper-7", "erased": True, "memories_deleted": 2, "chats_deleted": 2}
     assert erased == [f"mem:{ws}:end_user:shopper-7"]
     assert sorted(redis.deleted) == sorted(f"mem:session:{ws}:{c}" for c in theirs)
     chats, messages, records = _left(new_session, ws)
     assert set(chats) == set(kept) and messages == len(kept) and records == ["shopper-8"]
 
 
-def test_sessions_redis_cant_reach_are_reported_not_hidden(new_session, workspace, monkeypatch):
+def test_sessions_redis_cant_clear_leave_the_erase_for_the_next_one_to_finish(new_session, workspace, monkeypatch):
+    from fastapi import HTTPException
+
     ws, person = workspace
     _service(monkeypatch, _Redis(fails=True))
     key, theirs, _ = _setup(new_session, ws, person)
-    done = _erase(new_session, key, "shopper-7")
-    assert (done["chats_deleted"], done["sessions_cleared"]) == (2, False)
-    assert not set(theirs) & set(_left(new_session, ws)[0])
+    with pytest.raises(HTTPException) as failed:
+        _erase(new_session, key, "shopper-7")
+    assert failed.value.status_code == 503
+    chats, _, records = _left(new_session, ws)
+    assert set(theirs) <= set(chats) and "shopper-7" in records  # nothing reported erased; all there to retry
+    redis = _Redis()
+    _service(monkeypatch, redis)
+    assert _erase(new_session, key, "shopper-7")["chats_deleted"] == 2
+    assert sorted(redis.deleted) == sorted(f"mem:session:{ws}:{c}" for c in theirs)
 
 
 def _store(new_session, ctx, end_user_id):
@@ -217,3 +224,35 @@ def _consent_again(new_session, ctx, end_user_id):
         return eum.record_consent(eum.EndUserConsent(consent=True), end_user_id=end_user_id, ctx=ctx, db=s)
     finally:
         s.close()
+
+
+def test_a_chat_opened_as_their_erase_started_is_deleted_by_the_turn(new_session, workspace, monkeypatch):
+    from fastapi import HTTPException
+
+    from api import chat
+    from api.chat_models import ChatRequest, MessagePart
+    from consumers.chatbot import ChatService
+
+    ws, person = workspace
+    key, _, _ = _setup(new_session, ws, person)
+    s = new_session()
+    try:
+        before = set(_left(new_session, ws)[0])
+        opened = ChatService.create_chat
+
+        def opened_then_erase_starts(self, *args, **kwargs):  # the erase marks them just after the chat is saved
+            made = opened(self, *args, **kwargs)
+            s.execute(text("UPDATE end_users SET erasing_at = now() WHERE workspace_id = CAST(:w AS uuid) "
+                           "AND end_user_id = 'shopper-7'"), {"w": ws})
+            s.commit()
+            return made
+
+        monkeypatch.setattr(ChatService, "create_chat", opened_then_erase_starts)
+        with pytest.raises(HTTPException) as refused:
+            chat._open_chat(s, ChatService(s), ChatRequest(message={"content": "x"}, endUserId="shopper-7"), key,
+                            get_user_id(s, key), [MessagePart(type="text", text="Where is my order?")])
+        assert refused.value.status_code == 409
+    finally:
+        s.close()
+    assert set(_left(new_session, ws)[0]) == before
+

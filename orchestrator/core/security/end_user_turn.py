@@ -61,6 +61,10 @@ class EndUser:
 
     workspace_id: str
     end_user_id: str
+    # The consent record the turn was admitted under: it keys the caches, and a write lands only while it
+    # still stands. After an erase, a consent recorded again is a new record, so nothing cached or admitted
+    # before the erase is read or written under the new one.
+    record_id: Optional[str] = None
 
     @property
     def namespace(self) -> str:
@@ -105,7 +109,9 @@ def turn_subject(person: Optional[str]) -> Optional[str]:
 def end_user_key() -> str:
     """The turn's end user for a cache key: empty on a turn that is no end user's."""
     end_user = _end_user.get()
-    return "" if end_user is None else f"eu={end_user.end_user_id}"
+    if end_user is None:
+        return ""
+    return f"eu={end_user.end_user_id}" + (f":{end_user.record_id}" if end_user.record_id else "")
 
 
 def _in_workspace(namespace: str, workspace_id: str) -> bool:
@@ -126,16 +132,18 @@ def routed(end_user: EndUser, user_id: str, metadata: Optional[Dict[str, Any]]) 
 
 
 async def _consented(end_user: EndUser) -> bool:
-    """Their consent is on record and no erase of them has started (a read on its own session)."""
+    """Their consent is on record, no erase of them has started, and it is the record the turn was
+    admitted under when it names one (a read on its own session)."""
     from core.database.database import SessionLocal
-    from core.models.end_users import consented
+    from core.models.end_users import consent_record_id
 
     def check() -> bool:
         db = SessionLocal()
         try:
-            return consented(db, end_user.workspace_id, end_user.end_user_id)
+            record_id = consent_record_id(db, end_user.workspace_id, end_user.end_user_id)
         finally:
             db.close()
+        return record_id is not None and end_user.record_id in (None, record_id)
 
     return await asyncio.to_thread(check)
 

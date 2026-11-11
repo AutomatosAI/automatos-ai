@@ -8,7 +8,7 @@ product record. ``api/end_user_memory.py`` reads and writes it; erasing the end 
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 from uuid import uuid4
 
 from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String
@@ -39,7 +39,14 @@ class EndUser(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
+def consent_record_id(db: Any, workspace_id: Any, end_user_id: str) -> Optional[str]:
+    """The id of the end user's consent record in the workspace, while no erase of them has started; None
+    otherwise. A consent recorded again after an erase is a new record, with a new id."""
+    row = db.query(EndUser.id).filter(EndUser.workspace_id == workspace_id, EndUser.end_user_id == end_user_id,
+                                      EndUser.erasing_at.is_(None)).first()
+    return str(row[0]) if row else None
+
+
 def consented(db: Any, workspace_id: Any, end_user_id: str) -> bool:
     """The end user's consent is on record in the workspace, and no erase of them has started."""
-    return db.query(EndUser.id).filter(EndUser.workspace_id == workspace_id, EndUser.end_user_id == end_user_id,
-                                       EndUser.erasing_at.is_(None)).first() is not None
+    return consent_record_id(db, workspace_id, end_user_id) is not None

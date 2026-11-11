@@ -111,7 +111,8 @@ def test_a_keys_turn_for_an_end_user_needs_their_consent(new_session, workspace,
         _checked(new_session, key, agentId=agent, endUserId="shopper-7")
     assert refused.value.status_code == 409 and "consent" in refused.value.detail
     _consent(new_session, ws, "shopper-7")
-    assert _checked(new_session, key, agentId=agent, endUserId="shopper-7").end_user == EndUser(ws, "shopper-7")
+    end_user = _checked(new_session, key, agentId=agent, endUserId="shopper-7").end_user
+    assert (end_user.workspace_id, end_user.end_user_id) == (ws, "shopper-7") and end_user.record_id  # their record
     assert _checked(new_session, key, agentId=agent).end_user is None
 
 
@@ -153,6 +154,7 @@ def _tag_of(new_session, chat_id):
 def test_each_end_users_conversation_is_theirs_alone(new_session, workspace):
     ws, _ = workspace
     key = _key(new_session, ws)
+    _consent(new_session, ws, "shopper-7")
     theirs = _open(new_session, key, endUserId="shopper-7")
     assert _tag_of(new_session, theirs) == "shopper-7"
     assert _open(new_session, key, id=theirs, endUserId="shopper-7") == theirs
@@ -194,6 +196,7 @@ def test_a_new_conversation_is_saved_with_its_end_user_in_one_write(new_session,
 
     ws, _ = workspace
     key = _key(new_session, ws)
+    _consent(new_session, ws, "shopper-7")
     statements = []
 
     def seen(conn, cursor, statement, parameters, context, executemany):

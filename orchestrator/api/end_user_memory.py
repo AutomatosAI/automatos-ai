@@ -117,10 +117,11 @@ async def store_end_user_memory(body: MemoryCreate, end_user_id: str = END_USER_
                                 db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Stores one fact about the end user; their consent must be on record, and the write is made as
     theirs (``end_user_turn``): tagged with their subject, and taken back if their erase starts meanwhile."""
-    from core.models.end_users import consented
+    from core.models.end_users import consent_record_id
     from core.security.end_user_turn import ERASED, EndUser, end_user_turn
 
-    if not await run_in_threadpool(consented, db, ctx.workspace_id, end_user_id):
+    record_id = await run_in_threadpool(consent_record_id, db, ctx.workspace_id, end_user_id)
+    if record_id is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NO_CONSENT)
     metadata = {**without_server_keys(body.metadata), "end_user_id": end_user_id}
     if body.tags:
@@ -129,7 +130,7 @@ async def store_end_user_memory(body: MemoryCreate, end_user_id: str = END_USER_
         metadata[WRITTEN_BY_KEY] = ctx.user.id
     service = _service_or_503()
     try:
-        with end_user_turn(EndUser(str(ctx.workspace_id), end_user_id)):
+        with end_user_turn(EndUser(str(ctx.workspace_id), end_user_id, record_id)):
             stored = await service.store_long_term_messages(
                 user_id=_namespace(ctx, end_user_id), messages=[{"role": "user", "content": body.content}],
                 metadata=metadata, workspace_id=str(ctx.workspace_id))
@@ -190,8 +191,9 @@ async def erase_end_user(end_user_id: str = END_USER_ID,
                          ctx: RequestContext = Depends(require_workspace_permission_or_server_key(
                              "knowledge:delete", MEMORY_WRITE)),
                          db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Erases the end user (GDPR): every memory in their namespace, their conversations and those
-    conversations' sessions, then their consent record."""
+    """Erases the end user (GDPR): every memory in their namespace, their conversations' sessions, their
+    conversations, then their consent record. Any step that fails is a 503 that keeps the record and its
+    erase mark, so the next erase finishes it; nothing is reported erased until all of it is."""
     row = await run_in_threadpool(_known, db, ctx, end_user_id)
     service = _service_or_503()
     await run_in_threadpool(_mark_erasing, db, row)  # first: no new turn, store or write for them from here
@@ -201,16 +203,18 @@ async def erase_end_user(end_user_id: str = END_USER_ID,
         logger.exception("[end_user_memory] erase failed for workspace %s", ctx.workspace_id)
         raise _unavailable(MEMORY_UNAVAILABLE) from exc
 
-    def _forget() -> List[str]:
-        chat_ids = _erase_their_chats(db, ctx, end_user_id)
+    chat_ids = await run_in_threadpool(_their_chat_ids, db, ctx, end_user_id)
+    if not await _forget_their_sessions(service, str(ctx.workspace_id), chat_ids):
+        raise _unavailable(MEMORY_UNAVAILABLE)  # their chats, record and mark stay for the next erase
+
+    def _forget() -> int:
+        deleted = _erase_their_chats(db, ctx, end_user_id)
         db.delete(row)
         db.commit()
-        return chat_ids
+        return deleted
 
-    chat_ids = await run_in_threadpool(_forget)
-    cleared = await _forget_their_sessions(service, str(ctx.workspace_id), chat_ids)
-    return {"end_user_id": end_user_id, "erased": True, "memories_deleted": erased,
-            "chats_deleted": len(chat_ids), "sessions_cleared": cleared}
+    chats_deleted = await run_in_threadpool(_forget)
+    return {"end_user_id": end_user_id, "erased": True, "memories_deleted": erased, "chats_deleted": chats_deleted}
 
 
 def _mark_erasing(db: Session, row: Any) -> None:
@@ -224,20 +228,29 @@ def _mark_erasing(db: Session, row: Any) -> None:
         db.commit()
 
 
-def _erase_their_chats(db: Session, ctx: RequestContext, end_user_id: str) -> List[str]:
-    """Deletes the end user's conversations in this workspace; their messages, votes and pinned
-    documents go with them (each foreign key cascades). The ids deleted, for their sessions."""
+def _their_chats(db: Session, ctx: RequestContext, end_user_id: str) -> Any:
     from core.models.core import Chat
 
-    theirs = db.query(Chat).filter(Chat.workspace_id == ctx.workspace_id, Chat.end_user_id == end_user_id)
-    chat_ids = [str(row.id) for row in theirs.with_entities(Chat.id)]
-    theirs.delete(synchronize_session=False)
-    return chat_ids
+    return db.query(Chat).filter(Chat.workspace_id == ctx.workspace_id, Chat.end_user_id == end_user_id)
+
+
+def _their_chat_ids(db: Session, ctx: RequestContext, end_user_id: str) -> List[str]:
+    """The ids of the end user's conversations in this workspace, for their sessions."""
+    from core.models.core import Chat
+
+    return [str(row.id) for row in _their_chats(db, ctx, end_user_id).with_entities(Chat.id)]
+
+
+def _erase_their_chats(db: Session, ctx: RequestContext, end_user_id: str) -> int:
+    """Deletes the end user's conversations in this workspace; their messages, votes and pinned
+    documents go with them (each foreign key cascades). How many were deleted. A chat a turn opened
+    after the erase mark is deleted by that turn itself (``api.chat_server_key``)."""
+    return _their_chats(db, ctx, end_user_id).delete(synchronize_session=False)
 
 
 async def _forget_their_sessions(service: Any, workspace_id: str, chat_ids: List[str]) -> bool:
-    """Deletes the L1 sessions (Redis) of the erased conversations. False, logged, when Redis
-    can't be reached: they then expire within ``MEMORY_SESSION_TTL_SECONDS``."""
+    """Deletes the L1 sessions (Redis) of the end user's conversations, before the conversations go, so a
+    failure leaves their ids for the next erase. False, logged, when Redis can't be reached."""
     redis_client = service._get_redis() if chat_ids else None
     if redis_client is None:
         return True

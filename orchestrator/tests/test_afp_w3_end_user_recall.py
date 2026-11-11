@@ -122,3 +122,14 @@ def test_the_memory_section_reads_no_other_conversation_on_their_turn():
     assert section._reads_the_workspace(chat_turn) is True
     with end_user_turn(PLAYER):
         assert section._reads_the_workspace(chat_turn) is False
+
+
+def test_a_consent_recorded_again_after_an_erase_reads_no_cache_from_before_it():
+    from modules.memory.unified_memory_service import MemoryNamespace
+
+    keys = []
+    for record in ("record-1", "record-2"):
+        with end_user_turn(EndUser(WS, "player-7", record)):
+            keys.append(MemoryNamespace(WS).cache_key(None, "q"))
+    assert keys[0] != keys[1] and "eu=player-7:record-1" in keys[0]
+

@@ -107,12 +107,13 @@ def _for_its_end_user(db: Any, ctx: Any, request: Any, lean: Any) -> Any:
     if not end_user_id:
         return lean
     from api.end_user_memory import NO_CONSENT
-    from core.models.end_users import consented
+    from core.models.end_users import consent_record_id
     from core.security.end_user_turn import EndUser
 
-    if not consented(db, ctx.workspace_id, end_user_id):  # none on record, or their erase has started
+    record_id = consent_record_id(db, ctx.workspace_id, end_user_id)
+    if record_id is None:  # none on record, or their erase has started
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NO_CONSENT)
-    return replace(lean, end_user=EndUser(str(ctx.workspace_id), end_user_id))
+    return replace(lean, end_user=EndUser(str(ctx.workspace_id), end_user_id, record_id))
 
 
 def keeps_each_end_users_chats_apart(open_chat: Callable[..., str]) -> Callable[..., str]:
@@ -128,9 +129,23 @@ def keeps_each_end_users_chats_apart(open_chat: Callable[..., str]) -> Callable[
         chat = chat_service.get_chat(request.id, workspace_id=ctx.workspace_id) if request.id else None
         if chat is not None and chat.user_id == user_id and chat.end_user_id != wanted:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=NOT_THIS_END_USERS_CHAT)
-        return open_chat(db, chat_service, request, ctx, user_id, parts)
+        chat_id = open_chat(db, chat_service, request, ctx, user_id, parts)
+        if wanted:
+            _unless_their_erase_started(db, chat_service, ctx, wanted, chat_id)
+        return chat_id
 
     return opened
+
+
+def _unless_their_erase_started(db: Any, chat_service: Any, ctx: Any, end_user_id: str, chat_id: str) -> None:
+    """Checked again once the chat is saved: when the end user's erase started after the turn was admitted,
+    the turn deletes the chat it opened and stops (409). Otherwise the erase, marked later, deletes it."""
+    from api.end_user_memory import NO_CONSENT
+    from core.models.end_users import consented
+
+    if not consented(db, ctx.workspace_id, end_user_id):
+        chat_service.delete_chat(chat_id)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NO_CONSENT)
 
 
 def _refuse(detail: str) -> HTTPException:
