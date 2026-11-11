@@ -37,6 +37,7 @@ def engine():  # conftest's new_session binds to it
     EndUserRecord.__table__.create(eng, checkfirst=True)  # a test database built before these
     with eng.begin() as conn:
         conn.execute(text("ALTER TABLE chats ADD COLUMN IF NOT EXISTS end_user_id VARCHAR(128)"))
+        conn.execute(text("ALTER TABLE end_users ADD COLUMN IF NOT EXISTS erasing_at TIMESTAMPTZ"))
         conn.execute(text("ALTER TABLE sdk_api_keys ADD COLUMN IF NOT EXISTS model_allow_list JSONB"))
         conn.execute(text("ALTER TABLE sdk_api_keys ADD COLUMN IF NOT EXISTS service_user_id INTEGER "
                           "REFERENCES users(id) ON DELETE SET NULL"))

@@ -36,6 +36,8 @@ def engine():  # conftest's new_session binds to it
 
     eng = create_engine(get_database_url(), pool_pre_ping=True)
     EndUser.__table__.create(eng, checkfirst=True)  # a test database built before the table
+    with eng.begin() as conn:  # or before its erase mark
+        conn.execute(text("ALTER TABLE end_users ADD COLUMN IF NOT EXISTS erasing_at TIMESTAMPTZ"))
     yield eng
     eng.dispose()
 

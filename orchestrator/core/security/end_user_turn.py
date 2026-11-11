@@ -7,6 +7,10 @@ owner's Auto or the workspace's other conversations would read it.
 The rule is held where memory is written, by the turn's **end user**, a context variable, not path by
 path (as ``core.security.memory_audience`` holds the reader):
 
+- **A write is made only while their consent counts** (``writes_to_its_end_user``): it is checked
+  before the write, and again after it. An end user whose erase has started (``end_users.erasing_at``)
+  gets no new write, and a write that landed while the erase was deleting is taken back, so a turn still
+  running when they are erased leaves nothing behind.
 - **Every durable write lands in the end user's namespace** (``writes_to_its_end_user`` on the durable
   store's ``add``). The distilled facts of the turn, a tool's outcome, the context guard's flush: each
   names the workspace's namespace or an agent's, and each is written to the end user's instead, tagged
@@ -35,6 +39,7 @@ end user's, and every read and write of it goes where it always has.
 """
 from __future__ import annotations
 
+import asyncio
 import functools
 import inspect
 from contextlib import contextmanager
@@ -47,6 +52,7 @@ OWNER_KEY = "owner"  # a fact's owner (modules.memory.write_contract): who may s
 SUBJECT_PREFIX = "end_user:"
 NAMESPACE_PREFIX = "mem:"
 NOT_SHARED = "an end user's turn: nothing is shared with the workspace"
+ERASED = "the end user is erased, or their erase has started: nothing more is written for them"
 
 
 @dataclass(frozen=True)
@@ -119,8 +125,26 @@ def routed(end_user: EndUser, user_id: str, metadata: Optional[Dict[str, Any]]) 
     return {"user_id": end_user.namespace, "subject_id": end_user.subject, "metadata": named}
 
 
+async def _consented(end_user: EndUser) -> bool:
+    """Their consent is on record and no erase of them has started (a read on its own session)."""
+    from core.database.database import SessionLocal
+    from core.models.end_users import consented
+
+    def check() -> bool:
+        db = SessionLocal()
+        try:
+            return consented(db, end_user.workspace_id, end_user.end_user_id)
+        finally:
+            db.close()
+
+    return await asyncio.to_thread(check)
+
+
 def writes_to_its_end_user(add: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
-    """Wrap the durable store's ``add``: during an end user's turn the write lands in their namespace."""
+    """Wrap the durable store's ``add``: during an end user's turn the write lands in their namespace,
+    and only while their consent counts, checked before and after it (an erase that started meanwhile
+    takes the write back). An erase deletes their namespace after marking them, so a write that landed
+    first is deleted by the erase, and one that landed after is taken back here."""
     signature = inspect.signature(add)
 
     @functools.wraps(add)
@@ -128,11 +152,24 @@ def writes_to_its_end_user(add: Callable[..., Awaitable[Any]]) -> Callable[..., 
         end_user = _end_user.get()
         if end_user is None:
             return await add(*args, **kwargs)
+        if not await _consented(end_user):
+            return {"success": False, "skipped": ERASED}
         bound = signature.bind(*args, **kwargs)
         bound.arguments.update(routed(end_user, bound.arguments["user_id"], bound.arguments.get("metadata")))
-        return await add(*bound.args, **bound.kwargs)
+        result = await add(*bound.args, **bound.kwargs)
+        if await _consented(end_user):
+            return result
+        await _take_back(bound.arguments["self"], end_user, result)
+        return {"success": False, "skipped": ERASED}
 
     return wrapped
+
+
+async def _take_back(store: Any, end_user: EndUser, result: Any) -> None:
+    """Deletes the point a write just made, when the end user's erase started while it was made."""
+    point_id = result.get("id") if isinstance(result, dict) else None
+    if point_id:
+        await store.delete([point_id], user_id=end_user.namespace)
 
 
 def reads_its_end_users_memory(search: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:

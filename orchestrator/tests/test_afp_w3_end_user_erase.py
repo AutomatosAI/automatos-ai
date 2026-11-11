@@ -30,6 +30,7 @@ def engine():  # conftest's new_session binds to it
     EndUser.__table__.create(eng, checkfirst=True)  # a test database built before these
     with eng.begin() as conn:
         conn.execute(text("ALTER TABLE chats ADD COLUMN IF NOT EXISTS end_user_id VARCHAR(128)"))
+        conn.execute(text("ALTER TABLE end_users ADD COLUMN IF NOT EXISTS erasing_at TIMESTAMPTZ"))
     yield eng
     eng.dispose()
 
@@ -159,3 +160,60 @@ def test_sessions_redis_cant_reach_are_reported_not_hidden(new_session, workspac
     done = _erase(new_session, key, "shopper-7")
     assert (done["chats_deleted"], done["sessions_cleared"]) == (2, False)
     assert not set(theirs) & set(_left(new_session, ws)[0])
+
+
+def _store(new_session, ctx, end_user_id):
+    s = new_session()
+    try:
+        body = eum.MemoryCreate(content="Prefers delivery after six.")
+        return asyncio.run(eum.store_end_user_memory(body, end_user_id=end_user_id, ctx=ctx, db=s))
+    finally:
+        s.close()
+
+
+def test_an_erase_marks_them_first_so_a_failed_one_stops_their_writes_and_the_next_finishes(
+        new_session, workspace, monkeypatch):
+    from fastapi import HTTPException
+
+    from api import chat_server_key
+    from core.models.end_users import consented
+
+    ws, person = workspace
+    key, theirs, kept = _setup(new_session, ws, person)
+
+    async def down(user_id):
+        raise ConnectionError("qdrant unreachable")
+
+    fake = SimpleNamespace(_durable=SimpleNamespace(erase_namespace=down), _get_redis=lambda: None, namespace=MemoryNamespace)
+    monkeypatch.setattr("api.widget_memory._get_memory_service", lambda: fake)
+    with pytest.raises(HTTPException) as failed:
+        _erase(new_session, key, "shopper-7")
+    assert failed.value.status_code == 503
+    s = new_session()
+    try:
+        marked = s.execute(text("SELECT erasing_at FROM end_users WHERE workspace_id = CAST(:w AS uuid) "
+                                "AND end_user_id = 'shopper-7'"), {"w": ws}).scalar()
+        assert marked is not None and not consented(s, uuid.UUID(ws), "shopper-7") and consented(s, uuid.UUID(ws), "shopper-8")
+        with pytest.raises(HTTPException) as no_turn:
+            chat_server_key._for_its_end_user(s, key, SimpleNamespace(endUserId="shopper-7"), None)
+        assert no_turn.value.status_code == 409
+    finally:
+        s.close()
+    for refused in (lambda: _store(new_session, key, "shopper-7"),
+                    lambda: _consent_again(new_session, key, "shopper-7")):
+        with pytest.raises(HTTPException) as conflict:
+            refused()
+        assert conflict.value.status_code == 409
+    redis = _Redis()
+    _service(monkeypatch, redis)
+    done = _erase(new_session, key, "shopper-7")
+    assert (done["erased"], done["chats_deleted"]) == (True, 2)
+    assert set(_left(new_session, ws)[0]) == set(kept) and _left(new_session, ws)[2] == ["shopper-8"]
+
+
+def _consent_again(new_session, ctx, end_user_id):
+    s = new_session()
+    try:
+        return eum.record_consent(eum.EndUserConsent(consent=True), end_user_id=end_user_id, ctx=ctx, db=s)
+    finally:
+        s.close()
