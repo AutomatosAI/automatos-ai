@@ -10,6 +10,7 @@ responsible for consent (§8-6) and records it here before anything is stored fo
 | ``POST /{end_user_id}/memories``: store a fact | ``knowledge:create`` | ``memory:write`` |
 | ``GET /{end_user_id}/memories``: list | ``knowledge:read`` | ``memory:read`` |
 | ``GET /{end_user_id}/memories/search``: their facts and the workspace's | ``knowledge:read`` | ``memory:read`` |
+| ``GET /{end_user_id}/resume``: where they left off (§5.7) | ``knowledge:read`` | ``memory:read`` |
 | ``DELETE /{end_user_id}``: erase them (GDPR) | ``knowledge:delete`` | ``memory:write`` |
 | ``DELETE /{end_user_id}/memories/{id}``: one fact (a key: only one it wrote) | ``knowledge:delete`` | ``memory:write`` |
 
@@ -184,6 +185,24 @@ async def search_end_user_memories(q: str = Query(..., min_length=1), end_user_i
         raise _unavailable(MEMORY_UNAVAILABLE) from exc
     items = [_item(m, str(ctx.workspace_id), with_score=True) for m in _readable(ctx, rows)]
     return {"end_user_id": end_user_id, "query": q, "results": items, "total": len(items)}
+
+
+@router.get("/{end_user_id}/resume")
+async def resume_end_user(end_user_id: str = END_USER_ID,
+                          ctx: RequestContext = Depends(require_workspace_permission_or_server_key(
+                              "knowledge:read", MEMORY_READ)),
+                          db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Where the end user left off (§5.7, "where were we"): their recent conversations with each one's
+    checkpoint, and the decisions, open loops and next steps in their facts and the workspace's, never
+    another end user's. The workspace's are read as the other routes read them (``_readable``)."""
+    from modules.memory.resume_context import build_end_user_resume_payload
+
+    row = await run_in_threadpool(_known, db, ctx, end_user_id)
+    if row.erasing_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=BEING_ERASED)
+    payload = await build_end_user_resume_payload(db, workspace_id=str(ctx.workspace_id), end_user_id=end_user_id,
+                                                  readable=lambda rows: _readable(ctx, rows))
+    return {"end_user_id": end_user_id, **payload}
 
 
 @router.delete("/{end_user_id}")
