@@ -186,3 +186,24 @@ def test_the_turn_runs_as_its_end_user(monkeypatch):
     asyncio.run(drain(LeanRequest(end_user=player)))
     asyncio.run(drain(None))
     assert seen == [player, None] and current_end_user() is None
+
+
+def test_a_new_conversation_is_saved_with_its_end_user_in_one_write(new_session, workspace, engine):
+    from sqlalchemy import event
+
+    ws, _ = workspace
+    key = _key(new_session, ws)
+    statements = []
+
+    def seen(conn, cursor, statement, parameters, context, executemany):
+        statements.append(" ".join(statement.split()).upper())
+
+    event.listen(engine, "before_cursor_execute", seen)
+    try:
+        theirs = _open(new_session, key, endUserId="shopper-7")
+    finally:
+        event.remove(engine, "before_cursor_execute", seen)
+    inserts = [s for s in statements if s.startswith("INSERT INTO CHATS")]
+    assert len(inserts) == 1 and "END_USER_ID" in inserts[0]
+    assert not [s for s in statements if s.startswith("UPDATE CHATS")]
+    assert _tag_of(new_session, theirs) == "shopper-7"

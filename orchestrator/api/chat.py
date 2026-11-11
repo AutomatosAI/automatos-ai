@@ -268,6 +268,7 @@ def _open_chat(db: Session, chat_service: ChatService, request: ChatRequest, ctx
         title=_unique_title(db, user_id, parts),
         visibility=request.selectedVisibilityType,
         workspace_id=ctx.workspace_id,
+        end_user_id=getattr(request, "endUserId", None),  # PRD-274 W3: checked for a key, refused for a person
     )
     return str(chat.id)
 

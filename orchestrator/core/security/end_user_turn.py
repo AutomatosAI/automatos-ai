@@ -73,6 +73,7 @@ _end_user: ContextVar[Optional[EndUser]] = ContextVar("end_user_turn", default=N
 
 
 def current_end_user() -> Optional[EndUser]:
+    """The turn's end user; None on a turn that is no end user's."""
     return _end_user.get()
 
 
