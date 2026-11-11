@@ -28,6 +28,10 @@ from api.chat_models import ChatMessageRequest, ChatRequest, MessagePart
 from api.chat_turn_history import turn_history
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
+from api.chat_server_key import (acts_as_its_service_user, keeps_each_end_users_chats_apart,
+                                 what_a_server_key_may_ask)
+from core.auth.scopes import AGENTS_CHAT
+from core.auth.server_key_gate import require_workspace_permission_or_server_key
 from core.auth.dependencies import RequestContext
 from core.auth.principal import resolve_user_pk
 from core.models.core import User
@@ -78,6 +82,7 @@ class ChatSessionRequest(BaseModel):
 
 
 # Helper function to get user ID from database
+@acts_as_its_service_user  # PRD-274 W1: a server key runs as its own service user, never user 1
 def get_user_id(db: Session, ctx=None) -> int:
     """Resolve the authenticated principal to the integer ``users.id`` PK (PRD-185 S6).
 
@@ -114,6 +119,7 @@ def _explicitly_chosen_agent(db: Session, workspace_id, agent_id: int) -> int:
     return agent_id
 
 
+@what_a_server_key_may_ask  # PRD-274 W1: a key chats with a lean agent, its models on both lists
 def _checked_lean_request(db: Session, ctx: RequestContext, request: ChatRequest) -> Any:
     """Wave 2: the request's model and app context, checked against the agent it names before
     anything is saved; a 422 saying why when they cannot be used (consumers.chatbot.lean_request)."""
@@ -246,6 +252,7 @@ def _unique_title(db: Session, user_id: int, parts: List[MessagePart]) -> str:
     return title
 
 
+@keeps_each_end_users_chats_apart  # PRD-274 W3: a key's conversation is one end user's, or none's
 def _open_chat(db: Session, chat_service: ChatService, request: ChatRequest, ctx: RequestContext,
                user_id: int, parts: List[MessagePart]) -> str:
     """The turn's chat id: the request's own chat, or a new one. A stale or unknown id
@@ -261,6 +268,7 @@ def _open_chat(db: Session, chat_service: ChatService, request: ChatRequest, ctx
         title=_unique_title(db, user_id, parts),
         visibility=request.selectedVisibilityType,
         workspace_id=ctx.workspace_id,
+        end_user_id=getattr(request, "endUserId", None),  # PRD-274 W3: checked for a key, refused for a person
     )
     return str(chat.id)
 
@@ -382,10 +390,10 @@ def _after_the_turn(workspace_id: Any, chat_id: str, user_id: int, message_id: A
 
 
 # Endpoints
-@router.post("", dependencies=[Depends(require_workspace_permission("agents:execute"))])
+@router.post("")
 async def stream_chat(
     request: ChatRequest,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(require_workspace_permission_or_server_key("agents:execute", AGENTS_CHAT)),
     db: Session = Depends(get_db)
 ):
     """Stream chat messages using AI SDK Data Stream format (text/plain)"""

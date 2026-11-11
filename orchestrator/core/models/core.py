@@ -25,6 +25,7 @@ from uuid import uuid4
 # F292: a playbook's steps say their order on every read.
 from core.playbook_steps import steps_in_order
 from core.models.blog_post_review import BlogPostReviewColumns
+from core.models.end_users import END_USER_ID_MAX
 
 # Define PriorityLevel locally to avoid circular imports
 class PriorityLevel(str, Enum):
@@ -1238,6 +1239,8 @@ class Chat(Base):
     # F155: the widget key that started this conversation. A widget key reads
     # and resumes only the conversations it started; NULL is no key's.
     widget_key_id = Column(UUID(as_uuid=True), nullable=True)
+    # PRD-274 W3: the end user a server key's conversation is for; only their turns continue it.
+    end_user_id = Column(String(END_USER_ID_MAX), nullable=True)
 
     # Relationships
     messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan")
@@ -1248,6 +1251,8 @@ class Chat(Base):
         CheckConstraint("visibility IN ('private', 'public')", name='check_chat_visibility'),
         CheckConstraint("kind IN ('user', 'auto')", name='check_chat_kind'),
         Index('ix_chats_workspace_user', 'workspace_id', 'user_id'),
+        Index('ix_chats_workspace_end_user', 'workspace_id', 'end_user_id',
+              postgresql_where=text("end_user_id IS NOT NULL")),
         Index(
             'uq_chats_auto_thread', 'workspace_id', 'user_id',
             unique=True,

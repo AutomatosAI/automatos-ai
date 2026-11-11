@@ -205,8 +205,8 @@ stored as memory, and not returned in history.
 **Who else:** support that remembers a customer across visits, tutors that remember a student, coaches, companion
 apps, a returning shopper.
 
-A memory **subject** for end users: `MemoryNamespace` gains `end_user(product_id, end_user_id)`, written only when a
-server key asserts the end user (a widget visitor without that assertion stays as F154 has it). Consent is the
+A memory **subject** for end users: `MemoryNamespace` gains `end_user(workspace, end_user_id)` (§8-17), written only
+when a server key asserts the end user (a widget visitor without that assertion stays as F154 has it). Consent is the
 product's responsibility and recorded per subject; retention is set per product; one call erases an end user's
 memories (GDPR). Recall for an end user's turn reads that subject plus the workspace tier, never another end user's.
 
@@ -261,15 +261,26 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
   It found that consolidation deleted true facts about different subjects phrased alike: #1438, fixed on `main` in
   #1439.
 
-### Wave 1: headless access (next)
+### Wave 1: headless access (built)
 
-- Server keys on the named routes of §5.2, each with a declared scope; empty permissions deny; idempotency keys;
-  per-key limits and ceiling enforced.
-- The per-request model allow-list moves onto the product's key (§8-5); until then a lean agent's own
-  `model_allow_list` is the only one (Wave 2).
-- A lean turn's `model` and app context on the headless chat route (§8-10).
-- Signed completion callbacks with the run id, and a real `POST /api/agents/{id}/execute` in place of the fixed
-  response (§8-8).
+- A real `POST /api/agents/{id}/execute`: the run is a board ticket assigned to the agent, answered at once with
+  its id (#1461), in place of the fixed response (§8-8).
+- Signed completion callbacks with the run id: an https `callback_url`, checked against private addresses when the
+  run is asked for and before every send, an HMAC-SHA256 signature with the workspace's rotatable signing secret,
+  and three attempts (#1462).
+- `Idempotency-Key` on `/execute`: a repeat answers with the run it started, the same key on a different request
+  is a 409, and a race files one ticket (#1463).
+- Server keys on the named routes of §5.2, each with a declared scope, through one gate the shared auth dependency
+  never learns about; empty permissions deny, a publishable key is refused (#1468).
+- Per-key limits and ceiling: a key's requests and tokens a minute, under `SERVER_KEY_REQUESTS_PER_MINUTE`; on the
+  key routes a valid key meets its own limits instead of the per-IP one (#1470).
+- Memory read and write on keys (`memory:read`, `memory:write`); a key reads only facts no audience limits and none
+  private to a person, and what it stores names the key (#1471).
+- Starting a Playbook (`playbooks:execute`) and writing a Deliverable (`documents:write`) on keys (#1475).
+- The headless chat turn: `POST /api/chat` with a key listing `agents:chat`, to a lean agent, with `model` and app
+  context (§8-10); the model allow-list on the key (§8-5) (#1476).
+- Alongside: the caller's address read one way, from the header the proxy sets (#1474); stacked PRs get every
+  required check (#1473); private memories kept to their owner on list and search (#1472).
 
 ### Wave 2: lean turns and app context (built)
 
@@ -280,17 +291,29 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
 - Acceptance, met in `evals/lean_turn.py` with live memory recall: 346 tokens of platform overhead (target 2,000),
   and the first token 430 ms after the model's own (target 1.5 s).
 
-### Wave 3: end-user memory and the memory write API (next)
+### Wave 3: end-user memory and the memory write API (in progress)
 
-- The end-user subject, asserted by the product's server key (§8-6), consent record, retention and erasure; the
-  extended `POST /api/memory`.
+- The end-user subject, asserted by the product's server key (§8-6), with its consent record, retention and
+  erasure (#1479). A key deletes one end-user memory, and only one it wrote (#1480).
+- End-user chat turns: `endUserId` on a server key's `POST /api/chat`. Their consent must be on record (409), and
+  a person's turn names no end user (422) (#1486). Held by the turn's end user (`core/security/end_user_turn.py`):
+  - their turn writes only to their namespace, and nothing to the workspace's L2, its mirror or the daily log
+    (#1484);
+  - it recalls their facts, the workspace tier and the agent's own, never another end user's, with the caches,
+    the private-row guard and the standing rules keyed on them (#1485);
+  - each conversation is one end user's (`chats.end_user_id`), and erasing them deletes their conversations and
+    those conversations' sessions (#1487). The erase marks them first (`end_users.erasing_at`), so a turn still
+    running writes nothing more for them, and a failed erase is finished by the next one.
+- Still to come: the retention sweep (`end_users.retention_days`), "where were we" per end user (§5.7), and
+  cleaning up a key's service user (the follow-up below).
 
 ### Wave 4: memory profiles and need-to-know (built)
 
 - Profiles as seeded data (`general`, `customer`, `incident`, `case`) in `memory_profiles`, picked per agent or
   workspace (#1452). In `evals/memory_profiles.py` the incident profile keeps all of an incident's timeline where
   `general` kept 70%, and the case profile stops general legal background being kept as a case fact.
-- Workspace-defined profiles (§8-7): the create route, on the table #1452 already has.
+- Workspace-defined profiles (§8-7): create, change and delete a workspace's own, on the table #1452 already
+  has (#1460).
 - `audience` labels on facts and agents, held at the durable store by the run's reader; Auto and the owner's own
   pages read everything (§8-11); consolidation never crosses audiences (#1453). F155's stricter widget rule stays,
   with the labels on top of it.
@@ -300,6 +323,16 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
 - The product record (§8-3), find-or-create by external id with roster seeding, list, guarded purge; billed to the
   product's owner workspace (§8-2). Both registered verticals move onto it last, each keeping its behaviour: Shopify's
   re-provision mints a key, BudStacks' keeps the existing one.
+
+### Follow-ups from Wave 1 (open)
+
+| Follow-up | Waiting on |
+| --- | --- |
+| Set `CLIENT_IP_HEADER=X-Real-IP` on the hosted API service, then check Railway's edge replaces a client-supplied value | Gerard (an ops change on Railway) |
+| Enforce a key's IP allow-list instead of refusing one (#1467) | The setting above |
+| The app-wide per-IP limit is off in hosted (`AUTOMATOS_POLICY_PLANE` unset); the key routes are already exempt from it | A decision to turn the policy plane on |
+| Re-send a callback a restart left `pending` (#1462 sends in-process) | Done (#1481); PRD-276 (#1483) proposes a durable job in its place |
+| A key's service user outlives the key and its workspace (no personal data in it) | Nothing: clean up on revocation and workspace erase |
 
 ## 7. Rollout
 
@@ -332,6 +365,37 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
    main latency cost.
 10. **`model` and app context on the widget chat route.** Not added there; they arrive with Wave 1's headless routes.
 11. **Need-to-know and Auto.** Auto (and every system agent) reads every audience, as the owner's own pages do.
+
+### Decisions made while building Wave 1 (10 Nov 2026, Dave)
+
+12. **A key's chat turn runs as the key's own service user:** a non-login users row per key, never a workspace member.
+    (Not: the workspace owner, whom a caller with no person used to default to.)
+13. **Headless chat is its own scope, `agents:chat`.** (Not: `chat`, the widget's, which would grant it by accident.)
+14. **A model a key names must be on the key's allow-list and the agent's.** (Not: the key's alone.)
+15. **What a key starts is outside input.** A Playbook run a key starts is read as a payload, never the owner's
+    words; a ticket a key files gets no operator consent and meets the workspace's approval policy.
+16. **Memory delete and resume stay with people until Wave 3,** when a key's end users have their own scope.
+
+### Decided for Wave 3 (10 Nov 2026, Dave)
+
+17. **The end-user subject is scoped by workspace,** `(workspace, end_user_id)`, asserted by a server key of that
+    workspace: `mem:{ws}:end_user:{id}`, inside the tenant boundary the store and its namespace guard already keep.
+    Consent and retention hang off the key until Wave 5's product record, then move onto it. (Not: `(product_id,
+    end_user_id)` across a product's workspaces, which would break the tenant boundary and wait on Wave 5.) §5.5 is
+    read this way.
+
+### Made while building Wave 3's chat turns (11 Nov 2026, Dave; for Gerard to confirm)
+
+18. **An end user's turn writes nothing where the whole workspace reads:** no L2 transcript, no L2 mirror, no
+    daily log. Their conversation stays in its chat. (Not: tagged L2 rows filtered on every read, which every
+    reader of L2 would have to honour.)
+19. **Their recall is their namespace, the workspace tier and the agent's own.** The agent's namespace holds only
+    what turns that are no end user's wrote there (#1484 routes an end user's writes to theirs): the owner's
+    directions for that agent.
+20. **Their standing rules and private facts are their own** (`owner = end_user:{id}`), not the key's service
+    user's (decision 12), whom every end user of the key shares.
+21. **A conversation is one end user's, or none's.** A turn for another end user, or a key's turn for none,
+    doesn't continue it (403), and a person's turn names no end user.
 
 ## 9. Later
 

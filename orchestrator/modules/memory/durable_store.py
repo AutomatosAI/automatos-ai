@@ -45,6 +45,8 @@ from core.qdrant import (
 )
 from core.qdrant_writes import is_timeout, upsert_retrying_a_timeout_once
 from modules.memory.injection_filter import STATED_BY_KEY, deletable_by
+from core.security.end_user_turn import (owned_reads_go_to_its_end_user, reads_its_end_users_memory,
+                                         writes_to_its_end_user)
 from core.security.memory_audience import for_its_reader, labels_what_its_reader_writes
 from modules.memory.retired import leaves_out_retired, retired_metadata, unretired
 
@@ -250,6 +252,7 @@ class DurableMemoryStore:
 
     # ── Write ───────────────────────────────────────────────────
 
+    @writes_to_its_end_user  # PRD-274 W3: an end user's turn writes to their own namespace
     @labels_what_its_reader_writes  # Wave 4b: a labelled agent's write carries its labels
     async def add(
         self,
@@ -320,6 +323,7 @@ class DurableMemoryStore:
 
     # ── Read ────────────────────────────────────────────────────
 
+    @reads_its_end_users_memory  # PRD-274 W3: an end user's turn reads theirs with the workspace's
     @for_its_reader  # Wave 4b: nothing labelled for agents the run's reader is not
     @leaves_out_retired  # P256-FIX-N15-9: a rule the owner replaced is never recalled
     async def search(
@@ -405,6 +409,20 @@ class DurableMemoryStore:
         """Every memory in a namespace (unscored, scroll order)."""
         return await self._scroll(self._namespace_filter(user_id), limit)
 
+    async def get_one(self, memory_id: str, user_id: str) -> Optional[Dict]:
+        """The memory ``memory_id`` when it belongs to the namespace ``user_id``, else None. One
+        point read by id, so it is found however many the namespace holds (a scroll's order is
+        the point ids', not the newest first). A store that can't be read raises."""
+        if not self._enabled or not _is_point_id(memory_id):
+            return None
+        await self.ensure_collection()
+        points = await self._client.retrieve(self._collection, ids=[memory_id], with_payload=True)
+        payload = (points[0].payload or {}) if points else {}
+        if not points or payload.get("namespace") != user_id:
+            return None
+        return self._item_from_payload(points[0].id, payload)
+
+    @owned_reads_go_to_its_end_user  # PRD-274 W3: what an end user owns is in their namespace
     async def get_where_any(self, user_id: str, any_of: Dict[str, List[str]], limit: int = 100,
                             where: Optional[Dict[str, str]] = None) -> List[Dict]:
         """PRD-256 FX-015: the namespace's memories whose payload matches at least one of

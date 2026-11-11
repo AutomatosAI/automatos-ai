@@ -1,5 +1,5 @@
 {
-  "route_count": 1027,
+  "route_count": 1033,
   "routes": [
     {
       "method": "GET",
@@ -1892,6 +1892,30 @@
     {
       "method": "POST",
       "path": "/api/memory"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/memory/end-users/{end_user_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/memory/end-users/{end_user_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/end-users/{end_user_id}/memories"
+    },
+    {
+      "method": "POST",
+      "path": "/api/memory/end-users/{end_user_id}/memories"
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/end-users/{end_user_id}/memories/search"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/memory/end-users/{end_user_id}/memories/{memory_id}"
     },
     {
       "method": "GET",

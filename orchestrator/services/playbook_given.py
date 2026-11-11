@@ -37,9 +37,10 @@ BARE_INPUT = "{" + INPUT_KEY + "}"
 _NAMED_BLANK = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 # A trigger's payload (api/composio.py, api/webhooks.py); the run shows its content itself.
 TRIGGER_KEYS = ("content", "metadata")
-# RecipeExecution.triggered_by of a run a trigger or a webhook started (api/composio.py,
-# api/webhooks.py, api/workflow_recipes.py): its details are not the owner's words.
-TRIGGER_STARTS = ("composio_trigger", "workspace_webhook", "webhook")
+# RecipeExecution.triggered_by of a run a trigger, a webhook or a product's server key started
+# (api/composio.py, api/webhooks.py, api/workflow_recipes.py, api/playbook_run_start.py): its
+# details are not the owner's words.
+TRIGGER_STARTS = ("composio_trigger", "workspace_webhook", "webhook", "api_key")
 # Each detail is cut to this many characters.
 DETAIL_CHARS = 500
 STEP_OVERRIDES_KEY = "step_overrides"   # PRD-204 S7: a rerun's own wording for some steps

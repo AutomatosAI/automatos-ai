@@ -162,7 +162,15 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # workspace_signing_secrets and run_callbacks (new tables only): signed completion callbacks.
 # 2026-11-09 (Automatos for products, Wave 1): execute_idempotency_20261109 chains onto that —
 # one partial unique index on board_tasks: an API run's Idempotency-Key files one ticket.
-EXPECTED_HEAD = "execute_idempotency_20261109"
+# 2026-11-10 (Automatos for products, Wave 1): server_key_chat_20261110 chains onto that —
+# sdk_api_keys.model_allow_list and service_user_id (new nullable columns): headless chat turns.
+# 2026-11-10 (Automatos for products, Wave 3): end_users_20261110 chains onto that —
+# end_users (a new table only): a product's end users and the consent recorded for them.
+# 2026-11-11 (Automatos for products, Wave 3): end_user_chats_20261111 chains onto that —
+# chats.end_user_id (a new nullable column) and its partial index: an end user's conversations.
+# 2026-11-11 (Automatos for products, Wave 3): end_users_erasing_20261111 chains onto that —
+# end_users.erasing_at (a new nullable column): an erase that has started stops their writes.
+EXPECTED_HEAD = "end_users_erasing_20261111"
 
 
 def _literal(node: ast.AST):

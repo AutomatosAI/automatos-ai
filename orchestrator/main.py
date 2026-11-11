@@ -46,6 +46,7 @@ from core.models import Base
 import integrations.budstacks  # noqa: F401 — self-registers the budstacks VerticalProvisioner
 from api.agents import router as agents_router
 from api.agent_execute import router as agent_execute_router
+from api.end_user_memory import router as end_user_memory_router
 from api.run_callbacks import router as run_callbacks_router
 from api.partner_packs import router as partner_packs_router
 from api.workflows import router as workflows_router
@@ -1017,6 +1018,8 @@ from api.widgets.rate_limit import WidgetRateLimitMiddleware
 
 app.add_middleware(WidgetCORSMiddleware)
 app.add_middleware(WidgetRateLimitMiddleware)
+from core.security.client_ip import TrustedClientAddressMiddleware  # noqa: E402
+app.add_middleware(TrustedClientAddressMiddleware)  # outermost so far: the widget limiter sees the caller
 
 # Rate limiting (US-017)
 # PRD-174 F040 — the limiter was constructed but SlowAPIMiddleware was never
@@ -1025,16 +1028,14 @@ app.add_middleware(WidgetRateLimitMiddleware)
 # swallow_errors=False means a limiter that can't evaluate (storage error) raises
 # instead of waving the request through. A gate that can't decide must deny.
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from core.security.rate_limit_middleware import RouteTreeSlowAPIMiddleware  # PRD-262 US-008
 
 def _get_real_client_ip(request) -> str:
-    """Extract real client IP, respecting X-Forwarded-For behind reverse proxy."""
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return get_remote_address(request)
+    """The caller's address, read as every other limit reads it (core.security.client_ip)."""
+    from core.security.client_ip import client_ip
+
+    return client_ip(request)
 
 # F040 fix is gated on the policy-plane flag so flag-OFF is byte-for-byte today's
 # behaviour (limiter constructed but inert). swallow_errors follows the flag:
@@ -1044,7 +1045,7 @@ _policy_plane_on = bool(getattr(_app_config, "POLICY_PLANE_ENABLED", False))
 
 limiter = Limiter(
     key_func=_get_real_client_ip,
-    default_limits=["60/minute"],
+    default_limits=[f"{_app_config.APP_RATE_LIMIT_PER_MINUTE}/minute"],
     swallow_errors=not _policy_plane_on,  # F040: fail CLOSED when the plane is on
 )
 app.state.limiter = limiter
@@ -1230,6 +1231,7 @@ async def api_tracking_middleware(request, call_next):
 # Include API routers
 app.include_router(agents_router)
 app.include_router(agent_execute_router)  # PRD-274 Wave 1: a run of one agent, filed as a board ticket
+app.include_router(end_user_memory_router)  # PRD-274 Wave 3: a product's end users and their memories
 app.include_router(run_callbacks_router)  # PRD-274 Wave 1: the callback signing secret
 app.include_router(partner_packs_router)  # PRD-275: a workspace's partner packs (404 unless PARTNER_TOOLS_ENABLED)
 app.include_router(models_router)  # PRD-15: Model management
@@ -1365,6 +1367,10 @@ except Exception as e:
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)
+
+# PRD-274 W1: the routes a server key reaches limit per IP inside their gate, after it knows who calls.
+from core.auth.server_key_ip_limit import exempt_server_key_routes  # noqa: E402
+exempt_server_key_routes(limiter, app.routes)
 
 
 # Exports directory served through authenticated endpoint instead of open StaticFiles mount.

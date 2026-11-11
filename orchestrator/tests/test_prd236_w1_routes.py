@@ -385,7 +385,23 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # one partial unique index on board_tasks, no table and no row changed; the guard follows it.
     idempotency = (versions / "execute_idempotency_20261109.py").read_text()
     assert 'down_revision = "run_callbacks_20261109"' in idempotency
-    assert 'EXPECTED_HEAD = "execute_idempotency_20261109"' in guard
+    # 2026-11-10 (Automatos for products, Wave 1): server_key_chat_20261110 chains onto that —
+    # two nullable columns on sdk_api_keys, no row changed; the guard follows it.
+    key_chat = (versions / "server_key_chat_20261110.py").read_text()
+    assert 'down_revision = "execute_idempotency_20261109"' in key_chat
+    # 2026-11-10 (Automatos for products, Wave 3): end_users_20261110 chains onto that —
+    # end_users, a new table only; the guard follows it.
+    end_users = (versions / "end_users_20261110.py").read_text()
+    assert 'down_revision = "server_key_chat_20261110"' in end_users
+    # 2026-11-11 (Automatos for products, Wave 3): end_user_chats_20261111 chains onto that —
+    # one nullable column on chats and its partial index, no row changed; the guard follows it.
+    end_user_chats = (versions / "end_user_chats_20261111.py").read_text()
+    assert 'down_revision = "end_users_20261110"' in end_user_chats
+    # 2026-11-11 (Automatos for products, Wave 3): end_users_erasing_20261111 chains onto that —
+    # one nullable column on end_users, no row changed; the guard follows it.
+    erasing = (versions / "end_users_erasing_20261111.py").read_text()
+    assert 'down_revision = "end_user_chats_20261111"' in erasing
+    assert 'EXPECTED_HEAD = "end_users_erasing_20261111"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

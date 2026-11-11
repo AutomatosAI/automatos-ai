@@ -96,6 +96,7 @@ class ApiKeyService:
         default_agent_id: Optional[int] = None,
         team: Optional[str] = None,
         expires_at: Optional[datetime] = None,
+        model_allow_list: Optional[list[dict[str, str]]] = None,
     ) -> dict[str, Any]:
         """Create a new API key for a workspace.
 
@@ -125,6 +126,7 @@ class ApiKeyService:
             default_agent_id=default_agent_id,
             team=team,
             expires_at=expires_at,
+            model_allow_list=model_allow_list or None,
         )
 
         db.add(record)
@@ -140,6 +142,7 @@ class ApiKeyService:
             "permissions": record.permissions,
             "default_agent_id": record.default_agent_id,
             "team": record.team,
+            "model_allow_list": record.model_allow_list,
             "created_at": record.created_at.isoformat() if record.created_at else None,
         }
 
