@@ -28,6 +28,8 @@ from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
+from core.security.end_user_turn import shared_with_no_end_user, skipped_log
+
 logger = logging.getLogger(__name__)
 
 
@@ -733,6 +735,7 @@ class UnifiedMemoryService:
     # L3: Daily Logs (durable store, daily namespace)
     # ------------------------------------------------------------------
 
+    @shared_with_no_end_user(skipped_log)  # PRD-274 W3: the workspace's daily log
     async def store_daily_log(
         self,
         workspace_id: str,
@@ -903,6 +906,7 @@ class UnifiedMemoryService:
             row_id = str(row.id)
             return row_id
 
+    @shared_with_no_end_user(None)  # PRD-274 W3: every chat turn of the workspace reads L2
     async def store_short_term(
         self,
         workspace_id: str,

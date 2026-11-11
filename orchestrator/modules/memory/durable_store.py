@@ -45,6 +45,7 @@ from core.qdrant import (
 )
 from core.qdrant_writes import is_timeout, upsert_retrying_a_timeout_once
 from modules.memory.injection_filter import STATED_BY_KEY, deletable_by
+from core.security.end_user_turn import writes_to_its_end_user
 from core.security.memory_audience import for_its_reader, labels_what_its_reader_writes
 from modules.memory.retired import leaves_out_retired, retired_metadata, unretired
 
@@ -250,6 +251,7 @@ class DurableMemoryStore:
 
     # ── Write ───────────────────────────────────────────────────
 
+    @writes_to_its_end_user  # PRD-274 W3: an end user's turn writes to their own namespace
     @labels_what_its_reader_writes  # Wave 4b: a labelled agent's write carries its labels
     async def add(
         self,
