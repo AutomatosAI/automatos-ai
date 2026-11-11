@@ -168,3 +168,31 @@ def test_one_end_user_that_fails_is_counted_and_the_rest_are_swept(new_session, 
     assert totals["failed"] >= 1
     assert broken in _chats(new_session, ws) and _messages(new_session, broken) == 1
     assert fine not in _chats(new_session, ws)
+
+
+def test_the_shared_scheduler_sweeps_retention_daily_once_it_starts():
+    added = []
+    scheduler = SimpleNamespace(add_job=lambda fn, trigger, **kw: added.append((fn, trigger, kw)))
+
+    @end_user_retention.schedules_the_retention_sweep
+    def start(self):
+        self._scheduler = scheduler
+
+    start(SimpleNamespace())
+    ((fn, trigger, kw),) = added
+    assert fn is end_user_retention.sweep_end_user_retention and trigger == "cron"
+    assert (kw["hour"], kw["minute"]) == (end_user_retention.RETENTION_HOUR_UTC, end_user_retention.RETENTION_MINUTE_UTC)
+    assert kw["id"] == end_user_retention.RETENTION_JOB_ID and kw["replace_existing"] and kw["max_instances"] == 1
+    assert kw["misfire_grace_time"] == end_user_retention.RETENTION_MISFIRE_SECONDS
+
+
+def test_the_unified_scheduler_carries_it():
+    from services.scheduler import UnifiedScheduler
+
+    wrappers = []
+    start = UnifiedScheduler.start
+    while hasattr(start, "__wrapped__"):
+        wrappers.append(start.__code__.co_qualname)
+        start = start.__wrapped__
+    assert "schedules_the_retention_sweep.<locals>.started" in wrappers
+
