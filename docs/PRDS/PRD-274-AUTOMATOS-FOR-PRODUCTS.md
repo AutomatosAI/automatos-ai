@@ -291,10 +291,20 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
 - Acceptance, met in `evals/lean_turn.py` with live memory recall: 346 tokens of platform overhead (target 2,000),
   and the first token 430 ms after the model's own (target 1.5 s).
 
-### Wave 3: end-user memory and the memory write API (next)
+### Wave 3: end-user memory and the memory write API (in progress)
 
-- The end-user subject, asserted by the product's server key (§8-6), consent record, retention and erasure; the
-  extended `POST /api/memory`.
+- The end-user subject, asserted by the product's server key (§8-6), with its consent record, retention and
+  erasure (#1479). A key deletes one end-user memory, and only one it wrote (#1480).
+- End-user chat turns: `endUserId` on a server key's `POST /api/chat`. Their consent must be on record (409), and
+  a person's turn names no end user (422) (#1486). Held by the turn's end user (`core/security/end_user_turn.py`):
+  - their turn writes only to their namespace, and nothing to the workspace's L2, its mirror or the daily log
+    (#1484);
+  - it recalls their facts, the workspace tier and the agent's own, never another end user's, with the caches,
+    the private-row guard and the standing rules keyed on them (#1485);
+  - each conversation is one end user's (`chats.end_user_id`), and erasing them deletes their conversations and
+    those conversations' sessions (#TBD).
+- Still to come: the retention sweep (`end_users.retention_days`), "where were we" per end user (§5.7), and
+  cleaning up a key's service user (the follow-up below).
 
 ### Wave 4: memory profiles and need-to-know (built)
 
@@ -320,7 +330,7 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
 | Set `CLIENT_IP_HEADER=X-Real-IP` on the hosted API service, then check Railway's edge replaces a client-supplied value | Gerard (an ops change on Railway) |
 | Enforce a key's IP allow-list instead of refusing one (#1467) | The setting above |
 | The app-wide per-IP limit is off in hosted (`AUTOMATOS_POLICY_PLANE` unset); the key routes are already exempt from it | A decision to turn the policy plane on |
-| Re-send a callback a restart left `pending` (#1462 sends in-process) | Nothing: a small PR |
+| Re-send a callback a restart left `pending` (#1462 sends in-process) | Done (#1481); PRD-276 (#1483) proposes a durable job in its place |
 | A key's service user outlives the key and its workspace (no personal data in it) | Nothing: clean up on revocation and workspace erase |
 
 ## 7. Rollout
@@ -372,6 +382,19 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
     Consent and retention hang off the key until Wave 5's product record, then move onto it. (Not: `(product_id,
     end_user_id)` across a product's workspaces, which would break the tenant boundary and wait on Wave 5.) §5.5 is
     read this way.
+
+### Made while building Wave 3's chat turns (11 Nov 2026, Dave; for Gerard to confirm)
+
+18. **An end user's turn writes nothing where the whole workspace reads:** no L2 transcript, no L2 mirror, no
+    daily log. Their conversation stays in its chat. (Not: tagged L2 rows filtered on every read, which every
+    reader of L2 would have to honour.)
+19. **Their recall is their namespace, the workspace tier and the agent's own.** The agent's namespace holds only
+    what turns that are no end user's wrote there (#1484 routes an end user's writes to theirs): the owner's
+    directions for that agent.
+20. **Their standing rules and private facts are their own** (`owner = end_user:{id}`), not the key's service
+    user's (decision 12), whom every end user of the key shares.
+21. **A conversation is one end user's, or none's.** A turn for another end user, or a key's turn for none,
+    doesn't continue it (403), and a person's turn names no end user.
 
 ## 9. Later
 

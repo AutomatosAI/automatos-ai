@@ -192,7 +192,8 @@ def test_an_erase_deletes_the_namespace_and_the_record(new_session, workspace, s
     key = _key(new_session, workspace)
     _call(new_session, eum.record_consent, eum.EndUserConsent(consent=True), end_user_id="player-7", ctx=key)
     erased = _call(new_session, eum.erase_end_user, end_user_id="player-7", ctx=key)
-    assert erased == {"end_user_id": "player-7", "erased": True, "memories_deleted": 3}
+    assert erased == {"end_user_id": "player-7", "erased": True, "memories_deleted": 3, "chats_deleted": 0,
+                      "sessions_cleared": True}
     assert store.calls == [("erase", f"mem:{workspace}:end_user:player-7")]
     s = new_session()
     assert s.query(EndUser).filter(EndUser.workspace_id == uuid.UUID(workspace)).count() == 0

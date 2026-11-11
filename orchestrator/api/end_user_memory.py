@@ -15,11 +15,15 @@ responsible for consent (§8-6) and records it here before anything is stored fo
 
 Reads leave out anything private to a person and, for a key, anything an audience limits (as
 ``GET /api/memory`` does). A store needs a consent record first. What a key stores names the key
-(``written_by``). The erase deletes the namespace and the record; an end user's chat turns arrive
-in the next PR, and so does erasing what they leave elsewhere.
+(``written_by``).
+
+The erase deletes everything the end user left: their namespace, their conversations (a server key's
+chat turns for them, ``chats.end_user_id``, with their messages) and those conversations' sessions,
+then their consent record. Their turns write nothing anywhere else (``core.security.end_user_turn``).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -176,7 +180,8 @@ async def erase_end_user(end_user_id: str = END_USER_ID,
                          ctx: RequestContext = Depends(require_workspace_permission_or_server_key(
                              "knowledge:delete", MEMORY_WRITE)),
                          db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Erases the end user (GDPR): every memory in their namespace, then their consent record."""
+    """Erases the end user (GDPR): every memory in their namespace, their conversations and those
+    conversations' sessions, then their consent record."""
     row = await run_in_threadpool(_known, db, ctx, end_user_id)
     service = _service_or_503()
     try:
@@ -185,12 +190,42 @@ async def erase_end_user(end_user_id: str = END_USER_ID,
         logger.exception("[end_user_memory] erase failed for workspace %s", ctx.workspace_id)
         raise _unavailable(MEMORY_UNAVAILABLE) from exc
 
-    def _forget() -> None:
+    def _forget() -> List[str]:
+        chat_ids = _erase_their_chats(db, ctx, end_user_id)
         db.delete(row)
         db.commit()
+        return chat_ids
 
-    await run_in_threadpool(_forget)
-    return {"end_user_id": end_user_id, "erased": True, "memories_deleted": erased}
+    chat_ids = await run_in_threadpool(_forget)
+    cleared = await _forget_their_sessions(service, str(ctx.workspace_id), chat_ids)
+    return {"end_user_id": end_user_id, "erased": True, "memories_deleted": erased,
+            "chats_deleted": len(chat_ids), "sessions_cleared": cleared}
+
+
+def _erase_their_chats(db: Session, ctx: RequestContext, end_user_id: str) -> List[str]:
+    """Deletes the end user's conversations in this workspace; their messages, votes and pinned
+    documents go with them (each foreign key cascades). The ids deleted, for their sessions."""
+    from core.models.core import Chat
+
+    theirs = db.query(Chat).filter(Chat.workspace_id == ctx.workspace_id, Chat.end_user_id == end_user_id)
+    chat_ids = [str(row.id) for row in theirs.with_entities(Chat.id)]
+    theirs.delete(synchronize_session=False)
+    return chat_ids
+
+
+async def _forget_their_sessions(service: Any, workspace_id: str, chat_ids: List[str]) -> bool:
+    """Deletes the L1 sessions (Redis) of the erased conversations. False, logged, when Redis
+    can't be reached: they then expire within ``MEMORY_SESSION_TTL_SECONDS``."""
+    redis_client = service._get_redis() if chat_ids else None
+    if redis_client is None:
+        return True
+    keys = [service.namespace(workspace_id).session(chat_id) for chat_id in chat_ids]
+    try:
+        await asyncio.to_thread(redis_client.get_redis().delete, *keys)
+    except Exception:
+        logger.exception("[end_user_memory] erased conversations' sessions not cleared for workspace %s", workspace_id)
+        return False
+    return True
 
 
 @router.delete("/{end_user_id}/memories/{memory_id}")
