@@ -124,6 +124,14 @@ class MemorySection(BaseSection):
         return (ctx.context_mode in (ContextMode.RECIPE.value, ContextMode.TASK_EXECUTION.value)
                 and not ctx.kwargs.get("conversation"))
 
+    def _reads_the_workspace(self, ctx: SectionContext) -> bool:
+        """The turn recalls the workspace's other conversations (the Context Router's L2) and its
+        daily logs: a chat turn's, never a widget visitor's (F155), autonomous work's (F182) or an
+        end user's (PRD-274 W3), whose recall is their own facts and the workspace tier."""
+        from core.security.end_user_turn import current_end_user
+
+        return not (ctx.widget_mode or self._autonomous(ctx) or current_end_user() is not None)
+
     async def _build(self, ctx: SectionContext) -> str:
         # --- Context Router first (PRD-79), for a chat turn only ---
         # It also recalls the workspace's other conversations (L2) and its
@@ -131,8 +139,7 @@ class MemorySection(BaseSection):
         # recalls only its agent's own memories) or for autonomous work (F182).
         chat_id = ctx.kwargs.get("chat_id")
         autonomous = self._autonomous(ctx)
-        chat_turn = not (ctx.widget_mode or autonomous)
-        context_bundle = await self._try_context_router(ctx, chat_id) if chat_turn else None
+        context_bundle = await self._try_context_router(ctx, chat_id) if self._reads_the_workspace(ctx) else None
 
         if context_bundle is not None:
             content = self._format_context_bundle(context_bundle, ctx)
@@ -304,8 +311,7 @@ class MemorySection(BaseSection):
         memory_text = await self._retrieve_memories(manager, ctx)
 
         # --- Retrieve daily logs (the workspace's: a chat turn's only) ---
-        chat_turn = not (ctx.widget_mode or self._autonomous(ctx))
-        daily_logs = await self._retrieve_daily_logs(manager, ctx) if chat_turn else ""
+        daily_logs = await self._retrieve_daily_logs(manager, ctx) if self._reads_the_workspace(ctx) else ""
 
         # --- Session hydration (Redis) — only in fallback path ---
         session_text = await self._hydrate_session(ctx, chat_id)

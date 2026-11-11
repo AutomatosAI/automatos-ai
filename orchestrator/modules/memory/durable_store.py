@@ -45,6 +45,8 @@ from core.qdrant import (
 )
 from core.qdrant_writes import is_timeout, upsert_retrying_a_timeout_once
 from modules.memory.injection_filter import STATED_BY_KEY, deletable_by
+from core.security.end_user_turn import (owned_reads_go_to_its_end_user, reads_its_end_users_memory,
+                                         writes_to_its_end_user)
 from core.security.memory_audience import for_its_reader, labels_what_its_reader_writes
 from modules.memory.retired import leaves_out_retired, retired_metadata, unretired
 
@@ -82,6 +84,15 @@ def workspace_from_namespace(user_id: str) -> Optional[str]:
         return None
     parts = user_id.split(":")
     return parts[1] if len(parts) > 1 and parts[1] else None
+
+
+def _made_before(created_at: Any, cutoff: datetime) -> bool:
+    """A point's ``created_at`` (an ISO time, as ``add`` writes it) is before ``cutoff``; False when unreadable."""
+    try:
+        made = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return (made if made.tzinfo else made.replace(tzinfo=timezone.utc)) < cutoff
 
 
 def _is_point_id(memory_id: Any) -> bool:
@@ -250,6 +261,7 @@ class DurableMemoryStore:
 
     # ── Write ───────────────────────────────────────────────────
 
+    @writes_to_its_end_user  # PRD-274 W3: an end user's turn writes to their own namespace
     @labels_what_its_reader_writes  # Wave 4b: a labelled agent's write carries its labels
     async def add(
         self,
@@ -320,6 +332,7 @@ class DurableMemoryStore:
 
     # ── Read ────────────────────────────────────────────────────
 
+    @reads_its_end_users_memory  # PRD-274 W3: an end user's turn reads theirs with the workspace's
     @for_its_reader  # Wave 4b: nothing labelled for agents the run's reader is not
     @leaves_out_retired  # P256-FIX-N15-9: a rule the owner replaced is never recalled
     async def search(
@@ -418,6 +431,7 @@ class DurableMemoryStore:
             return None
         return self._item_from_payload(points[0].id, payload)
 
+    @owned_reads_go_to_its_end_user  # PRD-274 W3: what an end user owns is in their namespace
     async def get_where_any(self, user_id: str, any_of: Dict[str, List[str]], limit: int = 100,
                             where: Optional[Dict[str, str]] = None) -> List[Dict]:
         """PRD-256 FX-015: the namespace's memories whose payload matches at least one of
@@ -559,6 +573,28 @@ class DurableMemoryStore:
             count, subject_id, workspace_id,
         )
         return count
+
+    async def prune_older_than(self, user_id: str, cutoff: datetime) -> int:
+        """Deletes the memories in one exact namespace made before ``cutoff`` (an end user's retention,
+        PRD-274 W3), retired ones too; how many. Read in pages straight from the store, so neither the
+        run's reader nor the retired filter leaves an old one out. A memory with no readable
+        ``created_at`` is kept."""
+        if not self._enabled:
+            return 0
+        await self.ensure_collection()
+        old: List[Any] = []
+        offset: Any = None
+        while True:
+            points, offset = await self._client.scroll(
+                collection_name=self._collection, scroll_filter=self._namespace_filter(user_id),
+                limit=SCROLL_PAGE, offset=offset, with_payload=["created_at"], with_vectors=False)
+            old.extend(p.id for p in points if _made_before((p.payload or {}).get("created_at"), cutoff))
+            if not points or offset is None:
+                break
+        if old:
+            await self._client.delete(collection_name=self._collection, points_selector=old)
+            logger.info("[Durable] Pruned %d memor(ies) older than %s in namespace=%s", len(old), cutoff, user_id)
+        return len(old)
 
     async def erase_namespace(self, user_id: str) -> int:
         """Delete every memory in one exact namespace (e.g. a deleted

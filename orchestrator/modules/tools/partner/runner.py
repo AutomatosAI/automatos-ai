@@ -4,7 +4,8 @@
 limit, so a partner tool runs on its seam (``runs_partner_tools``, the innermost wrapper):
 
 1. A name shaped ``<pack>_<tool>`` that is not one of the executor's own tools is looked up:
-   the workspace has the pack installed and the calling agent lists it (``resolve``). Any
+   the workspace has the pack installed for the calling agent, and the agent lists it
+   (``resolve``). Any
    other name, and every name while ``PARTNER_TOOLS_ENABLED`` is off, takes the executor's
    own path untouched.
 2. The executor's own gates judge the call first: a widget turn's scopes, a lean turn's
@@ -37,7 +38,7 @@ from modules.tools.partner.request import (
     PartnerRefusal, auth_headers, checked_arguments, checked_base_url, chosen_operation, request_url,
 )
 from modules.tools.partner.shape import UNEXPECTED_ANSWER, shaped
-from modules.tools.partner.store import credential_fields, installed_packs, on_own_session, record_call
+from modules.tools.partner.store import credential_fields, installed_packs, may_use, on_own_session, record_call
 
 logger = logging.getLogger(__name__)
 
@@ -92,11 +93,13 @@ def might_be_partner_tool(executor: Any, tool_name: Any) -> bool:
 
 def resolve(db: Any, workspace_id: Any, agent_id: Any, tool_name: str) -> Optional[Resolved]:
     """The partner tool ``tool_name`` names for this agent: its workspace has the pack installed
-    and the agent's configuration lists it. None for anything else."""
+    for this agent, and the agent's configuration lists it. None for anything else."""
     parts = split_tool_name(tool_name)
     if parts is None or parts[0] not in granted_packs(db, agent_id, workspace_id):
         return None
     for installed in installed_packs(db, workspace_id, [parts[0]]):
+        if not may_use(installed, agent_id):
+            return None
         for tool in installed.pack.tools:
             if tool.name == parts[1]:
                 return Resolved(installed.pack.name, tool, tool_name, installed.credential_id)

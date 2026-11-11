@@ -489,8 +489,8 @@ def test_a_credential_that_is_gone_sends_nothing_and_records_nothing(on, stored,
 
 @pytest.fixture
 def installed(monkeypatch):
-    """A workspace with the pack installed, and one agent (``AGENT``) that lists it."""
-    packs = [SimpleNamespace(pack=parse_pack(_pack()), credential_id=CREDENTIAL)]
+    """A workspace with the pack installed for one agent (``AGENT``), which lists it."""
+    packs = [SimpleNamespace(pack=parse_pack(_pack()), credential_id=CREDENTIAL, agents=(AGENT,))]
     monkeypatch.setattr(offer, "granted_packs", lambda db, agent_id, workspace_id: ("acme",) if agent_id == AGENT else ())
     monkeypatch.setattr(offer, "installed_packs", lambda db, workspace_id, names=None: packs)
     return packs
@@ -506,6 +506,19 @@ BUILT_IN = [{"type": "function", "function": {"name": "search_knowledge", "param
 def test_only_an_agent_that_lists_the_pack_is_offered_its_tools(on, installed):
     assert _named(offer.with_partner_tools(BUILT_IN, object(), AGENT, WS)) == ["search_knowledge", TOOL]
     assert offer.with_partner_tools(BUILT_IN, object(), OTHER_AGENT, WS) == BUILT_IN
+
+
+def test_an_agent_that_lists_the_pack_without_the_installs_leave_is_offered_nothing(on, installed, monkeypatch):
+    # An editor may edit an agent (agents:update) but not install a pack (workspace:manage): listing the
+    # pack on an agent the install does not name gives it nothing, on a full turn or a lean one.
+    from consumers.chatbot import lean_turn
+
+    monkeypatch.setattr(offer, "granted_packs", lambda db, agent_id, workspace_id: ("acme",))
+    assert offer.with_partner_tools(BUILT_IN, object(), OTHER_AGENT, WS) == BUILT_IN
+    edited = SimpleNamespace(**{**vars(_lean_agent()), "id": OTHER_AGENT})
+    monkeypatch.setattr(config, "LEAN_TURNS_ENABLED", True)
+    assert lean_turn.lean_grant_for(_db_with(edited), OTHER_AGENT) == lean_turn.granted_names(edited)
+    assert offer.granted_partner_schemas(_db_with(edited), OTHER_AGENT, [TOOL]) == []
 
 
 def test_a_name_already_offered_is_never_offered_twice(on, installed):
@@ -722,26 +735,34 @@ def routes(monkeypatch):
 
     installs: List[Any] = []
 
-    def install(db, workspace_id, pack, credential_id):
-        installs.append((workspace_id, pack.name, credential_id))
-        return SimpleNamespace(pack=pack, credential_id=credential_id)
+    def install(db, workspace_id, pack, credential_id, agent_ids=()):
+        installs.append((workspace_id, pack.name, credential_id, tuple(agent_ids)))
+        return SimpleNamespace(pack=pack, credential_id=credential_id, agents=tuple(agent_ids))
 
     monkeypatch.setattr(api, "install_pack", install)
     monkeypatch.setattr(api, "taken_names", lambda db, pack: [])
     return SimpleNamespace(api=api, installs=installs, ctx=SimpleNamespace(workspace_id=WS))
 
 
-def _install(routes, name: str = "acme", pack: Any = None) -> Dict[str, Any]:
-    body = routes.api.InstallRequest(pack=_pack() if pack is None else pack, credential_id=CREDENTIAL)
+def _install(routes, name: str = "acme", pack: Any = None, agents: Any = (AGENT,)) -> Dict[str, Any]:
+    body = routes.api.InstallRequest(pack=_pack() if pack is None else pack, credential_id=CREDENTIAL,
+                                     agents=list(agents))
     return routes.api.install_partner_pack(name, body, ctx=routes.ctx, db=object())
 
 
 def test_a_manager_installs_a_pack_with_the_credential_its_calls_use(on, routes):
     described = _install(routes)
-    assert routes.installs == [(WS, "acme", CREDENTIAL)]
+    assert routes.installs == [(WS, "acme", CREDENTIAL, (AGENT,))] and described["agents"] == [AGENT]
     assert described["tools"] == [{"name": TOOL, "description": "Search and look up orders.", "scope": "orders:read",
                                    "operations": ["search", "get"]}]
     assert described["credential_id"] == CREDENTIAL and KEY not in json.dumps(described)
+
+
+def test_a_pack_installed_for_no_agent_is_installed_for_no_one(on, routes):
+    body = routes.api.InstallRequest(pack=_pack(), credential_id=CREDENTIAL)  # no agents named
+    assert routes.api.install_partner_pack("acme", body, ctx=routes.ctx, db=object())["agents"] == []
+    with pytest.raises(ValueError):  # more agents than a pack may be allowed to
+        routes.api.InstallRequest(pack=_pack(), credential_id=CREDENTIAL, agents=list(range(1, 52)))
 
 
 def test_a_pack_that_cannot_be_installed_says_why(on, routes, monkeypatch):

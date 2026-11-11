@@ -28,6 +28,8 @@ from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
+from core.security.end_user_turn import shared_with_no_end_user, skipped_log
+
 logger = logging.getLogger(__name__)
 
 
@@ -92,10 +94,12 @@ class MemoryNamespace:
 
     def cache_key(self, agent_id: Optional[int], query_hash: str, with_workspace: bool = False) -> str:
         """Cache key for L3 search results; ``with_workspace`` marks a search that also read the workspace."""
+        from core.security.end_user_turn import end_user_key
         from core.security.memory_audience import reader_key
 
         scope = (str(agent_id) if agent_id is not None else "global") + ("+workspace" if with_workspace else "")
-        return f"mem:cache:{self.workspace_id}:{scope}{reader_key()}:{query_hash}"  # Wave 4b: per reader
+        # Wave 4b: per reader; Wave 3: per end user, whose own facts a workspace search reads too
+        return f"mem:cache:{self.workspace_id}:{scope}{reader_key()}{end_user_key()}:{query_hash}"
 
     def cache_pattern(self) -> str:
         """Pattern to match all cache keys for this workspace (for invalidation)."""
@@ -733,6 +737,7 @@ class UnifiedMemoryService:
     # L3: Daily Logs (durable store, daily namespace)
     # ------------------------------------------------------------------
 
+    @shared_with_no_end_user(skipped_log)  # PRD-274 W3: the workspace's daily log
     async def store_daily_log(
         self,
         workspace_id: str,
@@ -903,6 +908,7 @@ class UnifiedMemoryService:
             row_id = str(row.id)
             return row_id
 
+    @shared_with_no_end_user(None)  # PRD-274 W3: every chat turn of the workspace reads L2
     async def store_short_term(
         self,
         workspace_id: str,
