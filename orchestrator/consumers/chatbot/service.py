@@ -282,9 +282,11 @@ class ChatService:
         visibility: str = "private",
         workspace_id: Optional[uuid.UUID] = None,
         widget_key_id: Optional[uuid.UUID] = None,
+        end_user_id: Optional[str] = None,
     ) -> Chat:
         """Create a new chat session scoped to a workspace. A widget passes
-        the key that starts it (F155)."""
+        the key that starts it (F155); a server key's turn for an end user, the
+        end user it is for (PRD-274 W3), saved with the chat in one commit."""
         chat = Chat(
             id=uuid.uuid4(),
             user_id=user_id,
@@ -292,6 +294,7 @@ class ChatService:
             title=title,
             visibility=visibility,
             widget_key_id=widget_key_id,
+            end_user_id=end_user_id,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
         )

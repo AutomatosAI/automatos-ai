@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import functools
 import logging
-import uuid
 from dataclasses import replace
 from typing import Any, Callable, List, Mapping, Optional
 
@@ -121,7 +120,8 @@ def _for_its_end_user(db: Any, ctx: Any, request: Any, lean: Any) -> Any:
 
 def keeps_each_end_users_chats_apart(open_chat: Callable[..., str]) -> Callable[..., str]:
     """Wraps ``api.chat._open_chat``: a key's conversation is for one end user or for none, and only
-    a turn for the same one continues it (403 otherwise). A new conversation is tagged with its end user."""
+    a turn for the same one continues it (403 otherwise). ``_open_chat`` saves a new conversation with
+    its end user in the same commit (``ChatService.create_chat``)."""
 
     @functools.wraps(open_chat)
     def opened(db: Any, chat_service: Any, request: Any, ctx: Any, user_id: int, parts: Any) -> str:
@@ -131,21 +131,9 @@ def keeps_each_end_users_chats_apart(open_chat: Callable[..., str]) -> Callable[
         chat = chat_service.get_chat(request.id, workspace_id=ctx.workspace_id) if request.id else None
         if chat is not None and chat.user_id == user_id and chat.end_user_id != wanted:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=NOT_THIS_END_USERS_CHAT)
-        chat_id = open_chat(db, chat_service, request, ctx, user_id, parts)
-        if wanted:
-            _tag_a_new_chat(db, chat_id, wanted)
-        return chat_id
+        return open_chat(db, chat_service, request, ctx, user_id, parts)
 
     return opened
-
-
-def _tag_a_new_chat(db: Any, chat_id: str, end_user_id: str) -> None:
-    """The conversation just opened is the end user's (an untagged one only: a tagged one is theirs)."""
-    from core.models.core import Chat
-
-    (db.query(Chat).filter(Chat.id == uuid.UUID(str(chat_id)), Chat.end_user_id.is_(None))
-     .update({Chat.end_user_id: end_user_id}, synchronize_session=False))
-    db.commit()
 
 
 def _refuse(detail: str) -> HTTPException:
