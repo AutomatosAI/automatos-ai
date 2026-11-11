@@ -329,14 +329,35 @@ def schedules_the_resend(start: Callable[..., Any]) -> Callable[..., Any]:
     return started
 
 
+class ResendFailed(RuntimeError):
+    """Some callbacks of a resend batch raised; each was logged and the rest were still sent."""
+
+    def __init__(self, task_ids: List[int]) -> None:
+        super().__init__(f"re-sending the callbacks of tickets {task_ids} raised")
+        self.task_ids = task_ids
+
+
 async def resend_pending_callbacks() -> int:
-    """Delivers each callback still pending well after its ticket ended; how many it tried."""
+    """Delivers each callback still pending well after its ticket ended; how many it tried. One that
+    raises is logged and the rest are still sent, so a callback that always fails holds up no
+    other; the batch then raises ``ResendFailed``, naming those that did."""
     task_ids = await asyncio.to_thread(_on_own_session, _stale_pending)
-    for task_id in task_ids:
-        await deliver_run_callback(task_id)
+    failed = [task_id for task_id in task_ids if not await _resent(task_id)]
     if task_ids:
-        logger.info("[run_callbacks] re-sent %d callback(s) a restart left pending", len(task_ids))
+        logger.info("[run_callbacks] re-sent %d callback(s) a restart left pending", len(task_ids) - len(failed))
+    if failed:
+        raise ResendFailed(failed)
     return len(task_ids)
+
+
+async def _resent(task_id: int) -> bool:
+    """Delivers one ticket's callback; False, logged, when it raised."""
+    try:
+        await deliver_run_callback(task_id)
+    except Exception:
+        logger.exception("[run_callbacks] re-sending ticket %s's callback raised; the batch goes on", task_id)
+        return False
+    return True
 
 
 def _stale_pending(db: Any) -> List[int]:

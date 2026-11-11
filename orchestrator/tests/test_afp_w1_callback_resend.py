@@ -72,6 +72,21 @@ def test_only_callbacks_cut_off_after_their_ticket_ended_are_sent_again(new_sess
     assert {t for t in sent if t in mine} == {tickets["cut_off"], tickets["failed_run"]}
 
 
+def test_a_callback_that_raises_is_logged_and_the_rest_are_still_sent(new_session, tickets, monkeypatch):
+    sent = []
+
+    async def deliver(task_id, run_id=None):
+        if task_id == tickets["cut_off"]:
+            raise RuntimeError("signing secret unreadable")
+        sent.append(task_id)
+        return "delivered"
+
+    monkeypatch.setattr(rc, "deliver_run_callback", deliver)
+    with pytest.raises(rc.ResendFailed) as failed:
+        asyncio.run(rc.resend_pending_callbacks())
+    assert tickets["failed_run"] in sent and tickets["cut_off"] in failed.value.task_ids
+
+
 def test_the_shared_scheduler_runs_the_resend_once_it_starts():
     added = []
     scheduler = SimpleNamespace(add_job=lambda fn, trigger, **kw: added.append((fn, trigger, kw)))
