@@ -311,7 +311,7 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
   with each one's checkpoint, and the decisions and open loops in their facts and the workspace's, read as them,
   never another end user's (#1490).
 - A key's service user goes with its workspace: the purge deletes it after the workspace's rows, and revoking a key
-  keeps it (decision 23) (#TBD).
+  keeps it (decision 23) (#1491).
 
 ### Wave 4: memory profiles and need-to-know (built)
 
@@ -338,7 +338,7 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
 | Enforce a key's IP allow-list instead of refusing one (#1467) | The setting above |
 | The app-wide per-IP limit is off in hosted (`AUTOMATOS_POLICY_PLANE` unset); the key routes are already exempt from it | A decision to turn the policy plane on |
 | Re-send a callback a restart left `pending` (#1462 sends in-process) | Done (#1481); PRD-276 (#1483) proposes a durable job in its place |
-| A key's service user outlives the key and its workspace (no personal data in it) | Done: the purge deletes it with its workspace; revoking keeps it (decision 23) (#TBD) |
+| A key's service user outlives the key and its workspace (no personal data in it) | Done: the purge deletes it with its workspace; revoking keeps it (decision 23) (#1491) |
 
 ## 7. Rollout
 
