@@ -256,3 +256,32 @@ def test_a_chat_opened_as_their_erase_started_is_deleted_by_the_turn(new_session
         s.close()
     assert set(_left(new_session, ws)[0]) == before
 
+
+def test_a_redis_configured_but_unavailable_leaves_the_erase_for_the_next_one(new_session, workspace, monkeypatch):
+    from fastapi import HTTPException
+
+    from config import config
+
+    ws, person = workspace
+    monkeypatch.setenv("REDIS_URL", "redis://redis.invalid:6379/0")
+    assert config.REDIS_URL
+    _service(monkeypatch, None)  # the client could not be made
+    key, theirs, _ = _setup(new_session, ws, person)
+    with pytest.raises(HTTPException) as failed:
+        _erase(new_session, key, "shopper-7")
+    assert failed.value.status_code == 503 and set(theirs) <= set(_left(new_session, ws)[0])
+    redis = _Redis()
+    _service(monkeypatch, redis)
+    assert _erase(new_session, key, "shopper-7")["chats_deleted"] == 2
+    assert sorted(redis.deleted) == sorted(f"mem:session:{ws}:{c}" for c in theirs)
+
+
+def test_with_no_redis_configured_there_are_no_sessions_to_clear(new_session, workspace, monkeypatch):
+    ws, person = workspace
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.setattr("config.config.REDIS_HOST", None, raising=False)
+    _service(monkeypatch, None)
+    key, theirs, kept = _setup(new_session, ws, person)
+    assert _erase(new_session, key, "shopper-7")["chats_deleted"] == 2
+    assert set(_left(new_session, ws)[0]) == set(kept)
+

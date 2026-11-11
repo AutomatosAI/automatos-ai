@@ -250,9 +250,19 @@ def _erase_their_chats(db: Session, ctx: RequestContext, end_user_id: str) -> in
 
 async def _forget_their_sessions(service: Any, workspace_id: str, chat_ids: List[str]) -> bool:
     """Deletes the L1 sessions (Redis) of the end user's conversations, before the conversations go, so a
-    failure leaves their ids for the next erase. False, logged, when Redis can't be reached."""
-    redis_client = service._get_redis() if chat_ids else None
+    failure leaves their ids for the next erase. False, logged, when Redis can't be reached: a client that
+    can't be made while Redis is configured is a failure, since their sessions may be there. With no Redis
+    configured, no session was ever stored."""
+    from config import config
+
+    if not chat_ids:
+        return True
+    redis_client = service._get_redis()
     if redis_client is None:
+        if config.REDIS_URL:
+            logger.error("[end_user_memory] Redis is configured but unavailable; sessions not cleared for workspace %s",
+                         workspace_id)
+            return False
         return True
     keys = [service.namespace(workspace_id).session(chat_id) for chat_id in chat_ids]
     try:
