@@ -107,14 +107,15 @@ Railway's replica count for the API isn't set in the manifest (`infrastructure/r
 
 ### 6.1 Three roles, one image
 
-`PROCESS_ROLE` in `config.py`: `api`, `worker`, `scheduler` or `all`.
+`PROCESS_ROLES` in `config.py` is a comma-separated set of `api`, `worker` and `scheduler`. The default is all three. A process starts each role it lists, and no other.
 
 | Role | Runs | Hosted | Local edition |
 |---|---|---|---|
-| `api` | HTTP and SSE. Queues jobs; runs none | The existing API service; `WEB_CONCURRENCY` unchanged | Part of `all` |
-| `worker` | The job loop (§6.3) and, from Wave 4, the board dispatch loop | A new Railway service from the same image, scaled independently | Part of `all` |
-| `scheduler` | APScheduler. Every timed job only **queues** a job (§6.4) | Inside the worker service, behind a Postgres advisory lock, so exactly one runs across containers | Part of `all` |
-| `all` (default) | All three, in one process, as today | Not used | `docker compose up` unchanged |
+| `api` | HTTP and SSE. Queues jobs; runs none | The existing API service: `PROCESS_ROLES=api`, `WEB_CONCURRENCY` unchanged | Listed by default |
+| `worker` | The job loop (§6.3) and, from Wave 4, the board dispatch loop | A new Railway service from the same image: `PROCESS_ROLES=worker,scheduler`, scaled independently | Listed by default |
+| `scheduler` | The timed jobs. Each only **queues** a job (§6.4). It runs only while it holds a Postgres advisory lock, so a process can list it safely on every replica | Listed on the worker service: every replica tries for the lock, one holds it, and another takes over if that one dies | Listed by default |
+
+The local edition keeps the default, so `docker compose up` runs everything in one process, as today. **So a deployment can't run without timed work unnoticed,** the API's readiness reports a problem when no process has held the scheduler lock for longer than the shortest timed-job interval.
 
 ### 6.2 The job table and how a job is queued
 
@@ -124,9 +125,9 @@ One new table, `jobs`:
 |---|---|
 | `id` (uuid), `kind` (text), `workspace_id` (uuid, nullable for platform jobs) | What the job is, and its tenant |
 | `payload` (jsonb) | The handler's input: ids, never large blobs |
-| `status` | `queued`, `running`, `done`, `failed`, `dead` |
+| `status` | `queued` (including a failed job waiting for its next attempt), `running`, `done`, `dead` (its attempts used up) |
 | `run_at`, `attempts`, `max_attempts` | When it may run next, and the retry budget |
-| `lease_until`, `claimed_by` | PRD-161's lease, generalised |
+| `lease_until`, `claimed_by`, `claim_id` (uuid, new on every claim) | PRD-161's lease, generalised, and the token that fences a stale worker (§6.3) |
 | `idempotency_key` (unique per `kind`) | A second queue with the same key is a no-op |
 | `last_error`, `created_at`, `updated_at`, `finished_at` | What happened |
 
@@ -142,34 +143,56 @@ db.commit()  # the job exists only if the ticket's write committed
 - **Handlers are registered per kind,** with that kind's backoff, attempt limit, lease and concurrency:
 
 ```python
-@job_handler("run_callback.deliver", backoff=(5, 15, 60, 300), max_attempts=6, lease_seconds=60)
+@job_handler("run_callback.deliver", backoff=(5, 15, 60, 300, 900), max_attempts=6, lease_seconds=60)
 async def deliver(job: Job) -> None: ...
 ```
+
+- **How attempts map to delays:** `attempts` counts claims, starting at 1 on the first. After the *n*th attempt fails, the job waits `backoff[n - 1]` seconds. If the tuple is shorter than `max_attempts - 1`, its last delay repeats. So every retry has a delay, and a handler that lists one delay waits the same time between all its attempts.
 
 ### 6.3 The worker loop
 
 This is PRD-161's dispatch loop, generalised to any `kind` [T: the primitives it reuses]:
 - **Claiming:** `FOR UPDATE SKIP LOCKED` over `jobs` where `status = 'queued' AND run_at <= now()`, a batch at a time, within each kind's concurrency limit.
 - **Waking up:** `LISTEN jobs_available`, with a poll as the fallback.
-- **Leases:** the lease is renewed while a long handler runs. An expired lease puts the job back in the queue, with its attempt already counted.
-- **Failure:** a handler that raises is logged with `logger.exception` and recorded through `record_error` under `subsystem="jobs"`. The job then goes back in the queue at `run_at = now() + backoff[attempts]`. Once its attempts are used up it becomes `dead`, and the owner is told where a person should know (callbacks, Playbook runs).
+- **Leases:** the lease is renewed while a long handler runs.
+  - **An expired lease counts as a failed attempt,** because `attempts` was raised when the job was claimed. With attempts left, the job goes back in the queue at its next delay. With none left, it becomes `dead`, and is reported as a failure would be. So a job whose worker keeps dying can't loop forever. This is PRD-161's rule: `requeue_expired_leases` fails a ticket once its attempts reach the limit (`services/board_dispatcher.py:355`) [T].
+- **Fencing a stale worker:** a slow worker may still be running after its lease has expired and another worker has claimed the job.
+  - Every claim writes a new `claim_id`, and every renewal, success or failure is `UPDATE … WHERE id = :id AND claim_id = :claim_id`.
+  - A worker whose update matches no row has lost the job. It stops, logs, and writes nothing more, so it can never requeue or complete a newer claim.
+  - PRD-161 already fences renewals by run (F209: `runtime_ref->>'run_id'` in `renew_lease`) [T]. Here every write is fenced, not just renewals.
+- **Failure:** a handler that raises is logged with `logger.exception` and recorded through `record_error` under `subsystem="jobs"`. The job then goes back in the queue at its next delay (§6.2). Once its attempts are used up it becomes `dead`, and the owner is told where a person should know (callbacks, Playbook runs).
 - **Shutdown:** on SIGTERM the worker stops claiming and finishes or abandons what it holds. An abandoned job's lease runs out and another worker picks it up.
 - **Retention:** a timed job deletes `done` rows older than `JOBS_RETENTION_DAYS`.
 
 ### 6.4 The scheduler queues; it never runs
 
-- **Every timed job becomes `enqueue(kind, key=f"{kind}:{scheduled_slot}")`.** Two schedulers firing the same slot queue one job, so a duplicate tick is harmless.
+- **Every timed job becomes `enqueue(kind, key=f"{schedule_id}:{slot}")`,** where the key is unique per `kind`.
+  - **`schedule_id`** is the schedule's own stable identity: `playbook:<id>` for a Playbook schedule, `heartbeat:<agent id>`, `scheduled_task:<id>`, or `platform` for a platform job such as metering. Those rows belong to a workspace, so two schedules, in one workspace or two, never share a key.
+  - **`slot`** is the scheduled time the tick is for, not the time it ran.
+  - Two schedulers firing the same schedule's same slot queue one job, so a duplicate tick is harmless.
 - **One scheduler across containers:** a Postgres advisory lock, held on a session for as long as the process runs. This replaces the `/tmp` file lock, which holds within one container only. Another process waits for the lock and takes over if the holder dies.
 - **APScheduler's job store goes back to memory.** The schedule is rebuilt from the database at start-up, as `load_active_tasks_to_scheduler` and the reconcile tick already do (`main.py:509-527`). The schedule never needs sharing across processes.
+- **Slots missed while no scheduler ran:** a rebuilt schedule doesn't by itself queue the slots that passed during a deploy. Today, APScheduler skips a slot that fires too late (its misfire grace time) [I]. Instead:
+  - **A durable cursor per schedule:** a `job_schedules` row (`kind`, `schedule_id`, `last_slot`). Each due slot is queued in the same transaction that moves `last_slot` forward, so a slot is either queued and recorded, or neither.
+  - **At start-up, and on each tick,** the scheduler queues every slot between `last_slot` and now, by the kind's **catch-up policy:**
+    - `all`: every missed slot, for work that is counted per slot;
+    - `latest`: the most recent missed slot only, for heartbeats, digests and reconcilers;
+    - `none`: skip, for best-effort work.
+  - **Metering needs `latest`, not `all`.** `meter_tick` debits every call still waiting and marks it charged (`services/credits/jobs.py:37`, `meter_pending`) [T], so one late tick covers the missed ones.
+  - With the cursor in place, APScheduler is only a timer that wakes the scheduler. §10-3 asks whether a plain tick loop over the cursors should replace it.
 
 ### 6.5 Outbound deliveries are one kind of job
 
 `run_callback.deliver` and `widget_destination.deliver` replace the two in-memory retry loops (§4.4):
-- **A stable delivery id per callback** (the job's id), so `X-Automatos-Delivery` really does identify repeats for the receiver;
+- **A stable delivery id per callback** (the job's id), the same on every attempt;
 - **backoff long enough** to ride out a receiver's restart;
 - **a `dead` state** shown where `run_callbacks` and `widget_event_log` already report delivery.
 
-#1481's resend job, and #1482, become unnecessary, and are deleted in Wave 1.
+**The guarantee is at least once.** A worker can die after the receiver accepted a send, but before the job is marked done, and the retry sends it again. What that means for each receiver:
+- **Run callbacks:** the receiver dedupes. The contract (#1462) already says `X-Automatos-Delivery` names the delivery and retries keep it (`services/run_callbacks.py:9`) [T]. With a stable id per callback, a receiver that drops an id it has seen gets each callback once in effect. The docs for callback receivers say so, and Wave 1 tests that the id is the same on every attempt.
+- **Widget destinations** (Telegram, Slack, a workspace webhook, sent through `send_workspace_notification`): Telegram and Slack messages have no delivery id to dedupe on [I]. A rare duplicate message is possible and is documented as such. Wave 1 gives a workspace webhook the same `X-Automatos-Delivery` header, so it can dedupe as a run callback's receiver does.
+
+#1481's resend job is deleted in Wave 1, and #1482's race goes with it.
 
 ### 6.6 Jobs and events are different things
 
@@ -179,8 +202,11 @@ This is PRD-161's dispatch loop, generalised to any `kind` [T: the primitives it
 
 ### 6.7 Editions
 
-- **Local edition:** `PROCESS_ROLE=all`. Same compose file, same single container, no new service.
-- **Hosted:** an `automatos-ai-worker` service from the same image with `PROCESS_ROLE=worker`, plus the scheduler behind the advisory lock. The API service becomes `PROCESS_ROLE=api`.
+- **Local edition:** the default `PROCESS_ROLES` (all three). Same compose file, same single container, no new service.
+- **Hosted:**
+  - the API service sets `PROCESS_ROLES=api`;
+  - a new `automatos-ai-worker` service, from the same image, sets `PROCESS_ROLES=worker,scheduler`;
+  - every worker replica runs jobs, and one at a time holds the scheduler lock.
 - Both editions run the same code. No hosted-only path.
 
 ## 7. What is reused, and what is deleted
@@ -204,13 +230,13 @@ This is PRD-161's dispatch loop, generalised to any `kind` [T: the primitives it
 | Wave | Delivers | Proven by |
 |---|---|---|
 | **0** | This PRD decided (§10) | — |
-| **1** | `core/jobs` (table, `enqueue`, handler registry, the worker loop in `PROCESS_ROLE=all`); run callbacks and widget destinations moved; the resend job and both retry loops deleted | A test kills the worker mid-delivery; the callback arrives once, with the same delivery id |
-| **2** | The scheduler queues only, behind the advisory lock; idempotency key per slot; memory job store | Two schedulers in one test: each slot's job is queued once |
+| **1** | `core/jobs` (table, `enqueue`, handler registry, fenced claims, the worker loop under the default `PROCESS_ROLES`); run callbacks and widget destinations moved; the resend job and both retry loops deleted | Tests:<br>• a worker is killed mid-delivery, and the retry carries the same delivery id;<br>• a stale worker's completion matches no row;<br>• a job whose lease keeps expiring becomes `dead` at its limit |
+| **2** | The scheduler queues only, behind the advisory lock; keys of `schedule_id` plus slot; `job_schedules` cursors with each kind's catch-up policy; memory job store | Tests:<br>• two schedulers: each schedule's slot is queued once;<br>• two schedules with the same slot each queue their own job;<br>• a scheduler stopped across three slots queues them by each kind's policy on start-up |
 | **3** | Playbook runs as `playbook.run` jobs through `PlaybookEngine.launch`; inbound webhook replies as jobs; the reaper's `RecipeExecution` surface replaced by the lease | A restart during a run: the run is retried, not failed |
-| **4** | `PROCESS_ROLE` split on hosted: a worker service; the board dispatch loop moves to the worker role; the decision on board tasks as jobs (§10-5) | The API's event loop stays free while runs execute (`core/loop_watchdog.py` reports no stalls under load) |
+| **4** | `PROCESS_ROLES` split on hosted (§6.7): a worker service; the board dispatch loop moves to the worker role; the decision on board tasks as jobs (§10-5) | The API's event loop stays free while runs execute (`core/loop_watchdog.py` reports no stalls under load) |
 | **5** | The remaining `create_task` and `BackgroundTasks` sites sorted: move what a person would notice losing; keep what is best-effort | A short list in the PR, site by site |
 
-Waves 1 and 2 stand on their own, and each is a few hundred lines. Every wave keeps `PROCESS_ROLE=all` working.
+Waves 1 and 2 stand on their own, and each is a few hundred lines. Every wave keeps the default `PROCESS_ROLES`, all three in one process, working.
 
 ## 9. Limits, stated plainly
 
@@ -224,7 +250,7 @@ Waves 1 and 2 stand on their own, and each is a few hundred lines. Every wave ke
 1. **The backing store.** *Recommendation:* a `jobs` table in Postgres, generalised from PRD-161: no new dependency, and jobs are queued in the same transaction.
    - **Alternatives:** a Postgres queue library (`procrastinate`, `pgqueuer`), which is a new dependency and needs an issue under AGENTS.md; or Redis (ARQ), which can't queue in the same transaction.
 2. **Hosted topology.** Does hosted run, or plan to run, more than one API container? Should hosted have a worker service? *Recommendation:* one worker service, with replicas allowed, and the API unchanged.
-3. **One scheduler across containers,** using a Postgres advisory lock and APScheduler's memory job store. *Recommendation:* yes, in Wave 2.
+3. **One scheduler across containers,** using a Postgres advisory lock, `job_schedules` cursors and APScheduler's memory job store. Should a plain tick loop over the cursors replace APScheduler, now that it is only a timer? *Recommendation:* the lock and cursors in Wave 2; keep APScheduler until the cursors have run a while, then decide.
 4. **The workspace worker's Redis queue** (`TASK_RUNNER_BACKEND=queued`). Keep it as it is, or move its intake onto `jobs`? *Recommendation:* keep it in this PRD; it is a separate isolated consumer and works. What does hosted set `TASK_RUNNER_BACKEND` to?
 5. **Board tasks as a kind of job** (Wave 4), or keep PRD-161's own columns? *Recommendation:* decide in Wave 4, once Waves 1 to 3 have shown `jobs` working.
 6. **#1481 and #1482 in the meantime.** *Recommendation:* merge #1481 as it is. Close #1482 in favour of this PRD's Waves 1 and 2, which delete the resend job.
@@ -234,4 +260,7 @@ Waves 1 and 2 stand on their own, and each is a few hundred lines. Every wave ke
 
 - **Playbook runs and side effects:** should a step that has a side effect (a send, a post, a write to another system) record that it finished, so a retried run skips it? That is the difference between "retry" and "resume" in §9.
 - **Who sees a dead job:** the workspace owner (as today for a failed run), an operator view, or both?
-- **Credit metering** (`services/credits/jobs.py`) spends money. It needs its idempotency key settled before Wave 2 moves it, so two ticks can never charge twice.
+- **Credit metering** (`services/credits/jobs.py`) spends money. A missed tick is caught up by the next (§6.4).
+  - **Can two overlapping runs double-debit?** `_pending` selects waiting calls without locking them (`services/credits/meter.py`) [T], so it depends on how `meter_call` marks a call charged [?].
+  - **Today** one scheduler per container and `max_instances=1` stop overlap within a container. Wave 2's per-slot key stops two schedulers queueing the same slot, but not a slow run overlapping the next slot's.
+  - Settle this before Wave 2 moves metering: a conditional "mark charged", or a concurrency of 1 for the `credits.meter` kind.
