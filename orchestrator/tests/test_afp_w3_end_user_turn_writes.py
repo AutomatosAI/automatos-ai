@@ -52,6 +52,8 @@ def test_the_write_carries_their_subject_and_never_leaves_the_workspace():
     assert routed(PLAYER, f"mem:{WS}:agent:42", None) == {
         "user_id": f"mem:{WS}:end_user:player-7", "subject_id": "end_user:player-7",
         "metadata": {"end_user_id": "player-7"}}
+    owned = routed(PLAYER, f"mem:{WS}", {"owner": "user:9", "scope": "private"})["metadata"]
+    assert owned == {"owner": "end_user:player-7", "scope": "private", "end_user_id": "player-7"}
     for elsewhere in ("mem:22222222-2222-2222-2222-222222222222", f"mem:{WS}0", "agent:42"):
         with pytest.raises(ValueError):
             routed(PLAYER, elsewhere, {})

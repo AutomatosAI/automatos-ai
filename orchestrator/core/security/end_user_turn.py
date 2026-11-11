@@ -10,8 +10,8 @@ path (as ``core.security.memory_audience`` holds the reader):
 - **Every durable write lands in the end user's namespace** (``writes_to_its_end_user`` on the durable
   store's ``add``). The distilled facts of the turn, a tool's outcome, the context guard's flush: each
   names the workspace's namespace or an agent's, and each is written to the end user's instead, tagged
-  with their subject (``end_user:{id}``) so their erasure finds it. A write into another workspace
-  during the turn is refused.
+  with their subject (``end_user:{id}``) so their erasure finds it, and a fact with an owner is theirs.
+  A write into another workspace during the turn is refused.
 - **Nothing goes where the whole workspace reads** (``shared_with_no_end_user``): no L2 transcript
   (``memory_short_term``) and so no ``mem:{ws}:l2`` mirror, and no daily log. The Context Router reads
   those on every chat turn of the workspace. The end user's conversation stays in their chat.
@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, Iterator, Optional
 
 END_USER_ID_KEY = "end_user_id"
+OWNER_KEY = "owner"  # a fact's owner (modules.memory.write_contract): who may see it when private
 SUBJECT_PREFIX = "end_user:"
 NAMESPACE_PREFIX = "mem:"
 NOT_SHARED = "an end user's turn: nothing is shared with the workspace"
@@ -87,11 +88,14 @@ def _in_workspace(namespace: str, workspace_id: str) -> bool:
 
 def routed(end_user: EndUser, user_id: str, metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Where a write during ``end_user``'s turn goes: their namespace, their subject, and
-    ``metadata`` naming them (a new dict). A namespace of another workspace is refused."""
+    ``metadata`` naming them (a new dict). A fact with an owner is theirs, not the key's service
+    user's, whom every end user of the key shares. A namespace of another workspace is refused."""
     if not _in_workspace(user_id, end_user.workspace_id):
         raise ValueError(f"an end user's turn writes only to their own workspace, not {user_id}")
-    return {"user_id": end_user.namespace, "subject_id": end_user.subject,
-            "metadata": {**(metadata or {}), END_USER_ID_KEY: end_user.end_user_id}}
+    named = {**(metadata or {}), END_USER_ID_KEY: end_user.end_user_id}
+    if named.get(OWNER_KEY):
+        named[OWNER_KEY] = end_user.subject
+    return {"user_id": end_user.namespace, "subject_id": end_user.subject, "metadata": named}
 
 
 def writes_to_its_end_user(add: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
