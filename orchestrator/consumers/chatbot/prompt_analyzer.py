@@ -4,25 +4,15 @@ Prompt Analyzer - Message Processing and Tool Intent Detection
 
 Handles:
 - Converting chat messages to LLM format
-- Extracting search terms from conversational queries
 - Detecting tool intent from user messages
 """
 
-import json
 import logging
-import re
 from typing import List, Dict, Any, Optional
 
 from core.attachment_refs import render_unresolved_file_part
 
 logger = logging.getLogger(__name__)
-
-# Explicit tool call syntax (e.g., "Use tool foo with params {...}")
-EXPLICIT_TOOL_CALL_RE = re.compile(
-    r"^\s*use\s+tool\s+([a-zA-Z0-9_\-\.]+)\s*(?:with\s+params|params|with\s+arguments|arguments)?\s*(\{.*\})\s*$",
-    re.IGNORECASE | re.DOTALL,
-)
-
 
 class PromptAnalyzer:
     """
@@ -48,103 +38,6 @@ class PromptAnalyzer:
         ]
         return any(p in text_lower for p in patterns)
     
-    def extract_search_terms(self, query: str) -> str:
-        """
-        Extract meaningful search terms from conversational queries.
-        
-        Converts: "Can you access my code and show me how agents work?"
-        To: "agents AgentFactory agent_factory"
-        """
-        # Remove common conversational phrases
-        stop_phrases = [
-            r"can you (please )?",
-            r"could you (please )?",
-            r"please ",
-            r"show me (how )?(to )?",
-            r"tell me (about )?(how )?(to )?",
-            r"i want to (know|see|understand) (about )?(how )?(to )?",
-            r"help me (understand|with) ",
-            r"what is (the )?",
-            r"what are (the )?",
-            r"how (does|do|can|to) ",
-            r"where (is|are|can) ",
-            r"access my ",
-            r"look at (my )?",
-            r"find (me )?",
-            r"search (for )?",
-            r"query (the )?",
-        ]
-        
-        cleaned = query.lower()
-        for phrase in stop_phrases:
-            cleaned = re.sub(phrase, "", cleaned, flags=re.IGNORECASE)
-        
-        # Remove punctuation
-        cleaned = re.sub(r"[^\w\s]", " ", cleaned)
-        
-        # Split into words and filter
-        stop_words = {
-            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-            'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
-            'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
-            'could', 'should', 'may', 'might', 'must', 'shall', 'can', 'need',
-            'my', 'your', 'our', 'their', 'its', 'this', 'that', 'these', 'those',
-            'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us',
-            'work', 'works', 'working', 'about', 'just', 'also', 'only', 'some',
-            'code', 'codebase'  # 'code' too generic
-        }
-        
-        words = cleaned.split()
-        keywords = [w for w in words if w not in stop_words and len(w) > 2]
-        
-        # Add variations for common terms
-        expanded = []
-        term_expansions = {
-            'agent': ['AgentFactory', 'agent_factory', 'agent_execution'],
-            'agents': ['AgentFactory', 'agent_factory', 'agent_execution'],
-            'workflow': ['workflow_execution', 'WorkflowExecution'],
-            'workflows': ['workflow_execution', 'WorkflowExecution'],
-            'memory': ['memory_system'],
-            'memories': ['memory_system'],
-            'tool': ['ToolRegistry', 'tool_executor'],
-            'tools': ['ToolRegistry', 'tool_executor'],
-        }
-        
-        for kw in keywords:
-            expanded.append(kw)
-            if kw in term_expansions:
-                expanded.extend(term_expansions[kw])
-        
-        result = " ".join(expanded[:8])  # Limit to 8 terms
-        return result if result.strip() else query[:50]
-
-    def parse_explicit_tool_call(self, query: str) -> Optional[Dict[str, Any]]:
-        """
-        Parse explicit tool call syntax:
-        "Use tool <tool_name> with params {...}"
-        """
-        match = EXPLICIT_TOOL_CALL_RE.match(query or "")
-        if not match:
-            return None
-
-        tool_name = match.group(1)
-        args_str = match.group(2) or "{}"
-        try:
-            tool_args = json.loads(args_str)
-        except Exception as exc:
-            logger.warning(f"Failed to parse explicit tool params for {tool_name}: {exc}")
-            return {
-                "tool_name": tool_name,
-                "tool_args": {},
-                "parse_error": f"Invalid JSON params: {exc}"
-            }
-
-        return {
-            "tool_name": tool_name,
-            "tool_args": tool_args,
-            "parse_error": None
-        }
-
     def convert_to_llm_messages(
         self,
         messages: List[Dict[str, Any]],
