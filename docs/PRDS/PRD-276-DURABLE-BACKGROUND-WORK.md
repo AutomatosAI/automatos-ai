@@ -242,7 +242,7 @@ Waves 1 and 2 stand on their own, and each is a few hundred lines. Every wave ke
 
 - **At least once, not exactly once.** A handler can run twice if its worker dies after the work but before it marks the job done. Every handler must be idempotent. The idempotency key stops a second queue, not a second run.
 - **A retried Playbook run starts again** unless its executor can resume from its finished steps. Retrying a run that is half done may repeat a side effect, such as a sent email. Wave 3 needs a rule for each kind: retry, resume, or fail and tell the owner, as today.
-- **Postgres takes the queue's load.** At today's volume that's well within what PRD-161 already does [I]. Polling stays modest because NOTIFY does the waking.
+- **Postgres takes the queue's load.** At today's volume that's well within what PRD-161 already does [I]. Polling stays modest because NOTIFY does the waking. §12 covers growth to thousands of hosted customers, and the path off Postgres if it is ever needed.
 - **A long LLM step holds a lease.** Renewal is per kind, and the lease must outlast the longest step between renewals.
 
 ## 10. Decisions for the maintainer
@@ -254,7 +254,12 @@ Waves 1 and 2 stand on their own, and each is a few hundred lines. Every wave ke
 4. **The workspace worker's Redis queue** (`TASK_RUNNER_BACKEND=queued`). Keep it as it is, or move its intake onto `jobs`? *Recommendation:* keep it in this PRD; it is a separate isolated consumer and works. What does hosted set `TASK_RUNNER_BACKEND` to?
 5. **Board tasks as a kind of job** (Wave 4), or keep PRD-161's own columns? *Recommendation:* decide in Wave 4, once Waves 1 to 3 have shown `jobs` working.
 6. **#1481 and #1482 in the meantime.** *Recommendation:* merge #1481 as it is. Close #1482 in favour of this PRD's Waves 1 and 2, which delete the resend job.
-7. **The PRD number.**
+7. **The backend behind an interface, with switching triggers written down** (§12). *Recommendation:*
+   - `enqueue` and `@job_handler` are the only way in, and Postgres is the one backend for now;
+   - jobs get their own schema, with an optional `JOBS_DATABASE_URL`;
+   - queue metrics from Wave 1;
+   - the outbox relay to a broker is the planned next step, built only when a trigger is met.
+8. **The PRD number.**
 
 ## 11. Open questions
 
@@ -264,3 +269,76 @@ Waves 1 and 2 stand on their own, and each is a few hundred lines. Every wave ke
   - **Can two overlapping runs double-debit?** `_pending` selects waiting calls without locking them (`services/credits/meter.py`) [T], so it depends on how `meter_call` marks a call charged [?].
   - **Today** one scheduler per container and `max_instances=1` stop overlap within a container. Wave 2's per-slot key stops two schedulers queueing the same slot, but not a slow run overlapping the next slot's.
   - Settle this before Wave 2 moves metering: a conditional "mark charged", or a concurrency of 1 for the `credits.meter` kind.
+
+## 12. Notes: scale, and a path off Postgres
+
+Written after a review question: if hosted served hundreds or thousands of customers, would a Postgres queue be the wrong choice, and should the queue sit behind an interface so its provider can change?
+
+### 12.1 Customers aren't queue throughput
+
+- **A rough estimate [I]:** a few hundred jobs an hour per workspace (runs, callbacks, heartbeats, schedules).
+
+  | Workspaces | Jobs per second |
+  |---|---|
+  | 1,000 | ~30–80 |
+  | 10,000 | a few hundred |
+
+  A `SKIP LOCKED` queue on a well-sized Postgres handles that. Outside this repository, Rails' default job queue (Solid Queue) and Elixir's Oban both run on the database in large production systems.
+- **The queue isn't what limits throughput.** Most jobs are LLM calls lasting seconds to minutes. Worker count, model providers' rate limits and cost run out first. A broker improves none of them.
+
+### 12.2 Where Postgres starts to hurt, and what to do first
+
+| Pressure | What it looks like | First response |
+|---|---|---|
+| Write churn on one hot table | Dead rows, autovacuum lag, index bloat on `jobs` | Short retention for `done` rows; tune autovacuum for the table |
+| Sharing the main database | Queue writes slow the app's own reads and writes | Its own schema from Wave 1, and an optional `JOBS_DATABASE_URL` that moves it to its own Postgres. Queueing in the same transaction then needs the outbox (§12.4) |
+| `NOTIFY` at high rates | `NOTIFY` takes a lock as each transaction commits, so commits contend at thousands of notifies a second [I] | Coalesce notifies, or poll on a short interval |
+| Connections | Every worker replica holds a pool | A pooler, and a fixed pool size per worker |
+
+**What Postgres isn't built for** is high-volume fan-out of events to many consumers, replaying history, and streaming across regions. Those are the signs that a broker or a log is needed. None is needed today.
+
+### 12.3 Fairness matters more than the broker
+
+With thousands of tenants, one workspace can flood the queue and starve the rest. The claim needs per-workspace concurrency limits, and fair ordering (round-robin by workspace, not just oldest first).
+- Postgres does this in the claim query.
+- PRD-161 already limits slots per agent (`BOARD_DISPATCH_AGENT_SLOTS`) [T].
+- A broker doesn't solve it: a queue per tenant gets hard to run at thousands of tenants.
+
+*For Wave 1:* a per-workspace concurrency limit on each kind, from the start.
+
+### 12.4 One interface, and switching triggers
+
+- **The interface is the seam.** `enqueue()` and `@job_handler` are the only way in, and handler code never touches the backend. A backend meets one contract:
+  - queue a job, delayed by `run_at`, and inside the caller's transaction;
+  - claim, then acknowledge or fail;
+  - renew a lease;
+  - per-kind retries, backoff and dead-letter;
+  - per-kind and per-workspace concurrency;
+  - idempotency keys.
+- **The contract is what Automatos needs, not what every provider has in common:**
+
+  | Need | Postgres | Brokers |
+  |---|---|---|
+  | Queue in the caller's transaction | Native | Only through an outbox table and a relay that forwards it |
+  | Delayed jobs | Native | RabbitMQ needs a plugin or a TTL workaround; SQS caps delays at 15 minutes; Kafka has none [I] |
+  | Long-running jobs | Lease renewal | A visibility timeout, with different limits per provider |
+- **The Postgres design is the first step, not a dead end.** Moving to a broker keeps Postgres as the outbox: jobs still commit with the write that caused them, and a relay forwards them. The `jobs` table becomes that outbox.
+- **A broker, not a log.** If the queue ever outgrows Postgres, the move is to a task broker (RabbitMQ, SQS, NATS JetStream or Redis Streams), with acknowledgements, retries and dead-letter built in. Kafka is a durable event log. It is awkward for per-message retries, delays and leases, and fits later as an event backbone, such as usage, audit and analytics events for many consumers, not as this job queue.
+- **A library interface, not a queue-manager service.** A service between the app and the queue would:
+  - add a network hop and a single point of failure to every queue call;
+  - break queueing inside the caller's transaction;
+  - add a container to the local edition.
+
+  It would earn its place only if services in other languages needed to queue or consume work. Even then the broker's own protocol is usually better.
+- **Few backends, all tested the same way.**
+  - Postgres now, and at most one broker backend when a trigger is met.
+  - One contract test suite runs against every backend in CI.
+  - A backend no one runs decays unnoticed, as can happen with `TASK_RUNNER_BACKEND`'s three backends (`local` by default) [I].
+- **Switching triggers, measured from Wave 1:**
+  - the time from a job's `run_at` to its claim (p95, per kind);
+  - queue depth per kind;
+  - jobs queued a second, sustained;
+  - write volume and autovacuum lag on `jobs`;
+  - the queue's share of the main database's load.
+
+  A sustained breach that its own schema or database doesn't fix is the signal to build the relay.
