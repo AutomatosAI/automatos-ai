@@ -393,7 +393,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # end_users, a new table only; the guard follows it.
     end_users = (versions / "end_users_20261110.py").read_text()
     assert 'down_revision = "server_key_chat_20261110"' in end_users
-    assert 'EXPECTED_HEAD = "end_users_20261110"' in guard
+    # 2026-11-11 (Automatos for products, Wave 3): end_user_chats_20261111 chains onto that —
+    # one nullable column on chats and its partial index, no row changed; the guard follows it.
+    end_user_chats = (versions / "end_user_chats_20261111.py").read_text()
+    assert 'down_revision = "end_users_20261110"' in end_user_chats
+    assert 'EXPECTED_HEAD = "end_user_chats_20261111"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

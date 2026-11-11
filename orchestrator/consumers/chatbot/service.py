@@ -58,7 +58,7 @@ from consumers.chatbot.lean_turn import (  # Wave 2: a lean agent's turn, step b
 )
 from consumers.chatbot.turn_timing import keeps_the_turns_timing, records_the_first_token
 from consumers.chatbot.lean_request import NOTHING_ASKED
-from core.security.end_user_turn import turn_subject
+from core.security.end_user_turn import end_user_turn, turn_subject
 from core.security.memory_audience import memory_reader, reader_for_agent_id
 
 # Import from modules — SINGLE SOURCE for tool schemas
@@ -2449,7 +2449,8 @@ class StreamingChatService:
                 ask_scope(LANE_CHAT, workspace_id=getattr(self, "workspace_id", None)), \
                 turn_surface(WIDGET if self.widget_mode else None, self.widget_scopes, self.widget_team,
                              self.widget_agent_lock), \
-                self._hidden_action_scope(agent_id), lean_grants(self._lean_actions), memory_reader(reader):
+                self._hidden_action_scope(agent_id), lean_grants(self._lean_actions), memory_reader(reader), \
+                end_user_turn(getattr(self._lean_request, "end_user", None)):  # PRD-274 W3: whose turn it is
             async for chunk in self._stream_response_with_agent_scoped(
                 chat_id, messages, agent_id, user_id,
                 use_orchestrator_llm=use_orchestrator_llm, skip_composio=skip_composio,

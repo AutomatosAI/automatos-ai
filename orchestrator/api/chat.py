@@ -28,7 +28,8 @@ from api.chat_models import ChatMessageRequest, ChatRequest, MessagePart
 from api.chat_turn_history import turn_history
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
-from api.chat_server_key import acts_as_its_service_user, what_a_server_key_may_ask
+from api.chat_server_key import (acts_as_its_service_user, keeps_each_end_users_chats_apart,
+                                 what_a_server_key_may_ask)
 from core.auth.scopes import AGENTS_CHAT
 from core.auth.server_key_gate import require_workspace_permission_or_server_key
 from core.auth.dependencies import RequestContext
@@ -251,6 +252,7 @@ def _unique_title(db: Session, user_id: int, parts: List[MessagePart]) -> str:
     return title
 
 
+@keeps_each_end_users_chats_apart  # PRD-274 W3: a key's conversation is one end user's, or none's
 def _open_chat(db: Session, chat_service: ChatService, request: ChatRequest, ctx: RequestContext,
                user_id: int, parts: List[MessagePart]) -> str:
     """The turn's chat id: the request's own chat, or a new one. A stale or unknown id

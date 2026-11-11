@@ -166,7 +166,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # sdk_api_keys.model_allow_list and service_user_id (new nullable columns): headless chat turns.
 # 2026-11-10 (Automatos for products, Wave 3): end_users_20261110 chains onto that —
 # end_users (a new table only): a product's end users and the consent recorded for them.
-EXPECTED_HEAD = "end_users_20261110"
+# 2026-11-11 (Automatos for products, Wave 3): end_user_chats_20261111 chains onto that —
+# chats.end_user_id (a new nullable column) and its partial index: an end user's conversations.
+EXPECTED_HEAD = "end_user_chats_20261111"
 
 
 def _literal(node: ast.AST):

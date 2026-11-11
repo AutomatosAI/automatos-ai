@@ -28,8 +28,10 @@ What the turn **reads** is theirs and the workspace's, never another end user's:
 - The memory caches key on the end user too (``end_user_key``), and the memory section reads no
   other conversation and no daily log on their turn (``modules.context.sections.memory``).
 
-Nothing sets the end user yet: until a server key's chat turn names one, no turn is an end user's and
-every read and write goes where it always has.
+**Who sets it:** a server key's chat turn that names an end user whose consent is on record
+(``endUserId`` on ``POST /api/chat``, ``api.chat_server_key``), for the whole turn
+(``StreamingChatService.stream_response_with_agent``), the work it starts included. No other turn is an
+end user's, and every read and write of it goes where it always has.
 """
 from __future__ import annotations
 
