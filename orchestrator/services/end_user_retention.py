@@ -8,6 +8,9 @@ A product records, with an end user's consent, how many days their memories are 
 - deletes their messages sent before the cutoff, in their own conversations (``chats.end_user_id``), and
   then each of their conversations left empty that was itself opened before the cutoff.
 
+It runs once a day on the shared scheduler (``schedules_the_retention_sweep`` on ``UnifiedScheduler.start``),
+at ``RETENTION_HOUR_UTC``; a run missed by up to ``RETENTION_MISFIRE_SECONDS`` (a deploy) still runs.
+
 An end user whose erase has started is left to the erase. Running it twice deletes nothing more: each run
 deletes only what is older than its own cutoff. One end user that fails is logged and counted, and the rest
 are still swept. Their sessions (Redis) need nothing: a conversation untouched for a whole day has none
@@ -16,11 +19,17 @@ left at the default ``MEMORY_SESSION_TTL_SECONDS``.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+RETENTION_JOB_ID = "end_user_retention_sweep"
+RETENTION_HOUR_UTC = 3
+RETENTION_MINUTE_UTC = 40
+RETENTION_MISFIRE_SECONDS = 6 * 3600
 
 Kept = Tuple[str, str, int]  # (workspace_id, end_user_id, retention_days)
 
@@ -82,3 +91,20 @@ async def sweep_end_user_retention(now: Optional[datetime] = None) -> Dict[str, 
         totals["chats"] += chats
     logger.info("[end_user_retention] swept %s", totals)
     return totals
+
+
+def schedules_the_retention_sweep(start: Callable[..., Any]) -> Callable[..., Any]:
+    """Wraps ``UnifiedScheduler.start``: once the shared scheduler runs, it sweeps end users' retention daily."""
+
+    @functools.wraps(start)
+    def started(self: Any, *args: Any, **kwargs: Any) -> Any:
+        result = start(self, *args, **kwargs)
+        scheduler = getattr(self, "_scheduler", None)
+        if scheduler is not None:
+            scheduler.add_job(sweep_end_user_retention, "cron", hour=RETENTION_HOUR_UTC, minute=RETENTION_MINUTE_UTC,
+                              id=RETENTION_JOB_ID, replace_existing=True, max_instances=1, coalesce=True,
+                              misfire_grace_time=RETENTION_MISFIRE_SECONDS)
+        return result
+
+    return started
+
