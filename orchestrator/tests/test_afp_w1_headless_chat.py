@@ -105,12 +105,17 @@ def test_a_key_runs_as_its_own_service_user_never_the_owner(new_session, workspa
     from core.models.core import User
 
     ws, _ = workspace
+    s = new_session()
+    try:  # the owner (user 1 on a seeded database) and every other person, before the keys exist
+        people = set(s.execute(text("SELECT id FROM users")).scalars().all())
+    finally:
+        s.close()
     key, other = _key(new_session, ws), _key(new_session, ws)
     s = new_session()
     try:
         first, again, theirs = chat.get_user_id(s, key), chat.get_user_id(s, key), chat.get_user_id(s, other)
         user = s.get(User, first)
-        assert first == again and first != theirs and first != 1
+        assert first == again and first != theirs and first not in people
         assert (user.clerk_user_id, user.username, user.email.endswith("@keys.automatos.invalid")) == (
             None, f"sdk-{key.api_key_id}", True)
         member = s.execute(text("SELECT count(*) FROM workspace_members WHERE user_id = :u"), {"u": first}).scalar()
