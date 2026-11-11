@@ -15,11 +15,15 @@ responsible for consent (§8-6) and records it here before anything is stored fo
 
 Reads leave out anything private to a person and, for a key, anything an audience limits (as
 ``GET /api/memory`` does). A store needs a consent record first. What a key stores names the key
-(``written_by``). The erase deletes the namespace and the record; an end user's chat turns arrive
-in the next PR, and so does erasing what they leave elsewhere.
+(``written_by``).
+
+The erase deletes everything the end user left: their namespace, their conversations (a server key's
+chat turns for them, ``chats.end_user_id``, with their messages) and those conversations' sessions,
+then their consent record. Their turns write nothing anywhere else (``core.security.end_user_turn``).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -48,6 +52,7 @@ END_USER_ID = Path(..., pattern=rf"^[A-Za-z0-9._:@-]{{1,{END_USER_ID_MAX}}}$",
 RETENTION_MAX_DAYS = 3650
 NO_CONSENT = "Record this end user's consent first: PUT /api/memory/end-users/{end_user_id}."
 NO_SUCH_END_USER = "No end user with that id in this workspace."
+BEING_ERASED = "This end user is being erased: DELETE them again to finish, then record their consent anew."
 
 
 class EndUserConsent(BaseModel):
@@ -94,6 +99,8 @@ def record_consent(body: EndUserConsent, end_user_id: str = END_USER_ID,
     if not body.consent:
         raise HTTPException(status_code=422, detail="consent must be true; to forget the person, DELETE them.")
     row = _record(db, ctx, end_user_id) or EndUser(workspace_id=ctx.workspace_id, end_user_id=end_user_id)
+    if row.erasing_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=BEING_ERASED)
     row.retention_days = body.retention_days
     row.api_key_id = ctx.api_key_id if is_server_key(ctx) else row.api_key_id
     db.add(row)
@@ -108,8 +115,12 @@ async def store_end_user_memory(body: MemoryCreate, end_user_id: str = END_USER_
                                 ctx: RequestContext = Depends(require_workspace_permission_or_server_key(
                                     "knowledge:create", MEMORY_WRITE)),
                                 db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Stores one fact about the end user; their consent must be on record."""
-    if await run_in_threadpool(_record, db, ctx, end_user_id) is None:
+    """Stores one fact about the end user; their consent must be on record, and the write is made as
+    theirs (``end_user_turn``): tagged with their subject, and taken back if their erase starts meanwhile."""
+    from core.models.end_users import consented
+    from core.security.end_user_turn import ERASED, EndUser, end_user_turn
+
+    if not await run_in_threadpool(consented, db, ctx.workspace_id, end_user_id):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NO_CONSENT)
     metadata = {**without_server_keys(body.metadata), "end_user_id": end_user_id}
     if body.tags:
@@ -118,13 +129,16 @@ async def store_end_user_memory(body: MemoryCreate, end_user_id: str = END_USER_
         metadata[WRITTEN_BY_KEY] = ctx.user.id
     service = _service_or_503()
     try:
-        stored = await service.store_long_term_messages(
-            user_id=_namespace(ctx, end_user_id), messages=[{"role": "user", "content": body.content}],
-            metadata=metadata, workspace_id=str(ctx.workspace_id))
+        with end_user_turn(EndUser(str(ctx.workspace_id), end_user_id)):
+            stored = await service.store_long_term_messages(
+                user_id=_namespace(ctx, end_user_id), messages=[{"role": "user", "content": body.content}],
+                metadata=metadata, workspace_id=str(ctx.workspace_id))
     except Exception as exc:
         logger.exception("[end_user_memory] store raised for workspace %s", ctx.workspace_id)
         raise _unavailable(MEMORY_STORE_FAILED) from exc
     stored = stored if isinstance(stored, dict) else {}
+    if stored.get("skipped") == ERASED:  # their erase started between the check above and the write
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=BEING_ERASED)
     if not (stored.get("success") and stored.get("id")):
         logger.error("[end_user_memory] store refused for workspace %s: %s", ctx.workspace_id, stored.get("error"))
         raise _unavailable(MEMORY_OFF if stored.get("skipped") else MEMORY_STORE_FAILED)
@@ -176,21 +190,64 @@ async def erase_end_user(end_user_id: str = END_USER_ID,
                          ctx: RequestContext = Depends(require_workspace_permission_or_server_key(
                              "knowledge:delete", MEMORY_WRITE)),
                          db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Erases the end user (GDPR): every memory in their namespace, then their consent record."""
+    """Erases the end user (GDPR): every memory in their namespace, their conversations and those
+    conversations' sessions, then their consent record."""
     row = await run_in_threadpool(_known, db, ctx, end_user_id)
     service = _service_or_503()
+    await run_in_threadpool(_mark_erasing, db, row)  # first: no new turn, store or write for them from here
     try:
         erased = await service._durable.erase_namespace(_namespace(ctx, end_user_id))
     except Exception as exc:
         logger.exception("[end_user_memory] erase failed for workspace %s", ctx.workspace_id)
         raise _unavailable(MEMORY_UNAVAILABLE) from exc
 
-    def _forget() -> None:
+    def _forget() -> List[str]:
+        chat_ids = _erase_their_chats(db, ctx, end_user_id)
         db.delete(row)
         db.commit()
+        return chat_ids
 
-    await run_in_threadpool(_forget)
-    return {"end_user_id": end_user_id, "erased": True, "memories_deleted": erased}
+    chat_ids = await run_in_threadpool(_forget)
+    cleared = await _forget_their_sessions(service, str(ctx.workspace_id), chat_ids)
+    return {"end_user_id": end_user_id, "erased": True, "memories_deleted": erased,
+            "chats_deleted": len(chat_ids), "sessions_cleared": cleared}
+
+
+def _mark_erasing(db: Session, row: Any) -> None:
+    """The end user's erase has started (``end_users.erasing_at``): their consent no longer counts, and a
+    turn still running writes nothing more for them (``core.security.end_user_turn``). Kept on a failed
+    erase, which the next one finishes."""
+    from datetime import datetime, timezone
+
+    if row.erasing_at is None:
+        row.erasing_at = datetime.now(timezone.utc)
+        db.commit()
+
+
+def _erase_their_chats(db: Session, ctx: RequestContext, end_user_id: str) -> List[str]:
+    """Deletes the end user's conversations in this workspace; their messages, votes and pinned
+    documents go with them (each foreign key cascades). The ids deleted, for their sessions."""
+    from core.models.core import Chat
+
+    theirs = db.query(Chat).filter(Chat.workspace_id == ctx.workspace_id, Chat.end_user_id == end_user_id)
+    chat_ids = [str(row.id) for row in theirs.with_entities(Chat.id)]
+    theirs.delete(synchronize_session=False)
+    return chat_ids
+
+
+async def _forget_their_sessions(service: Any, workspace_id: str, chat_ids: List[str]) -> bool:
+    """Deletes the L1 sessions (Redis) of the erased conversations. False, logged, when Redis
+    can't be reached: they then expire within ``MEMORY_SESSION_TTL_SECONDS``."""
+    redis_client = service._get_redis() if chat_ids else None
+    if redis_client is None:
+        return True
+    keys = [service.namespace(workspace_id).session(chat_id) for chat_id in chat_ids]
+    try:
+        await asyncio.to_thread(redis_client.get_redis().delete, *keys)
+    except Exception:
+        logger.exception("[end_user_memory] erased conversations' sessions not cleared for workspace %s", workspace_id)
+        return False
+    return True
 
 
 @router.delete("/{end_user_id}/memories/{memory_id}")

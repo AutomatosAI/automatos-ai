@@ -107,13 +107,10 @@ def _for_its_end_user(db: Any, ctx: Any, request: Any, lean: Any) -> Any:
     if not end_user_id:
         return lean
     from api.end_user_memory import NO_CONSENT
-    from core.models.end_users import EndUser as EndUserRecord
+    from core.models.end_users import consented
     from core.security.end_user_turn import EndUser
 
-    known = (db.query(EndUserRecord.id)
-             .filter(EndUserRecord.workspace_id == ctx.workspace_id, EndUserRecord.end_user_id == end_user_id)
-             .first())
-    if known is None:
+    if not consented(db, ctx.workspace_id, end_user_id):  # none on record, or their erase has started
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NO_CONSENT)
     return replace(lean, end_user=EndUser(str(ctx.workspace_id), end_user_id))
 
