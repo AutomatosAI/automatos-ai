@@ -17,6 +17,9 @@ from typing import Any, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 SCHEDULER_ROLE = "scheduler"
+WORKER_ROLE = "worker"
+NOTHING_RUNS_THE_QUEUE = ("JOBS_ENABLED is off: the scheduler queues scheduled work, credit metering among it, "
+                          "and no worker will run it")
 
 # (the config switch that turns it on, or None for always; its name; its module; the getter whose
 # result has ``start(scheduler=...)``), in the order main.py started them.
@@ -57,10 +60,31 @@ async def start_scheduler_leadership() -> bool:
     from config import config
     from services.scheduler import get_unified_scheduler
 
+    check_the_queue_runs()
     leading = await get_unified_scheduler().lead(start_scheduled_services, float(config.SCHEDULER_LEADER_CHECK_SECONDS))
     if not leading:
         logger.info("[scheduler] another process holds the scheduler lock; this one waits to take over")
     return leading
+
+
+def check_the_queue_runs() -> bool:
+    """The scheduler only queues (PRD-276 §6.4), so something must run the queue: an error, logged and
+    recorded, when ``JOBS_ENABLED`` is off; a warning when this process has no worker role, since
+    another process must have it. True when this process runs the queue itself."""
+    from config import config
+    from core.jobs.worker import roles
+
+    if not config.JOBS_ENABLED:
+        from core.utils.exception_telemetry import record_error
+
+        logger.error("[scheduler] %s", NOTHING_RUNS_THE_QUEUE)
+        record_error(subsystem="jobs", operation="start_scheduler", error=RuntimeError(NOTHING_RUNS_THE_QUEUE))
+        return False
+    if WORKER_ROLE not in roles():
+        logger.warning("[scheduler] this process has no worker role: another process must run the worker "
+                       "role with JOBS_ENABLED on, or scheduled work (credit metering among it) is never run")
+        return False
+    return True
 
 
 async def start_scheduled_services(scheduler: Any) -> None:

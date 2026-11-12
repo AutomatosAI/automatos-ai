@@ -88,17 +88,32 @@ def test_interval_slots_are_the_same_in_every_process():
     one, two = schedules.interval(minutes=10), schedules.interval(minutes=10)
     after, until = T0 + timedelta(minutes=3), T0 + timedelta(minutes=34)
     expected = [T0 + timedelta(minutes=m) for m in (10, 20, 30)]
-    assert schedules.due_slots(one, after, until) == schedules.due_slots(two, after, until) == expected
+    assert schedules.due_slots(one, after, until, 24) == schedules.due_slots(two, after, until, 24) == (expected, 3)
 
 
 def test_each_policy_chooses_its_slots():
     slots = [T0 + timedelta(minutes=m) for m in (10, 20, 30)]
     now = T0 + timedelta(minutes=30, seconds=5)
-    assert schedules.chosen(CATCH_UP_ALL, slots, now, 24) == (slots, 0)
-    assert schedules.chosen(CATCH_UP_ALL, slots, now, 2) == (slots[1:], 1)  # the newest kept
-    assert schedules.chosen(CATCH_UP_LATEST, slots, now, 24) == (slots[-1:], 0)
-    assert schedules.chosen(CATCH_UP_NONE, slots, now, 24) == (slots[-1:], 0)  # due right now
-    assert schedules.chosen(CATCH_UP_NONE, slots, now + timedelta(minutes=5), 24) == ([], 0)  # missed
+    assert schedules.chosen(CATCH_UP_ALL, slots, 3, now, 24) == (slots, 0)
+    assert schedules.chosen(CATCH_UP_ALL, slots[1:], 3, now, 2) == (slots[1:], 1)  # the newest kept
+    assert schedules.chosen(CATCH_UP_ALL, slots, 3, now, 0) == (slots[-1:], 2)  # a cap below 1 is 1
+    assert schedules.chosen(CATCH_UP_LATEST, slots[-1:], 3, now, 24) == (slots[-1:], 0)
+    assert schedules.chosen(CATCH_UP_NONE, slots[-1:], 3, now, 24) == (slots[-1:], 0)  # due right now
+    assert schedules.chosen(CATCH_UP_NONE, slots[-1:], 3, now + timedelta(minutes=5), 24) == ([], 0)  # missed
+
+
+def test_a_long_backlog_is_counted_whole_and_its_latest_slot_is_the_real_latest():
+    every_second = schedules.interval(seconds=1)
+    after, until = T0, T0 + timedelta(hours=30)  # 108,000 slots: more than any one scan used to hold
+    kept, total = schedules.due_slots(every_second, after, until, 1)
+    assert total == 108_000 and kept == [until]
+
+
+def test_a_schedule_id_too_long_for_its_job_keys_is_refused():
+    with pytest.raises(ValueError, match="at most"):
+        schedules.Schedule("test_prd276_w2b.latest", "x" * (schedules.MAX_SCHEDULE_ID + 1), schedules.interval(minutes=1))
+    longest = schedules.Schedule("k", "x" * schedules.MAX_SCHEDULE_ID, schedules.interval(minutes=1))
+    assert len(f"{longest.schedule_id}:{datetime.max.replace(tzinfo=timezone.utc).isoformat()}") <= 255
 
 
 def test_a_new_schedule_starts_now_and_never_backfills(new_session, kinds):
@@ -180,15 +195,18 @@ def test_declaring_a_schedule_wakes_it_on_its_trigger_and_once_at_once(kinds):
     assert asyncio.run(schedules.fire(kinds[CATCH_UP_LATEST], schedules.PLATFORM)) == 0  # no longer declared
 
 
-def test_a_purge_deletes_a_workspaces_cursors_with_its_jobs(new_session, kinds):
+def test_a_closed_workspaces_schedule_queues_nothing_and_its_purge_deletes_the_rest(new_session, kinds):
     from core.jobs.erasure import jobs_stop_first
 
     ws = str(uuid.uuid4())
-    _do(new_session, lambda s: s.execute(text("INSERT INTO workspaces (id, name, deleted_at) VALUES "
-                                              "(CAST(:id AS uuid), 'w2b', now())"), {"id": ws}))
+    _do(new_session, lambda s: s.execute(text("INSERT INTO workspaces (id, name) VALUES (CAST(:id AS uuid), 'w2b')"),
+                                         {"id": ws}))
     spec = schedules.Schedule(kinds[CATCH_UP_LATEST], f"report:{ws}", schedules.interval(minutes=10), ws)
     _do(new_session, schedules.tick, spec, T0 + timedelta(minutes=3))
-    _do(new_session, schedules.tick, spec, T0 + timedelta(minutes=10, seconds=1))
+    assert _do(new_session, schedules.tick, spec, T0 + timedelta(minutes=10, seconds=1)) == 1
+    _do(new_session, lambda s: s.execute(text("UPDATE workspaces SET deleted_at = now() WHERE id = CAST(:id AS uuid)"),
+                                         {"id": ws}))
+    assert _do(new_session, schedules.tick, spec, T0 + timedelta(minutes=20, seconds=1)) == 0  # closed: nothing
     left = []
 
     @jobs_stop_first
@@ -200,6 +218,8 @@ def test_a_purge_deletes_a_workspaces_cursors_with_its_jobs(new_session, kinds):
 
     try:
         assert first_data_step(uuid.UUID(ws), SimpleNamespace(skipped_reason=None)) is True and left == [0]
+        assert _do(new_session, schedules.tick, spec, T0 + timedelta(minutes=30, seconds=1)) == 0
+        assert _cursor(new_session, spec) is None  # the still-declared schedule made no cursor again
     finally:
         _do(new_session, lambda s: s.execute(text("DELETE FROM workspaces WHERE id = CAST(:id AS uuid)"), {"id": ws}))
 
@@ -243,3 +263,50 @@ def test_every_worker_loads_every_kinds_handlers(monkeypatch):
     for module in worker.HANDLER_MODULES:
         __import__(module)
     assert {"run_callback.deliver", "widget_destination.deliver", "credits.meter"} <= set(registered())
+
+
+def test_a_handler_module_that_fails_to_load_is_retried_until_it_loads(monkeypatch):
+    from core.jobs import worker
+
+    attempts = []
+
+    def flaky(module):
+        attempts.append(module)
+        if len(attempts) == 1:
+            raise ImportError("a dependency is not ready yet")
+
+    monkeypatch.setattr("importlib.import_module", flaky)
+    assert worker.load_handlers(("services.credits.jobs",)) == ("services.credits.jobs",)
+    monkeypatch.setattr(worker, "RETRY_HANDLERS_EVERY_TICKS", 1)
+
+    async def idle(self):
+        return 0
+
+    monkeypatch.setattr(worker.JobWorker, "tick", idle)
+
+    async def run():
+        jobs = worker.JobWorker("w-test", missing_handlers=("services.credits.jobs",))
+        stop = asyncio.Event()
+        task = asyncio.create_task(jobs.run(stop, 0.5, 7))
+        await asyncio.sleep(0.1)
+        stop.set()
+        await task
+        return jobs.missing_handlers
+
+    assert asyncio.run(run()) == () and attempts == ["services.credits.jobs"] * 2
+
+
+def test_a_scheduler_says_when_nothing_would_run_its_queue(monkeypatch):
+    from config import config
+    from services import scheduler_boot
+
+    errors = MagicMock()
+    monkeypatch.setattr("core.utils.exception_telemetry.record_error", errors)
+    monkeypatch.setattr(config, "PROCESS_ROLES", "api,worker,scheduler")
+    monkeypatch.setattr(config, "JOBS_ENABLED", True)
+    assert scheduler_boot.check_the_queue_runs() is True and not errors.called
+    monkeypatch.setattr(config, "PROCESS_ROLES", "scheduler")
+    assert scheduler_boot.check_the_queue_runs() is False and not errors.called  # another process may run it
+    monkeypatch.setattr(config, "JOBS_ENABLED", False)
+    assert scheduler_boot.check_the_queue_runs() is False
+    assert errors.call_args.kwargs["operation"] == "start_scheduler"

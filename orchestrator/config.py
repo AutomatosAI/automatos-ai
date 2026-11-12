@@ -690,7 +690,10 @@ class Config:
     # (services/key_limits.py); a key's own rate_limit_requests can only lower it.
     SERVER_KEY_REQUESTS_PER_MINUTE: int = int(os.getenv("SERVER_KEY_REQUESTS_PER_MINUTE", "600"))
     # PRD-276: the roles this process takes (api, worker, scheduler; all three by default, as the local
-    # edition runs them), and the durable job queue's worker settings (core/jobs).
+    # edition runs them), and the durable job queue's worker settings (core/jobs). The scheduler only
+    # queues scheduled work (credit metering among it, Wave 2b): some process in the deployment must
+    # run the worker role with JOBS_ENABLED on, or nothing runs it. A scheduler process checks this at
+    # start-up (services/scheduler_boot.py).
     PROCESS_ROLES: str = os.getenv("PROCESS_ROLES", "api,worker,scheduler")
     JOBS_ENABLED: bool = os.getenv("JOBS_ENABLED", "true").lower() == "true"
     JOBS_POLL_SECONDS: float = float(os.getenv("JOBS_POLL_SECONDS", "2"))

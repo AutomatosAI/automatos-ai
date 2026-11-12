@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -35,7 +36,10 @@ logger = logging.getLogger(__name__)
 PLATFORM = "platform"  # the schedule_id of a platform-wide schedule, such as metering
 ANCHOR = datetime(2026, 1, 1, tzinfo=timezone.utc)  # every interval trigger counts from here
 ON_TIME_SECONDS = 60  # under "none", a slot this recent is the one firing now, not a missed one
-SCAN_MAX = 100_000  # the most slots looked at in one tick, so a tiny interval can't loop forever
+# A job's key is "<schedule_id>:<slot>" in a 255-character column; a slot's ISO time is at most 32.
+MAX_SCHEDULE_ID = 200
+
+_LIVE = text("SELECT 1 FROM workspaces WHERE id = CAST(:ws AS uuid) AND deleted_at IS NULL")
 
 _SEED = text("INSERT INTO jobs.job_schedules (kind, schedule_id, workspace_id, last_slot) "
              "VALUES (:kind, :sid, CAST(:ws AS uuid), :now) ON CONFLICT (kind, schedule_id) DO NOTHING")
@@ -54,6 +58,11 @@ class Schedule:
     workspace_id: Optional[str] = None
     payload: Dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if len(self.schedule_id) > MAX_SCHEDULE_ID:
+            raise ValueError(f"schedule_id is {len(self.schedule_id)} characters; at most {MAX_SCHEDULE_ID}, "
+                             "so its slots' job keys fit")
+
 
 _SCHEDULES: Dict[Tuple[str, str], Schedule] = {}
 
@@ -65,25 +74,29 @@ def interval(**every: Any) -> Any:
     return IntervalTrigger(start_date=ANCHOR, timezone=timezone.utc, **every)
 
 
-def due_slots(trigger: Any, after: datetime, until: datetime) -> List[datetime]:
-    """Every slot of ``trigger`` after ``after`` and no later than ``until``, oldest first."""
-    slots: List[datetime] = []
-    moment = after + timedelta(microseconds=1)
-    while len(slots) < SCAN_MAX:
+def due_slots(trigger: Any, after: datetime, until: datetime, keep: int) -> Tuple[List[datetime], int]:
+    """The newest ``keep`` slots of ``trigger`` after ``after`` and no later than ``until`` (oldest
+    first), and how many such slots there are in all. Every slot is counted, however long the
+    backlog, so the last one kept is always the latest; only ``keep`` are held at once."""
+    kept: deque = deque(maxlen=max(1, keep))
+    total, moment = 0, after + timedelta(microseconds=1)
+    while True:
         slot = trigger.get_next_fire_time(None, moment)
         if slot is None or slot > until:
-            break
-        slots.append(slot)
+            return list(kept), total
+        kept.append(slot)
+        total += 1
         moment = slot + timedelta(microseconds=1)
-    return slots
 
 
-def chosen(policy: str, slots: List[datetime], now: datetime, cap: int) -> Tuple[List[datetime], int]:
-    """The slots ``policy`` queues, and how many due slots "all" had to drop past its cap."""
+def chosen(policy: str, slots: List[datetime], total: int, now: datetime, cap: int) -> Tuple[List[datetime], int]:
+    """The slots ``policy`` queues from the newest due ``slots`` (of ``total`` due), and how many "all"
+    had to drop past its cap (at least 1, whatever ``JOBS_CATCH_UP_MAX`` says)."""
     if not slots:
         return [], 0
     if policy == CATCH_UP_ALL:
-        return slots[-cap:], max(0, len(slots) - cap)
+        queue = slots[-max(1, cap):]
+        return queue, total - len(queue)
     if policy == CATCH_UP_LATEST:
         return slots[-1:], 0
     return [s for s in slots[-1:] if (now - s).total_seconds() <= ON_TIME_SECONDS], 0
@@ -92,16 +105,20 @@ def chosen(policy: str, slots: List[datetime], now: datetime, cap: int) -> Tuple
 def tick(db: Any, spec: Schedule, now: Optional[datetime] = None) -> int:
     """Queues the schedule's due slots by its kind's policy and moves its cursor, in one
     transaction; answers how many jobs went in (a slot already queued, by a second scheduler,
-    adds none). Commits."""
+    adds none). A schedule of a workspace that is closed or gone does nothing: no cursor is made
+    again after a purge deleted it, and no job is queued for it (§6.8). Commits."""
     from config import config
     from core.jobs.queue import enqueue
 
+    if spec.workspace_id and db.execute(_LIVE, {"ws": spec.workspace_id}).first() is None:
+        return 0
     now = now or datetime.now(timezone.utc)
+    cap = max(1, int(config.JOBS_CATCH_UP_MAX))
     params = {"kind": spec.kind, "sid": spec.schedule_id}
     db.execute(_SEED, {**params, "ws": spec.workspace_id, "now": now})
     last_slot = db.execute(_LOCK, params).scalar()
-    slots = due_slots(spec.trigger, last_slot, now)
-    queue, dropped = chosen(kind_of(spec.kind).catch_up, slots, now, int(config.JOBS_CATCH_UP_MAX))
+    slots, total = due_slots(spec.trigger, last_slot, now, cap)
+    queue, dropped = chosen(kind_of(spec.kind).catch_up, slots, total, now, cap)
     queued = 0
     for slot in queue:
         stamp = slot.isoformat()

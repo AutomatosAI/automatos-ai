@@ -15,7 +15,7 @@ import logging
 import os
 import socket
 from collections import defaultdict
-from typing import Any, Callable, Dict, Optional, Set
+from typing import Any, Callable, Dict, Optional, Set, Tuple
 
 from core.jobs import queue
 from core.jobs.registry import JobKind, kind_of, registered
@@ -23,6 +23,7 @@ from core.jobs.registry import JobKind, kind_of, registered
 logger = logging.getLogger(__name__)
 
 PRUNE_EVERY_TICKS = 1800  # about an hour at the default poll
+RETRY_HANDLERS_EVERY_TICKS = 30  # about a minute: a handler module that failed to load is tried again
 # The modules whose ``@job_handler``s define the kinds, imported when a worker starts so that every
 # worker process can claim every kind, whichever role it has (PRD-276 §6.7: a worker service in
 # Wave 4 has no scheduler and serves no route that would import them otherwise).
@@ -49,10 +50,11 @@ def on_own_session(work: Callable[..., Any], *args: Any) -> Any:
 class JobWorker:
     """Runs the registered kinds' jobs in this process."""
 
-    def __init__(self, worker_id: Optional[str] = None) -> None:
+    def __init__(self, worker_id: Optional[str] = None, missing_handlers: Tuple[str, ...] = ()) -> None:
         self.worker_id = worker_id or f"{socket.gethostname()}:{os.getpid()}"
         self._inflight: Dict[str, Set[asyncio.Task]] = defaultdict(set)
         self._ticks = 0
+        self.missing_handlers = tuple(missing_handlers)  # modules that failed to load, retried until they do
 
     def inflight(self) -> int:
         return sum(len(tasks) for tasks in self._inflight.values())
@@ -108,6 +110,8 @@ class JobWorker:
                 self._ticks += 1
                 if self._ticks % PRUNE_EVERY_TICKS == 0:
                     await asyncio.to_thread(on_own_session, queue.prune, retention_days)
+                if self.missing_handlers and self._ticks % RETRY_HANDLERS_EVERY_TICKS == 0:
+                    self.missing_handlers = load_handlers(self.missing_handlers)
             except Exception:  # noqa: BLE001 — logged; the next tick tries again
                 logger.exception("[jobs] worker tick failed")
             try:
@@ -125,16 +129,21 @@ def _record(job: queue.Job, exc: Exception) -> None:
         logger.warning("[jobs] could not record the failure of %s", job.id, exc_info=True)
 
 
-def load_handlers() -> None:
-    """Imports every module in ``HANDLER_MODULES``, so their kinds are registered here. One that fails
-    is logged; the worker still runs the rest."""
+def load_handlers(modules: Tuple[str, ...] = HANDLER_MODULES) -> Tuple[str, ...]:
+    """Imports ``modules``, so their kinds are registered here; answers those that failed. Each failure
+    is logged; the worker runs the rest and tries the failed ones again (``RETRY_HANDLERS_EVERY_TICKS``)."""
     import importlib
 
-    for module in HANDLER_MODULES:
+    failed = []
+    for module in modules:
         try:
             importlib.import_module(module)
-        except Exception:  # noqa: BLE001 — logged; that module's kinds stay queued for a worker that has them
-            logger.exception("[jobs] could not load the job handlers in %s", module)
+        except Exception:  # noqa: BLE001 — logged; retried, and its kinds stay queued until it loads
+            logger.exception("[jobs] could not load the job handlers in %s; retrying", module)
+            failed.append(module)
+    if modules != HANDLER_MODULES and not failed:
+        logger.info("[jobs] job handlers loaded at last: %s", ", ".join(modules))
+    return tuple(failed)
 
 
 def roles() -> Set[str]:
@@ -155,9 +164,9 @@ def also_starts_the_job_worker(start_board_dispatch: Callable[..., None]) -> Cal
 
         if not (trust_passed and config.JOBS_ENABLED and WORKER_ROLE in roles()):
             return
-        load_handlers()
+        missing = load_handlers()
         app_instance.state.job_worker_stop = asyncio.Event()
-        app_instance.state.job_worker_task = asyncio.create_task(JobWorker().run(
+        app_instance.state.job_worker_task = asyncio.create_task(JobWorker(missing_handlers=missing).run(
             app_instance.state.job_worker_stop, float(config.JOBS_POLL_SECONDS), int(config.JOBS_RETENTION_DAYS)))
         from core.jobs.metrics import observe_queue
 
