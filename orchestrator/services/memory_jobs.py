@@ -1,7 +1,9 @@
 """
 MemoryJobScheduler — Background Jobs for Unified Memory (PRD-79)
 ================================================================
-Registers three recurring jobs on the UnifiedScheduler:
+Eight recurring memory jobs, each a job kind with a platform schedule (PRD-276 Wave 2c): the
+scheduler only queues a slot, and a worker runs it. Each catches up ``latest``: every job sweeps
+all workspaces, so one run after downtime does what the missed runs would have.
 
 1. **Consolidation** (periodic) — contradiction-based invalidation (PRD-159 S4)
    Per workspace, near-duplicate L3 memories merge into one canonical and
@@ -17,20 +19,79 @@ Registers three recurring jobs on the UnifiedScheduler:
    no access-count gate) are stored verbatim in the durable store,
    deduped by content hash.
 
-All three jobs are resilient: one workspace failure does not stop others.
+4. **Archival** (monthly), 5. **audit retention** (PRD-196 S5), 6. **Qdrant snapshot** (daily,
+   PRD-197 S3), 7. **substrate metrics prune** (PRD-197 S4) and 8. **thread checkpoints**
+   (PRD-206 S2).
+
+All are resilient: one workspace failure does not stop others.
 Each job logs start/end timestamps and summary metrics.
 """
 
 import logging
-from typing import Optional
+from datetime import timezone
+from typing import Any, Callable, Optional, Tuple
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from core.jobs.registry import job_handler
+
 logger = logging.getLogger(__name__)
+
+# (the status key, the job kind, the runner method, the config switch that turns it on or None)
+_JOBS: Tuple[Tuple[str, str, str, Optional[str]], ...] = (
+    ("memory_session_consolidation", "memory.consolidation", "_run_consolidation", None),
+    ("memory_decay_scoring", "memory.decay", "_run_decay", None),
+    ("memory_l2_l3_promotion", "memory.promotion", "_run_promotion", None),
+    ("memory_graphify_archival", "memory.archival", "_run_archival", "MEMORY_ARCHIVAL_ENABLED"),
+    ("audit_retention_sweep", "audit.retention_sweep", "_run_audit_retention", None),  # PRD-196 S5
+    ("memory_qdrant_snapshot", "memory.snapshot", "_run_snapshot", "MEMORY_SNAPSHOT_ENABLED"),  # PRD-197 S3
+    ("substrate_metrics_prune", "substrate.metrics_prune", "_run_substrate_prune", None),  # PRD-197 S4
+    ("thread_checkpoint_sweep", "memory.thread_checkpoints", "_run_thread_checkpoints",
+     "THREAD_CHECKPOINT_ENABLED"),  # PRD-206 S2
+)
+
+
+def _trigger(kind: str, config: Any) -> Any:
+    """Each job's trigger, from its settings (the defaults are the ones it always had)."""
+    from apscheduler.triggers.cron import CronTrigger
+
+    from core.jobs.schedules import interval
+
+    def setting(name: str, default: int) -> int:
+        return int(getattr(config, name, default))
+
+    triggers: dict = {
+        "memory.consolidation": lambda: interval(seconds=setting("MEMORY_CONSOLIDATION_INTERVAL_SECONDS", 3600)),
+        "memory.decay": lambda: interval(seconds=setting("MEMORY_DECAY_INTERVAL_SECONDS", 3600)),
+        "memory.promotion": lambda: CronTrigger(hour=setting("MEMORY_PROMOTION_HOUR_UTC", 3), minute=0,
+                                                timezone=timezone.utc),
+        "memory.archival": lambda: CronTrigger(day=setting("MEMORY_ARCHIVAL_CRON_DAY", 1),
+                                               hour=setting("MEMORY_ARCHIVAL_CRON_HOUR", 3), minute=0,
+                                               timezone=timezone.utc),
+        "audit.retention_sweep": lambda: interval(seconds=setting("AUDIT_RETENTION_SWEEP_INTERVAL_SECONDS", 86400)),
+        "memory.snapshot": lambda: CronTrigger(hour=setting("MEMORY_SNAPSHOT_CRON_HOUR_UTC", 4), minute=0,
+                                               timezone=timezone.utc),
+        "substrate.metrics_prune": lambda: interval(seconds=setting("SUBSTRATE_METRICS_PRUNE_INTERVAL_SECONDS", 86400)),
+        "memory.thread_checkpoints": lambda: interval(
+            seconds=setting("THREAD_CHECKPOINT_SWEEP_INTERVAL_SECONDS", 900)),
+    }
+    return triggers[kind]()
+
+
+def _runs(method: str) -> Callable[[Any], Any]:
+    async def handler(job: Any) -> None:
+        await getattr(get_memory_job_scheduler(), method)()
+
+    handler.__name__ = f"run{method}"
+    return handler
+
+
+for _status_key, _kind, _method, _switch in _JOBS:  # registered on import, in every worker process
+    job_handler(_kind, concurrency=1, workspace_concurrency=1)(_runs(_method))
 
 
 class MemoryJobScheduler:
-    """Registers memory background jobs on the shared APScheduler."""
+    """Declares the memory jobs' schedules on the shared APScheduler, and runs each job."""
 
     JOB_ID_CONSOLIDATION = "memory_session_consolidation"
     JOB_ID_DECAY = "memory_decay_scoring"
@@ -49,164 +110,27 @@ class MemoryJobScheduler:
     # ------------------------------------------------------------------
 
     async def start(self, scheduler: AsyncIOScheduler):
-        """Register all three memory jobs on the shared scheduler."""
+        """Declare each enabled memory job's platform schedule on the shared scheduler."""
         from config import config as app_config
+        from core.jobs.schedules import PLATFORM, schedule
 
         self._scheduler = scheduler
-
-        consolidation_interval = getattr(
-            app_config, "MEMORY_CONSOLIDATION_INTERVAL_SECONDS", 3600
-        )
-        decay_interval = getattr(
-            app_config, "MEMORY_DECAY_INTERVAL_SECONDS", 3600
-        )
-        promotion_hour = getattr(
-            app_config, "MEMORY_PROMOTION_HOUR_UTC", 3
-        )
-
-        # Periodic: contradiction-based consolidation (PRD-159 S4)
-        self._scheduler.add_job(
-            self._run_consolidation,
-            "interval",
-            seconds=consolidation_interval,
-            id=self.JOB_ID_CONSOLIDATION,
-            replace_existing=True,
-            max_instances=1,
-        )
-
-        # Hourly: Decay scoring on L2
-        self._scheduler.add_job(
-            self._run_decay,
-            "interval",
-            seconds=decay_interval,
-            id=self.JOB_ID_DECAY,
-            replace_existing=True,
-            max_instances=1,
-        )
-
-        # Daily at promotion_hour UTC: L2 → L3 promotion
-        self._scheduler.add_job(
-            self._run_promotion,
-            "cron",
-            hour=promotion_hour,
-            minute=0,
-            id=self.JOB_ID_PROMOTION,
-            replace_existing=True,
-            max_instances=1,
-        )
-
-        # Monthly: graphify archival (L2+L3 → workspace knowledge graph)
-        archival_enabled = getattr(app_config, "MEMORY_ARCHIVAL_ENABLED", True)
-        archival_day = getattr(app_config, "MEMORY_ARCHIVAL_CRON_DAY", 1)
-        archival_hour = getattr(app_config, "MEMORY_ARCHIVAL_CRON_HOUR", 3)
-        if archival_enabled:
-            self._scheduler.add_job(
-                self._run_archival,
-                "cron",
-                day=archival_day,
-                hour=archival_hour,
-                minute=0,
-                id=self.JOB_ID_ARCHIVAL,
-                replace_existing=True,
-                max_instances=1,
-            )
-
-        # PRD-196 S5: audit-log retention sweep (Art.12 floor without unbounded
-        # growth). Reuses this scheduler pattern; its own config-driven interval
-        # (default daily). max_instances=1 so a slow sweep never overlaps itself.
-        retention_interval = getattr(
-            app_config, "AUDIT_RETENTION_SWEEP_INTERVAL_SECONDS", 86400
-        )
-        self._scheduler.add_job(
-            self._run_audit_retention,
-            "interval",
-            seconds=retention_interval,
-            id=self.JOB_ID_AUDIT_RETENTION,
-            replace_existing=True,
-            max_instances=1,
-        )
-
-        # PRD-197 S3: daily Qdrant snapshot of the memory planes (durable +
-        # field), uploaded to the object store, both sides pruned to the
-        # retention window. §8-Q3 built to proposal (daily / 7-day / platform
-        # object store) — the MEMORY_SNAPSHOT_* knobs adjust it.
-        snapshot_enabled = getattr(app_config, "MEMORY_SNAPSHOT_ENABLED", True)
-        snapshot_hour = getattr(app_config, "MEMORY_SNAPSHOT_CRON_HOUR_UTC", 4)
-        if snapshot_enabled:
-            self._scheduler.add_job(
-                self._run_snapshot,
-                "cron",
-                hour=snapshot_hour,
-                minute=0,
-                id=self.JOB_ID_SNAPSHOT,
-                replace_existing=True,
-                max_instances=1,
-            )
-
-        # PRD-197 S4: prune substrate telemetry rows past retention — always
-        # on (the table always accrues while retrieval runs).
-        substrate_prune_interval = getattr(
-            app_config, "SUBSTRATE_METRICS_PRUNE_INTERVAL_SECONDS", 86400
-        )
-        self._scheduler.add_job(
-            self._run_substrate_prune,
-            "interval",
-            seconds=substrate_prune_interval,
-            id=self.JOB_ID_SUBSTRATE_PRUNE,
-            replace_existing=True,
-            max_instances=1,
-        )
-
-        # PRD-206 S2: checkpoint recently-idle chat threads (Q3: silently) —
-        # summary onto chats.summary, new decisions/open loops into L3. The
-        # batch cap bounds LLM spend per sweep; the checkpointed_at watermark
-        # keeps already-checkpointed threads out of the candidate set.
-        checkpoint_enabled = getattr(app_config, "THREAD_CHECKPOINT_ENABLED", True)
-        checkpoint_interval = getattr(
-            app_config, "THREAD_CHECKPOINT_SWEEP_INTERVAL_SECONDS", 900
-        )
-        if checkpoint_enabled:
-            self._scheduler.add_job(
-                self._run_thread_checkpoints,
-                "interval",
-                seconds=checkpoint_interval,
-                id=self.JOB_ID_THREAD_CHECKPOINT,
-                replace_existing=True,
-                max_instances=1,
-            )
-
-        logger.info(
-            "[MemoryJobs] Started — consolidation every %ds, "
-            "decay every %ds, promotion daily at %02d:00 UTC, "
-            "archival %s (day=%d hour=%02d), audit-retention every %ds, "
-            "qdrant-snapshot %s (daily %02d:00 UTC)",
-            consolidation_interval,
-            decay_interval,
-            promotion_hour,
-            "enabled" if archival_enabled else "disabled",
-            archival_day,
-            archival_hour,
-            retention_interval,
-            "enabled" if snapshot_enabled else "disabled",
-            snapshot_hour,
-        )
+        declared = []
+        for status_key, kind, _, switch in _JOBS:
+            if switch is not None and not getattr(app_config, switch, True):
+                continue
+            schedule(scheduler, kind, PLATFORM, _trigger(kind, app_config))
+            declared.append(status_key)
+        logger.info("[MemoryJobs] Started — scheduled: %s", ", ".join(declared))
 
     async def stop(self):
-        """Remove all memory jobs from the scheduler."""
+        """Remove the memory jobs' schedules from the scheduler."""
         if not self._scheduler:
             return
-        for job_id in (
-            self.JOB_ID_CONSOLIDATION,
-            self.JOB_ID_DECAY,
-            self.JOB_ID_PROMOTION,
-            self.JOB_ID_ARCHIVAL,
-            self.JOB_ID_AUDIT_RETENTION,
-            self.JOB_ID_SNAPSHOT,
-            self.JOB_ID_SUBSTRATE_PRUNE,
-            self.JOB_ID_THREAD_CHECKPOINT,
-        ):
-            if self._scheduler.get_job(job_id):
-                self._scheduler.remove_job(job_id)
+        from core.jobs.schedules import PLATFORM, unschedule
+
+        for _, kind, _, _ in _JOBS:
+            unschedule(self._scheduler, kind, PLATFORM)
         logger.info("[MemoryJobs] Stopped")
 
     # ------------------------------------------------------------------
@@ -489,23 +413,15 @@ class MemoryJobScheduler:
     # ------------------------------------------------------------------
 
     def get_status(self) -> dict:
-        """Return job status for health checks."""
+        """Return job status for health checks, keyed by each job's status name."""
         if not self._scheduler:
             return {"active": False, "jobs": {}}
+        from core.jobs.schedules import PLATFORM, job_id
 
         jobs = {}
-        for job_id in (
-            self.JOB_ID_CONSOLIDATION,
-            self.JOB_ID_DECAY,
-            self.JOB_ID_PROMOTION,
-            self.JOB_ID_ARCHIVAL,
-            self.JOB_ID_AUDIT_RETENTION,
-            self.JOB_ID_SNAPSHOT,
-            self.JOB_ID_SUBSTRATE_PRUNE,
-            self.JOB_ID_THREAD_CHECKPOINT,
-        ):
-            job = self._scheduler.get_job(job_id)
-            jobs[job_id] = {
+        for status_key, kind, _, _ in _JOBS:
+            job = self._scheduler.get_job(job_id(kind, PLATFORM))
+            jobs[status_key] = {
                 "active": job is not None,
                 "next_run": str(job.next_run_time) if job else None,
             }

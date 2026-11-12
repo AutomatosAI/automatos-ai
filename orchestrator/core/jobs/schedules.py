@@ -184,3 +184,12 @@ def declared(kind: str, schedule_id: str) -> Optional[Schedule]:
 def forget(kind: str, schedule_id: str) -> None:
     """Removes a declaration (tests)."""
     _SCHEDULES.pop((kind, schedule_id), None)
+
+
+def unschedule(scheduler: Any, kind: str, schedule_id: str) -> None:
+    """Undoes ``schedule``: its timer and any catch-up not yet run come off ``scheduler``, and the
+    declaration goes. The cursor stays, so declaring it again catches up from where it stopped."""
+    for apscheduler_id in (job_id(kind, schedule_id), f"{job_id(kind, schedule_id)}:catch-up"):
+        if scheduler.get_job(apscheduler_id) is not None:
+            scheduler.remove_job(apscheduler_id)
+    forget(kind, schedule_id)

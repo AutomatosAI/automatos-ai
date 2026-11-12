@@ -34,6 +34,7 @@ HANDLER_MODULES = (
     "services.end_user_retention",  # end_users.retention_sweep (Wave 2c)
     "services.push.receipts",  # push.receipts (Wave 2c)
     "services.mobile.digest",  # mobile.digest (Wave 2c)
+    "services.memory_jobs",  # the eight memory jobs (Wave 2c)
 )
 MIN_POLL_SECONDS = 0.5  # a zero or negative JOBS_POLL_SECONDS would spin the loop
 WORKER_ROLE = "worker"
