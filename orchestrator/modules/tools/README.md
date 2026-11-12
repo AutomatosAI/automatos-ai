@@ -42,8 +42,8 @@ it:
 3. **Composio tools** — third-party app actions from the Composio catalogue
    (`composio_apps_cache`), bound per agent — when Composio is available.
 4. **Partner tools** — the tools of the partner packs the agent's
-   `configuration.partner_packs` lists, when `PARTNER_TOOLS_ENABLED` is on
-   (below).
+   `configuration.partner_packs` lists and whose install names the agent,
+   when `PARTNER_TOOLS_ENABLED` is on (below).
 
 ## Composio availability — the degrade seam (PRD-233 S2)
 
@@ -89,10 +89,12 @@ API, write a pack; never add a client.
   as a `workspace_tool_config` row (`tool_id` `partner:<name>`) beside one of
   the workspace's `generic_api` credentials: the base URL, the key and how the
   key is sent.
-- **Granted per agent.** Only an agent whose `configuration.partner_packs`
-  lists the pack is offered its tools (`partner/offer.py`, on
-  `_get_tools_for_agent_core` and on a lean turn's grants), and the grant is
-  read again when a call runs.
+- **Granted per agent, by a manager.** The install names the agents that may
+  use the pack (`agents`), and each lists it in `configuration.partner_packs`.
+  Only an agent with both is offered its tools (`partner/offer.py`, on
+  `_get_tools_for_agent_core` and on a lean turn's grants), and both are read
+  again when a call runs. An editor can edit an agent but not install a pack,
+  so listing a pack on an agent the install does not name gives it nothing.
 - **Run on the executor's seam.** `partner/runner.py` wraps
   `UnifiedToolExecutor.execute_tool`: the executor's own gates, then the
   arguments are checked, the key is read through the credential store, one GET
@@ -101,6 +103,10 @@ API, write a pack; never add a client.
   row is written to the credential's audit log.
 - **The key never leaves the server.** It is not in the tool's schema, its
   result, a log line, the telemetry row or the audit row.
+- **A partner's answer is untrusted input.** It reaches the model as the
+  partner wrote it, so text in a record can try to steer the agent's other
+  tools. Grant a pack to a lean agent (`runtime_profile: lean`) whose other
+  grants are read-only; a lean agent is offered only what it is granted.
 
 Regression rule: a pack has no method field and the client sends only GET. A
 change that lets a pack, an argument or a redirect choose the method, the host

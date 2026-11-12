@@ -11,13 +11,18 @@ inactive or expired credential and audits the access; another workspace's creden
 found", as a missing one is. A call that read the key then writes one more
 ``credential_audit_logs`` row, ``partner_call``: the tool, the operation, the partner's
 status code and how long the call took.
+
+The manager who installs a pack names the agents that may use it (``configuration.agents``).
+An agent is offered a pack's tools only when it lists the pack *and* the install allows it
+(``may_use``): editing an agent (``agents:update``, which an editor holds) cannot reach a
+partner's records that installing (``workspace:manage``) did not allow.
 """
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 from uuid import UUID
 
 from modules.tools.partner.pack import PackError, PartnerPack, parse_pack
@@ -27,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 TOOL_ID_PREFIX = "partner:"
 PACK_KEY = "pack"
+AGENTS_KEY = "agents"
+MAX_AGENTS_PER_PACK = 50
 CREDENTIAL_TYPE = "generic_api"
 SERVICE_NAME = "partner_tools"
 AUDIT_ACTION = "partner_call"
@@ -39,6 +46,7 @@ class InstalledPack:
 
     pack: PartnerPack
     credential_id: Optional[int]
+    agents: Tuple[int, ...] = ()  # the agents the install allows; none means the pack is offered to no one
 
 
 def _uuid(value: Any) -> UUID:
@@ -50,6 +58,21 @@ def same_workspace(left: Any, right: Any) -> bool:
     try:
         return left is not None and right is not None and _uuid(left) == _uuid(right)
     except ValueError:
+        return False
+
+
+def _agent_ids(raw: Any) -> Tuple[int, ...]:
+    """The agent ids an installed pack allows; anything that is not an id is no agent."""
+    if not isinstance(raw, (list, tuple)):
+        return ()
+    return tuple(sorted({value for value in raw if isinstance(value, int) and not isinstance(value, bool)}))
+
+
+def may_use(installed: InstalledPack, agent_id: Any) -> bool:
+    """The install allows ``agent_id`` to use the pack."""
+    try:
+        return agent_id is not None and int(agent_id) in installed.agents
+    except (TypeError, ValueError):
         return False
 
 
@@ -88,7 +111,7 @@ def _installed(row: Any) -> Optional[InstalledPack]:
     if tool_id_for(pack.name) != row.tool_id:
         logger.warning("[partner-tools] the pack stored as %s names itself %s; it is not offered", row.tool_id, pack.name)
         return None
-    return InstalledPack(pack, row.credential_id)
+    return InstalledPack(pack, row.credential_id, _agent_ids((row.configuration or {}).get(AGENTS_KEY)))
 
 
 def installed_packs(db: Any, workspace_id: Any, names: Optional[Iterable[str]] = None) -> List[InstalledPack]:
@@ -114,23 +137,42 @@ def _check_credential(db: Any, workspace_id: Any, credential_id: int) -> None:
         raise PackError(f"A pack's credential must be of the type '{CREDENTIAL_TYPE}': a base URL and an API key.")
 
 
-def install_pack(db: Any, workspace_id: Any, pack: PartnerPack, credential_id: int) -> InstalledPack:
-    """Install ``pack`` in the workspace, or replace the one of its name. Raises
-    :class:`PackError` when the credential is not this workspace's or not a ``generic_api`` one."""
+def _check_agents(db: Any, workspace_id: Any, agent_ids: Tuple[int, ...]) -> None:
+    from core.models import Agent
+
+    if len(agent_ids) > MAX_AGENTS_PER_PACK:
+        raise PackError(f"A pack may be allowed to at most {MAX_AGENTS_PER_PACK} agents.")
+    if not agent_ids:
+        return
+    found = {row.id for row in db.query(Agent.id).filter(Agent.id.in_(agent_ids),
+                                                         Agent.workspace_id == _uuid(workspace_id)).all()}
+    unknown = [agent_id for agent_id in agent_ids if agent_id not in found]
+    if unknown:
+        raise PackError(f"Agents {unknown} are not this workspace's agents.")
+
+
+def install_pack(db: Any, workspace_id: Any, pack: PartnerPack, credential_id: int,
+                 agent_ids: Sequence[int] = ()) -> InstalledPack:
+    """Install ``pack`` in the workspace, or replace the one of its name, for the agents named in
+    ``agent_ids``. Raises :class:`PackError` when the credential is not this workspace's or not a
+    ``generic_api`` one, or an agent is not this workspace's."""
     from core.models.tool_assignments import WorkspaceToolConfig
 
+    agents = _agent_ids(list(agent_ids))
     _check_credential(db, workspace_id, credential_id)
+    _check_agents(db, workspace_id, agents)
     tool_id = tool_id_for(pack.name)
     row = _rows(db, workspace_id).filter(WorkspaceToolConfig.tool_id == tool_id).first()
     if row is None:
         row = WorkspaceToolConfig(workspace_id=_uuid(workspace_id), tool_id=tool_id, display_name=pack.title)
         db.add(row)
     row.display_name, row.enabled, row.credential_id = pack.title, True, int(credential_id)
-    row.configuration = {PACK_KEY: pack.as_stored()}
+    row.configuration = {PACK_KEY: pack.as_stored(), AGENTS_KEY: list(agents)}
     row.cached_metadata = {"version": pack.version, "tools": [tool.name for tool in pack.tools]}
     db.commit()
-    logger.info("[partner-tools] pack %s %s installed in workspace %s", pack.name, pack.version, workspace_id)
-    return InstalledPack(pack, int(credential_id))
+    logger.info("[partner-tools] pack %s %s installed in workspace %s for %d agent(s)", pack.name, pack.version,
+                workspace_id, len(agents))
+    return InstalledPack(pack, int(credential_id), agents)
 
 
 def remove_pack(db: Any, workspace_id: Any, name: str) -> bool:
@@ -178,6 +220,6 @@ def record_call(db: Any, credential_id: int, *, tool: str, operation: str, statu
     db.commit()
 
 
-__all__ = ["AUDIT_ACTION", "CREDENTIAL_TYPE", "InstalledPack", "NO_CREDENTIAL", "SERVICE_NAME", "TOOL_ID_PREFIX",
-           "credential_fields", "install_pack", "installed_packs", "on_own_session", "record_call", "remove_pack",
-           "same_workspace", "tool_id_for"]
+__all__ = ["AGENTS_KEY", "AUDIT_ACTION", "CREDENTIAL_TYPE", "InstalledPack", "MAX_AGENTS_PER_PACK", "NO_CREDENTIAL",
+           "SERVICE_NAME", "TOOL_ID_PREFIX", "credential_fields", "install_pack", "installed_packs", "may_use",
+           "on_own_session", "record_call", "remove_pack", "same_workspace", "tool_id_for"]
