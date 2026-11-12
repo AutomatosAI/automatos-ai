@@ -88,6 +88,7 @@ class ComposioSyncScheduler:
             )
         except Exception:
             logger.exception("[ComposioSync] Daily sync failed")
+            raise  # PRD-276: the queue retries a failed sync with the kind's backoff
 
 
 _instance: Optional[ComposioSyncScheduler] = None

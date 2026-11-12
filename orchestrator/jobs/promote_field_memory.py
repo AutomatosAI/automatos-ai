@@ -335,6 +335,7 @@ class FieldPromotionJobScheduler:
             )
         except Exception:
             logger.error("[FieldPromotion] job run failed", exc_info=True)
+            raise  # PRD-276: the queue retries a failed run with the kind's backoff
 
 
 _field_promotion_scheduler: Optional[FieldPromotionJobScheduler] = None

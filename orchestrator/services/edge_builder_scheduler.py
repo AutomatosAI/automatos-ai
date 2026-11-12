@@ -55,8 +55,11 @@ class EdgeBuilderScheduler:
 
     async def _run_edge_builder(self):
         """Execute the edge builder pipeline in its memory-capped child process
-        (F416): running out of memory ends the run, never the backend. A failed
-        run has already logged its one error; the next night runs as usual."""
+        (F416): running out of memory ends the run, never the backend. A run
+        that failed in the child has already logged its one error and isn't
+        retried (it would most likely fail the same way): the next night runs as
+        usual. An error here, outside the child, is logged and raised, so the
+        queue retries the run (PRD-276)."""
         try:
             from core.services.edge_builder_worker import build_edges_in_worker
 
@@ -75,6 +78,7 @@ class EdgeBuilderScheduler:
             )
         except Exception:
             logger.exception("[EdgeBuilder] Nightly run failed")
+            raise
 
 
 _instance: Optional[EdgeBuilderScheduler] = None

@@ -95,3 +95,31 @@ def test_every_worker_loads_them():
     from core.jobs import worker
 
     assert {module for module, _, _ in JOBS} <= set(worker.HANDLER_MODULES)
+
+
+@pytest.mark.parametrize("module_name, getter, method, target", [
+    ("services.edge_builder_scheduler", "get_edge_builder_scheduler", "_run_edge_builder",
+     "core.services.edge_builder_worker.build_edges_in_worker"),
+    ("services.composio_sync_scheduler", "get_composio_sync_scheduler", "_run_sync",
+     "jobs.sync_composio_actions.sync_all_composio_actions"),
+    ("jobs.promote_field_memory", "get_field_promotion_scheduler", "_run",
+     "jobs.promote_field_memory.run_field_promotion_all"),
+])
+def test_a_failed_run_is_raised_so_the_queue_retries_it(monkeypatch, module_name, getter, method, target):
+    async def broken(*args, **kwargs):
+        raise RuntimeError("upstream unavailable")
+
+    monkeypatch.setattr(target, broken)
+    runner = getattr(importlib.import_module(module_name), getter)()
+    with pytest.raises(RuntimeError, match="upstream unavailable"):
+        asyncio.run(getattr(runner, method)())
+
+
+def test_an_edge_build_that_failed_in_its_child_is_not_retried(monkeypatch):
+    from services import edge_builder_scheduler as edges
+
+    async def failed(window):
+        return SimpleNamespace(failed=True)
+
+    monkeypatch.setattr("core.services.edge_builder_worker.build_edges_in_worker", failed)
+    asyncio.run(edges.EdgeBuilderScheduler()._run_edge_builder())  # returns: the next night runs as usual
