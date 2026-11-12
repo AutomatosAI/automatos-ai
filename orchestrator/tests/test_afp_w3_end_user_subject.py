@@ -212,6 +212,7 @@ def test_the_routes_carry_the_gate_and_take_only_a_clean_end_user_id():
             ("POST", "/api/memory/end-users/{end_user_id}/memories"): ("knowledge:create", MEMORY_WRITE),
             ("GET", "/api/memory/end-users/{end_user_id}/memories"): ("knowledge:read", MEMORY_READ),
             ("GET", "/api/memory/end-users/{end_user_id}/memories/search"): ("knowledge:read", MEMORY_READ),
+            ("GET", "/api/memory/end-users/{end_user_id}/resume"): ("knowledge:read", MEMORY_READ),
             ("DELETE", "/api/memory/end-users/{end_user_id}"): ("knowledge:delete", MEMORY_WRITE),
             ("DELETE", "/api/memory/end-users/{end_user_id}/memories/{memory_id}"): ("knowledge:delete", MEMORY_WRITE)}
     routes = {(m, r.path): r for r in iter_route_contexts(app.routes)
