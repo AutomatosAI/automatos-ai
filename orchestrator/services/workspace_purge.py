@@ -35,6 +35,7 @@ from config import config
 from core.auth.clerk import get_clerk_auth
 from core.database.database import SessionLocal
 from core.storage import get_s3_client, is_storage_configured
+from core.jobs.erasure import jobs_stop_first
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +172,7 @@ PURGE_RAISED = "exception"
 S3_DELETE_FAILED = "s3_delete_failed"
 
 
+@jobs_stop_first  # PRD-276 §6.8: a workspace's jobs go before its data
 def _s3_purged(workspace_id: UUID, result: "PurgeResult") -> bool:
     """The workspace's S3 objects deleted, counted into ``result``; False (``S3_DELETE_FAILED``)
     when some could not be (CodeRabbit on #1443): deleting the row then would leave those

@@ -689,6 +689,12 @@ class Config:
     # PRD-274 W1: requests a minute any server key may make on the routes named for it
     # (services/key_limits.py); a key's own rate_limit_requests can only lower it.
     SERVER_KEY_REQUESTS_PER_MINUTE: int = int(os.getenv("SERVER_KEY_REQUESTS_PER_MINUTE", "600"))
+    # PRD-276: the roles this process takes (api, worker, scheduler; all three by default, as the local
+    # edition runs them), and the durable job queue's worker settings (core/jobs).
+    PROCESS_ROLES: str = os.getenv("PROCESS_ROLES", "api,worker,scheduler")
+    JOBS_ENABLED: bool = os.getenv("JOBS_ENABLED", "true").lower() == "true"
+    JOBS_POLL_SECONDS: float = float(os.getenv("JOBS_POLL_SECONDS", "2"))
+    JOBS_RETENTION_DAYS: int = int(os.getenv("JOBS_RETENTION_DAYS", "7"))
     # The per-IP limit every route gets while the policy plane is on (main.py, slowapi), and the one
     # the routes a server key reaches apply to their other callers (core/auth/server_key_ip_limit.py).
     APP_RATE_LIMIT_PER_MINUTE: int = int(os.getenv("APP_RATE_LIMIT_PER_MINUTE", "60"))

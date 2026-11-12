@@ -401,7 +401,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # one nullable column on end_users, no row changed; the guard follows it.
     erasing = (versions / "end_users_erasing_20261111.py").read_text()
     assert 'down_revision = "end_user_chats_20261111"' in erasing
-    assert 'EXPECTED_HEAD = "end_users_erasing_20261111"' in guard
+    # 2026-11-11 (Durable background work, Wave 1a): jobs_20261111 chains onto that —
+    # jobs, a new table only; the guard follows it.
+    jobs = (versions / "jobs_20261111.py").read_text()
+    assert 'down_revision = "end_users_erasing_20261111"' in jobs
+    assert 'EXPECTED_HEAD = "jobs_20261111"' in guard
 
 
 def test_orm_row_is_keyed_by_route():
