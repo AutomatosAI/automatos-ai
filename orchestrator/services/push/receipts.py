@@ -35,7 +35,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from config import config
-from core.jobs.registry import job_handler
+from core.jobs.registry import CATCH_UP_LATEST, job_handler
 from core.models.mobile_devices import MobileDevice
 from core.models.mobile_push import MobilePushTicket
 from services.push import consent
@@ -240,7 +240,7 @@ def register(scheduler: Any) -> bool:
     return True
 
 
-@job_handler(RECEIPTS_KIND, concurrency=1, workspace_concurrency=1)
+@job_handler(RECEIPTS_KIND, catch_up=CATCH_UP_LATEST, concurrency=1, workspace_concurrency=1)
 async def run_receipts_job(job: Any) -> None:
     """A receipts slot, off the event loop."""
     await asyncio.to_thread(run_receipts)

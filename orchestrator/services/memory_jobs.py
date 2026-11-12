@@ -23,17 +23,20 @@ all workspaces, so one run after downtime does what the missed runs would have.
    PRD-197 S3), 7. **substrate metrics prune** (PRD-197 S4) and 8. **thread checkpoints**
    (PRD-206 S2).
 
-All are resilient: one workspace failure does not stop others.
-Each job logs start/end timestamps and summary metrics.
+All are resilient: one workspace failure does not stop the others. A run that fails as a whole is
+logged and raised, so the queue retries it with the kind's backoff. Synchronous database work runs
+in a thread, off the worker's loop, which renews every running job's lease.
 """
 
+import asyncio
 import logging
 from datetime import timezone
 from typing import Any, Callable, Optional, Tuple
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from sqlalchemy import text
 
-from core.jobs.registry import job_handler
+from core.jobs.registry import CATCH_UP_LATEST, job_handler
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +81,45 @@ def _trigger(kind: str, config: Any) -> Any:
     return triggers[kind]()
 
 
+def _on_own_session(work: Callable[[Any], Any]) -> Any:
+    """``work(db)`` on a session of its own, always closed (run in a thread)."""
+    from core.database.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        return work(db)
+    finally:
+        db.close()
+
+
+_CANDIDATES = text("""
+    SELECT id, workspace_id FROM chats
+    WHERE kind = 'user'
+      AND workspace_id IS NOT NULL
+      AND updated_at <= NOW() - (:idle_min * INTERVAL '1 minute')
+      AND updated_at >= NOW() - (:lookback_h * INTERVAL '1 hour')
+      AND (
+        summary IS NULL
+        OR COALESCE((summary->>'checkpointed_at')::double precision, 0) < EXTRACT(EPOCH FROM updated_at)
+      )
+      AND (SELECT COUNT(*) FROM messages m WHERE m.chat_id = chats.id) >= :min_msgs
+    ORDER BY updated_at DESC
+    LIMIT :batch
+""")
+
+
+def _checkpoint_candidates(db: Any) -> list:
+    """User chats idle past the threshold (touched inside the lookback), with enough messages, whose
+    summary watermark is older than their last activity: the thread checkpoint sweep's batch."""
+    from config import config as app_config
+
+    params = {"idle_min": getattr(app_config, "THREAD_CHECKPOINT_IDLE_MINUTES", 30),
+              "lookback_h": getattr(app_config, "THREAD_CHECKPOINT_LOOKBACK_HOURS", 48),
+              "min_msgs": getattr(app_config, "THREAD_CHECKPOINT_MIN_MESSAGES", 4),
+              "batch": getattr(app_config, "THREAD_CHECKPOINT_BATCH", 10)}
+    return list(db.execute(_CANDIDATES, params).fetchall())
+
+
 def _runs(method: str) -> Callable[[Any], Any]:
     async def handler(job: Any) -> None:
         await getattr(get_memory_job_scheduler(), method)()
@@ -86,21 +128,17 @@ def _runs(method: str) -> Callable[[Any], Any]:
     return handler
 
 
+# Batch sweeps over every workspace: a lease long enough that a slow run isn't swept while it still
+# works (it is renewed every third of this), short enough that a crashed one is retried soon.
+MEMORY_JOB_LEASE_SECONDS = 300
+
 for _status_key, _kind, _method, _switch in _JOBS:  # registered on import, in every worker process
-    job_handler(_kind, concurrency=1, workspace_concurrency=1)(_runs(_method))
+    job_handler(_kind, catch_up=CATCH_UP_LATEST, concurrency=1, workspace_concurrency=1,
+                lease_seconds=MEMORY_JOB_LEASE_SECONDS)(_runs(_method))
 
 
 class MemoryJobScheduler:
     """Declares the memory jobs' schedules on the shared APScheduler, and runs each job."""
-
-    JOB_ID_CONSOLIDATION = "memory_session_consolidation"
-    JOB_ID_DECAY = "memory_decay_scoring"
-    JOB_ID_PROMOTION = "memory_l2_l3_promotion"
-    JOB_ID_ARCHIVAL = "memory_graphify_archival"
-    JOB_ID_AUDIT_RETENTION = "audit_retention_sweep"  # PRD-196 S5
-    JOB_ID_SNAPSHOT = "memory_qdrant_snapshot"  # PRD-197 S3
-    JOB_ID_SUBSTRATE_PRUNE = "substrate_metrics_prune"  # PRD-197 S4
-    JOB_ID_THREAD_CHECKPOINT = "thread_checkpoint_sweep"  # PRD-206 S2
 
     def __init__(self):
         self._scheduler: Optional[AsyncIOScheduler] = None
@@ -162,6 +200,7 @@ class MemoryJobScheduler:
                 e,
                 exc_info=True,
             )
+            raise
 
     # ------------------------------------------------------------------
     # Job: Decay Scoring (L2)
@@ -190,6 +229,7 @@ class MemoryJobScheduler:
                 e,
                 exc_info=True,
             )
+            raise
 
     # ------------------------------------------------------------------
     # Job: L2 → L3 Promotion
@@ -217,6 +257,7 @@ class MemoryJobScheduler:
                 e,
                 exc_info=True,
             )
+            raise
 
     # ------------------------------------------------------------------
     # Job: Graphify Archival (L2+L3 → workspace knowledge graph)
@@ -245,143 +286,77 @@ class MemoryJobScheduler:
                 e,
                 exc_info=True,
             )
+            raise
 
     async def _run_audit_retention(self):
         """PRD-196 S5: hard-delete audit_logs rows past the retention floor and
-        write one summary row per affected workspace. Resilient — a failure here
-        never stops the other memory jobs (its own try/except, like the rest)."""
-        try:
-            from core.database.database import SessionLocal
-            from services.audit_retention import sweep_expired_audit_logs
+        write one summary row per affected workspace, on a session of its own
+        in a thread (the worker's loop renews every running job's lease)."""
+        from services.audit_retention import sweep_expired_audit_logs
 
-            db = SessionLocal()
-            try:
-                result = sweep_expired_audit_logs(db)
-            finally:
-                db.close()
-            logger.info(
-                "[MemoryJobs] Audit retention sweep: deleted=%d, workspaces=%d, cutoff=%s",
-                result.get("total_deleted", 0),
-                result.get("workspaces_affected", 0),
-                result.get("cutoff"),
-            )
-        except Exception as e:
-            logger.error(
-                "[MemoryJobs] Audit retention sweep failed: %s",
-                e,
-                exc_info=True,
-            )
+        try:
+            result = await asyncio.to_thread(_on_own_session, sweep_expired_audit_logs)
+        except Exception:
+            logger.error("[MemoryJobs] Audit retention sweep failed", exc_info=True)
+            raise
+        logger.info(
+            "[MemoryJobs] Audit retention sweep: deleted=%d, workspaces=%d, cutoff=%s",
+            result.get("total_deleted", 0),
+            result.get("workspaces_affected", 0),
+            result.get("cutoff"),
+        )
 
     # ------------------------------------------------------------------
     # Job: Qdrant memory snapshots (PRD-197 S3)
     # ------------------------------------------------------------------
 
     async def _run_substrate_prune(self):
-        """PRD-197 S4: delete substrate_metric_events rows past retention.
-        Fail-soft like the rest."""
-        try:
-            from config import config as app_config
-            from core.database.database import SessionLocal
-            from services.substrate_health import prune_substrate_metrics
+        """PRD-197 S4: delete substrate_metric_events rows past retention, on a
+        session of its own in a thread."""
+        from config import config as app_config
+        from services.substrate_health import prune_substrate_metrics
 
-            db = SessionLocal()
-            try:
-                deleted = prune_substrate_metrics(
-                    db,
-                    retention_days=getattr(
-                        app_config, "SUBSTRATE_METRICS_RETENTION_DAYS", 14
-                    ),
-                )
-            finally:
-                db.close()
-            if deleted:
-                logger.info(
-                    "[MemoryJobs] Substrate metrics prune: deleted=%d", deleted
-                )
-        except Exception as e:
-            logger.error(
-                "[MemoryJobs] Substrate metrics prune failed: %s", e,
-                exc_info=True,
-            )
+        days = getattr(app_config, "SUBSTRATE_METRICS_RETENTION_DAYS", 14)
+        try:
+            deleted = await asyncio.to_thread(
+                _on_own_session, lambda db: prune_substrate_metrics(db, retention_days=days))
+        except Exception:
+            logger.error("[MemoryJobs] Substrate metrics prune failed", exc_info=True)
+            raise
+        if deleted:
+            logger.info("[MemoryJobs] Substrate metrics prune: deleted=%d", deleted)
 
     async def _run_thread_checkpoints(self):
-        """PRD-206 S2: checkpoint recently-idle threads. Candidates: user-kind
-        chats idle past the threshold (but touched inside the lookback), with
-        enough messages, whose summary watermark is older than their last
-        activity. Per-chat failures never stop the batch; fail-soft overall."""
+        """PRD-206 S2: checkpoint recently-idle threads. The candidates are read in
+        a thread (``_checkpoint_candidates``); each checkpoint runs here. Per-chat
+        failures never stop the batch; a failed sweep is retried by the queue."""
+        from config import config as app_config
+        from core.database.database import SessionLocal
+        from modules.memory.thread_checkpoint import run_thread_checkpoint
+
+        min_messages = getattr(app_config, "THREAD_CHECKPOINT_MIN_MESSAGES", 4)
         try:
-            from sqlalchemy import text as sql_text
-
-            from config import config as app_config
-            from core.database.database import SessionLocal
-            from modules.memory.thread_checkpoint import run_thread_checkpoint
-
-            idle_minutes = getattr(app_config, "THREAD_CHECKPOINT_IDLE_MINUTES", 30)
-            lookback_hours = getattr(app_config, "THREAD_CHECKPOINT_LOOKBACK_HOURS", 48)
-            batch = getattr(app_config, "THREAD_CHECKPOINT_BATCH", 10)
-            min_messages = getattr(app_config, "THREAD_CHECKPOINT_MIN_MESSAGES", 4)
-
-            db = SessionLocal()
-            try:
-                rows = db.execute(
-                    sql_text(
-                        """
-                        SELECT id, workspace_id FROM chats
-                        WHERE kind = 'user'
-                          AND workspace_id IS NOT NULL
-                          AND updated_at <= NOW() - (:idle_min * INTERVAL '1 minute')
-                          AND updated_at >= NOW() - (:lookback_h * INTERVAL '1 hour')
-                          AND (
-                            summary IS NULL
-                            OR COALESCE((summary->>'checkpointed_at')::double precision, 0)
-                               < EXTRACT(EPOCH FROM updated_at)
-                          )
-                          AND (
-                            SELECT COUNT(*) FROM messages m WHERE m.chat_id = chats.id
-                          ) >= :min_msgs
-                        ORDER BY updated_at DESC
-                        LIMIT :batch
-                        """
-                    ),
-                    {
-                        "idle_min": idle_minutes,
-                        "lookback_h": lookback_hours,
-                        "min_msgs": min_messages,
-                        "batch": batch,
-                    },
-                ).fetchall()
-
-                done = failed = 0
-                for chat_id, workspace_id in rows:
-                    try:
-                        result = await run_thread_checkpoint(
-                            db,
-                            workspace_id=str(workspace_id),
-                            chat_id=str(chat_id),
-                            trigger="idle_sweep",
-                            min_messages=min_messages,
-                        )
-                        if result.get("success"):
-                            done += 1
-                        elif not result.get("skipped"):
-                            failed += 1
-                    except Exception:
-                        failed += 1
-                        logger.error(
-                            "[MemoryJobs] Thread checkpoint failed for chat=%s",
-                            chat_id, exc_info=True,
-                        )
-            finally:
-                db.close()
-            if done or failed:
-                logger.info(
-                    "[MemoryJobs] Thread checkpoint sweep: candidates=%d done=%d failed=%d",
-                    len(rows), done, failed,
-                )
-        except Exception as e:
-            logger.error(
-                "[MemoryJobs] Thread checkpoint sweep failed: %s", e, exc_info=True,
-            )
+            rows = await asyncio.to_thread(_on_own_session, _checkpoint_candidates)
+        except Exception:
+            logger.error("[MemoryJobs] Thread checkpoint sweep failed", exc_info=True)
+            raise
+        done = failed = 0
+        db = SessionLocal()
+        try:
+            for chat_id, workspace_id in rows:
+                try:
+                    result = await run_thread_checkpoint(db, workspace_id=str(workspace_id), chat_id=str(chat_id),
+                                                         trigger="idle_sweep", min_messages=min_messages)
+                except Exception:
+                    failed += 1
+                    logger.error("[MemoryJobs] Thread checkpoint failed for chat=%s", chat_id, exc_info=True)
+                    continue
+                done += bool(result.get("success"))
+                failed += not result.get("success") and not result.get("skipped")
+        finally:
+            db.close()
+        if done or failed:
+            logger.info("[MemoryJobs] Thread checkpoint sweep: candidates=%d done=%d failed=%d", len(rows), done, failed)
 
     async def _run_snapshot(self):
         """PRD-197 S3: snapshot durable_memory + field_memory to the object
@@ -407,6 +382,7 @@ class MemoryJobScheduler:
                 "[MemoryJobs] Qdrant snapshot cycle failed: %s", e,
                 exc_info=True,
             )
+            raise
 
     # ------------------------------------------------------------------
     # Status
