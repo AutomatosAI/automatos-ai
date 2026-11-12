@@ -25,7 +25,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from core.jobs.registry import job_handler
+from core.jobs.registry import CATCH_UP_LATEST, job_handler
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ def schedules_the_retention_sweep(start: Callable[..., Any]) -> Callable[..., An
     return started
 
 
-@job_handler(RETENTION_KIND, concurrency=1, workspace_concurrency=1)
+@job_handler(RETENTION_KIND, catch_up=CATCH_UP_LATEST, concurrency=1, workspace_concurrency=1)
 async def run_sweep(job: Any) -> None:
     """A daily retention slot (PRD-276 Wave 2c)."""
     await sweep_end_user_retention()
