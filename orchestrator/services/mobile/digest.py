@@ -67,7 +67,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from config import config
-from core.jobs.registry import job_handler
+from core.jobs.registry import CATCH_UP_LATEST, job_handler
 from core.models.core import User
 from core.models.mobile_devices import MobileDevice, MobileDeviceStatus
 from core.models.mobile_push import MobileDigestPost
@@ -605,7 +605,7 @@ def register(scheduler: Any) -> bool:
     return True
 
 
-@job_handler(DIGEST_KIND, concurrency=1, workspace_concurrency=1)
+@job_handler(DIGEST_KIND, catch_up=CATCH_UP_LATEST, concurrency=1, workspace_concurrency=1)
 async def run_digests_job(job: Any) -> None:
     """A digest slot."""
     await run_digests()

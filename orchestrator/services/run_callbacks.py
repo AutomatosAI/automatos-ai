@@ -36,7 +36,7 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from uuid import UUID
 
-from core.jobs.registry import job_handler
+from core.jobs.registry import CATCH_UP_LATEST, job_handler
 
 logger = logging.getLogger(__name__)
 
@@ -397,7 +397,7 @@ def schedules_the_callback_sweep(start: Callable[..., Any]) -> Callable[..., Any
     return started
 
 
-@job_handler(SWEEP_KIND, concurrency=1, workspace_concurrency=1)
+@job_handler(SWEEP_KIND, catch_up=CATCH_UP_LATEST, concurrency=1, workspace_concurrency=1)
 async def run_sweep(job: Any) -> None:
     """A sweep slot (PRD-276 Wave 2c)."""
     await queue_stale_callbacks()
