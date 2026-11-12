@@ -3,13 +3,16 @@
 A job is "do this, later or now, and don't lose it": queued in the same transaction as the write
 that caused it, claimed by a worker with a lease (PRD-161's claim, generalised), retried with its
 kind's backoff, and ``dead`` once its attempts are used up. ``core/jobs`` is the only code that
-reads or writes it. ``alembic/versions/jobs_20261111.py`` creates the same shape.
+reads or writes it. ``alembic/versions/jobs_20261111.py`` creates the same shape, and
+``jobs_schema_20261112.py`` moves it into its own schema, ``jobs`` (§10-7, §12.2): the queue's
+write churn sits apart from the business tables in the same database, and every query names it
+``jobs.jobs``.
 """
 from __future__ import annotations
 
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import DDL, Column, DateTime, ForeignKey, Index, Integer, String, Text, event, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.sql import func
 
@@ -20,6 +23,7 @@ RUNNING = "running"
 DONE = "done"
 DEAD = "dead"
 STATUSES = (QUEUED, RUNNING, DONE, DEAD)
+JOBS_SCHEMA = "jobs"
 
 
 class Job(Base):
@@ -33,6 +37,7 @@ class Job(Base):
               postgresql_where=text("idempotency_key IS NOT NULL"), postgresql_nulls_not_distinct=True),
         Index("ix_jobs_claim", "status", "run_at"),
         Index("ix_jobs_workspace", "workspace_id"),
+        {"schema": JOBS_SCHEMA},
     )
 
     id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -51,3 +56,7 @@ class Job(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
     finished_at = Column(DateTime(timezone=True), nullable=True)
+
+
+# create_all (and a test's ``Job.__table__.create``) builds the table only once its schema exists.
+event.listen(Job.__table__, "before_create", DDL(f"CREATE SCHEMA IF NOT EXISTS {JOBS_SCHEMA}"))

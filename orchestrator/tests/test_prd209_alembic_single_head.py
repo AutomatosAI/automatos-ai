@@ -172,7 +172,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # end_users.erasing_at (a new nullable column): an erase that has started stops their writes.
 # 2026-11-11 (Durable background work, Wave 1a): jobs_20261111 chains onto that —
 # jobs (a new table only): the durable job queue.
-EXPECTED_HEAD = "jobs_20261111"
+# 2026-11-12 (Durable background work, §10-7): jobs_schema_20261112 chains onto that —
+# the jobs table moves into its own schema, jobs (rows, indexes and key carried; nothing rewritten).
+EXPECTED_HEAD = "jobs_schema_20261112"
 
 
 def _literal(node: ast.AST):

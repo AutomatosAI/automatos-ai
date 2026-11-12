@@ -138,6 +138,9 @@ def also_starts_the_job_worker(start_board_dispatch: Callable[..., None]) -> Cal
         app_instance.state.job_worker_stop = asyncio.Event()
         app_instance.state.job_worker_task = asyncio.create_task(JobWorker().run(
             app_instance.state.job_worker_stop, float(config.JOBS_POLL_SECONDS), int(config.JOBS_RETENTION_DAYS)))
+        from core.jobs.metrics import observe_queue
+
+        observe_queue()  # §10-7: queue depth and wait, from the worker role only
         logger.info("Job worker started (PRD-276)")
 
     return started

@@ -27,7 +27,7 @@ def jobs_stop_first(first_data_step: Callable[..., bool]) -> Callable[..., bool]
 
         db = SessionLocal()
         try:
-            deleted = db.execute(text("DELETE FROM jobs WHERE workspace_id = CAST(:ws AS uuid)"),
+            deleted = db.execute(text("DELETE FROM jobs.jobs WHERE workspace_id = CAST(:ws AS uuid)"),
                                  {"ws": str(workspace_id)}).rowcount
             db.commit()
         except Exception:  # noqa: BLE001 — logged; the purge holds rather than erase under a running send

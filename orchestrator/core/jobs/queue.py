@@ -40,7 +40,7 @@ class Job:
 
 
 _ENQUEUE = text("""
-    INSERT INTO jobs (id, kind, workspace_id, payload, run_at, max_attempts, idempotency_key)
+    INSERT INTO jobs.jobs (id, kind, workspace_id, payload, run_at, max_attempts, idempotency_key)
     VALUES (:id, :kind, :ws, CAST(:payload AS jsonb), COALESCE(:run_at, clock_timestamp()), :max_attempts, :key)
     ON CONFLICT DO NOTHING
     RETURNING id
@@ -81,26 +81,28 @@ _CLAIM_TURN = text("SELECT pg_advisory_xact_lock(hashtext('jobs:claim:' || :kind
 
 # Each workspace's room is applied before the claim's own limit: every due job is ranked within its
 # workspace, and only those that fit that workspace's room are candidates. A workspace at its limit,
-# however long its backlog, never fills the claim and hides another workspace's due jobs.
+# however long its backlog, never fills the claim and hides another workspace's due jobs. Candidates
+# go in rank order, then age (§12.3): each workspace's next job before any workspace's second, so a
+# claim takes turns across workspaces instead of serving one workspace's backlog first.
 _CLAIM = text("""
     WITH running AS (
-        SELECT workspace_id, count(*) AS n FROM jobs WHERE kind = :kind AND status = 'running' GROUP BY workspace_id
+        SELECT workspace_id, count(*) AS n FROM jobs.jobs WHERE kind = :kind AND status = 'running' GROUP BY workspace_id
     ), ranked AS (
         SELECT j.id, j.run_at, COALESCE(r.n, 0)
                + row_number() OVER (PARTITION BY j.workspace_id ORDER BY j.run_at, j.id) AS nth
-        FROM jobs j
+        FROM jobs.jobs j
         LEFT JOIN workspaces w ON w.id = j.workspace_id
         LEFT JOIN running r ON r.workspace_id IS NOT DISTINCT FROM j.workspace_id
         WHERE j.kind = :kind AND j.status = 'queued' AND j.run_at <= clock_timestamp()
           AND (j.workspace_id IS NULL OR w.deleted_at IS NULL)
     ), eligible AS (
-        SELECT id FROM ranked WHERE nth <= :per_workspace ORDER BY run_at, id LIMIT :limit
+        SELECT id FROM ranked WHERE nth <= :per_workspace ORDER BY nth, run_at, id LIMIT :limit
     ), picked AS (
-        SELECT j.id FROM jobs j JOIN eligible e ON e.id = j.id
+        SELECT j.id FROM jobs.jobs j JOIN eligible e ON e.id = j.id
         WHERE j.status = 'queued'
         FOR UPDATE OF j SKIP LOCKED
     )
-    UPDATE jobs SET status = 'running', attempts = jobs.attempts + 1, claim_id = gen_random_uuid(),
+    UPDATE jobs.jobs SET status = 'running', attempts = jobs.attempts + 1, claim_id = gen_random_uuid(),
                     claimed_by = :worker, lease_until = clock_timestamp() + make_interval(secs => :lease),
                     updated_at = clock_timestamp()
     FROM picked WHERE jobs.id = picked.id
@@ -122,10 +124,10 @@ def claim(db: Any, spec: JobKind, worker_id: str, limit: int) -> List[Job]:
 
 
 # Every write about a claimed job is fenced by its claim: "WHERE id AND status = 'running' AND claim_id".
-_RENEW = text("UPDATE jobs SET lease_until = clock_timestamp() + make_interval(secs => :lease), "
+_RENEW = text("UPDATE jobs.jobs SET lease_until = clock_timestamp() + make_interval(secs => :lease), "
               "updated_at = clock_timestamp() WHERE id = :id AND status = 'running' AND claim_id = :claim_id RETURNING id")
-_HOLD = text("SELECT id FROM jobs WHERE id = :id AND status = 'running' AND claim_id = :claim_id FOR UPDATE")
-_COMPLETE = text("UPDATE jobs SET status = 'done', finished_at = clock_timestamp(), lease_until = NULL, "
+_HOLD = text("SELECT id FROM jobs.jobs WHERE id = :id AND status = 'running' AND claim_id = :claim_id FOR UPDATE")
+_COMPLETE = text("UPDATE jobs.jobs SET status = 'done', finished_at = clock_timestamp(), lease_until = NULL, "
                  "payload = payload - CAST(:scrub AS text[]), updated_at = clock_timestamp() "
                  "WHERE id = :id AND status = 'running' AND claim_id = :claim_id RETURNING id")
 
@@ -147,7 +149,7 @@ def fence(db: Any, job: Job, extend_seconds: int) -> bool:
     if job.workspace_id is not None and not db.execute(
             text("SELECT 1 FROM workspaces WHERE id = :ws AND deleted_at IS NULL"), {"ws": job.workspace_id}).first():
         return False
-    db.execute(text("UPDATE jobs SET lease_until = greatest(lease_until, clock_timestamp() + "
+    db.execute(text("UPDATE jobs.jobs SET lease_until = greatest(lease_until, clock_timestamp() + "
                     "make_interval(secs => :extend)) WHERE id = :id"), {"id": job.id, "extend": extend_seconds})
     return True
 
@@ -174,7 +176,7 @@ def fail(db: Any, job: Job, error: str) -> bool:
 
 
 _FAIL = text("""
-    UPDATE jobs SET
+    UPDATE jobs.jobs SET
         status = CASE WHEN attempts >= max_attempts THEN 'dead' ELSE 'queued' END,
         finished_at = CASE WHEN attempts >= max_attempts THEN clock_timestamp() END,
         run_at = CASE WHEN attempts >= max_attempts THEN run_at
@@ -186,7 +188,7 @@ _FAIL = text("""
 
 # The sweep: the same next state, and claim_id cleared with it, so the old holder's token matches nothing.
 _EXPIRE = text("""
-    UPDATE jobs SET
+    UPDATE jobs.jobs SET
         status = CASE WHEN attempts >= max_attempts THEN 'dead' ELSE 'queued' END,
         finished_at = CASE WHEN attempts >= max_attempts THEN clock_timestamp() END,
         run_at = CASE WHEN attempts >= max_attempts THEN run_at
@@ -201,7 +203,7 @@ def sweep_expired(db: Any, limit: int = 100) -> int:
     """An expired lease is a failed attempt (§6.3): the job's ``claim_id`` is cleared in the same update,
     so its old holder's token matches nothing from that moment, and it goes back in the queue or, with
     no attempts left, becomes dead. Commits; answers how many it swept."""
-    rows = db.execute(text("SELECT id, kind, attempts FROM jobs WHERE status = 'running' AND lease_until < "
+    rows = db.execute(text("SELECT id, kind, attempts FROM jobs.jobs WHERE status = 'running' AND lease_until < "
                            "clock_timestamp() ORDER BY lease_until LIMIT :limit FOR UPDATE SKIP LOCKED"),
                       {"limit": limit}).all()
     for job_id, kind, attempts in rows:
@@ -224,7 +226,7 @@ def _delay_or_default(kind: str, attempts: int) -> int:
 
 def prune(db: Any, retention_days: int) -> int:
     """Deletes ``done`` jobs finished more than ``retention_days`` ago (§6.3). Commits."""
-    deleted = db.execute(text("DELETE FROM jobs WHERE status = 'done' AND finished_at < clock_timestamp() - "
+    deleted = db.execute(text("DELETE FROM jobs.jobs WHERE status = 'done' AND finished_at < clock_timestamp() - "
                               "make_interval(days => :days)"), {"days": retention_days}).rowcount
     db.commit()
     return int(deleted or 0)

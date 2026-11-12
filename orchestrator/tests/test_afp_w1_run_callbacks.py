@@ -130,7 +130,7 @@ def _deliver(new_session, task_id):
     from core.jobs.registry import kind_of
 
     _do(new_session, rc.queue_if_pending, task_id)
-    due = text("UPDATE jobs SET run_at = clock_timestamp() WHERE kind = :k AND idempotency_key = :key "
+    due = text("UPDATE jobs.jobs SET run_at = clock_timestamp() WHERE kind = :k AND idempotency_key = :key "
                "AND status = 'queued'")
     status = None
     for _ in range(rc.DELIVERY_ATTEMPTS):
@@ -294,7 +294,7 @@ def test_the_completion_writer_queues_a_pending_callback_once_and_nothing_else(s
     finally:
         s.close()
     jobs = _do(new_session, lambda db: db.execute(text(
-        "SELECT payload FROM jobs WHERE kind = :k AND workspace_id = CAST(:w AS uuid)"),
+        "SELECT payload FROM jobs.jobs WHERE kind = :k AND workspace_id = CAST(:w AS uuid)"),
         {"k": rc.DELIVER_KIND, "w": ws}).scalars().all())
     assert jobs == [{"task_id": with_callback, "run_id": "r"}]
 

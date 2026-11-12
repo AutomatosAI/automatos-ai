@@ -35,7 +35,7 @@ def _db(role: Optional[str]) -> MagicMock:
     def execute(stmt, params=None):
         sql, res = str(stmt), MagicMock()
         res.fetchone.return_value = (role,) if role and "SELECT wm.role" in sql else None
-        if "FROM jobs" in sql or "UPDATE jobs" in sql or "DELETE FROM jobs" in sql:
+        if "FROM jobs.jobs" in sql or "UPDATE jobs.jobs" in sql or "DELETE FROM jobs.jobs" in sql:
             db.job_queries.append(sql)
         res.all.return_value, res.scalar.return_value = [], 1
         res.first.return_value, res.rowcount = ("test_prd276.kind",), 1

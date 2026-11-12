@@ -68,7 +68,7 @@ def workspaces(new_session, kinds):
 
     yield make
     s = new_session.sweep()
-    s.execute(text("DELETE FROM jobs WHERE kind LIKE 'test_prd276.%'"))
+    s.execute(text("DELETE FROM jobs.jobs WHERE kind LIKE 'test_prd276.%'"))
     for ws in made:
         s.execute(text("DELETE FROM workspaces WHERE id = CAST(:id AS uuid)"), {"id": ws})
     s.commit()
@@ -90,12 +90,12 @@ def _claim(new_session, kind=KIND, limit=10):
 
 
 def _expire(new_session, job_id):
-    _do(new_session, lambda s: s.execute(text("UPDATE jobs SET lease_until = clock_timestamp() - interval '1 second' "
+    _do(new_session, lambda s: s.execute(text("UPDATE jobs.jobs SET lease_until = clock_timestamp() - interval '1 second' "
                                               "WHERE id = :id"), {"id": job_id}))
 
 
 def _row(new_session, job_id):
-    return _do(new_session, lambda s: s.execute(text("SELECT status, attempts, claim_id, last_error FROM jobs "
+    return _do(new_session, lambda s: s.execute(text("SELECT status, attempts, claim_id, last_error FROM jobs.jobs "
                                                      "WHERE id = :id"), {"id": job_id}).first())
 
 
@@ -163,7 +163,7 @@ def test_a_failure_waits_its_backoff_then_dies_at_its_limit(new_session, workspa
     (job,) = _claim(new_session, FLAKY)
     assert _do(new_session, queue.fail, job, "RuntimeError: receiver down") is True
     assert _row(new_session, job_id)[0] == "queued" and _claim(new_session, FLAKY) == []  # 60 s backoff
-    _do(new_session, lambda s: s.execute(text("UPDATE jobs SET run_at = clock_timestamp() WHERE id = :id"),
+    _do(new_session, lambda s: s.execute(text("UPDATE jobs.jobs SET run_at = clock_timestamp() WHERE id = :id"),
                                          {"id": job_id}))
     (again,) = _claim(new_session, FLAKY)
     _do(new_session, queue.fail, again, "RuntimeError: receiver down")
@@ -177,7 +177,7 @@ def test_the_fence_extends_the_lease_and_refuses_a_closed_workspace(new_session,
     _expire(new_session, job_id)
     assert _do(new_session, queue.fence, job, 120) is True
     left = _do(new_session, lambda s: s.execute(text("SELECT extract(epoch FROM lease_until - clock_timestamp()) "
-                                                     "FROM jobs WHERE id = :id"), {"id": job_id}).scalar())
+                                                     "FROM jobs.jobs WHERE id = :id"), {"id": job_id}).scalar())
     assert 100 < left <= 120
     _do(new_session, lambda s: s.execute(text("UPDATE workspaces SET deleted_at = now() WHERE id = CAST(:ws AS uuid)"),
                                          {"ws": ws}))
@@ -213,7 +213,7 @@ def test_a_purge_deletes_the_workspaces_jobs_before_its_data(new_session, worksp
 
     @jobs_stop_first
     def first_data_step(workspace_id, result):
-        seen.append(_do(new_session, lambda s: s.execute(text("SELECT count(*) FROM jobs WHERE workspace_id = "
+        seen.append(_do(new_session, lambda s: s.execute(text("SELECT count(*) FROM jobs.jobs WHERE workspace_id = "
                                                                "CAST(:ws AS uuid)"), {"ws": ws}).scalar()))
         return True
 
@@ -229,7 +229,7 @@ def test_a_workspaces_managers_retry_or_clear_its_dead_jobs_and_no_one_elses(new
     ids = []
     for ws in (mine, mine, theirs):
         job_id = _do(new_session, queue.enqueue, KIND, {}, workspace_id=ws)
-        _do(new_session, lambda s, i=job_id: s.execute(text("UPDATE jobs SET status = 'dead', attempts = 2, "
+        _do(new_session, lambda s, i=job_id: s.execute(text("UPDATE jobs.jobs SET status = 'dead', attempts = 2, "
                                                             "finished_at = now() WHERE id = :id"), {"id": i}))
         ids.append(job_id)
     ctx = SimpleNamespace(workspace_id=uuid.UUID(mine))
@@ -250,7 +250,7 @@ def test_a_workspaces_managers_retry_or_clear_its_dead_jobs_and_no_one_elses(new
 def test_prune_deletes_old_finished_jobs(new_session, workspaces):
     ws = workspaces()
     job_id = _do(new_session, queue.enqueue, KIND, {}, workspace_id=ws)
-    _do(new_session, lambda s: s.execute(text("UPDATE jobs SET status = 'done', finished_at = now() - "
+    _do(new_session, lambda s: s.execute(text("UPDATE jobs.jobs SET status = 'done', finished_at = now() - "
                                               "interval '8 days' WHERE id = :id"), {"id": job_id}))
     assert _do(new_session, queue.prune, 7) >= 1 and _row(new_session, job_id) is None
 
@@ -282,7 +282,7 @@ def test_a_kinds_scrub_keys_last_only_until_the_job_ends(new_session, workspaces
     try:
         ws = workspaces()
         payload = lambda job_id: _do(new_session, lambda s: s.execute(  # noqa: E731
-            text("SELECT payload FROM jobs WHERE id = :id"), {"id": job_id}).scalar())
+            text("SELECT payload FROM jobs.jobs WHERE id = :id"), {"id": job_id}).scalar())
         done = _do(new_session, queue.enqueue, sealed, {"contact": "sealed", "ref": 1}, workspace_id=ws, key="a")
         dies = _do(new_session, queue.enqueue, sealed, {"contact": "sealed", "ref": 2}, workspace_id=ws, key="b")
         first = {j.id: j for j in _claim(new_session, sealed)}
@@ -380,7 +380,7 @@ def test_the_purges_first_data_step_deletes_the_jobs_before_touching_s3(new_sess
 
     def s3_delete(workspace_id, result):
         left_at_s3.append(_do(new_session, lambda s: s.execute(text(
-            "SELECT count(*) FROM jobs WHERE workspace_id = CAST(:ws AS uuid)"), {"ws": ws}).scalar()))
+            "SELECT count(*) FROM jobs.jobs WHERE workspace_id = CAST(:ws AS uuid)"), {"ws": ws}).scalar()))
 
     monkeypatch.setattr(workspace_purge, "_purge_workspace_s3", s3_delete)
     result = workspace_purge.PurgeResult(workspace_id=ws)

@@ -405,7 +405,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # jobs, a new table only; the guard follows it.
     jobs = (versions / "jobs_20261111.py").read_text()
     assert 'down_revision = "end_users_erasing_20261111"' in jobs
-    assert 'EXPECTED_HEAD = "jobs_20261111"' in guard
+    # 2026-11-12 (Durable background work, §10-7): jobs_schema_20261112 chains onto that —
+    # the jobs table moves into its own schema; the guard follows it.
+    moved = (versions / "jobs_schema_20261112.py").read_text()
+    assert 'down_revision = "jobs_20261111"' in moved
+    assert 'EXPECTED_HEAD = "jobs_schema_20261112"' in guard
 
 
 def test_orm_row_is_keyed_by_route():
