@@ -21,6 +21,7 @@ Every export and every download is audited, like the GDPR export.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -32,6 +33,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from config import config
+from core.jobs.registry import job_handler
 from core.models.workspace_move import (
     ACTIVE_STATUSES, DOWNLOADED, EXPIRED, EXPORT, FAILED, QUEUED, READY, RUNNING, WorkspaceMoveJob,
 )
@@ -45,7 +47,7 @@ from services.workspace_move.writer import ExportTooLarge
 logger = logging.getLogger(__name__)
 
 SessionFactory = Callable[[], Session]
-SWEEP_JOB_ID = "workspace_export_sweep"
+SWEEP_KIND = "workspace_move.export_sweep"
 SWEEP_MINUTES = 15
 # A downloaded file whose clean-up did not run (the download broke off) is deleted after this.
 DOWNLOAD_GRACE = timedelta(hours=6)
@@ -344,15 +346,13 @@ def sweep_exports(*, now: Optional[datetime] = None,
 
 
 def register(scheduler: Any) -> bool:
-    """The sweep on the leader's scheduler, every ``SWEEP_MINUTES``; False when this worker hosts none."""
+    """The sweep's platform schedule on the leader's scheduler, every ``SWEEP_MINUTES``; False when this
+    worker hosts none. PRD-276 Wave 2c: a ``workspace_move.export_sweep`` job (catch-up ``latest``)."""
     if scheduler is None or not getattr(scheduler, "running", False):
         return False
-    from apscheduler.triggers.interval import IntervalTrigger
+    from core.jobs.schedules import PLATFORM, interval, schedule
 
-    scheduler.add_job(
-        sweep_exports, IntervalTrigger(minutes=SWEEP_MINUTES), id=SWEEP_JOB_ID,
-        replace_existing=True, max_instances=1, coalesce=True,
-    )
+    schedule(scheduler, SWEEP_KIND, PLATFORM, interval(minutes=SWEEP_MINUTES))
     logger.info("[workspace-move] export sweep every %d minutes", SWEEP_MINUTES)
     return True
 
@@ -361,3 +361,9 @@ __all__ = [
     "ExportBusy", "ExportGone", "ExportNotFound", "claim_download", "discard_file", "get_job", "register",
     "release_download", "run_export", "start_export", "sweep_exports",
 ]
+
+
+@job_handler(SWEEP_KIND, concurrency=1, workspace_concurrency=1)
+async def run_sweep_job(job: Any) -> None:
+    """A sweep slot, off the event loop."""
+    await asyncio.to_thread(sweep_exports)

@@ -256,6 +256,9 @@ def test_another_workspaces_export_is_not_found(world, maker, monkeypatch):
 def test_the_sweep_is_registered_on_the_leader():
     added = []
     scheduler = SimpleNamespace(running=True, add_job=lambda func, trigger, **kw: added.append((func, kw["id"])))
-    assert jobs.register(scheduler) is True
-    assert added == [(jobs.sweep_exports, jobs.SWEEP_JOB_ID)]
+    from core.jobs import schedules
+
+    assert jobs.register(scheduler) is True  # PRD-276 Wave 2c: a platform schedule queues the sweep
+    timer_id = schedules.job_id(jobs.SWEEP_KIND, schedules.PLATFORM)
+    assert added == [(schedules.fire, timer_id), (schedules.fire, f"{timer_id}:catch-up")]
     assert jobs.register(SimpleNamespace(running=False)) is False

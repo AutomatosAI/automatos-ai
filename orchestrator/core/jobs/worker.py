@@ -35,6 +35,11 @@ HANDLER_MODULES = (
     "services.push.receipts",  # push.receipts (Wave 2c)
     "services.mobile.digest",  # mobile.digest (Wave 2c)
     "services.memory_jobs",  # the eight memory jobs (Wave 2c)
+    "services.edge_builder_scheduler",  # graph.edge_builder (Wave 2c)
+    "services.composio_sync_scheduler",  # composio.action_sync (Wave 2c)
+    "jobs.promote_field_memory",  # memory.field_promotion (Wave 2c)
+    "services.proactive.retention",  # proactive.runs_prune (Wave 2c)
+    "services.workspace_move.jobs",  # workspace_move.export_sweep (Wave 2c)
 )
 MIN_POLL_SECONDS = 0.5  # a zero or negative JOBS_POLL_SECONDS would spin the loop
 WORKER_ROLE = "worker"
