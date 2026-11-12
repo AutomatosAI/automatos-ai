@@ -695,6 +695,9 @@ class Config:
     JOBS_ENABLED: bool = os.getenv("JOBS_ENABLED", "true").lower() == "true"
     JOBS_POLL_SECONDS: float = float(os.getenv("JOBS_POLL_SECONDS", "2"))
     JOBS_RETENTION_DAYS: int = int(os.getenv("JOBS_RETENTION_DAYS", "7"))
+    # PRD-276 §6.4: how often the scheduler's leader checks it still holds the scheduler lock, and a
+    # waiting process tries to take it; a dead holder is replaced within about this long.
+    SCHEDULER_LEADER_CHECK_SECONDS: float = float(os.getenv("SCHEDULER_LEADER_CHECK_SECONDS", "5"))
     # The per-IP limit every route gets while the policy plane is on (main.py, slowapi), and the one
     # the routes a server key reaches apply to their other callers (core/auth/server_key_ip_limit.py).
     APP_RATE_LIMIT_PER_MINUTE: int = int(os.getenv("APP_RATE_LIMIT_PER_MINUTE", "60"))
@@ -818,7 +821,7 @@ class Config:
     # =============================================================================
     # AUTO WATCHER (PRD-204: persistent supervision of launched work)
     # =============================================================================
-    # The watcher tick rides the fcntl-locked UnifiedScheduler (single owner
+    # The watcher tick rides the lock-held UnifiedScheduler (single owner
     # across workers). Each tick claims due watches with FOR UPDATE SKIP
     # LOCKED, sweeps terminal states the S3 event hooks missed, detects
     # missed cron fires / benched schedules on scheduled-playbook watches,

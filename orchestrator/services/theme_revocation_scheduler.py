@@ -6,12 +6,12 @@ default), the first run ``FIRST_RUN_DELAY_SECONDS`` after start, one run at a ti
 (``max_instances=1``). It is never registered in the hosted edition (which serves the feed) or
 with an empty ``THEME_REVOCATIONS_URL`` (QB-25, still open: the plan's default is on).
 
-The job is the module-level ``run_scheduled_pull``, so a RedisJobStore can store it by reference
+The job is the module-level ``run_scheduled_pull``, so a job store can store it by reference
 (a scheduler or service instance refuses to be serialized). It runs the synchronous pull in a
 worker thread with its own session; a failed pull is recorded on the sync row by ``pull_feed``
 and logged here, never raised (a stale list degrades to the rows already held, it must not kill
 the job or boot). ``services/scheduler.py`` registers it when the shared scheduler starts, which
-``main.py`` does inside its fcntl-locked block (one worker owns it), and only when HEARTBEAT, RECIPE
+the process holding the scheduler lock does (``services/scheduler_boot.py``), and only when HEARTBEAT, RECIPE
 or COORDINATOR is on. The admin's Check now (``api/admin_theme_revocation_sync.py``) runs the same
 pull on demand, and is the only pull when the shared scheduler is off: the sync status then shows
 the list going stale.

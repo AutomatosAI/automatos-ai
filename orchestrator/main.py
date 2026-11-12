@@ -423,140 +423,15 @@ async def _boot_phase_2_extensions(app_instance: "FastAPI") -> "DeferredInitResu
     except Exception as e:
         logger.warning(f"Dashboard init failed (non-fatal): {e}")
 
-    # Unified Scheduler: single fcntl lock guards heartbeat + recipe + coordinator
-    # Only one uvicorn worker acquires the lock — prevents 4x duplicate executions
-    if config.HEARTBEAT_ENABLED or config.RECIPE_SCHEDULER_ENABLED or config.COORDINATOR_ENABLED:
-        try:
-            import fcntl
-            lock_path = "/tmp/automatos_scheduler.lock"
-            lock_file = open(lock_path, "w")
-            try:
-                fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                # We got the lock — this worker owns ALL scheduled services
-                from services.scheduler import get_unified_scheduler
-                unified = get_unified_scheduler()
-                unified.start()
-                shared_sched = unified.apscheduler
-                app_instance.state.scheduler_lock = lock_file  # keep file open to hold lock
+    # PRD-276 §6.4: the process holding the scheduler lock (a Postgres advisory lock) runs the
+    # unified scheduler and every scheduled service on it; the others wait to take over.
+    try:
+        from services.scheduler_boot import start_scheduler_leadership
 
-                if config.HEARTBEAT_ENABLED:
-                    from services.heartbeat_service import get_heartbeat_service
-                    await get_heartbeat_service().start(scheduler=shared_sched)
-                    logger.info("HeartbeatService started on unified scheduler")
-
-                if config.RECIPE_SCHEDULER_ENABLED:
-                    from services.playbook_scheduler import get_playbook_scheduler
-                    await get_playbook_scheduler().start(scheduler=shared_sched)
-                    logger.info("PlaybookSchedulerService started on unified scheduler")
-
-                # PRD-72: Task Reconciliation — stall detection + auto-retry
-                try:
-                    from services.task_reconciler import get_task_reconciler
-                    await get_task_reconciler().start(scheduler=shared_sched)
-                    logger.info("TaskReconciler started on unified scheduler")
-                except Exception as _tr_err:
-                    logger.warning("Could not start TaskReconciler: %s", _tr_err)
-
-                # PRD-204 S5: Auto Watcher tick -- heartbeat sweep for watches
-                # (terminal fallback, missed-run/benched detection, expiry).
-                # Rides the same fcntl-locked scheduler: single owner across
-                # workers, so watch claims never race between processes.
-                if config.WATCHER_ENABLED:
-                    try:
-                        from services.watch_ticker import get_watch_ticker
-                        await get_watch_ticker().start(scheduler=shared_sched)
-                        logger.info("WatchTicker started on unified scheduler")
-                    except Exception as _wt_err:
-                        logger.warning("Could not start WatchTicker: %s", _wt_err)
-
-                # PRD-79: Memory background jobs (consolidation, decay, promotion)
-                if config.MEMORY_JOBS_ENABLED:
-                    try:
-                        from services.memory_jobs import get_memory_job_scheduler
-                        await get_memory_job_scheduler().start(scheduler=shared_sched)
-                        logger.info("MemoryJobScheduler started on unified scheduler")
-                    except Exception as _mj_err:
-                        logger.warning("Could not start MemoryJobScheduler: %s", _mj_err)
-
-                # PRD-178 S4: field → durable promotion (the moat arm) — distill
-                # strong, untainted field patterns into durable memory
-                # before compaction hard-deletes them. Taint-gated.
-                if config.FIELD_PROMOTION_ENABLED:
-                    try:
-                        from jobs.promote_field_memory import get_field_promotion_scheduler
-                        await get_field_promotion_scheduler().start(scheduler=shared_sched)
-                        logger.info("FieldPromotionJobScheduler started on unified scheduler")
-                    except Exception as _fp_err:
-                        logger.warning("Could not start FieldPromotionJobScheduler: %s", _fp_err)
-
-                # PRD-139: Nightly edge builder (populates graph regardless of flag)
-                try:
-                    from services.edge_builder_scheduler import get_edge_builder_scheduler
-                    await get_edge_builder_scheduler().start(scheduler=shared_sched)
-                    logger.info("EdgeBuilderScheduler started on unified scheduler")
-                except Exception as _eb_err:
-                    logger.warning("Could not start EdgeBuilderScheduler: %s", _eb_err)
-
-                # PRD-177 S3 (F018): daily Composio action-metadata sync — keeps
-                # the classification table (which backs the fail-closed
-                # destructive gate) fresh, on the same scheduler as the recompute.
-                if config.COMPOSIO_SYNC_ENABLED:
-                    try:
-                        from services.composio_sync_scheduler import get_composio_sync_scheduler
-                        await get_composio_sync_scheduler().start(scheduler=shared_sched)
-                        logger.info("ComposioSyncScheduler started on unified scheduler")
-                    except Exception as _cs_err:
-                        logger.warning("Could not start ComposioSyncScheduler: %s", _cs_err)
-
-                # PRD-77: Load agent-scheduled tasks into APScheduler
-                try:
-                    from services.scheduled_task_service import ScheduledTaskService
-                    from core.database.database import SessionLocal
-                    _sched_db = SessionLocal()
-                    try:
-                        _sched_svc = ScheduledTaskService(_sched_db, workspace_id=None)
-                        await _sched_svc.load_active_tasks_to_scheduler()
-                    finally:
-                        _sched_db.close()
-                except Exception as _st_err:
-                    logger.warning("Could not load scheduled tasks: %s", _st_err)
-
-                # Leader reconcile tick: scheduled-task and heartbeat changes made on
-                # any worker reach this scheduler within a minute (not at next boot).
-                try:
-                    from services.schedule_reconcile import start_schedule_reconcile
-                    await start_schedule_reconcile(shared_sched)
-                except Exception as _rc_err:
-                    logger.warning("Could not start schedule reconcile tick: %s", _rc_err)
-
-                # PRD-82A: Coordinator tick — sequential mission orchestration
-                if config.COORDINATOR_ENABLED:
-                    try:
-                        from services.coordinator_service import get_coordinator_service
-                        await get_coordinator_service().start(scheduler=shared_sched)
-                        logger.info("CoordinatorService started on unified scheduler")
-                    except Exception as _cs_err:
-                        logger.warning("Could not start CoordinatorService: %s", _cs_err)
-
-                # PRD-121: HARNESS Self-Optimizing Organization Loop
-                if config.HARNESS_ENABLED:
-                    try:
-                        from services.harness_service import get_harness_service
-                        await get_harness_service().start(scheduler=shared_sched)
-                        logger.info("HarnessService started on unified scheduler")
-                    except Exception as _hs_err:
-                        logger.warning("Could not start HarnessService: %s", _hs_err)
-
-                result.scheduler_started = True
-                logger.info("Unified scheduler started (this worker owns it)")
-            except BlockingIOError:
-                lock_file.close()
-                result.scheduler_started = True  # another worker owns it — that's OK
-                logger.info("Unified scheduler: another worker owns it, skipping")
-        except Exception as e:
-            logger.warning(f"Unified scheduler failed to start (non-fatal): {e}")
-    else:
-        result.scheduler_started = True  # disabled by config — not a failure
+        await start_scheduler_leadership()
+        result.scheduler_started = True
+    except Exception:
+        logger.exception("Unified scheduler failed to start (non-fatal)")
 
     # Mark remaining flags that don't have dedicated init yet
     result.skills_loaded = True

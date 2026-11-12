@@ -2,9 +2,10 @@
 
 Each scheduled post has one APScheduler ``DateTrigger`` job, ``social-publish-<post_id>``,
 on the unified scheduler (``services/scheduler.py``), which only the worker holding
-the fcntl lock runs. The job is :func:`fire_scheduled_post`, a module-level function
-with plain string args (the post and its workspace), never a closure: the
-``RedisJobStore`` pickles it.
+the scheduler lock runs. The job is :func:`fire_scheduled_post`, a module-level function
+with plain string args (the post and its workspace), never a closure; the job
+store is in memory, and the reconcile pass rebuilds the job from the post when
+the scheduler starts.
 
 * **Keeping jobs and posts in step.** A request usually lands on a worker without the
   scheduler. After a committed write, :func:`sync_job` registers, moves or removes

@@ -6,13 +6,18 @@ HeartbeatService and RecipeSchedulerService register their jobs on this
 shared scheduler instead of each spinning up their own.
 
 This ensures:
-- One worker holds the fcntl lock → one scheduler across all uvicorn workers
-- Single Redis/memory jobstore connection
+- One process holds the scheduler lock (a Postgres advisory lock, PRD-276 §6.4,
+  ``core/jobs/leadership.py``) → one scheduler across workers and containers;
+  the others wait and take over if it dies, and it pauses if it loses the lock
+- An in-memory job store: every service rebuilds its jobs from the database when
+  it starts (scheduled tasks and social posts through the reconcile tick), so the
+  schedule never needs sharing across processes
 - Centralised start/stop lifecycle
 """
 
+import asyncio
 import logging
-from typing import Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.memory import MemoryJobStore
@@ -27,6 +32,9 @@ class UnifiedScheduler:
 
     def __init__(self):
         self._scheduler: Optional[AsyncIOScheduler] = None
+        self._leadership: Any = None
+        self._leader_stop: Optional[asyncio.Event] = None
+        self._leader_task: Optional[asyncio.Task] = None
 
     @property
     def apscheduler(self) -> Optional[AsyncIOScheduler]:
@@ -40,20 +48,7 @@ class UnifiedScheduler:
             logger.warning("[Scheduler] Already running, skipping start")
             return
 
-        jobstores = {"default": MemoryJobStore()}
-
-        try:
-            from config import config as app_config
-
-            if app_config.REDIS_URL:
-                from apscheduler.jobstores.redis import RedisJobStore
-
-                jobstores["default"] = RedisJobStore(url=app_config.REDIS_URL)
-                logger.info("[Scheduler] Using Redis job store")
-        except Exception:
-            logger.info("[Scheduler] Using memory job store")
-
-        self._scheduler = AsyncIOScheduler(jobstores=jobstores)
+        self._scheduler = AsyncIOScheduler(jobstores={"default": MemoryJobStore()})
         self._scheduler.start()
         logger.info("[Scheduler] Unified scheduler started")
 
@@ -73,8 +68,39 @@ class UnifiedScheduler:
         except Exception:
             logger.exception("[Scheduler] Could not start ThemeRevocationScheduler (non-fatal)")
 
+    async def lead(self, register_services: Callable[[Any], Awaitable[None]], every_seconds: float) -> bool:
+        """Tries the scheduler lock now, then keeps checking it in the background. The first time
+        this process holds it, the scheduler starts and ``register_services`` puts the scheduled
+        services on it; losing the lock pauses it, and holding it again resumes it. True when this
+        process leads after the first try."""
+        from core.jobs.leadership import leadership_for
+
+        async def start_services() -> None:
+            self.start()
+            await register_services(self._scheduler)
+
+        self._leadership = leadership_for(start_services, self.set_paused)
+        leading = await self._leadership.check()
+        self._leader_stop = asyncio.Event()
+        self._leader_task = asyncio.create_task(self._leadership.run(self._leader_stop, every_seconds))
+        return leading
+
+    def set_paused(self, paused: bool) -> None:
+        """Pauses the scheduler (no job fires) or resumes it; nothing when it isn't running."""
+        if self._scheduler is None or not self._scheduler.running:
+            return
+        (self._scheduler.pause if paused else self._scheduler.resume)()
+
     def stop(self):
-        """Shut down the shared scheduler (stops all registered jobs)."""
+        """Shut down the shared scheduler (stops all registered jobs) and give back the scheduler lock."""
+        if self._leader_stop is not None:
+            self._leader_stop.set()
+        if self._leader_task is not None:
+            self._leader_task.cancel()
+            self._leader_task = None
+        if self._leadership is not None:
+            self._leadership.release()
+            self._leadership = None
         if self._scheduler:
             self._scheduler.shutdown(wait=False)
             logger.info("[Scheduler] Unified scheduler stopped")
