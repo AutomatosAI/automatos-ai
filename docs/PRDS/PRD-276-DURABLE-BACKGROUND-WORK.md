@@ -1,8 +1,7 @@
 # PRD-276: Durable background work — one job queue, and work that outlives the request
 
-**Status:** Proposed, for decision. Written 11 Nov 2026 by Dave. No code is changed by this PRD.
-**Maintainer approval:** needed, from Gerard. §10 lists the decisions, each with a recommendation.
-**The PRD number is provisional** until the maintainer confirms it.
+**Status:** Waves 1a and 1b built and merged on 12 Nov 2026 (#1493, #1494, #1495); Wave 2 next. Written 11 Nov 2026 by Dave; updated 12 Nov 2026 with where the waves stand (§8.1) and which decisions are settled (§10).
+**Maintainer approval:** from Gerard. §10 marks each decision **Decided** or **Open**, and §10.1 lists the choices made while building Wave 1b, for confirmation.
 **Grounded on:** `main @ 2e3c99286`. Labels: **[T]** read in code at that commit; **[R]** read from the hosted Railway project on 11 Nov 2026; **[I]** inferred; **[?]** not known.
 
 ## 1. Why
@@ -215,7 +214,7 @@ This is PRD-161's dispatch loop, generalised to any `kind` [T: the primitives it
 - **Run callbacks:** the receiver dedupes. The contract (#1462) already says `X-Automatos-Delivery` names the delivery and retries keep it (the `services/run_callbacks.py` docstring) [T]. With a stable id per callback, a receiver that drops an id it has seen gets each callback once in effect. The docs for callback receivers say so. Wave 1b tests that the id is the same on every attempt, and that a receiver dropping repeated ids records one effect.
 - **Widget destinations** (Telegram, Slack, a workspace webhook, sent through `send_workspace_notification`): Telegram and Slack messages have no delivery id to dedupe on [I]. A rare duplicate message is possible and is documented as such. Wave 1b gives a workspace webhook the same `X-Automatos-Delivery` header, so it can dedupe as a run callback's receiver does.
 
-#1481's resend job is deleted in Wave 1b, and #1482's race goes with it.
+**As built (#1494):** #1481's resend loop is deleted, and #1482's race with it. A ten-minute sweep stays, but it only *queues*: it queues a `run_callback.deliver` job for each callback still pending five minutes after its ticket ended, when the callback has no job yet. Tickets end in many places besides the board's completion writer (a cancel, the dispatcher's lease sweep, the reconciler, approval grants, the CLI host), and only the completion writer queues the job itself. The job is keyed per ticket, so the sweep and the writer can't both queue one. The sweep also did the cutover step below (§8). See §10.1.
 
 ### 6.6 Jobs and events are different things
 
@@ -267,7 +266,7 @@ This is PRD-161's dispatch loop, generalised to any `kind` [T: the primitives it
 
 **Deleted, each in the wave that replaces it** ("Replace, don't shim"):
 - the in-memory retries in `run_callbacks` and `destinations/dispatcher`;
-- #1481's resend job;
+- #1481's resend loop (a sweep that only queues replaces it, §6.5);
 - the `/tmp/automatos_scheduler.lock` file lock;
 - `RedisJobStore` for the unified scheduler;
 - the boot reaper's surfaces as each moves to a lease: `RecipeExecution` first.
@@ -284,6 +283,20 @@ This is PRD-161's dispatch loop, generalised to any `kind` [T: the primitives it
 | **4** | `PROCESS_ROLES` split on hosted (§6.7): a worker service; the board dispatch loop moves to the worker role; the decision on board tasks as jobs (§10-5) | The API's event loop stays free while runs execute (`core/loop_watchdog.py` reports no stalls under load) |
 | **5** | The remaining `create_task` and `BackgroundTasks` sites sorted: move what a person would notice losing; keep what is best-effort | A short list in the PR, site by site |
 
+### 8.1 Where the waves stand (12 Nov 2026)
+
+- **1a, built (#1493).** As §6 describes, with two changes from review:
+  - a claim ranks each due job within its workspace before applying its own limit, so a workspace at its limit with a long backlog can't hide another workspace's due jobs; claims of one kind take turns (an advisory lock), so the per-workspace limit holds across workers;
+  - a kind's limits are checked when it registers: a lease of at least 10 seconds, and every concurrency limit at least 1.
+
+  Not built yet, from §10-7's recommendation: the `jobs` schema (the table is in `public`) and the queue metrics.
+- **1b, built (#1494, #1495).** Run callbacks and widget destinations are jobs. The departures from the table above are in §10.1:
+  - #1481's job stays as a sweep that only queues (§6.5);
+  - a widget callback's contact details travel encrypted in the job and are removed from the row the moment it ends; a new per-kind `scrub` option on `core/jobs` does this;
+  - a webhook destination gets `X-Automatos-Delivery`, the job's id, on every attempt;
+  - the dashboard's test send makes one attempt per destination and answers at once.
+- **2 to 5:** not started.
+
 Waves 1a, 1b and 2 each stand on their own. Wave 1a is the largest, and lands with no consumer moved, so it can be reviewed by itself. Every wave keeps the default `PROCESS_ROLES`, all three in one process, working.
 
 ## 9. Limits, stated plainly
@@ -296,24 +309,35 @@ Waves 1a, 1b and 2 each stand on their own. Wave 1a is the largest, and lands wi
 
 ## 10. Decisions for the maintainer
 
-1. **The backing store.** *Recommendation:* a `jobs` table in Postgres, generalised from PRD-161: no new dependency, and jobs are queued in the same transaction.
+1. **The backing store.** **Decided:** a `jobs` table in Postgres, as built in Wave 1a. It is generalised from PRD-161: no new dependency, and jobs are queued in the same transaction.
    - **Alternatives:** a Postgres queue library (`procrastinate`, `pgqueuer`), which is a new dependency and needs an issue under AGENTS.md; or Redis (ARQ), which can't queue in the same transaction.
-2. **Hosted topology.** Hosted runs one API container today [R]. Is a second planned? Should hosted have a worker service? *Recommendation:* one worker service, with replicas allowed, and the API unchanged.
-3. **One scheduler across containers,** using a Postgres advisory lock, `job_schedules` cursors and APScheduler's memory job store. Should a plain tick loop over the cursors replace APScheduler, now that it is only a timer? *Recommendation:* the lock and cursors in Wave 2; keep APScheduler until the cursors have run a while, then decide.
-4. **The workspace worker's Redis queue** (`TASK_RUNNER_BACKEND=queued`). Keep it as it is, or move its intake onto `jobs`? *Recommendation:* keep it in this PRD; it is a separate isolated consumer and works. Hosted uses it: `TASK_RUNNER_BACKEND=queued` [R].
-5. **Board tasks as a kind of job** (Wave 4), or keep PRD-161's own columns? *Recommendation:* decide in Wave 4, once Waves 1 to 3 have shown `jobs` working.
-6. **#1481 and #1482 in the meantime.** #1481 is merged. *Recommendation:* keep its resend job until Wave 1b deletes it, and close #1482 in favour of this PRD's Waves 1 and 2.
-7. **The backend behind an interface, with switching triggers written down** (§12). *Recommendation:*
+2. **Hosted topology.** **Open,** needed by Wave 4. Hosted runs one API container today [R]. Is a second planned? Should hosted have a worker service? *Recommendation:* one worker service, with replicas allowed, and the API unchanged.
+3. **One scheduler across containers.** **Open,** needed by Wave 2. It uses a Postgres advisory lock, `job_schedules` cursors and APScheduler's memory job store. Should a plain tick loop over the cursors replace APScheduler, now that it is only a timer? *Recommendation:* the lock and cursors in Wave 2; keep APScheduler until the cursors have run a while, then decide.
+4. **The workspace worker's Redis queue** (`TASK_RUNNER_BACKEND=queued`). **Open.** Keep it as it is, or move its intake onto `jobs`? *Recommendation:* keep it in this PRD; it is a separate isolated consumer and works. Hosted uses it: `TASK_RUNNER_BACKEND=queued` [R].
+5. **Board tasks as a kind of job,** or keep PRD-161's own columns? **Open,** for Wave 4. *Recommendation:* decide in Wave 4, once Waves 1 to 3 have shown `jobs` working.
+6. **#1481 and #1482 in the meantime.** **Decided, and done in Wave 1b (#1494):** the resend loop is deleted, and #1482's race with it; #1482 can be closed. A sweep that only queues stays (§6.5, §10.1). *The recommendation was:* keep the resend job until Wave 1b deletes it, and close #1482 in favour of this PRD's Waves 1 and 2.
+7. **The backend behind an interface, with switching triggers written down** (§12). **Open.** The interface is built (`enqueue` and `@job_handler` are the only way in). The schema and the metrics are not; a follow-up PR proposes both, with the fair ordering of §12.3. *Recommendation:*
    - `enqueue` and `@job_handler` are the only way in, and Postgres is the one backend for now;
    - jobs get their own schema in the business database. A separate jobs database (`JOBS_DATABASE_URL`) comes only with the outbox relay (§12.4), never before it;
    - queue metrics from Wave 1a;
    - the outbox relay to a broker is the planned next step, built only when a trigger is met.
-8. **The PRD number.**
+8. **The PRD number.** **Decided:** 276, under which this PRD was merged (#1483).
+
+### 10.1 Choices made while building Wave 1b, for confirmation
+
+Each was flagged in its pull request. Wave 1b is merged with them, so each stands unless reversed.
+
+| Choice | Why | The alternative |
+|---|---|---|
+| **#1481's job stays as a sweep that only queues** (#1494) | Tickets end in many places, and only the completion writer queues the delivery job. Without the sweep, a cancelled or swept API run would never call back. One job per ticket means the sweep and the writer can't queue a callback twice; a retry after a worker died can still send it again, with the same delivery id, so the receiver can drop it (§6.5). | Queue the job from every place that ends a ticket, or from a database trigger |
+| **A dead widget delivery can't be retried** (#1495) | The shopper's name and phone are encrypted in the job and removed from the row the moment it ends, because Automatos otherwise keeps only the phone's hash. A retry finds them gone, sends nothing, and its event log says why. | Keep the encrypted details on dead jobs until they are cleared, so they can be retried |
+| **A widget callback that can't be queued still answers 202** (#1495) | The request is already logged, so failing it would only have the shopper's retry answered as a duplicate with nothing queued. The failure is logged and shown on the widget error tile. | Answer 503, and change the duplicate check to ignore requests with no queued delivery |
+| **The dashboard's test send makes one attempt per destination** (#1495) | The merchant sees the real result at once, not after retries. | Retry within the request |
 
 ## 11. Open questions
 
 - **Playbook runs and side effects:** should a step that has a side effect (a send, a post, a write to another system) record that it finished, so a retried run skips it? That is the difference between "retry" and "resume" in §9.
-- **Who sees a dead job:** the workspace owner (as today for a failed run), an operator view, or both? §6.8 gives them a list and a retry; this question is who is told.
+- **Who sees a dead job:** the workspace owner (as today for a failed run), an operator view, or both? §6.8 gives them a list and a retry; this question is who is told. As built, a dead delivery shows only on the dead-jobs routes, the error tile and (for a widget callback) the widget event log, and no screen lists dead jobs yet.
 - **Credit metering** (`services/credits/jobs.py`) spends money. **Settled: two overlapping runs can't double-debit** [T].
   - `meter_call` writes each debit through the ledger's one writer, `record` (`services/credits/ledger.py`). It locks the workspace's balance row, then checks whether that usage row's debit is already in the ledger, and does nothing if it is. A unique key on (`source_type`, `source_ref`, `bucket`) backs the check.
   - So a missed tick is caught up by the next (`latest`, §6.4), and an overlapping run changes nothing. Wave 2 moves metering with no extra guard; a concurrency of 1 for `credits.meter` would only save repeated work.
@@ -352,7 +376,7 @@ With thousands of tenants, one workspace can flood the queue and starve the rest
 - PRD-161 already limits slots per agent (`BOARD_DISPATCH_AGENT_SLOTS`) [T].
 - A broker doesn't solve it: a queue per tenant gets hard to run at thousands of tenants.
 
-*For Wave 1a:* a per-workspace concurrency limit on each kind, from the start.
+*For Wave 1a:* a per-workspace concurrency limit on each kind, from the start. **Built** (§8.1). Round-robin ordering isn't yet: within the limits, the oldest due job goes first, so one workspace's backlog still leads every claim up to its limit. The §10-7 follow-up proposes it.
 
 ### 12.4 One interface, and switching triggers
 
