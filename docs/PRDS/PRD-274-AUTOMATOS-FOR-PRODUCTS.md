@@ -309,7 +309,7 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
   (`services/end_user_retention.py`; #1488, #1489).
 - "Where were we" per end user (§5.7): `GET /api/memory/end-users/{id}/resume` answers their recent conversations
   with each one's checkpoint, and the decisions and open loops in their facts and the workspace's, read as them,
-  never another end user's (#1490).
+  never another end user's and, for a key, nothing an audience limits (#1490, #1491).
 - A key's service user goes with its workspace: the purge deletes it after the workspace's rows, and revoking a key
   keeps it (decision 23) (#1491).
 
