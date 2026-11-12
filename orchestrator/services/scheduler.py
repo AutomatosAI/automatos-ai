@@ -17,7 +17,7 @@ from typing import Optional
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.memory import MemoryJobStore
 from services.end_user_retention import schedules_the_retention_sweep
-from services.run_callbacks import schedules_the_resend
+from services.run_callbacks import schedules_the_callback_sweep
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class UnifiedScheduler:
     def apscheduler(self) -> Optional[AsyncIOScheduler]:
         return self._scheduler
 
-    @schedules_the_resend  # PRD-274 W1: callbacks a restart cut off are sent again
+    @schedules_the_callback_sweep  # PRD-276 W1b: callbacks no completion writer queued are queued
     @schedules_the_retention_sweep  # PRD-274 W3: what is past an end user's retention, daily
     def start(self):
         """Create and start the shared AsyncIOScheduler."""
