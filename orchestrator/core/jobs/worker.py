@@ -28,9 +28,12 @@ RETRY_HANDLERS_EVERY_TICKS = 30  # about a minute: a handler module that failed 
 # worker process can claim every kind, whichever role it has (PRD-276 §6.7: a worker service in
 # Wave 4 has no scheduler and serves no route that would import them otherwise).
 HANDLER_MODULES = (
-    "services.run_callbacks",  # run_callback.deliver (Wave 1b)
+    "services.run_callbacks",  # run_callback.deliver (Wave 1b), run_callback.sweep (Wave 2c)
     "services.destinations.delivery_jobs",  # widget_destination.deliver (Wave 1b)
     "services.credits.jobs",  # credits.meter, credits.overhead, credits.expiry (Wave 2b)
+    "services.end_user_retention",  # end_users.retention_sweep (Wave 2c)
+    "services.push.receipts",  # push.receipts (Wave 2c)
+    "services.mobile.digest",  # mobile.digest (Wave 2c)
 )
 MIN_POLL_SECONDS = 0.5  # a zero or negative JOBS_POLL_SECONDS would spin the loop
 WORKER_ROLE = "worker"

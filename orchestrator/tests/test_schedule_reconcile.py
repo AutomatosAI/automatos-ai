@@ -301,8 +301,11 @@ class TestTick:
         # the reads of published posts' numbers, PRD-266 (US-010e) Expo's push receipts and
         # (US-013) the daily digest, PRD-268 (§6.2) the proactive_runs prune, and PRD-273 the
         # sweep that deletes expired workspace export files.
+        # PRD-276 Wave 2c: receipts and the digest are platform schedules (a timer and its catch-up).
         assert fake.added == [
-            sr.RECONCILE_JOB_ID, "socials_plan_tick", "socials_results_tick", "push_receipts_tick", "daily_digest_tick",
+            sr.RECONCILE_JOB_ID, "socials_plan_tick", "socials_results_tick",
+            "schedule:push.receipts:platform", "schedule:push.receipts:platform:catch-up",
+            "schedule:mobile.digest:platform", "schedule:mobile.digest:platform:catch-up",
             "proactive_runs_prune", "workspace_export_sweep",
         ]
         assert passes == [fake]

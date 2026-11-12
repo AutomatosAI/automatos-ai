@@ -67,6 +67,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from config import config
+from core.jobs.registry import job_handler
 from core.models.core import User
 from core.models.mobile_devices import MobileDevice, MobileDeviceStatus
 from core.models.mobile_push import MobileDigestPost
@@ -82,7 +83,7 @@ from services.push.recipients import AUTO_MESSAGE, recipients
 
 logger = logging.getLogger(__name__)
 
-DIGEST_JOB_ID = "daily_digest_tick"
+DIGEST_KIND = "mobile.digest"
 # A person is due from their digest time until this many minutes after it (K12).
 DIGEST_CATCH_UP_MINUTES = 90
 # A claim only matters on its own local date; older ones are deleted at each run.
@@ -588,27 +589,31 @@ async def post_now(
 
 
 def register(scheduler: Any) -> bool:
-    """The digest job on the leader's scheduler; ``False`` when this worker hosts none.
+    """The digest schedule on the leader's scheduler; ``False`` when this worker hosts none.
 
-    No job args: a Redis job store pickles them (``schedule_reconcile._tick``), and the job
-    needs none.
+    A platform schedule queues a ``mobile.digest`` job every ``DIGEST_JOB_INTERVAL_SECONDS``
+    (PRD-276 Wave 2c; catch-up ``latest``: one pass posts every digest that is due, with its own
+    catch-up window, ``DIGEST_CATCH_UP_MINUTES``).
     """
     if scheduler is None or not getattr(scheduler, "running", False):
         return False
-    from apscheduler.triggers.interval import IntervalTrigger
+    from core.jobs.schedules import PLATFORM, interval, schedule
 
-    interval = int(config.DIGEST_JOB_INTERVAL_SECONDS)
-    scheduler.add_job(
-        run_digests, IntervalTrigger(seconds=interval), id=DIGEST_JOB_ID,
-        replace_existing=True, max_instances=1, coalesce=True,
-    )
-    logger.info("Daily digest: checked every %ds", interval)
+    seconds = int(config.DIGEST_JOB_INTERVAL_SECONDS)
+    schedule(scheduler, DIGEST_KIND, PLATFORM, interval(seconds=seconds))
+    logger.info("Daily digest: checked every %ds", seconds)
     return True
+
+
+@job_handler(DIGEST_KIND, concurrency=1, workspace_concurrency=1)
+async def run_digests_job(job: Any) -> None:
+    """A digest slot."""
+    await run_digests()
 
 
 __all__ = [
     "DIGEST_CATCH_UP_MINUTES",
-    "DIGEST_JOB_ID",
+    "DIGEST_KIND",
     "DIGEST_POSTS_KEEP_DAYS",
     "DuePerson",
     "LeaseLost",

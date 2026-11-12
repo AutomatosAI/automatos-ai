@@ -565,13 +565,16 @@ def test_register_adds_one_job_with_no_args(monkeypatch):
     monkeypatch.setattr(config, "DIGEST_JOB_INTERVAL_SECONDS", 600)
     scheduler = _FakeScheduler()
 
-    assert digest.register(scheduler) is True
+    from core.jobs import schedules
+    from core.jobs.registry import CATCH_UP_LATEST, kind_of
 
-    (job,) = scheduler.jobs
-    assert job.func is digest.run_digests
-    assert job.trigger.interval == timedelta(seconds=600)
-    assert "args" not in job.kwargs and "kwargs" not in job.kwargs
-    assert job.kwargs == {"id": digest.DIGEST_JOB_ID, "replace_existing": True, "max_instances": 1, "coalesce": True}
+    assert digest.register(scheduler) is True  # PRD-276 Wave 2c: the schedule queues, a worker posts
+
+    timer, catch_up = scheduler.jobs
+    assert timer.func is schedules.fire and timer.trigger.interval == timedelta(seconds=600)
+    assert timer.kwargs["id"] == schedules.job_id(digest.DIGEST_KIND, schedules.PLATFORM)
+    assert timer.kwargs["args"] == [digest.DIGEST_KIND, schedules.PLATFORM] and catch_up.trigger == "date"
+    assert kind_of(digest.DIGEST_KIND).catch_up == CATCH_UP_LATEST
 
 
 def test_register_needs_a_running_scheduler():
@@ -587,9 +590,11 @@ def test_start_schedule_reconcile_registers_the_digest_on_the_leader(monkeypatch
 
     assert asyncio.run(schedule_reconcile.start_schedule_reconcile(scheduler)) is True
 
-    jobs = [job for job in scheduler.jobs if job.kwargs.get("id") == digest.DIGEST_JOB_ID]
+    from core.jobs import schedules
+
+    jobs = [job for job in scheduler.jobs if job.kwargs.get("id") == schedules.job_id(digest.DIGEST_KIND, schedules.PLATFORM)]
     assert len(jobs) == 1
-    assert jobs[0].func is digest.run_digests and "args" not in jobs[0].kwargs
+    assert jobs[0].func is schedules.fire
 
 
 def test_the_settings_are_declared():

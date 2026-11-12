@@ -8,8 +8,9 @@ A product records, with an end user's consent, how many days their memories are 
 - deletes their messages sent before the cutoff, in their own conversations (``chats.end_user_id``), and
   then each of their conversations left empty that was itself opened before the cutoff.
 
-It runs once a day on the shared scheduler (``schedules_the_retention_sweep`` on ``UnifiedScheduler.start``),
-at ``RETENTION_HOUR_UTC``; a run missed by up to ``RETENTION_MISFIRE_SECONDS`` (a deploy) still runs.
+It runs once a day, queued at ``RETENTION_HOUR_UTC`` by a platform schedule (``schedules_the_retention_sweep``
+on ``UnifiedScheduler.start``; PRD-276 Wave 2c). A run missed while no scheduler ran is queued when one
+starts again (catch-up ``latest``: one sweep deletes everything past every cutoff).
 
 An end user whose erase has started is left to the erase. Running it twice deletes nothing more: each run
 deletes only what is older than its own cutoff. One end user that fails is logged and counted, and the rest
@@ -24,12 +25,13 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from core.jobs.registry import job_handler
+
 logger = logging.getLogger(__name__)
 
-RETENTION_JOB_ID = "end_user_retention_sweep"
+RETENTION_KIND = "end_users.retention_sweep"
 RETENTION_HOUR_UTC = 3
 RETENTION_MINUTE_UTC = 40
-RETENTION_MISFIRE_SECONDS = 6 * 3600
 
 Kept = Tuple[str, str, int]  # (workspace_id, end_user_id, retention_days)
 
@@ -101,10 +103,19 @@ def schedules_the_retention_sweep(start: Callable[..., Any]) -> Callable[..., An
         result = start(self, *args, **kwargs)
         scheduler = getattr(self, "_scheduler", None)
         if scheduler is not None:
-            scheduler.add_job(sweep_end_user_retention, "cron", hour=RETENTION_HOUR_UTC, minute=RETENTION_MINUTE_UTC,
-                              id=RETENTION_JOB_ID, replace_existing=True, max_instances=1, coalesce=True,
-                              misfire_grace_time=RETENTION_MISFIRE_SECONDS)
+            from apscheduler.triggers.cron import CronTrigger
+
+            from core.jobs.schedules import PLATFORM, schedule
+
+            schedule(scheduler, RETENTION_KIND, PLATFORM,
+                     CronTrigger(hour=RETENTION_HOUR_UTC, minute=RETENTION_MINUTE_UTC, timezone=timezone.utc))
         return result
 
     return started
+
+
+@job_handler(RETENTION_KIND, concurrency=1, workspace_concurrency=1)
+async def run_sweep(job: Any) -> None:
+    """A daily retention slot (PRD-276 Wave 2c)."""
+    await sweep_end_user_retention()
 
