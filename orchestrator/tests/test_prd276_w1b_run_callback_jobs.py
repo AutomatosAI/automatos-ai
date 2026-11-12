@@ -64,7 +64,7 @@ def tickets(new_session):
     s.close()
     yield made
     s = new_session.sweep()
-    for table in ("jobs", "run_callbacks", "workspace_signing_secrets", "board_tasks"):
+    for table in ("jobs.jobs", "run_callbacks", "workspace_signing_secrets", "board_tasks"):
         s.execute(text(f"DELETE FROM {table} WHERE workspace_id = CAST(:id AS uuid)"), {"id": ws})  # noqa: S608
     s.execute(text("DELETE FROM workspaces WHERE id = CAST(:id AS uuid)"), {"id": ws})
     s.commit()
