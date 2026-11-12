@@ -1,8 +1,9 @@
 """The purge's barrier (PRD-276 §6.8): a workspace's jobs go before its data.
 
 ``services.workspace_purge`` erases a workspace only after it was soft-deleted, so its jobs are no
-longer claimed. Its first data step (``_s3_purged``) is wrapped to delete the workspace's ``jobs``
-rows first, on a session of its own. That ``DELETE`` waits for any row lock a handler holds while it
+longer claimed. Its first data step (``_s3_purged``) is wrapped to delete the workspace's schedule
+cursors (``job_schedules``, so no scheduler queues another slot for it) and its ``jobs`` rows first,
+in one transaction on a session of its own. That ``DELETE`` waits for any row lock a handler holds while it
 sends under its fence, so once it commits no handler of the workspace is mid-send, and any later
 fence matches no row. Only then does the purge erase data. If the barrier fails, the purge stops.
 """
@@ -16,6 +17,9 @@ from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
+_DELETE_CURSORS = text("DELETE FROM jobs.job_schedules WHERE workspace_id = CAST(:ws AS uuid)")
+_DELETE_JOBS = text("DELETE FROM jobs.jobs WHERE workspace_id = CAST(:ws AS uuid)")
+
 
 def jobs_stop_first(first_data_step: Callable[..., bool]) -> Callable[..., bool]:
     """Wraps the purge's first data step: the workspace's jobs are deleted before it runs."""
@@ -27,8 +31,8 @@ def jobs_stop_first(first_data_step: Callable[..., bool]) -> Callable[..., bool]
 
         db = SessionLocal()
         try:
-            deleted = db.execute(text("DELETE FROM jobs.jobs WHERE workspace_id = CAST(:ws AS uuid)"),
-                                 {"ws": str(workspace_id)}).rowcount
+            db.execute(_DELETE_CURSORS, {"ws": str(workspace_id)})
+            deleted = db.execute(_DELETE_JOBS, {"ws": str(workspace_id)}).rowcount
             db.commit()
         except Exception:  # noqa: BLE001 — logged; the purge holds rather than erase under a running send
             db.rollback()

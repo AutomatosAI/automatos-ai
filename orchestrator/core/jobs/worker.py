@@ -23,6 +23,14 @@ from core.jobs.registry import JobKind, kind_of, registered
 logger = logging.getLogger(__name__)
 
 PRUNE_EVERY_TICKS = 1800  # about an hour at the default poll
+# The modules whose ``@job_handler``s define the kinds, imported when a worker starts so that every
+# worker process can claim every kind, whichever role it has (PRD-276 §6.7: a worker service in
+# Wave 4 has no scheduler and serves no route that would import them otherwise).
+HANDLER_MODULES = (
+    "services.run_callbacks",  # run_callback.deliver (Wave 1b)
+    "services.destinations.delivery_jobs",  # widget_destination.deliver (Wave 1b)
+    "services.credits.jobs",  # credits.meter, credits.overhead, credits.expiry (Wave 2b)
+)
 MIN_POLL_SECONDS = 0.5  # a zero or negative JOBS_POLL_SECONDS would spin the loop
 WORKER_ROLE = "worker"
 
@@ -117,6 +125,18 @@ def _record(job: queue.Job, exc: Exception) -> None:
         logger.warning("[jobs] could not record the failure of %s", job.id, exc_info=True)
 
 
+def load_handlers() -> None:
+    """Imports every module in ``HANDLER_MODULES``, so their kinds are registered here. One that fails
+    is logged; the worker still runs the rest."""
+    import importlib
+
+    for module in HANDLER_MODULES:
+        try:
+            importlib.import_module(module)
+        except Exception:  # noqa: BLE001 — logged; that module's kinds stay queued for a worker that has them
+            logger.exception("[jobs] could not load the job handlers in %s", module)
+
+
 def roles() -> Set[str]:
     """This process's roles (``PROCESS_ROLES``, §6.1): all three by default."""
     from config import config
@@ -135,6 +155,7 @@ def also_starts_the_job_worker(start_board_dispatch: Callable[..., None]) -> Cal
 
         if not (trust_passed and config.JOBS_ENABLED and WORKER_ROLE in roles()):
             return
+        load_handlers()
         app_instance.state.job_worker_stop = asyncio.Event()
         app_instance.state.job_worker_task = asyncio.create_task(JobWorker().run(
             app_instance.state.job_worker_stop, float(config.JOBS_POLL_SECONDS), int(config.JOBS_RETENTION_DAYS)))

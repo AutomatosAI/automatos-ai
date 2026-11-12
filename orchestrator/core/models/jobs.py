@@ -6,7 +6,7 @@ kind's backoff, and ``dead`` once its attempts are used up. ``core/jobs`` is the
 reads or writes it. ``alembic/versions/jobs_20261111.py`` creates the same shape, and
 ``jobs_schema_20261112.py`` moves it into its own schema, ``jobs`` (§10-7, §12.2): the queue's
 write churn sits apart from the business tables in the same database, and every query names it
-``jobs.jobs``.
+``jobs.jobs``. ``jobs.job_schedules`` holds each schedule's cursor (Wave 2b, ``job_schedules_20261112.py``).
 """
 from __future__ import annotations
 
@@ -58,5 +58,24 @@ class Job(Base):
     finished_at = Column(DateTime(timezone=True), nullable=True)
 
 
-# create_all (and a test's ``Job.__table__.create``) builds the table only once its schema exists.
-event.listen(Job.__table__, "before_create", DDL(f"CREATE SCHEMA IF NOT EXISTS {JOBS_SCHEMA}"))
+class JobSchedule(Base):
+    """A schedule's cursor (PRD-276 §6.4, Wave 2b): the last slot it queued. Each due slot is queued
+    in the transaction that moves ``last_slot`` past it, so a slot is queued and recorded, or
+    neither; at start-up the slots missed since are queued by the kind's catch-up policy."""
+
+    __tablename__ = "job_schedules"
+    __table_args__ = (
+        Index("ix_job_schedules_workspace", "workspace_id"),
+        {"schema": JOBS_SCHEMA},
+    )
+
+    kind = Column(String(100), primary_key=True)
+    schedule_id = Column(String(255), primary_key=True)
+    workspace_id = Column(PGUUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True)
+    last_slot = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+# create_all (and a test's ``__table__.create``) builds either table only once its schema exists.
+for _table in (Job.__table__, JobSchedule.__table__):
+    event.listen(_table, "before_create", DDL(f"CREATE SCHEMA IF NOT EXISTS {JOBS_SCHEMA}"))

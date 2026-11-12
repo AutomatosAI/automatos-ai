@@ -134,6 +134,8 @@ _NOT_MOVED = (
     # stays so that the table is still classified wherever it sits.
     not_moved("jobs", "Work queued on this install finishes here; the new install rebuilds its schedules "
               "from what it imports (PRD-276 §6.8)."),
+    not_moved("job_schedules", "A schedule's cursor belongs to this install's scheduler; the new install starts its own "
+              "when it imports the schedule (PRD-276 §6.8)."),
     not_moved("credit_ledger", _BILLING),
     not_moved("credit_balances", _BILLING),
     not_moved("billing_accounts", _BILLING),

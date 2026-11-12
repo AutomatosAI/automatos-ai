@@ -698,6 +698,9 @@ class Config:
     # PRD-276 §6.4: how often the scheduler's leader checks it still holds the scheduler lock, and a
     # waiting process tries to take it; a dead holder is replaced within about this long.
     SCHEDULER_LEADER_CHECK_SECONDS: float = float(os.getenv("SCHEDULER_LEADER_CHECK_SECONDS", "5"))
+    # PRD-276 §6.4: the most missed slots a schedule whose kind catches up "all" queues at once; older
+    # ones are skipped, logged and recorded.
+    JOBS_CATCH_UP_MAX: int = int(os.getenv("JOBS_CATCH_UP_MAX", "24"))
     # The per-IP limit every route gets while the policy plane is on (main.py, slowapi), and the one
     # the routes a server key reaches apply to their other callers (core/auth/server_key_ip_limit.py).
     APP_RATE_LIMIT_PER_MINUTE: int = int(os.getenv("APP_RATE_LIMIT_PER_MINUTE", "60"))
