@@ -15,6 +15,9 @@ DEFAULT_MAX_ATTEMPTS = 5
 DEFAULT_LEASE_SECONDS = 60
 DEFAULT_CONCURRENCY = 4
 DEFAULT_WORKSPACE_CONCURRENCY = 2
+# The worker renews a lease every third of its length, waking at least once a second, so a lease
+# shorter than this could lapse between renewals and be swept from a job that is still running.
+MIN_LEASE_SECONDS = 10
 
 Handler = Callable[[Any], Awaitable[None]]
 
@@ -49,8 +52,10 @@ def job_handler(kind: str, **options: Any) -> Callable[[Handler], Handler]:
 
     def register(handler: Handler) -> Handler:
         spec = JobKind(kind=kind, handler=handler, **options)
-        if spec.max_attempts < 1 or spec.lease_seconds < 1 or spec.concurrency < 1:
-            raise ValueError(f"job kind {kind}: max_attempts, lease_seconds and concurrency must be at least 1")
+        if min(spec.max_attempts, spec.concurrency, spec.workspace_concurrency) < 1:
+            raise ValueError(f"job kind {kind}: max_attempts, concurrency and workspace_concurrency must be at least 1")
+        if spec.lease_seconds < MIN_LEASE_SECONDS:
+            raise ValueError(f"job kind {kind}: lease_seconds must be at least {MIN_LEASE_SECONDS}")
         _KINDS[kind] = spec
         return handler
 

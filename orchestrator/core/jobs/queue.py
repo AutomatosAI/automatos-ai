@@ -78,28 +78,27 @@ def enqueue_now(kind: str, payload: Dict[str, Any], **options: Any) -> Optional[
 # A kind's claims take turns (a transaction-scoped advisory lock), so each sees the last one's
 # committed claims and the per-workspace limit holds across workers, not just within one claim.
 _CLAIM_TURN = text("SELECT pg_advisory_xact_lock(hashtext('jobs:claim:' || :kind))")
-CLAIM_SCAN = 10  # candidates looked at per job wanted, so a busy workspace can't crowd out the rest
 
+# Each workspace's room is applied before the claim's own limit: every due job is ranked within its
+# workspace, and only those that fit that workspace's room are candidates. A workspace at its limit,
+# however long its backlog, never fills the claim and hides another workspace's due jobs.
 _CLAIM = text("""
     WITH running AS (
         SELECT workspace_id, count(*) AS n FROM jobs WHERE kind = :kind AND status = 'running' GROUP BY workspace_id
-    ), candidates AS (
-        SELECT j.id, j.workspace_id, j.run_at FROM jobs j
+    ), ranked AS (
+        SELECT j.id, j.run_at, COALESCE(r.n, 0)
+               + row_number() OVER (PARTITION BY j.workspace_id ORDER BY j.run_at, j.id) AS nth
+        FROM jobs j
         LEFT JOIN workspaces w ON w.id = j.workspace_id
+        LEFT JOIN running r ON r.workspace_id IS NOT DISTINCT FROM j.workspace_id
         WHERE j.kind = :kind AND j.status = 'queued' AND j.run_at <= clock_timestamp()
           AND (j.workspace_id IS NULL OR w.deleted_at IS NULL)
-        ORDER BY j.run_at
-        LIMIT :scan
-        FOR UPDATE OF j SKIP LOCKED
+    ), eligible AS (
+        SELECT id FROM ranked WHERE nth <= :per_workspace ORDER BY run_at, id LIMIT :limit
     ), picked AS (
-        SELECT id FROM (
-            SELECT c.id, c.run_at, COALESCE(r.n, 0)
-                   + row_number() OVER (PARTITION BY c.workspace_id ORDER BY c.run_at) AS nth
-            FROM candidates c LEFT JOIN running r ON r.workspace_id IS NOT DISTINCT FROM c.workspace_id
-        ) ranked
-        WHERE nth <= :per_workspace
-        ORDER BY run_at
-        LIMIT :limit
+        SELECT j.id FROM jobs j JOIN eligible e ON e.id = j.id
+        WHERE j.status = 'queued'
+        FOR UPDATE OF j SKIP LOCKED
     )
     UPDATE jobs SET status = 'running', attempts = jobs.attempts + 1, claim_id = gen_random_uuid(),
                     claimed_by = :worker, lease_until = clock_timestamp() + make_interval(secs => :lease),
@@ -115,7 +114,7 @@ def claim(db: Any, spec: JobKind, worker_id: str, limit: int) -> List[Job]:
     if limit < 1:
         return []
     db.execute(_CLAIM_TURN, {"kind": spec.kind})
-    rows = db.execute(_CLAIM, {"kind": spec.kind, "worker": worker_id, "limit": limit, "scan": limit * CLAIM_SCAN,
+    rows = db.execute(_CLAIM, {"kind": spec.kind, "worker": worker_id, "limit": limit,
                                "lease": spec.lease_seconds, "per_workspace": spec.workspace_concurrency}).all()
     db.commit()
     return [Job(id=r[0], kind=r[1], workspace_id=r[2], payload=r[3] or {}, attempts=r[4], max_attempts=r[5],

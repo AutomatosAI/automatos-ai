@@ -233,8 +233,11 @@ def test_a_workspaces_managers_retry_or_clear_its_dead_jobs_and_no_one_elses(new
                                                             "finished_at = now() WHERE id = :id"), {"id": i}))
         ids.append(job_id)
     ctx = SimpleNamespace(workspace_id=uuid.UUID(mine))
-    listed = _do(new_session, lambda s: jobs_api.list_dead_jobs(limit=50, ctx=ctx, db=s))
-    assert {j["id"] for j in listed["jobs"]} == {str(ids[0]), str(ids[1])}
+    listed = _do(new_session, lambda s: jobs_api.list_dead_jobs(limit=50, offset=0, ctx=ctx, db=s))
+    assert {j["id"] for j in listed["jobs"]} == {str(ids[0]), str(ids[1])} and listed["total"] == 2
+    pages = [_do(new_session, lambda s, o=o: jobs_api.list_dead_jobs(limit=1, offset=o, ctx=ctx, db=s)) for o in (0, 1)]
+    assert [p["total"] for p in pages] == [2, 2]  # the count is all of them, not the page
+    assert {p["jobs"][0]["id"] for p in pages} == {str(ids[0]), str(ids[1])}
     _do(new_session, lambda s: jobs_api.retry_dead_job(ids[0], ctx=ctx, db=s))
     _do(new_session, lambda s: jobs_api.clear_dead_job(ids[1], ctx=ctx, db=s))
     assert _row(new_session, ids[0])[:2] == ("queued", 0) and _row(new_session, ids[1]) is None
@@ -291,3 +294,109 @@ def test_a_kinds_scrub_keys_last_only_until_the_job_ends(new_session, workspaces
         assert _row(new_session, dies)[0] == "dead" and payload(dies) == {"ref": 2}
     finally:
         forget(sealed)
+
+
+def test_a_workspace_at_its_limit_never_hides_another_workspaces_due_jobs(new_session, workspaces):
+    busy, quiet = workspaces(), workspaces()
+    from datetime import datetime, timedelta, timezone
+
+    earlier = datetime.now(timezone.utc) - timedelta(minutes=5)
+    _do(new_session, queue.enqueue, KIND, {"n": "running"}, workspace_id=busy, run_at=earlier)
+    (running,) = _claim(new_session)  # busy is now at its limit of one
+    for n in range(15):  # a backlog older than quiet's job, longer than any one claim
+        _do(new_session, queue.enqueue, KIND, {"n": n}, workspace_id=busy, run_at=earlier)
+    waiting = _do(new_session, queue.enqueue, KIND, {"n": "quiet"}, workspace_id=quiet)
+    (claimed,) = _claim(new_session, limit=1)
+    assert claimed.id == waiting and str(running.workspace_id) == busy
+
+
+@pytest.mark.parametrize("option", [{"workspace_concurrency": 0}, {"concurrency": 0}, {"max_attempts": 0},
+                                    {"lease_seconds": 3}])
+def test_a_kind_the_worker_couldnt_run_safely_is_refused(option):
+    with pytest.raises(ValueError):
+        job_handler("test_prd276.refused", **option)(lambda job: None)
+    with pytest.raises(KeyError):
+        kind_of("test_prd276.refused")
+
+
+def test_a_cancelled_handler_stops_its_leases_renewal(kinds, monkeypatch):
+    from core.jobs import worker as jobs_worker
+
+    stopped = []
+
+    async def renews_forever(self, spec, job):
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            stopped.append(job.id)
+            raise
+
+    async def cancelled(job):
+        await asyncio.sleep(0)  # mid-work, its lease renewal running
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(jobs_worker.JobWorker, "_keep_renewed", renews_forever)
+    spec = kind_of(KIND).__class__(kind=KIND, handler=cancelled, lease_seconds=30)
+    job = queue.Job(id=uuid.uuid4(), kind=KIND, workspace_id=None, payload={}, attempts=1, max_attempts=2,
+                    claim_id=uuid.uuid4())
+
+    async def run():
+        with pytest.raises(asyncio.CancelledError):
+            await jobs_worker.JobWorker("w-test")._run(spec, job)
+        await asyncio.sleep(0)  # let the renewal task see its cancellation
+        assert stopped == [job.id]  # inside the loop: asyncio.run's teardown would cancel it anyway
+
+    asyncio.run(run())
+
+
+def test_a_zero_poll_interval_still_waits_between_ticks(monkeypatch):
+    from core.jobs import worker as jobs_worker
+
+    ticks = []
+
+    async def tick(self):
+        ticks.append(1)
+        return 0
+
+    monkeypatch.setattr(jobs_worker.JobWorker, "tick", tick)
+
+    async def run():
+        stop = asyncio.Event()
+        task = asyncio.create_task(jobs_worker.JobWorker("w-test").run(stop, 0, 7))
+        await asyncio.sleep(jobs_worker.MIN_POLL_SECONDS * 0.6)
+        stop.set()
+        await task
+
+    asyncio.run(run())
+    assert ticks == [1]
+
+
+def test_the_purges_first_data_step_deletes_the_jobs_before_touching_s3(new_session, workspaces, monkeypatch):
+    from services import workspace_purge
+
+    ws = workspaces(deleted=True)
+    _do(new_session, queue.enqueue, KIND, {}, workspace_id=ws)
+    left_at_s3 = []
+
+    def s3_delete(workspace_id, result):
+        left_at_s3.append(_do(new_session, lambda s: s.execute(text(
+            "SELECT count(*) FROM jobs WHERE workspace_id = CAST(:ws AS uuid)"), {"ws": ws}).scalar()))
+
+    monkeypatch.setattr(workspace_purge, "_purge_workspace_s3", s3_delete)
+    result = workspace_purge.PurgeResult(workspace_id=ws)
+    assert workspace_purge._s3_purged(uuid.UUID(ws), result) is True and left_at_s3 == [0]
+
+
+def test_every_dead_job_route_is_for_the_workspaces_managers():
+    from fastapi.routing import APIRoute, iter_route_contexts
+
+    from core.auth.workspace_permission import PERMISSION_MARKER_ATTR
+    from main import app
+
+    routes = [(m, r.path, r) for r in iter_route_contexts(app.routes) if isinstance(r.original_route, APIRoute)
+              and r.path.startswith("/api/v1/jobs") for m in r.methods]
+    assert {(m, path) for m, path, _ in routes} == {("GET", "/api/v1/jobs/dead"), ("POST", "/api/v1/jobs/{job_id}/retry"),
+                                                    ("DELETE", "/api/v1/jobs/{job_id}")}
+    for method, path, route in routes:
+        calls = [d.call for d in route.dependant.dependencies]
+        assert "workspace:manage" in [getattr(c, PERMISSION_MARKER_ATTR, None) for c in calls], (method, path)

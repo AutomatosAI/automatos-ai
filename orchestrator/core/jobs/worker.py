@@ -23,6 +23,7 @@ from core.jobs.registry import JobKind, kind_of, registered
 logger = logging.getLogger(__name__)
 
 PRUNE_EVERY_TICKS = 1800  # about an hour at the default poll
+MIN_POLL_SECONDS = 0.5  # a zero or negative JOBS_POLL_SECONDS would spin the loop
 WORKER_ROLE = "worker"
 
 
@@ -71,12 +72,13 @@ class JobWorker:
         try:
             await spec.handler(job)
         except Exception as exc:  # noqa: BLE001 — logged, recorded, and the attempt is failed below
-            logger.exception("[jobs] %s %s failed on attempt %d", job.kind, job.id, job.attempts)
-            _record(job, exc)
             renewing.cancel()
+            logger.exception("[jobs] %s %s failed on attempt %d", job.kind, job.id, job.attempts)
+            await asyncio.to_thread(_record, job, exc)
             await asyncio.to_thread(on_own_session, queue.fail, job, f"{type(exc).__name__}: {exc}")
             return
-        renewing.cancel()
+        finally:
+            renewing.cancel()  # however the handler stopped, cancelled included: its lease is no longer renewed
         if not await asyncio.to_thread(on_own_session, queue.complete, job):
             logger.info("[jobs] %s %s was finished by its handler or lost its claim", job.kind, job.id)
 
@@ -88,7 +90,9 @@ class JobWorker:
                 return
 
     async def run(self, stop: asyncio.Event, poll_seconds: float, retention_days: int) -> None:
-        """Ticks until ``stop`` is set; prunes finished jobs about once an hour."""
+        """Ticks until ``stop`` is set, waiting at least ``MIN_POLL_SECONDS`` between ticks; prunes
+        finished jobs about once an hour."""
+        poll_seconds = max(MIN_POLL_SECONDS, poll_seconds)
         logger.info("[jobs] worker %s started", self.worker_id)
         while not stop.is_set():
             try:
