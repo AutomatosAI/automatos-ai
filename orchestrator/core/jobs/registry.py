@@ -18,6 +18,10 @@ DEFAULT_WORKSPACE_CONCURRENCY = 2
 # The worker renews a lease every third of its length, waking at least once a second, so a lease
 # shorter than this could lapse between renewals and be swept from a job that is still running.
 MIN_LEASE_SECONDS = 10
+# What a schedule of this kind queues for slots missed while no scheduler ran (§6.4, Wave 2b):
+# every missed slot (capped), the most recent one only, or none.
+CATCH_UP_ALL, CATCH_UP_LATEST, CATCH_UP_NONE = "all", "latest", "none"
+CATCH_UPS = (CATCH_UP_ALL, CATCH_UP_LATEST, CATCH_UP_NONE)
 
 Handler = Callable[[Any], Awaitable[None]]
 
@@ -34,6 +38,7 @@ class JobKind:
     concurrency: int = DEFAULT_CONCURRENCY
     workspace_concurrency: int = DEFAULT_WORKSPACE_CONCURRENCY
     scrub: Tuple[str, ...] = ()  # payload keys held only until the job ends, done or dead
+    catch_up: str = CATCH_UP_LATEST  # a scheduled kind's missed slots: all, latest or none
 
     def delay_after(self, attempts: int) -> int:
         """Seconds to wait after the ``attempts``-th attempt failed: ``backoff[n - 1]``, the last
@@ -48,7 +53,7 @@ _KINDS: Dict[str, JobKind] = {}
 
 def job_handler(kind: str, **options: Any) -> Callable[[Handler], Handler]:
     """Registers the decorated coroutine as ``kind``'s handler, with ``options`` (``backoff``,
-    ``max_attempts``, ``lease_seconds``, ``concurrency``, ``workspace_concurrency``, ``scrub``)."""
+    ``max_attempts``, ``lease_seconds``, ``concurrency``, ``workspace_concurrency``, ``scrub``, ``catch_up``)."""
 
     def register(handler: Handler) -> Handler:
         spec = JobKind(kind=kind, handler=handler, **options)
@@ -56,6 +61,8 @@ def job_handler(kind: str, **options: Any) -> Callable[[Handler], Handler]:
             raise ValueError(f"job kind {kind}: max_attempts, concurrency and workspace_concurrency must be at least 1")
         if spec.lease_seconds < MIN_LEASE_SECONDS:
             raise ValueError(f"job kind {kind}: lease_seconds must be at least {MIN_LEASE_SECONDS}")
+        if spec.catch_up not in CATCH_UPS:
+            raise ValueError(f"job kind {kind}: catch_up must be one of {CATCH_UPS}")
         _KINDS[kind] = spec
         return handler
 

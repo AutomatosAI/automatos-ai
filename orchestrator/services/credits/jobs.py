@@ -1,28 +1,33 @@
-"""The credit meter's scheduled jobs, on the unified scheduler (PRD-265).
+"""The credit meter's scheduled jobs (PRD-265), queued by their schedules (PRD-276 §6.4, Wave 2b).
 
-- ``credits_meter_tick`` — every ``CREDITS_METER_INTERVAL_SECONDS``: debit the
-  model calls made since the last tick and send balance alerts
-  (``meter.meter_pending``).
-- ``credits_overhead_nightly`` — 03:15 UTC: record yesterday's absorbed overhead
-  per workspace (``meter.record_overhead``), for margin reporting.
-- ``credits_expiry_hourly`` — every hour: expire months past their grace and
-  top-ups past their date (``expiry.expire_due``, PRD-265 §4.3).
+Each is a job kind with a platform schedule: the scheduler only queues a slot, and a worker runs it.
 
-Both are plain functions (the Redis job store keeps references, not closures)
-and run on the scheduler's thread pool, off the event loop. The local edition
-never meters, so they do nothing there.
+- ``credits.meter`` — every ``CREDITS_METER_INTERVAL_SECONDS``: debit the model calls made since the
+  last tick and send balance alerts (``meter.meter_pending``). Catch-up ``latest``: one late tick
+  debits everything still waiting, and the ledger never debits a call twice (§11).
+- ``credits.overhead`` — 03:15 UTC: record the absorbed overhead per workspace for the day before
+  the slot (``meter.record_overhead``), for margin reporting. Catch-up ``all``: each missed night
+  records its own day, and a day recorded twice changes nothing (the ledger's key per workspace
+  and day).
+- ``credits.expiry`` — every hour: expire months past their grace and top-ups past their date
+  (``expiry.expire_due``, PRD-265 §4.3). Catch-up ``latest``.
+
+Each runs off the event loop. The local edition never meters, so they do nothing there.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Optional
+
+from core.jobs.registry import CATCH_UP_ALL, CATCH_UP_LATEST, job_handler
 
 logger = logging.getLogger(__name__)
 
-METER_JOB_ID = "credits_meter_tick"
-OVERHEAD_JOB_ID = "credits_overhead_nightly"
-EXPIRY_JOB_ID = "credits_expiry_hourly"
+METER_KIND = "credits.meter"
+OVERHEAD_KIND = "credits.overhead"
+EXPIRY_KIND = "credits.expiry"
 EXPIRY_INTERVAL_HOURS = 1
 OVERHEAD_HOUR_UTC = 3
 OVERHEAD_MINUTE = 15
@@ -50,17 +55,17 @@ def meter_tick() -> None:
         db.close()
 
 
-def overhead_nightly() -> None:
-    """Record yesterday's absorbed overhead."""
+def overhead_nightly(day: Optional[date] = None) -> None:
+    """Record ``day``'s absorbed overhead (yesterday's, by default)."""
     if not _metered_edition():
         return
     from core.database.database import SessionLocal
     from services.credits.meter import record_overhead
 
+    day = day or (datetime.now(timezone.utc) - timedelta(days=1)).date()
     db = SessionLocal()
     try:
-        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date()
-        logger.info("[credits] overhead for %s: %d workspaces", yesterday, record_overhead(db, yesterday))
+        logger.info("[credits] overhead for %s: %d workspaces", day, record_overhead(db, day))
     finally:
         db.close()
 
@@ -81,15 +86,38 @@ def expiry_hourly() -> None:
         db.close()
 
 
-def register_credit_jobs(scheduler: Any) -> None:
-    """Put the jobs on ``scheduler`` (replacing any earlier registration)."""
-    from config import config
+def _slot(job: Any) -> datetime:
+    return datetime.fromisoformat(job.payload["slot"])
 
-    scheduler.add_job(meter_tick, "interval", seconds=int(config.CREDITS_METER_INTERVAL_SECONDS),
-                      id=METER_JOB_ID, replace_existing=True, max_instances=1)
-    scheduler.add_job(overhead_nightly, "cron", hour=OVERHEAD_HOUR_UTC, minute=OVERHEAD_MINUTE,
-                      id=OVERHEAD_JOB_ID, replace_existing=True, max_instances=1)
-    scheduler.add_job(expiry_hourly, "interval", hours=EXPIRY_INTERVAL_HOURS,
-                      id=EXPIRY_JOB_ID, replace_existing=True, max_instances=1)
+
+@job_handler(METER_KIND, catch_up=CATCH_UP_LATEST, concurrency=1, workspace_concurrency=1)
+async def run_meter(job: Any) -> None:
+    """A metering slot."""
+    await asyncio.to_thread(meter_tick)
+
+
+@job_handler(OVERHEAD_KIND, catch_up=CATCH_UP_ALL, concurrency=1, workspace_concurrency=1)
+async def run_overhead(job: Any) -> None:
+    """A nightly slot: the overhead of the day before it."""
+    await asyncio.to_thread(overhead_nightly, (_slot(job) - timedelta(days=1)).date())
+
+
+@job_handler(EXPIRY_KIND, catch_up=CATCH_UP_LATEST, concurrency=1, workspace_concurrency=1)
+async def run_expiry(job: Any) -> None:
+    """An hourly expiry slot."""
+    await asyncio.to_thread(expiry_hourly)
+
+
+def register_credit_jobs(scheduler: Any) -> None:
+    """Declares the three platform schedules on ``scheduler`` (replacing any earlier declaration)."""
+    from apscheduler.triggers.cron import CronTrigger
+
+    from config import config
+    from core.jobs.schedules import PLATFORM, interval, schedule
+
+    schedule(scheduler, METER_KIND, PLATFORM, interval(seconds=int(config.CREDITS_METER_INTERVAL_SECONDS)))
+    schedule(scheduler, OVERHEAD_KIND, PLATFORM,
+             CronTrigger(hour=OVERHEAD_HOUR_UTC, minute=OVERHEAD_MINUTE, timezone=timezone.utc))
+    schedule(scheduler, EXPIRY_KIND, PLATFORM, interval(hours=EXPIRY_INTERVAL_HOURS))
     logger.info("[credits] meter every %ss; overhead recorded daily at %02d:%02d UTC",
                 config.CREDITS_METER_INTERVAL_SECONDS, OVERHEAD_HOUR_UTC, OVERHEAD_MINUTE)

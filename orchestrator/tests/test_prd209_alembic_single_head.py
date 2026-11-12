@@ -174,7 +174,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # jobs (a new table only): the durable job queue.
 # 2026-11-12 (Durable background work, §10-7): jobs_schema_20261112 chains onto that —
 # the jobs table moves into its own schema, jobs (rows, indexes and key carried; nothing rewritten).
-EXPECTED_HEAD = "jobs_schema_20261112"
+# 2026-11-12 (Durable background work, Wave 2b): job_schedules_20261112 chains onto that —
+# jobs.job_schedules (a new table only): each schedule's cursor.
+EXPECTED_HEAD = "job_schedules_20261112"
 
 
 def _literal(node: ast.AST):

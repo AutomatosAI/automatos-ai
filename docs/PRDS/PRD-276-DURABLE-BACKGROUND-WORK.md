@@ -1,6 +1,6 @@
 # PRD-276: Durable background work — one job queue, and work that outlives the request
 
-**Status:** Waves 1a and 1b built and merged on 12 Nov 2026 (#1493, #1494, #1495); Wave 2 next. Written 11 Nov 2026 by Dave; updated 12 Nov 2026 with where the waves stand (§8.1) and which decisions are settled (§10).
+**Status:** Waves 1a and 1b built and merged on 12 Nov 2026 (#1493, #1494, #1495), with §10-7's schema and metrics (#1498) and Wave 2a (#1499); Wave 2b in review, then 2c. Written 11 Nov 2026 by Dave; updated 12 Nov 2026 with where the waves stand (§8.1) and which decisions are settled (§10).
 **Maintainer approval:** from Gerard. §10 marks each decision **Decided** or **Open**, and §10.1 lists the choices made while building Wave 1b, for confirmation.
 **Grounded on:** `main @ 2e3c99286`. Labels: **[T]** read in code at that commit; **[R]** read from the hosted Railway project on 11 Nov 2026; **[I]** inferred; **[?]** not known.
 
@@ -289,13 +289,16 @@ This is PRD-161's dispatch loop, generalised to any `kind` [T: the primitives it
   - a claim ranks each due job within its workspace before applying its own limit, so a workspace at its limit with a long backlog can't hide another workspace's due jobs; claims of one kind take turns (an advisory lock), so the per-workspace limit holds across workers;
   - a kind's limits are checked when it registers: a lease of at least 10 seconds, and every concurrency limit at least 1.
 
-  Not built yet, from §10-7's recommendation: the `jobs` schema (the table is in `public`) and the queue metrics.
+  §10-7's schema and metrics followed in #1498: the table is `jobs.jobs`, and two OpenTelemetry gauges report each kind's queued, running and dead counts and its oldest due job's wait. #1498 also made claims take turns across workspaces (§12.3).
 - **1b, built (#1494, #1495).** Run callbacks and widget destinations are jobs. The departures from the table above are in §10.1:
   - #1481's job stays as a sweep that only queues (§6.5);
   - a widget callback's contact details travel encrypted in the job and are removed from the row the moment it ends; a new per-kind `scrub` option on `core/jobs` does this;
   - a webhook destination gets `X-Automatos-Delivery`, the job's id, on every attempt;
   - the dashboard's test send makes one attempt per destination and answers at once.
-- **2 to 5:** not started.
+- **2a, built (#1499).** A Postgres advisory lock, on a dedicated connection, picks the process that runs the scheduler, in place of the `/tmp` file lock; a process that loses it pauses its scheduler, and a waiting one takes over within `SCHEDULER_LEADER_CHECK_SECONDS`. APScheduler's job store is in memory.
+- **2b, in review.** The `jobs.job_schedules` cursors, each kind's catch-up policy (`all`, capped by `JOBS_CATCH_UP_MAX`; `latest`; `none`), and `schedule()`, which declares a schedule whose timer only queues. Credit metering is its first consumer: three platform schedules.
+- **2c:** the other scheduled jobs moved onto schedules, a few kinds at a time, each with its catch-up policy.
+- **3 to 5:** not started.
 
 Waves 1a, 1b and 2 each stand on their own. Wave 1a is the largest, and lands with no consumer moved, so it can be reviewed by itself. Every wave keeps the default `PROCESS_ROLES`, all three in one process, working.
 
@@ -312,11 +315,11 @@ Waves 1a, 1b and 2 each stand on their own. Wave 1a is the largest, and lands wi
 1. **The backing store.** **Decided:** a `jobs` table in Postgres, as built in Wave 1a. It is generalised from PRD-161: no new dependency, and jobs are queued in the same transaction.
    - **Alternatives:** a Postgres queue library (`procrastinate`, `pgqueuer`), which is a new dependency and needs an issue under AGENTS.md; or Redis (ARQ), which can't queue in the same transaction.
 2. **Hosted topology.** **Open,** needed by Wave 4. Hosted runs one API container today [R]. Is a second planned? Should hosted have a worker service? *Recommendation:* one worker service, with replicas allowed, and the API unchanged.
-3. **One scheduler across containers.** **Open,** needed by Wave 2. It uses a Postgres advisory lock, `job_schedules` cursors and APScheduler's memory job store. Should a plain tick loop over the cursors replace APScheduler, now that it is only a timer? *Recommendation:* the lock and cursors in Wave 2; keep APScheduler until the cursors have run a while, then decide.
+3. **One scheduler across containers.** **Decided in part, by merging #1499:** the advisory lock and an in-memory job store, with APScheduler kept as the timer. **Still open:** whether a plain tick loop replaces APScheduler. It uses a Postgres advisory lock, `job_schedules` cursors and APScheduler's memory job store. Should a plain tick loop over the cursors replace APScheduler, now that it is only a timer? *Recommendation:* the lock and cursors in Wave 2; keep APScheduler until the cursors have run a while, then decide.
 4. **The workspace worker's Redis queue** (`TASK_RUNNER_BACKEND=queued`). **Open.** Keep it as it is, or move its intake onto `jobs`? *Recommendation:* keep it in this PRD; it is a separate isolated consumer and works. Hosted uses it: `TASK_RUNNER_BACKEND=queued` [R].
 5. **Board tasks as a kind of job,** or keep PRD-161's own columns? **Open,** for Wave 4. *Recommendation:* decide in Wave 4, once Waves 1 to 3 have shown `jobs` working.
 6. **#1481 and #1482 in the meantime.** **Decided, and done in Wave 1b (#1494):** the resend loop is deleted, and #1482's race with it; #1482 can be closed. A sweep that only queues stays (§6.5, §10.1). *The recommendation was:* keep the resend job until Wave 1b deletes it, and close #1482 in favour of this PRD's Waves 1 and 2.
-7. **The backend behind an interface, with switching triggers written down** (§12). **Open.** The interface is built (`enqueue` and `@job_handler` are the only way in). The schema and the metrics are not; a follow-up PR proposes both, with the fair ordering of §12.3. *Recommendation:*
+7. **The backend behind an interface, with switching triggers written down** (§12). **Decided, by merging #1498:** the interface (`enqueue` and `@job_handler` are the only way in), the queue in its own schema (`jobs.jobs`), and its metrics. The outbox relay waits for a trigger (§12.4). *The recommendation was:*
    - `enqueue` and `@job_handler` are the only way in, and Postgres is the one backend for now;
    - jobs get their own schema in the business database. A separate jobs database (`JOBS_DATABASE_URL`) comes only with the outbox relay (§12.4), never before it;
    - queue metrics from Wave 1a;
@@ -376,7 +379,7 @@ With thousands of tenants, one workspace can flood the queue and starve the rest
 - PRD-161 already limits slots per agent (`BOARD_DISPATCH_AGENT_SLOTS`) [T].
 - A broker doesn't solve it: a queue per tenant gets hard to run at thousands of tenants.
 
-*For Wave 1a:* a per-workspace concurrency limit on each kind, from the start. **Built** (§8.1). Round-robin ordering isn't yet: within the limits, the oldest due job goes first, so one workspace's backlog still leads every claim up to its limit. The §10-7 follow-up proposes it.
+*For Wave 1a:* a per-workspace concurrency limit on each kind, from the start. **Built** (§8.1). Round-robin ordering followed in #1498: a claim takes each workspace's next job before any workspace's second.
 
 ### 12.4 One interface, and switching triggers
 

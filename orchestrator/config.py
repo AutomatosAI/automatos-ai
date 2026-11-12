@@ -690,7 +690,10 @@ class Config:
     # (services/key_limits.py); a key's own rate_limit_requests can only lower it.
     SERVER_KEY_REQUESTS_PER_MINUTE: int = int(os.getenv("SERVER_KEY_REQUESTS_PER_MINUTE", "600"))
     # PRD-276: the roles this process takes (api, worker, scheduler; all three by default, as the local
-    # edition runs them), and the durable job queue's worker settings (core/jobs).
+    # edition runs them), and the durable job queue's worker settings (core/jobs). The scheduler only
+    # queues scheduled work (credit metering among it, Wave 2b): some process in the deployment must
+    # run the worker role with JOBS_ENABLED on, or nothing runs it. A scheduler process checks this at
+    # start-up (services/scheduler_boot.py).
     PROCESS_ROLES: str = os.getenv("PROCESS_ROLES", "api,worker,scheduler")
     JOBS_ENABLED: bool = os.getenv("JOBS_ENABLED", "true").lower() == "true"
     JOBS_POLL_SECONDS: float = float(os.getenv("JOBS_POLL_SECONDS", "2"))
@@ -698,6 +701,9 @@ class Config:
     # PRD-276 §6.4: how often the scheduler's leader checks it still holds the scheduler lock, and a
     # waiting process tries to take it; a dead holder is replaced within about this long.
     SCHEDULER_LEADER_CHECK_SECONDS: float = float(os.getenv("SCHEDULER_LEADER_CHECK_SECONDS", "5"))
+    # PRD-276 §6.4: the most missed slots a schedule whose kind catches up "all" queues at once; older
+    # ones are skipped, logged and recorded.
+    JOBS_CATCH_UP_MAX: int = int(os.getenv("JOBS_CATCH_UP_MAX", "24"))
     # The per-IP limit every route gets while the policy plane is on (main.py, slowapi), and the one
     # the routes a server key reaches apply to their other callers (core/auth/server_key_ip_limit.py).
     APP_RATE_LIMIT_PER_MINUTE: int = int(os.getenv("APP_RATE_LIMIT_PER_MINUTE", "60"))
