@@ -23,16 +23,16 @@ from core.jobs.queue import NOTIFY_CHANNEL
 router = APIRouter(prefix="/api/v1/jobs", tags=["Jobs"])
 
 NO_SUCH_DEAD_JOB = "No dead job with that id in this workspace."
-_RETRY = text("UPDATE jobs SET status = 'queued', attempts = 0, run_at = clock_timestamp(), last_error = NULL, "
+_RETRY = text("UPDATE jobs.jobs SET status = 'queued', attempts = 0, run_at = clock_timestamp(), last_error = NULL, "
               "finished_at = NULL, updated_at = clock_timestamp() "
               "WHERE id = :id AND workspace_id = CAST(:ws AS uuid) AND status = 'dead' RETURNING kind")
-_CLEAR = text("DELETE FROM jobs WHERE id = :id AND workspace_id = CAST(:ws AS uuid) AND status = 'dead'")
+_CLEAR = text("DELETE FROM jobs.jobs WHERE id = :id AND workspace_id = CAST(:ws AS uuid) AND status = 'dead'")
 
 
-_DEAD_PAGE = text("SELECT id, kind, attempts, last_error, created_at, finished_at FROM jobs "
+_DEAD_PAGE = text("SELECT id, kind, attempts, last_error, created_at, finished_at FROM jobs.jobs "
                   "WHERE workspace_id = CAST(:ws AS uuid) AND status = 'dead' "
                   "ORDER BY finished_at DESC NULLS LAST, id LIMIT :limit OFFSET :offset")
-_DEAD_COUNT = text("SELECT count(*) FROM jobs WHERE workspace_id = CAST(:ws AS uuid) AND status = 'dead'")
+_DEAD_COUNT = text("SELECT count(*) FROM jobs.jobs WHERE workspace_id = CAST(:ws AS uuid) AND status = 'dead'")
 
 
 @router.get("/dead", dependencies=[Depends(require_workspace_permission("workspace:manage"))])

@@ -57,7 +57,7 @@ def site(new_session):
     yield SimpleNamespace(id=uuid.UUID(site_id), workspace_id=uuid.UUID(ws))
     s = new_session.sweep()
     s.execute(text("DELETE FROM widget_event_log WHERE site_id = CAST(:id AS uuid)"), {"id": site_id})
-    s.execute(text("DELETE FROM jobs WHERE workspace_id = CAST(:w AS uuid)"), {"w": ws})
+    s.execute(text("DELETE FROM jobs.jobs WHERE workspace_id = CAST(:w AS uuid)"), {"w": ws})
     s.execute(text("DELETE FROM sites WHERE id = CAST(:id AS uuid)"), {"id": site_id})
     s.execute(text("DELETE FROM workspaces WHERE id = CAST(:w AS uuid)"), {"w": ws})
     s.commit()
@@ -104,7 +104,7 @@ def _claim(new_session):
 
 def _rows(new_session, site):
     return _do(new_session, lambda s: s.execute(text(
-        "SELECT idempotency_key, status, payload, payload::text FROM jobs WHERE workspace_id = CAST(:w AS uuid) "
+        "SELECT idempotency_key, status, payload, payload::text FROM jobs.jobs WHERE workspace_id = CAST(:w AS uuid) "
         "ORDER BY idempotency_key"), {"w": str(site.workspace_id)}).all())
 
 
@@ -138,7 +138,7 @@ def test_a_retryable_failure_requeues_keeping_the_contact_and_the_last_one_recor
                                                                                                channel):
     channel.answer(SendResult(ok=False, latency_ms=5, error="telegram 502", retryable=True))
     _request(new_session, site, [DESTINATIONS[0]])
-    due = text("UPDATE jobs SET run_at = clock_timestamp() WHERE workspace_id = CAST(:w AS uuid)")
+    due = text("UPDATE jobs.jobs SET run_at = clock_timestamp() WHERE workspace_id = CAST(:w AS uuid)")
     for attempt in range(1, dj.DELIVERY_ATTEMPTS + 1):
         _do(new_session, lambda s: s.execute(due, {"w": str(site.workspace_id)}))
         (job,) = _claim(new_session)
@@ -156,13 +156,13 @@ def test_a_retryable_failure_requeues_keeping_the_contact_and_the_last_one_recor
 
 def test_a_dead_job_loses_its_contact_and_a_retry_sends_nothing(new_session, site, channel):
     _request(new_session, site, [DESTINATIONS[0]])
-    _do(new_session, lambda s: s.execute(text("UPDATE jobs SET attempts = max_attempts - 1 "
+    _do(new_session, lambda s: s.execute(text("UPDATE jobs.jobs SET attempts = max_attempts - 1 "
                                               "WHERE workspace_id = CAST(:w AS uuid)"), {"w": str(site.workspace_id)}))
     (job,) = _claim(new_session)  # its last attempt
     _do(new_session, queue.fail, job, "worker lost")
     ((_, status, payload, _),) = _rows(new_session, site)
     assert status == "dead" and dj.CONTACT_KEY not in payload
-    _do(new_session, lambda s: s.execute(text("UPDATE jobs SET status = 'queued', attempts = 0 WHERE id = :id"),
+    _do(new_session, lambda s: s.execute(text("UPDATE jobs.jobs SET status = 'queued', attempts = 0 WHERE id = :id"),
                                          {"id": job.id}))  # the dead-job route's retry
     (again,) = _claim(new_session)
     assert asyncio.run(dj.deliver_widget_callback(again)) is False and channel.sent == []

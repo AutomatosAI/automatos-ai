@@ -64,7 +64,7 @@ def tickets(new_session):
     s.close()
     yield made
     s = new_session.sweep()
-    for table in ("jobs", "run_callbacks", "workspace_signing_secrets", "board_tasks"):
+    for table in ("jobs.jobs", "run_callbacks", "workspace_signing_secrets", "board_tasks"):
         s.execute(text(f"DELETE FROM {table} WHERE workspace_id = CAST(:id AS uuid)"), {"id": ws})  # noqa: S608
     s.execute(text("DELETE FROM workspaces WHERE id = CAST(:id AS uuid)"), {"id": ws})
     s.commit()
@@ -109,15 +109,15 @@ def _claim(new_session):
 
 def _jobs(new_session, ws):
     return _do(new_session, lambda s: s.execute(text(
-        "SELECT idempotency_key, status FROM jobs WHERE kind = :k AND workspace_id = CAST(:w AS uuid) "
+        "SELECT idempotency_key, status FROM jobs.jobs WHERE kind = :k AND workspace_id = CAST(:w AS uuid) "
         "ORDER BY idempotency_key"), {"k": rc.DELIVER_KIND, "w": ws}).all())
 
 
 def _expire_and_sweep(new_session, job_id):
-    _do(new_session, lambda s: s.execute(text("UPDATE jobs SET lease_until = clock_timestamp() - interval '1 second' "
+    _do(new_session, lambda s: s.execute(text("UPDATE jobs.jobs SET lease_until = clock_timestamp() - interval '1 second' "
                                               "WHERE id = :id"), {"id": job_id}))
     _do(new_session, queue.sweep_expired)
-    _do(new_session, lambda s: s.execute(text("UPDATE jobs SET run_at = clock_timestamp() WHERE id = :id"),
+    _do(new_session, lambda s: s.execute(text("UPDATE jobs.jobs SET run_at = clock_timestamp() WHERE id = :id"),
                                          {"id": job_id}))
 
 
