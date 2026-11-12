@@ -29,17 +29,23 @@ _RETRY = text("UPDATE jobs SET status = 'queued', attempts = 0, run_at = clock_t
 _CLEAR = text("DELETE FROM jobs WHERE id = :id AND workspace_id = CAST(:ws AS uuid) AND status = 'dead'")
 
 
+_DEAD_PAGE = text("SELECT id, kind, attempts, last_error, created_at, finished_at FROM jobs "
+                  "WHERE workspace_id = CAST(:ws AS uuid) AND status = 'dead' "
+                  "ORDER BY finished_at DESC NULLS LAST, id LIMIT :limit OFFSET :offset")
+_DEAD_COUNT = text("SELECT count(*) FROM jobs WHERE workspace_id = CAST(:ws AS uuid) AND status = 'dead'")
+
+
 @router.get("/dead", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-def list_dead_jobs(limit: int = Query(50, ge=1, le=200), ctx: RequestContext = Depends(get_request_context_hybrid),
+def list_dead_jobs(limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
+                   ctx: RequestContext = Depends(get_request_context_hybrid),
                    db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """The workspace's dead jobs, newest first: what failed and why, never their payloads."""
-    rows = db.execute(text("SELECT id, kind, attempts, last_error, created_at, finished_at FROM jobs "
-                           "WHERE workspace_id = CAST(:ws AS uuid) AND status = 'dead' "
-                           "ORDER BY finished_at DESC NULLS LAST LIMIT :limit"),
-                      {"ws": str(ctx.workspace_id), "limit": limit}).all()
+    """A page of the workspace's dead jobs, newest first: what failed and why, never their payloads.
+    ``total`` counts all of them, so a manager can page through a backlog of any size."""
+    params = {"ws": str(ctx.workspace_id), "limit": limit, "offset": offset}
+    rows = db.execute(_DEAD_PAGE, params).all()
     jobs = [{"id": str(r[0]), "kind": r[1], "attempts": r[2], "last_error": r[3],
              "created_at": r[4], "finished_at": r[5]} for r in rows]
-    return {"jobs": jobs, "total": len(jobs)}
+    return {"jobs": jobs, "total": int(db.execute(_DEAD_COUNT, params).scalar() or 0), "limit": limit, "offset": offset}
 
 
 @router.post("/{job_id}/retry", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
