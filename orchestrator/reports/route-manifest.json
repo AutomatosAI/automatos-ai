@@ -1,5 +1,5 @@
 {
-  "route_count": 1033,
+  "route_count": 1034,
   "routes": [
     {
       "method": "GET",
@@ -1916,6 +1916,10 @@
     {
       "method": "DELETE",
       "path": "/api/memory/end-users/{end_user_id}/memories/{memory_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/end-users/{end_user_id}/resume"
     },
     {
       "method": "GET",
