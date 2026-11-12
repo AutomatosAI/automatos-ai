@@ -310,3 +310,64 @@ def test_a_scheduler_says_when_nothing_would_run_its_queue(monkeypatch):
     monkeypatch.setattr(config, "JOBS_ENABLED", False)
     assert scheduler_boot.check_the_queue_runs() is False
     assert errors.call_args.kwargs["operation"] == "start_scheduler"
+
+
+def _blocked(statement, params):
+    """Runs ``statement`` on a connection of its own with a short lock timeout: True when it had to
+    wait for a lock another transaction holds."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.exc import OperationalError
+
+    from core.database.database import get_database_url
+
+    probe = create_engine(get_database_url())
+    try:
+        with probe.connect() as conn:
+            tx = conn.begin()
+            conn.execute(text("SET LOCAL lock_timeout = '200ms'"))
+            try:
+                conn.execute(statement, params)
+            except OperationalError as waited:
+                return "lock timeout" in str(waited)
+            finally:
+                tx.rollback()
+        return False
+    finally:
+        probe.dispose()
+
+
+def _while_ticking(monkeypatch, probe):
+    """Runs ``probe`` in the middle of the next tick, after it took its locks, and keeps its answer."""
+    seen, real = [], schedules.due_slots
+
+    def due_slots(*args, **kwargs):
+        seen.append(probe())
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(schedules, "due_slots", due_slots)
+    return seen
+
+
+def test_overlapping_ticks_of_one_schedule_take_turns_on_its_cursor(new_session, kinds, monkeypatch):
+    spec = _every_ten(kinds[CATCH_UP_LATEST])
+    _do(new_session, schedules.tick, spec, T0 + timedelta(minutes=3))
+    lock = text("SELECT last_slot FROM jobs.job_schedules WHERE kind = :k AND schedule_id = :sid FOR UPDATE")
+    seen = _while_ticking(monkeypatch, lambda: _blocked(lock, {"k": spec.kind, "sid": spec.schedule_id}))
+    fired = T0 + timedelta(minutes=10, seconds=1)
+    assert _do(new_session, schedules.tick, spec, fired) == 1 and seen == [True]  # the second tick had to wait
+    monkeypatch.undo()
+    assert _do(new_session, schedules.tick, spec, fired) == 0  # and then found the cursor moved
+
+
+def test_a_workspace_cant_be_closed_in_the_middle_of_its_schedules_tick(new_session, kinds, monkeypatch):
+    ws = str(uuid.uuid4())
+    _do(new_session, lambda s: s.execute(text("INSERT INTO workspaces (id, name) VALUES (CAST(:id AS uuid), 'w2b')"),
+                                         {"id": ws}))
+    try:
+        spec = schedules.Schedule(kinds[CATCH_UP_LATEST], f"report:{ws}", schedules.interval(minutes=10), ws)
+        close = text("UPDATE workspaces SET deleted_at = now() WHERE id = CAST(:id AS uuid)")
+        seen = _while_ticking(monkeypatch, lambda: _blocked(close, {"id": ws}))
+        _do(new_session, schedules.tick, spec, T0 + timedelta(minutes=3))
+        assert seen == [True]  # the close waited for the tick to commit
+    finally:
+        _do(new_session, lambda s: s.execute(text("DELETE FROM workspaces WHERE id = CAST(:id AS uuid)"), {"id": ws}))

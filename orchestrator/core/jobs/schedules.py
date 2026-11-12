@@ -39,7 +39,9 @@ ON_TIME_SECONDS = 60  # under "none", a slot this recent is the one firing now, 
 # A job's key is "<schedule_id>:<slot>" in a 255-character column; a slot's ISO time is at most 32.
 MAX_SCHEDULE_ID = 200
 
-_LIVE = text("SELECT 1 FROM workspaces WHERE id = CAST(:ws AS uuid) AND deleted_at IS NULL")
+# A share lock on a live workspace's row, held to the tick's commit: closing the workspace (its
+# soft delete) waits for a tick in progress, so no tick seeds a cursor or queues a slot after it.
+_LIVE = text("SELECT 1 FROM workspaces WHERE id = CAST(:ws AS uuid) AND deleted_at IS NULL FOR SHARE")
 
 _SEED = text("INSERT INTO jobs.job_schedules (kind, schedule_id, workspace_id, last_slot) "
              "VALUES (:kind, :sid, CAST(:ws AS uuid), :now) ON CONFLICT (kind, schedule_id) DO NOTHING")
@@ -106,7 +108,9 @@ def tick(db: Any, spec: Schedule, now: Optional[datetime] = None) -> int:
     """Queues the schedule's due slots by its kind's policy and moves its cursor, in one
     transaction; answers how many jobs went in (a slot already queued, by a second scheduler,
     adds none). A schedule of a workspace that is closed or gone does nothing: no cursor is made
-    again after a purge deleted it, and no job is queued for it (§6.8). Commits."""
+    again after a purge deleted it, and no job is queued for it (§6.8). A live workspace's row is
+    share-locked to the commit, so it can't be closed in the middle of a tick. The cursor's row
+    lock makes two overlapping ticks of one schedule take turns. Commits."""
     from config import config
     from core.jobs.queue import enqueue
 
