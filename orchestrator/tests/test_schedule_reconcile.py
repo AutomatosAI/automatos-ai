@@ -341,8 +341,14 @@ class TestTick:
         sr._tick(_FakeScheduler())  # no raise
 
     def test_boot_starts_the_tick_after_loading_tasks(self):
-        src = (_ORCH / "main.py").read_text()
-        load = src.index("load_active_tasks_to_scheduler()")
-        tick = src.index("start_schedule_reconcile(shared_sched)")
-        coordinator = src.index("PRD-82A: Coordinator tick")
-        assert load < tick < coordinator
+        # PRD-276 W2a: the scheduled services start from services/scheduler_boot.py, in this order.
+        import inspect
+
+        from services import scheduler_boot
+
+        src = inspect.getsource(scheduler_boot.start_scheduled_services)
+        load = src.index("_load_scheduled_tasks")
+        tick = src.index("_start_reconcile")
+        after = src.index("_AFTER_SCHEDULED_TASKS")
+        assert load < tick < after
+        assert "CoordinatorService" in [name for _, name, _, _ in scheduler_boot._AFTER_SCHEDULED_TASKS]
