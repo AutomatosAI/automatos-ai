@@ -63,7 +63,8 @@ def _fact(fid, text_, fact_type, **meta):
 
 
 THEIRS = [_fact("their-10", "Switched to the yearly plan.", "decision"),
-          _fact("their-11", "Wants the invoice re-sent.", "open_loop", scope="private", owner="end_user:shopper-7")]
+          _fact("their-11", "Wants the invoice re-sent.", "open_loop", scope="private", owner="end_user:shopper-7"),
+          _fact("their-12", "Flagged for the fraud team.", "decision", audience=["fraud"])]
 WORKSPACE = [_fact("ws-09", "Refunds go out on Fridays.", "decision"),
              _fact("ws-08", "A member's own reminder.", "decision", scope="private", owner="user:1"),
              _fact("ws-07", "Margins for the finance team.", "decision", audience=["finance"])]
@@ -133,6 +134,8 @@ def test_where_they_left_off_is_theirs_and_the_workspaces_never_another_end_user
     assert resumed["end_user_id"] == "shopper-7"
     assert {t["chat_id"] for t in resumed["threads"]} == {chats["billing"], chats["delivery"]}
     assert resumed["suggested_next_steps"] == ["Re-send the invoice"]
+    # A key never reads what an audience limits, theirs ("their-12") or the workspace's ("ws-07"); their own
+    # private open loop ("their-11") is theirs to see.
     assert [d["id"] for d in resumed["recent_decisions"]] == ["their-10", "ws-09"]
     assert [o["id"] for o in resumed["open_loops"]] == ["their-11"]
     assert memory == [f"mem:{workspace}:end_user:shopper-7"]

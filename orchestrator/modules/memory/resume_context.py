@@ -213,16 +213,19 @@ async def build_end_user_resume_payload(
     workspace_id: str,
     end_user_id: str,
     readable: Callable[[List[Dict[str, Any]]], List[Dict[str, Any]]] = lambda rows: rows,
+    readable_theirs: Callable[[List[Dict[str, Any]]], List[Dict[str, Any]]] = lambda rows: rows,
     limit_threads: int = DEFAULT_THREAD_LIMIT,
     limit_items: int = DEFAULT_ITEM_LIMIT,
 ) -> Dict[str, Any]:
     """Where an end user left off (PRD-274 W3, §5.7): their own recent conversations, and the
     decisions and open loops in their facts and the workspace's, read as them (``end_user:{id}``),
-    never another end user's. ``readable`` narrows the workspace's (what the caller may read)."""
+    never another end user's. ``readable`` narrows the workspace's and ``readable_theirs`` the end user's
+    own (what the caller may read); their own private facts are left to the viewer rule, which shows them."""
     from modules.memory.unified_memory_service import MemoryNamespace
 
     threads = await asyncio.to_thread(_load_end_user_threads, db, workspace_id, end_user_id, limit_threads)
-    theirs = await _load_namespace_memories(workspace_id, MemoryNamespace(workspace_id).end_user(end_user_id))
+    theirs = readable_theirs(
+        await _load_namespace_memories(workspace_id, MemoryNamespace(workspace_id).end_user(end_user_id)))
     workspace = readable(await _load_typed_memories(workspace_id))
     return assemble_resume_payload(threads, theirs + workspace, viewer=f"end_user:{end_user_id}",
                                    limit_items=limit_items)

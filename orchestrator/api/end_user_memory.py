@@ -84,6 +84,12 @@ def _known(db: Session, ctx: RequestContext, end_user_id: str) -> Any:
     return row
 
 
+def _not_limited_for(ctx: RequestContext, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """For a key, nothing an audience limits (as ``_readable``); private facts are left to the viewer rule,
+    so an end user's own private facts stay in their resume."""
+    return [m for m in rows if not (is_server_key(ctx) and audience_of(m))]
+
+
 def _readable(ctx: RequestContext, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Nothing private to a person; for a key, nothing an audience limits either."""
     return [m for m in rows if visible_to_viewer(m, None) and not (is_server_key(ctx) and audience_of(m))]
@@ -194,14 +200,16 @@ async def resume_end_user(end_user_id: str = END_USER_ID,
                           db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Where the end user left off (§5.7, "where were we"): their recent conversations with each one's
     checkpoint, and the decisions, open loops and next steps in their facts and the workspace's, never
-    another end user's. The workspace's are read as the other routes read them (``_readable``)."""
+    another end user's. The workspace's are read as the other routes read them (``_readable``); for a key,
+    neither theirs nor the workspace's includes anything an audience limits."""
     from modules.memory.resume_context import build_end_user_resume_payload
 
     row = await run_in_threadpool(_known, db, ctx, end_user_id)
     if row.erasing_at is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=BEING_ERASED)
     payload = await build_end_user_resume_payload(db, workspace_id=str(ctx.workspace_id), end_user_id=end_user_id,
-                                                  readable=lambda rows: _readable(ctx, rows))
+                                                  readable=lambda rows: _readable(ctx, rows),
+                                                  readable_theirs=lambda rows: _not_limited_for(ctx, rows))
     return {"end_user_id": end_user_id, **payload}
 
 

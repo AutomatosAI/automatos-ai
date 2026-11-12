@@ -128,12 +128,20 @@ def test_revoking_a_key_keeps_its_service_user_and_its_conversations(new_session
 
 
 def test_a_purge_deletes_its_keys_service_users_and_keeps_one_still_referenced(new_session, made, purge):
+    from core.services.api_key_service import ApiKeyService
+
     workspaces, users = made
     owner = _owner(new_session)
     ws, elsewhere = _workspace(new_session, owner), _workspace(new_session, owner)
     workspaces.extend([ws, elsewhere])
-    (_, gone), (_, referenced) = _service_user(new_session, ws), _service_user(new_session, ws)
-    users.extend([owner, gone, referenced])
+    (revoked_key, gone), (_, referenced) = _service_user(new_session, ws), _service_user(new_session, ws)
+    other_key, other_workspaces = _service_user(new_session, elsewhere)  # a control: another workspace's key
+    users.extend([owner, gone, referenced, other_workspaces])
+    s = new_session()
+    try:  # a revoked key's service user goes with its workspace too
+        assert ApiKeyService.revoke_api_key(s, uuid.UUID(str(revoked_key)), uuid.UUID(ws)) is True
+    finally:
+        s.close()
     chat = _chat(new_session, ws, gone)
     _run(new_session, "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (CAST(:w AS uuid), :u, "
          "'member')", w=elsewhere, u=referenced)  # a reference purge does not own: the user must stay
@@ -142,4 +150,6 @@ def test_a_purge_deletes_its_keys_service_users_and_keeps_one_still_referenced(n
     assert result.skipped_reason is None and result.workspace_row_deleted
     assert not _exists(new_session, "users", "id", gone) and not _exists(new_session, "chats", "id", chat)
     assert _exists(new_session, "users", "id", referenced)
+    assert _exists(new_session, "users", "id", other_workspaces)  # never another workspace's
+    assert _exists(new_session, "sdk_api_keys", "id", uuid.UUID(str(other_key)))
     assert result.rows_deleted["users (key service users)"] == 1
