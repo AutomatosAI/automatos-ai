@@ -5,14 +5,15 @@ These routes create, read, change and delete its record, and replace its key:
 
 - ``GET /api/admin/products`` and ``GET /api/admin/products/{id}``: the records, never a key's hash.
 - ``POST /api/admin/products``: creates one and mints its key, returned once in ``key``.
-- ``PATCH /api/admin/products/{id}``: its name, roster, minted key and default retention. Its slug and owner
+- ``PATCH /api/admin/products/{id}``: its name, roster, minted key (and whether a find mints another) and default
+  retention. Its slug and owner
   workspace don't change: the owner pays for every workspace the product has (§8-2).
 - ``POST /api/admin/products/{id}/key``: a new key, returned once; the old one stops working at once.
 - ``DELETE /api/admin/products/{id}``: refused (409) while any workspace carries its ``settings.product_id``.
 
 Each change is recorded in the owner workspace's audit log. Platform admins only (403 for anyone else),
-in both editions, while ``PRODUCTS_ENABLED`` is on (404 otherwise). Nothing reads the record yet: 5b's
-find-or-create is the first.
+in both editions, while ``PRODUCTS_ENABLED`` is on (404 otherwise). The product's key uses the record:
+``api/products.py`` finds or creates its customers' workspaces.
 """
 from __future__ import annotations
 
@@ -57,6 +58,8 @@ class _Editable(BaseModel):
                                             description="The roster agent the others report to; one of agent_slugs")
     key_type: Optional[Literal["public", "server"]] = None
     key_scopes: Optional[List[str]] = Field(None, description="The scopes of the key each customer's workspace gets")
+    reuse_existing_key: Optional[bool] = Field(None, description="Finding a workspace again mints no new key while it "
+                                                                 "has an active one (default); false mints one each time")
     default_retention_days: Optional[int] = Field(None, ge=1, le=RETENTION_MAX_DAYS,
                                                   description="Days an end user's memories are kept when the product "
                                                               "records none for them; none: until erased")
@@ -100,6 +103,7 @@ def _view(product: Product) -> Dict[str, Any]:
         "owner_workspace_id": str(product.owner_workspace_id), "key_prefix": product.key_prefix,
         "agent_slugs": list(product.agent_slugs or []), "ops_manager_slug": product.ops_manager_slug,
         "key_type": product.key_type, "key_scopes": list(product.key_scopes or []),
+        "reuse_existing_key": product.reuse_existing_key,
         "default_retention_days": product.default_retention_days,
         "created_at": utc_iso(product.created_at), "updated_at": utc_iso(product.updated_at),
     }
@@ -183,7 +187,8 @@ def create_product(body: ProductCreate, ctx: RequestContext = Depends(get_reques
     product = Product(slug=body.slug, name=body.name, owner_workspace_id=body.owner_workspace_id,
                       key_hash=key.key_hash, key_prefix=key.key_prefix, agent_slugs=agent_slugs,
                       ops_manager_slug=body.ops_manager_slug, key_type=body.key_type or "server",
-                      key_scopes=list(body.key_scopes or []), default_retention_days=body.default_retention_days)
+                      key_scopes=list(body.key_scopes or []), default_retention_days=body.default_retention_days,
+                      reuse_existing_key=True if body.reuse_existing_key is None else body.reuse_existing_key)
     db.add(product)
     try:
         db.commit()
@@ -204,7 +209,7 @@ def update_product(product_id: UUID, body: _Editable, ctx: RequestContext = Depe
     _require_admin(ctx)
     product = _product_or_404(db, product_id)
     changes = body.model_dump(exclude_unset=True)
-    for field in ("name", "agent_slugs", "key_type", "key_scopes"):
+    for field in ("name", "agent_slugs", "key_type", "key_scopes", "reuse_existing_key"):
         if field in changes and changes[field] is None:
             raise HTTPException(status_code=422, detail=f"{field} can't be null")
     if "agent_slugs" in changes or "ops_manager_slug" in changes:
