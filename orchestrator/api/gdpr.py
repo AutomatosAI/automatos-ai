@@ -88,6 +88,7 @@ def public_erasure(result: Dict[str, Any]) -> Dict[str, Any]:
     complete; never an exception's text or an internal sign-in id."""
     # A purge's own reasons for stopping pass as they are; any other is "failed" to the caller,
     # the detail being in the server log (workspace_purge logs it).
+    from services.products import OWNS_A_PRODUCT
     from services.workspace_purge import (
         MEMORY_ERASE_FAILED, NOT_SOFT_DELETED, S3_DELETE_FAILED, WORKSPACE_NOT_FOUND,
     )
@@ -96,7 +97,7 @@ def public_erasure(result: Dict[str, Any]) -> Dict[str, Any]:
     reason = sql.get("skipped_reason")
     public_sql = {key: sql.get(key) for key in _PUBLIC_SQL_COUNTS}
     public_sql["rows_deleted"] = {str(t): int(n) for t, n in (sql.get("rows_deleted") or {}).items()}
-    public_reasons = (WORKSPACE_NOT_FOUND, NOT_SOFT_DELETED, MEMORY_ERASE_FAILED, S3_DELETE_FAILED)
+    public_reasons = (WORKSPACE_NOT_FOUND, NOT_SOFT_DELETED, MEMORY_ERASE_FAILED, S3_DELETE_FAILED, OWNS_A_PRODUCT)
     public_sql["skipped_reason"] = None if reason is None else (reason if reason in public_reasons else "failed")
     return {
         "workspace_id": str(result.get("workspace_id")), "erased_at": result.get("erased_at"),

@@ -176,7 +176,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # the jobs table moves into its own schema, jobs (rows, indexes and key carried; nothing rewritten).
 # 2026-11-12 (Durable background work, Wave 2b): job_schedules_20261112 chains onto that —
 # jobs.job_schedules (a new table only): each schedule's cursor.
-EXPECTED_HEAD = "job_schedules_20261112"
+# 2026-11-13 (Automatos for products, Wave 5a): products_20261113 chains onto that —
+# products (a new table only): a product's record, its owner workspace and its key's hash.
+EXPECTED_HEAD = "products_20261113"
 
 
 def _literal(node: ast.AST):

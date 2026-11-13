@@ -413,7 +413,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # jobs.job_schedules, a new table only; the guard follows it.
     cursors = (versions / "job_schedules_20261112.py").read_text()
     assert 'down_revision = "jobs_schema_20261112"' in cursors
-    assert 'EXPECTED_HEAD = "job_schedules_20261112"' in guard
+    # 2026-11-13 (Automatos for products, Wave 5a): products_20261113 chains onto that —
+    # products, a new table only; the guard follows it.
+    products = (versions / "products_20261113.py").read_text()
+    assert 'down_revision = "job_schedules_20261112"' in products
+    assert 'EXPECTED_HEAD = "products_20261113"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

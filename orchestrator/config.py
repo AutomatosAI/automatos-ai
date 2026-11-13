@@ -2306,6 +2306,9 @@ class Config:
     # configuration.audience meets it (core/security/memory_audience.py). Off by default: until it is on,
     # no run has a reader, so nothing is filtered and nothing is labelled by its writer.
     MEMORY_AUDIENCE_ENABLED: bool = os.getenv("MEMORY_AUDIENCE_ENABLED", "false").strip().lower() == "true"
+    # Products (Wave 5): a product is a record an admin creates (core/models/products.py), whose key will find or
+    # create its customers' workspaces. Off by default: until it is on, the product routes answer 404.
+    PRODUCTS_ENABLED: bool = os.getenv("PRODUCTS_ENABLED", "false").strip().lower() == "true"
     # Partner tools (PRD-275): read-only tools on a partner's own HTTP API, from a pack an operator
     # installs with the credential that holds the partner's base URL and key (modules/tools/partner).
     # Off by default: until it is on, no pack installs, none is offered to an agent and none runs.
