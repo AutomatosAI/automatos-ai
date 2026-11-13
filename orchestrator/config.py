@@ -713,6 +713,9 @@ class Config:
     # takes no account, so each client IP gets this many checks a minute (at least one).
     PROVENANCE_RATE_PER_MINUTE: int = max(1, int(os.getenv("PROVENANCE_RATE_PER_MINUTE", "30")))
     SHOPIFY_INTERNAL_API_KEY: str = os.getenv("SHOPIFY_INTERNAL_API_KEY", "")
+    # PRD-274 W5f: the workspace that owns the Shopify product and pays for every shop's workspace. With this and
+    # SHOPIFY_INTERNAL_API_KEY set, a boot seeds the product record from the key (integrations/vertical_products).
+    SHOPIFY_PRODUCT_OWNER_WORKSPACE_ID: str = os.getenv("SHOPIFY_PRODUCT_OWNER_WORKSPACE_ID", "")
     # BudStacks vertical (api/verticals.py) — same fail-closed posture: unset ⇒
     # the budstacks provision surface answers 503, never open.
     BUDSTACKS_INTERNAL_API_KEY: str = os.getenv("BUDSTACKS_INTERNAL_API_KEY", "")

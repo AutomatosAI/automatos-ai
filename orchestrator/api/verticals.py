@@ -48,14 +48,23 @@ _VERTICAL_INTERNAL_KEYS: Dict[str, str] = {
 def _verify_vertical_internal_key(
     vertical: str, authorization: str = Header(...)
 ) -> None:
-    """Fail-closed per-vertical twin of ``api.shopify._verify_internal_key``."""
+    """Fail-closed per-vertical internal key (``api.shopify._verify_internal_key`` calls it too). A vertical
+    that is a product (PRD-274 W5f, ``integrations/vertical_products``) is checked against its record's key
+    hash, so an admin's key replacement takes effect; one with no record yet, against its environment key."""
+    from integrations.vertical_products import key_matches
+
+    token = authorization.replace("Bearer ", "").strip()
+    matched = key_matches(vertical, token)
+    if matched is not None:
+        if not matched:
+            raise HTTPException(status_code=401, detail="Invalid internal API key")
+        return
     attr = _VERTICAL_INTERNAL_KEYS.get(vertical)
     expected = (getattr(config, attr, "") or "").strip() if attr else ""
     if not expected:
         raise HTTPException(
             status_code=503, detail=f"{vertical} provisioning not configured"
         )
-    token = authorization.replace("Bearer ", "").strip()
     if not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=401, detail="Invalid internal API key")
 

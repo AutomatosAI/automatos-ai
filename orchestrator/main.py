@@ -283,7 +283,7 @@ async def _boot_phase_1_core():
     Only 1 of N workers leads (pg_advisory_lock); the rest skip and return None.
     The leader runs the seeds when seed_fingerprint.leader changed
     (core/seeds/leader_stage.py, PRD-262 US-031), then, on every boot, the local
-    first-run seed and the orphaned-run reaper. It returns what the seeds did, for
+    first-run seed, the verticals' product records and the orphaned-run reaper. It returns what the seeds did, for
     the starters pass the background boot runs (PRD-262 US-034); a result that is not
     None also marks this worker as the boot leader. Per-workspace seeding (templates,
     Auto agent) happens at signup time in _provision_new_user_workspace(), NOT here.
@@ -293,6 +293,7 @@ async def _boot_phase_1_core():
     from core.database.database import create_tables, get_db_session, engine
     from core.database.boot_lock import boot_leader_lock
     from core.seeds.leader_stage import run_leader_seeds, seed_local_first_run_on_boot
+    from integrations.vertical_products import seed_vertical_products_on_boot
 
     # DDL — safe for all workers (idempotent, fast no-op when tables exist)
     create_tables()
@@ -302,6 +303,7 @@ async def _boot_phase_1_core():
             return None
         seeds = run_leader_seeds()
         seed_local_first_run_on_boot()
+        seed_vertical_products_on_boot()  # PRD-274 W5f: a vertical's product record and its workspaces
 
         # ── Orphaned-run reaper (PRD-142 Wave 1 · WS-C · W1-S6) ──
         # Runs under the leader lock so exactly one worker reaps per deploy.

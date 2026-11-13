@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import hmac
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -97,13 +96,13 @@ def _verify_internal_key(authorization: str = Header(...)) -> None:
     (``SdkApiKey``). If the app-store wedge ever revives, one shared secret is
     set on both sides and these lanes light up. A falsy configured key can
     never wave through an arbitrary ``Authorization: Bearer x``.
+
+    PRD-274 W5f: Shopify is a product once a boot has seeded its record, and its key is then the record's
+    (``api.verticals._verify_vertical_internal_key``, the one check for every vertical).
     """
-    expected = (config.SHOPIFY_INTERNAL_API_KEY or "").strip()
-    if not expected:
-        raise HTTPException(status_code=503, detail="Shopify provisioning not configured")
-    token = authorization.replace("Bearer ", "").strip()
-    if not hmac.compare_digest(token, expected):
-        raise HTTPException(status_code=401, detail="Invalid internal API key")
+    from api.verticals import _verify_vertical_internal_key
+
+    _verify_vertical_internal_key("shopify", authorization=authorization)
 
 
 # ── Pydantic models ─────────────────────────────────────────────────

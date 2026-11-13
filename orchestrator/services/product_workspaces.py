@@ -48,7 +48,7 @@ class WorkspaceRequestInvalid(ValueError):
 
 
 @dataclass(frozen=True)
-class _Provisioner:
+class Roster:
     """The product's record in the shape ``seed_roster_once`` and ``workspace_key`` read."""
 
     agent_slugs: List[str]
@@ -58,7 +58,7 @@ class _Provisioner:
     reuse_existing_key: bool
 
     @classmethod
-    def of(cls, product: Product) -> "_Provisioner":
+    def of(cls, product: Product) -> "Roster":
         return cls(list(product.agent_slugs or []), product.ops_manager_slug, product.key_type,
                    list(product.key_scopes or []), bool(product.reuse_existing_key))
 
@@ -120,7 +120,7 @@ def find_or_create(db: Any, product: Product, *, external_id: str, name: str, me
     if workspace.deleted_at is not None:
         db.rollback()
         raise WorkspaceClosed(external_id)
-    provisioner = _Provisioner.of(product)
+    provisioner = Roster.of(product)
     installed = seed_roster_once(db, workspace, provisioner, f"product:{product.slug}")
     key = workspace_key(db, workspace, provisioner, name=f"{product.name} key ({external_id})",
                         allowed_domains=allowed_domains)
