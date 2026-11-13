@@ -160,7 +160,23 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # auto_soul_one_source_20261107 — memory_profiles (a new table only): what distillation keeps, by domain.
 # 2026-11-09 (Automatos for products, Wave 1): run_callbacks_20261109 chains onto that —
 # workspace_signing_secrets and run_callbacks (new tables only): signed completion callbacks.
-EXPECTED_HEAD = "run_callbacks_20261109"
+# 2026-11-09 (Automatos for products, Wave 1): execute_idempotency_20261109 chains onto that —
+# one partial unique index on board_tasks: an API run's Idempotency-Key files one ticket.
+# 2026-11-10 (Automatos for products, Wave 1): server_key_chat_20261110 chains onto that —
+# sdk_api_keys.model_allow_list and service_user_id (new nullable columns): headless chat turns.
+# 2026-11-10 (Automatos for products, Wave 3): end_users_20261110 chains onto that —
+# end_users (a new table only): a product's end users and the consent recorded for them.
+# 2026-11-11 (Automatos for products, Wave 3): end_user_chats_20261111 chains onto that —
+# chats.end_user_id (a new nullable column) and its partial index: an end user's conversations.
+# 2026-11-11 (Automatos for products, Wave 3): end_users_erasing_20261111 chains onto that —
+# end_users.erasing_at (a new nullable column): an erase that has started stops their writes.
+# 2026-11-11 (Durable background work, Wave 1a): jobs_20261111 chains onto that —
+# jobs (a new table only): the durable job queue.
+# 2026-11-12 (Durable background work, §10-7): jobs_schema_20261112 chains onto that —
+# the jobs table moves into its own schema, jobs (rows, indexes and key carried; nothing rewritten).
+# 2026-11-12 (Durable background work, Wave 2b): job_schedules_20261112 chains onto that —
+# jobs.job_schedules (a new table only): each schedule's cursor.
+EXPECTED_HEAD = "job_schedules_20261112"
 
 
 def _literal(node: ast.AST):

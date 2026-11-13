@@ -56,9 +56,8 @@ def run_reconcile_once(scheduler: Any, db: Optional[Any] = None) -> Dict[str, An
 
 
 def _tick(scheduler: Any = None) -> None:
-    """One pass. Registered WITHOUT args: a job store pickles job args
-    (RedisJobStore) and a scheduler instance refuses to be serialized, so the
-    live scheduler is resolved at call time instead."""
+    """One pass. Registered WITHOUT args, resolving the live scheduler at call
+    time, so the job never carries a scheduler instance."""
     try:
         if scheduler is None:
             from services.scheduler import get_unified_scheduler

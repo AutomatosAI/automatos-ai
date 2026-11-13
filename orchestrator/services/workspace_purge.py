@@ -28,12 +28,14 @@ from uuid import UUID
 
 from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from config import config
 from core.auth.clerk import get_clerk_auth
 from core.database.database import SessionLocal
 from core.storage import get_s3_client, is_storage_configured
+from core.jobs.erasure import jobs_stop_first
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +172,7 @@ PURGE_RAISED = "exception"
 S3_DELETE_FAILED = "s3_delete_failed"
 
 
+@jobs_stop_first  # PRD-276 §6.8: a workspace's jobs go before its data
 def _s3_purged(workspace_id: UUID, result: "PurgeResult") -> bool:
     """The workspace's S3 objects deleted, counted into ``result``; False (``S3_DELETE_FAILED``)
     when some could not be (CodeRabbit on #1443): deleting the row then would leave those
@@ -435,6 +438,28 @@ def _delete_rows(
     return counts
 
 
+def _key_service_users(db: Session, workspace_id: UUID) -> list[int]:
+    """The users rows the workspace's server keys chat as (PRD-274 W1, ``sdk_api_keys.service_user_id``):
+    never a login or a member, and kept when a key is revoked (its conversations are theirs)."""
+    return [row[0] for row in db.execute(
+        text("SELECT service_user_id FROM sdk_api_keys WHERE workspace_id = :id AND service_user_id IS NOT NULL"),
+        {"id": str(workspace_id)})]
+
+
+def _delete_key_service_users(db: Session, user_ids: list[int], result: "PurgeResult") -> None:
+    """Deletes the workspace's keys' service users once its rows are gone, their chats with them. Each in a
+    savepoint: one still referenced elsewhere is kept and logged, and the purge goes on."""
+    deleted = 0
+    for user_id in user_ids:
+        try:
+            with db.begin_nested():
+                deleted += db.execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id}).rowcount
+        except IntegrityError:
+            logger.exception("[purge] a key's service user %s is still referenced; kept", user_id)
+    if deleted:
+        result.rows_deleted["users (key service users)"] = deleted
+
+
 def purge_workspace_sync(workspace_id: UUID) -> PurgeResult:
     """Synchronous purge entry point — used by `BackgroundTasks` callers.
 
@@ -477,7 +502,8 @@ def purge_workspace_sync(workspace_id: UUID) -> PurgeResult:
             result.clerk_user_id = clerk_uid
             result.clerk_user_deleted = asyncio.run(_delete_clerk_user(clerk_uid))
 
-        # 3) DB cascade — explicit per-table deletes
+        # 3) DB cascade — explicit per-table deletes (its keys go here: note their service users first)
+        service_users = _key_service_users(db, workspace_id)
         result.rows_deleted = _delete_rows(db, workspace_id)
 
         # 4) The workspace row itself — must come BEFORE the users row,
@@ -485,6 +511,8 @@ def purge_workspace_sync(workspace_id: UUID) -> PurgeResult:
         # Deleting users first violates that constraint.
         wd = db.execute(text("DELETE FROM workspaces WHERE id = :id"), {"id": str(workspace_id)})
         result.workspace_row_deleted = bool(wd.rowcount)
+
+        _delete_key_service_users(db, service_users, result)  # PRD-274 W1: never a login, nothing of theirs left
 
         # 5) Owner user row, only when they have nothing left (see _owner_has_nothing_left).
         if owner_leaves:

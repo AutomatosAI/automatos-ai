@@ -91,17 +91,20 @@ class ApiKeyService:
         key_type: str = "public",
         permissions: Optional[list[str]] = None,
         allowed_domains: Optional[list[str]] = None,
-        allowed_ips: Optional[list[str]] = None,
         rate_limit_requests: Optional[int] = None,
         rate_limit_tokens: Optional[int] = None,
         default_agent_id: Optional[int] = None,
         team: Optional[str] = None,
         expires_at: Optional[datetime] = None,
+        model_allow_list: Optional[list[dict[str, str]]] = None,
     ) -> dict[str, Any]:
         """Create a new API key for a workspace.
 
         Returns a dict that includes the full plaintext ``key`` — this is
         the **only** time the caller will ever see it.
+
+        No IP allow-list is written: nothing enforces one yet, and a key that
+        claimed to work only from listed addresses would work from anywhere.
         """
         secret = secrets.token_hex(32)
         prefix = "ak_pub_" if key_type == "public" else "ak_srv_"
@@ -118,12 +121,12 @@ class ApiKeyService:
             key_type=key_type,
             permissions=permissions,
             allowed_domains=allowed_domains,
-            allowed_ips=allowed_ips,
             rate_limit_requests=rate_limit_requests,
             rate_limit_tokens=rate_limit_tokens,
             default_agent_id=default_agent_id,
             team=team,
             expires_at=expires_at,
+            model_allow_list=model_allow_list or None,
         )
 
         db.add(record)
@@ -139,6 +142,7 @@ class ApiKeyService:
             "permissions": record.permissions,
             "default_agent_id": record.default_agent_id,
             "team": record.team,
+            "model_allow_list": record.model_allow_list,
             "created_at": record.created_at.isoformat() if record.created_at else None,
         }
 

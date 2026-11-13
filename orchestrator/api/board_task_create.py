@@ -32,6 +32,7 @@ from api.board_tasks import (
     _text_of,
 )
 from core.auth.dependencies import RequestContext
+from core.auth.server_key_gate import API_KEY_FILER
 from core.models import Agent
 from core.models.core import BoardTask
 from services.board_consent import WHY_CREATED_AND_ASSIGNED, actor_ref, consent_for_created_ticket
@@ -93,7 +94,7 @@ def file_ticket(db: Session, ctx: RequestContext, columns: Dict[str, Any],
     dispatch loop can claim it."""
     task = BoardTask(
         workspace_id=ctx.workspace_id,
-        created_by_type="user",
+        created_by_type=_filer_type(ctx),
         created_by_id=ctx.user.clerk_user_id or ctx.user.id,
         sla_deadline=datetime.now(timezone.utc) + timedelta(hours=PRIORITY_SLA_HOURS.get(columns["priority"], 24)),
         **columns,
@@ -119,10 +120,13 @@ def file_ticket(db: Session, ctx: RequestContext, columns: Dict[str, Any],
     if task.status == "assigned" and task.assigned_agent_id and task.source_type != "recipe":
         # PRD-234 D16: the operator created AND assigned it — on the local edition
         # that is the approval; recorded before the dispatcher can claim the row.
-        consent_for_created_ticket(
-            db, workspace_id=ctx.workspace_id, task=task,
-            actor=actor_ref(ctx), why=WHY_CREATED_AND_ASSIGNED,
-        )
+        # PRD-274 W1: a server key is not the operator; its ticket meets the
+        # workspace's approval policy (always_ask holds it for the owner).
+        if task.created_by_type != API_KEY_FILER:
+            consent_for_created_ticket(
+                db, workspace_id=ctx.workspace_id, task=task,
+                actor=actor_ref(ctx), why=WHY_CREATED_AND_ASSIGNED,
+            )
         _note_no_host_for_cli(db, task)
         notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
         db.commit()  # F118: the wake rides this commit
@@ -130,6 +134,14 @@ def file_ticket(db: Session, ctx: RequestContext, columns: Dict[str, Any],
     logger.info("[BoardTasks] Created task %d in workspace %s", task.id, ctx.workspace_id)
     return task
 
+
+
+def _filer_type(ctx: RequestContext) -> str:
+    """Who filed it: a person ("user"), or a product's server key ("api_key", PRD-274 W1). A
+    key's input is never the owner's own words (``created_by_type == "user"`` means that)."""
+    from core.auth.server_key_gate import is_server_key
+
+    return API_KEY_FILER if is_server_key(ctx) else DEFAULT_SOURCE_TYPE
 
 def _assignee(db: Session, workspace_id: Any, raw: Any) -> Optional[int]:
     """The agent the ticket is given to, one of this workspace's; None for none."""

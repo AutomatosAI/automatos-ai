@@ -11,10 +11,15 @@ review, failed or cancelled), its ending is POSTed there once, with the run id:
   (``core.security.web_access``) when the run is requested and again before every attempt: a
   private, loopback, link-local or metadata address is refused, the POST goes to the address that
   was checked, and a redirect is never followed.
-* **Retried, then recorded.** Up to three attempts (``BACKOFF_SECONDS``); a 2xx delivers; a 4xx
-  other than 429 is the receiver's answer and is not retried. The outcome stays on the
-  ``run_callbacks`` row. Attempts are made in this process: a restart mid-retry leaves the row
-  ``pending``.
+* **Durable, then recorded.** Each callback is a ``run_callback.deliver`` job (PRD-276 §6.5): its
+  id is the delivery id, kept by every attempt; a 5xx, a 429 or no answer is retried at
+  ``DELIVERY_BACKOFF``, up to ``DELIVERY_ATTEMPTS``; a 2xx delivers; any other 4xx is the receiver's
+  answer and is not retried. Each send happens under the job's fence, and the outcome stays on the
+  ``run_callbacks`` row. A restart re-runs the job; it can't lose it. The board's completion writer
+  queues the job; a sweep queues it for a ticket ended any other way (``schedules_the_callback_sweep``).
+* **At least once.** A worker can die after the receiver accepted and before the outcome is written;
+  the retry sends the same ``X-Automatos-Delivery``. A receiver that drops a delivery id it has
+  already seen gets each callback once in effect.
 """
 from __future__ import annotations
 
@@ -28,8 +33,10 @@ import secrets
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
-from uuid import UUID, uuid4
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from uuid import UUID
+
+from core.jobs.registry import CATCH_UP_LATEST, job_handler
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +48,6 @@ DELIVERY_HEADER = "X-Automatos-Delivery"
 EVENT = "agent_run.finished"
 SIGNATURE_VERSION = "v1"
 TOLERANCE_SECONDS = 300
-BACKOFF_SECONDS = (0, 5, 15)  # the wait before each attempt
 TIMEOUT_SECONDS = 10.0
 URL_MAX = 2048
 RESULT_MAX = 50_000
@@ -162,49 +168,109 @@ def new_callback(workspace_id: Any, url: str) -> Callable[[Any, Any], None]:
     return attach
 
 
-# ── Delivery ───────────────────────────────────────────────────────────────────────────────
+# ── Delivery, as a durable job (PRD-276 §6.5) ──────────────────────────────────────────────
+
+DELIVER_KIND = "run_callback.deliver"
+DELIVERY_BACKOFF = (5, 30, 120, 600)  # seconds after attempts 1-4: long enough to ride out a receiver's restart
+DELIVERY_ATTEMPTS = 5
+SEND_MARGIN_SECONDS = 5  # the fence's lease covers the send's timeout plus this
+
+
+class NotYetDelivered(RuntimeError):
+    """A 5xx, a 429 or no answer: the job goes back in the queue at its next delay."""
+
+
+def job_key(task_id: int) -> str:
+    """One delivery job per ticket: the finalize path and the sweep can't both queue it."""
+    return f"task:{task_id}"
+
 
 def sends_run_callback(finalize: Callable[..., Awaitable[Optional[str]]]) -> Callable[..., Awaitable[Optional[str]]]:
     """Wraps the board's one completion writer: once it writes a ticket's ending, a pending
-    callback for that ticket is delivered in the background."""
+    callback for that ticket is queued as a ``run_callback.deliver`` job."""
 
     @functools.wraps(finalize)
     async def finalize_then_call_back(db: Any, **kwargs: Any) -> Optional[str]:
         ended = await finalize(db, **kwargs)
-        if ended is not None and await _has_pending_callback(kwargs["task_id"]):
-            from core.utils.background_tasks import launch_guarded
-
-            launch_guarded(deliver_run_callback(kwargs["task_id"], kwargs.get("run_id")),
-                           subsystem="run_callbacks", operation="deliver", agent_id=kwargs.get("agent_id"))
+        if ended is not None:
+            await _queue_after_ending(kwargs["task_id"], kwargs.get("run_id"))
         return ended
 
     return finalize_then_call_back
 
 
-async def _has_pending_callback(task_id: int) -> bool:
-    """On its own session, off the event loop: the writer's session is left as it was. A read
-    that fails is logged and the callback stays pending; the ticket's ending is never held up."""
+async def _queue_after_ending(task_id: int, run_id: Optional[str]) -> None:
+    """On its own session, off the event loop: the writer's session is left as it was. A failure is
+    logged and the callback stays pending, for the sweep to queue; the ending is never held up."""
     try:
-        return await asyncio.to_thread(_on_own_session, _pending, task_id)
-    except Exception:  # noqa: BLE001 — logged; the row stays pending for a later send
-        logger.exception("[run_callbacks] could not read ticket %s's callback; it stays pending", task_id)
-        return False
+        await asyncio.to_thread(_on_own_session, queue_if_pending, task_id, run_id)
+    except Exception:  # noqa: BLE001 — logged; the sweep queues it later
+        logger.exception("[run_callbacks] could not queue ticket %s's callback; the sweep will", task_id)
 
 
-def _pending(db: Any, task_id: int) -> bool:
+def queue_if_pending(db: Any, task_id: int, run_id: Optional[str] = None) -> bool:
+    """Queues the ticket's callback when one is pending; True when a job went in. Commits."""
+    from core.jobs import enqueue
     from core.models.run_callbacks import PENDING, RunCallback
 
-    return db.query(RunCallback.id).filter(RunCallback.task_id == task_id, RunCallback.status == PENDING).first() \
-        is not None
+    row = db.query(RunCallback.workspace_id).filter(RunCallback.task_id == task_id,
+                                                    RunCallback.status == PENDING).first()
+    if row is None:
+        return False
+    queued = enqueue(db, DELIVER_KIND, {"task_id": task_id, "run_id": run_id}, workspace_id=row[0],
+                     key=job_key(task_id))
+    db.commit()
+    return queued is not None
 
 
-async def deliver_run_callback(task_id: int, run_id: Optional[str] = None) -> Optional[str]:
-    """Sends the ticket's ending to its callback URL and records how it went; the status written."""
-    delivery = await asyncio.to_thread(_on_own_session, _prepare, task_id, run_id)
-    if delivery is None:
+@job_handler(DELIVER_KIND, backoff=DELIVERY_BACKOFF, max_attempts=DELIVERY_ATTEMPTS)
+async def deliver_run_callback(job: Any) -> Optional[str]:
+    """Sends the ticket's ending once per attempt and records it; the status written. The job's id
+    is the delivery id, the same on every attempt, so a receiver that drops ids it has seen gets
+    each callback once in effect. A retryable answer raises, and the worker re-queues the job."""
+    from core.database.database import SessionLocal
+
+    if not await asyncio.to_thread(_on_own_session, _secret_ready, job.payload["task_id"]):
+        return None  # no callback left to send
+    db = SessionLocal()
+    try:
+        status = await _send_under_fence(db, job)
+    finally:
+        db.close()
+    from core.models.run_callbacks import PENDING
+
+    if status == PENDING:
+        raise NotYetDelivered(f"callback for ticket {job.payload['task_id']} not yet delivered")
+    return status
+
+
+def _secret_ready(db: Any, task_id: int) -> bool:
+    """Makes the workspace's signing secret now, if it has none, so nothing commits under the fence."""
+    from core.models.run_callbacks import RunCallback
+
+    row = db.query(RunCallback.workspace_id).filter(RunCallback.task_id == task_id).first()
+    if row is None:
+        return False
+    signing_secret(db, row[0])
+    return True
+
+
+async def _send_under_fence(db: Any, job: Any) -> Optional[str]:
+    """§6.8: the fence (the job row locked while the claim holds, the workspace live, the lease
+    stretched past the send), then a fresh read, the send, and the outcome, in one transaction."""
+    from core.jobs.queue import fence
+
+    if not await asyncio.to_thread(fence, db, job, int(TIMEOUT_SECONDS) + SEND_MARGIN_SECONDS):
+        await asyncio.to_thread(db.rollback)
+        logger.info("[run_callbacks] job %s lost its claim or its workspace closed; nothing sent", job.id)
         return None
-    outcome = await _send_with_retries(delivery)
-    await asyncio.to_thread(_on_own_session, _record, task_id, outcome)
+    delivery = await asyncio.to_thread(_prepare, db, job.payload["task_id"], job.payload.get("run_id"), str(job.id))
+    if delivery is None:
+        await asyncio.to_thread(db.rollback)
+        return None
+    code, error = await _post_once(delivery)
+    outcome = _outcome(code, error, job)
+    await asyncio.to_thread(_record, db, job, outcome)
     return outcome.status
 
 
@@ -218,49 +284,42 @@ def _on_own_session(work: Callable[..., Any], *args: Any) -> Any:
         db.close()
 
 
-def _prepare(db: Any, task_id: int, run_id: Optional[str]) -> Optional[Delivery]:
+def _prepare(db: Any, task_id: int, run_id: Optional[str], delivery_id: str) -> Optional[Delivery]:
     from api.board_tasks import ticket_cost
     from core.models.core import BoardTask
-    from core.models.run_callbacks import PENDING, RunCallback
+    from core.models.run_callbacks import DELIVERED, RunCallback
     from services.board_dispatcher import RUN_ID_KEY
 
-    callback = db.query(RunCallback).filter(RunCallback.task_id == task_id, RunCallback.status == PENDING).first()
+    callback = db.query(RunCallback).filter(RunCallback.task_id == task_id, RunCallback.status != DELIVERED).first()
     task = db.get(BoardTask, task_id)
     if callback is None or task is None:
         return None
-    payload = run_payload(task, run_id or (task.runtime_ref or {}).get(RUN_ID_KEY), ticket_cost(db, task_id))
+    payload = run_payload(task, run_id or (task.runtime_ref or {}).get(RUN_ID_KEY), ticket_cost(db, task_id),
+                          delivery_id)
     body = json.dumps(payload, separators=(",", ":"), default=str).encode()
-    return Delivery(url=callback.url, secret=signing_secret(db, task.workspace_id), body=body,
-                    delivery_id=payload["delivery_id"])
+    return Delivery(url=callback.url, secret=signing_secret(db, task.workspace_id), body=body, delivery_id=delivery_id)
 
 
-def run_payload(task: Any, run_id: Optional[str], cost: Dict[str, Any]) -> Dict[str, Any]:
+def run_payload(task: Any, run_id: Optional[str], cost: Dict[str, Any], delivery_id: str) -> Dict[str, Any]:
     """What the callback says about the run."""
     def iso(moment: Optional[datetime]) -> Optional[str]:
         return moment.isoformat() if moment else None
 
-    return {"event": EVENT, "delivery_id": str(uuid4()), "task_id": task.id, "run_id": run_id,
+    return {"event": EVENT, "delivery_id": delivery_id, "task_id": task.id, "run_id": run_id,
             "agent_id": task.assigned_agent_id, "workspace_id": str(task.workspace_id), "status": task.status,
             "result": (task.result or "")[:RESULT_MAX] or None, "error": task.error_message,
             "started_at": iso(task.started_at), "completed_at": iso(task.completed_at), "cost": cost}
 
 
-async def _send_with_retries(delivery: Delivery) -> Outcome:
-    attempts, code, error = 0, None, None
-    for wait in BACKOFF_SECONDS:
-        if wait:
-            await asyncio.sleep(wait)
-        attempts += 1
-        code, error = await _post_once(delivery)
-        if code is not None and 200 <= code < 300:
-            from core.models.run_callbacks import DELIVERED
+def _outcome(code: Optional[int], error: Optional[str], job: Any) -> Outcome:
+    """A 2xx delivers; a 4xx other than 429 is the receiver's answer; anything else is retried
+    until the job's last attempt."""
+    from core.models.run_callbacks import DELIVERED, FAILED, PENDING
 
-            return Outcome(DELIVERED, attempts, code)
-        if code is not None and code < 500 and code != TOO_MANY_REQUESTS:
-            break  # the receiver's answer: sending it again won't change it
-    from core.models.run_callbacks import FAILED
-
-    return Outcome(FAILED, attempts, code, error)
+    if code is not None and 200 <= code < 300:
+        return Outcome(DELIVERED, 1, code)
+    final = (code is not None and code < 500 and code != TOO_MANY_REQUESTS) or job.attempts >= job.max_attempts
+    return Outcome(FAILED if final else PENDING, 1, code, error)
 
 
 async def _post_once(delivery: Delivery) -> Tuple[Optional[int], Optional[str]]:
@@ -289,15 +348,93 @@ def _client() -> Any:
     return httpx.AsyncClient(timeout=TIMEOUT_SECONDS, follow_redirects=False)
 
 
-def _record(db: Any, task_id: int, outcome: Outcome) -> None:
-    from core.models.run_callbacks import DELIVERED, RunCallback
+def _record(db: Any, job: Any, outcome: Outcome) -> None:
+    """The attempt on the callback row and, when it was the last, the job done: one commit, under the fence."""
+    from core.jobs.queue import complete
+    from core.models.run_callbacks import DELIVERED, PENDING, RunCallback
 
-    callback = db.query(RunCallback).filter(RunCallback.task_id == task_id).first()
-    if callback is None:
-        return
-    callback.status, callback.attempts = outcome.status, callback.attempts + outcome.attempts
-    callback.last_status_code, callback.last_error = outcome.status_code, (outcome.error or None) and outcome.error[:ERROR_MAX]
-    if outcome.status == DELIVERED:
-        callback.delivered_at = datetime.now(timezone.utc)
+    callback = db.query(RunCallback).filter(RunCallback.task_id == job.payload["task_id"]).first()
+    if callback is not None:
+        callback.status, callback.attempts = outcome.status, callback.attempts + outcome.attempts
+        callback.last_status_code = outcome.status_code
+        callback.last_error = (outcome.error or None) and outcome.error[:ERROR_MAX]
+        if outcome.status == DELIVERED:
+            callback.delivered_at = datetime.now(timezone.utc)
+    if outcome.status != PENDING:
+        complete(db, job, commit=False)
     db.commit()
-    logger.info("[run_callbacks] ticket %s: callback %s after %d attempt(s)", task_id, outcome.status, outcome.attempts)
+    logger.info("[run_callbacks] ticket %s: callback %s on attempt %d", job.payload["task_id"], outcome.status,
+                job.attempts)
+
+
+# ── The sweep: callbacks no completion writer queued ───────────────────────────────────────
+
+SWEEP_KIND = "run_callback.sweep"
+SWEEP_EVERY_SECONDS = 600
+SWEEP_AFTER_SECONDS = 300  # a ticket ended this long ago with its callback still pending, and no job
+SWEEP_BATCH = 50
+ENDED = ("done", "review", "failed", "cancelled")
+
+
+def schedules_the_callback_sweep(start: Callable[..., Any]) -> Callable[..., Any]:
+    """Wraps ``UnifiedScheduler.start``: once the shared scheduler runs, a platform schedule queues a
+    ``run_callback.sweep`` every ``SWEEP_EVERY_SECONDS`` (catch-up ``latest``: one sweep finds every
+    callback a missed one would have). The sweep queues a delivery job for each callback still pending
+    well after its ticket ended. Tickets end in many places (a cancel, the dispatcher's sweep, the
+    reconciler), and only the board's completion writer queues the job itself; the sweep also queued,
+    once, what was pending at cutover."""
+
+    @functools.wraps(start)
+    def started(self: Any, *args: Any, **kwargs: Any) -> Any:
+        result = start(self, *args, **kwargs)
+        scheduler = getattr(self, "_scheduler", None)
+        if scheduler is not None:
+            from core.jobs.schedules import PLATFORM, interval, schedule
+
+            schedule(scheduler, SWEEP_KIND, PLATFORM, interval(seconds=SWEEP_EVERY_SECONDS))
+        return result
+
+    return started
+
+
+@job_handler(SWEEP_KIND, catch_up=CATCH_UP_LATEST, concurrency=1, workspace_concurrency=1)
+async def run_sweep(job: Any) -> None:
+    """A sweep slot (PRD-276 Wave 2c)."""
+    await queue_stale_callbacks()
+
+
+async def queue_stale_callbacks() -> int:
+    """Queues the stale pending callbacks that have no job yet; how many it queued."""
+    return await asyncio.to_thread(_on_own_session, _queue_stale)
+
+
+def _queue_stale(db: Any) -> int:
+    from core.jobs import enqueue
+
+    rows = _stale_pending(db)
+    for task_id, workspace_id in rows:
+        enqueue(db, DELIVER_KIND, {"task_id": task_id, "run_id": None}, workspace_id=workspace_id,
+                key=job_key(task_id))
+    db.commit()
+    if rows:
+        logger.info("[run_callbacks] queued %d callback(s) no completion writer queued", len(rows))
+    return len(rows)
+
+
+def _stale_pending(db: Any) -> List[Tuple[int, Any]]:
+    from datetime import timedelta
+
+    from sqlalchemy import exists, func
+
+    from core.models.core import BoardTask
+    from core.models.jobs import Job as JobRow
+    from core.models.run_callbacks import PENDING, RunCallback
+
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=SWEEP_AFTER_SECONDS)
+    has_job = exists().where(JobRow.kind == DELIVER_KIND,
+                             JobRow.idempotency_key == func.concat("task:", RunCallback.task_id))
+    rows = (db.query(RunCallback.task_id, RunCallback.workspace_id).join(BoardTask, BoardTask.id == RunCallback.task_id)
+            .filter(RunCallback.status == PENDING, BoardTask.status.in_(ENDED), BoardTask.completed_at < cutoff,
+                    ~has_job)
+            .order_by(BoardTask.completed_at).limit(SWEEP_BATCH).all())
+    return [(row[0], row[1]) for row in rows]

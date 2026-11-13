@@ -75,23 +75,25 @@ class SessionTokenResponse(BaseModel):
 
 
 def _exchange_session_token_permissions(api_key_record, request: SessionTokenRequest) -> List[str]:
-    """Effective permissions: the request's (a subset of the key's) or the key's own."""
-    key_permissions: List[str] = api_key_record.permissions or []
+    """Effective permissions: the request's, each one granted by the key, or the key's own.
 
-    if request.permissions is not None:
-        # Requested permissions must be a subset of the key's permissions.
-        # An empty key_permissions list means unrestricted (all allowed).
-        if key_permissions:
-            extra = set(request.permissions) - set(key_permissions)
-            if extra:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Requested permissions not granted by API key: {sorted(extra)}",
-                )
-        effective_permissions = request.permissions
-    else:
-        effective_permissions = key_permissions
-    return effective_permissions
+    Each requested permission is judged by the platform's one authority
+    (``modules.policy.roles.has_permission``, PRD-195 S1): a key grants what it lists,
+    or everything when it lists ``"*"``, and a key that lists nothing grants nothing.
+    A token never carries a permission its key does not grant.
+    """
+    from modules.policy.roles import has_permission
+
+    key_permissions: List[str] = api_key_record.permissions or []
+    if request.permissions is None:
+        return key_permissions
+    extra = sorted(p for p in set(request.permissions) if not has_permission(key_permissions, p))
+    if extra:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Requested permissions not granted by API key: {extra}",
+        )
+    return request.permissions
 
 
 def _exchange_session_token_sign(api_key_record, request: SessionTokenRequest, effective_permissions: List[str]):

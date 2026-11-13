@@ -39,7 +39,7 @@ from services.callback import (
     normalise_phone,
 )
 from services.destinations.base import CallbackPayload
-from services.destinations.dispatcher import enqueue_callback_dispatch
+from services.destinations.delivery_jobs import enqueue_callback_dispatch
 from services.sites import get_default_site
 
 logger = logging.getLogger(__name__)

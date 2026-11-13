@@ -1,7 +1,9 @@
 """PRD-206 S3 — "Where did we leave off?"
 
-One resume payload, consumed by three surfaces:
+One resume payload, consumed by these surfaces:
   - ``GET /api/memory/resume`` (workspace router, ``api/widget_memory.py``),
+  - ``GET /api/memory/end-users/{id}/resume`` (PRD-274 W3, §5.7): an end user's own, for the product
+    that serves them (``build_end_user_resume_payload``),
   - the ``platform_resume_context`` tool (so the question works in ANY chat),
   - the chat/widget resume buttons (which just ask the question).
 
@@ -17,8 +19,9 @@ Assembly is pure; the two loaders are thin I/O.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from modules.memory.injection_filter import visible_to_viewer
 
@@ -152,15 +155,25 @@ def _load_recent_threads(
         .limit(limit)
         .all()
     )
-    return [
-        {
-            "chat_id": str(r.id),
-            "title": r.title,
-            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
-            "summary": r.summary if isinstance(r.summary, dict) else None,
-        }
-        for r in rows
-    ]
+    return [_thread(r) for r in rows]
+
+
+def _thread(row: Any) -> Dict[str, Any]:
+    return {
+        "chat_id": str(row.id),
+        "title": row.title,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        "summary": row.summary if isinstance(row.summary, dict) else None,
+    }
+
+
+def _load_end_user_threads(db, workspace_id: str, end_user_id: str, limit: int) -> List[Dict[str, Any]]:
+    """The end user's own recent conversations (``chats.end_user_id``), newest activity first."""
+    from core.models.core import Chat
+
+    rows = (db.query(Chat).filter(Chat.workspace_id == workspace_id, Chat.end_user_id == end_user_id)
+            .order_by(Chat.updated_at.desc()).limit(limit).all())
+    return [_thread(r) for r in rows]
 
 
 async def _load_typed_memories(workspace_id: str) -> List[Dict[str, Any]]:
@@ -176,6 +189,46 @@ async def _load_typed_memories(workspace_id: str) -> List[Dict[str, Any]]:
     except Exception:
         logger.warning("[Resume] typed-memory load failed", exc_info=True)
         return []
+
+
+async def _load_namespace_memories(workspace_id: str, namespace: str) -> List[Dict[str, Any]]:
+    """Every memory of one namespace of the workspace (an end user's), up to the scan limit."""
+    try:
+        from modules.memory.unified_memory_service import get_unified_memory_service
+
+        service = get_unified_memory_service()
+        if not service.is_durable_configured:
+            return []
+        return await service.get_all_memories_scoped(
+            user_id=namespace, limit=MEMORY_SCAN_LIMIT, workspace_id=workspace_id
+        ) or []
+    except Exception:
+        logger.warning("[Resume] end-user memory load failed", exc_info=True)
+        return []
+
+
+async def build_end_user_resume_payload(
+    db,
+    *,
+    workspace_id: str,
+    end_user_id: str,
+    readable: Callable[[List[Dict[str, Any]]], List[Dict[str, Any]]] = lambda rows: rows,
+    readable_theirs: Callable[[List[Dict[str, Any]]], List[Dict[str, Any]]] = lambda rows: rows,
+    limit_threads: int = DEFAULT_THREAD_LIMIT,
+    limit_items: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
+    """Where an end user left off (PRD-274 W3, §5.7): their own recent conversations, and the
+    decisions and open loops in their facts and the workspace's, read as them (``end_user:{id}``),
+    never another end user's. ``readable`` narrows the workspace's and ``readable_theirs`` the end user's
+    own (what the caller may read); their own private facts are left to the viewer rule, which shows them."""
+    from modules.memory.unified_memory_service import MemoryNamespace
+
+    threads = await asyncio.to_thread(_load_end_user_threads, db, workspace_id, end_user_id, limit_threads)
+    theirs = readable_theirs(
+        await _load_namespace_memories(workspace_id, MemoryNamespace(workspace_id).end_user(end_user_id)))
+    workspace = readable(await _load_typed_memories(workspace_id))
+    return assemble_resume_payload(threads, theirs + workspace, viewer=f"end_user:{end_user_id}",
+                                   limit_items=limit_items)
 
 
 async def build_resume_payload(

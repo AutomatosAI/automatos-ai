@@ -43,10 +43,11 @@ class TurnModel:
 
 @dataclass(frozen=True)
 class LeanRequest:
-    """What a lean turn's request added: a model, app context, or neither."""
+    """What a lean turn's request added: a model, app context, the end user it is for, or none."""
 
     model: Optional[TurnModel] = None
     app_context: Optional[str] = None
+    end_user: Optional[Any] = None  # a server key's turn's end user (core.security.end_user_turn.EndUser)
 
 
 NOTHING_ASKED = LeanRequest()

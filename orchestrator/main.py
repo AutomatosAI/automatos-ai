@@ -46,7 +46,11 @@ from core.models import Base
 import integrations.budstacks  # noqa: F401 — self-registers the budstacks VerticalProvisioner
 from api.agents import router as agents_router
 from api.agent_execute import router as agent_execute_router
+from api.end_user_memory import router as end_user_memory_router
+from api.jobs import router as jobs_router
+from core.jobs.worker import also_starts_the_job_worker
 from api.run_callbacks import router as run_callbacks_router
+from api.partner_packs import router as partner_packs_router
 from api.workflows import router as workflows_router
 from api.workflow_templates import router as workflow_templates_router
 from api.workflow_recipes import router as workflow_recipes_router, webhook_router as recipe_webhook_router
@@ -419,140 +423,15 @@ async def _boot_phase_2_extensions(app_instance: "FastAPI") -> "DeferredInitResu
     except Exception as e:
         logger.warning(f"Dashboard init failed (non-fatal): {e}")
 
-    # Unified Scheduler: single fcntl lock guards heartbeat + recipe + coordinator
-    # Only one uvicorn worker acquires the lock — prevents 4x duplicate executions
-    if config.HEARTBEAT_ENABLED or config.RECIPE_SCHEDULER_ENABLED or config.COORDINATOR_ENABLED:
-        try:
-            import fcntl
-            lock_path = "/tmp/automatos_scheduler.lock"
-            lock_file = open(lock_path, "w")
-            try:
-                fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                # We got the lock — this worker owns ALL scheduled services
-                from services.scheduler import get_unified_scheduler
-                unified = get_unified_scheduler()
-                unified.start()
-                shared_sched = unified.apscheduler
-                app_instance.state.scheduler_lock = lock_file  # keep file open to hold lock
+    # PRD-276 §6.4: the process holding the scheduler lock (a Postgres advisory lock) runs the
+    # unified scheduler and every scheduled service on it; the others wait to take over.
+    try:
+        from services.scheduler_boot import start_scheduler_leadership
 
-                if config.HEARTBEAT_ENABLED:
-                    from services.heartbeat_service import get_heartbeat_service
-                    await get_heartbeat_service().start(scheduler=shared_sched)
-                    logger.info("HeartbeatService started on unified scheduler")
-
-                if config.RECIPE_SCHEDULER_ENABLED:
-                    from services.playbook_scheduler import get_playbook_scheduler
-                    await get_playbook_scheduler().start(scheduler=shared_sched)
-                    logger.info("PlaybookSchedulerService started on unified scheduler")
-
-                # PRD-72: Task Reconciliation — stall detection + auto-retry
-                try:
-                    from services.task_reconciler import get_task_reconciler
-                    await get_task_reconciler().start(scheduler=shared_sched)
-                    logger.info("TaskReconciler started on unified scheduler")
-                except Exception as _tr_err:
-                    logger.warning("Could not start TaskReconciler: %s", _tr_err)
-
-                # PRD-204 S5: Auto Watcher tick -- heartbeat sweep for watches
-                # (terminal fallback, missed-run/benched detection, expiry).
-                # Rides the same fcntl-locked scheduler: single owner across
-                # workers, so watch claims never race between processes.
-                if config.WATCHER_ENABLED:
-                    try:
-                        from services.watch_ticker import get_watch_ticker
-                        await get_watch_ticker().start(scheduler=shared_sched)
-                        logger.info("WatchTicker started on unified scheduler")
-                    except Exception as _wt_err:
-                        logger.warning("Could not start WatchTicker: %s", _wt_err)
-
-                # PRD-79: Memory background jobs (consolidation, decay, promotion)
-                if config.MEMORY_JOBS_ENABLED:
-                    try:
-                        from services.memory_jobs import get_memory_job_scheduler
-                        await get_memory_job_scheduler().start(scheduler=shared_sched)
-                        logger.info("MemoryJobScheduler started on unified scheduler")
-                    except Exception as _mj_err:
-                        logger.warning("Could not start MemoryJobScheduler: %s", _mj_err)
-
-                # PRD-178 S4: field → durable promotion (the moat arm) — distill
-                # strong, untainted field patterns into durable memory
-                # before compaction hard-deletes them. Taint-gated.
-                if config.FIELD_PROMOTION_ENABLED:
-                    try:
-                        from jobs.promote_field_memory import get_field_promotion_scheduler
-                        await get_field_promotion_scheduler().start(scheduler=shared_sched)
-                        logger.info("FieldPromotionJobScheduler started on unified scheduler")
-                    except Exception as _fp_err:
-                        logger.warning("Could not start FieldPromotionJobScheduler: %s", _fp_err)
-
-                # PRD-139: Nightly edge builder (populates graph regardless of flag)
-                try:
-                    from services.edge_builder_scheduler import get_edge_builder_scheduler
-                    await get_edge_builder_scheduler().start(scheduler=shared_sched)
-                    logger.info("EdgeBuilderScheduler started on unified scheduler")
-                except Exception as _eb_err:
-                    logger.warning("Could not start EdgeBuilderScheduler: %s", _eb_err)
-
-                # PRD-177 S3 (F018): daily Composio action-metadata sync — keeps
-                # the classification table (which backs the fail-closed
-                # destructive gate) fresh, on the same scheduler as the recompute.
-                if config.COMPOSIO_SYNC_ENABLED:
-                    try:
-                        from services.composio_sync_scheduler import get_composio_sync_scheduler
-                        await get_composio_sync_scheduler().start(scheduler=shared_sched)
-                        logger.info("ComposioSyncScheduler started on unified scheduler")
-                    except Exception as _cs_err:
-                        logger.warning("Could not start ComposioSyncScheduler: %s", _cs_err)
-
-                # PRD-77: Load agent-scheduled tasks into APScheduler
-                try:
-                    from services.scheduled_task_service import ScheduledTaskService
-                    from core.database.database import SessionLocal
-                    _sched_db = SessionLocal()
-                    try:
-                        _sched_svc = ScheduledTaskService(_sched_db, workspace_id=None)
-                        await _sched_svc.load_active_tasks_to_scheduler()
-                    finally:
-                        _sched_db.close()
-                except Exception as _st_err:
-                    logger.warning("Could not load scheduled tasks: %s", _st_err)
-
-                # Leader reconcile tick: scheduled-task and heartbeat changes made on
-                # any worker reach this scheduler within a minute (not at next boot).
-                try:
-                    from services.schedule_reconcile import start_schedule_reconcile
-                    await start_schedule_reconcile(shared_sched)
-                except Exception as _rc_err:
-                    logger.warning("Could not start schedule reconcile tick: %s", _rc_err)
-
-                # PRD-82A: Coordinator tick — sequential mission orchestration
-                if config.COORDINATOR_ENABLED:
-                    try:
-                        from services.coordinator_service import get_coordinator_service
-                        await get_coordinator_service().start(scheduler=shared_sched)
-                        logger.info("CoordinatorService started on unified scheduler")
-                    except Exception as _cs_err:
-                        logger.warning("Could not start CoordinatorService: %s", _cs_err)
-
-                # PRD-121: HARNESS Self-Optimizing Organization Loop
-                if config.HARNESS_ENABLED:
-                    try:
-                        from services.harness_service import get_harness_service
-                        await get_harness_service().start(scheduler=shared_sched)
-                        logger.info("HarnessService started on unified scheduler")
-                    except Exception as _hs_err:
-                        logger.warning("Could not start HarnessService: %s", _hs_err)
-
-                result.scheduler_started = True
-                logger.info("Unified scheduler started (this worker owns it)")
-            except BlockingIOError:
-                lock_file.close()
-                result.scheduler_started = True  # another worker owns it — that's OK
-                logger.info("Unified scheduler: another worker owns it, skipping")
-        except Exception as e:
-            logger.warning(f"Unified scheduler failed to start (non-fatal): {e}")
-    else:
-        result.scheduler_started = True  # disabled by config — not a failure
+        await start_scheduler_leadership()
+        result.scheduler_started = True
+    except Exception:
+        logger.exception("Unified scheduler failed to start (non-fatal)")
 
     # Mark remaining flags that don't have dedicated init yet
     result.skills_loaded = True
@@ -627,6 +506,7 @@ async def _boot_phase_2_stage(app_instance: "FastAPI", report: "BootstrapReport"
     await run_stage(report, BootstrapStage.SCHEDULER_INIT, _run_phase_2)
 
 
+@also_starts_the_job_worker  # PRD-276: a worker-role process runs the job queue beside board dispatch
 def _start_board_dispatch(app_instance: "FastAPI", trust_passed: bool) -> None:
     """PRD-161: the board dispatch spine (single claim/lease/requeue loop).
 
@@ -1016,6 +896,8 @@ from api.widgets.rate_limit import WidgetRateLimitMiddleware
 
 app.add_middleware(WidgetCORSMiddleware)
 app.add_middleware(WidgetRateLimitMiddleware)
+from core.security.client_ip import TrustedClientAddressMiddleware  # noqa: E402
+app.add_middleware(TrustedClientAddressMiddleware)  # outermost so far: the widget limiter sees the caller
 
 # Rate limiting (US-017)
 # PRD-174 F040 — the limiter was constructed but SlowAPIMiddleware was never
@@ -1024,16 +906,14 @@ app.add_middleware(WidgetRateLimitMiddleware)
 # swallow_errors=False means a limiter that can't evaluate (storage error) raises
 # instead of waving the request through. A gate that can't decide must deny.
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from core.security.rate_limit_middleware import RouteTreeSlowAPIMiddleware  # PRD-262 US-008
 
 def _get_real_client_ip(request) -> str:
-    """Extract real client IP, respecting X-Forwarded-For behind reverse proxy."""
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return get_remote_address(request)
+    """The caller's address, read as every other limit reads it (core.security.client_ip)."""
+    from core.security.client_ip import client_ip
+
+    return client_ip(request)
 
 # F040 fix is gated on the policy-plane flag so flag-OFF is byte-for-byte today's
 # behaviour (limiter constructed but inert). swallow_errors follows the flag:
@@ -1043,7 +923,7 @@ _policy_plane_on = bool(getattr(_app_config, "POLICY_PLANE_ENABLED", False))
 
 limiter = Limiter(
     key_func=_get_real_client_ip,
-    default_limits=["60/minute"],
+    default_limits=[f"{_app_config.APP_RATE_LIMIT_PER_MINUTE}/minute"],
     swallow_errors=not _policy_plane_on,  # F040: fail CLOSED when the plane is on
 )
 app.state.limiter = limiter
@@ -1229,7 +1109,10 @@ async def api_tracking_middleware(request, call_next):
 # Include API routers
 app.include_router(agents_router)
 app.include_router(agent_execute_router)  # PRD-274 Wave 1: a run of one agent, filed as a board ticket
+app.include_router(end_user_memory_router)  # PRD-274 Wave 3: a product's end users and their memories
+app.include_router(jobs_router)  # PRD-276: a workspace's dead jobs, retried or cleared
 app.include_router(run_callbacks_router)  # PRD-274 Wave 1: the callback signing secret
+app.include_router(partner_packs_router)  # PRD-275: a workspace's partner packs (404 unless PARTNER_TOOLS_ENABLED)
 app.include_router(models_router)  # PRD-15: Model management
 app.include_router(widget_workflows_router)  # US-014: Widget workflow control (pause/resume/cancel) — must be before workflows_router to avoid /{id} catch-all
 app.include_router(workflows_router)
@@ -1363,6 +1246,10 @@ except Exception as e:
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)
+
+# PRD-274 W1: the routes a server key reaches limit per IP inside their gate, after it knows who calls.
+from core.auth.server_key_ip_limit import exempt_server_key_routes  # noqa: E402
+exempt_server_key_routes(limiter, app.routes)
 
 
 # Exports directory served through authenticated endpoint instead of open StaticFiles mount.

@@ -144,6 +144,7 @@ async def test_metadata_sync_scheduled():
 
     assert scheduler.jobs, "a composio sync job must be registered on the scheduler"
     job = scheduler.jobs[0]
-    assert job["trigger"] == "cron"
-    assert job.get("id"), "the sync job needs a stable id (replace_existing safe)"
+    # PRD-276 Wave 2c: a daily platform schedule queues a composio.action_sync job
+    assert type(job["trigger"]).__name__ == "CronTrigger"
+    assert job.get("id") == "schedule:composio.action_sync:platform"
     assert callable(job["func"])

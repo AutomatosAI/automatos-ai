@@ -23,6 +23,7 @@ push token.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections import Counter
@@ -34,6 +35,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from config import config
+from core.jobs.registry import CATCH_UP_LATEST, job_handler
 from core.models.mobile_devices import MobileDevice
 from core.models.mobile_push import MobilePushTicket
 from services.push import consent
@@ -48,7 +50,7 @@ PUSH_RECEIPT_MIN_AGE_SECONDS = 900
 PUSH_RECEIPT_MAX_AGE_SECONDS = 86_400
 # Expo's getReceipts limit: the ids one request asks about, and one commit settles.
 RECEIPTS_BATCH = 1000
-RECEIPTS_JOB_ID = "push_receipts_tick"
+RECEIPTS_KIND = "push.receipts"
 # A receipt error with no code (never Expo's: the sender always names one).
 UNNAMED_ERROR = "unnamed"
 
@@ -223,29 +225,32 @@ def run_receipts(
 
 
 def register(scheduler: Any) -> bool:
-    """The receipts job on the leader's scheduler; ``False`` when this worker hosts none.
+    """The receipts schedule on the leader's scheduler; ``False`` when this worker hosts none.
 
-    No job args: a Redis job store pickles them (``schedule_reconcile._tick``), and the job
-    needs none.
+    A platform schedule queues a ``push.receipts`` job every ``PUSH_RECEIPTS_INTERVAL_SECONDS``
+    (PRD-276 Wave 2c; catch-up ``latest``: one read takes every receipt that is due).
     """
     if scheduler is None or not getattr(scheduler, "running", False):
         return False
-    from apscheduler.triggers.interval import IntervalTrigger
+    from core.jobs.schedules import PLATFORM, interval, schedule
 
-    interval = int(config.PUSH_RECEIPTS_INTERVAL_SECONDS)
-    scheduler.add_job(
-        run_receipts, IntervalTrigger(seconds=interval), id=RECEIPTS_JOB_ID,
-        replace_existing=True, max_instances=1, coalesce=True,
-    )
-    logger.info("Push receipts: read every %ds", interval)
+    seconds = int(config.PUSH_RECEIPTS_INTERVAL_SECONDS)
+    schedule(scheduler, RECEIPTS_KIND, PLATFORM, interval(seconds=seconds))
+    logger.info("Push receipts: read every %ds", seconds)
     return True
+
+
+@job_handler(RECEIPTS_KIND, catch_up=CATCH_UP_LATEST, concurrency=1, workspace_concurrency=1)
+async def run_receipts_job(job: Any) -> None:
+    """A receipts slot, off the event loop."""
+    await asyncio.to_thread(run_receipts)
 
 
 __all__ = [
     "PUSH_RECEIPT_MAX_AGE_SECONDS",
     "PUSH_RECEIPT_MIN_AGE_SECONDS",
     "RECEIPTS_BATCH",
-    "RECEIPTS_JOB_ID",
+    "RECEIPTS_KIND",
     "register",
     "run_receipts",
 ]

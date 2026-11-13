@@ -680,6 +680,33 @@ class Config:
     WIDGET_RATE_LIMIT_WINDOW_SECONDS: int = int(os.getenv("WIDGET_RATE_LIMIT_WINDOW_SECONDS", "60"))
     WIDGET_RATE_LIMIT_PUBLIC_PER_WINDOW: int = int(os.getenv("WIDGET_RATE_LIMIT_PUBLIC_PER_WINDOW", "30"))
     WIDGET_RATE_LIMIT_SERVER_PER_WINDOW: int = int(os.getenv("WIDGET_RATE_LIMIT_SERVER_PER_WINDOW", "1000"))
+    # The header a proxy in front sets to the caller's address (hosted on Railway: X-Real-IP). Every
+    # per-IP limit reads it when set; unset, the first X-Forwarded-For hop (core/security/client_ip.py).
+    # It is trusted from every caller, so set it only where every request comes through a proxy that
+    # overwrites it: no direct, TCP-proxy or private-network callers (on Railway, *.railway.internal
+    # skips the edge and a caller there can send its own). Check that a forged one is replaced first.
+    CLIENT_IP_HEADER: str = os.getenv("CLIENT_IP_HEADER", "")
+    # PRD-274 W1: requests a minute any server key may make on the routes named for it
+    # (services/key_limits.py); a key's own rate_limit_requests can only lower it.
+    SERVER_KEY_REQUESTS_PER_MINUTE: int = int(os.getenv("SERVER_KEY_REQUESTS_PER_MINUTE", "600"))
+    # PRD-276: the roles this process takes (api, worker, scheduler; all three by default, as the local
+    # edition runs them), and the durable job queue's worker settings (core/jobs). The scheduler only
+    # queues scheduled work (credit metering among it, Wave 2b): some process in the deployment must
+    # run the worker role with JOBS_ENABLED on, or nothing runs it. A scheduler process checks this at
+    # start-up (services/scheduler_boot.py).
+    PROCESS_ROLES: str = os.getenv("PROCESS_ROLES", "api,worker,scheduler")
+    JOBS_ENABLED: bool = os.getenv("JOBS_ENABLED", "true").lower() == "true"
+    JOBS_POLL_SECONDS: float = float(os.getenv("JOBS_POLL_SECONDS", "2"))
+    JOBS_RETENTION_DAYS: int = int(os.getenv("JOBS_RETENTION_DAYS", "7"))
+    # PRD-276 §6.4: how often the scheduler's leader checks it still holds the scheduler lock, and a
+    # waiting process tries to take it; a dead holder is replaced within about this long.
+    SCHEDULER_LEADER_CHECK_SECONDS: float = float(os.getenv("SCHEDULER_LEADER_CHECK_SECONDS", "5"))
+    # PRD-276 §6.4: the most missed slots a schedule whose kind catches up "all" queues at once; older
+    # ones are skipped, logged and recorded.
+    JOBS_CATCH_UP_MAX: int = int(os.getenv("JOBS_CATCH_UP_MAX", "24"))
+    # The per-IP limit every route gets while the policy plane is on (main.py, slowapi), and the one
+    # the routes a server key reaches apply to their other callers (core/auth/server_key_ip_limit.py).
+    APP_RATE_LIMIT_PER_MINUTE: int = int(os.getenv("APP_RATE_LIMIT_PER_MINUTE", "60"))
     WIDGET_CHAT_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CHAT_IP_LIMIT_PER_WINDOW", "30"))
     WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW", "10"))
     # PRD-264 EUAI-10 (D16): the public detection route GET /api/public/provenance/{sha256}
@@ -800,7 +827,7 @@ class Config:
     # =============================================================================
     # AUTO WATCHER (PRD-204: persistent supervision of launched work)
     # =============================================================================
-    # The watcher tick rides the fcntl-locked UnifiedScheduler (single owner
+    # The watcher tick rides the lock-held UnifiedScheduler (single owner
     # across workers). Each tick claims due watches with FOR UPDATE SKIP
     # LOCKED, sweeps terminal states the S3 event hooks missed, detects
     # missed cron fires / benched schedules on scheduled-playbook watches,
@@ -1111,7 +1138,7 @@ class Config:
     # PRD-130 — Business Intake Wizard (PoC)
     # =============================================================================
     FIRECRAWL_API_KEY: str = os.getenv("FIRECRAWL_API_KEY")
-    FIRECRAWL_BASE_URL: str = os.getenv("FIRECRAWL_BASE_URL", "https://api.firecrawl.dev/v1")
+    FIRECRAWL_BASE_URL: str = os.getenv("FIRECRAWL_BASE_URL", "https://api.firecrawl.dev/v2")
     FIRECRAWL_MAX_PAGES_PER_SCAN: int = int(os.getenv("FIRECRAWL_MAX_PAGES_PER_SCAN", "20"))
 
     WIZARD_ENABLED: bool = os.getenv("WIZARD_ENABLED", "true").lower() == "true"
@@ -2279,6 +2306,10 @@ class Config:
     # configuration.audience meets it (core/security/memory_audience.py). Off by default: until it is on,
     # no run has a reader, so nothing is filtered and nothing is labelled by its writer.
     MEMORY_AUDIENCE_ENABLED: bool = os.getenv("MEMORY_AUDIENCE_ENABLED", "false").strip().lower() == "true"
+    # Partner tools (PRD-275): read-only tools on a partner's own HTTP API, from a pack an operator
+    # installs with the credential that holds the partner's base URL and key (modules/tools/partner).
+    # Off by default: until it is on, no pack installs, none is offered to an agent and none runs.
+    PARTNER_TOOLS_ENABLED: bool = os.getenv("PARTNER_TOOLS_ENABLED", "false").strip().lower() == "true"
     SPOKEN_MODE_MODEL: str = os.getenv("SPOKEN_MODE_MODEL", "claude-haiku-5-5").strip()
     SPOKEN_MODE_PROVIDER: str = os.getenv("SPOKEN_MODE_PROVIDER", "anthropic").strip().lower()
     # A spoken turn's narration and retraction frames carry the speechified text the client was

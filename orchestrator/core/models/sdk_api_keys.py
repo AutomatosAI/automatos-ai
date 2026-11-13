@@ -19,7 +19,7 @@ from sqlalchemy import (
     Integer,
     String,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PGUUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -56,6 +56,12 @@ class SdkApiKey(Base):
 
     # PRD-124: Team lock — scope all requests through this key to a specific team
     team = Column(String(100), nullable=True)
+
+    # PRD-274 W1: the models a request through this key may ask a lean agent to answer on
+    # ([{"provider", "model_id"}]; a model must be on the agent's list too), and the non-login
+    # users row its headless chat turns run as (api/chat_server_key.py), made on first use.
+    model_allow_list = Column(JSONB, nullable=True)
+    service_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Access restrictions
     allowed_domains = Column(ARRAY(String), nullable=True)

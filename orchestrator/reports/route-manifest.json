@@ -1,5 +1,5 @@
 {
-  "route_count": 1024,
+  "route_count": 1037,
   "routes": [
     {
       "method": "GET",
@@ -1894,6 +1894,34 @@
       "path": "/api/memory"
     },
     {
+      "method": "DELETE",
+      "path": "/api/memory/end-users/{end_user_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/memory/end-users/{end_user_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/end-users/{end_user_id}/memories"
+    },
+    {
+      "method": "POST",
+      "path": "/api/memory/end-users/{end_user_id}/memories"
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/end-users/{end_user_id}/memories/search"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/memory/end-users/{end_user_id}/memories/{memory_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/end-users/{end_user_id}/resume"
+    },
+    {
       "method": "GET",
       "path": "/api/memory/resume"
     },
@@ -2092,6 +2120,18 @@
     {
       "method": "GET",
       "path": "/api/openrouter/sync/history"
+    },
+    {
+      "method": "GET",
+      "path": "/api/partner-packs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/partner-packs/{name}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/partner-packs/{name}"
     },
     {
       "method": "GET",
@@ -3136,6 +3176,18 @@
     {
       "method": "GET",
       "path": "/api/v1/governance/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/jobs/dead"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/jobs/{job_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/jobs/{job_id}/retry"
     },
     {
       "method": "GET",

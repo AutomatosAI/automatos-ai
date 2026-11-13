@@ -381,7 +381,39 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # workspace_signing_secrets and run_callbacks, new tables only; the guard follows it.
     callbacks = (versions / "run_callbacks_20261109.py").read_text()
     assert 'down_revision = "memory_profiles_20261109"' in callbacks
-    assert 'EXPECTED_HEAD = "run_callbacks_20261109"' in guard
+    # 2026-11-09 (Automatos for products, Wave 1): execute_idempotency_20261109 chains onto that —
+    # one partial unique index on board_tasks, no table and no row changed; the guard follows it.
+    idempotency = (versions / "execute_idempotency_20261109.py").read_text()
+    assert 'down_revision = "run_callbacks_20261109"' in idempotency
+    # 2026-11-10 (Automatos for products, Wave 1): server_key_chat_20261110 chains onto that —
+    # two nullable columns on sdk_api_keys, no row changed; the guard follows it.
+    key_chat = (versions / "server_key_chat_20261110.py").read_text()
+    assert 'down_revision = "execute_idempotency_20261109"' in key_chat
+    # 2026-11-10 (Automatos for products, Wave 3): end_users_20261110 chains onto that —
+    # end_users, a new table only; the guard follows it.
+    end_users = (versions / "end_users_20261110.py").read_text()
+    assert 'down_revision = "server_key_chat_20261110"' in end_users
+    # 2026-11-11 (Automatos for products, Wave 3): end_user_chats_20261111 chains onto that —
+    # one nullable column on chats and its partial index, no row changed; the guard follows it.
+    end_user_chats = (versions / "end_user_chats_20261111.py").read_text()
+    assert 'down_revision = "end_users_20261110"' in end_user_chats
+    # 2026-11-11 (Automatos for products, Wave 3): end_users_erasing_20261111 chains onto that —
+    # one nullable column on end_users, no row changed; the guard follows it.
+    erasing = (versions / "end_users_erasing_20261111.py").read_text()
+    assert 'down_revision = "end_user_chats_20261111"' in erasing
+    # 2026-11-11 (Durable background work, Wave 1a): jobs_20261111 chains onto that —
+    # jobs, a new table only; the guard follows it.
+    jobs = (versions / "jobs_20261111.py").read_text()
+    assert 'down_revision = "end_users_erasing_20261111"' in jobs
+    # 2026-11-12 (Durable background work, §10-7): jobs_schema_20261112 chains onto that —
+    # the jobs table moves into its own schema; the guard follows it.
+    moved = (versions / "jobs_schema_20261112.py").read_text()
+    assert 'down_revision = "jobs_20261111"' in moved
+    # 2026-11-12 (Durable background work, Wave 2b): job_schedules_20261112 chains onto that —
+    # jobs.job_schedules, a new table only; the guard follows it.
+    cursors = (versions / "job_schedules_20261112.py").read_text()
+    assert 'down_revision = "jobs_schema_20261112"' in cursors
+    assert 'EXPECTED_HEAD = "job_schedules_20261112"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

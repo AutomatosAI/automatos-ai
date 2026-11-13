@@ -301,9 +301,13 @@ class TestTick:
         # the reads of published posts' numbers, PRD-266 (US-010e) Expo's push receipts and
         # (US-013) the daily digest, PRD-268 (§6.2) the proactive_runs prune, and PRD-273 the
         # sweep that deletes expired workspace export files.
+        # PRD-276 Wave 2c: receipts and the digest are platform schedules (a timer and its catch-up).
         assert fake.added == [
-            sr.RECONCILE_JOB_ID, "socials_plan_tick", "socials_results_tick", "push_receipts_tick", "daily_digest_tick",
-            "proactive_runs_prune", "workspace_export_sweep",
+            sr.RECONCILE_JOB_ID, "socials_plan_tick", "socials_results_tick",
+            "schedule:push.receipts:platform", "schedule:push.receipts:platform:catch-up",
+            "schedule:mobile.digest:platform", "schedule:mobile.digest:platform:catch-up",
+            "schedule:proactive.runs_prune:platform", "schedule:proactive.runs_prune:platform:catch-up",
+            "schedule:workspace_move.export_sweep:platform", "schedule:workspace_move.export_sweep:platform:catch-up",
         ]
         assert passes == [fake]
 
@@ -341,8 +345,14 @@ class TestTick:
         sr._tick(_FakeScheduler())  # no raise
 
     def test_boot_starts_the_tick_after_loading_tasks(self):
-        src = (_ORCH / "main.py").read_text()
-        load = src.index("load_active_tasks_to_scheduler()")
-        tick = src.index("start_schedule_reconcile(shared_sched)")
-        coordinator = src.index("PRD-82A: Coordinator tick")
-        assert load < tick < coordinator
+        # PRD-276 W2a: the scheduled services start from services/scheduler_boot.py, in this order.
+        import inspect
+
+        from services import scheduler_boot
+
+        src = inspect.getsource(scheduler_boot.start_scheduled_services)
+        load = src.index("_load_scheduled_tasks")
+        tick = src.index("_start_reconcile")
+        after = src.index("_AFTER_SCHEDULED_TASKS")
+        assert load < tick < after
+        assert "CoordinatorService" in [name for _, name, _, _ in scheduler_boot._AFTER_SCHEDULED_TASKS]

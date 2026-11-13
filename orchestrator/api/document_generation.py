@@ -18,6 +18,8 @@ from sqlalchemy.orm import Session
 
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.principal import resolve_user_pk
+from core.auth.scopes import DOCUMENTS_WRITE
+from core.auth.server_key_gate import require_workspace_permission_or_server_key
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.database.database import get_db
@@ -437,10 +439,10 @@ async def upload_docx_template(
 # ------------------------------------------------------------------
 
 
-@router.post("/generate", response_model=GenerateDocumentResponse, dependencies=[Depends(require_workspace_permission("documents:create"))])
+@router.post("/generate", response_model=GenerateDocumentResponse)
 async def generate_document(
     body: GenerateDocumentRequest,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(require_workspace_permission_or_server_key("documents:create", DOCUMENTS_WRITE)),
     db: Session = Depends(get_db),
 ):
     """Generate a document from data + template.

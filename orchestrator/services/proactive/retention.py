@@ -25,6 +25,7 @@ the retention's check-ins: one row per check-in run, a table that stays small.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -34,6 +35,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from config import config
+from core.jobs.registry import job_handler
 from core.models.proactive import ProactiveRun
 
 logger = logging.getLogger(__name__)
@@ -42,7 +44,7 @@ __all__ = [
     "MIN_RETENTION_DAYS",
     "PRUNE_BATCH",
     "PRUNE_HOUR_UTC",
-    "PRUNE_JOB_ID",
+    "PRUNE_KIND",
     "PRUNE_MINUTE",
     "cutoff",
     "prune_batches",
@@ -54,12 +56,10 @@ __all__ = [
 MIN_RETENTION_DAYS = 1
 # As services.audit_retention: a backlog never holds the table in one statement.
 PRUNE_BATCH = 5000
-PRUNE_JOB_ID = "proactive_runs_prune"
+PRUNE_KIND = "proactive.runs_prune"
 # Once a day, after the 03:00 memory promotion and the 03:15 credit overhead.
 PRUNE_HOUR_UTC = 4
 PRUNE_MINUTE = 45
-# A run the leader starts late (busy, or just restarted) still runs within this hour.
-PRUNE_MISFIRE_GRACE_SECONDS = 3600
 
 SessionFactory = Callable[[], Session]
 
@@ -149,19 +149,22 @@ def run_prune(*, session_factory: Optional[SessionFactory] = None,
 
 
 def register(scheduler: Any) -> bool:
-    """The prune job on the leader's scheduler, daily; ``False`` when this worker hosts none.
-
-    No job args: a Redis job store pickles them (``schedule_reconcile._tick``), and the job
-    needs none.
-    """
+    """The prune's daily platform schedule on the leader's scheduler; ``False`` when this worker
+    hosts none. PRD-276 Wave 2c: a ``proactive.runs_prune`` job (catch-up ``latest``: one prune
+    after downtime deletes everything past the cutoff)."""
     if scheduler is None or not getattr(scheduler, "running", False):
         return False
     from apscheduler.triggers.cron import CronTrigger
 
-    scheduler.add_job(
-        run_prune, CronTrigger(hour=PRUNE_HOUR_UTC, minute=PRUNE_MINUTE, timezone=timezone.utc),
-        id=PRUNE_JOB_ID, replace_existing=True, max_instances=1, coalesce=True,
-        misfire_grace_time=PRUNE_MISFIRE_GRACE_SECONDS,
-    )
+    from core.jobs.schedules import PLATFORM, schedule
+
+    schedule(scheduler, PRUNE_KIND, PLATFORM,
+             CronTrigger(hour=PRUNE_HOUR_UTC, minute=PRUNE_MINUTE, timezone=timezone.utc))
     logger.info("[proactive] runs prune: daily at %02d:%02d UTC", PRUNE_HOUR_UTC, PRUNE_MINUTE)
     return True
+
+
+@job_handler(PRUNE_KIND, concurrency=1, workspace_concurrency=1)
+async def run_prune_job(job: Any) -> None:
+    """A daily slot, off the event loop."""
+    await asyncio.to_thread(run_prune)

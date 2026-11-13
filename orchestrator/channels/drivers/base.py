@@ -116,6 +116,9 @@ class ChannelDriver(ABC):
     #: True (the receiver is a system): ``send`` takes an ``ai_disclosure``
     #: keyword and puts it in the payload, with ``ai_generated: true``.
     AI_NOTICE_IN_PAYLOAD: bool = False
+    # PRD-276 W1b: a driver whose receiver can dedupe takes a ``delivery_id`` in ``send``, the same
+    # on every retry of one delivery (the generic webhook sends it as ``X-Automatos-Delivery``).
+    ACCEPTS_DELIVERY_ID: bool = False
 
     # ------------------------------------------------------------------
     # Required lifecycle

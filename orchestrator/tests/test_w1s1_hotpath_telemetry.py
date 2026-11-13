@@ -197,22 +197,22 @@ def test_widget_permanent_failure_emits_widget_error(monkeypatch):
         error="bot token invalid",
         retryable=False,  # permanent → terminal on attempt 1
     )
-    monkeypatch.setattr(disp_mod, "dispatch_via_channel", AsyncMock(return_value=fail))
 
     ws = uuid4()
-    result = asyncio.run(
-        disp_mod.dispatch_one_destination(
-            db=MagicMock(),
+    asyncio.run(
+        disp_mod.record_attempt(  # PRD-276 W1b: a delivery job's final attempt
+            MagicMock(),
             site_id=uuid4(),
             workspace_id=ws,
             session_id="sess-1",
             request_id="req-1",
             destination={"platform": "telegram"},
-            payload=MagicMock(),
+            result=fail,
+            attempt=1,
+            final=True,
         )
     )
 
-    assert result.success is False
     assert rec.call_count >= 1, "record_error never called on terminal widget failure"
     kw = rec.call_args.kwargs
     assert kw["subsystem"] == "widget"
@@ -235,21 +235,21 @@ def test_widget_success_does_not_emit(monkeypatch):
         error=None,
         retryable=False,
     )
-    monkeypatch.setattr(disp_mod, "dispatch_via_channel", AsyncMock(return_value=ok))
 
-    result = asyncio.run(
-        disp_mod.dispatch_one_destination(
-            db=MagicMock(),
+    asyncio.run(
+        disp_mod.record_attempt(
+            MagicMock(),
             site_id=uuid4(),
             workspace_id=uuid4(),
             session_id="sess-1",
             request_id="req-1",
             destination={"platform": "telegram"},
-            payload=MagicMock(),
+            result=ok,
+            attempt=1,
+            final=True,
         )
     )
 
-    assert result.success is True
     rec.assert_not_called()
 
 

@@ -76,6 +76,9 @@ _MOVED = (
     moved("social_voice_examples", MEMORY, "Drafts and the approved text Auto learns the brand voice from."),
     moved("memory_profiles", MEMORY, "The workspace's own memory profiles (what distillation keeps, by domain); "
           "the seeded ones are the platform's and have no workspace."),
+    moved("end_users", MEMORY, "A product's end users and the consent recorded for them; their memories travel "
+          "in memory/ with the rest. The key that recorded it stays behind, as keys do.",
+          secret_columns=("api_key_id",)),
     # ── Chats ───────────────────────────────────────────────────────────────
     moved("chats", CHATS, "Chats; the Auto thread becomes the target's Auto thread."),
     moved("messages", CHATS, "The chats' messages."),
@@ -127,6 +130,12 @@ _NOT_MOVED = (
     not_moved("cloud_documents", "Sync state of a cloud-drive connection; the documents themselves move."),
     not_moved("cloud_sync_jobs", _TELEMETRY),
     not_moved("approval_grants", "Approvals are decisions made on this install (§5.3)."),
+    # In its own schema since PRD-276 §10-7, so the public-schema probe no longer sees it; the rule
+    # stays so that the table is still classified wherever it sits.
+    not_moved("jobs", "Work queued on this install finishes here; the new install rebuilds its schedules "
+              "from what it imports (PRD-276 §6.8)."),
+    not_moved("job_schedules", "A schedule's cursor belongs to this install's scheduler; the new install starts its own "
+              "when it imports the schedule (PRD-276 §6.8)."),
     not_moved("credit_ledger", _BILLING),
     not_moved("credit_balances", _BILLING),
     not_moved("billing_accounts", _BILLING),

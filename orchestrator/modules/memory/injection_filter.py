@@ -142,8 +142,11 @@ STANDING_RULE_FILTER: Dict[str, List[str]] = {f"metadata.{STATED_BY_KEY}": [STAT
 STANDING_RULE_OWNER_KEY = "metadata.owner"
 
 
-# The keys only the platform writes: who a memory belongs to, and that it is in their words.
-SERVER_SET_KEYS = ("owner", STATED_BY_KEY)
+# PRD-274 W1: which server key stored a memory (``sdk:<key id>``), written by the route, never a caller.
+WRITTEN_BY_KEY = "written_by"
+# The keys only the platform writes: who a memory belongs to, that it is in their words, and which
+# product's key stored it.
+SERVER_SET_KEYS = ("owner", STATED_BY_KEY, WRITTEN_BY_KEY)
 
 
 def without_server_keys(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:

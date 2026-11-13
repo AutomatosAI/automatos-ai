@@ -10,7 +10,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 from pydantic import ValidationError
 
 from api.agent_execute import AgentRunRequest, execute_agent
@@ -63,7 +63,7 @@ def test_execute_files_a_ticket_the_dispatch_loop_claims(seeded, new_session):
 
     ws, agent_id, _ = seeded
     s = new_session()
-    answer = execute_agent(agent_id, AgentRunRequest(input=ASKED), ctx=_ctx(ws), db=s)
+    answer = execute_agent(agent_id, AgentRunRequest(input=ASKED), Response(), ctx=_ctx(ws), db=s)
     s.close()
     assert answer["agent_id"] == agent_id and answer["status"] == "assigned"
     assert answer["task_url"] == f"/api/v1/tasks/{answer['task_id']}"
@@ -83,7 +83,7 @@ def test_a_title_given_is_the_tickets_title(seeded, new_session):
 
     ws, agent_id, _ = seeded
     s = new_session()
-    answer = execute_agent(agent_id, AgentRunRequest(input=ASKED, title="Acme renewal"), ctx=_ctx(ws), db=s)
+    answer = execute_agent(agent_id, AgentRunRequest(input=ASKED, title="Acme renewal"), Response(), ctx=_ctx(ws), db=s)
     assert s.get(BoardTask, answer["task_id"]).title == "Acme renewal"
     s.close()
 
@@ -95,9 +95,9 @@ def test_an_inactive_agent_or_another_workspaces_agent_is_refused(seeded, new_se
     s = new_session()
     try:
         with pytest.raises(HTTPException) as paused:
-            execute_agent(paused_id, AgentRunRequest(input=ASKED), ctx=_ctx(ws), db=s)
+            execute_agent(paused_id, AgentRunRequest(input=ASKED), Response(), ctx=_ctx(ws), db=s)
         with pytest.raises(HTTPException) as stranger:
-            execute_agent(agent_id, AgentRunRequest(input=ASKED), ctx=_ctx(str(uuid.uuid4())), db=s)
+            execute_agent(agent_id, AgentRunRequest(input=ASKED), Response(), ctx=_ctx(str(uuid.uuid4())), db=s)
         filed = s.execute(text("SELECT count(*) FROM board_tasks WHERE workspace_id = CAST(:w AS uuid)"),
                           {"w": ws}).scalar()
     finally:

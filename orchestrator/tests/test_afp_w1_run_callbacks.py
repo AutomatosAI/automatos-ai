@@ -2,8 +2,9 @@
 
 The workspace's signing secret is made once, kept encrypted and rotatable. ``callback_url`` must be
 https and resolve outside blocked ranges, checked when the run is asked for and again before every
-attempt. When the board's completion writer ends the ticket, the ending is POSTed with the run id,
-signed; a 2xx delivers, a 5xx or 429 is retried, any other 4xx is not. Real database.
+attempt. When the board's completion writer ends the ticket, a delivery job is queued, and the
+ending is POSTed with the run id, signed; a 2xx delivers, a 5xx or 429 is retried at the job's
+next attempt, any other 4xx is not. Real database; jobs run the way the worker runs them.
 """
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 
 from api.agent_execute import AgentRunRequest, execute_agent
 from core.security.web_access import OutboundTarget
@@ -30,10 +31,11 @@ def engine():
     from sqlalchemy import create_engine
 
     from core.database.database import get_database_url
+    from core.models.jobs import Job
     from core.models.run_callbacks import RunCallback, WorkspaceSigningSecret
 
     eng = create_engine(get_database_url(), pool_pre_ping=True)
-    for model in (WorkspaceSigningSecret, RunCallback):  # a test database built before the tables
+    for model in (WorkspaceSigningSecret, RunCallback, Job):  # a test database built before the tables
         model.__table__.create(eng, checkfirst=True)
     yield eng
     eng.dispose()
@@ -67,7 +69,6 @@ def reachable(monkeypatch):
 
     monkeypatch.setattr("core.security.web_access.resolve_outbound", lambda url, *, enforce_switch=True: PUBLIC)
     monkeypatch.setattr("core.security.web_access.resolve_outbound_async", resolve_async)
-    monkeypatch.setattr(rc, "BACKOFF_SECONDS", (0, 0, 0))
 
 
 def _receiver(monkeypatch, *codes):
@@ -91,7 +92,7 @@ def _ctx(ws):
 def _run(new_session, ws, agent_id, url=HOOK):
     s = new_session()
     try:
-        return execute_agent(agent_id, AgentRunRequest(input="Draft Acme's renewal reminder.", callback_url=url),
+        return execute_agent(agent_id, AgentRunRequest(input="Draft Acme's renewal reminder.", callback_url=url), Response(),
                              ctx=_ctx(ws), db=s)
     finally:
         s.close()
@@ -108,6 +109,44 @@ def _end(new_session, task_id, status="done", result="Drafted the reminder.", ru
     task.started_at = task.completed_at = datetime.now(timezone.utc)
     s.commit()
     s.close()
+
+
+def _do(new_session, work, *args):
+    s = new_session()
+    try:
+        out = work(s, *args)
+        s.commit()
+        return out
+    finally:
+        s.close()
+
+
+def _deliver(new_session, task_id):
+    """Queues the ticket's callback and runs its job attempt after attempt, as the worker does, with
+    the backoff skipped; the status the last attempt wrote (None: nothing was sent)."""
+    from sqlalchemy import text
+
+    from core.jobs import queue
+    from core.jobs.registry import kind_of
+
+    _do(new_session, rc.queue_if_pending, task_id)
+    due = text("UPDATE jobs.jobs SET run_at = clock_timestamp() WHERE kind = :k AND idempotency_key = :key "
+               "AND status = 'queued'")
+    status = None
+    for _ in range(rc.DELIVERY_ATTEMPTS):
+        _do(new_session, lambda s: s.execute(due, {"k": rc.DELIVER_KIND, "key": rc.job_key(task_id)}))
+        claimed = _do(new_session, queue.claim, kind_of(rc.DELIVER_KIND), "w-test", 10)
+        if not claimed:
+            break
+        (job,) = claimed
+        try:
+            status = asyncio.run(rc.deliver_run_callback(job))
+        except rc.NotYetDelivered as retry:
+            _do(new_session, queue.fail, job, str(retry))
+            continue
+        _do(new_session, queue.complete, job)
+        break
+    return status
 
 
 def _callback(new_session, task_id):
@@ -188,7 +227,7 @@ def test_the_ending_is_posted_signed_with_the_run_id(seeded, new_session, reacha
     got = _receiver(monkeypatch, 200)
     task_id = _run(new_session, ws, agent_id)["task_id"]
     _end(new_session, task_id)
-    assert asyncio.run(rc.deliver_run_callback(task_id)) == "delivered"
+    assert _deliver(new_session, task_id) == "delivered"
 
     (request,) = got
     s = new_session()
@@ -204,7 +243,7 @@ def test_the_ending_is_posted_signed_with_the_run_id(seeded, new_session, reacha
     assert "cost" in sent and sent["workspace_id"] == ws
     row = _callback(new_session, task_id)
     assert (row.status, row.attempts, row.last_status_code, row.delivered_at is not None) == ("delivered", 1, 200, True)
-    assert asyncio.run(rc.deliver_run_callback(task_id)) is None  # delivered once, never again
+    assert _deliver(new_session, task_id) is None  # delivered once, never again
 
 
 def test_a_5xx_or_429_is_retried_and_a_4xx_is_the_receivers_answer(seeded, new_session, reachable, monkeypatch):
@@ -212,12 +251,12 @@ def test_a_5xx_or_429_is_retried_and_a_4xx_is_the_receivers_answer(seeded, new_s
     retried = _receiver(monkeypatch, 503, 429, 200)
     first = _run(new_session, ws, agent_id)["task_id"]
     _end(new_session, first)
-    assert asyncio.run(rc.deliver_run_callback(first)) == "delivered" and len(retried) == 3
+    assert _deliver(new_session, first) == "delivered" and len(retried) == 3
 
     refused = _receiver(monkeypatch, 410)
     second = _run(new_session, ws, agent_id)["task_id"]
     _end(new_session, second, status="failed", result=None)
-    assert asyncio.run(rc.deliver_run_callback(second)) == "failed" and len(refused) == 1
+    assert _deliver(new_session, second) == "failed" and len(refused) == 1
     row = _callback(new_session, second)
     assert (row.status, row.attempts, row.last_status_code, row.last_error) == ("failed", 1, 410, "HTTP 410")
 
@@ -232,15 +271,14 @@ def test_an_address_that_turns_private_by_send_time_is_never_posted_to(seeded, n
         return OutboundTarget(ok=False, reason="resolves to a blocked range")
 
     monkeypatch.setattr("core.security.web_access.resolve_outbound_async", rebound)
-    assert asyncio.run(rc.deliver_run_callback(task_id)) == "failed" and got == []
+    assert _deliver(new_session, task_id) == "failed" and got == []
     assert _callback(new_session, task_id).last_error.startswith("refused")
 
 
-def test_the_completion_writer_sends_a_pending_callback_and_nothing_else(seeded, new_session, reachable, monkeypatch):
+def test_the_completion_writer_queues_a_pending_callback_once_and_nothing_else(seeded, new_session, reachable):
+    from sqlalchemy import text
+
     ws, agent_id = seeded
-    launched = []
-    monkeypatch.setattr("core.utils.background_tasks.launch_guarded",
-                        lambda coro, **kw: launched.append(kw) or coro.close())
 
     async def finalize(db, **kwargs):
         return kwargs.pop("ended")
@@ -250,11 +288,15 @@ def test_the_completion_writer_sends_a_pending_callback_and_nothing_else(seeded,
     s = new_session()
     try:
         assert asyncio.run(wrapped(s, task_id=with_callback, agent_id=agent_id, run_id="r", ended="done")) == "done"
+        assert asyncio.run(wrapped(s, task_id=with_callback, agent_id=agent_id, run_id="r", ended="done")) == "done"
         assert asyncio.run(wrapped(s, task_id=with_callback, agent_id=agent_id, ended=None)) is None
         assert asyncio.run(wrapped(s, task_id=-1, agent_id=agent_id, ended="done")) == "done"
     finally:
         s.close()
-    assert [k["operation"] for k in launched] == ["deliver"]
+    jobs = _do(new_session, lambda db: db.execute(text(
+        "SELECT payload FROM jobs.jobs WHERE kind = :k AND workspace_id = CAST(:w AS uuid)"),
+        {"k": rc.DELIVER_KIND, "w": ws}).scalars().all())
+    assert jobs == [{"task_id": with_callback, "run_id": "r"}]
 
 
 def test_the_boards_completion_writer_is_wrapped():

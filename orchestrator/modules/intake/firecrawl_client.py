@@ -5,7 +5,7 @@ PRD-130: Firecrawl Client (cloud, single-tenant PoC)
 Domain-locked Firecrawl wrapper for the Business Intake Wizard.
 
 Phase 1 scope:
-  - Cloud Firecrawl API only (https://api.firecrawl.dev/v1)
+  - Cloud Firecrawl API only (https://api.firecrawl.dev/v2)
   - Two operations: map() for URL discovery, scrape() for single-page content
   - Hard page cap enforced client-side regardless of API response size
   - Domain lock: scrape() refuses URLs that don't match the bound domain
@@ -42,7 +42,7 @@ class FirecrawlClient:
     def __init__(
         self,
         api_key: str,
-        base_url: str = "https://api.firecrawl.dev/v1",
+        base_url: str = "https://api.firecrawl.dev/v2",
         max_pages: int = 20,
         timeout_seconds: float = 60.0,
     ) -> None:
@@ -164,8 +164,7 @@ class FirecrawlClient:
             "formats": list(formats),
         }
         if schema is not None:
-            payload["formats"] = list(set(formats) | {"extract"})
-            payload["extract"] = {"schema": schema}
+            payload["formats"].append({"type": "json", "schema": schema})
 
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
@@ -202,6 +201,6 @@ class FirecrawlClient:
         return {
             "url": url,
             "markdown": body.get("markdown"),
-            "extract": body.get("extract") or body.get("llm_extraction"),
+            "extract": body.get("json"),
             "metadata": body.get("metadata") or {},
         }

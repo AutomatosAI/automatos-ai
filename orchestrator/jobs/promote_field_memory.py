@@ -27,9 +27,12 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from config import config
+from core.jobs.registry import job_handler
 from modules.context import field_scoring
 
 logger = logging.getLogger(__name__)
+
+FIELD_PROMOTION_KIND = "memory.field_promotion"
 
 # Typed category for promoted field patterns (the "typed durable memory").
 PROMOTED_CATEGORY = "field_pattern"
@@ -290,7 +293,6 @@ class FieldPromotionJobScheduler:
     """Registers the daily field→durable promotion job on the shared scheduler
     (mirrors ``services.memory_jobs.MemoryJobScheduler``)."""
 
-    JOB_ID = "field_memory_promotion"
 
     def __init__(self) -> None:
         self._scheduler = None
@@ -299,24 +301,24 @@ class FieldPromotionJobScheduler:
         if not config.FIELD_PROMOTION_ENABLED:
             logger.info("[FieldPromotion] disabled (FIELD_PROMOTION_ENABLED=false)")
             return
+        from apscheduler.triggers.cron import CronTrigger
+
+        from core.jobs.schedules import PLATFORM, schedule
+
         self._scheduler = scheduler
-        self._scheduler.add_job(
-            self._run,
-            "cron",
-            hour=config.FIELD_PROMOTION_HOUR_UTC,
-            minute=30,
-            id=self.JOB_ID,
-            replace_existing=True,
-            max_instances=1,
-        )
+        # PRD-276 Wave 2c: a memory.field_promotion job, queued daily (catch-up latest).
+        schedule(scheduler, FIELD_PROMOTION_KIND, PLATFORM,
+                 CronTrigger(hour=config.FIELD_PROMOTION_HOUR_UTC, minute=30, timezone=timezone.utc))
         logger.info(
             "[FieldPromotion] Started — daily at %02d:30 UTC",
             config.FIELD_PROMOTION_HOUR_UTC,
         )
 
     async def stop(self) -> None:
-        if self._scheduler and self._scheduler.get_job(self.JOB_ID):
-            self._scheduler.remove_job(self.JOB_ID)
+        if self._scheduler:
+            from core.jobs.schedules import PLATFORM, unschedule
+
+            unschedule(self._scheduler, FIELD_PROMOTION_KIND, PLATFORM)
             logger.info("[FieldPromotion] Stopped")
 
     async def _run(self) -> None:
@@ -333,6 +335,7 @@ class FieldPromotionJobScheduler:
             )
         except Exception:
             logger.error("[FieldPromotion] job run failed", exc_info=True)
+            raise  # PRD-276: the queue retries a failed run with the kind's backoff
 
 
 _field_promotion_scheduler: Optional[FieldPromotionJobScheduler] = None
@@ -343,3 +346,9 @@ def get_field_promotion_scheduler() -> FieldPromotionJobScheduler:
     if _field_promotion_scheduler is None:
         _field_promotion_scheduler = FieldPromotionJobScheduler()
     return _field_promotion_scheduler
+
+
+@job_handler(FIELD_PROMOTION_KIND, concurrency=1, workspace_concurrency=1)
+async def run_field_promotion_job(job: Any) -> None:
+    """A daily slot."""
+    await get_field_promotion_scheduler()._run()

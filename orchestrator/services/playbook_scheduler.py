@@ -115,7 +115,7 @@ class PlaybookSchedulerService:
         self._owns_scheduler: bool = False  # True when we created our own scheduler (tests)
         # PRD-204 S4: once-per-breaker-open-period latch for playbook_benched.
         # In-memory is deliberate and sufficient: the scheduler is a
-        # single-owner process (fcntl lock in main.py lifespan), so exactly
+        # single-owner process (the scheduler lock, services/scheduler_boot.py), so exactly
         # one instance observes every skip. Cleared when the breaker closes
         # (the check passes again); a process restart re-notifies at most
         # once per still-open breaker, which is acceptable for an alert.
@@ -142,17 +142,8 @@ class PlaybookSchedulerService:
             self._scheduler = scheduler
             self._owns_scheduler = False
         else:
-            # Standalone mode (tests / backwards compat)
-            jobstores = {"default": MemoryJobStore()}
-            try:
-                from config import config as app_config
-                if app_config.REDIS_URL:
-                    from apscheduler.jobstores.redis import RedisJobStore
-                    jobstores["default"] = RedisJobStore(url=app_config.REDIS_URL)
-                    logger.info("[PlaybookScheduler] Using Redis job store (standalone)")
-            except Exception:
-                pass
-            self._scheduler = AsyncIOScheduler(jobstores=jobstores)
+            # Standalone mode (tests): an in-memory store, as the shared scheduler uses (PRD-276 §6.4)
+            self._scheduler = AsyncIOScheduler(jobstores={"default": MemoryJobStore()})
             self._scheduler.start()
             self._owns_scheduler = True
 

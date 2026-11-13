@@ -24,7 +24,8 @@ from config import config
 from core.auth.hybrid import get_request_context_hybrid, require_task_context
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
-from core.auth.scopes import TASKS_READ
+from core.auth.scopes import TASKS_READ, TASKS_WRITE
+from core.auth.server_key_gate import require_workspace_permission_or_server_key
 from core.database.database import get_db
 from core.observability.work_links import with_link
 from core.models.core import BoardTask
@@ -271,10 +272,10 @@ async def _dispatch_task_failed(db: Session, workspace_id, task: BoardTask) -> N
 
 # ── CRUD ─────────────────────────────────────────────────────────────
 
-@router.post("", dependencies=[Depends(require_workspace_permission("missions:create"))])
+@router.post("")
 async def create_task(
     request: Request,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(require_workspace_permission_or_server_key("missions:create", TASKS_WRITE)),
     db: Session = Depends(get_db),
 ):
     """Create a new board task. F276: the answer is the ticket as the board lists
