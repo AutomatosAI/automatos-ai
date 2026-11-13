@@ -19,6 +19,9 @@ path (as ``core.security.memory_audience`` holds the reader):
 - **Nothing goes where the whole workspace reads** (``shared_with_no_end_user``): no L2 transcript
   (``memory_short_term``) and so no ``mem:{ws}:l2`` mirror, and no daily log. The Context Router reads
   those on every chat turn of the workspace. The end user's conversation stays in their chat.
+- **Their conversation's L1 session follows the same consent rule** (``sessions_while_consented`` on
+  ``update_session``): it is written only while their consent counts, and cleared if their erase started
+  while it was written, so a turn still running when they are erased leaves no session excerpt behind.
 
 What the turn **reads** is theirs and the workspace's, never another end user's:
 
@@ -42,10 +45,13 @@ from __future__ import annotations
 import asyncio
 import functools
 import inspect
+import logging
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, Iterator, Optional
+
+logger = logging.getLogger(__name__)
 
 END_USER_ID_KEY = "end_user_id"
 OWNER_KEY = "owner"  # a fact's owner (modules.memory.write_contract): who may see it when private
@@ -53,6 +59,8 @@ SUBJECT_PREFIX = "end_user:"
 NAMESPACE_PREFIX = "mem:"
 NOT_SHARED = "an end user's turn: nothing is shared with the workspace"
 ERASED = "the end user is erased, or their erase has started: nothing more is written for them"
+CLEAR_ATTEMPTS = 3  # tries to clear a session written as their erase started, before the failure is raised
+CLEAR_RETRY_SECONDS = 0.2  # the wait before the next try grows by this much each time
 
 
 @dataclass(frozen=True)
@@ -165,12 +173,26 @@ def writes_to_its_end_user(add: Callable[..., Awaitable[Any]]) -> Callable[..., 
         bound = signature.bind(*args, **kwargs)
         bound.arguments.update(routed(end_user, bound.arguments["user_id"], bound.arguments.get("metadata")))
         result = await add(*bound.args, **bound.kwargs)
-        if await _consented(end_user):
+        if await _still_consented(end_user, lambda: _take_back(bound.arguments["self"], end_user, result)):
             return result
-        await _take_back(bound.arguments["self"], end_user, result)
         return {"success": False, "skipped": ERASED}
 
     return wrapped
+
+
+async def _still_consented(end_user: EndUser, undo: Callable[[], Awaitable[None]]) -> bool:
+    """Whether their consent still counts once a write is made. When it doesn't, ``undo`` takes the write back.
+    A check that fails is never read as consent: the write is taken back, then the failure is raised."""
+    try:
+        still = await _consented(end_user)
+    except Exception:
+        logger.exception("[end_user_turn] consent not checked after a write for workspace %s; taking it back",
+                         end_user.workspace_id)
+        await undo()
+        raise
+    if not still:
+        await undo()
+    return still
 
 
 async def _take_back(store: Any, end_user: EndUser, result: Any) -> None:
@@ -178,6 +200,60 @@ async def _take_back(store: Any, end_user: EndUser, result: Any) -> None:
     point_id = result.get("id") if isinstance(result, dict) else None
     if point_id:
         await store.delete([point_id], user_id=end_user.namespace)
+
+
+def sessions_while_consented(update: Callable[..., Awaitable[None]]) -> Callable[..., Awaitable[None]]:
+    """Wrap ``UnifiedMemoryService.update_session``: during an end user's turn their conversation's L1
+    session (Redis) is written only while their consent counts, checked before and after it, as a durable
+    write is. Their erase clears their conversations' sessions after marking them, so a session written
+    first is cleared by the erase, and one written after is cleared here."""
+    signature = inspect.signature(update)
+
+    @functools.wraps(update)
+    async def wrapped(*args: Any, **kwargs: Any) -> None:
+        end_user = _end_user.get()
+        if end_user is None:
+            return await update(*args, **kwargs)
+        if not await _consented(end_user):
+            return None
+        await update(*args, **kwargs)
+        bound = signature.bind(*args, **kwargs).arguments
+        await _still_consented(end_user, lambda: _clear_session(bound["self"], bound["workspace_id"],
+                                                                bound["conversation_id"]))
+        return None
+
+    return wrapped
+
+
+async def _clear_session(service: Any, workspace_id: str, conversation_id: str) -> None:
+    """Deletes a conversation's L1 session, written while the end user's erase started. Their erase has
+    reported success, so a session left behind is an error: the delete is tried ``CLEAR_ATTEMPTS`` times,
+    then the failure is logged, recorded and raised. With no Redis configured, no session was written."""
+    from config import config
+
+    key = service.namespace(workspace_id).session(conversation_id)
+    for attempt in range(1, CLEAR_ATTEMPTS + 1):
+        try:
+            redis_client = service._get_redis()
+            if redis_client is None and not config.REDIS_URL:
+                return
+            if redis_client is None:
+                raise ConnectionError("Redis is configured but unavailable")
+            await asyncio.to_thread(redis_client.get_redis().delete, key)
+            return
+        except Exception as exc:
+            if attempt == CLEAR_ATTEMPTS:
+                logger.error("[end_user_turn] an erased end user's session %s could not be cleared", key, exc_info=exc)
+                await asyncio.to_thread(_record_left_session, workspace_id, key, exc)  # it writes error_events
+                raise
+            await asyncio.sleep(CLEAR_RETRY_SECONDS * attempt)
+
+
+def _record_left_session(workspace_id: str, key: str, error: Exception) -> None:
+    from core.utils.exception_telemetry import record_error
+
+    record_error(subsystem="memory", operation="end_user_session_clear", workspace_id=workspace_id, error=error,
+                 extra={"key": key})
 
 
 def reads_its_end_users_memory(search: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:

@@ -28,7 +28,7 @@ from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
-from core.security.end_user_turn import shared_with_no_end_user, skipped_log
+from core.security.end_user_turn import sessions_while_consented, shared_with_no_end_user, skipped_log
 
 logger = logging.getLogger(__name__)
 
@@ -1610,6 +1610,7 @@ class UnifiedMemoryService:
             )
             return None
 
+    @sessions_while_consented  # PRD-274 W3: an erased end user's conversation keeps no session
     async def update_session(
         self,
         workspace_id: str,
