@@ -47,7 +47,8 @@ export ADMIN_KEY='<ORCHESTRATOR_API_KEY>'   # never paste it into a ticket or a 
    Expect `budstacks`, with `key_prefix` `env`, `key_type` `public`, `key_scopes` `["chat"]` and
    `reuse_existing_key` `true`. Note its `id` as `PRODUCT_ID`. If there is no record: the variables are not both
    set, `PRODUCTS_ENABLED` is not `true`, or the owner id is not a live workspace; the log says which
-   (`Vertical products: [...]`).
+   (`Vertical products: [...]`). That line is logged at INFO, unlike the two `[products]` lines (WARNING), so check
+   the service's log level shows INFO if you don't see it.
 
 3. **Set the product's limits.** A monthly credit cap for each tenant workspace (#1522), and, if BudStacks wants
    one, a default retention for new end users:
@@ -97,7 +98,9 @@ export ADMIN_KEY='<ORCHESTRATOR_API_KEY>'   # never paste it into a ticket or a 
    WHERE settings->>'product_id' = '<PRODUCT_ID>';
   ```
 
-  The record can stay; its key keeps working for BudStacks while it exists.
+  The record can stay; its key keeps working for BudStacks while it exists. Do not turn `PRODUCTS_ENABLED` back on
+  unless you mean to re-attach the tenants: until #1521 removes it, the boot seed re-joins every BudStacks
+  workspace that has no `product_id`.
 - **After step 7, before step 8:** revert #1521 and redeploy. The environment key is still set, so the fallback
   works again.
 - **After step 8:** set `BUDSTACKS_INTERNAL_API_KEY` again only with the same value BudStacks holds. Otherwise
