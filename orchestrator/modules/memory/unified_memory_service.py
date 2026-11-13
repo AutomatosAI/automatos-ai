@@ -1703,9 +1703,7 @@ class UnifiedMemoryService:
                 ws_merged, ws_superseded = await self._consolidate_workspace(ws_id)
             except Exception:  # noqa: BLE001 — one workspace failing never stops the rest; counted below
                 errors += 1
-                logger.exception(
-                    "[UnifiedMemoryService] run_sleep_time_consolidation failed for ws=%s", ws_id,
-                )
+                logger.exception("[UnifiedMemoryService] run_sleep_time_consolidation failed for ws=%s", ws_id)
                 continue
             merged += ws_merged
             superseded += ws_superseded
@@ -1726,8 +1724,7 @@ class UnifiedMemoryService:
         }
 
     async def _consolidation_workspace_ids(self, workspace_id: Optional[str]) -> List[str]:
-        """The one workspace asked for, else every active one (an empty list when
-        that lookup fails: the run then does nothing and says so)."""
+        """The one workspace asked for, else every active one ([] when that lookup fails)."""
         if workspace_id:
             return [workspace_id]
         try:

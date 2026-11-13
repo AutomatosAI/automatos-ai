@@ -1289,139 +1289,54 @@ class HeartbeatService:
     # ------------------------------------------------------------------
 
     async def _dispatch_heartbeat_notification(self, result: dict) -> None:
-        """Fan out a heartbeat completion event via ``NotificationDispatcher``.
+        """Fan out a heartbeat completion event (pieces: ``services.heartbeats.notification``).
 
-        Reads ``notification_preferences`` for the workspace and delivers the
-        event to every enabled destination (in_app / telegram / slack /
-        webhook / silent). Opens a dedicated DB session so the in-app row is
-        committed independently of the caller's transaction. Non-blocking:
-        any failure is logged but never propagates back to the heartbeat tick.
+        The agent's ``report_to`` picks the route: ``auto`` files a board task for the
+        workspace's Auto (PRD-72), ``webhook`` POSTs to the agent's own URL, anything else
+        goes to the workspace's ``NotificationDispatcher`` (in_app / telegram / slack /
+        webhook / silent). Non-blocking: any failure is logged but never propagates back
+        to the heartbeat tick. A Claude Code agent's tick that only queued its session
+        sends nothing: the session's ticket sends what it found when it ends (13 Nov 2026,
+        ``services.heartbeats.session_ticks``).
         """
+        from services.heartbeats import notification
+        from services.heartbeats.session_ticks import only_queued_a_session
+
         workspace_id = result.get("workspace_id")
-        if not workspace_id:
+        if not workspace_id or only_queued_a_session(result.get("actions_taken")):
             return
-
         try:
-            from core.database.database import SessionLocal
-            from core.services.notification_dispatcher import NotificationDispatcher
-
             source_type = result.get("source_type", "orchestrator")
-            hb_status = result.get("status", "success")
-            dispatch_status = "ok" if hb_status == "success" else "error"
-
-            # Extract LLM analysis (or fallback summary) for the message body
-            findings = result.get("findings", []) or []
-            message_body = ""
-            for f in findings:
-                if f.get("check") == "llm_analysis":
-                    message_body = (f.get("detail") or "")[:2000]
-                    break
-            if not message_body:
-                details = [
-                    (f.get("detail") or "")[:300]
-                    for f in findings
-                    if f.get("detail")
-                ]
-                message_body = "\n".join(details) if details else "No findings."
-
-            # Resolve agent metadata + per-agent report_to override (agent tick only)
-            agent_id: Optional[int] = None
-            agent_name: Optional[str] = None
-            agent_hb_config: dict = {}
-            if source_type == "agent":
-                try:
-                    agent_id = int(result.get("source_id"))
-                except (TypeError, ValueError):
-                    agent_id = None
-                if agent_id is not None:
-                    db_lookup = SessionLocal()
-                    try:
-                        from core.models import Agent
-
-                        agent = db_lookup.query(Agent).get(agent_id)
-                        agent_name = agent.name if agent else f"agent-{agent_id}"
-                        if agent and agent.configuration:
-                            agent_hb_config = (agent.configuration or {}).get("heartbeat", {}) or {}
-                    finally:
-                        db_lookup.close()
-                title = f"{agent_name or 'Agent'} Heartbeat"
-            else:
-                agent_name = "Orchestrator"
-                title = "Orchestrator Heartbeat"
-
+            status = "ok" if result.get("status", "success") == "success" else "error"
+            message = notification.message_of(result.get("findings"))
+            source = await asyncio.to_thread(notification.source_of, result)
             link_id = result.get("_heartbeat_result_id")
-
-            # Per-agent ``report_to`` overrides the workspace dispatch path.
-            #   - "auto"     → assign a board task to the workspace's Auto, so
-            #                  Auto picks it up on its next tick (PRD-72 loop).
-            #   - "webhook"  → POST directly to the agent's stored webhook_url,
-            #                  bypassing workspace prefs.
-            #   - anything else (orchestrator/telegram/slack/empty) falls
-            #                  through to the workspace-level NotificationDispatcher.
-            report_to = (agent_hb_config.get("report_to") or "").strip().lower()
-
             # PRD-248 S5 (shadow only): does this heartbeat need the owner today?
             # Logged beside the route it takes; never changes the route.
             _shadow_heartbeat_triage(
-                workspace_id=workspace_id, link_id=link_id, agent_id=agent_id,
-                agent_name=agent_name, title=title, message=message_body,
-                status=dispatch_status, source_type=source_type,
-                platform_action=f"report_to={report_to or 'workspace'}",
+                workspace_id=workspace_id, link_id=link_id, agent_id=source.agent_id,
+                agent_name=source.agent_name, title=source.title, message=message,
+                status=status, source_type=source_type,
+                platform_action=f"report_to={source.report_to or 'workspace'}",
             )
-
-            if report_to == "auto" and source_type == "agent":
+            if source.report_to == "auto" and source_type == "agent":
                 await self._route_heartbeat_to_auto(
-                    workspace_id=workspace_id,
-                    source_agent_id=agent_id,
-                    source_agent_name=agent_name,
-                    title=title,
-                    message=message_body,
-                    link_id=link_id,
-                    status=dispatch_status,
+                    workspace_id=workspace_id, source_agent_id=source.agent_id,
+                    source_agent_name=source.agent_name, title=source.title, message=message,
+                    link_id=link_id, status=status,
                 )
                 return
-
-            if report_to == "webhook" and agent_hb_config.get("webhook_url"):
+            if source.report_to == "webhook" and source.hb_config.get("webhook_url"):
                 await self._route_heartbeat_to_webhook(
-                    webhook_url=agent_hb_config["webhook_url"],
-                    title=title,
-                    message=message_body,
-                    agent_id=agent_id,
-                    agent_name=agent_name,
-                    link_id=link_id,
-                    status=dispatch_status,
+                    webhook_url=source.hb_config["webhook_url"], title=source.title, message=message,
+                    agent_id=source.agent_id, agent_name=source.agent_name, link_id=link_id, status=status,
                 )
                 return
-
-            db = SessionLocal()
-            try:
-                dispatcher = NotificationDispatcher(db, workspace_id)
-                dispatched = await dispatcher.dispatch(
-                    event_type="heartbeat_complete",
-                    title=title,
-                    message=message_body,
-                    link_type="heartbeat",
-                    link_id=str(link_id) if link_id is not None else None,
-                    agent_id=agent_id,
-                    agent_name=agent_name,
-                    status=dispatch_status,
-                )
-                db.commit()
-                logger.info(
-                    "[Heartbeat] Dispatched heartbeat_complete ws=%s → %s",
-                    workspace_id,
-                    dispatched.get("dispatched_to"),
-                )
-            except Exception:
-                db.rollback()
-                raise
-            finally:
-                db.close()
-        except Exception as e:
-            logger.error(
-                "[Heartbeat] Notification dispatch failed for ws=%s: %s",
-                workspace_id, e, exc_info=True,
+            await notification.dispatch_to_workspace(
+                workspace_id=workspace_id, source=source, message=message, link_id=link_id, status=status,
             )
+        except Exception:  # noqa: BLE001 — a heartbeat never fails on its notification; logged
+            logger.exception("[Heartbeat] Notification dispatch failed for ws=%s", workspace_id)
 
     # ------------------------------------------------------------------
     # report_to routing — per-agent overrides (PRD-72 follow-up)
@@ -1439,16 +1354,10 @@ class HeartbeatService:
         status: str,
     ) -> None:
         """Create a BoardTask for Auto to pick up on its next tick
-        (``services.heartbeats.auto_review``). ``report_to=auto`` means "the manager
-        should look at this." A tick that only queued a Claude Code session has nothing
-        to look at yet: its ticket files the review when the session ends (13 Nov 2026).
-        Both run on worker threads, each on a session of its own."""
-        from services.heartbeats.auto_review import file_auto_review, tick_only_queued_a_session
+        (``services.heartbeats.auto_review``): ``report_to=auto`` means "the manager
+        should look at this." Written on a worker thread, on a session of its own."""
+        from services.heartbeats.auto_review import file_auto_review
 
-        if await asyncio.to_thread(tick_only_queued_a_session, workspace_id, link_id):
-            logger.info("[Heartbeat] report_to=auto: tick %s only queued a session ticket — "
-                        "its review is filed when the session ends", link_id)
-            return
         await asyncio.to_thread(functools.partial(
             file_auto_review, workspace_id=workspace_id, source_agent_id=source_agent_id,
             source_agent_name=source_agent_name, message=message, link_id=link_id, status=status,

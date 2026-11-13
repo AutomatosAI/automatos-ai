@@ -92,7 +92,7 @@ def report_type_for(task: Any) -> str:
 async def auto_create_task_report(db: Session, workspace_id: str, task: Any, exec_result: Dict[str, Any]) -> None:
     """File an agent_reports row for a finished ticket, so it shows in Reports,
     Deliverables and the Activity Feed. Never raises: a failure is logged."""
-    from services.heartbeats.auto_review import review_finished_session
+    from services.heartbeats.session_ticks import report_finished_session
     from services.report_metrics import settled_execution_metrics
     from services.report_service import ReportService
 
@@ -112,8 +112,8 @@ async def auto_create_task_report(db: Session, workspace_id: str, task: Any, exe
         )
         if not filed.get("success"):
             logger.warning("[BoardTasks] Auto-report creation failed for task=%s: %s", task.id, filed.get("error"))
-        # A Claude Code agent's heartbeat reports to Auto now, with what its session found.
-        await review_finished_session(db, workspace_id, task, agent_name=agent_name, answer=answer)
+        # A Claude Code agent's heartbeat reports now, with what its session found (13 Nov 2026).
+        await report_finished_session(workspace_id, task, answer=answer)
     except Exception:
         logger.exception("[BoardTasks] the task report for task=%s was not filed", getattr(task, "id", "?"))
 

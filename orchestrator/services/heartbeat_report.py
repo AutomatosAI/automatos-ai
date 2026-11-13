@@ -88,9 +88,9 @@ async def auto_create_heartbeat_report(agent_id: int, workspace_id: str, result:
     """File a report for every heartbeat tick, even when the agent filed none.
     Runs on its own session. Never raises: a failure is logged. A tick that only
     queued a Claude Code session files none: that ticket files its own report, with
-    what the session found, when it ends (``services.heartbeats.auto_review``)."""
+    what the session found, when it ends (``services.heartbeats.session_ticks``)."""
     from core.database.database import SessionLocal
-    from services.heartbeats.auto_review import only_queued_a_session
+    from services.heartbeats.session_ticks import only_queued_a_session
 
     if only_queued_a_session(result.get("actions_taken")):
         return
