@@ -1,13 +1,10 @@
-"""PRD-274 Wave 5f (decisions 27 and 28): BudStacks moves onto a product record, keeping its behaviour.
+"""PRD-274 Wave 5f (decisions 27–31): BudStacks is a product record, keeping its behaviour.
 
-The generic seed (``integrations/vertical_products``, tested in full with Shopify) makes BudStacks' record from its
-internal key's hash and its own settings: no roster yet, a public ``chat`` key, and a re-provision that keeps a
-live storefront's key. Its existing tenants join it, a provisioned tenant joins it and is paid for by the owner, a
-re-provision mints no new key, and the key check reads the record.
+A provisioned tenant joins the product and is paid for by its owner, a re-provision mints no new key (BudStacks'
+``reuse_existing_key``), and the machine key is the record's.
 """
 from __future__ import annotations
 
-import json
 import uuid
 from types import SimpleNamespace
 
@@ -18,12 +15,10 @@ from sqlalchemy import text
 from config import config
 from core.models.products import Product
 from integrations.provisioning import PROVISIONER_REGISTRY, provision_vertical
-from integrations.vertical_products import seed_vertical_product
-from services.products import key_hash, mint_key
+from services.products import mint_key
 
 import integrations.budstacks  # noqa: F401  # registers the BudStacks provisioner
 
-ENV_KEY = "budstacks-internal-" + uuid.uuid4().hex
 DOMAINS = {"domains": ["green.example"]}
 
 
@@ -47,21 +42,21 @@ def engine():  # conftest's new_session binds to it
 
 @pytest.fixture
 def world(new_session, monkeypatch):
-    """Products on, the BudStacks key and owner set, and no BudStacks product or tenant workspace before the test
-    (any left are moved aside and put back); everything the test made is swept after."""
-    owner, tag = str(uuid.uuid4()), uuid.uuid4().hex[:8]
+    """Products on, and the BudStacks product record (moved aside and put back if one exists); everything the
+    test made is swept after."""
+    owner, tag, key = str(uuid.uuid4()), uuid.uuid4().hex[:8], mint_key()
+    budstacks = PROVISIONER_REGISTRY["budstacks"]
     s = new_session()
     s.execute(text("INSERT INTO workspaces (id, name) VALUES (CAST(:o AS uuid), 'w5f-bs-owner')"), {"o": owner})
     s.execute(text("UPDATE products SET slug = slug || '-aside-' || :t WHERE slug = 'budstacks'"), {"t": tag})
-    s.execute(text("UPDATE workspaces SET settings = settings || jsonb_build_object('vertical', 'aside-' || :t) "
-                   "WHERE settings->>'vertical' = 'budstacks' OR settings->>'source' = 'budstacks'"), {"t": tag})
+    s.add(Product(slug="budstacks", name="BudStacks", owner_workspace_id=uuid.UUID(owner), key_hash=key.key_hash,
+                  key_prefix=key.key_prefix, agent_slugs=[], key_type="public",
+                  key_scopes=list(budstacks.key_permissions), reuse_existing_key=True))
     s.commit()
     s.close()
     monkeypatch.setattr(config, "PRODUCTS_ENABLED", True)
-    monkeypatch.setattr(config, "BUDSTACKS_INTERNAL_API_KEY", ENV_KEY)
-    monkeypatch.setattr(config, "BUDSTACKS_PRODUCT_OWNER_WORKSPACE_ID", owner)
     made = []
-    yield SimpleNamespace(owner=owner, made=made)
+    yield SimpleNamespace(owner=owner, key=key.plaintext, made=made)
     s = new_session.sweep()
     ids = made + [r[0] for r in s.execute(text("SELECT id::text FROM workspaces WHERE settings->>'product_id' IN "
                                                 "(SELECT id::text FROM products WHERE slug = 'budstacks')")).all()]
@@ -69,19 +64,9 @@ def world(new_session, monkeypatch):
     s.execute(text("DELETE FROM workspaces WHERE id::text = ANY(:ids)"), {"ids": ids})
     s.execute(text("DELETE FROM products WHERE slug = 'budstacks'"))
     s.execute(text("UPDATE products SET slug = 'budstacks' WHERE slug = 'budstacks-aside-' || :t"), {"t": tag})
-    s.execute(text("UPDATE workspaces SET settings = settings || '{\"vertical\": \"budstacks\"}'::jsonb "
-                   "WHERE settings->>'vertical' = 'aside-' || :t"), {"t": tag})
     s.execute(text("DELETE FROM workspaces WHERE id = CAST(:o AS uuid)"), {"o": owner})
     s.commit()
     s.close()
-
-
-def _seed(new_session):
-    s = new_session()
-    try:
-        return seed_vertical_product(s, "budstacks", PROVISIONER_REGISTRY["budstacks"])
-    finally:
-        s.close()
 
 
 def _provision(new_session, world, tenant):
@@ -103,36 +88,12 @@ def _product_id(new_session, ws):
         s.close()
 
 
-def test_the_record_keeps_budstacks_own_settings(new_session, world):
-    outcome = _seed(new_session)
-    s = new_session()
-    record = s.query(Product).filter(Product.slug == "budstacks").one()
-    s.close()
-    assert outcome["product"] == str(record.id) and str(record.owner_workspace_id) == world.owner
-    assert record.key_hash == key_hash(ENV_KEY) and record.name == "BudStacks"
-    assert (record.agent_slugs, record.ops_manager_slug, record.key_type, record.key_scopes) == ([], None, "public",
-                                                                                                ["chat"])
-    assert record.reuse_existing_key is True
-
-
-def test_an_existing_tenant_joins_it(new_session, world):
-    tenant = str(uuid.uuid4())
-    s = new_session()
-    s.execute(text("INSERT INTO workspaces (id, name, settings, is_active) VALUES (CAST(:id AS uuid), 'tenant-1', "
-                   "CAST(:s AS jsonb), true)"),
-              {"id": tenant, "s": json.dumps({"vertical": "budstacks", "budstacks_tenant_id": "tenant-1",
-                                              "source_external_id": "tenant-1"})})
-    s.commit()
-    s.close()
-    world.made.append(tenant)
-    outcome = _seed(new_session)
-    assert outcome["attached"] == 1 and _product_id(new_session, tenant) == outcome["product"]
-
-
 def test_a_tenant_is_provisioned_into_it_paid_by_its_owner_and_keeps_its_key(new_session, world):
     from services.credits.payer import paying_workspace
 
-    product = _seed(new_session)["product"]
+    s = new_session()
+    product = str(s.query(Product.id).filter(Product.slug == "budstacks").scalar())
+    s.close()
     first = _provision(new_session, world, "tenant-2")
     again = _provision(new_session, world, "tenant-2")
     assert _product_id(new_session, first["id"]) == product and first["key_minted"]
@@ -147,14 +108,13 @@ def test_a_tenant_is_provisioned_into_it_paid_by_its_owner_and_keeps_its_key(new
 def test_the_key_check_reads_the_record(new_session, world):
     from api.verticals import _verify_vertical_internal_key
 
-    _seed(new_session)
-    _verify_vertical_internal_key("budstacks", authorization=f"Bearer {ENV_KEY}")
+    _verify_vertical_internal_key("budstacks", authorization=f"Bearer {world.key}")
     replaced = mint_key()
     s = new_session()
     s.execute(text("UPDATE products SET key_hash = :h WHERE slug = 'budstacks'"), {"h": replaced.key_hash})
     s.commit()
     s.close()
     with pytest.raises(HTTPException) as refused:
-        _verify_vertical_internal_key("budstacks", authorization=f"Bearer {ENV_KEY}")
+        _verify_vertical_internal_key("budstacks", authorization=f"Bearer {world.key}")
     assert refused.value.status_code == 401
     _verify_vertical_internal_key("budstacks", authorization=f"Bearer {replaced.plaintext}")

@@ -239,15 +239,20 @@ class TestF004ShopifyFailClosed:
     def test_boot_passes_when_shopify_key_unset(self, monkeypatch):
         from config import Config
         cfg = Config()
-        monkeypatch.setattr(cfg, "SHOPIFY_INTERNAL_API_KEY", "", raising=False)
         monkeypatch.setattr(cfg, "S3_VECTORS_ENABLED", False, raising=False)
         cfg.validate_security()  # no raise — the endpoint 503 is the guard
 
+    @staticmethod
+    def _record(monkeypatch, key):
+        """The Shopify product record's key (PRD-274 W5f): ``None`` means it has no record."""
+        import integrations.vertical_products as vp
+        monkeypatch.setattr(vp, "key_matches", lambda vertical, token: None if key is None else token == key)
+
     def test_verify_internal_key_503s_when_unset(self, monkeypatch):
-        """Unset key ⇒ the machine lane is dark, not open."""
+        """No product record ⇒ the machine lane is dark, not open."""
         import api.shopify as sh
         from fastapi import HTTPException
-        monkeypatch.setattr(sh.config, "SHOPIFY_INTERNAL_API_KEY", "", raising=False)
+        self._record(monkeypatch, None)
         with pytest.raises(HTTPException) as ei:
             sh._verify_internal_key("Bearer anything-at-all")
         assert ei.value.status_code == 503
@@ -255,7 +260,7 @@ class TestF004ShopifyFailClosed:
     def test_verify_internal_key_rejects_arbitrary_header(self, monkeypatch):
         import api.shopify as sh
         from fastapi import HTTPException
-        monkeypatch.setattr(sh.config, "SHOPIFY_INTERNAL_API_KEY", "real-secret", raising=False)
+        self._record(monkeypatch, "real-secret")
         # An arbitrary bearer value is rejected — no fail-open branch remains.
         with pytest.raises(HTTPException) as ei:
             sh._verify_internal_key("Bearer x")
@@ -263,7 +268,7 @@ class TestF004ShopifyFailClosed:
 
     def test_verify_internal_key_accepts_correct_key(self, monkeypatch):
         import api.shopify as sh
-        monkeypatch.setattr(sh.config, "SHOPIFY_INTERNAL_API_KEY", "real-secret", raising=False)
+        self._record(monkeypatch, "real-secret")
         # Correct key: no raise.
         sh._verify_internal_key("Bearer real-secret")
 

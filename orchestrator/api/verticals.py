@@ -9,17 +9,16 @@ forking ``api/shopify.py``. The Shopify Remix app targets
 compat wrapper that delegates here.
 
 Authenticated with a fail-closed PER-VERTICAL internal API key (the
-integration/app server is the caller, not a browser): each vertical's secret is
-declared in ``config.py`` and resolved from the path's ``{vertical}`` — so the
-BudStacks app cannot provision Shopify workspaces with its own key, and an
-unconfigured vertical answers 503 (dark), mirroring ``_verify_internal_key``'s
-posture (see the 2026-08-01 boot-guard outage note in config.py for why this is
-a request-time check, never a boot-fatal one).
+integration/app server is the caller, not a browser): the key of the vertical's
+product record (PRD-274 W5f), resolved from the path's ``{vertical}`` — so the
+BudStacks app cannot provision Shopify workspaces with its own key, and a
+vertical with no product record answers 503 (dark), mirroring
+``_verify_internal_key``'s posture (see the 2026-08-01 boot-guard outage note in
+config.py for why this is a request-time check, never a boot-fatal one).
 """
 
 from __future__ import annotations
 
-import hmac
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -28,7 +27,6 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from config import config
 from core.database.database import get_db
 from core.models.workspaces import Workspace
 
@@ -37,35 +35,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/verticals", tags=["Verticals"])
 
 
-# Vertical → the config attribute holding its server-to-server secret. A
-# vertical absent here (or with an empty secret) is dark: 503, never open.
-_VERTICAL_INTERNAL_KEYS: Dict[str, str] = {
-    "shopify": "SHOPIFY_INTERNAL_API_KEY",
-    "budstacks": "BUDSTACKS_INTERNAL_API_KEY",
-}
-
-
 def _verify_vertical_internal_key(
     vertical: str, authorization: str = Header(...)
 ) -> None:
-    """Fail-closed per-vertical internal key (``api.shopify._verify_internal_key`` calls it too). A vertical
-    that is a product (PRD-274 W5f, ``integrations/vertical_products``) is checked against its record's key
-    hash, so an admin's key replacement takes effect; one with no record yet, against its environment key."""
+    """Fail-closed per-vertical internal key (``api.shopify._verify_internal_key`` calls it too): the key of the
+    vertical's product record (PRD-274 W5f, ``integrations/vertical_products``), compared by hash in constant time,
+    so an admin's key replacement takes effect at once. A vertical with no record is dark (503), never open."""
     from integrations.vertical_products import key_matches
 
     token = authorization.replace("Bearer ", "").strip()
     matched = key_matches(vertical, token)
-    if matched is not None:
-        if not matched:
-            raise HTTPException(status_code=401, detail="Invalid internal API key")
-        return
-    attr = _VERTICAL_INTERNAL_KEYS.get(vertical)
-    expected = (getattr(config, attr, "") or "").strip() if attr else ""
-    if not expected:
-        raise HTTPException(
-            status_code=503, detail=f"{vertical} provisioning not configured"
-        )
-    if not hmac.compare_digest(token, expected):
+    if matched is None:
+        raise HTTPException(status_code=503, detail=f"{vertical} provisioning not configured")
+    if not matched:
         raise HTTPException(status_code=401, detail="Invalid internal API key")
 
 

@@ -8,7 +8,7 @@ workspace admin and resolve the workspace from ``ctx.workspace_id``). This test
 pins the fix: the internal-key-authed ``/api/verticals/{v}/gdpr/*`` surface
 
   * authenticates with the SAME internal key as ``/provision`` and ``/events``
-    (``_verify_internal_key`` → ``SHOPIFY_INTERNAL_API_KEY``), NOT a workspace
+    (``_verify_internal_key`` → the Shopify product record's key), NOT a workspace
     admin;
   * resolves the workspace from the shop/external id using the SAME indexed
     ``settings[external_id_key]`` lookup the provision flow + Shopify routes use;
@@ -109,21 +109,16 @@ def test_gdpr_endpoints_use_internal_key_dep():
         assert verticals._verify_vertical_internal_key in deps, f"{path} not internal-key authed"
 
 
-def test_missing_internal_key_is_rejected():
-    """No/blank Authorization → the internal-key dep raises (401/403/503 family),
-    never a 200. We invoke the dep directly (as FastAPI would) with an empty key."""
-    from config import config
+@pytest.mark.parametrize("record, status", [(None, 503), ("the-key", 401)])
+def test_missing_internal_key_is_rejected(monkeypatch, record, status):
+    """A wrong key → the internal-key dep raises, never a 200: 503 while the vertical has no product record
+    (PRD-274 W5f), 401 once it has one. We invoke the dep directly (as FastAPI would)."""
+    import integrations.vertical_products as vp
 
-    if not (config.SHOPIFY_INTERNAL_API_KEY or "").strip():
-        # Key unset in the test env → dep fail-closes with 503 for any token.
-        with pytest.raises(HTTPException) as ei:
-            verticals._verify_vertical_internal_key("shopify", authorization="Bearer whatever")
-        assert ei.value.status_code in (401, 403, 503)
-    else:
-        # Key set → a wrong token is rejected 401.
-        with pytest.raises(HTTPException) as ei:
-            verticals._verify_vertical_internal_key("shopify", authorization="Bearer definitely-wrong-key")
-        assert ei.value.status_code == 401
+    monkeypatch.setattr(vp, "key_matches", lambda vertical, token: None if record is None else token == record)
+    with pytest.raises(HTTPException) as ei:
+        verticals._verify_vertical_internal_key("shopify", authorization="Bearer definitely-wrong-key")
+    assert ei.value.status_code == status
 
 
 # ===========================================================================

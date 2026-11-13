@@ -359,7 +359,7 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
 
 | Follow-up | Waiting on |
 | --- | --- |
-| Delete `SHOPIFY_INTERNAL_API_KEY` and `BUDSTACKS_INTERNAL_API_KEY`, the seed's key read and the key check's environment fallback (decision 30) | A deploy whose boot has seeded each record; then Gerard removes the Railway variables |
+| Delete `SHOPIFY_INTERNAL_API_KEY` and `BUDSTACKS_INTERNAL_API_KEY`, the seed's key read and the key check's environment fallback (decision 30) | Done in the PR that deletes them, merged after the deploy that seeded BudStacks' record; then Gerard removes the Railway variable. Shopify had no key set, so it has no record: an admin creates one when Shopify becomes a product |
 | A per-workspace spend cap for a product's workspaces: today the owner's balance is their only limit | Gerard, before `PRODUCTS_ENABLED` is turned on: the proposal below |
 | Products on in hosted | Gerard: `PRODUCTS_ENABLED`, and an owner for each vertical that becomes a product. Only BudStacks' key is set on Railway, so only BudStacks would |
 
