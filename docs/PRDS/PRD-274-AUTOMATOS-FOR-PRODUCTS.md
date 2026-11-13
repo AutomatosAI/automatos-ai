@@ -1,7 +1,7 @@
 # PRD-274: Automatos for products — the platform layer other products run on
 
 **Status:** Approved, 9 Nov 2026 (Gerard): numbered PRD-274, with every §8 recommendation decided as recommended.
-Written by Dave, 8 Nov 2026. Waves 0–4 are built; Wave 5 is built but for 5e, retention through the product (§6).
+Written by Dave, 8 Nov 2026. Waves 0–5 are built (§6); Wave 5 is behind `PRODUCTS_ENABLED`, off.
 
 **Why now:** external tools built to run *on* Automatos have independently hit the same missing layer.
 - **One uses Automatos through its API as a machine customer.** Its platform requirements include a server key that
@@ -323,7 +323,7 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
   pages read everything (§8-11); consolidation never crosses audiences (#1453). F155's stricter widget rule stays,
   with the labels on top of it.
 
-### Wave 5: sub-tenants (built but for 5e; approved in #1492)
+### Wave 5: sub-tenants (built; approved in #1492)
 
 - The product record (§8-3), find-or-create by external id with roster seeding, list, guarded purge; billed to the
   product's owner workspace (§8-2). Both registered verticals move onto it last, each keeping its behaviour: Shopify's
@@ -340,8 +340,9 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
   - 5d, the billing roll-up (#1512): `services/credits/payer.py`, and `credit_ledger.sub_tenant_id`.
   - 5f, Shopify (#1513) and BudStacks (#1514) onto product records: a boot seeds each record from its key once its
     owner setting is set (`SHOPIFY_PRODUCT_OWNER_WORKSPACE_ID`, `BUDSTACKS_PRODUCT_OWNER_WORKSPACE_ID`).
-- Not built yet: **5e, retention through the product.** A new end user of a product's workspace is given the
-  product's `default_retention_days` (decision 28). Until it is built, the default is stored and nothing reads it.
+  - 5e, retention through the product: a new end user of a product's workspace, recorded with no `retention_days`,
+    is given the product's `default_retention_days`; an explicit value, `null` included, is kept, and an end user
+    who already exists never takes the default (decision 28).
 
 ### Follow-ups from Wave 1 (open)
 
@@ -357,7 +358,6 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
 
 | Follow-up | Waiting on |
 | --- | --- |
-| 5e: a product's default retention for its new end users (decision 28) | Building it (the next PR) |
 | Delete `SHOPIFY_INTERNAL_API_KEY` and `BUDSTACKS_INTERNAL_API_KEY`, the seed's key read and the key check's environment fallback (decision 30) | A deploy whose boot has seeded each record; then Gerard removes the Railway variables |
 | A per-workspace spend cap for a product's workspaces: today the owner's balance is their only limit | Gerard, before `PRODUCTS_ENABLED` is turned on |
 | Products on in hosted | Gerard: `PRODUCTS_ENABLED`, and an owner for each vertical that becomes a product. Only BudStacks' key is set on Railway, so only BudStacks would |
@@ -456,7 +456,7 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
     takes the product's default, read through their workspace. `api_key_id` stays as the record of which key wrote
     the consent. (Not: a new column, which would need a migration and a backfill, and keep a second copy of the
     product to keep in step.)
-    *Existing end users (proposed, for Gerard to confirm):* the product's default applies only to end users created
+    *Existing end users (proposed, for Gerard to confirm; built so in 5e):* the product's default applies only to end users created
     after their workspace belongs to the product. 5e writes the default into `retention_days` when it creates an end
     user, read through the workspace; the sweep, which today reads only `retention_days`, is unchanged. An end user who
     already exists with no `retention_days` keeps their memories until erased, as they consented to. Otherwise
