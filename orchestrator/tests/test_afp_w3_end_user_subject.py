@@ -137,7 +137,10 @@ def test_consent_is_recorded_by_the_key_and_refused_when_false(new_session, work
     made = _call(new_session, eum.record_consent, eum.EndUserConsent(consent=True, retention_days=90),
                  end_user_id="player-7", ctx=key)
     again = _call(new_session, eum.record_consent, eum.EndUserConsent(consent=True), end_user_id="player-7", ctx=key)
-    assert (made["retention_days"], again["retention_days"]) == (90, None)
+    cleared = _call(new_session, eum.record_consent, eum.EndUserConsent(consent=True, retention_days=None),
+                    end_user_id="player-7", ctx=key)
+    # A refresh with no retention_days keeps it (PRD-274 W5e follow-up); an explicit null clears it.
+    assert (made["retention_days"], again["retention_days"], cleared["retention_days"]) == (90, 90, None)
     s = new_session()
     rows = s.query(EndUser).filter(EndUser.workspace_id == uuid.UUID(workspace)).all()
     s.close()
