@@ -24,6 +24,8 @@ from services.credits.routing import (
 )
 
 USAGE_WINDOW_DAYS = 30
+SUB_TENANTS_SHOWN = 100
+_SPENT_SOURCES = ("usage", "voice_live_call")  # what a product's workspace spends of its owner's credits
 # What the ledger shows a customer for each movement's source.
 _SOURCE_LABELS = {
     "usage": "AI usage",
@@ -42,11 +44,36 @@ _SOURCE_LABELS = {
 _HIDDEN_SOURCES = ("overhead_day",)
 
 
+def _paid_by_product(db: Any, workspace: Any, payer: str) -> dict:
+    """A product's workspace's summary (PRD-274 W5d): it has no credits, plan or trial of its own; its product's
+    owner pays. Whether that owner's platform-funded work is paused shows, and none of the owner's figures. The
+    shape is every summary's (the web app reads ``balance`` and its buckets), with nothing in it."""
+    from config import config
+    from services.credits.alerts import LEVEL_OUT, level_for
+
+    from core.models.workspaces import Workspace
+
+    owner = db.query(Workspace).get(payer)
+    plan = getattr(owner, "plan", None)
+    funding = funding_for(plan, read_balance(db, payer), edition=config.AUTH_EDITION, free=is_free_workspace(db, payer))
+    paused = funding.funded_by == FUNDED_BY_CREDITS and level_for(funding.spendable, plan) == LEVEL_OUT
+    return {"paid_by_product": True, "plan": None, "plan_name": None, "price_usd": None, "price_label": None,
+            "billing_open": bool(config.BILLING_OPEN), "status": "paused" if paused else "active",
+            "renewal_date": None, "balance": {"trial": 0, "monthly": 0, "topup": 0, "spendable": None},
+            "trial_credits": 0, "platform_ai": False, "metered": False, "paused": paused, "low": False,
+            "own_keys": has_own_keys(workspace)}
+
+
 def billing_summary(db: Any, workspace: Any) -> dict:
     """Plan, status, renewal date and balance by bucket for one workspace."""
     from config import config
     from services.credits.alerts import LEVEL_LOW, LEVEL_OUT, level_for
+    from services.credits.payer import payer_of
     from services.plan_tiers import exposure_for_plan, platform_ai_allowed
+
+    payer = payer_of(db, workspace)
+    if payer != str(workspace.id):
+        return _paid_by_product(db, workspace, payer)
 
     plan = getattr(workspace, "plan", None)
     balance = read_balance(db, workspace.id)
@@ -70,6 +97,7 @@ def billing_summary(db: Any, workspace: Any) -> dict:
         "paused": paused,
         "low": level == LEVEL_LOW,
         "own_keys": has_own_keys(workspace),
+        "paid_by_product": False,
     }
 
 
@@ -98,9 +126,17 @@ def _usage(db: Any, workspace_id: Any, since: datetime) -> dict:
         "WHERE workspace_id = CAST(:ws AS uuid) AND source_type = 'usage' AND created_at >= :since "
         "GROUP BY reason ORDER BY 3 DESC LIMIT 20"
     ), {"ws": str(workspace_id), "since": since}).fetchall()
+    by_workspace = db.execute(text(
+        "SELECT sub_tenant_id::text, count(DISTINCT source_ref), COALESCE(-SUM(credits), 0) FROM credit_ledger "
+        "WHERE workspace_id = CAST(:ws AS uuid) AND sub_tenant_id IS NOT NULL AND source_type = ANY(:spent) "
+        "AND created_at >= :since GROUP BY sub_tenant_id ORDER BY 3 DESC LIMIT :limit"
+    ), {"ws": str(workspace_id), "since": since, "spent": list(_SPENT_SOURCES), "limit": SUB_TENANTS_SHOWN}).fetchall()
     return {
         "since": since.isoformat(),
         "by_model": [{"model": r[0], "calls": int(r[1]), "credits": int(r[2])} for r in by_model],
+        # PRD-274 W5d: a product's owner pays for its product's workspaces; what each one spent.
+        "by_product_workspace": [{"workspace_id": r[0], "calls": int(r[1]), "credits": int(r[2])}
+                                 for r in by_workspace],
     }
 
 

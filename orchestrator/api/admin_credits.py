@@ -68,6 +68,17 @@ def _require_platform_admin(ctx: RequestContext) -> None:
         raise HTTPException(status_code=403, detail="Admin access required")
 
 
+def _refuse_a_products_workspace(db: Session, workspace: Workspace) -> None:
+    """A product's workspace has no credits of its own: its product's owner pays (PRD-274 W5d), so credits
+    are granted to the owner (409 otherwise, naming it)."""
+    from services.credits.payer import payer_of
+
+    payer = payer_of(db, workspace)
+    if payer != str(workspace.id):
+        raise HTTPException(status_code=409, detail=f"This workspace is paid for by its product's owner workspace "
+                                                    f"{payer}; adjust that workspace's credits instead")
+
+
 @router.post("/{workspace_id}/credits")
 def adjust_workspace_credits(
     workspace_id: UUID,
@@ -84,6 +95,7 @@ def adjust_workspace_credits(
     workspace = db.query(Workspace).filter(Workspace.id == workspace_id).first()
     if workspace is None or getattr(workspace, "deleted_at", None):
         raise HTTPException(status_code=404, detail="Workspace not found")
+    _refuse_a_products_workspace(db, workspace)
     actor = str(getattr(ctx.user, "email", None) or getattr(ctx.user, "id", "admin"))
     source_ref = f"{workspace_id}:{body.request_id}" if body.request_id else uuid.uuid4().hex
     written = record(db, workspace_id, Entry(

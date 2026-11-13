@@ -73,7 +73,11 @@ def grant_trial(db: Any, workspace_id: Any, *, owner_id: Any) -> Optional[int]:
     always logging why. A pause is a normal, visible outcome, never an error.
     """
     from config import config
+    from services.credits.payer import is_paid_by_its_product
 
+    if is_paid_by_its_product(db, workspace_id):  # PRD-274 W5d: its product's owner pays; it has no trial
+        logger.info("Trial grant skipped for workspace %s: its product's owner pays for it", workspace_id)
+        return None
     ref = owner_ref(workspace_id, owner_id)
     spent_today = trial_spent_today(db)
     decision = decide_trial_grant(

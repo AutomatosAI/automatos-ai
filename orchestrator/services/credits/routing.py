@@ -139,16 +139,22 @@ def funding_for(plan: Optional[str], balance: Balance, *, edition: str, backgrou
 
 
 def workspace_funding(db: Any, workspace_id: Any, *, background: bool = False) -> Funding:
-    """:func:`funding_for` for a stored workspace (its plan and its balance)."""
+    """:func:`funding_for` for a stored workspace: the plan and balance of the workspace that pays for it
+    (itself, or a product's owner, ``services.credits.payer``)."""
     from config import config
     from core.models.workspaces import Workspace
 
     if config.AUTH_EDITION == "local":
         return Funding(FUNDED_BY_LOCAL)
+    from services.credits.payer import payer_of
+
     workspace = db.query(Workspace).get(workspace_id)
+    payer = payer_of(db, workspace) if workspace is not None else str(workspace_id)
+    if payer != str(workspace_id):  # PRD-274 W5d: a product's workspace spends its owner's credits, on its plan
+        workspace = db.query(Workspace).get(payer)
     plan = getattr(workspace, "plan", None)
-    return funding_for(plan, read_balance(db, workspace_id), edition=config.AUTH_EDITION, background=background,
-                       free=is_free_workspace(db, workspace_id))
+    return funding_for(plan, read_balance(db, payer), edition=config.AUTH_EDITION, background=background,
+                       free=is_free_workspace(db, payer))
 
 
 def can_pay(funding: Funding, credits: int) -> bool:

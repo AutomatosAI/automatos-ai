@@ -47,17 +47,17 @@ def _cost(cents):
 
 @pytest.fixture
 def ledger(monkeypatch):
-    """Credits-funded unless a test says otherwise; every record() call kept, the first new."""
+    """Credits-funded unless a test says otherwise; every debit() call kept, the first new."""
     state = {"funding": Funding(FUNDED_BY_CREDITS, BUCKETS, 500), "entries": [], "seen": set()}
     monkeypatch.setattr(live_billing, "workspace_funding", lambda db, workspace_id: state["funding"])
 
-    def record(db, workspace_id, entry, *, spend_buckets):
+    def debit(db, workspace_id, entry, *, spend_buckets, payer=None):
         state["entries"].append((workspace_id, entry, tuple(spend_buckets)))
         fresh = entry.source_ref not in state["seen"]
         state["seen"].add(entry.source_ref)
         return fresh
 
-    monkeypatch.setattr(live_billing, "record", record)
+    monkeypatch.setattr(live_billing, "debit", debit)
     return state
 
 

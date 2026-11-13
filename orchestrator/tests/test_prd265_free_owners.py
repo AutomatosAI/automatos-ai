@@ -58,7 +58,7 @@ def test_the_meter_waves_through_only_the_free_owners_calls(monkeypatch):
 
     seen = {}
 
-    def fake_meter_call(db, pending, plan, *, free):
+    def fake_meter_call(db, pending, plan, *, free, payer=None):
         seen[pending.usage_id] = free
         return not free
 

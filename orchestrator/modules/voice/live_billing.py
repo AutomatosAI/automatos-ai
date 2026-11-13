@@ -30,7 +30,8 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from config import config
-from services.credits.ledger import KIND_DEBIT, Entry, record
+from services.credits.ledger import KIND_DEBIT, Entry
+from services.credits.payer import debit
 from services.credits.meter import BAND_METERED
 from services.credits.routing import FUNDED_BY_CREDITS, can_pay, credits_for, workspace_funding
 
@@ -81,7 +82,8 @@ def _cost_of(row: Any, call: Any) -> Optional[float]:
 
 
 def charge_call(db: Session, row: Any, call: Any) -> int:
-    """Debit one finished call's cost from its workspace's credits. Returns the credits charged
+    """Debit one finished call's cost from the credits of the workspace that pays for it (a product's
+    workspace: its owner, ``services.credits.payer``). Returns the credits charged
     (0 when nothing was: not paying in credits, nothing to charge, or charged already).
 
     It does not commit: the caller folds the charge into the same transaction as the call's row.
@@ -96,7 +98,7 @@ def charge_call(db: Session, row: Any, call: Any) -> int:
     if not credits:
         return 0
     minutes = math.ceil(max(0, row.duration_seconds or 0) / _SECONDS_PER_MINUTE)
-    recorded = record(db, row.workspace_id, Entry(
+    recorded = debit(db, row.workspace_id, Entry(
         kind=KIND_DEBIT, source_type=SOURCE_VOICE_LIVE, source_ref=str(row.call_id), credits=-credits,
         actor="system", reason=f"Auto Live call, {minutes} min", band=BAND_METERED,
         charged_credits=credits, actual_cost_usd=round(cost, 6),
