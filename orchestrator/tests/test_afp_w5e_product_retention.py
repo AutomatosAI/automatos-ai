@@ -37,6 +37,13 @@ def engine():  # conftest's new_session binds to it
     eng.dispose()
 
 
+@pytest.fixture(autouse=True)
+def enabled(monkeypatch):
+    from config import config
+
+    monkeypatch.setattr(config, "PRODUCTS_ENABLED", True)
+
+
 @pytest.fixture
 def world(new_session):
     """An owner, its product (default 30 days), the product's workspace, and a plain workspace; swept after."""
@@ -106,3 +113,10 @@ def test_a_consent_recorded_again_after_an_erase_is_new_and_takes_the_default(ne
     s.commit()
     s.close()
     assert _put(new_session, world.customer, "shopper-5") == 30
+
+
+def test_while_products_are_off_no_new_end_user_takes_the_default(new_session, world, monkeypatch):
+    from config import config
+
+    monkeypatch.setattr(config, "PRODUCTS_ENABLED", False)  # the product and its workspace stay from when it was on
+    assert _put(new_session, world.customer, "shopper-6") is None

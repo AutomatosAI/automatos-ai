@@ -73,7 +73,12 @@ def product_for_key(db: Any, product_id: Any, presented: Optional[str]) -> Optio
 
 def default_retention_of(db: Any, workspace_id: Any) -> Optional[int]:
     """The default retention, in days, of the product whose workspace ``workspace_id`` is (decision 28); None
-    when it is no product's, or its product sets none."""
+    when it is no product's, its product sets none, or products are off (``PRODUCTS_ENABLED``): the default
+    deletes memories, so it never applies while the feature is off, whatever records are left from when it was on."""
+    from config import config
+
+    if not config.PRODUCTS_ENABLED:
+        return None
     days = db.execute(_DEFAULT_RETENTION, {"ws": str(workspace_id)}).scalar()
     return int(days) if days else None
 
