@@ -86,8 +86,12 @@ def _notify(db: Any, workspace_id: str, level: int, spendable: int) -> None:
 
 def check_alerts(db: Any, workspace_id: str) -> Optional[int]:
     """Send the low / run-out alert once per crossing, and reset the level when
-    credits were added. Returns the level alerted, or None. Commits."""
+    credits were added. Returns the level alerted, or None. Commits. For a product's workspace, its
+    owner's balance is checked and alerted (``services.credits.payer``): the owner pays for it."""
     from config import config
+    from services.credits.payer import paying_workspace
+
+    workspace_id = paying_workspace(db, workspace_id)
 
     row = db.execute(text(
         "SELECT w.plan, b.alert_level FROM credit_balances b JOIN workspaces w ON w.id = b.workspace_id "

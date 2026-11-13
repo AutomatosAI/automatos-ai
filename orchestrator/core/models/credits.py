@@ -33,6 +33,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -65,6 +66,9 @@ class CreditLedgerEntry(Base):
     band = Column(String(16), nullable=True)
     charged_credits = Column(Integer, nullable=True)
     actual_cost_usd = Column(Numeric(14, 6), nullable=True)
+    # PRD-274 W5d: a debit a product's owner paid records the product's workspace it was for. Not named
+    # ``workspace_id`` and no foreign key, so the owner's usage per workspace outlives that workspace's purge.
+    sub_tenant_id = Column(UUID(as_uuid=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
@@ -77,6 +81,8 @@ class CreditLedgerEntry(Base):
             "bucket IN ('trial', 'monthly', 'topup', 'overhead')", name="ck_credit_ledger_bucket",
         ),
         Index("ix_credit_ledger_workspace_created", "workspace_id", "created_at"),
+        Index("ix_credit_ledger_sub_tenant", "workspace_id", "sub_tenant_id",
+              postgresql_where=text("sub_tenant_id IS NOT NULL")),
         {"extend_existing": True},
     )
 

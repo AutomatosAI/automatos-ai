@@ -28,6 +28,8 @@ from services.credits.ledger import (
 )
 
 _MIGRATION = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "prd265_credit_ledger.py"
+# Later migrations that add to the same tables: each name the model declares is in one of them.
+_LATER = (Path(__file__).resolve().parents[1] / "alembic" / "versions" / "credit_ledger_sub_tenant_20261113.py",)
 
 
 def _migration():
@@ -101,11 +103,11 @@ def test_spendable_ignores_negative_buckets_and_honours_the_bucket_set():
 
 
 def test_the_model_and_the_migration_declare_the_same_names():
-    src = _MIGRATION.read_text()
+    src = "\n".join(path.read_text() for path in (_MIGRATION, *_LATER))
     ledger = CreditLedgerEntry.__table__
     names = {c.name for c in ledger.constraints if c.name} | {i.name for i in ledger.indexes}
     for name in ("uq_credit_ledger_source", "ck_credit_ledger_kind", "ck_credit_ledger_bucket",
-                 "ix_credit_ledger_workspace_created"):
+                 "ix_credit_ledger_workspace_created", "ix_credit_ledger_sub_tenant"):
         assert name in names, name
         assert name in src, name
     for column in ledger.columns:

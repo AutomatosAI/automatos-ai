@@ -421,7 +421,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # a new column and a unique partial index; the guard follows it.
     found = (versions / "product_workspaces_20261113.py").read_text()
     assert 'down_revision = "products_20261113"' in found
-    assert 'EXPECTED_HEAD = "product_workspaces_20261113"' in guard
+    # 2026-11-13 (Automatos for products, Wave 5d): credit_ledger_sub_tenant_20261113 chains onto that —
+    # a new nullable column and a partial index; the guard follows it.
+    spent = (versions / "credit_ledger_sub_tenant_20261113.py").read_text()
+    assert 'down_revision = "product_workspaces_20261113"' in spent
+    assert 'EXPECTED_HEAD = "credit_ledger_sub_tenant_20261113"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

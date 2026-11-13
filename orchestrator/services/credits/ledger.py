@@ -88,6 +88,8 @@ class Entry:
     actual_cost_usd: Optional[float] = None
     expires_at: Optional[datetime] = None
     split: tuple = ()
+    # PRD-274 W5d: the product's workspace a debit on its owner's balance was for (``services.credits.payer``).
+    sub_tenant_id: Optional[str] = None
 
 
 def allocate(balance: Balance, entry: Entry, spend_buckets: Iterable[str] = SPEND_ORDER) -> list[tuple[str, int]]:
@@ -173,9 +175,9 @@ def entry_rows(db: Any, source_type: str, source_ref: str) -> list[tuple[str, in
 
 _INSERT = text(
     "INSERT INTO credit_ledger (workspace_id, kind, bucket, credits, expires_at, source_type, "
-    "source_ref, actor, reason, band, charged_credits, actual_cost_usd) VALUES "
+    "source_ref, actor, reason, band, charged_credits, actual_cost_usd, sub_tenant_id) VALUES "
     "(CAST(:ws AS uuid), :kind, :bucket, :credits, :expires_at, :source_type, :source_ref, "
-    ":actor, :reason, :band, :charged_credits, :actual_cost_usd)"
+    ":actor, :reason, :band, :charged_credits, :actual_cost_usd, CAST(:sub_tenant_id AS uuid))"
 )
 
 
@@ -191,7 +193,7 @@ def _insert_rows(db: Any, workspace_id: Any, entry: Entry, rows: list[tuple[str,
             "expires_at": entry.expires_at, "source_type": entry.source_type,
             "source_ref": entry.source_ref, "actor": entry.actor, "reason": entry.reason,
             "band": entry.band, "charged_credits": entry.charged_credits if first else None,
-            "actual_cost_usd": cost if first else None,
+            "actual_cost_usd": cost if first else None, "sub_tenant_id": entry.sub_tenant_id,
         })
 
 

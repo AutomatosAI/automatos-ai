@@ -33,6 +33,7 @@ from sqlalchemy import text
 
 from services.credits.asks import is_background_lane
 from services.credits.ledger import BUCKET_OVERHEAD, KIND_DEBIT, Balance, Entry, record
+from services.credits.payer import debit, paying_workspaces
 from services.credits.routing import FUNDED_BY_CREDITS, credits_for, free_workspace_ids, funding_for
 
 logger = logging.getLogger(__name__)
@@ -101,9 +102,11 @@ def _plans(db: Any, workspace_ids: set) -> dict:
     return {r[0]: r[1] for r in rows}
 
 
-def meter_call(db: Any, call: PendingCall, plan: Optional[str], *, free: bool = False) -> bool:
+def meter_call(db: Any, call: PendingCall, plan: Optional[str], *, free: bool = False,
+               payer: Optional[str] = None) -> bool:
     """Debit one call (if the platform paid for it) and mark it charged. Commits.
-    Returns True when credits were debited. A free owner's call is recorded, never debited."""
+    Returns True when credits were debited. A free owner's call is recorded, never debited. ``plan``
+    and ``free`` are those of ``payer``, the workspace that pays (a product's workspace: its owner)."""
     from config import config
 
     funding = funding_for(plan, Balance(), edition=config.AUTH_EDITION,
@@ -111,11 +114,11 @@ def meter_call(db: Any, call: PendingCall, plan: Optional[str], *, free: bool = 
     cost = billable_cost(call) if funding.funded_by == FUNDED_BY_CREDITS else 0.0
     credits = credits_for(cost)
     if credits:
-        record(db, call.workspace_id, Entry(
+        debit(db, call.workspace_id, Entry(
             kind=KIND_DEBIT, source_type=SOURCE_USAGE, source_ref=str(call.usage_id), credits=-credits,
             actor="system", reason=call.model_id[:255], band=BAND_METERED, charged_credits=credits,
             actual_cost_usd=round(cost, 6),
-        ), spend_buckets=funding.spend_buckets)
+        ), spend_buckets=funding.spend_buckets, payer=payer)
     db.execute(text("UPDATE llm_usage SET charge_class = :charged WHERE id = :id"),
                {"charged": CHARGED, "id": call.usage_id})
     db.commit()
@@ -123,14 +126,18 @@ def meter_call(db: Any, call: PendingCall, plan: Optional[str], *, free: bool = 
 
 
 def _meter_batch(db: Any, calls: list[PendingCall]) -> tuple[int, set]:
-    plans = _plans(db, {c.workspace_id for c in calls})
+    """Meters ``calls``; (how many were debited, the workspaces that paid). A product's workspace's
+    calls are paid by its owner, on the owner's plan (``services.credits.payer``)."""
+    payers = paying_workspaces(db, {c.workspace_id for c in calls})
+    plans = _plans(db, set(payers.values()))
     free = free_workspace_ids(db, plans)
     debited, touched = 0, set()
     for call in calls:
+        payer = payers.get(call.workspace_id, call.workspace_id)
         try:
-            if meter_call(db, call, plans.get(call.workspace_id), free=call.workspace_id in free):
+            if meter_call(db, call, plans.get(payer), free=payer in free, payer=payer):
                 debited += 1
-                touched.add(call.workspace_id)
+                touched.add(payer)
         except Exception:  # noqa: BLE001 — one bad row never blocks the rest; it stays pending
             db.rollback()
             logger.exception("[credits] metering usage %s failed", call.usage_id)
