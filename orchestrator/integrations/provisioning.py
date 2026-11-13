@@ -28,7 +28,7 @@ is written to stay clean regardless.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
@@ -235,6 +235,63 @@ def _warn_if_the_roster_is_over_the_plan(workspace: Any, vertical: str, seeded: 
         logger.warning("[F200] vertical %s seeded %d agents on a %s plan of %d", vertical, seeded, plan, max_agents)
 
 
+def seed_roster_once(db: Session, workspace: Any, provisioner: Any, label: str) -> int:
+    """Clones ``provisioner``'s roster into a workspace that has no agents of its own yet; how many were
+    cloned (0 for a workspace that has some: a re-provision never re-seeds). ``label`` names the vertical
+    or product in the plan-limit warning."""
+    from core.models.core import Agent
+
+    existing = db.query(Agent).filter(Agent.workspace_id == workspace.id, Agent.owner_type == "workspace").count()
+    if existing:
+        return 0
+    installed = _seed_roster(db, workspace.id, provisioner)
+    _warn_if_the_roster_is_over_the_plan(workspace, label, installed)
+    return installed
+
+
+def workspace_key(db: Session, workspace: Any, provisioner: Any, *, name: str,
+                  allowed_domains: List[str]) -> Optional[Dict[str, Any]]:
+    """Mints the workspace a key of ``provisioner``'s type and scopes (``ApiKeyService.create_api_key``, which
+    commits). None, minting nothing, when the provisioner reuses a key and the workspace has an active one of
+    that type: the caller keeps the copy it stored."""
+    key_type = getattr(provisioner, "key_type", "public")
+    if getattr(provisioner, "reuse_existing_key", False):
+        from core.models.sdk_api_keys import SdkApiKey
+
+        active = (db.query(SdkApiKey)
+                  .filter(SdkApiKey.workspace_id == workspace.id, SdkApiKey.key_type == key_type,
+                          SdkApiKey.is_active.is_(True))
+                  .first())
+        if active is not None:
+            return None
+    return _create_widget_key(db=db, workspace_id=workspace.id, name=name, key_type=key_type,
+                              permissions=list(provisioner.key_permissions), allowed_domains=allowed_domains)
+
+
+def _vertical_workspace(db: Session, vertical: str, provisioner: Any, external_id: str, name: str,
+                        metadata: Dict[str, Any]) -> Tuple[Workspace, bool]:
+    """The vertical's active workspace for ``external_id``, or a new one (flushed); and whether it is new.
+    Resolved by the vertical's own key (e.g. ``shopify_domain``) so a workspace provisioned before this
+    generic path, or by that vertical's other routes, is found, not duplicated."""
+    id_key = getattr(provisioner, "external_id_key", "source_external_id")
+    workspace = (db.query(Workspace)
+                 .filter(Workspace.settings[id_key].astext == external_id, Workspace.is_active.is_(True))
+                 .first())
+    if workspace is not None:
+        return workspace, False
+    settings = {
+        "vertical": vertical, "source": vertical, "source_external_id": external_id, id_key: external_id,
+        f"{vertical}_metadata": metadata, "widget_proactive": dict(provisioner.default_widget_config),
+    }
+    workspace = Workspace(id=uuid4(), name=name, slug=workspace_slug(external_id),
+                          plan="basic",  # PRD-222 W2·S1: entry tier (renamed from 'starter')
+                          is_personal=False, is_active=True, webhook_key=uuid4().hex, settings=settings)
+    db.add(workspace)
+    db.flush()
+    logger.info("Created workspace %s for %s '%s'", workspace.id, vertical, external_id)
+    return workspace, True
+
+
 def provision_vertical(
     *,
     db: Session,
@@ -256,87 +313,13 @@ def provision_vertical(
     if provisioner is None:
         raise ValueError(f"Unknown vertical '{vertical}' — no provisioner registered")
 
-    is_new = False
-    id_key = getattr(provisioner, "external_id_key", "source_external_id")
-
-    # Resolve by the vertical's own key (e.g. shopify_domain) so a workspace
-    # provisioned before this generic path — or by that vertical's other routes —
-    # is found, not duplicated.
-    workspace = (
-        db.query(Workspace)
-        .filter(
-            Workspace.settings[id_key].astext == external_id,
-            Workspace.is_active.is_(True),
-        )
-        .first()
-    )
-
-    if workspace is None:
-        settings = {
-            "vertical": vertical,
-            "source": vertical,
-            "source_external_id": external_id,
-            id_key: external_id,
-            f"{vertical}_metadata": metadata,
-            "widget_proactive": dict(provisioner.default_widget_config),
-        }
-        workspace = Workspace(
-            id=uuid4(),
-            name=name,
-            slug=_slugify(external_id),
-            plan="basic",  # PRD-222 W2·S1: entry tier (renamed from 'starter')
-            is_personal=False,
-            is_active=True,
-            webhook_key=uuid4().hex,
-            settings=settings,
-        )
-        db.add(workspace)
-        db.flush()
-        is_new = True
-        logger.info("Created workspace %s for %s '%s'", workspace.id, vertical, external_id)
-
-    from core.models.core import Agent
-
-    existing_agent_count = (
-        db.query(Agent)
-        .filter(Agent.workspace_id == workspace.id, Agent.owner_type == "workspace")
-        .count()
-    )
-
-    agents_installed = 0
-    if existing_agent_count == 0:
-        agents_installed = _seed_roster(db, workspace.id, provisioner)
-        _warn_if_the_roster_is_over_the_plan(workspace, vertical, agents_installed)
-
+    workspace, is_new = _vertical_workspace(db, vertical, provisioner, external_id, name, metadata)
+    agents_installed = seed_roster_once(db, workspace, provisioner, vertical)
     # Resolve the allowlist BEFORE any key decision so a malformed request
     # (VerticalConfigError) rejects without side effects either way.
     domains = provisioner.allowed_domains(external_id, metadata)
-
-    existing_key = None
-    if getattr(provisioner, "reuse_existing_key", False):
-        from core.models.sdk_api_keys import SdkApiKey
-
-        existing_key = (
-            db.query(SdkApiKey)
-            .filter(
-                SdkApiKey.workspace_id == workspace.id,
-                SdkApiKey.key_type == "public",
-                SdkApiKey.is_active.is_(True),
-            )
-            .order_by(SdkApiKey.created_at.desc())
-            .first()
-        )
-
-    key_result = None
-    if existing_key is None:
-        key_result = _create_widget_key(
-            db=db,
-            workspace_id=workspace.id,
-            name=f"{vertical.title()} Widget Key ({external_id})",
-            key_type=getattr(provisioner, "key_type", "public"),
-            permissions=list(provisioner.key_permissions),
-            allowed_domains=domains,
-        )
+    key_result = workspace_key(db, workspace, provisioner, name=f"{vertical.title()} Widget Key ({external_id})",
+                               allowed_domains=domains)
 
     # Optional vertical-specific post-provision step (e.g. ensure a Site).
     hook = getattr(provisioner, "on_provisioned", None)
@@ -359,7 +342,7 @@ def provision_vertical(
     }
 
 
-def _slugify(external_id: str) -> str:
+def workspace_slug(external_id: str) -> str:
     """Best-effort workspace slug from an external id (host/domain-ish)."""
     base = external_id.split("://", 1)[-1].strip("/").split("/", 1)[0]
     for suffix in (".myshopify.com",):
@@ -376,4 +359,7 @@ __all__ = [
     "register_graph_source_mappers",
     "get_graph_source_mapper",
     "provision_vertical",
+    "seed_roster_once",
+    "workspace_key",
+    "workspace_slug",
 ]

@@ -33,6 +33,9 @@ def engine():  # conftest's new_session binds to it
 
     eng = create_engine(get_database_url(), pool_pre_ping=True)
     Product.__table__.create(eng, checkfirst=True)  # a test database built before this table
+    with eng.begin() as conn:
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS reuse_existing_key BOOLEAN NOT NULL "
+                          "DEFAULT true"))
     yield eng
     eng.dispose()
 
@@ -235,3 +238,12 @@ def test_the_purge_stops_before_its_first_data_step_and_an_erase_says_why(new_se
     s.close()
     assert left == 1  # the guard runs before the jobs barrier: a refused purge stops nothing
     assert public_erasure({"sql": {"skipped_reason": OWNS_A_PRODUCT}})["sql"]["skipped_reason"] == OWNS_A_PRODUCT
+
+
+def test_whether_a_find_mints_another_key_is_the_admins_to_set(new_session, owner):
+    client = _client(new_session)
+    product = _create(client, owner).json()["product"]
+    assert product["reuse_existing_key"] is True
+    changed = client.patch(f"/api/admin/products/{product['id']}", json={"reuse_existing_key": False})
+    assert changed.json()["reuse_existing_key"] is False
+    assert client.patch(f"/api/admin/products/{product['id']}", json={"reuse_existing_key": None}).status_code == 422

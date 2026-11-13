@@ -178,7 +178,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # jobs.job_schedules (a new table only): each schedule's cursor.
 # 2026-11-13 (Automatos for products, Wave 5a): products_20261113 chains onto that —
 # products (a new table only): a product's record, its owner workspace and its key's hash.
-EXPECTED_HEAD = "products_20261113"
+# 2026-11-13 (Automatos for products, Wave 5b): product_workspaces_20261113 chains onto that —
+# products.reuse_existing_key (a new column) and a unique partial index on workspaces: one per (product, external id).
+EXPECTED_HEAD = "product_workspaces_20261113"
 
 
 def _literal(node: ast.AST):

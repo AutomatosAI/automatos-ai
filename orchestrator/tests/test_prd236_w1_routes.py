@@ -417,7 +417,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # products, a new table only; the guard follows it.
     products = (versions / "products_20261113.py").read_text()
     assert 'down_revision = "job_schedules_20261112"' in products
-    assert 'EXPECTED_HEAD = "products_20261113"' in guard
+    # 2026-11-13 (Automatos for products, Wave 5b): product_workspaces_20261113 chains onto that —
+    # a new column and a unique partial index; the guard follows it.
+    found = (versions / "product_workspaces_20261113.py").read_text()
+    assert 'down_revision = "products_20261113"' in found
+    assert 'EXPECTED_HEAD = "product_workspaces_20261113"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

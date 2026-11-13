@@ -94,6 +94,10 @@ OWN_AUTH_ROUTES = {
     # transport contract) authenticated by the minted call_id — WS routes never
     # appear in this HTTP manifest.
     ("POST", "/api/voice/retell/events"),
+    # PRD-274 W5b: a product's server finds or creates its customers' workspaces (api/products.py). Its
+    # credential is the product's own key (Authorization: Bearer, checked against the product's stored hash in
+    # constant time; 401 otherwise), NOT the shared hybrid dependency: no person or workspace calls it.
+    ("POST", "/api/products/{product_id}/workspaces"),
     # PRD-265 US-010: Stripe's webhook (api/billing_webhooks.py) — its credential is
     # the Stripe-Signature HMAC over the raw body (STRIPE_WEBHOOK_SECRET, 5-minute
     # tolerance, fail-closed 400/503), NOT the shared hybrid dependency: Stripe is

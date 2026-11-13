@@ -2,7 +2,8 @@
 
 - **The key** (``mint_key``): a high-entropy secret shown once, when an admin creates the product or replaces
   its key. Only its PBKDF2-HMAC-SHA256 hash is stored, with a fixed salt of its own, so a key is found by its
-  hash and a product key's hash never equals an SDK key's (``core/services/api_key_service``). 5b checks it.
+  hash and a product key's hash never equals an SDK key's (``core/services/api_key_service``).
+  ``product_for_key`` checks it (``api/products.py``).
 - **The owner workspace can't be purged while it owns a product** (``refused_while_it_owns_a_product``, on the
   purge's first data step): nothing is erased, the workspace stays soft-deleted, and the purge answers
   ``owns_a_product``. An admin deletes the product first. ``products.owner_workspace_id``'s foreign key is
@@ -14,9 +15,10 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import hmac
 import logging
 import secrets
-from typing import Any, Callable, NamedTuple
+from typing import Any, Callable, NamedTuple, Optional
 
 from sqlalchemy import text
 
@@ -49,6 +51,18 @@ def mint_key() -> MintedKey:
     """A new product key."""
     plaintext = KEY_PREFIX + secrets.token_hex(32)
     return MintedKey(plaintext, key_hash(plaintext), plaintext[:KEY_PREFIX_SHOWN])
+
+
+def product_for_key(db: Any, product_id: Any, presented: Optional[str]) -> Optional[Any]:
+    """The product, when ``presented`` is its key; None otherwise, whether the product or the key is wrong
+    (the key is hashed either way, so the answer takes as long). Compared in constant time."""
+    from core.models.products import Product
+
+    presented_hash = key_hash(presented or "")
+    product = db.get(Product, product_id)
+    if product is None or not presented or not hmac.compare_digest(product.key_hash, presented_hash):
+        return None
+    return product
 
 
 def owns_a_product(db: Any, workspace_id: Any) -> bool:

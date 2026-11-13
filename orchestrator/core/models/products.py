@@ -1,12 +1,13 @@
 """A product: an outside app that runs its customers' workspaces on Automatos (PRD-274 Wave 5, §5.1, §8-3).
 
 A platform admin creates the record (``api/admin_products.py``). It says who pays (the owner workspace, §8-2),
-what each customer's workspace starts with (the agent roster to clone and the scopes of the key it is minted)
+what each customer's workspace starts with (the agent roster to clone and the scopes of the key it is minted,
+and whether finding it again mints another)
 and how long an end user's memories are kept when the product records no retention of its own (decision 28).
 
 The product's own key authenticates it to Automatos: only its PBKDF2 hash is stored (``services/products``),
-and the plaintext is shown once, when it is minted. Later PRDs of the wave read the record: 5b finds or creates
-a customer's workspace with that key, and the workspace carries ``settings.product_id``.
+and the plaintext is shown once, when it is minted. With that key the product finds or creates its customers'
+workspaces (``api/products.py``, ``services/product_workspaces``), each carrying ``settings.product_id``.
 
 The owner workspace is ``owner_workspace_id``, not ``workspace_id``: a product is the platform's record, not a
 row of the owner's workspace, so a move or an export of the owner workspace doesn't take it, and its purge is
@@ -16,7 +17,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Integer, String, text
+from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, ForeignKey, Integer, String, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.sql import func
 
@@ -51,6 +52,9 @@ class Product(Base):
     # The key each customer's workspace is minted: its type and scopes (api/api_keys.VALID_PERMISSIONS).
     key_type = Column(String(16), nullable=False, default="server", server_default=text("'server'"))
     key_scopes = Column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
+    # Finding a customer's workspace again mints no new key while it has an active one of that type (its copy is
+    # the product's to keep); False mints one on every find, as Shopify's re-provision does.
+    reuse_existing_key = Column(Boolean, nullable=False, default=True, server_default=text("true"))
     default_retention_days = Column(Integer, nullable=True)  # None: an end user's memories are kept until erased
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())

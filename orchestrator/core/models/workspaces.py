@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, text
+from sqlalchemy import Boolean, Column, DateTime, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.sql import func
 
@@ -20,7 +20,13 @@ from core.database.base import Base
 
 class Workspace(Base):
     __tablename__ = "workspaces"
-    __table_args__ = {"extend_existing": True}
+    __table_args__ = (
+        # PRD-274 W5b: one workspace per (product, external id); a find-or-create that loses a race finds the other.
+        Index("uq_workspaces_product_external_id", text("(settings->>'product_id')"),
+              text("(settings->>'source_external_id')"), unique=True,
+              postgresql_where=text("settings->>'product_id' IS NOT NULL")),
+        {"extend_existing": True},
+    )
 
     id = Column(PGUUID(as_uuid=True), primary_key=True)
 

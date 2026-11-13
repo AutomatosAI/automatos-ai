@@ -1,5 +1,5 @@
 {
-  "route_count": 1043,
+  "route_count": 1044,
   "routes": [
     {
       "method": "GET",
@@ -2244,6 +2244,10 @@
     {
       "method": "POST",
       "path": "/api/proactive/suggestions/{suggestion_id}/start"
+    },
+    {
+      "method": "POST",
+      "path": "/api/products/{product_id}/workspaces"
     },
     {
       "method": "GET",
