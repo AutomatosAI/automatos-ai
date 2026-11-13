@@ -2309,6 +2309,8 @@ class Config:
     # Products (Wave 5): a product is a record an admin creates (core/models/products.py), whose key will find or
     # create its customers' workspaces. Off by default: until it is on, the product routes answer 404.
     PRODUCTS_ENABLED: bool = os.getenv("PRODUCTS_ENABLED", "false").strip().lower() == "true"
+    # Days a product's closed workspace can be restored before a daily schedule purges it (decision 25). At least 1.
+    PRODUCT_CLOSE_GRACE_DAYS: int = int(os.getenv("PRODUCT_CLOSE_GRACE_DAYS", "7"))
     # Partner tools (PRD-275): read-only tools on a partner's own HTTP API, from a pack an operator
     # installs with the credential that holds the partner's base URL and key (modules/tools/partner).
     # Off by default: until it is on, no pack installs, none is offered to an agent and none runs.

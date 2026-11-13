@@ -6,6 +6,15 @@ with the product's roster, and gets a key of the product's type and scopes (``se
 answers 201 with a new workspace and 200 with one found. ``api_key`` is the workspace's new key, once; it is null
 when the product reuses keys and the workspace already has an active one.
 
+Its workspaces, by id (``services/product_lifecycle``, decision 25):
+
+- ``GET /api/products/{product_id}/workspaces``: the product's workspaces, oldest first; closed ones too with
+  ``include_closed=true``, each with when its purge is due.
+- ``DELETE /api/products/{product_id}/workspaces/{workspace_id}``: closes it, 202. It stops working at once,
+  and is purged after ``PRODUCT_CLOSE_GRACE_DAYS`` (7) unless it is restored. Closing it again changes nothing.
+- ``POST /api/products/{product_id}/workspaces/{workspace_id}/restore``: opens it again within the grace (409
+  when it isn't closed, 410 when its grace has passed).
+
 The caller is the product's server, with ``Authorization: Bearer <the product's key>`` (``core/models/products``),
 not a signed-in person, so these routes take no workspace context. A wrong key, or a product that doesn't exist,
 is 401 either way. 404 while ``PRODUCTS_ENABLED`` is off. A product reaches only its own workspaces.
@@ -17,7 +26,7 @@ import logging
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
@@ -34,6 +43,9 @@ METADATA_MAX_BYTES = 8192
 DOMAINS_MAX = 50
 BAD_KEY = "Invalid product key"
 CLOSED = "That workspace is closed. Restore it, or wait for its purge to make a new one."
+NOT_THEIRS = "This product has no workspace with that id."
+NOT_CLOSED = "That workspace isn't closed."
+PAST_GRACE = "That workspace's grace has passed; its purge is due, and it can't be restored."
 
 
 class WorkspaceRequest(BaseModel):
@@ -87,3 +99,42 @@ def find_or_create_workspace(body: WorkspaceRequest, response: Response, product
         raise HTTPException(status_code=401, detail=BAD_KEY) from exc
     response.status_code = 201 if result["is_new"] else 200
     return result
+
+
+@router.get("/{product_id}/workspaces")
+def list_workspaces(include_closed: bool = Query(False), limit: int = Query(100, ge=1, le=200),
+                    offset: int = Query(0, ge=0), product: Product = Depends(the_product),
+                    db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """The product's workspaces, oldest first; closed ones only with ``include_closed``."""
+    from services.product_lifecycle import list_theirs
+
+    rows = list_theirs(db, product, include_closed=include_closed, limit=limit, offset=offset)
+    return {"workspaces": rows, "limit": limit, "offset": offset}
+
+
+@router.delete("/{product_id}/workspaces/{workspace_id}", status_code=202)
+def close_workspace(workspace_id: UUID, product: Product = Depends(the_product),
+                    db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Closes the workspace now (202): its purge is due when ``purge_after`` passes, unless it is restored."""
+    from services.product_lifecycle import NotTheirs, close
+
+    try:
+        return close(db, product, workspace_id)
+    except NotTheirs as exc:
+        raise HTTPException(status_code=404, detail=NOT_THEIRS) from exc
+
+
+@router.post("/{product_id}/workspaces/{workspace_id}/restore")
+def restore_workspace(workspace_id: UUID, product: Product = Depends(the_product),
+                      db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Opens a closed workspace again, within its grace."""
+    from services.product_lifecycle import NotClosed, NotTheirs, PastGrace, restore
+
+    try:
+        return restore(db, product, workspace_id)
+    except NotTheirs as exc:
+        raise HTTPException(status_code=404, detail=NOT_THEIRS) from exc
+    except NotClosed as exc:
+        raise HTTPException(status_code=409, detail=NOT_CLOSED) from exc
+    except PastGrace as exc:
+        raise HTTPException(status_code=410, detail=PAST_GRACE) from exc

@@ -98,6 +98,9 @@ OWN_AUTH_ROUTES = {
     # credential is the product's own key (Authorization: Bearer, checked against the product's stored hash in
     # constant time; 401 otherwise), NOT the shared hybrid dependency: no person or workspace calls it.
     ("POST", "/api/products/{product_id}/workspaces"),
+    # PRD-274 W5c: the same key closes and restores one of the product's own workspaces (404 for any other).
+    ("DELETE", "/api/products/{product_id}/workspaces/{workspace_id}"),
+    ("POST", "/api/products/{product_id}/workspaces/{workspace_id}/restore"),
     # PRD-265 US-010: Stripe's webhook (api/billing_webhooks.py) — its credential is
     # the Stripe-Signature HMAC over the raw body (STRIPE_WEBHOOK_SECRET, 5-minute
     # tolerance, fail-closed 400/503), NOT the shared hybrid dependency: Stripe is
