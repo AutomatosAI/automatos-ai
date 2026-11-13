@@ -255,6 +255,18 @@ def test_the_three_derived_measures_are_sums_of_measured_parts():
     assert result.held_first_audio_ms == 3000 + 910
 
 
+def test_a_reply_that_sent_an_error_frame_has_no_full_time():
+    from scripts.eval.voice_latency.quick_ask_protocol import QuickAskWatch, SpeechTimes, quick_ask_result
+
+    failed = QuickAskWatch(started=0.0, headers_at=0.1, first_text_at=1.0, first_sentence_at=1.2, ended_at=3.0,
+                           failed=True)
+
+    result = quick_ask_result("board", failed, SpeechTimes(first_byte_ms=620, total_ms=910))
+
+    assert result.full_ms is None and result.held_first_audio_ms is None
+    assert result.first_sentence_ms == 1200 and result.go_first_audio_ms == 2110  # what was measured is kept
+
+
 def test_a_derived_measure_is_none_when_a_part_is_missing():
     from scripts.eval.voice_latency.quick_ask_protocol import NO_SPEECH, SpeechTimes, quick_ask_result
 
@@ -742,6 +754,39 @@ def test_the_host_may_be_a_whole_base_url():
 
     assert quick_ask.base_url("localhost", 8000) == "http://localhost:8000"
     assert quick_ask.base_url("https://api.example.test/", 8000) == "https://api.example.test"
+
+
+@pytest.mark.parametrize(("base", "token_file", "in_the_clear"), [
+    ("http://api.example.test:8000", "a-token-file", True),
+    ("https://api.example.test", "a-token-file", False),
+    ("http://localhost:8000", "a-token-file", False),
+    ("http://127.0.0.1:8000", "a-token-file", False),
+    ("http://[::1]:8000", "a-token-file", False),
+    ("http://api.example.test:8000", None, False),
+])
+def test_a_token_crosses_plain_http_only_to_this_machine(base, token_file, in_the_clear):
+    from scripts.eval.voice_latency import quick_ask
+
+    target = quick_ask.Target(base_url=base, workspace_id=_WS_ID, token_file=token_file)
+
+    assert quick_ask.sends_token_in_the_clear(target) is in_the_clear
+
+
+def test_a_run_that_would_send_its_token_in_the_clear_is_refused_before_any_request(runner, tmp_path):
+    from scripts.eval.voice_latency.run import RunRefused
+
+    class NeverCalled:
+        def __getattr__(self, name):
+            raise AssertionError(f"the server was contacted ({name})")
+
+    token_file = tmp_path / "token"
+    token_file.write_text(_TOKEN + "\n")
+    args = _args(runner, "--host", "api.example.test", "--token-file", str(token_file))
+
+    with pytest.raises(RunRefused, match="https") as refused:
+        runner.quick_ask(args, _asks(), NeverCalled())
+
+    assert _TOKEN not in str(refused.value) and str(tmp_path) not in str(refused.value)
 
 
 def test_the_workspace_must_be_an_id(runner):

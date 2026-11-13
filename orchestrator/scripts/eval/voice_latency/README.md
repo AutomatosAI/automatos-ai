@@ -206,6 +206,9 @@ python -m scripts.eval.voice_latency.quick_ask --host https://<api host> \
   device's token, or keep the file refreshed (write a new file and rename it
   over the old one, so it is never read half-written). The token is never an
   argument, a log line or output. Keep the file outside this repo.
+- A token is sent only over https, or to this machine (`localhost`, `127.0.0.1`,
+  `::1`). A run that would send it over plain http to another host is refused
+  before any request.
 - If the token file is empty or unreadable before an ask, the run stops there
   and still reports the asks already timed; the JSON's `asks_not_sent` says
   how many were left. If it is unreadable before the first ask, the run is

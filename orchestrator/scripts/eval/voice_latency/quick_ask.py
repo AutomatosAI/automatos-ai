@@ -43,6 +43,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -75,6 +76,10 @@ WORKSPACE_HEADER = "X-Workspace-ID"
 AUTHORIZATION_HEADER = "Authorization"
 BEARER = "Bearer"
 SCHEME_MARK = "://"
+PLAIN_HTTP = "http://"
+# A token crosses plain http only to this machine (the backend's own container).
+THIS_MACHINE = frozenset({"localhost", "127.0.0.1", "::1"})
+TOKEN_NEEDS_HTTPS = "a token is sent only over https, or to this machine: give --host an https:// address"
 ASSISTANT_ROLE = "assistant"
 
 
@@ -152,6 +157,13 @@ def read_token(path: str) -> str:
 def base_url(host: str, port: int) -> str:
     """``http://<host>:<port>``, or ``host`` itself when it already names a scheme (a hosted server)."""
     return host.rstrip("/") if SCHEME_MARK in host else f"http://{host}:{port}"
+
+
+def sends_token_in_the_clear(target: Target) -> bool:
+    """Whether the run's token would cross a network unencrypted: plain http to another machine."""
+    if not target.token_file or not target.base_url.startswith(PLAIN_HTTP):
+        return False
+    return (urlsplit(target.base_url).hostname or "") not in THIS_MACHINE
 
 
 # ── the requests ────────────────────────────────────────────────────────────
@@ -337,6 +349,8 @@ def quick_ask(args: argparse.Namespace, asks: Sequence[Ask], client: Any) -> Dic
     target = Target(
         base_url=base_url(args.host, args.port), workspace_id=args.workspace, token_file=args.token_file
     )
+    if sends_token_in_the_clear(target):
+        raise RunRefused(TOKEN_NEEDS_HTTPS)
     capabilities = read_capabilities(client, target)
     refused = wire.refusal(capabilities, no_speech=bool(args.no_speech))
     if refused:

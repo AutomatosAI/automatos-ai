@@ -386,9 +386,10 @@ def quick_ask_result(
     speech: SpeechTimes = NO_SPEECH,
     trace: Optional[Mapping[str, Any]] = None,
 ) -> QuickAskResult:
-    """One ask's measures from its watch, its speech request and (when read) its trace."""
+    """One ask's measures from its watch, its speech request and (when read) its trace. A reply
+    that sent an error frame has no ``full``: its stream ended, the reply did not finish."""
     first_sentence_ms = watch.ms(watch.first_sentence_at)
-    full_ms = watch.ms(watch.ended_at)
+    full_ms = None if watch.failed else watch.ms(watch.ended_at)
     return QuickAskResult(
         kind=kind,
         silent=watch.silent,
