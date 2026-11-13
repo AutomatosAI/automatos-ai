@@ -8,6 +8,8 @@
   purge's first data step): nothing is erased, the workspace stays soft-deleted, and the purge answers
   ``owns_a_product``. An admin deletes the product first. ``products.owner_workspace_id``'s foreign key is
   the backstop.
+- **A product's default retention** (``default_retention_of``, PRD-274 W5e, decision 28): a new end user of one of
+  its workspaces, recorded with no ``retention_days``, is given it (``api/end_user_memory``).
 - **A product isn't deleted while it has workspaces** (``workspaces_of``): every workspace carrying its
   ``settings.product_id``, a closed one inside its grace included (decision 25), would be left with no product.
 """
@@ -30,6 +32,10 @@ _KEY_SALT = b"automatos/product-key/v1"
 _KEY_ITERATIONS = 100_000
 OWNS_A_PRODUCT = "owns_a_product"  # services/workspace_purge: PurgeResult.skipped_reason
 
+_DEFAULT_RETENTION = text(
+    "SELECT p.default_retention_days FROM workspaces w JOIN products p ON p.id::text = w.settings->>'product_id' "
+    "WHERE w.id = CAST(:ws AS uuid)"
+)
 _OWNS = text("SELECT 1 FROM products WHERE owner_workspace_id = CAST(:ws AS uuid) LIMIT 1")
 _WORKSPACES = text("SELECT count(*) FROM workspaces WHERE settings->>'product_id' = :product")
 
@@ -63,6 +69,13 @@ def product_for_key(db: Any, product_id: Any, presented: Optional[str]) -> Optio
     if product is None or not presented or not hmac.compare_digest(product.key_hash, presented_hash):
         return None
     return product
+
+
+def default_retention_of(db: Any, workspace_id: Any) -> Optional[int]:
+    """The default retention, in days, of the product whose workspace ``workspace_id`` is (decision 28); None
+    when it is no product's, or its product sets none."""
+    days = db.execute(_DEFAULT_RETENTION, {"ws": str(workspace_id)}).scalar()
+    return int(days) if days else None
 
 
 def owns_a_product(db: Any, workspace_id: Any) -> bool:

@@ -61,7 +61,9 @@ class EndUserConsent(BaseModel):
 
     consent: bool = Field(..., description="True: the product has the person's consent to remember them")
     retention_days: Optional[int] = Field(None, ge=1, le=RETENTION_MAX_DAYS,
-                                          description="Days their memories are kept; none: until erased")
+                                          description="Days their memories are kept; null: until erased. Left "
+                                                      "out for a new end user of a product's workspace: the "
+                                                      "product's default")
 
 
 def _namespace(ctx: RequestContext, end_user_id: str) -> str:
@@ -95,20 +97,34 @@ def _readable(ctx: RequestContext, rows: List[Dict[str, Any]]) -> List[Dict[str,
     return [m for m in rows if visible_to_viewer(m, None) and not (is_server_key(ctx) and audience_of(m))]
 
 
+def _retention_for(db: Session, ctx: RequestContext, body: EndUserConsent) -> Optional[int]:
+    """A new end user's retention: what the request sent (``null`` included), else their workspace's product's
+    default. An end user who already exists never takes it: their memories are kept as they consented."""
+    if "retention_days" in body.model_fields_set:
+        return body.retention_days
+    from services.products import default_retention_of
+
+    return default_retention_of(db, ctx.workspace_id)
+
+
 @router.put("/{end_user_id}")
 def record_consent(body: EndUserConsent, end_user_id: str = END_USER_ID,
                    ctx: RequestContext = Depends(require_workspace_permission_or_server_key("knowledge:create",
                                                                                             MEMORY_WRITE)),
                    db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Records (or updates) the product's consent and retention for one end user."""
+    """Records (or updates) the product's consent and retention for one end user. A new end user of a product's
+    workspace recorded with no ``retention_days`` gets the product's default (PRD-274 W5e, decision 28); an
+    explicit ``null`` keeps them until erased, and an update sets exactly what it sends, as before."""
     from core.models.end_users import EndUser
 
     if not body.consent:
         raise HTTPException(status_code=422, detail="consent must be true; to forget the person, DELETE them.")
-    row = _record(db, ctx, end_user_id) or EndUser(workspace_id=ctx.workspace_id, end_user_id=end_user_id)
+    row = _record(db, ctx, end_user_id)
+    new = row is None
+    row = row or EndUser(workspace_id=ctx.workspace_id, end_user_id=end_user_id)
     if row.erasing_at is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=BEING_ERASED)
-    row.retention_days = body.retention_days
+    row.retention_days = _retention_for(db, ctx, body) if new else body.retention_days
     row.api_key_id = ctx.api_key_id if is_server_key(ctx) else row.api_key_id
     db.add(row)
     db.commit()
