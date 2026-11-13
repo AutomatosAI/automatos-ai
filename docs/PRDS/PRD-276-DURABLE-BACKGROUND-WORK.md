@@ -322,12 +322,16 @@ Waves 1a, 1b and 2 each stand on their own. Wave 1a is the largest, and lands wi
 
 ## 10. Decisions for the maintainer
 
+Gerard merged this PRD (#1483) without comment, which is read here as each recommendation accepted (Dave, 13 Nov
+2026; Gerard to correct any). Where a recommendation was "decide later", the item says so. What had no
+recommendation, and what came up while building, is in §10.2 and §11, each with one now.
+
 1. **The backing store.** **Decided:** a `jobs` table in Postgres, as built in Wave 1a. It is generalised from PRD-161: no new dependency, and jobs are queued in the same transaction.
    - **Alternatives:** a Postgres queue library (`procrastinate`, `pgqueuer`), which is a new dependency and needs an issue under AGENTS.md; or Redis (ARQ), which can't queue in the same transaction.
-2. **Hosted topology.** **Open,** needed by Wave 4. Hosted runs one API container today [R]. Is a second planned? Should hosted have a worker service? *Recommendation:* one worker service, with replicas allowed, and the API unchanged.
-3. **One scheduler across containers.** **Decided in part, by merging #1499:** the advisory lock and an in-memory job store, with APScheduler kept as the timer. **Still open:** whether a plain tick loop replaces APScheduler. It uses a Postgres advisory lock, `job_schedules` cursors and APScheduler's memory job store. Should a plain tick loop over the cursors replace APScheduler, now that it is only a timer? *Recommendation:* the lock and cursors in Wave 2; keep APScheduler until the cursors have run a while, then decide.
-4. **The workspace worker's Redis queue** (`TASK_RUNNER_BACKEND=queued`). **Open.** Keep it as it is, or move its intake onto `jobs`? *Recommendation:* keep it in this PRD; it is a separate isolated consumer and works. Hosted uses it: `TASK_RUNNER_BACKEND=queued` [R].
-5. **Board tasks as a kind of job,** or keep PRD-161's own columns? **Open,** for Wave 4. *Recommendation:* decide in Wave 4, once Waves 1 to 3 have shown `jobs` working.
+2. **Hosted topology.** **Decided, as recommended:** one worker service, with replicas allowed, and the API unchanged. Gerard sets it up on Railway in Wave 4 (§6.7). Hosted runs one API container today [R]. **Still open, a fact rather than a choice:** whether a second API container is planned, which decides how soon Wave 4 matters.
+3. **One scheduler across containers.** **Decided in part, by merging #1499:** the advisory lock and an in-memory job store, with APScheduler kept as the timer. **Deferred, as recommended:** whether a plain tick loop replaces APScheduler is decided once the cursors have run a while. It uses a Postgres advisory lock, `job_schedules` cursors and APScheduler's memory job store. Should a plain tick loop over the cursors replace APScheduler, now that it is only a timer? *Recommendation:* the lock and cursors in Wave 2; keep APScheduler until the cursors have run a while, then decide.
+4. **The workspace worker's Redis queue** (`TASK_RUNNER_BACKEND=queued`): keep it as it is, or move its intake onto `jobs`? **Decided, as recommended:** keep it in this PRD; it is a separate isolated consumer and works. Hosted uses it: `TASK_RUNNER_BACKEND=queued` [R].
+5. **Board tasks as a kind of job,** or keep PRD-161's own columns? **Deferred to Wave 4, as recommended.** The task reconciler (`task_reconciler_tick`) waits on it too. *The recommendation was:* decide in Wave 4, once Waves 1 to 3 have shown `jobs` working.
 6. **#1481 and #1482 in the meantime.** **Decided, and done in Wave 1b (#1494):** the resend loop is deleted, and #1482's race with it; #1482 can be closed. A sweep that only queues stays (§6.5, §10.1). *The recommendation was:* keep the resend job until Wave 1b deletes it, and close #1482 in favour of this PRD's Waves 1 and 2.
 7. **The backend behind an interface, with switching triggers written down** (§12). **Decided, by merging #1498:** the interface (`enqueue` and `@job_handler` are the only way in), the queue in its own schema (`jobs.jobs`), and its metrics. The outbox relay waits for a trigger (§12.4). *The recommendation was:*
    - `enqueue` and `@job_handler` are the only way in, and Postgres is the one backend for now;
@@ -347,10 +351,28 @@ Each was flagged in its pull request. Wave 1b is merged with them, so each stand
 | **A widget callback that can't be queued still answers 202** (#1495) | The request is already logged, so failing it would only have the shopper's retry answered as a duplicate with nothing queued. The failure is logged and shown on the widget error tile. | Answer 503, and change the duplicate check to ignore requests with no queued delivery |
 | **The dashboard's test send makes one attempt per destination** (#1495) | The merchant sees the real result at once, not after retries. | Retry within the request |
 
+### 10.2 What a schedule does with a slot it missed, for the jobs still to move (Wave 2c)
+
+The platform sweeps catch up `latest` (§8.1): each sweeps everything, so one run after downtime covers the missed ones.
+The jobs below belong to a workspace or have timing people see, so each needs a rule. Today each either drops a slot
+it reaches late, silently or with a notice, or has its own workaround. *Recommendation* for each:
+
+| Job | Today | Recommendation |
+| --- | --- | --- |
+| **Agent and orchestrator heartbeats** (per workspace) | APScheduler's default 1-second grace: a heartbeat due during a deploy is skipped, and nobody is told | `latest`: run once on recovery. A heartbeat is a check-in; one late run is useful, more would be waste (an LLM run each). Each workspace's concurrency limit spreads a burst after a long outage |
+| **Scheduled Playbooks** (per workspace) | 5-minute grace (`PLAYBOOK_SCHEDULE_MISFIRE_GRACE_SECONDS`), then skipped and the owner told why | Keep it, as a policy: run within the grace, otherwise skip and tell the owner. A morning report at 2 pm, or a Playbook that sends emails hours late, surprises people more than "this was skipped". Needs a "skipped, tell someone" hook on the cursor; it goes with Wave 3, which moves Playbook runs onto jobs |
+| **Agent-scheduled tasks, recurring** (per workspace) | 1-second grace: skipped silently | `latest`, as heartbeats |
+| **Agent-scheduled tasks, one-off** (per workspace) | 3-minute grace, then left `active`, never run, and nobody told | Run late up to an hour, otherwise mark it missed and tell the owner. A one-off needs no schedule: it is one job queued with `run_at` at its time, so a restart can't lose it |
+| **Scheduled social posts** (per workspace) | 30-minute grace (`SOCIALS_MISFIRE_GRACE_SECONDS`), then the post goes to `missed` and the workspace is told; stale content is never posted silently | Keep the rule; change the mechanism. Each post is one queued job with `run_at` at its slot, keyed per post, and the handler applies the same 30 minutes. The social-post reconcile pass (§8.1) then goes |
+| **Theme revocation pull** (local edition) | First pull 60 s after boot, then every `THEME_REVOCATIONS_PULL_MINUTES` (60) | Move it, with a `schedule()` option that queues one run at once when the schedule has no cursor yet, keeping the quick first pull; `latest` after that |
+| **Socials plan tick** (5 min) **and results tick** (hourly) | No catch-up: a missed tick waits for the next | `latest` for both, if the plan tick makes only posts still due (the PRD-251B/C owner to confirm) |
+| **HARNESS sweeps** (`HARNESS_SWEEP_CRON`, and the grant sweep at 09:00 UTC) | Default grace: skipped silently | `latest` for both, unless the grant sweep's notices must arrive at 09:00 |
+| **The watch ticker** (`WATCHER_TICK_SECONDS`, 5 min) | No catch-up | `latest`: a platform sweep of the watches |
+
 ## 11. Open questions
 
-- **Playbook runs and side effects:** should a step that has a side effect (a send, a post, a write to another system) record that it finished, so a retried run skips it? That is the difference between "retry" and "resume" in §9.
-- **Who sees a dead job:** the workspace owner (as today for a failed run), an operator view, or both? §6.8 gives them a list and a retry; this question is who is told. As built, a dead delivery shows only on the dead-jobs routes, the error tile and (for a widget callback) the widget event log, and no screen lists dead jobs yet.
+- **Playbook runs and side effects:** should a step that has a side effect (a send, a post, a write to another system) record that it finished, so a retried run skips it? That is the difference between "retry" and "resume" in §9. *Recommendation, needed before Wave 3:* one rule per run, from its steps. A run whose steps have no side effects is retried. A run with a side-effecting step fails and tells the owner, as it does today, until steps record that they finished; then a retried run resumes after the last finished step instead.
+- **Who sees a dead job:** the workspace owner (as today for a failed run), an operator view, or both? §6.8 gives them a list and a retry; this question is who is told. *Recommendation:* the workspace owner, through the notification service a failed run already uses, plus a "Failed deliveries" list in the workspace's settings on the existing dead-jobs routes, with Retry and Clear. An operator view across workspaces comes later, from the queue metrics (§10-7). As built, a dead delivery shows only on the dead-jobs routes, the error tile and (for a widget callback) the widget event log, and no screen lists dead jobs yet.
 - **Credit metering** (`services/credits/jobs.py`) spends money. **Settled: two overlapping runs can't double-debit** [T].
   - `meter_call` writes each debit through the ledger's one writer, `record` (`services/credits/ledger.py`). It locks the workspace's balance row, then checks whether that usage row's debit is already in the ledger, and does nothing if it is. A unique key on (`source_type`, `source_ref`, `bucket`) backs the check.
   - So a missed tick is caught up by the next (`latest`, §6.4), and an overlapping run changes nothing. Wave 2 moves metering with no extra guard; a concurrency of 1 for `credits.meter` would only save repeated work.
