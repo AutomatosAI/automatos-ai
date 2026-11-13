@@ -33,20 +33,22 @@ def join(db: Any, product: Any, workspace: Any, external_id: str) -> None:
     db.flush()
 
 
-def key_matches(vertical: str, presented: str) -> Optional[bool]:
+def key_matches(vertical: str, presented: str, db: Optional[Any] = None) -> Optional[bool]:
     """Whether ``presented`` is the key of the vertical's product record, compared in constant time; None when
-    the vertical has no record (``api/verticals`` then answers 503)."""
+    the vertical has no record (``api/verticals`` then answers 503). Reads on ``db``, the request's own session,
+    when the caller has one, so a request takes no second connection; else on a session of its own."""
     import hmac
 
-    from core.database.database import SessionLocal
     from core.models.products import Product
     from services.products import key_hash
 
-    db = SessionLocal()
-    try:
+    if db is not None:
         stored = db.query(Product.key_hash).filter(Product.slug == vertical).scalar()
-    finally:
-        db.close()
+    else:
+        from core.database.database import SessionLocal
+
+        with SessionLocal() as own:
+            stored = own.query(Product.key_hash).filter(Product.slug == vertical).scalar()
     if stored is None:
         return None
     return bool(presented) and hmac.compare_digest(stored, key_hash(presented))

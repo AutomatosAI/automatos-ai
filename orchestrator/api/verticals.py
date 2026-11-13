@@ -36,15 +36,16 @@ router = APIRouter(prefix="/api/verticals", tags=["Verticals"])
 
 
 def _verify_vertical_internal_key(
-    vertical: str, authorization: str = Header(...)
+    vertical: str, authorization: str = Header(...), db: Session = Depends(get_db)
 ) -> None:
     """Fail-closed per-vertical internal key (``api.shopify._verify_internal_key`` calls it too): the key of the
     vertical's product record (PRD-274 W5f, ``integrations/vertical_products``), compared by hash in constant time,
-    so an admin's key replacement takes effect at once. A vertical with no record is dark (503), never open."""
+    so an admin's key replacement takes effect at once. A vertical with no record is dark (503), never open. It
+    reads on the request's session (``get_db``, shared with the route), so the check takes no extra connection."""
     from integrations.vertical_products import key_matches
 
     token = authorization.replace("Bearer ", "").strip()
-    matched = key_matches(vertical, token)
+    matched = key_matches(vertical, token, db=db)
     if matched is None:
         raise HTTPException(status_code=503, detail=f"{vertical} provisioning not configured")
     if not matched:

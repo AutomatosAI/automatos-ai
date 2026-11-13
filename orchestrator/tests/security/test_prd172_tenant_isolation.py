@@ -246,7 +246,7 @@ class TestF004ShopifyFailClosed:
     def _record(monkeypatch, key):
         """The Shopify product record's key (PRD-274 W5f): ``None`` means it has no record."""
         import integrations.vertical_products as vp
-        monkeypatch.setattr(vp, "key_matches", lambda vertical, token: None if key is None else token == key)
+        monkeypatch.setattr(vp, "key_matches", lambda vertical, token, db=None: None if key is None else token == key)
 
     def test_verify_internal_key_503s_when_unset(self, monkeypatch):
         """No product record ⇒ the machine lane is dark, not open."""
@@ -254,7 +254,7 @@ class TestF004ShopifyFailClosed:
         from fastapi import HTTPException
         self._record(monkeypatch, None)
         with pytest.raises(HTTPException) as ei:
-            sh._verify_internal_key("Bearer anything-at-all")
+            sh._verify_internal_key("Bearer anything-at-all", db=None)
         assert ei.value.status_code == 503
 
     def test_verify_internal_key_rejects_arbitrary_header(self, monkeypatch):
@@ -263,14 +263,14 @@ class TestF004ShopifyFailClosed:
         self._record(monkeypatch, "real-secret")
         # An arbitrary bearer value is rejected — no fail-open branch remains.
         with pytest.raises(HTTPException) as ei:
-            sh._verify_internal_key("Bearer x")
+            sh._verify_internal_key("Bearer x", db=None)
         assert ei.value.status_code == 401
 
     def test_verify_internal_key_accepts_correct_key(self, monkeypatch):
         import api.shopify as sh
         self._record(monkeypatch, "real-secret")
         # Correct key: no raise.
-        sh._verify_internal_key("Bearer real-secret")
+        sh._verify_internal_key("Bearer real-secret", db=None)
 
 
 # ===========================================================================

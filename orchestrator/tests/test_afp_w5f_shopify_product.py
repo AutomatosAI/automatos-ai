@@ -106,8 +106,8 @@ def test_the_key_check_reads_the_record_so_a_replaced_key_takes_over(new_session
     from api.shopify import _verify_internal_key
     from api.verticals import _verify_vertical_internal_key
 
-    _verify_vertical_internal_key("shopify", authorization=f"Bearer {world.key}")
-    _verify_internal_key(f"Bearer {world.key}")
+    _verify_vertical_internal_key("shopify", authorization=f"Bearer {world.key}", db=None)
+    _verify_internal_key(f"Bearer {world.key}", db=None)
     replaced = mint_key()
     s = new_session()
     s.execute(text("UPDATE products SET key_hash = :h WHERE slug = 'shopify'"), {"h": replaced.key_hash})
@@ -115,9 +115,9 @@ def test_the_key_check_reads_the_record_so_a_replaced_key_takes_over(new_session
     s.close()
     for stale in (world.key, "", "Bearer"):
         with pytest.raises(HTTPException) as refused:
-            _verify_internal_key(f"Bearer {stale}")
+            _verify_internal_key(f"Bearer {stale}", db=None)
         assert refused.value.status_code == 401
-    _verify_vertical_internal_key("shopify", authorization=f"Bearer {replaced.plaintext}")
+    _verify_vertical_internal_key("shopify", authorization=f"Bearer {replaced.plaintext}", db=None)
 
 
 def test_a_provisioned_shop_joins_the_product_and_its_owner_pays(new_session, world):
@@ -159,7 +159,7 @@ def test_with_no_record_the_vertical_is_dark(new_session, world):
     s.commit()
     try:
         with pytest.raises(HTTPException) as dark:
-            _verify_vertical_internal_key("shopify", authorization=f"Bearer {world.key}")
+            _verify_vertical_internal_key("shopify", authorization=f"Bearer {world.key}", db=None)
         assert dark.value.status_code == 503
     finally:
         s.execute(text("UPDATE products SET slug = 'shopify' WHERE slug = 'shopify-gone'"))
@@ -178,3 +178,18 @@ def test_no_environment_key_or_boot_seed_is_left():
         assert not hasattr(config, name), name
     assert not hasattr(vertical_products, "seed_vertical_products")
     assert "vertical_products" not in inspect.getsource(main._boot_phase_1_core)
+
+
+def test_the_key_check_reads_on_the_requests_session_and_opens_no_other(new_session, world, monkeypatch):
+    import core.database.database as database
+    from api.verticals import _verify_vertical_internal_key
+
+    monkeypatch.setattr(database, "SessionLocal", lambda: pytest.fail("the request's session should be used"))
+    s = new_session()
+    try:
+        _verify_vertical_internal_key("shopify", authorization=f"Bearer {world.key}", db=s)
+        with pytest.raises(HTTPException) as refused:
+            _verify_vertical_internal_key("shopify", authorization="Bearer wrong", db=s)
+        assert refused.value.status_code == 401
+    finally:
+        s.close()

@@ -223,29 +223,29 @@ def test_vertical_key_verifier_triad(monkeypatch):
     from api.verticals import _verify_vertical_internal_key
 
     records = {}  # PRD-274 W5f: a vertical's key is its product record's
-    monkeypatch.setattr(vp, "key_matches", lambda vertical, token: (
+    monkeypatch.setattr(vp, "key_matches", lambda vertical, token, db=None: (
         None if vertical not in records else token == records[vertical]))
 
     # No record ⇒ 503 (dark, never open)
     with pytest.raises(HTTPException) as exc:
-        _verify_vertical_internal_key("budstacks", authorization="Bearer whatever")
+        _verify_vertical_internal_key("budstacks", authorization="Bearer whatever", db=None)
     assert exc.value.status_code == 503
 
     # Wrong ⇒ 401
     records["budstacks"] = "s3cret"
     with pytest.raises(HTTPException) as exc:
-        _verify_vertical_internal_key("budstacks", authorization="Bearer nope")
+        _verify_vertical_internal_key("budstacks", authorization="Bearer nope", db=None)
     assert exc.value.status_code == 401
 
     # Correct ⇒ passes
     assert (
-        _verify_vertical_internal_key("budstacks", authorization="Bearer s3cret")
+        _verify_vertical_internal_key("budstacks", authorization="Bearer s3cret", db=None)
         is None
     )
 
     # Unknown vertical ⇒ 503 (no record for it)
     with pytest.raises(HTTPException) as exc:
-        _verify_vertical_internal_key("nonexistent", authorization="Bearer s3cret")
+        _verify_vertical_internal_key("nonexistent", authorization="Bearer s3cret", db=None)
     assert exc.value.status_code == 503
 
 

@@ -115,9 +115,9 @@ def test_missing_internal_key_is_rejected(monkeypatch, record, status):
     (PRD-274 W5f), 401 once it has one. We invoke the dep directly (as FastAPI would)."""
     import integrations.vertical_products as vp
 
-    monkeypatch.setattr(vp, "key_matches", lambda vertical, token: None if record is None else token == record)
+    monkeypatch.setattr(vp, "key_matches", lambda vertical, token, db=None: None if record is None else token == record)
     with pytest.raises(HTTPException) as ei:
-        verticals._verify_vertical_internal_key("shopify", authorization="Bearer definitely-wrong-key")
+        verticals._verify_vertical_internal_key("shopify", authorization="Bearer definitely-wrong-key", db=None)
     assert ei.value.status_code == status
 
 

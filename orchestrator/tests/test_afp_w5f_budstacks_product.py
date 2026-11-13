@@ -108,13 +108,13 @@ def test_a_tenant_is_provisioned_into_it_paid_by_its_owner_and_keeps_its_key(new
 def test_the_key_check_reads_the_record(new_session, world):
     from api.verticals import _verify_vertical_internal_key
 
-    _verify_vertical_internal_key("budstacks", authorization=f"Bearer {world.key}")
+    _verify_vertical_internal_key("budstacks", authorization=f"Bearer {world.key}", db=None)
     replaced = mint_key()
     s = new_session()
     s.execute(text("UPDATE products SET key_hash = :h WHERE slug = 'budstacks'"), {"h": replaced.key_hash})
     s.commit()
     s.close()
     with pytest.raises(HTTPException) as refused:
-        _verify_vertical_internal_key("budstacks", authorization=f"Bearer {world.key}")
+        _verify_vertical_internal_key("budstacks", authorization=f"Bearer {world.key}", db=None)
     assert refused.value.status_code == 401
-    _verify_vertical_internal_key("budstacks", authorization=f"Bearer {replaced.plaintext}")
+    _verify_vertical_internal_key("budstacks", authorization=f"Bearer {replaced.plaintext}", db=None)
