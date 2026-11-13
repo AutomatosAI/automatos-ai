@@ -292,6 +292,21 @@ def _vertical_workspace(db: Session, vertical: str, provisioner: Any, external_i
     return workspace, True
 
 
+def _its_products_roster(db: Session, vertical: str, workspace: Any, external_id: str) -> Any:
+    """When the vertical is a product (PRD-274 W5f, ``integrations/vertical_products``): the workspace joins it,
+    and the roster and key it is given are the record's (an admin may change them). None otherwise: the
+    vertical's own, as before. Its hooks stay the vertical's either way."""
+    from integrations.vertical_products import join, product_of
+
+    product = product_of(db, vertical)
+    if product is None:
+        return None
+    from services.product_workspaces import Roster
+
+    join(db, product, workspace, external_id)
+    return Roster.of(product)
+
+
 def provision_vertical(
     *,
     db: Session,
@@ -314,11 +329,12 @@ def provision_vertical(
         raise ValueError(f"Unknown vertical '{vertical}' — no provisioner registered")
 
     workspace, is_new = _vertical_workspace(db, vertical, provisioner, external_id, name, metadata)
-    agents_installed = seed_roster_once(db, workspace, provisioner, vertical)
+    roster = _its_products_roster(db, vertical, workspace, external_id) or provisioner
+    agents_installed = seed_roster_once(db, workspace, roster, vertical)
     # Resolve the allowlist BEFORE any key decision so a malformed request
     # (VerticalConfigError) rejects without side effects either way.
     domains = provisioner.allowed_domains(external_id, metadata)
-    key_result = workspace_key(db, workspace, provisioner, name=f"{vertical.title()} Widget Key ({external_id})",
+    key_result = workspace_key(db, workspace, roster, name=f"{vertical.title()} Widget Key ({external_id})",
                                allowed_domains=domains)
 
     # Optional vertical-specific post-provision step (e.g. ensure a Site).
