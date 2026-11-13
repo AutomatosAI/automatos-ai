@@ -46,7 +46,8 @@ _HIDDEN_SOURCES = ("overhead_day",)
 
 def _paid_by_product(db: Any, workspace: Any, payer: str) -> dict:
     """A product's workspace's summary (PRD-274 W5d): it has no credits, plan or trial of its own; its product's
-    owner pays. Whether that owner's platform-funded work is paused shows, and none of the owner's figures."""
+    owner pays. Whether that owner's platform-funded work is paused shows, and none of the owner's figures. The
+    shape is every summary's (the web app reads ``balance`` and its buckets), with nothing in it."""
     from config import config
     from services.credits.alerts import LEVEL_OUT, level_for
 
@@ -56,9 +57,11 @@ def _paid_by_product(db: Any, workspace: Any, payer: str) -> dict:
     plan = getattr(owner, "plan", None)
     funding = funding_for(plan, read_balance(db, payer), edition=config.AUTH_EDITION, free=is_free_workspace(db, payer))
     paused = funding.funded_by == FUNDED_BY_CREDITS and level_for(funding.spendable, plan) == LEVEL_OUT
-    return {"paid_by_product": True, "plan": None, "billing_open": bool(config.BILLING_OPEN),
-            "status": "paused" if paused else "active", "balance": None, "metered": False, "paused": paused,
-            "low": False, "own_keys": has_own_keys(workspace)}
+    return {"paid_by_product": True, "plan": None, "plan_name": None, "price_usd": None, "price_label": None,
+            "billing_open": bool(config.BILLING_OPEN), "status": "paused" if paused else "active",
+            "renewal_date": None, "balance": {"trial": 0, "monthly": 0, "topup": 0, "spendable": None},
+            "trial_credits": 0, "platform_ai": False, "metered": False, "paused": paused, "low": False,
+            "own_keys": has_own_keys(workspace)}
 
 
 def billing_summary(db: Any, workspace: Any) -> dict:

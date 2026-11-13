@@ -171,7 +171,9 @@ def test_its_summary_says_its_product_pays_and_shows_none_of_the_owners_figures(
         owners = summary.billing_summary(s, s.get(Workspace, uuid.UUID(world.owner)))
     finally:
         s.close()
-    assert theirs["paid_by_product"] is True and theirs["balance"] is None and theirs["plan"] is None
+    assert theirs["paid_by_product"] is True and theirs["plan"] is None and theirs["metered"] is False
+    assert theirs["balance"] == {"trial": 0, "monthly": 0, "topup": 0, "spendable": None}
+    assert set(theirs) == set(owners)  # the same shape the web app reads
     assert theirs["paused"] is False and "1000" not in str(theirs)
     assert owners["paid_by_product"] is False and owners["balance"]["monthly"] == 1000
 
