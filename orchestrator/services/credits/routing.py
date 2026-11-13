@@ -33,7 +33,8 @@ from services.credits.ledger import BUCKET_TRIAL, SPEND_ORDER, Balance, read_bal
 logger = logging.getLogger(__name__)
 
 CREDITS_EXHAUSTED_CODE = "credits_exhausted"
-CREDIT_STOP_CODES = frozenset({CREDITS_EXHAUSTED_CODE})
+WORKSPACE_CAP_CODE = "workspace_cap_reached"  # PRD-274: a product's workspace spent its month's cap (caps.py)
+CREDIT_STOP_CODES = frozenset({CREDITS_EXHAUSTED_CODE, WORKSPACE_CAP_CODE})
 
 FUNDED_BY_OWN_KEY = "own_key"
 FUNDED_BY_CREDITS = "credits"
@@ -63,6 +64,18 @@ class CreditsExhaustedError(Exception):
         self.own_keys_plan = own_keys_plan
         self.message = message or (_OWN_KEYS_MESSAGE if own_keys_plan else _PAUSED_MESSAGE)
         super().__init__(self.message)
+
+
+class WorkspaceCapReachedError(CreditsExhaustedError):
+    """A product's workspace has spent its month's cap of its owner's credits (``services/credits/caps``). It stops
+    work as a run-out does, with its own code, so the product can tell its customer their plan's limit is reached;
+    calls on the workspace's own keys keep working."""
+
+    error_code = WORKSPACE_CAP_CODE
+
+    def __init__(self, message: Optional[str] = None):
+        super().__init__(message or "This workspace has reached its monthly limit, so work on Automatos's AI keys "
+                                    "is paused until next month. Your own AI keys keep working.")
 
 
 def is_credit_stop(exc: BaseException) -> bool:
@@ -180,6 +193,8 @@ def background_allowed(db: Any, workspace_id: Any) -> bool:
     platform call the run makes without credits."""
     from core.models.workspaces import Workspace
 
-    if can_pay(workspace_funding(db, workspace_id, background=True), 1):
+    from services.credits.caps import under_cap
+
+    if can_pay(workspace_funding(db, workspace_id, background=True), 1) and under_cap(db, workspace_id):
         return True
     return has_own_keys(db.query(Workspace).get(workspace_id))

@@ -46,6 +46,7 @@ def balance(monkeypatch):
         return state["funding"]
 
     monkeypatch.setattr(gate, "workspace_funding", _funding)
+    monkeypatch.setattr("services.credits.caps.cap_left", lambda db, ws: None)  # no product cap (PRD-274)
     return state
 
 

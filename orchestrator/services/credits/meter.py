@@ -149,16 +149,21 @@ def meter_pending(db: Any) -> int:
     balance alerts. Returns how many calls were debited."""
     from services.credits.alerts import check_alerts
 
-    debited, touched, after_id = 0, set(), 0
+    from services.credits.caps import check_cap_notices
+
+    debited, touched, spent_in, after_id = 0, set(), set(), 0
     for _ in range(MAX_BATCHES):
         calls = _pending(db, after_id)
         if not calls:
             break
         count, workspaces = _meter_batch(db, calls)
         debited, touched = debited + count, touched | workspaces
+        spent_in |= {c.workspace_id for c in calls}
         after_id = calls[-1].usage_id
     for workspace_id in sorted(touched):
         check_alerts(db, workspace_id)
+    for workspace_id in sorted(spent_in - touched):  # a product's workspace: its cap notices (caps.py)
+        check_cap_notices(db, workspace_id)
     return debited
 
 

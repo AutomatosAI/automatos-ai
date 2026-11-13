@@ -65,8 +65,11 @@ def estimate_usd(duration_seconds: Optional[int]) -> float:
 
 
 def has_credits(db: Session, workspace_id: Any) -> bool:
-    """Whether a call may start: a workspace paying in credits needs some left; any other pays nothing."""
-    return can_pay(workspace_funding(db, workspace_id), 1)
+    """Whether a call may start: a workspace paying in credits needs some left, and a product's workspace credits
+    left under its month's cap (``services.credits.caps``); any other pays nothing."""
+    from services.credits.caps import under_cap
+
+    return can_pay(workspace_funding(db, workspace_id), 1) and under_cap(db, workspace_id)
 
 
 def _cost_of(row: Any, call: Any) -> Optional[float]:
@@ -109,5 +112,7 @@ def charge_call(db: Session, row: Any, call: Any) -> int:
 def after_charge(db: Session, workspace_id: Any) -> None:
     """After the charge is committed: the running-low and run-out notices, as after the meter's."""
     from services.credits.alerts import check_alerts
+    from services.credits.caps import check_cap_notices
 
     check_alerts(db, str(workspace_id))
+    check_cap_notices(db, workspace_id)

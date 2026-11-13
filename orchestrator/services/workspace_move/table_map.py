@@ -138,6 +138,7 @@ _NOT_MOVED = (
               "when it imports the schedule (PRD-276 §6.8)."),
     not_moved("credit_ledger", _BILLING),
     not_moved("credit_balances", _BILLING),
+    not_moved("product_workspace_spend", _BILLING),
     not_moved("billing_accounts", _BILLING),
     not_moved("billing_events", _BILLING),
     not_moved("workspace_members", _PEOPLE),

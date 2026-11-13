@@ -1,5 +1,5 @@
 {
-  "route_count": 1047,
+  "route_count": 1048,
   "routes": [
     {
       "method": "GET",
@@ -2255,6 +2255,10 @@
     },
     {
       "method": "DELETE",
+      "path": "/api/products/{product_id}/workspaces/{workspace_id}"
+    },
+    {
+      "method": "PATCH",
       "path": "/api/products/{product_id}/workspaces/{workspace_id}"
     },
     {

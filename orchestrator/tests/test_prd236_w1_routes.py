@@ -425,7 +425,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # a new nullable column and a partial index; the guard follows it.
     spent = (versions / "credit_ledger_sub_tenant_20261113.py").read_text()
     assert 'down_revision = "product_workspaces_20261113"' in spent
-    assert 'EXPECTED_HEAD = "credit_ledger_sub_tenant_20261113"' in guard
+    # 2026-11-13 (Automatos for products, spend cap): product_spend_cap_20261113 chains onto that —
+    # a new column and a new table; the guard follows it.
+    capped = (versions / "product_spend_cap_20261113.py").read_text()
+    assert 'down_revision = "credit_ledger_sub_tenant_20261113"' in capped
+    assert 'EXPECTED_HEAD = "product_spend_cap_20261113"' in guard
 
 
 def test_orm_row_is_keyed_by_route():
