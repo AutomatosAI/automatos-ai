@@ -63,6 +63,16 @@ def key_identity_digest(identity_text: str) -> str:
     return _legacy_hash_key(identity_text)
 
 
+def _workspace_open(db: Session, workspace_id: Any) -> bool:
+    """The key's workspace is not closed (soft-deleted): a closed workspace's keys stop working at once,
+    however long its purge waits (an admin's delete, or a product's close and its grace, PRD-274 W5c)."""
+    from sqlalchemy import text
+
+    row = db.execute(text("SELECT deleted_at IS NULL FROM workspaces WHERE id = CAST(:id AS uuid)"),
+                     {"id": str(workspace_id)}).first()
+    return bool(row and row[0])
+
+
 def _host_only(value: str) -> str:
     """Reduce an origin or allow-list pattern to its host[:port] form.
 
@@ -169,7 +179,7 @@ class ApiKeyService:
         if record is None:
             return None
 
-        if not record.is_active:
+        if not record.is_active or not _workspace_open(db, record.workspace_id):
             return None
 
         now = datetime.now(timezone.utc)

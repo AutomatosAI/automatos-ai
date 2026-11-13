@@ -22,6 +22,7 @@ from typing import Any, Awaitable, Callable, Optional
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.memory import MemoryJobStore
 from services.end_user_retention import schedules_the_retention_sweep
+from services.product_purge import schedules_the_closed_purge
 from services.run_callbacks import schedules_the_callback_sweep
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ class UnifiedScheduler:
 
     @schedules_the_callback_sweep  # PRD-276 W1b: callbacks no completion writer queued are queued
     @schedules_the_retention_sweep  # PRD-274 W3: what is past an end user's retention, daily
+    @schedules_the_closed_purge  # PRD-274 W5c: product workspaces closed past their grace, daily
     def start(self):
         """Create and start the shared AsyncIOScheduler."""
         if self._scheduler and self._scheduler.running:

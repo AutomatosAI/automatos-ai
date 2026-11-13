@@ -1,5 +1,5 @@
 {
-  "route_count": 1044,
+  "route_count": 1047,
   "routes": [
     {
       "method": "GET",
@@ -2246,8 +2246,20 @@
       "path": "/api/proactive/suggestions/{suggestion_id}/start"
     },
     {
+      "method": "GET",
+      "path": "/api/products/{product_id}/workspaces"
+    },
+    {
       "method": "POST",
       "path": "/api/products/{product_id}/workspaces"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/products/{product_id}/workspaces/{workspace_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/products/{product_id}/workspaces/{workspace_id}/restore"
     },
     {
       "method": "GET",

@@ -40,6 +40,7 @@ HANDLER_MODULES = (
     "jobs.promote_field_memory",  # memory.field_promotion (Wave 2c)
     "services.proactive.retention",  # proactive.runs_prune (Wave 2c)
     "services.workspace_move.jobs",  # workspace_move.export_sweep (Wave 2c)
+    "services.product_purge",  # products.purge_closed (PRD-274 Wave 5c)
 )
 MIN_POLL_SECONDS = 0.5  # a zero or negative JOBS_POLL_SECONDS would spin the loop
 WORKER_ROLE = "worker"
