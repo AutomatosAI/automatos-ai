@@ -324,11 +324,14 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
   pages read everything (§8-11); consolidation never crosses audiences (#1453). F155's stricter widget rule stays,
   with the labels on top of it.
 
-### Wave 5: sub-tenants (next)
+### Wave 5: sub-tenants (next; approved in #1492)
 
 - The product record (§8-3), find-or-create by external id with roster seeding, list, guarded purge; billed to the
   product's owner workspace (§8-2). Both registered verticals move onto it last, each keeping its behaviour: Shopify's
   re-provision mints a key, BudStacks' keeps the existing one.
+- The build, one PR each: 5a the `products` table and admin routes; 5b the product's key and find-or-create; 5c list,
+  close and restore; 5d the billing roll-up; 5e retention through the product; 5f Shopify, then BudStacks, onto
+  product records. Decisions 24–28 below shape them.
 
 ### Follow-ups from Wave 1 (open)
 
@@ -337,7 +340,7 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
 | Set `CLIENT_IP_HEADER=X-Real-IP` on the hosted API service, then check Railway's edge replaces a client-supplied value | Gerard (an ops change on Railway) |
 | Enforce a key's IP allow-list instead of refusing one (#1467) | The setting above |
 | The app-wide per-IP limit is off in hosted (`AUTOMATOS_POLICY_PLANE` unset); the key routes are already exempt from it | A decision to turn the policy plane on |
-| Re-send a callback a restart left `pending` (#1462 sends in-process) | Done (#1481); PRD-276 (#1483) proposes a durable job in its place |
+| Re-send a callback a restart left `pending` (#1462 sends in-process) | Done: a durable job since PRD-276 Wave 1b (#1494); #1482 closed |
 | A key's service user outlives the key and its workspace (no personal data in it) | Done: the purge deletes it with its workspace; revoking keeps it (decision 23) (#1491) |
 
 ## 7. Rollout
@@ -390,7 +393,7 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
     end_user_id)` across a product's workspaces, which would break the tenant boundary and wait on Wave 5.) §5.5 is
     read this way.
 
-### Made while building Wave 3's chat turns (11 Nov 2026, Dave; for Gerard to confirm)
+### Made while building Wave 3's chat turns (11 Nov 2026, Dave; confirmed by Gerard in #1492)
 
 18. **An end user's turn writes nothing where the whole workspace reads:** no L2 transcript, no L2 mirror, no
     daily log. Their conversation stays in its chat. (Not: tagged L2 rows filtered on every read, which every
@@ -408,6 +411,38 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
 23. **Revoking a key keeps its service user; the workspace's purge deletes it.** Deleting it on revocation would
     delete the key's conversations (`chats.user_id` cascades), its end users' among them, so a product rotating its
     key would lose them. Their retention and erasure still apply while it stays. (Not: delete on revocation.)
+
+### Decided for Wave 5 (11 Nov 2026, Gerard, in #1492)
+
+24. **The roll-up happens where a call is checked and where it is metered.** One place resolves the workspace that
+    pays: a sub-tenant workspace (`settings.product_id`) is paid for by its product's owner workspace, under the
+    owner's plan. The credit gate (`before_platform_call`, `workspace_funding`), the meter (`meter_call`), the
+    balance alerts and the balance summary all use it. A sub-tenant has no credits and no trial, so a meter-only
+    change would refuse every sub-tenant call at the gate first. (Not: debit the sub-tenant and sweep balances up,
+    which the gate would block before there was anything to sweep.)
+25. **A product closes a workspace with seven days to undo it.** The product's key soft-deletes it and the call
+    answers 202; the workspace stops working at once. The same key can restore it within 7 days. A daily platform
+    schedule (PRD-276) purges product workspaces soft-deleted more than 7 days ago, through `purge_workspace_sync`.
+    The admin purge stays immediate, for urgent cases. Each debit the owner pays records which sub-tenant it was for,
+    in a column not named `workspace_id`, so the owner's usage per sub-tenant survives the sub-tenant's purge.
+    (Not: an immediate purge, which another company's bug or a wrong external id would make irreversible.)
+26. **The owner doesn't see its sub-tenants.** They are separate tenants: the owner's Auto, memory pages and search
+    never read them. The owner gets usage per sub-tenant now (24, 25) and the product console (§9) later.
+27. **The verticals move off their environment keys with no sunset window.** Each vertical's PR seeds its product
+    record with the hash of the key in its environment setting, so the deployed key keeps working with no client
+    change, and deletes the setting and the registry entry in the same PR. Gerard removes
+    `SHOPIFY_INTERNAL_API_KEY` and `BUDSTACKS_INTERNAL_API_KEY` from Railway after the deploy that seeds each record.
+28. **An end user reaches their product through their workspace.** No `end_users.product_id`: every end user has a
+    `workspace_id`, and a sub-tenant workspace carries `settings.product_id`. An end user with no `retention_days`
+    takes the product's default, read through their workspace. `api_key_id` stays as the record of which key wrote
+    the consent. (Not: a new column, which would need a migration and a backfill, and keep a second copy of the
+    product to keep in step.)
+    *Existing end users (proposed, for Gerard to confirm):* the product's default applies only to end users created
+    after their workspace belongs to the product. 5e writes the default into `retention_days` when it creates an end
+    user, read through the workspace; the sweep, which today reads only `retention_days`, is unchanged. An end user who
+    already exists with no `retention_days` keeps their memories until erased, as they consented to. Otherwise
+    attaching a workspace to a product (5f does this for Shopify's and BudStacks' existing workspaces), or a product
+    changing its default, would have the next sweep delete their older facts and messages, which can't be undone.
 
 ## 9. Later
 
