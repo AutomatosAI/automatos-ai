@@ -307,7 +307,10 @@ async def test_snapshot_job_registered(monkeypatch):
         registered = {
             call.kwargs.get("id") for call in scheduler.add_job.call_args_list
         }
-        assert (MemoryJobScheduler.JOB_ID_SNAPSHOT in registered) is expect
+        # PRD-276 Wave 2c: the snapshot is a platform schedule of the memory.snapshot kind
+        from core.jobs.schedules import PLATFORM, job_id
+
+        assert (job_id("memory.snapshot", PLATFORM) in registered) is expect
 
 
 class _FakeQdrant:

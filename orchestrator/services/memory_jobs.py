@@ -1,7 +1,9 @@
 """
 MemoryJobScheduler — Background Jobs for Unified Memory (PRD-79)
 ================================================================
-Registers three recurring jobs on the UnifiedScheduler:
+Eight recurring memory jobs, each a job kind with a platform schedule (PRD-276 Wave 2c): the
+scheduler only queues a slot, and a worker runs it. Each catches up ``latest``: every job sweeps
+all workspaces, so one run after downtime does what the missed runs would have.
 
 1. **Consolidation** (periodic) — contradiction-based invalidation (PRD-159 S4)
    Per workspace, near-duplicate L3 memories merge into one canonical and
@@ -17,29 +19,126 @@ Registers three recurring jobs on the UnifiedScheduler:
    no access-count gate) are stored verbatim in the durable store,
    deduped by content hash.
 
-All three jobs are resilient: one workspace failure does not stop others.
-Each job logs start/end timestamps and summary metrics.
+4. **Archival** (monthly), 5. **audit retention** (PRD-196 S5), 6. **Qdrant snapshot** (daily,
+   PRD-197 S3), 7. **substrate metrics prune** (PRD-197 S4) and 8. **thread checkpoints**
+   (PRD-206 S2).
+
+All are resilient: one workspace failure does not stop the others. A run that fails as a whole is
+logged and raised, so the queue retries it with the kind's backoff. Synchronous database work runs
+in a thread, off the worker's loop, which renews every running job's lease.
 """
 
+import asyncio
 import logging
-from typing import Optional
+from datetime import timezone
+from typing import Any, Callable, Optional, Tuple
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from sqlalchemy import text
+
+from core.jobs.registry import CATCH_UP_LATEST, job_handler
 
 logger = logging.getLogger(__name__)
 
+# (the status key, the job kind, the runner method, the config switch that turns it on or None)
+_JOBS: Tuple[Tuple[str, str, str, Optional[str]], ...] = (
+    ("memory_session_consolidation", "memory.consolidation", "_run_consolidation", None),
+    ("memory_decay_scoring", "memory.decay", "_run_decay", None),
+    ("memory_l2_l3_promotion", "memory.promotion", "_run_promotion", None),
+    ("memory_graphify_archival", "memory.archival", "_run_archival", "MEMORY_ARCHIVAL_ENABLED"),
+    ("audit_retention_sweep", "audit.retention_sweep", "_run_audit_retention", None),  # PRD-196 S5
+    ("memory_qdrant_snapshot", "memory.snapshot", "_run_snapshot", "MEMORY_SNAPSHOT_ENABLED"),  # PRD-197 S3
+    ("substrate_metrics_prune", "substrate.metrics_prune", "_run_substrate_prune", None),  # PRD-197 S4
+    ("thread_checkpoint_sweep", "memory.thread_checkpoints", "_run_thread_checkpoints",
+     "THREAD_CHECKPOINT_ENABLED"),  # PRD-206 S2
+)
+
+
+def _trigger(kind: str, config: Any) -> Any:
+    """Each job's trigger, from its settings (the defaults are the ones it always had)."""
+    from apscheduler.triggers.cron import CronTrigger
+
+    from core.jobs.schedules import interval
+
+    def setting(name: str, default: int) -> int:
+        return int(getattr(config, name, default))
+
+    triggers: dict = {
+        "memory.consolidation": lambda: interval(seconds=setting("MEMORY_CONSOLIDATION_INTERVAL_SECONDS", 3600)),
+        "memory.decay": lambda: interval(seconds=setting("MEMORY_DECAY_INTERVAL_SECONDS", 3600)),
+        "memory.promotion": lambda: CronTrigger(hour=setting("MEMORY_PROMOTION_HOUR_UTC", 3), minute=0,
+                                                timezone=timezone.utc),
+        "memory.archival": lambda: CronTrigger(day=setting("MEMORY_ARCHIVAL_CRON_DAY", 1),
+                                               hour=setting("MEMORY_ARCHIVAL_CRON_HOUR", 3), minute=0,
+                                               timezone=timezone.utc),
+        "audit.retention_sweep": lambda: interval(seconds=setting("AUDIT_RETENTION_SWEEP_INTERVAL_SECONDS", 86400)),
+        "memory.snapshot": lambda: CronTrigger(hour=setting("MEMORY_SNAPSHOT_CRON_HOUR_UTC", 4), minute=0,
+                                               timezone=timezone.utc),
+        "substrate.metrics_prune": lambda: interval(seconds=setting("SUBSTRATE_METRICS_PRUNE_INTERVAL_SECONDS", 86400)),
+        "memory.thread_checkpoints": lambda: interval(
+            seconds=setting("THREAD_CHECKPOINT_SWEEP_INTERVAL_SECONDS", 900)),
+    }
+    return triggers[kind]()
+
+
+def _on_own_session(work: Callable[[Any], Any]) -> Any:
+    """``work(db)`` on a session of its own, always closed (run in a thread)."""
+    from core.database.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        return work(db)
+    finally:
+        db.close()
+
+
+_CANDIDATES = text("""
+    SELECT id, workspace_id FROM chats
+    WHERE kind = 'user'
+      AND workspace_id IS NOT NULL
+      AND updated_at <= NOW() - (:idle_min * INTERVAL '1 minute')
+      AND updated_at >= NOW() - (:lookback_h * INTERVAL '1 hour')
+      AND (
+        summary IS NULL
+        OR COALESCE((summary->>'checkpointed_at')::double precision, 0) < EXTRACT(EPOCH FROM updated_at)
+      )
+      AND (SELECT COUNT(*) FROM messages m WHERE m.chat_id = chats.id) >= :min_msgs
+    ORDER BY updated_at DESC
+    LIMIT :batch
+""")
+
+
+def _checkpoint_candidates(db: Any) -> list:
+    """User chats idle past the threshold (touched inside the lookback), with enough messages, whose
+    summary watermark is older than their last activity: the thread checkpoint sweep's batch."""
+    from config import config as app_config
+
+    params = {"idle_min": getattr(app_config, "THREAD_CHECKPOINT_IDLE_MINUTES", 30),
+              "lookback_h": getattr(app_config, "THREAD_CHECKPOINT_LOOKBACK_HOURS", 48),
+              "min_msgs": getattr(app_config, "THREAD_CHECKPOINT_MIN_MESSAGES", 4),
+              "batch": getattr(app_config, "THREAD_CHECKPOINT_BATCH", 10)}
+    return list(db.execute(_CANDIDATES, params).fetchall())
+
+
+def _runs(method: str) -> Callable[[Any], Any]:
+    async def handler(job: Any) -> None:
+        await getattr(get_memory_job_scheduler(), method)()
+
+    handler.__name__ = f"run{method}"
+    return handler
+
+
+# Batch sweeps over every workspace: a lease long enough that a slow run isn't swept while it still
+# works (it is renewed every third of this), short enough that a crashed one is retried soon.
+MEMORY_JOB_LEASE_SECONDS = 300
+
+for _status_key, _kind, _method, _switch in _JOBS:  # registered on import, in every worker process
+    job_handler(_kind, catch_up=CATCH_UP_LATEST, concurrency=1, workspace_concurrency=1,
+                lease_seconds=MEMORY_JOB_LEASE_SECONDS)(_runs(_method))
+
 
 class MemoryJobScheduler:
-    """Registers memory background jobs on the shared APScheduler."""
-
-    JOB_ID_CONSOLIDATION = "memory_session_consolidation"
-    JOB_ID_DECAY = "memory_decay_scoring"
-    JOB_ID_PROMOTION = "memory_l2_l3_promotion"
-    JOB_ID_ARCHIVAL = "memory_graphify_archival"
-    JOB_ID_AUDIT_RETENTION = "audit_retention_sweep"  # PRD-196 S5
-    JOB_ID_SNAPSHOT = "memory_qdrant_snapshot"  # PRD-197 S3
-    JOB_ID_SUBSTRATE_PRUNE = "substrate_metrics_prune"  # PRD-197 S4
-    JOB_ID_THREAD_CHECKPOINT = "thread_checkpoint_sweep"  # PRD-206 S2
+    """Declares the memory jobs' schedules on the shared APScheduler, and runs each job."""
 
     def __init__(self):
         self._scheduler: Optional[AsyncIOScheduler] = None
@@ -49,164 +148,27 @@ class MemoryJobScheduler:
     # ------------------------------------------------------------------
 
     async def start(self, scheduler: AsyncIOScheduler):
-        """Register all three memory jobs on the shared scheduler."""
+        """Declare each enabled memory job's platform schedule on the shared scheduler."""
         from config import config as app_config
+        from core.jobs.schedules import PLATFORM, schedule
 
         self._scheduler = scheduler
-
-        consolidation_interval = getattr(
-            app_config, "MEMORY_CONSOLIDATION_INTERVAL_SECONDS", 3600
-        )
-        decay_interval = getattr(
-            app_config, "MEMORY_DECAY_INTERVAL_SECONDS", 3600
-        )
-        promotion_hour = getattr(
-            app_config, "MEMORY_PROMOTION_HOUR_UTC", 3
-        )
-
-        # Periodic: contradiction-based consolidation (PRD-159 S4)
-        self._scheduler.add_job(
-            self._run_consolidation,
-            "interval",
-            seconds=consolidation_interval,
-            id=self.JOB_ID_CONSOLIDATION,
-            replace_existing=True,
-            max_instances=1,
-        )
-
-        # Hourly: Decay scoring on L2
-        self._scheduler.add_job(
-            self._run_decay,
-            "interval",
-            seconds=decay_interval,
-            id=self.JOB_ID_DECAY,
-            replace_existing=True,
-            max_instances=1,
-        )
-
-        # Daily at promotion_hour UTC: L2 → L3 promotion
-        self._scheduler.add_job(
-            self._run_promotion,
-            "cron",
-            hour=promotion_hour,
-            minute=0,
-            id=self.JOB_ID_PROMOTION,
-            replace_existing=True,
-            max_instances=1,
-        )
-
-        # Monthly: graphify archival (L2+L3 → workspace knowledge graph)
-        archival_enabled = getattr(app_config, "MEMORY_ARCHIVAL_ENABLED", True)
-        archival_day = getattr(app_config, "MEMORY_ARCHIVAL_CRON_DAY", 1)
-        archival_hour = getattr(app_config, "MEMORY_ARCHIVAL_CRON_HOUR", 3)
-        if archival_enabled:
-            self._scheduler.add_job(
-                self._run_archival,
-                "cron",
-                day=archival_day,
-                hour=archival_hour,
-                minute=0,
-                id=self.JOB_ID_ARCHIVAL,
-                replace_existing=True,
-                max_instances=1,
-            )
-
-        # PRD-196 S5: audit-log retention sweep (Art.12 floor without unbounded
-        # growth). Reuses this scheduler pattern; its own config-driven interval
-        # (default daily). max_instances=1 so a slow sweep never overlaps itself.
-        retention_interval = getattr(
-            app_config, "AUDIT_RETENTION_SWEEP_INTERVAL_SECONDS", 86400
-        )
-        self._scheduler.add_job(
-            self._run_audit_retention,
-            "interval",
-            seconds=retention_interval,
-            id=self.JOB_ID_AUDIT_RETENTION,
-            replace_existing=True,
-            max_instances=1,
-        )
-
-        # PRD-197 S3: daily Qdrant snapshot of the memory planes (durable +
-        # field), uploaded to the object store, both sides pruned to the
-        # retention window. §8-Q3 built to proposal (daily / 7-day / platform
-        # object store) — the MEMORY_SNAPSHOT_* knobs adjust it.
-        snapshot_enabled = getattr(app_config, "MEMORY_SNAPSHOT_ENABLED", True)
-        snapshot_hour = getattr(app_config, "MEMORY_SNAPSHOT_CRON_HOUR_UTC", 4)
-        if snapshot_enabled:
-            self._scheduler.add_job(
-                self._run_snapshot,
-                "cron",
-                hour=snapshot_hour,
-                minute=0,
-                id=self.JOB_ID_SNAPSHOT,
-                replace_existing=True,
-                max_instances=1,
-            )
-
-        # PRD-197 S4: prune substrate telemetry rows past retention — always
-        # on (the table always accrues while retrieval runs).
-        substrate_prune_interval = getattr(
-            app_config, "SUBSTRATE_METRICS_PRUNE_INTERVAL_SECONDS", 86400
-        )
-        self._scheduler.add_job(
-            self._run_substrate_prune,
-            "interval",
-            seconds=substrate_prune_interval,
-            id=self.JOB_ID_SUBSTRATE_PRUNE,
-            replace_existing=True,
-            max_instances=1,
-        )
-
-        # PRD-206 S2: checkpoint recently-idle chat threads (Q3: silently) —
-        # summary onto chats.summary, new decisions/open loops into L3. The
-        # batch cap bounds LLM spend per sweep; the checkpointed_at watermark
-        # keeps already-checkpointed threads out of the candidate set.
-        checkpoint_enabled = getattr(app_config, "THREAD_CHECKPOINT_ENABLED", True)
-        checkpoint_interval = getattr(
-            app_config, "THREAD_CHECKPOINT_SWEEP_INTERVAL_SECONDS", 900
-        )
-        if checkpoint_enabled:
-            self._scheduler.add_job(
-                self._run_thread_checkpoints,
-                "interval",
-                seconds=checkpoint_interval,
-                id=self.JOB_ID_THREAD_CHECKPOINT,
-                replace_existing=True,
-                max_instances=1,
-            )
-
-        logger.info(
-            "[MemoryJobs] Started — consolidation every %ds, "
-            "decay every %ds, promotion daily at %02d:00 UTC, "
-            "archival %s (day=%d hour=%02d), audit-retention every %ds, "
-            "qdrant-snapshot %s (daily %02d:00 UTC)",
-            consolidation_interval,
-            decay_interval,
-            promotion_hour,
-            "enabled" if archival_enabled else "disabled",
-            archival_day,
-            archival_hour,
-            retention_interval,
-            "enabled" if snapshot_enabled else "disabled",
-            snapshot_hour,
-        )
+        declared = []
+        for status_key, kind, _, switch in _JOBS:
+            if switch is not None and not getattr(app_config, switch, True):
+                continue
+            schedule(scheduler, kind, PLATFORM, _trigger(kind, app_config))
+            declared.append(status_key)
+        logger.info("[MemoryJobs] Started — scheduled: %s", ", ".join(declared))
 
     async def stop(self):
-        """Remove all memory jobs from the scheduler."""
+        """Remove the memory jobs' schedules from the scheduler."""
         if not self._scheduler:
             return
-        for job_id in (
-            self.JOB_ID_CONSOLIDATION,
-            self.JOB_ID_DECAY,
-            self.JOB_ID_PROMOTION,
-            self.JOB_ID_ARCHIVAL,
-            self.JOB_ID_AUDIT_RETENTION,
-            self.JOB_ID_SNAPSHOT,
-            self.JOB_ID_SUBSTRATE_PRUNE,
-            self.JOB_ID_THREAD_CHECKPOINT,
-        ):
-            if self._scheduler.get_job(job_id):
-                self._scheduler.remove_job(job_id)
+        from core.jobs.schedules import PLATFORM, unschedule
+
+        for _, kind, _, _ in _JOBS:
+            unschedule(self._scheduler, kind, PLATFORM)
         logger.info("[MemoryJobs] Stopped")
 
     # ------------------------------------------------------------------
@@ -238,6 +200,7 @@ class MemoryJobScheduler:
                 e,
                 exc_info=True,
             )
+            raise
 
     # ------------------------------------------------------------------
     # Job: Decay Scoring (L2)
@@ -266,6 +229,7 @@ class MemoryJobScheduler:
                 e,
                 exc_info=True,
             )
+            raise
 
     # ------------------------------------------------------------------
     # Job: L2 → L3 Promotion
@@ -293,6 +257,7 @@ class MemoryJobScheduler:
                 e,
                 exc_info=True,
             )
+            raise
 
     # ------------------------------------------------------------------
     # Job: Graphify Archival (L2+L3 → workspace knowledge graph)
@@ -321,143 +286,77 @@ class MemoryJobScheduler:
                 e,
                 exc_info=True,
             )
+            raise
 
     async def _run_audit_retention(self):
         """PRD-196 S5: hard-delete audit_logs rows past the retention floor and
-        write one summary row per affected workspace. Resilient — a failure here
-        never stops the other memory jobs (its own try/except, like the rest)."""
-        try:
-            from core.database.database import SessionLocal
-            from services.audit_retention import sweep_expired_audit_logs
+        write one summary row per affected workspace, on a session of its own
+        in a thread (the worker's loop renews every running job's lease)."""
+        from services.audit_retention import sweep_expired_audit_logs
 
-            db = SessionLocal()
-            try:
-                result = sweep_expired_audit_logs(db)
-            finally:
-                db.close()
-            logger.info(
-                "[MemoryJobs] Audit retention sweep: deleted=%d, workspaces=%d, cutoff=%s",
-                result.get("total_deleted", 0),
-                result.get("workspaces_affected", 0),
-                result.get("cutoff"),
-            )
-        except Exception as e:
-            logger.error(
-                "[MemoryJobs] Audit retention sweep failed: %s",
-                e,
-                exc_info=True,
-            )
+        try:
+            result = await asyncio.to_thread(_on_own_session, sweep_expired_audit_logs)
+        except Exception:
+            logger.error("[MemoryJobs] Audit retention sweep failed", exc_info=True)
+            raise
+        logger.info(
+            "[MemoryJobs] Audit retention sweep: deleted=%d, workspaces=%d, cutoff=%s",
+            result.get("total_deleted", 0),
+            result.get("workspaces_affected", 0),
+            result.get("cutoff"),
+        )
 
     # ------------------------------------------------------------------
     # Job: Qdrant memory snapshots (PRD-197 S3)
     # ------------------------------------------------------------------
 
     async def _run_substrate_prune(self):
-        """PRD-197 S4: delete substrate_metric_events rows past retention.
-        Fail-soft like the rest."""
-        try:
-            from config import config as app_config
-            from core.database.database import SessionLocal
-            from services.substrate_health import prune_substrate_metrics
+        """PRD-197 S4: delete substrate_metric_events rows past retention, on a
+        session of its own in a thread."""
+        from config import config as app_config
+        from services.substrate_health import prune_substrate_metrics
 
-            db = SessionLocal()
-            try:
-                deleted = prune_substrate_metrics(
-                    db,
-                    retention_days=getattr(
-                        app_config, "SUBSTRATE_METRICS_RETENTION_DAYS", 14
-                    ),
-                )
-            finally:
-                db.close()
-            if deleted:
-                logger.info(
-                    "[MemoryJobs] Substrate metrics prune: deleted=%d", deleted
-                )
-        except Exception as e:
-            logger.error(
-                "[MemoryJobs] Substrate metrics prune failed: %s", e,
-                exc_info=True,
-            )
+        days = getattr(app_config, "SUBSTRATE_METRICS_RETENTION_DAYS", 14)
+        try:
+            deleted = await asyncio.to_thread(
+                _on_own_session, lambda db: prune_substrate_metrics(db, retention_days=days))
+        except Exception:
+            logger.error("[MemoryJobs] Substrate metrics prune failed", exc_info=True)
+            raise
+        if deleted:
+            logger.info("[MemoryJobs] Substrate metrics prune: deleted=%d", deleted)
 
     async def _run_thread_checkpoints(self):
-        """PRD-206 S2: checkpoint recently-idle threads. Candidates: user-kind
-        chats idle past the threshold (but touched inside the lookback), with
-        enough messages, whose summary watermark is older than their last
-        activity. Per-chat failures never stop the batch; fail-soft overall."""
+        """PRD-206 S2: checkpoint recently-idle threads. The candidates are read in
+        a thread (``_checkpoint_candidates``); each checkpoint runs here. Per-chat
+        failures never stop the batch; a failed sweep is retried by the queue."""
+        from config import config as app_config
+        from core.database.database import SessionLocal
+        from modules.memory.thread_checkpoint import run_thread_checkpoint
+
+        min_messages = getattr(app_config, "THREAD_CHECKPOINT_MIN_MESSAGES", 4)
         try:
-            from sqlalchemy import text as sql_text
-
-            from config import config as app_config
-            from core.database.database import SessionLocal
-            from modules.memory.thread_checkpoint import run_thread_checkpoint
-
-            idle_minutes = getattr(app_config, "THREAD_CHECKPOINT_IDLE_MINUTES", 30)
-            lookback_hours = getattr(app_config, "THREAD_CHECKPOINT_LOOKBACK_HOURS", 48)
-            batch = getattr(app_config, "THREAD_CHECKPOINT_BATCH", 10)
-            min_messages = getattr(app_config, "THREAD_CHECKPOINT_MIN_MESSAGES", 4)
-
-            db = SessionLocal()
-            try:
-                rows = db.execute(
-                    sql_text(
-                        """
-                        SELECT id, workspace_id FROM chats
-                        WHERE kind = 'user'
-                          AND workspace_id IS NOT NULL
-                          AND updated_at <= NOW() - (:idle_min * INTERVAL '1 minute')
-                          AND updated_at >= NOW() - (:lookback_h * INTERVAL '1 hour')
-                          AND (
-                            summary IS NULL
-                            OR COALESCE((summary->>'checkpointed_at')::double precision, 0)
-                               < EXTRACT(EPOCH FROM updated_at)
-                          )
-                          AND (
-                            SELECT COUNT(*) FROM messages m WHERE m.chat_id = chats.id
-                          ) >= :min_msgs
-                        ORDER BY updated_at DESC
-                        LIMIT :batch
-                        """
-                    ),
-                    {
-                        "idle_min": idle_minutes,
-                        "lookback_h": lookback_hours,
-                        "min_msgs": min_messages,
-                        "batch": batch,
-                    },
-                ).fetchall()
-
-                done = failed = 0
-                for chat_id, workspace_id in rows:
-                    try:
-                        result = await run_thread_checkpoint(
-                            db,
-                            workspace_id=str(workspace_id),
-                            chat_id=str(chat_id),
-                            trigger="idle_sweep",
-                            min_messages=min_messages,
-                        )
-                        if result.get("success"):
-                            done += 1
-                        elif not result.get("skipped"):
-                            failed += 1
-                    except Exception:
-                        failed += 1
-                        logger.error(
-                            "[MemoryJobs] Thread checkpoint failed for chat=%s",
-                            chat_id, exc_info=True,
-                        )
-            finally:
-                db.close()
-            if done or failed:
-                logger.info(
-                    "[MemoryJobs] Thread checkpoint sweep: candidates=%d done=%d failed=%d",
-                    len(rows), done, failed,
-                )
-        except Exception as e:
-            logger.error(
-                "[MemoryJobs] Thread checkpoint sweep failed: %s", e, exc_info=True,
-            )
+            rows = await asyncio.to_thread(_on_own_session, _checkpoint_candidates)
+        except Exception:
+            logger.error("[MemoryJobs] Thread checkpoint sweep failed", exc_info=True)
+            raise
+        done = failed = 0
+        db = SessionLocal()
+        try:
+            for chat_id, workspace_id in rows:
+                try:
+                    result = await run_thread_checkpoint(db, workspace_id=str(workspace_id), chat_id=str(chat_id),
+                                                         trigger="idle_sweep", min_messages=min_messages)
+                except Exception:
+                    failed += 1
+                    logger.error("[MemoryJobs] Thread checkpoint failed for chat=%s", chat_id, exc_info=True)
+                    continue
+                done += bool(result.get("success"))
+                failed += not result.get("success") and not result.get("skipped")
+        finally:
+            db.close()
+        if done or failed:
+            logger.info("[MemoryJobs] Thread checkpoint sweep: candidates=%d done=%d failed=%d", len(rows), done, failed)
 
     async def _run_snapshot(self):
         """PRD-197 S3: snapshot durable_memory + field_memory to the object
@@ -483,29 +382,22 @@ class MemoryJobScheduler:
                 "[MemoryJobs] Qdrant snapshot cycle failed: %s", e,
                 exc_info=True,
             )
+            raise
 
     # ------------------------------------------------------------------
     # Status
     # ------------------------------------------------------------------
 
     def get_status(self) -> dict:
-        """Return job status for health checks."""
+        """Return job status for health checks, keyed by each job's status name."""
         if not self._scheduler:
             return {"active": False, "jobs": {}}
+        from core.jobs.schedules import PLATFORM, job_id
 
         jobs = {}
-        for job_id in (
-            self.JOB_ID_CONSOLIDATION,
-            self.JOB_ID_DECAY,
-            self.JOB_ID_PROMOTION,
-            self.JOB_ID_ARCHIVAL,
-            self.JOB_ID_AUDIT_RETENTION,
-            self.JOB_ID_SNAPSHOT,
-            self.JOB_ID_SUBSTRATE_PRUNE,
-            self.JOB_ID_THREAD_CHECKPOINT,
-        ):
-            job = self._scheduler.get_job(job_id)
-            jobs[job_id] = {
+        for status_key, kind, _, _ in _JOBS:
+            job = self._scheduler.get_job(job_id(kind, PLATFORM))
+            jobs[status_key] = {
                 "active": job is not None,
                 "next_run": str(job.next_run_time) if job else None,
             }
