@@ -712,16 +712,6 @@ class Config:
     # PRD-264 EUAI-10 (D16): the public detection route GET /api/public/provenance/{sha256}
     # takes no account, so each client IP gets this many checks a minute (at least one).
     PROVENANCE_RATE_PER_MINUTE: int = max(1, int(os.getenv("PROVENANCE_RATE_PER_MINUTE", "30")))
-    SHOPIFY_INTERNAL_API_KEY: str = os.getenv("SHOPIFY_INTERNAL_API_KEY", "")
-    # PRD-274 W5f: the workspace that owns the Shopify product and pays for every shop's workspace. With this and
-    # SHOPIFY_INTERNAL_API_KEY set, a boot seeds the product record from the key (integrations/vertical_products).
-    SHOPIFY_PRODUCT_OWNER_WORKSPACE_ID: str = os.getenv("SHOPIFY_PRODUCT_OWNER_WORKSPACE_ID", "")
-    # BudStacks vertical (api/verticals.py) — same fail-closed posture: unset ⇒
-    # the budstacks provision surface answers 503, never open.
-    BUDSTACKS_INTERNAL_API_KEY: str = os.getenv("BUDSTACKS_INTERNAL_API_KEY", "")
-    # PRD-274 W5f: the workspace that owns the BudStacks product and pays for every tenant's workspace. With this and
-    # BUDSTACKS_INTERNAL_API_KEY set, a boot seeds the product record from the key (integrations/vertical_products).
-    BUDSTACKS_PRODUCT_OWNER_WORKSPACE_ID: str = os.getenv("BUDSTACKS_PRODUCT_OWNER_WORKSPACE_ID", "")
     # PRD-189 S3: per-workspace debounce window (seconds) for catalog-webhook
     # re-syncs. A merchant bulk edit emits a burst of products/update webhooks;
     # /events coalesces the burst into ONE full Bulk-Op re-sync once it has
@@ -2639,9 +2629,10 @@ class Config:
         - Widget CORS. Storefront origins are authorised from the per-key
           ``SdkApiKey.allowed_domains`` the merchant already maintains — there
           is no global widget allowlist to validate. See ``api/widgets/cors.py``.
-        - ``SHOPIFY_INTERNAL_API_KEY`` (F004). The machine lanes it guards
+        - The verticals' internal keys (F004). Since PRD-274 W5f they are each
+          vertical's product record, not settings. The machine lanes they guard
           (Shopify app-install provisioning, GDPR verticals) fail CLOSED at the
-          endpoint — ``_verify_internal_key`` returns 503 when the key is unset,
+          endpoint — ``_verify_internal_key`` returns 503 with no record,
           with no fail-open branch. In the current deployment model there IS no
           Automatos-owned Shopify app: clients connect their own stores and all
           merchant traffic authenticates with per-workspace widget keys, so the

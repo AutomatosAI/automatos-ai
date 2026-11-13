@@ -1,10 +1,9 @@
-"""PRD-274 Wave 5f (decisions 27 and 28): Shopify moves onto a product record.
+"""PRD-274 Wave 5f (decisions 27–31): Shopify is a product record.
 
-A boot seeds the record once products are on and both the Shopify internal key and the owner workspace are set:
-the key's hash (never its value), the vertical's roster and minted key, and Shopify's mint-on-every-provision. Its
-existing workspaces join it, one per shop: the live one when there is one. The vertical's key check then reads the
-record, so an admin's key replacement takes effect, and a provision joins the shop's workspace to the product (a
-reinstalled shop's new workspace takes it over from the old one), so the owner pays for it.
+The vertical's machine key is its record's (no record: 503), so an admin's key replacement takes effect at once;
+a provision joins the shop's workspace to the product (a reinstalled shop's new workspace takes it over from the
+old one), so the owner pays for it. The environment key and the boot seed that made the record are gone
+(decision 30).
 """
 from __future__ import annotations
 
@@ -19,12 +18,10 @@ from sqlalchemy import text
 from config import config
 from core.models.products import Product
 from integrations.provisioning import PROVISIONER_REGISTRY, provision_vertical
-from integrations.vertical_products import seed_vertical_product
-from services.products import key_hash, mint_key
+from services.products import mint_key
 
 import integrations.shopify  # noqa: F401  # registers the Shopify provisioner
 
-ENV_KEY = "shpss-internal-" + uuid.uuid4().hex
 
 
 @pytest.fixture(scope="module")
@@ -47,21 +44,22 @@ def engine():  # conftest's new_session binds to it
 
 @pytest.fixture
 def world(new_session, monkeypatch):
-    """Products on, the Shopify key and owner set, and no Shopify product or shop workspace before the test
-    (any left are moved aside and put back); everything the test made is swept after."""
-    owner, tag = str(uuid.uuid4()), uuid.uuid4().hex[:8]
+    """Products on, and the Shopify product record (moved aside and put back if one exists); everything the
+    test made is swept after."""
+    owner, tag, key = str(uuid.uuid4()), uuid.uuid4().hex[:8], mint_key()
+    shopify = PROVISIONER_REGISTRY["shopify"]
     s = new_session()
     s.execute(text("INSERT INTO workspaces (id, name) VALUES (CAST(:o AS uuid), 'w5f-owner')"), {"o": owner})
     s.execute(text("UPDATE products SET slug = slug || '-aside-' || :t WHERE slug = 'shopify'"), {"t": tag})
-    s.execute(text("UPDATE workspaces SET settings = settings || jsonb_build_object('vertical', 'aside-' || :t) "
-                   "WHERE settings->>'vertical' = 'shopify' OR settings->>'source' = 'shopify'"), {"t": tag})
+    s.add(Product(slug="shopify", name="Shopify", owner_workspace_id=uuid.UUID(owner), key_hash=key.key_hash,
+                  key_prefix=key.key_prefix, agent_slugs=list(shopify.agent_slugs),
+                  ops_manager_slug=shopify.ops_manager_slug, key_type="public",
+                  key_scopes=list(shopify.key_permissions), reuse_existing_key=False))
     s.commit()
     s.close()
     monkeypatch.setattr(config, "PRODUCTS_ENABLED", True)
-    monkeypatch.setattr(config, "SHOPIFY_INTERNAL_API_KEY", ENV_KEY)
-    monkeypatch.setattr(config, "SHOPIFY_PRODUCT_OWNER_WORKSPACE_ID", owner)
     made = []
-    yield SimpleNamespace(owner=owner, made=made, shop=lambda **kw: _shop(new_session, made, **kw))
+    yield SimpleNamespace(owner=owner, key=key.plaintext, made=made, shop=lambda **kw: _shop(new_session, made, **kw))
     s = new_session.sweep()
     ids = made + [r[0] for r in s.execute(text("SELECT id::text FROM workspaces WHERE settings->>'product_id' IN "
                                                 "(SELECT id::text FROM products WHERE slug = 'shopify')")).all()]
@@ -70,8 +68,6 @@ def world(new_session, monkeypatch):
     s.execute(text("DELETE FROM workspaces WHERE id::text = ANY(:ids)"), {"ids": ids})
     s.execute(text("DELETE FROM products WHERE slug = 'shopify'"))
     s.execute(text("UPDATE products SET slug = 'shopify' WHERE slug = 'shopify-aside-' || :t"), {"t": tag})
-    s.execute(text("UPDATE workspaces SET settings = settings || '{\"vertical\": \"shopify\"}'::jsonb "
-                   "WHERE settings->>'vertical' = 'aside-' || :t"), {"t": tag})
     s.execute(text("DELETE FROM workspaces WHERE id = CAST(:o AS uuid)"), {"o": owner})
     s.commit()
     s.close()
@@ -98,14 +94,6 @@ def _settings(new_session, ws):
         s.close()
 
 
-def _seed(new_session):
-    s = new_session()
-    try:
-        return seed_vertical_product(s, "shopify", PROVISIONER_REGISTRY["shopify"])
-    finally:
-        s.close()
-
-
 def _record(new_session):
     s = new_session()
     try:
@@ -114,68 +102,27 @@ def _record(new_session):
         s.close()
 
 
-@pytest.mark.parametrize("setting, value, reason", [
-    ("PRODUCTS_ENABLED", False, "products are off"),
-    ("SHOPIFY_PRODUCT_OWNER_WORKSPACE_ID", "", "not set"),
-    ("SHOPIFY_INTERNAL_API_KEY", "", "not set"),
-    ("SHOPIFY_PRODUCT_OWNER_WORKSPACE_ID", str(uuid.uuid4()), "not a live workspace"),
-])
-def test_no_record_is_made_until_products_are_on_and_both_settings_name_something_real(
-        new_session, world, monkeypatch, setting, value, reason):
-    monkeypatch.setattr(config, setting, value)
-    outcome = _seed(new_session)
-    assert outcome["product"] is None and reason in outcome["reason"] and _record(new_session) is None
-
-
-def test_the_record_is_seeded_from_the_keys_hash_and_the_verticals_roster(new_session, world):
-    outcome = _seed(new_session)
-    record = _record(new_session)
-    shopify = PROVISIONER_REGISTRY["shopify"]
-    assert outcome["product"] == str(record.id) and str(record.owner_workspace_id) == world.owner
-    assert record.key_hash == key_hash(ENV_KEY) and record.key_prefix == "env" and ENV_KEY not in str(outcome)
-    assert record.agent_slugs == shopify.agent_slugs and record.ops_manager_slug == shopify.ops_manager_slug
-    assert (record.key_type, record.key_scopes, record.reuse_existing_key) == ("public", shopify.key_permissions, False)
-    assert _seed(new_session) == {"vertical": "shopify", "product": str(record.id), "attached": 0}  # once
-
-
-def test_existing_shops_join_one_workspace_per_shop_the_live_one_first(new_session, world):
-    old = world.shop(domain="acme.myshopify.com", active=False, days_old=30)
-    live = world.shop(domain="acme.myshopify.com", active=True, days_old=1)
-    gone = world.shop(domain="gone.myshopify.com", active=False)
-    early = world.shop(domain="early.myshopify.com", generic=False)  # made before the generic flow
-    outcome = _seed(new_session)
-    product = outcome["product"]
-    assert outcome["attached"] == 3
-    assert _settings(new_session, live)["product_id"] == product and "product_id" not in _settings(new_session, old)
-    assert _settings(new_session, gone)["product_id"] == product
-    assert _settings(new_session, early) == {"vertical": "shopify", "shopify_domain": "early.myshopify.com",
-                                                  "product_id": product, "source_external_id": "early.myshopify.com"}
-    assert _seed(new_session)["attached"] == 0
-
-
 def test_the_key_check_reads_the_record_so_a_replaced_key_takes_over(new_session, world):
     from api.shopify import _verify_internal_key
     from api.verticals import _verify_vertical_internal_key
 
-    _seed(new_session)
-    _verify_vertical_internal_key("shopify", authorization=f"Bearer {ENV_KEY}")
-    _verify_internal_key(f"Bearer {ENV_KEY}")
+    _verify_vertical_internal_key("shopify", authorization=f"Bearer {world.key}", db=None)
+    _verify_internal_key(f"Bearer {world.key}", db=None)
     replaced = mint_key()
     s = new_session()
     s.execute(text("UPDATE products SET key_hash = :h WHERE slug = 'shopify'"), {"h": replaced.key_hash})
     s.commit()
     s.close()
-    for stale in (ENV_KEY, "", "Bearer"):
+    for stale in (world.key, "", "Bearer"):
         with pytest.raises(HTTPException) as refused:
-            _verify_internal_key(f"Bearer {stale}")
+            _verify_internal_key(f"Bearer {stale}", db=None)
         assert refused.value.status_code == 401
-    _verify_vertical_internal_key("shopify", authorization=f"Bearer {replaced.plaintext}")
+    _verify_vertical_internal_key("shopify", authorization=f"Bearer {replaced.plaintext}", db=None)
 
 
 def test_a_provisioned_shop_joins_the_product_and_its_owner_pays(new_session, world):
     from services.credits.payer import paying_workspace
 
-    _seed(new_session)
     s = new_session()
     try:
         made = provision_vertical(db=s, vertical="shopify", external_id="new.myshopify.com", name="New", metadata={})
@@ -189,8 +136,10 @@ def test_a_provisioned_shop_joins_the_product_and_its_owner_pays(new_session, wo
 
 def test_a_reinstalled_shops_new_workspace_takes_the_product_over(new_session, world):
     old = world.shop(domain="back.myshopify.com", active=True)
-    _seed(new_session)
     s = new_session()
+    s.execute(text("UPDATE workspaces SET settings = settings || jsonb_build_object('product_id', :p, "
+                   "'source_external_id', 'back.myshopify.com') WHERE id = CAST(:w AS uuid)"),
+              {"p": str(_record(new_session).id), "w": old})
     s.execute(text("UPDATE workspaces SET is_active = false WHERE id = CAST(:w AS uuid)"), {"w": old})  # uninstalled
     s.commit()
     try:
@@ -202,22 +151,45 @@ def test_a_reinstalled_shops_new_workspace_takes_the_product_over(new_session, w
     assert "product_id" not in _settings(new_session, old)
 
 
-def test_the_boot_leader_seeds_it_and_a_failure_never_stops_the_boot(world, monkeypatch, caplog):
-    import integrations.vertical_products as vertical_products
+def test_with_no_record_the_vertical_is_dark(new_session, world):
+    from api.verticals import _verify_vertical_internal_key
 
-    ran = []
-    monkeypatch.setattr(vertical_products, "seed_vertical_products", lambda db: ran.append(db) or [])
-    vertical_products.seed_vertical_products_on_boot()
-    assert len(ran) == 1
+    s = new_session()
+    s.execute(text("UPDATE products SET slug = 'shopify-gone' WHERE slug = 'shopify'"))
+    s.commit()
+    try:
+        with pytest.raises(HTTPException) as dark:
+            _verify_vertical_internal_key("shopify", authorization=f"Bearer {world.key}", db=None)
+        assert dark.value.status_code == 503
+    finally:
+        s.execute(text("UPDATE products SET slug = 'shopify' WHERE slug = 'shopify-gone'"))
+        s.commit()
+        s.close()
 
-    def broken(db):
-        raise RuntimeError("database unreachable")
 
-    monkeypatch.setattr(vertical_products, "seed_vertical_products", broken)
-    vertical_products.seed_vertical_products_on_boot()  # logged, never raised
-    assert "the next boot tries again" in caplog.text
+def test_no_environment_key_or_boot_seed_is_left():
     import inspect
 
+    import integrations.vertical_products as vertical_products
     import main
 
-    assert "seed_vertical_products_on_boot()" in inspect.getsource(main._boot_phase_1_core)
+    for name in ("SHOPIFY_INTERNAL_API_KEY", "BUDSTACKS_INTERNAL_API_KEY", "SHOPIFY_PRODUCT_OWNER_WORKSPACE_ID",
+                 "BUDSTACKS_PRODUCT_OWNER_WORKSPACE_ID"):
+        assert not hasattr(config, name), name
+    assert not hasattr(vertical_products, "seed_vertical_products")
+    assert "vertical_products" not in inspect.getsource(main._boot_phase_1_core)
+
+
+def test_the_key_check_reads_on_the_requests_session_and_opens_no_other(new_session, world, monkeypatch):
+    import core.database.database as database
+    from api.verticals import _verify_vertical_internal_key
+
+    monkeypatch.setattr(database, "SessionLocal", lambda: pytest.fail("the request's session should be used"))
+    s = new_session()
+    try:
+        _verify_vertical_internal_key("shopify", authorization=f"Bearer {world.key}", db=s)
+        with pytest.raises(HTTPException) as refused:
+            _verify_vertical_internal_key("shopify", authorization="Bearer wrong", db=s)
+        assert refused.value.status_code == 401
+    finally:
+        s.close()

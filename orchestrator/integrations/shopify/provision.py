@@ -73,11 +73,6 @@ class ShopifyProvisioner:
     # workspace by settings.shopify_domain, so the generic flow must stamp that
     # key too — not only the canonical source_external_id.
     external_id_key = "shopify_domain"
-    # PRD-274 W5f: Shopify is a product (integrations/vertical_products): its record is seeded from this key, and
-    # the workspace named here owns it and pays for every shop's workspace (Wave 5d).
-    product_name = "Shopify"
-    key_setting = "SHOPIFY_INTERNAL_API_KEY"
-    owner_setting = "SHOPIFY_PRODUCT_OWNER_WORKSPACE_ID"
     # Rotate-on-reprovision is Shopify's documented key-recovery path
     # (runbooks/client-onboarding) — keep minting a fresh key every call.
     reuse_existing_key = False
