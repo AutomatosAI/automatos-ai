@@ -1,8 +1,7 @@
 # PRD-274: Automatos for products — the platform layer other products run on
 
 **Status:** Approved, 9 Nov 2026 (Gerard): numbered PRD-274, with every §8 recommendation decided as recommended.
-Written by Dave, 8 Nov 2026. Waves 0, 2 and 4 are built as draft PRs stacked on this one (§6); Waves 1, 3 and 5
-start next.
+Written by Dave, 8 Nov 2026. Waves 0–4 are built; Wave 5 is built but for 5e, retention through the product (§6).
 
 **Why now:** external tools built to run *on* Automatos have independently hit the same missing layer.
 - **One uses Automatos through its API as a machine customer.** Its platform requirements include a server key that
@@ -324,7 +323,7 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
   pages read everything (§8-11); consolidation never crosses audiences (#1453). F155's stricter widget rule stays,
   with the labels on top of it.
 
-### Wave 5: sub-tenants (next; approved in #1492)
+### Wave 5: sub-tenants (built but for 5e; approved in #1492)
 
 - The product record (§8-3), find-or-create by external id with roster seeding, list, guarded purge; billed to the
   product's owner workspace (§8-2). Both registered verticals move onto it last, each keeping its behaviour: Shopify's
@@ -332,6 +331,17 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
 - The build, one PR each: 5a the `products` table and admin routes; 5b the product's key and find-or-create; 5c list,
   close and restore; 5d the billing roll-up; 5e retention through the product; 5f Shopify, then BudStacks, onto
   product records. Decisions 24–28 below shape them.
+- Built, 13 Nov 2026, behind `PRODUCTS_ENABLED` (off):
+  - 5a, the product record and its admin routes (#1509). A product's owner workspace can't be purged while it
+    owns one.
+  - 5b, find-or-create by the product's key (#1510): one workspace per (product, external id).
+  - 5c, list, close and restore (#1511): `PRODUCT_CLOSE_GRACE_DAYS` (7) and the daily purge
+    `products.purge_closed`. A closed workspace's keys stop at once (`validate_api_key`).
+  - 5d, the billing roll-up (#1512): `services/credits/payer.py`, and `credit_ledger.sub_tenant_id`.
+  - 5f, Shopify (#1513) and BudStacks (#1514) onto product records: a boot seeds each record from its key once its
+    owner setting is set (`SHOPIFY_PRODUCT_OWNER_WORKSPACE_ID`, `BUDSTACKS_PRODUCT_OWNER_WORKSPACE_ID`).
+- Not built yet: **5e, retention through the product.** A new end user of a product's workspace is given the
+  product's `default_retention_days` (decision 28). Until it is built, the default is stored and nothing reads it.
 
 ### Follow-ups from Wave 1 (open)
 
@@ -343,13 +353,22 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
 | Re-send a callback a restart left `pending` (#1462 sends in-process) | Done: a durable job since PRD-276 Wave 1b (#1494); #1482 closed |
 | A key's service user outlives the key and its workspace (no personal data in it) | Done: the purge deletes it with its workspace; revoking keeps it (decision 23) (#1491) |
 
+### Follow-ups from Wave 5 (open)
+
+| Follow-up | Waiting on |
+| --- | --- |
+| 5e: a product's default retention for its new end users (decision 28) | Building it (the next PR) |
+| Delete `SHOPIFY_INTERNAL_API_KEY` and `BUDSTACKS_INTERNAL_API_KEY`, the seed's key read and the key check's environment fallback (decision 30) | A deploy whose boot has seeded each record; then Gerard removes the Railway variables |
+| A per-workspace spend cap for a product's workspaces: today the owner's balance is their only limit | Gerard, before `PRODUCTS_ENABLED` is turned on |
+| Products on in hosted | Gerard: `PRODUCTS_ENABLED`, and an owner for each vertical that becomes a product. Only BudStacks' key is set on Railway, so only BudStacks would |
+
 ## 7. Rollout
 
 - Wave 0 fixes behaviour the platform already promises (a store that says when it failed, recall that reads the
   workspace's facts), so it ships unflagged.
 - Waves 1–5 add capabilities. Each ships behind a flag in `orchestrator/config.py`, off by default, and changes
   nothing for the owner's Auto until enabled: `LEAN_TURNS_ENABLED` (Wave 2), `MEMORY_PROFILES_ENABLED` and
-  `MEMORY_AUDIENCE_ENABLED` (Wave 4).
+  `MEMORY_AUDIENCE_ENABLED` (Wave 4), `PRODUCTS_ENABLED` (Wave 5).
 - Both editions: the local edition needs Waves 1–4 for self-hosted products; Wave 5 matters most to the hosted
   edition.
 - The external tools above are the first products and the reference tests; Shopify moves onto Wave 5's product
@@ -443,6 +462,27 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
     already exists with no `retention_days` keeps their memories until erased, as they consented to. Otherwise
     attaching a workspace to a product (5f does this for Shopify's and BudStacks' existing workspaces), or a product
     changing its default, would have the next sweep delete their older facts and messages, which can't be undone.
+
+### Made while building Wave 5 (13 Nov 2026, Dave)
+
+29. **A vertical's product owner is named in config** (`SHOPIFY_PRODUCT_OWNER_WORKSPACE_ID`,
+    `BUDSTACKS_PRODUCT_OWNER_WORKSPACE_ID`). A boot seeds the record once products are on and both the owner and
+    the key are set. (Not: an admin creating the record by hand with the key's value.)
+30. **The environment keys stay one release** (amends 27). Settings reach code only through `config.py`, migrations
+    included, so the seed reads the key there, and the setting can't go in the same PR. A follow-up deletes it
+    once a deploy has seeded the record (§6, follow-ups).
+31. **A vertical's existing workspaces join its product**: one per external id, the live one first. A reinstalled
+    shop's new workspace takes the product over from the deactivated one.
+
+Flagged in their PRs, for Gerard to confirm:
+
+32. **A closed workspace's keys stop at once**: `ApiKeyService.validate_api_key` refuses a key whose workspace is
+    soft-deleted (#1511). The widget's public-key paths never checked, so a closed workspace's public key worked
+    until its purge.
+33. **A product's find reuses a workspace's active key by default** (`reuse_existing_key`, #1510), so keys don't
+    pile up. Shopify's record sets it off: its re-provision is its key recovery.
+34. **A product's workspace sees only whether its work is paused**, never its owner's plan or balance (#1512).
+    When the owner runs out of credits, all of the product's workspaces pause together.
 
 ## 9. Later
 
