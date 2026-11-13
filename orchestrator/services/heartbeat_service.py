@@ -11,6 +11,7 @@ Dependencies (add to requirements.txt):
 import json
 import logging
 import asyncio
+import functools
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta, timezone
 
@@ -1437,79 +1438,21 @@ class HeartbeatService:
         link_id: Optional[Any],
         status: str,
     ) -> None:
-        """Create a BoardTask for Auto to pick up on its next tick.
+        """Create a BoardTask for Auto to pick up on its next tick
+        (``services.heartbeats.auto_review``). ``report_to=auto`` means "the manager
+        should look at this." A tick that only queued a Claude Code session has nothing
+        to look at yet: its ticket files the review when the session ends (13 Nov 2026).
+        Both run on worker threads, each on a session of its own."""
+        from services.heartbeats.auto_review import file_auto_review, tick_only_queued_a_session
 
-        ``report_to=auto`` means "the manager should look at this." Auto's
-        heartbeat already scans assigned board tasks
-        (heartbeat_service:730-765) and ingests them as priority work, so
-        creating a task here is enough — no new scheduler, no notification.
-        """
-        from core.database.database import SessionLocal
-        from core.models import Agent
-        from core.models.core import BoardTask
-
-        db = SessionLocal()
-        try:
-            auto = (
-                db.query(Agent)
-                .filter(
-                    Agent.workspace_id == workspace_id,
-                    Agent.is_system_agent.is_(True),
-                    Agent.name == "Auto",
-                )
-                .first()
-            )
-            if not auto:
-                logger.warning(
-                    "[Heartbeat] report_to=auto but no canonical Auto found for ws=%s — "
-                    "falling back to silent (DB only).",
-                    workspace_id,
-                )
-                return
-
-            summary_line = (message or "").strip().splitlines()[0] if message else ""
-            summary_line = summary_line[:200] or "no findings"
-
-            description = (
-                f"{source_agent_name or 'Agent'} heartbeat completed (status={status}).\n\n"
-                f"Findings:\n{(message or '(no findings)')[:2000]}\n\n"
-                f"Read the full report with `platform_get_latest_report` "
-                f"(agent_name=\"{source_agent_name}\")."
-            )
-
-            priority = "high" if status in ("error", "critical") else "medium"
-
-            task = BoardTask(
-                workspace_id=workspace_id,
-                title=f"Review {source_agent_name or 'agent'} heartbeat — {summary_line}"[:500],
-                description=description,
-                status="assigned",
-                priority=priority,
-                assigned_agent_id=auto.id,
-                created_by_type="agent",
-                created_by_id=str(source_agent_id) if source_agent_id else None,
-                source_type="heartbeat",
-                source_id=str(link_id) if link_id is not None else None,
-            )
-            db.add(task)
-            db.commit()
-            # Local edition: the operator's heartbeat schedule is the approval
-            # (PRD-234 board_consent) — Auto's review ticket runs on the next tick.
-            from services.board_consent import consent_for_lane_ticket
-            consent_for_lane_ticket(db, workspace_id=workspace_id, task=task, source_type="heartbeat")
-            logger.info(
-                "[Heartbeat] report_to=auto: created BoardTask id=%s assigned to Auto "
-                "(agent_id=%s) for source_agent=%s",
-                task.id, auto.id, source_agent_id,
-            )
-        except Exception as e:
-            db.rollback()
-            logger.error(
-                "[Heartbeat] _route_heartbeat_to_auto failed for ws=%s: %s",
-                workspace_id, e, exc_info=True,
-            )
-        finally:
-            db.close()
+        if await asyncio.to_thread(tick_only_queued_a_session, workspace_id, link_id):
+            logger.info("[Heartbeat] report_to=auto: tick %s only queued a session ticket — "
+                        "its review is filed when the session ends", link_id)
+            return
+        await asyncio.to_thread(functools.partial(
+            file_auto_review, workspace_id=workspace_id, source_agent_id=source_agent_id,
+            source_agent_name=source_agent_name, message=message, link_id=link_id, status=status,
+        ))
 
     async def _route_heartbeat_to_webhook(
         self,

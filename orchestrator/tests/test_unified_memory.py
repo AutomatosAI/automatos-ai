@@ -432,6 +432,51 @@ class TestSleepTimeConsolidation:
         assert deleted == ["2"]
 
     @pytest.mark.asyncio
+    async def test_the_plan_runs_off_the_event_loop(self, service, monkeypatch):
+        """13 Nov 2026, VPS ``loop-watchdog``: planning a workspace's memories pairwise
+        (difflib) on the event loop froze every request for 12-14 s each hour. The plan
+        runs in a worker thread; its result is applied exactly as before."""
+        import threading
+
+        from modules.memory.operations import contradiction
+
+        real_plan = contradiction.plan_consolidation
+        planned_on = []
+
+        def _plan(memories, *args, **kwargs):
+            planned_on.append(threading.get_ident())
+            return real_plan(memories, *args, **kwargs)
+
+        monkeypatch.setattr(contradiction, "plan_consolidation", _plan)
+        mems = [
+            {"id": "1", "memory": "InBuildUK is a UK smoke ventilation contractor.",
+             "created_at": "2026-06-10", "metadata": {"importance": 0.9}},
+            {"id": "2", "memory": "InBuildUK is a UK smoke ventilation contractor.",
+             "created_at": "2026-06-01", "metadata": {"importance": 0.4}},
+        ]
+        with patch.object(service, "get_all_memories", new_callable=AsyncMock, return_value=mems), \
+             patch.object(service, "delete_memory", new_callable=AsyncMock, return_value=True) as mock_del:
+            result = await service.run_sleep_time_consolidation(workspace_id=WS_ID)
+
+        assert planned_on and planned_on[0] != threading.get_ident()
+        assert result == {"workspaces_processed": 1, "merged": 1, "superseded": 0, "errors": 0}
+        mock_del.assert_awaited_once_with("2", WS_ID)
+
+    @pytest.mark.asyncio
+    async def test_one_failing_workspace_is_counted_and_the_rest_still_run(self, service):
+        async def _get(ws_id, limit=200):
+            if ws_id == "broken":
+                raise RuntimeError("store down")
+            return []
+
+        with patch.object(service, "_get_active_workspace_ids_sync", return_value=["broken", WS_ID]), \
+             patch.object(service, "get_all_memories", side_effect=_get) as mock_get:
+            result = await service.run_sleep_time_consolidation()
+
+        assert result == {"workspaces_processed": 2, "merged": 0, "superseded": 0, "errors": 1}
+        assert [c.args[0] for c in mock_get.call_args_list] == ["broken", WS_ID]
+
+    @pytest.mark.asyncio
     async def test_empty_workspace_is_noop(self, service):
         with patch.object(service, "get_all_memories", new_callable=AsyncMock) as mock_get, \
              patch.object(service, "delete_memory", new_callable=AsyncMock) as mock_del:

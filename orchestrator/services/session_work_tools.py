@@ -310,7 +310,9 @@ GET_LATEST_REPORT_SPEC: Dict[str, Any] = {
     "action": "platform_get_latest_report",
     "description": (
         "Read another agent's most recent report in this workspace, e.g. the research a writer "
-        "builds on. Name the agent; optionally the kind of report."
+        "builds on. Name the agent; optionally the kind of report (research for a digest: the "
+        "latest report of an agent with a heartbeat is often that). The text files the report's "
+        "ticket saved come with it, under files: read them there, never by a path."
     ),
     "input_schema": _schema({
         "agent_name": _string("The agent whose report to read."),

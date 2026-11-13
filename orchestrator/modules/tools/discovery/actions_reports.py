@@ -132,6 +132,7 @@ def _register_get_latest_report(registry: ActionRegistry) -> None:
             "Read the most recent report from a specific agent. Use to check another "
             "agent's latest output before taking action (e.g. reading research before "
             "writing a newsletter). For historical reports, this returns only the latest one. "
+            "The text files the report's ticket saved come with it, under files. "
             "Provide agent_name or agent_id."
         ),
         category="reports",

@@ -37,6 +37,14 @@ FILE_READ_TOOLS = frozenset({"Read", "Glob", "Grep", "LS"})
 FILE_WRITE_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
 SHELL_TOOLS = frozenset({"Bash"})
 WEB_TOOLS = frozenset({"WebFetch", "WebSearch"})
+# Claude Code 2.1.32x reads a page only through its built-in ``web-fetch`` subagent:
+# a direct WebFetch answers "not available directly in this context — use the Agent
+# tool with subagent_type: web-fetch". Denying every Agent call (13 Nov 2026) left the
+# News agent's digests resting on search snippets, with no page ever opened. That one
+# subagent is a web read; each call it makes still comes through this gate. Every
+# other subagent stays UNKNOWN, which the policy denies.
+SUBAGENT_TOOLS = frozenset({"Agent", "Task"})
+WEB_SUBAGENTS = frozenset({"web-fetch"})
 # ToolSearch only fetches a deferred tool's schema; the tool it loads is still judged
 # per call. Denying it (night 1, 2026-09-18) meant the bridge's own mcp__automatos__*
 # tools could never be loaded — sessions could not submit_report or update_ticket.
@@ -322,6 +330,8 @@ class ClaudeAdapter(PresetAdapter):
             return ToolIntent(tool=tool_name, cls=ToolClass.SHELL, command=str(ti.get("command") or ""))
         if tool_name in WEB_TOOLS:
             return ToolIntent(tool=tool_name, cls=ToolClass.WEB, paths=tuple(str(ti[k]) for k in ("url", "query") if ti.get(k)))
+        if tool_name in SUBAGENT_TOOLS and str(ti.get("subagent_type") or "") in WEB_SUBAGENTS:
+            return ToolIntent(tool=tool_name, cls=ToolClass.WEB)
         if tool_name in BENIGN_TOOLS:
             return ToolIntent(tool=tool_name, cls=ToolClass.BENIGN)
         if tool_name in PLAN_TOOLS:
@@ -344,7 +354,8 @@ class ClaudeAdapter(PresetAdapter):
 
 __all__ = [
     "BENIGN_TOOLS", "ClaudeAdapter", "FILE_READ_TOOLS", "FILE_WRITE_TOOLS", "MCP_CONFIG_FILENAME",
-    "MCP_SERVER_NAME", "MCP_TOOL_PREFIX", "SHELL_TOOLS", "WEB_TOOLS", "build_mcp_config", "write_mcp_config",
+    "MCP_SERVER_NAME", "MCP_TOOL_PREFIX", "SHELL_TOOLS", "SUBAGENT_TOOLS", "WEB_SUBAGENTS", "WEB_TOOLS",
+    "build_mcp_config", "write_mcp_config",
     "build_settings", "claude_state_path", "has_completed_onboarding", "is_directory_trusted",
     "read_claude_state", "record_directory_trust", "subject_of_input", "write_settings",
 ]
