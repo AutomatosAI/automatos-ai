@@ -162,7 +162,8 @@ def meter_pending(db: Any) -> int:
         after_id = calls[-1].usage_id
     for workspace_id in sorted(touched):
         check_alerts(db, workspace_id)
-    for workspace_id in sorted(spent_in - touched):  # a product's workspace: its cap notices (caps.py)
+    products_workspaces = {ws for ws, payer in paying_workspaces(db, spent_in).items() if payer != ws}
+    for workspace_id in sorted(products_workspaces):  # a product's workspace: its cap notices (caps.py)
         check_cap_notices(db, workspace_id)
     return debited
 

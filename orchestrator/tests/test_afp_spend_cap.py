@@ -198,3 +198,61 @@ def test_a_capped_turn_reports_its_own_code():
 
     error = describe_turn_error(routing.WorkspaceCapReachedError())
     assert error.code == "workspace_cap_reached" and "monthly limit" in error.message
+
+
+def test_of_two_runs_that_see_the_same_new_level_only_one_tells_the_owner(new_session, world, monkeypatch):
+    told = []
+    monkeypatch.setattr(caps, "_notify_owner", lambda db, ws, level, spent, cap: told.append(level))
+    _spend(new_session, world.customer, 85)
+    late = new_session()
+    try:
+        assert late.execute(caps._SPENT, {"ws": world.customer}).first()[1] == 0  # it read the row at level 0
+        s = new_session()
+        assert caps.check_cap_notices(s, world.customer) == caps.LEVEL_NEAR  # the other run tells the owner
+        s.close()
+        # The late run now makes the same move: the conditional update matches nothing, so it sends nothing.
+        assert late.execute(caps._NOTIFIED, {"ws": world.customer, "level": caps.LEVEL_NEAR}).rowcount == 0
+        late.rollback()
+    finally:
+        late.close()
+    assert told == [caps.LEVEL_NEAR]
+
+
+def test_a_changed_cap_starts_the_months_notices_again(new_session, world, monkeypatch):
+    from api.products import router
+    from core.database.database import get_db
+
+    told = []
+    monkeypatch.setattr(caps, "_notify_owner", lambda db, ws, level, spent, cap: told.append((level, cap)))
+    _spend(new_session, world.customer, 100)
+    s = new_session()
+    caps.check_cap_notices(s, world.customer)
+    s.close()
+    app = FastAPI()
+    app.include_router(router)
+
+    def db():
+        session = new_session()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    app.dependency_overrides[get_db] = db
+    TestClient(app).patch(f"/api/products/{world.product}/workspaces/{world.customer}", json={"credit_cap": 120},
+                          headers={"Authorization": f"Bearer {world.key}"})
+    _spend(new_session, world.customer, 20)
+    s = new_session()
+    caps.check_cap_notices(s, world.customer)
+    s.close()
+    assert told == [(caps.LEVEL_REACHED, 100), (caps.LEVEL_REACHED, 120)]
+
+
+def test_a_new_month_starts_with_nothing_spent_and_no_notice_sent(new_session, world):
+    s = new_session()
+    s.execute(text("INSERT INTO product_workspace_spend (workspace_id, month, credits, notified_level) VALUES "
+                   "(CAST(:w AS uuid), CAST(date_trunc('month', now() AT TIME ZONE 'utc') - interval '1 month' AS date), "
+                   "100, 2)"), {"w": world.customer})
+    s.commit()
+    s.close()
+    assert _left(new_session, world.customer) == 100  # last month's spend and notices don't count this month

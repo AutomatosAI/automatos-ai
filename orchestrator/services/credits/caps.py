@@ -10,10 +10,12 @@ calendar month (UTC), so one customer can't spend the owner's whole balance and 
   ``product_workspace_spend`` in the debit's own transaction (``payer.debit``), so ``cap_left`` reads one row.
 - **The stop** (``cap_left``): the credit gate makes an ask's budget the smaller of the owner's spendable credits
   and the cap left, and refuses with ``WorkspaceCapReachedError`` when none is (``gate.py``); background work and
-  an Auto Live call check it before they start. As with the balance, a run overshoots by at most one call.
+  an Auto Live call check it before they start. As with the balance, one run overshoots by at most one call, but
+  each ask takes the cap left at its first call as its budget, so N asks running at once can each spend it: the
+  cap is a monthly limit, not a hard real-time one.
 - **The notices** (``check_cap_notices``): the owner is told once a month when a workspace reaches 80% of its cap,
   and once when it reaches it, on its ``credits_low`` / ``credits_exhausted`` destinations, naming the workspace
-  by its external id.
+  by its external id. A changed cap starts them again (``cap_changed``).
 
 Calls on a workspace's own keys are never metered, so never capped.
 """
@@ -37,7 +39,11 @@ _SPENT = text(f"SELECT credits, notified_level FROM product_workspace_spend "  #
 _COUNT = text(f"INSERT INTO product_workspace_spend (workspace_id, month, credits) "  # noqa: S608 — a constant
               f"VALUES (CAST(:ws AS uuid), {_MONTH}, :credits) ON CONFLICT (workspace_id, month) "
               f"DO UPDATE SET credits = product_workspace_spend.credits + EXCLUDED.credits")
+# Conditional, so of two meter runs that both see a new level only the one that moves the row sends the notice.
 _NOTIFIED = text(f"UPDATE product_workspace_spend SET notified_level = :level "  # noqa: S608 — a constant
+                 f"WHERE workspace_id = CAST(:ws AS uuid) AND month = {_MONTH} AND notified_level < :level")
+# A changed cap starts the month's notices again, so the owner hears when the workspace reaches the new one.
+_RENOTIFY = text(f"UPDATE product_workspace_spend SET notified_level = 0 "  # noqa: S608 — a constant
                  f"WHERE workspace_id = CAST(:ws AS uuid) AND month = {_MONTH}")
 
 
@@ -83,6 +89,11 @@ def under_cap(db: Any, workspace_id: Any) -> bool:
     return left is None or left > 0
 
 
+def cap_changed(db: Any, workspace_id: Any) -> None:
+    """A workspace's cap changed: this month's notices start again (no commit)."""
+    db.execute(_RENOTIFY, {"ws": str(workspace_id)})
+
+
 def count_spend(db: Any, workspace_id: Any, credits: int) -> None:
     """Adds a debit's credits to the workspace's month (no commit: the debit's transaction)."""
     if credits > 0:
@@ -102,13 +113,17 @@ def check_cap_notices(db: Any, workspace_id: Any) -> Optional[int]:
 
     workspace = db.query(Workspace).get(workspace_id)
     cap = monthly_cap(db, workspace) if workspace is not None else None
+    if cap is None:
+        return None
     row = db.execute(_SPENT, {"ws": str(workspace_id)}).first()
-    if cap is None or row is None:
+    if row is None:
         return None
     level = _level(int(row[0]), cap)
     if level <= int(row[1]):
         return None
-    db.execute(_NOTIFIED, {"ws": str(workspace_id), "level": level})
+    if db.execute(_NOTIFIED, {"ws": str(workspace_id), "level": level}).rowcount == 0:
+        db.rollback()  # another run recorded this level first, and tells the owner
+        return None
     db.commit()
     _notify_owner(db, workspace, level, int(row[0]), cap)
     return level

@@ -122,7 +122,7 @@ def _audit(db: Any, product: Product, workspace: Workspace, action: str) -> None
 def set_cap(db: Any, product: Product, workspace_id: Any, cap: Optional[int]) -> Dict[str, Any]:
     """Sets the workspace's own monthly credit cap (None: back to its product's default), and answers it with
     the cap in force and what it spent this month (``services/credits/caps``). Commits."""
-    from services.credits.caps import SETTING, monthly_cap, spent_this_month
+    from services.credits.caps import SETTING, cap_changed, monthly_cap, spent_this_month
 
     workspace = theirs(db, product, workspace_id)
     settings = dict(workspace.settings or {})
@@ -130,6 +130,8 @@ def set_cap(db: Any, product: Product, workspace_id: Any, cap: Optional[int]) ->
         settings.pop(SETTING, None)
     else:
         settings[SETTING] = int(cap)
+    if settings.get(SETTING) != (workspace.settings or {}).get(SETTING):
+        cap_changed(db, workspace.id)
     workspace.settings = settings
     db.commit()
     return {**view(workspace), "monthly_cap": monthly_cap(db, workspace),
