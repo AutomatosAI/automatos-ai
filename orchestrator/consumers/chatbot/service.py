@@ -1204,71 +1204,13 @@ class StreamingChatService:
         Returns (updated use_tools, composio_result). F105: both lookups run
         off the loop (core.composio.off_loop).
         """
-        from core.composio.off_loop import ComposioLookupTimeout, composio_lookup
+        from consumers.chatbot.app_lookup import apply_app_lookup, asks_the_apps, tool_hints_of
+        from consumers.chatbot.early_lookups import the_turns_app_lookup
 
-        _composio_result = None
-        _tool_hints = (
-            complexity_assessment.tool_hints
-            if complexity_assessment and hasattr(complexity_assessment, 'tool_hints')
-            else []
-        )
-        try:
-            if latest_text and agent_id and self.workspace_id and not skip_composio:
-                from modules.tools.services.composio_tool_service import ComposioToolService
-
-                workspace_id = self.workspace_id
-                _search_prompt = (
-                    " ".join(_tool_hints) if _tool_hints else latest_text
-                )
-                _composio_result = await composio_lookup(
-                    lambda db: ComposioToolService(db).get_tools_for_step(
-                        agent_id=agent_id,
-                        workspace_id=workspace_id,
-                        task_prompt=_search_prompt,
-                        tool_hints=_tool_hints,
-                    ),
-                    step=f"chat turn (agent {agent_id}): tool search",
-                )
-                if _composio_result and _composio_result.tools:
-                    if use_tools:
-                        use_tools = [
-                            t for t in use_tools
-                            if t.get("function", {}).get("name") != "composio_execute"
-                        ] + _composio_result.tools
-                    else:
-                        use_tools = _composio_result.tools
-                    from api.recipe_executor import _composio_scope_message
-                    llm_messages.insert(2, {
-                        "role": "system",
-                        "content": _composio_scope_message(_composio_result.app_names),
-                    })
-                    logger.info(
-                        f"[ComposioToolService] Agent {agent_id}: strategy={_composio_result.strategy} "
-                        f"actions={len(_composio_result.action_set)} search_ms={_composio_result.search_ms}"
-                    )
-                else:
-                    from modules.tools.services.composio_hint_service import ComposioHintService
-
-                    hint_result = await composio_lookup(
-                        lambda db: ComposioHintService(db).build_hints(
-                            agent_id=agent_id,
-                            prompt=latest_text,
-                            workspace_id=workspace_id,
-                        ),
-                        step=f"chat turn (agent {agent_id}): action hints",
-                    )
-                    if hint_result.hint_lines:
-                        llm_messages.insert(2, {"role": "system", "content": "\n".join(hint_result.hint_lines)})
-                        logger.info(
-                            f"[Composio Hints fallback] Agent {agent_id}: strategy={hint_result.strategy_used} "
-                            f"apps={hint_result.allowed_apps} matches={len(hint_result.matched_actions)}"
-                        )
-        except ComposioLookupTimeout:
-            pass  # warned where it gave up; the turn goes on without Composio tools
-        except Exception as exc:
-            logger.warning(f"Composio tool injection failed for agent {agent_id}: {exc}")
-
-        return use_tools, _composio_result
+        if not asks_the_apps(latest_text, agent_id, self.workspace_id, skip_composio):
+            return use_tools, None
+        lookup = await the_turns_app_lookup(self, agent_id, latest_text, tool_hints_of(complexity_assessment))
+        return apply_app_lookup(llm_messages, use_tools, lookup, agent_id), lookup.found
 
     def _bind_turn_person(self, user_id: Optional[int]) -> None:
         """Remember who this turn is for.
@@ -1420,29 +1362,13 @@ class StreamingChatService:
         """F085-A: search the documents for a question (N17-11: or a drafting turn)
         before the first model call. Yields the activity-trail frames; appends the cited passages to
         ``llm_messages`` and what ran to ``prefetched``. Never breaks a turn."""
-        from consumers.chatbot.knowledge_prefetch import PREFETCH_TOOL, prefetch, searched_first
+        from consumers.chatbot.early_lookups import the_turns_prefetch
+        from consumers.chatbot.knowledge_prefetch import PREFETCH_TOOL, searched_first
 
         if (how := searched_first(latest_text)) is None:  # P256-FIX-N17-11 (F443): a question, or a drafting turn
             return
-
-        async def _search(args: Dict[str, Any]) -> Dict[str, Any]:
-            from services.draft_guides import owners_own  # F269/F287 (night 8): never an agent's writing as facts
-            result = owners_own(self.db, await self.tool_router.execute_and_format(
-                tool_name=PREFETCH_TOOL, tool_args=args,
-                agent_id=agent_runtime.agent_id if hasattr(agent_runtime, "agent_id") else 1,
-                workspace_id=self.workspace_id,
-                original_intent=latest_text,
-                caller_context={"user_query": latest_text, "conversation_id": chat_id, "retrieval_first": True},
-            ), self.workspace_id)
-            self._collect_tool_retrieval(PREFETCH_TOOL, result)
-            return result
-
         try:
-            found = await prefetch(
-                self.db, self.workspace_id, latest_text, search=_search, viewer=getattr(self, "_viewer_subject_id", None),
-                enabled=config.CHATBOT_KNOWLEDGE_PREFETCH, **how,
-                limit=config.KNOWLEDGE_PREFETCH_PASSAGES, min_score=config.KNOWLEDGE_PREFETCH_MIN_SCORE,
-            )
+            found = await the_turns_prefetch(self, latest_text, agent_runtime, chat_id, how)
         except Exception:
             logger.warning("[F085] retrieval first skipped", exc_info=True)
             return
