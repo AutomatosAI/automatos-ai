@@ -7,6 +7,7 @@ log. On any other turn every write goes where it always has.
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -126,8 +127,6 @@ def test_a_write_their_erase_overtook_is_taken_back(consent):
 
 def _session_service():
     """The real ``update_session`` on a dict standing in for Redis."""
-    from types import SimpleNamespace
-
     from modules.memory.unified_memory_service import UnifiedMemoryService
 
     service = object.__new__(UnifiedMemoryService)
@@ -173,3 +172,80 @@ def test_any_other_turns_session_is_written_as_always(consent):
     consent.extend([False, False])  # never asked: no end user's turn
     _update(service)
     assert SESSION in saved and consent == [False, False]
+
+
+@pytest.fixture
+def no_wait(monkeypatch):
+    monkeypatch.setattr("core.security.end_user_turn.CLEAR_RETRY_SECONDS", 0)
+    recorded = []
+    monkeypatch.setattr("core.security.end_user_turn._record_left_session", lambda *a: recorded.append(a))
+    return recorded
+
+
+def test_a_consent_check_that_fails_after_the_write_clears_the_session_and_raises(monkeypatch):
+    service, saved = _session_service()
+    answers = iter([True])
+
+    async def consented(end_user):
+        try:
+            return next(answers)
+        except StopIteration:
+            raise ConnectionError("database unreachable") from None
+
+    monkeypatch.setattr("core.security.end_user_turn._consented", consented)
+    with end_user_turn(PLAYER), pytest.raises(ConnectionError):
+        _update(service)
+    assert saved == {}
+
+
+def test_a_durable_write_whose_consent_check_fails_is_taken_back_and_raised(monkeypatch):
+    store, seen = _captured_add()
+    deleted = []
+
+    async def delete(memory_ids, user_id, workspace_id=None):
+        deleted.append(tuple(memory_ids))
+
+    async def consented(end_user):
+        if seen:
+            raise ConnectionError("database unreachable")
+        return True
+
+    store.delete = delete
+    monkeypatch.setattr("core.security.end_user_turn._consented", consented)
+    with end_user_turn(PLAYER), pytest.raises(ConnectionError):
+        asyncio.run(store.add([{"role": "user", "content": "x"}], user_id=f"mem:{WS}", workspace_id=WS))
+    assert deleted == [("existing",)]
+
+
+def _flaky(service, saved, failures):
+    """Redis's delete fails ``failures`` times, then works."""
+    conn = service._get_redis().get_redis()
+    tries = []
+
+    def delete(*keys):
+        tries.append(keys)
+        if len(tries) <= failures:
+            raise ConnectionError("redis unreachable")
+        return [saved.pop(k, None) for k in keys]
+
+    service._get_redis = lambda: SimpleNamespace(get_redis=lambda: SimpleNamespace(get=conn.get, setex=conn.setex,
+                                                                                    delete=delete))
+    return tries
+
+
+def test_a_session_clear_that_fails_is_tried_again(consent, no_wait):
+    service, saved = _session_service()
+    tries = _flaky(service, saved, failures=2)
+    consent.extend([True, False])
+    with end_user_turn(PLAYER):
+        _update(service)
+    assert saved == {} and len(tries) == 3 and no_wait == []
+
+
+def test_a_session_that_cant_be_cleared_is_recorded_and_raised(consent, no_wait):
+    service, saved = _session_service()
+    tries = _flaky(service, saved, failures=99)
+    consent.extend([True, False])
+    with end_user_turn(PLAYER), pytest.raises(ConnectionError):
+        _update(service)
+    assert SESSION in saved and len(tries) == 3 and len(no_wait) == 1 and no_wait[0][1] == SESSION
