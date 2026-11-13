@@ -360,8 +360,35 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
 | Follow-up | Waiting on |
 | --- | --- |
 | Delete `SHOPIFY_INTERNAL_API_KEY` and `BUDSTACKS_INTERNAL_API_KEY`, the seed's key read and the key check's environment fallback (decision 30) | A deploy whose boot has seeded each record; then Gerard removes the Railway variables |
-| A per-workspace spend cap for a product's workspaces: today the owner's balance is their only limit | Gerard, before `PRODUCTS_ENABLED` is turned on |
+| A per-workspace spend cap for a product's workspaces: today the owner's balance is their only limit | Gerard, before `PRODUCTS_ENABLED` is turned on: the proposal below |
 | Products on in hosted | Gerard: `PRODUCTS_ENABLED`, and an owner for each vertical that becomes a product. Only BudStacks' key is set on Railway, so only BudStacks would |
+
+### Proposal: a spend cap per product workspace (for Gerard to decide)
+
+**The gap.** Since 5d, a product's workspaces spend their owner's credits, and the owner's balance is the only
+limit. One customer's runaway agent, a loop, or a scraper behind a storefront can spend the whole balance, and then
+every one of the product's workspaces pauses together (decision 34). A product needs to say "this customer may
+spend up to N".
+
+**Recommendation: a monthly credit cap per product workspace, checked at the credit gate.**
+
+| Question | Recommendation | Why, and the alternative |
+| --- | --- | --- |
+| What is capped | Credits spent in a product's workspace per calendar month (UTC), by the meter and Auto Live calls together | The owner thinks in credits, and the ledger already records each workspace's spend (`sub_tenant_id`, 5d). (Not: a daily cap, which suits abuse but not a customer's plan; it can come later as a second number) |
+| Who sets it | The product record carries a default (`workspace_monthly_credit_cap`, set by an admin as today's product fields). The product's key overrides it per workspace (`PATCH /api/products/{id}/workspaces/{workspace_id}`, `credit_cap`), since the product knows its own customers' plans | The product sells the tiers; the owner sets the floor. (Not: the owner only, which would need the owner's members to manage another company's customers, against decision 26) |
+| No cap set | No cap, as today: the owner's balance limits | A product opts in. Gerard's call: a required default would make every new product pick a number first |
+| Where it is enforced | At the credit gate (`before_platform_call`), as the balance is: an ask's budget becomes the smaller of the owner's spendable credits and the workspace's cap left this month (`asks.set_budget`), so a long run stops when either is reached. Background work (heartbeats, schedules) checks it too (`background_allowed`) | One place, the same "at most one call over" overrun the balance has today. (Not: refusing at the meter, which would be after the money is spent) |
+| How it is counted | A running total per workspace and month, `product_workspace_spend` (workspace, month, credits), moved in the same transaction as each debit (`payer.debit`), so the gate reads one row. The ledger stays the record; the total can be rebuilt from it | One indexed row per check. (Not: summing the ledger on every ask, which grows with the month) |
+| What is seen | A capped call fails as a paused one does, with its own code `workspace_cap_reached` (402), so the product can tell its customer "your plan's limit is reached" and offer its own upgrade. The owner gets one notice when a workspace reaches 80% and one at 100% (the `credits_low` / `credits_exhausted` destinations), naming the workspace by its external id | The product owns its customer's experience; the owner sees its exposure. Own-key calls are never capped, as they are never metered |
+| The owner's view | The product console (§9) later; now, `by_product_workspace` in the owner's usage (5d) shows each workspace's month against its cap | No new screen before the console |
+
+**What it takes:** one migration (the cap on `products`, the running total table), the gate and background checks,
+the per-workspace route, the two notices, and the error code; about one PR. It goes before `PRODUCTS_ENABLED` is
+turned on for BudStacks.
+
+**For Gerard:** yes or no to the recommendation; the default when a product sets none (none, or a number); and
+whether the 80% notice should also go to the product (a signed callback, as run callbacks are) as well as to the
+owner.
 
 ## 7. Rollout
 
