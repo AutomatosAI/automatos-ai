@@ -409,12 +409,15 @@ class _FakeScheduler:
 def test_register_adds_one_daily_job_with_no_args():
     scheduler = _FakeScheduler()
 
-    assert retention.register(scheduler) is True
+    from core.jobs import schedules
+    from core.jobs.registry import CATCH_UP_LATEST, kind_of
 
-    (job,) = scheduler.jobs
-    assert job["func"] is retention.run_prune and job["id"] == retention.PRUNE_JOB_ID
-    assert "args" not in job and "kwargs" not in job
-    assert (job["replace_existing"], job["max_instances"], job["coalesce"]) == (True, 1, True)
+    assert retention.register(scheduler) is True  # PRD-276 Wave 2c: a platform schedule queues the prune
+
+    job, catch_up = scheduler.jobs
+    assert job["func"] is schedules.fire and job["id"] == schedules.job_id(retention.PRUNE_KIND, schedules.PLATFORM)
+    assert job["args"] == [retention.PRUNE_KIND, schedules.PLATFORM] and catch_up["trigger"] == "date"
+    assert kind_of(retention.PRUNE_KIND).catch_up == CATCH_UP_LATEST
     after = datetime(2026, 10, 31, 5, 0, tzinfo=timezone.utc)
     before = datetime(2026, 10, 31, 4, 0, tzinfo=timezone.utc)
     assert job["trigger"].get_next_fire_time(None, after) == datetime(2026, 11, 1, 4, 45, tzinfo=timezone.utc)
@@ -434,5 +437,7 @@ def test_start_schedule_reconcile_registers_the_prune_on_the_leader(monkeypatch)
 
     assert asyncio.run(schedule_reconcile.start_schedule_reconcile(scheduler)) is True
 
-    jobs = [job for job in scheduler.jobs if job["id"] == retention.PRUNE_JOB_ID]
-    assert len(jobs) == 1 and jobs[0]["func"] is retention.run_prune
+    from core.jobs import schedules
+
+    jobs = [job for job in scheduler.jobs if job["id"] == schedules.job_id(retention.PRUNE_KIND, schedules.PLATFORM)]
+    assert len(jobs) == 1 and jobs[0]["func"] is schedules.fire

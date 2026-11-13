@@ -306,7 +306,8 @@ class TestTick:
             sr.RECONCILE_JOB_ID, "socials_plan_tick", "socials_results_tick",
             "schedule:push.receipts:platform", "schedule:push.receipts:platform:catch-up",
             "schedule:mobile.digest:platform", "schedule:mobile.digest:platform:catch-up",
-            "proactive_runs_prune", "workspace_export_sweep",
+            "schedule:proactive.runs_prune:platform", "schedule:proactive.runs_prune:platform:catch-up",
+            "schedule:workspace_move.export_sweep:platform", "schedule:workspace_move.export_sweep:platform:catch-up",
         ]
         assert passes == [fake]
 

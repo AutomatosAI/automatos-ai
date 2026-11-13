@@ -15,9 +15,14 @@ table degrades gracefully to the fail-closed gate, it must not crash boot.
 
 import asyncio
 import logging
-from typing import Optional
+from datetime import timezone
+from typing import Any, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+from core.jobs.registry import job_handler
+
+COMPOSIO_SYNC_KIND = "composio.action_sync"
 
 logger = logging.getLogger(__name__)
 
@@ -25,27 +30,21 @@ logger = logging.getLogger(__name__)
 class ComposioSyncScheduler:
     """Registers the daily Composio action-metadata sync on the shared scheduler."""
 
-    JOB_ID = "composio_action_sync_daily"
 
     def __init__(self):
         self._scheduler: Optional[AsyncIOScheduler] = None
 
     async def start(self, scheduler: AsyncIOScheduler):
-        """Register the Composio metadata sync cron job."""
+        """Declare the Composio metadata sync's daily platform schedule (PRD-276 Wave 2c: a
+        ``composio.action_sync`` job; catch-up ``latest``, one sync after downtime refreshes it all)."""
+        from apscheduler.triggers.cron import CronTrigger
+
         from config import config as app_config
+        from core.jobs.schedules import PLATFORM, schedule
 
         self._scheduler = scheduler
         hour = int(getattr(app_config, "COMPOSIO_SYNC_HOUR_UTC", 4))
-
-        self._scheduler.add_job(
-            self._run_sync,
-            "cron",
-            hour=hour,
-            minute=0,
-            id=self.JOB_ID,
-            replace_existing=True,
-            max_instances=1,
-        )
+        schedule(scheduler, COMPOSIO_SYNC_KIND, PLATFORM, CronTrigger(hour=hour, minute=0, timezone=timezone.utc))
         logger.info("[ComposioSync] Scheduled daily metadata sync at %02d:00 UTC", hour)
 
         # PRD-194 S6 (P2-13): startup assertion — connected apps with an
@@ -89,6 +88,7 @@ class ComposioSyncScheduler:
             )
         except Exception:
             logger.exception("[ComposioSync] Daily sync failed")
+            raise  # PRD-276: the queue retries a failed sync with the kind's backoff
 
 
 _instance: Optional[ComposioSyncScheduler] = None
@@ -99,3 +99,9 @@ def get_composio_sync_scheduler() -> ComposioSyncScheduler:
     if _instance is None:
         _instance = ComposioSyncScheduler()
     return _instance
+
+
+@job_handler(COMPOSIO_SYNC_KIND, concurrency=1, workspace_concurrency=1)
+async def run_composio_sync(job: Any) -> None:
+    """A daily slot."""
+    await get_composio_sync_scheduler()._run_sync()

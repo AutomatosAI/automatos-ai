@@ -296,8 +296,18 @@ This is PRD-161's dispatch loop, generalised to any `kind` [T: the primitives it
   - a webhook destination gets `X-Automatos-Delivery`, the job's id, on every attempt;
   - the dashboard's test send makes one attempt per destination and answers at once.
 - **2a, built (#1499).** A Postgres advisory lock, on a dedicated connection, picks the process that runs the scheduler, in place of the `/tmp` file lock; a process that loses it pauses its scheduler, and a waiting one takes over within `SCHEDULER_LEADER_CHECK_SECONDS`. APScheduler's job store is in memory.
-- **2b, in review.** The `jobs.job_schedules` cursors, each kind's catch-up policy (`all`, capped by `JOBS_CATCH_UP_MAX`; `latest`; `none`), and `schedule()`, which declares a schedule whose timer only queues. Credit metering is its first consumer: three platform schedules.
-- **2c:** the other scheduled jobs moved onto schedules, a few kinds at a time, each with its catch-up policy.
+- **2b, built (#1500).** The `jobs.job_schedules` cursors, each kind's catch-up policy (`all`, capped by `JOBS_CATCH_UP_MAX`; `latest`; `none`), and `schedule()`, which declares a schedule whose timer only queues. Credit metering is its first consumer: three platform schedules.
+- **2c, in batches.** The other scheduled jobs moved onto schedules, each with its catch-up policy:
+  - **moved** (all catch up `latest`; each sweeps everything, so one run after downtime covers the missed ones): the run-callback sweep, the end-user retention sweep, push receipts and the mobile digest (#1501); the eight memory jobs (#1502); the edge builder, the Composio action sync, field-memory promotion, the proactive-runs prune and the workspace export sweep (#1503);
+  - **still to move, with a decision each:** the theme revocation pull (`theme_revocation_pull`; its first pull runs 60 s after boot, which anchored slots would change), the watch ticker (`watch_ticker_tick`, every `WATCHER_TICK_SECONDS`), the socials plan and results ticks (`socials_plan_tick`, `socials_results_tick`), the two HARNESS sweeps (`harness_sweep`, and the grant sweep on `HARNESS_GRANT_SWEEP_CRON`), and the per-workspace schedules: agent and orchestrator heartbeats, Playbooks, agent-scheduled tasks and scheduled social posts. For each of those, a slot missed during downtime needs a rule (run it late, run only the latest, or skip it) that is a product choice, not a technical one;
+  - **with Wave 4:** the task reconciler (`task_reconciler_tick`, every `TASK_RECONCILE_INTERVAL_SECONDS`), which finds stalled board tasks. Whether it moves depends on §10-5, board tasks as jobs;
+  - **staying APScheduler timers, by design**, as they manage the leader's own scheduler or its own process and so must run on it:
+    - the schedule reconcile tick (`services/schedule_reconcile.py`), which registers, moves and removes scheduled-task, heartbeat and social-post jobs on the leader's scheduler;
+    - the services' own registration at start-up: `HeartbeatService.start`, `PlaybookSchedulerService.start` and its reconcile, `ScheduledTaskService.load_active_tasks_to_scheduler`, and the social-post reconcile (`modules/socials/schedule_jobs.py`), which put per-workspace jobs on that scheduler until those schedules move;
+    - the channel-polling tick (`channels/polling.py`), which reconciles the pollers running in the leader's own process;
+    - and two where a job row every few seconds would cost more than it saves: the coordinator's 5-second tick and the durable-memory probe.
+
+    The lock (2a) already keeps each to one scheduler.
 - **3 to 5:** not started.
 
 Waves 1a, 1b and 2 each stand on their own. Wave 1a is the largest, and lands with no consumer moved, so it can be reviewed by itself. Every wave keeps the default `PROCESS_ROLES`, all three in one process, working.
