@@ -336,16 +336,19 @@ class _FakeScheduler:
         return [job["id"] for job in self.jobs]
 
 
-def test_register_adds_one_job_with_no_args_and_is_false_without_a_running_scheduler():
+def test_register_declares_a_platform_schedule_and_is_false_without_a_running_scheduler():
+    from core.jobs import schedules
+    from core.jobs.registry import CATCH_UP_LATEST, kind_of
+
     scheduler = _FakeScheduler()
 
-    assert receipts.register(scheduler) is True
+    assert receipts.register(scheduler) is True  # PRD-276 Wave 2c: the schedule queues, a worker reads
 
-    (job,) = scheduler.jobs
-    assert job["func"] is receipts.run_receipts and job["id"] == receipts.RECEIPTS_JOB_ID
-    assert job["trigger"].interval == timedelta(seconds=config.PUSH_RECEIPTS_INTERVAL_SECONDS)
-    assert "args" not in job and "kwargs" not in job
-    assert (job["replace_existing"], job["max_instances"], job["coalesce"]) == (True, 1, True)
+    timer, catch_up = scheduler.jobs
+    assert timer["func"] is schedules.fire and timer["id"] == schedules.job_id(receipts.RECEIPTS_KIND, schedules.PLATFORM)
+    assert timer["trigger"].interval == timedelta(seconds=config.PUSH_RECEIPTS_INTERVAL_SECONDS)
+    assert timer["args"] == [receipts.RECEIPTS_KIND, schedules.PLATFORM] and catch_up["trigger"] == "date"
+    assert kind_of(receipts.RECEIPTS_KIND).catch_up == CATCH_UP_LATEST
     assert config.PUSH_RECEIPTS_INTERVAL_SECONDS >= 60
 
     stopped = _FakeScheduler(running=False)
@@ -359,6 +362,9 @@ def test_start_schedule_reconcile_registers_it_on_the_leader(monkeypatch):
 
     assert asyncio.run(schedule_reconcile.start_schedule_reconcile(scheduler)) is True
 
-    assert scheduler.ids().count(receipts.RECEIPTS_JOB_ID) == 1
-    (job,) = [job for job in scheduler.jobs if job["id"] == receipts.RECEIPTS_JOB_ID]
-    assert job["func"] is receipts.run_receipts and "args" not in job
+    from core.jobs import schedules
+
+    timer_id = schedules.job_id(receipts.RECEIPTS_KIND, schedules.PLATFORM)
+    assert scheduler.ids().count(timer_id) == 1
+    (job,) = [job for job in scheduler.jobs if job["id"] == timer_id]
+    assert job["func"] is schedules.fire

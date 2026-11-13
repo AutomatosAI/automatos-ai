@@ -36,7 +36,7 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from uuid import UUID
 
-from core.jobs.registry import job_handler
+from core.jobs.registry import CATCH_UP_LATEST, job_handler
 
 logger = logging.getLogger(__name__)
 
@@ -369,7 +369,7 @@ def _record(db: Any, job: Any, outcome: Outcome) -> None:
 
 # ── The sweep: callbacks no completion writer queued ───────────────────────────────────────
 
-SWEEP_JOB_ID = "run_callbacks_resend"  # #1481's id, so a job store that kept that job has it replaced
+SWEEP_KIND = "run_callback.sweep"
 SWEEP_EVERY_SECONDS = 600
 SWEEP_AFTER_SECONDS = 300  # a ticket ended this long ago with its callback still pending, and no job
 SWEEP_BATCH = 50
@@ -377,21 +377,30 @@ ENDED = ("done", "review", "failed", "cancelled")
 
 
 def schedules_the_callback_sweep(start: Callable[..., Any]) -> Callable[..., Any]:
-    """Wraps ``UnifiedScheduler.start``: once the shared scheduler runs, every ``SWEEP_EVERY_SECONDS``
-    it queues a delivery job for each callback still pending well after its ticket ended. Tickets
-    end in many places (a cancel, the dispatcher's sweep, the reconciler), and only the board's
-    completion writer queues the job itself; the sweep also queues, once, what was pending at cutover."""
+    """Wraps ``UnifiedScheduler.start``: once the shared scheduler runs, a platform schedule queues a
+    ``run_callback.sweep`` every ``SWEEP_EVERY_SECONDS`` (catch-up ``latest``: one sweep finds every
+    callback a missed one would have). The sweep queues a delivery job for each callback still pending
+    well after its ticket ended. Tickets end in many places (a cancel, the dispatcher's sweep, the
+    reconciler), and only the board's completion writer queues the job itself; the sweep also queued,
+    once, what was pending at cutover."""
 
     @functools.wraps(start)
     def started(self: Any, *args: Any, **kwargs: Any) -> Any:
         result = start(self, *args, **kwargs)
         scheduler = getattr(self, "_scheduler", None)
         if scheduler is not None:
-            scheduler.add_job(queue_stale_callbacks, "interval", seconds=SWEEP_EVERY_SECONDS,
-                              id=SWEEP_JOB_ID, replace_existing=True, max_instances=1)
+            from core.jobs.schedules import PLATFORM, interval, schedule
+
+            schedule(scheduler, SWEEP_KIND, PLATFORM, interval(seconds=SWEEP_EVERY_SECONDS))
         return result
 
     return started
+
+
+@job_handler(SWEEP_KIND, catch_up=CATCH_UP_LATEST, concurrency=1, workspace_concurrency=1)
+async def run_sweep(job: Any) -> None:
+    """A sweep slot (PRD-276 Wave 2c)."""
+    await queue_stale_callbacks()
 
 
 async def queue_stale_callbacks() -> int:

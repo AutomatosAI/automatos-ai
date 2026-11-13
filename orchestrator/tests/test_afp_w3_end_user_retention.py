@@ -178,12 +178,18 @@ def test_the_shared_scheduler_sweeps_retention_daily_once_it_starts():
     def start(self):
         self._scheduler = scheduler
 
-    start(SimpleNamespace())
-    ((fn, trigger, kw),) = added
-    assert fn is end_user_retention.sweep_end_user_retention and trigger == "cron"
-    assert (kw["hour"], kw["minute"]) == (end_user_retention.RETENTION_HOUR_UTC, end_user_retention.RETENTION_MINUTE_UTC)
-    assert kw["id"] == end_user_retention.RETENTION_JOB_ID and kw["replace_existing"] and kw["max_instances"] == 1
-    assert kw["misfire_grace_time"] == end_user_retention.RETENTION_MISFIRE_SECONDS
+    from core.jobs import schedules
+    from core.jobs.registry import CATCH_UP_LATEST, kind_of
+
+    start(SimpleNamespace())  # PRD-276 Wave 2c: a daily platform schedule queues the sweep
+    (timer, _, _), (_, catch_up, _) = added
+    kind = end_user_retention.RETENTION_KIND
+    assert timer is schedules.fire and catch_up == "date"
+    spec = schedules.declared(kind, schedules.PLATFORM)
+    fields = {f.name: str(f) for f in spec.trigger.fields}
+    assert (fields["hour"], fields["minute"]) == (str(end_user_retention.RETENTION_HOUR_UTC),
+                                                  str(end_user_retention.RETENTION_MINUTE_UTC))
+    assert kind_of(kind).catch_up == CATCH_UP_LATEST
 
 
 def test_the_unified_scheduler_carries_it():

@@ -192,10 +192,15 @@ def test_the_shared_scheduler_runs_the_sweep_once_it_starts():
     def start(self):
         self._scheduler = scheduler
 
-    start(SimpleNamespace())
-    ((fn, trigger, kw),) = added
-    assert fn is rc.queue_stale_callbacks and trigger == "interval"
-    assert kw["seconds"] == rc.SWEEP_EVERY_SECONDS and kw["id"] == rc.SWEEP_JOB_ID and kw["replace_existing"]
+    from datetime import timedelta
+
+    from core.jobs import schedules
+
+    start(SimpleNamespace())  # PRD-276 Wave 2c: a platform schedule queues the sweep
+    (timer, trigger, kw), (_, catch_up, _) = added
+    assert timer is schedules.fire and catch_up == "date"
+    assert trigger.interval == timedelta(seconds=rc.SWEEP_EVERY_SECONDS)
+    assert kw["id"] == schedules.job_id(rc.SWEEP_KIND, schedules.PLATFORM)
 
 
 def test_the_unified_scheduler_carries_it():
