@@ -222,6 +222,12 @@ ADMIN_GATED_IN_HANDLER = {
     # gate. POST /api/v1/billing/checkout and the api/billing_manage.py routes
     # carry `require_workspace_admin` and classify as workspace-admin on their own.
     ("POST", "/api/admin/workspaces/{workspace_id}/business-invite"),
+    # PRD-274 W5a: products (api/admin_products.py): create, change, replace the key and delete call
+    # `_require_admin(ctx)` (`caller_is_admin`, 403; 404 while PRODUCTS_ENABLED is off) first in the handler.
+    ("POST", "/api/admin/products"),
+    ("PATCH", "/api/admin/products/{product_id}"),
+    ("POST", "/api/admin/products/{product_id}/key"),
+    ("DELETE", "/api/admin/products/{product_id}"),
 }
 
 # (g) Own explicit in-handler gate.

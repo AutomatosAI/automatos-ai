@@ -1,5 +1,5 @@
 {
-  "route_count": 1037,
+  "route_count": 1043,
   "routes": [
     {
       "method": "GET",
@@ -100,6 +100,30 @@
     {
       "method": "GET",
       "path": "/api/admin/plugins/{plugin_id}/scan"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/products"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/products"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/products/{product_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/products/{product_id}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/products/{product_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/products/{product_id}/key"
     },
     {
       "method": "GET",
