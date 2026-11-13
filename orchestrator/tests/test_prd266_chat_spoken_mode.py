@@ -372,11 +372,11 @@ def test_the_route_passes_the_formatter_only_when_the_switch_is_on(route, monkey
                           raw, PROGRESS, FINISH]
 
 
-def test_the_switch_is_on_by_default_and_named_on_the_config_surface():
+def test_the_switch_is_off_by_default_and_named_on_the_config_surface():
     surface = json.loads((ORCH / "reports" / "config-surface.json").read_text())
 
     assert "SPOKEN_MODE_NARRATION_AS_SPOKEN" in json.dumps(surface)
-    assert 'os.getenv("SPOKEN_MODE_NARRATION_AS_SPOKEN", "true")' in (ORCH / "config.py").read_text()
+    assert 'os.getenv("SPOKEN_MODE_NARRATION_AS_SPOKEN", "false")' in (ORCH / "config.py").read_text()
 
 
 # --------------------------------------------------------------------------- off: unchanged
