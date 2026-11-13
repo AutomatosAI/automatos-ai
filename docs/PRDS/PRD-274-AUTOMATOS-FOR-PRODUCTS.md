@@ -437,6 +437,12 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
     takes the product's default, read through their workspace. `api_key_id` stays as the record of which key wrote
     the consent. (Not: a new column, which would need a migration and a backfill, and keep a second copy of the
     product to keep in step.)
+    *Existing end users (proposed, for Gerard to confirm):* the product's default applies only to end users created
+    after their workspace belongs to the product. 5e writes the default into `retention_days` when it creates an end
+    user, read through the workspace; the sweep, which today reads only `retention_days`, is unchanged. An end user who
+    already exists with no `retention_days` keeps their memories until erased, as they consented to. Otherwise
+    attaching a workspace to a product (5f does this for Shopify's and BudStacks' existing workspaces), or a product
+    changing its default, would have the next sweep delete their older facts and messages, which can't be undone.
 
 ## 9. Later
 
