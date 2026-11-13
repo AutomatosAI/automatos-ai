@@ -342,7 +342,8 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
     owner setting is set (`SHOPIFY_PRODUCT_OWNER_WORKSPACE_ID`, `BUDSTACKS_PRODUCT_OWNER_WORKSPACE_ID`).
   - 5e, retention through the product: a new end user of a product's workspace, recorded with no `retention_days`,
     is given the product's `default_retention_days`; an explicit value, `null` included, is kept, and an end user
-    who already exists never takes the default (decision 28).
+    who already exists never takes the default (decision 28). An update changes an end user's retention only when
+    it sends `retention_days`, so a consent refresh keeps what they were told (Gerard's review of #1517).
 
 ### Follow-ups from Wave 1 (open)
 

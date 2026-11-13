@@ -91,8 +91,14 @@ def test_what_the_product_sends_is_kept_null_included(new_session, world, sent):
 
 def test_an_end_user_who_exists_never_takes_the_default(new_session, world):
     assert _put(new_session, world.customer, "shopper-3", retention_days=None) is None
-    assert _put(new_session, world.customer, "shopper-3") is None  # an update sets what it sends, as before
+    assert _put(new_session, world.customer, "shopper-3") is None  # a refresh with none sent keeps what they have
     assert _put(new_session, world.customer, "shopper-3", retention_days=14) == 14
+
+
+def test_a_consent_refresh_in_the_same_shape_keeps_the_default(new_session, world):
+    assert _put(new_session, world.customer, "shopper-7") == 30
+    assert _put(new_session, world.customer, "shopper-7") == 30  # not cleared to "until erased"
+    assert _put(new_session, world.customer, "shopper-7", retention_days=None) is None  # an explicit null clears it
 
 
 def test_any_other_workspace_or_a_product_with_no_default_records_none(new_session, world):
