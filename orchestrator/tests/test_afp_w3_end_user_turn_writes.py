@@ -122,3 +122,54 @@ def test_a_write_their_erase_overtook_is_taken_back(consent):
     assert seen["user_id"] == f"mem:{WS}:end_user:player-7"
     assert deleted == [(("existing",), f"mem:{WS}:end_user:player-7")] and answer["skipped"] == ERASED
 
+
+
+def _session_service():
+    """The real ``update_session`` on a dict standing in for Redis."""
+    from types import SimpleNamespace
+
+    from modules.memory.unified_memory_service import UnifiedMemoryService
+
+    service = object.__new__(UnifiedMemoryService)
+    saved = {}
+    conn = SimpleNamespace(get=saved.get, setex=lambda key, ttl, value: saved.__setitem__(key, value),
+                           delete=lambda *keys: [saved.pop(k, None) for k in keys])
+    service._get_redis = lambda: SimpleNamespace(get_redis=lambda: conn)
+    return service, saved
+
+
+SESSION = f"mem:session:{WS}:chat-1"
+
+
+def _update(service):
+    asyncio.run(service.update_session(workspace_id=WS, conversation_id="chat-1", user_msg="hi", assistant_msg="hello"))
+
+
+def test_their_session_is_written_while_their_consent_counts():
+    service, saved = _session_service()
+    with end_user_turn(PLAYER):
+        _update(service)
+    assert "User: hi" in saved[SESSION]
+
+
+def test_no_session_is_written_once_their_erase_has_started(consent):
+    service, saved = _session_service()
+    consent.append(False)
+    with end_user_turn(PLAYER):
+        _update(service)
+    assert saved == {}
+
+
+def test_a_session_their_erase_overtook_is_cleared(consent):
+    service, saved = _session_service()
+    consent.extend([True, False])  # on record before the write; erasing once it landed
+    with end_user_turn(PLAYER):
+        _update(service)
+    assert saved == {}
+
+
+def test_any_other_turns_session_is_written_as_always(consent):
+    service, saved = _session_service()
+    consent.extend([False, False])  # never asked: no end user's turn
+    _update(service)
+    assert SESSION in saved and consent == [False, False]

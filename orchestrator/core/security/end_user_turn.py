@@ -19,6 +19,9 @@ path (as ``core.security.memory_audience`` holds the reader):
 - **Nothing goes where the whole workspace reads** (``shared_with_no_end_user``): no L2 transcript
   (``memory_short_term``) and so no ``mem:{ws}:l2`` mirror, and no daily log. The Context Router reads
   those on every chat turn of the workspace. The end user's conversation stays in their chat.
+- **Their conversation's L1 session follows the same consent rule** (``sessions_while_consented`` on
+  ``update_session``): it is written only while their consent counts, and cleared if their erase started
+  while it was written, so a turn still running when they are erased leaves no session excerpt behind.
 
 What the turn **reads** is theirs and the workspace's, never another end user's:
 
@@ -178,6 +181,37 @@ async def _take_back(store: Any, end_user: EndUser, result: Any) -> None:
     point_id = result.get("id") if isinstance(result, dict) else None
     if point_id:
         await store.delete([point_id], user_id=end_user.namespace)
+
+
+def sessions_while_consented(update: Callable[..., Awaitable[None]]) -> Callable[..., Awaitable[None]]:
+    """Wrap ``UnifiedMemoryService.update_session``: during an end user's turn their conversation's L1
+    session (Redis) is written only while their consent counts, checked before and after it, as a durable
+    write is. Their erase clears their conversations' sessions after marking them, so a session written
+    first is cleared by the erase, and one written after is cleared here."""
+    signature = inspect.signature(update)
+
+    @functools.wraps(update)
+    async def wrapped(*args: Any, **kwargs: Any) -> None:
+        end_user = _end_user.get()
+        if end_user is None:
+            return await update(*args, **kwargs)
+        if not await _consented(end_user):
+            return None
+        await update(*args, **kwargs)
+        if not await _consented(end_user):
+            bound = signature.bind(*args, **kwargs).arguments
+            await _clear_session(bound["self"], bound["workspace_id"], bound["conversation_id"])
+        return None
+
+    return wrapped
+
+
+async def _clear_session(service: Any, workspace_id: str, conversation_id: str) -> None:
+    """Deletes a conversation's L1 session, written while the end user's erase started."""
+    redis_client = service._get_redis()
+    if redis_client is not None:
+        key = service.namespace(workspace_id).session(conversation_id)
+        await asyncio.to_thread(redis_client.get_redis().delete, key)
 
 
 def reads_its_end_users_memory(search: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
