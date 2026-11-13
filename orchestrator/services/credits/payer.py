@@ -18,33 +18,44 @@ from __future__ import annotations
 
 from dataclasses import replace
 from typing import Any, Dict, Iterable, Optional
+from uuid import UUID
 
 from sqlalchemy import text
 
 from services.credits.ledger import SPEND_ORDER, Entry, record
 
-_OWNER = text("SELECT owner_workspace_id::text FROM products WHERE id::text = :product")
+# The parameters are cast, never the indexed ``id`` columns, so each lookup is a primary-key index scan (the
+# meter resolves a batch of workspaces every tick). The join reads ``settings.product_id`` as text: a malformed
+# value then matches no product, where casting it would fail the whole batch; ``products`` is a few rows.
+_OWNER = text("SELECT owner_workspace_id::text FROM products WHERE id = CAST(:product AS uuid)")
 _OWNERS = text(
     "SELECT w.id::text, p.owner_workspace_id::text FROM workspaces w "
-    "JOIN products p ON p.id::text = w.settings->>'product_id' WHERE w.id::text = ANY(:ids)"
+    "JOIN products p ON p.id::text = w.settings->>'product_id' WHERE w.id = ANY(CAST(:ids AS uuid[]))"
 )
+
+
+def _uuid(value: Any) -> Optional[str]:
+    """``value`` as a canonical UUID string; None when it isn't one (it is then never sent to be cast)."""
+    try:
+        return str(UUID(str(value)))
+    except (TypeError, ValueError, AttributeError):
+        return None
 
 
 def payer_of(db: Any, workspace: Any) -> str:
     """The id of the workspace that pays for ``workspace`` (a loaded row): no query unless it is a product's."""
-    product_id = (getattr(workspace, "settings", None) or {}).get("product_id")
+    product_id = _uuid((getattr(workspace, "settings", None) or {}).get("product_id"))
     if not product_id:
         return str(workspace.id)
-    owner = db.execute(_OWNER, {"product": str(product_id)}).scalar()
+    owner = db.execute(_OWNER, {"product": product_id}).scalar()
     return str(owner or workspace.id)
 
 
 def paying_workspaces(db: Any, workspace_ids: Iterable[Any]) -> Dict[str, str]:
     """Each of ``workspace_ids`` (as strings) to the id of the workspace that pays for it, in one query."""
     ids = sorted({str(w) for w in workspace_ids if w})
-    if not ids:
-        return {}
-    owners = {row[0]: row[1] for row in db.execute(_OWNERS, {"ids": ids}).fetchall()}
+    valid = [ws for ws in ids if _uuid(ws) == ws]
+    owners = {row[0]: row[1] for row in db.execute(_OWNERS, {"ids": valid}).fetchall()} if valid else {}
     return {ws: owners.get(ws) or ws for ws in ids}
 
 

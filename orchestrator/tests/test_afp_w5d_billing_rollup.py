@@ -192,3 +192,20 @@ def test_it_gets_no_trial_and_no_admin_grant(new_session, world, monkeypatch):
         _refuse_a_products_workspace(s, s.get(Workspace, uuid.UUID(world.plain)))  # any other: no refusal
     finally:
         s.close()
+
+
+def test_the_lookups_use_the_primary_key_indexes_and_a_malformed_id_is_never_cast(new_session, world):
+    s = new_session()
+    try:
+        s.execute(text("SET LOCAL enable_seqscan = off"))
+        plan = "\n".join(r[0] for r in s.execute(text("EXPLAIN " + str(payer._OWNERS)), {"ids": [world.customer]}))
+        assert "workspaces_pkey" in plan
+        owner_plan = "\n".join(r[0] for r in s.execute(text("EXPLAIN " + str(payer._OWNER)),
+                                                         {"product": world.product}))
+        assert "products_pkey" in owner_plan
+        s.rollback()
+        assert payer.paying_workspaces(s, [world.customer, "not-a-uuid"]) == {
+            world.customer: world.owner, "not-a-uuid": "not-a-uuid"}
+        assert payer.payer_of(s, SimpleNamespace(id="w-1", settings={"product_id": "junk"})) == "w-1"
+    finally:
+        s.close()
