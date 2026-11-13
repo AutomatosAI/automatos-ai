@@ -161,7 +161,8 @@ def schedule(scheduler: Any, kind: str, schedule_id: str, trigger: Any, *, works
     _SCHEDULES[(kind, schedule_id)] = spec
     common = {"args": [kind, schedule_id], "replace_existing": True, "max_instances": 1}
     scheduler.add_job(fire, trigger, id=job_id(kind, schedule_id), coalesce=True, misfire_grace_time=None, **common)
-    scheduler.add_job(fire, "date", id=f"{job_id(kind, schedule_id)}:catch-up", **common)
+    # However late the catch-up starts (a busy boot), it runs: APScheduler's default grace would skip it.
+    scheduler.add_job(fire, "date", id=f"{job_id(kind, schedule_id)}:catch-up", misfire_grace_time=None, **common)
     return spec
 
 

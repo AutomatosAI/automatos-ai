@@ -15,6 +15,7 @@ the scheduled job and the boot-probe both call.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
@@ -122,13 +123,18 @@ def run_telemetry_canary(
 
 
 async def telemetry_canary_tick() -> Dict[str, Any]:
-    """Scheduled-job + boot-probe entrypoint: open a session, run the canary,
-    close it. Registered on the shared scheduler by ``HeartbeatService.start()``
-    and fired once at boot as the boot-probe. Honours the enable flag so it can
-    be switched off without unscheduling."""
+    """Scheduled-job + boot-probe entrypoint: run the canary on its own session,
+    in a worker thread (its queries are synchronous, and must not hold the event
+    loop: at boot they made the scheduler's other jobs start late). Registered on
+    the shared scheduler by ``HeartbeatService.start()`` and fired once at boot as
+    the boot-probe. Honours the enable flag so it can be switched off without
+    unscheduling."""
     if not config.TELEMETRY_CANARY_ENABLED:
         return {"alert": False, "skipped": True}
+    return await asyncio.to_thread(_canary_on_own_session)
 
+
+def _canary_on_own_session() -> Dict[str, Any]:
     from core.database.database import SessionLocal
 
     db = SessionLocal()
