@@ -58,6 +58,7 @@ def view(workspace: Workspace) -> Dict[str, Any]:
         "workspace_id": str(workspace.id), "external_id": settings.get("source_external_id"), "name": workspace.name,
         "status": "closed" if closed else "open", "created_at": _iso(workspace.created_at),
         "closed_at": _iso(closed), "purge_after": _iso(closed + grace()) if closed else None,
+        "credit_cap": settings.get("product_credit_cap"),  # its own cap, when the product set one (caps.py)
     }
 
 
@@ -116,3 +117,22 @@ def _audit(db: Any, product: Product, workspace: Workspace, action: str) -> None
                          resource_id=str(workspace.id), resource_name=workspace.name,
                          details={"product": product.slug,
                                   "external_id": (workspace.settings or {}).get("source_external_id")})
+
+
+def set_cap(db: Any, product: Product, workspace_id: Any, cap: Optional[int]) -> Dict[str, Any]:
+    """Sets the workspace's own monthly credit cap (None: back to its product's default), and answers it with
+    the cap in force and what it spent this month (``services/credits/caps``). Commits."""
+    from services.credits.caps import SETTING, cap_changed, monthly_cap, spent_this_month
+
+    workspace = theirs(db, product, workspace_id)
+    settings = dict(workspace.settings or {})
+    if cap is None:
+        settings.pop(SETTING, None)
+    else:
+        settings[SETTING] = int(cap)
+    if settings.get(SETTING) != (workspace.settings or {}).get(SETTING):
+        cap_changed(db, workspace.id)
+    workspace.settings = settings
+    db.commit()
+    return {**view(workspace), "monthly_cap": monthly_cap(db, workspace),
+            "spent_this_month": spent_this_month(db, workspace.id)}

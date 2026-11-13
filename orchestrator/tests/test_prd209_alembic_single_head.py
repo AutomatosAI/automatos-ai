@@ -182,7 +182,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # products.reuse_existing_key (a new column) and a unique partial index on workspaces: one per (product, external id).
 # 2026-11-13 (Automatos for products, Wave 5d): credit_ledger_sub_tenant_20261113 chains onto that —
 # credit_ledger.sub_tenant_id (a new nullable column) and its partial index: what each product workspace spent.
-EXPECTED_HEAD = "credit_ledger_sub_tenant_20261113"
+# 2026-11-13 (Automatos for products, spend cap): product_spend_cap_20261113 chains onto that —
+# products.workspace_monthly_credit_cap (a new nullable column) and product_workspace_spend (a new table).
+EXPECTED_HEAD = "product_spend_cap_20261113"
 
 
 def _literal(node: ast.AST):

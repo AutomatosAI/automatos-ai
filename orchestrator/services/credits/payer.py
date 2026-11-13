@@ -74,6 +74,11 @@ def debit(db: Any, workspace_id: Any, entry: Entry, *, spend_buckets: Iterable[s
     (``payer`` when the caller resolved it), with the workspace it was for when that is another. Does not
     commit; False when the source event was already recorded."""
     payer = payer or paying_workspace(db, workspace_id)
-    if payer != str(workspace_id):
-        entry = replace(entry, sub_tenant_id=str(workspace_id))
-    return record(db, payer, entry, spend_buckets=spend_buckets)
+    if payer == str(workspace_id):
+        return record(db, payer, entry, spend_buckets=spend_buckets)
+    recorded = record(db, payer, replace(entry, sub_tenant_id=str(workspace_id)), spend_buckets=spend_buckets)
+    if recorded:  # the month's spend against its cap moves with the debit (services/credits/caps)
+        from services.credits.caps import count_spend
+
+        count_spend(db, workspace_id, -int(entry.credits))
+    return recorded
