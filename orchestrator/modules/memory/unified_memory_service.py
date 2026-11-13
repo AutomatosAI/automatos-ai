@@ -26,7 +26,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from core.security.end_user_turn import sessions_while_consented, shared_with_no_end_user, skipped_log
 
@@ -1694,57 +1694,19 @@ class UnifiedMemoryService:
         memories are superseded by newer/contradicting facts or merged, not aged
         out. Promotion (L2→L3) stays in ``run_promotion_all``.
         """
-        from modules.memory.operations.contradiction import plan_consolidation
-
-        if workspace_id:
-            workspace_ids: List[str] = [workspace_id]
-        else:
-            try:
-                loop = asyncio.get_event_loop()
-                workspace_ids = await loop.run_in_executor(
-                    None, self._get_active_workspace_ids_sync
-                )
-            except Exception:
-                logger.error(
-                    "[UnifiedMemoryService] run_sleep_time_consolidation: "
-                    "workspace fetch failed",
-                    exc_info=True,
-                )
-                workspace_ids = []
-
+        workspace_ids = await self._consolidation_workspace_ids(workspace_id)
         merged = 0
         superseded = 0
         errors = 0
         for ws_id in workspace_ids:
             try:
-                memories = await self.get_all_memories(ws_id, limit=200)
-                if not memories:
-                    continue
-                plan = plan_consolidation(memories)
-                # Fold near-duplicates → delete the non-canonical members.
-                for mg in plan.merges:
-                    for dup_id in mg.merged_from:
-                        if dup_id and await self.delete_memory(dup_id, ws_id):
-                            merged += 1
-                # Contradictions → the loser leaves the active set (reason logged).
-                for s in plan.supersessions:
-                    loser_id = str(s.loser.get("id") or "")
-                    if loser_id and await self.delete_memory(loser_id, ws_id):
-                        superseded += 1
-                        logger.info(
-                            "[UnifiedMemoryService] consolidation superseded "
-                            "id=%s (%s)",
-                            loser_id,
-                            s.reason,
-                        )
-            except Exception:
+                ws_merged, ws_superseded = await self._consolidate_workspace(ws_id)
+            except Exception:  # noqa: BLE001 — one workspace failing never stops the rest; counted below
                 errors += 1
-                logger.error(
-                    "[UnifiedMemoryService] run_sleep_time_consolidation failed "
-                    "for ws=%s",
-                    ws_id,
-                    exc_info=True,
-                )
+                logger.exception("[UnifiedMemoryService] run_sleep_time_consolidation failed for ws=%s", ws_id)
+                continue
+            merged += ws_merged
+            superseded += ws_superseded
 
         logger.info(
             "[UnifiedMemoryService] run_sleep_time_consolidation complete: "
@@ -1760,6 +1722,44 @@ class UnifiedMemoryService:
             "superseded": superseded,
             "errors": errors,
         }
+
+    async def _consolidation_workspace_ids(self, workspace_id: Optional[str]) -> List[str]:
+        """The one workspace asked for, else every active one ([] when that lookup fails)."""
+        if workspace_id:
+            return [workspace_id]
+        try:
+            return await asyncio.to_thread(self._get_active_workspace_ids_sync)
+        except Exception:  # noqa: BLE001 — logged; no workspaces means no consolidation this run
+            logger.exception("[UnifiedMemoryService] run_sleep_time_consolidation: workspace fetch failed")
+            return []
+
+    async def _consolidate_workspace(self, ws_id: str) -> Tuple[int, int]:
+        """Plan and apply one workspace's consolidation: (merged, superseded).
+
+        The plan compares every memory with every other one in pure Python
+        (difflib), seconds of CPU for a few hundred memories. It runs in a worker
+        thread: on the event loop it froze every request for 12-14 s each hour
+        (VPS logs, 13 Nov 2026, ``loop-watchdog``)."""
+        from modules.memory.operations.contradiction import plan_consolidation
+
+        memories = await self.get_all_memories(ws_id, limit=200)
+        if not memories:
+            return 0, 0
+        plan = await asyncio.to_thread(plan_consolidation, memories)
+        merged = 0
+        # Fold near-duplicates → delete the non-canonical members.
+        for mg in plan.merges:
+            for dup_id in mg.merged_from:
+                if dup_id and await self.delete_memory(dup_id, ws_id):
+                    merged += 1
+        superseded = 0
+        # Contradictions → the loser leaves the active set (reason logged).
+        for s in plan.supersessions:
+            loser_id = str(s.loser.get("id") or "")
+            if loser_id and await self.delete_memory(loser_id, ws_id):
+                superseded += 1
+                logger.info("[UnifiedMemoryService] consolidation superseded id=%s (%s)", loser_id, s.reason)
+        return merged, superseded
 
     # ------------------------------------------------------------------
     # Cross-layer

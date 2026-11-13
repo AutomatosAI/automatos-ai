@@ -124,6 +124,22 @@ def test_tool_intent_says_what_a_call_does(tmp_path):
     assert PresetAdapter(CODEX).tool_intent("unified_exec", {"cmd": "ls"}).cls is ToolClass.UNKNOWN
 
 
+def test_the_web_fetch_subagent_is_a_web_read_and_no_other_subagent_is(tmp_path):
+    """13 Nov 2026: Claude Code 2.1.32x reads a page only through its ``web-fetch``
+    subagent, and the gate denied every Agent call, so no session could open a page.
+    That one subagent is a web read; any other subagent is still denied."""
+    a = ClaudeAdapter(CLAUDE)
+    ctx = policy.PolicyContext(cwd=tmp_path)
+    fetch = {"subagent_type": "web-fetch", "description": "Read a page", "prompt": "Fetch https://x and summarise"}
+    for tool in ("Agent", "Task"):
+        assert a.tool_intent(tool, fetch).cls is ToolClass.WEB
+        assert policy.decide(a.tool_intent(tool, fetch), ctx).allow
+    for other in ({"subagent_type": "general-purpose", "prompt": "p"}, {"subagent_type": "Explore"}, {"prompt": "p"}):
+        assert a.tool_intent("Agent", other).cls is ToolClass.UNKNOWN
+        assert policy.decide(a.tool_intent("Agent", other), ctx).behavior == "deny"
+    assert a.tool_intent("Agent", "web-fetch").cls is ToolClass.UNKNOWN       # not a mapping: nothing to read
+
+
 def test_policy_verdicts_are_the_same_through_intents(tmp_path):
     """The proof the seam changed nothing: the pre-seam verdicts, now reached
     through ToolIntent, for every class the policy knows."""
@@ -137,6 +153,7 @@ def test_policy_verdicts_are_the_same_through_intents(tmp_path):
     assert d("Bash", {"command": "rm -rf build"}).behavior == "ask"
     assert d("WebFetch", {"url": "https://x"}).allow
     assert d("Task", {}).behavior == "deny"
+    assert d("Agent", {"subagent_type": "general-purpose", "prompt": "do it"}).behavior == "deny"
     # a multi-path write is judged on EVERY path
     two = a.tool_intent("Edit", {"file_path": str(tmp_path / "ok.py")})
     outside = two.__class__(tool="Edit", cls=ToolClass.FILE_WRITE, paths=(str(tmp_path / "ok.py"), "/etc/x"))

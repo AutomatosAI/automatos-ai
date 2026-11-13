@@ -213,7 +213,10 @@ async def link_report_to_task(
 
 
 async def get_latest_report(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Get the most recent report from a specific agent."""
+    """Get the most recent report from a specific agent, with the text files of the tickets
+    it came from (``services.report_linked_files``: a session's digest is a file its report
+    only points at, in a folder no other session can open)."""
+    from services.report_linked_files import with_linked_files
     from services.report_service import ReportService
 
     agent_name = params.get("agent_name")
@@ -224,11 +227,12 @@ async def get_latest_report(db: Session, workspace_id: UUID, params: Dict[str, A
         return {"success": False, "error": "Provide agent_name or agent_id"}
 
     svc = ReportService(db, workspace_id)
-    return await svc.get_latest_report(
+    found = await svc.get_latest_report(
         agent_name=agent_name,
         agent_id=agent_id,
         report_type=report_type,
     )
+    return await with_linked_files(workspace_id, found)
 
 
 async def browse_reports(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
