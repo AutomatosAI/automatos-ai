@@ -337,8 +337,8 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
 
 | Follow-up | Waiting on |
 | --- | --- |
-| Set `CLIENT_IP_HEADER=X-Real-IP` on the hosted API service, then check Railway's edge replaces a client-supplied value | Gerard (an ops change on Railway) |
-| Enforce a key's IP allow-list instead of refusing one (#1467) | The setting above |
+| Set `CLIENT_IP_HEADER=X-Real-IP` on the hosted API service, then check Railway's edge replaces a client-supplied value | Done (13 Nov 2026): set by Gerard. Railway's edge replaces a client-supplied `X-Real-IP` (and `X-Forwarded-For`): 32 requests with a different forged value each, to a route allowing 30 a minute per address, were limited as one address. No service calls the API on the private network, and it has no TCP proxy. Still to run: the same check from a second address, to confirm the address read is the caller's own |
+| Enforce a key's IP allow-list instead of refusing one (#1467) | Nothing: the setting above is in |
 | The app-wide per-IP limit is off in hosted (`AUTOMATOS_POLICY_PLANE` unset); the key routes are already exempt from it | A decision to turn the policy plane on |
 | Re-send a callback a restart left `pending` (#1462 sends in-process) | Done: a durable job since PRD-276 Wave 1b (#1494); #1482 closed |
 | A key's service user outlives the key and its workspace (no personal data in it) | Done: the purge deletes it with its workspace; revoking keeps it (decision 23) (#1491) |
