@@ -90,3 +90,18 @@ def test_run_canary_never_raises_on_db_error():
     # A broken query must neither alarm falsely nor raise into the scheduler.
     assert v["alert"] is False
     assert v.get("error") is True
+
+
+def test_the_tick_runs_the_canary_off_the_event_loop(monkeypatch):
+    """Its queries are synchronous: at boot, run on the loop, they made the scheduler's other jobs start late."""
+    import asyncio
+    import threading
+
+    from services import telemetry_canary
+
+    ran_on = []
+    monkeypatch.setattr(telemetry_canary.config, "TELEMETRY_CANARY_ENABLED", True)
+    monkeypatch.setattr(telemetry_canary, "_canary_on_own_session",
+                        lambda: ran_on.append(threading.current_thread()) or {"alert": False})
+    assert asyncio.run(telemetry_canary.telemetry_canary_tick()) == {"alert": False}
+    assert ran_on and ran_on[0] is not threading.main_thread()

@@ -188,6 +188,7 @@ def test_declaring_a_schedule_wakes_it_on_its_trigger_and_once_at_once(kinds):
         (timer, catch_up) = added
         assert timer[0] is schedules.fire and timer[1] is trigger and timer[2]["coalesce"]
         assert catch_up[1] == "date" and catch_up[2]["args"] == [kinds[CATCH_UP_LATEST], schedules.PLATFORM]
+        assert catch_up[2]["misfire_grace_time"] is None  # a catch-up a busy boot starts late still runs
         with pytest.raises(KeyError):
             schedules.schedule(scheduler, "test_prd276_w2b.nobody", schedules.PLATFORM, trigger)
     finally:
