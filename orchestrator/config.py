@@ -719,6 +719,9 @@ class Config:
     # BudStacks vertical (api/verticals.py) — same fail-closed posture: unset ⇒
     # the budstacks provision surface answers 503, never open.
     BUDSTACKS_INTERNAL_API_KEY: str = os.getenv("BUDSTACKS_INTERNAL_API_KEY", "")
+    # PRD-274 W5f: the workspace that owns the BudStacks product and pays for every tenant's workspace. With this and
+    # BUDSTACKS_INTERNAL_API_KEY set, a boot seeds the product record from the key (integrations/vertical_products).
+    BUDSTACKS_PRODUCT_OWNER_WORKSPACE_ID: str = os.getenv("BUDSTACKS_PRODUCT_OWNER_WORKSPACE_ID", "")
     # PRD-189 S3: per-workspace debounce window (seconds) for catalog-webhook
     # re-syncs. A merchant bulk edit emits a burst of products/update webhooks;
     # /events coalesces the burst into ONE full Bulk-Op re-sync once it has
