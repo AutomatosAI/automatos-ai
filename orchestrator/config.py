@@ -2344,6 +2344,13 @@ class Config:
     # length, so fewer embedding calls are made and booked. false = every embed call is made,
     # as before. Remove the switch once the count of reused calls has been read on a live server.
     TURN_EMBED_ONCE: bool = os.getenv("TURN_EMBED_ONCE", "false").strip().lower() == "true"
+    # A chat turn starts its two late lookups (connected apps, and the knowledge prefetch for a
+    # question or a drafting turn) as soon as its agent is active, beside tool loading and the
+    # prompt build, and collects each where it used to run (consumers/chatbot/early_lookups.py).
+    # An early lookup that failed, or was asked for something else, is made again in place. A
+    # question turn can then hold up to four pool connections for a moment, not one. false = each
+    # lookup runs in place, as before. Remove the off path once the before/after numbers are accepted.
+    CHAT_EARLY_LOOKUPS: bool = os.getenv("CHAT_EARLY_LOOKUPS", "false").strip().lower() == "true"
     # Auto's server voice (services/voice-tts): POST /api/voice/speech streams a reply
     # as MP3 for the phone and the web quick-ask (modules/voice/speech.py). Empty URL =
     # off: the route answers 503 tts_off and discovery does not list `tts`, so clients
