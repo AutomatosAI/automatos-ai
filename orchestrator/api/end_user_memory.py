@@ -97,16 +97,6 @@ def _readable(ctx: RequestContext, rows: List[Dict[str, Any]]) -> List[Dict[str,
     return [m for m in rows if visible_to_viewer(m, None) and not (is_server_key(ctx) and audience_of(m))]
 
 
-def _retention_for(db: Session, ctx: RequestContext, body: EndUserConsent) -> Optional[int]:
-    """A new end user's retention: what the request sent (``null`` included), else their workspace's product's
-    default. An end user who already exists never takes it (``record_consent``)."""
-    if "retention_days" in body.model_fields_set:
-        return body.retention_days
-    from services.products import default_retention_of
-
-    return default_retention_of(db, ctx.workspace_id)
-
-
 @router.put("/{end_user_id}")
 def record_consent(body: EndUserConsent, end_user_id: str = END_USER_ID,
                    ctx: RequestContext = Depends(require_workspace_permission_or_server_key("knowledge:create",
@@ -125,10 +115,12 @@ def record_consent(body: EndUserConsent, end_user_id: str = END_USER_ID,
     row = row or EndUser(workspace_id=ctx.workspace_id, end_user_id=end_user_id)
     if row.erasing_at is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=BEING_ERASED)
-    if new:
-        row.retention_days = _retention_for(db, ctx, body)
-    elif "retention_days" in body.model_fields_set:
+    if "retention_days" in body.model_fields_set:  # what the request sends applies, null included
         row.retention_days = body.retention_days
+    elif new:  # only a new end user takes their product's default; a refresh leaves retention as it is
+        from services.products import default_retention_of
+
+        row.retention_days = default_retention_of(db, ctx.workspace_id)
     row.api_key_id = ctx.api_key_id if is_server_key(ctx) else row.api_key_id
     db.add(row)
     db.commit()
