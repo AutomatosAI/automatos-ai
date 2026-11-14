@@ -23,6 +23,7 @@ def test_the_defaults_describe_the_image(tmp_path):
     assert (settings.max_chars, settings.mp3_kbps, settings.lame_bin) == (500, 64, "lame")
     assert (settings.max_concurrent, settings.threads) == (4, 4)
     assert settings.token == "" and not settings.allow_no_token and not settings.is_production
+    assert settings.warm_up is True
 
 
 def test_the_token_never_reaches_a_repr():
@@ -68,6 +69,13 @@ def test_a_quota_above_the_machine_is_held_to_the_machine(tmp_path):
 @pytest.mark.parametrize("raw, allowed", [("true", True), ("TRUE", True), ("1", False), ("yes", False), ("", False)])
 def test_running_without_a_token_takes_the_explicit_flag(raw, allowed):
     assert load_settings({"VOICE_TTS_ALLOW_NO_TOKEN": raw}, cpus=1).allow_no_token is allowed
+
+
+@pytest.mark.parametrize("raw, warms", [
+    ("true", True), ("TRUE", True), ("", True), ("false", False), ("False", False), ("0", False), ("no", False),
+])
+def test_the_warm_up_is_on_unless_it_is_switched_off(raw, warms):
+    assert load_settings({"VOICE_TTS_WARM_UP": raw}, cpus=1).warm_up is warms
 
 
 def test_production_is_named_by_environment():

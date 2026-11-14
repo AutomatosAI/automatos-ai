@@ -35,7 +35,8 @@ def engine():
     from voice_tts.config import load_settings
 
     loaded = Engine(load_settings({}, cpus=2))
-    loaded.load()
+    # Warmed as the service warms it, so the real warm-up path runs once on the module's one model.
+    loaded.load(("af_heart", "en-us"))
     return loaded
 
 

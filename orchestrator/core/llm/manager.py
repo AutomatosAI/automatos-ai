@@ -16,7 +16,7 @@ from functools import lru_cache
 from config import config
 from core.llm.owner_words_stream import in_owner_words
 
-from .clients.base import LLMProvider, LLMConfig
+from .clients.base import LLMProvider, LLMConfig, live_stream
 from .clients.openai_client import OpenAIProvider
 from .clients.anthropic_client import AnthropicProvider
 from .clients.google_client import GoogleProvider
@@ -661,7 +661,7 @@ class LLMManager:
         actionable messages so they can fix their configuration.
 
         PRD-238 S2: pass ``on_delta(kind, text)`` to receive text and reasoning deltas live when the
-        provider can stream (F264: in Auto's words); providers without ``stream_response`` answer whole.
+        provider streams this call (F264: in Auto's words); any other call answers whole (``live_stream``).
         """
         # PRD-265: the credit gate may read the database (an ask's first call), so it
         # runs off the event loop (F105); to_thread carries the ask's context with it.
@@ -671,7 +671,7 @@ class LLMManager:
         budget = self._call_budget()
         try:
             with output_budget.call_budget(budget):
-                stream = getattr(self.provider, "stream_response", None) if on_delta is not None else None
+                stream = live_stream(self.provider, on_delta)
                 if stream is not None:
                     response = await in_owner_words(stream, messages, tools, on_delta)
                 else:
@@ -689,7 +689,7 @@ class LLMManager:
             return await failover.answer_on_failover(self, target, messages, tools)
 
     def _call_failed(self, exc: Exception, start: float, budget: Optional[int]) -> None:
-        self._track_usage(None, start, status="error")
+        self._track_usage(getattr(exc, "partial_response", None), start, status="error")
         self._remember_refusal(exc)
         self._note_refusal(exc, budget)
 

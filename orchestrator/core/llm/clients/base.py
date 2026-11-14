@@ -11,7 +11,7 @@ import contextvars
 import functools
 import logging
 import re
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
@@ -150,6 +150,18 @@ async def run_blocking(fn: Callable[..., _T], *args: Any) -> _T:
     """
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, functools.partial(contextvars.copy_context().run, fn, *args))
+
+
+def live_stream(provider: Any, on_delta: Any) -> Optional[Callable[..., Awaitable[Any]]]:
+    """The provider's ``stream_response`` when the caller listens (``on_delta``) and the provider
+    streams this call; None when the call answers whole. A provider with no ``streams_now``
+    streams whenever it can; one that has it (Anthropic: ``ANTHROPIC_STREAMING`` and the turn's
+    surface) is asked here, on the event loop, before any thread hop."""
+    stream = getattr(provider, "stream_response", None) if on_delta is not None else None
+    if stream is None:
+        return None
+    streams_now = getattr(provider, "streams_now", None)
+    return stream if streams_now is None or streams_now() else None
 
 
 @dataclass

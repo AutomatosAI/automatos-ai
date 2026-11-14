@@ -29,8 +29,10 @@ class ContextResult:
     # PRD-201 S1: the persisted assembly trace — "what did Auto know?".
     # ``sections`` is the per-section record the assembler already computes and
     # used to throw away: {name, priority, token_estimate, rendered_nonempty,
-    # trimmed}. ``model`` + ``budget_total`` are the resolved driving model and
-    # its model-aware budget ceiling (PRD-201 S3). ``injected_memory_ids`` is
+    # trimmed}, plus ``render_ms`` (the section's render wall time) on chat
+    # builds; planning builds do not carry it. ``model`` + ``budget_total``
+    # are the resolved driving model and its model-aware budget ceiling
+    # (PRD-201 S3). ``injected_memory_ids`` is
     # best-effort memory-item provenance for the turn (empty when unknown).
     model: Optional[str] = None
     budget_total: int = 0

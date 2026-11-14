@@ -351,6 +351,7 @@ class ContextService:
                 "token_estimate": s.token_estimate,
                 "rendered_nonempty": bool(s.content),
                 "trimmed": s.name in _trimmed_set,
+                "render_ms": s.render_ms,
             }
             for s in assembly.rendered
         ]
@@ -604,6 +605,7 @@ class ContextService:
         """Render all sections in parallel, catching per-section failures."""
 
         async def _safe_render(section: Any) -> RenderedSection:
+            started = time.perf_counter()
             try:
                 content = await section.render(ctx)
             except Exception:
@@ -612,13 +614,14 @@ class ContextService:
                     section.name,
                 )
                 content = ""
-
+            render_ms = round((time.perf_counter() - started) * 1000, 1)
             return RenderedSection(
                 name=section.name,
                 priority=section.priority,
                 content=content or "",
                 token_estimate=count_tokens(content or ""),
                 max_tokens=section.max_tokens,
+                render_ms=render_ms,
             )
 
         results = await asyncio.gather(

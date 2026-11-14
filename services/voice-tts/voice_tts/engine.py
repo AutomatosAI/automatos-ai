@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 import numpy as np
 
@@ -32,6 +32,12 @@ SAMPLE_RATE = 24000
 PCM_MAX = 32767
 # Loggers that would write a request's text, or its phonemes, at DEBUG.
 QUIET_LOGGERS = ("kokoro_onnx", "phonemizer")
+# Spoken once, and dropped, before the service reports ready: onnxruntime's first run is its slowest, and
+# the model's inputs are sized by the text, so this is about as long as a reply's first sentence.
+WARM_TEXT = "Here is a short summary of what is waiting on your board today, before the first meeting of the morning."
+WARM_SPEED = 1.0
+
+logger = logging.getLogger(__name__)
 
 
 class Engine:
@@ -45,11 +51,19 @@ class Engine:
     def loaded(self) -> bool:
         return self._model is not None
 
-    def load(self) -> float:
-        """Load the model and the voices: the seconds it took. Blocking: run it in a thread."""
+    def load(self, warm: Optional[Tuple[str, str]] = None) -> float:
+        """Load the model and the voices: the seconds it took. Blocking: run it in a thread.
+
+        ``warm`` is ``(voice id, espeak language)``: one synthesis in that voice runs, and is dropped,
+        before ``loaded`` turns true, so the first request does not pay onnxruntime's first run. A
+        warm-up that raises is logged and the model is kept; one that hangs keeps ``loaded`` false.
+        """
         started = time.monotonic()
         if self._model is None:
-            self._model = _load_model(self._settings)
+            model = _load_model(self._settings)
+            if warm is not None:
+                _warm_up(model, *warm)
+            self._model = model
         return round(time.monotonic() - started, 3)
 
     def speak(self, text: str, voice: str, speed: float, language: str) -> bytes:
@@ -74,6 +88,17 @@ def to_pcm16(samples: Any) -> bytes:
 def silence(seconds: float) -> bytes:
     """``seconds`` of 16-bit PCM silence at Kokoro's rate."""
     return bytes(2 * int(round(seconds * SAMPLE_RATE)))
+
+
+def _warm_up(model: Any, voice: str, language: str) -> None:
+    """One synthesis whose audio nobody hears. It never stops the model from being used."""
+    started = time.monotonic()
+    try:
+        model.create(WARM_TEXT, voice=voice, speed=WARM_SPEED, lang=language)
+    except Exception as exc:  # noqa: BLE001 — a library's message can carry text: logged by type, the model is kept
+        logger.warning("kokoro: the warm-up synthesis failed: %s voice=%s", type(exc).__name__, voice)
+        return
+    logger.info("kokoro: warm-up synthesis voice=%s took %.2f s", voice, time.monotonic() - started)
 
 
 def _load_model(settings: Settings) -> Any:

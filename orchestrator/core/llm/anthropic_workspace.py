@@ -124,8 +124,12 @@ def _stored_workspace(fingerprint: str) -> Optional[str]:
 
 
 def clear_cache() -> None:
-    """Forget cached lookups (a key was saved or deleted)."""
+    """Forget cached lookups, and the SDK clients built from them (a key was saved or deleted)."""
     _cache.clear()
+    # Imported here: core.llm.clients imports this module at the top.
+    from core.llm.clients.shared_clients import forget_clients
+
+    forget_clients()
 
 
 __all__ = [

@@ -28,6 +28,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from config import config
+from core.monitoring import turn_clock
 from modules.voice.speech import (
     TTS_BAD_REQUEST,
     TTS_BUSY,
@@ -152,6 +153,9 @@ class SpeechStream:
     voice: str
     response: httpx.Response
     started: float
+    # Seconds from the route's first dependency (the request's clock) to ``started``; None
+    # when no clock ran: turn timing is off, or the caller is not the route.
+    waited: Optional[float] = None
 
 
 async def open_speech(spec: SpeechRequest, workspace_id: str) -> SpeechStream:
@@ -161,6 +165,7 @@ async def open_speech(spec: SpeechRequest, workspace_id: str) -> SpeechStream:
     client = _client()
     payload = {"text": spec.text, "voice": voice, "speed": spec.speed}
     started = time.monotonic()
+    waited = turn_clock.elapsed_seconds()
     try:
         response = await client.send(client.build_request("POST", _url(SPEAK_PATH), json=payload), stream=True)
     except httpx.HTTPError as exc:
@@ -168,7 +173,8 @@ async def open_speech(spec: SpeechRequest, workspace_id: str) -> SpeechStream:
         raise unavailable() from exc
     if response.status_code != 200:
         raise await _refusal(response, workspace_id)
-    return SpeechStream(voice=response.headers.get(VOICE_HEADER) or voice or "", response=response, started=started)
+    return SpeechStream(voice=response.headers.get(VOICE_HEADER) or voice or "", response=response, started=started,
+                        waited=waited)
 
 
 async def relay(stream: SpeechStream, spec: SpeechRequest, workspace_id: str) -> AsyncIterator[bytes]:
@@ -201,6 +207,7 @@ async def relay(stream: SpeechStream, spec: SpeechRequest, workspace_id: str) ->
             workspace_id=workspace_id, voice=stream.voice, chars=len(spec.text),
             first_byte_seconds=None if first_byte is None else first_byte - stream.started,
             total_seconds=finished - stream.started, audio_bytes=sent, outcome=outcome,
+            waited_seconds=stream.waited, turn_ref=spec.turn_ref,
         ))
 
 

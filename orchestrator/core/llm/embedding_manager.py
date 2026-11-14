@@ -12,6 +12,7 @@ import threading
 from typing import Optional, List
 
 from core.loop_scoped_clients import adopt
+from .embed_once import embed_once
 from .clients.base import (
     BaseEmbeddingProvider,
     EmbeddingConfig,
@@ -200,8 +201,17 @@ class EmbeddingManager:
         if self.provider is None:
             raise ValueError("Embedding provider not initialized")
         
-        return await self.provider.generate_embedding(text)
-    
+        # Inside a chat turn's scope (TURN_EMBED_ONCE) a repeat of the same text is answered
+        # from the turn's memo; with no scope open this is the provider's call, as before.
+        return await embed_once(self._model_key(), text, self.provider.generate_embedding)
+
+    def _model_key(self) -> str:
+        """What tells one embedding space from another: the provider's class, model and dimension."""
+        provider_config = getattr(self.provider, "config", None)
+        model = getattr(provider_config, "model", None)
+        dimension = getattr(provider_config, "dimension", None)
+        return f"{type(self.provider).__name__}:{model}:{dimension}"
+
     def generate_embedding_sync(self, text: str) -> List[float]:
         """
         Generate embedding for text (synchronous).
