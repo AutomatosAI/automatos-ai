@@ -20,7 +20,21 @@ export type Permission =
   | "missions:read"
   | "missions:execute"
   | "playbooks:read"
-  | "playbooks:execute";
+  | "playbooks:execute"
+  | "tasks:read"
+  | "tasks:write"
+  | "memory:read"
+  | "memory:write"
+  | "agents:chat";
+
+/** One scope the create form offers: its checkbox label and, where the label needs it, a hint. */
+export interface PermissionOption {
+  value: Permission;
+  label: string;
+  group: string;
+  /** What the scope lets the key do, in a sentence under the checkbox. */
+  hint?: string;
+}
 
 export type ExpiryOption = "none" | "30d" | "90d" | "1y";
 
@@ -77,7 +91,8 @@ export interface KeyStatus {
 // Constants
 // ---------------------------------------------------------------------------
 
-export const ALL_PERMISSIONS: { value: Permission; label: string; group: string }[] = [
+/** The scopes either kind of key is offered. "Select All" ticks these and no others. */
+export const COMMON_PERMISSIONS: PermissionOption[] = [
   { value: "chat", label: "Chat", group: "Chat" },
   { value: "documents:read", label: "Documents: Read", group: "Documents" },
   { value: "documents:write", label: "Documents: Write", group: "Documents" },
@@ -89,6 +104,47 @@ export const ALL_PERMISSIONS: { value: Permission; label: string; group: string 
   { value: "missions:execute", label: "Missions: Execute", group: "Missions" },
   { value: "playbooks:read", label: "Playbooks: Read", group: "Playbooks" },
   { value: "playbooks:execute", label: "Playbooks: Execute", group: "Playbooks" },
+];
+
+/**
+ * The scopes a product's own backend uses (PRD-274; orchestrator/api/api_keys.py
+ * `VALID_PERMISSIONS`). The form offers them for a server key only, and each is ticked on its
+ * own: "Select All" leaves them out, so one click never widens a key. The routes behind four of
+ * them refuse a public key (orchestrator/core/auth/server_key_gate.py). The board's read routes
+ * accept `tasks:read` from either kind; this form still offers it for a server key only, because
+ * a public key can be read by anyone who opens the page it sits in.
+ */
+export const SERVER_KEY_PERMISSIONS: PermissionOption[] = [
+  {
+    value: "tasks:read",
+    label: "Tasks: Read",
+    group: "Tasks",
+    hint: "Read the board's Tasks, what each one cost, and the fleet's live state.",
+  },
+  {
+    value: "tasks:write",
+    label: "Tasks: Write",
+    group: "Tasks",
+    hint: "File a Task, including one assigned to an agent with a prompt.",
+  },
+  {
+    value: "memory:read",
+    label: "Memory: Read",
+    group: "Memory",
+    hint: "Read and search memory: the workspace's, and any end user's.",
+  },
+  {
+    value: "memory:write",
+    label: "Memory: Write",
+    group: "Memory",
+    hint: "Store memory. Also erases an end user entirely: their memories, conversations and consent record.",
+  },
+  {
+    value: "agents:chat",
+    label: "Agents: Chat",
+    group: "Agents",
+    hint: "Chat with an agent as the key's own service user. This workspace pays for each turn.",
+  },
 ];
 
 export const EXPIRY_OPTIONS: { value: ExpiryOption; label: string }[] = [
