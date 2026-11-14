@@ -1,7 +1,7 @@
 """The voice-tts HTTP service (aiohttp, as media-render and the workspace worker are).
 
-    GET  /healthz   open: 200 {"ready": bool}; ready once the model has loaded
-    GET  /readyz    open: 200 once the model has loaded, 503 until then (a deploy's health check)
+    GET  /healthz   open: 200 {"ready": bool}; ready once the model has loaded and warmed up
+    GET  /readyz    open: 200 once the model has loaded and warmed up, 503 until then (a deploy's health check)
     GET  /voices    open: {"default", "voices": [{id, name, accent, gender}]}, English first
     POST /speak     Authorization: Bearer <VOICE_TTS_TOKEN>; {"text", "voice", "speed"} -> audio/mpeg
 
@@ -14,7 +14,9 @@ has gone). It never waits for a slot: the caller falls back to the device's own 
 at once. Any other failure is a 500 ``tts_failed`` (speaking.py). The text is never logged.
 
 Once the service is listening the model loads in a background thread (the PRD-262
-US-053 pattern from media-render), so /healthz answers at once.
+US-053 pattern from media-render), so /healthz answers at once. With VOICE_TTS_WARM_UP
+(the default) that thread also speaks one sentence in the default voice, and drops it,
+before the service is ready: the first request then does not pay the model's first run.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ import hmac
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, Set
+from typing import Any, Callable, Optional, Set, Tuple
 
 from aiohttp import web
 
@@ -148,10 +150,18 @@ async def _cancel_tasks(app: web.Application) -> None:
     state.slots.shutdown()
 
 
+def _warm_voice(state: ServiceState) -> Optional[Tuple[str, str]]:
+    """The default voice and its language for the warm-up synthesis, or None when it is switched off."""
+    if not state.settings.warm_up:
+        return None
+    voice = state.catalogue.get(state.catalogue.default)
+    return voice.id, voice.espeak
+
+
 async def _warm(state: ServiceState) -> None:
     logger.info("kokoro: loading the voice model in the background")
     try:
-        seconds = await asyncio.to_thread(state.engine.load)
+        seconds = await asyncio.to_thread(state.engine.load, _warm_voice(state))
     except Exception:
         logger.exception("kokoro: the voice model did not load; /speak answers tts_warming until a restart")
         return

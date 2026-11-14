@@ -33,6 +33,8 @@ import logging
 from typing import Any, AsyncGenerator, Callable, Optional
 
 from config import config
+from core.llm.request_scope import QUICK_ASK, set_spoken_turn, spoken_turn
+from core.monitoring import turn_clock
 
 logger = logging.getLogger(__name__)
 
@@ -159,12 +161,14 @@ class TurnAgents:
 
     async def activate_agent(self, agent_id: int, **kwargs: Any) -> Any:
         runtime = await self._factory.activate_agent(agent_id, **kwargs)
+        turn_clock.mark(turn_clock.MARK_AGENT)
         if runtime is None:
             return None
         if self._requested is not None:
             runtime = await self._on_the_requested_model(runtime, kwargs.get("workspace_id"))
         elif self._spoken:
             runtime = await self._on_the_spoken_model(runtime, kwargs.get("workspace_id"))
+        turn_clock.mark(turn_clock.MARK_TURN_MODEL)
         logger.info(TURN_MODEL_LOG, model_of(runtime), str(self._spoken).lower())
         return runtime
 
@@ -190,10 +194,13 @@ def answers_on_the_turns_model(turn: Stream) -> Stream:
     """Wrap ``StreamingChatService._stream_response_with_agent_scoped``: the agent the turn
     activates answers on the turn's model, the spoken model on a spoken turn. The service is
     built for one turn; its own factory is put back when the turn ends. A service built
-    without a factory runs its turn as it is."""
+    without a factory runs its turn as it is. Every turn also says which spoken surface its
+    model calls answer (``core.llm.request_scope``): a quick ask, the surface it was started
+    in (Auto Live), or none on a turn that is read; what was there before is put back."""
     @functools.wraps(turn)
     async def wrapped(chat: Any, *args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:
         factory = getattr(chat, "agent_factory", None)
+        before = set_spoken_turn((spoken_turn() or QUICK_ASK) if kwargs.get("spoken_mode") else "")
         if factory is not None:
             chat.agent_factory = TurnAgents(factory, spoken=bool(kwargs.get("spoken_mode")),
                                             requested=_requested_model(chat))
@@ -201,6 +208,7 @@ def answers_on_the_turns_model(turn: Stream) -> Stream:
             async for chunk in turn(chat, *args, **kwargs):
                 yield chunk
         finally:
+            set_spoken_turn(before)
             if factory is not None:
                 chat.agent_factory = factory
     return wrapped

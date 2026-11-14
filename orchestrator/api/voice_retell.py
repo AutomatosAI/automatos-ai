@@ -37,6 +37,7 @@ from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db, get_db_session
+from core.llm.request_scope import LIVE, set_spoken_turn
 from modules.policy import ai_disclosure
 from modules.voice import (
     arming,
@@ -397,9 +398,13 @@ async def _agent_retell_stream_inner(req: RetellLLMRequest) -> AsyncIterator[dic
             return
         yield turn_timing.landed(binding.workspace_id, binding.chat_id)
 
-        tap = turn_timing.SpeechTap(_start_spoken_turn(db, req, binding))
-        async for frame in retell_response_frames(req.response_id, tap):
-            yield frame
+        before = set_spoken_turn(LIVE)  # the turn's model calls answer Auto Live (ANTHROPIC_STREAMING)
+        try:
+            tap = turn_timing.SpeechTap(_start_spoken_turn(db, req, binding))
+            async for frame in retell_response_frames(req.response_id, tap):
+                yield frame
+        finally:
+            set_spoken_turn(before)
 
         _stamp_and_notify(db, req, binding, turn_started_at)
         yield turn_timing.finished(

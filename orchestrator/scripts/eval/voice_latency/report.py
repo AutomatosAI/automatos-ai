@@ -14,6 +14,11 @@ followed by Retell's own e2e / asr / llm / tts p50/p90.
 
 Every figure is whole milliseconds; a measure with no value is ``-``, never
 an invented number.
+
+``group_stats``, ``summarize``, ``group_segment`` and ``results_line`` take the measure
+list as ``measures`` (default: Auto Live's ``MEASURES``), so the quick-ask runner
+(``quick_ask.py``) reports its own result type through the same code. A result is any
+object with ``kind``, ``silent`` and one attribute per measure.
 """
 
 from __future__ import annotations
@@ -66,10 +71,13 @@ def nearest_rank(values: Iterable[Optional[float]], percentile: int) -> Optional
     return int(round(present[rank - 1]))
 
 
-def group_stats(results: Sequence[TurnResult]) -> Dict[str, Any]:
+Measures = Sequence[Tuple[str, str]]
+
+
+def group_stats(results: Sequence[Any], measures: Measures = MEASURES) -> Dict[str, Any]:
     """p50/p90 of every measure over these turns, the silent count and the turn count."""
     stats: Dict[str, Any] = {}
-    for name, attr in MEASURES:
+    for name, attr in measures:
         values = [getattr(r, attr) for r in results]
         stats[name] = {"p50": nearest_rank(values, P50), "p90": nearest_rank(values, P90)}
     stats["silent"] = sum(1 for r in results if r.silent)
@@ -77,17 +85,17 @@ def group_stats(results: Sequence[TurnResult]) -> Dict[str, Any]:
     return stats
 
 
-def _kinds_in_order(results: Sequence[TurnResult]) -> List[str]:
+def _kinds_in_order(results: Sequence[Any]) -> List[str]:
     seen = {r.kind for r in results}
     known = [k for k in ASK_KINDS if k in seen]
     return known + sorted(seen - set(known))
 
 
-def summarize(results: Sequence[TurnResult]) -> Dict[str, Dict[str, Any]]:
+def summarize(results: Sequence[Any], measures: Measures = MEASURES) -> Dict[str, Dict[str, Any]]:
     """The stats overall first, then per kind (the ask set's kinds in their order)."""
-    summary = {OVERALL: group_stats(results)}
+    summary = {OVERALL: group_stats(results, measures)}
     for kind in _kinds_in_order(results):
-        summary[kind] = group_stats([r for r in results if r.kind == kind])
+        summary[kind] = group_stats([r for r in results if r.kind == kind], measures)
     return summary
 
 
@@ -99,16 +107,18 @@ def _pair(stats: Mapping[str, Any]) -> str:
     return f"{_fmt(stats.get('p50'))}/{_fmt(stats.get('p90'))}"
 
 
-def group_segment(label: str, stats: Mapping[str, Any]) -> str:
+def group_segment(label: str, stats: Mapping[str, Any], measures: Measures = MEASURES) -> str:
     """``<label>: first_frame p50/p90 · first_auto_frame p50/p90 · full p50/p90 · prep p50/p90 · silent N``."""
-    parts = [f"{name} {_pair(stats[name])}" for name, _ in MEASURES]
+    parts = [f"{name} {_pair(stats[name])}" for name, _ in measures]
     parts.append(f"silent {stats['silent']}")
     return f"{label}: " + FIELD_SEP.join(parts)
 
 
-def results_line(when_iso: str, build_sha: str, summary: Mapping[str, Mapping[str, Any]]) -> str:
+def results_line(
+    when_iso: str, build_sha: str, summary: Mapping[str, Mapping[str, Any]], measures: Measures = MEASURES
+) -> str:
     """The one line a run prints: every group of ``summarize`` in order."""
-    groups = GROUP_SEP.join(group_segment(label, stats) for label, stats in summary.items())
+    groups = GROUP_SEP.join(group_segment(label, stats, measures) for label, stats in summary.items())
     return FIELD_SEP.join((when_iso, build_sha, groups))
 
 

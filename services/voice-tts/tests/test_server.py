@@ -176,6 +176,27 @@ def test_the_text_is_never_logged(settings, tmp_path, caplog):
     assert "Nightingale" not in caplog.text
 
 
+def test_the_log_line_says_when_the_first_pcm_was_ready_and_how_long_it_plays(settings, tmp_path, caplog):
+    async def go():
+        async with _client(settings, tmp_path) as client:
+            body = {"text": "The first answer. The second answer follows."}
+            response = await client.post("/speak", json=body, headers=AUTH)
+            assert response.status == 200
+            await response.read()
+
+    with caplog.at_level(logging.DEBUG):
+        _run(go())
+    lines = [record.getMessage() for record in caplog.records if record.getMessage().startswith("speak ok:")]
+    assert len(lines) == 1
+    line = lines[0]
+    assert "first_pcm_s=" in line
+    # "The first answer." is 17 characters; FakeEngine's 100 bytes are 50 samples at 24 kHz.
+    assert " first_chars=17 " in line
+    assert line.endswith(" first_audio_s=0.002")
+    assert "The first answer" not in caplog.text
+    assert "follows" not in caplog.text
+
+
 # --------------------------------------------------------------------------- warming and busy
 
 
@@ -202,6 +223,47 @@ def test_the_model_loads_in_the_background_and_then_speak_answers(settings, tmp_
             assert response.status == 200
 
     _run(go())
+
+
+def test_the_model_is_warmed_in_the_default_voice_before_it_is_ready(settings, tmp_path):
+    engine = FakeEngine(loaded=False)
+
+    async def go():
+        async with _client(settings, tmp_path, engine) as client:
+            assert (await client.get("/readyz")).status == 503
+            await warm_in_background(client.app)
+            assert (await client.get("/readyz")).status == 200
+
+    _run(go())
+    assert settings.warm_up is True
+    assert engine.warmed == ("af_heart", "en-us")
+
+
+def test_the_warm_up_follows_the_default_voice(settings, tmp_path):
+    engine = FakeEngine(loaded=False)
+    british = replace(settings, default_voice="bm_george")
+
+    async def go():
+        app = create_app(british, engine=engine, catalogue=catalogue(tmp_path, default="bm_george"),
+                         encoder=FakeEncoder.start)
+        async with TestClient(TestServer(app)) as client:
+            await warm_in_background(client.app)
+
+    _run(go())
+    assert engine.warmed == ("bm_george", "en-gb")
+
+
+def test_warm_up_can_be_switched_off(settings, tmp_path):
+    engine = FakeEngine(loaded=False)
+
+    async def go():
+        async with _client(replace(settings, warm_up=False), tmp_path, engine) as client:
+            await warm_in_background(client.app)
+            assert (await client.get("/readyz")).status == 200
+
+    _run(go())
+    assert engine.loaded
+    assert engine.warmed is None
 
 
 def test_past_the_concurrency_limit_speak_is_a_429_tts_busy_at_once(settings, tmp_path):

@@ -19,6 +19,8 @@ TOKEN_ENV = "VOICE_TTS_TOKEN"
 # The one way to run without a token, for a developer's or a test's own machine: boot
 # refuses an empty VOICE_TTS_TOKEN in every environment unless this is "true".
 ALLOW_NO_TOKEN_ENV = "VOICE_TTS_ALLOW_NO_TOKEN"
+# One synthesis before the service reports ready (engine.py). Anything but "true" switches it off.
+WARM_UP_ENV = "VOICE_TTS_WARM_UP"
 
 # The contract (README "API"): text of 1 to 500 characters after trimming; speed clamped to 0.8-1.2.
 DEFAULT_MAX_CHARS = 500
@@ -58,6 +60,8 @@ class Settings:
     # Silence between two sentences, which Kokoro trims from each one it speaks.
     sentence_pause_seconds: float
     encode_timeout_seconds: int
+    # Speak one sentence, and drop it, before the service reports ready.
+    warm_up: bool
 
     @property
     def is_production(self) -> bool:
@@ -141,5 +145,6 @@ def load_settings(environ: Optional[Mapping[str, str]] = None, cpus: Optional[in
         espeak_data_path=env.text("VOICE_TTS_ESPEAK_DATA_PATH", "/opt/espeak"),
         lame_bin=env.text("VOICE_TTS_LAME_BIN", "lame"),
         default_voice=env.text("VOICE_TTS_DEFAULT_VOICE", "af_heart"),
+        warm_up=env.text(WARM_UP_ENV, "true").lower() == "true",
         **_limits(env, available_cpus() if cpus is None else cpus),
     )

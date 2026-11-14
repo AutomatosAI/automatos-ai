@@ -18,14 +18,15 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text, func, or_
 from pydantic import BaseModel
 
+from config import config
 from core.database.database import SessionLocal, get_db
 from consumers.chatbot import ChatService, StreamingChatService
 from consumers.chatbot.chat_history import ChatCursorNotFound, history_row
 from consumers.chatbot.turn_errors import CODE_SESSION_AGENT_TERMINAL, TurnError
 from consumers.chatbot.turn_notes import note_an_unanswered_turn, save_turn_note
-from api.chat_dispatch import TurnLane, auto_lane, chosen_agent_lane, response_headers, said_before
+from api.chat_dispatch import TurnLane, apps_skipped, auto_lane, chosen_agent_lane, response_headers, said_before
 from api.chat_models import ChatMessageRequest, ChatRequest, MessagePart
-from api.chat_turn_history import turn_history
+from api.chat_turn_history import spoken_window, turn_history
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from api.chat_server_key import (acts_as_its_service_user, keeps_each_end_users_chats_apart,
@@ -35,6 +36,7 @@ from core.auth.server_key_gate import require_workspace_permission_or_server_key
 from core.auth.dependencies import RequestContext
 from core.auth.principal import resolve_user_pk
 from core.models.core import User
+from core.monitoring import turn_clock
 from core.session_queue import get_session_queue
 from core.utils.timestamps import utc_iso
 from services.board_events import notify_chat_event
@@ -292,6 +294,7 @@ async def _turn_lane(db: Session, ctx: RequestContext, request: ChatRequest, mes
     return await auto_lane(
         db, ctx.workspace_id, auto_agent_id=get_default_agent_id(db, ctx.workspace_id),
         message_text=message_text, history_length=history_length, before=before,
+        spoken=bool(getattr(request, "spokenMode", False)),  # voice latency C-1 (a caller's request may have none)
     )
 
 
@@ -314,6 +317,7 @@ class _Turn:
     spoken_mode: bool
     locale: Optional[str] = None  # the person's checked BCP 47 tag (pt-BR); None: none named
     lean_request: Any = None  # a lean agent's model and app context (consumers.chatbot.lean_request)
+    agent_chosen: bool = False  # the person chose the agent (agentId): no app-name check (C-3)
 
 
 async def _turn_chunks(service: StreamingChatService, task_db: Session, turn: _Turn, messages: List[Dict[str, Any]]):
@@ -334,9 +338,11 @@ async def _turn_chunks(service: StreamingChatService, task_db: Session, turn: _T
         yield service.streaming_handler.format_aisdk_data("mission-suggestion", {
             "goal": turn.message_text, "complexity": lane.assessment.complexity.value, "agent_id": lane.agent_id,
         })
+    skips_apps = await apps_skipped(lane, spoken=turn.spoken_mode, agent_chosen=turn.agent_chosen,
+                                    workspace_id=turn.workspace_id, text=turn.message_text)  # voice latency C-2, C-3
     reply = service.stream_response_with_agent(
         chat_id=turn.chat_id, messages=messages, agent_id=lane.agent_id, user_id=turn.user_id,
-        skip_composio=lane.skip_composio, complexity_assessment=lane.assessment,
+        skip_composio=skips_apps, complexity_assessment=lane.assessment,
         mission_mode=turn.mission_mode, plan_mode=turn.plan_mode, suggest_mission=lane.suggest_mission,
         is_super_admin=turn.is_super_admin, locale=turn.locale,  # locale: the variant Auto replies in (pt-BR)
         # PRD-221 S3/S4: the sanitized reference set rides into the turn's context_trace and the page-prior action exposure.
@@ -346,7 +352,8 @@ async def _turn_chunks(service: StreamingChatService, task_db: Session, turn: _T
     )
     if turn.spoken_mode:
         # The prompt alone is no guarantee (modules.voice.spoken_style): the text is speechified too.
-        reply = spoken_text_frames(reply, service.streaming_handler.format_aisdk_text)
+        handler = service.streaming_handler  # B-5: a narration frame names the text the phone was sent
+        reply = spoken_text_frames(reply, handler.format_aisdk_text, handler.narration_frame if config.SPOKEN_MODE_NARRATION_AS_SPOKEN else None)
     async for chunk in reply:
         yield chunk
 
@@ -362,8 +369,9 @@ async def _produce_turn(turn: _Turn):
     try:
         service = StreamingChatService(task_db, workspace_id=turn.workspace_id)
         async with get_session_queue().acquire(f"{turn.workspace_id}:{turn.chat_id}"):
+            turn_clock.mark(turn_clock.MARK_LOCKED)
             messages = turn_history(ChatService(task_db), turn.chat_id, turn.message, turn.page_context,
-                                    turn.message_id)
+                                    turn.message_id, recent=spoken_window(turn.spoken_mode))
             async for chunk in _turn_chunks(service, task_db, turn, messages):
                 yield chunk
     finally:
@@ -390,10 +398,11 @@ def _after_the_turn(workspace_id: Any, chat_id: str, user_id: int, message_id: A
 
 
 # Endpoints
-@router.post("")
+@router.post("", dependencies=[Depends(turn_clock.arrives)])  # the turn's clock starts before auth
 async def stream_chat(
     request: ChatRequest,
     ctx: RequestContext = Depends(require_workspace_permission_or_server_key("agents:execute", AGENTS_CHAT)),
+    _authorised: None = Depends(turn_clock.authorised),  # and marks it once the gate above has answered
     db: Session = Depends(get_db)
 ):
     """Stream chat messages using AI SDK Data Stream format (text/plain)"""
@@ -410,10 +419,16 @@ async def stream_chat(
     saved = chat_service.save_message(
         chat_id=chat_id, role="user", parts=[part.dict() for part in parts], workspace_id=ctx.workspace_id,
     )
+    turn_clock.mark(turn_clock.MARK_SAVED)
     page_ctx = sanitize_page_context(request.context)
-    history = turn_history(chat_service, chat_id, current_msg, page_ctx)  # the lane's read; the turn reads again
+    window = spoken_window(request.spokenMode)  # voice latency C-4: a spoken turn's recent messages
+    history = ([] if request.agentId and window  # a chosen agent's lane reads none of it
+               else turn_history(chat_service, chat_id, current_msg, page_ctx, recent=window))  # the turn reads again
+    turn_clock.mark(turn_clock.MARK_HISTORY)
     message_text = _message_text(parts)
     lane = await _turn_lane(db, ctx, request, message_text, len(history), said_before(history))
+    turn_clock.mark(turn_clock.MARK_ROUTED)
+    turn_clock.note(ref=request.turnRef)
     logger.info("[chat] agent_id=%s answers the turn", lane.agent_id)
     # The request-scoped ``db`` is never handed to the turn: FastAPI closes it when the
     # response ends, which may be before the turn does.
@@ -422,7 +437,7 @@ async def stream_chat(
         message_id=getattr(saved, "id", None), lane=lane, locale=request.locale,
         message_text=message_text, mission_mode=bool(request.missionMode), plan_mode=bool(request.planMode),
         is_super_admin=_is_super_admin(ctx), page_context=page_ctx, spoken_mode=request.spokenMode,
-        lean_request=lean_request,
+        lean_request=lean_request, agent_chosen=bool(request.agentId),
     )
     # F105 (4 Nov): and it is done with here. Ending its transaction gives the pooled
     # connection back now (as api/voice_speech.py's speak does), instead of it sitting idle

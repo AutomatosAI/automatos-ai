@@ -30,6 +30,9 @@ import logging
 import time
 from typing import AsyncIterator, Awaitable, Callable, Dict, Optional
 
+from core.monitoring import turn_clock
+from modules.voice.spoken_stream import TEXT_FRAME_PREFIX
+
 logger = logging.getLogger(__name__)
 
 #: A turn older than this is presumed dead if its marker is still around.
@@ -38,6 +41,8 @@ INFLIGHT_TTL_S = 15 * 60
 CANCEL_TTL_S = 120
 #: How often the cancel watcher looks for a cross-process cancel marker.
 CANCEL_POLL_S = 0.5
+#: How a turn ended, on its timing line (core.monitoring.turn_clock).
+OUTCOME_COMPLETED, OUTCOME_CANCELLED, OUTCOME_FAILED = "completed", "cancelled", "failed"
 #: Hard bound on every Redis marker op. The markers are an optimisation; the
 #: turn's chunks must never wait on Redis. 2026-09-16: a registry pointed at a
 #: remote Redis (the local .env carried the Railway URL) stalled every reply
@@ -203,6 +208,8 @@ async def _produce_into(
     try:
         async for chunk in source:
             chunks += 1
+            if isinstance(chunk, str) and chunk.startswith(TEXT_FRAME_PREFIX):
+                turn_clock.mark(turn_clock.MARK_FIRST_TEXT)
             await queue.put(chunk)
         outcome["completed"] = True
         logger.info(
@@ -245,6 +252,13 @@ async def _watch_cancel(chat_id: str, registry: TurnRegistry, producer: asyncio.
             return
 
 
+def _ended_as(outcome: dict) -> str:
+    """How the producer ended, for the turn's timing line."""
+    if outcome.get("completed"):
+        return OUTCOME_COMPLETED
+    return OUTCOME_CANCELLED if outcome.get("cancelled") else OUTCOME_FAILED
+
+
 async def _run_producer(
     queue: "asyncio.Queue",
     *,
@@ -263,10 +277,12 @@ async def _run_producer(
                 _watch_cancel(chat_id, registry, task), name=f"chat-turn-cancel-watch:{chat_id}"
             )
     await registry.mark_inflight(chat_id)
+    turn_clock.mark(turn_clock.MARK_PRODUCER)
     outcome = {"completed": False, "cancelled": True}
     try:
         outcome = await _produce_into(queue, chat_id=chat_id, produce=produce, registry=registry)
     finally:
+        turn_clock.finish(chat_id, _ended_as(outcome))  # the turn's one timing line, whatever its ending
         if watcher is not None:
             watcher.cancel()
         await queue.put(_DONE)
@@ -314,6 +330,7 @@ async def run_detached_turn(
     ends, whatever happened to the consumer. Closing this generator early (the
     HTTP client went away) only records ``client_gone`` — the turn carries on.
     """
+    turn_clock.mark(turn_clock.MARK_RESPONSE_STARTED)
     reg = registry or get_turn_registry()
     queue: "asyncio.Queue" = asyncio.Queue()
     client_gone = asyncio.Event()

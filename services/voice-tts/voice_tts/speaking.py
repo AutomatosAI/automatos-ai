@@ -15,7 +15,9 @@ gone out, and ends the stream cleanly once audio has. Its message and traceback 
 carry the text, so a failure is logged by its exception type and the voice alone.
 
 One log line per answer: voice, characters, sentences, the seconds to the first byte
-and in all, the audio's bytes. Never the text.
+and in all, the audio's bytes, then the first piece that had something to say: the
+seconds until its PCM was ready, its characters and the seconds it plays for. Never the
+text.
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ from typing import Any, Awaitable, Callable, Optional, Sequence, Tuple
 from aiohttp import web
 
 from .config import Settings
-from .engine import silence
+from .engine import SAMPLE_RATE, silence
 from .mp3 import EncoderError, Mp3Encoder
 from .request import SpeechRequest, sentences
 from .slots import Slot
@@ -65,6 +67,11 @@ class _Answer:
     started: float
     first_byte: Optional[float] = None
     bytes_out: int = 0
+    # The first piece Kokoro had something to say for: when its PCM was ready, its
+    # characters and the seconds it plays for (16-bit mono, so two bytes a sample).
+    first_pcm: Optional[float] = None
+    first_chars: int = 0
+    first_audio_seconds: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -99,10 +106,15 @@ class Speaker:
                 return pcm, pieces[index + 1:]
         raise SpeakError(422, "tts_bad_request", "the text has nothing the voice can say")
 
-    async def _start(self, pieces: Sequence[str], job: _Job) -> Tuple[bytes, Sequence[str], Any]:
+    async def _start(
+        self, pieces: Sequence[str], job: _Job, answer: _Answer,
+    ) -> Tuple[bytes, Sequence[str], Any]:
         """The first sentence spoken and the encoder started. Raises SpeakError: nothing has gone out."""
         try:
             first, rest = await self._first(pieces, job)
+            answer.first_pcm = time.monotonic()
+            answer.first_chars = len(pieces[len(pieces) - len(rest) - 1])
+            answer.first_audio_seconds = len(first) / 2 / SAMPLE_RATE
             encoder = await self._start_encoder(self._settings)
         except SpeakError:
             raise
@@ -114,7 +126,7 @@ class Speaker:
         job = _Job(spec=spec, slot=slot)
         answer = _Answer(started=time.monotonic())
         pieces = sentences(spec.text)
-        first, rest, encoder = await self._start(pieces, job)
+        first, rest, encoder = await self._start(pieces, job, answer)
         response = web.StreamResponse(headers={"Cache-Control": "no-store", VOICE_HEADER: spec.voice.id})
         response.content_type = CONTENT_TYPE
         outcome = await self._pipe(request, encoder, response, answer, first, rest, job)
@@ -177,7 +189,9 @@ class Speaker:
         now = time.monotonic()
         first = (answer.first_byte or now) - answer.started
         logger.info(
-            "speak %s: voice=%s chars=%d sentences=%d speed=%.2f first_byte_s=%.3f total_s=%.3f bytes=%d",
+            "speak %s: voice=%s chars=%d sentences=%d speed=%.2f first_byte_s=%.3f total_s=%.3f bytes=%d"
+            " first_pcm_s=%.3f first_chars=%d first_audio_s=%.3f",
             outcome, spec.voice.id, len(spec.text), sentence_count, spec.speed, first, now - answer.started,
-            answer.bytes_out,
+            answer.bytes_out, (answer.first_pcm or now) - answer.started, answer.first_chars,
+            answer.first_audio_seconds,
         )

@@ -15,9 +15,15 @@ so the contract is the refusals as much as the audio:
   usage line per answer names the workspace, the voice, the characters and the latency, never the
   text; the permission check's transaction is ended before the stream, and the session not closed
   twice; a voice-tts 500 ``tts_failed`` is this server's ``tts_unavailable``;
+* a ``turnRef`` (voice-latency A-3) joins the usage line to its chat turn: while
+  ``CHAT_TURN_TIMING_ENABLED`` is true the line ends ``outcome=ok wait_ms=<n> ref=<ref>``, where
+  ``wait_ms`` runs from the route's first dependency (before the permission read) to the send to
+  voice-tts; a ref that does not fit is dropped (still audio, ``ref=-``), the ref never reaches
+  voice-tts, and with the switch false the line is the one it was;
 * the voice list is voice-tts's, cached, and checked before it is passed on;
 * discovery lists ``tts`` only while ``VOICE_TTS_URL`` is set, and the routes are mounted and in the
-  route manifest.
+  route manifest; ``tts_first_clause`` (voice-latency E-12) needs ``VOICE_TTS_URL`` and
+  ``VOICE_TTS_FIRST_CLAUSE`` both, and ``spoken_unit_ends`` needs ``SPOKEN_MODE_UNIT_ENDS``.
 
 Through the real router with the request context and the session overridden and voice-tts behind
 httpx's MockTransport: no database, no Redis (a fake), no network.
@@ -27,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from pathlib import Path
@@ -42,6 +49,7 @@ import api.voice_speech as vs
 import core.auth.workspace_permission as permission
 from api.widgets.rate_limit import RateLimitStore
 from config import config
+from core.monitoring import turn_clock
 from modules.voice import speech, speech_client
 from services.mobile import discovery
 
@@ -306,6 +314,172 @@ def test_the_client_sends_the_token_and_gives_up_on_a_connection_fast(monkeypatc
     assert "authorization" not in speech_client.new_http_client().headers
 
 
+# --------------------------------------------------------------------------- the turn it belongs to
+
+TURN_REF = "vt-test-0001"
+# The usage line as it was before turn timing, whole.
+USAGE_AS_BEFORE = re.compile(
+    r"voice_tts_speech workspace=\S+ voice=\S+ chars=\d+ first_byte_ms=-?\d+ total_ms=\d+ bytes=\d+ outcome=ok")
+USAGE_TIMED = re.compile(USAGE_AS_BEFORE.pattern + r" wait_ms=(-?\d+) ref=(\S+)")
+
+
+def _usage_lines(caplog) -> list:
+    return [r.getMessage() for r in caplog.records if r.getMessage().startswith("voice_tts_speech ")]
+
+
+def _timed(caplog) -> tuple:
+    """The one usage line's ``(wait_ms, ref)``; fails when the line is not the timed shape."""
+    (line,) = _usage_lines(caplog)
+    found = USAGE_TIMED.fullmatch(line)
+    assert found is not None, line
+    return int(found.group(1)), found.group(2)
+
+
+@pytest.fixture
+def timing(monkeypatch):
+    monkeypatch.setattr(config, "CHAT_TURN_TIMING_ENABLED", True)
+
+
+@pytest.fixture
+def usages(monkeypatch) -> list:
+    """Every SpeechUsage the relay records, kept as well as logged."""
+    kept = []
+    real = speech_client.record_usage
+
+    def keeping(usage):
+        kept.append(usage)
+        real(usage)
+
+    monkeypatch.setattr(speech_client, "record_usage", keeping)
+    return kept
+
+
+def test_a_turn_ref_is_on_the_usage_line_after_the_wait_and_never_reaches_voice_tts(voice, role, timing, caplog):
+    with caplog.at_level(logging.DEBUG):
+        response = _speak({"text": SECRET_TEXT, "voice": "bm_george", "turnRef": TURN_REF})
+
+    assert response.status_code == 200, response.text
+    assert response.content == b"".join(MP3_CHUNKS)
+    (line,) = _usage_lines(caplog)
+    wait_ms, ref = _timed(caplog)
+    assert wait_ms >= 0 and ref == TURN_REF
+    assert line.endswith(f"outcome=ok wait_ms={wait_ms} ref={TURN_REF}")
+    assert voice.spoken == [{"text": SECRET_TEXT, "voice": "bm_george", "speed": 1.0}]
+    assert set(voice.spoken[0]) == {"text", "voice", "speed"}, "the ref is not forwarded"
+    assert TURN_REF.encode() not in voice.requests[0].content
+    assert "Nightingale" not in caplog.text
+
+
+@pytest.mark.parametrize("bad", [42, "a b", "vt-1a.b-3", "r" * 60, "short", "", True, None, ["vt-test-0001"],
+                                 {"ref": "vt-test-0001"}, "vt-test-0001\noutcome=forged"])
+def test_a_turn_ref_that_does_not_fit_still_gets_audio_and_is_left_off_the_line(voice, role, timing, caplog, bad):
+    with caplog.at_level(logging.DEBUG):
+        response = _speak({"text": "Hello there.", "turnRef": bad})
+
+    assert response.status_code == 200, response.text
+    assert response.content == b"".join(MP3_CHUNKS)
+    wait_ms, ref = _timed(caplog)
+    assert wait_ms >= 0 and ref == "-"
+    assert "forged" not in caplog.text
+
+
+def test_a_request_with_no_turn_ref_says_so_on_the_line(voice, role, timing, caplog):
+    with caplog.at_level(logging.DEBUG):
+        response = _speak({"text": "Hello there."})
+
+    assert response.status_code == 200
+    wait_ms, ref = _timed(caplog)
+    assert wait_ms >= 0 and ref == "-"
+
+
+def test_the_wait_counts_from_before_the_permission_read(voice, timing, monkeypatch, caplog):
+    """E-4's case: the clock starts at the route's first dependency, ahead of the permission gate."""
+    def slow(db, ctx):
+        time.sleep(0.06)
+        return "editor"
+
+    monkeypatch.setattr(permission, "resolve_workspace_role", slow)
+
+    with caplog.at_level(logging.DEBUG):
+        response = _speak({"text": "Hello there.", "turnRef": TURN_REF})
+
+    assert response.status_code == 200, response.text
+    wait_ms, ref = _timed(caplog)
+    assert wait_ms >= 50 and ref == TURN_REF
+
+
+def test_with_turn_timing_off_the_usage_line_is_the_one_it_was(voice, role, monkeypatch, caplog, usages):
+    monkeypatch.setattr(config, "CHAT_TURN_TIMING_ENABLED", False)
+
+    with caplog.at_level(logging.DEBUG):
+        response = _speak({"text": "Hello there.", "voice": "bm_george", "turnRef": TURN_REF})
+
+    assert response.status_code == 200, response.text
+    (line,) = _usage_lines(caplog)
+    assert USAGE_AS_BEFORE.fullmatch(line) is not None, line
+    assert line.endswith(f"bytes={sum(map(len, MP3_CHUNKS))} outcome=ok")
+    assert "wait_ms" not in caplog.text and TURN_REF not in caplog.text
+    (usage,) = usages
+    assert usage.waited_seconds is None, "no clock was begun for the request"
+    assert set(voice.spoken[0]) == {"text", "voice", "speed"}
+
+
+def test_the_route_measures_its_wait_and_hands_it_to_the_usage(voice, role, timing, usages):
+    assert _speak({"text": "Hello there.", "turnRef": TURN_REF}).status_code == 200
+
+    (usage,) = usages
+    assert usage.turn_ref == TURN_REF
+    assert usage.waited_seconds is not None and usage.waited_seconds >= 0
+
+
+def test_a_refused_request_is_refused_as_before_whatever_its_turn_ref(voice, role, timing, caplog):
+    with caplog.at_level(logging.DEBUG):
+        response = _speak({"text": "", "turnRef": TURN_REF})
+
+    assert response.status_code == 422 and response.json()["code"] == "tts_bad_request"
+    assert voice.requests == [] and _usage_lines(caplog) == []
+
+
+def test_parse_speech_keeps_a_fitting_turn_ref_and_drops_any_other():
+    assert speech.parse_speech({"text": "Hi.", "turnRef": TURN_REF}).turn_ref == TURN_REF
+    assert speech.parse_speech({"text": "Hi.", "turnRef": "a b"}).turn_ref is None
+    assert speech.parse_speech({"text": "Hi.", "turnRef": 42}).turn_ref is None
+    assert speech.parse_speech({"text": "Hi."}).turn_ref is None
+
+
+def _usage(**changes) -> speech.SpeechUsage:
+    fields = {"workspace_id": str(WS), "voice": "af_heart", "chars": 9, "first_byte_seconds": 0.02,
+              "total_seconds": 0.05, "audio_bytes": 128, "outcome": "ok", **changes}
+    return speech.SpeechUsage(**fields)
+
+
+def test_a_usage_with_no_wait_and_no_ref_says_unknown(timing, caplog):
+    with caplog.at_level(logging.INFO, logger=speech.logger.name):
+        speech.record_usage(_usage())
+
+    assert _usage_lines(caplog) == [
+        f"voice_tts_speech workspace={WS} voice=af_heart chars=9 first_byte_ms=20 total_ms=50 bytes=128 outcome=ok"
+        " wait_ms=-1 ref=-"]
+
+
+def test_the_usage_line_never_carries_a_ref_that_is_text(timing, caplog):
+    with caplog.at_level(logging.INFO, logger=speech.logger.name):
+        speech.record_usage(_usage(waited_seconds=0.0384, turn_ref="what the person said"))
+
+    (line,) = _usage_lines(caplog)
+    assert line.endswith("outcome=ok wait_ms=38 ref=-")
+    assert "person" not in caplog.text
+
+
+def test_the_speech_route_starts_its_clock_before_the_permission_check():
+    routes = {route.path: route for route in vs.router.routes}
+    first, second = [dep.call for dep in routes[SPEECH].dependant.dependencies][:2]
+
+    assert first is turn_clock.arrives
+    assert getattr(second, permission.PERMISSION_MARKER_ATTR, None) == "agents:execute"
+    assert turn_clock.arrives not in [dep.call for dep in routes[VOICES].dependant.dependencies]
+
+
 # --------------------------------------------------------------------------- refusals
 
 
@@ -506,7 +680,42 @@ def test_discovery_lists_tts_only_while_voice_tts_url_is_set(monkeypatch, editio
     assert discovery.CAPABILITY_ROUTES["tts"] == ("POST", SPEECH)
     monkeypatch.setattr(config, "SUGGESTION_PUSH_ENABLED", True)  # the other capabilities that need setup
     monkeypatch.setattr(config, "CALIBRATION_ENABLED", True)
+    monkeypatch.setattr(config, "CHAT_TURN_TIMING_ENABLED", True)
+    monkeypatch.setattr(config, "SPOKEN_MODE_UNIT_ENDS", True)
+    monkeypatch.setattr(config, "VOICE_TTS_FIRST_CLAUSE", True)
     assert discovery.offered_capabilities() == sorted(discovery.CAPABILITY_ROUTES)
+
+
+@pytest.mark.parametrize("edition", ["saas", "local"])
+def test_discovery_lists_tts_first_clause_only_with_a_voice_and_its_switch(monkeypatch, edition):
+    """Voice-latency E-12: the clause cut is for the server voice, so the name needs both."""
+    monkeypatch.setattr(config, "AUTH_EDITION", edition)
+    monkeypatch.setattr(config, "VOICE_TTS_URL", URL)
+    monkeypatch.setattr(config, "VOICE_TTS_FIRST_CLAUSE", False)  # the default
+    assert "tts_first_clause" not in discovery.offered_capabilities()
+    assert "tts" in discovery.offered_capabilities()
+
+    monkeypatch.setattr(config, "VOICE_TTS_URL", "")
+    monkeypatch.setattr(config, "VOICE_TTS_FIRST_CLAUSE", True)
+    assert "tts_first_clause" not in discovery.offered_capabilities()
+
+    monkeypatch.setattr(config, "VOICE_TTS_URL", URL)
+    assert "tts_first_clause" in discovery.offered_capabilities()
+    assert discovery.CAPABILITY_ROUTES["tts_first_clause"] == ("POST", SPEECH)
+    assert discovery.CONFIGURED_CAPABILITIES["tts_first_clause"] is discovery.first_clause_enabled
+
+
+@pytest.mark.parametrize("edition", ["saas", "local"])
+def test_discovery_lists_spoken_unit_ends_only_while_its_switch_is_on(monkeypatch, edition):
+    """Voice-latency E-12: it needs no voice, only ``SPOKEN_MODE_UNIT_ENDS``."""
+    monkeypatch.setattr(config, "AUTH_EDITION", edition)
+    monkeypatch.setattr(config, "VOICE_TTS_URL", "")
+    monkeypatch.setattr(config, "SPOKEN_MODE_UNIT_ENDS", False)  # the default
+    assert "spoken_unit_ends" not in discovery.offered_capabilities()
+
+    monkeypatch.setattr(config, "SPOKEN_MODE_UNIT_ENDS", True)
+    assert "spoken_unit_ends" in discovery.offered_capabilities()
+    assert discovery.CAPABILITY_ROUTES["spoken_unit_ends"] == ("POST", "/api/chat")
 
 
 def test_the_router_is_mounted_and_both_routes_are_in_the_route_manifest():
@@ -523,4 +732,5 @@ def test_the_settings_are_on_the_config_surface():
     names = set(json.loads((ORCH / "reports" / "config-surface.json").read_text(encoding="utf-8"))["settings"])
 
     assert {"VOICE_TTS_URL", "VOICE_TTS_TOKEN", "VOICE_TTS_TIMEOUT_SECONDS", "VOICE_TTS_CONNECT_TIMEOUT_SECONDS",
-            "VOICE_TTS_DEFAULT_VOICE", "VOICE_TTS_RATE_PER_MINUTE"} <= names
+            "VOICE_TTS_DEFAULT_VOICE", "VOICE_TTS_RATE_PER_MINUTE", "VOICE_TTS_FIRST_CLAUSE",
+            "SPOKEN_MODE_UNIT_ENDS"} <= names

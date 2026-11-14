@@ -22,6 +22,10 @@ that names no voice is spoken in ``VOICE_TTS_DEFAULT_VOICE`` only when voice-tts
 (``speech_client.default_voice``): the hosted API still carries a value of that name from the
 voice service retired in #625, which may be no Kokoro voice at all.
 
+A client may also send ``turnRef``, the reference of the chat turn the sentence belongs to
+(``core/monitoring/turn_ref.py``). It only names the turn on the usage line: one that does not
+fit the pattern is dropped, never refused, and it is never sent on to voice-tts.
+
 No text is ever logged. ``record_usage`` writes one line per answer, and it is the one place
 speech would be metered. It charges no credit, by decision (PRD-265 D-6, Gerard, 30 Oct 2026):
 the voice runs on our own server and costs us no more per use than the device's own voice.
@@ -38,6 +42,8 @@ from typing import Any, Dict, Optional, Union
 from pydantic import BaseModel, ConfigDict, StrictFloat, StrictInt, StrictStr, ValidationError
 
 from config import config
+from core.monitoring import turn_clock
+from core.monitoring.turn_ref import clean_ref
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +61,13 @@ TTS_TOO_LONG = "tts_too_long"
 TTS_BUSY = "tts_busy"
 
 UNAVAILABLE_DETAIL = "Auto's voice is not available right now; the device's voice is used instead."
+
+USAGE_LINE = "voice_tts_speech workspace=%s voice=%s chars=%d first_byte_ms=%d total_ms=%d bytes=%d outcome=%s"
+# Appended to the usage line while CHAT_TURN_TIMING_ENABLED is true: the time the request spent
+# in this server before voice-tts was asked, and the chat turn the sentence belongs to.
+USAGE_TIMING_FIELDS = " wait_ms=%d ref=%s"
+UNKNOWN_MS = -1
+NO_REF = "-"
 
 
 class SpeechRefused(Exception):
@@ -95,6 +108,9 @@ class SpeechBody(BaseModel):
     text: StrictStr
     voice: Optional[StrictStr] = None
     speed: Optional[Union[StrictInt, StrictFloat]] = None
+    # The chat turn this sentence belongs to. Any type is taken: a value that is no turn
+    # reference is dropped by ``clean_ref``, so it can never refuse the audio.
+    turnRef: Optional[Any] = None
 
 
 @dataclass(frozen=True)
@@ -103,6 +119,8 @@ class SpeechRequest:
     # None: the request named no voice; the default is chosen against voice-tts's list.
     voice: Optional[str]
     speed: float
+    # The turn reference the client sent, when it fits the pattern; only ever logged.
+    turn_ref: Optional[str] = None
 
 
 def _bad(detail: str) -> SpeechRefused:
@@ -137,7 +155,8 @@ def parse_speech(payload: Any) -> SpeechRequest:
         raise _bad("text is empty")
     if len(text) > MAX_TEXT_CHARS:
         raise SpeechRefused(413, TTS_TOO_LONG, f"text is {len(text)} characters; at most {MAX_TEXT_CHARS} are spoken")
-    return SpeechRequest(text=text, voice=_voice(body.voice), speed=_speed(body.speed))
+    return SpeechRequest(text=text, voice=_voice(body.voice), speed=_speed(body.speed),
+                         turn_ref=clean_ref(body.turnRef))
 
 
 @dataclass(frozen=True)
@@ -151,6 +170,13 @@ class SpeechUsage:
     total_seconds: float
     audio_bytes: int
     outcome: str
+    # From the route's first dependency to the send to voice-tts; None when no clock ran.
+    waited_seconds: Optional[float] = None
+    turn_ref: Optional[str] = None
+
+
+def _ms(seconds: Optional[float]) -> int:
+    return round(seconds * 1000) if seconds is not None else UNKNOWN_MS
 
 
 def record_usage(usage: SpeechUsage) -> None:
@@ -158,10 +184,14 @@ def record_usage(usage: SpeechUsage) -> None:
 
     Speech is free (PRD-265 D-6). Were that ever to change, the charge would go here, once
     per answer, by ``usage.chars`` for ``usage.workspace_id``.
+
+    While ``CHAT_TURN_TIMING_ENABLED`` is true the line also ends ``wait_ms=<n> ref=<ref>``
+    (``-1`` and ``-`` when unknown); the ref is pattern-checked again here, so it is never text.
     """
-    first_ms = round(usage.first_byte_seconds * 1000) if usage.first_byte_seconds is not None else -1
-    logger.info(
-        "voice_tts_speech workspace=%s voice=%s chars=%d first_byte_ms=%d total_ms=%d bytes=%d outcome=%s",
-        usage.workspace_id, usage.voice, usage.chars, first_ms, round(usage.total_seconds * 1000),
-        usage.audio_bytes, usage.outcome,
-    )
+    line = USAGE_LINE
+    fields = (usage.workspace_id, usage.voice, usage.chars, _ms(usage.first_byte_seconds),
+              round(usage.total_seconds * 1000), usage.audio_bytes, usage.outcome)
+    if turn_clock.enabled():
+        line += USAGE_TIMING_FIELDS
+        fields += (_ms(usage.waited_seconds), clean_ref(usage.turn_ref) or NO_REF)
+    logger.info(line, *fields)

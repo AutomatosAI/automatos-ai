@@ -14,6 +14,14 @@ and the Anthropic client reads ``is_headless_run()``. ContextVars are async-safe
 (each task sees its own value), so a concurrent chat turn in the same process
 never sees the flag. Zero signature changes, cleanly scoped, unit-testable
 (set the var, assert the request shape).
+
+Voice latency B-1 adds a second flag the same way: which **spoken surface** a turn's LLM
+calls answer (``QUICK_ASK`` for a turn sent to ``POST /api/chat`` with ``spokenMode``,
+``LIVE`` for an Auto Live call, ``""`` for a turn that is read). The chat turn's wrapper
+(``consumers.chatbot.spoken_model.answers_on_the_turns_model``) and the Auto Live stream
+(``api.voice_retell``) set it; the Anthropic client reads it to decide whether a call
+streams (``ANTHROPIC_STREAMING``). It is set and put back, not reset by token: an async
+generator can be closed from another context, where a token reset raises.
 """
 from __future__ import annotations
 
@@ -45,3 +53,20 @@ def headless_run() -> Iterator[None]:
 def is_headless_run() -> bool:
     """True when running inside a ``headless_run()`` scope (PRD-201 S5)."""
     return bool(_HEADLESS_RUN.get())
+
+
+QUICK_ASK, LIVE = "quick-ask", "live"
+_SPOKEN_TURN: contextvars.ContextVar[str] = contextvars.ContextVar("automatos_spoken_turn", default="")
+
+
+def set_spoken_turn(surface: str) -> str:
+    """Say which spoken surface (QUICK_ASK, LIVE, or "" for none) the LLM calls made from here on
+    answer; returns what it was before, for the caller to put back."""
+    before = _SPOKEN_TURN.get()
+    _SPOKEN_TURN.set(surface or "")
+    return before
+
+
+def spoken_turn() -> str:
+    """The spoken surface this call answers: QUICK_ASK, LIVE, or "" on a turn that is read."""
+    return _SPOKEN_TURN.get()
