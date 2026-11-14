@@ -16,12 +16,22 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ALL_PERMISSIONS, EXPIRY_OPTIONS, type ExpiryOption, type KeyType } from "./api-key-types";
+import { cn } from "@/lib/utils";
+import {
+  COMMON_PERMISSIONS,
+  EXPIRY_OPTIONS,
+  SERVER_KEY_PERMISSIONS,
+  type ExpiryOption,
+  type KeyType,
+  type PermissionOption,
+} from "./api-key-types";
 import type { CreateKeyForm } from "./use-create-key";
 
 interface FieldProps {
   form: CreateKeyForm;
 }
+
+const COMMON_PERMISSION_VALUES = COMMON_PERMISSIONS.map((option) => option.value);
 
 /** The required key name. */
 export function KeyNameField({ form }: FieldProps) {
@@ -73,32 +83,76 @@ export function KeyTypeField({ form }: FieldProps) {
   );
 }
 
-/** One checkbox per permission, with Select All and Clear All. */
+interface PermissionCheckboxProps extends FieldProps {
+  option: PermissionOption;
+}
+
+/** One scope's checkbox and label, with its hint underneath when it has one. */
+function PermissionCheckbox({ form, option }: PermissionCheckboxProps) {
+  const { formPermissions, togglePermission } = form;
+  const id = `perm-${option.value}`;
+  const hintId = option.hint ? `${id}-hint` : undefined;
+  const label = (
+    <Label htmlFor={id} className="text-sm font-normal cursor-pointer">
+      {option.label}
+    </Label>
+  );
+  return (
+    <div className={cn("flex space-x-2", option.hint ? "items-start" : "items-center")}>
+      <Checkbox
+        id={id}
+        aria-describedby={hintId}
+        checked={formPermissions.has(option.value)}
+        onCheckedChange={() => togglePermission(option.value)}
+      />
+      {option.hint ? (
+        <div className="space-y-1">
+          {label}
+          <p id={hintId} className="text-xs text-muted-foreground">
+            {option.hint}
+          </p>
+        </div>
+      ) : (
+        label
+      )}
+    </div>
+  );
+}
+
+/** The scopes for a product's own backend, each ticked on its own. Shown for a server key only. */
+function ServerKeyPermissions({ form }: FieldProps) {
+  return (
+    <div className="space-y-3 rounded-md border border-border p-3">
+      <div className="space-y-1">
+        <p className="text-sm font-medium">Server key only</p>
+        <p className="text-xs text-muted-foreground">
+          For your own backend. Tick each one this key needs: Select All leaves these out.
+        </p>
+      </div>
+      <div className="space-y-2">
+        {SERVER_KEY_PERMISSIONS.map((option) => (
+          <PermissionCheckbox key={option.value} form={form} option={option} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One checkbox per permission. Select All ticks the scopes either kind of key is offered and
+ * keeps what is already ticked; Clear All unticks everything. A server key also gets its own
+ * scopes underneath.
+ */
 export function KeyPermissionsField({ form }: FieldProps) {
-  const { formPermissions, setFormPermissions, togglePermission } = form;
+  const { formKeyType, setFormPermissions } = form;
   return (
     <div className="space-y-3">
       <Label>
         Permissions <span className="text-destructive">*</span>
       </Label>
       <div className="grid grid-cols-2 gap-x-6 gap-y-2">
-        {ALL_PERMISSIONS.map((perm) => (
-          <div
-            key={perm.value}
-            className="flex items-center space-x-2"
-          >
-            <Checkbox
-              id={`perm-${perm.value}`}
-              checked={formPermissions.has(perm.value)}
-              onCheckedChange={() => togglePermission(perm.value)}
-            />
-            <Label
-              htmlFor={`perm-${perm.value}`}
-              className="text-sm font-normal cursor-pointer"
-            >
-              {perm.label}
-            </Label>
-          </div>
+        {COMMON_PERMISSIONS.map((option) => (
+          <PermissionCheckbox key={option.value} form={form} option={option} />
         ))}
       </div>
       <div className="flex gap-2">
@@ -108,9 +162,7 @@ export function KeyPermissionsField({ form }: FieldProps) {
           size="sm"
           className="h-7 text-xs"
           onClick={() =>
-            setFormPermissions(
-              new Set(ALL_PERMISSIONS.map((p) => p.value))
-            )
+            setFormPermissions((ticked) => new Set([...ticked, ...COMMON_PERMISSION_VALUES]))
           }
         >
           Select All
@@ -125,6 +177,7 @@ export function KeyPermissionsField({ form }: FieldProps) {
           Clear All
         </Button>
       </div>
+      {formKeyType === "server" && <ServerKeyPermissions form={form} />}
     </div>
   );
 }

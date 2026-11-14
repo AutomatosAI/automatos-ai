@@ -2,7 +2,14 @@
  * The create form's checks and the `POST /api/api-keys` body built from it. Pure functions,
  * so the create hook only sequences the request.
  */
-import type { CreateKeyFormValues, CreateKeyPayload, ExpiryOption, KeyType } from "./api-key-types";
+import {
+  SERVER_KEY_PERMISSIONS,
+  type CreateKeyFormValues,
+  type CreateKeyPayload,
+  type ExpiryOption,
+  type KeyType,
+  type Permission,
+} from "./api-key-types";
 
 const EXPIRY_DAYS: Record<string, number> = {
   "30d": 30,
@@ -12,10 +19,24 @@ const EXPIRY_DAYS: Record<string, number> = {
 
 const MS_PER_DAY = 86400000;
 
+const SERVER_KEY_ONLY: ReadonlySet<Permission> = new Set(SERVER_KEY_PERMISSIONS.map((p) => p.value));
+
+/**
+ * The ticked scopes the key will be given. A public key takes none of the server-key scopes:
+ * the form hides them once the type is public, and one ticked before the switch is left behind.
+ */
+export function grantedPermissions(
+  values: Pick<CreateKeyFormValues, "formKeyType" | "formPermissions">,
+): Permission[] {
+  const ticked = Array.from(values.formPermissions);
+  if (values.formKeyType === "server") return ticked;
+  return ticked.filter((permission) => !SERVER_KEY_ONLY.has(permission));
+}
+
 /** Why the form cannot be sent yet (the toast's text), or null when it can. */
 export function createFormError(values: CreateKeyFormValues): string | null {
   if (!values.formName.trim()) return "Key name is required";
-  if (values.formPermissions.size === 0) return "Select at least one permission";
+  if (grantedPermissions(values).length === 0) return "Select at least one permission";
   if (values.formKeyType === "public" && !values.formDomains.trim()) {
     return "Allowed domains are required for public keys";
   }
@@ -57,7 +78,7 @@ export function buildCreatePayload(values: CreateKeyFormValues): CreateKeyPayloa
   return {
     name: values.formName.trim(),
     key_type: values.formKeyType,
-    permissions: Array.from(values.formPermissions),
+    permissions: grantedPermissions(values),
     ...allowedDomains(values.formKeyType, values.formDomains),
     ...rateLimit(values.formRateLimit),
     ...expiresAt(values.formExpiry),
