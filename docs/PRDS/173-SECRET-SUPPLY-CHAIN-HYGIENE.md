@@ -310,7 +310,7 @@ gitleaks-clean history, tokens encrypted at rest, and SAST + dependabot + gitlea
 **Owner-decision & production-unknown dependencies (surface, do not silently resolve — CLAUDE.md §12; review §14):**
 
 1. **Were the committed secrets rotated? (§14 production unknown).** Were the committed Clerk session material
-   (F012) and the flagged AWS key **`AKIA3ZLYFH2WTHW2CMN6`** rotated? The review recommends **rotating both
+   (F012) and the flagged AWS key **`AKIA…(redacted)`** rotated? The review recommends **rotating both
    regardless**; until answered, treat them as live. (The Clerk dev-browser client revocation is in §4.1
    step 3; the AWS key rotation is an operational action outside this PRD's code diff but is called out here so
    it is not lost.)
@@ -333,7 +333,7 @@ gitleaks-clean history, tokens encrypted at rest, and SAST + dependabot + gitlea
   unauthenticated OpenMemory call"**; scope: revoke/purge/gitleaks + merge mem0/pin SHA/boot probe + encrypt
   Shopify token + add SAST and dependabot lanes)
 - Review §13 Security pillar (the pass/fail bar this wave closes toward)
-- Review §14 — production unknowns (rotate committed Clerk material + AWS key `AKIA3ZLYFH2WTHW2CMN6` regardless;
+- Review §14 — production unknowns (rotate committed Clerk material + AWS key `AKIA…(redacted)` regardless;
   confirm Railway mem0 build source)
 - Roadmap §2 (Security pillar bar), §3 (W3 row: F011/F012/F058/F092, M, medium/history-rewrite), §4 Phase A,
   §5 (Ralph option for mechanical waves; review's dependency order is not deferral)

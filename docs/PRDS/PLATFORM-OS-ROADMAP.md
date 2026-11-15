@@ -163,7 +163,7 @@ the legacy engines (blocks the coherence thesis); memory's place in the IA (KB t
 sunset date; fix-or-delete the four honest-signal zombies (F036/F038/F039 + broken docx template); canonicalise
 one package manager; the moat pitch framing; open-core messaging timing; **production unknowns to confirm now**
 (is `SHOPIFY_INTERNAL_API_KEY` set (F003/F004), does every `S3_VECTORS_BUCKET` carry `{workspace_id}` (F005),
-were the committed Clerk material (F012) and the flagged AWS key `AKIA3ZLYFH2WTHW2CMN6` rotated — review
+were the committed Clerk material (F012) and the flagged AWS key `AKIA…(redacted)` rotated — review
 recommends rotating both regardless); branch-protection `strict=true`; read-only DB role for NL2SQL sources (F019).
 
 ---
