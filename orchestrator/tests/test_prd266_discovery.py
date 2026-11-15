@@ -326,6 +326,18 @@ def test_capabilities_are_the_mapped_names_and_only_known_ones(client, saas, mon
 
 
 @pytest.mark.parametrize("edition", ["saas", "local"])
+def test_report_content_is_listed_on_the_content_reports_route(client, saas, monkeypatch, edition):
+    """PRD-266 US-016a: the app offers "Report this" on an AI reply only when this build lists
+    ``report_content``, and the route needs no setup, so both editions list it."""
+    from api.content_reports import CONTENT_REPORTS_PREFIX
+
+    monkeypatch.setattr(config, "AUTH_EDITION", edition)
+
+    assert "report_content" in _document(client)["capabilities"]
+    assert discovery.CAPABILITY_ROUTES["report_content"] == ("POST", CONTENT_REPORTS_PREFIX)
+
+
+@pytest.mark.parametrize("edition", ["saas", "local"])
 def test_mobile_theme_is_listed_on_the_mobile_theme_route(client, saas, monkeypatch, edition):
     """PRD-261 M-04: the app offers installed themes on the phone only when this build lists them."""
     monkeypatch.setattr(config, "AUTH_EDITION", edition)
