@@ -105,6 +105,8 @@ CAPABILITY_ROUTES: Mapping[str, Tuple[str, str]] = MappingProxyType({
     "mobile_theme": ("GET", "/api/themes/mobile/{install_id}"),
     "push": ("POST", "/api/v1/mobile/devices"),
     "readiness": ("GET", "/api/readiness"),
+    # PRD-266 §4.8 US-016a: "Report this" on an AI reply; the app offers it only when this is listed.
+    "report_content": ("POST", "/api/v1/reports"),
     "spoken_mode": ("POST", "/api/chat"),
     "spoken_unit_ends": ("POST", "/api/chat"),
     "suggestion_push": ("POST", "/api/v1/mobile/devices"),
