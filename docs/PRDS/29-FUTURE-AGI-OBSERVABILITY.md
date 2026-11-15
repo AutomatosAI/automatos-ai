@@ -138,8 +138,8 @@ class WorkflowTracingService:
 
     def __init__(self):
         # Future AGI credentials
-        os.environ["FI_API_KEY"] = "ec73882c007948c7ad539b8f2819f785"
-        os.environ["FI_SECRET_KEY"] = "fce912febb5e4b28a3c036e632e8f030"
+        os.environ["FI_API_KEY"] = "<redacted>"
+        os.environ["FI_SECRET_KEY"] = "<redacted>"
 
         # Initialize tracing for workflow session
         self.trace_provider = register(
@@ -386,8 +386,8 @@ class ChatbotTracingService:
 
     def __init__(self):
         # Future AGI credentials (same as workflow)
-        os.environ["FI_API_KEY"] = "ec73882c007948c7ad539b8f2819f785"
-        os.environ["FI_SECRET_KEY"] = "fce912febb5e4b28a3c036e632e8f030"
+        os.environ["FI_API_KEY"] = "<redacted>"
+        os.environ["FI_SECRET_KEY"] = "<redacted>"
 
         # Initialize tracing for chatbot session
         self.trace_provider = register(
@@ -490,8 +490,8 @@ class RAGTracingService:
     """Future AGI tracing for RAG retrieval operations"""
 
     def __init__(self):
-        os.environ["FI_API_KEY"] = "ec73882c007948c7ad539b8f2819f785"
-        os.environ["FI_SECRET_KEY"] = "fce912febb5e4b28a3c036e632e8f030"
+        os.environ["FI_API_KEY"] = "<redacted>"
+        os.environ["FI_SECRET_KEY"] = "<redacted>"
 
         # Initialize tracing for RAG session
         self.trace_provider = register(
@@ -598,8 +598,8 @@ class CodeGraphTracingService:
     """Future AGI tracing for CodeGraph operations"""
 
     def __init__(self):
-        os.environ["FI_API_KEY"] = "ec73882c007948c7ad539b8f2819f785"
-        os.environ["FI_SECRET_KEY"] = "fce912febb5e4b28a3c036e632e8f030"
+        os.environ["FI_API_KEY"] = "<redacted>"
+        os.environ["FI_SECRET_KEY"] = "<redacted>"
 
         # Initialize tracing for CodeGraph session
         self.trace_provider = register(
@@ -696,8 +696,8 @@ class WorkflowEvaluationService:
 
     def __init__(self):
         self.fi_client = FutureAGIClient(
-            api_key="ec73882c007948c7ad539b8f2819f785",
-            secret_key="fce912febb5e4b28a3c036e632e8f030"
+            api_key="<redacted>",
+            secret_key="<redacted>"
         )
 
     async def create_workflow_evaluation_suite(self):
@@ -854,8 +854,8 @@ class ModelComparisonService:
 
     def __init__(self):
         self.fi_client = FutureAGIClient(
-            api_key="ec73882c007948c7ad539b8f2819f785",
-            secret_key="fce912febb5e4b28a3c036e632e8f030"
+            api_key="<redacted>",
+            secret_key="<redacted>"
         )
 
     async def create_model_comparison_study(self):
@@ -945,8 +945,8 @@ class ModelComparisonService:
 2. **Configure Environment**
    ```python
    # Set Future AGI credentials
-   os.environ["FI_API_KEY"] = "ec73882c007948c7ad539b8f2819f785"
-   os.environ["FI_SECRET_KEY"] = "fce912febb5e4b28a3c036e632e8f030"
+   os.environ["FI_API_KEY"] = "<redacted>"
+   os.environ["FI_SECRET_KEY"] = "<redacted>"
    ```
 
 3. **Initialize Tracing Sessions**
