@@ -10,8 +10,6 @@ import os
 import hashlib
 import tempfile
 import json
-import uuid
-from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
@@ -39,11 +37,11 @@ from core.auth.dependencies import RequestContext
 from core.auth.scopes import DOCUMENTS_READ, DOCUMENTS_WRITE
 from core.auth.server_key_gate import request_context_or_server_key, require_workspace_permission_or_server_key
 from starlette.concurrency import run_in_threadpool
-from api.document_upload_checks import checked_upload, upload_tags
+from api.document_upload_steps import checked_upload, new_upload, replace_upload, stored_upload, upload_tags
 from services.document_downloads import media_type_for, stored_object_link, workspace_file
 # PRD-274 §5.2: a product's server key uploads, lists, gets, searches and deletes its own
 # workspace's documents, and reaches only those no team or person limits.
-from services.document_key_access import reachable_by, reachable_or_none, search_answer_for, uploaded_by
+from services.document_key_access import reachable_by, reachable_or_none, search_answer_for
 
 def parse_database_url(url: str) -> dict:
     """Parse DATABASE_URL into psycopg2 connection dict format"""
@@ -148,19 +146,6 @@ ALLOWED_MIME_TYPES = {
 # uploaded source file on restart, which is what broke /reprocess.
 UPLOAD_DIR = Path(os.getenv("DOCUMENT_UPLOAD_DIR", "/tmp/automotas_uploads"))
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50MB
-PROCESSING_ERROR_CHARS = 200  # how much of a failed ingestion's error the upload's answer quotes
-
-
-@dataclass(frozen=True)
-class _StoredUpload:
-    """An upload as saved: what its document row and the ingestion pipeline are given."""
-
-    filename: str
-    content: bytes
-    file_path: Path
-    file_type: str
-    content_hash: str
-
 
 @router.post("/upload", response_model=DocumentUploadResponse)
 async def handle_request(
@@ -172,9 +157,9 @@ async def handle_request(
     team_access: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
-    """Upload and process a document: its checks (api/document_upload_checks), a duplicate
-    answered with the document already stored, a same-name upload replacing that document
-    (F087), else a new document, ingested now.
+    """Upload and process a document: its checks, a duplicate answered with the document already
+    stored, a same-name upload replacing that document (F087), else a new document, ingested now
+    (each step in api/document_upload_steps).
 
     PRD-274 §5.2: a member with ``documents:create``, or a product's server key listing
     ``documents:write``, which uploads into its own workspace. The key is named as the uploader
@@ -198,7 +183,7 @@ async def handle_request(
                 message="Document already exists"
             )
 
-        upload = _stored_upload(file.filename, content, file_extension, content_hash)
+        upload = stored_upload(file.filename, content, file_extension, content_hash)
 
         # PRD-124: Parse team_access (comma-separated → list, empty = all teams)
         from core.team_access import normalize_teams
@@ -210,122 +195,14 @@ async def handle_request(
 
         replaced = reachable_or_none(db, ctx, replaceable_document(db, ctx.workspace_id, file.filename, team_access_list))
         if replaced is not None:
-            return await _replace_upload(db, ctx, replaced, upload, upload_tags(tags), description)
-        return await _new_upload(db, ctx, upload, upload_tags(tags), description, team_access_list)
+            return await replace_upload(db, ctx, replaced, upload, upload_tags(tags), description)
+        return await new_upload(db, ctx, upload, upload_tags(tags), description, team_access_list)
 
     except HTTPException:
         raise
     except Exception as e:
         logger.exception("Error uploading document")
         raise HTTPException(status_code=500, detail="Internal server error") from e
-
-
-def _stored_upload(filename: str, content: bytes, file_extension: str, content_hash: str) -> _StoredUpload:
-    """Save the checked bytes in ``UPLOAD_DIR`` under a random name (never the original filename)."""
-    UPLOAD_DIR.mkdir(exist_ok=True)
-    file_path = UPLOAD_DIR / f"{uuid.uuid4().hex}{file_extension}"
-    with open(file_path, "wb") as f:
-        f.write(content)
-    # The file type category, from the extension
-    return _StoredUpload(filename, content, file_path, UPLOAD_FILE_TYPES.get(file_extension, "unknown"), content_hash)
-
-
-async def _replace_upload(db: Session, ctx: RequestContext, replaced: Document, upload: _StoredUpload,
-                          tag_list: List[str], description: Optional[str]) -> DocumentUploadResponse:
-    """F087: ingest the upload under ``replaced``'s id, the old source kept in its history."""
-    from services.document_versions import replace_document, replaced_message
-    # F181: a spreadsheet is also copied into the workspace, where agents
-    # count it with code (services.spreadsheet_workspace). Best effort.
-    from services.spreadsheet_workspace import SPREADSHEET_TYPES, copy_to_workspace
-
-    version = await replace_document(
-        db, replaced, workspace_id=ctx.workspace_id, file_path=str(upload.file_path), file_size=len(upload.content),
-        content_hash=upload.content_hash, file_type=upload.file_type, replaced_by=uploaded_by(ctx),
-        tags=tag_list, description=description,
-    )
-    if upload.file_type in SPREADSHEET_TYPES:
-        await copy_to_workspace(ctx.workspace_id, upload.filename, upload.content)
-    return DocumentUploadResponse(
-        document_id=replaced.id,
-        filename=replaced.filename,
-        status=replaced.status,
-        message=replaced_message(replaced.filename, version, replaced.status),
-    )
-
-
-async def _new_upload(db: Session, ctx: RequestContext, upload: _StoredUpload, tag_list: List[str],
-                      description: Optional[str], team_access_list: List[str]) -> DocumentUploadResponse:
-    """A new document for the upload, ingested now; the answer says so when processing failed."""
-    from services.spreadsheet_workspace import SPREADSHEET_TYPES, copy_to_workspace
-
-    # Create document record. tags persist to documents.tags — a real PostgreSQL
-    # text[] column (see migration 208275450a15: ARRAY(TEXT), default ARRAY[]::text[]).
-    # The prior "SQLAlchemy array bug" was a mis-diagnosis: team_access below uses the
-    # identical PG_ARRAY(String) column and writes a Python list on every upload without
-    # issue. Assigning a fresh list[str] to a new row is tracked correctly (no
-    # flag_modified needed — that only matters for in-place mutation of a loaded array).
-    document = Document(
-        workspace_id=ctx.workspace_id,
-        filename=upload.filename,
-        original_filename=upload.filename,
-        file_type=upload.file_type,
-        file_size=len(upload.content),
-        file_path=str(upload.file_path),
-        content_hash=upload.content_hash,
-        status="uploaded",
-        tags=tag_list,
-        description=description,
-        team_access=team_access_list,
-        # PRD-168 S4: real actor. The principal lives on ctx.user —
-        # RequestContext itself has no clerk_user_id; reading it there
-        # raised AttributeError and 500'd every upload (2026-08-06).
-        # A server key is named as sdk:<key id> (PRD-274 §5.2).
-        created_by=uploaded_by(ctx),
-    )
-    db.add(document)
-    db.commit()
-    db.refresh(document)
-
-    processing_error = await _ingest_upload(db, ctx, document, upload)
-    if upload.file_type in SPREADSHEET_TYPES:
-        await copy_to_workspace(ctx.workspace_id, upload.filename, upload.content)
-
-    return DocumentUploadResponse(
-        document_id=document.id,
-        filename=document.filename,
-        status=document.status,
-        # PRD-233: never say "successfully" over a failed pipeline — every local
-        # upload had ended status=failed (no embedding provider) behind this text.
-        message=(
-            "Document uploaded successfully"
-            if document.status != "failed"
-            else f"Uploaded, but processing failed: {processing_error or 'see backend logs'}"
-        ),
-    )
-
-
-async def _ingest_upload(db: Session, ctx: RequestContext, document: Document, upload: _StoredUpload) -> Optional[str]:
-    """Run the ingestion pipeline on the new document's file. None when it ran; when it failed,
-    the row is ``failed`` and the error, cut short, is answered."""
-    try:
-        # DocumentManager.upload_document creates its own DB record, so the
-        # processing is triggered directly on this one.
-        document.status = "processing"
-        db.commit()
-
-        # Get workspace-specific DocumentManager
-        doc_manager = get_document_manager(str(ctx.workspace_id))
-        await doc_manager._process_document(document.id, str(upload.file_path), processing_type(upload.file_type))
-
-        # Refresh to get updated chunk_count
-        db.refresh(document)
-        return None
-    except Exception as e:
-        logger.exception(f"Error processing document {document.id}")
-        document.status = "failed"
-        db.commit()
-        return str(e)[:PROCESSING_ERROR_CHARS]
-
 
 # F453: both downloads are the caller's own workspace's, behind documents:read. Another
 # workspace's document id answers 404, the same as a missing one (no existence oracle).
