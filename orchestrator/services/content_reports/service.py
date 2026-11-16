@@ -5,7 +5,8 @@
 1. the reporter (``reporter``): the request's person (``resolve_user_pk``), or a
    server key's own service user for the end user it names. Any other caller has
    no person and cannot report (``ReportNeedsAPerson``); a key that has never
-   chatted holds no chat, so its target is not found (``ReportTargetNotFound``);
+   chatted holds no chat, and an end user whose consent is gone or whose erase
+   has started is not reported for: either is ``ReportTargetNotFound``;
 2. the per-reporter rate limit (``check_rate_limit``; over it the limiter raises
    its own 429, before anything is written). A key counts per end user;
 3. the target, found in the caller's workspace (``targets``), else
@@ -39,7 +40,7 @@ from core.services.notification_dispatcher import NotificationDispatcher
 from core.workspaces.audit import AuditLog, AuditService
 from core.workspaces.owner import workspace_owner
 from services.content_reports import AUDIT_ACTION
-from services.content_reports.reporter import Reporter, reporter_of
+from services.content_reports.reporter import Reporter, end_user_gone, reporter_of
 from services.content_reports.targets import canonical_target_id, resolve_target
 
 logger = logging.getLogger(__name__)
@@ -122,7 +123,7 @@ def _earlier_report_id(
 def _record(db: Any, *, reporter: Reporter, report: FiledReport) -> int:
     """Write the report's one audit row (``AuditService.log`` commits it); its id.
 
-    A key's row names the key and the end user it filed for, beside the reason, note and excerpt.
+    A key's row names the key beside the reason, note and excerpt; never the end user.
     """
     entry = AuditService(db).log(
         workspace_id=report.workspace_id,
@@ -183,6 +184,8 @@ async def file_report(
         raise ReportTargetNotFound() if reporter.is_key else ReportNeedsAPerson()
     reporter_pk = reporter.pk
     workspace_id = getattr(ctx, "workspace_id", None)
+    if end_user_gone(db, workspace_id, reporter):
+        raise ReportTargetNotFound()
     await _within_rate_limit(workspace_id, reporter)
 
     canonical_id = canonical_target_id(target_id)

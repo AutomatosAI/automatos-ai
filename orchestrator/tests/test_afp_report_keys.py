@@ -6,9 +6,10 @@ chat turns run as, and reaches only an assistant message in a chat that user hol
 end user it names (``chats.end_user_id``), or tagged with none when it names none
 (``services/content_reports/reporter.py``). Everything else is not found and writes nothing:
 another end user's chat, the key's chats for no one, another key's chat, a member's chat (public
-ones too), a person's own message, a Deliverable. A key that has never chatted has no service user,
-so whatever it reports is not found and no service user is made. Its audit row names the key and the
-end user; it counts against one bucket per end user.
+ones too), a person's own message, a chat in another workspace, an end user whose erase has started,
+a Deliverable. A key that has never chatted has no service user, so whatever it reports is not found
+and no service user is made. Its audit row names the key, never the end user; it counts against one
+bucket per end user.
 
 Real keys, users, chats and messages on the real database (CI); the owner's notice dispatcher, the
 rate limiter and the Deliverable reader are fakes that record what they are given.
@@ -30,7 +31,7 @@ from services.content_reports import AUDIT_ACTION
 from services.content_reports import service, targets
 from services.content_reports.reporter import KEY_ACTOR_TYPE
 
-ALPHA, BETA = "product:alpha", "product:beta"
+ALPHA, BETA, GONE = "product:alpha", "product:beta", "product:gone"
 REPLY = "Try a short walk before lunch."
 
 
@@ -81,12 +82,34 @@ def _message(s, ws, owner, *, end_user=None, role="assistant", visibility="priva
                          {"c": chat, "w": ws, "r": role, "p": f'[{{"type": "text", "text": "{REPLY}"}}]'}).scalar())
 
 
+@pytest.fixture(autouse=True)
+def unlimited(monkeypatch):
+    """The gate's per-key limits never refuse (``tests/test_afp_w1_document_keys.py``)."""
+
+    class _Open:
+        def check(self, *args, **kwargs):
+            return (True, 1, 0, 60)
+
+    monkeypatch.setattr("api.widgets.rate_limit.RateLimitStore", _Open)
+
+
+def _consent(s, ws, end_user, *, erasing=False):
+    s.execute(text("INSERT INTO end_users (id, workspace_id, end_user_id, erasing_at) VALUES (gen_random_uuid(), "
+                   "CAST(:w AS uuid), :e, CASE WHEN :erasing THEN now() END)"),
+              {"w": ws, "e": end_user, "erasing": erasing})
+
+
 @pytest.fixture
 def floor(new_session):
     """Key A (chatted), key B (chatted), key C (never chatted), an owner, and one message per case."""
-    ws = str(uuid.uuid4())
+    ws, other_ws = str(uuid.uuid4()), str(uuid.uuid4())
     s = new_session()
-    s.execute(text("INSERT INTO workspaces (id, name) VALUES (CAST(:id AS uuid), 'report-keys')"), {"id": ws})
+    for workspace_id in (ws, other_ws):
+        s.execute(text("INSERT INTO workspaces (id, name) VALUES (CAST(:id AS uuid), 'report-keys')"),
+                  {"id": workspace_id})
+    for end_user in (ALPHA, BETA):
+        _consent(s, ws, end_user)
+    _consent(s, ws, GONE, erasing=True)
     owner = _user(s, "owner")
     s.execute(text("INSERT INTO workspace_members (workspace_id, user_id, role, is_active) "
                    "VALUES (CAST(:w AS uuid), :u, 'owner', TRUE)"), {"w": ws, "u": owner})
@@ -101,17 +124,20 @@ def floor(new_session):
         "another_keys_reply_for_alpha": _message(s, ws, b_user, end_user=ALPHA),
         "a_members_public_reply": _message(s, ws, owner, visibility="public"),
         "a_members_private_reply": _message(s, ws, owner),
+        "alphas_reply_in_another_workspace": _message(s, other_ws, a_user, end_user=ALPHA),
+        "an_erased_end_users_reply": _message(s, ws, a_user, end_user=GONE),
     }
     s.commit()
     s.close()
     yield SimpleNamespace(ws=ws, owner=owner, a=a, b=b, c=c, a_user=a_user, msgs=msgs)
     s = new_session.sweep()
-    s.execute(text("DELETE FROM chats WHERE workspace_id = CAST(:w AS uuid)"), {"w": ws})
-    for table in ("audit_logs", "workspace_members", "sdk_api_keys"):
-        s.execute(text(f"DELETE FROM {table} WHERE workspace_id = CAST(:w AS uuid)"), {"w": ws})  # noqa: S608
+    both = {"w": ws, "o": other_ws}
+    for table in ("chats", "audit_logs", "workspace_members", "end_users", "sdk_api_keys"):
+        s.execute(text(f"DELETE FROM {table} WHERE workspace_id IN (CAST(:w AS uuid), CAST(:o AS uuid))"),  # noqa: S608
+                  both)
     s.execute(text("DELETE FROM users WHERE id IN :ids").bindparams(bindparam("ids", expanding=True)),
               {"ids": [owner, a_user, b_user]})
-    s.execute(text("DELETE FROM workspaces WHERE id = CAST(:w AS uuid)"), {"w": ws})
+    s.execute(text("DELETE FROM workspaces WHERE id IN (CAST(:w AS uuid), CAST(:o AS uuid))"), both)
     s.commit()
     s.close()
 
@@ -196,8 +222,7 @@ def test_a_key_reports_its_end_users_reply_as_its_service_user(new_session, floo
     assert (filed.duplicate, filed.target_id, filed.excerpt) == (False, floor.msgs["alphas_reply"], REPLY)
     (row,) = _rows(new_session, floor.ws)
     assert (row.user_id, row.actor_type, row.resource_id) == (floor.a_user, KEY_ACTOR_TYPE, filed.target_id)
-    assert row.details == {"reason": "harmful", "note": None, "excerpt": REPLY,
-                           "api_key_id": floor.a["id"], "end_user_id": ALPHA}
+    assert row.details == {"reason": "harmful", "note": None, "excerpt": REPLY, "api_key_id": floor.a["id"]}
     assert fakes.limits == [(service.RATE_LIMIT_OPERATION, f"{floor.a_user}:end_user:{ALPHA}")]
     assert [n["user_id"] for n in fakes.notices] == [floor.owner]
 
@@ -212,11 +237,18 @@ def test_the_same_reply_again_answers_the_first_report(new_session, floor, fakes
 
 @pytest.mark.parametrize("case", [
     "betas_reply", "the_keys_own_reply", "another_keys_reply_for_alpha",
-    "a_members_public_reply", "a_members_private_reply", "alphas_own_words",
+    "a_members_public_reply", "a_members_private_reply", "alphas_own_words", "alphas_reply_in_another_workspace",
 ])
 def test_a_reply_outside_the_end_users_chats_with_this_key_is_not_found(new_session, floor, fakes, case):
     with pytest.raises(service.ReportTargetNotFound):
         _report(new_session, floor.a, floor.msgs[case])
+    assert _rows(new_session, floor.ws) == [] and fakes.notices == []
+
+
+def test_an_end_user_whose_erase_started_is_not_reported_for(new_session, floor, fakes):
+    with pytest.raises(service.ReportTargetNotFound):
+        _report(new_session, floor.a, floor.msgs["an_erased_end_users_reply"], end_user=GONE)
+    assert fakes.limits == []
     assert _rows(new_session, floor.ws) == [] and fakes.notices == []
 
 

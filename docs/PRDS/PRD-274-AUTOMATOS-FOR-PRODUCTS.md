@@ -287,8 +287,9 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
   context (§8-10); the model allow-list on the key (§8-5) (#1476).
 - Reporting a reply on keys (`reports:write`): `POST /api/v1/reports` takes a server key as well as a member. A key
   reports as its own service user, only an agent's reply in a chat that user holds, tagged with the end user it names
-  in `end_user_id` (or with none when it names none); never a member's chat, a public chat, another key's chat or a
-  Deliverable, each a 404. Its audit row names the key and the end user, and it counts per end user.
+  in `end_user_id` (or with none when it names none); never a member's chat, a public chat, another key's chat, a
+  Deliverable or an end user whose erase has started, each a 404. Its audit row names the key, never the end user (the
+  erase leaves audit rows alone), and it counts per end user.
 - Alongside: the caller's address read one way, from the header the proxy sets (#1474); stacked PRs get every
   required check (#1473); private memories kept to their owner on list and search (#1472).
 

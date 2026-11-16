@@ -259,6 +259,28 @@ def test_a_member_naming_an_end_user_is_422_and_files_nothing(monkeypatch, filed
     assert filed["calls"] == []
 
 
+@pytest.mark.parametrize("end_user", ["product:alpha", None])
+def test_a_server_key_reports_through_the_gate_with_its_end_user(monkeypatch, filed, end_user):
+    """An ``ak_srv_`` bearer takes the gate's key path (its scope and limits, faked here); the
+    route passes the end user it names, or none, to the service."""
+    key = RequestContext(workspace_id=WS_ID, user=UserContext(id="sdk", system_role="user"),
+                         auth_type="sdk_key", api_key_id=str(uuid.uuid4()))
+    scopes = []
+
+    def _key_context(request, key_scope):
+        scopes.append(key_scope)
+        return key
+
+    monkeypatch.setattr(gate, "_server_key_context", _key_context)
+    body = {**BODY, "end_user_id": end_user} if end_user else BODY
+
+    resp = _client(monkeypatch, _member_ctx()).post(
+        ROUTE, json=body, headers={"Authorization": f"Bearer {gate.SERVER_KEY_PREFIX}{'k' * 40}"})
+
+    assert (resp.status_code, scopes) == (201, [REPORTS_WRITE])
+    assert filed["calls"][0]["end_user_id"] == end_user
+
+
 def test_the_note_is_optional(monkeypatch, filed):
     _as_role(monkeypatch, "viewer")
     body = {k: v for k, v in BODY.items() if k != "note"}

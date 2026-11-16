@@ -9,10 +9,13 @@ person. It reports as its own service user, the ``users`` row its chat turns run
 tagged with the end user the key names (``chats.end_user_id``), or tagged with none when it names
 none. It never reaches a member's chat, a public chat, another key's chat or a Deliverable
 (``targets``). A key that has never chatted has no service user and so no chat: whatever it
-reports is not found. Nothing here makes a service user.
+reports is not found. Nothing here makes a service user. An end user whose consent is gone, or
+whose erase has started, is not reported for (``end_user_gone``), as the chat path refuses their turn.
 
 A key's reports count against one bucket per end user it names, so one person's reports never
-use up another's; the key's own per-key limits apply as well, in the gate.
+use up another's; the key's own per-key limits cap its total, in the gate. The audit row names the
+key, never the end user: the end-user erase leaves audit rows alone, so no report links to a
+person after they are erased.
 """
 
 from __future__ import annotations
@@ -56,10 +59,8 @@ class Reporter:
         return str(self.pk)
 
     def audit_details(self) -> dict[str, Any]:
-        """What the audit row adds about who filed it: for a key, the key and its end user."""
-        if not self.is_key:
-            return {}
-        return {"api_key_id": self.api_key_id, "end_user_id": self.end_user_id}
+        """What the audit row adds about who filed it: for a key, the key (never its end user)."""
+        return {"api_key_id": self.api_key_id} if self.is_key else {}
 
 
 def reporter_of(db: Any, ctx: Any, end_user_id: Optional[str] = None) -> Reporter:
@@ -70,6 +71,15 @@ def reporter_of(db: Any, ctx: Any, end_user_id: Optional[str] = None) -> Reporte
     return Reporter(pk=resolve_user_pk(db, ctx))
 
 
+def end_user_gone(db: Any, workspace_id: Any, reporter: Reporter) -> bool:
+    """For a key naming an end user: whether their consent is gone or their erase has started."""
+    if not reporter.is_key or reporter.end_user_id is None:
+        return False
+    from core.models.end_users import consented
+
+    return not consented(db, workspace_id, reporter.end_user_id)
+
+
 def _service_user_of(db: Any, key_id: Any) -> Optional[int]:
     """The ``users.id`` the key's chat turns run as, or ``None`` when it has never chatted."""
     from core.models.sdk_api_keys import SdkApiKey
@@ -78,4 +88,4 @@ def _service_user_of(db: Any, key_id: Any) -> Optional[int]:
     return None if key is None else key.service_user_id
 
 
-__all__ = ["KEY_ACTOR_TYPE", "PERSON_ACTOR_TYPE", "Reporter", "reporter_of"]
+__all__ = ["KEY_ACTOR_TYPE", "PERSON_ACTOR_TYPE", "Reporter", "end_user_gone", "reporter_of"]
