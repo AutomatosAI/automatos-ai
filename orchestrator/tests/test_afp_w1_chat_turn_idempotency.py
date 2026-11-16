@@ -444,4 +444,4 @@ def test_the_route_reads_the_key_from_the_idempotency_key_header():
     headers = {p["name"]: p for p in operation.get("parameters", []) if p["in"] == "header"}
     assert agent_execute.IDEMPOTENCY_HEADER in headers
     assert not headers[agent_execute.IDEMPOTENCY_HEADER].get("required", False)
-    assert chat.stream_chat.__wrapped__.__name__ == "stream_chat" and chat._after_the_turn.__wrapped__
+    assert chat._chat_turn.__wrapped__.__name__ == "_chat_turn" and chat._after_the_turn.__wrapped__

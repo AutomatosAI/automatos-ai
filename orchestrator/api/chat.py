@@ -401,15 +401,20 @@ def _after_the_turn(workspace_id: Any, chat_id: str, user_id: int, message_id: A
 
 # Endpoints
 @router.post("", dependencies=[Depends(turn_clock.arrives)])  # the turn's clock starts before auth
-@answers_a_repeated_key_once  # PRD-274 W1: a key's Idempotency-Key runs its turn once; a repeat is answered
 async def stream_chat(
     request: ChatRequest,
     ctx: RequestContext = Depends(require_workspace_permission_or_server_key("agents:execute", AGENTS_CHAT)),
     _authorised: None = Depends(turn_clock.authorised),  # and marks it once the gate above has answered
     db: Session = Depends(get_db),
-    idempotency_key: Annotated[Optional[str], Header(alias=IDEMPOTENCY_HEADER)] = None,  # read by the wrapper
+    idempotency_key: Annotated[Optional[str], Header(alias=IDEMPOTENCY_HEADER)] = None,
 ):
     """Stream chat messages using AI SDK Data Stream format (text/plain)"""
+    return await _chat_turn(request, ctx, db, idempotency_key=idempotency_key)
+
+
+@answers_a_repeated_key_once  # PRD-274 W1: a key's Idempotency-Key runs its turn once; a repeat is answered
+async def _chat_turn(request: ChatRequest, ctx: RequestContext, db: Session, idempotency_key: Optional[str] = None):
+    """The route's turn; ``idempotency_key`` is read by its wrapper only."""
     logger.info("[chat] RequestContext workspace_id=%s agentId=%s", ctx.workspace_id, request.agentId)
     chat_service = ChatService(db)
     # F145: an admin_only tool is an admin's when the call is made for an active

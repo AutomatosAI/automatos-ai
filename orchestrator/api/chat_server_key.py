@@ -25,7 +25,8 @@ never takes that path:
   saved answer, or a 409 while it runs, instead of running it again. A person's header is ignored.
 
 Five decorators wire this into ``api/chat.py``, a line each: ``get_user_id``, ``_checked_lean_request``,
-``_open_chat``, ``stream_chat`` and ``_after_the_turn`` are wrapped; everyone else passes straight through.
+``_open_chat``, ``_chat_turn`` (the turn the route ``stream_chat`` runs) and ``_after_the_turn`` are wrapped;
+everyone else passes straight through.
 """
 from __future__ import annotations
 
@@ -56,7 +57,7 @@ NOT_A_PERSONS = "endUserId is a server key's: a person's chat turn is their own.
 NOT_THIS_END_USERS_CHAT = "This conversation is not this end user's: start a new one for them."
 # The row a keyed turn's request holds, while the route runs (answers_a_repeated_key_once).
 _KEYED_TURN: ContextVar[Optional[Any]] = ContextVar("chat_server_key_keyed_turn", default=None)
-# The route's own parameter that carries the Idempotency-Key header (declared on api.chat.stream_chat).
+# The parameter that carries the Idempotency-Key header (declared on api.chat.stream_chat, handed to _chat_turn).
 IDEMPOTENCY_PARAMETER = "idempotency_key"
 
 
@@ -193,11 +194,11 @@ def _key_models(db: Any, key_id: Any) -> List[str]:
 
 
 def answers_a_repeated_key_once(stream_chat: Callable[..., Any]) -> Callable[..., Any]:
-    """Wraps ``api.chat.stream_chat``: a server key's turn sent with ``Idempotency-Key`` runs once in the
-    window (``api.chat_turn_keys``). A repeat of a turn that answered runs nothing and is answered with that
-    answer, framed as the turn framed it; a repeat while it runs, or the key on a different request, is a
-    409; a malformed key is a 422, as on ``/execute``. A person's turn, and a key's turn without the header,
-    pass straight through: a person's header is ignored, a malformed one included."""
+    """Wraps ``api.chat._chat_turn``, the turn the route runs: a server key's turn sent with ``Idempotency-Key``
+    runs once in the window (``api.chat_turn_keys``). A repeat of a turn that answered runs nothing and is
+    answered with that answer, framed as the turn framed it; a repeat while it runs, or the key on a different
+    request, is a 409; a malformed key is a 422, as on ``/execute``. A person's turn, and a key's turn without
+    the header, pass straight through: a person's header is ignored, a malformed one included."""
     signature = inspect.signature(stream_chat, eval_str=True)
 
     @functools.wraps(stream_chat)
