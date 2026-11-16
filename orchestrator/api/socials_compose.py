@@ -41,6 +41,7 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core.social_cuts import fields_cut_out
+from core.social_field_order import ordered_schema
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
@@ -134,7 +135,7 @@ def template_entry(row: Any) -> Dict[str, Any]:
     blocks = row.blocks if isinstance(row.blocks, dict) else {}
     return {
         "id": str(row.id), "name": row.name, "description": row.description, "format": row.format,
-        "sizes": blocks.get("sizes") or [], "variables_schema": blocks.get("variables_schema") or {},
+        "sizes": blocks.get("sizes") or [], "variables_schema": ordered_schema(blocks),
         # PRD-251B (B5): the lengths a video declares (US-B104), for the editor and the model.
         "durations": durations_of(blocks, row.format),
         "photo_slots": compose_photos.photo_slots(blocks),
