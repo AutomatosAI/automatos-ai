@@ -8,7 +8,8 @@
  * * Channels and sizes: each ticked channel's size, and "Renders" the distinct ratios.
  * * Save draft writes the post (POST, or PATCH once it exists), its channels (PUT /targets)
  *   and its slot (PUT /slot, only when it moved); Write with Auto sends the editor's
- *   choices and replaces the copy, the variables and the sources only; Submit submits.
+ *   choices and replaces the copy, the variables and the sources only; Submit submits a text
+ *   post (a post with a visual renders first, PRD-251D: socials-editor-submit.test.tsx).
  * * F254: a try that fails after creating the post opens that post, and the next try edits
  *   it: one post, never a new row per Save, Render or Submit.
  * * PRD-251C (US-C301): a ticked channel that posts stories offers "As a story" for an image or
@@ -254,12 +255,15 @@ describe('the post editor', () => {
     expect(within(text).queryByText(fieldsLeftToAuto(2))).toBeNull()
   })
 
-  it('Submit for approval saves, then submits', async () => {
-    renderEditor(post())
+  // PRD-251D (E1): a post with a visual now renders on Submit (socials-editor-submit.test.tsx);
+  // a text post has nothing to render, so it still saves, then submits.
+  it('Submit for approval on a text post saves, then submits', async () => {
+    renderEditor(post({ format: 'text' }))
     await screen.findByText('TikTok')
     fireEvent.click(screen.getByRole('button', { name: 'Submit for approval' }))
     await waitFor(() => expect(api.submitSocialPost).toHaveBeenCalledWith('post-1'))
     expect(api.updateSocialPost).toHaveBeenCalled()
+    expect(api.renderSocialPost).not.toHaveBeenCalled()
   })
 
   it('Render preview: a video asks for the preview, an image renders for real', async () => {
@@ -305,8 +309,11 @@ describe('the post editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Render preview' }))
     await waitFor(() => expect(go).toHaveBeenCalledWith({ post: 'post-new' }))
 
+    // PRD-251D (E1): an image post's Submit makes its file, so the next try is the full render, on the same post.
     fireEvent.click(screen.getByRole('button', { name: 'Submit for approval' }))
-    await waitFor(() => expect(api.submitSocialPost).toHaveBeenCalledWith('post-new'))
+    await waitFor(() => expect(api.renderSocialPost).toHaveBeenLastCalledWith('post-new', {}))
+    expect(api.renderSocialPost).toHaveBeenCalledTimes(2)
+    expect(api.submitSocialPost).not.toHaveBeenCalled()
     expect(api.createSocialPost).toHaveBeenCalledTimes(1)
     expect(api.updateSocialPost).toHaveBeenCalledWith('post-new', expect.objectContaining({ title: 'First Post' }))
   })

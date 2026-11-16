@@ -3,6 +3,8 @@
  * templates and footage a workspace offers, a stateful apiClient double, and the editor
  * rendered with its query client. The editor tests mock '@/lib/api-client' with
  * `apiModule` from here, so the double and the tests share one instance.
+ * PRD-251D: the editor reads the workspace's posts (a new post's starting channels: none by
+ * default), approves (the Queue's controls), and connects a channel through Composio (`post`).
  */
 import { vi } from 'vitest'
 import { render } from '@testing-library/react'
@@ -61,8 +63,19 @@ export const api = {
   pickSocialAiOption: vi.fn(),
   // PRD-251B: a Library picture in a template's photo spot.
   setSocialPostPhoto: vi.fn(),
+  // PRD-251D US-D101: the Queue's approve controls, in the editor.
+  approveSocialPost: vi.fn(),
+  requestSocialPostChanges: vi.fn(),
+  retakeSocialPost: vi.fn(),
+  rejectSocialPost: vi.fn(),
+  publishSocialPostNow: vi.fn(),
+  // PRD-251D US-D105: the Composio connect flow (POST /api/composio/connect/{app}).
+  post: vi.fn(),
 }
 export const apiModule = { apiClient: api, default: api }
+
+/** Where the connect flow's hosted sign-in opens (the answer of POST /api/composio/connect/{app}). */
+export const CONNECT_URL = 'https://connect.composio.test/link'
 
 export function post(over: Partial<SocialPost> = {}): SocialPost {
   return {
@@ -111,6 +124,14 @@ export function resetApi() {
   api.setSocialPostPhoto.mockImplementation(async (id: string, slot: string) =>
     post({ id, footage: { [slot]: { prompt: 'Photo: your own picture (library-1.png)', status: 'done', toolkit: 'library', name: 'library-1.png' } } }),
   )
+  api.approveSocialPost.mockImplementation(async (id: string) => post({ id, status: 'approved' }))
+  api.requestSocialPostChanges.mockImplementation(async (id: string) => post({ id, status: 'changes_requested' }))
+  api.retakeSocialPost.mockImplementation(async (id: string) => post({ id, status: 'changes_requested' }))
+  api.rejectSocialPost.mockImplementation(async (id: string) => post({ id, status: 'archived' }))
+  api.publishSocialPostNow.mockImplementation(async (id: string) => post({ id, status: 'publishing' }))
+  api.post.mockImplementation(async (path: string) => ({
+    redirect_url: `${CONNECT_URL}/${path.split('/').pop()}`, app_name: path.split('/').pop(),
+  }))
 }
 
 export function renderWith(ui: React.ReactElement) {

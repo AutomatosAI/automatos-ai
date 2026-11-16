@@ -240,6 +240,31 @@ export function withFormat(draft: EditorDraft, format: string, channels: Readonl
   }
 }
 
+/**
+ * PRD-251D (E4, US-D104): the channels a new post starts with, each at the format's own kind:
+ * the channels of the workspace's most recent post (`posts` newest first, as GET /posts lists
+ * them) that are still connected and can take the format; with no earlier post, the one
+ * connected channel when there is exactly one and it can take the format; otherwise none.
+ */
+export function startingKinds(
+  channels: ReadonlyArray<SocialChannel>, posts: ReadonlyArray<Pick<SocialPost, 'targets'>>, format: string,
+): Record<string, SocialPostKind> {
+  const takes = (channel: SocialChannel) => !channelBlock(channel, format) && defaultKind(channel, format) !== null
+  const latest = posts[0]
+  const used = new Set((latest?.targets ?? []).map((target) => target.toolkit))
+  const picked = latest
+    ? channels.filter((channel) => used.has(channel.toolkit) && takes(channel))
+    : channels.length === 1 && takes(channels[0]) ? [channels[0]] : []
+  return Object.fromEntries(picked.map((channel) => [channel.toolkit, defaultKind(channel, format) as SocialPostKind]))
+}
+
+/** The new post's draft with its starting channels ticked (`startingKinds`). */
+export function withStartingChannels(
+  draft: EditorDraft, channels: ReadonlyArray<SocialChannel>, posts: ReadonlyArray<Pick<SocialPost, 'targets'>>,
+): EditorDraft {
+  return { ...draft, kinds: startingKinds(channels, posts, draft.format) }
+}
+
 export function withChannelTicked(draft: EditorDraft, channel: SocialChannel, on: boolean): EditorDraft {
   const { [channel.toolkit]: _dropped, ...kinds } = draft.kinds
   if (!on) return { ...draft, kinds }

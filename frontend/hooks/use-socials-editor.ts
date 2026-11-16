@@ -6,7 +6,8 @@
  * and video Deliverables, what footage a template's slots can be filled with) and what it
  * writes, each through apiClient: Save draft creates the post (POST /posts) or edits it
  * (PATCH), then sets its channels (PUT /targets) and its slot (PUT /slot); Render preview
- * and Submit for approval save first; Write with Auto asks the composer with the
+ * and Submit for approval save first, and Submit makes the post's file with the full render
+ * when it has a visual (PRD-251D E1); Write with Auto asks the composer with the
  * editor's choices and the fields the person filled in; an upload or a Library pick saves a new post first, then sets its
  * media. The server checks everything again.
  */
@@ -26,6 +27,7 @@ import type {
 } from '@/lib/api-client'
 import { useInvalidateSocials, useSocialsOn } from '@/hooks/use-socials-api'
 import { useWorkspace } from '@/components/workspace-provider'
+import { RENDERING_FOR_APPROVAL, SENT_FOR_APPROVAL } from '@/components/deliverables/socials/studio/editor-submit'
 
 export const socialsEditorKeys = {
   brandName: (workspaceId: string | null) => ['socials', workspaceId, 'brand-name'] as const,
@@ -108,13 +110,17 @@ export async function saveEditor({ postId, fields, targets, slot, onCreated }: E
   return saved
 }
 
-function useEditorMutation<Input>(run: (input: Input) => Promise<SocialPost>, success: string | null, failure: string) {
+/** What a call says once it worked: one sentence, one that depends on what was asked, or nothing. */
+type SuccessMessage<Input> = string | null | ((input: Input) => string)
+
+function useEditorMutation<Input>(run: (input: Input) => Promise<SocialPost>, success: SuccessMessage<Input>, failure: string) {
   const invalidate = useInvalidateSocials()
   return useMutation<SocialPost, Error, Input>({
     mutationFn: run,
-    onSuccess: async () => {
+    onSuccess: async (_post, input) => {
       await invalidate()
-      if (success) toast.success(success)
+      const message = typeof success === 'function' ? success(input) : success
+      if (message) toast.success(message)
     },
     onError: async (error) => {
       await invalidate()
@@ -136,10 +142,16 @@ export function useRenderEditorPreview() {
   )
 }
 
+/** PRD-251D (E1): Submit for approval saves, then makes the file: with `render`, the full render
+ * (never the preview), which ends the post in needs_approval by itself; without (a text post, a
+ * video or slides of the person's own), the submit. A refusal (422, 429) leaves the post as it was. */
 export function useSubmitEditor() {
-  return useEditorMutation<EditorSave>(
-    async (save) => apiClient.submitSocialPost((await saveEditor(save)).id),
-    'Sent for approval',
+  return useEditorMutation<EditorSave & { render: boolean }>(
+    async ({ render, ...save }) => {
+      const { id } = await saveEditor(save)
+      return render ? apiClient.renderSocialPost(id, {}) : apiClient.submitSocialPost(id)
+    },
+    ({ render }) => (render ? RENDERING_FOR_APPROVAL : SENT_FOR_APPROVAL),
     'Could not send the post for approval',
   )
 }
