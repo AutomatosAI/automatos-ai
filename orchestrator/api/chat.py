@@ -29,8 +29,8 @@ from api.chat_models import ChatMessageRequest, ChatRequest, MessagePart
 from api.chat_turn_history import spoken_window, turn_history
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
-from api.chat_server_key import (acts_as_its_service_user, keeps_each_end_users_chats_apart,
-                                 what_a_server_key_may_ask)
+from api.chat_server_key import (acts_as_its_service_user, answers_a_repeated_key_once, keeps_each_end_users_chats_apart,
+                                 records_a_keyed_turn, what_a_server_key_may_ask)
 from core.auth.scopes import AGENTS_CHAT
 from core.auth.server_key_gate import require_workspace_permission_or_server_key
 from core.auth.dependencies import RequestContext
@@ -378,6 +378,7 @@ async def _produce_turn(turn: _Turn):
         task_db.close()
 
 
+@records_a_keyed_turn  # PRD-274 W1: a turn run under an Idempotency-Key records how it ended
 def _after_the_turn(workspace_id: Any, chat_id: str, user_id: int, message_id: Any):
     """The turn's ``on_complete``: a turn that did not complete (Stop, a failure outside the
     streaming service) leaves its note (consumers.chatbot.turn_notes). A client that missed
@@ -399,6 +400,7 @@ def _after_the_turn(workspace_id: Any, chat_id: str, user_id: int, message_id: A
 
 # Endpoints
 @router.post("", dependencies=[Depends(turn_clock.arrives)])  # the turn's clock starts before auth
+@answers_a_repeated_key_once  # PRD-274 W1: a key's Idempotency-Key runs its turn once; a repeat is answered
 async def stream_chat(
     request: ChatRequest,
     ctx: RequestContext = Depends(require_workspace_permission_or_server_key("agents:execute", AGENTS_CHAT)),

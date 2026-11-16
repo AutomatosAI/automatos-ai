@@ -269,6 +269,8 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
   and three attempts (#1462).
 - `Idempotency-Key` on `/execute`: a repeat answers with the run it started, the same key on a different request
   is a 409, and a race files one ticket (#1463).
+- `Idempotency-Key` on a server key's chat turn (`POST /api/chat`): a repeat of a turn that answered gets its saved
+  answer and runs nothing; a repeat while it runs, or the same key on a different request, is a 409 (kept 24 hours).
 - Server keys on the named routes of §5.2, each with a declared scope, through one gate the shared auth dependency
   never learns about; empty permissions deny, a publishable key is refused (#1468).
 - Per-key limits and ceiling: a key's requests and tokens a minute, under `SERVER_KEY_REQUESTS_PER_MINUTE`; on the

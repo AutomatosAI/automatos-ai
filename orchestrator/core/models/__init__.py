@@ -122,6 +122,7 @@ from .workspace_move import WorkspaceMoveJob  # noqa: F401  # PRD-273: a workspa
 from .memory_profiles import MemoryProfile  # noqa: F401  # what distillation keeps, by domain (Wave 4)
 from .run_callbacks import RunCallback, WorkspaceSigningSecret  # noqa: F401  # PRD-274 W1: signed completion callbacks
 from .end_users import EndUser  # noqa: F401  # PRD-274 W3: a product's end users and their consent
+from .chat_turn_keys import ChatTurnKey  # noqa: F401  # PRD-274 W1: a key's chat turn under an Idempotency-Key
 from .jobs import Job, JobSchedule  # noqa: F401  # PRD-276: the durable job queue, its schedules' cursors
 from .products import Product  # noqa: F401  # PRD-274 W5: a product, and the workspaces it runs for its customers
 

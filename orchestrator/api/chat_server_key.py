@@ -20,20 +20,29 @@ never takes that path:
 * **A turn that names no end user is the key's own, and stores no memory** (``LeanRequest.server_key``,
   ``core.security.end_user_turn.keys_own_turn``), as a widget turn stores none (F154): nothing it says
   is distilled into the workspace's memory, where other turns would recall it.
+* **A turn sent with ``Idempotency-Key`` runs once** in a window (``api.chat_turn_keys``), as a run on
+  ``/execute`` does: a product's backend that retries after a timeout is answered with the first turn's
+  saved answer, or a 409 while it runs, instead of running it again. A person's header is ignored.
 
-Three decorators wire this into ``api/chat.py`` without growing it: ``get_user_id``,
-``_checked_lean_request`` and ``_open_chat`` are wrapped; everyone else passes straight through.
+Five decorators wire this into ``api/chat.py``, a line each: ``get_user_id``, ``_checked_lean_request``,
+``_open_chat``, ``stream_chat`` and ``_after_the_turn`` are wrapped; everyone else passes straight through.
 """
 from __future__ import annotations
 
+import asyncio
 import functools
+import inspect
 import logging
+from contextvars import ContextVar
 from dataclasses import replace
-from typing import Any, Callable, List, Mapping, Optional
+from typing import Annotated, Any, Callable, Dict, List, Mapping, Optional, Tuple
 
-from fastapi import HTTPException, status
+from fastapi import Header, HTTPException, status
 from sqlalchemy.exc import IntegrityError
+from starlette.concurrency import run_in_threadpool
 
+from api import chat_turn_keys as turn_keys
+from api.agent_execute import IDEMPOTENCY_HEADER, _checked_key  # one shape check for both routes
 from core.auth.server_key_gate import is_server_key
 
 logger = logging.getLogger(__name__)
@@ -45,6 +54,13 @@ NAME_A_LEAN_AGENT = "A server key chats with a lean agent of its workspace: name
 NOT_A_KEYS_MODE = "missionMode, planMode and spokenMode are a person's, not a server key's."
 NOT_A_PERSONS = "endUserId is a server key's: a person's chat turn is their own."
 NOT_THIS_END_USERS_CHAT = "This conversation is not this end user's: start a new one for them."
+# The row a keyed turn's request holds, while the route runs (answers_a_repeated_key_once).
+_KEYED_TURN: ContextVar[Optional[Any]] = ContextVar("chat_server_key_keyed_turn", default=None)
+# The header, added to the route's signature with a real annotation: FastAPI then never resolves a string
+# annotation against api/chat.py's globals.
+_IDEMPOTENCY_PARAMETER = inspect.Parameter(
+    "idempotency_key", inspect.Parameter.KEYWORD_ONLY, default=None,
+    annotation=Annotated[Optional[str], Header(alias=IDEMPOTENCY_HEADER)])
 
 
 def service_user_for(db: Any, key_id: Any) -> int:
@@ -177,3 +193,93 @@ def _key_models(db: Any, key_id: Any) -> List[str]:
     row = db.query(SdkApiKey.model_allow_list).filter(SdkApiKey.id == key_id).first()
     entries: Optional[list] = row[0] if row else None
     return [e["model_id"] for e in entries or [] if isinstance(e, Mapping) and isinstance(e.get("model_id"), str)]
+
+
+def answers_a_repeated_key_once(stream_chat: Callable[..., Any]) -> Callable[..., Any]:
+    """Wraps ``api.chat.stream_chat``: a server key's turn sent with ``Idempotency-Key`` runs once in the
+    window (``api.chat_turn_keys``). A repeat of a turn that answered runs nothing and is answered with that
+    answer, framed as the turn framed it; a repeat while it runs, or the key on a different request, is a
+    409; a malformed key is a 422, as on ``/execute``. A person's turn, and a key's turn without the header,
+    pass straight through: a person's header is ignored, a malformed one included."""
+    signature = inspect.signature(stream_chat, eval_str=True)
+
+    @functools.wraps(stream_chat)
+    async def wrapped(*args: Any, idempotency_key: Optional[str] = None, **kwargs: Any) -> Any:
+        call = signature.bind_partial(*args, **kwargs).arguments
+        if idempotency_key is None or not is_server_key(call.get("ctx")):
+            return await stream_chat(*args, **kwargs)
+        return await _run_once(stream_chat, call, idempotency_key, args, kwargs)
+
+    wrapped.__signature__ = signature.replace(  # type: ignore[attr-defined]
+        parameters=[*signature.parameters.values(), _IDEMPOTENCY_PARAMETER])
+    return wrapped
+
+
+async def _run_once(stream_chat: Callable[..., Any], call: Mapping[str, Any], raw_key: str,
+                    args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> Any:
+    """The keyed turn: its saved answer replayed, a refusal, or the route run while this request holds the
+    key's row (read by ``records_a_keyed_turn``)."""
+    from core.jobs.worker import on_own_session
+
+    key = _checked_key(raw_key)
+    held = await run_in_threadpool(on_own_session, turn_keys.claim, call["ctx"], key,
+                                   turn_keys.request_hash(call["request"]))
+    if isinstance(held, turn_keys.Replay):
+        return turn_keys.replayed(held)
+    token = _KEYED_TURN.set(held)
+    try:
+        return await stream_chat(*args, **kwargs)
+    except BaseException:  # refused before its turn started (422, 403, 409): nothing ran, so the key is free
+        await _free(held)
+        raise
+    finally:
+        _KEYED_TURN.reset(token)
+
+
+async def _free(row_id: Any) -> None:
+    """Deletes the row a refused request held. One that cannot be deleted is logged; it is presumed dead in
+    time (``api.chat_turn_keys``), and the key may then run again."""
+    from core.jobs.worker import on_own_session
+
+    try:
+        await run_in_threadpool(on_own_session, turn_keys.release, row_id)
+    except Exception:  # the caller is told its own refusal, never this one
+        logger.exception("[chat_server_key] the Idempotency-Key row %s of a refused turn was not deleted", row_id)
+
+
+def records_a_keyed_turn(after_the_turn: Callable[..., Any]) -> Callable[..., Any]:
+    """Wraps ``api.chat._after_the_turn``: a turn run under an ``Idempotency-Key`` records how it ended once
+    it has, whatever the client did (``api.chat_turn_keys.record_end``). The route calls it while it runs,
+    so the row recorded is the one this request holds; any other turn's hook is the route's own."""
+
+    @functools.wraps(after_the_turn)
+    def bound(workspace_id: Any, chat_id: str, user_id: int, message_id: Any) -> Callable[..., Any]:
+        on_complete = after_the_turn(workspace_id, chat_id, user_id, message_id)
+        row_id = _KEYED_TURN.get()
+        return on_complete if row_id is None else _recording(on_complete, row_id, chat_id, message_id)
+
+    return bound
+
+
+def _recording(on_complete: Callable[..., Any], row_id: Any, chat_id: str, message_id: Any) -> Callable[..., Any]:
+    """``on_complete``, then the keyed turn's ending, written off the event loop."""
+
+    async def recorded(*, completed: bool, cancelled: bool, client_gone: bool) -> None:
+        try:
+            await on_complete(completed=completed, cancelled=cancelled, client_gone=client_gone)
+        finally:  # after the route's hook, which saves the note of a turn that did not finish
+            await asyncio.to_thread(_record_end, row_id, chat_id, message_id, completed)
+
+    return recorded
+
+
+def _record_end(row_id: Any, chat_id: str, message_id: Any, completed: bool) -> Optional[str]:
+    """How the keyed turn ended, on a session of its own; None (logged) when it could not be written: the
+    row is then presumed dead in time, and the key may run the turn again."""
+    from core.jobs.worker import on_own_session
+
+    try:
+        return on_own_session(turn_keys.record_end, row_id, chat_id, message_id, completed)
+    except Exception:  # after the turn: logged with its trace, never raised into the turn's end
+        logger.exception("[chat_server_key] the end of keyed turn %s was not recorded", row_id)
+        return None

@@ -425,7 +425,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # a new nullable column and a partial index; the guard follows it.
     spent = (versions / "credit_ledger_sub_tenant_20261113.py").read_text()
     assert 'down_revision = "product_workspaces_20261113"' in spent
-    assert 'EXPECTED_HEAD = "credit_ledger_sub_tenant_20261113"' in guard
+    # 2026-11-16 (Automatos for products, Wave 1): chat_turn_keys_20261116 chains onto that —
+    # chat_turn_keys, a new table only; the guard follows it.
+    turn_keys = (versions / "chat_turn_keys_20261116.py").read_text()
+    assert 'down_revision = "credit_ledger_sub_tenant_20261113"' in turn_keys
+    assert 'EXPECTED_HEAD = "chat_turn_keys_20261116"' in guard
 
 
 def test_orm_row_is_keyed_by_route():
