@@ -11,8 +11,8 @@ import logging
 import uuid as _uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated, Any, Dict, List, Optional
+from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func, or_
@@ -29,6 +29,7 @@ from api.chat_models import ChatMessageRequest, ChatRequest, MessagePart
 from api.chat_turn_history import spoken_window, turn_history
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
+from api.agent_execute import IDEMPOTENCY_HEADER
 from api.chat_server_key import (acts_as_its_service_user, answers_a_repeated_key_once, keeps_each_end_users_chats_apart,
                                  records_a_keyed_turn, what_a_server_key_may_ask)
 from core.auth.scopes import AGENTS_CHAT
@@ -405,7 +406,8 @@ async def stream_chat(
     request: ChatRequest,
     ctx: RequestContext = Depends(require_workspace_permission_or_server_key("agents:execute", AGENTS_CHAT)),
     _authorised: None = Depends(turn_clock.authorised),  # and marks it once the gate above has answered
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    idempotency_key: Annotated[Optional[str], Header(alias=IDEMPOTENCY_HEADER)] = None,  # read by the wrapper
 ):
     """Stream chat messages using AI SDK Data Stream format (text/plain)"""
     logger.info("[chat] RequestContext workspace_id=%s agentId=%s", ctx.workspace_id, request.agentId)

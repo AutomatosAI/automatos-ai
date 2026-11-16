@@ -35,14 +35,14 @@ import inspect
 import logging
 from contextvars import ContextVar
 from dataclasses import replace
-from typing import Annotated, Any, Callable, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
-from fastapi import Header, HTTPException, status
+from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from starlette.concurrency import run_in_threadpool
 
 from api import chat_turn_keys as turn_keys
-from api.agent_execute import IDEMPOTENCY_HEADER, _checked_key  # one shape check for both routes
+from api.agent_execute import _checked_key  # one shape check for both routes
 from core.auth.server_key_gate import is_server_key
 
 logger = logging.getLogger(__name__)
@@ -56,11 +56,8 @@ NOT_A_PERSONS = "endUserId is a server key's: a person's chat turn is their own.
 NOT_THIS_END_USERS_CHAT = "This conversation is not this end user's: start a new one for them."
 # The row a keyed turn's request holds, while the route runs (answers_a_repeated_key_once).
 _KEYED_TURN: ContextVar[Optional[Any]] = ContextVar("chat_server_key_keyed_turn", default=None)
-# The header, added to the route's signature with a real annotation: FastAPI then never resolves a string
-# annotation against api/chat.py's globals.
-_IDEMPOTENCY_PARAMETER = inspect.Parameter(
-    "idempotency_key", inspect.Parameter.KEYWORD_ONLY, default=None,
-    annotation=Annotated[Optional[str], Header(alias=IDEMPOTENCY_HEADER)])
+# The route's own parameter that carries the Idempotency-Key header (declared on api.chat.stream_chat).
+IDEMPOTENCY_PARAMETER = "idempotency_key"
 
 
 def service_user_for(db: Any, key_id: Any) -> int:
@@ -204,14 +201,13 @@ def answers_a_repeated_key_once(stream_chat: Callable[..., Any]) -> Callable[...
     signature = inspect.signature(stream_chat, eval_str=True)
 
     @functools.wraps(stream_chat)
-    async def wrapped(*args: Any, idempotency_key: Optional[str] = None, **kwargs: Any) -> Any:
+    async def wrapped(*args: Any, **kwargs: Any) -> Any:
         call = signature.bind_partial(*args, **kwargs).arguments
+        idempotency_key = call.get(IDEMPOTENCY_PARAMETER)
         if idempotency_key is None or not is_server_key(call.get("ctx")):
             return await stream_chat(*args, **kwargs)
         return await _run_once(stream_chat, call, idempotency_key, args, kwargs)
 
-    wrapped.__signature__ = signature.replace(  # type: ignore[attr-defined]
-        parameters=[*signature.parameters.values(), _IDEMPOTENCY_PARAMETER])
     return wrapped
 
 
