@@ -19,7 +19,9 @@ from core.auth.dependencies import RequestContext
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.step_up import require_step_up
 from core.auth.hybrid import get_request_context_hybrid
-from core.auth.scopes import AGENTS_CHAT, MEMORY_READ, MEMORY_WRITE, TASKS_READ, TASKS_WRITE
+from core.auth.scopes import (
+    AGENTS_CHAT, DOCUMENTS_READ, DOCUMENTS_WRITE, MEMORY_READ, MEMORY_WRITE, TASKS_READ, TASKS_WRITE,
+)
 from core.database.database import get_db
 from core.services.api_key_service import ApiKeyService
 from config import config
@@ -41,8 +43,8 @@ STEP_UP = require_step_up(config.STEP_UP_MAX_AGE_MINUTES)
 VALID_PERMISSIONS = [
     "chat",
     "blog",
-    "documents:read",
-    "documents:write",
+    DOCUMENTS_READ,  # PRD-274 W1: a server key also lists, gets and searches knowledge documents
+    DOCUMENTS_WRITE,  # and uploads and deletes them (api/documents.py)
     "data:query",
     "data:execute",
     "agents:read",
