@@ -44,13 +44,13 @@ Each carries the recommendation it was built on. The owner calls that can still 
 
 | # | Decision |
 |---|---|
-| E1 | **Submit makes the file.** "Submit for approval" on a post with a visual starts the full render through the render route, which ends the post in `needs_approval`. It never sends a post for approval whose file does not show its current words. A text post, and a post that is the person's own video file, submit as they do today. |
-| E2 | **An empty caption is Auto's to write, like an empty field.** When a render starts with the caption empty, Auto writes it from the brief for the post's channels. A caption that holds words is never rewritten. |
-| E3 | **Approve where you are.** The editor shows the Queue's own approve controls for a post that waits for approval, to a person who may approve. Approval binds to the stored content (D6), so the controls are off while the editor holds unsaved edits. |
+| E1 | **Submit makes the file.** "Submit for approval" on a post with a visual starts the full render through the render route, which ends the post in `needs_approval`. It never sends a post for approval whose file does not show its current words. A text post, and a post that is the person's own video file, submit as they do today. As built: Submit renders every time, because a post does not record what its file was made from (US-D108 adds that). |
+| E2 | **An empty caption is Auto's to write, like an empty field.** When a render starts with the caption empty and the post has a brief, Auto writes it from the brief for the post's channels. A caption that holds words is never rewritten, and nothing is written into a post that holds an approval. |
+| E3 | **Approve where you are.** The editor shows the Queue's own approve controls for a post that waits for approval, to a person who may approve. Approval binds to the stored content (D6), so the controls are off while the editor holds unsaved edits, and after a saved change to what the file shows, until the file is made again. |
 | E4 | **Channels start ticked.** A new post starts with the channels the workspace's most recent post used that can take the format. With no earlier post and exactly one connected channel, that one. Otherwise none, as today. |
 | E5 | **Connect from the editor.** Each supported channel that is not connected has a Connect button in the Channels card (the existing Composio connect flow). |
 | E6 | **Auto sets the slot, never the schedule.** The create and update tools take a planned day and time with its timezone. It is written with `set_planned_for` only, and only while the post is a draft, waits for approval or was sent back. The tools still never approve, schedule or publish: an approved or scheduled post's slot is refused, saying a person moves it. |
-| E7 | **The gallery says what a template is for.** Each card shows the template's description. A search box filters by name and description; chips filter to templates with a photo or words only. "Let Auto pick" stays first. |
+| E7 | **The gallery says what a template is for.** Each card shows the template's description. A search box filters by name and description; chips filter to templates with a photo or with none. "Let Auto pick" stays first. |
 | E8 | **An instant preview of an image post** (Wave 2). The server returns the template as one self-contained page, filled and escaped by the same rules as the renderer, with the brand tokens, the font faces and a stub for the timeline library. The browser shows it in a frame with `sandbox="allow-scripts"` (no same-origin) and its own content security policy that allows nothing from the network. It is labelled a preview: the approved file is always the render. |
 | E9 | **Fewer views** (Wave 2). The list of what is removed is an owner call, below. |
 | E10 | **Look options on a post** (Wave 3). Design step first: it touches the template contract and what an approval covers. |
@@ -63,6 +63,7 @@ Each carries the recommendation it was built on. The owner calls that can still 
 
 - [ ] The editor shows the approve controls of `socials-post-review.tsx` (Approve with the Queue's "publishes HH:MM" wording, Request changes, Reject, the unsourced-claims confirmation) for a post in `needs_approval`, to a person who may approve (the role rule the Queue uses).
 - [ ] While the editor holds unsaved edits the controls are off and say to save first (the component's `dirty`).
+- [ ] After a saved change to what the file shows (the brief, a field, the template, the length or the format) on a post that already has a file, the controls stay off and say why, and Submit is offered to make the file again. The editor holds this for the sitting; US-D108 makes the server hold it.
 - [ ] A viewer, and a post in any other status, see no approve controls.
 - [ ] After approving, the editor shows the post as approved or scheduled, with its Activity card.
 - [ ] Tests: the controls show for `needs_approval` and an approver; not for a viewer; not for a draft; off while dirty; Approve calls the approve route with the post's content hash.
@@ -71,17 +72,19 @@ Each carries the recommendation it was built on. The owner calls that can still 
 **As** a person with a brief and a look, **I want** one button to make the post and send it for approval.
 
 - [ ] On a post with a visual whose file is not the render of its current content, "Submit for approval" saves, then starts the full render (`POST /posts/{id}/render`, no `preview`). The post is `rendering`, then `needs_approval`.
-- [ ] On a post whose rendered file already shows its current content, on a text post, and on a post that is the person's own video file, it saves and submits as today.
+- [ ] On a text post, and on a post that is the person's own video file, it saves and submits as today.
+- [ ] Every post with a visual renders on Submit, one that was rendered before included. The post does not record which content its file was made from (an edit keeps the old file, and a person's saved edit leaves no history entry), so "this file still shows these words" cannot be told apart from "the words changed since". US-D108 records it; Submit can then skip a render that would change nothing.
 - [ ] A person's own still picture renders its crops (today's `OWN_STILL` path) and ends in `needs_approval`.
 - [ ] The button says what it will do: its label or the line under it names the render, and for a video the render minutes (the existing `renderNote` wording, now true).
 - [ ] A refusal (422 naming what Auto could not write, 429 no render minutes) shows as it does for Render preview, and the post is left a draft.
 - [ ] "Render preview" stays for a look before submitting.
-- [ ] Tests: an unrendered image post submits through the render route and not the submit route; a rendered, unchanged post submits through the submit route; a text post submits; a video calls the full render, not the preview.
+- [ ] Tests: an unrendered image post submits through the render route and not the submit route; a post rendered and sent back renders again; a text post submits; a video calls the full render, not the preview.
 
 ### US-D103: A render writes an empty caption
 **As** a person who gave a brief, **I want** the caption written with the image's words.
 
-- [ ] When the person's render or preview route starts and the post's caption is empty (no base text and no channel text), Auto writes the caption from the brief for the post's channels (every connected channel when it has none), in the same composer call that writes the empty fields, and saves it as part of the same edit. The history line names it.
+- [ ] When the person's render or preview route starts and the post's caption is empty (no base text and no channel text) and the post has a brief, Auto writes the caption from the brief for the post's channels (every connected channel when it has none), in the same composer call that writes the empty fields, and saves it as part of the same edit. The history line names it. With no brief Auto would have only the title, so the caption stays the person's to write.
+- [ ] A post that holds an approval is never written into, fields or caption: a preview is allowed for it and keeps its status, so Auto's words there would void the approval.
 - [ ] A caption that holds any words is never changed. A post with every field filled and an empty caption still gets its caption.
 - [ ] "Let Auto pick" (a post with no template) gets the same: the template, its fields and an empty caption.
 - [ ] A plan's or an agent's render is unchanged (`render_post` itself asks nothing).
@@ -114,7 +117,7 @@ Each carries the recommendation it was built on. The owner calls that can still 
 ### US-D107: The gallery says what each template is for
 - [ ] Each template card shows the template's description under its name, cut to two lines.
 - [ ] A search box filters the gallery by name and description as the person types; no match says so.
-- [ ] Chips filter to All, With a photo (a template with an image slot) and Words only. "Let Auto pick" is always shown first.
+- [ ] Chips filter to All, With a photo (a template with an image slot) and No photo. "Let Auto pick" is always shown first.
 - [ ] The chosen template stays visible when a filter would hide it.
 - [ ] Tests: the description shows; search narrows the list; each chip filters; "Let Auto pick" stays.
 
@@ -131,6 +134,17 @@ What the research found (16 Nov): an image template needs its own inline script 
 - [ ] A photo the post already has shows in its slot (the editor reads the file through the post's media route and hands it to the page as a `data:` URI). With none, the slot shows what the renderer shows for an empty one.
 - [ ] A video, a text post and a post that is the person's own file keep today's preview. Once a render exists and is current, the frame shows the rendered file.
 - [ ] Both routes are authenticated, scoped to the caller's workspace and in the route manifest, and the change passes the security review. A workspace's own template runs its script only inside the sandboxed frame.
+
+### US-D108: A file older than its words is never approved
+
+Found while building Wave 1 (16 Nov): a post that waits for approval, edited and saved, keeps its old file, and Approve accepts that file with the new words. `finish_render` records no content with the render, `update_post` keeps `media` after an edit, and a person's saved edit leaves no history entry, so nothing can tell. The Queue has had this since PRD-251B; a retake is safe, because it renders again. Wave 1's editor guards its own sitting only. This closes it on the server, which D6 ("approved against the exact content that goes out") needs.
+
+- [ ] A render records what the file was made from (a hash of what a render reads: the template, the fields, the format and the length), on its `render_done` entry.
+- [ ] A post says whether its file is current (`file_current` in its JSON): its last render was made from what it holds now. A post with no template, a text post and a person's own file are always current.
+- [ ] Approve refuses a post whose file is not current, saying to render it again. The Queue and the editor show the same sentence in place of Approve, with the button that renders.
+- [ ] The update tool's answer says when an edit left the file older than the words, so an agent renders again.
+- [ ] Submit renders only when the file is not current.
+- [ ] Tests: an edit after a render makes the file not current and Approve is refused; a render makes it current again; a slot move, a caption change and a channel change do not.
 
 ### US-D202: The Calendar's List is one plain list
 The research (16 Nov): the List layout renders the older `socials-post-list.tsx`, which brings a second list, a Board and a second detail pane. The Board and the status list are today the only views of an archived post and of a post with no slot, so the list stays and the rest goes.
