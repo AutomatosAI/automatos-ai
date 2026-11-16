@@ -698,6 +698,8 @@ export interface SocialComposeInput {
   /** PRD-251B (US-B103): the editor's chosen template and length, honoured by the proposal. */
   template_id?: string | null
   length_seconds?: number | null
+  /** The template fields the person filled in (name → value): kept as written; Auto writes the rest. */
+  given_variables?: Record<string, string | number | boolean>
 }
 
 /** The composer's draft proposal: checked by the server, never saved until "Save draft". */

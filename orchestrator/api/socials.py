@@ -822,8 +822,10 @@ async def render_social_post(
     post = _load(db, ctx, post_id)
     actor = _actor(ctx)
     workspace = _workspace(db, ctx)
-    flow = socials_preview.preview_post if body is not None and body.preview else render_post
+    preview_only = body is not None and body.preview
+    flow = socials_preview.preview_post if preview_only else render_post
     try:
+        await socials_compose.write_missing_fields(db, workspace, post, actor, preview_only=preview_only)
         return await flow(db, workspace, post, actor)
     except (service.SocialsError, render_quota.RenderQuotaExceeded) as exc:
         _raise_for(exc)

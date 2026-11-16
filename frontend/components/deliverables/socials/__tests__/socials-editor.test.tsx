@@ -7,7 +7,7 @@
  *   text, saying why; a channel the format excludes says why too.
  * * Channels and sizes: each ticked channel's size, and "Renders" the distinct ratios.
  * * Save draft writes the post (POST, or PATCH once it exists), its channels (PUT /targets)
- *   and its slot (PUT /slot, only when it moved); Redraft with Auto sends the editor's
+ *   and its slot (PUT /slot, only when it moved); Write with Auto sends the editor's
  *   choices and replaces the copy, the variables and the sources only; Submit submits.
  * * F254: a try that fails after creating the post opens that post, and the next try edits
  *   it: one post, never a new row per Save, Render or Submit.
@@ -32,7 +32,9 @@ vi.mock('@/components/widgets/FileWidget/FilePreview', () => ({
 
 import { NEW_POST_STEPS, OWN_FILE_STEPS, OWN_STILL_STEPS, SocialsEditor } from '@/components/deliverables/socials/studio/socials-editor'
 import { AUTO_PICK_NOTE, LOOK_HINTS } from '@/components/deliverables/socials/studio/editor-look-card'
-import { FIELDS_LEGEND } from '@/components/deliverables/socials/socials-variables-form'
+import { CLEAR_FIELDS, FIELDS_LEGEND } from '@/components/deliverables/socials/socials-variables-form'
+import { BRIEF_HINT } from '@/components/deliverables/socials/studio/editor-brief-card'
+import { HIDE_FIELDS, fieldsLeftToAuto, showFieldsLabel } from '@/components/deliverables/socials/studio/editor-claims-card'
 import { TEXT_ONLY_NOTE } from '@/components/deliverables/socials/studio/editor-format-card'
 import { IMAGE_TEMPLATE, api, post, renderWith, resetApi } from './socials-editor-harness'
 
@@ -183,7 +185,7 @@ describe('the post editor', () => {
     expect(go).not.toHaveBeenCalled()
   })
 
-  it('Redraft with Auto sends the editor choices and replaces the copy, variables and sources only', async () => {
+  it('Write with Auto sends the editor choices and replaces the copy, variables and sources only', async () => {
     api.composeSocialPost.mockResolvedValue({
       title: 'Another title', copy: { base: 'Fresh copy.', channels: { tiktok: 'Fresh for TikTok.' } },
       format: 'video', template_id: 'tpl-vid', template: null, variables: { hook: { value: 'Look', claim: false } },
@@ -194,7 +196,7 @@ describe('the post editor', () => {
       targets: [{ toolkit: 'tiktok', post_kind: 'video', options: {} } as any],
     }))
     await within(card('Format')).findByRole('group', { name: 'Length' })
-    fireEvent.click(screen.getByRole('button', { name: /Redraft with Auto/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Write with Auto/ }))
     await waitFor(() => expect(api.composeSocialPost).toHaveBeenCalledWith({
       brief: 'The approval rule', channels: ['tiktok'], format: 'video', template_id: 'tpl-vid', length_seconds: 30,
     }))
@@ -212,8 +214,44 @@ describe('the post editor', () => {
     renderEditor(post())
     await screen.findByText('TikTok')
     expect(within(card('Brief')).queryByRole('status')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: /Redraft with Auto/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Write with Auto/ }))
     expect(await within(card('Brief')).findByRole('status')).toHaveTextContent("Auto needs: Source line; A photo for 'Photo'")
+  })
+
+  it('Write with Auto keeps the fields the person filled in and writes the ones left empty', async () => {
+    api.composeSocialPost.mockResolvedValue({
+      title: 'Members', copy: { base: 'Fresh copy.', channels: {} }, format: 'image', template_id: 'tpl-img', template: null,
+      variables: { headline: { value: "Auto's headline", claim: false }, members: { value: 412, claim: true } },
+      sources: {}, channels: [], warnings: [],
+    })
+    renderEditor(post({ template_id: 'tpl-img', variables: { headline: { value: 'MY HEADLINE', claim: false } } }))
+    const text = card('Text on the image')
+    // A field holds a value, so the card is open: the person sees their own words.
+    expect(await within(text).findByLabelText('Headline')).toHaveValue('MY HEADLINE')
+
+    fireEvent.click(screen.getByRole('button', { name: /Write with Auto/ }))
+
+    await waitFor(() => expect(api.composeSocialPost).toHaveBeenCalledWith({
+      brief: 'The approval rule', channels: undefined, format: 'image', template_id: 'tpl-img', length_seconds: null,
+      given_variables: { headline: 'MY HEADLINE' },
+    }))
+    await waitFor(() => expect(within(text).getByLabelText('Members')).toHaveValue(412))
+    expect(within(text).getByLabelText('Headline')).toHaveValue('MY HEADLINE')
+
+    // Clear all hands every field back to Auto; the form stays open under the person using it.
+    fireEvent.click(within(text).getByRole('button', { name: CLEAR_FIELDS }))
+    expect(within(text).getByLabelText('Headline')).toHaveValue('')
+    expect(within(text).getByLabelText('Members')).toHaveValue(null)
+    expect(within(text).queryByRole('button', { name: CLEAR_FIELDS })).toBeNull()
+  })
+
+  it('emptying the only filled field does not close the fields under the person typing', async () => {
+    renderEditor(post({ template_id: 'tpl-img', variables: { headline: { value: 'MY HEADLINE', claim: false } } }))
+    const text = card('Text on the image')
+    const headline = await within(text).findByLabelText('Headline')
+    fireEvent.change(headline, { target: { value: '' } })
+    expect(within(text).getByLabelText('Headline')).toHaveValue('')
+    expect(within(text).queryByText(fieldsLeftToAuto(2))).toBeNull()
   })
 
   it('Submit for approval saves, then submits', async () => {
@@ -277,13 +315,29 @@ describe('the post editor', () => {
     renderEditor()
     fireEvent.click(await within(card('Look')).findByRole('button', { name: /Fact card/ }))
     const claims = card('Text on the image')
-    expect(within(claims).getByText(/Unsourced/)).toBeInTheDocument()
     expect(within(claims).getByText('A claim without a source needs a second confirmation from whoever approves.')).toBeInTheDocument()
-    fireEvent.click(within(claims).getByRole('button', { name: 'Add a source' }))
+    fireEvent.click(within(claims).getByRole('button', { name: 'Add a source' }))  // opens the fields, at the claim
+    expect(within(claims).getByText(/Unsourced/)).toBeInTheDocument()
     expect(await within(claims).findByRole('textbox', { name: 'Search sources for members' })).toBeInTheDocument()
   })
 
-  it("each field shows the template's example, what goes in it, a * when the render needs it, and its count", async () => {
+  it("a chosen template's fields stay closed and left to Auto until the person opens them", async () => {
+    renderEditor()
+    fireEvent.click(await within(card('Look')).findByRole('button', { name: /Fact card/ }))
+    const text = card('Text on the image')
+    expect(within(text).getByText(fieldsLeftToAuto(2))).toBeInTheDocument()
+    expect(within(text).queryByLabelText('Headline')).toBeNull()
+
+    fireEvent.click(within(text).getByRole('button', { name: showFieldsLabel(2) }))
+    expect(within(text).getByLabelText('Headline')).toBeInTheDocument()
+    expect(within(text).queryByText(fieldsLeftToAuto(2))).toBeNull()
+
+    fireEvent.click(within(text).getByRole('button', { name: HIDE_FIELDS }))
+    expect(within(text).queryByLabelText('Headline')).toBeNull()
+    expect(within(card('Brief')).getByText(BRIEF_HINT)).toBeInTheDocument()
+  })
+
+  it("each field shows the template's example, what goes in it and its count, and none is marked as needed", async () => {
     api.listSocialTemplates.mockResolvedValue([{
       ...IMAGE_TEMPLATE,
       variables_schema: {
@@ -295,12 +349,15 @@ describe('the post editor', () => {
     renderEditor()
     fireEvent.click(await within(card('Look')).findByRole('button', { name: /Fact card/ }))
     const text = card('Text on the image')
+    fireEvent.click(within(text).getByRole('button', { name: showFieldsLabel(2) }))
     expect(within(text).getByText(FIELDS_LEGEND)).toBeInTheDocument()
-    const headline = within(text).getByLabelText(/Headline/)
+    const headline = within(text).getByLabelText('Headline')
     expect(headline).toHaveAttribute('placeholder', 'e.g. AUTUMN|COLOUR WEEK')
     expect(headline).toHaveAccessibleDescription('The big statement. Use | to break the line.')
-    expect(within(text).getByText('(needed to render)')).toBeInTheDocument() // headline has no default
-    expect(within(text).getByLabelText('Call to action')).toHaveAttribute('placeholder', 'e.g. Book now') // optional: no *
+    // Auto writes what is left empty, so no field carries a "needed" mark (headline has no default).
+    expect(within(text).queryByText('(needed to render)')).toBeNull()
+    expect(within(text).queryByText('*')).toBeNull()
+    expect(within(text).getByLabelText('Call to action')).toHaveAttribute('placeholder', 'e.g. Book now')
     fireEvent.change(headline, { target: { value: 'OPEN LATE' } })
     expect(within(text).getByText('9/60')).toBeInTheDocument()
   })

@@ -67,11 +67,17 @@ def bound_candidates(proposal: Mapping[str, Any], ctx: Any) -> List[Mapping[str,
     return [index[key] for key in keys if key in index]
 
 
+def owner_words(ctx: Any) -> str:
+    """What the owner wrote for this post: the brief, and the template fields they filled in themselves."""
+    given = getattr(ctx, "given_fields", None) or {}
+    return "\n".join([str(getattr(ctx, "brief", "") or ""), *(_value_text(value) for value in given.values())])
+
+
 def given_text(proposal: Mapping[str, Any], ctx: Any) -> str:
-    """Everything the owner gave the composer, as one text: the brief, the current take, the
-    kit's handles and the sources the claims are bound to."""
+    """Everything the owner gave the composer, as one text: the brief and their own fields, the
+    current take, the kit's handles and the sources the claims are bound to."""
     current = getattr(ctx, "current_take", None) or {}
-    parts = [str(getattr(ctx, "brief", "") or ""), json.dumps(current, ensure_ascii=False, default=str) if current else ""]
+    parts = [owner_words(ctx), json.dumps(current, ensure_ascii=False, default=str) if current else ""]
     parts += [str(handle) for handle in (getattr(ctx, "handles", None) or {}).values()]
     parts += [_candidate_text(candidate) for candidate in bound_candidates(proposal, ctx)]
     return "\n".join(part for part in parts if part)
@@ -118,7 +124,7 @@ def _kit_handle(ctx: Any) -> Optional[str]:
 
 def _known(handle: str, ctx: Any) -> bool:
     kit = {_norm(h) for h in (getattr(ctx, "handles", None) or {}).values()}
-    return _norm(handle) in kit or _norm(handle) in str(getattr(ctx, "brief", "") or "").lower()
+    return _norm(handle) in kit or _norm(handle) in owner_words(ctx).lower()
 
 
 def checked_handles(variables: Mapping[str, Any], ctx: Any) -> Tuple[Dict[str, Any], List[str]]:

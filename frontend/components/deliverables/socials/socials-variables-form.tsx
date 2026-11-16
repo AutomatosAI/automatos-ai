@@ -7,8 +7,9 @@
  * its source, or the red Unsourced chip until one is picked.
  *
  * Each field says what goes in it: the template's sample text greyed in as an example,
- * the field's own description under it, a * on a field the render needs (one with no
- * default), and a count against its limit.
+ * the field's own description under it, and a count against its limit. No field is marked
+ * as needed: Auto writes whatever is left empty from the brief (a redraft, or the render),
+ * and what the person writes is kept. "Clear all" empties the fields for Auto to write again.
  */
 import { useState } from 'react'
 import { Braces } from 'lucide-react'
@@ -23,11 +24,14 @@ import { ClaimSource } from './socials-claim-source'
 type Variables = Record<string, SocialPostVariable>
 type Sources = Record<string, SocialClaimSource>
 const LONG_TEXT_CHARS = 120
-export const FIELDS_LEGEND = 'Fields marked * are needed before the post can render. Grey text in a field is an example.'
+export const FIELDS_LEGEND = 'Auto writes any field you leave empty, from your brief. What you write here is kept. Grey text in a field is an example.'
+export const CLEAR_FIELDS = 'Clear all'
+export const CLEAR_FIELDS_HELP = 'Empty every field, so Auto writes them again'
 
-/** Whether the render needs a value: a text or number field with no default (core/social_templates.py). */
-export function isRequired(spec: SocialTemplateVariable): boolean {
-  return spec.type !== 'boolean' && spec.default === undefined
+/** `record` (the variables, or their sources) without this template's fields: what Clear all
+ * leaves. A carousel's slide count stays; a cleared claim's source goes with its value. */
+export function withoutFields<T>(record: Record<string, T>, schema: Record<string, SocialTemplateVariable>): Record<string, T> {
+  return Object.fromEntries(Object.entries(record).filter(([name]) => !(name in schema)))
 }
 
 /**
@@ -70,20 +74,6 @@ interface VariableFieldProps {
   onChange: (variables: Variables) => void
 }
 
-function FieldLabel({ id, label, required }: { id: string; label: string; required: boolean }) {
-  return (
-    <Label htmlFor={id}>
-      {label}
-      {required && (
-        <>
-          <span aria-hidden className="ml-0.5 text-destructive">*</span>
-          <span className="sr-only"> (needed to render)</span>
-        </>
-      )}
-    </Label>
-  )
-}
-
 /** Under the field: what goes in it, and how much of its limit is used. */
 function FieldHelp({ id, description, used, limit }: { id: string; description?: string; used: number; limit?: number }) {
   if (!description && !limit) return null
@@ -116,7 +106,7 @@ function VariableField({ name, spec, variables, example, onChange }: VariableFie
   }
   return (
     <div className="space-y-1">
-      <FieldLabel id={id} label={label} required={isRequired(spec)} />
+      <Label htmlFor={id}>{label}</Label>
       {long ? (
         <Textarea {...field} rows={2} onChange={(e) => set(e.target.value)} />
       ) : (
@@ -163,6 +153,7 @@ interface SocialsVariablesFormProps {
 export function SocialsVariablesForm({ schema, variables, sources, onChange, openFirstUnsourced = false, examples = {} }: SocialsVariablesFormProps) {
   const [json, setJson] = useState(false)
   const names = Object.keys(schema)
+  const anyFilled = names.some((name) => variables[name] !== undefined)
   const firstUnsourced = openFirstUnsourced ? names.find((name) => schema[name].claim && !sources[name]) : undefined
   const setSource = (name: string, source: SocialClaimSource | null) => {
     const { [name]: _dropped, ...rest } = sources
@@ -172,9 +163,16 @@ export function SocialsVariablesForm({ schema, variables, sources, onChange, ope
     <section aria-label="Fields" className="space-y-3">
       <div className="flex items-center justify-between">
         <h4 className="text-sm font-medium text-foreground">Fields</h4>
-        <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setJson(!json)}>
-          <Braces className="h-3.5 w-3.5" aria-hidden /> {json ? 'Form view' : 'JSON view'}
-        </Button>
+        <div className="flex items-center gap-1">
+          {anyFilled && (
+            <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" title={CLEAR_FIELDS_HELP} onClick={() => onChange(withoutFields(variables, schema), withoutFields(sources, schema))}>
+              {CLEAR_FIELDS}
+            </Button>
+          )}
+          <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setJson(!json)}>
+            <Braces className="h-3.5 w-3.5" aria-hidden /> {json ? 'Form view' : 'JSON view'}
+          </Button>
+        </div>
       </div>
       {names.length === 0 && <p className="text-sm text-muted-foreground">This template has no fields.</p>}
       {names.length > 0 && !json && <p className="text-xs text-muted-foreground">{FIELDS_LEGEND}</p>}

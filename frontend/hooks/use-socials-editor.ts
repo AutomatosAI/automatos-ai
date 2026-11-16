@@ -6,8 +6,8 @@
  * and video Deliverables, what footage a template's slots can be filled with) and what it
  * writes, each through apiClient: Save draft creates the post (POST /posts) or edits it
  * (PATCH), then sets its channels (PUT /targets) and its slot (PUT /slot); Render preview
- * and Submit for approval save first; Redraft with Auto asks the composer with the
- * editor's choices; an upload or a Library pick saves a new post first, then sets its
+ * and Submit for approval save first; Write with Auto asks the composer with the
+ * editor's choices and the fields the person filled in; an upload or a Library pick saves a new post first, then sets its
  * media. The server checks everything again.
  */
 import { useMutation, useQuery } from '@tanstack/react-query'
@@ -190,7 +190,7 @@ export function usePickLibraryMedia() {
   )
 }
 
-/** Redraft with Auto: the composer's proposal for the editor's brief and choices (not saved). */
+/** Write with Auto: the composer's proposal for the editor's brief and choices (not saved). */
 export function useRedraft() {
   return useMutation<SocialComposeProposal, Error, SocialComposeInput>({
     mutationFn: (input) => apiClient.composeSocialPost(input),

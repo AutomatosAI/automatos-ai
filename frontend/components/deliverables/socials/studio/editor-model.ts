@@ -282,13 +282,30 @@ export function renderRatios(draft: Pick<EditorDraft, 'kinds'>, templateSizes: R
   return Array.from(new Set(ratios.filter((r): r is string => !!r)))
 }
 
-/** Redraft with Auto: the proposal replaces the copy, the variables and the sources only. */
+export type GivenFields = Record<string, string | number | boolean>
+
+function holdsAValue(value: unknown): value is string | number | boolean {
+  return typeof value === 'string' ? value.trim() !== '' : typeof value === 'number' || typeof value === 'boolean'
+}
+
+/** The fields the person has filled in (name → value): Auto keeps each as written and writes
+ * the rest. null when none is filled. */
+export function givenFields(draft: Pick<EditorDraft, 'variables'>): GivenFields | null {
+  const filled = Object.entries(draft.variables).filter(([, spec]) => holdsAValue(spec?.value))
+  return filled.length ? Object.fromEntries(filled.map(([name, spec]) => [name, spec.value as string | number | boolean])) : null
+}
+
+/** Write with Auto: the proposal replaces the copy and fills the fields left empty. A field
+ * that already holds a value stays as written, with the source it was given; an empty field's
+ * old source never rides on to the value Auto wrote for it. */
 export function withProposal(draft: EditorDraft, proposal: SocialComposeProposal): EditorDraft {
+  const kept = Object.fromEntries(Object.entries(draft.variables).filter(([, spec]) => holdsAValue(spec?.value)))
+  const keptSources = Object.fromEntries(Object.entries(draft.sources).filter(([name]) => name in kept))
   return {
     ...draft,
     base: proposal.copy.base,
     perChannel: { ...proposal.copy.channels },
-    variables: { ...proposal.variables },
-    sources: { ...proposal.sources },
+    variables: { ...proposal.variables, ...kept },
+    sources: { ...proposal.sources, ...keptSources },
   }
 }

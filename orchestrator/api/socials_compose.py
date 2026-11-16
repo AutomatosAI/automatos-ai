@@ -31,12 +31,12 @@ import asyncio
 import logging
 import re
 from dataclasses import replace
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Annotated, Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 from uuid import UUID
 
 import anyio
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy.orm import Session
 
 from config import config
@@ -50,7 +50,8 @@ from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.models.workspaces import Workspace
 from core.social_templates import SOCIAL_TEMPLATE_FORMATS, claim_names, made_for
 from modules.documents.brand_kit import get_brand_kit
-from modules.socials import compose, compose_photos, compose_sources, history, service, voice_examples
+from modules.socials import compose, compose_facts, compose_photos, compose_sources, empty_fields, history, preview, service
+from modules.socials import voice_examples
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import social_channels
 from modules.socials.compose_checks import template_kind
@@ -73,6 +74,16 @@ CANDIDATES_PER_TERM = 3
 MAX_CANDIDATES = 24
 MAX_BRIEF_URLS = 5
 _URL = re.compile(r"https?://[^\s<>\"')]+")
+# The fields the person wrote themselves, sent with a redraft: at most the largest template's worth.
+MAX_GIVEN_FIELDS = 200
+GIVEN_NAME_MAX_CHARS = 120
+GIVEN_VALUE_MAX_CHARS = 2000
+GivenName = Annotated[str, StringConstraints(min_length=1, max_length=GIVEN_NAME_MAX_CHARS)]
+GivenValue = Union[bool, int, float, Annotated[str, StringConstraints(max_length=GIVEN_VALUE_MAX_CHARS)]]
+# What the composer reads of a template row (``template_entry``).
+ENTRY_COLUMNS = (
+    DocumentTemplate.id, DocumentTemplate.name, DocumentTemplate.description, DocumentTemplate.format, DocumentTemplate.blocks,
+)
 
 
 class ComposeRequest(BaseModel):
@@ -85,6 +96,9 @@ class ComposeRequest(BaseModel):
     # workspace's of the format's kind; the length one the template declares.
     template_id: Optional[UUID] = None
     length_seconds: Optional[int] = Field(None, ge=1)
+    # The template fields the person wrote themselves (name → value): each is kept as written
+    # and Auto writes the rest (``modules/socials/empty_fields.py``).
+    given_variables: Optional[Dict[GivenName, GivenValue]] = Field(None, max_length=MAX_GIVEN_FIELDS)
 
 
 class ChoiceRefused(ValueError):
@@ -105,8 +119,7 @@ def social_templates(db: Session, workspace_id: UUID, post_format: Optional[str]
     the gallery lists them (``template_gallery.gallery``: an archived one is never offered)."""
     kinds = [template_kind(post_format)] if post_format else list(SOCIAL_TEMPLATE_FORMATS)
     rows = (
-        db.query(DocumentTemplate.id, DocumentTemplate.name, DocumentTemplate.description, DocumentTemplate.format,
-                 DocumentTemplate.blocks)
+        db.query(*ENTRY_COLUMNS)
         .filter(DocumentTemplate.workspace_id == workspace_id, DocumentTemplate.format.in_(kinds),
                 DocumentTemplate.is_active.isnot(False))
         .order_by(DocumentTemplate.name)
@@ -247,9 +260,11 @@ def brand_style_text(db: Session, workspace_id: UUID) -> str:
 
 def compose_context(
     db: Session, workspace_id: UUID, body: ComposeRequest, *, current_take: Optional[Mapping[str, Any]] = None,
+    given_fields: Optional[Mapping[str, Any]] = None,
 ) -> compose.ComposeContext:
     """Everything the composer is given, from the caller's workspace only; a retake's
-    ``current_take`` (F378) is the post as it is, the take to start from."""
+    ``current_take`` (F378) is the post as it is, the take to start from; ``given_fields`` are
+    the template fields the person wrote themselves, which stay as written."""
     channels, warnings = connected_channels(db, workspace_id, body.channels)
     if body.format == TEXT_FORMAT:
         channels = text_channels(channels, body.channels, warnings)
@@ -273,6 +288,7 @@ def compose_context(
         voice_examples=tuple(voice_examples.for_composer(db, workspace_id)),  # PRD-251C US-C406
         handles=brand_handles(db, workspace_id),  # F378: the only handles a post carries
         current_take=dict(current_take or {}),
+        given_fields=dict(given_fields or {}),
     )
 
 
@@ -295,7 +311,7 @@ def compose_social_post(
     if body.format is not None and body.format not in SOCIAL_POST_FORMATS:
         raise HTTPException(status_code=422, detail=f"format must be one of {list(SOCIAL_POST_FORMATS)}")
     try:
-        context = compose_context(db, ctx.workspace_id, body)
+        context = compose_context(db, ctx.workspace_id, body, given_fields=body.given_variables)
     except ChoiceRefused as exc:
         raise HTTPException(status_code=422, detail={"code": exc.code, "message": str(exc)}) from exc
     timeout = float(config.SOCIALS_COMPOSE_TIMEOUT_SECONDS)
@@ -319,6 +335,8 @@ def compose_social_post(
 # does, from the post's own words. The person's copy and title stay as they are.
 
 VISUAL_FORMATS = tuple(name for name in SOCIAL_POST_FORMATS if name != TEXT_FORMAT)
+PICK_FAILED = "Auto could not pick a template"
+WRITE_FAILED = "Auto could not write the words on the image"
 NO_TEMPLATE_FOR = "Auto found no template for this {format} post: add one in Templates, or choose a format that has one."
 
 
@@ -358,16 +376,19 @@ def _auto_edit(proposal: Mapping[str, Any], post: Any) -> Dict[str, Any]:
     }
 
 
-async def _auto_proposal(context: compose.ComposeContext, workspace_id: UUID, post_id: Any) -> Dict[str, Any]:
-    """The composer's checked proposal; a model that gives no usable answer is NotRenderable."""
+async def _auto_proposal(
+    context: compose.ComposeContext, workspace_id: UUID, post_id: Any, failed: str = PICK_FAILED,
+) -> Dict[str, Any]:
+    """The composer's checked proposal; a model that gives no usable answer is NotRenderable,
+    saying what Auto could not do (``failed``)."""
     timeout = float(config.SOCIALS_COMPOSE_TIMEOUT_SECONDS)
     try:
         return await compose.propose(context, compose.llm_factory(workspace_id), timeout)
     except (compose.ComposeTimedOut, compose.ComposeFailed) as exc:
-        raise NotRenderable(f"Auto could not pick a template: {exc}") from exc
+        raise NotRenderable(f"{failed}: {exc}") from exc
     except Exception as exc:
-        logger.exception("[Socials] Auto's template pick failed for post %s", post_id)
-        raise NotRenderable("Auto could not pick a template: the model could not be reached. Try again.") from exc
+        logger.exception("[Socials] Auto's proposal failed for post %s (%s)", post_id, failed)
+        raise NotRenderable(f"{failed}: the model could not be reached. Try again.") from exc
 
 
 async def auto_template(db: Session, workspace_id: UUID, post: Any) -> Tuple[Dict[str, Any], str]:
@@ -409,3 +430,72 @@ async def let_auto_pick(
     changes, template_name = await auto_template(db, workspace.id, post)
     service.record_auto_pick(post, actor, changes, template_name)
     _posts_api()._commit_unchanged(db, post, status=status, content_hash=content_hash)
+
+
+# ---------------------------------------------------------------------------
+# A chosen template's empty fields, written when the post renders
+# ---------------------------------------------------------------------------
+# Choosing a template used to hand the person its whole form: a render with a required field
+# empty was refused. A field left empty is now Auto's to write, as "Let Auto pick" already
+# does for a post with no template; a field that holds a value stays as it is.
+
+
+def _chosen_template(db: Session, workspace_id: UUID, post: Any) -> Optional[Dict[str, Any]]:
+    """The post's chosen template as the composer sees it, when it is one of the workspace's
+    social templates; ``None`` for a post without one (``let_auto_pick``'s)."""
+    if post.template_id is None:
+        return None
+    row = (
+        db.query(*ENTRY_COLUMNS)
+        .filter(DocumentTemplate.id == post.template_id, DocumentTemplate.workspace_id == workspace_id)
+        .first()
+    )
+    return template_entry(row) if row is not None and row.format in SOCIAL_TEMPLATE_FORMATS else None
+
+
+async def auto_fields(db: Session, workspace_id: UUID, post: Any) -> Dict[str, Any]:
+    """The edit that fills the chosen template's empty fields: the composer, with that template
+    and the post's own fields given, writes the rest from the post's own words. The post's own
+    value stays in every field that holds one (``empty_fields.fields_edit``)."""
+    body = ComposeRequest(
+        brief=auto_brief(post), format=post.format, template_id=post.template_id, length_seconds=post.length_seconds,
+    )
+    given = empty_fields.own_values(post)
+    try:
+        context = await asyncio.to_thread(compose_context, db, workspace_id, body, given_fields=given)
+    except ChoiceRefused as exc:
+        raise NotRenderable(f"{WRITE_FAILED}: {exc}") from exc
+    return empty_fields.fields_edit(await _auto_proposal(context, workspace_id, post.id, WRITE_FAILED), post)
+
+
+def _still_needed(template: Mapping[str, Any], post: Any) -> None:
+    """:class:`NotRenderable`, naming by its label each required field Auto could not write
+    and the render would refuse (a fact the brief does not give: a customer's name, their words)."""
+    missing = empty_fields.render_refuses(template, post)
+    if not missing:
+        return
+    schema = template.get("variables_schema") or {}
+    labels = [compose_facts.field_label(name, schema.get(name)) for name in missing]
+    raise NotRenderable(empty_fields.STILL_NEEDED.format(fields=", ".join(labels)), missing=tuple(missing))
+
+
+async def write_missing_fields(db: Session, workspace: Workspace, post: SocialPost, actor: str, *, preview_only: bool) -> None:
+    """Before a person's render or preview: when the post's chosen template still has required
+    fields empty, Auto writes them from the post's own words, saved as an edit by the
+    compare-and-set commit with a line in the history naming them. Every field that holds a
+    value stays as it is. A post with no template (``let_auto_pick``'s) or with nothing empty
+    is left alone, and one that cannot render now is refused before the model is asked. What
+    Auto could not write is asked of the person by its label (422), with what it did write kept."""
+    template = await asyncio.to_thread(_chosen_template, db, workspace.id, post)
+    if template is None or not empty_fields.empty_required(template, post):
+        return
+    (preview.assert_can_preview if preview_only else service.assert_can_render)(post)
+    status, content_hash = post.status, post.content_hash
+    changes = await auto_fields(db, workspace.id, post)
+    wrote = empty_fields.newly_written(changes, post)
+    if wrote:
+        schema = template.get("variables_schema") or {}
+        labels = [compose_facts.field_label(name, schema.get(name)) for name in wrote]
+        empty_fields.record_written(post, actor, changes, labels)
+        _posts_api()._commit_unchanged(db, post, status=status, content_hash=content_hash)
+    _still_needed(template, post)

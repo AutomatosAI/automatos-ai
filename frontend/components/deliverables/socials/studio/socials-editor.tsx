@@ -3,7 +3,7 @@
 /**
  * PRD-251B US-B109 — the post editor (Editor.dc.html), at ?post=new (the post is created on
  * the first Save draft) or ?post=<id>. The header holds Save draft, Render preview and
- * Submit for approval; the cards, in order: Brief (Redraft with Auto), Format, Channels and
+ * Submit for approval; the cards, in order: Brief (Write with Auto), Format, Channels and
  * sizes, Look (Template · Upload · Library · AI-made), Claims and sources, When; beside them the
  * copy and the preview. PRD-264 EUAI-08a: a post with a visual has the AI-generated label card
  * (EditorAiLabelCard), on by default while it carries AI media. Save draft writes the post's
@@ -32,8 +32,8 @@ import { photoSpotsOf } from './editor-look-photo'
 import { EditorPreviewColumn } from './editor-preview-column'
 import { EditorWhenCard } from './editor-when-card'
 import {
-  editorTargets, isOwnFilePost, postFields, slidesOf, slotChanged, slotInput, videoSlotsOf, withChannelTicked, withFormat, withProposal,
-  withSlides, withStory,
+  editorTargets, givenFields, isOwnFilePost, postFields, slidesOf, slotChanged, slotInput, videoSlotsOf, withChannelTicked, withFormat,
+  withProposal, withSlides, withStory,
 } from './editor-model'
 import { SocialsEditorActivity } from './socials-editor-activity'
 import { DeletePostButton } from './delete-post-button'
@@ -43,7 +43,7 @@ import { useEditorDraft } from './use-editor-draft'
 import { Hint } from './editor-ui'
 
 /** A new post's four steps, in one line under its header. */
-export const NEW_POST_STEPS = 'Write a brief (or let Auto redraft it), choose the look, tick the channels, then Render preview and Submit for approval.'
+export const NEW_POST_STEPS = 'Write a brief, choose the look and tick the channels. Auto writes the caption and the words on the image: fill a field in yourself only when you want your own words. Then Render preview and Submit for approval.'
 /** A post that is the person's own file (an upload or a Library pick): its next steps. */
 export const OWN_FILE_STEPS = 'Your file is the post, so there is nothing to render: tick the channels, check each one in the preview, then Submit for approval.'
 /** PRD-251C (US-C303): a picture of your own is cropped to each channel's shape by a render. */
@@ -98,8 +98,12 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
   }
   const redraft = () => {
     const ticked = Object.keys(draft.kinds)
+    const given = givenFields(draft)  // what the person wrote stays; Auto writes the rest
     calls.redraft.mutate(
-      { brief: draft.brief, channels: ticked.length ? ticked : undefined, format: draft.format, template_id: draft.templateId, length_seconds: draft.lengthSeconds },
+      {
+        brief: draft.brief, channels: ticked.length ? ticked : undefined, format: draft.format, template_id: draft.templateId,
+        length_seconds: draft.lengthSeconds, ...(given ? { given_variables: given } : {}),
+      },
       {
         onSuccess: (proposal) => {
           setDraft((d) => withProposal(d, proposal))

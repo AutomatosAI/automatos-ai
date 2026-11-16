@@ -71,12 +71,16 @@ def _supplied(raw: Any) -> Dict[str, Any]:
     return {name: (v.get("value") if isinstance(v, dict) else v) for name, v in raw.items()}
 
 
-def _variables(raw: Any, template: Optional[Mapping[str, Any]], warnings: List[str]) -> Dict[str, Dict[str, Any]]:
+def _variables(raw: Any, template: Optional[Mapping[str, Any]], warnings: List[str],
+               given: Optional[Mapping[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
+    """The template's fields with a value: the model's, and over them the ones the owner wrote
+    themselves (``given``), which always win and are never reported as missing."""
     schema = (template or {}).get("variables_schema") or {}
-    supplied = _supplied(raw)
-    unknown = sorted(name for name in supplied if name not in schema)
+    answered = _supplied(raw)
+    unknown = sorted(name for name in answered if name not in schema)
     if unknown:
         warnings.append(f"Variables the template does not have were dropped: {', '.join(unknown)}")
+    supplied = {**answered, **{name: value for name, value in (given or {}).items() if name in schema}}
     resolved = resolve_variables(schema, {n: v for n, v in supplied.items() if n in schema})
     warnings.extend(f"The value of {problem}; it was dropped" for problem in resolved.invalid)
     if resolved.missing:
@@ -162,7 +166,7 @@ def checked_proposal(raw: Mapping[str, Any], ctx: Any) -> Dict[str, Any]:
         template = _template(raw.get("template_id"), ctx, post_format, warnings)
         if post_format is None and template is not None:
             post_format = VIDEO_FORMAT if template.get("format") == SOCIAL_VIDEO else "image"
-        variables = _variables(raw.get("variables"), template, warnings)
+        variables = _variables(raw.get("variables"), template, warnings, getattr(ctx, "given_fields", None))
     proposal = {
         "title": _title(raw.get("title"), ctx, warnings),
         "copy": _copy(raw.get("copy"), ctx, warnings),
