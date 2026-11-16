@@ -45,7 +45,9 @@ from api.document_upload_steps import checked_upload, new_upload, replace_upload
 from services.document_downloads import media_type_for, stored_object_link, workspace_file
 # PRD-274 §5.2: a product's server key uploads, lists, gets, searches and deletes its own
 # workspace's documents, and reaches only those no team or person limits.
-from services.document_key_access import UPLOAD_CLASH, clashes_with_unreachable, reachable_by, reachable_hits
+from services.document_key_access import (
+    KEY_TEAM_ACCESS_REFUSED, UPLOAD_CLASH, clashes_with_unreachable, reachable_by, reachable_hits, refuses_teams,
+)
 
 def parse_database_url(url: str) -> dict:
     """Parse DATABASE_URL into psycopg2 connection dict format"""
@@ -167,11 +169,18 @@ async def handle_request(
 
     PRD-274 §5.2: a member with ``documents:create``, or a product's server key listing
     ``documents:write``, which uploads into its own workspace. The key is named as the uploader
-    (``sdk:<key id>``). Its upload never answers with a document it may not read, and is refused
-    (409) where it would write over one: one of the same name, or a spreadsheet's workspace copy
+    (``sdk:<key id>``). Its upload may not name teams (400: a key writes only documents it can read
+    back), never answers with a document it may not read, and is refused (409) where it would
+    write over one: one of the same name, or a spreadsheet's workspace copy
     (services/document_key_access).
     """
     try:
+        # PRD-124: Parse team_access (comma-separated → list, empty = all teams)
+        from core.team_access import normalize_teams
+        team_access_list = normalize_teams(team_access.split(",")) if team_access else []
+        if refuses_teams(ctx, team_access_list):
+            raise HTTPException(status_code=400, detail=KEY_TEAM_ACCESS_REFUSED)
+
         content, file_extension = await checked_upload(file, ALLOWED_MIME_TYPES, MAX_UPLOAD_BYTES)
 
         # Generate file hash
@@ -193,10 +202,6 @@ async def handle_request(
         if clashes_with_unreachable(db, ctx, file.filename, file_type):
             raise HTTPException(status_code=409, detail=UPLOAD_CLASH)
         upload = stored_upload(file.filename, content, file_extension, file_type, content_hash)
-
-        # PRD-124: Parse team_access (comma-separated → list, empty = all teams)
-        from core.team_access import normalize_teams
-        team_access_list = normalize_teams(team_access.split(",")) if team_access else []
 
         # F087: a file uploaded again under the same name replaces that document —
         # same id, the new text, the old source kept in its history.

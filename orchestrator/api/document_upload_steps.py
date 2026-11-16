@@ -204,8 +204,8 @@ async def _ingest_upload(db: Any, ctx: Any, document: Document, upload: StoredUp
         # Refresh to get updated chunk_count
         db.refresh(document)
         return None
-    except Exception as e:
-        logger.exception(f"Error processing document {document.id}")
+    except Exception as e:  # noqa: BLE001 -- moved as it was: the document is marked failed, and the answer says so
+        logger.error(f"Error processing document {document.id}: {e}")
         document.status = "failed"
         db.commit()
         return str(e)[:PROCESSING_ERROR_CHARS]

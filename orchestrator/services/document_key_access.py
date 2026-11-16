@@ -13,7 +13,8 @@ limits, the rule its memory reads follow (``api/widget_memory.py``):
 A document a key can't reach answers as a missing one (404), so the key learns nothing of it.
 A key's search maps a hit only by the hit's own document id, and only to a document it reaches:
 a hit with no id is dropped, never resolved by its file name, which may also be the name of a
-document the key can't read. A key's upload never answers with such a document (an identical
+document the key can't read. A key's upload may not be limited to teams (400): a key writes only
+documents it can read back. It never answers with a document the key can't reach (an identical
 file), and is refused (409) where it would write over one: a document of the same name (which
 F087 would make the upload's earlier version), or the workspace copy of a spreadsheet
 (``services/spreadsheet_workspace.py``). A member reaches the workspace's documents exactly as
@@ -29,7 +30,7 @@ because its readers find it by rebuilding the path from the document's file name
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
 from sqlalchemy import and_, func, not_, or_
 
@@ -40,6 +41,8 @@ from core.models import Document
 NO_UPLOADER = "system"
 UPLOAD_CLASH = ("A document this key can't read already has this name, or owns the workspace copy "
                 "this spreadsheet would write. Upload it under another name.")
+KEY_TEAM_ACCESS_REFUSED = ("A server key writes only documents it can read back, so its upload can't be limited "
+                           "to teams. Leave team_access out.")
 
 
 def _reachable() -> Any:
@@ -84,6 +87,13 @@ def reachable_hits(db: Any, ctx: Any, hits: List[Dict[str, Any]]) -> List[Dict[s
     return [hit for hit, document_id in zip(hits, named) if document_id in allowed]
 
 
+def refuses_teams(ctx: Any, team_access: Sequence[str]) -> bool:
+    """Whether the caller's upload asks for teams it may not: a server key's asks for none, since a
+    document a team limits is one the key could never list, get, delete or upload again; a
+    member's may name any, as before."""
+    return is_server_key(ctx) and bool(team_access)
+
+
 def clashes_with_unreachable(db: Any, ctx: Any, filename: str, file_type: str) -> bool:
     """Whether a server key's upload of ``filename`` would write where a document it can't read
     already is: a document of the same name, or, for a spreadsheet, a spreadsheet whose workspace
@@ -115,6 +125,6 @@ def uploaded_by(ctx: Any) -> str:
 
 
 __all__ = [
-    "NO_UPLOADER", "UPLOAD_CLASH", "clashes_with_unreachable", "reachable_by", "reachable_hits", "reachable_ids",
-    "uploaded_by",
+    "KEY_TEAM_ACCESS_REFUSED", "NO_UPLOADER", "UPLOAD_CLASH", "clashes_with_unreachable", "reachable_by",
+    "reachable_hits", "reachable_ids", "refuses_teams", "uploaded_by",
 ]
