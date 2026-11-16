@@ -24,7 +24,7 @@ import { useSocialChannels } from '@/hooks/use-socials-composer'
 import type { EventActionDeps } from '@/components/command-center/calendar-actions'
 import { buildMonthGrid, buildWeek, type CalEvent } from '@/components/command-center/calendar-model'
 import { MonthGrid } from '@/components/command-center/calendar-month-grid'
-import { useSocialReschedule, type SocialReschedule } from '@/components/command-center/calendar-social-reschedule'
+import { RESCHEDULED_MESSAGE, useSocialReschedule, type SocialReschedule } from '@/components/command-center/calendar-social-reschedule'
 import { shiftedAnchor, titleFor, windowSpanFor } from '@/components/command-center/calendar-view'
 import { WeekGrid, eventBox } from '@/components/command-center/calendar-week-grid'
 import { SocialsPostList } from '../socials-post-list'
@@ -37,7 +37,7 @@ import { SocialsPlannedChip } from './socials-planned-chip'
 import { usePlannedSlots } from './use-planned-slots'
 import type { GoTo, SocialsRoute } from './studio-route'
 
-export const MOVED_MESSAGE = 'Moved to the new slot.'
+export const MOVED_MESSAGE = RESCHEDULED_MESSAGE
 export const DRAG_HINT = 'Drag a post to another day to move it. Click a post to open it.'
 const LIST_TITLE = 'All posts'
 

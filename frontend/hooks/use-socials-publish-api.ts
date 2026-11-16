@@ -5,13 +5,12 @@
  *
  * Every call goes through apiClient with the backend's verb (POST). A schedule
  * moves the post's slot and keeps its approval; the calendar and the post view
- * both refetch after it. A 409 says the post changed since it was loaded and
+ * both refetch after it (`useInvalidateSocials`, as after every post write). A 409 says the post changed since it was loaded and
  * refetches (as approve does); anything else shows the server's message.
  */
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
-import { activityQueryKeys } from '@/hooks/use-activity-api'
 import { useInvalidateSocials, usePostWriteErrorHandler } from '@/hooks/use-socials-api'
 import { apiClient, type SocialPost } from '@/lib/api-client'
 
@@ -23,17 +22,8 @@ export interface ScheduleSocialPostInput {
   timezone: string
 }
 
-/** After a schedule write: the posts and the calendar both show the new slot. */
-function useAfterScheduleWrite() {
-  const invalidateSocials = useInvalidateSocials()
-  const queryClient = useQueryClient()
-  return async () => {
-    await Promise.all([invalidateSocials(), queryClient.invalidateQueries({ queryKey: activityQueryKeys.all })])
-  }
-}
-
 export function useScheduleSocialPost() {
-  const after = useAfterScheduleWrite()
+  const after = useInvalidateSocials()
   const onError = usePostWriteErrorHandler('The post could not be scheduled')
   return useMutation<SocialPost, Error, ScheduleSocialPostInput>({
     mutationFn: ({ postId, scheduledFor, timezone }) => apiClient.scheduleSocialPost(postId, scheduledFor, timezone),
@@ -50,7 +40,7 @@ export function useScheduleSocialPost() {
 
 /** Publish an approved, scheduled or missed post now (US-301): 202, the post in publishing. */
 export function usePublishSocialPostNow() {
-  const after = useAfterScheduleWrite()
+  const after = useInvalidateSocials()
   const onError = usePostWriteErrorHandler('The post could not be published')
   return useMutation<SocialPost, Error, { postId: string }>({
     mutationFn: ({ postId }) => apiClient.publishSocialPostNow(postId),
@@ -64,7 +54,7 @@ export function usePublishSocialPostNow() {
 
 /** Publish again the targets that failed (US-301); a published target never runs again. */
 export function useRetrySocialPost() {
-  const after = useAfterScheduleWrite()
+  const after = useInvalidateSocials()
   const onError = usePostWriteErrorHandler('The retry could not start')
   return useMutation<SocialPost, Error, { postId: string }>({
     mutationFn: ({ postId }) => apiClient.retrySocialPost(postId),
@@ -77,7 +67,7 @@ export function useRetrySocialPost() {
 }
 
 export function useUnscheduleSocialPost() {
-  const after = useAfterScheduleWrite()
+  const after = useInvalidateSocials()
   const onError = usePostWriteErrorHandler('The post could not be unscheduled')
   return useMutation<SocialPost, Error, { postId: string }>({
     mutationFn: ({ postId }) => apiClient.unscheduleSocialPost(postId),

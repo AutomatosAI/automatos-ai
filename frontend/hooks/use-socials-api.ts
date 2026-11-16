@@ -39,6 +39,7 @@ import type {
   SocialSeriesShownPost,
 } from '@/lib/api-client'
 import { useWorkspace } from '@/components/workspace-provider'
+import { activityQueryKeys } from '@/hooks/use-activity-api'
 import { anyInFlight } from '@/components/deliverables/socials/socials-status'
 import { unsourcedClaimsOf } from '@/components/deliverables/socials/socials-review'
 
@@ -84,10 +85,16 @@ function httpStatusOf(error: unknown): number | undefined {
   return typeof status === 'number' ? status : undefined
 }
 
+/** After a post changed: the Socials queries and the Command Center's (its calendar shows the
+ * workspace's coming posts) are both read again, so a post moved, approved or deleted here
+ * never stays at its old slot there. It was done for a schedule write only. */
 export function useInvalidateSocials() {
   const workspaceId = useWorkspaceId()
   const queryClient = useQueryClient()
-  return () => queryClient.invalidateQueries({ queryKey: socialsQueryKeys.all(workspaceId) })
+  return () => Promise.all([
+    queryClient.invalidateQueries({ queryKey: socialsQueryKeys.all(workspaceId) }),
+    queryClient.invalidateQueries({ queryKey: activityQueryKeys.all }),
+  ])
 }
 
 /** onError for a post write: a 409 says the post changed and refetches the

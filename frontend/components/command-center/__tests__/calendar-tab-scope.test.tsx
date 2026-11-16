@@ -25,6 +25,7 @@ vi.mock('@/hooks/use-activity-api', () => ({
   }),
   useSchedulerHealth: () => ({ data: { healthy: null, last_fired_at: null } }),
 }))
+vi.mock('@/hooks/use-socials-api', () => ({ useInvalidateSocials: () => vi.fn(async () => []) }))
 vi.mock('@/hooks/use-heartbeats-api', () => ({
   useToggleHeartbeat: () => ({ mutate: vi.fn() }),
 }))
