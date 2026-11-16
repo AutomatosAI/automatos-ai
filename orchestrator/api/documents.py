@@ -35,13 +35,17 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.auth.scopes import DOCUMENTS_READ, DOCUMENTS_WRITE
-from core.auth.server_key_gate import request_context_or_server_key, require_workspace_permission_or_server_key
-from starlette.concurrency import run_in_threadpool
+from core.auth.server_key_gate import (
+    is_server_key, request_context_or_server_key, require_workspace_permission_or_server_key,
+)
+from api.document_search import (
+    SEARCH_MAX_LIMIT, aggregated_results, grouped_hits, in_team_scope, search_ask, track_search,
+)
 from api.document_upload_steps import checked_upload, new_upload, replace_upload, stored_upload, upload_tags
 from services.document_downloads import media_type_for, stored_object_link, workspace_file
 # PRD-274 §5.2: a product's server key uploads, lists, gets, searches and deletes its own
 # workspace's documents, and reaches only those no team or person limits.
-from services.document_key_access import reachable_by, reachable_or_none, search_answer_for
+from services.document_key_access import UPLOAD_CLASH, clashes_with_unreachable, reachable_by, reachable_hits
 
 def parse_database_url(url: str) -> dict:
     """Parse DATABASE_URL into psycopg2 connection dict format"""
@@ -163,8 +167,9 @@ async def handle_request(
 
     PRD-274 §5.2: a member with ``documents:create``, or a product's server key listing
     ``documents:write``, which uploads into its own workspace. The key is named as the uploader
-    (``sdk:<key id>``), and its upload neither answers with nor replaces a document it may not
-    read (services/document_key_access).
+    (``sdk:<key id>``). Its upload never answers with a document it may not read, and is refused
+    (409) where it would write over one: one of the same name, or a spreadsheet's workspace copy
+    (services/document_key_access).
     """
     try:
         content, file_extension = await checked_upload(file, ALLOWED_MIME_TYPES, MAX_UPLOAD_BYTES)
@@ -183,7 +188,11 @@ async def handle_request(
                 message="Document already exists"
             )
 
-        upload = stored_upload(file.filename, content, file_extension, content_hash)
+        # The file type category, from the extension
+        file_type = UPLOAD_FILE_TYPES.get(file_extension, "unknown")
+        if clashes_with_unreachable(db, ctx, file.filename, file_type):
+            raise HTTPException(status_code=409, detail=UPLOAD_CLASH)
+        upload = stored_upload(file.filename, content, file_extension, file_type, content_hash)
 
         # PRD-124: Parse team_access (comma-separated → list, empty = all teams)
         from core.team_access import normalize_teams
@@ -193,7 +202,7 @@ async def handle_request(
         # same id, the new text, the old source kept in its history.
         from services.document_versions import replaceable_document
 
-        replaced = reachable_or_none(db, ctx, replaceable_document(db, ctx.workspace_id, file.filename, team_access_list))
+        replaced = replaceable_document(db, ctx.workspace_id, file.filename, team_access_list)
         if replaced is not None:
             return await replace_upload(db, ctx, replaced, upload, upload_tags(tags), description)
         return await new_upload(db, ctx, upload, upload_tags(tags), description, team_access_list)
@@ -1001,13 +1010,6 @@ def get_document_content_by_id(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-SEARCH_DEFAULT_LIMIT = 10           # Results returned when the caller names no limit
-SEARCH_MAX_LIMIT = 50               # Hard ceiling, mirrored by the query-param validator
-PREVIEW_CHUNK_LIMIT = 6  # Max number of chunks included in preview window
-PREVIEW_CONTEXT_RADIUS = 2  # Number of chunks to include before the best match
-PREVIEW_CHAR_LIMIT = 2000  # Safety limit for preview text length
-
-
 class SemanticSearchRequest(BaseModel):
     """JSON body for POST /api/documents/search.
 
@@ -1057,280 +1059,8 @@ async def _retrieval_hits(query: str, max_chunks: int, workspace_id: str, team: 
     return hits
 
 
-# The search behind POST /search. ``search_documents`` (below) is the route: it takes the caller
-# through the member-or-server-key gate and calls this with every parameter given, so the
-# FastAPI markers in these defaults are never read here.
-async def semantic_search(
-    body: Optional[SemanticSearchRequest] = Body(None),
-    query: Optional[str] = Query(None, description="Search query (may also be sent in the JSON body)"),
-    limit: Optional[int] = Query(None, ge=1, le=50, description="Maximum number of results"),
-    min_similarity: Optional[float] = Query(None, ge=0.0, le=1.0, description="Minimum similarity score"),
-    document_ids: Optional[List[int]] = Query(None, description="Optional filter by document IDs"),
-    team: Optional[str] = Query(None, description="Optional team scope (PRD-157 S1); normalized server-side"),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    """
-    Semantic search across document chunks using vector similarity.
-
-    Accepts its parameters in the JSON body or the query string. Embeddings are
-    read from whichever document-vector backend the edition selects — S3 Vectors
-    on SaaS, pgvector over ``document_chunks.embedding`` locally.
-    """
-    try:
-        # Body-or-query, body first. A missing query is a 422 either way, but
-        # now it says so instead of rejecting a well-formed JSON POST.
-        if body is not None:
-            query = body.query if body.query is not None else query
-            limit = body.limit if body.limit is not None else limit
-            min_similarity = body.min_similarity if body.min_similarity is not None else min_similarity
-            document_ids = body.document_ids if body.document_ids is not None else document_ids
-            team = body.team if body.team is not None else team
-
-        if not query or not str(query).strip():
-            raise HTTPException(
-                status_code=422,
-                detail="'query' is required — send it in the JSON body or as a query parameter.",
-            )
-        query = str(query).strip()
-        limit = SEARCH_DEFAULT_LIMIT if limit is None else max(1, min(int(limit), SEARCH_MAX_LIMIT))
-        min_similarity = None if min_similarity is None else float(min_similarity)
-
-        import time
-        start_time = time.time()
-        
-        # F088 (night 3): this route ran its own vector-only search with a 0.70
-        # cosine floor, so exact words stored in three documents each ("The Salt
-        # Loft", "moreish", "Declan Frost") came back as 0 results. It now runs the
-        # ONE retrieval funnel the chat and the agents use — hybrid (vector +
-        # keyword) with reranking, on the edition's backend — and a similarity
-        # floor applies only when the caller asks for one.
-        hits = await _retrieval_hits(query, limit * 3, str(ctx.workspace_id), team, floor=min_similarity)
-        logger.info(f"document search returned {len(hits)} chunks")
-
-        # Map S3 results back to document metadata from PostgreSQL
-        # S3 stores: key, score, content (chunk_text), file_name, chunk_index, metadata
-        # We need: document_id, filename, file_type, file_size, upload_date from DB
-        grouped_results: Dict[int, Dict[str, Any]] = {}
-        doc_order: List[int] = []
-
-        for hit in hits:
-            similarity = hit.get("score", 0.0)
-            file_name = hit.get("file_name", "")
-            chunk_text = hit.get("content", "")
-            chunk_index = hit.get("chunk_index", 0)
-
-            # Prefer the hit's own document_id (the pgvector backend carries it,
-            # and it survives two documents sharing a filename); fall back to the
-            # filename lookup the S3 payload allows.
-            hit_doc_id = (hit.get("metadata") or {}).get("document_id")
-            doc_row = None
-            if hit_doc_id is not None:
-                try:
-                    doc_row = db.execute(text("""
-                        SELECT id, filename, file_type, file_size, upload_date
-                        FROM documents
-                        WHERE workspace_id = :workspace_id AND id = :document_id
-                        LIMIT 1
-                    """), {"workspace_id": ctx.workspace_id, "document_id": int(hit_doc_id)}).fetchone()
-                except (TypeError, ValueError):
-                    doc_row = None
-
-            if not doc_row and file_name:
-                doc_row = db.execute(text("""
-                    SELECT id, filename, file_type, file_size, upload_date
-                    FROM documents
-                    WHERE workspace_id = :workspace_id AND filename = :filename
-                    LIMIT 1
-                """), {"workspace_id": ctx.workspace_id, "filename": file_name}).fetchone()
-
-            if not doc_row:
-                continue
-
-            doc_id = doc_row.id
-
-            # Optional: filter by document_ids if provided
-            if document_ids and doc_id not in document_ids:
-                continue
-
-            if doc_id not in grouped_results:
-                grouped_results[doc_id] = {
-                    "document_id": doc_id,
-                    "best_similarity": similarity,
-                    "best_excerpt": chunk_text,
-                    "best_chunk_index": chunk_index,
-                    "metadata": {},
-                    "source": {
-                        "filename": doc_row.filename,
-                        "file_type": doc_row.file_type,
-                        "file_size": doc_row.file_size,
-                        "upload_date": doc_row.upload_date.isoformat() if doc_row.upload_date else None,
-                    },
-                }
-                doc_order.append(doc_id)
-            else:
-                existing = grouped_results[doc_id]
-                if similarity > existing["best_similarity"]:
-                    existing["best_similarity"] = similarity
-                    existing["best_excerpt"] = chunk_text
-                    existing["best_chunk_index"] = chunk_index
-
-        # PRD-157 S1: route surfaced documents through the centralized fail-closed
-        # scope choke point. Workspace is already enforced per-hit above; this adds
-        # team scoping (no-op when no team is supplied, preserving prior behaviour).
-        from modules.rag.retrieval_filters import build_retrieval_filters, allowed_document_ids
-        _scope = build_retrieval_filters(workspace_id=ctx.workspace_id, team=team)
-        if _scope.has_team_restriction and doc_order:
-            _allowed = allowed_document_ids(db, doc_order, _scope)
-            doc_order = [d for d in doc_order if str(d) in _allowed]
-            grouped_results = {d: v for d, v in grouped_results.items() if str(d) in _allowed}
-
-        # Fetch limited previews + stats for surfaced docs
-        # Collect doc_ids and calculate preview ranges upfront
-        doc_ids = doc_order[:limit]
-        if not doc_ids:
-            aggregated_results = []
-        else:
-            # Calculate preview ranges for each document
-            doc_preview_ranges: Dict[int, Dict[str, int]] = {}
-            for doc_id in doc_ids:
-                entry = grouped_results[doc_id]
-                best_chunk_index = entry.get("best_chunk_index") or 0
-                preview_start_index = max(best_chunk_index - PREVIEW_CONTEXT_RADIUS, 0)
-                preview_end_index = preview_start_index + PREVIEW_CHUNK_LIMIT - 1
-                doc_preview_ranges[doc_id] = {
-                    "start_index": preview_start_index,
-                    "end_index": preview_end_index,
-                }
-
-            # Batch query: Get chunk counts for all documents at once
-            chunk_count_query = text(
-                """
-                SELECT document_id, COUNT(*) AS chunk_count
-                FROM document_chunks
-                WHERE document_id = ANY(:document_ids)
-                GROUP BY document_id
-                """
-            )
-            chunk_count_rows = db.execute(chunk_count_query, {"document_ids": doc_ids}).fetchall()
-            chunk_counts_map: Dict[int, int] = {
-                int(row.document_id): int(row.chunk_count) for row in chunk_count_rows
-            }
-
-            # Batch query: Get previews for all documents using UNION ALL
-            # Build UNION ALL query with one SELECT per document
-            preview_queries = []
-            preview_params: Dict[str, Any] = {}
-            for idx, doc_id in enumerate(doc_ids):
-                ranges = doc_preview_ranges[doc_id]
-                start_param = f"start_{idx}"
-                end_param = f"end_{idx}"
-                doc_param = f"doc_{idx}"
-                preview_params[start_param] = ranges["start_index"]
-                preview_params[end_param] = ranges["end_index"]
-                preview_params[doc_param] = doc_id
-                
-                preview_queries.append(
-                    f"""
-                    SELECT 
-                        :{doc_param} AS document_id,
-                        string_agg(content, '\n\n' ORDER BY chunk_index) AS preview_content
-                    FROM document_chunks
-                    WHERE document_id = :{doc_param}
-                      AND chunk_index BETWEEN :{start_param} AND :{end_param}
-                    """
-                )
-
-            if preview_queries:
-                preview_query = text(" UNION ALL ".join(preview_queries))
-                preview_rows = db.execute(preview_query, preview_params).fetchall()
-                previews_map: Dict[int, str] = {
-                    int(row.document_id): (row.preview_content if row.preview_content else "")
-                    for row in preview_rows
-                }
-            else:
-                previews_map = {}
-
-            # Build aggregated results using batched data
-            aggregated_results: List[Dict[str, Any]] = []
-            for doc_id in doc_ids:
-                entry = grouped_results[doc_id]
-                chunk_count = chunk_counts_map.get(doc_id, 0)
-                
-                ranges = doc_preview_ranges[doc_id]
-                preview_start_index = ranges["start_index"]
-                preview_end_index = ranges["end_index"]
-                
-                preview_content = previews_map.get(doc_id, "")
-                preview_truncated = False
-                if preview_content and len(preview_content) > PREVIEW_CHAR_LIMIT:
-                    preview_content = preview_content[:PREVIEW_CHAR_LIMIT] + "…"
-                    preview_truncated = True
-                if preview_end_index < (chunk_count - 1):
-                    preview_truncated = True
-
-                aggregated_results.append(
-                    {
-                        "document_id": doc_id,
-                        "excerpt": entry["best_excerpt"],
-                        "similarity": entry["best_similarity"],
-                        "chunk_index": entry["best_chunk_index"],
-                        "chunk_count": chunk_count,
-                        "metadata": entry["metadata"],
-                        "source": entry["source"],
-                        "preview": preview_content,
-                        "preview_truncated": preview_truncated,
-                        "full_content_available": chunk_count > 0,
-                        "preview_chunk_start": preview_start_index,
-                        "preview_chunk_end": min(preview_end_index, max(chunk_count - 1, 0)),
-                    }
-                )
- 
-        execution_time_ms = int((time.time() - start_time) * 1000)
-
-        logger.info(f"Search completed: {len(aggregated_results)} documents in {execution_time_ms}ms")
-        
-        # Track search event for analytics
-        try:
-            tracking_query = text("""
-                INSERT INTO document_usage (event_type, query, results_count, execution_time_ms, metadata, timestamp)
-                VALUES ('document_searched', :query, :results_count, :execution_time_ms, :metadata, :timestamp)
-            """)
-            db.execute(
-                tracking_query,
-                {
-                    "query": query,
-                    "results_count": len(aggregated_results),
-                    "execution_time_ms": execution_time_ms,
-                    # PRD-156 S5: attribute each usage row to its workspace (the
-                    # table has no workspace_id column; metadata JSONB carries it so
-                    # analytics can filter by metadata->>'workspace_id' without a migration).
-                    "metadata": json.dumps({"min_similarity": min_similarity, "workspace_id": str(ctx.workspace_id)}),
-                    "timestamp": datetime.now()
-                }
-            )
-            db.commit()
-            logger.info(f"✅ Search tracked: '{query[:50]}' ({len(aggregated_results)} results)")
-        except Exception as track_error:
-            logger.warning(f"Could not track search event: {track_error}")
-            db.rollback()
-        
-        return {
-            "query": query,
-            "total_results": len(aggregated_results),
-            "execution_time_ms": execution_time_ms,
-            "results": aggregated_results,
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error performing semantic search: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
 @router.post("/search")
-async def search_documents(
+async def semantic_search(
     body: Optional[SemanticSearchRequest] = Body(None),
     query: Optional[str] = Query(None, description="Search query (may also be sent in the JSON body)"),
     limit: Optional[int] = Query(None, ge=1, le=SEARCH_MAX_LIMIT, description="Maximum number of results"),
@@ -1338,19 +1068,56 @@ async def search_documents(
     document_ids: Optional[List[int]] = Query(None, description="Optional filter by document IDs"),
     team: Optional[str] = Query(None, description="Optional team scope (PRD-157 S1); normalized server-side"),
     ctx: RequestContext = Depends(require_workspace_permission_or_server_key("documents:read", DOCUMENTS_READ)),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db)
 ):
-    """Semantic search across the caller's documents (:func:`semantic_search`).
-
-    A member with ``documents:read``, as before; or a product's server key listing
-    ``documents:read``, which searches its own workspace and is answered with only the documents
-    it may read (PRD-274 §5.2, services/document_key_access).
     """
-    answer = await semantic_search(
-        body=body, query=query, limit=limit, min_similarity=min_similarity,
-        document_ids=document_ids, team=team, ctx=ctx, db=db,
-    )
-    return await run_in_threadpool(search_answer_for, db, ctx, answer)
+    Semantic search across document chunks using vector similarity.
+
+    Accepts its parameters in the JSON body or the query string. Embeddings are
+    read from whichever document-vector backend the edition selects — S3 Vectors
+    on SaaS, pgvector over ``document_chunks.embedding`` locally. What is done
+    with the hits, step by step, is in api/document_search.
+
+    PRD-274 §5.2: a member with ``documents:read``, as before; or a product's server key
+    listing ``documents:read``, which searches its own workspace. A key's hit is mapped only
+    by its own document id, and only to a document the key may read; a hit with no id is
+    dropped, never resolved by its file name (services/document_key_access).
+    """
+    try:
+        asked = search_ask(body, query, limit, min_similarity, document_ids, team)
+
+        import time
+        start_time = time.time()
+
+        # F088 (night 3): this route ran its own vector-only search with a 0.70
+        # cosine floor, so exact words stored in three documents each ("The Salt
+        # Loft", "moreish", "Declan Frost") came back as 0 results. It now runs the
+        # ONE retrieval funnel the chat and the agents use — hybrid (vector +
+        # keyword) with reranking, on the edition's backend — and a similarity
+        # floor applies only when the caller asks for one.
+        hits = await _retrieval_hits(asked.query, asked.limit * 3, str(ctx.workspace_id), asked.team,
+                                     floor=asked.min_similarity)
+        logger.info(f"document search returned {len(hits)} chunks")
+
+        grouped, order = grouped_hits(db, ctx.workspace_id, reachable_hits(db, ctx, hits), asked.document_ids,
+                                      by_file_name=not is_server_key(ctx))
+        results = aggregated_results(db, grouped, in_team_scope(db, ctx.workspace_id, asked.team, order)[:asked.limit])
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        logger.info(f"Search completed: {len(results)} documents in {execution_time_ms}ms")
+
+        track_search(db, asked.query, len(results), execution_time_ms, asked.min_similarity, ctx.workspace_id)
+        return {
+            "query": asked.query,
+            "total_results": len(results),
+            "execution_time_ms": execution_time_ms,
+            "results": results,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error performing semantic search")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 def _get_queue_status_step(progress_pct):

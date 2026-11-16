@@ -12,7 +12,9 @@ from there when a step runs.
   They persist to ``documents.tags`` (PostgreSQL ``text[]``). The Academy corpus sync tags each
   document ``academy,<vendor>,<track>,<domain>`` so the tutor's knowledge graph can map chunks
   back to a course.
-* **Saving:** the bytes go to ``UPLOAD_DIR`` under a random name, never the uploaded one.
+* **Saving:** the bytes go to ``UPLOAD_DIR`` under a random name, never the uploaded one. The
+  route has already refused a server key's upload that would write over a document the key
+  can't read (``services.document_key_access.clashes_with_unreachable``).
 * **Replacing (F087)** a document of the same name, under its id, the old source kept in its
   history; else **a new document**, ingested now. Either names its uploader through
   ``services.document_key_access.uploaded_by``: a member's sign-in id, a server key's
@@ -99,7 +101,8 @@ def upload_tags(tags: Optional[str]) -> List[str]:
     return tag_list
 
 
-def stored_upload(filename: str, content: bytes, file_extension: str, content_hash: str) -> StoredUpload:
+def stored_upload(filename: str, content: bytes, file_extension: str, file_type: str,
+                  content_hash: str) -> StoredUpload:
     """Save the checked bytes in ``UPLOAD_DIR`` under a random name (never the original filename)."""
     from api import documents
 
@@ -107,8 +110,6 @@ def stored_upload(filename: str, content: bytes, file_extension: str, content_ha
     file_path = documents.UPLOAD_DIR / f"{uuid.uuid4().hex}{file_extension}"
     with open(file_path, "wb") as f:
         f.write(content)
-    # The file type category, from the extension
-    file_type = documents.UPLOAD_FILE_TYPES.get(file_extension, "unknown")
     return StoredUpload(filename, content, file_path, file_type, content_hash)
 
 
