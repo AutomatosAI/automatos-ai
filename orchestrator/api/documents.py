@@ -36,8 +36,14 @@ from urllib.parse import urlparse
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
+from core.auth.scopes import DOCUMENTS_READ, DOCUMENTS_WRITE
+from core.auth.server_key_gate import request_context_or_server_key, require_workspace_permission_or_server_key
+from starlette.concurrency import run_in_threadpool
 from api.document_upload_checks import checked_upload, upload_tags
 from services.document_downloads import media_type_for, stored_object_link, workspace_file
+# PRD-274 §5.2: a product's server key uploads, lists, gets, searches and deletes its own
+# workspace's documents, and reaches only those no team or person limits.
+from services.document_key_access import reachable_by, reachable_or_none, search_answer_for, uploaded_by
 
 def parse_database_url(url: str) -> dict:
     """Parse DATABASE_URL into psycopg2 connection dict format"""
@@ -156,9 +162,9 @@ class _StoredUpload:
     content_hash: str
 
 
-@router.post("/upload", response_model=DocumentUploadResponse, dependencies=[Depends(require_workspace_permission("documents:create"))])
+@router.post("/upload", response_model=DocumentUploadResponse)
 async def handle_request(
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(require_workspace_permission_or_server_key("documents:create", DOCUMENTS_WRITE)),
 
     file: UploadFile = File(...),
     description: Optional[str] = Form(None),
@@ -168,15 +174,22 @@ async def handle_request(
 ):
     """Upload and process a document: its checks (api/document_upload_checks), a duplicate
     answered with the document already stored, a same-name upload replacing that document
-    (F087), else a new document, ingested now."""
+    (F087), else a new document, ingested now.
+
+    PRD-274 §5.2: a member with ``documents:create``, or a product's server key listing
+    ``documents:write``, which uploads into its own workspace. The key is named as the uploader
+    (``sdk:<key id>``), and its upload neither answers with nor replaces a document it may not
+    read (services/document_key_access).
+    """
     try:
         content, file_extension = await checked_upload(file, ALLOWED_MIME_TYPES, MAX_UPLOAD_BYTES)
 
         # Generate file hash
         content_hash = hashlib.sha256(content).hexdigest()
 
-        # Check for duplicate
-        existing = db.query(Document).filter(Document.content_hash == content_hash, Document.workspace_id == ctx.workspace_id).first()
+        # Check for duplicate, among the documents the caller may read
+        existing = reachable_by(db.query(Document).filter(
+            Document.content_hash == content_hash, Document.workspace_id == ctx.workspace_id), ctx).first()
         if existing:
             return DocumentUploadResponse(
                 document_id=existing.id,
@@ -195,7 +208,7 @@ async def handle_request(
         # same id, the new text, the old source kept in its history.
         from services.document_versions import replaceable_document
 
-        replaced = replaceable_document(db, ctx.workspace_id, file.filename, team_access_list)
+        replaced = reachable_or_none(db, ctx, replaceable_document(db, ctx.workspace_id, file.filename, team_access_list))
         if replaced is not None:
             return await _replace_upload(db, ctx, replaced, upload, upload_tags(tags), description)
         return await _new_upload(db, ctx, upload, upload_tags(tags), description, team_access_list)
@@ -227,8 +240,7 @@ async def _replace_upload(db: Session, ctx: RequestContext, replaced: Document, 
 
     version = await replace_document(
         db, replaced, workspace_id=ctx.workspace_id, file_path=str(upload.file_path), file_size=len(upload.content),
-        content_hash=upload.content_hash, file_type=upload.file_type,
-        replaced_by=(ctx.user.clerk_user_id if ctx.user else None) or "system",
+        content_hash=upload.content_hash, file_type=upload.file_type, replaced_by=uploaded_by(ctx),
         tags=tag_list, description=description,
     )
     if upload.file_type in SPREADSHEET_TYPES:
@@ -267,7 +279,8 @@ async def _new_upload(db: Session, ctx: RequestContext, upload: _StoredUpload, t
         # PRD-168 S4: real actor. The principal lives on ctx.user —
         # RequestContext itself has no clerk_user_id; reading it there
         # raised AttributeError and 500'd every upload (2026-08-06).
-        created_by=(ctx.user.clerk_user_id if ctx.user else None) or "system",
+        # A server key is named as sdk:<key id> (PRD-274 §5.2).
+        created_by=uploaded_by(ctx),
     )
     db.add(document)
     db.commit()
@@ -552,7 +565,7 @@ def _list_documents_query(db, ctx, status, file_type, search, team, source_type,
 @router.get("", response_model=List[DocumentResponse])  # F327 (night 9b): the plain path answered 307, empty body
 @router.get("/", response_model=List[DocumentResponse])
 def list_documents(
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(request_context_or_server_key(DOCUMENTS_READ)),
 
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
@@ -575,9 +588,14 @@ def list_documents(
     content_hash: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """List documents with filtering and pagination"""
+    """List documents with filtering and pagination.
+
+    Any signed-in member, as before; a product's server key listing ``documents:read`` lists its
+    own workspace's, only those it may read (PRD-274 §5.2, services/document_key_access).
+    """
     try:
-        query = _list_documents_query(db, ctx, status, file_type, search, team, source_type, exclude_source_type, content_hash)
+        query = reachable_by(_list_documents_query(db, ctx, status, file_type, search, team, source_type,
+                                                   exclude_source_type, content_hash), ctx)
         documents = query.order_by(Document.upload_date.desc()).offset(skip).limit(limit).all()
         
         return [
@@ -713,12 +731,18 @@ def document_team_counts(
 @router.get("/{document_id:int}", response_model=DocumentResponse)
 def get_document(
     document_id: int,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(request_context_or_server_key(DOCUMENTS_READ)),
     db: Session = Depends(get_db)
 ):
-    """Get document by ID"""
+    """Get document by ID.
+
+    Any signed-in member, as before; a product's server key listing ``documents:read`` gets one
+    of its own workspace's it may read. Any other id answers 404, as a missing one does (PRD-274
+    §5.2, services/document_key_access).
+    """
     try:
-        document = db.query(Document).filter(Document.id == document_id, Document.workspace_id == ctx.workspace_id).first()
+        document = reachable_by(db.query(Document).filter(
+            Document.id == document_id, Document.workspace_id == ctx.workspace_id), ctx).first()
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
         
@@ -812,15 +836,22 @@ def get_delete_impact(
         logger.error(f"Error getting delete impact for document {document_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.delete("/{document_id}", dependencies=[Depends(require_workspace_permission("documents:delete"))])
+@router.delete("/{document_id}")
 def delete_document(
     document_id: int,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(require_workspace_permission_or_server_key("documents:delete", DOCUMENTS_WRITE)),
     db: Session = Depends(get_db)
 ):
-    """Delete document"""
+    """Delete document: its local file, its chunks, row and vectors (services.document_removal).
+
+    A member with ``documents:delete``, as before; or a product's server key listing
+    ``documents:write`` (delete rides on write, as erasing rides on ``memory:write``), which
+    deletes only a document of its own workspace it may read. Any other id answers 404 and
+    nothing is removed (PRD-274 §5.2, services/document_key_access).
+    """
     try:
-        document = db.query(Document).filter(Document.id == document_id, Document.workspace_id == ctx.workspace_id).first()
+        document = reachable_by(db.query(Document).filter(
+            Document.id == document_id, Document.workspace_id == ctx.workspace_id), ctx).first()
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
         
@@ -1149,7 +1180,9 @@ async def _retrieval_hits(query: str, max_chunks: int, workspace_id: str, team: 
     return hits
 
 
-@router.post("/search", dependencies=[Depends(require_workspace_permission("documents:read"))])
+# The search behind POST /search. ``search_documents`` (below) is the route: it takes the caller
+# through the member-or-server-key gate and calls this with every parameter given, so the
+# FastAPI markers in these defaults are never read here.
 async def semantic_search(
     body: Optional[SemanticSearchRequest] = Body(None),
     query: Optional[str] = Query(None, description="Search query (may also be sent in the JSON body)"),
@@ -1417,6 +1450,30 @@ async def semantic_search(
     except Exception as e:
         logger.error(f"Error performing semantic search: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/search")
+async def search_documents(
+    body: Optional[SemanticSearchRequest] = Body(None),
+    query: Optional[str] = Query(None, description="Search query (may also be sent in the JSON body)"),
+    limit: Optional[int] = Query(None, ge=1, le=SEARCH_MAX_LIMIT, description="Maximum number of results"),
+    min_similarity: Optional[float] = Query(None, ge=0.0, le=1.0, description="Minimum similarity score"),
+    document_ids: Optional[List[int]] = Query(None, description="Optional filter by document IDs"),
+    team: Optional[str] = Query(None, description="Optional team scope (PRD-157 S1); normalized server-side"),
+    ctx: RequestContext = Depends(require_workspace_permission_or_server_key("documents:read", DOCUMENTS_READ)),
+    db: Session = Depends(get_db),
+):
+    """Semantic search across the caller's documents (:func:`semantic_search`).
+
+    A member with ``documents:read``, as before; or a product's server key listing
+    ``documents:read``, which searches its own workspace and is answered with only the documents
+    it may read (PRD-274 §5.2, services/document_key_access).
+    """
+    answer = await semantic_search(
+        body=body, query=query, limit=limit, min_similarity=min_similarity,
+        document_ids=document_ids, team=team, ctx=ctx, db=db,
+    )
+    return await run_in_threadpool(search_answer_for, db, ctx, answer)
 
 
 def _get_queue_status_step(progress_pct):
