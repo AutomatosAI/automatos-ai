@@ -12,11 +12,12 @@ responsible for consent (§8-6) and records it here before anything is stored fo
 | ``GET /{end_user_id}/memories/search``: their facts and the workspace's | ``knowledge:read`` | ``memory:read`` |
 | ``GET /{end_user_id}/resume``: where they left off (§5.7) | ``knowledge:read`` | ``memory:read`` |
 | ``DELETE /{end_user_id}``: erase them (GDPR) | ``knowledge:delete`` | ``memory:write`` |
-| ``DELETE /{end_user_id}/memories/{id}``: one fact (a key: only one it wrote) | ``knowledge:delete`` | ``memory:write`` |
+| ``DELETE /{end_user_id}/memories/{id}``: one fact (a key: whoever wrote it) | ``knowledge:delete`` | ``memory:write`` |
 
 Reads leave out anything private to a person and, for a key, anything an audience limits (as
 ``GET /api/memory`` does). A store needs a consent record first. What a key stores names the key
-(``written_by``).
+(``written_by``). A key deletes any of the end user's facts whoever wrote it, except one an audience
+limits or one private to anyone but them, and none outside their namespace.
 
 The erase deletes everything the end user left: their namespace, their conversations (a server key's
 chat turns for them, ``chats.end_user_id``, with their messages) and those conversations' sessions,
@@ -42,7 +43,7 @@ from core.auth.server_key_gate import is_server_key, require_workspace_permissio
 from core.database.database import get_db
 from core.models.end_users import END_USER_ID_MAX
 from core.security.memory_audience import audience_of
-from modules.memory.injection_filter import WRITTEN_BY_KEY, visible_to_viewer, without_server_keys
+from modules.memory.injection_filter import WRITTEN_BY_KEY, deletable_by, visible_to_viewer, without_server_keys
 
 logger = logging.getLogger(__name__)
 
@@ -317,13 +318,20 @@ async def delete_end_user_memory(memory_id: str, end_user_id: str = END_USER_ID,
                                  ctx: RequestContext = Depends(require_workspace_permission_or_server_key(
                                      "knowledge:delete", MEMORY_WRITE)),
                                  db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Deletes one of the end user's facts. A member may delete any; a key only one it wrote
-    (``written_by``), so a product can never delete what the owner or another key stored."""
+    """Deletes one of the end user's facts, from their namespace only: never another end user's or the
+    workspace's. A member may delete any of them. A key may delete any of them whoever wrote it (the key
+    itself, another key, a member, or the platform distilling the end user's own conversation), so a
+    product can forget what it shows the person; never one an audience limits or one private to anyone
+    but the end user. An id that is no point id is no memory of anyone's: a 404, never sent to the store."""
+    from modules.memory.durable_store import _is_point_id
+
     await run_in_threadpool(_known, db, ctx, end_user_id)
+    if not _is_point_id(memory_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=NOT_THIS_KEYS)
     service = _service_or_503()
     namespace = _namespace(ctx, end_user_id)
     try:
-        if is_server_key(ctx) and not await _written_by_this_key(service, ctx, namespace, memory_id):
+        if is_server_key(ctx) and not await _forgettable_by_a_key(service, end_user_id, namespace, memory_id):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=NOT_THIS_KEYS)
         deleted = await service._durable.delete([memory_id], user_id=namespace, workspace_id=str(ctx.workspace_id))
     except HTTPException:
@@ -339,9 +347,11 @@ async def delete_end_user_memory(memory_id: str, end_user_id: str = END_USER_ID,
 NOT_THIS_KEYS = "No such memory of this end user that this caller may delete."
 
 
-async def _written_by_this_key(service: Any, ctx: RequestContext, namespace: str, memory_id: str) -> bool:
-    """Whether the end user's fact ``memory_id`` names this key as its writer. The fact is read by
-    its id, however many the end user has; a store that can't be read raises (the route's 503)."""
+async def _forgettable_by_a_key(service: Any, end_user_id: str, namespace: str, memory_id: str) -> bool:
+    """Whether a key may delete the end user's fact ``memory_id``: it is in their namespace, no audience
+    limits it, and it is private to no one but them. Who wrote it does not count. The fact is read by its
+    id, however many the end user has; a store that can't be read raises (the route's 503)."""
+    from core.security.end_user_turn import SUBJECT_PREFIX
+
     row = await service._durable.get_one(memory_id, namespace)
-    metadata = (row or {}).get("metadata") or {}
-    return row is not None and metadata.get(WRITTEN_BY_KEY) == ctx.user.id
+    return row is not None and not audience_of(row) and deletable_by(row, f"{SUBJECT_PREFIX}{end_user_id}")

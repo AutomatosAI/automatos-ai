@@ -229,27 +229,72 @@ def test_the_routes_carry_the_gate_and_take_only_a_clean_end_user_id():
     assert parameter["schema"]["pattern"] == "^[A-Za-z0-9._:@-]{1,128}$"
 
 
-def test_a_key_deletes_only_a_fact_it_wrote_and_a_member_any(new_session, workspace, store, monkeypatch):
+def _fact_id(name):
+    """A point id, as the store gives one (a UUID), named for the test."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"fact:{name}"))
+
+
+def _facts_by_namespace(workspace, key, other):
+    """Facts the fake store holds, by namespace and id: the end user's own, written every way one can be,
+    then one of another end user's and one of the workspace's."""
+    from modules.memory.unified_memory_service import MemoryNamespace
+
+    names = MemoryNamespace(workspace)
+    theirs = {
+        "by-this-key": {"end_user_id": "player-7", "written_by": key.user.id},
+        "by-another-key": {"end_user_id": "player-7", "written_by": other.user.id},
+        "by-a-member": {"end_user_id": "player-7"},
+        "distilled": {"end_user_id": "player-7", "type": "preference"},  # from their own conversation
+        "their-own-private": {"end_user_id": "player-7", "scope": "private", "owner": "end_user:player-7"},
+        "limited": {"end_user_id": "player-7", "audience": ["gm"]},
+        "a-members-private": {"end_user_id": "player-7", "scope": "private", "owner": "user:1"},
+    }
+    return {
+        names.end_user("player-7"): {_fact_id(name): metadata for name, metadata in theirs.items()},
+        names.end_user("player-8"): {_fact_id("another-end-users"): {"end_user_id": "player-8"}},
+        names.workspace(): {_fact_id("the-workspaces"): {}},
+    }
+
+
+def test_a_key_forgets_any_fact_of_the_end_user_whoever_wrote_it(new_session, workspace, store, monkeypatch):
     key, other = _key(new_session, workspace), _key(new_session, workspace)
     _call(new_session, eum.record_consent, eum.EndUserConsent(consent=True), end_user_id="player-7", ctx=key)
-    mine = {"id": "mine", "memory": "x", "metadata": {"written_by": key.user.id}}
-    theirs = {"id": "theirs", "memory": "y", "metadata": {"written_by": other.user.id}}
-    owners = {"id": "owners", "memory": "z", "metadata": {}}
+    facts = _facts_by_namespace(workspace, key, other)
 
-    async def one(memory_id, user_id):  # read by id: found however many facts the end user has
-        return next((dict(r) for r in (mine, theirs, owners) if r["id"] == memory_id), None)
+    async def one(memory_id, user_id):  # read by id, and only from the namespace asked, as the store reads
+        metadata = facts.get(user_id, {}).get(memory_id)
+        return None if metadata is None else {"id": memory_id, "memory": "x", "metadata": dict(metadata)}
 
     monkeypatch.setattr(store, "get_one", one)
-    done = _call(new_session, eum.delete_end_user_memory, memory_id="mine", end_user_id="player-7", ctx=key)
-    assert done["deleted"] is True
-    for memory_id in ("theirs", "owners", "missing"):
+    forgettable = [_fact_id(name) for name in
+                   ("by-this-key", "by-another-key", "by-a-member", "distilled", "their-own-private")]
+    for memory_id in forgettable:
+        done = _call(new_session, eum.delete_end_user_memory, memory_id=memory_id, end_user_id="player-7", ctx=key)
+        assert done == {"end_user_id": "player-7", "id": memory_id, "deleted": True}
+    refused_ids = [_fact_id(name) for name in
+                   ("limited", "a-members-private", "another-end-users", "the-workspaces", "missing")]
+    for memory_id in [*refused_ids, "not-a-point-id"]:
         with pytest.raises(HTTPException) as refused:
             _call(new_session, eum.delete_end_user_memory, memory_id=memory_id, end_user_id="player-7", ctx=key)
-        assert refused.value.status_code == 404
-    _call(new_session, eum.delete_end_user_memory, memory_id="owners", end_user_id="player-7", ctx=_member(workspace))
+        assert (refused.value.status_code, refused.value.detail) == (404, eum.NOT_THIS_KEYS)
     namespace = f"mem:{workspace}:end_user:player-7"
-    assert [c for c in store.calls if c[0] == "delete"] == [("delete", namespace, ("mine",)),
-                                                           ("delete", namespace, ("owners",))]
+    assert [c for c in store.calls if c[0] == "delete"] == [("delete", namespace, (m,)) for m in forgettable]
+
+
+def test_a_member_deletes_any_fact_of_the_end_user_without_reading_it_first(new_session, workspace, store):
+    key = _key(new_session, workspace)
+    _call(new_session, eum.record_consent, eum.EndUserConsent(consent=True), end_user_id="player-7", ctx=key)
+    member = _member(workspace)
+    for name in ("limited", "private"):
+        _call(new_session, eum.delete_end_user_memory, memory_id=_fact_id(name), end_user_id="player-7", ctx=member)
+    with pytest.raises(HTTPException) as refused:  # no memory of anyone's: a 404, never sent to the store
+        _call(new_session, eum.delete_end_user_memory, memory_id="not-a-point-id", end_user_id="player-7",
+              ctx=member)
+    assert (refused.value.status_code, refused.value.detail) == (404, eum.NOT_THIS_KEYS)
+    namespace = f"mem:{workspace}:end_user:player-7"
+    assert not [c for c in store.calls if c[0] == "get"]
+    assert [c for c in store.calls if c[0] == "delete"] == [("delete", namespace, (_fact_id("limited"),)),
+                                                           ("delete", namespace, (_fact_id("private"),))]
 
 
 def test_a_store_that_cant_be_read_is_a_503_for_a_key_not_a_404(new_session, workspace, store, monkeypatch):
@@ -261,7 +306,7 @@ def test_a_store_that_cant_be_read_is_a_503_for_a_key_not_a_404(new_session, wor
 
     monkeypatch.setattr(store, "get_one", down)
     with pytest.raises(HTTPException) as unavailable:
-        _call(new_session, eum.delete_end_user_memory, memory_id="mine", end_user_id="player-7", ctx=key)
+        _call(new_session, eum.delete_end_user_memory, memory_id=_fact_id("mine"), end_user_id="player-7", ctx=key)
     assert unavailable.value.status_code == 503
     assert not [c for c in store.calls if c[0] == "delete"]
 

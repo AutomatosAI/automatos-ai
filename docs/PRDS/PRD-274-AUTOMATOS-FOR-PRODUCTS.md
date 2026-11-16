@@ -293,7 +293,9 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
 ### Wave 3: end-user memory and the memory write API (built)
 
 - The end-user subject, asserted by the product's server key (§8-6), with its consent record, retention and
-  erasure (#1479). A key deletes one end-user memory, and only one it wrote (#1480).
+  erasure (#1479). A key deletes one end-user memory (#1480): at first only one it wrote; now any of the end
+  user's facts whoever wrote it, so a product can forget a fact the platform distilled from the person's own
+  conversation. Never one outside their namespace, one an audience limits, or one private to anyone but them.
 - End-user chat turns: `endUserId` on a server key's `POST /api/chat`. Their consent must be on record (409), and
   a person's turn names no end user (422) (#1486). Held by the turn's end user (`core/security/end_user_turn.py`):
   - their turn writes only to their namespace, and nothing to the workspace's L2, its mirror or the daily log
