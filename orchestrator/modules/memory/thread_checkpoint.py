@@ -26,13 +26,15 @@ I/O (`run_thread_checkpoint`) so they unit-test with plain dicts.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import re
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from core.security.end_user_turn import on_a_products_turn
 from modules.memory.write_contract import (
     SOURCE_TYPE_DISTILLED,
     build_memory_metadata,
@@ -40,6 +42,9 @@ from modules.memory.write_contract import (
 )
 
 logger = logging.getLogger(__name__)
+
+IDLE_SWEEP = "idle_sweep"  # the memory-jobs scheduler's trigger (services/memory_jobs.py)
+NOT_ON_A_PRODUCTS_TURN = "A product's turn keeps no checkpoint: nothing was saved. Tell them it was not saved."
 
 # Rendering caps for the checkpoint transcript — the distill model is the
 # cheap tier; a runaway thread must not become a runaway prompt.
@@ -309,6 +314,21 @@ async def _distill_checkpoint(
         return None
 
 
+def checkpoints_for_a_person_only(run: Callable[..., Awaitable[Dict[str, Any]]]) -> Callable[..., Awaitable[Dict[str, Any]]]:
+    """Wrap ``run_thread_checkpoint``: asked on a product's turn (PRD-274 §5.5: a server key's own, or an
+    end user's), it answers before its distil and its ``chats.summary`` write. The model names the chat, so
+    a product's turn could otherwise checkpoint a person's conversation, or another end user's. The idle
+    sweep is no turn: it checkpoints an end user's conversation as theirs (``services.memory_jobs``)."""
+    @functools.wraps(run)
+    async def wrapped(db: Any, *, trigger: str, **kwargs: Any) -> Dict[str, Any]:
+        if trigger != IDLE_SWEEP and on_a_products_turn():
+            return {"success": False, "error": NOT_ON_A_PRODUCTS_TURN}
+        return await run(db, trigger=trigger, **kwargs)
+
+    return wrapped
+
+
+@checkpoints_for_a_person_only  # PRD-274 §5.5: a product's turn checkpoints no conversation
 async def run_thread_checkpoint(
     db,
     *,

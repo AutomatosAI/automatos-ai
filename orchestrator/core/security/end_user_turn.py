@@ -37,8 +37,39 @@ What the turn **reads** is theirs and the workspace's, never another end user's:
 
 **Who sets it:** a server key's chat turn that names an end user whose consent is on record
 (``endUserId`` on ``POST /api/chat``, ``api.chat_server_key``), for the whole turn
-(``StreamingChatService.stream_response_with_agent``), the work it starts included. No other turn is an
-end user's, and every read and write of it goes where it always has.
+(``StreamingChatService.stream_response_with_agent``), the work it starts in-process included: its tool
+calls, and a Playbook run it starts, a task of the turn. A board ticket it files is dispatched later, outside
+the turn, as the board's own work. No other turn is an end user's, and every read and write of it goes where
+it always has.
+
+**A server key's own turn is nobody's, so it stores no memory** (PRD-274, made while building, 16 Nov 2026).
+F154 holds a widget turn the same way: an anonymous visitor's, it stores no memory. A key's turn that names
+no end user is no one's either. A tutor product sends a learner who has not consented that way, and a
+monitoring service's analyst agent runs one such turn per advisory it reads. What was said in it is no fact
+about the workspace, and written where the workspace reads, it would come back in another turn's answer:
+another learner's, or the next advisory's. So the turn writes no memory anywhere (``keys_own_turn``, a
+context variable set for the whole turn and the work it starts in-process, as above):
+
+- every write the end-user hold wraps answers as when it stores nothing (``kept_from_a_keys_own_turn``):
+  the durable store's ``add`` (the distilled facts, a tool's outcome, the context guard's flush, the L2
+  mirror, the daily log), L2's ``store_short_term``, the daily summary and the L1 session;
+- the turn runs no distil (``StreamingChatService._remember_the_turn``): no model call, no memory-stored frame;
+- a tool's outcome is not captured (``modules.memory.tool_outcome_capture``), and a tool that stores memory
+  says nothing was saved (F103), as it does for an end user whose erase has started.
+
+A key's turn that names an end user is theirs, as above, and a person's turn is unchanged.
+
+**A product's turn, a key's own or an end user's, follows §5.5 for what it reads and for the work done after
+it** (``on_a_products_turn``):
+
+- it reads the workspace's durable facts (and an end user's turn their own) and what the workspace can look
+  up, never the workspace's other conversations (the Context Router's L2, a transcript promoted into the
+  durable tier) or its daily logs (``modules.context.sections.memory``);
+- nothing it makes is ingested into the workspace's knowledge (``ingest_agent_output`` in
+  ``services.knowledge_flywheel``, held by ``shared_with_no_end_user``);
+- an on-demand checkpoint is not made on its turn (``modules.memory.thread_checkpoint``);
+- the idle thread-checkpoint sweep checkpoints an end user's conversation as their turn, into their own
+  namespace, and never a key's own conversation or a widget visitor's (F154) (``services.memory_jobs``).
 """
 from __future__ import annotations
 
@@ -59,6 +90,8 @@ SUBJECT_PREFIX = "end_user:"
 NAMESPACE_PREFIX = "mem:"
 NOT_SHARED = "an end user's turn: nothing is shared with the workspace"
 ERASED = "the end user is erased, or their erase has started: nothing more is written for them"
+KEYS_OWN = "a server key's own turn: it stores no memory"
+KEPT_FROM_A_KEYS_OWN_TURN = "_kept_from_a_keys_own_turn"  # the mark every write the hold covers carries
 CLEAR_ATTEMPTS = 3  # tries to clear a session written as their erase started, before the failure is raised
 CLEAR_RETRY_SECONDS = 0.2  # the wait before the next try grows by this much each time
 
@@ -106,6 +139,58 @@ def end_user_turn(end_user: Optional[EndUser]) -> Iterator[None]:
             _end_user.reset(token)
         except ValueError:  # closed from another context: left as it is (core.security.surface)
             pass
+
+
+# Whether the turn is a server key's own, one that names no end user; False on every other turn.
+_keys_own: ContextVar[bool] = ContextVar("keys_own_turn", default=False)
+
+
+@contextmanager
+def keys_own_turn(lean_request: Any) -> Iterator[None]:
+    """Run the block as a server key's own turn when ``lean_request`` (``consumers.chatbot.lean_request``)
+    is a key's and names no end user; as any other turn otherwise."""
+    own = bool(getattr(lean_request, "server_key", False)) and getattr(lean_request, "end_user", None) is None
+    token = _keys_own.set(own)
+    try:
+        yield
+    finally:
+        try:
+            _keys_own.reset(token)
+        except ValueError:  # closed from another context: left as it is (core.security.surface)
+            pass
+
+
+def on_a_keys_own_turn() -> bool:
+    """Whether the turn is a server key's own, one that names no end user: it stores no memory."""
+    return _keys_own.get()
+
+
+def on_a_products_turn() -> bool:
+    """Whether the turn is a product's (§5.5): a server key's own, or an end user's. It reads the workspace's
+    durable facts (and an end user's own), never the workspace's other conversations or its daily logs."""
+    return _keys_own.get() or _end_user.get() is not None
+
+
+def kept_nothing() -> Dict[str, Any]:
+    """A durable write's answer on a server key's own turn: no error, nothing stored."""
+    return {"success": False, "skipped": KEYS_OWN}
+
+
+def kept_from_a_keys_own_turn(answer: Any) -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]:
+    """Wrap a memory write: on a server key's own turn it is not made, and the call answers ``answer``
+    (called when callable: what the write answers when it stores nothing). The check runs before the
+    write's own work, a hop to a thread included. The wrapped write carries ``KEPT_FROM_A_KEYS_OWN_TURN``."""
+    def decorate(write: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+        @functools.wraps(write)
+        async def wrapped(*args: Any, **kwargs: Any) -> Any:
+            if _keys_own.get():
+                return answer() if callable(answer) else answer
+            return await write(*args, **kwargs)
+
+        setattr(wrapped, KEPT_FROM_A_KEYS_OWN_TURN, True)
+        return wrapped
+
+    return decorate
 
 
 def turn_subject(person: Optional[str]) -> Optional[str]:
@@ -160,7 +245,8 @@ def writes_to_its_end_user(add: Callable[..., Awaitable[Any]]) -> Callable[..., 
     """Wrap the durable store's ``add``: during an end user's turn the write lands in their namespace,
     and only while their consent counts, checked before and after it (an erase that started meanwhile
     takes the write back). An erase deletes their namespace after marking them, so a write that landed
-    first is deleted by the erase, and one that landed after is taken back here."""
+    first is deleted by the erase, and one that landed after is taken back here. On a server key's own
+    turn no write is made at all (``kept_from_a_keys_own_turn``)."""
     signature = inspect.signature(add)
 
     @functools.wraps(add)
@@ -177,7 +263,7 @@ def writes_to_its_end_user(add: Callable[..., Awaitable[Any]]) -> Callable[..., 
             return result
         return {"success": False, "skipped": ERASED}
 
-    return wrapped
+    return kept_from_a_keys_own_turn(kept_nothing)(wrapped)
 
 
 async def _still_consented(end_user: EndUser, undo: Callable[[], Awaitable[None]]) -> bool:
@@ -206,7 +292,8 @@ def sessions_while_consented(update: Callable[..., Awaitable[None]]) -> Callable
     """Wrap ``UnifiedMemoryService.update_session``: during an end user's turn their conversation's L1
     session (Redis) is written only while their consent counts, checked before and after it, as a durable
     write is. Their erase clears their conversations' sessions after marking them, so a session written
-    first is cleared by the erase, and one written after is cleared here."""
+    first is cleared by the erase, and one written after is cleared here. A server key's own turn writes
+    no session (``kept_from_a_keys_own_turn``)."""
     signature = inspect.signature(update)
 
     @functools.wraps(update)
@@ -222,7 +309,7 @@ def sessions_while_consented(update: Callable[..., Awaitable[None]]) -> Callable
                                                                 bound["conversation_id"]))
         return None
 
-    return wrapped
+    return kept_from_a_keys_own_turn(None)(wrapped)
 
 
 async def _clear_session(service: Any, workspace_id: str, conversation_id: str) -> None:
@@ -298,8 +385,9 @@ def owned_reads_go_to_its_end_user(read: Callable[..., Awaitable[Any]]) -> Calla
 
 
 def shared_with_no_end_user(skipped: Any) -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]:
-    """Wrap a write the whole workspace reads (an L2 row, a daily log): during an end user's turn it
-    is not made, and the call answers ``skipped`` (what the write answers when it stores nothing)."""
+    """Wrap a write the whole workspace reads (an L2 row, a daily log): during an end user's turn, or a
+    server key's own (``kept_from_a_keys_own_turn``), it is not made, and the call answers ``skipped``
+    (what the write answers when it stores nothing)."""
     def decorate(write: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
         @functools.wraps(write)
         async def wrapped(*args: Any, **kwargs: Any) -> Any:
@@ -307,11 +395,11 @@ def shared_with_no_end_user(skipped: Any) -> Callable[[Callable[..., Awaitable[A
                 return skipped() if callable(skipped) else skipped
             return await write(*args, **kwargs)
 
-        return wrapped
+        return kept_from_a_keys_own_turn(skipped)(wrapped)
 
     return decorate
 
 
 def skipped_log() -> Dict[str, Any]:
-    """A daily log's answer when none is written: no error, nothing stored."""
-    return {"success": False, "skipped": NOT_SHARED}
+    """A daily log's answer when none is written: no error, nothing stored, and whose turn it was."""
+    return {"success": False, "skipped": KEYS_OWN if _keys_own.get() else NOT_SHARED}

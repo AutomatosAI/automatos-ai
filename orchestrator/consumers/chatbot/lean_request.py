@@ -43,11 +43,14 @@ class TurnModel:
 
 @dataclass(frozen=True)
 class LeanRequest:
-    """What a lean turn's request added: a model, app context, the end user it is for, or none."""
+    """What a lean turn's request added: a model, app context, the end user it is for, or none; and
+    whether a product's server key sent it. A key's turn that names no end user is the key's own, and
+    stores no memory (``core.security.end_user_turn.keys_own_turn``)."""
 
     model: Optional[TurnModel] = None
     app_context: Optional[str] = None
     end_user: Optional[Any] = None  # a server key's turn's end user (core.security.end_user_turn.EndUser)
+    server_key: bool = False  # sent by a server key (api.chat_server_key), never by a person
 
 
 NOTHING_ASKED = LeanRequest()

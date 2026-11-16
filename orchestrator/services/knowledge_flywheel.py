@@ -21,7 +21,10 @@ goes in automatically. So the flywheel is now OFF unless the workspace says
 document row, no chunks, no KG pending. The report file, its Execution Metrics,
 the card's answer, Deliverables and the Reports page never depended on it.
 There is deliberately no second gate anywhere else; every caller goes
-through this module so the opt-in is provable at one seam.
+through this module so the opt-in is provable at one seam. The same seam
+holds PRD-274's rule (§5.5): what a product's turn makes (a server key's own
+turn, or an end user's) is never ingested into the workspace's knowledge
+(``core.security.end_user_turn.shared_with_no_end_user``).
 
 No parallel ingestion path: this module never chunks/embeds itself — it
 hands the content to ``DocumentManager.upload_document`` and cleans up.
@@ -37,6 +40,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
+
+from core.security.end_user_turn import shared_with_no_end_user
 
 logger = logging.getLogger(__name__)
 
@@ -288,6 +293,7 @@ def _kg_extraction_allowed(
     return True
 
 
+@shared_with_no_end_user(None)  # PRD-274 §5.5: nothing a product's turn makes is ingested
 async def ingest_agent_output(
     db: Session,
     workspace_id: UUID | str,
@@ -307,8 +313,9 @@ async def ingest_agent_output(
 
     Returns the ingested document id, or ``None`` when the workspace has
     not opted in (F305), the output is a report still waiting for its approval
-    (F235), or ingestion failed (fail-soft: producing the output must never
-    be broken by the knowledge loop).
+    (F235), the output was made on a product's turn (PRD-274), or
+    ingestion failed (fail-soft: producing the output must never be broken by
+    the knowledge loop).
 
     Args:
         content: The output text (markdown preferred — it chunks well).

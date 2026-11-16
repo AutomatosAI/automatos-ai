@@ -31,7 +31,7 @@ in a thread, off the worker's loop, which renews every running job's lease.
 import asyncio
 import logging
 from datetime import timezone
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import text
@@ -92,10 +92,16 @@ def _on_own_session(work: Callable[[Any], Any]) -> Any:
         db.close()
 
 
+# PRD-274 §5.5 and F154: the sweep checkpoints a person's conversations, and an end user's as theirs
+# (_checkpoint_one). A server key's own conversation (its service user's, naming no end user) and a widget
+# visitor's are never written into any tier (core.security.end_user_turn).
 _CANDIDATES = text("""
-    SELECT id, workspace_id FROM chats
+    SELECT id, workspace_id, end_user_id FROM chats
     WHERE kind = 'user'
       AND workspace_id IS NOT NULL
+      AND chats.widget_key_id IS NULL
+      AND (chats.end_user_id IS NOT NULL
+           OR NOT EXISTS (SELECT 1 FROM sdk_api_keys k WHERE k.service_user_id = chats.user_id))
       AND updated_at <= NOW() - (:idle_min * INTERVAL '1 minute')
       AND updated_at >= NOW() - (:lookback_h * INTERVAL '1 hour')
       AND (
@@ -110,7 +116,9 @@ _CANDIDATES = text("""
 
 def _checkpoint_candidates(db: Any) -> list:
     """User chats idle past the threshold (touched inside the lookback), with enough messages, whose
-    summary watermark is older than their last activity: the thread checkpoint sweep's batch."""
+    summary watermark is older than their last activity: the thread checkpoint sweep's batch, as
+    ``(chat id, workspace id, end user id)``. A person's and an end user's; never a server key's own or a
+    widget visitor's (PRD-274 §5.5, F154)."""
     from config import config as app_config
 
     params = {"idle_min": getattr(app_config, "THREAD_CHECKPOINT_IDLE_MINUTES", 30),
@@ -118,6 +126,33 @@ def _checkpoint_candidates(db: Any) -> list:
               "min_msgs": getattr(app_config, "THREAD_CHECKPOINT_MIN_MESSAGES", 4),
               "batch": getattr(app_config, "THREAD_CHECKPOINT_BATCH", 10)}
     return list(db.execute(_CANDIDATES, params).fetchall())
+
+
+def _their_turn(workspace_id: str, end_user_id: str) -> Any:
+    """The end user a conversation is for, as their turn runs (their consent record), or None when no
+    consent of theirs is on record or their erase has started (a read on its own session)."""
+    from core.models.end_users import consent_record_id
+    from core.security.end_user_turn import EndUser
+
+    record_id = _on_own_session(lambda db: consent_record_id(db, workspace_id, end_user_id))
+    return EndUser(workspace_id, end_user_id, record_id) if record_id else None
+
+
+async def _checkpoint_one(db: Any, workspace_id: str, chat_id: str, end_user_id: Optional[str],
+                          min_messages: int) -> Dict[str, Any]:
+    """One idle conversation's checkpoint (PRD-206 S2). An end user's is made as their turn
+    (``core.security.end_user_turn``): what it stores lands in their namespace, tagged with them, so it is
+    recalled for them only (PRD-274 §5.5, §5.7), and only while their consent counts. With none on record,
+    or their erase started, it is not made."""
+    from core.security.end_user_turn import end_user_turn
+    from modules.memory.thread_checkpoint import IDLE_SWEEP, run_thread_checkpoint
+
+    end_user = await asyncio.to_thread(_their_turn, workspace_id, end_user_id) if end_user_id else None
+    if end_user_id and end_user is None:
+        return {"success": False, "skipped": True}
+    with end_user_turn(end_user):
+        return await run_thread_checkpoint(db, workspace_id=workspace_id, chat_id=chat_id, trigger=IDLE_SWEEP,
+                                           min_messages=min_messages)
 
 
 def _runs(method: str) -> Callable[[Any], Any]:
@@ -332,7 +367,6 @@ class MemoryJobScheduler:
         failures never stop the batch; a failed sweep is retried by the queue."""
         from config import config as app_config
         from core.database.database import SessionLocal
-        from modules.memory.thread_checkpoint import run_thread_checkpoint
 
         min_messages = getattr(app_config, "THREAD_CHECKPOINT_MIN_MESSAGES", 4)
         try:
@@ -343,10 +377,9 @@ class MemoryJobScheduler:
         done = failed = 0
         db = SessionLocal()
         try:
-            for chat_id, workspace_id in rows:
+            for chat_id, workspace_id, end_user_id in rows:
                 try:
-                    result = await run_thread_checkpoint(db, workspace_id=str(workspace_id), chat_id=str(chat_id),
-                                                         trigger="idle_sweep", min_messages=min_messages)
+                    result = await _checkpoint_one(db, str(workspace_id), str(chat_id), end_user_id, min_messages)
                 except Exception:
                     failed += 1
                     logger.error("[MemoryJobs] Thread checkpoint failed for chat=%s", chat_id, exc_info=True)

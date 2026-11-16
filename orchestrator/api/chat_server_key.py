@@ -17,6 +17,9 @@ never takes that path:
   (``core.security.end_user_turn``): what it writes and recalls is their own and the workspace's.
   Their conversation is tagged with them (``chats.end_user_id``), and only turns for them continue
   it; a key's turn for no end user continues none of theirs. A person's turn names no end user.
+* **A turn that names no end user is the key's own, and stores no memory** (``LeanRequest.server_key``,
+  ``core.security.end_user_turn.keys_own_turn``), as a widget turn stores none (F154): nothing it says
+  is distilled into the workspace's memory, where other turns would recall it.
 
 Three decorators wire this into ``api/chat.py`` without growing it: ``get_user_id``,
 ``_checked_lean_request`` and ``_open_chat`` are wrapped; everyone else passes straight through.
@@ -81,7 +84,7 @@ def acts_as_its_service_user(get_user_id: Callable[..., int]) -> Callable[..., i
 def what_a_server_key_may_ask(checked: Callable[..., Any]) -> Callable[..., Any]:
     """Wraps ``api.chat._checked_lean_request``: a key's turn is refused (422) before anything is
     saved unless it names a lean agent of its workspace, in no person's mode, and any model is on
-    the key's list as well as the agent's."""
+    the key's list as well as the agent's. What it answers for a key says a key sent it."""
 
     @functools.wraps(checked)
     def wrapped(db: Any, ctx: Any, request: Any) -> Any:
@@ -90,7 +93,7 @@ def what_a_server_key_may_ask(checked: Callable[..., Any]) -> Callable[..., Any]
                 raise _refuse(NOT_A_PERSONS)
             return checked(db, ctx, request)
         _refuse_unless_allowed(db, ctx, request)
-        return _for_its_end_user(db, ctx, request, checked(db, ctx, request))
+        return _for_its_end_user(db, ctx, request, replace(checked(db, ctx, request), server_key=True))
 
     return wrapped
 
