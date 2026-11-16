@@ -206,9 +206,10 @@ def record_end(db: Session, row_id: Any, chat_id: str, message_id: Any, complete
 
 def answer_after(db: Session, chat_id: str, message_id: Any) -> Optional[Any]:
     """The id of the turn's answer: the newest row a turn saved after the person's message ``message_id``,
-    unless it is a failed turn's note. The session queue runs one turn of a chat at a time, so when this
-    turn ends its own reply is the newest; a post a background producer made answers no turn and is
-    passed over (``consumers.chatbot.model_history.is_turn_reply``)."""
+    unless it answers nothing: a failed turn's note, or a reply saved in place of an answer the turn never
+    got. The session queue runs one turn of a chat at a time, so when this turn ends its own reply is the
+    newest; a post a background producer made answers no turn and is passed over
+    (``consumers.chatbot.model_history.is_turn_reply``)."""
     from consumers.chatbot.model_history import is_failed_turn_note, is_turn_reply
     from core.models import Message
 
@@ -216,14 +217,23 @@ def answer_after(db: Session, chat_id: str, message_id: Any) -> Optional[Any]:
     asked = db.query(Message.created_at).filter(Message.id == message_id, Message.chat_id == chat_uuid).scalar()
     if asked is None:
         return None
-    rows = (db.query(Message.id, Message.role, Message.source)
+    rows = (db.query(Message.id, Message.role, Message.source, Message.parts)
             .filter(Message.chat_id == chat_uuid, Message.created_at > asked, Message.role != USER)
             .order_by(Message.created_at.desc())
             .all())
     newest = next((row for row in rows if is_turn_reply(row)), None)
-    if newest is None or is_failed_turn_note(newest.source):
+    if newest is None or is_failed_turn_note(newest.source) or _no_answer_in(newest.parts):
         return None
     return newest.id
+
+
+def _no_answer_in(parts: Any) -> bool:
+    """A reply saved in place of an answer the turn never got (``model_history.NO_ANSWER_SENTENCES``): the
+    turn failed, so a repeat runs it again rather than replaying the sentence."""
+    from consumers.chatbot.model_history import NO_ANSWER_SENTENCES
+
+    said = "\n".join(answer_texts(parts))
+    return any(sentence in said for sentence in NO_ANSWER_SENTENCES)
 
 
 def replayed(replay: Replay) -> StreamingResponse:

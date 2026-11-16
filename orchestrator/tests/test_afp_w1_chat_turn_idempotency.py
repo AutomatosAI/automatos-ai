@@ -28,7 +28,9 @@ from sqlalchemy import text
 from api import agent_execute, chat, chat_server_key, chat_turn_keys
 from api.chat_models import ChatRequest
 from consumers.chatbot import ChatService
+from consumers.chatbot.model_history import NO_ANSWER_SENTENCES
 from consumers.chatbot.streaming import get_streaming_handler
+from consumers.chatbot.turn_errors import TURN_ERROR_ORIGIN
 from core.auth.scopes import AGENTS_CHAT
 from core.models.chat_turn_keys import DONE, FAILED, RUNNING, UNIQUE_INDEX, ChatTurnKey
 from services import chat_turns
@@ -334,6 +336,27 @@ def test_a_failed_or_dead_turn_may_run_again_under_its_key(new_session, workspac
     third = _claim(new_session, key, KEY, request)
     assert isinstance(second, uuid.UUID) and len({first, second, third}) == 3
     assert [r["state"] for r in _rows(new_session, ws)] == [RUNNING]
+
+
+@pytest.mark.parametrize("reply", [
+    {"parts": [{"type": "text", "text": NO_ANSWER_SENTENCES[0]}]},  # saved in place of an answer it never got
+    {"parts": [{"type": "text", "text": "Not this time."}], "source": {"origin": TURN_ERROR_ORIGIN}},  # its note
+])
+def test_a_turn_that_completed_without_an_answer_ends_failed(new_session, workspace, reply):
+    ws, agent = workspace
+    key = _key(new_session, ws)
+    held = _claim(new_session, key, KEY, ChatRequest(message={"content": ASKED}, agentId=agent))
+    s = new_session()
+    try:
+        chats = ChatService(s)
+        chat_id = str(chats.create_chat(user_id=chat.get_user_id(s, key), title="game", workspace_id=uuid.UUID(ws)).id)
+        asked = chats.save_message(chat_id=chat_id, role="user", parts=[{"type": "text", "text": ASKED}], workspace_id=ws)
+        chats.save_message(chat_id=chat_id, role="assistant", workspace_id=ws, **reply)
+        assert chat_turn_keys.record_end(s, held, chat_id, asked.id, completed=True) == FAILED
+    finally:
+        s.close()
+    (row,) = _rows(new_session, ws)
+    assert (row["state"], row["answer_message_id"], str(row["chat_id"])) == (FAILED, None, chat_id)
 
 
 def test_a_turn_refused_before_it_starts_leaves_its_key_free(new_session, workspace, route):
