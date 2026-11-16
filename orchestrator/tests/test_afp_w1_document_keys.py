@@ -76,8 +76,12 @@ def routes():
 
     from main import app
 
-    return {(m, r.path): r for r in iter_route_contexts(app.routes)
-            if isinstance(r.original_route, APIRoute) for m in r.methods}
+    found = {(m, r.path): r for r in iter_route_contexts(app.routes)
+             if isinstance(r.original_route, APIRoute) for m in r.methods}
+    # GET /{document_id:int} is found by its handler, however the path's converter is spelled.
+    by_id = [r for (method, _path), r in found.items() if method == "GET" and r.endpoint is documents.get_document]
+    assert len(by_id) == 1
+    return {**found, GET: by_id[0]}
 
 
 @pytest.fixture
@@ -134,7 +138,6 @@ def library(new_session, workspaces):
     s.close()
     rows = {
         "shared": _document(ws, "pricing.md", team_access=[], is_shared=True),
-        "unset": _document(ws, "faq.md", team_access=None, is_shared=None),
         "team": _document(ws, "margins.md", team_access=["finance"], is_shared=True),
         "private": _document(ws, "notes.md", team_access=[], is_shared=False),
         "copy": _document(ws, "invoice-inv-0042.pdf", team_access=[], is_shared=True,
@@ -142,6 +145,13 @@ def library(new_session, workspaces):
         "theirs": _document(other, "pricing.md", team_access=[], is_shared=True),
     }
     ids = dict(zip(rows, _add(new_session, *rows.values())))
+    s = new_session()
+    ids["unset"] = s.execute(text(                                    # both visibility columns NULL, as written
+        "INSERT INTO documents (workspace_id, filename, original_filename, status, team_access, is_shared, upload_date) "
+        "VALUES (CAST(:ws AS uuid), 'faq.md', 'faq.md', 'completed', NULL, NULL, NOW()) RETURNING id"),
+        {"ws": ws}).scalar()
+    s.commit()
+    s.close()
     return SimpleNamespace(ws=ws, other=other, ids=ids, deliverable=deliverable)
 
 

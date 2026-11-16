@@ -253,8 +253,8 @@ def track_search(db: Any, query: str, results_count: int, execution_time_ms: int
         })
         db.commit()
         logger.info(f"Search tracked: '{query[:50]}' ({results_count} results)")
-    except Exception:
-        logger.exception("Could not track search event")
+    except Exception:  # noqa: BLE001 -- best effort, as before: an untracked search still answers
+        logger.warning("Could not track search event", exc_info=True)
         db.rollback()
 
 
