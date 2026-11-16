@@ -9,7 +9,8 @@ an end user still writes to their namespace; a person's turn, a lean agent's inc
 
 A product's turn (a key's own, or an end user's) reads the workspace's durable facts, never its other
 conversations or its daily logs; nothing it makes is ingested into the workspace's knowledge; and the idle
-checkpoint sweep reads a person's conversations only, never a product's or a widget visitor's.
+checkpoint sweep never reads a key's own conversation or a widget visitor's (an end user's it checkpoints as
+theirs: tests/test_afp_product_turn_holds.py).
 """
 from __future__ import annotations
 
@@ -376,7 +377,7 @@ async def test_nothing_an_end_users_turn_makes_is_ingested(monkeypatch):
             None, WS, content="# Their plan", filename="plan.md", source="generated_document") is None
 
 
-# ── the idle checkpoint sweep: a person's conversations only ──────────────────
+# ── the idle checkpoint sweep: never a key's own or a visitor's conversation ──
 
 @pytest.fixture(scope="module")
 def engine():  # conftest's new_session binds to it
@@ -473,33 +474,39 @@ def _a_keys_own(new_session, ws, person):
     return _idle_chat(new_session, ws, _keys_service_user(new_session, ws))
 
 
-def _an_end_users(new_session, ws, person):
-    return _idle_chat(new_session, ws, _keys_service_user(new_session, ws), end_user_id="learner-7")
-
-
 def _a_widget_visitors(new_session, ws, person):
     return _idle_chat(new_session, ws, person, widget_key_id=uuid.uuid4())  # a widget's chats are a person's row
 
 
-@pytest.mark.parametrize("product_or_visitor", [_a_keys_own, _an_end_users, _a_widget_visitors],
-                         ids=["a keys own", "an end users", "a widget visitors"])
-def test_the_idle_checkpoint_sweep_reads_a_persons_conversations_only(new_session, workspace, monkeypatch,
-                                                                     product_or_visitor):
+def _candidates(new_session, ws, monkeypatch):
+    """The sweep's batch for ``ws``: ``{chat id: end user id}``."""
     from config import config
     from services import memory_jobs
 
-    ws, made = workspace
     for name, value in (("THREAD_CHECKPOINT_IDLE_MINUTES", 30), ("THREAD_CHECKPOINT_LOOKBACK_HOURS", 48),
                         ("THREAD_CHECKPOINT_MIN_MESSAGES", 4), ("THREAD_CHECKPOINT_BATCH", 100000)):
         monkeypatch.setattr(config, name, value, raising=False)
-    person = _person(new_session, made)
-    skipped = product_or_visitor(new_session, ws, person)
-    persons = _idle_chat(new_session, ws, person)
-
     s = new_session()
     try:
-        candidates = {str(chat_id) for chat_id, workspace_id in memory_jobs._checkpoint_candidates(s)
-                      if str(workspace_id) == ws}
+        return {str(chat_id): end_user_id for chat_id, workspace_id, end_user_id
+                in memory_jobs._checkpoint_candidates(s) if str(workspace_id) == ws}
     finally:
         s.close()
-    assert candidates == {persons} and skipped not in candidates
+
+
+@pytest.mark.parametrize("never_swept", [_a_keys_own, _a_widget_visitors], ids=["a keys own", "a widget visitors"])
+def test_the_idle_checkpoint_sweep_never_reads_a_keys_own_or_a_visitors_conversation(new_session, workspace,
+                                                                                     monkeypatch, never_swept):
+    ws, made = workspace
+    person = _person(new_session, made)
+    skipped = never_swept(new_session, ws, person)
+    persons = _idle_chat(new_session, ws, person)
+    assert _candidates(new_session, ws, monkeypatch) == {persons: None} and skipped
+
+
+def test_the_idle_checkpoint_sweep_takes_an_end_users_conversation_with_its_end_user(new_session, workspace,
+                                                                                     monkeypatch):
+    ws, made = workspace
+    theirs = _idle_chat(new_session, ws, _keys_service_user(new_session, ws), end_user_id="learner-7")
+    persons = _idle_chat(new_session, ws, _person(new_session, made))
+    assert _candidates(new_session, ws, monkeypatch) == {theirs: "learner-7", persons: None}

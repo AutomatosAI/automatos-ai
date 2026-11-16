@@ -21,6 +21,8 @@ import logging
 from collections import OrderedDict
 from typing import Any, Dict, Optional
 
+from core.security.end_user_turn import on_a_keys_own_turn
+
 logger = logging.getLogger(__name__)
 
 # Memory category for these records (subset of the PRD-159 taxonomy).
@@ -211,7 +213,9 @@ def capture_tool_outcome(
     / deduped / no event loop. Never raises.
     """
     try:
-        if not workspace_id:
+        # PRD-274: a server key's own turn keeps no memory. It answers before the dedupe, so a hash it
+        # never wrote is never marked as seen and a later turn's same outcome is still written.
+        if not workspace_id or on_a_keys_own_turn():
             return None
         record = build_tool_outcome(
             tool_name=tool_name,

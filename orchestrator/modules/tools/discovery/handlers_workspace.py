@@ -215,6 +215,8 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
                 return memory_off_answer(NOT_SAVED)
             # F103: the model must not tell the owner "noted" over a lost write.
             return {"success": False, "error": f"Memory NOT saved — {result['error']}. Tell the owner it was not stored."}
+        if result.get("skipped"):  # PRD-274 §5.5, F103: a held write saved nothing, so it is never "Stored"
+            return {"success": False, "error": f"Memory NOT saved — {result['skipped']}. Tell them it was not stored."}
 
         user_id = service.namespace(ws_id).resolve(agent_id_int)
         return {

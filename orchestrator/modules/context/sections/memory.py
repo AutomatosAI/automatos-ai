@@ -146,7 +146,7 @@ class MemorySection(BaseSection):
         else:
             # --- SmartMemoryManager ---
             content = await self._build_from_smart_memory(ctx, chat_id)
-            if autonomous:  # what it can look up, as the router's bundle gave it
+            if autonomous or on_a_products_turn():  # what it can look up, as the router's bundle gave it (§5.5)
                 content = "\n\n".join(part for part in (content, await self._knowledge_awareness(ctx)) if part)
 
         # Recipe memories (Mem0 learnings from previous runs) — step 1 only;

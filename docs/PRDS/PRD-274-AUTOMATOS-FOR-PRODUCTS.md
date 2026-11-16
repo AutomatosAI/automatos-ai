@@ -520,17 +520,21 @@ Flagged in their PRs, for Gerard to confirm:
     work.**
     - *Writes.* A key's chat turn that names no end user is nobody's, as a widget turn is an anonymous visitor's
       (F154). It writes no distilled facts, nothing to L2, its mirror or the daily log, no L1 session, no tool
-      outcome and no context-guard flush. The rule is held where memory is written, for the whole turn and the work
-      it starts (`keys_own_turn` in `core/security/end_user_turn.py`). A key's turn for an end user still writes to
-      their namespace, and a person's turn is unchanged.
+      outcome and no context-guard flush, and a tool that stores memory says nothing was saved. The rule is held where
+      memory is written, for the whole turn and the work it starts in-process: its tool calls, and a Playbook run it
+      starts (`keys_own_turn` in `core/security/end_user_turn.py`). A board ticket it files is dispatched later,
+      outside the turn, as the board's own work. A key's turn for an end user still writes to their namespace, and
+      a person's turn is unchanged.
     - *Reads.* A product turn, a key's own or an end user's, reads the workspace's durable facts (and an end user's
-      turn their own), never the workspace's other conversations (L2, or a transcript promoted into the durable
-      tier) or its daily logs (`on_a_products_turn`). A person's turn is unchanged.
+      turn their own) and what the workspace can look up, never the workspace's other conversations (L2, or a
+      transcript promoted into the durable tier) or its daily logs (`on_a_products_turn`). A person's turn is
+      unchanged.
     - *Knowledge.* Nothing a product turn makes is ingested into the workspace's knowledge (the flywheel's one seam).
-    - *Background work.* The idle thread-checkpoint sweep reads a person's conversations only. It skips every
-      conversation that names an end user, every one a key's service user owns and every widget visitor's (F154),
-      so no product's or visitor's conversation is written into any tier of the workspace. An end user's resume
-      (§5.7) lists their conversations without a checkpoint from the sweep.
+    - *Checkpoints.* A product turn makes no on-demand checkpoint. The idle thread-checkpoint sweep checkpoints an
+      end user's conversation as their turn: its summary stays on their conversation, and what it stores lands in
+      their namespace, tagged with them and recalled for them only, while their consent counts. That keeps their
+      resume (§5.7). It never checkpoints a key's own conversation or a widget visitor's (F154), so neither is
+      written into any tier of the workspace.
     - (Not: storing a product's conversations as the workspace's memory, or reading the workspace's other
       conversations into them. A learner who has not consented, an analyst agent's account of one advisory, or one
       end user's conversation would come back in another turn's answer.)

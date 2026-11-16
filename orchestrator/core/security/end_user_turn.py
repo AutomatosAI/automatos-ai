@@ -37,8 +37,10 @@ What the turn **reads** is theirs and the workspace's, never another end user's:
 
 **Who sets it:** a server key's chat turn that names an end user whose consent is on record
 (``endUserId`` on ``POST /api/chat``, ``api.chat_server_key``), for the whole turn
-(``StreamingChatService.stream_response_with_agent``), the work it starts included. No other turn is an
-end user's, and every read and write of it goes where it always has.
+(``StreamingChatService.stream_response_with_agent``), the work it starts in-process included: its tool
+calls, and a Playbook run it starts, a task of the turn. A board ticket it files is dispatched later, outside
+the turn, as the board's own work. No other turn is an end user's, and every read and write of it goes where
+it always has.
 
 **A server key's own turn is nobody's, so it stores no memory** (PRD-274, made while building, 16 Nov 2026).
 F154 holds a widget turn the same way: an anonymous visitor's, it stores no memory. A key's turn that names
@@ -46,25 +48,28 @@ no end user is no one's either. A tutor product sends a learner who has not cons
 monitoring service's analyst agent runs one such turn per advisory it reads. What was said in it is no fact
 about the workspace, and written where the workspace reads, it would come back in another turn's answer:
 another learner's, or the next advisory's. So the turn writes no memory anywhere (``keys_own_turn``, a
-context variable set for the whole turn, the work it starts included):
+context variable set for the whole turn and the work it starts in-process, as above):
 
 - every write the end-user hold wraps answers as when it stores nothing (``kept_from_a_keys_own_turn``):
   the durable store's ``add`` (the distilled facts, a tool's outcome, the context guard's flush, the L2
   mirror, the daily log), L2's ``store_short_term``, the daily summary and the L1 session;
-- the turn runs no distil (``StreamingChatService._remember_the_turn``): no model call, no memory-stored frame.
+- the turn runs no distil (``StreamingChatService._remember_the_turn``): no model call, no memory-stored frame;
+- a tool's outcome is not captured (``modules.memory.tool_outcome_capture``), and a tool that stores memory
+  says nothing was saved (F103), as it does for an end user whose erase has started.
 
 A key's turn that names an end user is theirs, as above, and a person's turn is unchanged.
 
 **A product's turn, a key's own or an end user's, follows §5.5 for what it reads and for the work done after
 it** (``on_a_products_turn``):
 
-- it reads the workspace's durable facts (and an end user's turn their own), never the workspace's other
-  conversations (the Context Router's L2, a transcript promoted into the durable tier) or its daily logs
-  (``modules.context.sections.memory``);
+- it reads the workspace's durable facts (and an end user's turn their own) and what the workspace can look
+  up, never the workspace's other conversations (the Context Router's L2, a transcript promoted into the
+  durable tier) or its daily logs (``modules.context.sections.memory``);
 - nothing it makes is ingested into the workspace's knowledge (``ingest_agent_output`` in
   ``services.knowledge_flywheel``, held by ``shared_with_no_end_user``);
-- the idle thread-checkpoint sweep never reads a product's conversation (a key's service user's, or one that
-  names an end user) or a widget visitor's (F154) into any tier of the workspace (``services.memory_jobs``).
+- an on-demand checkpoint is not made on its turn (``modules.memory.thread_checkpoint``);
+- the idle thread-checkpoint sweep checkpoints an end user's conversation as their turn, into their own
+  namespace, and never a key's own conversation or a widget visitor's (F154) (``services.memory_jobs``).
 """
 from __future__ import annotations
 
