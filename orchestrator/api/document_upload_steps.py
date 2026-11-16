@@ -9,9 +9,8 @@ from there when a step runs.
   content as a MIME type in ``allowed_mime_types``, and its extension is one that type allows.
   Anything else is a 400 saying why.
 * **The tags:** the comma-separated ``tags`` field as a stripped, de-duplicated list, order kept.
-  They persist to ``documents.tags`` (PostgreSQL ``text[]``). The Academy corpus sync tags each
-  document ``academy,<vendor>,<track>,<domain>`` so the tutor's knowledge graph can map chunks
-  back to a course.
+  They persist to ``documents.tags`` (PostgreSQL ``text[]``), so a product that syncs a corpus
+  can tag each document and map its chunks back to where they came from.
 * **Saving:** the bytes go to ``UPLOAD_DIR`` under a random name, never the uploaded one. The
   route has already refused a server key's upload that would write over a document the key
   can't read (``services.document_key_access.clashes_with_unreachable``).
