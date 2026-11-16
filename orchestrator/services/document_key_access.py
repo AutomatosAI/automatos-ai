@@ -19,6 +19,13 @@ F087 would make the upload's earlier version), or the workspace copy of a spread
 (``services/spreadsheet_workspace.py``). A member reaches the workspace's documents exactly as
 before. What a key uploads names the key (``sdk:<key id>``) as its uploader, as the tickets and
 memories it writes do.
+
+**What the refusal tells a key.** A server key's upload refuses a filename that a document the
+key can't reach already has, or whose workspace copy belongs to a document the key can't reach;
+the refusal tells the key such a filename exists in its own workspace. That is accepted: the key
+is the workspace's own and is confined to it, and the copy cannot be moved aside instead,
+because its readers find it by rebuilding the path from the document's file name
+(``spreadsheet_workspace.workspace_copies``, which ``read_document`` calls).
 """
 from __future__ import annotations
 
