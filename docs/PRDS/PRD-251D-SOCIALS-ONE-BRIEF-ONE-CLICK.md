@@ -1,0 +1,159 @@
+# PRD-251D: Socials, one brief and one click. Auto does the typing, the editor does the approving, and a post looks the way you chose
+
+| | |
+|---|---|
+| Owner | Gerard Kavanagh |
+| Written | 2026-11-16 |
+| Status | Wave 1 in build; Waves 2 and 3 specified, with the owner calls listed at the end |
+| Builds on | PRD-251, 251B and 251C (on `main`), and the base branch `feat/prd-251d-socials-base` (16 Nov: Auto writes a chosen template's empty fields, the fields show in the order the image shows them, the two calendars show the same coming posts) |
+| Target | A person writes a brief, picks a look, and has a post waiting for their approval without typing a field or leaving the editor |
+
+## Framing
+
+The owner, 16 Nov 2026: "its still too complicated and when I select a template i am forced to fill in loads of fields, i might as well write the post myself. I do like the template model but it needs to be easy to just give a brief and select a template then the agent should fill in the required fields for me." And: "Review the full social model and see how we can make it slicker, better and higher quality, more flexible options."
+
+The base branch removed the forced fields. This PRD removes the rest of the work the product hands back to the person: the trip to the Queue to approve their own post, the two-step render and submit, the channels that are never ticked, a day and time Auto cannot set, a preview that only exists after a render, and a look that can only change by changing template.
+
+**It keeps every PRD-251, 251B and 251C rule:**
+- agents draft and never approve, schedule or publish (D6, D14);
+- every post is approved against the exact content that goes out (D6);
+- publishing goes only through the workspace's own Composio connections;
+- Auto uses only the facts it is given, and asks for the rest (F378);
+- Socials can be switched off.
+
+## What exists today (verified on `main` 8cfc0fde5 and the base branch, 16 Nov 2026)
+
+Paths are under `orchestrator/` or `frontend/`.
+
+- **Approving.** The approve controls (`components/deliverables/socials/socials-post-review.tsx`) are mounted only by the Queue's pane (`studio/queue-pane.tsx`) and the older detail pane (`socials-post-detail.tsx`). The editor (`studio/socials-editor.tsx`) has none: a post that waits for approval, opened from the calendar, can be read and edited and not approved. The editor's header hides Submit for it (`studio/socials-editor-header.tsx`, `SUBMITTABLE_STATUSES`).
+- **Rendering and submitting.**
+  - "Submit for approval" saves the post and calls `POST /posts/{id}/submit` (`hooks/use-socials-editor.ts`, `useSubmitEditor`; `api/socials.py`, `submit_social_post`). It renders nothing, so a post can wait for approval with no file.
+  - A render ends the post in `needs_approval` by itself (`modules/socials/service.py`, `TRANSITIONS[ACTION_RENDER_DONE]`). For an image, "Render preview" is the real render.
+  - For a video, "Render preview" is a half-resolution preview that keeps the status, and the note under it says "The full render is made when you submit" (`studio/preview-model.ts`, `renderNote`). Nothing makes it.
+  - A render writes a chosen template's empty fields first (base branch, `api/socials_compose.py`, `write_missing_fields`). It does not write an empty caption.
+- **Channels.** A new post starts with no channel ticked (`studio/editor-model.ts`, `newDraft`: `kinds: {}`). Approve is disabled for a post with no channel. With no channel connected, the card says "No social channel is connected. Connect one in Composio to publish." as plain text (`studio/editor-channels-card.tsx`). A connect button exists (`connect-toolkit.tsx`) and is used only by the voice picker and the brand kit's AI tools.
+- **Auto in chat.** `platform_create_social_post` and `platform_update_social_post` (`modules/tools/discovery/actions_socials.py`, `handlers_socials.py`, parameters in `core/social_post_schema.py`) take no day or time. The weekly Playbook writes "Proposed for: <day and time>" into the brief as text (`core/seeds/seed_socials_package.py`). The slot itself is set by `service.set_planned_for`, which is not content: it never changes the hash or an approval. Approving a post with a slot still ahead schedules it into that slot (`service.approve`).
+- **Template gallery.** A grid ordered by name: a thumbnail, the name and a Photo badge (`studio/editor-look-card.tsx`). Each entry already carries the template's description, which says what it is for ("For a review, a testimonial or a thank-you.") and is not shown. There is no search.
+- **Preview.** "Not rendered yet" until a render (`studio/socials-preview.tsx`). An image template is a full HTML document with its own layout script (it fits the text, breaks the headline on `|`, removes empty blocks). The renderer (`services/media-render`) fills the words on the server with HTML escaping, injects the brand tokens as `:root{--brand-*}`, stages the fonts and GSAP, and takes a still at 0 seconds. Nothing in an image template starts hidden, so the page looks finished the moment it loads. No HTML-only preview path exists for social templates.
+- **Look.** Every template field is text or a number. Colours, fonts and the logo come only from the brand kit's tokens. A different look means a different template.
+- **Views.** The Calendar's List layout renders the older post list, with its own Board, status list and detail pane. Plans, Campaigns and Series are one object (`social_campaigns`) with several screens.
+
+## Decisions
+
+Each carries the recommendation it was built on. The owner calls that can still change one are at the end.
+
+| # | Decision |
+|---|---|
+| E1 | **Submit makes the file.** "Submit for approval" on a post with a visual starts the full render through the render route, which ends the post in `needs_approval`. It never sends a post for approval whose file does not show its current words. A text post, and a post that is the person's own video file, submit as they do today. |
+| E2 | **An empty caption is Auto's to write, like an empty field.** When a render starts with the caption empty, Auto writes it from the brief for the post's channels. A caption that holds words is never rewritten. |
+| E3 | **Approve where you are.** The editor shows the Queue's own approve controls for a post that waits for approval, to a person who may approve. Approval binds to the stored content (D6), so the controls are off while the editor holds unsaved edits. |
+| E4 | **Channels start ticked.** A new post starts with the channels the workspace's most recent post used that can take the format. With no earlier post and exactly one connected channel, that one. Otherwise none, as today. |
+| E5 | **Connect from the editor.** Each supported channel that is not connected has a Connect button in the Channels card (the existing Composio connect flow). |
+| E6 | **Auto sets the slot, never the schedule.** The create and update tools take a planned day and time with its timezone. It is written with `set_planned_for` only, and only while the post is a draft, waits for approval or was sent back. The tools still never approve, schedule or publish: an approved or scheduled post's slot is refused, saying a person moves it. |
+| E7 | **The gallery says what a template is for.** Each card shows the template's description. A search box filters by name and description; chips filter to templates with a photo or words only. "Let Auto pick" stays first. |
+| E8 | **An instant preview of an image post** (Wave 2). The server returns the template as one self-contained page, filled and escaped by the same rules as the renderer, with the brand tokens, the font faces and a stub for the timeline library. The browser shows it in a frame with `sandbox="allow-scripts"` (no same-origin) and its own content security policy that allows nothing from the network. It is labelled a preview: the approved file is always the render. |
+| E9 | **Fewer views** (Wave 2). The list of what is removed is an owner call, below. |
+| E10 | **Look options on a post** (Wave 3). Design step first: it touches the template contract and what an approval covers. |
+| E11 | **Video templates explain their fields** (Wave 3, rescoped). The three software videos have 66 to 69 required fields. Giving them defaults would print the sample's words in every business's video, because Auto only writes a field that has no default. So every field gets a label and a description in plain words, and only text that is right for any business gets a default. |
+
+## Wave 1: the editor finishes the job
+
+### US-D101: Approve from the editor
+**As** an owner who opened a post that waits for approval, **I want** to approve it there, **so that** I do not have to find it again in the Queue.
+
+- [ ] The editor shows the approve controls of `socials-post-review.tsx` (Approve with the Queue's "publishes HH:MM" wording, Request changes, Reject, the unsourced-claims confirmation) for a post in `needs_approval`, to a person who may approve (the role rule the Queue uses).
+- [ ] While the editor holds unsaved edits the controls are off and say to save first (the component's `dirty`).
+- [ ] A viewer, and a post in any other status, see no approve controls.
+- [ ] After approving, the editor shows the post as approved or scheduled, with its Activity card.
+- [ ] Tests: the controls show for `needs_approval` and an approver; not for a viewer; not for a draft; off while dirty; Approve calls the approve route with the post's content hash.
+
+### US-D102: Submit for approval makes the file
+**As** a person with a brief and a look, **I want** one button to make the post and send it for approval.
+
+- [ ] On a post with a visual whose file is not the render of its current content, "Submit for approval" saves, then starts the full render (`POST /posts/{id}/render`, no `preview`). The post is `rendering`, then `needs_approval`.
+- [ ] On a post whose rendered file already shows its current content, on a text post, and on a post that is the person's own video file, it saves and submits as today.
+- [ ] A person's own still picture renders its crops (today's `OWN_STILL` path) and ends in `needs_approval`.
+- [ ] The button says what it will do: its label or the line under it names the render, and for a video the render minutes (the existing `renderNote` wording, now true).
+- [ ] A refusal (422 naming what Auto could not write, 429 no render minutes) shows as it does for Render preview, and the post is left a draft.
+- [ ] "Render preview" stays for a look before submitting.
+- [ ] Tests: an unrendered image post submits through the render route and not the submit route; a rendered, unchanged post submits through the submit route; a text post submits; a video calls the full render, not the preview.
+
+### US-D103: A render writes an empty caption
+**As** a person who gave a brief, **I want** the caption written with the image's words.
+
+- [ ] When the person's render or preview route starts and the post's caption is empty (no base text and no channel text), Auto writes the caption from the brief for the post's channels (every connected channel when it has none), in the same composer call that writes the empty fields, and saves it as part of the same edit. The history line names it.
+- [ ] A caption that holds any words is never changed. A post with every field filled and an empty caption still gets its caption.
+- [ ] "Let Auto pick" (a post with no template) gets the same: the template, its fields and an empty caption.
+- [ ] A plan's or an agent's render is unchanged (`render_post` itself asks nothing).
+- [ ] Tests fail without the change: an empty caption is written at render and kept in the saved post; a caption with words is untouched; nothing is asked when fields and caption are both filled.
+
+### US-D104: A new post starts with its channels ticked
+- [ ] A new post starts with the channels of the workspace's most recent post that can take the post's format, each with its default post kind.
+- [ ] With no earlier post and exactly one connected channel that can take the format, that channel is ticked.
+- [ ] Changing the format keeps the existing rule (`withFormat`): a channel that cannot take it is left out.
+- [ ] The person's own ticks are never overridden once they change one; an existing post opens with its own channels.
+- [ ] Tests: one connected channel is ticked; the last post's channels are ticked; two channels and no earlier post tick none; an existing post is unchanged.
+
+### US-D105: Connect a channel from the editor
+- [ ] In the Channels card, each supported channel that is not connected shows a Connect button (`connect-toolkit.tsx`); the list refreshes when the connect window reports back.
+- [ ] With no channel connected, the card shows the buttons in place of the plain sentence.
+- [ ] No new route and no new API client: the existing Composio connect flow only.
+- [ ] Tests: the buttons show for unconnected channels and not for connected ones.
+
+### US-D106: Auto sets the day and time a post is planned for
+**As** a person talking to Auto, **I want** "post it Friday at nine" to put the post on Friday at nine, waiting for my approval.
+
+- [ ] `platform_create_social_post` and `platform_update_social_post` take `planned_for` (an ISO date and time) and `timezone` (an IANA zone). The parameter descriptions say it is the slot the post is planned for, that the owner still approves it, and that approving it schedules it into that slot.
+- [ ] The slot is written with `service.set_planned_for` only. On update it is allowed only while the post is `draft`, `needs_approval` or `changes_requested`; any other status is refused in plain words ("it is approved: the owner moves it in Socials"). A past time and an unknown timezone are refused with the reason.
+- [ ] Setting the slot never changes the content hash, the status or an approval.
+- [ ] The tools' answers, and `platform_get_social_post` and `platform_list_social_posts`, show the planned slot in the post's timezone.
+- [ ] Nothing approves, schedules or publishes: no call to `schedule`, `apply_slot` or the publisher from a tool.
+- [ ] The weekly Playbook's prompt sets `planned_for` in place of writing "Proposed for:" in the brief. Skill text is not edited here (the skills repo is its source).
+- [ ] Tests fail without the change: a created post carries the slot; an update moves it on a draft; an approved post's slot is refused and unchanged; the hash and status are untouched; a bad timezone and a past time are refused.
+
+### US-D107: The gallery says what each template is for
+- [ ] Each template card shows the template's description under its name, cut to two lines.
+- [ ] A search box filters the gallery by name and description as the person types; no match says so.
+- [ ] Chips filter to All, With a photo (a template with an image slot) and Words only. "Let Auto pick" is always shown first.
+- [ ] The chosen template stays visible when a filter would hide it.
+- [ ] Tests: the description shows; search narrows the list; each chip filters; "Let Auto pick" stays.
+
+## Wave 2
+
+### US-D201: Instant preview of an image post
+- [ ] A new route returns one self-contained HTML page for a post's template, values and size: the words filled with HTML escaping by the renderer's rules, the brand tokens as `:root{--brand-*}`, the kit's font faces, the size variables, the story safe zone for a story, an empty slot's element removed, and a stub for the timeline library the image templates call. No file is fetched from the network by the page.
+- [ ] One test holds the page's filled body equal to what the renderer's own fill makes for the same inputs, so the two cannot drift.
+- [ ] The editor shows the page in a frame with `sandbox="allow-scripts"` and no `allow-same-origin`, with a content security policy inside the page that allows inline script and style, `data:` images and fonts, and nothing else. It refreshes a moment after the person stops typing and is labelled a preview.
+- [ ] A video, a text post and a post that is the person's own file keep today's preview.
+- [ ] Once a render exists and is current, the frame shows the rendered file.
+- [ ] The route is authenticated, scoped to the caller's workspace, in the route manifest, and passes the security review.
+
+### US-D202 and on: fewer views
+Specified once the owner has agreed the list below.
+
+## Wave 3
+
+### US-D301: Look options on a post
+Specified after the design step (what the tokens can switch for every starter without editing each one, and whether a look is part of what is approved).
+
+### US-D302: Video templates explain their fields
+- [ ] Every field of `app-promo`, `cinematic-product-promo` and `ui-story-promo` has a label and a description that say what it is and where it shows, in plain words.
+- [ ] A field whose text is right for any business has a default. A field that names a product, a number, a person or a claim has none.
+- [ ] The count of required fields per template is in the PR, before and after.
+
+## Not in this PRD
+
+- Auto approving, scheduling or publishing. D6 and D14 stand.
+- An auto-approve setting for a person's own posts.
+- One feed for both calendars. The base branch made them show the same coming posts and refresh each other.
+- Comments, replies and paid promotion.
+
+## Owner calls
+
+None of these blocks Wave 1.
+
+1. **Channels (E4).** Recommended: the last post's channels. The other choice is every connected channel that takes the format.
+2. **Fewer views (E9).** Recommended: the Calendar's List becomes a plain list in the studio's own style; the Board, the status list and the older detail pane go once the editor and the Queue cover what only they do today; Campaigns that are not plans keep one screen under Plans. The exact files, and what would be lost, come with the Wave 2 research.
+3. **Look options (E10).** Which ones: light or dark, the accent strong or sparing, the logo on or off. And whether changing the look after approval sends the post back for approval. Recommended: yes, it is what goes out.
+4. **Video templates (E11).** Recommended as rescoped above: explain the fields, default only what is right for anyone.
+5. **Instant preview and custom templates (E8).** A workspace's own template runs its script in the sandboxed frame. Recommended: allow it, with the sandbox and the policy above.
