@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 from core.llm.embedding_status import MEMORY_OFF, store_cannot_embed
+from core.security.end_user_turn import on_a_products_turn  # PRD-274 §5.5
 from modules.context.earlier_conversations import labels_the_bundle  # P256-FIX-N13-5 (F412)
 from modules.context.remembered_figures import labels_what_is_remembered  # F316 (night 9b)
 from modules.context.sections.base import BaseSection, SectionContext
@@ -125,12 +126,11 @@ class MemorySection(BaseSection):
                 and not ctx.kwargs.get("conversation"))
 
     def _reads_the_workspace(self, ctx: SectionContext) -> bool:
-        """The turn recalls the workspace's other conversations (the Context Router's L2) and its
-        daily logs: a chat turn's, never a widget visitor's (F155), autonomous work's (F182) or an
-        end user's (PRD-274 W3), whose recall is their own facts and the workspace tier."""
-        from core.security.end_user_turn import current_end_user
-
-        return not (ctx.widget_mode or self._autonomous(ctx) or current_end_user() is not None)
+        """The turn recalls the workspace's other conversations (the Context Router's L2, a transcript
+        promoted into the durable tier) and its daily logs: a person's chat turn's, never a widget visitor's
+        (F155), autonomous work's (F182) or a product's (PRD-274 §5.5: a server key's own turn, or an end
+        user's), whose recall is the workspace's durable facts, and an end user's own."""
+        return not (ctx.widget_mode or self._autonomous(ctx) or on_a_products_turn())
 
     async def _build(self, ctx: SectionContext) -> str:
         # --- Context Router first (PRD-79), for a chat turn only ---
@@ -356,7 +356,7 @@ class MemorySection(BaseSection):
                 query=query,
                 limit=8,
                 widget_mode=ctx.widget_mode,
-                chat_transcripts=not self._autonomous(ctx),
+                chat_transcripts=not (self._autonomous(ctx) or on_a_products_turn()),  # F182, PRD-274 §5.5
                 # PRD-206 S7: Q7 private-scope guard + composite ranking
                 # happen inside retrieve_memories; the viewer rides kwargs.
                 viewer_subject_id=ctx.kwargs.get("viewer_subject_id"),

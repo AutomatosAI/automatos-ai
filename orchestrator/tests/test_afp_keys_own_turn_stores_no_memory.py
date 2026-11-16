@@ -1,11 +1,15 @@
-"""PRD-274 (made while building, 16 Nov 2026): a server key's own chat turn stores no memory.
+"""PRD-274 (made while building, 16 Nov 2026): a server key's own chat turn stores no memory, and every
+product turn follows §5.5 for what it reads and for the work done after it.
 
 A key's turn that names no end user is nobody's, as a widget turn is an anonymous visitor's (F154). What
 was said in it is no fact about the workspace, so nothing of it is written where the workspace's other
-turns would recall it: no distilled facts, no L2 row or mirror, no daily log, no L1 session, no knowledge
-flywheel ingest, and the idle checkpoint sweep passes over its conversation. The rule is held where memory
-is written (``core.security.end_user_turn.kept_from_a_keys_own_turn``). A key's turn for an end user still
-writes to their namespace; a person's turn, a lean agent's included, stores as before.
+turns would recall it: no distilled facts, no L2 row or mirror, no daily log, no L1 session. The rule is
+held where memory is written (``core.security.end_user_turn.kept_from_a_keys_own_turn``). A key's turn for
+an end user still writes to their namespace; a person's turn, a lean agent's included, stores as before.
+
+A product's turn (a key's own, or an end user's) reads the workspace's durable facts, never its other
+conversations or its daily logs; nothing it makes is ingested into the workspace's knowledge; and the idle
+checkpoint sweep reads a person's conversations only, never a product's or a widget visitor's.
 """
 from __future__ import annotations
 
@@ -294,7 +298,85 @@ def test_every_write_where_memory_leaves_the_process_is_held(where):
     assert getattr(write, KEPT_FROM_A_KEYS_OWN_TURN, False), f"{where} is not held on a key's own turn"
 
 
-# ── the idle checkpoint sweep ─────────────────────────────────────────────────
+# ── what a product's turn reads (§5.5) ────────────────────────────────────────
+
+OTHER_CONVERSATION = "Owner said: keep the margin target at 40% until March"
+DAILY_LOG = "Owner priced the Q4 plan with the accountant"
+DURABLE_FACT = "Lessons are 40 minutes long"
+
+
+class _Router:
+    """The unified memory service as the section reads it: the Context Router's bundle (another
+    conversation's L2 and the daily logs) and the conversation's own L1 session."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def retrieve_context(self, **kwargs):
+        self.calls.append(kwargs)
+        return NS(long_term_memories=[], session_summary=None, daily_logs=DAILY_LOG,
+                  temporal_results=[{"memory": OTHER_CONVERSATION}], knowledge_awareness=None,
+                  total_tokens_estimate=40, signals=[])
+
+    async def get_session(self, **kwargs):
+        return None
+
+
+class _SmartMemory:
+    def __init__(self):
+        self.recalls, self.daily_logs = [], 0
+
+    async def retrieve_memories(self, **kwargs):
+        self.recalls.append(kwargs)
+        return NS(formatted_context=f"- {DURABLE_FACT}", memories=[{"memory": DURABLE_FACT}], user_context=None)
+
+    async def get_daily_logs(self, **kwargs):
+        self.daily_logs += 1
+        return DAILY_LOG
+
+
+def _section_for(monkeypatch, lean):
+    from modules.context.sections.base import SectionContext
+    from modules.context.sections.memory import MemorySection
+
+    router, smart = _Router(), _SmartMemory()
+    monkeypatch.setattr("modules.memory.unified_memory_service.get_unified_memory_service", lambda: router)
+    monkeypatch.setattr("consumers.chatbot.smart_memory.get_smart_memory_manager", lambda: smart)
+    ctx = SectionContext(agent=NS(id=42), workspace_id=WS, widget_mode=False,
+                         kwargs={"query": "How long is a lesson?", "chat_id": "chat-1"})
+    with end_user_turn(getattr(lean, "end_user", None)), keys_own_turn(lean):
+        text = asyncio.run(MemorySection().render(ctx))
+    return text, router, smart
+
+
+@pytest.mark.parametrize("lean", [KEYS_OWN_REQUEST, FOR_THE_LEARNER], ids=["a keys own turn", "an end users turn"])
+def test_a_products_turn_reads_no_other_conversation_and_no_daily_log(monkeypatch, lean):
+    text, router, smart = _section_for(monkeypatch, lean)
+    assert router.calls == [] and smart.daily_logs == 0              # no Context Router L2, no daily log
+    assert [recall["chat_transcripts"] for recall in smart.recalls] == [False]  # no transcript promoted to L3
+    assert DURABLE_FACT in text
+    assert OTHER_CONVERSATION not in text and DAILY_LOG not in text
+
+
+def test_a_persons_turn_reads_the_workspace_as_before(monkeypatch):
+    text, router, _smart = _section_for(monkeypatch, PERSONS_LEAN_REQUEST)
+    assert len(router.calls) == 1 and OTHER_CONVERSATION in text and DAILY_LOG in text
+
+
+@pytest.mark.asyncio
+async def test_nothing_an_end_users_turn_makes_is_ingested(monkeypatch):
+    from services import knowledge_flywheel
+
+    def never(*args, **kwargs):
+        raise AssertionError("the flywheel was asked on an end user's turn")
+
+    monkeypatch.setattr(knowledge_flywheel, "flywheel_enabled", never)
+    with end_user_turn(LEARNER), keys_own_turn(FOR_THE_LEARNER):
+        assert await knowledge_flywheel.ingest_agent_output(
+            None, WS, content="# Their plan", filename="plan.md", source="generated_document") is None
+
+
+# ── the idle checkpoint sweep: a person's conversations only ──────────────────
 
 @pytest.fixture(scope="module")
 def engine():  # conftest's new_session binds to it
@@ -305,6 +387,7 @@ def engine():  # conftest's new_session binds to it
     eng = create_engine(get_database_url(), pool_pre_ping=True)
     with eng.begin() as conn:  # a test database built before these
         conn.execute(text("ALTER TABLE chats ADD COLUMN IF NOT EXISTS end_user_id VARCHAR(128)"))
+        conn.execute(text("ALTER TABLE chats ADD COLUMN IF NOT EXISTS widget_key_id UUID"))
         conn.execute(text("ALTER TABLE sdk_api_keys ADD COLUMN IF NOT EXISTS model_allow_list JSONB"))
         conn.execute(text("ALTER TABLE sdk_api_keys ADD COLUMN IF NOT EXISTS service_user_id INTEGER "
                           "REFERENCES users(id) ON DELETE SET NULL"))
@@ -334,7 +417,8 @@ def workspace(new_session):
 
 
 def _keys_service_user(new_session, ws):
-    """A server key of ``ws`` and the users row its turns run as: ``(key id, users.id)``."""
+    """The users row a server key of ``ws`` runs its turns as, the key revoked: revoking keeps its
+    service user, and its conversations stay its own."""
     from api.chat_server_key import service_user_for
     from core.auth.scopes import AGENTS_CHAT
     from core.services.api_key_service import ApiKeyService
@@ -342,17 +426,9 @@ def _keys_service_user(new_session, ws):
     s = new_session()
     try:
         made = ApiKeyService.create_api_key(s, uuid.UUID(ws), "tutor", key_type="server", permissions=[AGENTS_CHAT])
-        return made["id"], service_user_for(s, made["id"])
-    finally:
-        s.close()
-
-
-def _revoke(new_session, ws, key_id):
-    from core.services.api_key_service import ApiKeyService
-
-    s = new_session()
-    try:
-        assert ApiKeyService.revoke_api_key(s, uuid.UUID(str(key_id)), uuid.UUID(ws))
+        user_id = service_user_for(s, made["id"])
+        assert ApiKeyService.revoke_api_key(s, uuid.UUID(str(made["id"])), uuid.UUID(ws))
+        return user_id
     finally:
         s.close()
 
@@ -362,7 +438,7 @@ def _person(new_session, made):
 
     s = new_session()
     try:
-        name = f"learner-desk-{uuid.uuid4().hex[:8]}"
+        name = f"desk-{uuid.uuid4().hex[:8]}"
         user = User(username=name, email=f"{name}@example.com", name="A person", is_active=True)
         s.add(user)
         s.commit()
@@ -372,15 +448,16 @@ def _person(new_session, made):
         s.close()
 
 
-def _idle_chat(new_session, ws, user_id, end_user_id=None):
-    """A conversation of four messages, idle past the sweep's threshold."""
+def _idle_chat(new_session, ws, user_id, **tags):
+    """A conversation of four messages, idle past the sweep's threshold; ``tags`` are its
+    ``end_user_id`` or ``widget_key_id``."""
     from consumers.chatbot import ChatService
 
     s = new_session()
     try:
         chats = ChatService(s)
         chat_id = str(chats.create_chat(user_id=user_id, title=f"chat {uuid.uuid4().hex[:6]}",
-                                        workspace_id=uuid.UUID(ws), end_user_id=end_user_id).id)
+                                        workspace_id=uuid.UUID(ws), **tags).id)
         for role in ("user", "assistant", "user", "assistant"):
             chats.save_message(chat_id=chat_id, role=role, parts=[{"type": "text", "text": f"the {role} speaks"}],
                                workspace_id=ws)
@@ -392,7 +469,22 @@ def _idle_chat(new_session, ws, user_id, end_user_id=None):
         s.close()
 
 
-def test_the_idle_checkpoint_sweep_passes_over_a_keys_own_conversations(new_session, workspace, monkeypatch):
+def _a_keys_own(new_session, ws, person):
+    return _idle_chat(new_session, ws, _keys_service_user(new_session, ws))
+
+
+def _an_end_users(new_session, ws, person):
+    return _idle_chat(new_session, ws, _keys_service_user(new_session, ws), end_user_id="learner-7")
+
+
+def _a_widget_visitors(new_session, ws, person):
+    return _idle_chat(new_session, ws, person, widget_key_id=uuid.uuid4())  # a widget's chats are a person's row
+
+
+@pytest.mark.parametrize("product_or_visitor", [_a_keys_own, _an_end_users, _a_widget_visitors],
+                         ids=["a keys own", "an end users", "a widget visitors"])
+def test_the_idle_checkpoint_sweep_reads_a_persons_conversations_only(new_session, workspace, monkeypatch,
+                                                                     product_or_visitor):
     from config import config
     from services import memory_jobs
 
@@ -400,11 +492,9 @@ def test_the_idle_checkpoint_sweep_passes_over_a_keys_own_conversations(new_sess
     for name, value in (("THREAD_CHECKPOINT_IDLE_MINUTES", 30), ("THREAD_CHECKPOINT_LOOKBACK_HOURS", 48),
                         ("THREAD_CHECKPOINT_MIN_MESSAGES", 4), ("THREAD_CHECKPOINT_BATCH", 100000)):
         monkeypatch.setattr(config, name, value, raising=False)
-    key_id, key_user = _keys_service_user(new_session, ws)
-    keys_own = _idle_chat(new_session, ws, key_user)
-    for_the_learner = _idle_chat(new_session, ws, key_user, end_user_id="learner-7")  # their resume reads it
-    persons = _idle_chat(new_session, ws, _person(new_session, made))
-    _revoke(new_session, ws, key_id)  # revoking keeps its service user, and its conversations stay its own
+    person = _person(new_session, made)
+    skipped = product_or_visitor(new_session, ws, person)
+    persons = _idle_chat(new_session, ws, person)
 
     s = new_session()
     try:
@@ -412,4 +502,4 @@ def test_the_idle_checkpoint_sweep_passes_over_a_keys_own_conversations(new_sess
                       if str(workspace_id) == ws}
     finally:
         s.close()
-    assert candidates == {for_the_learner, persons} and keys_own not in candidates
+    assert candidates == {persons} and skipped not in candidates

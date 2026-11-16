@@ -92,14 +92,16 @@ def _on_own_session(work: Callable[[Any], Any]) -> Any:
         db.close()
 
 
-# PRD-274: a server key's own conversation (its service user's, naming no end user) stores no memory
-# (core.security.end_user_turn.keys_own_turn), so it is never checkpointed into the workspace's.
+# PRD-274 §5.5 and F154: the sweep checkpoints a person's conversations only. A product's (one that names
+# an end user, or any a server key's service user owns) and a widget visitor's are never written into a
+# tier of the workspace (core.security.end_user_turn).
 _CANDIDATES = text("""
     SELECT id, workspace_id FROM chats
     WHERE kind = 'user'
       AND workspace_id IS NOT NULL
-      AND NOT (chats.end_user_id IS NULL
-               AND EXISTS (SELECT 1 FROM sdk_api_keys k WHERE k.service_user_id = chats.user_id))
+      AND chats.end_user_id IS NULL
+      AND chats.widget_key_id IS NULL
+      AND NOT EXISTS (SELECT 1 FROM sdk_api_keys k WHERE k.service_user_id = chats.user_id)
       AND updated_at <= NOW() - (:idle_min * INTERVAL '1 minute')
       AND updated_at >= NOW() - (:lookback_h * INTERVAL '1 hour')
       AND (
@@ -114,8 +116,8 @@ _CANDIDATES = text("""
 
 def _checkpoint_candidates(db: Any) -> list:
     """User chats idle past the threshold (touched inside the lookback), with enough messages, whose
-    summary watermark is older than their last activity: the thread checkpoint sweep's batch. A server
-    key's own conversations are never in it (PRD-274)."""
+    summary watermark is older than their last activity: the thread checkpoint sweep's batch. A person's
+    conversations only: never a product's or a widget visitor's (PRD-274 §5.5, F154)."""
     from config import config as app_config
 
     params = {"idle_min": getattr(app_config, "THREAD_CHECKPOINT_IDLE_MINUTES", 30),

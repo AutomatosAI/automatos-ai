@@ -51,13 +51,20 @@ context variable set for the whole turn, the work it starts included):
 - every write the end-user hold wraps answers as when it stores nothing (``kept_from_a_keys_own_turn``):
   the durable store's ``add`` (the distilled facts, a tool's outcome, the context guard's flush, the L2
   mirror, the daily log), L2's ``store_short_term``, the daily summary and the L1 session;
-- so does the knowledge flywheel's ``ingest_agent_output`` (``services.knowledge_flywheel``);
-- the turn runs no distil (``StreamingChatService._remember_the_turn``): no model call, no memory-stored frame;
-- the idle thread-checkpoint sweep passes over a key's conversations that name no end user
-  (``services.memory_jobs``).
+- the turn runs no distil (``StreamingChatService._remember_the_turn``): no model call, no memory-stored frame.
 
-What the turn reads is unchanged: a lean agent still recalls its workspace's facts. A key's turn that names
-an end user is theirs, as above, and a person's turn is unchanged.
+A key's turn that names an end user is theirs, as above, and a person's turn is unchanged.
+
+**A product's turn, a key's own or an end user's, follows §5.5 for what it reads and for the work done after
+it** (``on_a_products_turn``):
+
+- it reads the workspace's durable facts (and an end user's turn their own), never the workspace's other
+  conversations (the Context Router's L2, a transcript promoted into the durable tier) or its daily logs
+  (``modules.context.sections.memory``);
+- nothing it makes is ingested into the workspace's knowledge (``ingest_agent_output`` in
+  ``services.knowledge_flywheel``, held by ``shared_with_no_end_user``);
+- the idle thread-checkpoint sweep never reads a product's conversation (a key's service user's, or one that
+  names an end user) or a widget visitor's (F154) into any tier of the workspace (``services.memory_jobs``).
 """
 from __future__ import annotations
 
@@ -151,6 +158,12 @@ def keys_own_turn(lean_request: Any) -> Iterator[None]:
 def on_a_keys_own_turn() -> bool:
     """Whether the turn is a server key's own, one that names no end user: it stores no memory."""
     return _keys_own.get()
+
+
+def on_a_products_turn() -> bool:
+    """Whether the turn is a product's (§5.5): a server key's own, or an end user's. It reads the workspace's
+    durable facts (and an end user's own), never the workspace's other conversations or its daily logs."""
+    return _keys_own.get() or _end_user.get() is not None
 
 
 def kept_nothing() -> Dict[str, Any]:

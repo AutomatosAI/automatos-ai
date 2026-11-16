@@ -303,7 +303,8 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
   - each conversation is one end user's (`chats.end_user_id`), and erasing them deletes their conversations and
     those conversations' sessions (#1487). The erase marks them first (`end_users.erasing_at`), so a turn still
     running writes nothing more for them, and a failed erase is finished by the next one.
-- A key's turn that names no end user stores no memory anywhere (decision 35, 16 Nov 2026).
+- A key's turn that names no end user stores no memory anywhere, and every product turn (a key's own or an end
+  user's) follows §5.5 for what it reads and for the work done after it (decision 35, 16 Nov 2026).
 - Retention: once a day, each end user's facts made before their `retention_days`, retired ones too, their
   messages sent before it, and their conversations left empty are deleted
   (`services/end_user_retention.py`; #1488, #1489).
@@ -515,16 +516,26 @@ Flagged in their PRs, for Gerard to confirm:
 
 ### Made while building, 16 Nov 2026 (approved by Gerard)
 
-35. **A server key's own turn stores no memory.** A key's chat turn that names no end user is nobody's, as a widget
-    turn is an anonymous visitor's (F154). It writes no distilled facts, nothing to L2, its mirror or the daily log,
-    no L1 session, no tool outcome, no context-guard flush and no knowledge flywheel ingest, and the idle checkpoint
-    sweep passes over its conversations. The rule is held where memory is written, for the whole turn and the work
-    it starts (`keys_own_turn` in `core/security/end_user_turn.py`). What the turn reads is unchanged: a lean agent
-    still recalls its workspace's facts. A key's turn for an end user still writes to their namespace, and a
-    person's turn is unchanged. (Not: storing it as the workspace's memory. A learner who has not consented, or an
-    analyst agent's account of one advisory, would come back in another turn's answer.)
-    *Open:* how long a key's own conversations (their messages) are kept. `services/end_user_retention.py` covers
-    end users only.
+35. **A server key's own turn stores no memory, and a product turn follows §5.5 for its reads and background
+    work.**
+    - *Writes.* A key's chat turn that names no end user is nobody's, as a widget turn is an anonymous visitor's
+      (F154). It writes no distilled facts, nothing to L2, its mirror or the daily log, no L1 session, no tool
+      outcome and no context-guard flush. The rule is held where memory is written, for the whole turn and the work
+      it starts (`keys_own_turn` in `core/security/end_user_turn.py`). A key's turn for an end user still writes to
+      their namespace, and a person's turn is unchanged.
+    - *Reads.* A product turn, a key's own or an end user's, reads the workspace's durable facts (and an end user's
+      turn their own), never the workspace's other conversations (L2, or a transcript promoted into the durable
+      tier) or its daily logs (`on_a_products_turn`). A person's turn is unchanged.
+    - *Knowledge.* Nothing a product turn makes is ingested into the workspace's knowledge (the flywheel's one seam).
+    - *Background work.* The idle thread-checkpoint sweep reads a person's conversations only. It skips every
+      conversation that names an end user, every one a key's service user owns and every widget visitor's (F154),
+      so no product's or visitor's conversation is written into any tier of the workspace. An end user's resume
+      (§5.7) lists their conversations without a checkpoint from the sweep.
+    - (Not: storing a product's conversations as the workspace's memory, or reading the workspace's other
+      conversations into them. A learner who has not consented, an analyst agent's account of one advisory, or one
+      end user's conversation would come back in another turn's answer.)
+    - *Open:* how long a key's own conversations (their messages) are kept; `services/end_user_retention.py` covers
+      end users only.
 
 ## 9. Later
 
