@@ -16,6 +16,8 @@
  *   viewer sees the week without the button.
  * * P256-FIX-SOC-2: a plan's draft that waits for the owner's input is listed apart, "Waits for
  *   you": it opens its editor and offers no Approve; the Queue still lists only needs_approval.
+ * * PRD-251D US-D108: a post whose file is older than its words (`file_current` false) shows the
+ *   sentence the server refuses with in place of a working Approve, and Render again renders it.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
@@ -40,6 +42,7 @@ vi.mock('@/lib/api-client', () => {
     approveSocialCampaignSeries: vi.fn(),
     approveSocialPlanBatch: vi.fn(),
     listSocialPosts: vi.fn(async () => ({ posts: [], total: 0 })),
+    renderSocialPost: vi.fn(async (id: string) => ({ id, status: 'rendering' })),  // PRD-251D US-D108: Render again
   }
   return { apiClient, default: apiClient }
 })
@@ -50,7 +53,8 @@ import { apiClient } from '@/lib/api-client'
 import { SocialsQueue } from '@/components/deliverables/socials/studio/socials-queue'
 import { queueHeading, queuedPosts, timeLeft, waitingForInput } from '@/components/deliverables/socials/studio/queue-model'
 import { SOCIAL_POST_REVIEW_STALE_MESSAGE } from '@/hooks/use-socials-api'
-import { NO_CHANNEL_HINT } from '@/components/deliverables/socials/socials-post-review'
+import { FILE_OLDER_THAN_WORDS, NO_CHANNEL_HINT, RENDER_AGAIN } from '@/components/deliverables/socials/socials-post-review'
+import { POST_NOW_LABEL } from '@/components/deliverables/socials/socials-approve-post-now'
 import { UNDO_TAKE } from '@/components/deliverables/socials/studio/queue-pane'
 import { RETAKE_STARTED } from '@/hooks/use-socials-queue'
 import { renderWith } from './socials-editor-harness'
@@ -172,6 +176,23 @@ describe('the Queue', () => {
     expect(within(pane()).queryByRole('button', { name: /publishes/ })).toBeNull()
     expect(within(pane()).getByText(NO_CHANNEL_HINT)).toBeInTheDocument()
     expect(within(pane()).getByText('No channels chosen yet.')).toBeInTheDocument()
+  })
+
+  it('US-D108: a post whose file is older than its words cannot be approved, says so, and Render again renders it', async () => {
+    renderQueue([waiting('a', '2026-10-14T12:00:00Z', { media: { '1:1': ['d-square'] }, file_current: false })])
+    expect(within(pane()).getByText(FILE_OLDER_THAN_WORDS)).toBeInTheDocument()
+    expect(within(pane()).getByRole('button', { name: 'Approve · publishes 12:00' })).toBeDisabled()
+    expect(within(pane()).getByRole('button', { name: POST_NOW_LABEL })).toBeDisabled()
+    fireEvent.click(within(pane()).getByRole('button', { name: RENDER_AGAIN }))
+    await waitFor(() => expect(api.renderSocialPost).toHaveBeenCalledWith('a'))
+    expect(api.approveSocialPost).not.toHaveBeenCalled()
+  })
+
+  it('US-D108: a post whose file still shows it keeps a working Approve and no sentence', () => {
+    renderQueue([waiting('a', '2026-10-14T12:00:00Z', { media: { '1:1': ['d-square'] }, file_current: true })])
+    expect(within(pane()).getByRole('button', { name: 'Approve · publishes 12:00' })).toBeEnabled()
+    expect(within(pane()).queryByText(FILE_OLDER_THAN_WORDS)).toBeNull()
+    expect(within(pane()).queryByRole('button', { name: RENDER_AGAIN })).toBeNull()
   })
 
   it('F256: Approve all shown leaves out a post with no channel', async () => {

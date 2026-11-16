@@ -55,6 +55,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from core.database.base import Base
+from core.social_file_current import file_current
 from core.social_render_state import render_block
 
 # D2: the twelve post statuses. Wave 0 moves posts through draft,
@@ -332,6 +333,8 @@ class SocialPost(Base):
             "status": self.status,
             # P256-FIX-SOC-5 (F437): where its render stands, from its history, right after the status
             "render": render_block(self.status, self.review_log),
+            # PRD-251D US-D108: whether its last render was made from what it holds now (Approve needs it)
+            "file_current": file_current(self),
             "content_hash": self.content_hash,
             "approved_hash": self.approved_hash,
             "approved_by": self.approved_by,

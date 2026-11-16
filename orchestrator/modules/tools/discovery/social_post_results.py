@@ -25,6 +25,13 @@ PRD-251D (E6, US-D106): every answer says the slot the post is planned for in it
 the slot says what it means beside it (``planned_note``): the owner still approves the post, and
 approving it schedules it into that slot, so it is not scheduled until then. A slot whose commit was
 refused after the post's own save is a failed call that says the rest was saved (``slot_not_set``).
+
+PRD-251D (US-D108): a post records what its file was made from, and says ``file_current`` false once
+an edit changed what a render reads (``core/social_file_current.py``); the owner cannot approve it
+until it renders again. A save that left the file older than the post's words says so in its answer
+(``file_current`` false, and a message with the call that renders it), and the post an agent reads
+lists the new render among what it still needs, both only while a render can start (``renders_again``:
+an approved post keeps its approved file). The compact post itself is unchanged.
 """
 from __future__ import annotations
 
@@ -52,6 +59,12 @@ PLANNED_NOTE = ("Planned for {when}: that is the post's slot in the Socials cale
                 "and approving it schedules it into that slot; it is not scheduled until then.")
 SLOT_NOT_SET = ('Saved post {id} ({title}), but its planned slot was NOT set: {why}. Nothing after the save ran. '
                 'Send planned_for and timezone again with platform_update_social_post {{"post_id": "{id}"}}.')
+# PRD-251D (US-D108): the post's flag (SocialPost.to_dict), on a save's answer only when it is false.
+FILE_CURRENT = "file_current"
+FILE_OLDER = ("Saved the change, but post {id}'s file was made before it, so the file no longer shows the post as it "
+              "is now and the owner cannot approve it. Render it again with platform_update_social_post "
+              '{{"post_id": "{id}", "render": true}}.')
+NEEDS_NEW_RENDER = "a new render: its file was made before its last change, so the owner cannot approve it yet"
 # read_view (P256-FIX-SOC-4): what comes first, in order, and what an agent's read leaves out.
 READ_FIRST = ("id", "status", "render", "title", "format", "template_id")  # P256-FIX-SOC-5: the render's state too
 TARGET_KEYS = ("toolkit", "post_kind", "options", "status", "published_at", "remote_id", "permalink", "error", "notes")
@@ -77,6 +90,14 @@ def planned_words(post: Mapping[str, Any]) -> Optional[str]:
     from modules.tools.discovery.social_post_list import slot_words
 
     return slot_words(post.get("planned_for"), post.get("timezone"))
+
+
+def renders_again(post: Mapping[str, Any]) -> bool:
+    """PRD-251D (US-D108): the post's file is older than its words, and a render can make it again now. An
+    approved or scheduled post keeps its approved file, and a render is refused while it holds the approval."""
+    from modules.socials.service import ACTION_RENDER, TRANSITIONS
+
+    return post.get(FILE_CURRENT) is False and post.get("status") in TRANSITIONS[ACTION_RENDER]
 
 
 def post_view(post: Mapping[str, Any], template_name: Optional[str]) -> Dict[str, Any]:
@@ -107,17 +128,22 @@ def read_view(post: Mapping[str, Any]) -> Dict[str, Any]:
     kept = [{key: value for key, value in entry.items() if key != AUTO_COPY_KEY} if isinstance(entry, Mapping)
             else entry for entry in log[-REVIEW_LOG_KEPT:]]
     placed = {*READ_FIRST, "targets", *WHEN_KEYS, *APPROVAL_KEYS, REVIEW_LOG, *READ_DROPPED}
+    older = [NEEDS_NEW_RENDER] if renders_again(post) else []  # PRD-251D US-D108
     return {
         **{key: post.get(key) for key in READ_FIRST}, "targets": targets, PLANNED: planned_words(post),
-        **{key: post.get(key) for key in (*WHEN_KEYS, *APPROVAL_KEYS)}, "needs": what_it_needs(post),
+        **{key: post.get(key) for key in (*WHEN_KEYS, *APPROVAL_KEYS)}, "needs": [*what_it_needs(post), *older],
         **{key: value for key, value in post.items() if key not in placed},
         REVIEW_LOG: kept, "review_log_total": len(log),
     }
 
 
 def saved(post: Mapping[str, Any], template_name: Optional[str], message: str) -> Dict[str, Any]:
-    """A post saved and not rendered by this call."""
-    return {"success": True, "post": post_view(post, template_name), "message": message}
+    """A post saved and not rendered by this call. PRD-251D (US-D108): when the save left the post's file
+    older than what it holds, the answer says so (``file_current`` false) and how to render it again."""
+    answer = {"success": True, "post": post_view(post, template_name), "message": message}
+    if not renders_again(post):
+        return answer
+    return {**answer, FILE_CURRENT: False, "message": FILE_OLDER.format(id=post.get("id"))}
 
 
 def rendering(post: Mapping[str, Any], template_name: Optional[str]) -> Dict[str, Any]:
@@ -166,6 +192,7 @@ def slot_not_set(post: Mapping[str, Any], template_name: Optional[str], why: str
             "post": post_view(post, template_name)}
 
 
-__all__ = ["CHANGED", "DRAFT_SAVED", "PLANNED", "PLANNED_NOTE", "RENDER_STARTED", "SLOT_NOT_SET", "media_links",
-           "not_rendered", "planned_note", "planned_words", "post_view", "read_view", "rendering", "saved",
-           "slot_not_set"]
+__all__ = ["CHANGED", "DRAFT_SAVED", "FILE_CURRENT", "FILE_OLDER", "NEEDS_NEW_RENDER", "PLANNED", "PLANNED_NOTE",
+           "RENDER_STARTED", "SLOT_NOT_SET", "media_links",
+           "not_rendered", "planned_note", "planned_words", "post_view", "read_view", "renders_again", "rendering",
+           "saved", "slot_not_set"]

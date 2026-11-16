@@ -8,6 +8,10 @@
  *   and the card says to save first.
  * * A viewer, and a post in any other status, see no approve controls.
  * * Once approved, the editor shows the post as approved, with its Activity card.
+ * * US-D108: a post whose file is older than its words (its own `file_current`, which the server
+ *   keeps) shows the Queue's sentence in place of a working Approve, with Render again, and is
+ *   offered Submit, which makes the file again. The editor holds nothing for the sitting: Approve
+ *   follows the post as the server answers it.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
@@ -32,7 +36,7 @@ import type { Workspace } from '@/components/workspace-provider'
 import type { SocialPost } from '@/lib/api-client'
 import { SocialsEditor } from '@/components/deliverables/socials/studio/socials-editor'
 import { APPROVE_CARD, SAVE_BEFORE_APPROVING, SEND_BACK_SUBMIT } from '@/components/deliverables/socials/studio/editor-approve-card'
-import { FILE_OLDER_THAN_WORDS } from '@/components/deliverables/socials/studio/editor-submit'
+import { FILE_OLDER_THAN_WORDS, RENDER_AGAIN } from '@/components/deliverables/socials/socials-post-review'
 import { POST_NOW_LABEL } from '@/components/deliverables/socials/socials-approve-post-now'
 import { api, post, renderWith, resetApi } from './socials-editor-harness'
 
@@ -54,48 +58,55 @@ beforeEach(() => { resetApi(); go.mockReset() })
 afterEach(cleanup)
 
 describe('approving in the editor', () => {
-  it('a saved change to what the file shows turns Approve off and offers Submit, which makes the file again', async () => {
-    // The post has its rendered file; the person then changes the brief and saves. The server keeps
-    // the old file, so approving now would approve words the file does not show.
-    const rendered = { ...WAITING, media: { '1:1': ['d-square'] } } as SocialPost
-    renderEditor(rendered)
+  /** A post waiting for approval with its rendered file. */
+  const RENDERED = { ...WAITING, media: { '1:1': ['d-square'] } } as SocialPost
+
+  it('a post whose file is older than its words shows the sentence in place of a working Approve, and Render again renders it', async () => {
+    // The server says the file was made before the post's last change to what a render reads.
+    renderEditor({ ...RENDERED, file_current: false })
     const controls = await screen.findByRole('region', { name: APPROVE_CARD })
-    expect(within(controls).getByRole('button', { name: APPROVE })).toBeEnabled()
-
-    fireEvent.change(screen.getByRole('textbox', { name: 'Brief' }), { target: { value: 'A different point entirely' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }))
-
-    expect(await within(controls).findByText(FILE_OLDER_THAN_WORDS)).toBeInTheDocument()
+    expect(within(controls).getByText(FILE_OLDER_THAN_WORDS)).toBeInTheDocument()
     expect(within(controls).getByRole('button', { name: APPROVE })).toBeDisabled()
+    expect(within(controls).getByRole('button', { name: POST_NOW_LABEL })).toBeDisabled()
+
+    fireEvent.click(within(controls).getByRole('button', { name: RENDER_AGAIN }))
+    await waitFor(() => expect(api.renderSocialPost).toHaveBeenCalledWith('post-1'))
     expect(api.approveSocialPost).not.toHaveBeenCalled()
-    // Submit is offered for a post that waits for approval, and it renders (the route allows it).
+  })
+
+  it('offers Submit for such a post, and Submit makes the file again (a render is allowed while it waits)', async () => {
+    renderEditor({ ...RENDERED, file_current: false })
+    await screen.findByRole('region', { name: APPROVE_CARD })
     fireEvent.click(screen.getByRole('button', { name: 'Submit for approval' }))
     await waitFor(() => expect(api.renderSocialPost).toHaveBeenCalledWith('post-1', {}))
     expect(api.submitSocialPost).not.toHaveBeenCalled()
   })
 
-  it('a save that changes nothing the file shows, a post with no file yet, and a file of your own leave Approve as it was', async () => {
-    const cases: Array<[SocialPost, string, string]> = [
-      // The title is not on the file.
-      [{ ...WAITING, media: { '1:1': ['d-square'] } } as SocialPost, 'Title', 'A better title'],
-      // No file yet: there is nothing for the words to be newer than.
-      [{ ...WAITING, media: {} } as SocialPost, 'Brief', 'A different point entirely'],
-      // A video of the person's own shows none of the post's words, so no edit makes it older than them.
-      [{ ...WAITING, format: 'video', media: { original: ['d-1'] } } as SocialPost, 'Brief', 'A different point entirely'],
-    ]
-    for (const [waiting, field, value] of cases) {
-      vi.mocked(toast.success).mockClear()  // an earlier save's "Draft saved" must not answer for this one
-      renderEditor(waiting)
-      const controls = await screen.findByRole('region', { name: APPROVE_CARD })
-      fireEvent.change(screen.getByRole('textbox', { name: field }), { target: { value } })
-      fireEvent.click(screen.getByRole('button', { name: 'Save draft' }))
-      // The flag is set after the save has answered: wait for that, then one more turn of the loop.
-      await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Draft saved'))
-      await new Promise((resolve) => setTimeout(resolve, 0))
-      expect(within(controls).queryByText(FILE_OLDER_THAN_WORDS)).toBeNull()
-      expect(screen.queryByRole('button', { name: 'Submit for approval' })).toBeNull()
-      cleanup()
-    }
+  it("Approve follows the post's own flag as the server answers it: the editor holds nothing for the sitting", async () => {
+    vi.mocked(toast.success).mockClear()  // an earlier test's "Draft saved" must not answer for this one
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const editor = (p: SocialPost) => (
+      <QueryClientProvider client={client}><SocialsEditor role="owner" post={p} go={go} /></QueryClientProvider>
+    )
+    const view = render(editor(RENDERED))
+    await screen.findByRole('region', { name: APPROVE_CARD })
+
+    // The brief is not on the file: saved, the server answers the post with its file still current.
+    fireEvent.change(screen.getByRole('textbox', { name: 'Brief' }), { target: { value: 'A different point entirely' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Draft saved'))
+    view.rerender(editor({ ...RENDERED, brief: 'A different point entirely', file_current: true, updated_at: '2026-10-14T09:00:00Z' }))
+    let controls = screen.getByRole('region', { name: APPROVE_CARD })
+    expect(within(controls).getByRole('button', { name: APPROVE })).toBeEnabled()
+    expect(within(controls).queryByText(FILE_OLDER_THAN_WORDS)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Submit for approval' })).toBeNull()
+
+    // A field is: the server answers with `file_current` false, and Approve waits for the file.
+    view.rerender(editor({ ...RENDERED, file_current: false, updated_at: '2026-10-14T09:05:00Z' }))
+    controls = screen.getByRole('region', { name: APPROVE_CARD })
+    expect(within(controls).getByText(FILE_OLDER_THAN_WORDS)).toBeInTheDocument()
+    expect(within(controls).getByRole('button', { name: APPROVE })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Submit for approval' })).toBeInTheDocument()
   })
 
   it("shows the Queue's controls for a post that waits for approval, to an owner and to an editor", async () => {

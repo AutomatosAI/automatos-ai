@@ -38,6 +38,8 @@ export const socialsEditorKeys = {
 
 export const LIBRARY_KINDS = ['image', 'video'] as const
 export const LIBRARY_LIMIT = 24
+/** The status the render route answers with: the render started, and the post goes for approval once it ends. */
+const RENDERING: SocialPost['status'] = 'rendering'
 
 /** The name the preview's post frame shows (PRD-251B US-B110): the brand kit's, else the
  * workspace's. */
@@ -110,16 +112,16 @@ export async function saveEditor({ postId, fields, targets, slot, onCreated }: E
   return saved
 }
 
-/** What a call says once it worked: one sentence, one that depends on what was asked, or nothing. */
-type SuccessMessage<Input> = string | null | ((input: Input) => string)
+/** What a call says once it worked: one sentence, one that depends on the post it answered, or nothing. */
+type SuccessMessage = string | null | ((post: SocialPost) => string)
 
-function useEditorMutation<Input>(run: (input: Input) => Promise<SocialPost>, success: SuccessMessage<Input>, failure: string) {
+function useEditorMutation<Input>(run: (input: Input) => Promise<SocialPost>, success: SuccessMessage, failure: string) {
   const invalidate = useInvalidateSocials()
   return useMutation<SocialPost, Error, Input>({
     mutationFn: run,
-    onSuccess: async (_post, input) => {
+    onSuccess: async (post) => {
       await invalidate()
-      const message = typeof success === 'function' ? success(input) : success
+      const message = typeof success === 'function' ? success(post) : success
       if (message) toast.success(message)
     },
     onError: async (error) => {
@@ -142,16 +144,18 @@ export function useRenderEditorPreview() {
   )
 }
 
-/** PRD-251D (E1): Submit for approval saves, then makes the file: with `render`, the full render
- * (never the preview), which ends the post in needs_approval by itself; without (a text post, a
- * video or slides of the person's own), the submit. A refusal (422, 429) leaves the post as it was. */
+/** PRD-251D (E1, US-D108): Submit for approval saves, then makes the file: with `render` (editor-submit.ts
+ * `submitRenders`), the full render (never the preview), which ends the post in needs_approval by itself;
+ * without, the submit. The save's own answer can still ask for the render: a save that left the post's
+ * file older than what it holds (`file_current` false, a change the editor does not compare, such as a
+ * footage prompt) renders too. A refusal (422, 429) leaves the post as it was. */
 export function useSubmitEditor() {
   return useEditorMutation<EditorSave & { render: boolean }>(
     async ({ render, ...save }) => {
-      const { id } = await saveEditor(save)
-      return render ? apiClient.renderSocialPost(id, {}) : apiClient.submitSocialPost(id)
+      const saved = await saveEditor(save)
+      return render || saved.file_current === false ? apiClient.renderSocialPost(saved.id, {}) : apiClient.submitSocialPost(saved.id)
     },
-    ({ render }) => (render ? RENDERING_FOR_APPROVAL : SENT_FOR_APPROVAL),
+    (post) => (post.status === RENDERING ? RENDERING_FOR_APPROVAL : SENT_FOR_APPROVAL),
     'Could not send the post for approval',
   )
 }

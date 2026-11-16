@@ -12,8 +12,14 @@
  * - F256: a post with no channel publishes nothing, so Approve waits for one and says why;
  *   with ``onEdit`` (the Queue) the hint opens the post to add one (3 Oct 2026).
  * - Approve & post now approves and publishes at once (socials-approve-post-now.tsx).
+ * - PRD-251D US-D108: a post whose file was made before its last change to what a render reads
+ *   (`file_current` false) is refused by the server, so Approve and Approve & post now are off,
+ *   and the sentence the server refuses with says so beside Render again, the full render that
+ *   makes the file from the post as it is. The Queue's pane and the editor's approve card both
+ *   show it here.
  */
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -22,6 +28,7 @@ import type { SocialPost } from '@/lib/api-client'
 import {
   SOCIAL_POST_REVIEW_STALE_MESSAGE,
   useApproveSocialPost,
+  useRenderSocialPost,
   useSocialPostAction,
   type SocialPostAction,
 } from '@/hooks/use-socials-api'
@@ -127,6 +134,31 @@ function NoChannelHint({ onEdit }: { onEdit?: () => void }) {
   )
 }
 
+/** PRD-251D US-D108: the server's own refusal (core/social_file_current.py FILE_OLDER_THAN_WORDS). */
+export const FILE_OLDER_THAN_WORDS = 'This file was made before the post last changed, so it does not show the post as it is now. Render it again, then approve it.'
+export const RENDER_AGAIN = 'Render again'
+
+/** Whether the post's file is older than what it holds. A post read without the flag counts as
+ * current, as the server counts a post with no render record. */
+export function fileOlderThanWords(post: Pick<SocialPost, 'file_current'>): boolean {
+  return post.file_current === false
+}
+
+/** The sentence in place of a working Approve, and the full render that makes the file again
+ * (off while the screen holds unsaved edits: it would render the post as it was saved). */
+function FileOlderHint({ postId, disabled }: { postId: string; disabled: boolean }) {
+  const render = useRenderSocialPost()
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <p className="text-xs text-muted-foreground">{FILE_OLDER_THAN_WORDS}</p>
+      <Button size="sm" variant="outline" onClick={() => render.mutate({ postId })} disabled={disabled || render.isLoading}>
+        {render.isLoading && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden />}
+        {RENDER_AGAIN}
+      </Button>
+    </div>
+  )
+}
+
 export function SocialsPostReview({ post, dirty, approveLabel = 'Approve', sendBack, extra, onEdit }: SocialsPostReviewProps) {
   const [asking, setAsking] = useState<Asking>(null)
   const [confirmClaims, setConfirmClaims] = useState<string[] | null>(null)
@@ -135,6 +167,8 @@ export function SocialsPostReview({ post, dirty, approveLabel = 'Approve', sendB
   const approve = useApproveSocialPost({ onStale: () => setStale(true), onUnsourced: setConfirmClaims })
   const busy = act.isLoading || approve.isLoading
   const goesNowhere = !hasChannels(post)
+  const fileOlder = fileOlderThanWords(post)  // PRD-251D US-D108: the server refuses its approval
+  const approveOff = busy || dirty || confirmClaims !== null || goesNowhere || fileOlder
 
   // A new version on screen is the one to review: a confirmation for the old one goes.
   useEffect(() => {
@@ -160,10 +194,10 @@ export function SocialsPostReview({ post, dirty, approveLabel = 'Approve', sendB
         </p>
       )}
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" onClick={startApprove} disabled={busy || dirty || confirmClaims !== null || goesNowhere}>
+        <Button size="sm" onClick={startApprove} disabled={approveOff}>
           {approveLabel}
         </Button>
-        <ApproveAndPostNow post={post} disabled={busy || dirty || confirmClaims !== null || goesNowhere} />
+        <ApproveAndPostNow post={post} disabled={approveOff} />
         <Button size="sm" variant="outline" onClick={() => setAsking('changes')} disabled={busy}>
           Request changes
         </Button>
@@ -179,6 +213,7 @@ export function SocialsPostReview({ post, dirty, approveLabel = 'Approve', sendB
         </Button>
       </div>
       {goesNowhere && <NoChannelHint onEdit={onEdit} />}
+      {fileOlder && <FileOlderHint postId={post.id} disabled={dirty || busy} />}
       {confirmClaims && (
         <UnsourcedConfirmation
           claims={confirmClaims}

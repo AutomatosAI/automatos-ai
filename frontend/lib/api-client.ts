@@ -557,6 +557,9 @@ export interface SocialPost {
   status: SocialPostStatus
   /** P256-FIX-SOC-5: where its render stands (when it started, when it gives up, why it waits or failed). */
   render?: SocialPostRender | null
+  /** PRD-251D US-D108: false when its file was made before its last change to what a render reads, so
+   * Approve waits for a render. The server always sends it; a post read without it counts as current. */
+  file_current?: boolean
   content_hash: string
   approved_hash: string | null
   approved_by: string | null

@@ -4,10 +4,12 @@
  * * US-D104 (E4) `startingKinds`: a new post starts with the channels of the workspace's most
  *   recent post that are still connected and can take the format, each at the format's own kind;
  *   with no earlier post, the one connected channel when there is exactly one; otherwise none.
- * * US-D102 (E1) `submitRenders` / `submitNote`: Submit renders every post with a visual (a
- *   template, Let Auto pick, a still of the person's own) and says so, with a video's render
- *   minutes in the preview note's own words; a text post and a video or slides of the person's
- *   own submit as they are.
+ * * US-D102 (E1) and US-D108 `submitRenders` / `submitNote`: Submit renders a post with a visual
+ *   (a template, Let Auto pick) when its file does not show it yet (no rendered file, its own
+ *   `file_current` false, or unsaved changes to what a render reads) and says so, with a video's
+ *   render minutes in the preview note's own words; a post whose file still shows it submits as
+ *   it is; a still of the person's own is cropped every time; a text post and a video or slides of
+ *   the person's own submit as they are.
  * * US-D105 (E5) `unconnectedChannels`: the supported channels the workspace has not connected.
  */
 import { describe, it, expect } from 'vitest'
@@ -65,27 +67,51 @@ describe('the channels a new post starts with (US-D104)', () => {
   })
 })
 
-describe('what Submit for approval makes first (US-D102)', () => {
-  it('renders every post with a visual, and says so', () => {
-    expect(submitRenders({ format: 'image', ownFile: false })).toBe(true)
-    expect(submitRenders({ format: 'carousel', ownFile: false })).toBe(true)
-    expect(submitNote({ format: 'image', ownFile: false, lengthSeconds: null, sizes: 2 })).toBe(SUBMIT_RENDERS)
+describe('what Submit for approval makes first (US-D102, US-D108)', () => {
+  /** A post as the server has it, with a rendered file unless `media` says otherwise. */
+  const rendered = (over: Partial<SocialPost> = {}) => ({ media: { '1:1': ['d-square'] }, ...over }) as unknown as SocialPost
+  const NEW = { post: null, unsaved: false }
+
+  it('renders a post with a visual that has no rendered file yet, and says so', () => {
+    expect(submitRenders({ format: 'image', ownFile: false, ...NEW })).toBe(true)
+    expect(submitRenders({ format: 'carousel', ownFile: false, post: rendered({ media: {} }), unsaved: false })).toBe(true)
+    // A template chosen over a picture of the person's own: the picture is no render of the template.
+    expect(submitRenders({ format: 'image', ownFile: false, post: rendered({ media: { original: ['d-own'] } }), unsaved: false })).toBe(true)
+    expect(submitNote({ format: 'image', ownFile: false, lengthSeconds: null, sizes: 2, ...NEW })).toBe(SUBMIT_RENDERS)
   })
 
-  it("crops a still of the person's own, at no render minutes", () => {
-    expect(submitRenders({ format: 'image', ownFile: true })).toBe(true)
-    expect(submitNote({ format: 'image', ownFile: true, lengthSeconds: null, sizes: 0 })).toBe(SUBMIT_CROPS)
+  it('renders a post whose file is older than its words, or whose edits on screen change what a render reads', () => {
+    expect(submitRenders({ format: 'image', ownFile: false, post: rendered({ file_current: false }), unsaved: false })).toBe(true)
+    expect(submitRenders({ format: 'image', ownFile: false, post: rendered({ file_current: true }), unsaved: true })).toBe(true)
+    expect(submitNote({ format: 'image', ownFile: false, lengthSeconds: null, sizes: 2, post: rendered({ file_current: false }), unsaved: false }))
+      .toBe(SUBMIT_RENDERS)
+  })
+
+  it('submits a post whose file still shows it as it is, with no line about a render', () => {
+    // A post read without the flag counts as current, as the server counts one with no render record.
+    for (const post of [rendered({ file_current: true }), rendered()]) {
+      expect(submitRenders({ format: 'image', ownFile: false, post, unsaved: false })).toBe(false)
+      expect(submitNote({ format: 'image', ownFile: false, lengthSeconds: null, sizes: 2, post, unsaved: false })).toBeNull()
+    }
+    const video = rendered({ media: { '9:16': ['d-video'] }, file_current: true })
+    expect(submitRenders({ format: 'video', ownFile: false, post: video, unsaved: false })).toBe(false)
+  })
+
+  it("crops a still of the person's own every time, at no render minutes: its crops follow its channels", () => {
+    const own = rendered({ media: { original: ['d-own'], '1:1': ['d-crop'] }, file_current: true })
+    expect(submitRenders({ format: 'image', ownFile: true, post: own, unsaved: false })).toBe(true)
+    expect(submitNote({ format: 'image', ownFile: true, lengthSeconds: null, sizes: 0, post: own, unsaved: false })).toBe(SUBMIT_CROPS)
   })
 
   it("submits a text post and a video or slides of the person's own as they are, with no line", () => {
     for (const input of [{ format: 'text', ownFile: false }, { format: 'video', ownFile: true }, { format: 'carousel', ownFile: true }]) {
-      expect(submitRenders(input)).toBe(false)
-      expect(submitNote({ ...input, lengthSeconds: 30, sizes: 2 })).toBeNull()
+      expect(submitRenders({ ...input, ...NEW, unsaved: true })).toBe(false)
+      expect(submitNote({ ...input, lengthSeconds: 30, sizes: 2, ...NEW })).toBeNull()
     }
   })
 
   it("names a video's full render and its render minutes, in the preview note's own words", () => {
-    expect(submitNote({ format: 'video', ownFile: false, lengthSeconds: 30, sizes: 2 })).toBe(
+    expect(submitNote({ format: 'video', ownFile: false, lengthSeconds: 30, sizes: 2, ...NEW })).toBe(
       'Submit for approval makes the full render first, then it waits for approval: about 1 render minutes (2 sizes x 0:30).',
     )
     expect(fullRenderCost(null, 0)).toBe('about a few render minutes (1 size x its length)')

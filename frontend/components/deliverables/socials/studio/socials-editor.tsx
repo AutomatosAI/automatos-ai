@@ -13,9 +13,11 @@
  * PRD-251D Wave 1: a post that waits for approval is approved here, with the Queue's controls
  * (US-D101); Submit for approval makes the file with the full render (US-D102, editor-submit.ts);
  * a new post starts with its channels ticked (US-D104); a channel not connected yet is connected
- * from the Channels card (US-D105).
+ * from the Channels card (US-D105). US-D108: whether the file still shows the post is the post's
+ * own `file_current`, which the server keeps: Approve waits on it, and Submit renders only when
+ * the file does not show the post yet.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
 import type { Workspace } from '@/components/workspace-provider'
 import type { SocialPost } from '@/lib/api-client'
@@ -35,7 +37,8 @@ import { EditorFormatCard } from './editor-format-card'
 import { EditorLookCard } from './editor-look-card'
 import { photoSpotsOf } from './editor-look-photo'
 import { EditorPreviewColumn } from './editor-preview-column'
-import { saveOutdatesFile, submitNote, submitRenders, type SubmitInput } from './editor-submit'
+import { previewStale } from './preview-model'
+import { submitNote, submitRenders, type SubmitInput } from './editor-submit'
 import { EditorWhenCard } from './editor-when-card'
 import {
   editorTargets, givenFields, isOwnFilePost, postFields, slidesOf, slotChanged, slotInput, videoSlotsOf, withChannelTicked, withFormat,
@@ -83,12 +86,6 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
   const photoSpots = useMemo(() => photoSpotsOf(chosen), [chosen])
   const calls = useEditorCalls()
   const [needs, setNeeds] = useState<string | null>(null)  // F378: what the last redraft asked of the owner
-  // A change saved here to what the file shows leaves the file older than the words until a render
-  // makes it again: Approve waits and Submit is offered (editor-submit.ts `saveOutdatesFile`).
-  const [fileOutdated, setFileOutdated] = useState(false)
-  useEffect(() => {
-    if (post?.status === 'rendering') setFileOutdated(false)
-  }, [post?.status])
   // F254: the post a Save, Render or Submit created, kept even when a later step fails, so
   // the next try edits it instead of creating another.
   const created = useRef<string | null>(null)
@@ -126,37 +123,29 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
       },
     )
   }
-  const saveDraft = () => {
-    const outdates = saveOutdatesFile(post, draft)
-    calls.save.mutate(payload(), {
-      ...opened,
-      onSuccess: (saved) => {
-        if (outdates) setFileOutdated(true)
-        return opened.onSuccess(saved)
-      },
-    })
-  }
   const mediaBusy = calls.upload.isLoading || calls.pick.isLoading
   const ownFile = isOwnFilePost(post, draft)
   const ownStill = ownFile && draft.format === 'image'  // PRD-251C US-C303: rendered into a crop per channel
-  // PRD-251D (E1): what Submit for approval makes first, decided from what is on screen.
-  const submit: SubmitInput = { format: draft.format, ownFile, lengthSeconds: draft.lengthSeconds, sizes: (chosen?.sizes ?? []).length }
+  // PRD-251D (E1, US-D108): what Submit for approval makes first, from the post's own flag and what is on
+  // screen. Only the edits count, not a preview older than a later full render: hence no preview here.
+  const unsaved = previewStale(post && { ...post, preview: null }, draft)
+  const submit: SubmitInput = { format: draft.format, ownFile, lengthSeconds: draft.lengthSeconds, sizes: (chosen?.sizes ?? []).length, post, unsaved }
 
   return (
     <div className="socials-editor flex flex-col gap-5">
       <SocialsEditorHeader
         post={post} draft={draft} busy={busy} overLimit={channelsOverLimit(draft, channels).length > 0} nothingToRender={ownFile && !ownStill}
-        submitNote={submitNote(submit)} fileOutdated={fileOutdated}
+        submitNote={submitNote(submit)}
         onTitle={(title) => setDraft((d) => ({ ...d, title }))}
         onBack={() => go({ view: 'calendar', post: null })}
-        onSave={() => saveDraft()}
+        onSave={() => calls.save.mutate(payload(), opened)}
         onRender={() => calls.render.mutate({ ...payload(), video: draft.format === 'video' }, opened)}
         onSubmit={() => calls.submit.mutate({ ...payload(), render: submitRenders(submit) }, opened)}
         extra={post && <DeletePostButton post={post} role={role} onDeleted={() => go({ view: 'calendar', post: null })} />}
       />
       {!post && <Hint>{NEW_POST_STEPS}</Hint>}
       {ownFile && <Hint>{ownStill ? OWN_STILL_STEPS : OWN_FILE_STEPS}</Hint>}
-      {post && <EditorApproveCard post={post} role={role} dirty={dirty} fileOutdated={fileOutdated} />}
+      {post && <EditorApproveCard post={post} role={role} dirty={dirty} />}
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <div className="flex min-w-0 flex-col gap-4">
           <EditorBriefCard brief={draft.brief} busy={calls.redraft.isLoading} canRedraft needs={needs} onChange={(brief) => setDraft((d) => ({ ...d, brief }))} onRedraft={redraft} />

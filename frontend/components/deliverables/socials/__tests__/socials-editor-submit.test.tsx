@@ -1,10 +1,13 @@
 /**
  * PRD-251D US-D102 (E1) — Submit for approval makes the file, against the editor's apiClient double.
  *
- * * A post with a visual (a template, Let Auto pick) is saved, then given the full render (POST
- *   /render with no preview), which ends it in needs_approval by itself: never the submit route.
- * * A post whose rendered file was sent back renders again: the post keeps no record of which
- *   words its file shows, so Submit never sends one whose words may have changed since.
+ * * A post with a visual (a template, Let Auto pick) and no rendered file yet is saved, then given
+ *   the full render (POST /render with no preview), which ends it in needs_approval by itself:
+ *   never the submit route.
+ * * US-D108: a post sent back with its rendered file renders again only when the file does not
+ *   show it: its own `file_current` is false, the editor holds unsaved changes to what a render
+ *   reads, or the save itself answers that the file is older than the post. Otherwise its file
+ *   already shows it, and it is submitted through the submit route as before.
  * * A video makes the full render, never the half-resolution preview, and the line under Submit
  *   says its render minutes; a still of the person's own is cropped; a text post submits.
  * * A refusal (422 naming what Auto could not write, 429 no render minutes) shows as Render
@@ -82,10 +85,44 @@ describe('Submit for approval', () => {
     await waitFor(() => expect(go).toHaveBeenCalledWith({ post: 'post-new' }))
   })
 
-  it('renders again a post whose file was rendered before it was sent back', async () => {
-    await submit(SENT_BACK)
+  it('renders again a post sent back whose file is older than its words (US-D108)', async () => {
+    renderEditor({ ...SENT_BACK, file_current: false })
+    await screen.findByText('TikTok')
+    expect(note()).toHaveTextContent(SUBMIT_RENDERS)
+    fireEvent.click(submitButton())
     await waitFor(() => expect(api.renderSocialPost).toHaveBeenCalledWith('post-1', {}))
     expect(api.submitSocialPost).not.toHaveBeenCalled()
+  })
+
+  it('submits a post sent back whose file still shows it, through the submit route, with no line about a render (US-D108)', async () => {
+    renderEditor({ ...SENT_BACK, file_current: true })
+    await screen.findByText('TikTok')
+    expect(note()).toBeNull()
+    fireEvent.click(submitButton())
+    await waitFor(() => expect(api.submitSocialPost).toHaveBeenCalledWith('post-1'))
+    expect(api.renderSocialPost).not.toHaveBeenCalled()
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(SENT_FOR_APPROVAL))
+  })
+
+  it('renders such a post once the editor holds an unsaved change to what a render reads (US-D108)', async () => {
+    renderEditor({ ...SENT_BACK, file_current: true })
+    await screen.findByText('TikTok')
+    fireEvent.change(screen.getByRole('textbox', { name: 'Brief' }), { target: { value: 'Say Friday, not Thursday.' } })
+    expect(note()).toHaveTextContent(SUBMIT_RENDERS)
+    fireEvent.click(submitButton())
+    await waitFor(() => expect(api.renderSocialPost).toHaveBeenCalledWith('post-1', {}))
+    expect(api.submitSocialPost).not.toHaveBeenCalled()
+  })
+
+  it("renders when the save's own answer says the file is now older than the post (US-D108)", async () => {
+    // A change the editor does not compare (a footage prompt, say): the server's flag after the save decides.
+    api.setSocialPostTargets.mockImplementationOnce(async (id: string) => post({ ...SENT_BACK, id, file_current: false }))
+    renderEditor({ ...SENT_BACK, file_current: true })
+    await screen.findByText('TikTok')
+    fireEvent.click(submitButton())
+    await waitFor(() => expect(api.renderSocialPost).toHaveBeenCalledWith('post-1', {}))
+    expect(api.submitSocialPost).not.toHaveBeenCalled()
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(RENDERING_FOR_APPROVAL))
   })
 
   it('gives a video the full render, not the preview, and says its render minutes', async () => {

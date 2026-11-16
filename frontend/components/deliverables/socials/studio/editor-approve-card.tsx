@@ -6,9 +6,9 @@
  * changes, which sends the post back to Auto as the Queue does, Reject, and the unsourced-claims
  * confirmation) for a post that waits for approval, to a person who may approve (the Queue's
  * role rule, `postActions(...).review`). Approval binds to the stored content (D6), so while the
- * editor holds unsaved edits Approve is off and the card says to save first. After a saved
- * change to what the file shows, the file is older than the words: Approve stays off and the
- * card says to make the file again (editor-submit.ts `saveOutdatesFile`).
+ * editor holds unsaved edits Approve is off and the card says to save first. A post whose file was
+ * made before its last change to what a render reads (its `file_current`, US-D108) shows the
+ * Queue's own sentence in place of a working Approve, with Render again (socials-post-review.tsx).
  */
 import type { Workspace } from '@/components/workspace-provider'
 import type { SocialPost } from '@/lib/api-client'
@@ -17,7 +17,6 @@ import { SocialsPostReview, type SendBack } from '../socials-post-review'
 import { postActions } from '../socials-status'
 import { approveLabel } from './queue-model'
 import { SEND_BACK_HINT } from './queue-pane'
-import { FILE_OLDER_THAN_WORDS } from './editor-submit'
 import { EditorCard, Hint } from './editor-ui'
 
 export const APPROVE_CARD = 'Approve'
@@ -31,8 +30,6 @@ interface EditorApproveCardProps {
   role: Workspace['role']
   /** The editor holds edits the server does not have yet. */
   dirty: boolean
-  /** A change saved in this sitting left the post's file older than its words. */
-  fileOutdated?: boolean
 }
 
 /** Request changes as the Queue sends it: back to Auto with what should change. */
@@ -47,14 +44,13 @@ function useSendBack(postId: string): SendBack {
   }
 }
 
-export function EditorApproveCard({ post, role, dirty, fileOutdated = false }: EditorApproveCardProps) {
+export function EditorApproveCard({ post, role, dirty }: EditorApproveCardProps) {
   const sendBack = useSendBack(post.id)
   if (!postActions(role, post.status).review) return null
   return (
     <EditorCard label={APPROVE_CARD}>
       {dirty && <Hint>{SAVE_BEFORE_APPROVING}</Hint>}
-      {fileOutdated && <Hint>{FILE_OLDER_THAN_WORDS}</Hint>}
-      <SocialsPostReview post={post} dirty={dirty || fileOutdated} approveLabel={approveLabel(post)} sendBack={sendBack} />
+      <SocialsPostReview post={post} dirty={dirty} approveLabel={approveLabel(post)} sendBack={sendBack} />
     </EditorCard>
   )
 }

@@ -79,6 +79,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func, or_, update
 
+from core import social_file_current as file_state
 from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.social_templates import MAX_SLOTS, VARIABLE_NAME
 from modules.socials import targets as post_targets
@@ -809,7 +810,8 @@ def approve(
 
     ``content_hash`` is the hash of the version the approver was shown; when the post is not that version
     any more, :class:`StaleContent` (with the current hash) and the post is unchanged. A video whose label
-    disagrees with the post's AI-generated label is refused (:class:`NotPublishable`, PRD-264 EUAI-08a).
+    disagrees with the post's AI-generated label is refused (:class:`NotPublishable`, PRD-264 EUAI-08a), and
+    so is a post whose file was made before its last change to what a render reads (PRD-251D US-D108).
     Refuses unsourced claims (D7) unless ``override_unsourced``; an override is stored on the post and names
     the claims in ``review_log``. ``unresolved_sources`` (claim → why) are the sources the caller found
     missing from the workspace (S1.4): their claims count as unsourced, and an override records why.
@@ -821,6 +823,8 @@ def approve(
     if content_hash != current or content_hash != post.content_hash:
         raise StaleContent(current)
     ai_media.assert_label_rendered(post)  # PRD-264 EUAI-08a: the video shows the label as the post sets it
+    if not file_state.file_current(post):  # PRD-251D US-D108: never a file older than what the post holds
+        raise NotPublishable(file_state.FILE_OLDER_THAN_WORDS)
     unsourced = unsourced_claims(post, unresolved_sources, template_claims)
     if unsourced and not override_unsourced:
         raise UnsourcedClaims(unsourced, unresolved_sources)
@@ -966,6 +970,8 @@ def finish_render(
     recomputed over it, so an approval binds to these exact files (D6).
     ``credits`` are the lines the render's music asks for (S1.6, a CC BY
     track): they join the copy the approver reviews, and the history says so.
+    The entry records what the files were made from (PRD-251D US-D108,
+    ``core/social_file_current.py``), so a later edit shows as a file older than its words.
     """
     target = _target(post, ACTION_RENDER_DONE)
     before = post.media if isinstance(post.media, Mapping) else {}
@@ -979,6 +985,7 @@ def finish_render(
     extra: Dict[str, Any] = {"report": dict(report)} if report else {}
     if added:
         extra["credits_added"] = [line for line in dict.fromkeys(credits) if line]
+    extra[file_state.MADE_FROM] = file_state.render_inputs_hash(post)  # US-D108: what the file was made from
     _log(post, actor, ACTION_RENDER_DONE, summary, **extra)
     return post
 
