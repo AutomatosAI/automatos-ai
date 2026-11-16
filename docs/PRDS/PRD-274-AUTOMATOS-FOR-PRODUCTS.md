@@ -289,7 +289,7 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
   reports as its own service user, only an agent's reply in a chat that user holds, tagged with the end user it names
   in `end_user_id` (or with none when it names none); never a member's chat, a public chat, another key's chat, a
   Deliverable or an end user whose erase has started, each a 404. Its audit row names the key, never the end user (the
-  erase leaves audit rows alone), and it counts per end user.
+  erase leaves audit rows alone). It counts per end user, and per key for its own chats with no end user.
 - Alongside: the caller's address read one way, from the header the proxy sets (#1474); stacked PRs get every
   required check (#1473); private memories kept to their owner on list and search (#1472).
 

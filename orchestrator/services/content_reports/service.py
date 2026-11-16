@@ -8,7 +8,8 @@
    chatted holds no chat, and an end user whose consent is gone or whose erase
    has started is not reported for: either is ``ReportTargetNotFound``;
 2. the per-reporter rate limit (``check_rate_limit``; over it the limiter raises
-   its own 429, before anything is written). A key counts per end user;
+   its own 429, before anything is written). A key counts per end user, and for
+   its own chats with no end user per key, at its own limit;
 3. the target, found in the caller's workspace (``targets``), else
    ``ReportTargetNotFound``;
 4. a duplicate check: the same reporter's earlier report of the same target
@@ -49,6 +50,10 @@ logger = logging.getLogger(__name__)
 # 20 an hour unless RATE_LIMIT_CONTENT_REPORT_MAX / _WINDOW_SECONDS say otherwise.
 RATE_LIMIT_OPERATION = "content_report"
 CONTENT_REPORT_RATE_LIMIT: tuple[int, int] = config.rate_limit_for(RATE_LIMIT_OPERATION, 20, 3600)
+# A server key reporting a reply in its own chats for no end user (a key's own turn): one bucket per
+# key, 60 an hour unless RATE_LIMIT_CONTENT_REPORT_KEY_MAX / _WINDOW_SECONDS say otherwise.
+KEY_RATE_LIMIT_OPERATION = "content_report_key"
+KEY_CONTENT_REPORT_RATE_LIMIT: tuple[int, int] = config.rate_limit_for(KEY_RATE_LIMIT_OPERATION, 60, 3600)
 
 # The owner's notice (K9). The bell opens Command Center -> Governance for this link type.
 NOTICE_TITLE = "Content reported"
@@ -89,12 +94,19 @@ def notice_message(target_type: str, reason: str) -> str:
     return f"{kind} was reported as {reason}. Open Governance to review it."
 
 
+def _limit_of(reporter: Reporter) -> tuple[str, tuple[int, int]]:
+    """The limiter's operation and limits: a key's own chats count per key; anyone else per reporter."""
+    if reporter.is_key and reporter.end_user_id is None:
+        return KEY_RATE_LIMIT_OPERATION, KEY_CONTENT_REPORT_RATE_LIMIT
+    return RATE_LIMIT_OPERATION, CONTENT_REPORT_RATE_LIMIT
+
+
 async def _within_rate_limit(workspace_id: UUID, reporter: Reporter) -> None:
     """Count this report against the reporter's bucket; the limiter raises 429 over it."""
-    max_requests, window_seconds = CONTENT_REPORT_RATE_LIMIT
+    operation, (max_requests, window_seconds) = _limit_of(reporter)
     await rate_limiter.check_rate_limit(
         str(workspace_id),
-        RATE_LIMIT_OPERATION,
+        operation,
         max_requests=max_requests,
         window_seconds=window_seconds,
         subject_id=reporter.limit_subject,
@@ -222,6 +234,8 @@ def _with_id(report: FiledReport, report_id: int, *, duplicate: bool) -> FiledRe
 __all__ = [
     "CONTENT_REPORT_RATE_LIMIT",
     "FiledReport",
+    "KEY_CONTENT_REPORT_RATE_LIMIT",
+    "KEY_RATE_LIMIT_OPERATION",
     "NOTICE_LINK_TYPE",
     "NOTICE_TITLE",
     "RATE_LIMIT_OPERATION",

@@ -145,7 +145,7 @@ def floor(new_session):
 @pytest.fixture
 def fakes(monkeypatch):
     """The owner's notices, the rate-limit checks, and any Deliverable read (none is expected)."""
-    seen = SimpleNamespace(notices=[], limits=[], deliverables=[])
+    seen = SimpleNamespace(notices=[], limits=[], maxima=[], deliverables=[])
 
     class _Dispatcher:
         def __init__(self, db, workspace_id):
@@ -157,6 +157,7 @@ def fakes(monkeypatch):
 
     async def _check(workspace_id, operation, **kwargs):
         seen.limits.append((operation, kwargs["subject_id"]))
+        seen.maxima.append(kwargs["max_requests"])
 
     async def _deliverable(db, **kwargs):
         seen.deliverables.append(kwargs)
@@ -255,9 +256,16 @@ def test_an_end_user_whose_erase_started_is_not_reported_for(new_session, floor,
 def test_a_key_naming_no_end_user_reaches_only_its_chats_for_no_one(new_session, floor, fakes):
     filed = _report(new_session, floor.a, floor.msgs["the_keys_own_reply"], end_user=None)
     assert filed.duplicate is False
-    with pytest.raises(service.ReportTargetNotFound):
+    with pytest.raises(service.ReportTargetNotFound):  # an end user's chat, named without its end user
         _report(new_session, floor.a, floor.msgs["alphas_reply"], end_user=None)
-    assert fakes.limits[0] == (service.RATE_LIMIT_OPERATION, str(floor.a_user))
+    # The key's own chats count per key, at the key's own limit.
+    assert fakes.limits[0] == (service.KEY_RATE_LIMIT_OPERATION, str(floor.a_user))
+    assert fakes.maxima[0] == service.KEY_CONTENT_REPORT_RATE_LIMIT[0]
+
+
+def test_a_key_naming_its_end_user_counts_per_end_user_at_the_reporters_limit(new_session, floor, fakes):
+    _report(new_session, floor.a, floor.msgs["alphas_reply"])
+    assert fakes.maxima == [service.CONTENT_REPORT_RATE_LIMIT[0]]
 
 
 def test_a_key_reports_no_deliverable(new_session, floor, fakes):
