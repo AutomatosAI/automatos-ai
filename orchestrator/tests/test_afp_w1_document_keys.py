@@ -544,13 +544,13 @@ def test_a_keys_upload_never_answers_with_or_writes_over_a_hidden_document(new_s
                                          content_hash=hashlib.sha256(data).hexdigest()))
     member = _upload(new_session, _member(library.ws), "minutes-again.md", data)
     assert (member.status, member.document_id) == ("duplicate", kept)   # a member's upload is as before
-    key = _key_ctx(new_session, routes, UPLOAD, library.ws, [DOCUMENTS_WRITE])
+    caller = _key_ctx(new_session, routes, UPLOAD, library.ws, [DOCUMENTS_WRITE])
 
-    answer = _upload(new_session, key, "minutes-copy.md", data)          # the same bytes as a private document
+    answer = _upload(new_session, caller, "minutes-copy.md", data)          # the same bytes as a private document
     assert answer.status != "duplicate" and answer.document_id != kept
     for name in ("notes.md", "margins.md"):                               # the name of a private, a team document
         with pytest.raises(HTTPException) as clash:
-            _upload(new_session, key, name, b"A new text under that name.\n")
+            _upload(new_session, caller, name, b"A new text under that name.\n")
         assert (clash.value.status_code, clash.value.detail) == (409, UPLOAD_CLASH), name
     assert _names_in(new_session, library.ws).count("notes.md") == 1
     assert _names_in(new_session, library.ws).count("margins.md") == 1
@@ -562,17 +562,17 @@ def test_a_keys_spreadsheet_never_writes_over_a_hidden_spreadsheets_copy(new_ses
     original = "name,role\nPriya,lead\n"
     _add(new_session, _document(library.ws, "roster list.csv", file_type="csv", team_access=[], is_shared=False))
     uploads.worker.files["documents/roster_list.csv"] = original
-    key = _key_ctx(new_session, routes, UPLOAD, library.ws, [DOCUMENTS_WRITE])
+    caller = _key_ctx(new_session, routes, UPLOAD, library.ws, [DOCUMENTS_WRITE])
 
     for name in ("roster list.csv", "roster_list.csv"):                   # its name, and a name with its copy's path
         with pytest.raises(HTTPException) as clash:
-            _upload(new_session, key, name, b"name,role\nSam,stand-in\n")
+            _upload(new_session, caller, name, b"name,role\nSam,stand-in\n")
         assert (clash.value.status_code, clash.value.detail) == (409, UPLOAD_CLASH), name
     assert uploads.worker.files["documents/roster_list.csv"] == original and uploads.worker.written == {}
     assert list(uploads.folder.iterdir()) == []                           # nothing was saved either
     assert "roster_list.csv" not in _names_in(new_session, library.ws)
 
-    _upload(new_session, key, "rota.csv", b"day,shift\nMonday,early\n")   # a name of its own goes through
+    _upload(new_session, caller, "rota.csv", b"day,shift\nMonday,early\n")   # a name of its own goes through
     assert set(uploads.worker.written) == {"documents/rota.csv"}
     member = _upload(new_session, _member(library.ws), "roster_list.csv", b"name,role\nSam,stand-in\n")
     assert member.document_id and "documents/roster_list.csv" in uploads.worker.written   # a member as before
@@ -583,10 +583,10 @@ def test_a_keys_upload_naming_teams_is_refused_before_anything_is_saved(new_sess
     """A key writes only documents it can read back: one a team limits it could never list, get,
     delete or upload again."""
     forecast = b"month,total\nOctober,1200\n"
-    key = _key_ctx(new_session, routes, UPLOAD, library.ws, [DOCUMENTS_WRITE])
+    caller = _key_ctx(new_session, routes, UPLOAD, library.ws, [DOCUMENTS_WRITE])
     for teams in ("finance", "Finance, ops"):
         with pytest.raises(HTTPException) as refused:
-            _upload(new_session, key, "q4-forecast.csv", forecast, team_access=teams)
+            _upload(new_session, caller, "q4-forecast.csv", forecast, team_access=teams)
         assert (refused.value.status_code, refused.value.detail) == (400, KEY_TEAM_ACCESS_REFUSED), teams
     assert list(uploads.folder.iterdir()) == [] and uploads.worker.written == {}   # nothing saved, nothing written
     assert uploads.manager.processed == [] and "q4-forecast.csv" not in _names_in(new_session, library.ws)
@@ -597,13 +597,13 @@ def test_a_keys_upload_naming_teams_is_refused_before_anything_is_saved(new_sess
 
 def test_a_key_replaces_a_document_it_reaches_and_the_replacement_names_the_key(new_session, library, unlimited,
                                                                                routes, uploads):
-    key = _key_ctx(new_session, routes, UPLOAD, library.ws, [DOCUMENTS_WRITE])
-    answer = _upload(new_session, key, "pricing.md", b"Harvest Club: 23 pounds a month from January.\n")
+    caller = _key_ctx(new_session, routes, UPLOAD, library.ws, [DOCUMENTS_WRITE])
+    answer = _upload(new_session, caller, "pricing.md", b"Harvest Club: 23 pounds a month from January.\n")
 
     assert answer.document_id == library.ids["shared"]                             # the same document, replaced
     assert answer.message.startswith("Replaced pricing.md (version 2)")
     [earlier] = _row(new_session, library.ids["shared"]).doc_metadata["versions"]
-    assert earlier["replaced_by"] == key.user.id and key.user.id.startswith("sdk:")
+    assert earlier["replaced_by"] == caller.user.id and caller.user.id.startswith("sdk:")
     assert uploads.manager.cleared == [(library.ws, library.ids["shared"])]
     assert uploads.manager.processed == [(library.ws, library.ids["shared"])]
     assert _names_in(new_session, library.ws).count("pricing.md") == 1
