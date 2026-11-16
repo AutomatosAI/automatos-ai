@@ -19,7 +19,7 @@
 # The production stage copies this stage's node binary, which is built against
 # musl for Alpine 3.24, so the alpine3.24 suffix here and alpine:3.24 below name
 # the same release: bump them together.
-FROM node:24-alpine3.24@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS base
+FROM node:24-alpine3.24@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS base
 
 WORKDIR /app
 
@@ -130,7 +130,7 @@ RUN apk add --no-cache binutils && \
 # Node, /usr/local/bin/node (stripped by node-strip, PRD-262 #24). No npm, yarn,
 # corepack, C headers or curl.
 # libstdc++ (which brings libgcc) is the binary's only library beyond musl.
-FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS production
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS production
 
 WORKDIR /app
 

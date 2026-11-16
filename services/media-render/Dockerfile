@@ -42,7 +42,7 @@ ARG MEDIA_ASSETS=fetch
 # PRD-262 US-007: Node.js 24 (LTS until April 2028) comes from the official image.
 # It gets its own stage so the tag@digest pin sits on a FROM line, which is the
 # only place an updater reads (it never reads a bare `COPY --from=<image>`).
-FROM node:24-trixie-slim@sha256:0820eaa85e07d0490446dd01d14707e17e6108a36988cf374899cd057eb3812d AS node
+FROM node:24-trixie-slim@sha256:af02d57b57719b9657a45199a79264a9437940cd55b3c7b3fc99615654f124a0 AS node
 
 # Node, stripped. The same stage, byte for byte, in services/workspace-worker/Dockerfile
 # and services/media-render/Dockerfile, so the two images share one node layer on a host.
@@ -58,14 +58,14 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # uv from its own image, in a named stage for the same reason (as the worker's, US-044).
-FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.8@sha256:5cc1805e2426484abca4ad46ea783bab281fdb225fd82d8ce6d66a81254bac85 AS uv
 
 # The media assets, fetched, at the paths the media assets image carries them
 # (scripts/ci/media_assets.py): /kokoro/<release>/<file> and /music/<id>.<ext>.
 # Kokoro v1.0 (Apache-2.0 weights) comes from its GitHub release. Every track in
 # music/manifest.json is fetched from its source URL and checked against its sha256
 # (media_render/music_build.py --fetch-only): a mismatch FAILS the build.
-FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159 AS assets-fetch
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS assets-fetch
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends curl; \
@@ -88,7 +88,7 @@ FROM assets-${MEDIA_ASSETS} AS assets
 # (media_render/voices_build.py; about 14 MB less). The build fails if the
 # catalogue names a voice the upstream file lacks. SHA256SUMS describes the
 # upstream file, not the rewritten one, so it does not ship.
-FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159 AS kokoro
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS kokoro
 COPY --link --from=assets /kokoro/model-files-v1.0/kokoro-v1.0.onnx /kokoro/model-files-v1.0/voices-v1.0.bin /opt/kokoro/
 COPY --link kokoro/SHA256SUMS /opt/kokoro/SHA256SUMS
 COPY --link media_render/voices.json media_render/voices_build.py /build/voices/
@@ -106,7 +106,7 @@ RUN cd /opt/kokoro && sha256sum -c SHA256SUMS \
 # checksum database. The js stage puts the binary where npm put its own and
 # fails the build unless esbuild's JavaScript API accepts it, which it does only
 # when the binary's version is the locked package's.
-FROM golang:1.26.10-trixie@sha256:fd9a91f0ece5664556f4851d06dce5e5b505a71166dffd385a03ba9d200b6983 AS esbuild
+FROM golang:1.26.11-trixie@sha256:fa340cb59ebeb1d53ac1cccfc334201d938fe5f3458003cccb767096d8e032b8 AS esbuild
 RUN CGO_ENABLED=0 GOTOOLCHAIN=local GOBIN=/out go install -trimpath -buildvcs=false \
         -ldflags='-s -w -buildid=' github.com/evanw/esbuild/cmd/esbuild@v0.28.2 \
     && /out/esbuild --version
@@ -240,7 +240,7 @@ RUN set -eux; \
 #   library and cryptography's are stripped with the rest; c2pa and cryptography
 #   are imported and the SDK's version printed before the layer is kept, so a
 #   release that needs the deleted files, or a library the strip broke, fails here.
-FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159 AS py
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS py
 COPY --from=uv /uv /usr/local/bin/uv
 COPY requirements.lock /opt/media-render/requirements.lock
 COPY media_render/espeak_build.py /opt/media-render/build/espeak_build.py
@@ -287,7 +287,7 @@ RUN python /opt/media-render/build/music_build.py /opt/media-render/build/manife
         --tracks /opt/media-render/assets/music \
     && chmod -R a+rX /opt/media-render/music
 
-FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159 AS runtime
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS runtime
 
 # PRD-262 #22: the node binary stripped (about 20 MB of symbols). First on the base:
 # where the worker copies it the same way, a host with both images keeps one node
