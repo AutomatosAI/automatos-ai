@@ -307,8 +307,10 @@ def test_the_turn_and_its_calls_are_wired_to_the_screen():
     from consumers.chatbot.service import StreamingChatService
     from core.llm.owner_words_stream import in_owner_words
 
-    assert StreamingChatService._stream_response_with_agent_scoped.__code__.co_qualname == \
-        "keeps_one_answer_on_screen.<locals>.wrapped"
+    turn = StreamingChatService._stream_response_with_agent_scoped
+    # Outermost, the reply's id on its chat-id frame (consumers/chatbot/reply_id.py); the screen beneath it.
+    assert turn.__code__.co_qualname == "says_its_replys_id.<locals>.wrapped"
+    assert turn.__wrapped__.__code__.co_qualname == "keeps_one_answer_on_screen.<locals>.wrapped"
     assert StreamingChatService._stream_tool_loop.__code__.co_qualname == "the_loop_writes_receipts.<locals>.wrapped"
     assert StreamingChatService._stream_tool_loop.__wrapped__.__code__.co_qualname == \
         "settles_held_retractions.<locals>.wrapped"
