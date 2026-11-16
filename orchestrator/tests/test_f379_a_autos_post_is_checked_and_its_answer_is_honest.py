@@ -30,7 +30,8 @@ from tests.test_prd251w1_social_post_tools import COMPOSITION, _posts, _row, _te
 
 env = harness.env  # the US-116 fixture: SQLite, the real router and executor, media-render recorded
 
-COMPACT_KEYS = {"id", "title", "status", "format", "template", "template_id", "media"}
+COMPACT_KEYS = {"id", "title", "status", "format", "template", "template_id", "media",
+                "planned"}  # PRD-251D (US-D106): the planned slot, in words
 
 
 def _carousel(env):

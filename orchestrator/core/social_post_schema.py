@@ -39,6 +39,8 @@ LIST_DEFAULT_LIMIT = 25
 LIST_MAX_LIMIT = 100
 # modules/tools/discovery/social_post_list.py QUEUES (F379): the posts by what they still need.
 POST_QUEUES = ["awaiting_approval", "not_rendered", "open"]
+# PRD-251D (E6): the planned slot's two fields, as the create and update tools take them.
+PLANNED_FOR, PLANNED_ZONE = "planned_for", "timezone"
 
 
 def post_id_property() -> dict:
@@ -98,6 +100,33 @@ def _post_channel_fields() -> dict:
                 "publishes nowhere. Each channel posts it as the kind its format fits (a carousel as a "
                 "carousel); an update replaces the list, and [] clears it. Give them when you make the post, "
                 "so its render makes each channel's size."
+            ),
+        },
+    }
+
+
+def _post_slot_fields() -> dict:
+    """PRD-251D (E6, US-D106): the day and time a post is planned for. It is the post's slot, not its
+    schedule: REST sets it with PUT /posts/{id}/slot, and approving the post schedules it there."""
+    return {
+        PLANNED_FOR: {
+            "type": "string",
+            "description": (
+                "The day and time the post is planned for, as an ISO date and time: the person's own local "
+                "time, such as 2026-11-20T09:00, read in timezone (a time with an offset, such as Z, is that "
+                "exact moment). It is the post's slot in the Socials calendar, where it waits for the owner: "
+                "the owner still approves the post, and approving it schedules it into that slot. A time "
+                "already past is refused. Only a draft, a post waiting for approval or one sent back takes a "
+                "slot; an approved or scheduled post's slot is the owner's to move in Socials."
+            ),
+        },
+        PLANNED_ZONE: {
+            "type": "string",
+            "description": (
+                "The IANA timezone planned_for is in, such as Europe/Dublin or America/New_York: the person's "
+                "own (today's date line names the workspace's). Send it with planned_for; left out, the post's "
+                "own timezone is used, and a post with none refuses the slot. Without planned_for it changes "
+                "nothing."
             ),
         },
     }
@@ -216,10 +245,11 @@ def _post_chart_field() -> dict:
 
 
 def post_fields() -> dict:
-    """What a post carries: the REST body's fields, plus template (id or name), chart_report and
-    channels (its targets, which REST sets with PUT /posts/{id}/targets)."""
-    return {**_post_copy_fields(), **_post_channel_fields(), **_post_template_fields(), **_post_media_fields(),
-            **_post_chart_field()}
+    """What a post carries: the REST body's fields, plus template (id or name), chart_report,
+    channels (its targets, which REST sets with PUT /posts/{id}/targets) and planned_for with its
+    timezone (its planned slot, which REST sets with PUT /posts/{id}/slot)."""
+    return {**_post_copy_fields(), **_post_channel_fields(), **_post_slot_fields(), **_post_template_fields(),
+            **_post_media_fields(), **_post_chart_field()}
 
 
 def create_properties() -> dict:

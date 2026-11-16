@@ -20,6 +20,10 @@ formats, this workspace's own social template names, that a post renders when it
 video is a post too, how a refused render is fixed, how the owner adds a photo, and that Auto says
 a post exists only after the call that made it. A social template the owner names gets its
 fields, for a post: never ``generate_document``'s note.
+
+PRD-251D (E6, US-D106): the note says how "post it Friday at nine" is done: planned_for and
+timezone with the post, its slot in the Socials calendar until the owner approves it, and that
+it is not scheduled before then.
 """
 from __future__ import annotations
 
@@ -54,7 +58,11 @@ SOCIALS_NOTE = (
     "with a template renders as soon as it is saved, then waits for the owner's approval in the Socials tab: "
     "rendering never waits for approval. When the call fails because the render was refused, the post is a "
     "draft: fill the fields it names with platform_update_social_post and render true, and never make it "
-    "again. Say a post was made, changed or waits in the Socials tab only after the call that did it "
+    "again. When the owner names a day and time (\"post it Friday at nine\"), send planned_for, their local "
+    "date and time such as 2026-11-20T09:00, and timezone, the IANA zone of today's date line unless they "
+    "name another: the post then waits on that slot in the Socials calendar for their approval, and their "
+    "approval schedules it there, so never say it is scheduled before they approve. "
+    "Say a post was made, changed or waits in the Socials tab only after the call that did it "
     "succeeded in this turn, with its id. Photos: the owner adds their own in the Socials tab: open the post, "
     "and in its Look panel choose Upload (or Library, for a picture already in Deliverables), pick the spot "
     "under \"Where your picture goes\" (one photo per spot, such as Before photo and After photo), then drop "
