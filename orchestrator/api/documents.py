@@ -10,8 +10,6 @@ import os
 import hashlib
 import tempfile
 import json
-import uuid
-import magic
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
@@ -36,7 +34,20 @@ from urllib.parse import urlparse
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
+from core.auth.scopes import DOCUMENTS_READ, DOCUMENTS_WRITE
+from core.auth.server_key_gate import (
+    is_server_key, request_context_or_server_key, require_workspace_permission_or_server_key,
+)
+from api.document_search import (
+    SEARCH_MAX_LIMIT, aggregated_results, grouped_hits, in_team_scope, search_ask, track_search,
+)
+from api.document_upload_steps import checked_upload, new_upload, replace_upload, stored_upload, upload_tags
 from services.document_downloads import media_type_for, stored_object_link, workspace_file
+# PRD-274 §5.2: a product's server key uploads, lists, gets, searches and deletes its own
+# workspace's documents, and reaches only those no team or person limits.
+from services.document_key_access import (
+    KEY_TEAM_ACCESS_REFUSED, UPLOAD_CLASH, clashes_with_unreachable, reachable_by, reachable_hits, refuses_teams,
+)
 
 def parse_database_url(url: str) -> dict:
     """Parse DATABASE_URL into psycopg2 connection dict format"""
@@ -142,59 +153,42 @@ ALLOWED_MIME_TYPES = {
 UPLOAD_DIR = Path(os.getenv("DOCUMENT_UPLOAD_DIR", "/tmp/automotas_uploads"))
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50MB
 
-@router.post("/upload", response_model=DocumentUploadResponse, dependencies=[Depends(require_workspace_permission("documents:create"))])
+@router.post("/upload", response_model=DocumentUploadResponse)
 async def handle_request(
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    
+    ctx: RequestContext = Depends(require_workspace_permission_or_server_key("documents:create", DOCUMENTS_WRITE)),
+
     file: UploadFile = File(...),
     description: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
     team_access: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
-    """Upload and process a document"""
+    """Upload and process a document: its checks, a duplicate answered with the document already
+    stored, a same-name upload replacing that document (F087), else a new document, ingested now
+    (each step in api/document_upload_steps).
+
+    PRD-274 §5.2: a member with ``documents:create``, or a product's server key listing
+    ``documents:write``, which uploads into its own workspace. The key is named as the uploader
+    (``sdk:<key id>``). Its upload may not name teams (400: a key writes only documents it can read
+    back), never answers with a document it may not read, and is refused (409) where it would
+    write over one: one of the same name, or a spreadsheet's workspace copy
+    (services/document_key_access).
+    """
     try:
-        # Validate file
-        if not file.filename:
-            raise HTTPException(status_code=400, detail="No file provided")
-        
-        # Check file size (limit to 50MB)
-        file_size = 0
-        content = await file.read()
-        file_size = len(content)
-        
-        if file_size > MAX_UPLOAD_BYTES:
-            raise HTTPException(status_code=400, detail="File too large (max 50MB)")
+        # PRD-124: Parse team_access (comma-separated → list, empty = all teams)
+        from core.team_access import normalize_teams
+        team_access_list = normalize_teams(team_access.split(",")) if team_access else []
+        if refuses_teams(ctx, team_access_list):
+            raise HTTPException(status_code=400, detail=KEY_TEAM_ACCESS_REFUSED)
 
-        # MIME type validation using python-magic (detect actual content type)
-        detected_mime = magic.from_buffer(content, mime=True)
-        file_extension = Path(file.filename).suffix.lower()
-
-        if detected_mime not in ALLOWED_MIME_TYPES:
-            logger.warning(f"Upload rejected: {file.filename} — detected MIME '{detected_mime}', extension '{file_extension}'")
-            raise HTTPException(
-                status_code=400,
-                detail=f"File type not allowed. Detected MIME type: {detected_mime}"
-            )
-
-        # Verify extension matches detected MIME type
-        allowed_extensions = ALLOWED_MIME_TYPES[detected_mime]
-        if file_extension not in allowed_extensions:
-            logger.warning(f"Upload rejected: {file.filename} — extension '{file_extension}' not in {allowed_extensions} for MIME '{detected_mime}'")
-            raise HTTPException(
-                status_code=400,
-                detail=f"File extension '{file_extension}' does not match detected content type '{detected_mime}'. "
-                       f"Allowed extensions for this type: {', '.join(allowed_extensions)}"
-            )
-
-        # Reset file pointer
-        await file.seek(0)
+        content, file_extension = await checked_upload(file, ALLOWED_MIME_TYPES, MAX_UPLOAD_BYTES)
 
         # Generate file hash
         content_hash = hashlib.sha256(content).hexdigest()
 
-        # Check for duplicate
-        existing = db.query(Document).filter(Document.content_hash == content_hash, Document.workspace_id == ctx.workspace_id).first()
+        # Check for duplicate, among the documents the caller may read
+        existing = reachable_by(db.query(Document).filter(
+            Document.content_hash == content_hash, Document.workspace_id == ctx.workspace_id), ctx).first()
         if existing:
             return DocumentUploadResponse(
                 document_id=existing.id,
@@ -203,142 +197,26 @@ async def handle_request(
                 message="Document already exists"
             )
 
-        # Save file temporarily with random filename (never use original filename)
-        UPLOAD_DIR.mkdir(exist_ok=True)
-
-        safe_filename = f"{uuid.uuid4().hex}{file_extension}"
-        file_path = UPLOAD_DIR / safe_filename
-        
-        with open(file_path, "wb") as f:
-            f.write(content)
-
-        # Determine file type category from extension
+        # The file type category, from the extension
         file_type = UPLOAD_FILE_TYPES.get(file_extension, "unknown")
-        
-        # Parse tags: comma-separated form field → stripped, de-duplicated
-        # (order-preserving) list[str]. Persisted to documents.tags (PostgreSQL
-        # text[]). The Academy corpus sync tags each doc 'academy,<vendor>,<track>,
-        # <domain>' so the tutor's knowledge graph can map chunks back to a course.
-        tag_list: list[str] = []
-        if tags:
-            _seen: set[str] = set()
-            for _raw_tag in tags.split(","):
-                _tag = _raw_tag.strip()
-                if _tag and _tag not in _seen:
-                    _seen.add(_tag)
-                    tag_list.append(_tag)
-
-        # PRD-124: Parse team_access (comma-separated → list, empty = all teams)
-        from core.team_access import normalize_teams
-        team_access_list: list[str] = []
-        if team_access:
-            team_access_list = normalize_teams(team_access.split(","))
+        if clashes_with_unreachable(db, ctx, file.filename, file_type):
+            raise HTTPException(status_code=409, detail=UPLOAD_CLASH)
+        upload = stored_upload(file.filename, content, file_extension, file_type, content_hash)
 
         # F087: a file uploaded again under the same name replaces that document —
         # same id, the new text, the old source kept in its history.
-        from services.document_versions import replace_document, replaceable_document, replaced_message
-
-        # F181: a spreadsheet is also copied into the workspace, where agents
-        # count it with code (services.spreadsheet_workspace). Best effort.
-        from services.spreadsheet_workspace import SPREADSHEET_TYPES, copy_to_workspace
+        from services.document_versions import replaceable_document
 
         replaced = replaceable_document(db, ctx.workspace_id, file.filename, team_access_list)
         if replaced is not None:
-            version = await replace_document(
-                db, replaced, workspace_id=ctx.workspace_id, file_path=str(file_path), file_size=file_size,
-                content_hash=content_hash, file_type=file_type,
-                replaced_by=(ctx.user.clerk_user_id if ctx.user else None) or "system",
-                tags=tag_list, description=description,
-            )
-            if file_type in SPREADSHEET_TYPES:
-                await copy_to_workspace(ctx.workspace_id, file.filename, content)
-            return DocumentUploadResponse(
-                document_id=replaced.id,
-                filename=replaced.filename,
-                status=replaced.status,
-                message=replaced_message(replaced.filename, version, replaced.status),
-            )
+            return await replace_upload(db, ctx, replaced, upload, upload_tags(tags), description)
+        return await new_upload(db, ctx, upload, upload_tags(tags), description, team_access_list)
 
-        # Create document record. tags persist to documents.tags — a real PostgreSQL
-        # text[] column (see migration 208275450a15: ARRAY(TEXT), default ARRAY[]::text[]).
-        # The prior "SQLAlchemy array bug" was a mis-diagnosis: team_access below uses the
-        # identical PG_ARRAY(String) column and writes a Python list on every upload without
-        # issue. Assigning a fresh list[str] to a new row is tracked correctly (no
-        # flag_modified needed — that only matters for in-place mutation of a loaded array).
-        document = Document(
-            workspace_id=ctx.workspace_id,
-            filename=file.filename,
-            original_filename=file.filename,
-            file_type=file_type,
-            file_size=file_size,
-            file_path=str(file_path),
-            content_hash=content_hash,
-            status="uploaded",
-            tags=tag_list,
-            description=description,
-            team_access=team_access_list,
-            # PRD-168 S4: real actor. The principal lives on ctx.user —
-            # RequestContext itself has no clerk_user_id; reading it there
-            # raised AttributeError and 500'd every upload (2026-08-06).
-            created_by=(ctx.user.clerk_user_id if ctx.user else None) or "system",
-        )
-        
-        db.add(document)
-        db.commit()
-        db.refresh(document)
-        
-        # Process document asynchronously
-        try:
-            # Use existing document manager for processing
-            # Note: DocumentManager creates its own DB record, so we skip calling it
-            # and instead trigger processing directly
-            from modules.rag import DocumentManager, DocumentType
-            import asyncio
-            
-            # Determine file type enum
-            file_type_enum = processing_type(file_type)
-            
-            # Process document directly
-            processing_error = None
-            document.status = "processing"
-            db.commit()
-
-            # Get workspace-specific DocumentManager
-            doc_manager = get_document_manager(str(ctx.workspace_id))
-
-            # Call processing method directly
-            await doc_manager._process_document(document.id, str(file_path), file_type_enum)
-            
-            # Refresh to get updated chunk_count
-            db.refresh(document)
-            
-        except Exception as e:
-            logger.error(f"Error processing document {document.id}: {e}")
-            document.status = "failed"
-            processing_error = str(e)[:200]
-            db.commit()
-
-        if file_type in SPREADSHEET_TYPES:
-            await copy_to_workspace(ctx.workspace_id, file.filename, content)
-
-        return DocumentUploadResponse(
-            document_id=document.id,
-            filename=document.filename,
-            status=document.status,
-            # PRD-233: never say "successfully" over a failed pipeline — every local
-            # upload had ended status=failed (no embedding provider) behind this text.
-            message=(
-                "Document uploaded successfully"
-                if document.status != "failed"
-                else f"Uploaded, but processing failed: {processing_error or 'see backend logs'}"
-            ),
-        )
-        
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error uploading document: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.exception("Error uploading document")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 # F453: both downloads are the caller's own workspace's, behind documents:read. Another
 # workspace's document id answers 404, the same as a missing one (no existence oracle).
@@ -578,7 +456,7 @@ def _list_documents_query(db, ctx, status, file_type, search, team, source_type,
 @router.get("", response_model=List[DocumentResponse])  # F327 (night 9b): the plain path answered 307, empty body
 @router.get("/", response_model=List[DocumentResponse])
 def list_documents(
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(request_context_or_server_key(DOCUMENTS_READ)),
 
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
@@ -601,9 +479,14 @@ def list_documents(
     content_hash: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """List documents with filtering and pagination"""
+    """List documents with filtering and pagination.
+
+    Any signed-in member, as before; a product's server key listing ``documents:read`` lists its
+    own workspace's, only those it may read (PRD-274 §5.2, services/document_key_access).
+    """
     try:
-        query = _list_documents_query(db, ctx, status, file_type, search, team, source_type, exclude_source_type, content_hash)
+        query = reachable_by(_list_documents_query(db, ctx, status, file_type, search, team, source_type,
+                                                   exclude_source_type, content_hash), ctx)
         documents = query.order_by(Document.upload_date.desc()).offset(skip).limit(limit).all()
         
         return [
@@ -739,12 +622,18 @@ def document_team_counts(
 @router.get("/{document_id:int}", response_model=DocumentResponse)
 def get_document(
     document_id: int,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(request_context_or_server_key(DOCUMENTS_READ)),
     db: Session = Depends(get_db)
 ):
-    """Get document by ID"""
+    """Get document by ID.
+
+    Any signed-in member, as before; a product's server key listing ``documents:read`` gets one
+    of its own workspace's it may read. Any other id answers 404, as a missing one does (PRD-274
+    §5.2, services/document_key_access).
+    """
     try:
-        document = db.query(Document).filter(Document.id == document_id, Document.workspace_id == ctx.workspace_id).first()
+        document = reachable_by(db.query(Document).filter(
+            Document.id == document_id, Document.workspace_id == ctx.workspace_id), ctx).first()
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
         
@@ -838,15 +727,22 @@ def get_delete_impact(
         logger.error(f"Error getting delete impact for document {document_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.delete("/{document_id}", dependencies=[Depends(require_workspace_permission("documents:delete"))])
+@router.delete("/{document_id}")
 def delete_document(
     document_id: int,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(require_workspace_permission_or_server_key("documents:delete", DOCUMENTS_WRITE)),
     db: Session = Depends(get_db)
 ):
-    """Delete document"""
+    """Delete document: its local file, its chunks, row and vectors (services.document_removal).
+
+    A member with ``documents:delete``, as before; or a product's server key listing
+    ``documents:write`` (delete rides on write, as erasing rides on ``memory:write``), which
+    deletes only a document of its own workspace it may read. Any other id answers 404 and
+    nothing is removed (PRD-274 §5.2, services/document_key_access).
+    """
     try:
-        document = db.query(Document).filter(Document.id == document_id, Document.workspace_id == ctx.workspace_id).first()
+        document = reachable_by(db.query(Document).filter(
+            Document.id == document_id, Document.workspace_id == ctx.workspace_id), ctx).first()
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
         
@@ -1119,13 +1015,6 @@ def get_document_content_by_id(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-SEARCH_DEFAULT_LIMIT = 10           # Results returned when the caller names no limit
-SEARCH_MAX_LIMIT = 50               # Hard ceiling, mirrored by the query-param validator
-PREVIEW_CHUNK_LIMIT = 6  # Max number of chunks included in preview window
-PREVIEW_CONTEXT_RADIUS = 2  # Number of chunks to include before the best match
-PREVIEW_CHAR_LIMIT = 2000  # Safety limit for preview text length
-
-
 class SemanticSearchRequest(BaseModel):
     """JSON body for POST /api/documents/search.
 
@@ -1175,15 +1064,15 @@ async def _retrieval_hits(query: str, max_chunks: int, workspace_id: str, team: 
     return hits
 
 
-@router.post("/search", dependencies=[Depends(require_workspace_permission("documents:read"))])
+@router.post("/search")
 async def semantic_search(
     body: Optional[SemanticSearchRequest] = Body(None),
     query: Optional[str] = Query(None, description="Search query (may also be sent in the JSON body)"),
-    limit: Optional[int] = Query(None, ge=1, le=50, description="Maximum number of results"),
+    limit: Optional[int] = Query(None, ge=1, le=SEARCH_MAX_LIMIT, description="Maximum number of results"),
     min_similarity: Optional[float] = Query(None, ge=0.0, le=1.0, description="Minimum similarity score"),
     document_ids: Optional[List[int]] = Query(None, description="Optional filter by document IDs"),
     team: Optional[str] = Query(None, description="Optional team scope (PRD-157 S1); normalized server-side"),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(require_workspace_permission_or_server_key("documents:read", DOCUMENTS_READ)),
     db: Session = Depends(get_db)
 ):
     """
@@ -1191,258 +1080,49 @@ async def semantic_search(
 
     Accepts its parameters in the JSON body or the query string. Embeddings are
     read from whichever document-vector backend the edition selects — S3 Vectors
-    on SaaS, pgvector over ``document_chunks.embedding`` locally.
+    on SaaS, pgvector over ``document_chunks.embedding`` locally. What is done
+    with the hits, step by step, is in api/document_search.
+
+    PRD-274 §5.2: a member with ``documents:read``, as before; or a product's server key
+    listing ``documents:read``, which searches its own workspace. A key's hit is mapped only
+    by its own document id, and only to a document the key may read; a hit with no id is
+    dropped, never resolved by its file name (services/document_key_access).
     """
     try:
-        # Body-or-query, body first. A missing query is a 422 either way, but
-        # now it says so instead of rejecting a well-formed JSON POST.
-        if body is not None:
-            query = body.query if body.query is not None else query
-            limit = body.limit if body.limit is not None else limit
-            min_similarity = body.min_similarity if body.min_similarity is not None else min_similarity
-            document_ids = body.document_ids if body.document_ids is not None else document_ids
-            team = body.team if body.team is not None else team
-
-        if not query or not str(query).strip():
-            raise HTTPException(
-                status_code=422,
-                detail="'query' is required — send it in the JSON body or as a query parameter.",
-            )
-        query = str(query).strip()
-        limit = SEARCH_DEFAULT_LIMIT if limit is None else max(1, min(int(limit), SEARCH_MAX_LIMIT))
-        min_similarity = None if min_similarity is None else float(min_similarity)
+        asked = search_ask(body, query, limit, min_similarity, document_ids, team)
 
         import time
         start_time = time.time()
-        
+
         # F088 (night 3): this route ran its own vector-only search with a 0.70
         # cosine floor, so exact words stored in three documents each ("The Salt
         # Loft", "moreish", "Declan Frost") came back as 0 results. It now runs the
         # ONE retrieval funnel the chat and the agents use — hybrid (vector +
         # keyword) with reranking, on the edition's backend — and a similarity
         # floor applies only when the caller asks for one.
-        hits = await _retrieval_hits(query, limit * 3, str(ctx.workspace_id), team, floor=min_similarity)
+        hits = await _retrieval_hits(asked.query, asked.limit * 3, str(ctx.workspace_id), asked.team,
+                                     floor=asked.min_similarity)
         logger.info(f"document search returned {len(hits)} chunks")
 
-        # Map S3 results back to document metadata from PostgreSQL
-        # S3 stores: key, score, content (chunk_text), file_name, chunk_index, metadata
-        # We need: document_id, filename, file_type, file_size, upload_date from DB
-        grouped_results: Dict[int, Dict[str, Any]] = {}
-        doc_order: List[int] = []
-
-        for hit in hits:
-            similarity = hit.get("score", 0.0)
-            file_name = hit.get("file_name", "")
-            chunk_text = hit.get("content", "")
-            chunk_index = hit.get("chunk_index", 0)
-
-            # Prefer the hit's own document_id (the pgvector backend carries it,
-            # and it survives two documents sharing a filename); fall back to the
-            # filename lookup the S3 payload allows.
-            hit_doc_id = (hit.get("metadata") or {}).get("document_id")
-            doc_row = None
-            if hit_doc_id is not None:
-                try:
-                    doc_row = db.execute(text("""
-                        SELECT id, filename, file_type, file_size, upload_date
-                        FROM documents
-                        WHERE workspace_id = :workspace_id AND id = :document_id
-                        LIMIT 1
-                    """), {"workspace_id": ctx.workspace_id, "document_id": int(hit_doc_id)}).fetchone()
-                except (TypeError, ValueError):
-                    doc_row = None
-
-            if not doc_row and file_name:
-                doc_row = db.execute(text("""
-                    SELECT id, filename, file_type, file_size, upload_date
-                    FROM documents
-                    WHERE workspace_id = :workspace_id AND filename = :filename
-                    LIMIT 1
-                """), {"workspace_id": ctx.workspace_id, "filename": file_name}).fetchone()
-
-            if not doc_row:
-                continue
-
-            doc_id = doc_row.id
-
-            # Optional: filter by document_ids if provided
-            if document_ids and doc_id not in document_ids:
-                continue
-
-            if doc_id not in grouped_results:
-                grouped_results[doc_id] = {
-                    "document_id": doc_id,
-                    "best_similarity": similarity,
-                    "best_excerpt": chunk_text,
-                    "best_chunk_index": chunk_index,
-                    "metadata": {},
-                    "source": {
-                        "filename": doc_row.filename,
-                        "file_type": doc_row.file_type,
-                        "file_size": doc_row.file_size,
-                        "upload_date": doc_row.upload_date.isoformat() if doc_row.upload_date else None,
-                    },
-                }
-                doc_order.append(doc_id)
-            else:
-                existing = grouped_results[doc_id]
-                if similarity > existing["best_similarity"]:
-                    existing["best_similarity"] = similarity
-                    existing["best_excerpt"] = chunk_text
-                    existing["best_chunk_index"] = chunk_index
-
-        # PRD-157 S1: route surfaced documents through the centralized fail-closed
-        # scope choke point. Workspace is already enforced per-hit above; this adds
-        # team scoping (no-op when no team is supplied, preserving prior behaviour).
-        from modules.rag.retrieval_filters import build_retrieval_filters, allowed_document_ids
-        _scope = build_retrieval_filters(workspace_id=ctx.workspace_id, team=team)
-        if _scope.has_team_restriction and doc_order:
-            _allowed = allowed_document_ids(db, doc_order, _scope)
-            doc_order = [d for d in doc_order if str(d) in _allowed]
-            grouped_results = {d: v for d, v in grouped_results.items() if str(d) in _allowed}
-
-        # Fetch limited previews + stats for surfaced docs
-        # Collect doc_ids and calculate preview ranges upfront
-        doc_ids = doc_order[:limit]
-        if not doc_ids:
-            aggregated_results = []
-        else:
-            # Calculate preview ranges for each document
-            doc_preview_ranges: Dict[int, Dict[str, int]] = {}
-            for doc_id in doc_ids:
-                entry = grouped_results[doc_id]
-                best_chunk_index = entry.get("best_chunk_index") or 0
-                preview_start_index = max(best_chunk_index - PREVIEW_CONTEXT_RADIUS, 0)
-                preview_end_index = preview_start_index + PREVIEW_CHUNK_LIMIT - 1
-                doc_preview_ranges[doc_id] = {
-                    "start_index": preview_start_index,
-                    "end_index": preview_end_index,
-                }
-
-            # Batch query: Get chunk counts for all documents at once
-            chunk_count_query = text(
-                """
-                SELECT document_id, COUNT(*) AS chunk_count
-                FROM document_chunks
-                WHERE document_id = ANY(:document_ids)
-                GROUP BY document_id
-                """
-            )
-            chunk_count_rows = db.execute(chunk_count_query, {"document_ids": doc_ids}).fetchall()
-            chunk_counts_map: Dict[int, int] = {
-                int(row.document_id): int(row.chunk_count) for row in chunk_count_rows
-            }
-
-            # Batch query: Get previews for all documents using UNION ALL
-            # Build UNION ALL query with one SELECT per document
-            preview_queries = []
-            preview_params: Dict[str, Any] = {}
-            for idx, doc_id in enumerate(doc_ids):
-                ranges = doc_preview_ranges[doc_id]
-                start_param = f"start_{idx}"
-                end_param = f"end_{idx}"
-                doc_param = f"doc_{idx}"
-                preview_params[start_param] = ranges["start_index"]
-                preview_params[end_param] = ranges["end_index"]
-                preview_params[doc_param] = doc_id
-                
-                preview_queries.append(
-                    f"""
-                    SELECT 
-                        :{doc_param} AS document_id,
-                        string_agg(content, '\n\n' ORDER BY chunk_index) AS preview_content
-                    FROM document_chunks
-                    WHERE document_id = :{doc_param}
-                      AND chunk_index BETWEEN :{start_param} AND :{end_param}
-                    """
-                )
-
-            if preview_queries:
-                preview_query = text(" UNION ALL ".join(preview_queries))
-                preview_rows = db.execute(preview_query, preview_params).fetchall()
-                previews_map: Dict[int, str] = {
-                    int(row.document_id): (row.preview_content if row.preview_content else "")
-                    for row in preview_rows
-                }
-            else:
-                previews_map = {}
-
-            # Build aggregated results using batched data
-            aggregated_results: List[Dict[str, Any]] = []
-            for doc_id in doc_ids:
-                entry = grouped_results[doc_id]
-                chunk_count = chunk_counts_map.get(doc_id, 0)
-                
-                ranges = doc_preview_ranges[doc_id]
-                preview_start_index = ranges["start_index"]
-                preview_end_index = ranges["end_index"]
-                
-                preview_content = previews_map.get(doc_id, "")
-                preview_truncated = False
-                if preview_content and len(preview_content) > PREVIEW_CHAR_LIMIT:
-                    preview_content = preview_content[:PREVIEW_CHAR_LIMIT] + "…"
-                    preview_truncated = True
-                if preview_end_index < (chunk_count - 1):
-                    preview_truncated = True
-
-                aggregated_results.append(
-                    {
-                        "document_id": doc_id,
-                        "excerpt": entry["best_excerpt"],
-                        "similarity": entry["best_similarity"],
-                        "chunk_index": entry["best_chunk_index"],
-                        "chunk_count": chunk_count,
-                        "metadata": entry["metadata"],
-                        "source": entry["source"],
-                        "preview": preview_content,
-                        "preview_truncated": preview_truncated,
-                        "full_content_available": chunk_count > 0,
-                        "preview_chunk_start": preview_start_index,
-                        "preview_chunk_end": min(preview_end_index, max(chunk_count - 1, 0)),
-                    }
-                )
- 
+        grouped, order = grouped_hits(db, ctx.workspace_id, reachable_hits(db, ctx, hits), asked.document_ids,
+                                      by_file_name=not is_server_key(ctx))
+        results = aggregated_results(db, grouped, in_team_scope(db, ctx.workspace_id, asked.team, order)[:asked.limit])
         execution_time_ms = int((time.time() - start_time) * 1000)
+        logger.info(f"Search completed: {len(results)} documents in {execution_time_ms}ms")
 
-        logger.info(f"Search completed: {len(aggregated_results)} documents in {execution_time_ms}ms")
-        
-        # Track search event for analytics
-        try:
-            tracking_query = text("""
-                INSERT INTO document_usage (event_type, query, results_count, execution_time_ms, metadata, timestamp)
-                VALUES ('document_searched', :query, :results_count, :execution_time_ms, :metadata, :timestamp)
-            """)
-            db.execute(
-                tracking_query,
-                {
-                    "query": query,
-                    "results_count": len(aggregated_results),
-                    "execution_time_ms": execution_time_ms,
-                    # PRD-156 S5: attribute each usage row to its workspace (the
-                    # table has no workspace_id column; metadata JSONB carries it so
-                    # analytics can filter by metadata->>'workspace_id' without a migration).
-                    "metadata": json.dumps({"min_similarity": min_similarity, "workspace_id": str(ctx.workspace_id)}),
-                    "timestamp": datetime.now()
-                }
-            )
-            db.commit()
-            logger.info(f"✅ Search tracked: '{query[:50]}' ({len(aggregated_results)} results)")
-        except Exception as track_error:
-            logger.warning(f"Could not track search event: {track_error}")
-            db.rollback()
-        
+        track_search(db, asked.query, len(results), execution_time_ms, asked.min_similarity, ctx.workspace_id)
         return {
-            "query": query,
-            "total_results": len(aggregated_results),
+            "query": asked.query,
+            "total_results": len(results),
             "execution_time_ms": execution_time_ms,
-            "results": aggregated_results,
+            "results": results,
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error performing semantic search: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.exception("Error performing semantic search")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 def _get_queue_status_step(progress_pct):
