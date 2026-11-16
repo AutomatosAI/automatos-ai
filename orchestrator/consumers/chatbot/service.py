@@ -60,7 +60,7 @@ from consumers.chatbot.early_lookups import once_the_agent_is_active, starts_its
 from consumers.chatbot.turn_embeddings import embeds_each_text_once  # voice latency D-3
 from consumers.chatbot.turn_timing import keeps_the_turns_timing, records_the_first_token
 from consumers.chatbot.lean_request import NOTHING_ASKED
-from core.security.end_user_turn import end_user_turn, turn_subject
+from core.security.end_user_turn import end_user_turn, keys_own_turn, on_a_keys_own_turn, turn_subject
 from core.security.memory_audience import memory_reader, reader_for_agent_id
 
 # Import from modules — SINGLE SOURCE for tool schemas
@@ -1302,8 +1302,8 @@ class StreamingChatService:
         # are DEFERRED to when those lanes' memory writes go live (Gerard's call).
         subject_id = turn_subject(f"user:{user_id}" if user_id else None)  # PRD-274 W3: the end user's
 
-        # F154: a widget turn is an anonymous visitor's, so it stores no memory.
-        if not (latest_text and full_response and smart_chat) or self.widget_mode:
+        # F154: a widget turn is an anonymous visitor's and a server key's own turn nobody's (PRD-274): neither stores memory.
+        if not (latest_text and full_response and smart_chat) or self.widget_mode or on_a_keys_own_turn():
             return
         try:
             _stored = await smart_chat.store(latest_text, full_response, chat_id, subject_id=subject_id,
@@ -2382,7 +2382,7 @@ class StreamingChatService:
                 turn_surface(WIDGET if self.widget_mode else None, self.widget_scopes, self.widget_team,
                              self.widget_agent_lock), \
                 self._hidden_action_scope(agent_id), lean_grants(self._lean_actions), memory_reader(reader), \
-                end_user_turn(getattr(self._lean_request, "end_user", None)):  # PRD-274 W3: whose turn it is
+                end_user_turn(getattr(self._lean_request, "end_user", None)), keys_own_turn(self._lean_request):  # PRD-274: whose turn it is
             async for chunk in self._stream_response_with_agent_scoped(
                 chat_id, messages, agent_id, user_id,
                 use_orchestrator_llm=use_orchestrator_llm, skip_composio=skip_composio,

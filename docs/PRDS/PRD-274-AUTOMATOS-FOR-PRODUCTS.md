@@ -303,6 +303,7 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
   - each conversation is one end user's (`chats.end_user_id`), and erasing them deletes their conversations and
     those conversations' sessions (#1487). The erase marks them first (`end_users.erasing_at`), so a turn still
     running writes nothing more for them, and a failed erase is finished by the next one.
+- A key's turn that names no end user stores no memory anywhere (decision 35, 16 Nov 2026).
 - Retention: once a day, each end user's facts made before their `retention_days`, retired ones too, their
   messages sent before it, and their conversations left empty are deleted
   (`services/end_user_retention.py`; #1488, #1489).
@@ -511,6 +512,19 @@ Flagged in their PRs, for Gerard to confirm:
     pile up. Shopify's record sets it off: its re-provision is its key recovery.
 34. **A product's workspace sees only whether its work is paused**, never its owner's plan or balance (#1512).
     When the owner runs out of credits, all of the product's workspaces pause together.
+
+### Made while building, 16 Nov 2026 (approved by Gerard)
+
+35. **A server key's own turn stores no memory.** A key's chat turn that names no end user is nobody's, as a widget
+    turn is an anonymous visitor's (F154). It writes no distilled facts, nothing to L2, its mirror or the daily log,
+    no L1 session, no tool outcome, no context-guard flush and no knowledge flywheel ingest, and the idle checkpoint
+    sweep passes over its conversations. The rule is held where memory is written, for the whole turn and the work
+    it starts (`keys_own_turn` in `core/security/end_user_turn.py`). What the turn reads is unchanged: a lean agent
+    still recalls its workspace's facts. A key's turn for an end user still writes to their namespace, and a
+    person's turn is unchanged. (Not: storing it as the workspace's memory. A learner who has not consented, or an
+    analyst agent's account of one advisory, would come back in another turn's answer.)
+    *Open:* how long a key's own conversations (their messages) are kept. `services/end_user_retention.py` covers
+    end users only.
 
 ## 9. Later
 
