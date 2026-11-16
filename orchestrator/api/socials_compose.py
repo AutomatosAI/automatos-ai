@@ -20,6 +20,11 @@ renders (``auto_template``): the composer picks the template for the post's form
 writes its fields from the post's own words, and ``api/socials.py`` saves the pick before
 the render starts.
 
+PRD-251D (US-D103, E2): at the person's own render or preview (``write_missing_fields``), an
+empty caption is Auto's to write as well, from the post's brief and for its channels, in the
+same composer call that writes the empty fields or picks the template, and saved in the same
+edit. A render a plan or an agent starts (``render_post`` itself) writes no caption.
+
 This router has no prefix and no gate of its own: ``api/socials.py`` includes it
 in the Socials router, whose ``require_socials_enabled`` answers 404 unless both
 switches are on (D1). Never mount it in the app directly.
@@ -355,9 +360,20 @@ def auto_brief(post: Any) -> str:
     return "\n\n".join(words or [post.title])[:BRIEF_MAX_CHARS]
 
 
-def _auto_context(db: Session, workspace_id: UUID, post: Any) -> compose.ComposeContext:
-    """The composer's context for ``post``; a chosen length keeps the templates that offer it."""
-    body = ComposeRequest(brief=auto_brief(post), format=post.format, length_seconds=post.length_seconds)
+def post_channels(post: Any) -> Optional[List[str]]:
+    """The channels the post goes to, for the composer to write its caption for; ``None``, every
+    connected channel, when it has none yet (as ``api/socials_retake.py`` asks)."""
+    targets = getattr(post, "targets", None) or ()
+    return sorted({target.toolkit for target in targets}) or None
+
+
+def _auto_context(db: Session, workspace_id: UUID, post: Any, caption: bool = False) -> compose.ComposeContext:
+    """The composer's context for ``post``; a chosen length keeps the templates that offer it.
+    With ``caption``, the composer writes the caption for the post's own channels."""
+    body = ComposeRequest(
+        brief=auto_brief(post), format=post.format, length_seconds=post.length_seconds,
+        channels=post_channels(post) if caption else None,
+    )
     context = compose_context(db, workspace_id, body)
     if post.length_seconds is None:
         return context
@@ -392,12 +408,16 @@ async def _auto_proposal(
         raise NotRenderable(f"{failed}: the model could not be reached. Try again.") from exc
 
 
-async def auto_template(db: Session, workspace_id: UUID, post: Any) -> Tuple[Dict[str, Any], str]:
+async def auto_template(
+    db: Session, workspace_id: UUID, post: Any, *, caption: bool = False,
+) -> Tuple[Dict[str, Any], str]:
     """Auto's pick for ``post``: the edit that records it, and the template's name.
     :class:`NotRenderable` (422, saying why) when no template of the workspace fits the
-    post's format and length, or the model gave no usable answer."""
+    post's format and length, or the model gave no usable answer. With ``caption`` (the
+    person's own render of a post whose caption is empty, PRD-251D US-D103), the same call
+    writes the caption for the post's channels, and it joins the edit."""
     try:
-        context = await asyncio.to_thread(_auto_context, db, workspace_id, post)
+        context = await asyncio.to_thread(_auto_context, db, workspace_id, post, caption)
     except ChoiceRefused as exc:
         raise NotRenderable(f"Auto could not pick a template: {exc}") from exc
     if not context.templates:
@@ -405,7 +425,10 @@ async def auto_template(db: Session, workspace_id: UUID, post: Any) -> Tuple[Dic
     proposal = await _auto_proposal(context, workspace_id, post.id)
     if not proposal.get("template_id"):
         raise NotRenderable(NO_TEMPLATE_FOR.format(format=post.format))
-    return _auto_edit(proposal, post), str(proposal["template"]["name"])
+    edit = _auto_edit(proposal, post)
+    if caption:
+        edit = {**edit, **empty_fields.caption_edit(proposal, post)}
+    return edit, str(proposal["template"]["name"])
 
 
 def _posts_api() -> Any:
@@ -417,19 +440,25 @@ def _posts_api() -> Any:
 
 
 async def let_auto_pick(
-    db: Session, workspace: Workspace, post: SocialPost, actor: str, check: Callable[[Any], None]
+    db: Session, workspace: Workspace, post: SocialPost, actor: str, check: Callable[[Any], None],
+    *, caption: bool = False,
 ) -> None:
     """Give a post left to Auto (``left_to_auto``) its template as it first renders or
     previews: Auto picks it and writes its fields, and the pick is saved before the render
     starts, by the compare-and-set commit, with a line in the history naming the template.
     The render, the preview and the editor then all use it. ``check`` refuses a post that
-    cannot render or preview now, before the model is asked. Any other post is left as it is."""
+    cannot render or preview now, before the model is asked. Any other post is left as it is.
+    With ``caption`` (``write_missing_fields``, the person's own render), the empty caption is
+    written in the same call and the same edit, and the history line names it too."""
     if not left_to_auto(post):
         return
     check(post)
     status, content_hash = post.status, post.content_hash
-    changes, template_name = await auto_template(db, workspace.id, post)
-    service.record_auto_pick(post, actor, changes, template_name)
+    # ``render_post`` and ``preview_post`` (a plan's, an agent's and the person's renders) ask for
+    # the pick alone, in the call they always made.
+    pick = auto_template(db, workspace.id, post, caption=True) if caption else auto_template(db, workspace.id, post)
+    changes, template_name = await pick
+    empty_fields.record_pick(post, actor, changes, template_name)
     _posts_api()._commit_unchanged(db, post, status=status, content_hash=content_hash)
 
 
@@ -454,19 +483,24 @@ def _chosen_template(db: Session, workspace_id: UUID, post: Any) -> Optional[Dic
     return template_entry(row) if row is not None and row.format in SOCIAL_TEMPLATE_FORMATS else None
 
 
-async def auto_fields(db: Session, workspace_id: UUID, post: Any) -> Dict[str, Any]:
+async def auto_fields(db: Session, workspace_id: UUID, post: Any, *, caption: bool = False) -> Dict[str, Any]:
     """The edit that fills the chosen template's empty fields: the composer, with that template
     and the post's own fields given, writes the rest from the post's own words. The post's own
-    value stays in every field that holds one (``empty_fields.fields_edit``)."""
+    value stays in every field that holds one (``empty_fields.fields_edit``). With ``caption``
+    (PRD-251D US-D103), the composer writes for the post's own channels and the caption it
+    wrote joins the edit as ``copy``, for a post whose caption is empty."""
     body = ComposeRequest(
         brief=auto_brief(post), format=post.format, template_id=post.template_id, length_seconds=post.length_seconds,
+        channels=post_channels(post) if caption else None,
     )
     given = empty_fields.own_values(post)
     try:
         context = await asyncio.to_thread(compose_context, db, workspace_id, body, given_fields=given)
     except ChoiceRefused as exc:
         raise NotRenderable(f"{WRITE_FAILED}: {exc}") from exc
-    return empty_fields.fields_edit(await _auto_proposal(context, workspace_id, post.id, WRITE_FAILED), post)
+    proposal = await _auto_proposal(context, workspace_id, post.id, WRITE_FAILED)
+    edit = empty_fields.fields_edit(proposal, post)
+    return {**edit, **empty_fields.caption_edit(proposal, post)} if caption else edit
 
 
 def _still_needed(template: Mapping[str, Any], post: Any) -> None:
@@ -480,23 +514,50 @@ def _still_needed(template: Mapping[str, Any], post: Any) -> None:
     raise NotRenderable(empty_fields.STILL_NEEDED.format(fields=", ".join(labels)), missing=tuple(missing))
 
 
+def _record_auto_words(post: Any, actor: str, template: Mapping[str, Any], changes: Mapping[str, Any]) -> bool:
+    """Apply what Auto wrote (the fields it newly gave a value, the caption) as one edit with one
+    history line naming them; ``False``, and nothing applied, when it wrote neither."""
+    wrote = empty_fields.newly_written(changes, post)
+    caption = empty_fields.COPY in changes
+    if not (wrote or caption):
+        return False
+    schema = template.get("variables_schema") or {}
+    labels = [compose_facts.field_label(name, schema.get(name)) for name in wrote]
+    empty_fields.record_written(post, actor, changes, empty_fields.written_line(labels, caption))
+    return True
+
+
 async def write_missing_fields(db: Session, workspace: Workspace, post: SocialPost, actor: str, *, preview_only: bool) -> None:
     """Before a person's render or preview: when the post's chosen template still has required
-    fields empty, Auto writes them from the post's own words, saved as an edit by the
-    compare-and-set commit with a line in the history naming them. Every field that holds a
-    value stays as it is. A post with no template (``let_auto_pick``'s) or with nothing empty
-    is left alone, and one that cannot render now is refused before the model is asked. What
-    Auto could not write is asked of the person by its label (422), with what it did write kept."""
+    fields empty, or its caption is empty and it has a brief to write one from (PRD-251D US-D103,
+    ``empty_fields.caption_wanted``), Auto writes them from the post's own words in one composer
+    call, saved as one edit by the compare-and-set commit with a line
+    in the history naming them. Every field that holds a value stays as it is, and so does a
+    caption that holds words; with only the caption empty, only the caption is written. A post
+    left to "Let Auto pick" with an empty caption gets its template, fields and caption here
+    (``let_auto_pick``); one with a caption, or with nothing empty, is left alone, and one that
+    cannot render now is refused before the model is asked. What Auto could not write is asked
+    of the person by its label (422), with what it did write kept."""
+    if empty_fields.holds_an_approval(post):
+        return  # nothing is written under an approval: the preview or the render answers for itself
+    check = preview.assert_can_preview if preview_only else service.assert_can_render
+    caption = empty_fields.caption_wanted(post)
+    if left_to_auto(post):
+        if caption:
+            await let_auto_pick(db, workspace, post, actor, check, caption=True)
+        return  # with a caption, ``render_post`` and ``preview_post`` pick as they always have
     template = await asyncio.to_thread(_chosen_template, db, workspace.id, post)
-    if template is None or not empty_fields.empty_required(template, post):
+    if template is None:
         return
-    (preview.assert_can_preview if preview_only else service.assert_can_render)(post)
+    missing = empty_fields.empty_required(template, post)
+    if not (missing or caption):
+        return
+    check(post)
     status, content_hash = post.status, post.content_hash
-    changes = await auto_fields(db, workspace.id, post)
-    wrote = empty_fields.newly_written(changes, post)
-    if wrote:
-        schema = template.get("variables_schema") or {}
-        labels = [compose_facts.field_label(name, schema.get(name)) for name in wrote]
-        empty_fields.record_written(post, actor, changes, labels)
+    edit = await auto_fields(db, workspace.id, post, caption=caption)
+    # With every required field filled, only the caption is written: an optional field the person
+    # left empty stays empty, as it does today.
+    changes = edit if missing else empty_fields.only_caption(edit)
+    if _record_auto_words(post, actor, template, changes):
         _posts_api()._commit_unchanged(db, post, status=status, content_hash=content_hash)
     _still_needed(template, post)

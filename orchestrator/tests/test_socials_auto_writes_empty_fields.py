@@ -315,7 +315,10 @@ def auto(env, monkeypatch):
     """Auto's words, recorded: what it writes for each post it is asked about."""
     env.asked, env.writes = [], {"headline": _value("Three weeks to go")}
 
-    async def fake_auto_fields(db, workspace_id, post):
+    # ``caption`` (PRD-251D US-D103) is asked only for a post whose caption is empty; these posts
+    # hold the harness's caption, so it is always False here (test_socials_auto_writes_empty_caption.py).
+    async def fake_auto_fields(db, workspace_id, post, *, caption=False):
+        assert caption is False
         env.asked.append(post.id)
         return {"variables": {**env.writes, **(post.variables or {})}, "sources": dict(post.sources or {})}
 
@@ -410,6 +413,22 @@ def test_a_post_that_cannot_render_is_refused_before_auto_is_asked(auto):
 
     assert resp.status_code == 409
     assert auto.asked == [] and _post(auto, post["id"]).variables == {}
+
+
+def test_a_post_that_holds_an_approval_is_never_written_into(auto):
+    # A preview is allowed for an approved post and keeps its status and hash: words Auto wrote there
+    # are content, so they would send the post back for approval behind the person's back.
+    post = _empty(auto)
+    row = _post(auto, post["id"])
+    row.status, row.approved_hash = service.APPROVED, row.content_hash  # what an approval stores
+    auto.session.commit()
+
+    resp = auto.client.post(f"/api/socials/posts/{post['id']}/render", json={"preview": True})
+
+    assert resp.status_code == 422 and "fill in headline" in resp.json()["detail"]
+    row = _post(auto, post["id"])
+    assert auto.asked == [] and row.variables == {}
+    assert row.status == service.APPROVED and row.approved_hash == row.content_hash == post["content_hash"]
 
 
 def test_a_render_started_by_a_plan_or_an_agent_asks_auto_nothing(auto):
