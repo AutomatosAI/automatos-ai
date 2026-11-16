@@ -121,20 +121,43 @@ Each carries the recommendation it was built on. The owner calls that can still 
 ## Wave 2
 
 ### US-D201: Instant preview of an image post
-- [ ] A new route returns one self-contained HTML page for a post's template, values and size: the words filled with HTML escaping by the renderer's rules, the brand tokens as `:root{--brand-*}`, the kit's font faces, the size variables, the story safe zone for a story, an empty slot's element removed, and a stub for the timeline library the image templates call. No file is fetched from the network by the page.
-- [ ] One test holds the page's filled body equal to what the renderer's own fill makes for the same inputs, so the two cannot drift.
-- [ ] The editor shows the page in a frame with `sandbox="allow-scripts"` and no `allow-same-origin`, with a content security policy inside the page that allows inline script and style, `data:` images and fonts, and nothing else. It refreshes a moment after the person stops typing and is labelled a preview.
-- [ ] A video, a text post and a post that is the person's own file keep today's preview.
-- [ ] Once a render exists and is current, the frame shows the rendered file.
-- [ ] The route is authenticated, scoped to the caller's workspace, in the route manifest, and passes the security review.
 
-### US-D202 and on: fewer views
-Specified once the owner has agreed the list below.
+What the research found (16 Nov): an image template needs its own inline script to look right (it fits the text, breaks the headline on `|`, colours the accent words, removes empty blocks), and that script calls the timeline library once after the layout is done. Nothing starts hidden and the still is taken at 0 seconds, so a browser that runs the script shows the finished card. The renderer's page assembly (`services/media-render/media_render/composition.py`: `fill_placeholders`, `build_document`) lives in another container and cannot be imported, so the orchestrator assembles the page itself and one test holds the two equal. The kit's fonts can be 0.5 to 2 MB as data URIs, so they are fetched once and not with every keystroke.
+
+- [ ] `POST /api/socials/templates/{template_id}/preview-page` takes the fields' values, a size of the template's and whether it is a story, and returns one HTML page: the words filled on the server with HTML escaping by the renderer's rules (a value never lands inside a script or an event attribute), the brand tokens as `:root{--brand-*}`, the size variables, the story safe zone for a story, an empty slot's element removed, the logos as `data:` URIs, a stub in place of the timeline library, and a marker where the font faces go. The page fetches nothing from the network.
+- [ ] `GET /api/socials/brand-kit/preview-fonts` returns the kit's `@font-face` rules with the fonts as `data:` URIs. The editor fetches it once per kit and puts it at the marker.
+- [ ] One test holds the page's filled composition equal to what the renderer's own fill makes for the same template and values, so the two cannot drift.
+- [ ] The editor shows the page in a frame with `sandbox="allow-scripts"` and no `allow-same-origin`, and the page carries its own content security policy: inline script and style, `data:` images and fonts, nothing else. It refreshes a moment after the person stops typing and is labelled a preview; the approved file is always the render.
+- [ ] A photo the post already has shows in its slot (the editor reads the file through the post's media route and hands it to the page as a `data:` URI). With none, the slot shows what the renderer shows for an empty one.
+- [ ] A video, a text post and a post that is the person's own file keep today's preview. Once a render exists and is current, the frame shows the rendered file.
+- [ ] Both routes are authenticated, scoped to the caller's workspace and in the route manifest, and the change passes the security review. A workspace's own template runs its script only inside the sandboxed frame.
+
+### US-D202: The Calendar's List is one plain list
+The research (16 Nov): the List layout renders the older `socials-post-list.tsx`, which brings a second list, a Board and a second detail pane. The Board and the status list are today the only views of an archived post and of a post with no slot, so the list stays and the rest goes.
+
+- [ ] The List layout shows every post grouped by status, archived and unslotted ones included, in the studio's own style. A post opens in the post page, as it does from the calendar.
+- [ ] `socials-board.tsx`, `socials-view-toggle.tsx` and the detail pane inside `socials-post-list.tsx` are deleted with their tests' pins moved or removed; nothing else imports them.
+- [ ] Tests: the list shows an archived post and a post with no slot; a click opens the post page.
+
+### US-D203 (owner call 2): one post page for every status and role
+`socials-post-detail.tsx` is still the only surface for a viewer, for a post that is rendering, publishing, published, partly published or archived, and for a person in the Queue who may not approve. Moving those into the post page lets the older pane go. Specified once agreed.
+
+### US-D204 (owner call 2): campaigns that are not plans
+Their screens are the only place to make an ad-hoc campaign, add or remove its posts by hand, switch series approval on and approve a series. A plan's "Approve the week" does not use them. Removing them removes those four things. Specified once agreed.
 
 ## Wave 3
 
 ### US-D301: Look options on a post
-Specified after the design step (what the tokens can switch for every starter without editing each one, and whether a look is part of what is approved).
+
+What the research found (16 Nov): every starter reads its colours and its logo only through the brand tokens and the `brand.*` variables, so a look can be applied to the tokens of one render and no template file changes. Every kit already yields a light palette (paper) and a dark one (stage); nine starters are built on paper and ten on the dark stage or a photograph. The accent is already switched for the whole kit by `accent_use`.
+
+- [ ] A post carries a look: light or dark, the accent strong or sparing, the logo on or off. It is a render setting like the voice and the music (`RENDER_FIELDS`): stored on the post in a new nullable column, validated, and left out when it is the kit's own.
+- [ ] `bundle_for` applies it to one render's tokens and variables: the accent through the kit's `accent_use`, the logo by the empty-logo value the templates already hide, light or dark by mapping the paper tokens to the stage's (with one new derived token for a card on the dark ground).
+- [ ] Light or dark is offered only for a template built on paper; the gallery entry says which looks a template takes. The accent and the logo are offered for every template.
+- [ ] The editor's Look card has the three controls under the gallery; they save with the draft and mark the preview out of date.
+- [ ] An approved post's look is the look of its approved file: a render is refused while a post holds an approval, as today, so the look changes only with an edit that sends it back.
+- [ ] The renderer's contrast check passes for every starter in every look it is offered in, shown by the CI job that renders the starters.
+- [ ] Migration: one head, chained onto the current one, safe on a `create_all`-built database, both head pins moved.
 
 ### US-D302: Video templates explain their fields
 - [ ] Every field of `app-promo`, `cinematic-product-promo` and `ui-story-promo` has a label and a description that say what it is and where it shows, in plain words.
@@ -153,7 +176,7 @@ Specified after the design step (what the tokens can switch for every starter wi
 None of these blocks Wave 1.
 
 1. **Channels (E4).** Recommended: the last post's channels. The other choice is every connected channel that takes the format.
-2. **Fewer views (E9).** Recommended: the Calendar's List becomes a plain list in the studio's own style; the Board, the status list and the older detail pane go once the editor and the Queue cover what only they do today; Campaigns that are not plans keep one screen under Plans. The exact files, and what would be lost, come with the Wave 2 research.
-3. **Look options (E10).** Which ones: light or dark, the accent strong or sparing, the logo on or off. And whether changing the look after approval sends the post back for approval. Recommended: yes, it is what goes out.
+2. **Fewer views (E9).** US-D202 is built as specified (the Board and the second detail pane inside the list go; the list stays, because it is the only view of an archived or unslotted post). Two larger removals wait for a yes: US-D203, one post page for every status and role, which lets the older detail pane go; and US-D204, removing the screens for campaigns that are not plans, which removes ad-hoc campaigns, adding or removing a campaign's posts by hand, the series approval switch and "Approve series". Recommended: yes to US-D203, and keep the campaign screens until a plan can do what they do.
+3. **Look options (E10).** Recommended: all three (light or dark, the accent strong or sparing, the logo on or off), with light or dark only on the nine templates built on paper. A look cannot change under an approval, because a render is refused while a post holds one.
 4. **Video templates (E11).** Recommended as rescoped above: explain the fields, default only what is right for anyone.
 5. **Instant preview and custom templates (E8).** A workspace's own template runs its script in the sandboxed frame. Recommended: allow it, with the sandbox and the policy above.
