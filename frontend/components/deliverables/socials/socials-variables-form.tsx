@@ -65,6 +65,14 @@ export function withValue(variables: Variables, name: string, spec: SocialTempla
   return { ...rest, [name]: { value, claim: spec.claim === true } }
 }
 
+/** `sources` after an edit to field `name`: a field emptied by hand takes its source with it,
+ * so it never rides on to what Auto writes there next. Every other field's source stays. */
+export function sourcesAfterEdit(sources: Sources, variables: Variables, name: string): Sources {
+  if (variables[name] !== undefined || !(name in sources)) return sources
+  const { [name]: _dropped, ...rest } = sources
+  return rest
+}
+
 interface VariableFieldProps {
   name: string
   spec: SocialTemplateVariable
@@ -181,7 +189,7 @@ export function SocialsVariablesForm({ schema, variables, sources, onChange, ope
       ) : (
         names.map((name) => (
           <div key={name} className="space-y-1">
-            <VariableField name={name} spec={schema[name]} variables={variables} example={examples[name]} onChange={(next) => onChange(next, sources)} />
+            <VariableField name={name} spec={schema[name]} variables={variables} example={examples[name]} onChange={(next) => onChange(next, sourcesAfterEdit(sources, next, name))} />
             {schema[name].claim && (
               <ClaimSource
                 name={name}

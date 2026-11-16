@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'vitest'
 
-import { schemaAtLength, withoutFields } from '@/components/deliverables/socials/socials-variables-form'
+import { schemaAtLength, sourcesAfterEdit, withoutFields } from '@/components/deliverables/socials/socials-variables-form'
 import type { SocialTemplateVariable } from '@/lib/api-client'
 
 const SCHEMA: Record<string, SocialTemplateVariable> = {
@@ -30,6 +30,17 @@ describe('the fields a length asks for', () => {
     // A cleared claim's source goes with its value: it must not ride on to what Auto writes next.
     const sources = { stat_value: { kind: 'report', ref: 'r-1', as_of: null } }
     expect(withoutFields(sources, SCHEMA)).toEqual({})
+  })
+
+  it('a field emptied by hand takes its source with it; every other field keeps its own', () => {
+    const source = { kind: 'report', ref: 'r-1', as_of: null }
+    const sources = { stat_value: source, headline: source }
+    const emptied = { headline: { value: 'OPEN LATE', claim: false } }  // stat_value was just cleared
+    expect(sourcesAfterEdit(sources, emptied, 'stat_value')).toEqual({ headline: source })
+    // An edit that leaves the field filled changes nothing, and neither does one to another field
+    // (a source picked before its value is typed stays).
+    expect(sourcesAfterEdit(sources, emptied, 'headline')).toBe(sources)
+    expect(sourcesAfterEdit(sources, emptied, 'closing_line')).toBe(sources)
   })
 
   it('keeps every field at a length without a cut, with no length, or with no cuts at all', () => {

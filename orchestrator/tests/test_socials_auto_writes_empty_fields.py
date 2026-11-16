@@ -128,7 +128,8 @@ def test_autos_value_goes_only_where_the_post_holds_none_and_the_rest_of_the_pos
     proposal = {
         "template": CARD,
         "variables": {"headline": _value("Auto's headline"), "card_1_title": _value("Scoped"), "card_1_text": _value("One key per job.")},
-        "sources": {"card_1_text": {"kind": "metric", "ref": "m-1", "as_of": None}},
+        "sources": {"card_1_text": {"kind": "metric", "ref": "m-1", "as_of": None},
+                    "slides": {"kind": "metric", "ref": "m-2", "as_of": None}},  # bound to a value that is the person's
     }
 
     changes = empty_fields.fields_edit(proposal, post)
@@ -138,7 +139,8 @@ def test_autos_value_goes_only_where_the_post_holds_none_and_the_rest_of_the_pos
         "slides": _value(5),
     }
     # The person's source stays with the field that holds their value; the empty field's old
-    # source does not ride on to the value Auto wrote for it.
+    # source does not ride on to the value Auto wrote for it; and a source Auto bound goes only
+    # with a value Auto wrote, never on to the person's own.
     assert changes["sources"] == {
         "headline": {"kind": "report", "ref": "r-1", "as_of": None},
         "card_1_text": {"kind": "metric", "ref": "m-1", "as_of": None},

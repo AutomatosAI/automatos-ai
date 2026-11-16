@@ -70,16 +70,18 @@ def fields_edit(proposal: Mapping[str, Any], post: Any) -> Dict[str, Any]:
     """Auto's ``proposal`` as the edit that fills the post's empty fields. Auto's value goes
     only where the post holds none (a blank one never hides it); everything else the post has
     stays, a variable the template does not have included. A figure in a field the template
-    marks a claim is one (F433). The post's own source stays with a field that holds its own
-    value; an empty field's old source never rides on to the value Auto wrote."""
+    marks a claim is one (F433). A source goes with the value it was given for: the post's own
+    stays with a field that holds the post's value, Auto's goes only with a value Auto wrote,
+    and an empty field's old source never rides on to the value Auto wrote."""
     schema = (proposal.get("template") or {}).get("variables_schema") or {}
     held = own_values(post)
     stored = dict(post.variables) if isinstance(post.variables, Mapping) else {}
     written = {name: spec for name, spec in (proposal.get("variables") or {}).items() if name not in held}
     own_sources = {name: source for name, source in (post.sources or {}).items() if name in held}
+    auto_sources = {name: source for name, source in (proposal.get("sources") or {}).items() if name in written}
     return {
         "variables": with_template_claims({**stored, **written}, set(claim_names(schema))),
-        "sources": {**(proposal.get("sources") or {}), **own_sources},
+        "sources": {**auto_sources, **own_sources},
     }
 
 

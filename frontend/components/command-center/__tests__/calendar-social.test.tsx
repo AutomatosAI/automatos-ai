@@ -159,7 +159,8 @@ describe('the calendar with a scheduled post', () => {
     fireEvent.dragStart(event, { dataTransfer: transfer })
     fireEvent.drop(event.closest('.cc-cal-daycol') as HTMLElement, { dataTransfer: transfer })
     await waitFor(() => expect(api.setSocialPostSlot).toHaveBeenCalledTimes(1))
-    expect(toast.success).toHaveBeenCalledWith(RESCHEDULED_MESSAGE) // moved, and still waiting: nothing publishes
+    // moved, and still waiting: nothing publishes
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(RESCHEDULED_MESSAGE))
   })
 
   it('a drop on a day column moves the slot with the post\'s timezone', async () => {
@@ -183,7 +184,8 @@ describe('the calendar with a scheduled post', () => {
     expect(api.scheduleSocialPost).not.toHaveBeenCalled() // PUT /slot moves a post of any status
     // The move is a change in Socials too: its calendar and this one both read the post again.
     await waitFor(() => expect(socials.changed).toHaveBeenCalledTimes(1))
-    expect(toast.success).toHaveBeenCalledWith(PUBLISHES_THERE_MESSAGE) // the answer says it is scheduled
+    // the answer says it is scheduled
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(PUBLISHES_THERE_MESSAGE))
   })
 
   it('Reschedule… sends the new wall time in the post\'s timezone', async () => {
