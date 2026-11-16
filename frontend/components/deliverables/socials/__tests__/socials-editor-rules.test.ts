@@ -15,10 +15,10 @@ import { describe, it, expect } from 'vitest'
 import type { SocialChannel, SocialPost, SocialPostTarget } from '@/lib/api-client'
 import { startingKinds, withStartingChannels, newDraft } from '@/components/deliverables/socials/studio/editor-model'
 import {
-  SUBMIT_CROPS, SUBMIT_RENDERS, fullRenderCost, submitNote, submitRenders,
+  SUBMIT_CROPS, SUBMIT_RENDERS, submitNote, submitRenders,
 } from '@/components/deliverables/socials/studio/editor-submit'
 import { SUPPORTED_CHANNELS, unconnectedChannels } from '@/components/deliverables/socials/studio/editor-connect-channels'
-import { renderNote } from '@/components/deliverables/socials/studio/preview-model'
+import { fullRenderCost, renderNote } from '@/components/deliverables/socials/studio/preview-model'
 
 const kind = (k: string) => ({ kind: k, available: true, reason: null, needs_public_storage: false })
 const channel = (toolkit: string, kinds: string[]) =>

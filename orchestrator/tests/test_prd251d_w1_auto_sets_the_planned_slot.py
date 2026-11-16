@@ -135,7 +135,7 @@ def test_a_past_time_an_unknown_zone_and_a_day_without_a_time_are_refused_with_w
               "Nothing was saved.")
     for sent in ("Friday at nine", 20301122, ["2030-11-22T09:00"]):
         slot, problem = planned_slot(sent, NEW_YORK, now=NOW)
-        assert slot is None and "is not an ISO date and time, such as 2026-11-20T09:00" in problem, sent
+        assert slot is None and "is not an ISO date and time, written YYYY-MM-DDTHH:MM" in problem, sent
 
 
 def test_no_planned_for_is_no_slot_and_a_timezone_alone_changes_nothing():

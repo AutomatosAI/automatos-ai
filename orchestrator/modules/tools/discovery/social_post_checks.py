@@ -24,7 +24,7 @@ labels (``missing_in_words``).
 PRD-251D (E6, US-D106), "post it Friday at nine": the day and time a post is planned for is checked
 here too, before anything is saved (``slot_asked``: ``slot_held``, then ``planned_slot``). The rule:
 
-- ``planned_for`` with no offset ("2026-11-20T09:00") is that wall-clock time in ``timezone``; with
+- ``planned_for`` with no offset (YYYY-MM-DDTHH:MM) is that wall-clock time in ``timezone``; with
   timezone left out, in the post's own timezone. A time with an offset ("…Z", "…+01:00") is that
   exact moment, shown in the same zone. With no zone at all, it is refused: nothing guesses one.
 - a day with no time, a time already past (an agent's wrong year) and an unknown zone are refused
@@ -68,7 +68,7 @@ MORE_FIELDS = ", and {count} more (platform_get_template_schema lists them)"
 # PRD-251D (E6): the planned slot's refusals. Each says what was wrong and that nothing was saved.
 _DAY_ONLY = re.compile(r"^\d{4}-?\d{2}-?\d{2}$")
 SLOT_YEARS = range(1900, 9000)  # a year outside these is a typo, never a slot (a past one is refused as past)
-NOT_A_SLOT_TIME = ("planned_for {value!r} is not an ISO date and time, such as 2026-11-20T09:00. "
+NOT_A_SLOT_TIME = ("planned_for {value!r} is not an ISO date and time, written YYYY-MM-DDTHH:MM. "
                    "Nothing was saved.")
 NO_TIME_OF_DAY = ("planned_for {value!r} is a day with no time: send the time too, such as {value}T09:00. "
                   "Nothing was saved.")

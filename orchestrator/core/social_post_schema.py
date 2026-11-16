@@ -113,7 +113,7 @@ def _post_slot_fields() -> dict:
             "type": "string",
             "description": (
                 "The day and time the post is planned for, as an ISO date and time: the person's own local "
-                "time, such as 2026-11-20T09:00, read in timezone (a time with an offset, such as Z, is that "
+                "time, written YYYY-MM-DDTHH:MM, read in timezone (a time with an offset, such as Z, is that "
                 "exact moment). It is the post's slot in the Socials calendar, where it waits for the owner: "
                 "the owner still approves the post, and approving it schedules it into that slot. A time "
                 "already past is refused. Only a draft, a post waiting for approval or one sent back takes a "

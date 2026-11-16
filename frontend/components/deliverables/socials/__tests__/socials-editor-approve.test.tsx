@@ -12,6 +12,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { toast } from 'sonner'
 
 vi.mock('@/lib/api-client', async () => (await import('./socials-editor-harness')).apiModule)
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
@@ -73,14 +74,28 @@ describe('approving in the editor', () => {
     expect(api.submitSocialPost).not.toHaveBeenCalled()
   })
 
-  it('a save that changes nothing the file shows, and a post with no file yet, leave Approve as it was', async () => {
-    renderEditor({ ...WAITING, media: { '1:1': ['d-square'] } } as SocialPost)
-    const controls = await screen.findByRole('region', { name: APPROVE_CARD })
-    fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'A better title' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }))
-    await waitFor(() => expect(api.updateSocialPost).toHaveBeenCalled())
-    expect(within(controls).queryByText(FILE_OLDER_THAN_WORDS)).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Submit for approval' })).toBeNull()
+  it('a save that changes nothing the file shows, a post with no file yet, and a file of your own leave Approve as it was', async () => {
+    const cases: Array<[SocialPost, string, string]> = [
+      // The title is not on the file.
+      [{ ...WAITING, media: { '1:1': ['d-square'] } } as SocialPost, 'Title', 'A better title'],
+      // No file yet: there is nothing for the words to be newer than.
+      [{ ...WAITING, media: {} } as SocialPost, 'Brief', 'A different point entirely'],
+      // A video of the person's own shows none of the post's words, so no edit makes it older than them.
+      [{ ...WAITING, format: 'video', media: { original: ['d-1'] } } as SocialPost, 'Brief', 'A different point entirely'],
+    ]
+    for (const [waiting, field, value] of cases) {
+      vi.mocked(toast.success).mockClear()  // an earlier save's "Draft saved" must not answer for this one
+      renderEditor(waiting)
+      const controls = await screen.findByRole('region', { name: APPROVE_CARD })
+      fireEvent.change(screen.getByRole('textbox', { name: field }), { target: { value } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save draft' }))
+      // The flag is set after the save has answered: wait for that, then one more turn of the loop.
+      await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Draft saved'))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(within(controls).queryByText(FILE_OLDER_THAN_WORDS)).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Submit for approval' })).toBeNull()
+      cleanup()
+    }
   })
 
   it("shows the Queue's controls for a post that waits for approval, to an owner and to an editor", async () => {

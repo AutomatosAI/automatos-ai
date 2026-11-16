@@ -13,10 +13,8 @@
  * Submit never sends a file that does not show the post's current words.
  */
 import type { SocialPost } from '@/lib/api-client'
-import { formatRenderMinutes } from '../socials-status'
-import type { EditorDraft } from './editor-model'
-import { previewStale } from './preview-model'
-import { lengthLabel } from './socials-calendar-model'
+import { isOwnFilePost, type EditorDraft } from './editor-model'
+import { fullRenderCost, previewStale } from './preview-model'
 
 export const SUBMIT_RENDERS = 'Submit for approval renders the post first, then it waits for approval. Images use no render minutes.'
 export const SUBMIT_CROPS = "Submit for approval crops your picture to each channel's shape first, then it waits for approval. No render minutes."
@@ -24,17 +22,18 @@ export const RENDERING_FOR_APPROVAL = 'Rendering. The post goes for approval onc
 export const SENT_FOR_APPROVAL = 'Sent for approval'
 /** Under the approve controls after a saved change to what the file shows: why Approve waits. */
 export const FILE_OLDER_THAN_WORDS = 'You saved a change after this file was made, so it no longer shows the post as it is. Submit for approval makes it again; approve it after that.'
-const SECONDS_PER_MINUTE = 60
 
 /**
  * Whether saving `draft` leaves the post's file older than its words: the post already has a
  * rendered file, and the save changes something a render reads (preview-model's `previewStale`).
  * The server keeps the old file after an edit and does not record which content it was made
  * from, so the editor holds this for the sitting: Approve waits and Submit makes the file again.
+ * A file of the person's own (an upload or a Library pick) shows none of the post's words, so
+ * no edit makes it older than them.
  */
 export function saveOutdatesFile(post: SocialPost | null, draft: EditorDraft): boolean {
   const hasFile = !!post && Object.keys(post.media ?? {}).length > 0
-  return hasFile && previewStale(post, draft)
+  return hasFile && !isOwnFilePost(post, draft) && previewStale(post, draft)
 }
 
 export interface SubmitInput {
@@ -51,14 +50,6 @@ export interface SubmitInput {
 export function submitRenders({ format, ownFile }: Pick<SubmitInput, 'format' | 'ownFile'>): boolean {
   if (format === 'text') return false
   return !ownFile || format === 'image'
-}
-
-/** "about 1.5 render minutes (3 sizes x 0:30)": what a video's full render costs. */
-export function fullRenderCost(lengthSeconds: number | null, sizes: number): string {
-  const length = lengthSeconds ? lengthLabel(lengthSeconds) : 'its length'
-  const count = Math.max(1, sizes)
-  const minutes = lengthSeconds ? formatRenderMinutes((lengthSeconds / SECONDS_PER_MINUTE) * count, null) : 'a few'
-  return `about ${minutes} render minutes (${count} ${count === 1 ? 'size' : 'sizes'} x ${length})`
 }
 
 /** The line under Submit: what it will render first, and a video's render minutes; null when it

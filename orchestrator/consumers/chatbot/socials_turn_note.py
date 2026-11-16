@@ -59,7 +59,7 @@ SOCIALS_NOTE = (
     "rendering never waits for approval. When the call fails because the render was refused, the post is a "
     "draft: fill the fields it names with platform_update_social_post and render true, and never make it "
     "again. When the owner names a day and time (\"post it Friday at nine\"), send planned_for, their local "
-    "date and time such as 2026-11-20T09:00, and timezone, the IANA zone of today's date line unless they "
+    "date and time written YYYY-MM-DDTHH:MM, and timezone, the IANA zone of today's date line unless they "
     "name another: the post then waits on that slot in the Socials calendar for their approval, and their "
     "approval schedules it there, so never say it is scheduled before they approve. "
     "Say a post was made, changed or waits in the Socials tab only after the call that did it "
