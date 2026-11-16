@@ -30,7 +30,7 @@ from starlette.requests import Request
 from api import documents
 from core.auth import server_key_gate as gate
 from core.auth.scopes import DOCUMENTS_READ, DOCUMENTS_WRITE
-from services.document_key_access import UPLOAD_CLASH
+from services.document_key_access import KEY_TEAM_ACCESS_REFUSED, UPLOAD_CLASH
 
 UPLOAD = ("POST", "/api/documents/upload")
 LIST = ("GET", "/api/documents")
@@ -168,11 +168,14 @@ def unlimited(monkeypatch):
 def manager(new_session, monkeypatch):
     """The ingestion manager: it deletes by bare id on committed rows, as the real one does, so
     only the route's own scoping keeps other rows safe; and it records what it is asked."""
-    asked = SimpleNamespace(deleted=[], processed=[])
+    asked = SimpleNamespace(deleted=[], processed=[], cleared=[])
 
     class _Manager:
         def __init__(self, workspace_id):
             self.workspace_id = workspace_id
+
+        def clear_chunks(self, document_id):  # F087: a replacement clears the old text first
+            asked.cleared.append((self.workspace_id, document_id))
 
         def delete_document(self, document_id):
             asked.deleted.append((self.workspace_id, document_id))
@@ -501,16 +504,17 @@ class _Upload:
         pass
 
 
-def _upload(new_session, ctx, filename, data):
+def _upload(new_session, ctx, filename, data, team_access=None):
     return _call(new_session, documents.handle_request, ctx=ctx, file=_Upload(filename, data), description=None,
-                 tags=None, team_access=None)
+                 tags=None, team_access=team_access)
 
 
 def _row(new_session, document_id):
     s = new_session()
     try:
-        return s.execute(text("SELECT workspace_id, filename, created_by, created_by_user_id, content_hash "
-                              "FROM documents WHERE id = :id"), {"id": document_id}).fetchone()
+        return s.execute(text("SELECT workspace_id, filename, created_by, created_by_user_id, content_hash, "
+                              "team_access, is_shared, doc_metadata FROM documents WHERE id = :id"),
+                         {"id": document_id}).fetchone()
     finally:
         s.close()
 
@@ -572,3 +576,55 @@ def test_a_keys_spreadsheet_never_writes_over_a_hidden_spreadsheets_copy(new_ses
     assert set(uploads.worker.written) == {"documents/rota.csv"}
     member = _upload(new_session, _member(library.ws), "roster_list.csv", b"name,role\nSam,stand-in\n")
     assert member.document_id and "documents/roster_list.csv" in uploads.worker.written   # a member as before
+
+
+def test_a_keys_upload_naming_teams_is_refused_before_anything_is_saved(new_session, library, unlimited, routes,
+                                                                        uploads):
+    """A key writes only documents it can read back: one a team limits it could never list, get,
+    delete or upload again."""
+    forecast = b"month,total\nOctober,1200\n"
+    key = _key_ctx(new_session, routes, UPLOAD, library.ws, [DOCUMENTS_WRITE])
+    for teams in ("finance", "Finance, ops"):
+        with pytest.raises(HTTPException) as refused:
+            _upload(new_session, key, "q4-forecast.csv", forecast, team_access=teams)
+        assert (refused.value.status_code, refused.value.detail) == (400, KEY_TEAM_ACCESS_REFUSED), teams
+    assert list(uploads.folder.iterdir()) == [] and uploads.worker.written == {}   # nothing saved, nothing written
+    assert uploads.manager.processed == [] and "q4-forecast.csv" not in _names_in(new_session, library.ws)
+
+    member = _upload(new_session, _member(library.ws), "q4-forecast.csv", forecast, team_access="finance")
+    assert _row(new_session, member.document_id).team_access == ["finance"]        # a member's upload is as before
+
+
+def test_a_key_replaces_a_document_it_reaches_and_the_replacement_names_the_key(new_session, library, unlimited,
+                                                                               routes, uploads):
+    key = _key_ctx(new_session, routes, UPLOAD, library.ws, [DOCUMENTS_WRITE])
+    answer = _upload(new_session, key, "pricing.md", b"Harvest Club: 23 pounds a month from January.\n")
+
+    assert answer.document_id == library.ids["shared"]                             # the same document, replaced
+    assert answer.message.startswith("Replaced pricing.md (version 2)")
+    [earlier] = _row(new_session, library.ids["shared"]).doc_metadata["versions"]
+    assert earlier["replaced_by"] == key.user.id and key.user.id.startswith("sdk:")
+    assert uploads.manager.cleared == [(library.ws, library.ids["shared"])]
+    assert uploads.manager.processed == [(library.ws, library.ids["shared"])]
+    assert _names_in(new_session, library.ws).count("pricing.md") == 1
+    assert _remaining(new_session, library) == (ALL, True)                         # theirs, of the same name, too
+
+
+def test_a_document_stored_the_usual_way_is_one_a_key_reaches_end_to_end(new_session, library, unlimited, routes,
+                                                                         uploads):
+    """A member's upload with the defaults: no teams, and is_shared left to the column's default."""
+    stored = _upload(new_session, _member(library.ws), "staff-handbook.md", b"Staff handbook: shifts start at 8.\n")
+    row = _row(new_session, stored.document_id)
+    assert not row.team_access and row.is_shared is not False
+
+    reader = _key_ctx(new_session, routes, LIST, library.ws, [DOCUMENTS_READ])
+    assert stored.document_id in _listed(new_session, reader)
+    assert _call(new_session, documents.get_document, document_id=stored.document_id, ctx=reader).id == stored.document_id
+
+    writer = _key_ctx(new_session, routes, UPLOAD, library.ws, [DOCUMENTS_WRITE])
+    again = _upload(new_session, writer, "staff-handbook.md", b"Staff handbook: shifts start at 7 from March.\n")
+    assert again.document_id == stored.document_id and again.message.startswith("Replaced staff-handbook.md")
+
+    remover = _key_ctx(new_session, routes, DELETE, library.ws, [DOCUMENTS_WRITE])
+    assert _delete(new_session, remover, stored.document_id) == {"message": "Document deleted successfully"}
+    assert "staff-handbook.md" not in _names_in(new_session, library.ws)
