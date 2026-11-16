@@ -25,7 +25,8 @@ export type Permission =
   | "tasks:write"
   | "memory:read"
   | "memory:write"
-  | "agents:chat";
+  | "agents:chat"
+  | "reports:write";
 
 /** One scope the create form offers: its checkbox label and, where the label needs it, a hint. */
 export interface PermissionOption {
@@ -109,7 +110,7 @@ export const COMMON_PERMISSIONS: PermissionOption[] = [
 /**
  * The scopes a product's own backend uses (PRD-274; orchestrator/api/api_keys.py
  * `VALID_PERMISSIONS`). The form offers them for a server key only, and each is ticked on its
- * own: "Select All" leaves them out, so one click never widens a key. The routes behind four of
+ * own: "Select All" leaves them out, so one click never widens a key. The routes behind five of
  * them refuse a public key (orchestrator/core/auth/server_key_gate.py). The board's read routes
  * accept `tasks:read` from either kind; this form still offers it for a server key only, because
  * a public key can be read by anyone who opens the page it sits in.
@@ -144,6 +145,12 @@ export const SERVER_KEY_PERMISSIONS: PermissionOption[] = [
     label: "Agents: Chat",
     group: "Agents",
     hint: "Chat with an agent as the key's own service user. This workspace pays for each turn.",
+  },
+  {
+    value: "reports:write",
+    label: "Reports: Write",
+    group: "Reports",
+    hint: "Report an agent's reply in the key's own chats, for the end user who read it.",
   },
 ];
 

@@ -5,11 +5,13 @@ mapped. A new report is 201 ``{report_id, status: "received"}``, a duplicate 200
 ``{report_id, status: "already_received"}``; no person 403; a target the
 reporter cannot see 404 ``report_target_not_found``; a failed write 503 that
 leaks nothing; over the reporter's limit 429 before anything is written. Any
-member may report, a viewer included (``members:read``, held by every role). It
-mounts through ``RouterSpec("api.content_reports")``, never main.py.
+member may report, a viewer included (``members:read``, held by every role), and
+never names an end user (422): ``end_user_id`` is a server key's (``reports:write``,
+``tests/test_afp_report_keys.py``). It mounts through
+``RouterSpec("api.content_reports")``, never main.py.
 
 DB-free: the workspace role and the service are faked where the real ones would
-need Postgres.
+need Postgres, and the gate's sign-in answers the test's caller.
 """
 from __future__ import annotations
 
@@ -34,9 +36,10 @@ import tests.conftest as _conftest  # noqa: E402
 _conftest._restore_real_app_modules()
 
 import api.content_reports as reports_api  # noqa: E402
+import core.auth.server_key_gate as gate  # noqa: E402
 import core.auth.workspace_permission as permission_mod  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
-from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
+from core.auth.scopes import REPORTS_WRITE  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 from modules.policy.roles import workspace_has_permission  # noqa: E402
 from router_manifest import MANIFEST_ROUTERS, RouterSpec, load_routers  # noqa: E402
@@ -77,10 +80,15 @@ def _member_ctx(user_id="member-1"):
     )
 
 
-def _client(ctx, db=None):
+def _client(monkeypatch, ctx, db=None):
+    """The router, with the gate's sign-in answering ``ctx`` (a member's path through the gate)."""
+
+    async def _signed_in(request):
+        return ctx
+
+    monkeypatch.setattr(gate, "get_request_context_hybrid", _signed_in)
     app = FastAPI()
     app.include_router(reports_api.router)
-    app.dependency_overrides[get_request_context_hybrid] = lambda: ctx
     app.dependency_overrides[get_db] = lambda: db if db is not None else _NoRowsDB()
     return TestClient(app)
 
@@ -119,19 +127,19 @@ def filed(monkeypatch):
 def test_a_new_report_is_201_with_its_id(monkeypatch, filed):
     _as_role(monkeypatch, "editor")
 
-    resp = _client(_member_ctx()).post(ROUTE, json=BODY)
+    resp = _client(monkeypatch, _member_ctx()).post(ROUTE, json=BODY)
 
     assert resp.status_code == 201
     assert resp.json() == {"report_id": 41, "status": "received"}
     assert filed["calls"] == [{"target_type": "message", "target_id": MESSAGE_ID,
-                               "reason": "harmful", "note": "Not OK."}]
+                               "reason": "harmful", "note": "Not OK.", "end_user_id": None}]
 
 
 def test_a_duplicate_is_200_with_the_first_reports_id(monkeypatch, filed):
     _as_role(monkeypatch, "editor")
     filed["result"] = _filed(report_id=17, duplicate=True)
 
-    resp = _client(_member_ctx()).post(ROUTE, json=BODY)
+    resp = _client(monkeypatch, _member_ctx()).post(ROUTE, json=BODY)
 
     assert resp.status_code == 200
     assert resp.json() == {"report_id": 17, "status": "already_received"}
@@ -141,21 +149,21 @@ def test_a_duplicate_is_200_with_the_first_reports_id(monkeypatch, filed):
 def test_every_member_may_report_a_viewer_included(monkeypatch, filed, role):
     _as_role(monkeypatch, role)
 
-    assert _client(_member_ctx()).post(ROUTE, json=BODY).status_code == 201
+    assert _client(monkeypatch, _member_ctx()).post(ROUTE, json=BODY).status_code == 201
 
 
-def test_the_local_operator_may_report(filed):
+def test_the_local_operator_may_report(monkeypatch, filed):
     ctx = RequestContext(workspace_id=WS_ID, user=UserContext(id="local", system_role="user"),
                          auth_type="anonymous")
 
-    assert _client(ctx).post(ROUTE, json=BODY).status_code == 201
+    assert _client(monkeypatch, ctx).post(ROUTE, json=BODY).status_code == 201
 
 
 def test_a_target_the_reporter_cannot_see_is_404_with_its_code(monkeypatch, filed):
     _as_role(monkeypatch, "editor")
     filed["raise"] = service.ReportTargetNotFound()
 
-    resp = _client(_member_ctx()).post(ROUTE, json=BODY)
+    resp = _client(monkeypatch, _member_ctx()).post(ROUTE, json=BODY)
 
     assert resp.status_code == 404
     assert resp.json()["detail"]["code"] == "report_target_not_found"
@@ -165,7 +173,7 @@ def test_a_failed_write_is_503_and_leaks_nothing(monkeypatch, filed):
     _as_role(monkeypatch, "editor")
     filed["raise"] = service.ReportNotRecorded()
 
-    resp = _client(_member_ctx()).post(ROUTE, json=BODY)
+    resp = _client(monkeypatch, _member_ctx()).post(ROUTE, json=BODY)
 
     assert resp.status_code == 503
     assert resp.json() == {"detail": reports_api.NOT_RECORDED_DETAIL}
@@ -181,17 +189,17 @@ def test_a_member_with_no_person_row_is_403(monkeypatch):
     """The gate passes (the role resolves), but no ``users`` row is the caller's."""
     _as_role(monkeypatch, "editor")
 
-    resp = _client(_member_ctx()).post(ROUTE, json=BODY)
+    resp = _client(monkeypatch, _member_ctx()).post(ROUTE, json=BODY)
 
     assert resp.status_code == 403
     assert resp.json() == {"detail": reports_api.NEEDS_A_PERSON_DETAIL}
 
 
-def test_an_sdk_key_is_refused_by_the_gate(filed):
+def test_an_sdk_key_is_refused_by_the_gate(monkeypatch, filed):
     ctx = RequestContext(workspace_id=WS_ID, user=UserContext(id="sdk", system_role="user"),
                          auth_type="sdk_key")
 
-    assert _client(ctx).post(ROUTE, json=BODY).status_code == 403
+    assert _client(monkeypatch, ctx).post(ROUTE, json=BODY).status_code == 403
     assert filed["calls"] == []
 
 
@@ -210,7 +218,7 @@ def test_over_the_limit_is_429_before_anything_is_read_or_written(monkeypatch):
     monkeypatch.setattr(service, "resolve_target", _no_target)
     db = _NoRowsDB()
 
-    resp = _client(_member_ctx(user_id=7), db).post(ROUTE, json=BODY)
+    resp = _client(monkeypatch, _member_ctx(user_id=7), db).post(ROUTE, json=BODY)
 
     assert resp.status_code == 429
     assert seen == [(str(WS_ID), "content_report", "7")]
@@ -229,13 +237,25 @@ def test_over_the_limit_is_429_before_anything_is_read_or_written(monkeypatch):
     {"target_id": ""},
     {"target_id": "x" * 65},
     {"note": "n" * 501},
+    {"end_user_id": "has a space"},
+    {"end_user_id": "e" * 129},
 ])
 def test_a_bad_body_is_422_and_files_nothing(monkeypatch, filed, change):
     _as_role(monkeypatch, "editor")
 
-    resp = _client(_member_ctx()).post(ROUTE, json={**BODY, **change})
+    resp = _client(monkeypatch, _member_ctx()).post(ROUTE, json={**BODY, **change})
 
     assert resp.status_code == 422
+    assert filed["calls"] == []
+
+
+def test_a_member_naming_an_end_user_is_422_and_files_nothing(monkeypatch, filed):
+    _as_role(monkeypatch, "editor")
+
+    resp = _client(monkeypatch, _member_ctx()).post(ROUTE, json={**BODY, "end_user_id": "product:alpha"})
+
+    assert resp.status_code == 422
+    assert resp.json() == {"detail": reports_api.END_USER_IS_A_KEYS}
     assert filed["calls"] == []
 
 
@@ -243,7 +263,7 @@ def test_the_note_is_optional(monkeypatch, filed):
     _as_role(monkeypatch, "viewer")
     body = {k: v for k, v in BODY.items() if k != "note"}
 
-    assert _client(_member_ctx()).post(ROUTE, json=body).status_code == 201
+    assert _client(monkeypatch, _member_ctx()).post(ROUTE, json=body).status_code == 201
     assert filed["calls"][0]["note"] is None
 
 
@@ -252,12 +272,13 @@ def test_the_note_is_optional(monkeypatch, filed):
 # ---------------------------------------------------------------------------
 
 
-def test_the_route_carries_the_members_read_marker_and_is_in_the_manifest():
+def test_the_route_carries_the_members_read_and_reports_write_markers_and_is_in_the_manifest():
     (route,) = [r for r in reports_api.router.routes if getattr(r, "path", None) == ROUTE]
     assert route.methods == {"POST"}
-    markers = [getattr(dep.call, permission_mod.PERMISSION_MARKER_ATTR, None)
+    markers = [(getattr(dep.call, permission_mod.PERMISSION_MARKER_ATTR, None),
+                getattr(dep.call, gate.KEY_SCOPE_MARKER_ATTR, None))
                for dep in route.dependant.dependencies]
-    assert "members:read" in markers
+    assert ("members:read", REPORTS_WRITE) in markers
 
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     assert {"method": "POST", "path": ROUTE} in manifest["routes"]

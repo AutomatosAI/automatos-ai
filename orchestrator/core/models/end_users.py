@@ -18,6 +18,8 @@ from sqlalchemy.sql import func
 from core.database.base import Base
 
 END_USER_ID_MAX = 128
+# What an end user's id may be: letters, digits and ``. _ : @ -``, up to END_USER_ID_MAX characters.
+END_USER_ID_PATTERN = rf"^[A-Za-z0-9._:@-]{{1,{END_USER_ID_MAX}}}$"
 
 
 class EndUser(Base):

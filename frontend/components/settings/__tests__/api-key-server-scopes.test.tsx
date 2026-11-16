@@ -1,9 +1,10 @@
 /**
  * The create-key form's scopes (Settings › Widget SDK › API keys).
  *
- * The server accepts five scopes for a product's own backend (orchestrator/api/api_keys.py
- * `VALID_PERMISSIONS`: tasks:read, tasks:write, memory:read, memory:write, agents:chat), and the
- * form listed none of them, so such a key could only be minted by calling the API. The form now
+ * The server accepts six scopes for a product's own backend (orchestrator/api/api_keys.py
+ * `VALID_PERMISSIONS`: tasks:read, tasks:write, memory:read, memory:write, agents:chat,
+ * reports:write), and the form listed none of them, so such a key could only be minted by
+ * calling the API. The form now
  * offers them for a server key only, each ticked on its own: Select All leaves them out, and a
  * public key is never sent one.
  *
@@ -41,8 +42,12 @@ vi.mock('@/components/ui/select', () => ({
 }))
 
 // orchestrator/api/api_keys.py VALID_PERMISSIONS, the PRD-274 scopes and the board's read scope.
-const SERVER_KEY_SCOPES: Permission[] = ['tasks:read', 'tasks:write', 'memory:read', 'memory:write', 'agents:chat']
-const SERVER_KEY_LABELS = ['Tasks: Read', 'Tasks: Write', 'Memory: Read', 'Memory: Write', 'Agents: Chat']
+const SERVER_KEY_SCOPES: Permission[] = [
+  'tasks:read', 'tasks:write', 'memory:read', 'memory:write', 'agents:chat', 'reports:write',
+]
+const SERVER_KEY_LABELS = [
+  'Tasks: Read', 'Tasks: Write', 'Memory: Read', 'Memory: Write', 'Agents: Chat', 'Reports: Write',
+]
 const COMMON_SCOPES = COMMON_PERMISSIONS.map((option) => option.value)
 const NO_PERMISSION = 'Select at least one permission'
 
@@ -72,7 +77,7 @@ afterEach(() => {
 })
 
 describe('the create-key form: server-key scopes', () => {
-  it('lists the five scopes the server accepts for a backend, apart from the common ones', () => {
+  it('lists the six scopes the server accepts for a backend, apart from the common ones', () => {
     expect(SERVER_KEY_PERMISSIONS.map((option) => option.value)).toEqual(SERVER_KEY_SCOPES)
     expect(COMMON_SCOPES.filter((scope) => SERVER_KEY_SCOPES.includes(scope))).toEqual([])
   })
