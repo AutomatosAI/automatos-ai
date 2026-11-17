@@ -102,10 +102,16 @@ def acts_as_its_service_user(get_user_id: Callable[..., int]) -> Callable[..., i
 
 def with_its_agents_id(db: Any, ctx: Any, request: Any) -> Any:
     """``request`` as the turn reads it, ``agentId`` the agent's integer id or none. ``api.chat._chat_turn``
-    calls it first, so every reader after it sees an integer.
+    calls it first, so every reader after it sees an integer, and it logs the turn's workspace and agent.
 
     A person names the agent by integer, as before; a UUID is a 422. A key names it by UUID, found in the
     key's own workspace (``core.utils.agent_resolver``); an integer is a 422."""
+    named = _named_by_its_id(db, ctx, request)
+    logger.info("[chat] RequestContext workspace_id=%s agentId=%s", ctx.workspace_id, named.agentId)
+    return named
+
+
+def _named_by_its_id(db: Any, ctx: Any, request: Any) -> Any:
     agent_ref = getattr(request, "agentId", None)
     if not is_server_key(ctx):
         if isinstance(agent_ref, UUID):
