@@ -573,7 +573,7 @@ class AgentFactory:
         if not resolved:
             raise ValueError(
                 f"No API key available for {effective_provider}. "
-                f"Add one in Settings → API Keys, or set platform fallback "
+                f"Add one in Settings → Model keys, or set platform fallback "
                 f"({effective_provider.upper()}_API_KEY env var on the API service)."
             )
         return provider, effective_provider, effective_model_id, resolved

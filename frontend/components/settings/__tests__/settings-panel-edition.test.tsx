@@ -2,13 +2,14 @@
  * PRD-233 S6/S7 — the Settings tabs per edition.
  *
  * local → only what exists locally: Profile (S6), Session mode (PRD-234 S4),
- *         System Settings, Orchestrator, API Keys, Credentials, Channels (Telegram polls — no
+ *         System Settings, Orchestrator, Model keys, Credentials, Channels (Telegram polls — no
  *         public URL needed), Notifications, Socials (PRD-251B US-B106: the workspace switch),
  *         Voice (the workspace's Auto Live switch), Appearance (PRD-261 A-07d: Themes, both
- *         editions), Phones & devices (PRD-266 US-005c, both editions). Webhooks / Widget SDK
+ *         editions), Phones & devices (PRD-266 US-005c, both editions). Webhooks / API keys / Widget SDK
  *         (hosted-edition surfaces) are hidden by the explicit allowlist, not by
  *         role — the local operator is super_admin.
- * saas  → the eight tabs as before plus Phones & devices, Voice, Socials, Appearance and Billing
+ * saas  → the eight tabs as before plus API keys (the workspace's widget and server keys, out of
+ *         Widget SDK), Phones & devices, Voice, Socials, Appearance and Billing
  *         (PRD-265 US-011, hosted only); no Profile tab (Clerk owns it).
  *
  * Tab bodies are stubbed — this is about WHICH tabs exist, not their content.
@@ -97,7 +98,7 @@ describe('SettingsPanel edition gating (PRD-233 S6/S7)', () => {
       'Session mode',
       'System Settings',
       'Orchestrator',
-      'API Keys',
+      'Model keys',
       'Credentials',
       'Channels',
       'Notifications',
@@ -107,7 +108,8 @@ describe('SettingsPanel edition gating (PRD-233 S6/S7)', () => {
       'Appearance',
     ])
     expect(screen.getByRole('link', { name: /your profile/i })).toHaveAttribute('href', '/settings/profile')
-    for (const hidden of ['webhooks', 'widget-sdk', 'billing']) {
+    // The workspace's API keys (widget and server) are hosted-only, like the Widget SDK they left
+    for (const hidden of ['webhooks', 'api-keys', 'widget-sdk', 'billing']) {
       expect(LOCAL_EDITION_SETTINGS_TABS.has(hidden)).toBe(false)
     }
     // 2026-09-17: Channels is local — Telegram long-polls, so no public URL is needed
@@ -124,7 +126,7 @@ describe('SettingsPanel edition gating (PRD-233 S6/S7)', () => {
     expect(LOCAL_EDITION_SETTINGS_TABS.has('phones-devices')).toBe(true)
   })
 
-  it('saas: the eight tabs render as before, plus Phones & devices, Voice, Socials, Appearance and Billing, and there is no Profile tab', async () => {
+  it('saas: the eight tabs render as before, plus API keys, Phones & devices, Voice, Socials, Appearance and Billing, and there is no Profile tab', async () => {
     const { SettingsPanel } = await loadPanel('saas')
     render(<SettingsPanel />)
 
@@ -132,7 +134,8 @@ describe('SettingsPanel edition gating (PRD-233 S6/S7)', () => {
       'System Settings',
       'Orchestrator',
       'Webhooks',
-      'API Keys',
+      'API keys',
+      'Model keys',
       'Billing',
       'Credentials',
       'Channels',

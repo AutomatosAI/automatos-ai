@@ -304,7 +304,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
 
         if not api_key:
             logger.warning(
-                "%s API key not configured. Set %s or add a key in Settings → API Keys.",
+                "%s API key not configured. Set %s or add a key in Settings → Model keys.",
                 self.spec.label, self.spec.env_key or "the provider key",
             )
             self.client = None
@@ -326,7 +326,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             raise ValueError(
                 f"{self.spec.label} API key not configured. "
                 f"Set {self.spec.env_key or 'the provider key'} or add a {self.spec.slug} key "
-                "in Settings → API Keys."
+                "in Settings → Model keys."
             )
 
     def _rate_limit_error(self, exc: Exception) -> ProviderRateLimitError:

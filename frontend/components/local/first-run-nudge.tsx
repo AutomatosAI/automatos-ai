@@ -11,7 +11,7 @@
  * guess. Dismissal is remembered per browser in localStorage (try/catch —
  * storage may be unavailable).
  *
- * Reads the two queries Settings → API Keys already runs, under the SAME query
+ * Reads the two queries Settings → Model keys already runs, under the SAME query
  * keys, so saving a key there hides the nudge without a reload. No new
  * api-client methods. SaaS: never renders, never fetches.
  */
@@ -24,9 +24,9 @@ import { apiClient } from '@/lib/api-client'
 import { isLocal } from '@/lib/auth-edition'
 
 export const FIRST_RUN_NUDGE_STORAGE_KEY = 'automatos:local-first-run-nudge:dismissed'
-export const FIRST_RUN_NUDGE_SETTINGS_HREF = '/settings'
+export const FIRST_RUN_NUDGE_SETTINGS_HREF = '/settings?tab=model-keys'
 export const FIRST_RUN_NUDGE_MESSAGE = 'Add an LLM key to bring Auto to life'
-export const FIRST_RUN_NUDGE_LINK_LABEL = 'Settings → API Keys'
+export const FIRST_RUN_NUDGE_LINK_LABEL = 'Settings → Model keys'
 
 interface ApiKeyOut {
   id: number

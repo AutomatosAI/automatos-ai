@@ -1,6 +1,6 @@
 """An organization-level Anthropic key names the workspace it bills (9 Oct 2026).
 
-Gerard's Anthropic key failed in Settings → API Keys: "Key saved but failed validation:
+Gerard's Anthropic key failed in Settings → Model keys: "Key saved but failed validation:
 ... This API key is not scoped to a workspace, so this request must include the
 anthropic-workspace-id header". A key created at organization level must name a
 workspace on every request, and the dialog had nowhere to put one. The workspace ID

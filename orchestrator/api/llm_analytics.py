@@ -913,9 +913,9 @@ def _resolve_openrouter_key(workspace_id, db: Session, byok_only: bool = False) 
 
     raise HTTPException(
         404,
-        "No OpenRouter API key configured. Add one in Settings → API Keys."
+        "No OpenRouter API key configured. Add one in Settings → Model keys."
         if byok_only
-        else "No OpenRouter API key configured. Add one in Settings → API Keys or set OPENROUTER_API_KEY.",
+        else "No OpenRouter API key configured. Add one in Settings → Model keys or set OPENROUTER_API_KEY.",
     )
 
 

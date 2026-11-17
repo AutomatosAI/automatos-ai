@@ -55,12 +55,15 @@ HOSTED_EDITION = (
 # PRD-270 US-270-05b added Automatos Cloud (where Marketplace themes sync from, the last Sync,
 # Sync now), in the local edition only and only while the Sync is on: AUTOMATOS_CLOUD_URL=
 # (empty) hides it, so Auto names it only then.
-SETTINGS_TABS = ("Orchestrator", "Webhooks", "API Keys", "Credentials", "Channels", "Notifications",
+# Model keys holds the person's own model-provider keys (BYOK), in both editions; "API Keys" used to
+# name it. API keys holds the workspace's own keys, for the widget (public) and a product's backend
+# (server): hosted only, like the Widget SDK it came out of, so it is a hosted tab here.
+SETTINGS_TABS = ("Orchestrator", "Webhooks", "Model keys", "Credentials", "Channels", "Notifications",
                  "Phones & devices", "Voice", "Socials", "Appearance", "Widget SDK")
 LOCAL_LEADING_TABS = ("Profile", "Session mode")
 CLOUD_SYNC_TAB = "Automatos Cloud"
 LOCAL_SETTINGS_TABS = (*LOCAL_LEADING_TABS, CLOUD_SYNC_TAB)
-HOSTED_SETTINGS_TABS = ("Billing",)
+HOSTED_SETTINGS_TABS = ("API keys", "Billing")
 NO_SUCH_TAB = "There is no Billing, Plans or Team Management tab."
 HOSTED_NO_SUCH_TAB = ("There is no Plans or Team Management tab: the plan, the credits and payments "
                       "are on the Billing tab.")

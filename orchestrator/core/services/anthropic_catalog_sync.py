@@ -67,9 +67,9 @@ ANTHROPIC_TAG = "anthropic"
 
 NO_KEY_MESSAGE = (
     "No Anthropic API key is available to this workspace. Add your Anthropic key "
-    "in Settings > API Keys and switch it on, then sync again."
+    "in Settings > Model keys and switch it on, then sync again."
 )
-REJECTED_KEY_MESSAGE = "Anthropic refused the API key (HTTP {status}). Check the Anthropic key in Settings > API Keys."
+REJECTED_KEY_MESSAGE = "Anthropic refused the API key (HTTP {status}). Check the Anthropic key in Settings > Model keys."
 HTTP_ERROR_MESSAGE = "Anthropic's Models API answered HTTP {status}."
 UNREACHABLE_MESSAGE = "Could not reach Anthropic's Models API ({error})."
 ENDLESS_PAGES_MESSAGE = "Anthropic's Models API kept paging past {pages} pages; nothing was synced."

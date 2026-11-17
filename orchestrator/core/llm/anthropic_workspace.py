@@ -5,7 +5,7 @@ created at organization level is not scoped to one, and every request with it mu
 name the workspace in the ``anthropic-workspace-id`` header, or the API answers 400:
 "This API key is not scoped to a workspace, so this request must include the
 anthropic-workspace-id header" (Gerard, 9 Oct 2026: such a key failed validation in
-Settings → API Keys and could never be used).
+Settings → Model keys and could never be used).
 
 The workspace ID (``wrkspc_…``) is now saved with the key (``user_api_keys.
 provider_workspace_id``), beside the key's fingerprint (``key_fingerprint``, PBKDF2).

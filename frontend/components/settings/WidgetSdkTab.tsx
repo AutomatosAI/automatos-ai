@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Loader2, Globe, ShoppingBag, Code2, AlertCircle } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { ApiKeyManager } from './ApiKeyManager'
+import Link from 'next/link'
 import { CallbackPanel } from '@/components/sites/CallbackPanel'
 import { CartIdlePanel } from '@/components/sites/CartIdlePanel'
 import { ShopifyTab } from '@/components/sites/ShopifyTab'
@@ -26,13 +26,13 @@ const TYPE_ICON: Record<SiteType, typeof Globe> = {
   custom: Code2,
 }
 
-type Section = 'api-keys' | 'cart-idle' | 'callback' | 'sync' | 'shopify'
+type Section = 'cart-idle' | 'callback' | 'sync' | 'shopify'
 
 export function WidgetSdkTab() {
   const [sites, setSites] = useState<Site[] | null>(null)
   const [sitesError, setSitesError] = useState<string | null>(null)
   const [activeSiteId, setActiveSiteId] = useState<string | null>(null)
-  const [section, setSection] = useState<Section>('api-keys')
+  const [section, setSection] = useState<Section>('cart-idle')
 
   useEffect(() => {
     let cancelled = false
@@ -54,7 +54,6 @@ export function WidgetSdkTab() {
   const activeSite = sites?.find((s) => s.id === activeSiteId) ?? null
 
   const sections: Array<{ key: Section; label: string; show: boolean }> = [
-    { key: 'api-keys', label: 'API keys', show: true },
     { key: 'cart-idle', label: 'Cart-idle', show: true },
     { key: 'callback', label: 'Callback', show: true },
     // Sync is platform-agnostic; lights up the relevant card based on site.type.
@@ -107,6 +106,13 @@ export function WidgetSdkTab() {
 
   return (
     <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        The widget&apos;s public key is under{' '}
+        <Link href="/settings?tab=api-keys" className="text-primary underline-offset-4 hover:underline">
+          Settings → API keys
+        </Link>
+        .
+      </p>
       {sites && sites.length > 1 && (
         <div className="flex flex-wrap gap-2">
           {sites.map((s) => {
@@ -151,8 +157,6 @@ export function WidgetSdkTab() {
           </button>
         ))}
       </div>
-
-      {section === 'api-keys' && <ApiKeyManager />}
 
       {section === 'cart-idle' && (
         activeSite

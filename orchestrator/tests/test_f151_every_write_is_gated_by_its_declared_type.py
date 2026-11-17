@@ -107,7 +107,7 @@ def test_the_chat_cannot_create_an_api_key():
     registry = get_action_registry()
     assert registry.get("platform_create_api_key") is None
     assert "platform_create_api_key" not in PlatformActionExecutor(None, None)._handlers
-    assert "Settings → Widget SDK → API keys" in registry.get("platform_list_api_keys").description
+    assert "Settings → API keys" in registry.get("platform_list_api_keys").description
 
 
 def test_an_admin_sets_the_power_mode(cafe):

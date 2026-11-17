@@ -25,10 +25,10 @@ export function ApiKeysHeaderCard({ onCreate }: { onCreate: () => void }) {
               <Key className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <CardTitle className="text-xl">SDK API Keys</CardTitle>
+              <CardTitle className="text-xl">API keys</CardTitle>
               <CardDescription className="mt-1">
-                Create and manage API keys for programmatic access to your
-                workspace via the SDK.
+                Keys for this workspace: a public key for the widget in a web
+                page, and server keys for your product&apos;s own backend.
               </CardDescription>
             </div>
           </div>
@@ -80,7 +80,7 @@ function ApiKeysEmpty({ onCreate }: { onCreate: () => void }) {
       <Key className="h-10 w-10 mb-3 opacity-30" />
       <p className="text-sm font-medium">No API keys yet</p>
       <p className="text-xs mt-1">
-        Create your first API key to start using the SDK.
+        Create a key to embed the widget or to call Automatos from your backend.
       </p>
       <Button
         variant="outline"

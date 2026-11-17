@@ -81,7 +81,7 @@ class Fix:
 
 FIXES: Mapping[str, Fix] = MappingProxyType({
     CHOOSE_MODEL: Fix(CHOOSE_MODEL, "/settings?tab=orchestrator"),
-    ADD_KEY: Fix(ADD_KEY, "/settings?tab=api-keys"),
+    ADD_KEY: Fix(ADD_KEY, "/settings?tab=model-keys"),
     ANSWER_PUSH: Fix(ANSWER_PUSH, "/settings?tab=phones-devices"),
 })
 

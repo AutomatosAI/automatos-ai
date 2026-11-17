@@ -4,12 +4,23 @@ List and revoke the workspace's SDK keys via ApiKeyService — the same
 service layer as ``api/api_keys.py``. Revoke is ``destructive`` + confirmed
 (it cuts off whatever integration uses the key) and, since F151, an owner's
 or admin's. There is no create tool: a new key's full value exists only in
-its create response, so an owner or admin creates keys in Settings → Widget
-SDK → API keys, which shows it once, and it never enters the LLM context.
-BYOK provider keys are not exposed either, for the same reason.
+its create response, so an owner or admin creates keys in Settings → API
+keys, which shows it once, and it never enters the LLM context.
+BYOK provider keys (Settings → Model keys) are not exposed either, for the
+same reason.
 """
 
 from .action_registry import ActionDefinition, ActionRegistry
+
+LIST_API_KEYS_DESCRIPTION = (
+    "List the workspace's API keys — name, masked prefix, type "
+    "(public/server), permission scopes, expiry and last-used time. "
+    "Keys are always masked; the full key only exists at creation. "
+    "Use before revoking a key or when auditing API access. Auto "
+    "cannot create a key: in the hosted edition, an owner or admin creates "
+    "one in Settings → API keys, which shows the full key once. The local "
+    "edition has no API keys tab."
+)
 
 
 def register_api_keys_actions(registry: ActionRegistry) -> None:
@@ -17,14 +28,7 @@ def register_api_keys_actions(registry: ActionRegistry) -> None:
 
     registry.register(ActionDefinition(
         name="platform_list_api_keys",
-        description=(
-            "List the workspace's SDK API keys — name, masked prefix, type "
-            "(public/server), permission scopes, expiry and last-used time. "
-            "Keys are always masked; the full key only exists at creation. "
-            "Use before revoking a key or when auditing API access. Auto "
-            "cannot create a key: an owner or admin creates one in Settings → "
-            "Widget SDK → API keys, which shows the full key once."
-        ),
+        description=LIST_API_KEYS_DESCRIPTION,
         category="api_keys",
         parameters={
             "type": "object",

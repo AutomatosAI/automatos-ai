@@ -248,7 +248,7 @@ def test_no_embedding_provider_says_memory_and_knowledge_search_are_off(monkeypa
 
     assert finding == Finding("needs_setup", "no_embedding_provider", fix="fix_add_key")
     assert STRINGS["en"][finding.detail].startswith("Memory and knowledge search are off: no embedding provider.")
-    assert FIXES[finding.fix].href == "/settings?tab=api-keys"
+    assert FIXES[finding.fix].href == "/settings?tab=model-keys"
 
 
 @pytest.fixture
@@ -513,7 +513,7 @@ def test_any_member_reads_readiness_scoped_to_their_workspace(team, saas, probed
     [search] = [item for item in body["items"] if item["id"] == "web_search"]
     assert search == {"id": "web_search", "label": "Web search", "detail": "No search engine is set up.",
                       "state": "needs_setup", "needed_by": ["voice"],
-                      "fix": {"label": "Add a key", "href": "/settings?tab=api-keys"}}
+                      "fix": {"label": "Add a key", "href": "/settings?tab=model-keys"}}
     assert WHERE not in reply.text and not re.search(r"\d+ ms", reply.text)  # SaaS
 
 

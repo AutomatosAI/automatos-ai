@@ -26,7 +26,7 @@ NO_EMBEDDING_PROVIDER = "no_embedding_provider"
 OWNER_SENTENCE = (
     "Memory and knowledge search are off: no embedding provider. Add an embeddings key for your "
     "embedding provider (OpenRouter, unless Settings → System Settings → Embeddings names another) in "
-    "Settings → API Keys, then restart the backend so memory picks it up."
+    "Settings → Model keys, then restart the backend so memory picks it up."
 )
 
 # What Auto is told, in its memory section and in its memory tools' answers.
@@ -34,7 +34,7 @@ MEMORY_OFF = (
     "Memory is off on this install (no embedding provider): nothing can be stored or recalled. When asked "
     "what you remember, or to remember something, say memory is off on this install, never that it is "
     "empty or that nothing is stored. The owner turns it on by adding an embedding key (OpenRouter by "
-    "default) in Settings → API Keys and restarting the backend."
+    "default) in Settings → Model keys and restarting the backend."
 )
 
 

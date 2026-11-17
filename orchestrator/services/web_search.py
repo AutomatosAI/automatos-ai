@@ -41,7 +41,7 @@ COMPOSIO_SEARCH_APP = "COMPOSIO_SEARCH"
 COMPOSIO_SEARCH_ACTION = "COMPOSIO_SEARCH_WEB"
 
 NO_BACKEND_OPTIONS = [
-    "Add an OpenRouter key (Settings → API Keys, or OPENROUTER_API_KEY) — search on any model.",
+    "Add an OpenRouter key (Settings → Model keys, or OPENROUTER_API_KEY) — search on any model.",
     "Set COMPOSIO_KEY in .env (free tier) — Composio Search needs no extra setup.",
     "Run the search container: docker compose --profile search up -d, then SEARXNG_URL=http://searxng:8080.",
 ]
@@ -61,7 +61,7 @@ _OPENROUTER_SEARCH_INSTRUCTION = (
 
 def openrouter_key_available(db: Any, workspace_id: Any) -> bool:
     """Any OpenRouter key the manager could resolve: env, the operator
-    workspace's stored key, or this workspace's own Settings → API Keys row."""
+    workspace's stored key, or this workspace's own Settings → Model keys row."""
     if (config.OPENROUTER_API_KEY or "").strip():
         return True
     try:
