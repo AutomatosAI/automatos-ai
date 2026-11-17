@@ -150,7 +150,8 @@ describe('Memory profile: what it lists and shows', () => {
     await ready('Customer')
     expect(shownName()).toBe('Customer')
     expect(screen.getByTestId('memory-profile-help')).toHaveTextContent('For an agent that serves one customer at a time.')
-    expect(optionNames()).not.toContain('Workspace default')
+    // the way back to the workspace's default is offered here too, first
+    expect(optionNames()).toEqual(['Workspace default', 'General', 'Customer', 'Incident'])
   })
 
   it('shows no help line for a profile whose description is empty', async () => {
@@ -204,6 +205,55 @@ describe('Memory profile: saving through the existing save', () => {
     expect(screen.getByRole('radio', { name: 'Lean' })).toBeDisabled()
     fireEvent.change(picker(), { target: { value: 'customer' } })
     expect(save(onSave)).toEqual({ runtime: 'api', memory_profile: 'customer' })
+  })
+})
+
+describe('Memory profile: back to the workspace default', () => {
+  const DEFAULT_SENTENCE = "This agent uses the workspace's memory profile, or General when the workspace has none."
+  const workspaceDefaultValue = () => screen.getByRole('option', { name: 'Workspace default' }).getAttribute('value')
+
+  it('an agent with a saved profile offers Workspace default, first', async () => {
+    const mod = await load(apiMock({ configuration: WITH_CUSTOMER }, { profiles: [CUSTOMER, GENERAL], enabled: true }))
+    renderForm(mod, WITH_CUSTOMER)
+    await ready('Customer')
+    expect(optionNames()[0]).toBe('Workspace default')
+    expect(optionNames()).toEqual(['Workspace default', 'Customer', 'General'])
+  })
+
+  it('choosing it on an agent with a saved profile saves memory_profile null, and nothing else changes', async () => {
+    const mod = await load(apiMock({ configuration: WITH_CUSTOMER }, { profiles: [CUSTOMER], enabled: true }))
+    const onSave = renderForm(mod, WITH_CUSTOMER)
+    await ready('Customer')
+    fireEvent.change(picker(), { target: { value: workspaceDefaultValue() } })
+    expect(shownName()).toBe('Workspace default')
+    // the default's sentence, and no description line beside it
+    expect(screen.getAllByTestId('memory-profile-help')).toHaveLength(1)
+    expect(screen.getByTestId('memory-profile-help')).toHaveTextContent(DEFAULT_SENTENCE)
+    expect(screen.queryByText('For an agent that serves one customer at a time.')).not.toBeInTheDocument()
+    const sent = save(onSave)
+    expect(sent).toHaveProperty('memory_profile', null)
+    expect(sent).toEqual({ ...mod.runtimeConfiguration(mod.runtimeFieldsFromConfiguration(WITH_CUSTOMER)), memory_profile: null })
+  })
+
+  it('an agent with none that picks it again sends no key', async () => {
+    const mod = await load(apiMock({ configuration: API_AGENT }, { profiles: [CUSTOMER], enabled: true }))
+    const onSave = renderForm(mod, API_AGENT)
+    await ready('Customer')
+    fireEvent.change(picker(), { target: { value: workspaceDefaultValue() } })
+    expect(shownName()).toBe('Workspace default')
+    expect(save(onSave)).not.toHaveProperty('memory_profile')
+  })
+
+  it("a stored null reads as Workspace default, with the default's sentence and no description", async () => {
+    const configuration = { ...API_AGENT, memory_profile: null }
+    const mod = await load(apiMock({ configuration }, { profiles: [CUSTOMER], enabled: true }))
+    const onSave = renderForm(mod, configuration)
+    await ready('Customer')
+    expect(shownName()).toBe('Workspace default')
+    expect(screen.getAllByTestId('memory-profile-help')).toHaveLength(1)
+    expect(screen.getByTestId('memory-profile-help')).toHaveTextContent(DEFAULT_SENTENCE)
+    fireEvent.change(picker(), { target: { value: workspaceDefaultValue() } })
+    expect(save(onSave)).not.toHaveProperty('memory_profile')
   })
 })
 

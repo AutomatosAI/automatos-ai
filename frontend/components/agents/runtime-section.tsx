@@ -29,6 +29,7 @@ import type { SessionToolGapEntry, SkillToolGap } from '@/types/session-tools'
 import { useConfiguredAgentId } from './configured-agent-context'
 import { loadApiClient } from './lazy-api-client'
 import { AgentProfileFields } from './agent-profile-fields'
+import { memoryProfilePick, type MemoryProfilePick } from './memory-profile-model'
 import { isRuntimeProfile, type RuntimeProfile } from './runtime-profile-model'
 import { SessionToolsPanel } from './session-tools-panel'
 import { sessionGroupsField } from './session-tool-groups-model'
@@ -56,10 +57,11 @@ export interface RuntimeFields {
    */
   runtime_profile?: RuntimeProfile
   /**
-   * PRD-274 Wave 4: the memory profile's slug, as the person picked it. Undefined until they
-   * choose, so an untouched agent saves nothing and keeps following its workspace.
+   * PRD-274 Wave 4: the memory profile, as the person picked it: a slug, or null to go back to
+   * the workspace's default (saved as `memory_profile: null`). Undefined until they choose, so an
+   * untouched agent saves nothing and keeps what it has.
    */
-  memory_profile?: string
+  memory_profile?: MemoryProfilePick
 }
 
 const DEFAULT_CLI_PROVIDER = 'claude'
@@ -148,11 +150,11 @@ export function normalizeRuntimeFields(source: object | null | undefined): Runti
   const src = (source ?? {}) as Record<string, unknown>
   const groups = sessionGroupsField(src.cli_session_tool_groups)
   const profile = src.runtime_profile
-  const memoryProfile = str(src.memory_profile).trim()
+  const memoryProfile = memoryProfilePick(src.memory_profile)
   return {
     ...(groups ? { cli_session_tool_groups: groups } : {}),
     ...(isRuntimeProfile(profile) ? { runtime_profile: profile } : {}),
-    ...(memoryProfile ? { memory_profile: memoryProfile } : {}),
+    ...(memoryProfile !== undefined ? { memory_profile: memoryProfile } : {}),
     runtime: src.runtime === 'cli' ? 'cli' : 'api',
     cli_provider: str(src.cli_provider) || DEFAULT_CLI_PROVIDER,
     cli_model: str(src.cli_model),
@@ -217,13 +219,15 @@ export function runtimeBadge(
  * host falls back to the CLI's default model and its default directory, and
  * `session_tool_groups` only when the owner changed the boxes (#942). Either kind
  * carries `runtime_profile` and `memory_profile` only when the person picked one
- * (PRD-274). The backend merges this into the stored configuration, so a key left
- * out keeps its value.
+ * (PRD-274); a `memory_profile` of null is sent as null, clearing the agent's own.
+ * The backend merges this into the stored configuration, so a key left out keeps
+ * its value.
  */
 export function runtimeConfiguration(fields: RuntimeFields): Record<string, unknown> {
+  const memoryProfile = memoryProfilePick(fields.memory_profile)
   const profile = {
     ...(fields.runtime_profile ? { runtime_profile: fields.runtime_profile } : {}),
-    ...(fields.memory_profile ? { memory_profile: fields.memory_profile } : {}),
+    ...(memoryProfile !== undefined ? { memory_profile: memoryProfile } : {}),
   }
   if (fields.runtime !== 'cli') return { runtime: 'api', ...profile }
   return {

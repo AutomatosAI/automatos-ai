@@ -32,7 +32,7 @@ export function AgentProfileFields({ agentId, value, onChange }: AgentProfileFie
       <MemoryProfileField
         agent={agent}
         value={value.memory_profile}
-        onChange={(slug) => onChange('memory_profile', slug)}
+        onChange={(pick) => onChange('memory_profile', pick)}
       />
     </>
   )

@@ -3,11 +3,19 @@
  * can pick (`GET /api/v1/memory/profiles`), the agent's own (`configuration.memory_profile`, a
  * profile's slug) and what the picker shows. Nothing here fetches or renders.
  *
- * An agent with no `memory_profile` follows its workspace's own setting, else `general`.
+ * An agent with no `memory_profile` (absent or null) follows its workspace's own setting, else
+ * `general`; the backend accepts a stored null and reads it as no profile of the agent's own.
  * `general` is reserved: today's distillation, offered as "General" when the list does not hold
  * it. While the install's `MEMORY_PROFILES_ENABLED` is off the route answers `enabled: false` and
  * every agent keeps facts as `general`, whatever it chose.
  */
+
+/**
+ * The memory profile on the form: a profile's slug; null for "back to the workspace default",
+ * which saves `memory_profile: null`; undefined while the person has not picked, which saves
+ * nothing.
+ */
+export type MemoryProfilePick = string | null | undefined
 
 export const MEMORY_PROFILES_PATH = '/api/v1/memory/profiles'
 
@@ -66,22 +74,46 @@ export function normalizeMemoryProfiles(body: unknown): MemoryProfileList {
   return { profiles: hasGeneral ? listed : [general, ...listed], enabled: src.enabled === true }
 }
 
-/** The agent's own profile from its saved detail, or null when it follows the workspace. Pure. */
+/** A form value read as a pick: null kept as its own value, a non-empty slug trimmed, else not picked. Pure. */
+export function memoryProfilePick(value: unknown): MemoryProfilePick {
+  if (value === null) return null
+  return text(value) || undefined
+}
+
+/** The agent's own profile from its saved detail, or null when it follows the workspace (absent or null). Pure. */
 export function savedMemoryProfile(detail: unknown): string | null {
   const src = (detail ?? {}) as Record<string, unknown>
   const configuration = (src.configuration ?? {}) as Record<string, unknown>
   return text(configuration.memory_profile) || null
 }
 
+/** The picker's value: the person's pick over the saved profile; "Workspace default" for null or none. Pure. */
+export function shownMemoryProfile(pick: MemoryProfilePick, saved: string | null): string {
+  if (pick === null) return WORKSPACE_DEFAULT_VALUE
+  return pick ?? saved ?? WORKSPACE_DEFAULT_VALUE
+}
+
 /**
- * The picker's options: "Workspace default" first while the agent has no profile of its own, then
- * the listed profiles, and the saved slug kept by its own name when the list no longer holds it,
- * so the picker never shows blank. Pure.
+ * What choosing `selected` puts on the form: a slug as it is; "Workspace default" as null only
+ * when the agent has a saved profile to clear, else as not picked, so the save changes nothing. Pure.
+ */
+export function pickFor(selected: string, saved: string | null): MemoryProfilePick {
+  if (selected !== WORKSPACE_DEFAULT_VALUE) return selected
+  return saved === null ? undefined : null
+}
+
+const WORKSPACE_DEFAULT_OPTION: MemoryProfileOption = {
+  slug: WORKSPACE_DEFAULT_VALUE,
+  name: WORKSPACE_DEFAULT_NAME,
+  description: WORKSPACE_DEFAULT_HELP,
+}
+
+/**
+ * The picker's options: "Workspace default" first, always, then the listed profiles, and the saved
+ * slug kept by its own name when the list no longer holds it, so the picker never shows blank. Pure.
  */
 export function memoryProfileOptions(list: MemoryProfileList, saved: string | null): MemoryProfileOption[] {
   const fallback: MemoryProfileOption[] =
     saved && !list.profiles.some((option) => option.slug === saved) ? [{ slug: saved, name: saved, description: '' }] : []
-  const workspaceDefault: MemoryProfileOption[] =
-    saved === null ? [{ slug: WORKSPACE_DEFAULT_VALUE, name: WORKSPACE_DEFAULT_NAME, description: WORKSPACE_DEFAULT_HELP }] : []
-  return [...workspaceDefault, ...list.profiles, ...fallback]
+  return [WORKSPACE_DEFAULT_OPTION, ...list.profiles, ...fallback]
 }

@@ -7,9 +7,11 @@
  *
  * The pick rides the form as `memory_profile` (undefined until the person chooses), so the
  * modal's existing save sends `configuration.memory_profile` only when they did, through
- * `PUT /api/agents/{id}`, which merges it into the stored configuration. An agent with no profile
- * of its own shows "Workspace default" until a person picks one. Nothing on the backend treats a
- * system agent differently here, so the choice is open for one too.
+ * `PUT /api/agents/{id}`, which merges it into the stored configuration. "Workspace default" is
+ * always offered: it is what an agent with no profile of its own shows, and choosing it on an
+ * agent that has one saves `memory_profile: null`, which the backend reads as no profile of the
+ * agent's own. Nothing on the backend treats a system agent differently here, so the choice is
+ * open for one too.
  *
  * A failed list shows the shared error state with a retry; the runtime profile above it keeps
  * working.
@@ -25,9 +27,11 @@ import {
   PROFILES_LOAD_FAILED_TEXT,
   PROFILES_LOAD_FAILED_TITLE,
   PROFILES_OFF_NOTE,
-  WORKSPACE_DEFAULT_VALUE,
   memoryProfileOptions,
+  pickFor,
   savedMemoryProfile,
+  shownMemoryProfile,
+  type MemoryProfilePick,
 } from './memory-profile-model'
 import { useMemoryProfiles } from './use-memory-profiles'
 import type { SavedAgentRead } from './use-saved-agent'
@@ -40,10 +44,9 @@ const NOTE_CLASS = 'text-xs text-muted-foreground'
 interface MemoryProfileFieldProps {
   /** the saved agent's read, shared with the runtime profile choice */
   agent: SavedAgentRead
-  /** the person's pick on the form; undefined until they choose */
-  value: string | undefined
-  /** a profile's slug, or undefined for "Workspace default" (nothing to save) */
-  onChange: (slug: string | undefined) => void
+  /** the person's pick on the form: a slug, null to clear a saved one, undefined until they choose */
+  value: MemoryProfilePick
+  onChange: (pick: MemoryProfilePick) => void
 }
 
 export function MemoryProfileField({ agent, value, onChange }: MemoryProfileFieldProps) {
@@ -51,10 +54,10 @@ export function MemoryProfileField({ agent, value, onChange }: MemoryProfileFiel
   const saved = agent.status === 'ready' ? savedMemoryProfile(agent.detail) : null
   const ready = read.status === 'ready' && agent.status === 'ready'
   const options = read.status === 'ready' && ready ? memoryProfileOptions(read.list, saved) : []
-  const shown = value ?? saved ?? WORKSPACE_DEFAULT_VALUE
+  const shown = shownMemoryProfile(value, saved)
   const help = options.find((option) => option.slug === shown)?.description ?? ''
   const choose = (next: string) => {
-    if (ready) onChange(next === WORKSPACE_DEFAULT_VALUE ? undefined : next)
+    if (ready) onChange(pickFor(next, saved))
   }
   return (
     <div className="space-y-3 rounded-lg border border-border/40 p-4" data-testid="memory-profile">
