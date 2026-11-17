@@ -29,9 +29,10 @@ refused after the post's own save is a failed call that says the rest was saved 
 PRD-251D (US-D108): a post records what its file was made from, and says ``file_current`` false once
 an edit changed what a render reads (``core/social_file_current.py``); the owner cannot approve it
 until it renders again. A save that left the file older than the post's words says so in its answer
-(``file_current`` false, and a message with the call that renders it), and the post an agent reads
-lists the new render among what it still needs, both only while a render can start (``renders_again``:
-an approved post keeps its approved file). The compact post itself is unchanged.
+(``file_current`` false, and a message with the call that renders it), and the post an agent reads or
+lists says the new render among what it still needs (``social_post_list.what_it_needs``), in place of the
+owner's approval, both only while a render can start (``renders_again``: an approved post keeps its
+approved file). The compact post itself is unchanged.
 """
 from __future__ import annotations
 
@@ -128,10 +129,9 @@ def read_view(post: Mapping[str, Any]) -> Dict[str, Any]:
     kept = [{key: value for key, value in entry.items() if key != AUTO_COPY_KEY} if isinstance(entry, Mapping)
             else entry for entry in log[-REVIEW_LOG_KEPT:]]
     placed = {*READ_FIRST, "targets", *WHEN_KEYS, *APPROVAL_KEYS, REVIEW_LOG, *READ_DROPPED}
-    older = [NEEDS_NEW_RENDER] if renders_again(post) else []  # PRD-251D US-D108
     return {
         **{key: post.get(key) for key in READ_FIRST}, "targets": targets, PLANNED: planned_words(post),
-        **{key: post.get(key) for key in (*WHEN_KEYS, *APPROVAL_KEYS)}, "needs": [*what_it_needs(post), *older],
+        **{key: post.get(key) for key in (*WHEN_KEYS, *APPROVAL_KEYS)}, "needs": what_it_needs(post),
         **{key: value for key, value in post.items() if key not in placed},
         REVIEW_LOG: kept, "review_log_total": len(log),
     }

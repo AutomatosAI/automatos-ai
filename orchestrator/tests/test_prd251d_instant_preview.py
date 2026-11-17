@@ -8,16 +8,18 @@ answers the template as one self-contained page for the words on screen; ``GET
 * the words are filled on the server and HTML-escaped: a value holding ``<script>``, quotes or
   ``&`` stays text; a number goes into a script; a text value inside an event attribute is
   refused (422); the brand tokens, the size variables and the font marker are in the page;
-* the page opens with its own content security policy and the timeline stand-in, before any
-  script, and fetches nothing: no staged path is left, every src is a data: URI (the logo
-  too), the timeline library's script and the audio are gone;
+* the page opens with its own content security policy and the timeline stand-in, its first
+  script, which takes the peer-connection API away (the policy does not cover WebRTC); no staged
+  path is left, every src is a data: URI (the logo too), the timeline library's script and the
+  audio are gone;
 * an empty photo spot's element is removed; a spot the post holds a picture for shows its
   marker; a story's 9:16 keeps the safe zone;
-* a field left empty is empty text; a value over its field's limit is refused, saying why;
+* a field left empty is empty text (an empty number is 0 and an empty true/false is false, so one
+  in a script still previews); a value over its field's limit is refused, saying why;
 * only an image template of one still previews; a composition a render refuses is refused;
 * the request is bounded (values, their length, photos, the size, unknown keys);
 * another workspace's template is 404, a viewer is 403, a workspace with Socials off is 404;
-* the page reads the kit's logos and none of its uploaded fonts; the fonts route gives the
+* the page reads the kit's logos and none of its fonts, uploaded or bundled; the fonts route gives the
   kit's faces as the renderer writes them, with each file inline; ``fonts_version`` follows them;
 * the editor looks for the page's own policy and markers, as the server writes them;
 * both routes are plain ``def`` and in the committed route manifest.
@@ -135,6 +137,12 @@ def test_the_page_opens_with_its_own_policy_and_fetches_nothing(env):
     page = _html(env, _image(env), values={"headline": "Open late"})
     assert page.startswith("<!doctype html>" + instant_preview.POLICY_META + instant_preview.TIMELINE_STUB)
     assert page.index(instant_preview.POLICY_META) < page.lower().index("<script")
+    # The stand-in is the page's first script, and before it stands in for the timeline it takes the
+    # peer-connection API away: the policy does not cover WebRTC.
+    assert page.lower().index("<script") == page.index(instant_preview.TIMELINE_STUB)
+    for name in ("RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel"):
+        assert f'"{name}"' in instant_preview.TIMELINE_STUB
+    assert instant_preview.TIMELINE_STUB.index("Object.defineProperty(window, name") < instant_preview.TIMELINE_STUB.index("window.gsap")
     assert "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:" in page
     assert "window.gsap = stub;" in page
     assert "gsap.min.js" not in page and "<audio" not in page and "mix.wav" not in page and "assets/" not in page
@@ -173,6 +181,15 @@ def test_a_story_keeps_its_words_in_the_safe_zone(env):
 def test_a_field_left_empty_is_empty_text_and_a_value_over_its_limit_is_refused(env):
     template_id = _image(env)
     assert '<h1 class="v"></h1>' in _html(env, template_id, values={})
+    # An empty number or true/false with no default stays that kind (0, false): only those may sit in
+    # a script, so a template that puts one there still previews with the field left empty.
+    in_script = {
+        **PAGE_TEMPLATE,
+        "html": PAGE_HTML.replace("</body>", "<script>window.shown = {{ shown }};</script></body>"),
+        "variables_schema": {**PAGE_TEMPLATE["variables_schema"], "seconds": {"type": "number"}, "shown": {"type": "boolean"}},
+    }
+    page = _html(env, _image(env, blocks=in_script), values={})
+    assert "tl.set({}, {}, 0);" in page and "window.shown = false;" in page
     resp = _page(env, template_id, values={"headline": "x" * 61})
     assert resp.status_code == 422
     assert resp.json()["detail"] == "headline is longer than 60 characters (61 given)"
@@ -282,18 +299,26 @@ def test_another_workspaces_template_is_404_a_viewer_is_403_and_socials_off_is_4
 
 def test_the_page_shows_the_uploaded_logo_inline_and_reads_no_uploaded_font(env, monkeypatch):
     real = instant_api.brand_kit_for_media_render
-    asked = []
+    real_bundle = instant_preview.build_bundle
+    asked, bundled = [], []
 
     def render_ready(kit):
         asked.append(kit)
-        return {**real(kit), "logo_url": PNG_URI}
+        return {**real(kit), "logo_url": PNG_URI, BUNDLED_FONT_FILES: [FONT]}
+
+    def bundle(**parts):
+        bundled.append(parts["brand_kit"])
+        return real_bundle(**parts)
 
     monkeypatch.setattr(instant_api, "brand_kit_for_media_render", render_ready)
+    monkeypatch.setattr(instant_preview, "build_bundle", bundle)
     resp = _page(env, _image(env), values={"headline": "Open late"})
     assert resp.status_code == 200, resp.text
     page = resp.json()["html"]
     assert f'<img class="logo" src="{PNG_URI}" alt="" />' in page and "assets/brand/" not in page
     assert [kit["font_files"] for kit in asked] == [[]]
+    # No font goes into the page's bundle, a bundled face included: the editor has them from the fonts route.
+    assert [(kit["font_files"], kit[BUNDLED_FONT_FILES]) for kit in bundled] == [([], [])]
     assert resp.json()["fonts_version"] == instant_preview.fonts_version(get_brand_kit({"socials": {"enabled": True}}))
 
 

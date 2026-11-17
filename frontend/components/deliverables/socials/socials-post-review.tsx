@@ -34,7 +34,7 @@ import {
 } from '@/hooks/use-socials-api'
 import { ApproveAndPostNow } from './socials-approve-post-now'
 import { SOCIAL_COMMENT_MAX_CHARS } from './socials-status'
-import { hasChannels, unsourcedClaims } from './socials-review'
+import { FILE_OLDER_THAN_WORDS, hasChannels, unsourcedClaims } from './socials-review'
 
 type Asking = 'changes' | 'reject' | null
 
@@ -134,8 +134,7 @@ function NoChannelHint({ onEdit }: { onEdit?: () => void }) {
   )
 }
 
-/** PRD-251D US-D108: the server's own refusal (core/social_file_current.py FILE_OLDER_THAN_WORDS). */
-export const FILE_OLDER_THAN_WORDS = 'This file was made before the post last changed, so it does not show the post as it is now. Render it again, then approve it.'
+/** PRD-251D US-D108: the full render of a post that has a file, here and in its Activity card (post-notices.tsx). */
 export const RENDER_AGAIN = 'Render again'
 
 /** Whether the post's file is older than what it holds. A post read without the flag counts as

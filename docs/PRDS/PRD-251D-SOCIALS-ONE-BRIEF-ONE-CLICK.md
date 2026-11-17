@@ -44,15 +44,15 @@ Each carries the recommendation it was built on. The owner calls that can still 
 
 | # | Decision |
 |---|---|
-| E1 | **Submit makes the file.** "Submit for approval" on a post with a visual starts the full render through the render route, which ends the post in `needs_approval`. It never sends a post for approval whose file does not show its current words. A text post, and a post that is the person's own video file, submit as they do today. As built: Submit renders every time, because a post does not record what its file was made from (US-D108 adds that). |
+| E1 | **Submit makes the file.** "Submit for approval" on a post with a visual starts the full render through the render route, which ends the post in `needs_approval`. It never sends a post for approval whose file does not show its current words. A text post, and a post that is the person's own video file, submit as they do today. As built: Submit renders every time, because a post does not record what its file was made from (US-D108 adds that). Since Wave 2 (US-D108) it renders only when the file does not show the post yet: the post has no file, its file is older than its words, the editor holds an unsaved change to a field, the template, the length or the format, or the visual is a still of the person's own, which is cropped every time. |
 | E2 | **An empty caption is Auto's to write, like an empty field.** When a render starts with the caption empty and the post has a brief, Auto writes it from the brief for the post's channels. A caption that holds words is never rewritten, and nothing is written into a post that holds an approval. |
 | E3 | **Approve where you are.** The editor shows the Queue's own approve controls for a post that waits for approval, to a person who may approve. Approval binds to the stored content (D6), so the controls are off while the editor holds unsaved edits, and after a saved change to what the file shows, until the file is made again. |
 | E4 | **Channels start ticked.** A new post starts with the channels the workspace's most recent post used that can take the format. With no earlier post and exactly one connected channel, that one. Otherwise none, as today. |
 | E5 | **Connect from the editor.** Each supported channel that is not connected has a Connect button in the Channels card (the existing Composio connect flow). |
 | E6 | **Auto sets the slot, never the schedule.** The create and update tools take a planned day and time with its timezone. It is written with `set_planned_for` only, and only while the post is a draft, waits for approval or was sent back. The tools still never approve, schedule or publish: an approved or scheduled post's slot is refused, saying a person moves it. |
 | E7 | **The gallery says what a template is for.** Each card shows the template's description. A search box filters by name and description; chips filter to templates with a photo or with none. "Let Auto pick" stays first. |
-| E8 | **An instant preview of an image post** (Wave 2). The server returns the template as one self-contained page, filled and escaped by the same rules as the renderer, with the brand tokens, the font faces and a stub for the timeline library. The browser shows it in a frame with `sandbox="allow-scripts"` (no same-origin) and its own content security policy that allows nothing from the network. It is labelled a preview: the approved file is always the render. |
-| E9 | **Fewer views** (Wave 2). The list of what is removed is an owner call, below. |
+| E8 | **An instant preview of an image post** (Wave 2). The server returns the template as one self-contained page, filled and escaped by the same rules as the renderer, with the brand tokens, the font faces and a stub for the timeline library. The browser shows it in a frame with `sandbox="allow-scripts"` (no same-origin) and its own content security policy: inline script and style and `data:` files, and no request the policy covers. A policy does not cover WebRTC, so the page's first script takes that API off its window. As built: an image of one still; a carousel keeps its rendered preview. It is labelled a preview: the approved file is always the render. |
+| E9 | **Fewer views** (Wave 2). The list of what is removed is an owner call, below. As built: US-D202 and US-D203. The campaign screens (US-D204) stay. |
 | E10 | **Look options on a post** (Wave 3). Design step first: it touches the template contract and what an approval covers. |
 | E11 | **Video templates explain their fields** (Wave 3, rescoped). The three software videos have 66 to 69 required fields. Giving them defaults would print the sample's words in every business's video, because Auto only writes a field that has no default. So every field gets a label and a description in plain words, and only text that is right for any business gets a default. |
 
@@ -127,13 +127,20 @@ Each carries the recommendation it was built on. The owner calls that can still 
 
 What the research found (16 Nov): an image template needs its own inline script to look right (it fits the text, breaks the headline on `|`, colours the accent words, removes empty blocks), and that script calls the timeline library once after the layout is done. Nothing starts hidden and the still is taken at 0 seconds, so a browser that runs the script shows the finished card. The renderer's page assembly (`services/media-render/media_render/composition.py`: `fill_placeholders`, `build_document`) lives in another container and cannot be imported, so the orchestrator assembles the page itself and one test holds the two equal. The kit's fonts can be 0.5 to 2 MB as data URIs, so they are fetched once and not with every keystroke.
 
-- [ ] `POST /api/socials/templates/{template_id}/preview-page` takes the fields' values, a size of the template's and whether it is a story, and returns one HTML page: the words filled on the server with HTML escaping by the renderer's rules (a value never lands inside a script or an event attribute), the brand tokens as `:root{--brand-*}`, the size variables, the story safe zone for a story, an empty slot's element removed, the logos as `data:` URIs, a stub in place of the timeline library, and a marker where the font faces go. The page fetches nothing from the network.
+- [ ] `POST /api/socials/templates/{template_id}/preview-page` takes the fields' values, a size of the template's and whether it is a story, and returns one HTML page: the words filled on the server with HTML escaping by the renderer's rules (a value never lands inside a script or an event attribute), the brand tokens as `:root{--brand-*}`, the size variables, the story safe zone for a story, an empty slot's element removed, the logos as `data:` URIs, a stub in place of the timeline library, and a marker where the font faces go. The page names no address to fetch: every file it shows is inline.
 - [ ] `GET /api/socials/brand-kit/preview-fonts` returns the kit's `@font-face` rules with the fonts as `data:` URIs. The editor fetches it once per kit and puts it at the marker.
 - [ ] One test holds the page's filled composition equal to what the renderer's own fill makes for the same template and values, so the two cannot drift.
 - [ ] The editor shows the page in a frame with `sandbox="allow-scripts"` and no `allow-same-origin`, and the page carries its own content security policy: inline script and style, `data:` images and fonts, nothing else. It refreshes a moment after the person stops typing and is labelled a preview; the approved file is always the render.
 - [ ] A photo the post already has shows in its slot (the editor reads the file through the post's media route and hands it to the page as a `data:` URI). With none, the slot shows what the renderer shows for an empty one.
 - [ ] A video, a text post and a post that is the person's own file keep today's preview. Once a render exists and is current, the frame shows the rendered file.
 - [ ] Both routes are authenticated, scoped to the caller's workspace and in the route manifest, and the change passes the security review. A workspace's own template runs its script only inside the sandboxed frame.
+
+As built (Wave 2):
+- Only an image template of one still previews. A carousel's slides are shown one at a time by the renderer's runtime, which a browser does not have, so the route refuses it (422) and it keeps its rendered preview.
+- A field left empty with no default shows as empty text, so the template's own script takes its block out (0 for a number and false for a true/false, the only kinds a script may hold). The note under the frame says Auto writes an empty field when the post is made.
+- A value the template refuses (a field over its limit, say) keeps the last page and says why under the frame, also when no page has shown yet. Any other failure keeps today's frame.
+- The page reads the kit's logos and tokens and none of its fonts. The editor fetches the faces once per kit (`fonts_version`) and puts them at the marker; a save does not ask for the page or the fonts again.
+- What bounds a template's script is the frame's sandbox (no same origin, forms, popups or top navigation). The policy and the removed WebRTC API narrow what it can reach from its own window; the page holds only what the editor sent for it.
 
 ### US-D108: A file older than its words is never approved
 
@@ -146,6 +153,14 @@ Found while building Wave 1 (16 Nov): a post that waits for approval, edited and
 - [ ] Submit renders only when the file is not current.
 - [ ] Tests: an edit after a render makes the file not current and Approve is refused; a render makes it current again; a slot move, a caption change and a channel change do not.
 
+As built (Wave 2):
+- The record covers the template, each field that has a value, the format, the length, and each photo or footage spot's prompt and file; for a video also its voice and music. A claim mark, the caption, the channels, the slot and the brief are not on the file.
+- Asking for AI options changes a spot's prompt, and picking one changes its file, so either leaves the file older than the post until it renders again.
+- A post rendered before this record existed has none and counts as current, so nothing that exists today is refused.
+- The approve route, a plan's "Approve the week" and a series all hold to it: the route answers 409 with the sentence, the week and the series leave the post out and say why.
+- An agent's read, a list row and a ticket's note say the post needs a new render, in place of the owner's approval it cannot have yet.
+- The Activity card's own render is off while the editor holds unsaved edits, as Render again in the approve controls is.
+
 ### US-D202: The Calendar's List is one plain list
 The research (16 Nov): the List layout renders the older `socials-post-list.tsx`, which brings a second list, a Board and a second detail pane. The Board and the status list are today the only views of an archived post and of a post with no slot, so the list stays and the rest goes.
 
@@ -153,11 +168,15 @@ The research (16 Nov): the List layout renders the older `socials-post-list.tsx`
 - [ ] `socials-board.tsx`, `socials-view-toggle.tsx` and the detail pane inside `socials-post-list.tsx` are deleted with their tests' pins moved or removed; nothing else imports them.
 - [ ] Tests: the list shows an archived post and a post with no slot; a click opens the post page.
 
+As built (Wave 2): `socials-post-list.tsx`, `socials-board.tsx`, `socials-view-toggle.tsx`, `socials-status-list.tsx` and `socials-post-card.tsx` are deleted; the List is `studio/socials-calendar-list.tsx`. This month's render minutes show under its hint. A refetch that fails keeps the posts already listed.
+
 ### US-D203 (owner call 2): one post page for every status and role
-`socials-post-detail.tsx` is still the only surface for a viewer, for a post that is rendering, publishing, published, partly published or archived, and for a person in the Queue who may not approve. Moving those into the post page lets the older pane go. Specified once agreed.
+`socials-post-detail.tsx` is still the only surface for a viewer, for a post that is rendering, publishing, published, partly published or archived, and for a person in the Queue who may not approve. Moving those into the post page lets the older pane go.
+
+As built (Wave 2), on the recommendation: the post page shows every status to every role. A post a person may edit opens in the editor; any other opens read-only (`studio/socials-post-view.tsx`) with its channels, receipts, history and the actions its status allows. The lines about a render (since when it renders, what a waiting draft waits for, why the last render failed) and the full render of a failed or waiting post moved to the Activity card (`studio/post-notices.tsx`). `socials-post-detail.tsx` is deleted. Two things changed with it, both the owner's to keep or reverse: "Request changes" in the Queue always sends the post back to Auto with the comment (the plain send-back to the author was offered only in the deleted pane), and the hint "Saving a change sends this post back for approval" is no longer shown.
 
 ### US-D204 (owner call 2): campaigns that are not plans
-Their screens are the only place to make an ad-hoc campaign, add or remove its posts by hand, switch series approval on and approve a series. A plan's "Approve the week" does not use them. Removing them removes those four things. Specified once agreed.
+Their screens are the only place to make an ad-hoc campaign, add or remove its posts by hand, switch series approval on and approve a series. A plan's "Approve the week" does not use them. Removing them removes those four things. Not built: the screens stay, on the recommendation.
 
 ## Wave 3
 
@@ -190,7 +209,7 @@ What the research found (16 Nov): every starter reads its colours and its logo o
 None of these blocks Wave 1.
 
 1. **Channels (E4).** Recommended: the last post's channels. The other choice is every connected channel that takes the format.
-2. **Fewer views (E9).** US-D202 is built as specified (the Board and the second detail pane inside the list go; the list stays, because it is the only view of an archived or unslotted post). Two larger removals wait for a yes: US-D203, one post page for every status and role, which lets the older detail pane go; and US-D204, removing the screens for campaigns that are not plans, which removes ad-hoc campaigns, adding or removing a campaign's posts by hand, the series approval switch and "Approve series". Recommended: yes to US-D203, and keep the campaign screens until a plan can do what they do.
+2. **Fewer views (E9).** US-D202 is built as specified (the Board and the second detail pane inside the list go; the list stays, because it is the only view of an archived or unslotted post). Two larger removals were left as an owner call: US-D203, one post page for every status and role, which lets the older detail pane go (built in Wave 2 on the recommendation); and US-D204, removing the screens for campaigns that are not plans, which removes ad-hoc campaigns, adding or removing a campaign's posts by hand, the series approval switch and "Approve series". Recommended: yes to US-D203, and keep the campaign screens until a plan can do what they do.
 3. **Look options (E10).** Recommended: all three (light or dark, the accent strong or sparing, the logo on or off), with light or dark only on the nine templates built on paper. A look cannot change under an approval, because a render is refused while a post holds one.
 4. **Video templates (E11).** Recommended as rescoped above: explain the fields, default only what is right for anyone.
 5. **Instant preview and custom templates (E8).** A workspace's own template runs its script in the sandboxed frame. Recommended: allow it, with the sandbox and the policy above.

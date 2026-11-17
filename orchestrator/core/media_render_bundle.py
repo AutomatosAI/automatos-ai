@@ -225,7 +225,7 @@ def _logos(kit: Mapping[str, Any]) -> Tuple[List[Dict[str, str]], Dict[str, str]
     return logo_files + mark_files + dark_files, variables
 
 
-def _fonts(kit: Mapping[str, Any]) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
+def staged_fonts(kit: Mapping[str, Any]) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
     """The kit's font files (D5 ``font_files``, render-ready as data: URIs), then its bundled faces
     (F376 ``bundled_font_files``): bundle files and faces.
 
@@ -347,7 +347,7 @@ def build_bundle(
     width, height = render_size(blocks, size)
     html, media = _slots(blocks, slot_media or {}, keep_slots)
     logo_files, logo_variables = _logos(kit)
-    font_files, faces = _fonts(kit)
+    font_files, faces = staged_fonts(kit)
     variables = {
         **without_stray_breaks(values, blocks.get("html") or ""),  # F382: "|" breaks only display text
         VAR_BRAND_NAME: brand_name(kit, fallback_name),
@@ -472,6 +472,7 @@ __all__ = [
     "build_bundle",
     "type_scale_tokens",
     "render_size",
+    "staged_fonts",
     "voice_script",
     "with_slot_files",
     "with_template_inputs",

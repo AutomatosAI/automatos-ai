@@ -51,6 +51,7 @@ import { toast } from 'sonner'
 import { QueuePane } from '@/components/deliverables/socials/studio/queue-pane'
 import { SocialsEditorActivity } from '@/components/deliverables/socials/studio/socials-editor-activity'
 import { SOCIAL_POST_REVIEW_STALE_MESSAGE } from '@/hooks/use-socials-api'
+import { FILE_OLDER_THAN_WORDS } from '@/components/deliverables/socials/socials-review'
 import type { SocialPost } from '@/lib/api-client'
 
 const HASH = 'a'.repeat(64)
@@ -120,6 +121,19 @@ describe('approving (D6)', () => {
     )
     expect(toast.error).toHaveBeenCalledWith(SOCIAL_POST_REVIEW_STALE_MESSAGE)
     await waitFor(() => expect(reload).toHaveBeenCalledWith({ queryKey: ['socials', 'w1'] }))
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it("a 409 that says the file is older than the post's words shows that sentence, not a stale review (PRD-251D US-D108)", async () => {
+    // The post is the version on screen; its file went stale after the screen loaded it.
+    api.approveSocialPost.mockRejectedValueOnce(Object.assign(new Error(FILE_OLDER_THAN_WORDS), { status: 409 }))
+    show(post())
+    const reload = vi.spyOn(client, 'invalidateQueries')
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(FILE_OLDER_THAN_WORDS))
+    await waitFor(() => expect(reload).toHaveBeenCalledWith({ queryKey: ['socials', 'w1'] }))
+    expect(toast.error).not.toHaveBeenCalledWith(SOCIAL_POST_REVIEW_STALE_MESSAGE)
+    expect(screen.queryByRole('alert')).toBeNull()
     expect(toast.success).not.toHaveBeenCalled()
   })
 })

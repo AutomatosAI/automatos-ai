@@ -13,7 +13,8 @@ the same pieces:
   not have, so a carousel keeps its rendered preview;
 * the fields resolve as a render resolves them (``resolve_variables``): a value that does not
   fit its field is refused with the reason, and a field left empty with no default is empty
-  text, so the template's own script takes its block out (Auto writes it when the post is made);
+  text, so the template's own script takes its block out (Auto writes it when the post is made).
+  An empty number is 0 and an empty true/false is false: the fill puts only those into a script;
 * ``build_bundle`` makes what a render would: the brand and size variables, the brand tokens,
   the story's safe zone at 9:16, every empty slot's element taken out and the logos as files,
   which the logo variables then name as data: URIs;
@@ -27,7 +28,11 @@ the same pieces:
   :func:`fonts_version`, so a kit's megabytes of fonts never travel with a keystroke;
 * the elements a render refuses (another document, a base URL, a form, a refresh) are refused;
 * the page opens with its own content security policy (:data:`POLICY_META`), before any
-  script: inline script and style, data: images and fonts, nothing from the network.
+  script: inline script and style, data: images and fonts, and no request the policy covers.
+  The policy does not cover WebRTC, so the stand-in script, which runs first, takes the
+  peer-connection API off the page's window. The frame's sandbox is the boundary: no same
+  origin, no top navigation, no forms, no popups (``instant-preview-frame.tsx``). The page
+  holds only what the editor sent for it: the words on screen, the kit's logos and tokens.
 
 Each marker holds a bare ``&``, which an escaped value never holds (it is always ``&amp;``,
 ``&lt;`` or another entity), so no typed word can be taken for one. Pure: the caller reads
@@ -41,8 +46,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
-# ``_fonts`` is the render bundle's own font rule (which faces, which files), kept in one place.
-from core.media_render_bundle import VAR_BRAND_LOGO, VAR_BRAND_LOGO_MARK, VAR_BRAND_LOGO_ON_DARK, _fonts, build_bundle
+# ``staged_fonts`` is the render bundle's own font rule (which faces, which files), kept in one place.
+from core.media_render_bundle import VAR_BRAND_LOGO, VAR_BRAND_LOGO_MARK, VAR_BRAND_LOGO_ON_DARK, build_bundle, staged_fonts
 from core.social_composition import (
     GSAP_PATH,
     CompositionError,
@@ -51,12 +56,20 @@ from core.social_composition import (
     forbidden_elements,
     token_stylesheet,
 )
-from core.social_templates import IMAGE_SLOT, SOCIAL_IMAGE, SocialTemplateError, resolve_variables, validate_social_blocks
+from core.social_templates import (
+    BOOLEAN,
+    IMAGE_SLOT,
+    NUMBER,
+    SOCIAL_IMAGE,
+    SocialTemplateError,
+    resolve_variables,
+    validate_social_blocks,
+)
 from modules.socials import post_look
 from modules.socials.render import composition_of
 
 # The page's own policy: its inline script and styles run, data: images and fonts load, and
-# nothing else, so the page fetches nothing from the network. Its head opens with it.
+# nothing else the policy covers (fetch, XHR, images, styles, frames). Its head opens with it.
 PAGE_POLICY = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:"
 POLICY_META = f'<meta http-equiv="Content-Security-Policy" content="{PAGE_POLICY}">'
 # Where the editor puts the kit's @font-face rules: a CSS comment at the end of the brand styles.
@@ -67,9 +80,17 @@ PHOTO_MARKER = "&automatos-preview-photo-{slot};"
 # only then calls gsap.timeline({paused: true}) and .set(...) on it; every call on the stand-in
 # answers the stand-in, so those calls, and a workspace template's .to(...) or .fromTo(...), do
 # nothing. "then" is not answered, so nothing that awaits it waits forever.
+# It runs before any script of the template's, so it also takes the peer-connection API off the
+# page's window first: a content security policy does not cover WebRTC. That narrows what a
+# template's script can reach from this window; the frame's sandbox is what keeps it from the app.
 TIMELINE_STUB = """<script>
 (function () {
   "use strict";
+  ["RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel"].forEach(function (name) {
+    try {
+      Object.defineProperty(window, name, { value: undefined, writable: false, configurable: false });
+    } catch (error) { /* not there */ }
+  });
   var stub;
   var call = function () { return stub; };
   stub = new Proxy(call, {
@@ -79,6 +100,9 @@ TIMELINE_STUB = """<script>
 })();
 </script>"""
 REFERENCE_PREFIX = "instant-preview:"
+# What a field left empty with no default shows as. Only a number or a true/false may sit inside
+# a script (``core/social_composition.py``), so those two stay that kind; the rest is empty text.
+EMPTY_BY_TYPE: Mapping[str, Any] = {NUMBER: 0, BOOLEAN: False}
 LOGO_VARIABLES = frozenset({VAR_BRAND_LOGO, VAR_BRAND_LOGO_MARK, VAR_BRAND_LOGO_ON_DARK})
 FONTS_VERSION_CHARS = 16
 
@@ -139,11 +163,14 @@ def image_blocks(template: Any) -> Dict[str, Any]:
 
 def preview_values(blocks: Mapping[str, Any], typed: Mapping[str, Any]) -> Dict[str, Any]:
     """Each field's value as a render resolves it; a field left empty with no default is empty
-    text. A value that does not fit its field is refused, saying why."""
-    resolved = resolve_variables(blocks["variables_schema"], typed)
+    text (0 for a number, false for a true/false: :data:`EMPTY_BY_TYPE`). A value that does not
+    fit its field is refused, saying why."""
+    schema = blocks["variables_schema"]
+    resolved = resolve_variables(schema, typed)
     if resolved.invalid:
         raise PreviewRefused("; ".join(resolved.invalid))
-    return {**resolved.values, **{name: "" for name in resolved.missing}}
+    empty = {name: EMPTY_BY_TYPE.get(schema[name].get("type"), "") for name in resolved.missing}
+    return {**resolved.values, **empty}
 
 
 def checked_photos(blocks: Mapping[str, Any], photos: Sequence[str]) -> Tuple[str, ...]:
@@ -234,9 +261,9 @@ def preview_page(
 
 def font_faces(brand_kit: Mapping[str, Any]) -> str:
     """The kit's font faces as ``@font-face`` rules, each file a data: URI: what the editor puts
-    at :data:`FONTS_MARKER`. The faces a render stages (``media_render_bundle._fonts``): the
+    at :data:`FONTS_MARKER`. The faces a render stages (``media_render_bundle.staged_fonts``): the
     uploaded ones, then the bundled ones of the families the kit names and did not upload."""
-    files, faces = _fonts(brand_kit)
+    files, faces = staged_fonts(brand_kit)
     uris = {entry["path"]: entry["data_uri"] for entry in files}
     return "".join(
         font_face_rule(face["family"], face["weight"], face["style"], uris[face["path"]], face["path"].rsplit(".", 1)[-1])

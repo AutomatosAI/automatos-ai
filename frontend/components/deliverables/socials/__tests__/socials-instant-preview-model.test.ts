@@ -20,17 +20,15 @@ const PHOTO = 'data:image/png;base64,iVBORw0KGgo='
 
 describe('which posts show the instant preview', () => {
   it('an image post with a template whose file is not current', () => {
-    expect(wantsInstantPreview(null, draft(), false)).toBe(true)
-    expect(wantsInstantPreview(post({ template_id: 'tpl-img' }), draft(), false)).toBe(true)
+    expect(wantsInstantPreview(draft(), false)).toBe(true)
   })
 
-  it('not a video, a carousel, a text post, a post left to "Let Auto pick", the person\'s own file or a current render', () => {
-    expect(wantsInstantPreview(null, draft({ format: 'video' }), false)).toBe(false)
-    expect(wantsInstantPreview(null, draft({ format: 'carousel' }), false)).toBe(false)
-    expect(wantsInstantPreview(null, draft({ format: 'text', templateId: null }), false)).toBe(false)
-    expect(wantsInstantPreview(null, draft({ templateId: null }), false)).toBe(false)
-    expect(wantsInstantPreview(post({ media: { original: ['d-1'] } }), draft({ templateId: null }), false)).toBe(false)
-    expect(wantsInstantPreview(post({ template_id: 'tpl-img' }), draft(), true)).toBe(false)
+  it('not a video, a carousel, a text post, a post with no template ("Let Auto pick", the person\'s own file) or a current render', () => {
+    expect(wantsInstantPreview(draft({ format: 'video' }), false)).toBe(false)
+    expect(wantsInstantPreview(draft({ format: 'carousel' }), false)).toBe(false)
+    expect(wantsInstantPreview(draft({ format: 'text', templateId: null }), false)).toBe(false)
+    expect(wantsInstantPreview(draft({ templateId: null }), false)).toBe(false)
+    expect(wantsInstantPreview(draft(), true)).toBe(false)
   })
 
   it('a render is current while the post has a file and nothing a render reads changed since the save', () => {

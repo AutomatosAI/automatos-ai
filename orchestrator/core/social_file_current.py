@@ -65,10 +65,15 @@ FILE_OLDER_THAN_WORDS = (
 
 
 def _field_values(variables: Any) -> Dict[str, Any]:
-    """Each field's value, as the render reads it; a claim mark is not on the file."""
+    """Each field's value, as the render reads it; a claim mark is not on the file. A field with
+    no value reads as one that is not there (the render takes its default either way), so a save
+    that only adds or drops such a field leaves the file current."""
     if not isinstance(variables, Mapping):
         return {}
-    return {str(name): spec.get("value") for name, spec in variables.items() if isinstance(spec, Mapping)}
+    return {
+        str(name): spec.get("value") for name, spec in variables.items()
+        if isinstance(spec, Mapping) and spec.get("value") is not None
+    }
 
 
 def _slot_files(footage: Any) -> Dict[str, Any]:

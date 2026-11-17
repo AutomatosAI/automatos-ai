@@ -17,12 +17,19 @@ import { SocialsPublishControls } from '../socials-publish-controls'
 import { CARD } from './editor-ui'
 import { SocialsPostNotices } from './post-notices'
 
-export function SocialsEditorActivity({ post, role }: { post: SocialPost; role: Workspace['role'] }) {
+interface SocialsEditorActivityProps {
+  post: SocialPost
+  role: Workspace['role']
+  /** The editor above holds unsaved edits: the full render here waits for the save. */
+  dirty?: boolean
+}
+
+export function SocialsEditorActivity({ post, role, dirty = false }: SocialsEditorActivityProps) {
   return (
     <section aria-label="Activity" className={CARD}>
       <h2 className="text-[15px] font-semibold text-foreground">Activity</h2>
       <SocialsApprovalResetBanner post={post} />
-      <SocialsPostNotices post={post} role={role} />
+      <SocialsPostNotices post={post} role={role} dirty={dirty} />
       <SocialsPostReceipts post={post} role={role} />
       <SocialsPublishControls post={post} role={role} />
       <SocialsPostHistory post={post} />

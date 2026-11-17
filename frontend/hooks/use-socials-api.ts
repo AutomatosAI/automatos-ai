@@ -41,7 +41,7 @@ import type {
 import { useWorkspace } from '@/components/workspace-provider'
 import { activityQueryKeys } from '@/hooks/use-activity-api'
 import { anyInFlight } from '@/components/deliverables/socials/socials-status'
-import { unsourcedClaimsOf } from '@/components/deliverables/socials/socials-review'
+import { FILE_OLDER_THAN_WORDS, unsourcedClaimsOf } from '@/components/deliverables/socials/socials-review'
 
 // ============= QUERY KEYS =============
 
@@ -68,7 +68,7 @@ function useWorkspaceId(): string | null {
   return useWorkspace().workspace?.id ?? null
 }
 
-const HTTP_CONFLICT = 409
+export const HTTP_CONFLICT = 409
 const HTTP_UNPROCESSABLE = 422
 
 /** Shown when an action answers 409: the post changed since this screen loaded it. */
@@ -80,7 +80,7 @@ export const SOCIAL_POST_REVIEW_STALE_MESSAGE =
   'This post changed while you were reviewing it — review the new version'
 
 /** The HTTP status apiClient.request() puts on the Error it throws, if any. */
-function httpStatusOf(error: unknown): number | undefined {
+export function httpStatusOf(error: unknown): number | undefined {
   const status = (error as { status?: unknown } | null | undefined)?.status
   return typeof status === 'number' ? status : undefined
 }
@@ -332,6 +332,13 @@ export function useApproveSocialPost({ onStale, onUnsourced }: ApproveHandlers) 
       const claims = httpStatusOf(error) === HTTP_UNPROCESSABLE ? unsourcedClaimsOf(error) : null
       if (claims && claims.length > 0) {
         onUnsourced(claims)
+        return
+      }
+      if (httpStatusOf(error) === HTTP_CONFLICT && error.message === FILE_OLDER_THAN_WORDS) {
+        // PRD-251D US-D108: the post is the one on screen, but its file is older than its words. The
+        // server's own sentence, and the post read again so the controls offer Render again.
+        toast.error(error.message)
+        await invalidate()
         return
       }
       if (httpStatusOf(error) === HTTP_CONFLICT) {

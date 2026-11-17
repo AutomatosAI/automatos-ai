@@ -5,16 +5,16 @@
  *   the full render (POST /render with no preview), which ends it in needs_approval by itself:
  *   never the submit route.
  * * US-D108: a post sent back with its rendered file renders again only when the file does not
- *   show it: its own `file_current` is false, the editor holds unsaved changes to what a render
- *   reads, or the save itself answers that the file is older than the post. Otherwise its file
- *   already shows it, and it is submitted through the submit route as before.
+ *   show it: its own `file_current` is false, the editor holds unsaved changes to what the file
+ *   shows (a field, not the brief alone), or the save itself answers that the file is older than
+ *   the post. Otherwise its file already shows it, and it is submitted through the submit route as before.
  * * A video makes the full render, never the half-resolution preview, and the line under Submit
  *   says its render minutes; a still of the person's own is cropped; a text post submits.
  * * A refusal (422 naming what Auto could not write, 429 no render minutes) shows as Render
  *   preview's does, and the post stays as it was. Render preview stays.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
-import { screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 
 vi.mock('@/lib/api-client', async () => (await import('./socials-editor-harness')).apiModule)
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
@@ -104,14 +104,26 @@ describe('Submit for approval', () => {
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith(SENT_FOR_APPROVAL))
   })
 
-  it('renders such a post once the editor holds an unsaved change to what a render reads (US-D108)', async () => {
+  it('renders such a post once the editor holds an unsaved change to what its file shows (US-D108)', async () => {
     renderEditor({ ...SENT_BACK, file_current: true })
     await screen.findByText('TikTok')
-    fireEvent.change(screen.getByRole('textbox', { name: 'Brief' }), { target: { value: 'Say Friday, not Thursday.' } })
+    const fields = await screen.findByRole('region', { name: 'Text on the image' })
+    fireEvent.change(await within(fields).findByLabelText('Headline'), { target: { value: 'OPEN LATE FRIDAY' } })
     expect(note()).toHaveTextContent(SUBMIT_RENDERS)
     fireEvent.click(submitButton())
     await waitFor(() => expect(api.renderSocialPost).toHaveBeenCalledWith('post-1', {}))
     expect(api.submitSocialPost).not.toHaveBeenCalled()
+  })
+
+  it('submits it, with no second render, when the only unsaved edit is to the brief (US-D108)', async () => {
+    // The brief is what Auto writes from: it is not on the file, so the file still shows the post.
+    renderEditor({ ...SENT_BACK, file_current: true })
+    await screen.findByText('TikTok')
+    fireEvent.change(screen.getByRole('textbox', { name: 'Brief' }), { target: { value: 'Say Friday, not Thursday.' } })
+    expect(note()).toBeNull()
+    fireEvent.click(submitButton())
+    await waitFor(() => expect(api.submitSocialPost).toHaveBeenCalledWith('post-1'))
+    expect(api.renderSocialPost).not.toHaveBeenCalled()
   })
 
   it("renders when the save's own answer says the file is now older than the post (US-D108)", async () => {

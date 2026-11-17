@@ -5,9 +5,10 @@
  * template (instant-preview-model.ts says which posts): the page for what is on screen, asked for
  * a moment after the last change, with the kit's font faces and the post's photos put in it.
  *
- * null while the post keeps today's preview, until a first page and the kit's fonts arrive, and
+ * No page while the post keeps today's preview, until a first page and the kit's fonts arrive, and
  * after any failure but a refusal. After a refusal (a field over its limit, say) the last page of
- * the same template stays, with the reason. A page is shown only when it opens with its own policy.
+ * the same template stays, and the reason is said whether or not a page is on screen yet. A page is
+ * shown only when it opens with its own policy.
  */
 import { useEffect, useMemo, useState } from 'react'
 import type { UseQueryResult } from '@tanstack/react-query'
@@ -29,7 +30,13 @@ export interface InstantPreview {
   /** The template's size it is drawn at. */
   width: number
   height: number
-  /** Why the newest words wait (the server's reason); null when the page shows them. */
+}
+
+export interface InstantPreviewState {
+  /** The page shown in place of the file; null keeps today's frame. */
+  instant: InstantPreview | null
+  /** Why the words on screen have no page of their own (the server's reason for refusing them);
+   * null when the page shows them, or nothing was refused. */
   problem: string | null
 }
 
@@ -81,8 +88,8 @@ function refusalOf(query: UseQueryResult<SocialPreviewPage>): string | null {
   return query.isError && typeof detail === 'string' ? detail : null
 }
 
-export function useInstantPreview({ post, draft, templateSizes, active, fileCurrent }: InstantPreviewInput): InstantPreview | null {
-  const wanted = wantsInstantPreview(post, draft, fileCurrent)
+export function useInstantPreview({ post, draft, templateSizes, active, fileCurrent }: InstantPreviewInput): InstantPreviewState {
+  const wanted = wantsInstantPreview(draft, fileCurrent)
   const template = useChosenTemplate(draft)
   const files = useMemo(() => (wanted ? photoFilesOf(post, template) : []), [wanted, post, template])
   const photos = useSocialPreviewPhotos(post?.id ?? null, files)
@@ -96,8 +103,9 @@ export function useInstantPreview({ post, draft, templateSizes, active, fileCurr
   const fonts = useSocialPreviewFonts(shown?.page.fonts_version ?? null)
   const page = useMemo(() => (shown ? pageWithFiles(shown.page.html, fonts.data?.css ?? '', held) : null), [shown, fonts.data, held])
   const size = sizeOf(shown?.input.size ?? null)
-  const problem = refusalOf(query)
+  const problem = wanted ? refusalOf(query) : null
   const failed = query.isError && problem === null
-  if (!wanted || failed || !shown || shown.templateId !== draft.templateId || !page || !size || fonts.isInitialLoading) return null
-  return hasPagePolicy(page) ? { page, ...size, problem } : null
+  const usable = wanted && !failed && shown?.templateId === draft.templateId && !fonts.isInitialLoading
+  const instant = usable && page && size && hasPagePolicy(page) ? { page, ...size } : null
+  return { instant, problem }
 }

@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils'
 import type { Workspace } from '@/components/workspace-provider'
 import type { SocialPost, SocialPostStatus } from '@/lib/api-client'
 import { useRenderSocialPost } from '@/hooks/use-socials-api'
+import { RENDER_AGAIN } from '../socials-post-review'
 import { postActions } from '../socials-status'
 import { HINT, Hint } from './editor-ui'
 import { inputAsked, waitsForInput } from './queue-model'
@@ -34,7 +35,6 @@ export const RENDERING_NOTE = 'Rendering. This can take a few minutes; the post 
 /** The start of a failed post's line; the reason the render gave follows it. */
 export const RENDER_FAILED = 'The last render failed:'
 export const RENDER = 'Render'
-export const RENDER_AGAIN = 'Render again'
 export const RENDERS_AS_SAVED = 'It renders the post as it is saved: save your edits first.'
 const CLOCK = 'HH:mm'
 /** The review_log action of a render that failed (modules/socials/service.py ACTION_RENDER_FAILED). */
@@ -70,13 +70,15 @@ export function rendersHere(role: Workspace['role'], post: Pick<SocialPost, 'sta
   return RENDER_HERE.has(post.status) && postActions(role, post.status, !!post.template_id).render
 }
 
-function RenderButton({ post, role }: { post: SocialPost; role: Workspace['role'] }) {
+/** `dirty`: the editor above holds unsaved edits. The render takes the post as it is saved, so it
+ * waits for the save, as the approve controls' Render again does. */
+function RenderButton({ post, role, dirty }: { post: SocialPost; role: Workspace['role']; dirty: boolean }) {
   const startRender = useRenderSocialPost()
   if (!rendersHere(role, post)) return null
   const rendered = Object.keys(post.media ?? {}).length > 0 || post.status === 'failed'
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Button size="sm" variant="outline" onClick={() => startRender.mutate({ postId: post.id })} disabled={startRender.isLoading}>
+      <Button size="sm" variant="outline" onClick={() => startRender.mutate({ postId: post.id })} disabled={dirty || startRender.isLoading}>
         {rendered ? RENDER_AGAIN : RENDER}
       </Button>
       <Hint>{RENDERS_AS_SAVED}</Hint>
@@ -84,7 +86,7 @@ function RenderButton({ post, role }: { post: SocialPost; role: Workspace['role'
   )
 }
 
-export function SocialsPostNotices({ post, role }: { post: SocialPost; role: Workspace['role'] }) {
+export function SocialsPostNotices({ post, role, dirty = false }: { post: SocialPost; role: Workspace['role']; dirty?: boolean }) {
   const waiting = waitingLine(post)
   const failed = renderFailedLine(post)
   return (
@@ -96,7 +98,7 @@ export function SocialsPostNotices({ post, role }: { post: SocialPost; role: Wor
       {failed && (
         <p role="alert" className="m-0 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">{failed}</p>
       )}
-      <RenderButton post={post} role={role} />
+      <RenderButton post={post} role={role} dirty={dirty} />
     </>
   )
 }
