@@ -160,6 +160,22 @@ def test_a_turn_that_ran_tools_is_never_read_as_a_sign_in_failure():
     assert status == "error" and error.startswith("copilot exited (code 1) before finishing the turn")
 
 
+def test_a_turn_that_ended_on_an_api_error_fails_in_the_errors_own_words():
+    """Claude Code's StopFailure hook (its hooks reference): ``error`` is the type,
+    ``last_assistant_message`` the error text the terminal showed, ``error_details``
+    optional. Before, such a turn ran out the session timeout and said only that."""
+    words = turn_end.api_error_words({"hook_event_name": "StopFailure", "error": "unknown",
+                                      "last_assistant_message": "API Error: Connection lost mid-response."})
+    assert words == "API Error: Connection lost mid-response. (error type: unknown)"
+    assert turn_end.api_error_words({"error": "rate_limit", "error_details": "429 Too Many Requests"}) == (
+        "429 Too Many Requests (error type: rate_limit)")
+    assert turn_end.api_error_words({}) == "error type: unknown"
+    status, error = turn_end.describe("api_error", cli="claude", returncode=None, tail="❯", startup_window=180,
+                                      session_timeout=14400, stopped_by_host=None, failure=words)
+    assert status == "error" and error.startswith("claude's turn ended on an API error")
+    assert "Connection lost mid-response" in error and "14400" not in error
+
+
 # ── the real loop against a stand-in print-mode CLI ─────────────────────────
 
 def test_a_print_mode_turn_that_proved_its_gate_succeeds(short_tmp, monkeypatch, print_cli, env_clean):

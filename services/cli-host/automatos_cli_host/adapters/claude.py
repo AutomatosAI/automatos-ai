@@ -7,7 +7,8 @@ moved, not rewritten:
   unless the host runs with ``--no-session-sandbox``, Claude Code's own Bash
   sandbox (``sandbox.py``); nothing in ``~/.claude`` is edited; the file is per
   session and disposable;
-* the trust decision: ``~/.claude.json`` → ``projects[<cwd>].hasTrustDialogAccepted``
+* the trust decision: ``~/.claude.json`` → ``projects[<cwd>].hasTrustDialogAccepted``,
+  and the same for the ticket folder the launch adds with ``--add-dir``
   — registering a directory with the host IS the operator's trust decision; we
   record it where Claude Code reads it (munder ``config.ts:790-822``),
   backup-first, atomic, touching nothing else;
@@ -18,6 +19,7 @@ moved, not rewritten:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -32,6 +34,8 @@ from ..presets import CliPreset
 from ..sandbox import claude_settings, unavailable_reason
 from ..transcript import last_assistant_text, read_usage, transcript_path
 from .base import LaunchContext, Prepared, PresetAdapter, Refusal, ToolClass, ToolIntent, hook_command
+
+log = logging.getLogger("automatos.cli_host.adapters.claude")
 
 FILE_READ_TOOLS = frozenset({"Read", "Glob", "Grep", "LS"})
 FILE_WRITE_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
@@ -304,6 +308,14 @@ class ClaudeAdapter(PresetAdapter):
         settings_path = write_settings(self.preset, ctx.session_dir / "settings.json",
                                        sandbox=self._sandbox_settings(ctx))
         record_directory_trust(ctx.cwd)
+        if self.preset.add_dir_flag:
+            # Claude Code 2.1.326 asks before it adds a folder it has never been
+            # trusted in, and nobody is at the keyboard to answer: the launch
+            # stalls until the host gives up. The host made this ticket folder.
+            record_directory_trust(ctx.session_dir)
+            if not is_directory_trusted(ctx.session_dir):
+                log.warning("task %s: %s is still not trusted in Claude Code's state; the launch may stop on "
+                            "Claude Code's trust question", ctx.task_id, ctx.session_dir)
         args = ["--settings", str(settings_path)]
         mcp_path = write_mcp_config(ctx.session_dir / MCP_CONFIG_FILENAME, ctx.session_tools)
         if mcp_path is not None and self.preset.mcp_config_flag:

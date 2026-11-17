@@ -4,6 +4,9 @@ A preset says how its CLI's turn ends (``presets.TURN_ENDS``):
 
 * ``stop_hook`` — the CLI's own ``Stop`` hook (Claude Code, Codex). The host ends
   the interactive process itself, so an exit before ``Stop`` is a failed turn.
+  A Claude Code turn that ends on an API error fires ``StopFailure`` instead
+  (``API_ERROR``): the host ends that session too, and the ticket fails with
+  the error's own words.
 * ``process_exit`` — the CLI exits when its turn is over: a print-mode CLI such as
   ``copilot -p``, and the seed tier, whose stdout is the answer.
 
@@ -17,7 +20,7 @@ Pure: no I/O and no process handling. ``session.py`` asks; this answers.
 from __future__ import annotations
 
 import re
-from typing import Any, Optional, Tuple
+from typing import Any, Mapping, Optional, Tuple
 
 from .hook_shim import NOT_THE_HOST_MARK, UNREACHABLE_MARK
 from .presets import REGISTRY, TIER_HOOKS, TIER_NATIVE, TIER_PROXY, TURN_END_STOP_HOOK
@@ -54,6 +57,23 @@ UNGATED_EXIT = "ungated_exit"
 # F083: the CLI parked its turn at its usage limit and the host ended it;
 # ``session._collect`` reports the pause and its reset time.
 PARKED_AT_LIMIT = "parked_at_limit"
+# Claude Code ends a turn that failed on an API error with its StopFailure hook,
+# never Stop (code.claude.com/docs/en/hooks#stopfailure). Without it the session sat
+# at its empty prompt until the session timeout. ``error`` is the error type
+# (rate_limit, server_error, unknown, ...), ``last_assistant_message`` the error
+# text the terminal showed and ``error_details`` more, when Claude Code has it.
+API_ERROR = "api_error"
+API_ERROR_SAID = "{cli}'s turn ended on an API error, so the host ended the session: {words}\nLast output:\n{tail}"
+UNNAMED_API_ERROR = "unknown"
+
+
+def api_error_words(payload: Mapping[str, Any]) -> str:
+    """The API error a StopFailure hook reports, in its own words: the text the
+    terminal showed (else the details) with the error type, which is how a
+    ``rate_limit`` is read as a usage limit (a pause) rather than a failure."""
+    kind = str(payload.get("error") or UNNAMED_API_ERROR)
+    said = str(payload.get("last_assistant_message") or payload.get("error_details") or "").strip()
+    return f"{said} (error type: {kind})" if said else f"error type: {kind}"
 
 
 def is_gated(preset: Any) -> bool:
@@ -126,8 +146,10 @@ def cause_in_tail(reason: str, cli: str, tail: str) -> Optional[str]:
 
 
 def describe(reason: str, *, cli: str, returncode: Optional[int], tail: str, startup_window: float,
-             session_timeout: float, stopped_by_host: Optional[str]) -> Tuple[str, Optional[str]]:
-    """The ticket's status and, unless it succeeded, the sentence that says why."""
+             session_timeout: float, stopped_by_host: Optional[str],
+             failure: Optional[str] = None) -> Tuple[str, Optional[str]]:
+    """The ticket's status and, unless it succeeded, the sentence that says why.
+    ``failure`` is the API error that ended the turn (``api_error_words``)."""
     if reason == COMPLETED:
         return "success", None
     cause = cause_in_tail(reason, cli, tail)
@@ -140,6 +162,8 @@ def describe(reason: str, *, cli: str, returncode: Optional[int], tail: str, sta
         return "error", f"session exceeded {int(session_timeout)} s"
     if reason == PARKED_AT_LIMIT:
         return "error", f"{cli} stopped at its usage limit. Last output:\n{tail}"
+    if reason == API_ERROR:
+        return "error", API_ERROR_SAID.format(cli=cli, words=failure or api_error_words({}), tail=tail)
     if reason == NO_SESSION_START:
         return "error", (
             f"{cli} did not start a session within {int(startup_window)} s — "
@@ -159,8 +183,9 @@ def describe(reason: str, *, cli: str, returncode: Optional[int], tail: str, sta
 
 
 __all__ = [
-    "COMPLETED", "EXITED_BEFORE_STOP", "EXIT_GRACE_AFTER_SESSION_END_SECONDS", "GATED_TIERS", "UNGATED_EXIT",
+    "API_ERROR", "API_ERROR_SAID", "COMPLETED", "EXITED_BEFORE_STOP", "EXIT_GRACE_AFTER_SESSION_END_SECONDS",
+    "GATED_TIERS", "UNGATED_EXIT",
     "EXITED_BEFORE_SESSION", "HOOKS_CUT_OFF", "NO_SESSION_START", "PARKED_AT_LIMIT", "USAGE_REFUSED", "cause_in_tail",
-    "describe",
+    "api_error_words", "describe",
     "exit_reason", "is_gated", "sign_in_failure", "startup_timeout", "usage_error",
 ]
