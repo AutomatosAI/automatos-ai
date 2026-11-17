@@ -10,7 +10,9 @@ caller's session, a session they open themselves, or the workspace's files:
 - a spreadsheet's copy in the workspace (``platform_read_document``);
 - the NL2SQL audit row, its training example, its primitive heartbeat and the use count
   of each few-shot example it reads (``platform_query_data``);
-- a preview's picture in the session's folder (``platform_render_preview``).
+- a preview's picture in the session's folder (``platform_render_preview``);
+- a pending connection settled to ``active`` (``EntityManager.get_connected_apps``, which
+  ``platform_list_connected_apps`` reads).
 
 In a check-in each is skipped, and everywhere else each runs as before. The check-in lane
 marks its calls with ``reading_only()`` (``check_in_lane.carries_the_check_in``), and each
