@@ -429,7 +429,14 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # social_posts.look, a new nullable column; the guard follows it.
     looks = (versions / "prd251d_wave3.py").read_text()
     assert 'down_revision = "credit_ledger_sub_tenant_20261113"' in looks
-    assert 'EXPECTED_HEAD = "prd251d_wave3"' in guard
+    # 2026-11-16 (a key's chat turn once): chat_turn_keys_20261116 chains onto the same parent —
+    # chat_turn_keys, a new table only; 2026-11-17: merge_heads_20261117 joins the two, and the
+    # guard follows it.
+    turns = (versions / "chat_turn_keys_20261116.py").read_text()
+    assert 'down_revision = "credit_ledger_sub_tenant_20261113"' in turns
+    joins = (versions / "merge_heads_20261117.py").read_text()
+    assert '"chat_turn_keys_20261116"' in joins and '"prd251d_wave3"' in joins
+    assert 'EXPECTED_HEAD = "merge_heads_20261117"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

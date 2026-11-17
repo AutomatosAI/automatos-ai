@@ -184,7 +184,12 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # credit_ledger.sub_tenant_id (a new nullable column) and its partial index: what each product workspace spent.
 # 2026-11-16 (PRD-251D Wave 3, US-D301): prd251d_wave3 chains onto that — the ONE migration of
 # the wave: social_posts.look (a new nullable JSON column), a post's own look on its template.
-EXPECTED_HEAD = "prd251d_wave3"
+# 2026-11-16 (Automatos for products, a key's chat turn once): chat_turn_keys_20261116 chains onto
+# credit_ledger_sub_tenant_20261113 too — chat_turn_keys (a new table only): an Idempotency-Key's
+# turn, run once. Both merged on 17 Nov, leaving two heads.
+# 2026-11-17: merge_heads_20261117 joins chat_turn_keys_20261116 and prd251d_wave3 into the single
+# head (a merge revision, no operations).
+EXPECTED_HEAD = "merge_heads_20261117"
 
 
 def _literal(node: ast.AST):

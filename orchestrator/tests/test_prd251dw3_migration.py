@@ -75,7 +75,9 @@ def test_the_one_wave_revision_chains_onto_the_head_it_was_written_on():
         for p in VERSIONS.glob("*.py")
         if re.search(rf"^down_revision\s*=\s*['\"]{PARENT}['\"]", p.read_text(encoding="utf-8"), re.M)
     )
-    assert chained == ["prd251d_wave3.py"]
+    # The wave's one revision, and a sibling another PR wrote on the same parent (a key's chat turn
+    # once, chat_turn_keys_20261116); merge_heads_20261117 joins the two into the single head.
+    assert chained == ["chat_turn_keys_20261116.py", "prd251d_wave3.py"]
 
 
 def test_the_migration_builds_exactly_the_model_schema():
