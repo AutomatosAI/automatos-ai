@@ -41,7 +41,7 @@ from core.services.notification_dispatcher import NotificationDispatcher
 from core.workspaces.audit import AuditLog, AuditService
 from core.workspaces.owner import workspace_owner
 from services.content_reports import AUDIT_ACTION
-from services.content_reports.reporter import Reporter, end_user_gone, reporter_of
+from services.content_reports.reporter import Reporter, consent_held, consent_seen, reporter_of
 from services.content_reports.targets import canonical_target_id, resolve_target
 
 logger = logging.getLogger(__name__)
@@ -196,7 +196,8 @@ async def file_report(
         raise ReportTargetNotFound() if reporter.is_key else ReportNeedsAPerson()
     reporter_pk = reporter.pk
     workspace_id = getattr(ctx, "workspace_id", None)
-    if end_user_gone(db, workspace_id, reporter):
+    seen = consent_seen(db, workspace_id, reporter)
+    if seen is None:
         raise ReportTargetNotFound()
     await _within_rate_limit(workspace_id, reporter)
 
@@ -220,7 +221,7 @@ async def file_report(
     )
     if earlier is not None:
         return _with_id(report, earlier, duplicate=True)
-    if end_user_gone(db, workspace_id, reporter, hold=True):  # held until _record commits
+    if not consent_held(db, workspace_id, reporter, seen):  # held until _record commits
         db.rollback()
         raise ReportTargetNotFound()
 

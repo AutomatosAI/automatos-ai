@@ -10,7 +10,8 @@ tagged with the end user the key names (``chats.end_user_id``), or tagged with n
 none. It never reaches a member's chat, a public chat, another key's chat or a Deliverable
 (``targets``). A key that has never chatted has no service user and so no chat: whatever it
 reports is not found. Nothing here makes a service user. An end user whose consent is gone, or
-whose erase has started, is not reported for (``end_user_gone``), as the chat path refuses their turn.
+whose erase has started, is not reported for (``consent_seen``, ``consent_held``), as the chat path
+refuses their turn.
 
 A key's reports count against one bucket per end user it names, so one person's reports never
 use up another's; the key's own per-key limits cap its total, in the gate. The audit row names the
@@ -20,6 +21,7 @@ person after they are erased.
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -71,30 +73,42 @@ def reporter_of(db: Any, ctx: Any, end_user_id: Optional[str] = None) -> Reporte
     return Reporter(pk=resolve_user_pk(db, ctx))
 
 
-def end_user_gone(db: Any, workspace_id: Any, reporter: Reporter, *, hold: bool = False) -> bool:
-    """For a key naming an end user: whether their consent is gone or their erase has started.
+# What consent_seen answers when there is no end user to check: a person, or a key naming none.
+NO_END_USER = ""
 
-    With ``hold``, their consent record is read ``FOR SHARE``. The erase marks its start by updating
-    that row (``api.end_user_memory._mark_erasing``), so it waits until this transaction ends, and a
-    mark made first is seen here once it commits. The service checks again this way right before it
-    writes the audit row, in the transaction that commits it, so no report lands once an erase began.
-    """
+
+def consent_seen(db: Any, workspace_id: Any, reporter: Reporter) -> Optional[str]:
+    """For a key naming an end user: the id of their consent record while no erase of them has begun,
+    or None when their consent is gone or their erase has begun. NO_END_USER for anyone else."""
     if not reporter.is_key or reporter.end_user_id is None:
-        return False
-    if not hold:
-        from core.models.end_users import consented
+        return NO_END_USER
+    from core.models.end_users import consent_record_id
 
-        return not consented(db, workspace_id, reporter.end_user_id)
+    return consent_record_id(db, workspace_id, reporter.end_user_id)
+
+
+def consent_held(db: Any, workspace_id: Any, reporter: Reporter, seen: str) -> bool:
+    """Whether the consent record ``consent_seen`` found is still there with no erase begun.
+
+    The record is read ``FOR SHARE``. The erase marks its start by updating that row
+    (``api.end_user_memory._mark_erasing``), so it waits until this transaction ends, and a mark made
+    first is seen once it commits. It must be the SAME record: an erase and a fresh consent that both
+    finished meanwhile leave a new record, and the excerpt read before them is of a message the erase
+    deleted. The service calls this right before it writes the audit row, in the transaction that
+    commits it, so no report lands once the consent it was filed under is gone.
+    """
+    if seen == NO_END_USER:
+        return True
     from core.models.end_users import EndUser
 
     held = (
         db.query(EndUser.id)
-        .filter(EndUser.workspace_id == workspace_id, EndUser.end_user_id == reporter.end_user_id,
-                EndUser.erasing_at.is_(None))
+        .filter(EndUser.id == uuid.UUID(seen), EndUser.workspace_id == workspace_id,
+                EndUser.end_user_id == reporter.end_user_id, EndUser.erasing_at.is_(None))
         .with_for_update(read=True)
         .first()
     )
-    return held is None
+    return held is not None
 
 
 def _service_user_of(db: Any, key_id: Any) -> Optional[int]:
@@ -105,4 +119,5 @@ def _service_user_of(db: Any, key_id: Any) -> Optional[int]:
     return None if key is None else key.service_user_id
 
 
-__all__ = ["KEY_ACTOR_TYPE", "PERSON_ACTOR_TYPE", "Reporter", "end_user_gone", "reporter_of"]
+__all__ = ["KEY_ACTOR_TYPE", "NO_END_USER", "PERSON_ACTOR_TYPE", "Reporter", "consent_held", "consent_seen",
+           "reporter_of"]
