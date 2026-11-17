@@ -51,8 +51,9 @@ vi.mock('@/components/deliverables/socials/studio/socials-post-page', () => ({
 vi.mock('@/components/deliverables/socials/studio/queue-pane', () => ({
   QueuePane: ({ post }: { post: any }) => <article aria-label={`Post to approve: ${post.title}`} />,
 }))
-vi.mock('@/components/deliverables/socials/socials-post-detail', () => ({
-  SocialsPostDetail: ({ post }: { post: any }) => <article aria-label={`Post: ${post.title}`} />,
+// PRD-251D US-D203: the Queue shows a person who may not approve the post's read-only view.
+vi.mock('@/components/deliverables/socials/studio/socials-post-view', () => ({
+  SocialsPostView: ({ post }: { post: any }) => <article aria-label={`Post: ${post.title}`} />,
 }))
 
 import { SocialsStudio } from '@/components/deliverables/socials/studio/studio-shell'

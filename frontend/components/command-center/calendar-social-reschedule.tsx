@@ -5,8 +5,9 @@
  * Reschedule… dialog (a wall time in the post's own timezone) and drag and drop
  * (native HTML5 drag events: a social item is draggable, a day column takes the
  * drop at the quarter hour under the pointer). Both call
- * POST /api/socials/posts/{id}/schedule with the post's timezone: the slot moves,
- * the approval stands. calendar-tab.tsx only wires these in.
+ * PUT /api/socials/posts/{id}/slot with the post's timezone, the one route that moves a
+ * post whatever its status: a draft's or a waiting post's planned slot, an approved or
+ * scheduled post's schedule, with its approval standing. calendar-tab.tsx only wires these in.
  */
 import { useState, type DragEvent, type HTMLAttributes, type ReactNode } from 'react'
 import { toast } from 'sonner'
@@ -20,26 +21,34 @@ import { SOCIAL_DRAG_TYPE, isSocialItem, slotFromDrop, slotOnDay, wallInZone, zo
 
 const DEFAULT_TZ = 'UTC'
 const HTTP_CONFLICT = 409
-export const RESCHEDULED_MESSAGE = 'Rescheduled. The approval stands.'
+export const RESCHEDULED_MESSAGE = 'Moved to the new slot.'
+/** An approved or scheduled post moved: it is scheduled, so it goes out at the new slot. */
+export const PUBLISHES_THERE_MESSAGE = 'Moved. It publishes at the new slot.'
+const SCHEDULED = 'scheduled'
+
+/** What a move says: that the post publishes there when the answer says it is scheduled. */
+function movedMessage(answer: unknown): string {
+  return (answer as { status?: unknown } | null)?.status === SCHEDULED ? PUBLISHES_THERE_MESSAGE : RESCHEDULED_MESSAGE
+}
 export const POST_CHANGED_MESSAGE = 'This post changed since the calendar loaded it. The calendar has been refreshed.'
 
 type Reschedule = (postId: string, scheduledFor: string, timezone: string) => Promise<void>
 
-/** PRD-251B US-B108: how a move is written, and what it says. The Command Center's
- * default is POST /schedule (a scheduled post); the Socials calendar moves any post's
- * slot through PUT /slot, which keeps an approval and schedules an approved post. */
+/** PRD-251B US-B108: how a move is written, and what it says. The default is PUT /slot,
+ * which moves any post's slot, keeps an approval and schedules an approved post; the
+ * Socials calendar adds its plans' planned slots, which move through the plan. */
 export interface RescheduleOptions {
   move?: (postId: string, slot: string, timezone: string) => Promise<unknown>
   movedMessage?: string
 }
 
-/** POST /schedule (or the given move), then refresh the calendar however it went: a 409 says the post changed. */
+/** PUT /slot (or the given move), then refresh the calendar however it went: a 409 says the post changed. */
 function useRescheduleCall(onChanged: () => void, options: RescheduleOptions): Reschedule {
-  const move = options.move ?? ((postId, slot, timezone) => apiClient.scheduleSocialPost(postId, slot, timezone))
+  const move = options.move ?? ((postId, slot, timezone) => apiClient.setSocialPostSlot(postId, slot, timezone))
   return async (postId, scheduledFor, timezone) => {
     try {
-      await move(postId, scheduledFor, timezone)
-      toast.success(options.movedMessage ?? RESCHEDULED_MESSAGE)
+      const answer = await move(postId, scheduledFor, timezone)
+      toast.success(options.movedMessage ?? movedMessage(answer))
     } catch (error) {
       const status = (error as { status?: unknown } | null)?.status
       toast.error(status === HTTP_CONFLICT ? POST_CHANGED_MESSAGE : (error as Error)?.message || 'The post could not be rescheduled')
@@ -97,7 +106,7 @@ function RescheduleDialog({ item, onClose, reschedule }: { item: ScheduleItem | 
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Reschedule {item?.name}</DialogTitle>
-          <DialogDescription>The new slot is in the post&apos;s timezone, {tz}. The approval stands.</DialogDescription>
+          <DialogDescription>The new slot is in the post&apos;s timezone, {tz}. An approved post publishes at the new slot; its approval stands.</DialogDescription>
         </DialogHeader>
         <Input type="datetime-local" aria-label="New slot" value={value} onChange={(e) => setWall(e.target.value)} />
         <DialogFooter>

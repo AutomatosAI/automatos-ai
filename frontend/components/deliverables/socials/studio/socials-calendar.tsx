@@ -9,10 +9,13 @@
  * Drag a movable post to another day (Month keeps its time of day; Week takes the quarter
  * hour under the pointer): the move is PUT /slot (US-B105), which before approval sets the
  * slot alone and on an approved or scheduled post reschedules it through the one schedule
- * path, so the planned slot and the schedule never part. List is the post list (List |
- * Board). A click opens the post; a post waiting for approval opens in the Queue.
+ * path, so the planned slot and the schedule never part. A click opens the post; a post
+ * waiting for approval opens in the Queue.
  * US-B208: each active plan's slots not made yet are dashed chips (plan-calendar-model.ts);
  * dragging one moves the slot (PUT /plans/{id}/slots/{key}), a click opens the plan.
+ * PRD-251D US-D202: List is every post by status, archived and unslotted ones included
+ * (socials-calendar-list.tsx), and a row opens its post as a chip does. The channel filter is
+ * hidden there, so the list takes every post, not the filtered ones.
  */
 import { useMemo, useState, type CSSProperties } from 'react'
 import { useRouter } from 'next/navigation'
@@ -24,12 +27,12 @@ import { useSocialChannels } from '@/hooks/use-socials-composer'
 import type { EventActionDeps } from '@/components/command-center/calendar-actions'
 import { buildMonthGrid, buildWeek, type CalEvent } from '@/components/command-center/calendar-model'
 import { MonthGrid } from '@/components/command-center/calendar-month-grid'
-import { useSocialReschedule, type SocialReschedule } from '@/components/command-center/calendar-social-reschedule'
+import { RESCHEDULED_MESSAGE, useSocialReschedule, type SocialReschedule } from '@/components/command-center/calendar-social-reschedule'
 import { shiftedAnchor, titleFor, windowSpanFor } from '@/components/command-center/calendar-view'
 import { WeekGrid, eventBox } from '@/components/command-center/calendar-week-grid'
-import { SocialsPostList } from '../socials-post-list'
 import { SocialsCalendarChip } from './socials-calendar-chip'
 import { SocialsCalendarHeader } from './socials-calendar-header'
+import { SocialsCalendarList } from './socials-calendar-list'
 import { ALL_CHANNELS, isMovable, matchesFilter, opensInQueue, postEvents, type ChannelFilter } from './socials-calendar-model'
 import { SocialsTodayRail } from './socials-today-rail'
 import { parsePlannedId, plannedEvents } from './plan-calendar-model'
@@ -37,7 +40,7 @@ import { SocialsPlannedChip } from './socials-planned-chip'
 import { usePlannedSlots } from './use-planned-slots'
 import type { GoTo, SocialsRoute } from './studio-route'
 
-export const MOVED_MESSAGE = 'Moved to the new slot.'
+export const MOVED_MESSAGE = RESCHEDULED_MESSAGE
 export const DRAG_HINT = 'Drag a post to another day to move it. Click a post to open it.'
 const LIST_TITLE = 'All posts'
 
@@ -129,7 +132,7 @@ export function SocialsCalendar({ role, posts, route, go }: SocialsCalendarProps
         onFilter={setFilter}
       />
       {layout === 'list' ? (
-        <SocialsPostList role={role} />
+        <SocialsCalendarList role={role} posts={posts} onOpen={open} />
       ) : (
         <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
           <section aria-label={title} className="socials-calendar-grid overflow-x-auto">

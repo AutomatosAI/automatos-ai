@@ -62,6 +62,7 @@ vi.mock('@/hooks/use-board-event-stream', () => ({ useBoardEventStream: () => un
 vi.mock('@/hooks/use-needs-you', () => ({ useNeedsYou: () => ({ data: { total: 0 } }) }))
 vi.mock('@/hooks/use-watches-api', () => ({ useWatches: () => ({ data: { total: 0 } }) }))
 vi.mock('@/hooks/use-approval-grants', () => ({ useQuestions: () => ({ data: { grants: [] } }) }))
+vi.mock('@/hooks/use-socials-api', () => ({ useInvalidateSocials: () => vi.fn(async () => []) }))
 vi.mock('@/hooks/use-heartbeats-api', () => ({ useToggleHeartbeat: () => ({ mutate: vi.fn() }) }))
 vi.mock('@/hooks/use-scheduled-tasks-api', () => ({
   useUpdateScheduledTaskStatus: () => ({ mutate: vi.fn() }),

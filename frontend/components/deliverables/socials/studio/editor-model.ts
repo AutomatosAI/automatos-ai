@@ -19,6 +19,7 @@ import type {
 } from '@/lib/api-client'
 import { browserTimezone, wallInZone, zonedWallToIso } from '@/lib/social-time'
 import { defaultKind, draftTargets } from '../socials-composer-model'
+import { lookToSave, orderedLook, type PostLook } from './look-options-model'
 import { lengthLabel } from './socials-calendar-model'
 
 export type EditorFormat = 'image' | 'carousel' | 'video' | 'text'
@@ -65,12 +66,14 @@ export interface EditorDraft {
   /** PRD-251B US-B305: the footage the post asks for, slot → prompt (an AI image's, or the b-roll's). */
   footage: Record<string, string>
   slot: EditorSlot | null
+  /** PRD-251D US-D301: the post's own look; a key left out is the kit's own (look-options-model.ts). */
+  look: PostLook
 }
 
 export function newDraft(): EditorDraft {
   return {
     title: '', brief: '', format: 'image', templateId: null, lengthSeconds: null, base: '', perChannel: {},
-    variables: {}, sources: {}, kinds: {}, options: {}, footageOn: false, footage: {}, slot: null,
+    variables: {}, sources: {}, kinds: {}, options: {}, footageOn: false, footage: {}, slot: null, look: {},
   }
 }
 
@@ -99,6 +102,7 @@ export function draftFromPost(post: SocialPost): EditorDraft {
     footageOn: null,
     footage: Object.fromEntries(Object.entries(post.footage ?? {}).map(([slot, asked]) => [slot, asked.prompt])),
     slot: slotOfPost(post),
+    look: orderedLook(post.look),
   }
 }
 
@@ -143,6 +147,7 @@ export function postFields(draft: EditorDraft, footageSlots: ReadonlyArray<strin
     variables: draft.variables,
     sources: draft.sources,
     footage,
+    look: lookToSave(draft.look),
   }
 }
 
@@ -240,6 +245,31 @@ export function withFormat(draft: EditorDraft, format: string, channels: Readonl
   }
 }
 
+/**
+ * PRD-251D (E4, US-D104): the channels a new post starts with, each at the format's own kind:
+ * the channels of the workspace's most recent post (`posts` newest first, as GET /posts lists
+ * them) that are still connected and can take the format; with no earlier post, the one
+ * connected channel when there is exactly one and it can take the format; otherwise none.
+ */
+export function startingKinds(
+  channels: ReadonlyArray<SocialChannel>, posts: ReadonlyArray<Pick<SocialPost, 'targets'>>, format: string,
+): Record<string, SocialPostKind> {
+  const takes = (channel: SocialChannel) => !channelBlock(channel, format) && defaultKind(channel, format) !== null
+  const latest = posts[0]
+  const used = new Set((latest?.targets ?? []).map((target) => target.toolkit))
+  const picked = latest
+    ? channels.filter((channel) => used.has(channel.toolkit) && takes(channel))
+    : channels.length === 1 && takes(channels[0]) ? [channels[0]] : []
+  return Object.fromEntries(picked.map((channel) => [channel.toolkit, defaultKind(channel, format) as SocialPostKind]))
+}
+
+/** The new post's draft with its starting channels ticked (`startingKinds`). */
+export function withStartingChannels(
+  draft: EditorDraft, channels: ReadonlyArray<SocialChannel>, posts: ReadonlyArray<Pick<SocialPost, 'targets'>>,
+): EditorDraft {
+  return { ...draft, kinds: startingKinds(channels, posts, draft.format) }
+}
+
 export function withChannelTicked(draft: EditorDraft, channel: SocialChannel, on: boolean): EditorDraft {
   const { [channel.toolkit]: _dropped, ...kinds } = draft.kinds
   if (!on) return { ...draft, kinds }
@@ -282,13 +312,30 @@ export function renderRatios(draft: Pick<EditorDraft, 'kinds'>, templateSizes: R
   return Array.from(new Set(ratios.filter((r): r is string => !!r)))
 }
 
-/** Redraft with Auto: the proposal replaces the copy, the variables and the sources only. */
+export type GivenFields = Record<string, string | number | boolean>
+
+function holdsAValue(value: unknown): value is string | number | boolean {
+  return typeof value === 'string' ? value.trim() !== '' : typeof value === 'number' || typeof value === 'boolean'
+}
+
+/** The fields the person has filled in (name → value): Auto keeps each as written and writes
+ * the rest. null when none is filled. */
+export function givenFields(draft: Pick<EditorDraft, 'variables'>): GivenFields | null {
+  const filled = Object.entries(draft.variables).filter(([, spec]) => holdsAValue(spec?.value))
+  return filled.length ? Object.fromEntries(filled.map(([name, spec]) => [name, spec.value as string | number | boolean])) : null
+}
+
+/** Write with Auto: the proposal replaces the copy and fills the fields left empty. A field
+ * that already holds a value stays as written, with the source it was given; an empty field's
+ * old source never rides on to the value Auto wrote for it. */
 export function withProposal(draft: EditorDraft, proposal: SocialComposeProposal): EditorDraft {
+  const kept = Object.fromEntries(Object.entries(draft.variables).filter(([, spec]) => holdsAValue(spec?.value)))
+  const keptSources = Object.fromEntries(Object.entries(draft.sources).filter(([name]) => name in kept))
   return {
     ...draft,
     base: proposal.copy.base,
     perChannel: { ...proposal.copy.channels },
-    variables: { ...proposal.variables },
-    sources: { ...proposal.sources },
+    variables: { ...proposal.variables, ...kept },
+    sources: { ...proposal.sources, ...keptSources },
   }
 }

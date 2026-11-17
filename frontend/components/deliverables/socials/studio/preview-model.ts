@@ -36,9 +36,10 @@ export function fileForAspect(files: ReadonlyArray<PreviewFile>, aspect: string 
   return files.find((file) => file.aspect === aspect) ?? closestShape(files, (file) => file.aspect, aspect) ?? files[0] ?? null
 }
 
-/** What a render reads: an edit to any of these since the render makes it out of date. */
+/** What a render reads: an edit to any of these since the render makes it out of date. PRD-251D
+ * US-D301: the post's look too (light or dark, the accent, the logo). */
 function renderInputs(draft: EditorDraft): string {
-  return JSON.stringify([draft.brief, draft.variables, draft.templateId, draft.lengthSeconds, draft.format])
+  return JSON.stringify([draft.brief, draft.variables, draft.templateId, draft.lengthSeconds, draft.format, draft.look])
 }
 
 /** The preview no longer shows the post on screen: an edit to its brief, variables,
@@ -66,15 +67,23 @@ interface NoteInput {
   renderedAt: string | null
 }
 
+const SECONDS_PER_MINUTE = 60
+
+/** "about 1.5 render minutes (3 sizes x 0:30)": what a video's full render costs. The note under
+ * the preview and the line under Submit (editor-submit.ts) both say it in these words. */
+export function fullRenderCost(lengthSeconds: number | null, sizes: number): string {
+  const length = lengthSeconds ? lengthLabel(lengthSeconds) : 'its length'
+  const count = Math.max(1, sizes)
+  const minutes = lengthSeconds ? formatRenderMinutes((lengthSeconds / SECONDS_PER_MINUTE) * count, null) : 'a few'
+  return `about ${minutes} render minutes (${count} ${count === 1 ? 'size' : 'sizes'} x ${length})`
+}
+
 /** The note under the frame: what an image render made, what a video's full render costs. */
 export function renderNote({ format, lengthSeconds, ratios, sizes, renderedAt: at }: NoteInput): string {
   if (format === 'text') return TEXT_NOTE
   if (format === 'video') {
     const length = lengthSeconds ? lengthLabel(lengthSeconds) : 'its length'
-    const count = Math.max(1, sizes)
-    const minutes = lengthSeconds ? formatRenderMinutes((lengthSeconds / 60) * count, null) : 'a few'
-    const many = count === 1 ? 'size' : 'sizes'
-    return `Half-resolution preview, ${length}. The full render is made when you submit: about ${minutes} render minutes (${count} ${many} x ${length}).`
+    return `Half-resolution preview, ${length}. The full render is made when you submit: ${fullRenderCost(lengthSeconds, sizes)}.`
   }
   const when = at ? `Rendered ${at}.` : 'Not rendered yet.'
   return `${when} One PNG per size (${ratios.length ? ratios.join(', ') : 'no channel ticked'}). Images use no render minutes.`

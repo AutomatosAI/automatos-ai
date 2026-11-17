@@ -21,11 +21,23 @@ own fields (name, label, and which need a value); and a post to render with no t
 refused with the templates to choose from. A render that names empty fields is told in their
 labels (``missing_in_words``).
 
+PRD-251D (E6, US-D106), "post it Friday at nine": the day and time a post is planned for is checked
+here too, before anything is saved (``slot_asked``: ``slot_held``, then ``planned_slot``). The rule:
+
+- ``planned_for`` with no offset (YYYY-MM-DDTHH:MM) is that wall-clock time in ``timezone``; with
+  timezone left out, in the post's own timezone. A time with an offset ("…Z", "…+01:00") is that
+  exact moment, shown in the same zone. With no zone at all, it is refused: nothing guesses one.
+- a day with no time, a time already past (an agent's wrong year) and an unknown zone are refused
+  with the reason. planned_for left out, null or "", there is no slot (timezone alone changes nothing).
+- only a draft, a post waiting for approval or one sent back takes a slot from a tool (the slot
+  route's ``SLOT_EDIT_STATUSES``); any other post's slot is the owner's, and the call is refused.
+
 Stdlib at import: the template service and the model constants are read when a call needs them.
 """
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 # A template's format, sent as a post's: the one post format it can mean.
@@ -52,6 +64,30 @@ NEEDS_A_TEMPLATE = ("A {format} post renders on a template, and none was named. 
                     "or send render false to keep a draft without one, or format text for a post of copy alone.")
 NO_TEMPLATES = "none yet"
 MORE_FIELDS = ", and {count} more (platform_get_template_schema lists them)"
+
+# PRD-251D (E6): the planned slot's refusals. Each says what was wrong and that nothing was saved.
+_DAY_ONLY = re.compile(r"^\d{4}-?\d{2}-?\d{2}$")
+SLOT_YEARS = range(1900, 9000)  # a year outside these is a typo, never a slot (a past one is refused as past)
+NOT_A_SLOT_TIME = ("planned_for {value!r} is not an ISO date and time, written YYYY-MM-DDTHH:MM. "
+                   "Nothing was saved.")
+NO_TIME_OF_DAY = ("planned_for {value!r} is a day with no time: send the time too, such as {value}T09:00. "
+                  "Nothing was saved.")
+NOT_A_ZONE = ("timezone {value!r} is not an IANA timezone, such as Europe/Dublin or America/New_York. "
+              "Nothing was saved.")
+NO_SLOT_ZONE = ("planned_for needs its timezone, and the post has none: send timezone, the IANA zone the "
+                "person means, such as Europe/Dublin (today's date line names the workspace's). Nothing was saved.")
+SLOT_PASSED = ("planned_for is in the past: {when}, and it is now {now}. Send a day and time still ahead "
+               "(check the year). Nothing was saved.")
+NOT_ITS_SLOT = "planned_for was refused, and nothing was saved: post {id} {why}."
+# Why a post past the slot route's SLOT_EDIT_STATUSES takes no slot from a tool, by its status.
+SLOT_HELD_BECAUSE = {
+    "approved": "is approved: the owner moves it in Socials",
+    "scheduled": "is scheduled: the owner moves it in Socials",
+    "missed": "missed its slot: the owner gives it a new one in Socials",
+    "rendering": "is rendering: set its slot once the render has finished",
+    "failed": "failed its render: render it again (render true), then set its slot",
+}
+SLOT_HELD = "is {status}: its slot can no longer move"  # publishing, published, partially published, archived
 
 
 def post_format(value: Any) -> Tuple[Any, Optional[str]]:
@@ -193,6 +229,82 @@ def missing_names(error: str) -> List[str]:
     return [name.strip() for name in found.group("names").split(",") if name.strip()] if found else []
 
 
-__all__ = ["IMAGE_TEMPLATE", "NO_SUCH_TEMPLATE", "POST_FORMAT_ALIASES", "TEXT_POST", "VIDEO_POST", "VIDEO_TEMPLATE",
-           "field_list", "missing_in_words", "missing_names", "needs_a_template",
-           "post_format", "social_rows", "social_templates", "template_by_name", "template_names", "unknown_fields"]
+def _known_zone(value: Any) -> Tuple[Optional[str], bool]:
+    """The IANA zone ``value`` names, and True; or None and False when it names none."""
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    name = value.strip() if isinstance(value, str) else ""
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        return None, False
+    return name, bool(name)
+
+
+def _slot_moment(value: Any) -> Tuple[Optional[datetime], Optional[str]]:
+    """The date and time ``value`` holds (with its offset, if it has one), and None; or None and why not.
+    A year outside ``SLOT_YEARS`` is no date a post is planned for (and would overflow a zone change)."""
+    text = value.strip() if isinstance(value, str) else None
+    if text and _DAY_ONLY.match(text):
+        return None, NO_TIME_OF_DAY.format(value=text)
+    try:
+        moment = datetime.fromisoformat(text)
+    except (TypeError, ValueError):
+        return None, NOT_A_SLOT_TIME.format(value=value)
+    return (moment, None) if moment.year in SLOT_YEARS else (None, NOT_A_SLOT_TIME.format(value=value))
+
+
+def planned_slot(planned_for: Any, zone: Any, post_zone: Any = None,
+                 now: Optional[datetime] = None) -> Tuple[Optional[Tuple[datetime, str]], Optional[str]]:
+    """The slot ``planned_for`` asks for, as (its moment in UTC, its IANA zone), and None; or None and
+    why it is refused (the module note's rule). ``zone`` is the call's timezone, ``post_zone`` the
+    post's own; ``now`` is the moment a past time is judged by (the current time when left out).
+    planned_for not sent (None or "") is no slot: (None, None)."""
+    from zoneinfo import ZoneInfo
+
+    from modules.tools.discovery.social_post_list import slot_words
+
+    if planned_for in (None, ""):
+        return None, None
+    moment, problem = _slot_moment(planned_for)
+    name, known = _known_zone(post_zone if zone in (None, "") else zone)
+    if problem is None and not known:
+        problem = NO_SLOT_ZONE if zone in (None, "") else NOT_A_ZONE.format(value=zone)
+    if problem is not None:
+        return None, problem
+    at = moment if moment.tzinfo is not None else moment.replace(tzinfo=ZoneInfo(name))
+    current = now or datetime.now(timezone.utc)
+    if at <= current:
+        return None, SLOT_PASSED.format(when=slot_words(at, name), now=slot_words(current, name))
+    return (at.astimezone(timezone.utc), name), None
+
+
+def slot_asked(planned_for: Any, zone: Any, post: Any = None,
+               now: Optional[datetime] = None) -> Tuple[Optional[Tuple[datetime, str]], Optional[str]]:
+    """The slot a create (``post`` None) or an update of ``post`` asks for, and None; or None and why it
+    is refused, nothing saved: on an update the post's status first (``slot_held``), then the time
+    (``planned_slot``, in the post's own zone when the call names none). (None, None) when none is asked."""
+    if planned_for in (None, ""):
+        return None, None
+    held = slot_held(post) if post is not None else None
+    if held is not None:
+        return None, NOT_ITS_SLOT.format(id=getattr(post, "id", None), why=held)
+    return planned_slot(planned_for, zone, getattr(post, "timezone", None), now)
+
+
+def slot_held(post: Any) -> Optional[str]:
+    """Why ``post``'s planned slot is not a tool's to set, said after its id; None while it is a draft,
+    waits for approval or was sent back (``api.socials_slots.SLOT_EDIT_STATUSES``, the slot route's
+    own: there the slot is set alone, and nothing is rescheduled)."""
+    from api.socials_slots import SLOT_EDIT_STATUSES
+
+    status = str(getattr(post, "status", "") or "")
+    if status in SLOT_EDIT_STATUSES:
+        return None
+    return SLOT_HELD_BECAUSE.get(status) or SLOT_HELD.format(status=status.replace("_", " "))
+
+
+__all__ = ["IMAGE_TEMPLATE", "NOT_ITS_SLOT", "NO_SUCH_TEMPLATE", "POST_FORMAT_ALIASES", "TEXT_POST", "VIDEO_POST",
+           "VIDEO_TEMPLATE", "field_list", "missing_in_words", "missing_names", "needs_a_template", "planned_slot",
+           "post_format", "slot_asked", "slot_held", "social_rows", "social_templates", "template_by_name",
+           "template_names", "unknown_fields"]

@@ -69,6 +69,7 @@ WAVE2_MIGRATION = _ORCH / "alembic" / "versions" / "prd251_wave2.py"
 WAVE1B_MIGRATION = _ORCH / "alembic" / "versions" / "prd251b_wave1.py"
 WAVE2B_MIGRATION = _ORCH / "alembic" / "versions" / "prd251b_wave2.py"
 WAVE2C_MIGRATION = _ORCH / "alembic" / "versions" / "prd251c_wave2.py"
+WAVE3D_MIGRATION = _ORCH / "alembic" / "versions" / "prd251d_wave3.py"
 MODELS = _ORCH / "core" / "models" / "socials.py"
 TABLES = ("social_posts", "social_post_targets")
 
@@ -132,6 +133,10 @@ def _migration_engine():
         wave2c = _load_migration(WAVE2C_MIGRATION, "prd251c_wave2_migration_models")
         with Operations.context(MigrationContext.configure(conn)):
             wave2c.upgrade()
+        # PRD-251D Wave 3 (US-D301): look, the post's own look on its template.
+        wave3d = _load_migration(WAVE3D_MIGRATION, "prd251d_wave3_migration_models")
+        with Operations.context(MigrationContext.configure(conn)):
+            wave3d.upgrade()
     return engine
 
 
@@ -206,6 +211,8 @@ def test_social_posts_carries_every_d2_column():
         "slot_key", "music",
         # PRD-251C Wave 2 (US-C201): the batch a weekly or monthly plan made it in.
         "batch_key",
+        # PRD-251D Wave 3 (US-D301): the post's own look (light or dark, the accent, the logo).
+        "look",
     }
 
 
@@ -226,6 +233,7 @@ def test_social_post_targets_carries_every_d2_column():
         ("social_posts", "media"),
         ("social_posts", "voice"),
         ("social_posts", "footage"),
+        ("social_posts", "look"),  # PRD-251D US-D301
         ("social_posts", "review_log"),
         ("social_post_targets", "action_plan"),
     ],

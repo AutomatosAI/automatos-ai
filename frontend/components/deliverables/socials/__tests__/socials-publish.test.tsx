@@ -12,6 +12,10 @@
  * - apiClient calls publish-now and retry with POST.
  * - PRD-264 EUAI-05: every channel's receipt states its AI label decision, in the
  *   backend's words (GET /ai-labels): the receipt never decides it.
+ *
+ * PRD-251D US-D203: the post view these run against is the post page's: the editor's Activity
+ * card for a post the editor holds (approved, scheduled, missed), the read-only view for one it
+ * does not (published, partly published). The older detail pane is gone.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -39,7 +43,9 @@ vi.mock('@/components/workspace-provider', () => ({
 vi.mock('../socials-voice-picker', () => ({ SocialsVoicePicker: () => null }))
 
 import { toast } from 'sonner'
-import { SocialsPostDetail } from '@/components/deliverables/socials/socials-post-detail'
+import { SocialsEditorActivity } from '@/components/deliverables/socials/studio/socials-editor-activity'
+import { EDITOR_STATUSES } from '@/components/deliverables/socials/studio/socials-post-page'
+import { SocialsPostView } from '@/components/deliverables/socials/studio/socials-post-view'
 import { SOCIAL_POST_CHANGED_MESSAGE } from '@/hooks/use-socials-api'
 import type { SocialPost, SocialPostTarget } from '@/lib/api-client'
 import { slotTimeLabel } from '@/lib/social-time'
@@ -66,11 +72,16 @@ function post(overrides: Partial<SocialPost> = {}): SocialPost {
 
 let client: QueryClient
 
+/** The post where the post page shows its receipts and publish controls to an owner. */
+function PostHome({ post: p }: { post: SocialPost }) {
+  return EDITOR_STATUSES.has(p.status) ? <SocialsEditorActivity post={p} role="owner" /> : <SocialsPostView post={p} role="owner" />
+}
+
 function renderDetail(p: SocialPost) {
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
-      <SocialsPostDetail post={p} role="owner" />
+      <PostHome post={p} />
     </QueryClientProvider>,
   )
 }

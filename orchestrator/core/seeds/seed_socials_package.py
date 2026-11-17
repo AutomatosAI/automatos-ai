@@ -55,6 +55,7 @@ BRAND_DESIGNER_NAME = "Brand Designer"
 # PRD-251B (B8, US-B204): the plan's research run starts the workspace's copy of this one.
 RESEARCH_PLAYBOOK_TEMPLATE_ID = "marketplace-socials-content-research"
 BRAND_KIT_PLAYBOOK_TEMPLATE_ID = "marketplace-socials-brand-kit"
+WEEKLY_PLAYBOOK_TEMPLATE_ID = "marketplace-socials-weekly-posts"
 
 CREATED = "created"
 PRESENT = "present"
@@ -263,7 +264,9 @@ The previous step rendered the video and registered it as a Deliverable: its del
 3. Answer with the post's id and status.
 {_NEVER_PUBLISH}"""
 
-_WEEKLY_PLAN_PROMPT = f"""Plan this week's social posts: {{input.count}} posts across these channels: {{input.channels}}, spread over the coming week.
+# PRD-251's weekly prompts (946a0dcec), as marketplace rows and installed copies seeded before PRD-251D hold
+# them: the plan proposed a day as free text, and the draft wrote "Proposed for: <day and time>" into the brief.
+_WEEKLY_PLAN_PROMPT_251 = f"""Plan this week's social posts: {{input.count}} posts across these channels: {{input.channels}}, spread over the coming week.
 
 1. Read what the workspace made in the last 7 days: platform_list_deliverables (a blog post is a Deliverable too), platform_list_blog_posts and platform_browse_reports. Use search_knowledge for background only.
 2. Pick the {{input.count}} strongest ideas, one per post. For each: its channels; the day and time you propose to post it, in the workspace's timezone; the image template that fits (platform_list_templates with format social_image, then platform_get_template_schema for its variables; a report's table suits the Infographic, filled from the report with chart_report); the template's variables; each channel's copy; and its sources.
@@ -271,11 +274,28 @@ _WEEKLY_PLAN_PROMPT = f"""Plan this week's social posts: {{input.count}} posts a
 4. Save the plan with scratchpad_write, key "plan": a JSON list with one object per post, {{"title", "brief", "proposed_for", "channels", "format", "template", "variables", "copy", "sources", "chart_report" (the Infographic only)}}.
 5. Answer with the plan as a table: title, proposed for, channels, template."""
 
-_WEEKLY_DRAFT_PROMPT = f"""Draft every post in the plan the previous step saved (its "plan" key), one platform_create_social_post call per post: its title; its brief, starting with "Proposed for: <day and time>"; its format, template, variables, copy and sources (and chart_report for the Infographic); render true. A post whose render starts waits for approval when it finishes.
+_WEEKLY_DRAFT_PROMPT_251 = f"""Draft every post in the plan the previous step saved (its "plan" key), one platform_create_social_post call per post: its title; its brief, starting with "Proposed for: <day and time>"; its format, template, variables, copy and sources (and chart_report for the Infographic); render true. A post whose render starts waits for approval when it finishes.
 
 When a call is refused, fix what the answer names and try once more; when it is refused again, leave that post out and say why. When a post's render could not start (the answer says why), send the draft for approval anyway with platform_submit_social_post and a note naming the reason.
 
 Answer with a table: title, proposed for, channels, post id, status.
+{_NEVER_PUBLISH}"""
+
+# PRD-251D (E6, US-D106): the plan proposes each day and time as a local date and time with its zone, and the
+# draft sets it as the post's planned slot (planned_for, timezone), where the post waits for approval.
+_WEEKLY_PLAN_PROMPT = f"""Plan this week's social posts: {{input.count}} posts across these channels: {{input.channels}}, spread over the coming week.
+
+1. Read what the workspace made in the last 7 days: platform_list_deliverables (a blog post is a Deliverable too), platform_list_blog_posts and platform_browse_reports. Use search_knowledge for background only.
+2. Pick the {{input.count}} strongest ideas, one per post. For each: its channels; the day and time you propose to post it, as a local date and time in the coming week (YYYY-MM-DDTHH:MM), in the workspace's timezone (the IANA zone today's date line names); the image template that fits (platform_list_templates with format social_image, then platform_get_template_schema for its variables; a report's table suits the Infographic, filled from the report with chart_report); the template's variables; each channel's copy; and its sources.
+3. {_SOURCES_RULE}
+4. Save the plan with scratchpad_write, key "plan": a JSON list with one object per post, {{"title", "brief", "proposed_for" (YYYY-MM-DDTHH:MM), "timezone" (its IANA zone), "channels", "format", "template", "variables", "copy", "sources", "chart_report" (the Infographic only)}}.
+5. Answer with the plan as a table: title, proposed for, channels, template."""
+
+_WEEKLY_DRAFT_PROMPT = f"""Draft every post in the plan the previous step saved (its "plan" key), one platform_create_social_post call per post: its title; its brief; planned_for, the day and time the plan proposes for it (its proposed_for, as YYYY-MM-DDTHH:MM), with timezone, its IANA zone (the plan's, else the zone today's date line names); its format, template, variables, copy and sources (and chart_report for the Infographic); render true. planned_for puts the post on that day and time in the Socials calendar, where it waits for approval: the owner approves it, and approving it schedules it there. A post whose render starts waits for approval when it finishes.
+
+When a call is refused, fix what the answer names and try once more (a planned_for in the past: the plan's day in the coming week); when it is refused again, leave that post out and say why. When a post's render could not start (the answer says why), send the draft for approval anyway with platform_submit_social_post and a note naming the reason.
+
+Answer with a table: title, planned for (as the call's answer says it), channels, post id, status.
 {_NEVER_PUBLISH}"""
 
 _CAROUSEL_SLIDES_PROMPT = f"""Write an image carousel about: {{input.topic}}
@@ -353,6 +373,7 @@ You only add topics: posts are made from them on their day. {_NEVER_PUBLISH}"""
 SEEDED_BEFORE: Dict[str, Dict[str, Tuple[str, ...]]] = {
     RESEARCH_PLAYBOOK_TEMPLATE_ID: {"research": (_RESEARCH_PROMPT_251B, _RESEARCH_PROMPT_251C)},
     BRAND_KIT_PLAYBOOK_TEMPLATE_ID: {"brand-kit": (_BRAND_KIT_PROMPT_251,)},
+    WEEKLY_PLAYBOOK_TEMPLATE_ID: {"plan": (_WEEKLY_PLAN_PROMPT_251,), "draft": (_WEEKLY_DRAFT_PROMPT_251,)},  # PRD-251D
 }
 
 SOCIALS_PLAYBOOKS: List[Dict[str, Any]] = [
@@ -413,7 +434,7 @@ SOCIALS_PLAYBOOKS: List[Dict[str, Any]] = [
         "tags": ["socials", "video", "launch"],
     },
     {
-        "template_id": "marketplace-socials-weekly-posts",
+        "template_id": WEEKLY_PLAYBOOK_TEMPLATE_ID,
         "name": "Weekly social posts",
         "description": (
             "Reads the week's Deliverables, blog posts and reports, proposes posts across your channels "

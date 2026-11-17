@@ -97,7 +97,7 @@ export interface ScheduleRecurrence {
  * The six sources of the schedule feed (PRD-162 + the board-task SLA source):
  * routine = agent heartbeat, recipe = cron playbook, task = agent-scheduled task,
  * mission = a mission's SLA deadline, task_due = a board task's SLA deadline,
- * social = a scheduled social post (PRD-251 US-307).
+ * social = a social post still to go out, scheduled or planned (PRD-251 US-307).
  */
 export type ScheduleItemType = 'routine' | 'recipe' | 'task' | 'mission' | 'task_due' | 'social'
 

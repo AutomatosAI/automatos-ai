@@ -7,12 +7,15 @@
  * ratios of the ticked channels. YouTube's privacy and category show once it is ticked.
  * PRD-251C (US-C301): a ticked channel that posts stories offers "As a story" for an image
  * or a video, rendered 9:16 inside the story's safe zone.
+ * PRD-251D (E5, US-D105): under the rows, each supported channel that is not connected has its
+ * Connect button (editor-connect-channels.tsx); with none connected, the buttons are the card.
  */
 import { cn } from '@/lib/utils'
 import type { SocialChannel, SocialPostTargetOptions } from '@/lib/api-client'
 import { YOUTUBE_TOOLKIT, YoutubeOptions } from '../socials-channel-row'
 import { CHANNEL_BADGE } from './socials-calendar-chip'
 import { channelBadge } from './socials-calendar-model'
+import { EditorConnectChannels } from './editor-connect-channels'
 import { canStory, channelBlock, renderRatios, sizeFor, type EditorDraft } from './editor-model'
 import { EditorCard, Hint } from './editor-ui'
 
@@ -55,23 +58,28 @@ function ChannelLine({ channel, draft, templateSizes, onTick, onStory, onOptions
 interface EditorChannelsCardProps extends Omit<ChannelLineProps, 'channel'> {
   channels: ReadonlyArray<SocialChannel>
   loading: boolean
+  /** Reads the connected channels again, once a connect window reports back. */
+  onRefetch: () => unknown
 }
 
-export function EditorChannelsCard({ channels, loading, draft, ...line }: EditorChannelsCardProps) {
+export function EditorChannelsCard({ channels, loading, draft, onRefetch, ...line }: EditorChannelsCardProps) {
   const ratios = renderRatios(draft, line.templateSizes)
   const renders = draft.format === 'text' ? 'Text only' : ratios.length > 0 ? `Renders ${ratios.join(' · ')}` : 'Pick a channel'
   return (
     <EditorCard label="Channels and sizes" action={<span className="text-[12.5px] text-muted-foreground">{renders}</span>}>
       {loading ? (
         <Hint>Loading channels…</Hint>
-      ) : channels.length === 0 ? (
-        <Hint>No social channel is connected. Connect one in Composio to publish.</Hint>
       ) : (
-        <ul aria-label="Channels" className="flex flex-col gap-2">
-          {channels.map((channel) => (
-            <ChannelLine key={channel.toolkit} channel={channel} draft={draft} {...line} />
-          ))}
-        </ul>
+        <>
+          {channels.length > 0 && (
+            <ul aria-label="Channels" className="flex flex-col gap-2">
+              {channels.map((channel) => (
+                <ChannelLine key={channel.toolkit} channel={channel} draft={draft} {...line} />
+              ))}
+            </ul>
+          )}
+          <EditorConnectChannels channels={channels} refetch={onRefetch} />
+        </>
       )}
     </EditorCard>
   )

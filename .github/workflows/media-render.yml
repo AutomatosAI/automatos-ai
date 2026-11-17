@@ -527,6 +527,11 @@ jobs:
   # v1 kit (its logo on a light chip on dark stages), and Harbourline as a v2
   # kit (its stored paper and accent, a larger type scale, its dark logo), at
   # every size; its Title card's page reads back as its stored paper.
+  # PRD-251D US-D301: every template renders again in every look a post may give it
+  # (scripts/ci/social_template_looks.py, the orchestrator's own modules/socials/post_look.py),
+  # 0 check errors each, its contrast pass included: light and dark for the nine cards built on
+  # paper, the accent strong and sparing, the logo on and off (93 more render units, at the
+  # first size, shared across the shards like the rest).
   media-render-templates:
     name: media-render — the seeded templates (shard ${{ matrix.shard }} of 4)
     runs-on: ubuntu-latest

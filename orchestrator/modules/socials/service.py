@@ -79,6 +79,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func, or_, update
 
+from core import social_file_current as file_state
 from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.social_templates import MAX_SLOTS, VARIABLE_NAME
 from modules.socials import targets as post_targets
@@ -88,6 +89,7 @@ from modules.socials import template_claims as post_claims
 from modules.socials.voice_examples import draft_entry
 from modules.socials.kokoro_voices import validate_kokoro
 from modules.socials.music import validate_music
+from modules.socials.post_look import validate_look
 from modules.socials.targets import TARGETS
 
 # ── statuses ────────────────────────────────────────────────────────────────
@@ -194,7 +196,7 @@ PUBLISHABLE_STATUSES = frozenset({APPROVED, SCHEDULED, MISSED})
 # PRD-251B (US-B101): the chosen video length is content too; the planned slot is not.
 CONTENT_FIELDS = ("copy", "variables", "sources", "format", "template_id", "media", "length_seconds", TARGETS)
 LABEL_FIELDS = ("title", "brief")
-RENDER_FIELDS = ("voice", "footage", "music")  # PRD-251B: music, a render setting like the voice
+RENDER_FIELDS = ("voice", "footage", "music", "look")  # PRD-251B: music; PRD-251D US-D301: the look (post_look.py)
 EDITABLE_FIELDS = LABEL_FIELDS + CONTENT_FIELDS + RENDER_FIELDS
 
 # D11: the default voice, Kokoro inside media-render; any other toolkit is a
@@ -590,6 +592,7 @@ _VALIDATORS = {
     "voice": validate_voice,
     "footage": validate_footage,
     "music": validate_music,
+    "look": validate_look,
 }
 
 
@@ -673,6 +676,7 @@ def create_draft(
     agent: Optional[str] = None,
     music: Optional[Mapping[str, Any]] = None,
     targets: Optional[Sequence[Mapping[str, Any]]] = None,
+    look: Optional[Mapping[str, Any]] = None,
 ) -> SocialPost:
     """A new post in ``draft``, added to ``db`` (the caller commits), with its id,
     which its targets' keys name (US-204).
@@ -684,7 +688,7 @@ def create_draft(
     """
     clean = _validated(title=title, brief=brief, copy=copy, format=format, template_id=template_id,
                        variables=variables, sources=sources, media=media, voice=voice, footage=footage,
-                       length_seconds=length_seconds, music=music)
+                       length_seconds=length_seconds, music=music, look=look)
     post = SocialPost(
         id=uuid4(),
         workspace_id=workspace_id,
@@ -809,7 +813,8 @@ def approve(
 
     ``content_hash`` is the hash of the version the approver was shown; when the post is not that version
     any more, :class:`StaleContent` (with the current hash) and the post is unchanged. A video whose label
-    disagrees with the post's AI-generated label is refused (:class:`NotPublishable`, PRD-264 EUAI-08a).
+    disagrees with the post's AI-generated label is refused (:class:`NotPublishable`, PRD-264 EUAI-08a), and
+    so is a post whose file was made before its last change to what a render reads (PRD-251D US-D108).
     Refuses unsourced claims (D7) unless ``override_unsourced``; an override is stored on the post and names
     the claims in ``review_log``. ``unresolved_sources`` (claim → why) are the sources the caller found
     missing from the workspace (S1.4): their claims count as unsourced, and an override records why.
@@ -821,6 +826,8 @@ def approve(
     if content_hash != current or content_hash != post.content_hash:
         raise StaleContent(current)
     ai_media.assert_label_rendered(post)  # PRD-264 EUAI-08a: the video shows the label as the post sets it
+    if not file_state.file_current(post):  # PRD-251D US-D108: never a file older than what the post holds
+        raise NotPublishable(file_state.FILE_OLDER_THAN_WORDS)
     unsourced = unsourced_claims(post, unresolved_sources, template_claims)
     if unsourced and not override_unsourced:
         raise UnsourcedClaims(unsourced, unresolved_sources)
@@ -966,6 +973,8 @@ def finish_render(
     recomputed over it, so an approval binds to these exact files (D6).
     ``credits`` are the lines the render's music asks for (S1.6, a CC BY
     track): they join the copy the approver reviews, and the history says so.
+    The entry records what the files were made from (PRD-251D US-D108,
+    ``core/social_file_current.py``), so a later edit shows as a file older than its words.
     """
     target = _target(post, ACTION_RENDER_DONE)
     before = post.media if isinstance(post.media, Mapping) else {}
@@ -979,6 +988,7 @@ def finish_render(
     extra: Dict[str, Any] = {"report": dict(report)} if report else {}
     if added:
         extra["credits_added"] = [line for line in dict.fromkeys(credits) if line]
+    extra[file_state.MADE_FROM] = file_state.render_inputs_hash(post)  # US-D108: what the file was made from
     _log(post, actor, ACTION_RENDER_DONE, summary, **extra)
     return post
 

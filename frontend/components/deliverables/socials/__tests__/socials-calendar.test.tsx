@@ -10,6 +10,8 @@
  *   planned slot and the schedule together); a published post does not drag.
  * * The Today rail lists today's posts, says how many wait for review (into the Queue),
  *   and carries the status key. A click opens the post; Needs you opens the Queue.
+ * * PRD-251D US-D202: List is every post by status, the one with no slot included, and a row
+ *   opens its post as a chip does.
  *
  * The clock is fixed on Wed 14 Oct 2026 (only Date is faked); the grid is laid out in
  * the runner's time, the times are read in each post's own zone.
@@ -52,12 +54,13 @@ vi.mock('@/lib/api-client', () => {
       ],
     })),
     moveSocialPlanSlot: vi.fn(async () => ({})),
+    // PRD-251D US-D202: the List lists the posts it is given and reads the posts query only for
+    // whether it is loading or failed; it shows the month's render minutes.
+    listSocialPosts: vi.fn(async () => ({ posts: [], total: 0 })),
+    getSocialsUsage: vi.fn(async () => ({ render_minutes: null })),
   }
   return { apiClient, default: apiClient }
 })
-vi.mock('@/components/deliverables/socials/socials-post-list', () => ({
-  SocialsPostList: () => <div data-testid="post-list" />,
-}))
 
 import { apiClient } from '@/lib/api-client'
 import { SocialsCalendar } from '@/components/deliverables/socials/studio/socials-calendar'
@@ -153,14 +156,27 @@ describe('the Socials calendar', () => {
     expect(within(grid()).queryByRole('button', { name: /Post unslotted/ })).toBeNull()
   })
 
-  it('Week and List show the same posts', () => {
+  it('Week and List show the same posts', async () => {
     const { unmount } = renderCalendar(route({ cal: 'week' }))
     const weekTitles = within(grid()).getAllByRole('button').map((b) => b.textContent ?? '').filter((t) => t.includes('Post '))
     expect(weekTitles).toHaveLength(9) // every post with a slot falls in Sun 11 – Sat 17 Oct
     unmount()
     renderCalendar(route({ cal: 'list' }))
-    expect(screen.getByTestId('post-list')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'All posts' })).toBeInTheDocument()
+    // PRD-251D US-D202: the List lists every post it was given, by status: the nine the week shows
+    // and the one with no slot, which no grid shows.
+    const groups = await screen.findAllByRole('region', { name: / posts$/ })
+    const listed = groups.flatMap((group) => within(group).getAllByRole('button').map((row) => row.getAttribute('aria-label')?.split(', ')[0]))
+    expect(listed.sort()).toEqual(POSTS.map((p) => p.title).sort())
+    expect(screen.getByRole('button', { name: /^Post unslotted, No slot,/ })).toBeInTheDocument()
+  })
+
+  it('List: a row opens its post as a chip does; one waiting for approval opens in the Queue (PRD-251D US-D202)', async () => {
+    renderCalendar(route({ cal: 'list' }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Post unslotted,/ }))
+    expect(state.go).toHaveBeenLastCalledWith({ post: 'unslotted' })
+    fireEvent.click(screen.getByRole('button', { name: /^Post review,/ }))
+    expect(state.go).toHaveBeenLastCalledWith({ view: 'queue', post: 'review' })
   })
 
   it('the channel filter hides the other channels, and Video shows only videos', async () => {

@@ -8,6 +8,11 @@
  * - When the newest history entry voided an approval, a banner says so.
  * - The post's media renders through the shared FilePreview, from the presigned links.
  * - Each channel shows its copy, and each claim its source or a red Unsourced chip.
+ *
+ * PRD-251D US-D203: the approval view is the Queue's pane (studio/queue-pane.tsx), where a post
+ * that waits for approval opens from the calendar and its List; the older detail pane is gone.
+ * Its Request changes sends the post back to Auto. The approval-reset banner is in the post's
+ * Activity card, which the editor and the read-only view show.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
@@ -20,6 +25,8 @@ const api = vi.hoisted(() => ({
   submitSocialPost: vi.fn(),
   requestSocialPostChanges: vi.fn(),
   rejectSocialPost: vi.fn(),
+  // The Activity card's AI-label lines (GET /ai-labels): nothing to say here.
+  get: vi.fn(),
 }))
 const previews = vi.hoisted(() => [] as Array<{ url?: string; previewType?: string; filename?: string }>)
 
@@ -41,11 +48,14 @@ vi.mock('@/components/widgets/FileWidget/FilePreview', async (importOriginal) =>
 vi.mock('../socials-voice-picker', () => ({ SocialsVoicePicker: () => null }))
 
 import { toast } from 'sonner'
-import { SocialsPostDetail } from '@/components/deliverables/socials/socials-post-detail'
+import { QueuePane } from '@/components/deliverables/socials/studio/queue-pane'
+import { SocialsEditorActivity } from '@/components/deliverables/socials/studio/socials-editor-activity'
 import { SOCIAL_POST_REVIEW_STALE_MESSAGE } from '@/hooks/use-socials-api'
+import { FILE_OLDER_THAN_WORDS } from '@/components/deliverables/socials/socials-review'
 import type { SocialPost } from '@/lib/api-client'
 
 const HASH = 'a'.repeat(64)
+const NOW = new Date('2026-09-29T10:00:00Z')
 
 function post(overrides: Partial<SocialPost> = {}): SocialPost {
   return {
@@ -66,10 +76,19 @@ function target(toolkit: string, post_kind: 'text' | 'image') {
 }
 
 let client: QueryClient
+/** The approver's view of a post that waits for approval: the Queue's pane. */
 function show(p: SocialPost) {
   return render(
     <QueryClientProvider client={client}>
-      <SocialsPostDetail post={p} role="owner" />
+      <QueuePane post={p} campaignName={null} now={NOW} role="owner" />
+    </QueryClientProvider>,
+  )
+}
+/** The post's Activity card, under its editor and in its read-only view. */
+function showActivity(p: SocialPost) {
+  return render(
+    <QueryClientProvider client={client}>
+      <SocialsEditorActivity post={p} role="owner" />
     </QueryClientProvider>,
   )
 }
@@ -79,6 +98,7 @@ beforeEach(() => {
   previews.length = 0
   Object.values(api).forEach((fn) => fn.mockReset())
   api.listSocialPosts.mockResolvedValue({ posts: [], total: 0 })
+  api.get.mockResolvedValue({ targets: [] })
   api.approveSocialPost.mockImplementation(async () => post({ status: 'approved', approved_hash: HASH }))
 })
 afterEach(() => { cleanup(); vi.clearAllMocks() })
@@ -101,6 +121,19 @@ describe('approving (D6)', () => {
     )
     expect(toast.error).toHaveBeenCalledWith(SOCIAL_POST_REVIEW_STALE_MESSAGE)
     await waitFor(() => expect(reload).toHaveBeenCalledWith({ queryKey: ['socials', 'w1'] }))
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it("a 409 that says the file is older than the post's words shows that sentence, not a stale review (PRD-251D US-D108)", async () => {
+    // The post is the version on screen; its file went stale after the screen loaded it.
+    api.approveSocialPost.mockRejectedValueOnce(Object.assign(new Error(FILE_OLDER_THAN_WORDS), { status: 409 }))
+    show(post())
+    const reload = vi.spyOn(client, 'invalidateQueries')
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(FILE_OLDER_THAN_WORDS))
+    await waitFor(() => expect(reload).toHaveBeenCalledWith({ queryKey: ['socials', 'w1'] }))
+    expect(toast.error).not.toHaveBeenCalledWith(SOCIAL_POST_REVIEW_STALE_MESSAGE)
+    expect(screen.queryByRole('alert')).toBeNull()
     expect(toast.success).not.toHaveBeenCalled()
   })
 })
@@ -153,10 +186,11 @@ describe('what the approver sees', () => {
       { at: '2026-09-29T09:00:00Z', by: 'u1', action: 'approve', comment: null },
       { at: '2026-09-29T09:05:00Z', by: 'u1', action: 'approval_voided', comment: 'The content changed after approval.' },
     ] })
-    show(voided)
+    // PRD-251D: the banner is in the post's Activity card (the editor's, and the read-only view's).
+    showActivity(voided)
     expect(screen.getByText('Approval reset: content changed')).toBeInTheDocument()
     cleanup()
-    show(post({ review_log: [...voided.review_log, { at: '2026-09-29T09:06:00Z', by: 'u1', action: 'submit', comment: null }] }))
+    showActivity(post({ review_log: [...voided.review_log, { at: '2026-09-29T09:06:00Z', by: 'u1', action: 'submit', comment: null }] }))
     expect(screen.queryByText('Approval reset: content changed')).toBeNull()
   })
 
@@ -204,7 +238,9 @@ describe('what the approver sees', () => {
     api.rejectSocialPost.mockResolvedValue(post({ status: 'archived' }))
     show(post())
     fireEvent.click(screen.getByRole('button', { name: 'Request changes' }))
-    expect(screen.getByRole('button', { name: 'Send request' })).toBeDisabled()
+    // The Queue's pane sends the post back to Auto, with what should change.
+    expect(screen.getByLabelText('What should change?')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send back to Auto' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
     fireEvent.click(screen.getByRole('button', { name: 'Reject post' }))
     await waitFor(() => expect(api.rejectSocialPost).toHaveBeenCalledWith('p1', undefined))

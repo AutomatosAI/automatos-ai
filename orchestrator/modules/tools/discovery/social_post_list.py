@@ -19,10 +19,14 @@ what to fill in ("your input: Big number, Top item 1: value"), from its history.
 P256-FIX-SOC-5 (F437): that line replaces "a render: nothing is rendered yet", which was the only
 thing such a draft said (a plan's post the composer could not write waits the same way, saying
 so); and a rendering post says since when and when it gives up, from the post's ``render``.
+
+PRD-251D (E6, US-D106): a row says the slot the post is planned for in its own timezone, in the
+words an agent repeats to the owner (``slot_words``: "Friday 20 November 2026, 09:00 in
+Europe/Dublin"); the create, update and get answers say it the same way (``social_post_results``).
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -43,6 +47,7 @@ IS_RENDERING_SINCE = "rendering since {since} (gives up at {gives_up})"
 CLOCK_ZONE = "UTC"  # a post with no timezone of its own reads its render's times in UTC
 NEEDS_YOUR_INPUT = "your input: {fields}"
 UNKNOWN_QUEUE = "queue must be one of {queues}."
+SLOT_WORDS = "{weekday} {day} {month} {year}, {clock} in {zone}"  # services/todays_date.TODAY's own shape
 
 
 def _rendered(post: Mapping[str, Any]) -> bool:
@@ -84,6 +89,23 @@ def _clock(value: Any, zone: Any) -> Optional[str]:
         return None
 
 
+def slot_words(value: Any, zone: Any) -> Optional[str]:
+    """A planned slot in words in ``zone`` (UTC without one), as an agent says it to the owner: "Friday
+    20 November 2026, 09:00 in Europe/Dublin". ``value`` is a datetime or an ISO string, and one with
+    no offset is UTC (the database's convention). None for no slot, or one that cannot be read."""
+    if value in (None, ""):
+        return None
+    name = str(zone or CLOCK_ZONE)
+    try:
+        moment = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+        aware = moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
+        local = aware.astimezone(ZoneInfo(name))
+    except (ValueError, TypeError, OverflowError, ZoneInfoNotFoundError, OSError):
+        return None
+    return SLOT_WORDS.format(weekday=f"{local:%A}", day=local.day, month=f"{local:%B}", year=local.year,
+                             clock=f"{local:%H:%M}", zone=name)
+
+
 def _rendering(post: Mapping[str, Any]) -> str:
     """"rendering since 16:22 (gives up at 16:47)", from the post's ``render``; else "rendering now"."""
     block = post.get("render") if isinstance(post.get("render"), Mapping) else {}
@@ -92,7 +114,10 @@ def _rendering(post: Mapping[str, Any]) -> str:
 
 
 def what_it_needs(post: Mapping[str, Any]) -> List[str]:
-    """What the post still needs before it can go out, in plain words; [] when nothing."""
+    """What the post still needs before it can go out, in plain words; [] when nothing. A post whose
+    file is older than its words needs its new render, said last, and not yet the owner's approval."""
+    from modules.tools.discovery.social_post_results import NEEDS_NEW_RENDER, renders_again
+
     status = post.get("status")
     needs: List[str] = []
     asked = _input_asked(post)  # P256-FIX-SOC-5: a draft that waits for you says so, not "a render"
@@ -105,20 +130,24 @@ def what_it_needs(post: Mapping[str, Any]) -> List[str]:
     needs.extend(asked)
     if status == CHANGES:
         needs.append(NEEDS_CHANGES.format(why=_last_comment(post, REQUEST_CHANGES)))
-    if status == WAITING:
+    older = renders_again(post)  # PRD-251D US-D108: the owner cannot approve it until it renders again
+    if status == WAITING and not older:
         needs.append(NEEDS_APPROVAL)
     if post.get("format") != "text" and status in (DRAFT, CHANGES, WAITING, FAILED) and not _has_copy(post):
         needs.append(NEEDS_CAPTION)
+    if older:
+        needs.append(NEEDS_NEW_RENDER)
     return needs
 
 
 def post_row(post: Mapping[str, Any]) -> Dict[str, Any]:
-    """One post as a list row: who it is and what it still needs, never its whole content."""
+    """One post as a list row: who it is, the slot it is planned for (PRD-251D) and what it still needs,
+    never its whole content."""
     return {
         "id": post.get("id"), "title": post.get("title"), "status": post.get("status"), "format": post.get("format"),
         "template_id": post.get("template_id"), "created_at": post.get("created_at"),
-        "scheduled_for": post.get("scheduled_for"), "rendered": _rendered(post), "has_caption": _has_copy(post),
-        "needs": what_it_needs(post),
+        "scheduled_for": post.get("scheduled_for"), "planned": slot_words(post.get("planned_for"), post.get("timezone")),
+        "rendered": _rendered(post), "has_caption": _has_copy(post), "needs": what_it_needs(post),
     }
 
 
@@ -151,4 +180,5 @@ def listed(posts: List[Mapping[str, Any]], keep: Callable[[Mapping[str, Any]], b
     return {"success": True, "total": len(matching), "count": len(rows), "limit": limit, "posts": rows}
 
 
-__all__ = ["AWAITING_APPROVAL", "NOT_RENDERED", "OPEN", "QUEUES", "listed", "post_row", "queue_of", "what_it_needs"]
+__all__ = ["AWAITING_APPROVAL", "NOT_RENDERED", "OPEN", "QUEUES", "listed", "post_row", "queue_of", "slot_words",
+           "what_it_needs"]

@@ -5,7 +5,7 @@
  */
 import type { ScheduleItem } from '@/hooks/use-activity-api'
 import { isDeadlineItem } from './calendar-actions'
-import { isSocialItem, socialTimeLabel } from './calendar-social'
+import { isSocialItem, socialChipLabel } from './calendar-social'
 
 export type ViewMode = 'day' | 'week' | 'month'
 
@@ -273,5 +273,6 @@ export function expandItem(item: ScheduleItem, span: WindowSpan): CalEvent[] {
 export const hhmm = (evt: CalEvent) =>
   `${String(evt.hour).padStart(2, '0')}:${String(evt.min).padStart(2, '0')}`
 
-/** The event's time: a social post's in its own timezone (PRD-251 US-307). */
-export const timeLabel = (evt: CalEvent) => (isSocialItem(evt.item) ? socialTimeLabel(evt.item) : hhmm(evt))
+/** The event's time: a social post's in its own timezone (PRD-251 US-307), with where the
+ * post stands until it is scheduled. */
+export const timeLabel = (evt: CalEvent) => (isSocialItem(evt.item) ? socialChipLabel(evt.item) : hhmm(evt))
