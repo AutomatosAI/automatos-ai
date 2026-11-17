@@ -303,6 +303,9 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
   stored (#1451).
 - Acceptance, met in `evals/lean_turn.py` with live memory recall: 346 tokens of platform overhead (target 2,000),
   and the first token 430 ms after the model's own (target 1.5 s).
+- The reply's id on the stream: a turn's `chat-id` frame is `{chatId, messageId}`, and the reply is saved under
+  `messageId`, so a product's server that streams the turn through can report it later. A failed turn's note takes
+  its own id, so the said id then names no message (`consumers/chatbot/reply_id.py`).
 
 ### Wave 3: end-user memory and the memory write API (built)
 

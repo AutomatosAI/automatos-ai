@@ -20,7 +20,6 @@ import time
 from types import SimpleNamespace
 from typing import List, Optional, Dict, Any, AsyncGenerator, Set, Tuple
 from datetime import datetime, timedelta, timezone
-from uuid import UUID
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 
@@ -35,7 +34,7 @@ from modules.tools.execution.nudges import is_nudge  # F295: the loop's nudges a
 from modules.tools.execution.draft_here import a_bare_pointer_goes_through_the_loop  # F419 (night 14)
 from modules.tools.execution.telemetry import resolve_action_name
 
-from core.models import Chat, Message, Vote, Workspace
+from core.models import Chat, Message, Vote
 from core.services.image_store import get_image_store
 from config import config
 from core.database.read_release import release_if_read_only
@@ -59,6 +58,8 @@ from consumers.chatbot.lean_turn import (  # Wave 2: a lean agent's turn, step b
 from consumers.chatbot.early_lookups import once_the_agent_is_active, starts_its_lookups_early  # voice latency D-2
 from consumers.chatbot.turn_embeddings import embeds_each_text_once  # voice latency D-3
 from consumers.chatbot.turn_timing import keeps_the_turns_timing, records_the_first_token
+from consumers.chatbot.reply_id import says_its_replys_id  # the reply's id on its chat-id frame
+from consumers.chatbot.message_workspace import message_workspace
 from consumers.chatbot.lean_request import NOTHING_ASKED
 from core.security.end_user_turn import end_user_turn, keys_own_turn, on_a_keys_own_turn, turn_subject
 from core.security.memory_audience import memory_reader, reader_for_agent_id
@@ -399,8 +400,10 @@ class ChatService:
         retrieval_context: Optional[Dict[str, Any]] = None,
         context_trace: Optional[Dict[str, Any]] = None,
         source: Optional[Dict[str, Any]] = None,
+        message_id: Optional[uuid.UUID] = None,
     ) -> Message:
-        """Save a message to the database.
+        """Save a message to the database, under ``message_id`` when given (a turn's reply, whose id
+        its stream already said: ``consumers.chatbot.reply_id``), else a new id.
 
         ``retrieval_context`` (PRD-185 S7) carries the turn's retrieved
         ``{document_ids, chunk_ids, query}`` on assistant messages; NULL for
@@ -420,40 +423,12 @@ class ChatService:
         except ValueError:
             raise ValueError(f"Invalid chat_id format: {chat_id}")
 
-        if not workspace_id:
-            raise ValueError("workspace_id is required to save messages")
-
-        if isinstance(workspace_id, str):
-            try:
-                workspace_id = uuid.UUID(workspace_id)
-            except ValueError:
-                raise ValueError("Invalid workspace_id format")
-
-        dev_fallback = UUID("00000000-0000-0000-0000-000000000001")
-        existing_ws = self.db.query(Workspace).filter(Workspace.id == workspace_id).first()
-        if not existing_ws:
-            if workspace_id == dev_fallback:
-                ws = Workspace(
-                    id=workspace_id,
-                    name="Dev Workspace",
-                    slug="dev",
-                    plan="basic",  # PRD-222 W2·S1: entry tier (renamed from 'starter')
-                    plan_limits={},
-                    settings={},
-                    is_personal=True,
-                    is_active=True,
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow(),
-                )
-                self.db.add(ws)
-                self.db.commit()
-            else:
-                raise ValueError(f"workspace_id does not exist: {workspace_id}")
+        workspace_uuid = message_workspace(self.db, workspace_id)
 
         message = Message(
-            id=uuid.uuid4(),
+            id=message_id or uuid.uuid4(),
             chat_id=chat_uuid,
-            workspace_id=workspace_id,
+            workspace_id=workspace_uuid,
             role=role,
             parts=parts,
             attachments=attachments or [],
@@ -2411,6 +2386,7 @@ class StreamingChatService:
                 logger.debug("[chat] the turn's workspace could not be resolved for its tool scope", exc_info=True)
         return hidden_scope(hidden_categories_for_workspace(getattr(self, "workspace_id", None), getattr(self, "db", None)))
 
+    @says_its_replys_id  # outermost: the chat-id frame names the id the turn's reply is saved under
     @keeps_one_answer_on_screen  # FX-017: the turn records what each streamed call put on the screen
     @answers_on_the_turns_model  # a spoken turn answers on the spoken model; every turn logs its model
     @keeps_the_turns_timing  # the saved reply's trace says when the first token came
