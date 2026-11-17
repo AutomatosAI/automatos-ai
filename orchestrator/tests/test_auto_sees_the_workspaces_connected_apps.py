@@ -196,13 +196,14 @@ def test_the_tool_says_what_it_lists_and_never_that_any_agent_can_use_an_app():
     """The executor gates on assignment before connection (core/composio/tool_executor.py):
     an agent with apps assigned is refused an active app it does not have, so neither the
     description nor the note may say a connection is all an agent needs. A pending row is
-    read as recorded, never checked with Composio as the Tools page checks it."""
+    read as recorded, never checked with Composio as the Tools page checks it. The
+    description already says the tool lists the apps connected to the workspace, which is
+    now what it returns; the note carries what each status means."""
     from modules.tools.discovery import get_action_registry
 
     description = get_action_registry().get("platform_list_connected_apps").description
-    assert "active = connected for the whole workspace" in description
-    assert "added = in the workspace but disconnected" in description and "assigned_to_agents" in description
-    assert "not yet checked with Composio" in description and "Tools page" not in description
+    assert "connected to the workspace via Composio" in description
+    assert "any agent" not in description.lower()
     assert "pending is as recorded here, not yet checked with Composio" in CONNECTED_APPS_NOTE
     assert "any agent" not in CONNECTED_APPS_NOTE.lower()
     assert "an agent with apps assigned can use only the active apps assigned and switched on" in CONNECTED_APPS_NOTE
