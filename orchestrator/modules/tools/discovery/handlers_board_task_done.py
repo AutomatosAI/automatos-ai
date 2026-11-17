@@ -13,9 +13,10 @@ through, as the board's Approve does (``mission_step_verdicts``).
 
 PRD-256 US-005 (F380): done needs the artifact the card was for. A social post card
 without a rendered post, or a document card without its Deliverable, is refused before
-the move (``ticket_moves.keeps_the_board_rules`` asks ``services.done_needs_an_artifact``,
-the rule the board's Approve asks too): the error says what is missing, the card stays
-where it was, and nothing is filed here.
+the move (``ticket_moves.keeps_the_board_rules`` asks ``services.done_needs_an_artifact``):
+the error says what is missing, the card stays where it was, and nothing is filed here.
+That holds for Auto's call alone; a move the owner clicked on the chat's card is a person's,
+and closes the card with a note of what it lacked, as the board's Approve does (#0065).
 """
 from __future__ import annotations
 
