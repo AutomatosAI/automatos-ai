@@ -1,5 +1,5 @@
 /**
- * Display helpers for the SDK API Keys table: dates, "last used" and the status badge.
+ * Display helpers for the API keys table: dates, "last used" and the status badge.
  */
 import type { KeyStatus, SdkApiKey } from "./api-key-types";
 

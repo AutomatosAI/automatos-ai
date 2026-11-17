@@ -139,7 +139,7 @@ Sources: [docs/getting-started/self-hosting.md:1-128](), [QUICKSTART.md:1-124]()
 
 ## 2.2. Configuration Guide
 
-Automatos AI reads configuration through environment variables and system settings [QUICKSTART.md:35-50](). LLM providers such as OpenRouter, Anthropic, OpenAI, and NVIDIA can be configured dynamically in the app under **Settings → API Keys** or via environment variables [QUICKSTART.md:36-50](). OpenRouter serves as the default routing layer, while NVIDIA endpoints offer free trial open models under specified trial usage terms [QUICKSTART.md:41-70]().
+Automatos AI reads configuration through environment variables and system settings [QUICKSTART.md:35-50](). LLM providers such as OpenRouter, Anthropic, OpenAI, and NVIDIA can be configured dynamically in the app under **Settings → Model keys** or via environment variables [QUICKSTART.md:36-50](). OpenRouter serves as the default routing layer, while NVIDIA endpoints offer free trial open models under specified trial usage terms [QUICKSTART.md:41-70]().
 
 Core services like PostgreSQL, Redis, and MinIO S3 object storage are configured via connection parameters in `.env` and defaults in `envs/*.defaults` [docs/getting-started/self-hosting.md:8-12](). The `.env.example` file provides a template for these configurations, including `POSTGRES_DB`, `REDIS_PASSWORD`, `MINIO_ROOT_USER`, and `S3_ENDPOINT_URL` [.env.example:15-124](). Credentials are encrypted securely in the backend database, and API keys stored in settings are validated live on entry.
 

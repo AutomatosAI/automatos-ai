@@ -433,7 +433,7 @@ volumes, and the next `make up` generates all three.
 one, but chat, agents and embeddings have no model to call until you set one of
 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`
 or `DEEPSEEK_API_KEY` in `.env` — or add a key later in the UI under
-**Settings → API Keys**, which lists every provider in the registry (OpenAI,
+**Settings → Model keys**, which lists every provider in the registry (OpenAI,
 Anthropic, Google, OpenRouter, NVIDIA, DeepSeek, Azure OpenAI, AWS Bedrock,
 Grok / xAI, Cohere, HuggingFace), validates a key live on save, and stores it
 encrypted in your local database. Models are installed *per route* in
@@ -484,7 +484,7 @@ except the LLM provider you chose (and Composio, if you add a key).
 | `redis` | `automatos_redis` | `redis:7-alpine` | 6379 (`REDIS_PORT`) | Cache, pub/sub, queues. `FLUSHDB`, `FLUSHALL` and `DEBUG` are disabled; 256 MB `allkeys-lru`. Compose sets the backend's `REDIS_URL` to this service, so a `REDIS_URL` for a hosted Redis in `orchestrator/.env` is not picked up inside the container. |
 | `minio-volume-owner` | `automatos_minio_volume_owner` | `redis:7-alpine`, the same image as `redis` | none, and no network | One-shot, before MinIO starts: when root owns MinIO's volume, as on an install made while MinIO still ran as root, it re-owns the volume to uid 65532 once, says so in its log and exits; otherwise it exits at once. It runs as root with only the capabilities `chown` needs. MinIO starts only after it succeeds. |
 | `minio` | `automatos_minio` | `cgr.dev/chainguard/minio` (Chainguard's maintained MinIO build) | 9000 API (`MINIO_PORT`), 9001 console (`MINIO_CONSOLE_PORT`) | S3-compatible object store for documents, generated outputs, plugin packages and images. Runs as the image's own user, uid 65532, never root. The backend creates the documents bucket (`S3_DOCUMENTS_BUCKET`, default `automatos-ai`) and the others the first time it uses them. |
-| `qdrant` | `automatos_qdrant` | `qdrant/qdrant` | 6333 (`QDRANT_PORT`) | Durable (L3) and field memory. `envs/api.defaults` points the backend at it (`QDRANT_URL=http://qdrant:6333`). Writing a memory needs an embeddings key in **Settings → API Keys**: OpenRouter's, or the key of the provider chosen under Settings → System Settings → Embeddings; until there is one, **Knowledge → Memory** says so. Your own Qdrant: `QDRANT_URL` in `envs/api.local`; memory off: `QDRANT_URL=` (empty) there. |
+| `qdrant` | `automatos_qdrant` | `qdrant/qdrant` | 6333 (`QDRANT_PORT`) | Durable (L3) and field memory. `envs/api.defaults` points the backend at it (`QDRANT_URL=http://qdrant:6333`). Writing a memory needs an embeddings key in **Settings → Model keys**: OpenRouter's, or the key of the provider chosen under Settings → System Settings → Embeddings; until there is one, **Knowledge → Memory** says so. Your own Qdrant: `QDRANT_URL` in `envs/api.local`; memory off: `QDRANT_URL=` (empty) there. |
 | `backend` | `automatos_backend` | `ghcr.io/automatosai/automatos-api`, pulled: CI's build of `./orchestrator` (`production` target); `make build` builds it here | 8000 (`API_PORT`) | The FastAPI API, as CI builds and scans it: the code is inside the image and nothing reloads. `make dev` runs the `development` target instead, with the source bind-mounted and served by `uvicorn --reload`. |
 | `frontend` | `automatos_frontend` | `ghcr.io/automatosai/automatos-frontend`, pulled: CI's build of `./frontend` (`production` target); built here when `.env` changes its `NEXT_PUBLIC_*` values (§1b) | 3000 (`FRONTEND_PORT`) | The Next.js UI (the standalone server). Starts once the backend health check passes. `make dev` runs the `development` target instead (`npm run dev`, source bind-mounted). |
 | `workspace-worker` | `automatos_workspace_worker` | `ghcr.io/automatosai/automatos-workspace-worker`, pulled: CI's build of `./services/workspace-worker` | none — port 8081 stays inside the compose network | The Code Canvas runtime: the container in which agents read, write and run things, confined to your workspace directory (§5). |
@@ -780,7 +780,7 @@ every agent has:
 **Search engines, resolved in this order** (`WEB_SEARCH_PROVIDER=auto`):
 
 1. **OpenRouter** — any OpenRouter key the platform can see (env, the
-   operator workspace's key, or this workspace's Settings → API Keys). The
+   operator workspace's key, or this workspace's Settings → Model keys). The
    action runs one cheap completion (`WEB_SEARCH_OPENROUTER_MODEL`, default
    `openai/gpt-4o-mini`) carrying OpenRouter's `openrouter:web_search` server
    tool; the engine (Exa by default) does the searching and the pages come
@@ -1280,7 +1280,7 @@ table that `create_all` had already built. That is a bug in the migration
 edit `alembic_version` or stamp revisions by hand.
 
 **Chat answers nothing; banner "Add an LLM key to bring Auto to life".** No
-model key is stored. Settings → API Keys, or one of the keys in §2.
+model key is stored. Settings → Model keys, or one of the keys in §2.
 
 **Tools page: "Integrations are disabled".** No `COMPOSIO_KEY` (§7) — check the
 variable actually reached the container (`docker compose exec backend env | grep

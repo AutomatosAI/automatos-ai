@@ -6,7 +6,7 @@
  *
  * Shared keys configured by the admin — available to all workspaces.
  * Previously lived under Settings > API Keys (user-facing tab) but was
- * moved to Settings > System Settings > API Keys so end users only see
+ * moved to Settings > System Settings > Model keys so end users only see
  * the BYOK surface.
  */
 

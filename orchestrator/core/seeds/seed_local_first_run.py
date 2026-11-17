@@ -298,7 +298,7 @@ This workspace runs entirely on your machine — the API, Postgres, Redis and ob
 
 ## The one thing to do first
 
-Agents need a language model. Add an API key under **Settings → API Keys** (OpenRouter, OpenAI, Anthropic, Google and others are supported). Nothing answers until a key is present; everything listed above works with only that key.
+Agents need a language model. Add an API key under **Settings → Model keys** (OpenRouter, OpenAI, Anthropic, Google and others are supported). Nothing answers until a key is present; everything listed above works with only that key.
 
 ## Try it
 

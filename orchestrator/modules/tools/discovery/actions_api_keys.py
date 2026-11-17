@@ -18,12 +18,12 @@ def register_api_keys_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_list_api_keys",
         description=(
-            "List the workspace's SDK API keys — name, masked prefix, type "
+            "List the workspace's API keys — name, masked prefix, type "
             "(public/server), permission scopes, expiry and last-used time. "
             "Keys are always masked; the full key only exists at creation. "
             "Use before revoking a key or when auditing API access. Auto "
             "cannot create a key: an owner or admin creates one in Settings → "
-            "Widget SDK → API keys, which shows the full key once."
+            "API keys, which shows the full key once."
         ),
         category="api_keys",
         parameters={

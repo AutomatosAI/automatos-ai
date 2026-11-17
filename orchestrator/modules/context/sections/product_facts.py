@@ -55,7 +55,9 @@ HOSTED_EDITION = (
 # PRD-270 US-270-05b added Automatos Cloud (where Marketplace themes sync from, the last Sync,
 # Sync now), in the local edition only and only while the Sync is on: AUTOMATOS_CLOUD_URL=
 # (empty) hides it, so Auto names it only then.
-SETTINGS_TABS = ("Orchestrator", "Webhooks", "API Keys", "Credentials", "Channels", "Notifications",
+# API keys holds the workspace's own keys, for the widget (public) and a product's backend (server);
+# Model keys holds the person's own model-provider keys (BYOK), which "API Keys" used to name.
+SETTINGS_TABS = ("Orchestrator", "Webhooks", "API keys", "Model keys", "Credentials", "Channels", "Notifications",
                  "Phones & devices", "Voice", "Socials", "Appearance", "Widget SDK")
 LOCAL_LEADING_TABS = ("Profile", "Session mode")
 CLOUD_SYNC_TAB = "Automatos Cloud"

@@ -1,5 +1,5 @@
 /**
- * Types and option lists for the SDK API Keys surface (Settings › Widget SDK › API keys).
+ * Types and option lists for the SDK API Keys surface (Settings › API keys).
  * Mirrors the `/api/api-keys` request and response shapes in orchestrator/api/api_keys.py.
  */
 

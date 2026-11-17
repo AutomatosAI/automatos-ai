@@ -61,9 +61,9 @@ export function ApiKeysSettingsTab() {
                 <Shield className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <CardTitle className="text-xl">API Keys</CardTitle>
+                <CardTitle className="text-xl">Model keys</CardTitle>
                 <CardDescription className="mt-1">
-                  Manage your personal (BYOK) API keys. Toggle per-provider
+                  Manage your personal (BYOK) model-provider keys. Toggle per-provider
                   to control which key is used for chat and agent execution.
                 </CardDescription>
               </div>
@@ -77,7 +77,7 @@ export function ApiKeysSettingsTab() {
         <CardHeader className="pb-3">
           <div className="flex items-center gap-2">
             <Key className="h-4 w-4 text-muted-foreground" />
-            <CardTitle className="text-base">Your API Keys</CardTitle>
+            <CardTitle className="text-base">Your model keys</CardTitle>
           </div>
           <CardDescription className="text-xs">
             Add your own keys per provider. Toggle to override platform keys.
@@ -92,7 +92,7 @@ export function ApiKeysSettingsTab() {
           ) : isError ? (
             <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
               <XCircle className="h-6 w-6 mb-2 text-destructive" />
-              <p className="text-sm">Failed to load API keys.</p>
+              <p className="text-sm">Failed to load model keys.</p>
               <Button
                 variant="outline"
                 size="sm"

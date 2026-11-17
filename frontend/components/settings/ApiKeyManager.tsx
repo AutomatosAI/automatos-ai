@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Settings › Widget SDK › API keys: lists the workspace's SDK keys, creates one (under step-up,
+ * Settings › API keys: lists the workspace's API keys (public and server), creates one (under step-up,
  * PRD-261 A-07f), shows its secret once and revokes keys. The pieces live in ./api-keys/.
  */
 import { useState } from "react";
@@ -15,7 +15,7 @@ import { useApiKeys, useRevokeKey } from "./api-keys/use-api-keys";
 // Component
 // ---------------------------------------------------------------------------
 
-/** The SDK API Keys manager: the key list and its create, created-key and revoke dialogs. */
+/** The API keys manager: the key list and its create, created-key and revoke dialogs. */
 export function ApiKeyManager() {
   // Key list state
   const { keys, isLoading, error, fetchKeys } = useApiKeys();

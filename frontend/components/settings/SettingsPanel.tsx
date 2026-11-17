@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Bell, UserCircle, ArrowRight, TerminalSquare, Share2, Palette, Smartphone, CreditCard, Mic, Cloud } from 'lucide-react'
+import { Settings, Key, KeySquare, Webhook, KeyRound, Radio, Brain, Puzzle, Bell, UserCircle, ArrowRight, TerminalSquare, Share2, Palette, Smartphone, CreditCard, Mic, Cloud } from 'lucide-react'
 import { CredentialsTab } from './CredentialsTab'
 import SystemSettingsTab from './SystemSettingsTab'
 import SystemLLMSettingsTab from './SystemLLMSettingsTab'
@@ -50,6 +50,11 @@ import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
  * Phones & devices (PRD-266 US-005c) is in both editions: the device list everywhere, pairing
  * only on a local install in paired mode.
  *
+ * API keys and Model keys are two different things. API keys are the workspace's own keys for
+ * the widget (public) and for a product's backend (server); they are hosted-only, like the Widget
+ * SDK they used to sit under. Model keys are the person's own (BYOK) model-provider keys, in both
+ * editions; the readiness fix "Add a key" links to `?tab=model-keys`.
+ *
  * Billing (PRD-265 US-011) is hosted-only — the local edition never meters — so it is not in
  * this list. The open tab is read from and written to `?tab=` (./use-settings-tab.ts).
  *
@@ -60,7 +65,7 @@ export const LOCAL_EDITION_SETTINGS_TABS: ReadonlySet<string> = new Set([
   'profile',
   'system-settings',
   'orchestrator',
-  'api-keys',
+  'model-keys',
   'credentials',
   'channels',
   'notifications',
@@ -82,7 +87,8 @@ export function SettingsPanel() {
     ...(isAdmin ? [{ value: 'system-settings', label: 'System Settings', icon: Settings }] : []),
     { value: 'orchestrator', label: 'Orchestrator', icon: Brain },
     { value: 'webhooks', label: 'Webhooks', icon: Webhook },
-    { value: 'api-keys', label: 'API Keys', icon: KeyRound },
+    { value: 'api-keys', label: 'API keys', icon: KeySquare },
+    { value: 'model-keys', label: 'Model keys', icon: KeyRound },
     { value: 'billing', label: 'Billing', icon: CreditCard },
     { value: 'credentials', label: 'Credentials', icon: Key },
     { value: 'channels', label: 'Channels', icon: Radio },
@@ -166,8 +172,13 @@ export function SettingsPanel() {
           <WebhooksSettingsTab />
         </TabsContent>
 
-        {/* PRD-54: BYOK API Keys Tab */}
+        {/* The workspace's API keys: public (the widget) and server (a product's backend), hosted only */}
         <TabsContent value="api-keys">
+          <ApiKeyManager />
+        </TabsContent>
+
+        {/* PRD-54: the person's own model-provider keys (BYOK) */}
+        <TabsContent value="model-keys">
           <ApiKeysSettingsTab />
         </TabsContent>
 
@@ -218,7 +229,7 @@ export function SettingsPanel() {
           </TabsContent>
         )}
 
-        {/* PRD-008-A: Widget SDK — sites, behaviour, callback, API keys */}
+        {/* PRD-008-A: Widget SDK — sites, behaviour, callback (the widget's key is under API keys) */}
         <TabsContent value="widget-sdk">
           <WidgetSdkTab />
         </TabsContent>
