@@ -110,16 +110,18 @@ def test_a_workspace_creates_its_own_profile_and_distillation_uses_it(new_sessio
     assert profile is not None and profile.focus == RUNBOOK["focus"] and profile.keep == tuple(RUNBOOK["keep"])
 
 
-def test_its_own_overrides_a_seeded_one_and_deleting_it_brings_the_seeded_one_back(new_session, seeded, workspaces):
+@pytest.mark.parametrize("slug", ["customer", "wellbeing"])
+def test_its_own_overrides_a_seeded_one_and_deleting_it_brings_the_seeded_one_back(new_session, seeded, workspaces,
+                                                                                    slug):
     ws = workspaces()
-    seeded_customer = _listed(new_session, ws)["customer"]
-    assert seeded_customer["seeded"] is True
-    _create(new_session, ws, "customer", name="Acme support")
-    assert _listed(new_session, ws)["customer"]["name"] == "Acme support"
+    seeded_profile = _listed(new_session, ws)[slug]
+    assert seeded_profile["seeded"] is True
+    _create(new_session, ws, slug, name="Acme's own")
+    assert _listed(new_session, ws)[slug]["name"] == "Acme's own"
     s = new_session()
-    delete_memory_profile("customer", ctx=_ctx(ws), db=s)
+    delete_memory_profile(slug, ctx=_ctx(ws), db=s)
     s.close()
-    assert _listed(new_session, ws)["customer"] == seeded_customer
+    assert _listed(new_session, ws)[slug] == seeded_profile
 
 
 def test_an_update_replaces_what_its_own_profile_says(new_session, seeded, workspaces):

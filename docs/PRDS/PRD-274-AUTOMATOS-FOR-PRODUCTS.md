@@ -215,7 +215,7 @@ memories (GDPR). Recall for an end user's turn reads that subject plus the works
 customer accounts, a machine customer's per-run results.
 
 A workspace or agent picks a **memory profile**: the distillation prompt's fact types and examples. `general` is
-today's. The others are named by domain (`customer`, `incident`, `case`, …) and are data, seeded like personas. For every
+today's. The others are named by domain (`customer`, `incident`, `case`, `wellbeing`, …) and are data, seeded like personas. For every
 profile, distillation:
 - ignores the app context block (§5.4), so a product's per-turn framing never becomes a standing instruction;
 - keeps the owner's own standing instructions as today (PRD-256);

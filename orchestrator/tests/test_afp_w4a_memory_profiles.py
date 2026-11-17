@@ -92,6 +92,16 @@ def test_the_migration_declares_the_models_shape():
         assert index.name in source
 
 
+def _seeded_rows(new_session, slug: str) -> list:
+    from core.models.memory_profiles import MemoryProfile
+
+    s = new_session()
+    try:
+        return s.query(MemoryProfile).filter(MemoryProfile.workspace_id.is_(None), MemoryProfile.slug == slug).all()
+    finally:
+        s.close()
+
+
 def test_the_seeds_are_idempotent_and_general_is_todays_prompt(new_session):
     from core.seeds.seed_memory_profiles import SEEDED_PROFILES, seed_memory_profiles
     from modules.memory.write_contract import MEMORY_FACT_TYPES
@@ -100,11 +110,39 @@ def test_the_seeds_are_idempotent_and_general_is_todays_prompt(new_session):
     seed_memory_profiles(s)
     assert seed_memory_profiles(s) == (0, 0)
     s.close()
+    assert len(_seeded_rows(new_session, "wellbeing")) == 1
     by_slug = {p["slug"]: p for p in SEEDED_PROFILES}
-    assert set(by_slug) == {"general", "customer", "incident", "case"}
+    assert set(by_slug) == {"general", "customer", "incident", "case", "wellbeing"}
     assert not by_slug["general"]["focus"] and not by_slug["general"]["examples"]
     for profile in SEEDED_PROFILES:
         assert all(e["type"] in MEMORY_FACT_TYPES for e in profile["examples"]), profile["slug"]
+
+
+# Each keep and skip item of the seeded wellbeing profile, in order, by the words it must hold.
+WELLBEING_KEEP = (("people", "turn to"), ("helped", "hasn't"), ("routines",), ("plans", "open_loop"),
+                  ("spoken to", "prefer"))
+WELLBEING_SKIP = (("heart rate", "sleep numbers", "steps", "weight"), ("condition", "diagnosis"),
+                  ("symptom", "without a number"), ("medicine", "dose"),
+                  ("treatment", "therapy", "appointment", "doctor"),
+                  ("whole exchange", "safety concern", "self-harm", "suicide", "crisis", "even in passing"),
+                  ("different person's health",))
+NOT_IN_A_WELLBEING_EXAMPLE = ("heart", "sleep", "steps", "weight", "diagnos", "medic", "dose", "self-harm",
+                              "suicide", "crisis")
+
+
+def test_the_seeded_wellbeing_profile_keeps_what_helps_and_never_a_health_record(new_session, seeded):
+    from modules.memory.write_contract import MEMORY_FACT_TYPES
+
+    (row,) = _seeded_rows(new_session, "wellbeing")
+    assert row.name == "Wellbeing" and "overrides preserving specifics" in row.focus
+    assert "empty array for the whole exchange" in row.focus
+    for items, wanted in ((row.keep, WELLBEING_KEEP), (row.skip, WELLBEING_SKIP)):
+        assert len(items) == len(wanted)
+        for item, words in zip(items, wanted):
+            assert all(w in item for w in words), item
+    assert 2 <= len(row.examples) <= 3 and "open_loop" in {e["type"] for e in row.examples}
+    assert all(e["type"] in MEMORY_FACT_TYPES for e in row.examples)
+    assert not [w for e in row.examples for w in NOT_IN_A_WELLBEING_EXAMPLE if w in e["fact"].lower()]
 
 
 # --- the choice ----------------------------------------------------------------------------------
