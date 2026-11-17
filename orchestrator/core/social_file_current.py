@@ -23,7 +23,9 @@ What the hash covers, from the render path (``api/socials.py`` ``render_post``,
   once it is done (a shot a render made, an AI option picked, the person's own picture). The AI
   options offered for a slot and what a shot cost change nothing on the file;
 * for a video, the voice and the music: the render speaks the script with the voice and mixes the
-  music, so a new voice or track leaves the file older than the post. An image render reads neither.
+  music, so a new voice or track leaves the file older than the post. An image render reads neither;
+* the post's look (light or dark, the accent, the logo: PRD-251D US-D301), when it has one. A post
+  with no look reads as it did before posts carried one, so a file recorded then is still current.
 
 Left out, because they do not change what the file shows: the caption, the title, the brief (Auto
 writes empty fields from it before a render starts, and the record covers those fields), the
@@ -94,6 +96,9 @@ def render_inputs(post: Any) -> Dict[str, Any]:
         "fields": _field_values(getattr(post, "variables", None)),
         "slots": _slot_files(getattr(post, "footage", None)),
     }
+    look = getattr(post, "look", None)
+    if look:  # only a post that has one: every other post hashes as it did before the look existed
+        inputs = {**inputs, "look": dict(look)}
     if post_format != VIDEO_FORMAT:
         return inputs
     return {**inputs, "voice": getattr(post, "voice", None) or None, "music": getattr(post, "music", None) or None}

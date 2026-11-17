@@ -330,6 +330,28 @@ def _draft(**fields):
                                 copy={"base": "Hello"}, **fields)
 
 
+def test_a_look_changed_after_a_render_leaves_the_file_older_and_a_post_without_one_reads_as_before():
+    # PRD-251D US-D108 + US-D301: the look is a render setting outside the approved hash, so the record
+    # of what a file was made from is what tells a look changed since. A post with no look must hash
+    # exactly as it did before posts carried one, or every file recorded then would read as older.
+    from core import social_file_current as file_state
+    from core.social_render_state import RENDER_DONE
+
+    post = SimpleNamespace(format="image", template_id="tpl", length_seconds=None, variables={}, footage=None,
+                           look=None, review_log=[])
+    assert "look" not in file_state.render_inputs(post)
+    made_plain = file_state.render_inputs_hash(post)
+
+    post.look = {"mode": "dark"}
+    assert file_state.render_inputs(post)["look"] == {"mode": "dark"}
+    assert file_state.render_inputs_hash(post) != made_plain
+
+    post.review_log = [{"action": RENDER_DONE, file_state.MADE_FROM: made_plain}]  # rendered before the look was chosen
+    assert file_state.file_current(post) is False
+    post.look = None
+    assert file_state.file_current(post) is True
+
+
 def test_the_look_is_kept_on_the_post_and_never_hashed():
     plain, looked = _draft(), _draft(look={"logo": False, "mode": "dark", "accent": "bold"})
     assert looked.look == {"mode": "dark", "accent": "bold", "logo": False}

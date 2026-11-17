@@ -62,6 +62,9 @@ describe('what the editor asks for', () => {
     expect(previewInput(onScreen, sizes, channel('instagram'), []).size).toBe('1080x1920')
     expect(previewInput(draft({ kinds: { linkedin: 'image' } }), sizes, null, [])).toEqual({ values: {}, size: '1080x1350', story: false, photos: [] })
     expect(previewInput(draft(), [], null, []).size).toBeNull()
+    // US-D301: the look on screen travels with the request, and only when the post has one.
+    expect(previewInput(draft({ look: { mode: 'dark', logo: false } }), sizes, null, []).look).toEqual({ mode: 'dark', logo: false })
+    expect('look' in previewInput(draft(), sizes, null, [])).toBe(false)
   })
 
   it('the photos the post holds in the template\'s photo spots, chosen and stored', () => {

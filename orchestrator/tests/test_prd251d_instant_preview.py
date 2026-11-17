@@ -178,6 +178,47 @@ def test_a_field_left_empty_is_empty_text_and_a_value_over_its_limit_is_refused(
     assert resp.json()["detail"] == "headline is longer than 60 characters (61 given)"
 
 
+def _token(page, name):
+    """The value of ``--brand-<name>`` in the page's brand ``:root`` rule."""
+    return re.search(rf"--brand-{re.escape(name)}:([^;]*);", page).group(1)
+
+
+def test_the_page_is_drawn_in_the_posts_look_as_a_render_applies_it(env):
+    # PRD-251D US-D301: a template built on paper, drawn dark, with the logo off; the look is the
+    # same code a render runs (``post_look``), so the preview cannot show a look the file will not have.
+    paper = {**PAGE_TEMPLATE, "css": PAGE_TEMPLATE["css"] + " body { background: var(--brand-paper); color: var(--brand-on-paper); }"}
+    template_id = _image(env, blocks=paper)
+    words = {"headline": "Open late"}
+
+    light = _html(env, template_id, values=words)
+    dark = _html(env, template_id, values=words, look={"mode": "dark"})
+
+    assert _token(dark, "paper") == _token(light, "ink") != _token(light, "paper")
+    assert _token(dark, "on-paper") == _token(light, "on-ink")
+    # The kit's own look, sent or left out, is the page as it was.
+    assert _html(env, template_id, values=words, look={"mode": "light", "logo": True}) == light
+    assert _html(env, template_id, values=words, look=None) == light
+
+    # A template not built on paper has no dark look: the page is as authored.
+    stage_id = _image(env)
+    assert _html(env, stage_id, values=words, look={"mode": "dark"}) == _html(env, stage_id, values=words)
+
+
+def test_the_logo_off_empties_the_logo_and_a_look_that_is_not_a_choice_is_refused(env, monkeypatch):
+    real = instant_api.brand_kit_for_media_render
+    monkeypatch.setattr(instant_api, "brand_kit_for_media_render", lambda kit: {**real(kit), "logo_url": PNG_URI})
+    template_id = _image(env)
+    words = {"headline": "Open late"}
+
+    assert f'<img class="logo" src="{PNG_URI}" alt="" />' in _html(env, template_id, values=words)
+    off = _html(env, template_id, values=words, look={"logo": False})
+    assert PNG_URI not in off and f'<img class="logo" src="{NO_LOGO}" alt="" />' in off
+
+    for look in ({"mode": "sepia"}, {"tone": "dark"}, {"mode": "dark", "accent": "bold", "logo": True, "extra": 1}):
+        resp = _page(env, template_id, values=words, look=look)
+        assert resp.status_code == 422, (look, resp.text)
+
+
 def test_only_an_image_template_of_one_still_has_an_instant_preview(env):
     video = _template(env, blocks=COMPOSITION, fmt="social_video")
     resp = _page(env, video, values={})

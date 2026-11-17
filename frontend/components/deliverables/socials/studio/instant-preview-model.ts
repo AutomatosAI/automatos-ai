@@ -14,6 +14,7 @@ import type { SocialChannel, SocialPost, SocialPreviewPageInput, SocialTemplateS
 import type { PreviewPhotoFile } from '@/hooks/use-socials-instant-preview'
 import { closestShape } from './channel-shape'
 import { aspectOf, isOwnFilePost, type EditorDraft } from './editor-model'
+import { lookToSave } from './look-options-model'
 import { previewStale } from './preview-model'
 
 /** How long after the last change the page is asked for. */
@@ -90,11 +91,13 @@ export function previewSize(templateSizes: ReadonlyArray<string>, draft: EditorD
 export function previewInput(
   draft: EditorDraft, templateSizes: ReadonlyArray<string>, active: SocialChannel | null, photos: ReadonlyArray<string>,
 ): SocialPreviewPageInput {
+  const look = lookToSave(draft.look ?? {})  // US-D301: null when every choice is the kit's own
   return {
     values: valuesOf(draft),
     size: previewSize(templateSizes, draft, active),
     story: Object.values(draft.kinds).includes(STORY_KIND),
     photos: [...photos].sort(),
+    ...(look ? { look } : {}),
   }
 }
 

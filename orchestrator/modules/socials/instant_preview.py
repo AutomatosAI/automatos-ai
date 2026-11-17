@@ -52,6 +52,7 @@ from core.social_composition import (
     token_stylesheet,
 )
 from core.social_templates import IMAGE_SLOT, SOCIAL_IMAGE, SocialTemplateError, resolve_variables, validate_social_blocks
+from modules.socials import post_look
 from modules.socials.render import composition_of
 
 # The page's own policy: its inline script and styles run, data: images and fonts load, and
@@ -107,6 +108,8 @@ class PreviewRequest:
     size: Optional[str] = None
     story: bool = False
     photos: Tuple[str, ...] = ()
+    # PRD-251D US-D301: the post's look on screen (checked by ``post_look.validate_look``); None is the kit's own.
+    look: Optional[Mapping[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -186,11 +189,12 @@ def page_parts(
     try:
         bundle = build_bundle(
             workspace_id=workspace_id, reference=f"{REFERENCE_PREFIX}{getattr(template, 'id', '')}", blocks=staged,
-            values=values, brand_kit=brand_kit, fallback_name=fallback_name, size=request.size, keep_slots=photos,
-            fmt=SOCIAL_IMAGE, story_safe=request.story,
+            values=values, brand_kit=post_look.kit_with_look(brand_kit, request.look), fallback_name=fallback_name,
+            size=request.size, keep_slots=photos, fmt=SOCIAL_IMAGE, story_safe=request.story,
         )
     except ValueError as exc:  # a size the template does not declare
         raise PreviewRefused(str(exc)) from exc
+    bundle = post_look.with_look(bundle, blocks, request.look, brand_kit)  # the look, as a render applies it
     files = {entry["path"]: entry["data_uri"] for entry in bundle.get("files") or []}
     variables = {
         name: files.get(value, value) if name in LOGO_VARIABLES else value for name, value in bundle["variables"].items()

@@ -859,6 +859,8 @@ export interface SocialPreviewPageInput {
   story: boolean
   /** The photo spots the post holds a picture for: each shows a marker where the picture goes. */
   photos: string[]
+  /** PRD-251D US-D301: the look on screen, sent only when the post has one. */
+  look?: SocialPost['look']
 }
 
 /** The template as one self-contained page, and the version of the kit's font faces it expects. */

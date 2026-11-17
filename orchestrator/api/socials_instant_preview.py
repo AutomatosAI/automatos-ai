@@ -36,7 +36,7 @@ from core.models.workspaces import Workspace
 from core.social_templates import MAX_SLOTS, MAX_TEXT_CHARS, MAX_VARIABLES
 from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.documents.brand_kit import get_brand_kit
-from modules.socials import instant_preview
+from modules.socials import instant_preview, post_look, service
 
 router = APIRouter()
 
@@ -48,6 +48,7 @@ NAME_MAX_CHARS = 64
 # A size is WIDTHxHEIGHT, each four digits at most.
 SIZE_MAX_CHARS = 9
 TEMPLATE_COLUMNS = (DocumentTemplate.id, DocumentTemplate.format, DocumentTemplate.blocks)
+LOOK_MAX_KEYS = len(post_look.LOOK_KEYS)
 
 FieldName = Annotated[str, StringConstraints(min_length=1, max_length=NAME_MAX_CHARS)]
 FieldValue = Union[bool, int, float, Annotated[str, StringConstraints(max_length=MAX_TEXT_CHARS)]]
@@ -64,6 +65,8 @@ class PreviewPageRequest(BaseModel):
     size: Optional[SizeName] = None
     story: bool = False
     photos: List[SlotName] = Field(default_factory=list, max_length=MAX_SLOTS)
+    # PRD-251D US-D301: the look on screen (mode, accent, logo); null is the kit's own.
+    look: Optional[Dict[str, Any]] = Field(None, max_length=LOOK_MAX_KEYS)
 
 
 def _template(db: Session, ctx: RequestContext, template_id: UUID) -> Any:
@@ -97,14 +100,21 @@ def social_template_preview_page(
     ``html`` is the page and ``fonts_version`` names the kit's faces it expects at its font
     marker (``GET /brand-kit/preview-fonts``). 404 for a template of another workspace; 422,
     saying why, for a template that is not an image of one still, a value that does not fit its
-    field, a size or a photo spot the template does not have, or a composition a render refuses.
+    field, a size or a photo spot the template does not have, a look that is not one of its choices,
+    or a composition a render refuses. The look is applied as a render applies it (US-D301).
     """
     template = _template(db, ctx, template_id)
     workspace = _workspace(db, ctx)
     stored_kit = get_brand_kit(workspace.settings)
     # The logos and tokens a render reads; the uploaded fonts are left unread (the editor has them).
     brand_kit = brand_kit_for_media_render({**stored_kit, "font_files": []})
-    request = instant_preview.PreviewRequest(values=body.values, size=body.size, story=body.story, photos=tuple(body.photos))
+    try:
+        look = post_look.validate_look(body.look)
+    except service.InvalidPost as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    request = instant_preview.PreviewRequest(
+        values=body.values, size=body.size, story=body.story, photos=tuple(body.photos), look=look,
+    )
     try:
         page = instant_preview.preview_page(
             template, brand_kit, request, workspace_id=workspace.id, fallback_name=workspace.name or "",
