@@ -632,6 +632,37 @@ def test_agent_create_notifies_board_event(monkeypatch):
     assert calls[0]["task_id"] == 4242
 
 
+def _create_watching_the_consent(monkeypatch, db, params):
+    """create_board_task, recording the commits made before its consent and its wake."""
+    _patch_notify(monkeypatch)
+    seen = _ns(staged=[], woken=[])
+    monkeypatch.setattr(_HANDLER, "_consent_for_chat_filed",
+                        lambda session, ws, task, given: seen.staged.append((session.commits, task.id, task.status)))
+    monkeypatch.setattr(_HANDLER, "_notify_dispatch_safe",
+                        lambda session, ws, task_id: seen.woken.append((session.commits, task_id)))
+    seen.result = asyncio.run(_HANDLER.create_board_task(db, _WS_ID, params))
+    return seen
+
+
+def test_agent_create_stages_an_assigned_cards_consent_before_its_commit(monkeypatch):
+    """A card Auto files and assigns for the operator in chat commits with its consent.
+    Committed first, the dispatcher could claim it before its grant existed and park it."""
+    db = _FakeSession(agent=_ns(id=9, name="ATLAS"))
+    seen = _create_watching_the_consent(monkeypatch, db, {
+        "title": "Chase the October invoice", "description": "d", "assigned_agent_name": "ATLAS",
+        "_user_id": "user_owner"})
+    assert seen.result["success"] is True
+    assert seen.staged == [(0, 4242, "assigned")]        # on the flushed card, before any commit
+    assert seen.woken == [(1, 4242)] and db.commits == 2  # the wake still rides the second commit
+
+
+def test_agent_create_in_the_inbox_records_no_consent(monkeypatch):
+    db = _FakeSession()
+    seen = _create_watching_the_consent(monkeypatch, db, {"title": "t", "description": "d", "_user_id": "user_owner"})
+    assert seen.result["success"] is True
+    assert seen.staged == [] and seen.woken == [] and db.commits == 2
+
+
 def test_agent_assign_notifies_board_event(monkeypatch):
     """platform_assign_task fires task_updated once the assignment commits."""
     from core.models.core import BoardTask
@@ -1323,12 +1354,15 @@ def test_auto_ticket_watch_read_through_config_only():
     so this test file itself stays clean for the diff-scope env-read guard."""
     env_read = "os." + "getenv"  # the raw-env-read token, never a literal here
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    for rel in ("modules/tools/discovery/handlers_board_tasks.py",
+    # create_board_task's supervision moved to board_task_filing (the 50-line split).
+    for rel in ("modules/tools/discovery/board_task_filing.py",
                 "modules/tools/discovery/handlers_watches.py"):
         with open(os.path.join(here, rel)) as f:
             src = f.read()
         assert "AUTO_TICKET_WATCH" in src            # consumed here (via config)
         assert env_read not in src                    # but never a raw env read
+    with open(os.path.join(here, "modules/tools/discovery/handlers_board_tasks.py")) as f:
+        assert env_read not in f.read()               # the handler reads no env either
     with open(os.path.join(here, "config.py")) as f:
         assert (env_read + '("AUTO_TICKET_WATCH"') in f.read()  # declared in config.py
 

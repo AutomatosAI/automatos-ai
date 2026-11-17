@@ -13,10 +13,11 @@ A ``board_task`` suggestion's Start files one ticket, as a person files one on t
 ``file_ticket`` adds and flushes the row (its number is given on insert) and NOTIFYs the
 Command Centres, both riding the caller's commit. ``watch_ticket`` puts the ticket under
 watch in the same transaction (FR-8, PRD-204's ``WatchService``, target ``board_task``), so
-a Start makes its ticket and the watch together or neither. Once that commit is made,
-``wake`` does what the board's create route does for a ticket filed and assigned at once: on
-the local edition the person's click is the approval (``board_consent``), and the dispatch
-loop is woken on its channel. Nothing here runs the ticket.
+a Start makes its ticket and the watch together or neither. ``approve`` does what the board's
+create route does for a ticket filed and assigned at once: on the local edition the person's
+click is the approval (``board_consent``), staged in the same transaction so the ticket and
+its approval commit together (the dispatch loop never claims the ticket before it). Once that
+commit is made, ``wake`` wakes the dispatch loop on its channel. Nothing here runs the ticket.
 """
 from __future__ import annotations
 
@@ -30,7 +31,7 @@ from core.models.watch_enums import WatchTargetType
 from modules.tools.discovery.suggestion_fields import PAYLOAD_AGENT
 from services.proactive.decision_text import ticket_brief
 
-__all__ = ["SOURCE_SUGGESTION", "file_ticket", "wake", "watch_ticket"]
+__all__ = ["SOURCE_SUGGESTION", "approve", "file_ticket", "wake", "watch_ticket"]
 
 SOURCE_SUGGESTION = "suggestion"
 CREATED_BY_USER = "user"
@@ -84,15 +85,22 @@ def watch_ticket(db: Session, task: BoardTask, created_by: Optional[str]) -> Any
     )
 
 
-def wake(db: Session, task: Any, actor: str) -> None:
-    """After the Start's commit: an assigned ticket's approval (local edition) and the dispatch
-    loop's wake, committed. A ticket in the Inbox waits for a person to assign it."""
+def approve(db: Session, task: BoardTask, actor: str) -> None:
+    """Before the Start's commit: an assigned ticket's approval (local edition), staged (not
+    committed) so it commits with the ticket. ``consent_for_created_ticket`` skips a ticket in
+    the Inbox, which waits for a person to assign it."""
     from services.board_consent import WHY_CREATED_AND_ASSIGNED, consent_for_created_ticket
+
+    consent_for_created_ticket(db, workspace_id=task.workspace_id, task=task, actor=actor,
+                               why=WHY_CREATED_AND_ASSIGNED, commit=False)
+
+
+def wake(db: Session, task: Any) -> None:
+    """After the Start's commit: the dispatch loop's wake for an assigned ticket, committed. A
+    ticket in the Inbox waits for a person to assign it."""
     from services.board_dispatcher import notify_task_available
 
     if task.status != ASSIGNED or not task.assigned_agent_id:
         return
-    consent_for_created_ticket(db, workspace_id=task.workspace_id, task=task, actor=actor,
-                               why=WHY_CREATED_AND_ASSIGNED)
     notify_task_available(db, workspace_id=task.workspace_id, task_id=task.id)
     db.commit()

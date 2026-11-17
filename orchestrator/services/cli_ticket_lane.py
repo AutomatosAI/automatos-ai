@@ -24,6 +24,7 @@ from core.cli_runtime import (
     runtime_kind_of, session_cli,
 )
 from core.models.core import Agent, BoardTask
+from services.cli_ticket_filing import new_lane_ticket, stage_lane_consent
 from services.ticket_numbers import ticket_label  # PRD-252 R4
 
 logger = logging.getLogger(__name__)
@@ -176,42 +177,19 @@ def file_cli_ticket(
         )
         if card is not None:
             return card
-    task = BoardTask(
-        workspace_id=workspace_id,
-        title=title[:255],
-        description=prompt,
-        priority=priority if priority in ("low", "medium", "high", "urgent") else "medium",
-        assigned_agent_id=agent_id,
-        status="assigned",
-        created_by_type=created_by_type or "system",
-        created_by_id=created_by_id or source_type,
-        source_type=source_type,
-        source_id=source_id,
-        review_mode=review_mode,
-        tags=list(tags or []),
-        orchestration_run_id=orchestration_run_id,
-        orchestration_task_id=orchestration_task_id,
+    task = new_lane_ticket(
+        workspace_id=workspace_id, agent_id=agent_id, title=title, prompt=prompt, source_type=source_type,
+        source_id=source_id, priority=priority, review_mode=review_mode, tags=tags, created_by_type=created_by_type,
+        created_by_id=created_by_id, resume_session_id=resume_session_id, resume_host_id=resume_host_id,
+        orchestration_run_id=orchestration_run_id, orchestration_task_id=orchestration_task_id,
     )
-    if resume_session_id:
-        # Read at claim (cli_host_service) and honoured only by the same host —
-        # a transcript lives on one machine. The claim rebuilds runtime_ref.
-        task.runtime_ref = {
-            "resume_session_id": str(resume_session_id),
-            "resume_host_id": str(resume_host_id) if resume_host_id else None,
-        }
     task.blocked_reason = _waiting_line(db, workspace_id, agent_id)
     db.add(task)
+    db.flush()  # the id the consent carries
+    # The ticket and its consent commit together: the host never claims it first.
+    stage_lane_consent(db, workspace_id, task, actor, source_type)
     db.commit()
     db.refresh(task)
-    # PRD-234 (2026-09-07): the operator's standing schedule is their approval on
-    # the local edition — the dispatcher's claim finds an active grant instead of
-    # parking the heartbeat behind 'always_ask'. No-op on SaaS. PRD-239: a ticket
-    # a human typed for in chat carries that human's consent instead (D16).
-    from services.board_consent import WHY_ASKED_IN_CHAT, consent_for_created_ticket, consent_for_lane_ticket
-    if actor:
-        consent_for_created_ticket(db, workspace_id=workspace_id, task=task, actor=actor, why=WHY_ASKED_IN_CHAT)
-    else:
-        consent_for_lane_ticket(db, workspace_id=workspace_id, task=task, source_type=source_type)
     _notify(db, workspace_id, task)
     db.commit()  # F119: the notices ride this commit (after the consent, for the dispatch wake)
     logger.info("[CliTicketLane] filed ticket #%s for agent %s from %s/%s", task.id, agent_id, source_type, source_id)
@@ -430,10 +408,10 @@ def claim_step_card(
     card.lease_until = None
     card.runtime_ref = None
     card.blocked_reason = _waiting_line(db, workspace_id, agent_id)
-    db.commit()
-    db.refresh(card)
     from services.board_consent import consent_for_lane_ticket
-    consent_for_lane_ticket(db, workspace_id=workspace_id, task=card, source_type=MISSION_SOURCE_TYPE)
+    consent_for_lane_ticket(db, workspace_id=workspace_id, task=card, source_type=MISSION_SOURCE_TYPE, commit=False)
+    db.commit()  # the card's move to assigned and its consent, together: the host never claims it first
+    db.refresh(card)
     _notify(db, workspace_id, card, event="status_changed")
     db.commit()
     logger.info("[CliTicketLane] %s runs on the step's card #%s (agent %s)", source_id, card.id, agent_id)

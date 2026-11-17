@@ -62,10 +62,12 @@ def file_auto_review(*, workspace_id: str, source_agent_id: Optional[int], sourc
         task = BoardTask(workspace_id=workspace_id, status="assigned", assigned_agent_id=auto.id,
                          created_by_type="agent", source_type=HEARTBEAT_SOURCE, **fields)
         db.add(task)
-        db.commit()
+        db.flush()  # the id the consent carries
         # Local edition: the operator's heartbeat schedule is the approval
         # (PRD-234 board_consent) — Auto's review ticket runs on the next tick.
-        consent_for_lane_ticket(db, workspace_id=workspace_id, task=task, source_type=HEARTBEAT_SOURCE)
+        # It commits with the ticket, so the dispatcher never claims the ticket first.
+        consent_for_lane_ticket(db, workspace_id=workspace_id, task=task, source_type=HEARTBEAT_SOURCE, commit=False)
+        db.commit()
         logger.info("[Heartbeat] report_to=auto: created BoardTask id=%s assigned to Auto (agent_id=%s) "
                     "for source_agent=%s", task.id, auto.id, source_agent_id)
         return task.id

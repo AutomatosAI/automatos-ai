@@ -168,42 +168,44 @@ async def _auto_create_task_report(
 async def _dispatch_task_complete(db: Session, workspace_id, task: BoardTask) -> None:
     """Fire a ``task_complete`` event through NotificationDispatcher.
 
-    Uses the caller's DB session so the notification row joins the
-    existing transaction (no extra commits). Dispatcher never raises on
-    delivery failures, but we still wrap in try/except so any programming
-    error cannot block the task-completion flow.
+    Uses the caller's DB session so the notification row joins its transaction; the
+    try/except keeps a programming error out of the task-completion flow. A heartbeat's
+    ticket and Auto's review of it end without one (a routine tick that found nothing told
+    the owner twice); the watch and knowledge hooks below still run for them.
     """
-    try:
-        from core.services.notification_dispatcher import NotificationDispatcher
+    from services.heartbeats.session_ticks import is_heartbeat_ticket
+    if not is_heartbeat_ticket(task):
+        try:
+            from core.services.notification_dispatcher import NotificationDispatcher
 
-        agent_name = None
-        if task.assigned_agent_id:
-            agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
-            agent_name = agent.name if agent else f"agent-{task.assigned_agent_id}"
+            agent_name = None
+            if task.assigned_agent_id:
+                agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
+                agent_name = agent.name if agent else f"agent-{task.assigned_agent_id}"
 
-        message = None
-        if task.result:
-            message = str(task.result)[:500]
-        elif task.description:
-            message = task.description[:500]
+            message = None
+            if task.result:
+                message = str(task.result)[:500]
+            elif task.description:
+                message = task.description[:500]
 
-        dispatcher = NotificationDispatcher(db, str(workspace_id))
-        await dispatcher.dispatch(
-            event_type="task_complete",
-            title=f"Task: {task.title}",
-            message=message,
-            link_type="task",
-            link_id=str(task.id),
-            agent_id=task.assigned_agent_id,
-            agent_name=agent_name,
-            status="ok",
-        )
-    except Exception:
-        logger.error(
-            "[BoardTasks] task_complete dispatch failed for task %s",
-            getattr(task, "id", "?"),
-            exc_info=True,
-        )
+            dispatcher = NotificationDispatcher(db, str(workspace_id))
+            await dispatcher.dispatch(
+                event_type="task_complete",
+                title=f"Task: {task.title}",
+                message=message,
+                link_type="task",
+                link_id=str(task.id),
+                agent_id=task.assigned_agent_id,
+                agent_name=agent_name,
+                status="ok",
+            )
+        except Exception:
+            logger.error(
+                "[BoardTasks] task_complete dispatch failed for task %s",
+                getattr(task, "id", "?"),
+                exc_info=True,
+            )
 
     # PRD-204 S3: board-task terminal choke point (success) -- every
     # completion path funnels through this helper. Fail-soft.

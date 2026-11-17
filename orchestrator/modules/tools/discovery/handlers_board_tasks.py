@@ -3,7 +3,7 @@
 import logging
 from datetime import datetime, timezone
 from inspect import unwrap
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, Tuple
 from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
@@ -21,6 +21,10 @@ from modules.tools.discovery.ticket_moves import keeps_the_board_rules
 from modules.tools.discovery.auto_approve_scope import auto_approves_only_what_it_runs
 from modules.tools.discovery.agent_refs import gives_the_card_on_update, resolve_active_agent, takes_the_agent_id
 from modules.tools.discovery.cannot_call_warning import says_what_it_cannot_call
+from modules.tools.discovery.board_task_filing import (
+    assign_lane_supervision, auto_approve_on_create, new_chat_ticket, planning_data_of,
+    review_mode_or_refusal, tell_the_owner_if_it_waits,
+)
 
 # update_board_task_status: how many task_ids one bulk call may carry. The chat
 # loop caps a tool at 8 calls per turn, so one-id-per-call could never close more
@@ -99,7 +103,10 @@ def _consent_for_chat_filed(db: Session, workspace_id: UUID, task, params: Dict[
 
     ``_user_id`` is server-injected by the platform executor from the driving
     user (strip-then-inject, never caller-supplied); a heartbeat or scheduled run
-    carries none, so autonomous filings keep asking. Local edition only.
+    carries none, so autonomous filings keep asking. Local edition only. Staged,
+    not committed: the caller's next commit carries it with the new card, assignment,
+    status change or move back to an agent it consents to, so the dispatcher cannot
+    claim the card first.
     """
     driver = params.get("_user_id") if isinstance(params, dict) else None
     if not driver:
@@ -111,7 +118,7 @@ def _consent_for_chat_filed(db: Session, workspace_id: UUID, task, params: Dict[
 
         consent_for_created_ticket(
             db, workspace_id=workspace_id, task=task,
-            actor=actor_from_user_id(driver), why=WHY_ASKED_IN_CHAT,
+            actor=actor_from_user_id(driver), why=WHY_ASKED_IN_CHAT, commit=False,
         )
     except Exception:  # noqa: BLE001 — consent is a convenience; the gate stays the safety net
         logger.debug("[BoardTasks] chat-filed consent skipped for task %s", getattr(task, "id", "?"), exc_info=True)
@@ -164,32 +171,9 @@ def _parse_deadline(value: Any):
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-@checks_the_new_card  # F241/F265 (7b): never a copy of a card; no status orders in its brief
-@by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
-@auto_approves_only_what_it_runs  # auto_approve runs only publish_blog; others wait for the owner
-@takes_the_agent_id("assigned_agent_name")  # FX-012: agent_id beside the name; an id wins
-@says_what_it_cannot_call  # F430: a CLI agent's card names what its sessions cannot call
-async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Create a board task (called by agents via platform_create_task)."""
-    from core.models.core import BoardTask
-
-    title = params.get("title")
-    description = params.get("description")
-    if not title or not description:
-        return {"success": False, "error": "title and description are required"}
-
-    # F180 (#1110): the review gate is kept as asked, never quietly made 'auto'.
-    # 'human' was dropped because this tool took only 'auto' and 'manual'.
-    from api.board_tasks import VALID_REVIEW_MODES, board_review_mode
-
-    review_mode = "auto"
-    if params.get("review_mode") is not None:
-        review_mode = board_review_mode(params["review_mode"])
-        if review_mode is None:
-            return {"success": False, "error": (
-                f"Invalid review_mode: {params['review_mode']!r}. Must be one of {sorted(VALID_REVIEW_MODES)}: "
-                "'human' waits in Review for a person, 'llm' for a model, 'auto' closes it Done.")}
-
+def _chat_assignee(db: Session, workspace_id: UUID,
+                   params: Dict[str, Any]) -> Tuple[Optional[int], Optional[Dict[str, Any]]]:
+    """The active agent a new card is given to (None for the Inbox), or the refusal that stops the filing."""
     # Resolve assigned agent by name — ACTIVE only + ambiguity-aware (P224-RVW-4).
     # A same-named pair refuses rather than silently dispatching to a row-order
     # pick; an active-vs-inactive pair resolves to the active one. No match leaves
@@ -199,83 +183,55 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     if agent_name:
         agent, ambiguity_error = _resolve_active_agent_by_name(db, workspace_id, agent_name)
         if ambiguity_error:
-            return {"success": False, "error": ambiguity_error}
+            return None, {"success": False, "error": ambiguity_error}
         if agent:
             refused = _cannot_take_tasks(db, agent)
             if refused:
-                return {"success": False, "error": refused}
+                return None, {"success": False, "error": refused}
             assigned_agent_id = agent.id
+    return assigned_agent_id, None
 
-    # Build planning_data if approval_action or other planning fields provided
-    planning_data = params.get("planning_data")
-    if not planning_data and params.get("approval_action"):
-        planning_data = {"approval_action": params["approval_action"]}
 
+@checks_the_new_card  # F241/F265 (7b): never a copy of a card; no status orders in its brief
+@by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
+@auto_approves_only_what_it_runs  # auto_approve runs only publish_blog; others wait for the owner
+@takes_the_agent_id("assigned_agent_name")  # FX-012: agent_id beside the name; an id wins
+@says_what_it_cannot_call  # F430: a CLI agent's card names what its sessions cannot call
+async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a board task (called by agents via platform_create_task). Its pieces are in
+    ``board_task_filing``; an assigned card's consent commits with the card itself."""
+    title = params.get("title")
+    description = params.get("description")
+    if not title or not description:
+        return {"success": False, "error": "title and description are required"}
+    review_mode, refused = review_mode_or_refusal(params)
+    if refused:
+        return refused
+    assigned_agent_id, refused = _chat_assignee(db, workspace_id, params)
+    if refused:
+        return refused
+    planning_data = planning_data_of(params)
     initial_status = initial_board_status(params.get("status"), assigned_agent_id, planning_data)
-
-    task = BoardTask(
-        workspace_id=workspace_id,
-        title=title,
-        description=description,
-        priority=params.get("priority", "medium"),
-        assigned_agent_id=assigned_agent_id,
-        status=initial_status,
-        created_by_type="agent",
-        created_by_id=str(params.get("_agent_id", "")),
-        parent_task_id=params.get("parent_task_id"),
-        tags=params.get("tags", []),
-        planning_data=planning_data,
-        # PRD-234 S3: Auto can set the review gate and a due date when filing.
-        review_mode=review_mode,
+    task = new_chat_ticket(
+        workspace_id, params, title=title, description=description, assigned_agent_id=assigned_agent_id,
+        initial_status=initial_status, planning_data=planning_data, review_mode=review_mode,
         sla_deadline=_parse_deadline(params.get("sla_deadline")),
     )
     db.add(task)
+    db.flush()  # the id the consent carries
+    # PRD-234 D16: an assigned card's consent is staged here, so the card and its grant
+    # commit together and the dispatcher never claims the card first. A card for Review
+    # or the Inbox is not claimable, needs none, and commits as before.
+    if _is_dispatch_claimable(task):
+        _consent_for_chat_filed(db, workspace_id, task, params)
     db.commit()
     db.refresh(task)
 
-    # Auto-approve: execute the approval action immediately, skip human review.
-    # F155: a public widget visitor's call is never an approval; the task waits.
-    from core.security.surface import widget_turn
-
-    auto_approve_held = bool(params.get("auto_approve")) and widget_turn()
-    auto_approve = params.get("auto_approve", False) and not auto_approve_held
-    if auto_approve and planning_data and planning_data.get("approval_action"):
-        approval_action = planning_data["approval_action"]
-        action_type = approval_action.get("type")
-        try:
-            if action_type == "publish_blog":
-                from core.services.blog_service import BlogService
-                from uuid import UUID as _UUID
-                svc = BlogService(db, workspace_id)
-                svc.publish_post(_UUID(approval_action["post_id"]))
-                logger.info("[BoardTasks] Auto-approved publish_blog for task %s", task.id)
-            task.status = "done"
-            db.commit()
-            # PRD-227 US-001: push the create (+immediate done) to Command Centres.
-            _notify_board_safe(db, workspace_id, task.id, task.status, "task_created")
-            db.commit()  # F119: the notice rides this commit
-            return {
-                "success": True,
-                "task_id": task.id,
-                "status": "done",
-                "title": task.title,
-                "auto_approved": True,
-                "action_executed": action_type,
-            }
-        except Exception as approve_err:
-            logger.error("[BoardTasks] Auto-approve failed: %s", approve_err, exc_info=True)
-            # Fall through to normal review flow
-
-    # Send notification if task lands in review (approval gate)
-    if initial_status == "review":
-        try:
-            from core.services.notification_service import send_workspace_notification
-            action_type = (planning_data or {}).get("approval_action", {}).get("type", "")
-            action_label = "publish blog post" if action_type == "publish_blog" else "review task"
-            msg = f"[Approval Required] {title}\n{description}\nAction: {action_label}\nOpen the Board to approve or reject."
-            await send_workspace_notification(str(workspace_id), msg)
-        except Exception as notify_err:
-            logger.debug("[BoardTasks] Notification skipped: %s", notify_err)
+    approved, auto_approve_held = auto_approve_on_create(db, workspace_id, task, planning_data, params,
+                                                         _notify_board_safe)
+    if approved is not None:
+        return approved
+    await tell_the_owner_if_it_waits(workspace_id, initial_status, title, description, planning_data)
 
     # PRD-227 US-001: push the new card to Command Centres, same as api/board_tasks.py:389.
     _notify_board_safe(db, workspace_id, task.id, task.status, "task_created")
@@ -284,7 +240,6 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     # LISTEN channel (mirrors api/board_tasks.py:397-398) so it is claimed at wake
     # latency, not on the next fallback poll.
     if _is_dispatch_claimable(task):
-        _consent_for_chat_filed(db, workspace_id, task, params)
         _notify_dispatch_safe(db, workspace_id, task.id)
     db.commit()  # F119: the notices ride this commit
 
@@ -297,51 +252,7 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     }
     if auto_approve_held:
         result["auto_approve"] = "not applied: a call from the public widget is no approval"
-
-    # PRD-224 US-005: an ASSIGN-lane assigned ticket is auto-supervised — attach a
-    # run_and_report board_task watch here (in the create transaction path) so the
-    # LLM cannot forget it. Gated on the server-injected, unspoofable _assign_lane
-    # flag + an assigned agent; the AUTO_TICKET_WATCH dial is the actual switch.
-    # A non-ASSIGN creation (heartbeat, recipe mirror, plain agent task) carries no
-    # _assign_lane, so it attaches nothing.
-    if params.get("_assign_lane") and assigned_agent_id:
-        from config import config as _config
-
-        if not _config.AUTO_TICKET_WATCH:
-            result["supervised"] = False
-            result["supervision"] = "not supervised (AUTO_TICKET_WATCH is off)"
-        else:
-            from modules.tools.discovery.handlers_watches import (
-                _origin_chat_id,
-                auto_create_ticket_watch,
-            )
-
-            watch = auto_create_ticket_watch(
-                db,
-                workspace_id,
-                task_id=task.id,
-                title=f"Ticket: {title}",
-                success_criteria=description,
-                created_by=(str(params["_created_by"]) if params.get("_created_by") else None),
-                owner_agent_id=assigned_agent_id,
-                origin_chat_id=_origin_chat_id(params),
-            )
-            if watch is not None:
-                result["supervised"] = True
-                result["watch_id"] = str(watch.id)
-                result["supervision"] = "supervised — I'll report back here when it's done"
-            else:
-                # P224-RVW-6: the dial is ON but the watch did NOT attach —
-                # auto_create_ticket_watch is fail-soft and returns None on any
-                # internal error (a broken watcher must never break the ticket).
-                # Confirm honestly instead of silently omitting the signal: the
-                # ticket runs, but unwatched. The RVW-3 directive echoes this
-                # 'supervision' field verbatim, so the user is never told a false
-                # "I'll report back here". (A just-created task id can have no
-                # pre-existing live watch, so None here is an attach failure — not
-                # the idempotent already-watched case.)
-                result["supervised"] = False
-                result["supervision"] = "supervision unavailable — the ticket will run unwatched"
+    result.update(assign_lane_supervision(db, workspace_id, params, task, title, description, assigned_agent_id))
 
     # PRD-238 S6: the chat renders a live card for the ticket Auto just filed.
     try:
@@ -521,7 +432,6 @@ async def assign_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     task.assigned_agent_id = agent.id
     if task.status == "inbox":
         task.status = "assigned"
-    db.commit()
 
     # PRD-227 US-001: push the assignment to Command Centres, mirroring the human
     # assign path (api/board_tasks.py update_task notify_board_event, event="task_updated").
@@ -529,7 +439,8 @@ async def assign_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
 
     # PRD-224 US-001: assignment wakes the dispatch loop (mirrors
     # api/board_tasks.py:624-632); the loop claims 'assigned' tasks only, so
-    # re-assigning a running ticket is a no-op there.
+    # re-assigning a running ticket is a no-op there. The assignment and its
+    # consent commit together, below: the dispatcher never claims it first.
     if _is_dispatch_claimable(task):
         _consent_for_chat_filed(db, workspace_id, task, params)
         _notify_dispatch_safe(db, workspace_id, task.id)
@@ -828,8 +739,6 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
     from services.operator_stop import apply_explicit_status
 
     apply_explicit_status(task, old_status, new_status, blocked_reason, by="platform_tool")
-
-    db.commit()
 
     # PRD-227 US-001: push the status change to Command Centres, same payload
     # shape + event name as the human PATCH (api/board_tasks.py:912, "status_changed").

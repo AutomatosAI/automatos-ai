@@ -52,19 +52,50 @@ def test_file_cli_ticket_records_the_standing_schedule_consent(monkeypatch):
     monkeypatch.setattr(lane, "open_ticket_for_source", lambda db, ws, st, sid: None)
     monkeypatch.setattr(lane, "host_online", lambda db, ws: False)
     monkeypatch.setattr(lane, "_notify", lambda db, ws, task: None)
-    monkeypatch.setattr(bc, "consent_for_lane_ticket", lambda db, **kw: seen.update(kw) or "created")
 
     class _DB:
+        commits = 0
         def add(self, t): self.t = t
-        def commit(self): pass
-        def refresh(self, t): t.id = 75
+        def flush(self): self.t.id = 75
+        def commit(self): self.commits += 1
+        def refresh(self, t): pass
 
+    db = _DB()
+    # Staged before the commit that files the ticket, on its flushed id: a heartbeat review
+    # claimed 0.66 s after it was filed had its consent skipped (no longer assigned).
+    monkeypatch.setattr(bc, "consent_for_lane_ticket",
+                        lambda session, **kw: seen.update(kw, committed=session.commits, id=kw["task"].id) or "created")
     ticket = lane.file_cli_ticket(
-        _DB(), workspace_id="ws", agent_id=15, title="Heartbeat: Bob", prompt="p",
+        db, workspace_id="ws", agent_id=15, title="Heartbeat: Bob", prompt="p",
         source_type="heartbeat", source_id="agent:15", priority="low",
     )
     assert ticket.status == "assigned" and ticket.blocked_reason == lane.NO_HOST_REASON
     assert seen["task"] is ticket and seen["source_type"] == "heartbeat"
+    assert (seen["commit"], seen["committed"], seen["id"]) == (False, 0, 75) and db.commits == 2
+
+
+def test_a_ticket_asked_for_in_chat_is_staged_with_the_human_s_consent(monkeypatch):
+    from services import cli_ticket_lane as lane
+
+    seen = {}
+    monkeypatch.setattr(lane, "open_ticket_for_source", lambda db, ws, st, sid: None)
+    monkeypatch.setattr(lane, "host_online", lambda db, ws: False)
+    monkeypatch.setattr(lane, "_notify", lambda db, ws, task: None)
+    monkeypatch.setattr(bc, "consent_for_lane_ticket", lambda db, **kw: pytest.fail("a human's ticket is theirs"))
+
+    class _DB:
+        commits = 0
+        def add(self, t): self.t = t
+        def flush(self): self.t.id = 76
+        def commit(self): self.commits += 1
+        def refresh(self, t): pass
+
+    db = _DB()
+    monkeypatch.setattr(bc, "consent_for_created_ticket",
+                        lambda session, **kw: seen.update(kw, committed=session.commits) or "created")
+    lane.file_cli_ticket(db, workspace_id="ws", agent_id=15, title="Chase the order", prompt="p",
+                         source_type="chat", source_id="chat:1", actor="user:7")
+    assert (seen["actor"], seen["why"], seen["commit"], seen["committed"]) == ("user:7", bc.WHY_ASKED_IN_CHAT, False, 0)
 
 
 def test_parking_with_no_host_writes_the_reason_and_a_host_clears_it(monkeypatch):

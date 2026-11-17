@@ -221,6 +221,23 @@ def test_filing_an_assigned_ticket_mirrors_the_http_create_path(monkeypatch):
     assert seen["messages"] == []  # no origin chat → nothing to tell
 
 
+def test_the_consent_commits_with_the_ticket_never_after_it(monkeypatch):
+    """Ticket 343: committed as assigned, then consented; a dispatcher woken in the gap
+    claimed it before its grant existed and parked it. The consent is staged before the
+    one commit that makes the ticket claimable, and the wake still follows that commit."""
+    import services.board_consent as consent
+
+    seen = _capture_filing(monkeypatch)
+    db = _FilingDB()
+    staged = []
+    monkeypatch.setattr(consent, "consent_for_created_ticket",
+                        lambda session, **kw: staged.append((session.commits, kw["task"].id, kw.get("commit")))
+                        or "created")
+    ScheduledTaskService._file_board_task(db, _task(), 77)
+    assert staged == [(0, 501, False)]  # before any commit, on the flushed ticket, not committing
+    assert db.commits == 2 and seen["wakes"][0]["task_id"] == 501
+
+
 def test_filing_an_unassigned_ticket_goes_to_the_inbox_without_a_wake(monkeypatch):
     seen = _capture_filing(monkeypatch)
     db = _FilingDB()

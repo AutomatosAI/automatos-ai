@@ -81,8 +81,8 @@ def _run_again(db: Session, workspace_id: Any, params: Dict[str, Any], before: T
     keep_previous_run(task, why=GIVEN_WHY, by=actor_from_user_id(driver) if driver else BY_AN_AGENT)
     if not _decide(db, task, seen=task.status, values={"status": BACK_TO_AN_AGENT}):
         return out
+    _the_owners_go_ahead(db, workspace_id, task, params)  # staged: _back_to_its_agent's commit carries it
     _back_to_its_agent(db, SimpleNamespace(workspace_id=workspace_id, user_id=driver), task, GIVEN_TO_YOU)
-    _the_owners_go_ahead(db, workspace_id, task, params)
     agent = out.get("assigned_agent") or "its new agent"
     return {**out, "status": task.status, "runs_again": True,
             "message": RUNS_AGAIN.format(label=ticket_label(task, capital=True), agent=agent)}
@@ -90,11 +90,11 @@ def _run_again(db: Session, workspace_id: Any, params: Dict[str, Any], before: T
 
 def _the_owners_go_ahead(db: Session, workspace_id: Any, task: Any, params: Dict[str, Any]) -> None:
     """The owner's word in chat is their consent for the run, as for any card Auto
-    assigns on it (``_consent_for_chat_filed``)."""
+    assigns on it (``_consent_for_chat_filed``). Staged, not committed: the commit
+    that makes the card Assigned carries it, so the dispatcher never claims it first."""
     from modules.tools.discovery.handlers_board_tasks import _consent_for_chat_filed
 
     _consent_for_chat_filed(db, workspace_id, task, params)
-    db.commit()
 
 
 assign_board_task = an_answered_card_runs_again(_assign_board_task)

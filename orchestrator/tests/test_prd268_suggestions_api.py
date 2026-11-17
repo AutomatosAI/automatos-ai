@@ -485,7 +485,7 @@ def test_a_wake_that_fails_after_the_commit_still_answers_the_start_and_audits_i
 
     from services.proactive import start_ticket
 
-    def down(db, task, actor):
+    def down(db, task):
         raise OperationalError("SELECT pg_notify(...)", {}, Exception("the database went away"))
 
     monkeypatch.setattr(start_ticket, "wake", down)
