@@ -4,7 +4,8 @@
 ``agents:chat``. A key's turn runs as its own non-login service user, never user 1 (the owner), so
 it owns its own chats and no admin-only tool is its. It chats only with a lean agent of its
 workspace, in no person's mode, and a model it names must be on the key's allow-list and the
-agent's. Its chat turns count towards its tokens a minute. Real database, real keys.
+agent's. It names that agent by its public id (a UUID), never by integer; a person names it by
+integer, as before. Its chat turns count towards its tokens a minute. Real database, real keys.
 """
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ from core.auth.scopes import AGENTS_CHAT
 
 ALLOWED = [{"provider": "anthropic", "model_id": "claude-haiku-5-5"}]
 LEAN = {"runtime_profile": "lean", "model_allow_list": ALLOWED + [{"provider": "anthropic", "model_id": "claude-sonnet-5-5"}]}
+ASKED = {"content": "Roll for the gate."}
 
 
 @pytest.fixture(scope="module")
@@ -55,8 +57,8 @@ def workspace(new_session):
     agents = {}
     for name, configuration in (("GM", LEAN), ("Generalist", {})):
         agents[name] = s.execute(text(
-            "INSERT INTO agents (name, agent_type, workspace_id, status, configuration) "
-            "VALUES (:n, 'custom', CAST(:w AS uuid), 'active', CAST(:c AS jsonb)) RETURNING id"),
+            "INSERT INTO agents (name, agent_type, workspace_id, status, configuration, public_id) "
+            "VALUES (:n, 'custom', CAST(:w AS uuid), 'active', CAST(:c AS jsonb), gen_random_uuid()) RETURNING id"),
             {"n": name, "w": ws, "c": json.dumps(configuration)}).scalar()
     s.commit()
     s.close()
@@ -87,10 +89,45 @@ def _key(new_session, ws, model_allow_list=ALLOWED):
                                                 system_role="service"))
 
 
+@pytest.fixture
+def platform_agent(new_session):
+    """A lean platform system agent: no workspace owns it, and a person may choose it in any."""
+    s = new_session()
+    row = s.execute(text(
+        "INSERT INTO agents (name, agent_type, workspace_id, status, configuration, is_system_agent, public_id) "
+        "VALUES ('Platform GM', 'custom', NULL, 'active', CAST(:c AS jsonb), TRUE, gen_random_uuid()) "
+        "RETURNING id, public_id"), {"c": json.dumps(LEAN)}).one()
+    s.commit()
+    s.close()
+    yield row.id, str(row.public_id)
+    s = new_session.sweep()
+    s.execute(text("DELETE FROM agents WHERE id = :id"), {"id": row.id})
+    s.commit()
+    s.close()
+
+
 def _ask(new_session, ctx, **request):
     s = new_session()
     try:
-        return chat._checked_lean_request(s, ctx, ChatRequest(message={"content": "Roll for the gate."}, **request))
+        return chat._checked_lean_request(s, ctx, ChatRequest(message=ASKED, **request))
+    finally:
+        s.close()
+
+
+def _turn(new_session, ctx, **request):
+    """What ``api.chat._chat_turn`` checks before it saves anything: the agent it names, then the lean request."""
+    s = new_session()
+    try:
+        named = chat_server_key.with_its_agents_id(s, ctx, ChatRequest(message=ASKED, **request))
+        return named, chat._checked_lean_request(s, ctx, named)
+    finally:
+        s.close()
+
+
+def _public_id(new_session, agent_id):
+    s = new_session()
+    try:
+        return str(s.execute(text("SELECT public_id FROM agents WHERE id = :id"), {"id": agent_id}).scalar_one())
     finally:
         s.close()
 
@@ -153,6 +190,65 @@ def test_a_member_is_checked_as_before(new_session, workspace, lean_on):
                              user=SimpleNamespace(id=1, email=None, clerk_user_id=None))
     assert _ask(new_session, member, agentId=agents["GM"], model="claude-sonnet-5-5").model.model == "claude-sonnet-5-5"
     assert _ask(new_session, member).model is None
+    named, lean = _turn(new_session, member, agentId=agents["GM"], model="claude-sonnet-5-5")  # by integer, as before
+    assert named.agentId == agents["GM"] and lean.model.model == "claude-sonnet-5-5"
+
+
+# --- how the agent is named ----------------------------------------------------------------------------------
+
+def test_agent_id_is_an_integer_or_a_uuid_and_anything_else_is_a_422():
+    public_id = uuid.uuid4()
+    assert ChatRequest(message=ASKED, agentId=str(public_id)).agentId == public_id
+    assert ChatRequest(message=ASKED, agentId=7).agentId == ChatRequest(message=ASKED, agentId="7").agentId == 7  # as before
+    for malformed in ("GM", "", "7a", "not-a-uuid-at-all", 7.5, {"id": 7}, [7]):
+        with pytest.raises(ValidationError):
+            ChatRequest(message=ASKED, agentId=malformed)
+
+
+def test_a_key_names_its_agent_by_uuid_and_a_person_by_integer_before_any_lookup():
+    key = SimpleNamespace(workspace_id=uuid.uuid4(), auth_type="sdk_key")
+    person = SimpleNamespace(workspace_id=uuid.uuid4(), auth_type="clerk")
+    by_integer = ChatRequest(message=ASKED, agentId=7)
+    by_uuid = ChatRequest(message=ASKED, agentId=str(uuid.uuid4()))
+    nobody = ChatRequest(message=ASKED)
+    db = None  # neither refusal nor a person's integer reads the database
+    for ctx, request in ((key, by_integer), (key, ChatRequest(message=ASKED, agentId="7"))):
+        assert _refused(lambda c=ctx, r=request: chat_server_key.with_its_agents_id(db, c, r)) == (
+            422, chat_server_key.NAME_IT_BY_PUBLIC_ID)
+    assert "name the agent by its public id" in chat_server_key.NAME_IT_BY_PUBLIC_ID
+    assert chat_server_key.with_its_agents_id(db, person, by_integer) is by_integer
+    assert _refused(lambda: chat_server_key.with_its_agents_id(db, person, by_uuid)) == (
+        422, chat_server_key.NAME_IT_BY_ITS_ID)
+    assert chat_server_key.with_its_agents_id(db, key, nobody) is nobody  # the lean check refuses it
+
+
+def test_a_key_naming_its_agent_by_public_id_gets_that_agents_turn(new_session, workspace, lean_on):
+    ws, agents = workspace
+    key = _key(new_session, ws)
+    public_id = _public_id(new_session, agents["GM"])
+    named, lean = _turn(new_session, key, agentId=public_id)
+    assert named.agentId == agents["GM"] and lean.server_key and lean.model is None
+    named, lean = _turn(new_session, key, agentId=public_id, model="claude-haiku-5-5")
+    assert lean.model.model == "claude-haiku-5-5"
+    assert _refused(lambda: _turn(new_session, key, agentId=_public_id(new_session, agents["Generalist"]))) == (
+        422, chat_server_key.NAME_A_LEAN_AGENT)                                               # not lean
+    assert _refused(lambda: _turn(new_session, key, agentId=agents["GM"])) == (
+        422, chat_server_key.NAME_IT_BY_PUBLIC_ID)                                            # by integer
+
+
+def test_a_uuid_of_no_agent_of_the_keys_workspace_is_refused_as_such_an_integer_is(new_session, workspace, lean_on,
+                                                                                   platform_agent):
+    ws, agents = workspace
+    key, stranger = _key(new_session, ws), _key(new_session, ws)
+    stranger.workspace_id = uuid.uuid4()
+    platform_id, platform_public_id = platform_agent
+    as_today = _refused(lambda: _ask(new_session, stranger, agentId=agents["GM"]))  # another workspace's integer
+    assert as_today == (422, chat_server_key.NAME_A_LEAN_AGENT)
+    assert _refused(lambda: _ask(new_session, key, agentId=platform_id)) == as_today  # a platform agent's integer
+    for ctx, public_id in ((stranger, _public_id(new_session, agents["GM"])),  # another workspace's agent
+                           (key, str(uuid.uuid4())),                            # no agent at all
+                           (key, platform_public_id)):                          # a platform agent: no looser
+        assert _refused(lambda c=ctx, p=public_id: _turn(new_session, c, agentId=p)) == as_today
 
 
 def test_a_keys_chat_turns_count_towards_its_tokens_a_minute(new_session, workspace):

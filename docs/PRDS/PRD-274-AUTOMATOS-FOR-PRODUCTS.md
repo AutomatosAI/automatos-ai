@@ -286,7 +286,9 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
   filename that a document the key can't reach already has, or whose workspace copy belongs to a document the key
   can't reach; the refusal tells the key such a filename exists in its own workspace.
 - The headless chat turn: `POST /api/chat` with a key listing `agents:chat`, to a lean agent, with `model` and app
-  context (§8-10); the model allow-list on the key (§8-5) (#1476).
+  context (§8-10); the model allow-list on the key (§8-5) (#1476). The key names that agent in `agentId` by its public
+  id (`agents.public_id`, a UUID), so no product keeps a sequential id; an integer is a 422. A member's turn names it by
+  integer, as the web app's agent picker does.
 - Reporting a reply on keys (`reports:write`): `POST /api/v1/reports` takes a server key as well as a member. A key
   reports as its own service user, only an agent's reply in a chat that user holds, tagged with the end user it names
   in `end_user_id` (or with none when it names none); never a member's chat, a public chat, another key's chat, a

@@ -31,7 +31,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from api.agent_execute import IDEMPOTENCY_HEADER
 from api.chat_server_key import (acts_as_its_service_user, answers_a_repeated_key_once, keeps_each_end_users_chats_apart,
-                                 records_a_keyed_turn, what_a_server_key_may_ask)
+                                 records_a_keyed_turn, what_a_server_key_may_ask, with_its_agents_id)
 from core.auth.scopes import AGENTS_CHAT
 from core.auth.server_key_gate import require_workspace_permission_or_server_key
 from core.auth.dependencies import RequestContext
@@ -415,6 +415,7 @@ async def stream_chat(
 @answers_a_repeated_key_once  # PRD-274 W1: a key's Idempotency-Key runs its turn once; a repeat is answered
 async def _chat_turn(request: ChatRequest, ctx: RequestContext, db: Session, idempotency_key: Optional[str] = None):
     """The route's turn; ``idempotency_key`` is read by its wrapper only."""
+    request = with_its_agents_id(db, ctx, request)  # a key names its agent by UUID; from here, an integer id
     logger.info("[chat] RequestContext workspace_id=%s agentId=%s", ctx.workspace_id, request.agentId)
     chat_service = ChatService(db)
     # F145: an admin_only tool is an admin's when the call is made for an active
