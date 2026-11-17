@@ -3,8 +3,9 @@
 Pins:
 
 * **One revision.** ``prd251d_wave3`` chains onto ``credit_ledger_sub_tenant_20261113``, the head
-  it was written on, and is the only revision chained there; the head pins
-  (test_prd209_alembic_single_head, test_prd236_w1_routes) follow it.
+  it was written on. ``chat_turn_keys_20261116`` was written on the same head and merged the same
+  morning, so ``merge_heads_20261117`` joins the two back into one head; the head pins
+  (test_prd209_alembic_single_head, test_prd236_w1_routes) follow the merge.
 * **The migration builds the model's schema:** from where PRD-251C leaves a database, the
   reflected ``social_posts`` is the model's, facet by facet, with ``look`` a nullable JSON column.
 * **Create_all first (the 89d89c250 rule), then the upgrade twice:** no duplicate column, from a
@@ -75,7 +76,11 @@ def test_the_one_wave_revision_chains_onto_the_head_it_was_written_on():
         for p in VERSIONS.glob("*.py")
         if re.search(rf"^down_revision\s*=\s*['\"]{PARENT}['\"]", p.read_text(encoding="utf-8"), re.M)
     )
-    assert chained == ["prd251d_wave3.py"]
+    # Two revisions were written on that head and merged the same morning (17 Nov). Neither is
+    # re-chained, which a database stamped at both would refuse: a merge revision joins them.
+    assert chained == ["chat_turn_keys_20261116.py", "prd251d_wave3.py"]
+    merge = _load(VERSIONS / "merge_heads_20261117.py")
+    assert set(merge.down_revision) == {"prd251d_wave3", "chat_turn_keys_20261116"}
 
 
 def test_the_migration_builds_exactly_the_model_schema():

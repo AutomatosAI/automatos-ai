@@ -429,7 +429,19 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # social_posts.look, a new nullable column; the guard follows it.
     looks = (versions / "prd251d_wave3.py").read_text()
     assert 'down_revision = "credit_ledger_sub_tenant_20261113"' in looks
-    assert 'EXPECTED_HEAD = "prd251d_wave3"' in guard
+    # 2026-11-16 (Automatos for products, Wave 1): chat_turn_keys_20261116 chains onto
+    # credit_ledger_sub_tenant_20261113 too — a new table only. A second head beside prd251d_wave3:
+    # the two merged minutes apart on 17 Nov, each green without the other.
+    turn_keys = (versions / "chat_turn_keys_20261116.py").read_text()
+    assert 'down_revision = "credit_ledger_sub_tenant_20261113"' in turn_keys
+    # 2026-11-17: merge_heads_20261117 joins the two. A database deployed from the two-headed main
+    # is stamped at both (alembic upgrade heads, plural), so neither is re-chained (the
+    # prd266_merge_heads lesson). Pure merge, no schema operations; the guard follows it.
+    joined = (versions / "merge_heads_20261117.py").read_text()
+    assert 'down_revision = (' in joined
+    assert '"prd251d_wave3"' in joined and '"chat_turn_keys_20261116"' in joined
+    assert "from alembic import op" not in joined
+    assert 'EXPECTED_HEAD = "merge_heads_20261117"' in guard
 
 
 def test_orm_row_is_keyed_by_route():
