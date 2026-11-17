@@ -25,14 +25,23 @@ brief, and the note was dropped (only a move to Done kept one): the owner's word
 nowhere on the card, and times_sent_back stayed 0. A note on that move is the owner's
 correction, so it is the board's Reject too. F319: a send-back's answer says so
 (``sent_back``), which is what backs Auto's "I've sent it back".
+
+#0065 (PRD-256 US-005): a move to Done needs the card's artifact unless a person makes it.
+The owner's click on the chat's approval card is a person's (``owner_only.signed_by``: set
+only after a grant he gave this exact call is claimed, and stripped from anything the model
+sends), so it closes the card as the board's Approve does, and the card says what was missing,
+signed by who clicked (``_say_what_was_missing``). Auto's call alone, or an agent's run, is
+refused as before.
 """
 from __future__ import annotations
 
 import functools
 from types import SimpleNamespace
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
+
+from services.done_needs_an_artifact import DONE
 
 Handler = Callable[[Session, Any, Dict[str, Any]], Awaitable[Dict[str, Any]]]
 
@@ -63,14 +72,18 @@ def keeps_the_board_rules(handler: Handler) -> Handler:
         listed = _listed(params)
         if listed and len(listed) > MAX_BULK_TASK_IDS:  # refused whole by the handler, nothing moved first
             return await handler(db, workspace_id, params)
-        decided = _the_boards_way(db, workspace_id, listed or [params.get("task_id")], params)
+        refs = listed or [params.get("task_id")]
+        decided = _the_boards_way(db, workspace_id, refs, params)
+        lacking = _what_the_click_closes_without(db, workspace_id, refs, params)  # #0065: read before the move
         if not decided:
             result = await handler(db, workspace_id, params)
+            _say_what_was_missing(db, workspace_id, params, result, lacking)
             _keep_the_note(db, workspace_id, params, result)
             return _queued(db, workspace_id, params, result)
         if listed is None:
             return next(iter(decided.values()))
-        return _queued(db, workspace_id, params, await _the_rest(handler, db, workspace_id, params, listed, decided))
+        rest = await _the_rest(handler, db, workspace_id, params, (listed, decided, lacking))
+        return _queued(db, workspace_id, params, rest)
     return wrapped
 
 
@@ -92,11 +105,14 @@ def _queued(db: Session, workspace_id: Any, params: Dict[str, Any], result: Any)
 
 
 async def _the_rest(handler: Handler, db: Session, workspace_id: Any, params: Dict[str, Any],
-                    listed: List[Any], decided: Dict[int, Dict[str, Any]]) -> Dict[str, Any]:
+                    read: Tuple[List[Any], Dict[int, Dict[str, Any]], Dict[int, str]]) -> Dict[str, Any]:
     """A bulk call with tickets already answered the board's way: the handler moves
-    the rest, and the answer counts them all."""
+    the rest, and the answer counts them all. ``read``: the tickets listed, the answers
+    already given, and what the click closes each card without (#0065)."""
+    listed, decided, lacking = read
     rest = [ref for ref in listed if _as_id(ref) not in decided]
     result = await handler(db, workspace_id, {**params, "task_ids": rest}) if rest else {}
+    _say_what_was_missing(db, workspace_id, params, result, lacking)
     _keep_the_note(db, workspace_id, params, result)
     return _bulk_answer(params.get("status"), len(listed), decided, result)
 
@@ -118,8 +134,10 @@ def _in_the_boards_words(params: Dict[str, Any]) -> Dict[str, Any]:
 def _the_boards_way(db: Session, workspace_id: Any, refs: List[Any], params: Dict[str, Any]) -> Dict[int, Dict[str, Any]]:
     """The tickets this call moves as the board would, by id, with each one's answer:
     a refusal in the board's words, or a send-back through the board's Reject. The
-    rest are the handler's to move."""
-    new_status = params.get("status")
+    rest are the handler's to move. A move the owner clicked is a person's (#0065)."""
+    from modules.tools.discovery.owner_only import signed_by
+
+    new_status, clicked = params.get("status"), bool(signed_by(params))
     answers: Dict[int, Dict[str, Any]] = {}
     if not isinstance(new_status, str):
         return answers
@@ -129,7 +147,7 @@ def _the_boards_way(db: Session, workspace_id: Any, refs: List[Any], params: Dic
         if sends_it_back(task, new_status, params):
             answers[task.id] = _send_back(db, workspace_id, task, params)
             continue
-        refusal = board_refusal(db, task, new_status)
+        refusal = board_refusal(db, task, new_status, clicked=clicked)
         if refusal:
             answers[task.id] = _refused(task, refusal)
     return answers
@@ -154,19 +172,20 @@ def _tickets(db: Session, workspace_id: Any, refs: List[Any]) -> List[Any]:
     return db.query(BoardTask).filter(BoardTask.id.in_(ids), BoardTask.workspace_id == workspace_id).all()
 
 
-def board_refusal(db: Session, task: Any, new_status: str) -> Optional[str]:
+def board_refusal(db: Session, task: Any, new_status: str, *, clicked: bool = False) -> Optional[str]:
     """``move_refusal`` for this ticket: a running ticket waits or is cancelled, and a
     finished column needs work on the card. PRD-256 US-005: Done needs the artifact the
-    card was for (``services.done_needs_an_artifact``, the board's Approve's rule too).
-    F457: the chat's card reads it too (``send_back_checks``), so it never asks about a
-    move the board would refuse."""
+    card was for (``services.done_needs_an_artifact``) unless a person moves it: ``clicked``,
+    the owner's click on the chat's card, closes it as the board's Approve does (#0065); Auto's
+    call alone is refused. F457: the chat's card reads it too (``send_back_checks``), so it
+    never asks about a move the board would refuse."""
     from api.board_tasks import MISSION_TICKET_TYPES, _running_now
     from services.board_drag_rules import move_refusal
     from services.done_needs_an_artifact import done_refusal
 
     return move_refusal(task, new_status, running=_running_now(db, task),
                         mission_ticket=getattr(task, "source_type", None) in MISSION_TICKET_TYPES) \
-        or done_refusal(db, task, new_status)
+        or (None if clicked else done_refusal(db, task, new_status))
 
 
 def _send_back(db: Session, workspace_id: Any, task: Any, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -189,6 +208,41 @@ def _send_back(db: Session, workspace_id: Any, task: Any, params: Dict[str, Any]
         return _refused(task, str(refused.detail))
     return {"success": True, "task_id": task.id, "status": task.status, "triggered_execution": True,
             SENT_BACK_SAID: True, "message": SENT_BACK_WITH_A_NOTE if note else SENT_BACK_WITHOUT_ONE}
+
+
+def _what_the_click_closes_without(db: Session, workspace_id: Any, refs: List[Any],
+                                   params: Dict[str, Any]) -> Dict[int, str]:
+    """#0065: for a move to Done the owner clicked, what each card not Done yet lacks
+    (``done_needs_an_artifact.closed_without``), by id, read before the move; {} for any
+    other move. A card already Done is not this click's close, so it is never noted again."""
+    from modules.tools.discovery.owner_only import signed_by
+
+    if not signed_by(params) or params.get("status") != DONE:
+        return {}
+    from services.done_needs_an_artifact import closed_without
+
+    said = {task.id: closed_without(db, task) for task in _tickets(db, workspace_id, refs) if task.status != DONE}
+    return {task_id: note for task_id, note in said.items() if note}
+
+
+def _say_what_was_missing(db: Session, workspace_id: Any, params: Dict[str, Any], result: Any,
+                          lacking: Dict[int, str]) -> None:
+    """#0065: each card the owner's click moved to Done without the Socials post or the
+    Deliverable it asked for (``lacking``) says so, signed by who clicked, as the board's own
+    close says it. Nothing for a move no one clicked: that one was refused (``board_refusal``)."""
+    from modules.tools.discovery.handlers_board_task_done import moved_to_done
+    from modules.tools.discovery.owner_only import signed_by
+
+    moved = [task_id for task_id in moved_to_done(result) if task_id in lacking] \
+        if lacking and isinstance(result, dict) else []
+    if not moved:
+        return
+    from services.cli_host_service import append_session_note
+
+    for task_id in moved:
+        append_session_note(db, task_id=task_id, workspace_id=workspace_id, note=lacking[task_id],
+                            by=signed_by(params))
+    db.commit()
 
 
 def _keep_the_note(db: Session, workspace_id: Any, params: Dict[str, Any], result: Any) -> None:

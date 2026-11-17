@@ -13,6 +13,9 @@
   any other column says, in words, what it needs.
 - The board's Assign left no note on the card (#0313, #0332), while Auto's does
   ("Auto · Gave this to Analyst, in chat."). It now says "you · Gave this to …".
+- PRD-256 US-005 (#0065): a person's Approve closes a card that lacks the Socials post or
+  the Deliverable it asked for, and the card says what was missing (``done_by_hand``);
+  only a caller that is not a person is refused.
 
 It lives here because api/board_tasks.py is over 800 lines and does not grow.
 """
@@ -94,6 +97,22 @@ def approve_outside_review(db: Session, task: Any, note: str) -> Dict[str, Any]:
             "message": f"{label} was done already: your note is kept on it{teaches}."}
 
 
+def done_by_hand(db: Session, ctx: Any, task: Any) -> bool:
+    """PRD-256 US-005 (#0065): Approve's move of ``task`` to Done, before anything moves. True
+    for a person's, which closes the card whatever it lacks (what was missing is read once the
+    approval's own action has run: ``done_needs_an_artifact.closed_without``). Any other
+    caller's (a request with no credential; an in-process call for Auto, with no person's lane),
+    short of the card's artifact, is a 409 in the refusal's words, as Auto's status tool gets."""
+    from services.done_needs_an_artifact import a_persons_request, missing_artifact
+
+    if a_persons_request(ctx):
+        return True
+    refused = missing_artifact(db, task)
+    if refused:
+        raise HTTPException(status_code=409, detail=refused)
+    return False
+
+
 def assign_note(db: Session, workspace_id: Any, was: Optional[int], now: Optional[int]) -> Optional[str]:
     """The note the board's Assign leaves (#0313, #0332): who the card went to, or whose
     it no longer is. None when the agent is the same."""
@@ -111,4 +130,4 @@ def assign_note(db: Session, workspace_id: Any, was: Optional[int], now: Optiona
     return TOOK_ITS_AGENT_OFF.format(name=name(was) or "its agent") + "."
 
 
-__all__ = ["approve_outside_review", "assign_note", "call_off", "label_of", "left_as_it_is"]
+__all__ = ["approve_outside_review", "assign_note", "call_off", "done_by_hand", "label_of", "left_as_it_is"]

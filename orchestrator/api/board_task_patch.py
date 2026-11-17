@@ -71,9 +71,10 @@ def patch_agent(db: Session, workspace_id: Any, task: BoardTask, body: Dict[str,
 
 
 def refuse_the_patch(db: Session, task: BoardTask, body: Dict[str, Any], new_status: Optional[str],
-                     agent: Optional[int]) -> None:
+                     agent: Optional[int], *, ctx: Any) -> None:
     """Every refusal of the PATCH, before anything is written. A repeat of the
-    ticket's own status moves nothing, so nothing refuses it."""
+    ticket's own status moves nothing, so nothing refuses it. ``ctx`` is who sent it: a
+    person's move to Done is never refused for the card's artifact (PRD-256 US-005)."""
     from api import board_tasks as bt
 
     check_fields(body)
@@ -88,7 +89,7 @@ def refuse_the_patch(db: Session, task: BoardTask, body: Dict[str, Any], new_sta
     after = as_patched(task, assigned_agent_id=agent, result=body.get("result", task.result))
     refusal = drag_refusal(after, new_status, running=bt._running_now(db, task),
                            mission_ticket=task.source_type in bt.MISSION_TICKET_TYPES) \
-        or bt.done_refusal(db, after, new_status)  # PRD-256 US-005: Done needs the card's artifact
+        or bt.done_refusal(db, after, new_status, ctx=ctx)  # PRD-256 US-005: only a person's skips the artifact
     if refusal:
         raise HTTPException(status_code=409, detail=refusal)
 
@@ -121,6 +122,19 @@ def patch_fields(task: BoardTask, body: Dict[str, Any]) -> None:
             setattr(task, field, body[field])
     if body.get("note"):
         add_operator_note(task, body["note"])
+
+
+def note_a_close_by_hand(db: Session, ctx: Any, task: BoardTask, new_status: Optional[str]) -> None:
+    """PRD-256 US-005 (#0065): a person's drag or PATCH of ``task`` to Done closes it whatever it
+    lacks, and the card says what was missing (``done_needs_an_artifact.closed_without``). The
+    note is an operator note on the row this request writes (``add_operator_note``), as the
+    PATCH's own note is, so neither write overwrites the other. Nothing for any other move, a
+    card already Done, or a caller that is not a person (its move was refused before this)."""
+    from services.done_needs_an_artifact import DONE, a_persons_request, closed_without
+
+    if new_status != DONE or task.status == DONE or not a_persons_request(ctx):
+        return
+    add_operator_note(task, closed_without(db, task) or "")
 
 
 def note_the_assign(db: Session, task: BoardTask, agent: Optional[int]) -> None:

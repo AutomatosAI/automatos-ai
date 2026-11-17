@@ -30,10 +30,13 @@ OPERATOR_NOTE_BY = "you"
 
 
 def record_approval(db: Session, task_id: int, *, workspace_id: Any, decided_at: datetime,
-                    action_result: Optional[Dict[str, Any]], note: str = "") -> bool:
+                    action_result: Optional[Dict[str, Any]], note: str = "", missing: Optional[str] = None) -> bool:
     """Put the approval's result, and its note when it has one, on the ticket while
     it is still this approval's 'done' (F195); the caller commits. True when the
-    ticket is still this approval's."""
+    ticket is still this approval's. PRD-256 US-005 (#0065): ``missing`` is what the
+    card lacked when a person approved it anyway (``done_needs_an_artifact.closed_without``,
+    read after the approval's own action), kept as it is said, so it lands, and rolls back,
+    with the approval itself. None or '' when nothing was missing."""
     kept = (func.coalesce(func.nullif(BoardTask.result, ""), json.dumps(action_result))
             if action_result else BoardTask.result)
     still_approved = bool(
@@ -41,6 +44,10 @@ def record_approval(db: Session, task_id: int, *, workspace_id: Any, decided_at:
         .filter(BoardTask.id == task_id, BoardTask.status == "done", BoardTask.completed_at == decided_at)
         .update({BoardTask.result: kept}, synchronize_session=False)
     )
+    if still_approved and missing:
+        from services.cli_host_service import append_session_note
+
+        append_session_note(db, task_id=task_id, workspace_id=workspace_id, note=missing, by=OPERATOR_NOTE_BY)
     if still_approved and note:
         _keep_note(db, task_id=task_id, workspace_id=workspace_id, note=note)
     return still_approved
