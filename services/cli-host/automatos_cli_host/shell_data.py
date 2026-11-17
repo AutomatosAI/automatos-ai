@@ -55,6 +55,11 @@ SED_ESCAPE_RE = SedReader()
 # A shell reference in a word (``$F``, ``${X}``, ``$(…)``, a bare ``$``): the word's
 # text is only known when the line runs, so it is never data.
 SHELL_REFERENCE_RE = re.compile(r"\$(?:[{(]|[A-Za-z_0-9@*#?!$])|^\$$")
+# A glob (``*``, ``?``, ``[``) or a brace with ``,`` or ``..``: unquoted, the shell
+# expands it into other words — real files — before the tool runs, and after
+# tokenising the gate cannot tell it was quoted. So it is never data either: judged
+# as a path (``grep /etc/* f`` reads ``/etc/*``), the same as a ``$`` reference.
+GLOB_OR_BRACE_RE = re.compile(r"[*?[]|\{[^{}]*(?:,|\.\.)[^{}]*\}")
 
 @dataclass(frozen=True)
 class ScriptVerb:
@@ -73,10 +78,12 @@ class ScriptVerb:
 
 
 SCRIPT_VERBS: Mapping[str, ScriptVerb] = {
-    # gawk's ``-i`` loads a library by name (``-i inplace``): a value, path-checked.
+    # gawk's ``-i``/``--include`` loads awk source and ``-l``/``--load`` a shared
+    # library (``-i inplace`` too): code from a file, refused like ``-f`` and ``-E``.
     "awk": ScriptVerb(
-        AWK_ESCAPE_RE, ("-e", "--source"), ("-f", "--file", "--include", "-E", "--exec"),
-        ("-v", "--assign", "-F", "--field-separator", "-i", "-l", "--load"),
+        AWK_ESCAPE_RE, ("-e", "--source"),
+        ("-f", "--file", "--include", "-E", "--exec", "-i", "-l", "--load"),
+        ("-v", "--assign", "-F", "--field-separator"),
         flags=("-safe", "-version", "--version", "-V", "-h", "--help", "-b", "--characters-as-bytes", "-c",
                "--traditional", "-C", "--copyright", "-g", "--gen-pot", "-k", "--csv", "-M", "--bignum", "-n",
                "--non-decimal-data", "-N", "--use-lc-numeric", "-O", "--optimize", "-P", "--posix", "-r",
@@ -99,26 +106,42 @@ class Program:
     word that holds it."""
     texts: Tuple[Tuple[int, str], ...]
     from_file: bool = False          # a program file the gate cannot read
+    unreadable: bool = False         # an option the gate cannot read — the program may be anything
     certain: bool = True             # every option known, no program option after the first operand
 
 
+_OPTION_GROUPS = ("text", "file", "value", "suffix", "flag")
+
+
 def _kind(spec: ScriptVerb, option: str) -> str:
-    for kind, names in (("text", spec.text_options), ("file", spec.file_options), ("value", spec.value_options),
-                        ("suffix", spec.suffix_options), ("flag", spec.flags)):
+    for kind, names in zip(_OPTION_GROUPS, (spec.text_options, spec.file_options, spec.value_options,
+                                            spec.suffix_options, spec.flags)):
         if option in names:
             return kind
     return "unknown"
 
 
+def _long_prefix_kind(spec: ScriptVerb, name: str) -> str:
+    """GNU getopt_long takes a unique prefix of a long option (``--so`` is ``--source``,
+    ``--fi`` is ``--file``): the kind of the one option ``name`` abbreviates, or
+    'unknown' when it abbreviates none or several — both fail closed for a program verb."""
+    options = (*spec.text_options, *spec.file_options, *spec.value_options, *spec.suffix_options, *spec.flags)
+    matches = [opt for opt in options if opt.startswith("--") and opt.startswith(name)]
+    return _kind(spec, matches[0]) if len(matches) == 1 else "unknown"
+
+
 def _option(spec: ScriptVerb, word: str) -> Tuple[str, Optional[str]]:
     """What one option word is (text | file | value | flag | unknown) and the value
     glued to it, None when the next word holds it. Short options combine (``-ne``)
-    and take a glued value (``-F,``, ``-es/a/b/``), the way getopt reads them."""
+    and take a glued value (``-F,``, ``-es/a/b/``), the way getopt reads them; a long
+    option may be a unique prefix (``_long_prefix_kind``)."""
     if word in spec.flags:
         return "flag", None
     if word.startswith("--"):
         name, eq, value = word.partition("=")
         kind = _kind(spec, name)
+        if kind == "unknown":
+            kind = _long_prefix_kind(spec, name)
         return ("flag" if kind == "suffix" else kind), (value if eq else None)
     for position, letter in enumerate(word[1:], start=1):
         kind = _kind(spec, "-" + letter)
@@ -133,7 +156,9 @@ def read_program(spec: ScriptVerb, words: Sequence[str]) -> Program:
     """The program a script verb runs, from its words (the verb first): every ``-e``
     text wherever it sits (GNU permutes options) and, when none came before it, the
     first operand. All of them are read by the escape check. A program option after
-    the first operand, or an option this reading does not know, makes it uncertain."""
+    the first operand makes it uncertain; an option this reading does not know (so it
+    cannot tell a flag from one that swallows the next word, the program among it) is
+    refused — ``unreadable`` — rather than guessed."""
     texts: List[Tuple[int, str]] = []
     first: Optional[int] = None
     early, certain, i = False, True, 1
@@ -148,6 +173,8 @@ def read_program(spec: ScriptVerb, words: Sequence[str]) -> Program:
         kind, glued = _option(spec, word)
         if kind == "file":
             return Program(tuple(texts), from_file=True, certain=False)
+        if kind == "unknown":
+            return Program(tuple(texts), unreadable=True, certain=False)
         if kind in ("text", "value"):
             at = i if glued is not None else i + 1
             if kind == "text" and at < len(words):
@@ -155,7 +182,7 @@ def read_program(spec: ScriptVerb, words: Sequence[str]) -> Program:
                 early, certain = early or first is None, certain and first is None
             i = at + 1
             continue
-        certain, i = certain and kind == "flag", i + 1
+        i += 1      # a flag this reading knows; certain unchanged
     if first is not None and not early:
         texts = [(first, words[first]), *texts]
     return Program(tuple(texts), certain=certain)
@@ -375,13 +402,15 @@ def data_positions(words: Sequence[str]) -> Tuple[int, ...]:
     """The indexes of the words of one simple command (the verb first; wrappers and
     git's global options already stepped over) that are a pattern or a program its
     tool reads: the command-word rules and the ``..`` check leave them out. Empty for
-    every other tool, for an awk program, whenever the reading is not certain, and
-    when one of them holds a shell reference (its text is only known when the line runs)."""
+    every other tool, for an awk program, whenever the reading is not certain, and when
+    one of them holds a shell reference or a glob/brace (its words are only known when
+    the line runs, so each such word is judged whole, as a command and a path)."""
     spec = SCRIPT_VERBS.get(Path(words[0]).name) if words else None
     if not words or (spec is not None and not spec.program_is_data):
         return ()
     positions = _positions(words)
-    if any(SHELL_REFERENCE_RE.search(words[index]) for index in positions):
+    if any(SHELL_REFERENCE_RE.search(words[index]) or GLOB_OR_BRACE_RE.search(words[index])
+           for index in positions):
         return ()
     return positions
 

@@ -73,6 +73,9 @@ NEVER_ALLOWED_BASH = (
     re.compile(r"(^|[;&|(]\s*)(sudo|su)\b"),
     re.compile(r"(^|[;&|(]\s*)rm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+/(\s|$)"),
     re.compile(r"(^|[;&|(]\s*)curl\b.*\|\s*(ba|z)?sh\b"),
+    # ``RIPGREP_CONFIG_PATH`` names a config rg reads before its arguments, and a
+    # config can carry ``--pre`` (a program rg runs). Set, exported or env-assigned.
+    re.compile(r"(^|[\s;&|(])(export\s+)?RIPGREP_CONFIG_PATH\b"),
 )
 
 # Always a card, even in Auto mode, and even when the verb
@@ -704,7 +707,9 @@ def _judge_args(verb: str, args: Sequence[str], bindings: Bindings, roots: Seque
     question; a path built from a reference nothing on the line defined is a
     question."""
     verdicts: List[Decision] = []
-    for value in (v for arg in args for v in _expand(arg, bindings)):
+    # Braces expand before the path is read (``{x,/etc/shadow}`` is two words, one a
+    # real path), as for the ``..`` check; then the line's variables.
+    for value in (v for arg in args for a in secret_reach.expand_braces(arg)[0] for v in _expand(a, bindings)):
         path = _path_argument(value)
         if path is not None:
             verdict = _judge_path(path, roots)
@@ -878,11 +883,12 @@ def _judge_script(head: str, words: Sequence[str], bindings: Bindings) -> Decisi
     if spec is None:
         return Decision("allow")
     program = read_program(spec, words)
-    if program.from_file:
-        return Decision("deny", f"{head} reads its program from a file the gate cannot judge")
-    for text in (value for _, text in program.texts for value in {text, *_expand(text, bindings)}):
-        if spec.runs_a_command(text):
-            return Decision("deny", f"{head} program runs a command of its own: {text[:60]!r}")
+    if program.from_file or program.unreadable:
+        where = "from a file" if program.from_file else "through an option"
+        return Decision("deny", f"{head} reads its program {where} the gate cannot judge")
+    for candidate in (value for _, text in program.texts for value in {text, *_expand(text, bindings)}):
+        if spec.runs_a_command(candidate):
+            return Decision("deny", f"{head} program runs a command of its own: {candidate[:60]!r}")
     return Decision("allow")
 
 
@@ -933,17 +939,10 @@ def _judge_simple(words: Sequence[str], targets: Sequence[str], bindings: Bindin
         # refusal — the session holds the call while a card is shown on the ticket's
         # Canvas; no answer in time is a deny (the ticket lands in review).
         if ctx.permission_mode == MODE_AUTO:
-            # Auto mode (``--unlisted-bash allow`` until 2026-09-29): the operator chose to run what the
-            # list does not name. NEVER_ALLOWED_BASH was refused above, the explicit
-            # ask-list still asks — and the ARGUMENTS are still judged as paths.
-            #
-            # They were not. This returned ``on_targets`` (redirections) alone, so an
-            # unlisted verb could read any file on the machine: ``xxd /etc/passwd``,
-            # ``od -c ~/.ssh/id_rsa``, ``strings``, ``base64`` — all allowed, while
-            # ``cat`` of the same path was refused. The comment here and
-            # test_auto_mode_runs_unknown_verbs_but_keeps_the_hard_lines (then test_unlisted_bash_allow_…) both
-            # said otherwise; found 2026-09-22 when that test's stand-in verb changed.
-            # "Allow what the list does not name" means the VERB, never the path.
+            # Auto mode (``--unlisted-bash allow``): the operator chose to run what the
+            # list does not name — but "allow what is not named" means the VERB, never the
+            # path. The ARGUMENTS are still judged, or an unlisted ``xxd``/``od``/``base64``
+            # could read any file on the machine while ``cat`` of it was refused (2026-09-22).
             return _worst([Decision("allow", ALLOWED_UNLISTED_BASH.format(command=_first_words(joined))),
                            on_targets, on_globals, _judge_args(words[0], _operands(words), bindings, roots)])
         return _worst([on_targets, Decision("ask", f"{_first_words(joined)!r} is outside this ticket's Bash allowlist")])

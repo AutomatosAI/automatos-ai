@@ -309,3 +309,79 @@ def test_a_dotdot_the_shell_assembles_is_refused(gate, line):
     """Quotes, escapes and braces put ``..`` together only when the shell reads the
     line, so the raw text never shows it: the check reads the words, braces expanded."""
     assert gate(line).behavior == "deny", line
+
+
+# ── the scan of the pushed PR: more holes where text was read as data ───────
+
+@pytest.mark.parametrize("line", [
+    "grep /etc/* orchestrator/x",
+    "rg /etc/* orchestrator/x",
+    "git grep /etc/* orchestrator",
+    "grep '/etc/*' orchestrator/x",                  # quoted: the gate cannot tell after tokenising
+])
+def test_an_unquoted_glob_pattern_is_judged_as_a_path(gate, line):
+    """Unquoted, ``/etc/*`` expands into real files outside the session before the tool
+    runs; after tokenising a quoted one looks the same. So a pattern holding a glob or a
+    brace is not data — it is judged as a path, like a word holding ``$``."""
+    assert gate(line).behavior == "deny", line
+
+
+@pytest.mark.parametrize("line", [
+    "grep -n 'foo.*bar' orchestrator/x.py",          # a relative glob stays inside the session
+    "grep '^$' orchestrator/x.py",
+])
+def test_a_relative_glob_pattern_still_runs(gate, line):
+    """Judged as a path, a relative one resolves under the session directory, so it is
+    allowed — only an absolute or ``..`` path is refused."""
+    assert gate(line).behavior == "allow", line
+
+
+def test_a_brace_operand_is_expanded_before_the_path_check(gate):
+    """``{x,/etc/shadow}`` is two words, one a real path outside the session; the path
+    check expands braces, as the ``..`` check does, and judges each word."""
+    assert gate("grep {x,/etc/shadow} orchestrator/x").behavior == "deny"
+
+
+@pytest.mark.parametrize("line", [
+    "awk -i evil.awk 'p' orchestrator/x",            # gawk's include loads awk source
+    "awk -l evil 'p' orchestrator/x",                # --load loads a shared library
+    "awk --load evil 'p' orchestrator/x",
+    "awk -ievil.awk 'p' orchestrator/x",             # glued short option
+    "awk --load=evil 'p' orchestrator/x",            # glued long option
+])
+def test_an_awk_option_that_loads_code_from_a_file_is_refused(gate, line):
+    decision = gate(line)
+    assert decision.behavior == "deny" and "from a file" in decision.reason, (line, decision)
+
+
+@pytest.mark.parametrize("line", [
+    "RIPGREP_CONFIG_PATH=./c rg foo",
+    "env RIPGREP_CONFIG_PATH=./c rg foo",
+    "export RIPGREP_CONFIG_PATH=./c; rg foo",
+])
+def test_setting_ripgrep_config_path_is_refused(gate, line):
+    """An rg config can carry ``--pre`` (a program rg runs), so setting, exporting or
+    env-assigning ``RIPGREP_CONFIG_PATH`` is never allowed in a session."""
+    decision = gate(line)
+    assert decision.behavior == "deny" and "never allowed" in decision.reason, (line, decision)
+
+
+@pytest.mark.parametrize("line", [
+    "sed --expr='r /etc/passwd' p orchestrator/x",   # --expr is --expression; r reads a file
+    "sed --fi=prog.sed 's/a/b/' orchestrator/x",      # --fi is --file
+    "awk --so='BEGIN{system(\"id\")}' p orchestrator/x",   # --so is --source
+    "sed --expression='w /etc/x' orchestrator/x",
+    "awk --source='BEGIN{system(\"id\")}' orchestrator/x",
+])
+def test_an_abbreviated_sed_or_awk_long_option_is_read_or_refused(gate, line):
+    """getopt_long takes a unique prefix, so an abbreviation reaches the real option and
+    its program is read; an abbreviation that matches none or several fails closed."""
+    assert gate(line).behavior == "deny", line
+
+
+@pytest.mark.parametrize("line", [
+    "sed -n '1,5p' orchestrator/x",
+    "sed --quiet '1,5p' orchestrator/x",             # --quiet is known in full
+])
+def test_a_known_sed_option_still_runs(gate, line):
+    assert gate(line).behavior == "allow", line
