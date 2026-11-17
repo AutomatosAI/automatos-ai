@@ -843,6 +843,29 @@ export interface SocialTemplateSummary {
   sample_data?: Record<string, string | number | boolean>
 }
 
+/** POST /api/socials/templates/{id}/preview-page (PRD-251D US-D201): what the editor has on screen. */
+export interface SocialPreviewPageInput {
+  /** Each filled field's value; a field left out is empty. */
+  values: Record<string, string | number | boolean>
+  /** One of the template's sizes ("1080x1350"); null for its first. */
+  size: string | null
+  /** A ticked channel posts it as a story: a 9:16 keeps the story's safe zone. */
+  story: boolean
+  /** The photo spots the post holds a picture for: each shows a marker where the picture goes. */
+  photos: string[]
+}
+
+/** The template as one self-contained page, and the version of the kit's font faces it expects. */
+export interface SocialPreviewPage {
+  html: string
+  fonts_version: string
+}
+
+/** GET /api/socials/brand-kit/preview-fonts: the kit's @font-face rules, each file a data: URI. */
+export interface SocialPreviewFonts {
+  css: string
+}
+
 /** GET /api/socials/footage (D12, D15): the generation toolkit a render would use per kind, or why none. */
 export interface SocialFootageKind {
   available: boolean
@@ -3602,6 +3625,22 @@ class ApiClient {
   async listSocialTemplates(format?: string): Promise<SocialTemplateSummary[]> {
     const query = format ? `?format=${encodeURIComponent(format)}` : ''
     return this.request<SocialTemplateSummary[]>(`/api/socials/templates${query}`)
+  }
+
+  /** POST /api/socials/templates/{id}/preview-page (PRD-251D US-D201): the image template as one
+   * self-contained page for the words on screen, filled and escaped on the server. It runs only in
+   * a frame with sandbox="allow-scripts"; 422 says why a template or a value cannot make one. */
+  async getSocialTemplatePreviewPage(templateId: string, input: SocialPreviewPageInput): Promise<SocialPreviewPage> {
+    return this.request<SocialPreviewPage>(`/api/socials/templates/${templateId}/preview-page`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  }
+
+  /** GET /api/socials/brand-kit/preview-fonts (PRD-251D US-D201): the kit's font faces for the
+   * instant preview, fetched once per kit (the page's `fonts_version`). */
+  async getSocialPreviewFonts(): Promise<SocialPreviewFonts> {
+    return this.request<SocialPreviewFonts>('/api/socials/brand-kit/preview-fonts')
   }
 
   /** The workspace's connected social channels and the post kinds each can publish (D8). */

@@ -100,7 +100,7 @@ from sqlalchemy.orm import Session
 
 from api.socials_campaigns import router as campaigns_router
 from api.socials_channels import router as channels_router
-from api import socials_brand, socials_compose, socials_preview, socials_render_crops
+from api import socials_brand, socials_compose, socials_instant_preview, socials_preview, socials_render_crops
 from api.socials_publish import router as publish_router
 from api.socials_compose import router as compose_router
 from api.socials_delete import router as delete_router
@@ -149,7 +149,7 @@ for sub_router in (
     channels_router, targets_router, compose_router, campaigns_router, publish_router, templates_router,
     slots_router, media_upload_router,  # PRD-251B: planned slots (US-B105), an uploaded visual (US-B109)
     retake_router, plans_router,  # PRD-251B: another take (US-B111); plans and their bank (US-B202, US-B203)
-    delete_router,  # 3 Oct 2026: deleting a post that has not gone out
+    delete_router, socials_instant_preview.router,  # 3 Oct 2026: deleting a post that has not gone out; PRD-251D US-D201
     history_router,  # PRD-251C US-C103: what the workspace posted
 ):
     router.include_router(sub_router)  # their routes take this router's prefix and gate (the composer: US-207)

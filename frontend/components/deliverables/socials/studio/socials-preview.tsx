@@ -7,6 +7,9 @@
  * video's length); "Preview out of date" after an edit to what a render reads; the note on
  * what was rendered or what the full render will cost; and the channel's own copy with its
  * count against the channel's limit (red over it, and Submit waits).
+ * PRD-251D US-D201 (E8): an image post with a template whose file is not current shows its
+ * instant preview instead (use-instant-preview.ts): the template's own page for the words on
+ * screen, in a sandboxed frame, labelled a preview. Once its render is current, the render shows.
  */
 import { useState } from 'react'
 
@@ -18,7 +21,10 @@ import { ChannelCopyField } from '../socials-channel-copy'
 import { lengthLabel } from './socials-calendar-model'
 import { aspectOf, renderRatios, slotInput, type EditorDraft } from './editor-model'
 import { CARD, HINT, Hint, Segmented } from './editor-ui'
+import { InstantPreviewFrame } from './instant-preview-frame'
+import { INSTANT_PREVIEW_NOTE, PREVIEW_PAUSED, renderIsCurrent } from './instant-preview-model'
 import { PREVIEW_STALE, fileForAspect, previewStale, renderNote, renderedAt, type PreviewFile } from './preview-model'
+import { useInstantPreview, type InstantPreview } from './use-instant-preview'
 import { usePreviewMedia } from './use-preview-media'
 
 export const CHANNEL_COPY_HINT = 'Each channel starts from the same base copy. An edit here changes this channel only.'
@@ -33,9 +39,11 @@ interface FrameProps {
   length: string | null
   stale: boolean
   textOnly: boolean
+  /** PRD-251D US-D201: the instant preview, shown in place of the file; null keeps today's frame. */
+  instant: InstantPreview | null
 }
 
-function PostFrame({ brand, channel, slot, copy, file, aspect, length, stale, textOnly }: FrameProps) {
+function PostFrame({ brand, channel, slot, copy, file, aspect, length, stale, textOnly, instant }: FrameProps) {
   return (
     <div className="flex flex-col gap-3 rounded-[14px] border border-border bg-[#121110] p-4">
       <div className="flex items-center gap-2.5">
@@ -52,9 +60,11 @@ function PostFrame({ brand, channel, slot, copy, file, aspect, length, stale, te
         <div
           data-testid="socials-preview-frame"
           className="relative mx-auto w-full max-w-[360px] overflow-hidden rounded-lg bg-[#141210]"
-          style={{ aspectRatio: aspect.replace(':', ' / ') }}
+          style={{ aspectRatio: instant ? `${instant.width} / ${instant.height}` : aspect.replace(':', ' / ') }}
         >
-          {file ? (
+          {instant ? (
+            <InstantPreviewFrame page={instant.page} width={instant.width} height={instant.height} />
+          ) : file ? (
             <FilePreview url={file.url} filename={file.name} previewType={inferPreviewType(file.name, file.contentType)} />
           ) : (
             <span className="absolute inset-0 flex items-center justify-center font-mono text-[11px] uppercase tracking-[.12em] text-accent">
@@ -62,7 +72,7 @@ function PostFrame({ brand, channel, slot, copy, file, aspect, length, stale, te
             </span>
           )}
           {length && <span className="absolute bottom-2 right-2 font-mono text-[11px] text-foreground">{length}</span>}
-          {stale && file && (
+          {stale && file && !instant && (
             <span role="status" className="absolute inset-x-0 top-0 bg-[hsl(var(--warning)/0.9)] px-2 py-1 text-xs font-medium text-accent-foreground">
               {PREVIEW_STALE}
             </span>
@@ -88,6 +98,7 @@ export function SocialsPreview({ post, draft, channels, templateSizes, onChannel
   const active = ticked.find((channel) => channel.toolkit === tab) ?? ticked[0] ?? null
   const brand = useBrandName()
   const files = usePreviewMedia(post, draft.format === 'video')
+  const instant = useInstantPreview({ post, draft, templateSizes, active, fileCurrent: renderIsCurrent(post, draft) })
   const textOnly = draft.format === 'text'
   const slot = slotInput(draft.slot)
   const note = renderNote({
@@ -110,8 +121,11 @@ export function SocialsPreview({ post, draft, channels, templateSizes, onChannel
             aspect={aspectOf(active.toolkit, draft.kinds[active.toolkit]) ?? '1:1'}
             file={fileForAspect(files, aspectOf(active.toolkit, draft.kinds[active.toolkit]))}
             length={draft.format === 'video' && draft.lengthSeconds ? lengthLabel(draft.lengthSeconds) : null}
+            instant={instant}
           />
           <Hint>{note}</Hint>
+          {instant && <Hint>{INSTANT_PREVIEW_NOTE}</Hint>}
+          {instant?.problem && <p role="status" className="text-xs text-destructive">{PREVIEW_PAUSED} {instant.problem}</p>}
           <ChannelCopyField
             toolkit={active.toolkit} label={active.label} value={copyOf(active.toolkit)} limits={active.copy_limits}
             onChange={(text) => onChannelCopy(active.toolkit, text)}
