@@ -69,7 +69,8 @@ AHEAD_WORDS = f"{datetime(NEXT_YEAR, 11, 20):%A} 20 November {NEXT_YEAR}, 09:00 
 
 # What only a person may reach (D6, D14): the review, the schedule, the slot route's reschedule, the way out.
 NOT_FOR_TOOLS = {"approve", "schedule", "unschedule", "reslot", "apply_slot", "start_publish", "run_publish",
-                 "publish_target", "approve_social_post", "schedule_social_post", "publish_social_post_now"}
+                 "publish_target", "approve_social_post", "schedule_social_post", "publish_social_post_now",
+                 "publish_on_approval"}
 
 
 def _utc(value):

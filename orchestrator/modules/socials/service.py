@@ -808,6 +808,7 @@ def approve(
     comment: Optional[str] = None,
     unresolved_sources: Optional[Mapping[str, str]] = None,
     template_claims: Iterable[str] = (),
+    keep_schedule: bool = False,
 ) -> SocialPost:
     """needs_approval → approved, bound to the content the approver saw (D6).
 
@@ -846,11 +847,10 @@ def approve(
         _log(post, actor, ACTION_APPROVE, comment or note, **extra)
     else:
         _log(post, actor, ACTION_APPROVE, comment)
-    # PRD-251B (B11, US-B105): approved with a slot still ahead, the post is scheduled
-    # into it through the one schedule path; a past or missing slot leaves it approved.
-    planned = getattr(post, "planned_for", None)
-    if planned is not None and _as_utc(planned) > _utcnow():
-        schedule(post, actor, planned, getattr(post, "timezone", None) or "UTC")
+    slots = (getattr(post, "planned_for", None), getattr(post, "scheduled_for", None) if keep_schedule else None)
+    ahead = next((slot for slot in slots if slot is not None and _as_utc(slot) > _utcnow()), None)
+    if ahead is not None:
+        schedule(post, actor, ahead, getattr(post, "timezone", None) or "UTC")
     return post
 
 

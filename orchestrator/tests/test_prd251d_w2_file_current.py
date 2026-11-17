@@ -18,7 +18,7 @@ whose file is not current, saying to render it again. Pinned:
   voice or music;
 * a text post, a post with no template, a post never rendered and a post rendered before this
   record existed are current, and so is a history the reader cannot use;
-* the approve route answers 409 with the sentence (Approve & post now approves through it); a
+* the approve route answers 409 with the sentence (the one Approve, also when its click asks to post now); a
   plan's week leaves such a post out as ``render_again`` with the sentence and approves the rest;
   the series core does the same;
 * the literal names in ``core`` are ``modules.socials``'s.

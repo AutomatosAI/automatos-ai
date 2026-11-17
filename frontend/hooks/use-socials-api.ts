@@ -302,7 +302,12 @@ export interface ApproveSocialPostInput {
   contentHash: string
   /** The second confirmation: approve with the named unsourced claims (D7). */
   overrideUnsourced?: boolean
+  /** Its button said "Approve & post now" (`approvePostsNow`): the server publishes it at once only if it agrees. */
+  postNow?: boolean
 }
+
+/** The approve's answer: the post, and whether a publish it asked for did not start. */
+type ApprovedPost = SocialPost & { posting_not_started?: boolean }
 
 interface ApproveHandlers {
   /** 409: the post changed while it was reviewed; the posts are refetched. */
@@ -311,10 +316,33 @@ interface ApproveHandlers {
   onUnsourced: (claims: string[]) => void
 }
 
-function approve({ postId, contentHash, overrideUnsourced }: ApproveSocialPostInput): Promise<SocialPost> {
-  return overrideUnsourced
-    ? apiClient.approveSocialPost(postId, contentHash, { overrideUnsourced: true })
+function approve({ postId, contentHash, overrideUnsourced, postNow }: ApproveSocialPostInput): Promise<ApprovedPost> {
+  const options = { ...(overrideUnsourced ? { overrideUnsourced: true } : {}), ...(postNow ? { postNow: true } : {}) }
+  return Object.keys(options).length > 0
+    ? apiClient.approveSocialPost(postId, contentHash, options)
     : apiClient.approveSocialPost(postId, contentHash)
+}
+
+/** What an approval did, said once it is done (one Approve, 17 Nov 2026). */
+export const APPROVED = 'Approved'
+export const APPROVED_AND_SCHEDULED = 'Approved. It posts at its slot.'
+export const APPROVED_AND_PUBLISHING = 'Approved and publishing now. Each channel shows its receipt when it is done.'
+/** The approval stands, but the publish its click asked for did not start (the server logged why). */
+export const POSTING_NOT_STARTED = "Approved, but posting didn't start. Use Publish now."
+/** The same, for a post the server ended failed, each channel never tried: Retry publishes it. */
+export const POSTING_NOT_STARTED_RETRY = "Approved, but posting didn't start. Use Retry."
+
+/** The toast for the post as the approve answered it: the server schedules a post into a slot still
+ * ahead, publishes one with no slot at once, and otherwise leaves it approved. */
+export function approvedMessage(post: Pick<SocialPost, 'status'> | undefined): string {
+  if (post?.status === 'publishing') return APPROVED_AND_PUBLISHING
+  return post?.status === 'scheduled' ? APPROVED_AND_SCHEDULED : APPROVED
+}
+
+/** What to say when the publish an approval asked for did not start (`posting_not_started`), else null. */
+export function postingNotStarted(post: Pick<ApprovedPost, 'status' | 'posting_not_started'> | undefined): string | null {
+  if (!post?.posting_not_started) return null
+  return post.status === 'failed' ? POSTING_NOT_STARTED_RETRY : POSTING_NOT_STARTED
 }
 
 /** Approve the version on screen (US-206). A 409 says the post changed while it
@@ -322,11 +350,13 @@ function approve({ postId, contentHash, overrideUnsourced }: ApproveSocialPostIn
  * confirmation; anything else shows the server's message. */
 export function useApproveSocialPost({ onStale, onUnsourced }: ApproveHandlers) {
   const invalidate = useInvalidateSocials()
-  return useMutation<SocialPost, Error, ApproveSocialPostInput>({
+  return useMutation<ApprovedPost, Error, ApproveSocialPostInput>({
     mutationFn: approve,
-    onSuccess: async () => {
+    onSuccess: async (post) => {
       await invalidate()
-      toast.success('Approved')
+      const notStarted = postingNotStarted(post)
+      if (notStarted) toast.error(notStarted)
+      else toast.success(approvedMessage(post))
     },
     onError: async (error) => {
       const claims = httpStatusOf(error) === HTTP_UNPROCESSABLE ? unsourcedClaimsOf(error) : null

@@ -5,6 +5,9 @@
  *   changed while it was reviewed and reloads it.
  * - An approval with unsourced claims asks a second confirmation naming them,
  *   and only that sends override_unsourced. A 422 naming claims asks the same.
+ * - One Approve (17 Nov 2026): the post under review has a channel and no slot, so its Approve
+ *   reads "Approve & post now to X"; once done, the toast says what the approval did, from the
+ *   status the server answered (approved, scheduled or publishing).
  * - When the newest history entry voided an approval, a banner says so.
  * - The post's media renders through the shared FilePreview, from the presigned links.
  * - Each channel shows its copy, and each claim its source or a red Unsourced chip.
@@ -50,12 +53,18 @@ vi.mock('../socials-voice-picker', () => ({ SocialsVoicePicker: () => null }))
 import { toast } from 'sonner'
 import { QueuePane } from '@/components/deliverables/socials/studio/queue-pane'
 import { SocialsEditorActivity } from '@/components/deliverables/socials/studio/socials-editor-activity'
-import { SOCIAL_POST_REVIEW_STALE_MESSAGE } from '@/hooks/use-socials-api'
+import {
+  APPROVED, APPROVED_AND_PUBLISHING, APPROVED_AND_SCHEDULED, POSTING_NOT_STARTED, POSTING_NOT_STARTED_RETRY,
+  SOCIAL_POST_REVIEW_STALE_MESSAGE,
+} from '@/hooks/use-socials-api'
+import { APPROVE_AND_POST_NOW } from '@/components/deliverables/socials/studio/queue-model'
 import { FILE_OLDER_THAN_WORDS } from '@/components/deliverables/socials/socials-review'
 import type { SocialPost } from '@/lib/api-client'
 
 const HASH = 'a'.repeat(64)
 const NOW = new Date('2026-09-29T10:00:00Z')
+/** Approve on the post under review: on X, with no slot, so approving it posts it now. */
+const APPROVE_NOW = `${APPROVE_AND_POST_NOW} X`
 
 function post(overrides: Partial<SocialPost> = {}): SocialPost {
   return {
@@ -104,18 +113,51 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
 describe('approving (D6)', () => {
-  it('sends the content_hash of the version shown, and nothing else', async () => {
+  it('sends the content_hash of the version shown, and that its label said post now', async () => {
     show(post())
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
-    await waitFor(() => expect(api.approveSocialPost).toHaveBeenCalledWith('p1', HASH))
+    fireEvent.click(screen.getByRole('button', { name: APPROVE_NOW }))
+    await waitFor(() => expect(api.approveSocialPost).toHaveBeenCalledWith('p1', HASH, { postNow: true }))
     expect(toast.success).toHaveBeenCalledWith('Approved')
+    expect(APPROVED).toBe('Approved')
+  })
+
+  it('says what the approval did: publishing now, or scheduled into its slot', async () => {
+    api.approveSocialPost.mockImplementationOnce(async () => post({ status: 'publishing', approved_hash: HASH }))
+    show(post())
+    fireEvent.click(screen.getByRole('button', { name: APPROVE_NOW }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(APPROVED_AND_PUBLISHING))
+    expect(APPROVED_AND_PUBLISHING).toBe('Approved and publishing now. Each channel shows its receipt when it is done.')
+    cleanup()
+
+    api.approveSocialPost.mockImplementationOnce(async () => post({ status: 'scheduled', approved_hash: HASH }))
+    show(post({ planned_for: '2026-09-29T18:00:00Z', timezone: 'UTC' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve · posts 18:00' }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(APPROVED_AND_SCHEDULED))
+    expect(APPROVED_AND_SCHEDULED).toBe('Approved. It posts at its slot.')
+  })
+
+  it("says plainly when the approval stood but posting didn't start, with the button to press", async () => {
+    api.approveSocialPost.mockImplementationOnce(async () => ({ ...post({ status: 'approved', approved_hash: HASH }), posting_not_started: true }))
+    show(post())
+    fireEvent.click(screen.getByRole('button', { name: APPROVE_NOW }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(POSTING_NOT_STARTED))
+    expect(POSTING_NOT_STARTED).toBe("Approved, but posting didn't start. Use Publish now.")
+    expect(toast.success).not.toHaveBeenCalled()
+    cleanup()
+
+    // The server ended a post it claimed but could not start: failed, each channel never tried.
+    api.approveSocialPost.mockImplementationOnce(async () => ({ ...post({ status: 'failed', approved_hash: HASH }), posting_not_started: true }))
+    show(post())
+    fireEvent.click(screen.getByRole('button', { name: APPROVE_NOW }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(POSTING_NOT_STARTED_RETRY))
+    expect(POSTING_NOT_STARTED_RETRY).toBe("Approved, but posting didn't start. Use Retry.")
   })
 
   it('a 409 says the post changed while it was reviewed and reloads the posts', async () => {
     api.approveSocialPost.mockRejectedValueOnce(Object.assign(new Error('changed'), { status: 409 }))
     show(post())
     const reload = vi.spyOn(client, 'invalidateQueries')
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
+    fireEvent.click(screen.getByRole('button', { name: APPROVE_NOW }))
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'This post changed while you were reviewing it — review the new version',
     )
@@ -129,7 +171,7 @@ describe('approving (D6)', () => {
     api.approveSocialPost.mockRejectedValueOnce(Object.assign(new Error(FILE_OLDER_THAN_WORDS), { status: 409 }))
     show(post())
     const reload = vi.spyOn(client, 'invalidateQueries')
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
+    fireEvent.click(screen.getByRole('button', { name: APPROVE_NOW }))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(FILE_OLDER_THAN_WORDS))
     await waitFor(() => expect(reload).toHaveBeenCalledWith({ queryKey: ['socials', 'w1'] }))
     expect(toast.error).not.toHaveBeenCalledWith(SOCIAL_POST_REVIEW_STALE_MESSAGE)
@@ -153,7 +195,7 @@ describe('unsourced claims (D7)', () => {
 
   it('approving needs a second confirmation naming them, which sends override_unsourced', async () => {
     show(post(claimed as Partial<SocialPost>))
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
+    fireEvent.click(screen.getByRole('button', { name: APPROVE_NOW }))
     const confirm = screen.getByRole('alertdialog', { name: 'Approve with unsourced claims' })
     expect(confirm).toHaveTextContent('These claims have no source: members')
     expect(api.approveSocialPost).not.toHaveBeenCalled()
@@ -162,9 +204,9 @@ describe('unsourced claims (D7)', () => {
     expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(api.approveSocialPost).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
+    fireEvent.click(screen.getByRole('button', { name: APPROVE_NOW }))
     fireEvent.click(screen.getByRole('button', { name: 'Approve with unsourced claims' }))
-    await waitFor(() => expect(api.approveSocialPost).toHaveBeenCalledWith('p1', HASH, { overrideUnsourced: true }))
+    await waitFor(() => expect(api.approveSocialPost).toHaveBeenCalledWith('p1', HASH, { overrideUnsourced: true, postNow: true }))
   })
 
   it('a 422 naming claims (a source gone since) asks the same confirmation', async () => {
@@ -172,11 +214,11 @@ describe('unsourced claims (D7)', () => {
       Object.assign(new Error(JSON.stringify({ message: 'no source', claims: ['growth'], unresolved: { growth: 'gone' } })), { status: 422 }),
     )
     show(post())
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
+    fireEvent.click(screen.getByRole('button', { name: APPROVE_NOW }))
     const confirm = await screen.findByRole('alertdialog', { name: 'Approve with unsourced claims' })
     expect(confirm).toHaveTextContent('These claims have no source: growth')
     fireEvent.click(within(confirm).getByRole('button', { name: 'Approve with unsourced claims' }))
-    await waitFor(() => expect(api.approveSocialPost).toHaveBeenLastCalledWith('p1', HASH, { overrideUnsourced: true }))
+    await waitFor(() => expect(api.approveSocialPost).toHaveBeenLastCalledWith('p1', HASH, { overrideUnsourced: true, postNow: true }))
   })
 })
 

@@ -2,14 +2,16 @@
  * PRD-251D US-D101 (E3) — approve from the editor, against the editor's apiClient double.
  *
  * * A post that waits for approval shows the Queue's own controls to a person who may approve:
- *   "Approve · publishes HH:MM", Approve & post now, Request changes (back to Auto, as the
- *   Queue sends it) and Reject; a claim with no source asks the second confirmation.
+ *   the one Approve, labelled for what it does ("Approve · posts HH:MM" for a slot ahead, "Approve
+ *   & post now to X" for no slot, which one click approves and the server publishes), Request
+ *   changes (back to Auto, as the Queue sends it) and Reject; there is no separate Approve & post
+ *   now; a claim with no source asks the second confirmation.
  * * Approve sends the post's content hash (D6); while the editor holds unsaved edits it is off
  *   and the card says to save first.
  * * A viewer, and a post in any other status, see no approve controls.
  * * Once approved, the editor shows the post as approved, with its Activity card. Approved with no
- *   time, the line where the Approve card was says nothing will post, and that Schedule and Publish
- *   now are in Activity further down (the last card on the page).
+ *   time (unscheduled, say), the line where the Approve card was says nothing will post, and that
+ *   Schedule and Publish now are in Activity further down (the last card on the page).
  * * US-D108: a post whose file is older than its words (its own `file_current`, which the server
  *   keeps) shows the Queue's sentence in place of a working Approve, with Render again, and is
  *   offered Submit, which makes the file again. The editor holds nothing for the sitting: Approve
@@ -44,12 +46,14 @@ import { SocialsEditor } from '@/components/deliverables/socials/studio/socials-
 import { APPROVE_CARD, SAVE_BEFORE_APPROVING, SEND_BACK_SUBMIT } from '@/components/deliverables/socials/studio/editor-approve-card'
 import { RENDER_AGAIN } from '@/components/deliverables/socials/socials-post-review'
 import { FILE_OLDER_THAN_WORDS } from '@/components/deliverables/socials/socials-review'
-import { POST_NOW_LABEL } from '@/components/deliverables/socials/socials-approve-post-now'
+import { APPROVE_AND_POST_NOW, APPROVE_POSTS_AT } from '@/components/deliverables/socials/studio/queue-model'
 import { APPROVED_NO_TIME_NOTE, CONTROLS_IN_ACTIVITY } from '@/components/deliverables/socials/studio/post-notices'
 import { api, post, renderWith, resetApi } from './socials-editor-harness'
 
 const go = vi.fn()
-const APPROVE = 'Approve · publishes 12:00'
+/** Approve on WAITING, whose 12:00 slot is still ahead at the faked clock. */
+const APPROVE = `${APPROVE_POSTS_AT} 12:00`
+const NOW = new Date('2026-10-14T10:00:00Z')
 const card = () => screen.queryByRole('region', { name: APPROVE_CARD })
 
 /** A post waiting for approval: on X, slotted for 12:00 UTC. */
@@ -57,13 +61,21 @@ const WAITING = post({
   status: 'needs_approval', content_hash: 'h-wait', planned_for: '2026-10-20T12:00:00Z', timezone: 'UTC',
   targets: [{ id: 't-x', toolkit: 'twitter', post_kind: 'image', options: {}, status: 'pending' } as any],
 })
+/** The same post with no slot: its Approve publishes it at once. */
+const UNTIMED = post({ ...WAITING, planned_for: null })
 
 function renderEditor(p: SocialPost, role: Workspace['role'] = 'owner') {
   return renderWith(<SocialsEditor role={role} post={p} go={go} />)
 }
 
-beforeEach(() => { resetApi(); go.mockReset() })
-afterEach(cleanup)
+beforeEach(() => {
+  // Approve's label reads the slot against the clock: 10:00 on 14 Oct, so the 20 Oct slot is ahead.
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(NOW)
+  resetApi()
+  go.mockReset()
+})
+afterEach(() => { cleanup(); vi.useRealTimers() })
 
 describe('approving in the editor', () => {
   /** A post waiting for approval with its rendered file. */
@@ -75,7 +87,6 @@ describe('approving in the editor', () => {
     const controls = await screen.findByRole('region', { name: APPROVE_CARD })
     expect(within(controls).getByText(FILE_OLDER_THAN_WORDS)).toBeInTheDocument()
     expect(within(controls).getByRole('button', { name: APPROVE })).toBeDisabled()
-    expect(within(controls).getByRole('button', { name: POST_NOW_LABEL })).toBeDisabled()
 
     fireEvent.click(within(controls).getByRole('button', { name: RENDER_AGAIN }))
     await waitFor(() => expect(api.renderSocialPost).toHaveBeenCalledWith('post-1'))
@@ -121,9 +132,10 @@ describe('approving in the editor', () => {
     for (const role of ['owner', 'editor'] as const) {
       renderEditor(WAITING, role)
       const controls = await screen.findByRole('region', { name: APPROVE_CARD })
-      for (const name of [APPROVE, POST_NOW_LABEL, 'Request changes', 'Reject']) {
+      for (const name of [APPROVE, 'Request changes', 'Reject']) {
         expect(within(controls).getByRole('button', { name })).toBeEnabled()
       }
+      expect(within(controls).queryByRole('button', { name: 'Approve & post now' })).toBeNull()
       expect(screen.queryByText(SAVE_BEFORE_APPROVING)).toBeNull()
       // The post already waits for approval: there is nothing to submit.
       expect(screen.queryByRole('button', { name: 'Submit for approval' })).toBeNull()
@@ -153,7 +165,6 @@ describe('approving in the editor', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Copy' }), { target: { value: 'An edit not saved yet.' } })
 
     expect(within(controls).getByRole('button', { name: APPROVE })).toBeDisabled()
-    expect(within(controls).getByRole('button', { name: POST_NOW_LABEL })).toBeDisabled()
     expect(within(controls).getByText(SAVE_BEFORE_APPROVING)).toBeInTheDocument()
     expect(api.approveSocialPost).not.toHaveBeenCalled()
   })
@@ -202,20 +213,22 @@ describe('approving in the editor', () => {
     expect(screen.getByTestId('editor-activity')).toBeInTheDocument()
   })
 
-  it('approved with no time, the line where the Approve card was says nothing will post, and where Schedule and Publish now are', async () => {
-    const UNTIMED = post({ ...WAITING, planned_for: null })
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-    const editor = (p: SocialPost) => (
-      <QueryClientProvider client={client}><SocialsEditor role="owner" post={p} go={go} /></QueryClientProvider>
-    )
-    const view = render(editor(UNTIMED))
-    // With no slot, Approve says nothing about when it publishes.
-    fireEvent.click(within(await screen.findByRole('region', { name: APPROVE_CARD })).getByRole('button', { name: 'Approve' }))
-    await waitFor(() => expect(api.approveSocialPost).toHaveBeenCalledWith('post-1', 'h-wait'))
+  it('with no slot, Approve says it posts now to its channels, and one click approves it: the server publishes it', async () => {
+    renderEditor(UNTIMED)
+    const controls = await screen.findByRole('region', { name: APPROVE_CARD })
+    fireEvent.click(within(controls).getByRole('button', { name: `${APPROVE_AND_POST_NOW} X` }))
+    await waitFor(() => expect(api.approveSocialPost).toHaveBeenCalledWith('post-1', 'h-wait', { postNow: true }))
+    expect(api.approveSocialPost).toHaveBeenCalledTimes(1)
+    // Nothing more is asked, and the screen never publishes it itself: the approve route does.
+    expect(within(controls).queryByRole('alertdialog')).toBeNull()
+    expect(api.publishSocialPostNow).not.toHaveBeenCalled()
     expect(screen.queryByText(APPROVED_NO_TIME_NOTE, { exact: false })).toBeNull()
+  })
 
-    // The server leaves it approved with no time, "for a person to schedule".
-    view.rerender(editor(post({ ...UNTIMED, status: 'approved', approved_hash: 'h-wait', updated_at: '2026-10-14T09:00:00Z' })))
+  it('approved with no time, the line where the Approve card was says nothing will post, and where Schedule and Publish now are', async () => {
+    // Approved with neither slot (unscheduled, say): nothing posts it until a person gives it a time.
+    renderEditor(post({ ...UNTIMED, status: 'approved', approved_hash: 'h-wait', updated_at: '2026-10-14T09:00:00Z' }))
+    await screen.findByText('TikTok')
     const notice = screen.getByText(`${APPROVED_NO_TIME_NOTE} ${CONTROLS_IN_ACTIVITY}`)
     // Said once: the Activity card is asked to leave its own copy of the line out.
     expect(screen.getAllByText(APPROVED_NO_TIME_NOTE, { exact: false })).toHaveLength(1)

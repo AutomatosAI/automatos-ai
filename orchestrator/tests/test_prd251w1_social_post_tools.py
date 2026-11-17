@@ -119,7 +119,7 @@ TOOLS = (
 NOT_FOR_AGENTS = {
     "approve", "approve_social_post", "request_changes", "request_changes_social_post",
     "reject", "reject_social_post", "schedule", "schedule_social_post", "unschedule",
-    "unschedule_social_post", "publish_post", "publish_social_post_now",
+    "unschedule_social_post", "publish_post", "publish_social_post_now", "publish_on_approval", "begin_publish",
 }
 FORBIDDEN_WORD = re.compile(r"approv|schedul|publish", re.IGNORECASE)
 

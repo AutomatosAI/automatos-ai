@@ -5,6 +5,12 @@
  * * The pane shows the selected post exactly (PRD-251's approval view: the media, each
  *   channel's copy, the claims and sources) and approves the hash on screen; a 409 says it
  *   changed; unsourced claims still ask for the second confirmation.
+ * * One Approve (17 Nov 2026): its label says what the server does with the post, at the Queue's
+ *   clock: "Approve · posts 12:00" for a planned slot still ahead, else a schedule kept from before an
+ *   edit still ahead (scheduled there), "Approve & post now to X" for no slot and no schedule (published
+ *   at once, on one click, nothing asked), plain "Approve" for a slot or a kept schedule that passed, or
+ *   no channel; the pane's badge names the same time (`approvalSlot`). There is no
+ *   separate Approve & post now, and the toast says what the approval did.
  * * Send back to Auto requests changes with the comment, then asks for another take with it;
  *   Make another take asks for one without guidance.
  * * Approve all shown is offered only with series approval on; it approves each shown post by
@@ -55,13 +61,13 @@ import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 import { SocialsQueue } from '@/components/deliverables/socials/studio/socials-queue'
 import {
+  APPROVE, APPROVE_AND_POST_NOW, APPROVE_POSTS_AT, approvalSlot, approveLabel, approvePostsNow,
   approvedWithNoTime, queueCount, queueHeading, queuedPosts, timeLeft, waitingForATime, waitingForInput,
 } from '@/components/deliverables/socials/studio/queue-model'
 import { APPROVED_NO_TIME, APPROVED_NO_TIME_HINT } from '@/components/deliverables/socials/studio/queue-waiting'
-import { SOCIAL_POST_REVIEW_STALE_MESSAGE } from '@/hooks/use-socials-api'
+import { APPROVED_AND_PUBLISHING, SOCIAL_POST_REVIEW_STALE_MESSAGE } from '@/hooks/use-socials-api'
 import { NO_CHANNEL_HINT, RENDER_AGAIN } from '@/components/deliverables/socials/socials-post-review'
 import { FILE_OLDER_THAN_WORDS } from '@/components/deliverables/socials/socials-review'
-import { POST_NOW_LABEL } from '@/components/deliverables/socials/socials-approve-post-now'
 import { UNDO_TAKE } from '@/components/deliverables/socials/studio/queue-pane'
 import { RETAKE_STARTED } from '@/hooks/use-socials-queue'
 import { renderWith } from './socials-editor-harness'
@@ -80,6 +86,8 @@ function waiting(id: string, slot: string | null, extra: Record<string, unknown>
 }
 
 const TODAY = [waiting('a', '2026-10-14T12:00:00Z'), waiting('b', '2026-10-14T18:00:00Z')]
+/** Approve on a post slotted for 12:00 today, still ahead at the Queue's clock (07:20). */
+const APPROVE_AT_NOON = `${APPROVE_POSTS_AT} 12:00`
 const LATER = waiting('c', '2026-10-16T09:00:00Z')
 const UNSLOTTED = waiting('d', null)
 
@@ -100,6 +108,70 @@ beforeEach(() => {
   vi.mocked(toast.error).mockClear()
 })
 afterEach(() => { cleanup(); vi.useRealTimers() })
+
+describe('one Approve says what it does', () => {
+  const NOW = new Date('2026-10-14T07:20:00Z')
+  const LINKEDIN = { id: 't-li', toolkit: 'linkedin', post_kind: 'image', options: {}, status: 'pending' }
+
+  it('labels each case as the server decides it', () => {
+    expect(APPROVE_AT_NOON).toBe('Approve · posts 12:00')
+    expect(approveLabel(waiting('a', '2026-10-14T12:00:00Z'), NOW)).toBe(APPROVE_AT_NOON)
+    expect(approveLabel(waiting('d', null), NOW)).toBe('Approve & post now to X')
+    expect(approveLabel(waiting('d', null, { targets: [...UNSLOTTED.targets, LINKEDIN] }), NOW))
+      .toBe(`${APPROVE_AND_POST_NOW} X, LinkedIn`)
+    // A slot that passed is left approved for a person to reschedule: plain Approve.
+    expect(approveLabel(waiting('e', '2026-10-14T06:00:00Z'), NOW)).toBe(APPROVE)
+    expect(APPROVE).toBe('Approve')
+    // A schedule kept from before an edit sent it back is approved into while still ahead, as a slot
+    // is, and before a planned slot that passed; one that passed is plain Approve, as is no channel.
+    const KEPT_AHEAD = waiting('f', null, { scheduled_for: '2026-10-15T09:00:00Z' })
+    expect(approveLabel(KEPT_AHEAD, NOW)).toBe(`${APPROVE_POSTS_AT} 09:00`)
+    expect(approvalSlot(KEPT_AHEAD, NOW)).toBe('2026-10-15T09:00:00Z')
+    const PLANNED_PASSED_KEPT_AHEAD = waiting('h', '2026-10-14T06:00:00Z', { scheduled_for: '2026-10-14T15:30:00Z' })
+    expect(approveLabel(PLANNED_PASSED_KEPT_AHEAD, NOW)).toBe(`${APPROVE_POSTS_AT} 15:30`)
+    expect(approveLabel(waiting('a2', '2026-10-14T12:00:00Z', { scheduled_for: '2026-10-14T15:30:00Z' }), NOW))
+      .toBe(APPROVE_AT_NOON)  // a planned slot still ahead comes first
+    const KEPT_PASSED = waiting('k', null, { scheduled_for: '2026-10-14T06:00:00Z' })
+    expect(approveLabel(KEPT_PASSED, NOW)).toBe(APPROVE)
+    expect(approvalSlot(KEPT_PASSED, NOW)).toBeNull()
+    expect(approveLabel(waiting('g', null, { targets: [] }), NOW)).toBe(APPROVE)
+    // Only the post-now label sends post_now: a post with a slot or a kept schedule, or no channel, never does.
+    expect(approvePostsNow(UNSLOTTED)).toBe(true)
+    for (const other of [waiting('a', '2026-10-14T12:00:00Z'), waiting('e', '2026-10-14T06:00:00Z'), KEPT_AHEAD, KEPT_PASSED, waiting('g', null, { targets: [] })]) {
+      expect(approvePostsNow(other), other.id).toBe(false)
+    }
+  })
+
+  it('a post with no slot approves on one click, asks nothing more, and says it is publishing', async () => {
+    api.approveSocialPost.mockImplementation(async (id: string) => ({ id, status: 'publishing' }))
+    renderQueue([UNSLOTTED])
+    fireEvent.click(within(pane()).getByRole('button', { name: 'Approve & post now to X' }))
+    // The click says what its label said: post now. The server publishes only if it agrees.
+    await waitFor(() => expect(api.approveSocialPost).toHaveBeenCalledWith('d', 'hash-d', { postNow: true }))
+    expect(within(pane()).queryByRole('alertdialog')).toBeNull()
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(APPROVED_AND_PUBLISHING))
+  })
+
+  it('a slot that passed shows a plain Approve, which approves it', async () => {
+    renderQueue([waiting('e', '2026-10-14T06:00:00Z')])
+    expect(within(pane()).queryByRole('button', { name: /· posts|post now/ })).toBeNull()
+    fireEvent.click(within(pane()).getByRole('button', { name: APPROVE }))
+    await waitFor(() => expect(api.approveSocialPost).toHaveBeenCalledWith('e', 'hash-e'))
+  })
+
+  it('a schedule kept from before an edit, still ahead after its planned slot passed, is the time the button and the badge name', async () => {
+    renderQueue([waiting('h', '2026-10-14T06:00:00Z', { scheduled_for: '2026-10-14T15:30:00Z' })])
+    expect(within(pane()).getByText('Publishes 15:30 · in 8h 10m')).toBeInTheDocument()
+    fireEvent.click(within(pane()).getByRole('button', { name: `${APPROVE_POSTS_AT} 15:30` }))
+    await waitFor(() => expect(api.approveSocialPost).toHaveBeenCalledWith('h', 'hash-h'))
+  })
+
+  it('there is no separate Approve & post now', () => {
+    renderQueue(TODAY)
+    expect(within(pane()).getAllByRole('button', { name: /^Approve/ }).map((b) => b.textContent)).toEqual([APPROVE_AT_NOON])
+    expect(within(pane()).queryByRole('button', { name: 'Approve & post now' })).toBeNull()
+  })
+})
 
 describe('the Queue', () => {
   it('says how many need you today, in three forms', () => {
@@ -125,20 +197,20 @@ describe('the Queue', () => {
     expect(within(pane()).getByText('Publishes 12:00 · in 4h 40m')).toBeInTheDocument()
     expect(within(pane()).getByText('Copy of a.')).toBeInTheDocument() // the channel copy (SocialsPostEvidence)
     expect(within(pane()).getByText(/You approve exactly this file and this copy/)).toBeInTheDocument()
-    fireEvent.click(within(pane()).getByRole('button', { name: 'Approve · publishes 12:00' }))
+    fireEvent.click(within(pane()).getByRole('button', { name: APPROVE_AT_NOON }))
     await waitFor(() => expect(api.approveSocialPost).toHaveBeenCalledWith('a', 'hash-a'))
   })
 
   it('a post that changed while it was shown says so', async () => {
     api.approveSocialPost.mockRejectedValue(Object.assign(new Error('changed'), { status: 409 }))
     renderQueue(TODAY)
-    fireEvent.click(within(pane()).getByRole('button', { name: 'Approve · publishes 12:00' }))
+    fireEvent.click(within(pane()).getByRole('button', { name: APPROVE_AT_NOON }))
     expect(await within(pane()).findByText(SOCIAL_POST_REVIEW_STALE_MESSAGE)).toBeInTheDocument()
   })
 
   it('unsourced claims still ask for the second confirmation', () => {
     renderQueue([waiting('a', '2026-10-14T12:00:00Z', { variables: { members: { value: 1200, claim: true } } })])
-    fireEvent.click(within(pane()).getByRole('button', { name: 'Approve · publishes 12:00' }))
+    fireEvent.click(within(pane()).getByRole('button', { name: APPROVE_AT_NOON }))
     expect(within(pane()).getByRole('alertdialog', { name: 'Approve with unsourced claims' })).toBeInTheDocument()
     expect(api.approveSocialPost).not.toHaveBeenCalled()
   })
@@ -180,7 +252,7 @@ describe('the Queue', () => {
   it('F256: a post with no channel cannot be approved, and says nothing would post', () => {
     renderQueue([waiting('a', '2026-10-14T12:00:00Z', { targets: [] })])
     expect(within(pane()).getByRole('button', { name: 'Approve' })).toBeDisabled()
-    expect(within(pane()).queryByRole('button', { name: /publishes/ })).toBeNull()
+    expect(within(pane()).queryByRole('button', { name: /· posts|post now/ })).toBeNull()
     expect(within(pane()).getByText(NO_CHANNEL_HINT)).toBeInTheDocument()
     expect(within(pane()).getByText('No channels chosen yet.')).toBeInTheDocument()
   })
@@ -188,8 +260,7 @@ describe('the Queue', () => {
   it('US-D108: a post whose file is older than its words cannot be approved, says so, and Render again renders it', async () => {
     renderQueue([waiting('a', '2026-10-14T12:00:00Z', { media: { '1:1': ['d-square'] }, file_current: false })])
     expect(within(pane()).getByText(FILE_OLDER_THAN_WORDS)).toBeInTheDocument()
-    expect(within(pane()).getByRole('button', { name: 'Approve · publishes 12:00' })).toBeDisabled()
-    expect(within(pane()).getByRole('button', { name: POST_NOW_LABEL })).toBeDisabled()
+    expect(within(pane()).getByRole('button', { name: APPROVE_AT_NOON })).toBeDisabled()
     fireEvent.click(within(pane()).getByRole('button', { name: RENDER_AGAIN }))
     await waitFor(() => expect(api.renderSocialPost).toHaveBeenCalledWith('a'))
     expect(api.approveSocialPost).not.toHaveBeenCalled()
@@ -197,7 +268,7 @@ describe('the Queue', () => {
 
   it('US-D108: a post whose file still shows it keeps a working Approve and no sentence', () => {
     renderQueue([waiting('a', '2026-10-14T12:00:00Z', { media: { '1:1': ['d-square'] }, file_current: true })])
-    expect(within(pane()).getByRole('button', { name: 'Approve · publishes 12:00' })).toBeEnabled()
+    expect(within(pane()).getByRole('button', { name: APPROVE_AT_NOON })).toBeEnabled()
     expect(within(pane()).queryByText(FILE_OLDER_THAN_WORDS)).toBeNull()
     expect(within(pane()).queryByRole('button', { name: RENDER_AGAIN })).toBeNull()
   })

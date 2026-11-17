@@ -4,11 +4,13 @@
  * PRD-251 S3.3f (US-308) — publishing a post from its view.
  *
  * - An approved post is scheduled (a date-time picker, in the browser's own
- *   timezone, which the post keeps for showing its slot) or published now, after a
- *   confirmation that names its channels.
+ *   timezone, which the post keeps for showing its slot) or published now.
  * - A scheduled post shows its slot in its own timezone, and is rescheduled (the
- *   approval stands) or unscheduled (it stays approved).
+ *   approval stands), unscheduled (it stays approved) or published now.
  * - A missed post says it missed its slot, and is rescheduled or published now.
+ * - One Publish now (17 Nov 2026, Gerard: "are you sure, are you really sure?"): the button
+ *   names the channels, "Publish now to Instagram, X", and publishes on its one click. There is
+ *   no second step.
  *
  * Every call goes through apiClient with POST (use-socials-publish-api.ts); a 409
  * says the post changed and reloads it, as approve does.
@@ -26,16 +28,19 @@ import {
   useScheduleSocialPost,
   useUnscheduleSocialPost,
 } from '@/hooks/use-socials-publish-api'
-import { canAuthorPosts, channelLabel } from './socials-status'
+import { canAuthorPosts, channelNames } from './socials-status'
+
+export const PUBLISH_NOW = 'Publish now'
+/** What a post with no channel is published to: the server refuses it (409, no channels). */
+export const ITS_CHANNELS = 'its channels'
 
 interface ControlProps {
   post: SocialPost
 }
 
-/** The post's channels as the confirmation names them: "LinkedIn, X". */
-export function channelNames(post: Pick<SocialPost, 'targets'>): string {
-  const names = (post.targets ?? []).map((t) => channelLabel(t.toolkit))
-  return Array.from(new Set(names)).join(', ')
+/** "Publish now to Instagram, X": the one button that publishes the post at once. */
+export function publishNowLabel(post: Pick<SocialPost, 'targets'>): string {
+  return `${PUBLISH_NOW} to ${channelNames(post) || ITS_CHANNELS}`
 }
 
 function ScheduleForm({ post, submit }: ControlProps & { submit: string }) {
@@ -66,26 +71,10 @@ function ScheduleForm({ post, submit }: ControlProps & { submit: string }) {
 
 function PublishNow({ post }: ControlProps) {
   const publish = usePublishSocialPostNow()
-  const [confirming, setConfirming] = useState(false)
-  if (!confirming) {
-    return (
-      <Button size="sm" onClick={() => setConfirming(true)} disabled={publish.isLoading}>
-        Publish now
-      </Button>
-    )
-  }
   return (
-    <div role="alertdialog" aria-label="Publish now" className="space-y-2 rounded-lg border border-border px-3 py-2">
-      <p className="text-sm text-foreground">Publish now to {channelNames(post) || 'its channels'}? It goes live at once.</p>
-      <div className="flex justify-end gap-2">
-        <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
-          Cancel
-        </Button>
-        <Button size="sm" onClick={() => (setConfirming(false), publish.mutate({ postId: post.id }))}>
-          Publish
-        </Button>
-      </div>
-    </div>
+    <Button size="sm" onClick={() => publish.mutate({ postId: post.id })} disabled={publish.isLoading}>
+      {publishNowLabel(post)}
+    </Button>
   )
 }
 
@@ -100,6 +89,7 @@ function ScheduledControls({ post }: ControlProps) {
       <Button size="sm" variant="outline" onClick={() => unschedule.mutate({ postId: post.id })} disabled={unschedule.isLoading}>
         Unschedule
       </Button>
+      <PublishNow post={post} />
     </>
   )
 }
