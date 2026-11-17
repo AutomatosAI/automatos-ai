@@ -53,8 +53,8 @@ Each carries the recommendation it was built on. The owner calls that can still 
 | E7 | **The gallery says what a template is for.** Each card shows the template's description. A search box filters by name and description; chips filter to templates with a photo or with none. "Let Auto pick" stays first. |
 | E8 | **An instant preview of an image post** (Wave 2). The server returns the template as one self-contained page, filled and escaped by the same rules as the renderer, with the brand tokens, the font faces and a stub for the timeline library. The browser shows it in a frame with `sandbox="allow-scripts"` (no same-origin) and its own content security policy: inline script and style and `data:` files, and no request the policy covers. A policy does not cover WebRTC, so the page's first script takes that API off its window. As built: an image of one still; a carousel keeps its rendered preview. It is labelled a preview: the approved file is always the render. |
 | E9 | **Fewer views** (Wave 2). The list of what is removed is an owner call, below. As built: US-D202 and US-D203. The campaign screens (US-D204) stay. |
-| E10 | **Look options on a post** (Wave 3). Design step first: it touches the template contract and what an approval covers. |
-| E11 | **Video templates explain their fields** (Wave 3, rescoped). The three software videos have 66 to 69 required fields. Giving them defaults would print the sample's words in every business's video, because Auto only writes a field that has no default. So every field gets a label and a description in plain words, and only text that is right for any business gets a default. |
+| E10 | **Look options on a post** (Wave 3). Design step first: it touches the template contract and what an approval covers. As built: all three choices, applied to one render's tokens and variables, with no template file changed (US-D301). |
+| E11 | **Video templates explain their fields** (Wave 3, rescoped). The three software videos have 66 to 69 required fields. Giving them defaults would print the sample's words in every business's video, because Auto only writes a field that has no default. So every field gets a label and a description in plain words, and only text that is right for any business gets a default. As built: every field of the three is described; one field gained a default (US-D302). |
 
 ## Wave 1: the editor finishes the job
 
@@ -192,10 +192,23 @@ What the research found (16 Nov): every starter reads its colours and its logo o
 - [ ] The renderer's contrast check passes for every starter in every look it is offered in, shown by the CI job that renders the starters.
 - [ ] Migration: one head, chained onto the current one, safe on a `create_all`-built database, both head pins moved.
 
+As built (Wave 3):
+- `social_posts.look` is `{"mode", "accent", "logo"}`, each key optional. A choice that is the kit's own (light, the kit's accent, the logo on) is left out, and a look with no key left is stored as null.
+- Dark on a template built on paper: each paper token takes the stage token that plays its part, the stage pieces a paper card lays on its page take the paper's, and a kit's logo for dark backgrounds shows. One new derived token, `--brand-ink-card`, is the card on the dark ground. A mode a post keeps after its template changed to one that takes none is left out of its render.
+- The gallery entry says which choices a template takes (`looks`): light or dark for the nine cards built on paper; the accent and the logo for every template and for "Let Auto pick".
+- The look is part of what a file was made from (US-D108), only when a post has one, so a post rendered before this wave keeps its record. The instant preview (US-D201) shows it, and an unsaved change to it makes Submit render again.
+- The look is a person's choice in the editor's Look card. Auto's post tools do not set it.
+- Under an approval the file cannot change, but the stored look can: a look saved on an approved or scheduled post keeps the approval (as a voice, the music or a photo saved there does), the approved file goes out as it was approved, and the Preview keeps showing that file. The new look reaches a file only once the post is sent back and rendered again. Whether a look change should itself send the post back is the owner's call.
+- A mode sent straight to the API for a template that takes none is stored and left out of the render. It still counts in what the file was made from, so setting or clearing it there marks the file as older. The editor never sends one.
+- The contrast check is `scripts/ci/social_template_looks.py`: every starter renders in every look it is offered in (93 more render units) in the `media-render` workflow, which runs on demand, not on a pull request.
+- On ten starters the accent choice changes nothing a person can see, and the Brand board inverts in dark. Both are as the templates read their tokens today.
+
 ### US-D302: Video templates explain their fields
 - [ ] Every field of `app-promo`, `cinematic-product-promo` and `ui-story-promo` has a label and a description that say what it is and where it shows, in plain words.
 - [ ] A field whose text is right for any business has a default. A field that names a product, a number, a person or a claim has none.
 - [ ] The count of required fields per template is in the PR, before and after.
+
+As built (Wave 3): fields with a description went from 18 of 87 to 87 of 87 (`app-promo`), 46 of 122 to 122 of 122 (`cinematic-product-promo`) and 47 of 120 to 120 of 120 (`ui-story-promo`); every field already had a label. Required fields (no default): 68 to 67, 69 to 69 and 66 to 66. The one new default is `app-promo`'s button text ("Start"). The rest name a product, a number, a person or a claim, so Auto writes them from the brief. The descriptions add about 10,000 characters per template to what the composer reads for a video.
 
 ## Not in this PRD
 

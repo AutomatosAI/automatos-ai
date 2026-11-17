@@ -41,6 +41,21 @@ describe('which posts show the instant preview', () => {
     expect(renderIsCurrent({ ...saved, file_current: false }, onScreen)).toBe(false)
     expect(renderIsCurrent(null, onScreen)).toBe(false)
   })
+
+  it('a post that holds an approval keeps showing its approved file after a render setting was saved under it', () => {
+    // A look or a photo saved on an approved post is not on its file, and a render is refused: the
+    // approved file is what goes out, so the Preview shows it, not a page of what was saved since.
+    const saved = post({ template_id: 'tpl-img', variables: { headline: { value: 'Open late' } }, media: { '1:1': ['d-1'] }, file_current: false })
+    const onScreen = draft({ brief: saved.brief ?? '', variables: { headline: { value: 'Open late' } } })
+    for (const status of ['approved', 'scheduled', 'missed'] as const) {
+      expect(renderIsCurrent({ ...saved, status }, onScreen)).toBe(true)
+    }
+    for (const status of ['draft', 'changes_requested', 'needs_approval', 'failed'] as const) {
+      expect(renderIsCurrent({ ...saved, status }, onScreen)).toBe(false)
+    }
+    // An unsaved edit still shows as it would look.
+    expect(renderIsCurrent({ ...saved, status: 'approved' }, { ...onScreen, variables: { headline: { value: 'Open early' } } })).toBe(false)
+  })
 })
 
 describe('what the editor asks for', () => {

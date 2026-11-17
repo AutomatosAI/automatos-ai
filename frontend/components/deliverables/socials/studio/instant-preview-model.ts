@@ -13,6 +13,7 @@
 import type { SocialChannel, SocialPost, SocialPreviewPageInput, SocialTemplateSummary } from '@/lib/api-client'
 import type { PreviewPhotoFile } from '@/hooks/use-socials-instant-preview'
 import { closestShape } from './channel-shape'
+import { rendersFrom } from '../socials-status'
 import { aspectOf, type EditorDraft } from './editor-model'
 import { lookToSave } from './look-options-model'
 import { previewStale } from './preview-model'
@@ -40,11 +41,19 @@ const STYLE_CLOSE = /<\/style/i
 const SCRIPT_OPEN = /<script/i
 const SIZE = /^(\d{2,4})x(\d{2,4})$/
 
+/** Whether the post's file is older than what it holds and a render can make it again (the server's
+ * `renders_again`). A post that holds an approval keeps its approved file: a render setting saved
+ * under the approval (a look, a photo) is not on that file, and that file is what goes out. */
+function fileWaitsForRender(post: SocialPost): boolean {
+  return post.file_current === false && rendersFrom(post.status)
+}
+
 /** Whether the post's rendered file shows what is on screen: it has one, the server says it was
  * made from what the post holds now (`file_current`, US-D108: a saved edit after the render
- * leaves it older than the words), and nothing a render reads has changed since the post was saved. */
+ * leaves it older than the words) or the post holds an approval, whose file stands, and nothing
+ * a render reads has changed since the post was saved. */
 export function renderIsCurrent(post: SocialPost | null, draft: EditorDraft): boolean {
-  return !!post && Object.keys(post.media ?? {}).length > 0 && post.file_current !== false && !previewStale(post, draft)
+  return !!post && Object.keys(post.media ?? {}).length > 0 && !fileWaitsForRender(post) && !previewStale(post, draft)
 }
 
 /** Whether the preview shows the instant page: an image post with a template whose file is not

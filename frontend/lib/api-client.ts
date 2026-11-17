@@ -744,6 +744,8 @@ export interface UpdateSocialPostInput {
   media?: Record<string, string[]>
   /** PRD-251B: the music (a render setting): null the template's track, {track: null} none. */
   music?: SocialPostMusic
+  /** PRD-251D US-D301: the post's look (a render setting); `null` is the kit's own. */
+  look?: SocialPost['look']
 }
 
 /** GET /api/socials/voices: what a post can be spoken with (D11, D15). */

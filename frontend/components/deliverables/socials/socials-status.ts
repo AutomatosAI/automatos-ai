@@ -111,6 +111,12 @@ const RENDERABLE: ReadonlySet<SocialPostStatus> = new Set<SocialPostStatus>([
   'draft', 'changes_requested', 'needs_approval', 'failed',
 ])
 
+/** Whether a render can start from `status`. A post that holds an approval (approved, scheduled,
+ * missed) cannot render, so its file is the one it was approved with whatever was saved since. */
+export function rendersFrom(status: SocialPostStatus): boolean {
+  return RENDERABLE.has(status)
+}
+
 // 3 Oct 2026: deleting a post is documents:delete (owner and admin hold documents:*); one
 // rendering or publishing waits, and one that went out on a channel stays (api/socials_delete.py).
 const DELETABLE: ReadonlySet<SocialPostStatus> = new Set<SocialPostStatus>([
