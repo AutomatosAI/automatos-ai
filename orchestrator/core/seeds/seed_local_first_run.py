@@ -93,7 +93,10 @@ LOCAL_OPERATOR_PLACEHOLDER_NAME = "Local Operator"  # PRD-233 S6 makes it editab
 # any seed text, add the fingerprint the OLD content produced (capture it with
 # ``current_fingerprints()`` before editing) so untouched rows keep refreshing.
 # Rows hashing to none of current ∪ prior are user edits and are never touched.
-PRIOR_SEED_FINGERPRINTS: frozenset[str] = frozenset()
+PRIOR_SEED_FINGERPRINTS: frozenset[str] = frozenset({
+    # The welcome post before the BYOK tab was renamed Model keys (17 Nov 2026): "Settings → API Keys".
+    "967f89d65fec16bd21e1c06136aa107b23011841db78001933ac7c93685b5691",
+})
 
 # ── Roster ───────────────────────────────────────────────────────────────────
 

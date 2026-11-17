@@ -52,10 +52,10 @@ search for every model your agents run on. Auto starts on Claude Haiku 5.5
 (`anthropic` / `claude-haiku-5-5`), and so does the internal System LLM; with no
 Anthropic key, both send their calls through OpenRouter as
 `anthropic/claude-haiku-5.5`. Get a key at
-openrouter.ai/keys and add it under **Settings → API Keys**. Add **NVIDIA**
+openrouter.ai/keys and add it under **Settings → Model keys**. Add **NVIDIA**
 beside it for free open models (Kimi, DeepSeek, Nemotron — see below).
 
-**Every provider is added in the app** — **Settings → API Keys** lists OpenAI,
+**Every provider is added in the app** — **Settings → Model keys** lists OpenAI,
 Anthropic, OpenRouter, NVIDIA, DeepSeek, Google, Grok / xAI, Cohere, Azure
 OpenAI, AWS Bedrock and HuggingFace, and validates the key on save. Only two
 keys ever need to be in `.env`, and only for the Code Canvas worker, which
@@ -187,7 +187,7 @@ and channels) runs in the background, and 200 once the instance is fully up.
   Postgres (`S3_VECTORS_ENABLED=false`) — no AWS needed.
 - **MinIO object storage.** An S3-compatible store (ports 9000 / 9001) holds
   generated outputs so nothing is lost between runs.
-- **Every provider, one router.** Settings → API Keys lists every registered
+- **Every provider, one router.** Settings → Model keys lists every registered
   provider (OpenAI, Anthropic, Google, OpenRouter, NVIDIA, DeepSeek, Azure
   OpenAI, AWS Bedrock, Grok / xAI, Cohere, HuggingFace) and validates a key on
   save. Marketplace → LLMs shows one card per *route* — the same model served
@@ -206,7 +206,7 @@ and channels) runs in the background, and 200 once the instance is fully up.
   is confined to that directory and mutations still need your approval.
   The Canvas's *Auto session* engine (a headless Claude Agent SDK subprocess,
   billed to an API key) needs `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`
-  in `.env` — it reads env only, not Settings → API Keys. The **Runtime
+  in `.env` — it reads env only, not Settings → Model keys. The **Runtime
   Canvas** for session agents (below) needs no key at all: it is your own
   Claude Code, launched by the host on your machine. On a Linux host the worker
   writes under `./workspaces` as that folder's owner, your user; it cannot write
@@ -350,7 +350,7 @@ A tunnel or proxy on this machine is invisible to that check, so behind one run
   your OpenRouter key or a SearXNG container as well as with Composio.
 - **Memory needs an embeddings key.** Durable and field memory run on the
   Qdrant container the default stack starts, but writing a memory needs an
-  embedding provider: an OpenRouter key in **Settings → API Keys** (or the key of
+  embedding provider: an OpenRouter key in **Settings → Model keys** (or the key of
   the provider chosen under Settings → System Settings → Embeddings), then
   `docker compose restart backend` so memory picks it up. Until then,
   **Knowledge → Memory** shows *Unavailable* and says why.
@@ -400,6 +400,6 @@ Database migrations run on every backend boot.
 - **Database GUI:** Adminer at http://localhost:8080 (with `--profile all`).
 - **API reference:** http://localhost:8000/docs
 
-All keys you add through Settings → API Keys are encrypted in the database and
+All keys you add through Settings → Model keys are encrypted in the database and
 available to the platform immediately. More in
 [docs/getting-started/self-hosting.md](docs/getting-started/self-hosting.md).

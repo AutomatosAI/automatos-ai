@@ -62,7 +62,7 @@ Redis are **external**: use managed services, or anything you run yourself.
    open http://localhost:3000
    ```
 
-LLM keys are added in the app (Settings → API Keys) and stored encrypted in the
+LLM keys are added in the app (Settings → Model keys) and stored encrypted in the
 database.
 
 ## Settings

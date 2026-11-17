@@ -25,7 +25,7 @@ If you are an agent installing Automatos for someone, follow these rules:
    exact error, and use *Troubleshooting* below. Don't guess past a failed step.
 3. **Never ask the person to paste an API key or password into the chat.** You
    generate the three local secrets yourself (step 3). Model keys are entered by
-   the person in the app, under **Settings → API Keys**.
+   the person in the app, under **Settings → Model keys**.
 4. **Never commit, upload or print `.env`.** It holds the secrets.
 5. **Don't touch Docker data you didn't create.** Never run `docker system prune -a`,
    `docker volume prune` or `make reset`: they delete other projects' images and data.
@@ -196,7 +196,7 @@ couple of minutes to turn healthy on the first boot while it creates the databas
 Open **http://localhost:3000** (or your `FRONTEND_PORT`). There's no login in the local edition.
 
 To make the agents think, the person adds **one model key** in
-**Settings → API Keys**:
+**Settings → Model keys**:
 - **OpenRouter** (one key, 400+ models), or OpenAI / Anthropic / DeepSeek / Google…
 - **NVIDIA** (build.nvidia.com): hosted open models at no charge under NVIDIA's
   trial terms; then *Marketplace → LLMs → NVIDIA*, sync, add a model.
@@ -207,8 +207,8 @@ through the embedding provider in *Settings → System Settings → Embeddings*
 (OpenRouter unless changed). An Anthropic, DeepSeek or NVIDIA key alone runs the
 agents but not embeddings: without an OpenRouter key (or the key of whichever
 embedding provider is set) memory and knowledge search are **off**, nothing is
-remembered, and uploads end `failed`. Add the OpenRouter key in **Settings → API
-Keys**, then restart the backend (`docker compose restart backend`) so memory
+remembered, and uploads end `failed`. Add the OpenRouter key in **Settings → Model
+keys**, then restart the backend (`docker compose restart backend`) so memory
 picks it up.
 
 *Check:* **Settings → Orchestrator → What Auto depends on** shows *Memory and
@@ -395,7 +395,7 @@ that check, so behind one run `paired`. Details:
 - [ ] `docker compose ps`: all services running or healthy
 - [ ] http://localhost:3000 opens, and http://localhost:8000/health returns JSON (or your `FRONTEND_PORT` / `API_PORT`)
 - [ ] `.env` has real secrets (no `CHANGE_ME`) and an absolute `AUTOMATOS_WORKSPACE_DIR`
-- [ ] A model key is added in Settings → API Keys (by the person)
+- [ ] A model key is added in Settings → Model keys (by the person)
 - [ ] Optional: session mode paired, and `make cli-host-status` shows running
 - [ ] Optional: reached from a phone; discovery shows `"pairing":{"enabled":true}` and the phone is listed under Settings → Phones & devices
 
