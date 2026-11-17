@@ -133,7 +133,7 @@ import { WorkspaceProvider, useWorkspace } from '@/components/workspace-provider
 import { SocialsTab } from '@/components/deliverables/socials/socials-tab'
 import { APPROVE_CARD } from '@/components/deliverables/socials/studio/editor-approve-card'
 import { READ_ONLY_ROLE } from '@/components/deliverables/socials/studio/socials-post-view'
-import { SOCIAL_POST_REVIEW_STALE_MESSAGE } from '@/hooks/use-socials-api'
+import { SOCIAL_POST_CHANGED_MESSAGE, SOCIAL_POST_REVIEW_STALE_MESSAGE } from '@/hooks/use-socials-api'
 
 const api = apiClient as unknown as Record<string, ReturnType<typeof vi.fn>>
 
@@ -369,8 +369,8 @@ describe('Socials on', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Save draft' }))
 
-    // The editor says what the server said, and reads the posts again.
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('the post changed since you opened it'))
+    // The editor says the post changed, and reads the posts again.
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(SOCIAL_POST_CHANGED_MESSAGE))
     expect(api.updateSocialPost).toHaveBeenCalledWith(post.id, expect.objectContaining({ copy: { base: 'v2 mine', channels: {} } }))
     await waitFor(() => expect(api.listSocialPosts.mock.calls.length).toBeGreaterThan(fetches))
     expect(await screen.findByDisplayValue('v2 from another editor')).toBeInTheDocument()

@@ -25,7 +25,7 @@ import type {
   SocialPostTargetInput,
   SocialTemplateSummary,
 } from '@/lib/api-client'
-import { useInvalidateSocials, useSocialsOn } from '@/hooks/use-socials-api'
+import { HTTP_CONFLICT, SOCIAL_POST_CHANGED_MESSAGE, httpStatusOf, useInvalidateSocials, useSocialsOn } from '@/hooks/use-socials-api'
 import { useWorkspace } from '@/components/workspace-provider'
 import { RENDERING_FOR_APPROVAL, SENT_FOR_APPROVAL } from '@/components/deliverables/socials/studio/editor-submit'
 
@@ -115,7 +115,9 @@ export async function saveEditor({ postId, fields, targets, slot, onCreated }: E
 /** What a call says once it worked: one sentence, one that depends on the post it answered, or nothing. */
 type SuccessMessage = string | null | ((post: SocialPost) => string)
 
-function useEditorMutation<Input>(run: (input: Input) => Promise<SocialPost>, success: SuccessMessage, failure: string) {
+/** `conflict`: what a 409 says in place of the server's own words (a call whose only 409 is "another
+ * writer saved first"); without it the server's sentence shows, as for every other refusal. */
+function useEditorMutation<Input>(run: (input: Input) => Promise<SocialPost>, success: SuccessMessage, failure: string, conflict?: string) {
   const invalidate = useInvalidateSocials()
   return useMutation<SocialPost, Error, Input>({
     mutationFn: run,
@@ -126,13 +128,16 @@ function useEditorMutation<Input>(run: (input: Input) => Promise<SocialPost>, su
     },
     onError: async (error) => {
       await invalidate()
-      toast.error(error.message || failure)
+      const changed = conflict && httpStatusOf(error) === HTTP_CONFLICT ? conflict : null
+      toast.error(changed || error.message || failure)
     },
   })
 }
 
+/** Save draft. A 409 is another writer's save landing first: it says the post changed (the posts are
+ * read again, so the editor shows the server's version), as every other post write does. */
 export function useSaveEditor() {
-  return useEditorMutation<EditorSave>(saveEditor, 'Draft saved', 'Could not save the draft')
+  return useEditorMutation<EditorSave>(saveEditor, 'Draft saved', 'Could not save the draft', SOCIAL_POST_CHANGED_MESSAGE)
 }
 
 /** Save, then render: a video at half resolution (the preview), an image for real. */

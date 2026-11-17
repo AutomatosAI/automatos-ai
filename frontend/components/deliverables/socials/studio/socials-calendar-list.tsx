@@ -122,7 +122,8 @@ function ListBody({ role, posts, onOpen }: SocialsCalendarListProps) {
       </p>
     )
   }
-  if (isError) {
+  // A refetch that failed keeps the posts already here; only a list with none says the load failed.
+  if (isError && posts.length === 0) {
     return (
       <p role="alert" className="m-0 text-sm text-destructive">
         {LOAD_FAILED} {error instanceof Error ? error.message : UNKNOWN_ERROR}

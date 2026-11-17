@@ -24,6 +24,7 @@ from tests.test_prd251w1_social_post_tools import (  # its environment first
 from tests.test_prd251w1_social_post_tools import env as _env
 
 from modules.socials import service  # noqa: E402
+from modules.tools.discovery import social_post_list as listing  # noqa: E402
 from modules.tools.discovery import social_post_results as results  # noqa: E402
 
 env = _env  # the US-116 fixture: SQLite, the real router and executor
@@ -80,6 +81,11 @@ def test_the_answers_add_nothing_for_a_post_whose_file_is_current():
     assert answer["message"] == results.FILE_OLDER.format(id="p1")
     assert answer["post"] == results.post_view(current, None)  # the compact post is unchanged
     assert results.read_view(older)["needs"][-1] == results.NEEDS_NEW_RENDER
+    # One rule for the read, a list row and a ticket's note (social_post_list.what_it_needs): the render
+    # comes first, so a post the owner cannot approve yet is not said to need the owner's approval.
+    assert listing.what_it_needs(current) == [listing.NEEDS_APPROVAL, listing.NEEDS_CAPTION]
+    assert listing.what_it_needs(older) == [listing.NEEDS_CAPTION, results.NEEDS_NEW_RENDER]
+    assert listing.post_row(older)["needs"] == results.read_view(older)["needs"]
 
     # An approved post keeps its approved file, and a render is refused while it holds the approval:
     # a change to a render setting there (its voice, its footage) is not a render to ask for.
@@ -87,3 +93,4 @@ def test_the_answers_add_nothing_for_a_post_whose_file_is_current():
     assert results.saved(approved, None, results.CHANGED)["message"] == results.CHANGED
     assert results.FILE_CURRENT not in results.saved(approved, None, results.CHANGED)
     assert results.NEEDS_NEW_RENDER not in results.read_view(approved)["needs"]
+    assert listing.what_it_needs(approved) == []

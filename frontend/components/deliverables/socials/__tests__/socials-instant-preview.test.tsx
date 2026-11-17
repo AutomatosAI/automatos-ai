@@ -4,7 +4,8 @@
  * frame whose sandbox is exactly "allow-scripts", labelled a preview; the page is shown only when
  * it opens with its own content security policy; the kit's font faces and the post's photo go in
  * at the page's markers; it is asked for a moment after the typing stops, once for a burst of
- * typing; a refusal keeps the last page and says why, any other failure keeps today's frame; a
+ * typing; a refusal keeps the last page and says why (with no page yet, under today's frame), any
+ * other failure keeps today's frame; a
  * video and a post whose render is current keep today's preview, and an edit brings the page back.
  *
  * The shared editor harness's apiClient double does not carry the preview's two methods or
@@ -145,6 +146,16 @@ describe('the instant preview of an image post', () => {
     instantApi.getSocialTemplatePreviewPage.mockRejectedValue(Object.assign(new Error('Server error'), { status: 500 }))
     fireEvent.change(within(card('Text on the image')).getByLabelText('Headline'), { target: { value: 'Open at six' } })
     await waitFor(() => expect(instantFrame()).toBeNull(), WAIT)
+    expect(within(preview()).getByText('Not rendered yet')).toBeInTheDocument()
+  })
+
+  it('a refusal of the first page says why under today\'s frame', async () => {
+    instantApi.getSocialTemplatePreviewPage.mockRejectedValue(
+      Object.assign(new Error(REFUSAL), { status: 422, body: { detail: REFUSAL } }),
+    )
+    renderEditor(post({ ...IMAGE_POST, variables: { headline: { value: 'x'.repeat(61), claim: false } } }))
+    expect(await within(preview()).findByText(`${PREVIEW_PAUSED} ${REFUSAL}`, {}, WAIT)).toBeInTheDocument()
+    expect(instantFrame()).toBeNull()
     expect(within(preview()).getByText('Not rendered yet')).toBeInTheDocument()
   })
 

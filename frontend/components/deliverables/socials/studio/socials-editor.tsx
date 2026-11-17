@@ -37,8 +37,7 @@ import { EditorFormatCard } from './editor-format-card'
 import { EditorLookCard } from './editor-look-card'
 import { photoSpotsOf } from './editor-look-photo'
 import { EditorPreviewColumn } from './editor-preview-column'
-import { previewStale } from './preview-model'
-import { submitNote, submitRenders, type SubmitInput } from './editor-submit'
+import { submitNote, submitRenders, unsavedFileChanges, type SubmitInput } from './editor-submit'
 import { EditorWhenCard } from './editor-when-card'
 import {
   editorTargets, givenFields, isOwnFilePost, postFields, slidesOf, slotChanged, slotInput, videoSlotsOf, withChannelTicked, withFormat,
@@ -126,9 +125,9 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
   const mediaBusy = calls.upload.isLoading || calls.pick.isLoading
   const ownFile = isOwnFilePost(post, draft)
   const ownStill = ownFile && draft.format === 'image'  // PRD-251C US-C303: rendered into a crop per channel
-  // PRD-251D (E1, US-D108): what Submit for approval makes first, from the post's own flag and what is on
-  // screen. Only the edits count, not a preview older than a later full render: hence no preview here.
-  const unsaved = previewStale(post && { ...post, preview: null }, draft)
+  // PRD-251D (E1, US-D108): what Submit for approval makes first, from the post's own flag and the unsaved
+  // edits to what the file shows (not the brief, and not a preview older than a later full render).
+  const unsaved = unsavedFileChanges(post, draft)
   const submit: SubmitInput = { format: draft.format, ownFile, lengthSeconds: draft.lengthSeconds, sizes: (chosen?.sizes ?? []).length, post, unsaved }
 
   return (
@@ -181,7 +180,7 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
             onChange={(variables, sources) => setDraft((d) => ({ ...d, variables, sources }))}
           />
           <EditorWhenCard slot={draft.slot} onChange={(slot) => setDraft((d) => ({ ...d, slot }))} />
-          {post && <SocialsEditorActivity post={post} role={role} />}
+          {post && <SocialsEditorActivity post={post} role={role} dirty={dirty} />}
         </div>
         <EditorPreviewColumn
           post={post} draft={draft} channels={channels} templateSizes={chosen?.sizes ?? []}

@@ -6,14 +6,15 @@
  * cropped per channel) is saved, then given the full render (POST /posts/{id}/render with no
  * `preview`), which ends it in needs_approval by itself, when its file does not show it yet: it has
  * no rendered file, its file is not current (the post's `file_current`: the server records what each
- * render was made from, US-D108), or the editor holds unsaved changes to what a render reads
- * (preview-model's `previewStale`). Otherwise its file already shows it, and it is saved and
+ * render was made from, US-D108), or the editor holds unsaved changes to what the file shows
+ * (`unsavedFileChanges`: a field, the template, the length or the format; not the brief, which is
+ * what Auto writes from and is not on the file). Otherwise its file already shows it, and it is saved and
  * submitted as it was before Wave 1. A still of the person's own is cropped every time: its crops
  * follow its channels, which the record does not cover. A text post, and a post whose visual is the
  * person's own video or slides, have nothing to render: they are saved and submitted.
  */
 import type { SocialPost } from '@/lib/api-client'
-import { OWN_FILE_ASPECT } from './editor-model'
+import { OWN_FILE_ASPECT, draftFromPost, type EditorDraft } from './editor-model'
 import { fullRenderCost } from './preview-model'
 
 export const SUBMIT_RENDERS = 'Submit for approval renders the post first, then it waits for approval. Images use no render minutes.'
@@ -30,8 +31,19 @@ export interface SubmitInput {
   sizes: number
   /** The post as the server has it; null for a new one. */
   post: SocialPost | null
-  /** The editor holds unsaved changes to what a render reads (preview-model's `previewStale`). */
+  /** The editor holds unsaved changes to what the file shows (`unsavedFileChanges`). */
   unsaved: boolean
+}
+
+/** What the file shows of a draft: its fields, template, length and format. */
+function fileInputs(draft: EditorDraft): string {
+  return JSON.stringify([draft.variables, draft.templateId, draft.lengthSeconds, draft.format])
+}
+
+/** Whether the editor holds unsaved changes to what the post's file shows. An edit to the brief alone
+ * is not one: the file would be made from the same fields. A new post has nothing saved to differ from. */
+export function unsavedFileChanges(post: SocialPost | null, draft: EditorDraft): boolean {
+  return !!post && fileInputs(draftFromPost(post)) !== fileInputs(draft)
 }
 
 type RenderInput = Pick<SubmitInput, 'format' | 'ownFile' | 'post' | 'unsaved'>

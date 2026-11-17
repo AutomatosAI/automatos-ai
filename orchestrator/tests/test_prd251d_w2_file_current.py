@@ -230,6 +230,24 @@ def test_a_post_never_rendered_and_one_rendered_before_the_record_are_current():
     assert before.status == service.APPROVED
 
 
+def test_a_field_with_no_value_is_the_same_file_whether_it_is_there_or_not():
+    def post(variables):
+        return SimpleNamespace(format="image", template_id=TEMPLATE, variables=variables, footage=None, length_seconds=None)
+
+    bare = file_state.render_inputs_hash(post(FRIDAY))
+    # A render takes the field's default either way: a save that only adds or drops it changes no file.
+    assert file_state.render_inputs_hash(post({**FRIDAY, "kicker": {"value": None, "claim": False}})) == bare
+    # Empty text is a value: a render shows it in place of the default.
+    assert file_state.render_inputs_hash(post({**FRIDAY, "kicker": {"value": "", "claim": False}})) != bare
+
+
+def test_the_approve_controls_show_the_refusal_in_the_servers_own_words():
+    # frontend/.../socials-review.ts holds the sentence the server refuses with: the approve hook tells
+    # a 409 that says it from a review that went stale by comparing the two.
+    review = Path(__file__).resolve().parents[2] / "frontend" / "components" / "deliverables" / "socials" / "socials-review.ts"
+    assert f"export const FILE_OLDER_THAN_WORDS = '{file_state.FILE_OLDER_THAN_WORDS}'" in review.read_text(encoding="utf-8")
+
+
 def test_a_history_the_reader_cannot_use_reads_as_current_and_never_raises():
     for log in (None, [], ["not an entry", None, 7], [{"action": RENDER_DONE, file_state.MADE_FROM: 7}]):
         post = SimpleNamespace(format="image", template_id=TEMPLATE, review_log=log, variables=None, footage=None)

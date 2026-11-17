@@ -7,7 +7,8 @@
  * The page is a workspace's own template, its script included, so it runs only here: in a frame
  * with sandbox="allow-scripts" and nothing else (no same origin: it reads no cookie, storage or
  * page of the app's; no forms, popups or top navigation), under its own content security policy,
- * which lets it fetch nothing. It takes no pointer events, so nothing in it can be clicked.
+ * which allows no request it covers; the page's first script takes the peer-connection API away,
+ * which the policy does not cover. It takes no pointer events, so nothing in it can be clicked.
  */
 import { useEffect, useRef, useState, type RefObject } from 'react'
 

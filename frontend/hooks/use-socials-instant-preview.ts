@@ -7,11 +7,14 @@
  *   (POST /api/socials/templates/{id}/preview-page); the editor keeps the last page on screen
  *   while the next one loads (studio/use-instant-preview.ts);
  * - the brand kit's font faces (GET /api/socials/brand-kit/preview-fonts), fetched once per
- *   kit: keyed on the page's `fonts_version`, and outside the 'socials' keys, which every
- *   post save refreshes, so their megabytes are not fetched again with each save;
+ *   kit: keyed on the page's `fonts_version`;
  * - each photo the post holds in a photo spot, read through the post's media route and handed
  *   back as a data: URI. The page runs in a frame with no same origin, which can load neither a
  *   route behind sign-in nor a blob: URL of the app's.
+ *
+ * None of the three sits under the 'socials' keys, which every post save refreshes: a save changes
+ * neither the page for the words on screen nor the kit's megabytes of fonts, so neither is fetched
+ * again with it.
  *
  * Query keys are scoped by workspace id so switching workspaces clears cache.
  */
@@ -23,7 +26,7 @@ import { useSocialsOn } from '@/hooks/use-socials-api'
 
 export const socialsPreviewKeys = {
   page: (workspaceId: string | null, templateId: string, input: SocialPreviewPageInput | null) =>
-    ['socials', workspaceId, 'preview-page', templateId, input] as const,
+    ['socials-preview-page', workspaceId, templateId, input] as const,
   fonts: (workspaceId: string | null, version: string) => ['socials-preview-fonts', workspaceId, version] as const,
   photos: (workspaceId: string | null, postId: string, files: string) => ['socials-preview-photos', workspaceId, postId, files] as const,
 }

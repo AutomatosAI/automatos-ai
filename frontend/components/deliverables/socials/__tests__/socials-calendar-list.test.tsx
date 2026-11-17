@@ -52,7 +52,7 @@ vi.mock('@/lib/api-client', () => {
 import { apiClient } from '@/lib/api-client'
 import { SocialsTab } from '@/components/deliverables/socials/socials-tab'
 import { SOCIAL_STATUS_LABELS, SOCIAL_STATUS_ORDER } from '@/components/deliverables/socials/socials-status'
-import { NO_POSTS, START_ONE, TEAM_DRAFTS } from '@/components/deliverables/socials/studio/socials-calendar-list'
+import { LOAD_FAILED, NO_POSTS, SocialsCalendarList, START_ONE, TEAM_DRAFTS } from '@/components/deliverables/socials/studio/socials-calendar-list'
 import { READ_ONLY_ROLE } from '@/components/deliverables/socials/studio/socials-post-view'
 
 const STUDIO_DIR = path.resolve(__dirname, '..', 'studio')
@@ -224,5 +224,22 @@ describe('?post= (global search links a post there)', () => {
     renderTab('post-out-already')
     const view = await screen.findByRole('article', { name: 'Post: Out already' })
     expect(within(view).getByTestId('socials-post-status')).toHaveTextContent('Published')
+  })
+})
+
+describe('a read of the posts that failed', () => {
+  it('keeps the posts the list already has; with none, it says the load failed', async () => {
+    vi.mocked(apiClient.listSocialPosts).mockRejectedValueOnce(new Error('offline'))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const list = (posts: any[]) => (
+      <QueryClientProvider client={client}>
+        <SocialsCalendarList role="editor" posts={posts} onOpen={vi.fn()} />
+      </QueryClientProvider>
+    )
+    const view = render(list(POSTS))
+    expect(await screen.findByRole('region', { name: 'Draft posts' })).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).toBeNull()
+    view.rerender(list([]))
+    expect(await screen.findByRole('alert')).toHaveTextContent(`${LOAD_FAILED} offline`)
   })
 })

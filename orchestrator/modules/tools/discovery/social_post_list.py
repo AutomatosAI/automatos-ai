@@ -114,7 +114,10 @@ def _rendering(post: Mapping[str, Any]) -> str:
 
 
 def what_it_needs(post: Mapping[str, Any]) -> List[str]:
-    """What the post still needs before it can go out, in plain words; [] when nothing."""
+    """What the post still needs before it can go out, in plain words; [] when nothing. A post whose
+    file is older than its words needs its new render, said last, and not yet the owner's approval."""
+    from modules.tools.discovery.social_post_results import NEEDS_NEW_RENDER, renders_again
+
     status = post.get("status")
     needs: List[str] = []
     asked = _input_asked(post)  # P256-FIX-SOC-5: a draft that waits for you says so, not "a render"
@@ -127,10 +130,13 @@ def what_it_needs(post: Mapping[str, Any]) -> List[str]:
     needs.extend(asked)
     if status == CHANGES:
         needs.append(NEEDS_CHANGES.format(why=_last_comment(post, REQUEST_CHANGES)))
-    if status == WAITING:
+    older = renders_again(post)  # PRD-251D US-D108: the owner cannot approve it until it renders again
+    if status == WAITING and not older:
         needs.append(NEEDS_APPROVAL)
     if post.get("format") != "text" and status in (DRAFT, CHANGES, WAITING, FAILED) and not _has_copy(post):
         needs.append(NEEDS_CAPTION)
+    if older:
+        needs.append(NEEDS_NEW_RENDER)
     return needs
 
 

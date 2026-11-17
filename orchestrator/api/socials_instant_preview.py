@@ -16,7 +16,7 @@ Included into the Socials router (``api/socials.py``), so both take the ``/api/s
 prefix and the Socials gate. Every read is of the caller's workspace: another workspace's
 template is 404. The page is for a person who drafts posts (``documents:create``, as the
 composer is); the fonts are the kit's, read as the kit itself is. The page reads the kit's
-logos and none of its uploaded fonts. Plain ``def`` routes (F105): nothing here awaits.
+logos and none of its fonts, uploaded or bundled. Plain ``def`` routes (F105): nothing here awaits.
 """
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.core import DocumentTemplate
+from core.media_render_bundle import BUNDLED_FONT_FILES
 from core.models.workspaces import Workspace
 from core.social_templates import MAX_SLOTS, MAX_TEXT_CHARS, MAX_VARIABLES
 from modules.documents.brand_fonts import brand_kit_for_media_render
@@ -102,8 +103,9 @@ def social_template_preview_page(
     template = _template(db, ctx, template_id)
     workspace = _workspace(db, ctx)
     stored_kit = get_brand_kit(workspace.settings)
-    # The logos and tokens a render reads; the uploaded fonts are left unread (the editor has them).
-    brand_kit = brand_kit_for_media_render({**stored_kit, "font_files": []})
+    # The logos and tokens a render reads. No font goes into the page's bundle: the uploaded ones are
+    # left unread and the bundled ones are dropped (the editor has both, from the fonts route).
+    brand_kit = {**brand_kit_for_media_render({**stored_kit, "font_files": []}), BUNDLED_FONT_FILES: []}
     request = instant_preview.PreviewRequest(values=body.values, size=body.size, story=body.story, photos=tuple(body.photos))
     try:
         page = instant_preview.preview_page(

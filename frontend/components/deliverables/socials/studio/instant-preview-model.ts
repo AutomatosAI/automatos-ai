@@ -13,7 +13,7 @@
 import type { SocialChannel, SocialPost, SocialPreviewPageInput, SocialTemplateSummary } from '@/lib/api-client'
 import type { PreviewPhotoFile } from '@/hooks/use-socials-instant-preview'
 import { closestShape } from './channel-shape'
-import { aspectOf, isOwnFilePost, type EditorDraft } from './editor-model'
+import { aspectOf, type EditorDraft } from './editor-model'
 import { previewStale } from './preview-model'
 
 /** How long after the last change the page is asked for. */
@@ -46,11 +46,11 @@ export function renderIsCurrent(post: SocialPost | null, draft: EditorDraft): bo
   return !!post && Object.keys(post.media ?? {}).length > 0 && post.file_current !== false && !previewStale(post, draft)
 }
 
-/** Whether the preview shows the instant page: an image post with a template, not the person's
- * own file, whose file is not current. A video, a carousel, a text post, a post left to "Let Auto
- * pick", the person's own file and a current render keep the preview they have. */
-export function wantsInstantPreview(post: SocialPost | null, draft: EditorDraft, fileCurrent: boolean): boolean {
-  return draft.format === IMAGE_FORMAT && !!draft.templateId && !isOwnFilePost(post, draft) && !fileCurrent
+/** Whether the preview shows the instant page: an image post with a template whose file is not
+ * current. A video, a carousel, a text post, a post with no template (left to "Let Auto pick", or
+ * the person's own file, which never has one) and a current render keep the preview they have. */
+export function wantsInstantPreview(draft: Pick<EditorDraft, 'format' | 'templateId'>, fileCurrent: boolean): boolean {
+  return draft.format === IMAGE_FORMAT && !!draft.templateId && !fileCurrent
 }
 
 /** The pictures the post holds in the template's photo spots: each spot's chosen file. */

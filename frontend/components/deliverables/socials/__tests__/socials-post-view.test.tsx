@@ -234,6 +234,14 @@ describe("the Activity card's full render, the older pane's Render", () => {
     await waitFor(() => expect(api.renderSocialPost).toHaveBeenCalledWith('p1'))
   })
 
+  it('waits for the save while the editor above holds unsaved edits: it renders the post as it is saved', () => {
+    withClient(<SocialsEditorActivity post={post({ status: 'failed', template_id: 'tpl-video', format: 'video' })} role="owner" dirty />)
+    expect(screen.getByRole('button', { name: 'Render again' })).toBeDisabled()
+    cleanup()
+    activity(post({ status: 'failed', template_id: 'tpl-video', format: 'video' }))
+    expect(screen.getByRole('button', { name: 'Render again' })).toBeEnabled()
+  })
+
   it('a failed one, or one with its file, says Render again', () => {
     activity(post({ status: 'failed', template_id: 'tpl-video', format: 'video' }))
     expect(screen.getByRole('button', { name: 'Render again' })).toBeInTheDocument()

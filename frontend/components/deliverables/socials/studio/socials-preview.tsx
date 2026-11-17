@@ -98,7 +98,7 @@ export function SocialsPreview({ post, draft, channels, templateSizes, onChannel
   const active = ticked.find((channel) => channel.toolkit === tab) ?? ticked[0] ?? null
   const brand = useBrandName()
   const files = usePreviewMedia(post, draft.format === 'video')
-  const instant = useInstantPreview({ post, draft, templateSizes, active, fileCurrent: renderIsCurrent(post, draft) })
+  const { instant, problem } = useInstantPreview({ post, draft, templateSizes, active, fileCurrent: renderIsCurrent(post, draft) })
   const textOnly = draft.format === 'text'
   const slot = slotInput(draft.slot)
   const note = renderNote({
@@ -125,7 +125,7 @@ export function SocialsPreview({ post, draft, channels, templateSizes, onChannel
           />
           <Hint>{note}</Hint>
           {instant && <Hint>{INSTANT_PREVIEW_NOTE}</Hint>}
-          {instant?.problem && <p role="status" className="text-xs text-destructive">{PREVIEW_PAUSED} {instant.problem}</p>}
+          {problem && <p role="status" className="text-xs text-destructive">{PREVIEW_PAUSED} {problem}</p>}
           <ChannelCopyField
             toolkit={active.toolkit} label={active.label} value={copyOf(active.toolkit)} limits={active.copy_limits}
             onChange={(text) => onChannelCopy(active.toolkit, text)}
