@@ -178,9 +178,29 @@ command in it:
 - **A program is read, not just its verb.** `awk` and `sed` stay on the list
   because a ticket needs them, but their program is refused when it can run a
   command of its own (`awk 'BEGIN{system(…)}'`, a pipe to a command, `print >
-  file`, sed's `e` command or `s///e` flag) or when the gate cannot see it at
-  all (`-f progfile`). A program is not a path: `sed '/foo/d'` opens with a
-  regex address, so program text is left out of the path check.
+  file`, gawk's `@include`, sed's `e` command or `s///e` flag) or when the gate
+  cannot see it at all (`-f progfile`, gawk's `-E`). Options are read as getopt
+  reads them (`sed -e's/a/b/e'`, `sed -n p f -e …`). An awk program is read as
+  written: a `|` anywhere in it, a regex or a string too, is refused
+  (`awk '!/tests\/|alembic/'`). A sed script is read as sed reads it
+  (`sed_script.py`): `e`, `r`/`R`, `w`/`W` and the `e`/`w` flags of `s` are
+  refused where sed reads a command or a flag, so `sed -n '/warning/p'` runs and
+  `sed '/x/r ../y'` is refused. A script the gate cannot follow (an unterminated
+  regex, an unknown command, a control character, a shell variable in it) is
+  refused.
+- **A pattern or a program is data** (`shell_data.py`). A grep, rg or `git grep`
+  pattern, a `git log --grep`/`-S`/`-G` value, a sed program and a jq filter
+  are text the tool reads, so the command-word rules (a migration tool,
+  `docker`, `psql`, …), the `..` check and the path check leave them out:
+  `jq '.. | objects'` and `grep -v /tests/` are not a traversal or a read of
+  `/tests`. An awk program is left out of the path check only. Only when the reading is
+  certain: an option the gate does not know, or a pattern option after the
+  first operand, leaves every word judged. Quoting a path hides nothing
+  (`cat "../x"` is refused), text a shell runs (`bash -c`, `eval`, `$(…)`)
+  is still a command, a wrapper hides no rule (`time alembic upgrade head` is
+  asked), and the never-allowed list still reads the raw line. A pattern or
+  program held in a variable (`jq "$F"`) is not data. `ssh` is not read: only
+  its argument's words meet the ask-list (`ssh h 'alembic upgrade head'` runs).
 - **What `find` would run is judged too.** `-exec`/`-execdir`/`-ok`/`-okdir`
   hand their command to the same rules (`-exec cat {} \;` runs, `-exec rm {} +`
   and `-exec sh -c …` are held), and `-delete`/`-fprint…` are held for you.

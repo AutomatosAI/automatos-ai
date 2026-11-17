@@ -13,6 +13,9 @@ the word-level checks never had:
   runs (``git${IFS}push``, ``$CMD``), code an interpreter takes inline
   (``python3 -c``), a shell reading its commands from input (``echo … | sh``).
 
+And the subcommand under ``git``'s and ``gh``'s global options (``git -C x push``
+is ``git push``), moved here from ``policy.py`` on 17 Nov to keep that file short.
+
 In Auto mode — the local edition's default — an unlisted verb runs unasked, so a
 command the gate cannot read must be a card, not a pass (W0 security review).
 """
@@ -20,7 +23,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Dict, FrozenSet, List, Optional, Sequence
+from typing import Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple
 
 SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "mksh", "yash", "fish", "tcsh", "csh",
                     "pwsh", "powershell", "nu", "elvish", "xonsh"})
@@ -140,7 +143,54 @@ def opaque_reason(words: Sequence[str]) -> Optional[str]:
     return _hidden_input(head, words, args)
 
 
+# ── git's and gh's global options (moved from policy.py) ─────────────────────
+# Global options that may sit between ``git`` and its subcommand. Peeled before
+# the verb is judged, so no spelling of a global hides a ``push`` from the
+# never-allowed list; the ones that name a path are confined like any argument.
+GIT_PATH_OPTIONS = ("-C", "--git-dir", "--work-tree", "--exec-path")
+GIT_VALUE_OPTIONS = ("-c", "--namespace", "--config-env", "--super-prefix")
+GIT_FLAG_OPTIONS = ("-p", "-P", "--paginate", "--no-pager", "--bare", "--no-replace-objects",
+                    "--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs",
+                    "--icase-pathspecs", "--no-optional-locks", "--no-lazy-fetch")
+# ``gh`` names a repository, never a path.
+GH_VALUE_OPTIONS = ("-R", "--repo")
+# The verbs whose globals are peeled: (options naming a path, with a value, with none).
+GLOBAL_OPTIONS: Mapping[str, Tuple[Tuple[str, ...], Tuple[str, ...], Tuple[str, ...]]] = {
+    "git": (GIT_PATH_OPTIONS, GIT_VALUE_OPTIONS, GIT_FLAG_OPTIONS),
+    "gh": ((), GH_VALUE_OPTIONS, ()),
+}
+
+
+def strip_globals(words: Sequence[str]) -> Tuple[List[str], List[str]]:
+    """``git -C <path> -c k=v log`` is ``git log``: the command with EVERY global
+    option of ``git``/``gh`` peeled off, and the paths those options named. Any
+    other command comes back as it is."""
+    head = Path(words[0]).name if words else ""
+    if head not in GLOBAL_OPTIONS:
+        return list(words), []
+    path_options, value_options, flag_options = GLOBAL_OPTIONS[head]
+    rest = list(words[1:])
+    paths: List[str] = []
+    while rest:
+        name, glued, value = rest[0].partition("=")
+        if name in path_options or name in value_options:
+            if glued:
+                rest = rest[1:]
+            elif len(rest) >= 2:
+                value, rest = rest[1], rest[2:]
+            else:
+                break
+            if name in path_options:
+                paths = [*paths, value]
+        elif name in flag_options and not glued:
+            rest = rest[1:]
+        else:
+            break
+    return [head, *rest], paths
+
+
 __all__ = [
-    "GH_API_READ_METHODS", "GH_READ_ONLY", "GH_READ_ONLY_GROUPS", "INLINE_CODE_WORDS", "SHELLS", "SOURCE_VERBS",
-    "gh_api_writes", "gh_writes", "inline_commands", "opaque_reason",
+    "GH_API_READ_METHODS", "GH_READ_ONLY", "GH_READ_ONLY_GROUPS", "GH_VALUE_OPTIONS", "GIT_FLAG_OPTIONS",
+    "GIT_PATH_OPTIONS", "GIT_VALUE_OPTIONS", "GLOBAL_OPTIONS", "INLINE_CODE_WORDS", "SHELLS", "SOURCE_VERBS",
+    "gh_api_writes", "gh_writes", "inline_commands", "opaque_reason", "strip_globals",
 ]
