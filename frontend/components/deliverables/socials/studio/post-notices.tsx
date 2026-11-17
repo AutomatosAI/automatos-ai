@@ -62,8 +62,11 @@ export function renderFailedLine(post: Pick<SocialPost, 'status' | 'review_log'>
   return entry?.comment ? `${RENDER_FAILED} ${entry.comment}` : null
 }
 
-/** Whether `role` gets the full render here: a post with a template that failed or waits for approval. */
-export function rendersHere(role: Workspace['role'], post: Pick<SocialPost, 'status' | 'template_id'>): boolean {
+/** Whether `role` gets the full render here: a post with a template that failed or waits for approval.
+ * Not while its file is older than its words (US-D108): the approve controls then say so and hold the
+ * one Render again, so the page never shows two. */
+export function rendersHere(role: Workspace['role'], post: Pick<SocialPost, 'status' | 'template_id' | 'file_current'>): boolean {
+  if (post.status === 'needs_approval' && post.file_current === false) return false
   return RENDER_HERE.has(post.status) && postActions(role, post.status, !!post.template_id).render
 }
 

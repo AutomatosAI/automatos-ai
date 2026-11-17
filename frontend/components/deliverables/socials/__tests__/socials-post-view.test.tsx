@@ -249,6 +249,8 @@ describe("the Activity card's full render, the older pane's Render", () => {
       [post({ status: 'draft', template_id: 'tpl-video' }), 'owner'],
       [post({ status: 'changes_requested', template_id: 'tpl-video' }), 'owner'],
       [post({ status: 'approved', template_id: 'tpl-video' }), 'owner'],
+      // Its file is older than its words: the approve controls say so and hold the one Render again.
+      [post({ status: 'needs_approval', template_id: 'tpl-video', file_current: false }), 'owner'],
     ]
     for (const [p, role] of cases) {
       activity(p, role)
