@@ -15,11 +15,15 @@ const AGENT_ID = 7
 
 type Detail = Record<string, unknown>
 
-/** apiClient.request by path: the saved agent (or its failure), and the session-mode reads of a cli agent. */
+/**
+ * apiClient.request by path: the saved agent (or its failure), the memory profiles listed beside
+ * the runtime profile, and the session-mode reads of a cli agent.
+ */
 function apiMock(saved: Detail | Error) {
   return vi.fn(async (path: string) => {
     if (path === '/api/v1/cli-hosts/health') return { registry: [], providers_online: [] }
     if (path === '/api/v1/cli-hosts/settings') return { session_tools: [] }
+    if (path === '/api/v1/memory/profiles') return { profiles: [], enabled: true }
     if (path === `/api/agents/${AGENT_ID}`) {
       if (saved instanceof Error) throw saved
       return saved

@@ -13,8 +13,9 @@
  * working_directory). The backend validates them (`core/cli_runtime.py`), so a
  * bad alias is refused at save, not discovered at claim.
  *
- * PRD-274: under it, a saved agent's runtime profile (Full / Lean), in both
- * editions (`runtime-profile-field.tsx`); it rides the same configuration JSON.
+ * PRD-274: under it, a saved agent's runtime profile (Full / Lean) and memory
+ * profile, in both editions (`agent-profile-fields.tsx`); they ride the same
+ * configuration JSON.
  */
 
 import { useEffect, useState } from 'react'
@@ -27,7 +28,7 @@ import { PermissionModeSelect, WORKSPACE_DEFAULT, isPermissionMode } from '@/com
 import type { SessionToolGapEntry, SkillToolGap } from '@/types/session-tools'
 import { useConfiguredAgentId } from './configured-agent-context'
 import { loadApiClient } from './lazy-api-client'
-import { RuntimeProfileField } from './runtime-profile-field'
+import { AgentProfileFields } from './agent-profile-fields'
 import { isRuntimeProfile, type RuntimeProfile } from './runtime-profile-model'
 import { SessionToolsPanel } from './session-tools-panel'
 import { sessionGroupsField } from './session-tool-groups-model'
@@ -54,6 +55,11 @@ export interface RuntimeFields {
    * agent saves nothing and keeps its stored profile (absent = full).
    */
   runtime_profile?: RuntimeProfile
+  /**
+   * PRD-274 Wave 4: the memory profile's slug, as the person picked it. Undefined until they
+   * choose, so an untouched agent saves nothing and keeps following its workspace.
+   */
+  memory_profile?: string
 }
 
 const DEFAULT_CLI_PROVIDER = 'claude'
@@ -142,9 +148,11 @@ export function normalizeRuntimeFields(source: object | null | undefined): Runti
   const src = (source ?? {}) as Record<string, unknown>
   const groups = sessionGroupsField(src.cli_session_tool_groups)
   const profile = src.runtime_profile
+  const memoryProfile = str(src.memory_profile).trim()
   return {
     ...(groups ? { cli_session_tool_groups: groups } : {}),
     ...(isRuntimeProfile(profile) ? { runtime_profile: profile } : {}),
+    ...(memoryProfile ? { memory_profile: memoryProfile } : {}),
     runtime: src.runtime === 'cli' ? 'cli' : 'api',
     cli_provider: str(src.cli_provider) || DEFAULT_CLI_PROVIDER,
     cli_model: str(src.cli_model),
@@ -208,11 +216,15 @@ export function runtimeBadge(
  * a cli agent carries provider/model/working_directory, blanks as null so the
  * host falls back to the CLI's default model and its default directory, and
  * `session_tool_groups` only when the owner changed the boxes (#942). Either kind
- * carries `runtime_profile` only when the person picked one (PRD-274). The backend
- * merges this into the stored configuration, so a key left out keeps its value.
+ * carries `runtime_profile` and `memory_profile` only when the person picked one
+ * (PRD-274). The backend merges this into the stored configuration, so a key left
+ * out keeps its value.
  */
 export function runtimeConfiguration(fields: RuntimeFields): Record<string, unknown> {
-  const profile = fields.runtime_profile ? { runtime_profile: fields.runtime_profile } : {}
+  const profile = {
+    ...(fields.runtime_profile ? { runtime_profile: fields.runtime_profile } : {}),
+    ...(fields.memory_profile ? { memory_profile: fields.memory_profile } : {}),
+  }
   if (fields.runtime !== 'cli') return { runtime: 'api', ...profile }
   return {
     runtime: 'cli',
@@ -645,21 +657,15 @@ function RuntimeKindGroup({ value, onChange, sessionToolGaps }: RuntimeSectionPr
 
 /**
  * The Runtime group of an agent's Model step: where it runs (local edition only), then, for a
- * saved agent, its runtime profile (both editions; PRD-274). The create wizard has no agent yet,
- * so it gets no profile choice and a new agent starts Full.
+ * saved agent, its runtime and memory profiles (both editions; PRD-274). The create wizard has no
+ * agent yet, so it gets no profile choices: a new agent starts Full, on its workspace's memory.
  */
 export function RuntimeSection(props: RuntimeSectionProps) {
   const agentId = useConfiguredAgentId()
   return (
     <>
       <RuntimeKindGroup {...props} />
-      {agentId !== null && (
-        <RuntimeProfileField
-          agentId={agentId}
-          value={props.value.runtime_profile}
-          onChange={(profile) => props.onChange('runtime_profile', profile)}
-        />
-      )}
+      {agentId !== null && <AgentProfileFields agentId={agentId} value={props.value} onChange={props.onChange} />}
     </>
   )
 }

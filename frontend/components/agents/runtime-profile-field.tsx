@@ -9,14 +9,13 @@
  * modal's existing save sends `configuration.runtime_profile` only when they did, through
  * `PUT /api/agents/{id}`, which merges it into the stored configuration.
  *
- * The saved profile, and whether the agent is a system agent, come from the agent detail, read
- * once. The choice stays disabled until that read answers, when it fails, and for a system agent.
+ * The saved profile, and whether the agent is a system agent, come from the saved agent's read
+ * (`use-saved-agent.ts`). The choice stays disabled until that read answers, when it fails, and
+ * for a system agent.
  */
 
-import { useEffect, useState } from 'react'
 import { Layers } from 'lucide-react'
 import { Label } from '@/components/ui/label'
-import { loadApiClient } from './lazy-api-client'
 import {
   PROFILE_READ_FAILED_REASON,
   RUNTIME_PROFILE_HELP,
@@ -27,68 +26,38 @@ import {
   type RuntimeProfile,
   type SavedRuntimeProfile,
 } from './runtime-profile-model'
-import { agentDetailPath } from './session-tool-groups-model'
+import type { SavedAgentRead } from './use-saved-agent'
 
 const LABEL_ID = 'runtime-profile-label'
 const RADIO_NAME = 'runtime-profile'
 
-type SavedProfileRead =
-  | { status: 'loading' }
-  | { status: 'failed' }
-  | { status: 'ready'; saved: SavedRuntimeProfile }
-
-const LOADING: SavedProfileRead = { status: 'loading' }
-const FAILED: SavedProfileRead = { status: 'failed' }
-
-/** The saved agent's profile, read once per agent. Never throws: a failed read is a state. */
-function useSavedRuntimeProfile(agentId: number): SavedProfileRead {
-  const [read, setRead] = useState<SavedProfileRead>(LOADING)
-  useEffect(() => {
-    let cancelled = false
-    setRead(LOADING)
-    void (async () => {
-      try {
-        const apiClient = await loadApiClient()
-        const detail = await apiClient.request<unknown>(agentDetailPath(agentId, null))
-        if (!cancelled) setRead({ status: 'ready', saved: savedRuntimeProfile(detail) })
-      } catch (error) {
-        console.error('Failed to load the agent runtime profile:', error)
-        if (!cancelled) setRead(FAILED)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [agentId])
-  return read
-}
-
 /** Why the choice cannot change right now; null while loading or when it can. */
-function lockedReason(read: SavedProfileRead): string | null {
-  if (read.status === 'failed') return PROFILE_READ_FAILED_REASON
-  if (read.status === 'ready' && read.saved.systemAgent) return SYSTEM_AGENT_PROFILE_REASON
+function lockedReason(agent: SavedAgentRead, saved: SavedRuntimeProfile | null): string | null {
+  if (agent.status === 'failed') return PROFILE_READ_FAILED_REASON
+  if (saved?.systemAgent) return SYSTEM_AGENT_PROFILE_REASON
   return null
 }
 
 /** The profile to show as chosen: the person's pick over the saved one; none until the read answers. */
-function shownProfile(read: SavedProfileRead, draft: RuntimeProfile | undefined): RuntimeProfile | null {
-  if (read.status !== 'ready') return null
-  if (read.saved.systemAgent) return read.saved.profile
-  return draft ?? read.saved.profile
+function shownProfile(saved: SavedRuntimeProfile | null, draft: RuntimeProfile | undefined): RuntimeProfile | null {
+  if (!saved) return null
+  if (saved.systemAgent) return saved.profile
+  return draft ?? saved.profile
 }
 
 interface RuntimeProfileFieldProps {
-  agentId: number
+  /** the saved agent's read, shared with the memory profile choice */
+  agent: SavedAgentRead
   /** the person's pick on the form; undefined until they choose */
   value: RuntimeProfile | undefined
   onChange: (profile: RuntimeProfile) => void
 }
 
-export function RuntimeProfileField({ agentId, value, onChange }: RuntimeProfileFieldProps) {
-  const read = useSavedRuntimeProfile(agentId)
-  const editable = read.status === 'ready' && !read.saved.systemAgent
-  const shown = shownProfile(read, value)
-  const reason = lockedReason(read)
+export function RuntimeProfileField({ agent, value, onChange }: RuntimeProfileFieldProps) {
+  const saved = agent.status === 'ready' ? savedRuntimeProfile(agent.detail) : null
+  const editable = saved !== null && !saved.systemAgent
+  const shown = shownProfile(saved, value)
+  const reason = lockedReason(agent, saved)
   const choose = (profile: RuntimeProfile) => {
     if (editable) onChange(profile)
   }
