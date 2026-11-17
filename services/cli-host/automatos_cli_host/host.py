@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import state
+from . import usage_limit
 from . import __version__
 from .allowlist import NotAllowed, choose_default_root, session_deliverables_dir
 from .api import BackendClient, BackendError
@@ -187,16 +188,25 @@ class Host:
                 "paused": {cli: reason for cli, (_, reason, _) in paused.items()}}
 
     # ── F083: usage limits ───────────────────────────────────────────────────
-    def _pause_cli(self, cli: str, until_iso: Optional[str], reason: str) -> None:
+    def _pause_cli(self, cli: str, until_iso: Optional[str], reason: str, stated: bool = True) -> None:
         """Stop claiming this CLI's tickets until its window reopens, and tell the
         backend on the very next tick (a fresh heartbeat carries the capabilities
-        its claim filter reads)."""
+        its claim filter reads). ``stated``: the CLI said when it resets. A stated
+        reset always replaces the pause held, so a wrong long pause is corrected by
+        the next screen. Only the short re-check (no stated time) leaves a later
+        held pause standing: the other slot's session ending on the same limit
+        must not cut a days-long pause to 15 minutes."""
         try:
             from datetime import datetime
 
-            until = datetime.fromisoformat(until_iso).timestamp() if until_iso else time.time() + 15 * 60
+            until = (datetime.fromisoformat(until_iso).timestamp() if until_iso
+                     else time.time() + usage_limit.RECHECK_SECONDS)
         except ValueError:
-            until = time.time() + 15 * 60
+            until = time.time() + usage_limit.RECHECK_SECONDS
+        held = self.limited.get(cli)
+        if not stated and held is not None and held[0] >= until:
+            log.info("%s usage limit seen again — the pause stands: %s", cli, held[1])
+            return
         self.limited[cli] = (until, reason, until_iso)
         self._capabilities = None
         self._last_heartbeat = 0.0
@@ -372,7 +382,8 @@ class Host:
         def _runner() -> None:
             outcome = session.run()
             if outcome.status == "usage_limit":
-                self._pause_cli(session.cli, outcome.resets_at, outcome.error or f"paused: {session.cli} usage limit")
+                self._pause_cli(session.cli, outcome.resets_at, outcome.error or f"paused: {session.cli} usage limit",
+                                stated=outcome.reset_stated)
             self._upload(ticket, outcome)   # #848: before the result, which names the files by their paths
             self.pending_results[task_id] = outcome.as_result_payload(session.attempt)
 

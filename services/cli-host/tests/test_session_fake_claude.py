@@ -185,6 +185,22 @@ def test_a_session_that_never_starts_is_an_error_not_a_four_hour_wait(short_tmp,
     assert "login screen" in (out.error or "") and s.proc.poll() is not None
 
 
+def test_a_turn_that_ends_on_an_api_error_fails_at_once_with_its_words(short_tmp, fake_home, env_clean, monkeypatch):
+    """The API dropped a response a minute in: Claude Code printed the error, fired
+    StopFailure (never Stop) and sat at its empty prompt until the 4 h session
+    timeout failed the ticket as "session exceeded 14400 s"."""
+    workdir = short_tmp / "ws" / "repo"
+    workdir.mkdir(parents=True)
+    monkeypatch.setenv("FAKE_CLAUDE_SCENARIO", "api-error")
+    started = time.monotonic()
+    s, out = _run(short_tmp, _ticket(workdir))
+    assert time.monotonic() - started < 60                       # not the 120 s session timeout
+    assert (out.status, out.exit_reason) == ("error", "api_error"), out.error
+    assert "API Error: Connection lost mid-response" in out.error and "session exceeded" not in out.error
+    assert out.resets_at is None and "API Error" not in out.result_text     # a failure, never the answer
+    assert s.proc is not None and s.proc.poll() is not None      # the host ended the idle session
+
+
 def test_a_note_written_in_the_ticket_folder_lands_in_the_deliverables_folder(short_tmp, fake_home, env_clean, monkeypatch):
     """PRD-245 S0.7: DRG-DEV's note under ~/.automatos/cli-host/sessions/121 was
     invisible to Deliverables. Now the ticket names the folder, and what the

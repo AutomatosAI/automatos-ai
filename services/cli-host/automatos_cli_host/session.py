@@ -17,8 +17,9 @@ The turn is the same for every CLI; the adapter says how the CLI is spelled
 5. hooks carry the turn over the bus: ``PreToolUse`` is the policy gate
    (``ToolIntent`` — what the call does, not what the CLI calls it),
    ``PostToolUse`` the files touched, ``Notification`` the needs-a-human / limit
-   signals, ``Stop`` the end of the turn (with the final text). The adapter
-   translates each payload in and each reply out;
+   signals, ``Stop`` the end of the turn (with the final text), ``StopFailure``
+   a turn that ended on an API error. The adapter translates each payload in and
+   each reply out;
 6. on the turn's end read the transcript (the adapter knows where and how),
    terminate the process, report.
 
@@ -53,7 +54,8 @@ from .permission_request import PERMISSION_REQUEST_REJUDGE, AllowedCalls, reques
 from .permission_request import answer as permission_answer
 from .ptyproc import KILL, TERMINATE, PtyChild
 from .ptyproc import spawn as spawn_on_pty
-from .presets import HOOK_WAIT_SECONDS, REGISTRY, TURN_END_PROCESS_EXIT, TURN_END_STOP_HOOK, hold_seconds
+from .presets import (HOOK_WAIT_SECONDS, REGISTRY, TURN_END_PROCESS_EXIT, TURN_END_STOP_HOOK, TURN_FAILED_EVENT,
+                      hold_seconds)
 from .session_prompt import build_system_prompt, build_ticket_file
 from .session_files import CREDENTIAL_SESSION_FILES, land_session_deliverables, session_deliverables
 from .terminal_log import FILENAME as TERMINAL_LOG_FILENAME, BoundedLog
@@ -65,7 +67,7 @@ STOP_GRACE_SECONDS = 2.0
 KILL_GRACE_SECONDS = 5.0
 PTY_ROWS, PTY_COLS = 50, 200
 _OUTPUT_TAIL_BYTES = 16 * 1024
-_PARKED_SCAN_BYTES = 1024    # F083: the last output the drain reads for a parked-at-limit line
+_PARKED_SCAN_BYTES = 1024    # F083: earlier output read beside each new chunk, for a limit line split between reads
 # F167: a PreToolUse event carries the host's decision and, for a hold, the
 # operator's answer. The backend keeps them on the ticket's ``recent_tools``.
 DECISION_REASON_CHARS = 300
@@ -86,6 +88,7 @@ class SessionOutcome:
     transcript_path: Optional[str] = None
     effective_cwd: Optional[str] = None
     resets_at: Optional[str] = None   # F083: when a usage_limit pause ends (ISO, host clock)
+    reset_stated: bool = False        # the CLI stated that reset; False: the host's short re-check (not sent)
 
     def as_result_payload(self, attempt: int) -> Dict[str, Any]:
         return {
@@ -156,6 +159,8 @@ class Session:
     # How the session's hooks reach the host (``HookRegistry.session_env``), set by
     # the host; without it, the Unix socket at ``sock_path``.
     hook_env: Optional[Dict[str, str]] = None
+    # The API error that ended the turn (Claude Code's StopFailure), in its own words.
+    turn_failure: Optional[str] = None
 
     def __init__(self, ticket: Dict[str, Any], cfg: HostConfig, allow_roots: List[str],
                  sock_path: Path, default_root: Optional[str], workspace_id: str = ""):
@@ -260,6 +265,10 @@ class Session:
             return Reply.none()
         if event == "Notification":
             self.notifications.append({"type": payload.get("notification_type"), "message": payload.get("message")})
+            return Reply.none()
+        if event == TURN_FAILED_EVENT:
+            # Its last_assistant_message is the error, not an answer: never the result text.
+            self.turn_failure = turn_end.api_error_words(payload)
             return Reply.none()
         if event == "Stop":
             self.last_assistant_message = payload.get("last_assistant_message") or self.last_assistant_message
@@ -583,6 +592,8 @@ class Session:
             if hook_driven and self.stopped.is_set():
                 self.ended.wait(STOP_GRACE_SECONDS)
                 return turn_end.COMPLETED
+            if hook_driven and self.turn_failure is not None:
+                return turn_end.API_ERROR          # it would sit at its prompt until the deadline
             if self.proc.poll() is not None:
                 return self._exit_reason(preset)
             if self.cancel_requested.is_set():
@@ -622,11 +633,15 @@ class Session:
                 self.terminal_log.close()
 
     def _watch_for_parking(self, chunk: bytes) -> None:
-        """F083: Claude Code holds its turn at its usage limit ("continuing automatically
-        at 9am") instead of exiting. Seen here, the wait loop ends the session at once:
-        the ticket goes back to the queue and the host pauses the CLI until the reset."""
-        self._recent_output = (self._recent_output + chunk)[-_PARKED_SCAN_BYTES:]
-        if not self.parked.is_set() and usage_limit.is_parked(self._recent_output.decode("utf-8", "replace")):
+        """F083: Claude Code holds its turn at its usage limit (a line saying it will carry
+        on by itself at the reset, or its usage limit menu) instead of exiting. Seen here,
+        the wait loop ends the session at once: the ticket goes back to the queue and the
+        host pauses the CLI until the reset."""
+        # The whole chunk is read: one screen redraw can put far more than the carried
+        # window after the menu line, which a scan of only the last bytes would miss.
+        window = self._recent_output + chunk
+        self._recent_output = window[-_PARKED_SCAN_BYTES:]
+        if not self.parked.is_set() and usage_limit.is_parked(window.decode("utf-8", "replace")):
             self.parked.set()
 
     def _terminate(self) -> None:
@@ -667,14 +682,17 @@ class Session:
             tail=bytes(self.output_tail).decode("utf-8", "replace")[-1500:],
             startup_window=turn_end.startup_timeout(preset, self.cfg.startup_timeout_seconds),
             session_timeout=self.cfg.session_timeout_seconds, stopped_by_host=self.stopped_by_host,
+            failure=self.turn_failure,
         )
-        resets = None
+        resets, known = None, False
         if status == "error":
             # F083: the CLI's plan window closed. That is a pause — the ticket goes
             # back to the queue and the host stops claiming for this CLI — not a
-            # failed attempt, and never "check your key".
-            said = bytes(self.output_tail).decode("utf-8", "replace")[-4000:] + "\n" + (text or "")
-            if usage_limit.is_usage_limit(said):
+            # failed attempt, and never "check your key". An API error is judged by
+            # its own words alone: earlier output that mentions a limit is not one.
+            said = (self.turn_failure or "") if exit_reason == turn_end.API_ERROR else (
+                bytes(self.output_tail).decode("utf-8", "replace")[-4000:] + "\n" + (text or ""))
+            if exit_reason == turn_end.PARKED_AT_LIMIT or usage_limit.is_usage_limit(said):
                 until, known = usage_limit.pause(said, _local_now())
                 status, error, resets = "usage_limit", usage_limit.describe(self.cli, until, known), until.isoformat()
         files = [] if ungated else [*self.files_touched, *self._land_deliverables(cwd)]
@@ -682,7 +700,7 @@ class Session:
         self._shred_session_credentials()
         outcome = self._outcome(status, result_text=text, error=error, exit_reason=exit_reason, usage=usage, cwd=cwd,
                                 files_touched=files)
-        outcome.resets_at = resets
+        outcome.resets_at, outcome.reset_stated = resets, known
         return outcome
 
     def _report_plan(self, text: str, files: List[str]) -> List[str]:

@@ -424,6 +424,60 @@ def test_claude_launch_carries_the_mcp_config_under_strict_and_never_the_token(t
     assert "--mcp-config" not in adapter.launch_args(plain, adapter.prepare(plain))
 
 
+def test_claude_trusts_the_ticket_folder_it_adds_so_no_dialog_stalls_the_launch(fake_home, tmp_path):
+    """Claude Code 2.1.326 asks before it adds a folder it was never trusted in;
+    an unattended ticket stalled on that question until the host gave up."""
+    from automatos_cli_host.adapters.claude import is_directory_trusted
+
+    cwd = tmp_path / "repo"
+    session_dir = tmp_path / "sessions" / "353"
+    cwd.mkdir()
+    session_dir.mkdir(parents=True)
+    adapter = ClaudeAdapter(CLAUDE)
+    ctx = LaunchContext(
+        cwd=cwd, session_dir=session_dir, ticket_path=session_dir / "ticket.md",
+        system_prompt_path=session_dir / "system_prompt.md", task_id="353", session_id="sid",
+    )
+    args = adapter.launch_args(ctx, adapter.prepare(ctx))
+    assert args[args.index("--add-dir") + 1] == str(session_dir)
+    assert is_directory_trusted(cwd, fake_home)
+    assert is_directory_trusted(session_dir, fake_home)
+
+
+def test_claude_says_so_when_the_ticket_folder_is_still_untrusted(fake_home, tmp_path, monkeypatch, caplog):
+    """A trust write that did not hold (another writer replaced ~/.claude.json in
+    between, say) is a warning in the host log, not a silent launch that stalls on
+    Claude Code's trust question."""
+    import logging
+
+    from automatos_cli_host.adapters import claude as claude_adapter
+
+    monkeypatch.setattr(claude_adapter, "record_directory_trust", lambda cwd, home=None: False)
+    session_dir = tmp_path / "sessions" / "354"
+    session_dir.mkdir(parents=True)
+    ctx = LaunchContext(
+        cwd=tmp_path, session_dir=session_dir, ticket_path=session_dir / "ticket.md",
+        system_prompt_path=session_dir / "system_prompt.md", task_id="354", session_id="sid",
+    )
+    with caplog.at_level(logging.WARNING, logger="automatos.cli_host.adapters.claude"):
+        ClaudeAdapter(CLAUDE).prepare(ctx)
+    assert "task 354" in caplog.text and "trust question" in caplog.text
+
+
+def test_only_claude_code_is_asked_for_the_hook_of_a_turn_that_failed():
+    """A Claude Code turn that ends on an API error fires StopFailure instead of Stop
+    (its hooks reference). Unregistered, the host never heard of it and the session
+    sat at its prompt until the 4 h timeout. Codex and Copilot were never checked
+    against it, so their hook files do not gain it."""
+    from automatos_cli_host.adapters.claude import build_settings
+    from automatos_cli_host.presets import COPILOT
+
+    hooks = build_settings(CLAUDE, python="/usr/bin/python3")["hooks"]
+    assert hooks["StopFailure"][0]["hooks"][0]["command"].endswith("-m automatos_cli_host.hook_shim")
+    assert "matcher" not in hooks["StopFailure"][0]                  # every error type, rate_limit included
+    assert "StopFailure" not in CODEX.hook_events and "StopFailure" not in COPILOT.hook_events
+
+
 def test_claude_reads_our_mcp_tools_as_platform_and_everyone_elses_as_unknown():
     from automatos_cli_host.adapters.base import ToolClass
     from automatos_cli_host.adapters.claude import ClaudeAdapter

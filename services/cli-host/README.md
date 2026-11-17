@@ -93,7 +93,9 @@ Refused on Windows, each with a sentence: an older Windows (`__main__.py`), a
    (the ticket — which names its deliverables folder — a stable system prompt that
    says what the session can reach and how to ask, a hooks-only `settings.json`)
    — never into your repository — and records the folder-trust decision where
-   Claude Code reads it (`~/.claude.json`, one flag, backup kept).
+   Claude Code reads it (`~/.claude.json`, one flag, backup kept), for the
+   working folder and for that session folder, which the launch adds with
+   `--add-dir` and Claude Code would otherwise stop to ask about.
 4. Spawns **your** CLI under a pseudo-terminal it only drains — interactively
    for Claude Code and Codex, `copilot -p` for GitHub Copilot (below) — with the
    argv its preset spells — for Claude Code: `--session-id`,
@@ -106,15 +108,26 @@ Refused on Windows, each with a sentence: an older Windows (`__main__.py`), a
    policy gate — it reads what the call *does* (read, write, run a shell) so the
    rules are the same for every CLI: file tools inside the directory, the Bash
    gate below, never `git push`; `PostToolUse` the files touched; `Stop` the end
-   of the turn with the final text. A permission prompt that would reach the TUI
-   is denied — nobody is watching it. (GitHub Copilot can ask again for a call the
-   gate already allowed, for a path or URL check of its own: that request gets the
-   gate's verdict on the same call, at once.)
+   of the turn with the final text; for Claude Code, `StopFailure` a turn that
+   ended on an API error (a dropped connection, say), which ends the session at
+   once and fails the ticket with the error's own words instead of leaving it
+   idle at its prompt until the session timeout. A permission prompt that would
+   reach the TUI is denied — nobody is watching it. (GitHub Copilot can ask
+   again for a call the gate already allowed, for a path or URL check of its
+   own: that request gets the gate's verdict on the same call, at once.)
 6. On `Stop` (for a CLI whose turn is the process, its exit) it reads the
    transcript for token usage, terminates the process,
    copies what the session wrote in its own ticket folder into the deliverables
    folder (below) and posts the result. Only a held command forces `review`
    (below).
+7. A usage limit is a pause, not a failure. When Claude Code shows its limit (its
+   usage limit menu, its note that it will carry on by itself at the reset, or a
+   `rate_limit` API error) the host ends the session as soon as it appears, puts
+   the ticket back in the queue and claims no Claude Code ticket until the reset
+   the screen states, a weekly limit's date included ("resets Nov 20, 9am
+   (Europe/Berlin)"). With no reset time it can read, it checks again after 15
+   minutes, and that re-check never cuts a later stated reset short; a newly
+   stated reset always replaces the one held.
 
 ## The Bash gate (PRD-245)
 

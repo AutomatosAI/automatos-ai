@@ -60,10 +60,14 @@ def hold_seconds(ask_timeout: Optional[float]) -> float:
     (``UNSET_HOLD_SECONDS`` when unset), never past ``MAX_HOLD_SECONDS``."""
     return min(float(ask_timeout or UNSET_HOLD_SECONDS), MAX_HOLD_SECONDS)
 
+# A Claude Code turn that ends on an API error fires this instead of Stop (its hooks
+# reference). Only Claude Code's is verified, so the other rows leave it out and
+# their hook files stay as they were.
+TURN_FAILED_EVENT = "StopFailure"
 # The bus (design §5): every event the host models. A preset lists the subset its CLI delivers.
 BUS_EVENTS: FrozenSet[str] = frozenset({
     "SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse",
-    "Notification", "Stop", "SubagentStop", "PreCompact", "PostCompact", "SessionEnd",
+    "Notification", "Stop", TURN_FAILED_EVENT, "SubagentStop", "PreCompact", "PostCompact", "SessionEnd",
 })
 
 
@@ -236,7 +240,7 @@ CODEX = CliPreset(
     initial_prompt=PROMPT_POSITIONAL,
     ungated_stance=("-a", "never", "-s", "workspace-write"),   # approvals off, OS sandbox on
     required_args=("--dangerously-bypass-hook-trust",),        # trusts OUR hook file; not a gate bypass (§6.4)
-    hook_events=BUS_EVENTS - {"Notification"},
+    hook_events=BUS_EVENTS - {"Notification", TURN_FAILED_EVENT},
     # SECONDS, and 0 floors to 1 s (§6.3). A held call outlasts the shim's wait (D4):
     # with approvals off, a hook Codex timed out first would leave the call to Codex.
     hook_timeouts={"*": 30, "PreToolUse": HELD_HOOK_TIMEOUT_SECONDS, "PermissionRequest": HELD_HOOK_TIMEOUT_SECONDS},
@@ -292,7 +296,7 @@ COPILOT = CliPreset(
     # "No authentication information found" (F233). Without a credential, -p exits
     # with that error; it never waits on a login prompt.
     required_args=("--no-ask-user", "--disable-builtin-mcps", "--no-remote", "--no-auto-update"),
-    hook_events=BUS_EVENTS - {"PostCompact"},
+    hook_events=BUS_EVENTS - {"PostCompact", TURN_FAILED_EVENT},
     # SECONDS (``timeoutSec``). A timed-out Copilot hook FAILS OPEN, so a held call
     # must be answered by the shim first (D4).
     hook_timeouts={"*": 60, "PreToolUse": HELD_HOOK_TIMEOUT_SECONDS, "PermissionRequest": HELD_HOOK_TIMEOUT_SECONDS},
