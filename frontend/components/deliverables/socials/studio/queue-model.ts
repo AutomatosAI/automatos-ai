@@ -8,6 +8,11 @@
  *
  * P256-FIX-SOC-2 (F433): a plan's draft the render refused waits for the owner's input
  * (the server's `service.waits_for_input`): listed apart as "Waits for you", never approved here.
+ *
+ * An approved post with no time posts nothing: the server schedules an approval only into a slot
+ * still ahead (`service.approve`), so with neither slot it stays approved "for a person to
+ * schedule", and the calendar's grids, which need a slot, leave it out. Listed apart as
+ * "Approved, no time yet" and counted in the nav's Queue badge.
  */
 import type { SocialPost } from '@/lib/api-client'
 import { hasChannels } from '../socials-review'
@@ -15,6 +20,8 @@ import { channelLabel } from '../socials-status'
 import { formatLabel, postTime } from './socials-calendar-model'
 
 export const QUEUE_STATUS = 'needs_approval'
+/** The status of a post approved and not scheduled (modules/socials/service.py APPROVED). */
+export const APPROVED_STATUS = 'approved'
 /** The review_log action of a post that waits for the owner's input (modules/socials/service.py ACTION_NEEDS_INPUT). */
 export const NEEDS_INPUT = 'needs_input'
 export const NO_SLOT = 'No slot'
@@ -48,6 +55,22 @@ export function waitsForInput(post: Pick<SocialPost, 'status' | 'review_log'>): 
 export function waitingForInput(posts: ReadonlyArray<SocialPost>): SocialPost[] {
   const slot = (post: SocialPost) => slotOfQueued(post) ?? '9999'
   return posts.filter(waitsForInput).sort((a, b) => slot(a).localeCompare(slot(b)) || a.created_at.localeCompare(b.created_at))
+}
+
+/** Whether the post is approved with no time (neither `planned_for` nor `scheduled_for`): nothing posts it
+ * until a person schedules it or publishes it now. A missing field counts as no time. */
+export function approvedWithNoTime(post: Pick<SocialPost, 'status' | 'planned_for' | 'scheduled_for'>): boolean {
+  return post.status === APPROVED_STATUS && slotOfQueued(post) === null
+}
+
+/** The approved posts with no time, the oldest first. */
+export function waitingForATime(posts: ReadonlyArray<SocialPost>): SocialPost[] {
+  return posts.filter(approvedWithNoTime).sort((a, b) => a.created_at.localeCompare(b.created_at))
+}
+
+/** The nav's Queue badge: the posts waiting for approval and the approved posts with no time. */
+export function queueCount(posts: ReadonlyArray<SocialPost>): number {
+  return queuedPosts(posts).length + waitingForATime(posts).length
 }
 
 /** What a waiting draft asks for: the fields its last history entry names, else why. */

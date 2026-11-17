@@ -18,6 +18,9 @@
  *   you": it opens its editor and offers no Approve; the Queue still lists only needs_approval.
  * * PRD-251D US-D108: a post whose file is older than its words (`file_current` false) shows the
  *   sentence the server refuses with in place of a working Approve, and Render again renders it.
+ * * An approved post with no time (neither `planned_for` nor `scheduled_for`) posts nothing: it is
+ *   listed apart, "Approved, no time yet", each row opening the post's page, and the nav's count
+ *   adds it to what waits for approval.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
@@ -51,7 +54,10 @@ vi.mock('@/components/widgets/FileWidget/FilePreview', () => ({ FilePreview: () 
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 import { SocialsQueue } from '@/components/deliverables/socials/studio/socials-queue'
-import { queueHeading, queuedPosts, timeLeft, waitingForInput } from '@/components/deliverables/socials/studio/queue-model'
+import {
+  approvedWithNoTime, queueCount, queueHeading, queuedPosts, timeLeft, waitingForATime, waitingForInput,
+} from '@/components/deliverables/socials/studio/queue-model'
+import { APPROVED_NO_TIME, APPROVED_NO_TIME_HINT } from '@/components/deliverables/socials/studio/queue-waiting'
 import { SOCIAL_POST_REVIEW_STALE_MESSAGE } from '@/hooks/use-socials-api'
 import { NO_CHANNEL_HINT, RENDER_AGAIN } from '@/components/deliverables/socials/socials-post-review'
 import { FILE_OLDER_THAN_WORDS } from '@/components/deliverables/socials/socials-review'
@@ -297,5 +303,54 @@ describe('P256-FIX-SOC-2: a planned post that waits for you', () => {
     expect(within(pane()).getByText('Post a')).toBeInTheDocument()
     fireEvent.click(within(group).getByRole('button', { name: /Post w/ }))
     expect(edit).toHaveBeenCalledWith('w')
+  })
+})
+
+describe('an approved post with no time', () => {
+  // Approved with no slot, the server leaves it approved "for a person to schedule": nothing posts it.
+  const NO_TIME = waiting('n', null, { status: 'approved', approved_hash: 'hash-n' })
+  const OLDER = waiting('o', null, { status: 'approved', created_at: '2026-10-01T09:00:00Z' })
+  // Approved after its slot passed: it stays approved, but on the calendar's grid at that slot.
+  const SLOT_PASSED = waiting('pl', '2026-10-13T09:00:00Z', { status: 'approved' })
+  const SLOT_AHEAD = waiting('u', '2026-10-20T09:00:00Z', { status: 'approved' })
+  const SCHEDULE_ONLY = waiting('so', null, { status: 'approved', scheduled_for: '2026-10-20T09:00:00Z' })
+  const ON_SCHEDULE = waiting('s', null, { status: 'scheduled', scheduled_for: '2026-10-20T09:00:00Z' })
+
+  it('counts a post approved with neither a planned slot nor a schedule, and nothing else', () => {
+    expect(approvedWithNoTime(NO_TIME)).toBe(true)
+    expect(approvedWithNoTime({ status: 'approved' } as any)).toBe(true)  // a post read without the fields
+    for (const other of [SLOT_PASSED, SLOT_AHEAD, SCHEDULE_ONLY, ON_SCHEDULE, UNSLOTTED]) {
+      expect(approvedWithNoTime(other), other.id).toBe(false)
+    }
+    expect(waitingForATime([NO_TIME, SLOT_PASSED, OLDER, ON_SCHEDULE, ...TODAY]).map((post) => post.id)).toEqual(['o', 'n'])
+  })
+
+  it("the nav's count adds them to the posts waiting for approval", () => {
+    expect(queueCount([NO_TIME, OLDER, SLOT_PASSED, ON_SCHEDULE, UNSLOTTED, ...TODAY])).toBe(5)
+    expect(queueCount([SLOT_AHEAD, ON_SCHEDULE])).toBe(0)
+  })
+
+  it('lists them apart, says they post nothing yet, and a row opens the post without approving anything', () => {
+    const edit = vi.fn()
+    renderQueue([NO_TIME, ...TODAY], edit)
+    const group = screen.getByRole('region', { name: APPROVED_NO_TIME })
+    expect(within(group).getByRole('heading', { name: APPROVED_NO_TIME })).toBeInTheDocument()
+    expect(within(group).getByText(APPROVED_NO_TIME_HINT)).toBeInTheDocument()
+    expect(within(group).queryByRole('button', { name: /Approve/ })).toBeNull()
+    const list = screen.getByRole('complementary', { name: 'Waiting for approval' })
+    expect(within(list).queryByText('Post n')).toBeNull()
+    expect(within(pane()).getByText('Post a')).toBeInTheDocument()
+    fireEvent.click(within(group).getByRole('button', { name: /Post n/ }))
+    expect(edit).toHaveBeenCalledWith('n')
+    expect(api.approveSocialPost).not.toHaveBeenCalled()
+  })
+
+  it('shows when nothing waits for approval, and is absent when no approved post lacks a time', () => {
+    renderQueue([NO_TIME])
+    expect(screen.getByRole('region', { name: APPROVED_NO_TIME })).toBeInTheDocument()
+    expect(screen.getByText('Nothing is waiting for your approval.')).toBeInTheDocument()
+    cleanup()
+    renderQueue([SLOT_PASSED, SLOT_AHEAD, ...TODAY])
+    expect(screen.queryByRole('region', { name: APPROVED_NO_TIME })).toBeNull()
   })
 })

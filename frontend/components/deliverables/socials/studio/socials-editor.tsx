@@ -15,7 +15,9 @@
  * a new post starts with its channels ticked (US-D104); a channel not connected yet is connected
  * from the Channels card (US-D105). US-D108: whether the file still shows the post is the post's
  * own `file_current`, which the server keeps: Approve waits on it, and Submit renders only when
- * the file does not show the post yet.
+ * the file does not show the post yet. Approved with no time, the post posts nothing: the line
+ * where the Approve card was says so (post-notices.tsx `EditorNoTimeNotice`), and the Activity card
+ * leaves its own copy of that line out (`hideNoTime`).
  */
 import { useMemo, useRef, useState } from 'react'
 
@@ -44,6 +46,7 @@ import {
   withProposal, withSlides, withStory,
 } from './editor-model'
 import { SocialsEditorActivity } from './socials-editor-activity'
+import { EditorNoTimeNotice } from './post-notices'
 import { DeletePostButton } from './delete-post-button'
 import { SocialsEditorHeader } from './socials-editor-header'
 import type { GoTo } from './studio-route'
@@ -145,6 +148,7 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
       {!post && <Hint>{NEW_POST_STEPS}</Hint>}
       {ownFile && <Hint>{ownStill ? OWN_STILL_STEPS : OWN_FILE_STEPS}</Hint>}
       {post && <EditorApproveCard post={post} role={role} dirty={dirty} />}
+      {post && <EditorNoTimeNotice post={post} />}
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <div className="flex min-w-0 flex-col gap-4">
           <EditorBriefCard brief={draft.brief} busy={calls.redraft.isLoading} canRedraft needs={needs} onChange={(brief) => setDraft((d) => ({ ...d, brief }))} onRedraft={redraft} />
@@ -180,7 +184,7 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
             onChange={(variables, sources) => setDraft((d) => ({ ...d, variables, sources }))}
           />
           <EditorWhenCard slot={draft.slot} onChange={(slot) => setDraft((d) => ({ ...d, slot }))} />
-          {post && <SocialsEditorActivity post={post} role={role} dirty={dirty} />}
+          {post && <SocialsEditorActivity post={post} role={role} dirty={dirty} hideNoTime />}
         </div>
         <EditorPreviewColumn
           post={post} draft={draft} channels={channels} templateSizes={chosen?.sizes ?? []}

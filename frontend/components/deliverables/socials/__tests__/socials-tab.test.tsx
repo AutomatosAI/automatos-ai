@@ -132,6 +132,7 @@ import { apiClient } from '@/lib/api-client'
 import { WorkspaceProvider, useWorkspace } from '@/components/workspace-provider'
 import { SocialsTab } from '@/components/deliverables/socials/socials-tab'
 import { APPROVE_CARD } from '@/components/deliverables/socials/studio/editor-approve-card'
+import { APPROVED_NO_TIME_NOTE } from '@/components/deliverables/socials/studio/post-notices'
 import { READ_ONLY_ROLE } from '@/components/deliverables/socials/studio/socials-post-view'
 import { SOCIAL_POST_CHANGED_MESSAGE, SOCIAL_POST_REVIEW_STALE_MESSAGE } from '@/hooks/use-socials-api'
 
@@ -303,6 +304,9 @@ describe('Socials on', () => {
     await waitFor(() => expect(editorStatus()).toHaveTextContent('Approved'))
     expect(api.approveSocialPost).toHaveBeenCalledWith(post.id, server.posts[0].content_hash)
     expect(server.posts[0].approved_hash).toBe(server.posts[0].content_hash)
+    // It has no time, so nothing will post: the editor says so once, at its top, and not again in Activity.
+    expect(screen.getAllByText(APPROVED_NO_TIME_NOTE, { exact: false })).toHaveLength(1)
+    expect(within(screen.getByRole('region', { name: 'Activity' })).queryByText(APPROVED_NO_TIME_NOTE, { exact: false })).toBeNull()
 
     // An edit saved afterwards voids the approval (D6).
     fireEvent.change(screen.getByRole('textbox', { name: 'Copy' }), { target: { value: 'v2, sharper' } })
