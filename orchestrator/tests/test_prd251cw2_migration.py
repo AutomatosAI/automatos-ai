@@ -36,6 +36,7 @@ from tests.test_prd251w2_campaigns import (  # noqa: E402
     WAVE2,
     WAVE2B,
     WAVE2C,
+    WAVE3D,
     _assert_same_schema,
     _load,
     _run,
@@ -72,6 +73,7 @@ def test_the_migration_builds_exactly_the_model_schema():
     try:
         with engine.begin() as conn:
             _run(conn, WAVE2C, "upgrade")
+            _run(conn, WAVE3D, "upgrade")  # the model carries PRD-251D Wave 3's look too
         migrated = _schema(engine, POSTS)
         _assert_same_schema(migrated, _schema(model_engine, POSTS), "the migration path through prd251c_wave2")
         posts = migrated["social_posts"]
@@ -90,6 +92,7 @@ def test_create_all_first_then_the_upgrade_twice_leaves_the_model_schema(start):
         with engine.begin() as conn:
             _run(conn, WAVE2C, "upgrade")
             _run(conn, WAVE2C, "upgrade")
+            _run(conn, WAVE3D, "upgrade")
         _assert_same_schema(_schema(engine, POSTS), _schema(model_engine, POSTS), f"create_all first, from {start}")
     finally:
         model_engine.dispose()
@@ -113,6 +116,7 @@ def test_the_downgrade_drops_what_it_added_keeps_every_post_and_the_upgrade_work
             assert conn.execute(sa.text("SELECT title FROM social_posts")).scalars().all() == ["Week post"]
         with engine.begin() as conn:
             _run(conn, WAVE2C, "upgrade")
+            _run(conn, WAVE3D, "upgrade")
         _assert_same_schema(_schema(engine, POSTS), _schema(_model_engine(), POSTS), "upgraded again")
     finally:
         engine.dispose()

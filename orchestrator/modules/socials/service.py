@@ -89,6 +89,7 @@ from modules.socials import template_claims as post_claims
 from modules.socials.voice_examples import draft_entry
 from modules.socials.kokoro_voices import validate_kokoro
 from modules.socials.music import validate_music
+from modules.socials.post_look import validate_look
 from modules.socials.targets import TARGETS
 
 # ── statuses ────────────────────────────────────────────────────────────────
@@ -195,7 +196,7 @@ PUBLISHABLE_STATUSES = frozenset({APPROVED, SCHEDULED, MISSED})
 # PRD-251B (US-B101): the chosen video length is content too; the planned slot is not.
 CONTENT_FIELDS = ("copy", "variables", "sources", "format", "template_id", "media", "length_seconds", TARGETS)
 LABEL_FIELDS = ("title", "brief")
-RENDER_FIELDS = ("voice", "footage", "music")  # PRD-251B: music, a render setting like the voice
+RENDER_FIELDS = ("voice", "footage", "music", "look")  # PRD-251B: music; PRD-251D US-D301: the look (post_look.py)
 EDITABLE_FIELDS = LABEL_FIELDS + CONTENT_FIELDS + RENDER_FIELDS
 
 # D11: the default voice, Kokoro inside media-render; any other toolkit is a
@@ -591,6 +592,7 @@ _VALIDATORS = {
     "voice": validate_voice,
     "footage": validate_footage,
     "music": validate_music,
+    "look": validate_look,
 }
 
 
@@ -674,6 +676,7 @@ def create_draft(
     agent: Optional[str] = None,
     music: Optional[Mapping[str, Any]] = None,
     targets: Optional[Sequence[Mapping[str, Any]]] = None,
+    look: Optional[Mapping[str, Any]] = None,
 ) -> SocialPost:
     """A new post in ``draft``, added to ``db`` (the caller commits), with its id,
     which its targets' keys name (US-204).
@@ -685,7 +688,7 @@ def create_draft(
     """
     clean = _validated(title=title, brief=brief, copy=copy, format=format, template_id=template_id,
                        variables=variables, sources=sources, media=media, voice=voice, footage=footage,
-                       length_seconds=length_seconds, music=music)
+                       length_seconds=length_seconds, music=music, look=look)
     post = SocialPost(
         id=uuid4(),
         workspace_id=workspace_id,

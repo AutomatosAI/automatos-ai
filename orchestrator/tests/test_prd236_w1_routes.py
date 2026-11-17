@@ -425,7 +425,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # a new nullable column and a partial index; the guard follows it.
     spent = (versions / "credit_ledger_sub_tenant_20261113.py").read_text()
     assert 'down_revision = "product_workspaces_20261113"' in spent
-    assert 'EXPECTED_HEAD = "credit_ledger_sub_tenant_20261113"' in guard
+    # 2026-11-16 (PRD-251D Wave 3, US-D301): prd251d_wave3 chains onto that —
+    # social_posts.look, a new nullable column; the guard follows it.
+    looks = (versions / "prd251d_wave3.py").read_text()
+    assert 'down_revision = "credit_ledger_sub_tenant_20261113"' in looks
+    assert 'EXPECTED_HEAD = "prd251d_wave3"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

@@ -36,9 +36,10 @@ export function fileForAspect(files: ReadonlyArray<PreviewFile>, aspect: string 
   return files.find((file) => file.aspect === aspect) ?? closestShape(files, (file) => file.aspect, aspect) ?? files[0] ?? null
 }
 
-/** What a render reads: an edit to any of these since the render makes it out of date. */
+/** What a render reads: an edit to any of these since the render makes it out of date. PRD-251D
+ * US-D301: the post's look too (light or dark, the accent, the logo). */
 function renderInputs(draft: EditorDraft): string {
-  return JSON.stringify([draft.brief, draft.variables, draft.templateId, draft.lengthSeconds, draft.format])
+  return JSON.stringify([draft.brief, draft.variables, draft.templateId, draft.lengthSeconds, draft.format, draft.look])
 }
 
 /** The preview no longer shows the post on screen: an edit to its brief, variables,

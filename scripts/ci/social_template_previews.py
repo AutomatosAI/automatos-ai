@@ -47,7 +47,8 @@ The night kits (PRD-255 US-006, ``social_template_kits.py``): every template
 renders again, with 0 check errors, with each of :data:`NIGHT_KITS`: Automatos as
 its v1 kit has it, and Harbourline as a v2 kit (a stored paper and accent, a
 larger type scale, a logo for dark backgrounds). Its pages are its stored paper,
-and its dark stages show its dark logo.
+and its dark stages show its dark logo. The looks (PRD-251D US-D301, ``social_template_looks.py``):
+every template renders again, with 0 check errors, in every look a post may give it.
 
     python3 scripts/ci/social_template_previews.py --url http://127.0.0.1:8090 --token "$TOKEN" --out "$RUNNER_TEMP/templates"
 """
@@ -560,6 +561,7 @@ def run(renderer: Renderer, out: Path) -> List[str]:
     failures += run_infographic(renderer, out, kit, report)
     failures += run_heading_font(renderer, out, kit, report)
     failures += _sibling("social_template_kits").run_night_kits(sys.modules[__name__], renderer, out, report)
+    failures += _sibling("social_template_looks").run_looks(sys.modules[__name__], renderer, out, kit, report)  # PRD-251D US-D301
     (out / "report.json").write_text(json.dumps(report, indent=2, default=str))
     return failures
 

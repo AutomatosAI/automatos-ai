@@ -164,7 +164,7 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
           {draft.format !== 'text' && (
             <EditorLookCard
               templates={templates.data ?? []} loading={templates.isLoading} chosen={draft.templateId} onPick={pickTemplate} busy={mediaBusy}
-              photoSpots={photoSpots}
+              photoSpots={photoSpots} look={draft.look} onLook={(look) => setDraft((d) => ({ ...d, look }))}
               onUpload={(file, spot) => calls.upload.mutate({ ...payload(), file, spot }, opened)}
               onLibrary={(item, spot) => calls.pick.mutate({ ...payload(), item, spot }, opened)}
               ai={{

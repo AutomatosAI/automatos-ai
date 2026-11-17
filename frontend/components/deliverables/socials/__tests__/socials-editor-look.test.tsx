@@ -13,6 +13,10 @@
  *   photo and No photo narrow the gallery, and say so when nothing matches; "Let Auto pick"
  *   stays first and the chosen template stays shown. The model has its own tests:
  *   socials-template-gallery-model.test.ts.
+ * * PRD-251D US-D301 (E10): under the gallery, the post's own look: light or dark for a template
+ *   built on paper only (its entry's `looks`), the accent and the logo for every template and for
+ *   "Let Auto pick", each at the kit's own until chosen. The choices save with the draft and mark
+ *   the preview out of date. The model has its own tests: socials-look-options-model.test.ts.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
@@ -40,6 +44,10 @@ import { FILTER_LABEL, SEARCH_LABEL, noMatchLine } from '@/components/deliverabl
 import { DROP_PHOTO_TITLE } from '@/components/deliverables/socials/studio/editor-look-sources'
 import { PHOTO_SPOT_HINT, PHOTO_TARGET, WHOLE_POST_HINT } from '@/components/deliverables/socials/studio/editor-look-photo'
 import { OWN_PICTURE } from '@/components/deliverables/socials/studio/editor-look-ai'
+import {
+  ACCENT_LABEL, LOGO_LABEL, LOOK_OPTIONS_LABEL, MODE_LABEL, NO_MODE_NOTE,
+} from '@/components/deliverables/socials/studio/editor-look-options'
+import { PREVIEW_STALE } from '@/components/deliverables/socials/studio/preview-model'
 import { IMAGE_TEMPLATE, PHOTO_TEMPLATE, api, post, renderWith, resetApi } from './socials-editor-harness'
 
 const go = vi.fn()
@@ -256,5 +264,91 @@ describe('the template gallery says what each template is for (PRD-251D US-D107)
     expect(within(within(look()).getByRole('list', { name: 'Templates' })).getAllByRole('button')).toHaveLength(2)
     expect(within(look()).queryByRole('button', { name: /Fact card/ })).toBeNull()
     expect(within(look()).getByRole('button', { name: /Review/ })).toBeInTheDocument()
+  })
+})
+
+/** PRD-251D US-D301: a template built on paper (it takes light or dark) and one on a photo, as the gallery gets them. */
+const PAPER_CARD: SocialTemplateSummary = { ...IMAGE_TEMPLATE, id: 'tpl-paper', name: 'Quote card', looks: ['mode', 'accent', 'logo'] }
+const ON_A_PHOTO: SocialTemplateSummary = { ...PHOTO_TEMPLATE, id: 'tpl-on-photo', name: 'Photo headline', looks: ['accent', 'logo'] }
+const WIDE_FILE = {
+  aspect: '16:9', deliverable_id: 'd-wide', name: 'image-16x9.png', url: 'https://cdn.test/wide.png', content_type: 'image/png', bytes: 10, error: null,
+}
+const lookOptions = () => within(look()).findByRole('group', { name: LOOK_OPTIONS_LABEL })
+const pressedIn = (group: HTMLElement) =>
+  within(group).getAllByRole('button').filter((button) => button.getAttribute('aria-pressed') === 'true').map((button) => button.textContent)
+const choose = (options: HTMLElement, label: string, choice: string) =>
+  fireEvent.click(within(within(options).getByRole('group', { name: label })).getByRole('button', { name: choice }))
+
+describe('the look options under the gallery (PRD-251D US-D301)', () => {
+  it("a template built on paper offers light or dark, the accent and the logo, each at the kit's own", async () => {
+    api.listSocialTemplates.mockResolvedValue([PAPER_CARD, ON_A_PHOTO])
+    renderWith(<SocialsEditor role="owner" post={post({ template_id: 'tpl-paper' })} go={go} />)
+    const options = await lookOptions()
+    expect(pressedIn(await within(options).findByRole('group', { name: MODE_LABEL }))).toEqual(['Light'])
+    expect(pressedIn(within(options).getByRole('group', { name: ACCENT_LABEL }))).toEqual(['As your kit'])
+    expect(pressedIn(within(options).getByRole('group', { name: LOGO_LABEL }))).toEqual(['On'])
+    expect(within(options).queryByText(NO_MODE_NOTE)).toBeNull()
+  })
+
+  it('a template on a photo takes no light or dark: picking one hides the choice, says why and drops a dark choice', async () => {
+    api.listSocialTemplates.mockResolvedValue([PAPER_CARD, ON_A_PHOTO])
+    renderWith(<SocialsEditor role="owner" post={post({ template_id: 'tpl-paper' })} go={go} />)
+    const options = await lookOptions()
+    await within(options).findByRole('group', { name: MODE_LABEL })
+    choose(options, MODE_LABEL, 'Dark')
+    fireEvent.click(within(within(look()).getByRole('list', { name: 'Templates' })).getByRole('button', { name: /Photo headline/ }))
+    expect(within(options).queryByRole('group', { name: MODE_LABEL })).toBeNull()
+    expect(within(options).getByRole('group', { name: ACCENT_LABEL })).toBeInTheDocument()
+    expect(within(options).getByRole('group', { name: LOGO_LABEL })).toBeInTheDocument()
+    expect(within(options).getByText(NO_MODE_NOTE)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }))
+    // No hidden choice rides on: the dark choice went with the template that took it.
+    await waitFor(() =>
+      expect(api.updateSocialPost).toHaveBeenCalledWith('post-1', expect.objectContaining({ template_id: 'tpl-on-photo', look: null })),
+    )
+  })
+
+  it('Let Auto pick offers the accent and the logo, and no light or dark', async () => {
+    api.listSocialTemplates.mockResolvedValue([PAPER_CARD])
+    renderWith(<SocialsEditor role="owner" post={null} go={go} />)
+    const options = await lookOptions()
+    expect(within(options).queryByRole('group', { name: MODE_LABEL })).toBeNull()
+    expect(within(options).getByRole('group', { name: ACCENT_LABEL })).toBeInTheDocument()
+    expect(within(options).getByRole('group', { name: LOGO_LABEL })).toBeInTheDocument()
+    expect(within(options).queryByText(NO_MODE_NOTE)).toBeNull()
+  })
+
+  it("the choices save with the draft, the kit's own left out", async () => {
+    api.listSocialTemplates.mockResolvedValue([PAPER_CARD])
+    renderWith(<SocialsEditor role="owner" post={post({ template_id: 'tpl-paper' })} go={go} />)
+    const options = await lookOptions()
+    await within(options).findByRole('group', { name: MODE_LABEL })
+    choose(options, MODE_LABEL, 'Dark')
+    choose(options, LOGO_LABEL, 'Off')
+    choose(options, ACCENT_LABEL, 'Strong')
+    choose(options, ACCENT_LABEL, 'As your kit')
+    expect(pressedIn(within(options).getByRole('group', { name: MODE_LABEL }))).toEqual(['Dark'])
+    expect(pressedIn(within(options).getByRole('group', { name: ACCENT_LABEL }))).toEqual(['As your kit'])
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }))
+    await waitFor(() =>
+      expect(api.updateSocialPost).toHaveBeenCalledWith('post-1', expect.objectContaining({ look: { mode: 'dark', logo: false } })),
+    )
+  })
+
+  it('a look change marks the preview out of date', async () => {
+    api.listSocialTemplates.mockResolvedValue([PAPER_CARD])
+    api.getSocialPostMedia.mockResolvedValue([WIDE_FILE])
+    const shown = post({
+      template_id: 'tpl-paper', media: { '16:9': ['d-wide'] },
+      targets: [{ id: 't-twitter', toolkit: 'twitter', post_kind: 'image', options: {} } as any],
+    })
+    renderWith(<SocialsEditor role="owner" post={shown} go={go} />)
+    const frame = await within(screen.getByRole('region', { name: 'Preview' })).findByTestId('socials-preview-frame')
+    await within(frame).findByTestId('file-preview')
+    expect(within(frame).queryByText(PREVIEW_STALE)).toBeNull()
+    const options = await lookOptions()
+    await within(options).findByRole('group', { name: MODE_LABEL })
+    choose(options, MODE_LABEL, 'Dark')
+    expect(within(frame).getByText(PREVIEW_STALE)).toBeInTheDocument()
   })
 })

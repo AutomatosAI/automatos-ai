@@ -48,8 +48,9 @@ from tests.test_prd251w2_campaigns import (  # noqa: E402
 WAVE1B = VERSIONS / "prd251b_wave1.py"
 # The models also carry PRD-251B Wave 2's post columns: a comparison with them runs it after.
 WAVE2B = VERSIONS / "prd251b_wave2.py"
-# ...and PRD-251C Wave 2's batch_key (US-C201): the comparisons run it last.
+# ...and PRD-251C Wave 2's batch_key (US-C201), then PRD-251D Wave 3's look (US-D301): the comparisons run them last.
 WAVE2C = VERSIONS / "prd251c_wave2.py"
+WAVE3D = VERSIONS / "prd251d_wave3.py"
 BASE_HEAD = "prd252_ticket_numbers"
 POSTS = ("social_posts",)
 
@@ -102,6 +103,7 @@ def test_the_migration_builds_exactly_the_model_schema():
             _run(conn, WAVE1B, "upgrade")
             _run(conn, WAVE2B, "upgrade")
             _run(conn, WAVE2C, "upgrade")
+            _run(conn, WAVE3D, "upgrade")
         migrated, model = _schema(engine, POSTS), _schema(model_engine, POSTS)
         _assert_same_schema(migrated, model, "the migration path through prd251b_wave1")
         posts = migrated["social_posts"]
@@ -124,6 +126,7 @@ def test_create_all_first_then_the_upgrade_twice_leaves_the_model_schema(start):
             _run(conn, WAVE1B, "upgrade")
             _run(conn, WAVE2B, "upgrade")
             _run(conn, WAVE2C, "upgrade")
+            _run(conn, WAVE3D, "upgrade")
         _assert_same_schema(_schema(engine, POSTS), _schema(model_engine, POSTS), f"create_all first, from {start}")
         checks = [name for name, _sql in _schema(engine, POSTS)["social_posts"]["checks"]]
         assert checks.count("ck_social_posts_format") == 1 and checks.count("ck_social_posts_length_seconds") == 1
@@ -162,6 +165,7 @@ def test_the_downgrade_restores_the_old_check_and_drops_the_columns_and_the_upgr
             _run(conn, WAVE1B, "upgrade")
             _run(conn, WAVE2B, "upgrade")
             _run(conn, WAVE2C, "upgrade")
+            _run(conn, WAVE3D, "upgrade")
         _assert_same_schema(_schema(engine, POSTS), _schema(_model_engine(), POSTS), "upgraded again")
     finally:
         engine.dispose()

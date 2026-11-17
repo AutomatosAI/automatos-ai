@@ -722,8 +722,9 @@ def test_the_schemas_speak_the_lifecycles_own_vocabulary():
     # planned_for and timezone: the post's planned slot; REST sets it with PUT /posts/{id}/slot (PRD-251D).
     fields = set(create.parameters["properties"]) - {"template", "chart_report", "render", "channels",
                                                      "planned_for", "timezone"}
-    # The REST body's own fields, template_id taken as ``template`` (an id or a name).
-    rest = {f.alias or name for name, f in socials_api.CreateSocialPostRequest.model_fields.items()} - {"template_id"}
+    # The REST body's own fields, template_id taken as ``template`` (an id or a name). PRD-251D US-D301:
+    # the look (light or dark, the accent, the logo) is the person's choice in the editor's Look card.
+    rest = {f.alias or name for name, f in socials_api.CreateSocialPostRequest.model_fields.items()} - {"template_id", "look"}
     assert fields == rest
 
 

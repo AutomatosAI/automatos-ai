@@ -15,7 +15,9 @@ selection does: a gallery entry needs no tags. It carries the template's sample 
 (``sample_data``, what its thumbnail shows): the editor greys it into each empty field
 as an example of what goes there. F377 (night 11): the fields each shorter cut
 never shows (``fields_cut_out``), so the editor asks only for what the chosen length shows, and
-``made_for`` ("software" for the videos told on a software product's screens).
+``made_for`` ("software" for the videos told on a software product's screens). PRD-251D US-D301:
+``looks``, the look choices the template takes (``modules/socials/post_look.looks_of``): light or
+dark only for a template built on paper, the accent and the logo for every one.
 """
 from __future__ import annotations
 
@@ -30,6 +32,7 @@ from core.social_field_order import ordered_schema
 from core.social_templates import IMAGE_SLOT, SOCIAL_TEMPLATE_FORMATS, SOCIAL_VIDEO, made_for, root_duration, slot_generatable
 from modules.socials.compose_checks import template_kind
 from modules.socials.media_store import MediaStore
+from modules.socials.post_look import looks_of
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +119,8 @@ def entry(row: Any, store: MediaStore) -> Dict[str, Any]:
         "image_slot_labels": image_slot_labels(blocks),
         # F377: "software" for a video shown on a software product's own screens; None for any business.
         "made_for": made_for(blocks),
+        # PRD-251D US-D301: the look choices it takes: "mode" (light or dark) only when built on paper.
+        "looks": looks_of(blocks),
         # The template's fields, in the order the image shows them: the editor's Text on the
         # image card fills them (US-B109).
         "variables_schema": ordered_schema(blocks),

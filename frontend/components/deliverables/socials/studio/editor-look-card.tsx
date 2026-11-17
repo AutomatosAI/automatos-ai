@@ -14,6 +14,8 @@
  * cut to two lines. A search box (name and description) and the chips All, With a photo and
  * No photo narrow the gallery; "Let Auto pick" stays first and the chosen template stays
  * shown (template-gallery-model.ts).
+ * PRD-251D US-D301 (E10): under the gallery, the post's own look: light or dark (a template built
+ * on paper only), the accent strong or sparing and the logo on or off (editor-look-options.tsx).
  */
 import { useState } from 'react'
 
@@ -22,7 +24,9 @@ import { Input } from '@/components/ui/input'
 import type { DeliverableSummary, SocialFootageKind, SocialPost, SocialTemplateSummary } from '@/lib/api-client'
 import { useSocialLibrary } from '@/hooks/use-socials-editor'
 import { EditorLookAi } from './editor-look-ai'
+import { LookOptions } from './editor-look-options'
 import { LibraryGrid, UploadDrop } from './editor-look-sources'
+import { lookKeys, withLookChoice, type PostLook } from './look-options-model'
 import { PhotoTargetPicker, WHOLE_POST, photoTarget, type PhotoSpot } from './editor-look-photo'
 import { ChipGroup, EditorCard, Hint, Segmented } from './editor-ui'
 import {
@@ -167,20 +171,32 @@ interface EditorLookCardProps extends TemplateGalleryProps {
   onUpload: (file: File, spot?: string) => void
   onLibrary: (item: DeliverableSummary, spot?: string) => void
   ai: LookAiProps
+  /** PRD-251D US-D301: the post's own look, chosen under the gallery (editor-look-options.tsx). */
+  look: PostLook
+  onLook: (look: PostLook) => void
 }
 
-export function EditorLookCard({ templates, loading, chosen, onPick, busy, photoSpots, onUpload, onLibrary, ai }: EditorLookCardProps) {
+export function EditorLookCard({ templates, loading, chosen, onPick, busy, photoSpots, onUpload, onLibrary, ai, look, onLook }: EditorLookCardProps) {
   const [source, setSource] = useState<LookSource>('template')
   const [asked, setAsked] = useState<string | null>(null)
   const library = useSocialLibrary(source === 'library')
   const target = photoTarget(photoSpots, asked)
   const spot = target === WHOLE_POST ? undefined : target
   const items = spot ? library.data?.filter((item) => item.artifact_type === 'image') : library.data
+  const template = templates.find((t) => t.id === chosen) ?? null
+  // PRD-251D US-D301: a template that takes no light or dark (or "Let Auto pick") drops a dark choice,
+  // so no choice the person cannot see rides on to the render.
+  const pick = (templateId: string | null) => {
+    onPick(templateId)
+    const next = templates.find((t) => t.id === templateId) ?? null
+    if (look.mode && !lookKeys(next).includes('mode')) onLook(withLookChoice(look, 'mode', 'light'))
+  }
   return (
     <EditorCard label="Look">
       <Segmented label="Where the visual comes from" choices={LOOK_SOURCES} value={source} onChange={setSource} />
       <Hint>{LOOK_HINTS[source]}</Hint>
-      {source === 'template' && <TemplateGallery templates={templates} loading={loading} chosen={chosen} onPick={onPick} />}
+      {source === 'template' && <TemplateGallery templates={templates} loading={loading} chosen={chosen} onPick={pick} />}
+      {source === 'template' && !loading && <LookOptions template={template} look={look} onChange={onLook} />}
       {(source === 'upload' || source === 'library') && (
         <PhotoTargetPicker spots={photoSpots} target={target} post={ai.post} onTarget={setAsked} />
       )}

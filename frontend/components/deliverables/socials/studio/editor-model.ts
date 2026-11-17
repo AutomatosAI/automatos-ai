@@ -19,6 +19,7 @@ import type {
 } from '@/lib/api-client'
 import { browserTimezone, wallInZone, zonedWallToIso } from '@/lib/social-time'
 import { defaultKind, draftTargets } from '../socials-composer-model'
+import { lookToSave, orderedLook, type PostLook } from './look-options-model'
 import { lengthLabel } from './socials-calendar-model'
 
 export type EditorFormat = 'image' | 'carousel' | 'video' | 'text'
@@ -65,12 +66,14 @@ export interface EditorDraft {
   /** PRD-251B US-B305: the footage the post asks for, slot → prompt (an AI image's, or the b-roll's). */
   footage: Record<string, string>
   slot: EditorSlot | null
+  /** PRD-251D US-D301: the post's own look; a key left out is the kit's own (look-options-model.ts). */
+  look: PostLook
 }
 
 export function newDraft(): EditorDraft {
   return {
     title: '', brief: '', format: 'image', templateId: null, lengthSeconds: null, base: '', perChannel: {},
-    variables: {}, sources: {}, kinds: {}, options: {}, footageOn: false, footage: {}, slot: null,
+    variables: {}, sources: {}, kinds: {}, options: {}, footageOn: false, footage: {}, slot: null, look: {},
   }
 }
 
@@ -99,6 +102,7 @@ export function draftFromPost(post: SocialPost): EditorDraft {
     footageOn: null,
     footage: Object.fromEntries(Object.entries(post.footage ?? {}).map(([slot, asked]) => [slot, asked.prompt])),
     slot: slotOfPost(post),
+    look: orderedLook(post.look),
   }
 }
 
@@ -143,6 +147,7 @@ export function postFields(draft: EditorDraft, footageSlots: ReadonlyArray<strin
     variables: draft.variables,
     sources: draft.sources,
     footage,
+    look: lookToSave(draft.look),
   }
 }
 

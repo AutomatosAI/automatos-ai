@@ -583,6 +583,8 @@ export interface SocialPost {
   /** PRD-251C: the batch a weekly or monthly plan made it in ("2026-W43", "2026-11"). */
   batch_key?: string | null
   music?: SocialPostMusic
+  /** PRD-251D US-D301: the post's own look on its template, each key optional (absent: the kit's own); a render setting. */
+  look?: { mode?: 'light' | 'dark'; accent?: 'bold' | 'sparing'; logo?: boolean } | null
   /** F378: on a retake's answer, what the composer had to say (its warnings, its questions for the owner). */
   take?: { warnings: string[]; questions: string[] }
   created_at: string
@@ -690,6 +692,8 @@ export interface CreateSocialPostInput {
   length_seconds?: number | null
   /** Slot name → `{ prompt }`; `null` asks for no footage. */
   footage?: Record<string, { prompt: string }> | null
+  /** PRD-251D US-D301: the post's look (light or dark, the accent, the logo); `null` is the kit's own. */
+  look?: SocialPost['look']
 }
 
 /** POST /api/socials/compose (US-207): what the composer asks for. */
@@ -839,6 +843,8 @@ export interface SocialTemplateSummary {
   fields_cut_out?: Record<string, string[]>
   /** F377: 'software' for a video told on a software product's own screens; null for any business. */
   made_for?: string | null
+  /** PRD-251D US-D301: the look choices it takes: 'mode' (light or dark) only when built on paper, 'accent' and 'logo' always. */
+  looks?: Array<'mode' | 'accent' | 'logo'>
   /** The sample text of those fields (what the thumbnail shows): greyed in as each empty field's example. */
   sample_data?: Record<string, string | number | boolean>
 }
