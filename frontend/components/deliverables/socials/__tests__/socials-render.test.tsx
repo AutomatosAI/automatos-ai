@@ -4,15 +4,19 @@
  * * the list shows "Render minutes: used / quota this month" from
  *   GET /api/socials/usage (a plan with no quota shows the minutes used alone,
  *   and a used-up month says so);
- * * a post with a template, for a role that authors, shows Render; clicking it
- *   calls POST /render and the post shows Rendering; a refused render (429, no
- *   minutes left) shows the server's reason;
- * * a failed render shows its reason and offers Render again;
+ * * a draft with a template, for a role that authors, opens in its editor from the List, and
+ *   Submit for approval gives it the full render (POST /render, PRD-251D US-D102); the post
+ *   then shows Rendering in its read-only view, with nothing to render or edit; a refused
+ *   render (429, no minutes left) shows the server's reason;
+ * * a failed render shows its reason and offers a render again, in the editor's Activity card;
  * * the list polls only while a post renders, and the minutes are read again
  *   when the last render ends.
  * * P256-FIX-SOC-5 (F437): a rendering post says when it started and when it gives up (the
  *   server's `render`), keeping the "Rendering." start; a plan's draft that waits for you
  *   (SOC-2's `needs_input`) says what it waits for.
+ *
+ * PRD-251D US-D203: these lines moved from the older detail pane to the post's Activity card
+ * (studio/post-notices.tsx), under the editor and in the read-only view.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, within, waitFor } from '@testing-library/react'
@@ -60,6 +64,11 @@ vi.mock('@/lib/api-client', () => {
       )
       return server.posts.find((p) => p.id === id)
     }),
+    // PRD-251D: the editor saves a post (its fields, then its channels) before it renders it.
+    updateSocialPost: vi.fn(async (id: string) => server.posts.find((p) => p.id === id)),
+    setSocialPostTargets: vi.fn(async (id: string) => server.posts.find((p) => p.id === id)),
+    // The brand kit's name and a post's AI-label lines: nothing to say here.
+    get: vi.fn(async () => ({ targets: [] })),
   }
   return { apiClient, default: apiClient }
 })
@@ -71,7 +80,8 @@ import { SocialsTab } from '@/components/deliverables/socials/socials-tab'
 import { SocialsRenderMinutes } from '@/components/deliverables/socials/socials-render-minutes'
 import { formatRenderMinutes } from '@/components/deliverables/socials/socials-status'
 import { renderPollInterval, SOCIALS_RENDER_POLL_MS } from '@/hooks/use-socials-api'
-import { RENDERING_NOTE, renderingLine, waitingLine } from '@/components/deliverables/socials/socials-post-detail'
+import { RENDERING_NOTE, renderingLine, waitingLine } from '@/components/deliverables/socials/studio/post-notices'
+import { RENDERING_FOR_APPROVAL } from '@/components/deliverables/socials/studio/editor-submit'
 import { format } from 'date-fns'
 
 const api = apiClient as unknown as Record<string, ReturnType<typeof vi.fn>>
@@ -99,6 +109,8 @@ function post(overrides: Record<string, unknown> = {}) {
     variables: {}, sources: {}, media: {}, status: 'draft', content_hash: 'a'.repeat(64),
     approved_hash: null, approved_by: null, approved_at: null, override_unsourced: false,
     review_log: [], scheduled_for: null, timezone: null,
+    // PRD-251D: an author's draft now opens in the editor, which reads these as a saved post has them.
+    planned_for: null, length_seconds: null, targets: [], preview: null,
     created_at: '2026-09-25T09:00:00Z', updated_at: '2026-09-25T09:00:00Z', ...overrides,
   }
 }
@@ -115,7 +127,11 @@ function wrap(children: React.ReactNode, client: QueryClient = newClient()) {
   )
 }
 
+/** A post's read-only view (studio/socials-post-view.tsx). */
 const detail = (title: string) => screen.getByRole('article', { name: `Post: ${title}` })
+/** The editor's status, beside its title, and its Activity card. */
+const editorStatus = () => screen.getByTestId('socials-editor-status')
+const findActivity = () => screen.findByRole('region', { name: 'Activity' })
 
 beforeEach(() => {
   server.role = 'owner'
@@ -172,20 +188,26 @@ describe('render minutes', () => {
 })
 
 describe('rendering a post', () => {
-  it('Render moves a draft with a template to Rendering', async () => {
+  it("the editor's Submit for approval renders a draft with a template, and the post shows Rendering", async () => {
     server.posts = [post()]
     render(wrap(<SocialsTab />))
+    // PRD-251D: the List opens the draft in its editor, whose Submit for approval makes the full
+    // render (US-D102): the older pane's Render.
     fireEvent.click(await screen.findByRole('button', { name: /Launch teaser/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Submit for approval' }))
 
-    fireEvent.click(within(detail('Launch teaser')).getByRole('button', { name: 'Render' }))
-
-    await waitFor(() => expect(api.renderSocialPost).toHaveBeenCalledWith('post-1'))
-    expect(await screen.findByRole('heading', { name: 'Rendering 1' })).toBeInTheDocument()
-    expect(within(detail('Launch teaser')).getByRole('status')).toHaveTextContent('Rendering.')
-    expect(toast.success).toHaveBeenCalledWith('Rendering started')
+    await waitFor(() => expect(api.renderSocialPost).toHaveBeenCalledWith('post-1', {}))
+    // While it renders the post page shows the post's read-only view.
+    const card = await screen.findByRole('article', { name: 'Post: Launch teaser' })
+    expect(within(card).getByTestId('socials-post-status')).toHaveTextContent('Rendering')
+    expect(within(card).getByRole('status')).toHaveTextContent('Rendering.')
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(RENDERING_FOR_APPROVAL))
     // A rendering post is not rendered again, nor edited.
-    expect(within(detail('Launch teaser')).queryByRole('button', { name: /^Render/ })).toBeNull()
-    expect(within(detail('Launch teaser')).queryByRole('button', { name: 'Save copy' })).toBeNull()
+    for (const name of [/^Render/, 'Save copy', 'Save draft', 'Submit for approval']) {
+      expect(screen.queryByRole('button', { name })).toBeNull()
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Back to calendar' }))
+    expect(await screen.findByRole('heading', { name: 'Rendering 1' })).toBeInTheDocument()
   })
 
   it('a render refused for minutes (429) shows the server reason and changes nothing', async () => {
@@ -196,25 +218,29 @@ describe('rendering a post', () => {
     }
     render(wrap(<SocialsTab />))
     fireEvent.click(await screen.findByRole('button', { name: /Launch teaser/ }))
-    fireEvent.click(within(detail('Launch teaser')).getByRole('button', { name: 'Render' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Submit for approval' }))
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(server.renderError!.message))
-    expect(within(detail('Launch teaser')).getByTestId('socials-post-status')).toHaveTextContent('Draft')
+    expect(editorStatus()).toHaveTextContent('Draft')
+    expect(server.posts[0].status).toBe('draft')
     expect(toast.success).not.toHaveBeenCalled()
   })
 
-  it('a post without a template, or a viewer, gets no Render button', async () => {
+  it('a viewer gets no render; a post without a template is rendered with Let Auto pick', async () => {
+    // PRD-251D (US-D103): the editor renders a post with no template, Auto picking one, so a
+    // template-less draft is offered Render preview where the older pane offered nothing.
     server.posts = [post({ template_id: null })]
     render(wrap(<SocialsTab />))
     fireEvent.click(await screen.findByRole('button', { name: /Launch teaser/ }))
-    expect(within(detail('Launch teaser')).queryByRole('button', { name: 'Render' })).toBeNull()
+    expect(await screen.findByRole('button', { name: 'Render preview' })).toBeEnabled()
     cleanup()
 
     server.posts = [post()]
     server.role = 'viewer'
     render(wrap(<SocialsTab />))
     fireEvent.click(await screen.findByRole('button', { name: /Launch teaser/ }))
-    expect(within(detail('Launch teaser')).queryByRole('button', { name: 'Render' })).toBeNull()
+    expect(within(detail('Launch teaser')).queryByRole('button', { name: /Render/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Render/ })).toBeNull()
   })
 
   it('a failed render shows its reason and offers Render again', async () => {
@@ -226,14 +252,19 @@ describe('rendering a post', () => {
       ],
     })]
     render(wrap(<SocialsTab />))
+    // Failed is editable: the List opens it in its editor, whose Activity card says why.
     fireEvent.click(await screen.findByRole('button', { name: /Launch teaser/ }))
 
-    const card = detail('Launch teaser')
-    expect(within(card).getByRole('alert')).toHaveTextContent('The last render failed: The composition failed its check with 1 error(s).')
-    expect(within(card).getByRole('button', { name: 'Render again' })).toBeInTheDocument()
-    // Failed is editable: fix the post, then render again.
-    expect(within(card).getByRole('button', { name: 'Save copy' })).toBeInTheDocument()
-    expect(within(card).getByText('Render failed')).toBeInTheDocument()
+    const activity = await findActivity()
+    expect(within(activity).getByRole('alert')).toHaveTextContent('The last render failed: The composition failed its check with 1 error(s).')
+    expect(within(activity).getByText('Render failed')).toBeInTheDocument()
+    // Fix the post in the editor (Save draft), then render it again: the full render, which the
+    // editor's header does not offer a failed post (its Render preview of a video is the preview).
+    expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled()
+    expect(editorStatus()).toHaveTextContent('Failed')
+    fireEvent.click(within(activity).getByRole('button', { name: 'Render again' }))
+    await waitFor(() => expect(api.renderSocialPost).toHaveBeenCalledWith('post-1'))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Rendering started'))
   })
 })
 
@@ -255,8 +286,9 @@ describe('P256-FIX-SOC-5: a render says since when, and a waiting draft says why
   it('a draft whose newest entry asks for your input says so, and one rendered since does not', async () => {
     server.posts = [post({ review_log: [asked] })]
     render(wrap(<SocialsTab />))
+    // A draft opens in its editor; its Activity card says what it waits for.
     fireEvent.click(await screen.findByRole('button', { name: /Launch teaser/ }))
-    expect(within(detail('Launch teaser')).getByRole('alert')).toHaveTextContent('Waiting for you: fill in item_1_name, item_1_value before rendering')
+    expect(within(await findActivity()).getByRole('alert')).toHaveTextContent('Waiting for you: fill in item_1_name, item_1_value before rendering')
     const rendered = { at: '2026-10-14T08:00:00Z', by: 'user-1', action: 'render', comment: null }
     expect(waitingLine({ status: 'draft', review_log: [asked, rendered] } as any)).toBeNull()
     expect(waitingLine({ status: 'draft', review_log: [{ ...asked, fields: ['Item 1 name'] }] } as any)).toBe('Waiting for you: Fill in: Item 1 name')

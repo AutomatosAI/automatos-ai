@@ -15,6 +15,7 @@ Pure-function / monkeypatched style (no live DB), mirroring
 """
 
 import asyncio
+import contextvars
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -75,7 +76,9 @@ def _patch_valid(monkeypatch, record):
 
 
 def _resolve(req):
-    return _resolve_sdk_key_context(req, object(), required_scope=TASKS_READ)
+    # On a copy of the context, as the route runs it in the threadpool: the log context it sets
+    # (workspace_id_var) never outlives this test and reaches another one's usage rows.
+    return contextvars.copy_context().run(_resolve_sdk_key_context, req, object(), required_scope=TASKS_READ)
 
 
 # --------------------------------------------------------------------------- #

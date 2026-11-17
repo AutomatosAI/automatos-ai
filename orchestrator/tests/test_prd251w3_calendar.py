@@ -76,6 +76,7 @@ def test_a_scheduled_post_is_a_social_item_with_its_slot_and_timezone(db):
         "type": "social",
         "name": "Harvest Club opens",
         "next_run_at": slot.isoformat(),
+        "status": "scheduled",
         "timezone": "Europe/Lisbon",
         "frequency": "One-off",
         "agent_name": None,
@@ -95,6 +96,49 @@ def test_another_workspace_s_post_an_unscheduled_post_and_a_slot_outside_the_win
     _post(db, WS, service.SCHEDULED, NOW - timedelta(hours=1), title="Already due")
 
     assert [item["post_id"] for item in social_post_items(db, WS, NOW, HORIZON)] == [str(mine)]
+
+
+def _planned(db, status, slot, title):
+    """A post not scheduled yet, planned for ``slot``."""
+    post = service.create_draft(db, workspace_id=WS, created_by="a", title=title, copy={"base": "x"})
+    post.status, post.planned_for, post.timezone = status, slot, "Europe/Lisbon"
+    db.commit()
+    return post.id
+
+
+def test_a_post_planned_for_a_slot_shows_there_with_its_status_before_it_is_scheduled(db):
+    # 16 Nov 2026: the Socials calendar showed these and the Command Center calendar did not.
+    planned = {
+        status: _planned(db, status, NOW + timedelta(days=day), status)
+        for day, status in enumerate((service.NEEDS_APPROVAL, service.DRAFT, service.APPROVED, service.CHANGES_REQUESTED), start=1)
+    }
+    scheduled = _post(db, WS, service.SCHEDULED, NOW + timedelta(hours=6), title="Goes out today")
+    for status in (service.PUBLISHED, service.FAILED, service.MISSED, service.RENDERING):
+        _planned(db, status, NOW + timedelta(days=1), f"not coming: {status}")
+    _planned(db, service.DRAFT, NOW + timedelta(days=9), "Too far")
+    _planned(db, service.DRAFT, None, "No slot yet")
+
+    items = social_post_items(db, WS, NOW, HORIZON)
+
+    # Soonest first, each at its own slot, saying where it stands.
+    assert [(item["post_id"], item["status"]) for item in items] == [
+        (str(scheduled), "scheduled"),
+        (str(planned[service.NEEDS_APPROVAL]), "needs_approval"),
+        (str(planned[service.DRAFT]), "draft"),
+        (str(planned[service.APPROVED]), "approved"),
+        (str(planned[service.CHANGES_REQUESTED]), "changes_requested"),
+    ]
+    assert items[1]["next_run_at"] == (NOW + timedelta(days=1)).isoformat()
+
+
+def test_a_scheduled_post_sits_at_the_time_it_publishes_not_an_older_plan(db):
+    post_id = _post(db, WS, service.SCHEDULED, NOW + timedelta(days=3))
+    db.get(SocialPost, post_id).planned_for = NOW + timedelta(days=1)  # the slot it was first planned for
+    db.commit()
+
+    (item,) = social_post_items(db, WS, NOW, HORIZON)
+
+    assert item["next_run_at"] == (NOW + timedelta(days=3)).isoformat()
 
 
 def test_with_socials_off_there_are_no_social_items(db, monkeypatch):

@@ -43,475 +43,545 @@
       "type": "text",
       "label": "Hook: the headline",
       "max_chars": 24,
-      "description": "Over the hook footage, word by word; the accent words follow it."
+      "description": "The video's first words, large over the hook footage, landing word by word as the voice says them. The accent words follow it. Four or five words."
     },
     "hook_accent": {
       "type": "text",
       "label": "Hook: the accent words",
       "max_chars": 10,
-      "description": "In the brand colour, after the headline.",
+      "description": "One or two words that end the headline, in the brand colour, spoken with it. Leave empty for none.",
       "default": ""
     },
     "hook_question": {
       "type": "text",
       "label": "Hook: the question",
       "max_chars": 22,
-      "description": "In the brand colour, under the headline."
+      "description": "A short question under the headline, in the brand colour, spoken next. It sets up what the app answers."
     },
     "app_name": {
       "type": "text",
       "label": "The app's name",
       "max_chars": 28,
-      "description": "Over the app's own loop, and on the end card."
+      "description": "Small above the slogan in the reveal, over the app's own loop, and large on the end card. Write it exactly as the app is called."
     },
     "slogan_line_1": {
       "type": "text",
       "label": "Reveal: the slogan's first line",
       "max_chars": 11,
-      "description": "Very large, in caps."
+      "description": "Very large in the reveal, under the app's name; write it in capitals. One or two words; the accent word and the second line follow under it."
     },
     "slogan_accent": {
       "type": "text",
       "label": "Reveal: the slogan's accent word",
       "max_chars": 6,
-      "description": "In the brand colour, before the second line."
+      "description": "One short word in the brand colour that starts the slogan's second line, very large; write it in capitals."
     },
     "slogan_line_2": {
       "type": "text",
       "label": "Reveal: the slogan's second line",
-      "max_chars": 8
+      "max_chars": 8,
+      "description": "The rest of the slogan's second line, after the accent word, very large; write it in capitals. One word."
     },
     "slogan_note": {
       "type": "text",
       "label": "Reveal: the line under the slogan",
       "max_chars": 20,
+      "description": "Small text under the slogan in the reveal: what the app is, in a few words. Leave empty for none.",
       "default": ""
     },
     "phone_time": {
       "type": "text",
       "label": "Phone: the clock",
       "max_chars": 5,
+      "description": "The time in the top bar of the phone's first screen. Any time works: it is only the phone's clock.",
       "default": "9:41"
     },
     "phone_time_later": {
       "type": "text",
-      "label": "Phone: the clock on the second screen",
+      "label": "Help screen: the clock",
       "max_chars": 5,
+      "description": "The time in the top bar of the phone's second screen, the help screen: a minute after the first screen's clock.",
       "default": "9:42"
     },
     "course_code": {
       "type": "text",
       "label": "Phone: the badge at the top",
-      "max_chars": 10
+      "max_chars": 10,
+      "description": "A short tag in the header of the phone's first screen: what the person is working on in the app, as a short name or code."
     },
     "today_label": {
       "type": "text",
-      "label": "Phone: the first card's label",
+      "label": "Phone: the progress card's label",
       "max_chars": 12,
+      "description": "Small capitals on the progress card, the first card on the phone's first screen, above the card's line.",
       "default": "Today"
     },
     "today_detail": {
       "type": "text",
-      "label": "Phone: the first card's line",
-      "max_chars": 48
+      "label": "Phone: the progress card's line",
+      "max_chars": 48,
+      "description": "One line on the progress card, beside the ring: what is on today in the app, its items separated by ' · '."
     },
     "today_percent": {
       "type": "number",
-      "label": "Phone: the first card's progress, in percent",
+      "label": "Phone: today's progress, in percent",
       "min": 0,
       "max": 100,
-      "description": "Fills the ring and shows as its figure."
+      "description": "A whole number from 0 to 100. The ring on the progress card fills to it and shows it as a figure."
     },
     "streak": {
       "type": "text",
-      "label": "Phone: the number beside the progress",
-      "max_chars": 4
+      "label": "Phone: the number by the flame",
+      "max_chars": 4,
+      "description": "A small number beside a flame on the progress card, such as days in a row. Digits only."
     },
     "question_topic": {
       "type": "text",
-      "label": "Phone: the second screen's topic",
-      "max_chars": 44
+      "label": "Phone: the question's topic",
+      "max_chars": 44,
+      "description": "A small chip at the top of the question card, under the progress card: the subject the question comes from."
     },
     "question_label": {
       "type": "text",
-      "label": "Phone: the second screen's label",
+      "label": "Phone: the question card's label",
       "max_chars": 12,
+      "description": "Small capitals above the question, telling the viewer what to do.",
       "default": "Pick one"
     },
     "question_text": {
       "type": "text",
-      "label": "Phone: the second screen's question",
-      "max_chars": 140
+      "label": "Phone: the question",
+      "max_chars": 140,
+      "description": "The question on the card, in one or two sentences. Answers A to D follow under it, and A is the one picked."
     },
     "option_a": {
       "type": "text",
-      "label": "Phone: choice A (the one picked)",
-      "max_chars": 48
+      "label": "Phone: answer A, the right one",
+      "max_chars": 48,
+      "description": "The first answer under the question. It is tapped and marked with a tick, so it must be the right answer."
     },
     "option_b": {
       "type": "text",
-      "label": "Phone: choice B",
-      "max_chars": 48
+      "label": "Phone: answer B",
+      "max_chars": 48,
+      "description": "The second answer under the question, a wrong one. It fades when answer A is picked."
     },
     "option_c": {
       "type": "text",
-      "label": "Phone: choice C",
-      "max_chars": 48
+      "label": "Phone: answer C",
+      "max_chars": 48,
+      "description": "The third answer under the question, a wrong one. It fades when answer A is picked."
     },
     "option_d": {
       "type": "text",
-      "label": "Phone: choice D",
-      "max_chars": 48
+      "label": "Phone: answer D",
+      "max_chars": 48,
+      "description": "The fourth answer under the question, a wrong one. It fades when answer A is picked."
     },
     "result_label": {
       "type": "text",
-      "label": "Phone: what the pick shows",
+      "label": "Phone: the word after the pick",
       "max_chars": 12,
+      "description": "Shown in bold under the answers once answer A is picked, beside the help button.",
       "default": "Got it"
     },
     "tutor_button": {
       "type": "text",
       "label": "Phone: the help button",
       "max_chars": 30,
+      "description": "A button beside the word after the pick. The help screen follows it.",
       "default": "Learn more →"
     },
     "source_note": {
       "type": "text",
-      "label": "Phone: the line about the source",
-      "max_chars": 28
+      "label": "Phone: the note about the source",
+      "max_chars": 28,
+      "description": "Small text at the foot of the question card: where the question comes from or how it was checked. It describes the app, so keep it true."
     },
     "source_link": {
       "type": "text",
       "label": "Phone: the source link",
-      "max_chars": 30
+      "max_chars": 30,
+      "description": "A link at the foot of the question card, beside the note about the source, ending in ' ↗'."
     },
     "tutor_header": {
       "type": "text",
-      "label": "Phone: the help screen's header",
+      "label": "Help screen: the header",
       "max_chars": 12,
+      "description": "The small title at the top of the phone's second screen, the help screen, which follows the question card.",
       "default": "Help"
     },
     "tutor_title": {
       "type": "text",
-      "label": "Phone: the help screen's title",
+      "label": "Help screen: the title",
       "max_chars": 20,
+      "description": "The large title under the header on the help screen.",
       "default": "Ask a question"
     },
     "tutor_about": {
       "type": "text",
-      "label": "Phone: what the help is about",
-      "max_chars": 44
+      "label": "Help screen: what it is about",
+      "max_chars": 44,
+      "description": "One line under the help screen's title: what the help is about, such as the question just answered."
     },
     "tutor_question": {
       "type": "text",
-      "label": "Phone: the question asked",
-      "max_chars": 40
+      "label": "Help screen: the question asked",
+      "max_chars": 40,
+      "description": "The person's question on the help screen, shown as their message. One short sentence."
     },
     "tutor_answer": {
       "type": "text",
-      "label": "Phone: the answer",
+      "label": "Help screen: the answer",
       "max_chars": 240,
-      "description": "Types itself out word by word."
+      "description": "The app's reply under the person's question, typing itself out word by word. Two or three short sentences."
     },
     "cite_ok": {
       "type": "text",
-      "label": "Phone: the source chip",
-      "max_chars": 30
+      "label": "Help screen: the source chip",
+      "max_chars": 30,
+      "description": "A small chip under the answer saying the answer has a source, starting with '✓ '. It describes the app, so keep it true."
     },
     "cite_link": {
       "type": "text",
-      "label": "Phone: the link chip",
-      "max_chars": 30
+      "label": "Help screen: the link chip",
+      "max_chars": 30,
+      "description": "A second chip beside the source chip: a link to check the answer, ending in ' ↗'."
     },
     "tutor_scope": {
       "type": "text",
-      "label": "Phone: the note under the answer",
+      "label": "Help screen: the note under the answer",
       "max_chars": 48,
+      "description": "Small text under the chips on the help screen: what the help covers. Leave empty for none.",
       "default": ""
     },
     "ask_placeholder": {
       "type": "text",
-      "label": "Phone: the question bar's placeholder",
+      "label": "Help screen: the message box's hint",
       "max_chars": 24,
+      "description": "The hint in the empty message box at the foot of the help screen.",
       "default": "Type here…"
     },
     "ask_speak": {
       "type": "text",
-      "label": "Phone: the speak button",
+      "label": "Help screen: the speak button",
       "max_chars": 8,
+      "description": "The button beside the message box for asking by voice.",
       "default": "Speak"
     },
     "ask_send": {
       "type": "text",
-      "label": "Phone: the send button",
+      "label": "Help screen: the send button",
       "max_chars": 8,
+      "description": "The button at the end of the message box that sends the message.",
       "default": "Send"
     },
     "dock_1": {
       "type": "text",
-      "label": "Phone: dock item 1",
+      "label": "Phone: menu tab 1",
       "max_chars": 10,
+      "description": "The first tab in the menu bar at the foot of the phone, shown as the open one. The bar stays on both phone screens.",
       "default": "Home"
     },
     "dock_2": {
       "type": "text",
-      "label": "Phone: dock item 2",
+      "label": "Phone: menu tab 2",
       "max_chars": 10,
+      "description": "The second tab in the menu bar at the foot of the phone.",
       "default": "Search"
     },
     "dock_3": {
       "type": "text",
-      "label": "Phone: dock item 3",
+      "label": "Phone: menu tab 3",
       "max_chars": 10,
+      "description": "The third tab in the menu bar at the foot of the phone.",
       "default": "Saved"
     },
     "dock_4": {
       "type": "text",
-      "label": "Phone: dock item 4",
+      "label": "Phone: menu tab 4",
       "max_chars": 10,
+      "description": "The fourth tab in the menu bar at the foot of the phone.",
       "default": "Profile"
     },
     "mock_title": {
       "type": "text",
       "label": "Big moment: the title",
-      "max_chars": 22
+      "max_chars": 22,
+      "description": "Large title on a card of its own after the phone: the app's biggest step, such as a full session. A few words."
     },
     "mock_detail": {
       "type": "text",
       "label": "Big moment: the detail",
-      "max_chars": 48
+      "max_chars": 48,
+      "description": "One line under the big moment's title: what the step involves, such as how long it takes."
     },
     "mock_button": {
       "type": "text",
       "label": "Big moment: the button",
-      "max_chars": 24
+      "max_chars": 24,
+      "description": "The button on the big moment's card, pressed with a ripple before the goals show. A word or two that begins the step.",
+      "default": "Start"
     },
     "gate_title": {
       "type": "text",
       "label": "Goals: the title",
-      "max_chars": 44
+      "max_chars": 44,
+      "description": "Small capitals over the two goals, on the card that follows the big moment: what the person must reach."
     },
     "gate_1": {
       "type": "text",
       "label": "Goals: goal 1",
-      "max_chars": 40
+      "max_chars": 40,
+      "description": "The first goal on the goals card, ticked off. Any figure in it is a fact about the app, so keep it true."
     },
     "gate_2": {
       "type": "text",
       "label": "Goals: goal 2",
-      "max_chars": 40
+      "max_chars": 40,
+      "description": "The second goal on the goals card, ticked off just after the first. Any figure in it is a fact about the app, so keep it true."
     },
     "grade_note": {
       "type": "text",
       "label": "Result: the line above",
-      "max_chars": 40
+      "max_chars": 40,
+      "description": "Small capitals above the big result, on its own screen after the goals: what the result means."
     },
     "grade": {
       "type": "text",
-      "label": "Result: the result",
+      "label": "Result: the big result",
       "max_chars": 3,
-      "description": "Very large, e.g. 'A+'."
+      "description": "Very large, on its own screen after the goals: up to three characters, such as a letter or a mark. The lines above and below frame it."
     },
     "grade_caveat": {
       "type": "text",
       "label": "Result: the line below",
-      "max_chars": 16
+      "max_chars": 16,
+      "description": "A short line in large type under the big result: a twist or a condition on it."
     },
     "tracks_title": {
       "type": "text",
       "label": "List: the title",
-      "max_chars": 16
+      "max_chars": 16,
+      "description": "The heading over the list of what the app covers, a grid of ten items. A few words."
     },
     "tracks_detail": {
       "type": "text",
-      "label": "List: the line under it",
+      "label": "List: the line under the title",
       "max_chars": 56,
-      "description": "e.g. how much the app holds; each figure needs its source.",
+      "description": "One line under the list's heading, such as how much the app holds. Each figure in it is a fact that needs its source.",
       "claim": true
     },
     "track_1_code": {
       "type": "text",
       "label": "List: item 1's short code",
-      "max_chars": 8
+      "max_chars": 8,
+      "description": "A short code or abbreviation on list item 1, above its name."
     },
     "track_1_name": {
       "type": "text",
       "label": "List: item 1's name",
-      "max_chars": 44
+      "max_chars": 44,
+      "description": "The name of list item 1, under its code. It lights up as the voice says the spoken word for item 1."
     },
     "track_2_code": {
       "type": "text",
       "label": "List: item 2's short code",
-      "max_chars": 8
+      "max_chars": 8,
+      "description": "A short code or abbreviation on list item 2, above its name."
     },
     "track_2_name": {
       "type": "text",
       "label": "List: item 2's name",
-      "max_chars": 44
+      "max_chars": 44,
+      "description": "The name of list item 2, under its code. It lights up as the voice says the spoken word for item 2."
     },
     "track_3_code": {
       "type": "text",
       "label": "List: item 3's short code",
-      "max_chars": 8
+      "max_chars": 8,
+      "description": "A short code or abbreviation on list item 3, above its name."
     },
     "track_3_name": {
       "type": "text",
       "label": "List: item 3's name",
-      "max_chars": 44
+      "max_chars": 44,
+      "description": "The name of list item 3, under its code, in the grid of ten."
     },
     "track_4_code": {
       "type": "text",
       "label": "List: item 4's short code",
-      "max_chars": 8
+      "max_chars": 8,
+      "description": "A short code or abbreviation on list item 4, above its name."
     },
     "track_4_name": {
       "type": "text",
       "label": "List: item 4's name",
-      "max_chars": 44
+      "max_chars": 44,
+      "description": "The name of list item 4, under its code. It lights up as the voice says the spoken word for item 4."
     },
     "track_5_code": {
       "type": "text",
       "label": "List: item 5's short code",
-      "max_chars": 8
+      "max_chars": 8,
+      "description": "A short code or abbreviation on list item 5, above its name."
     },
     "track_5_name": {
       "type": "text",
       "label": "List: item 5's name",
-      "max_chars": 44
+      "max_chars": 44,
+      "description": "The name of list item 5, under its code. It lights up as the voice says the spoken word for item 5."
     },
     "track_6_code": {
       "type": "text",
       "label": "List: item 6's short code",
-      "max_chars": 8
+      "max_chars": 8,
+      "description": "A short code or abbreviation on list item 6, above its name."
     },
     "track_6_name": {
       "type": "text",
       "label": "List: item 6's name",
-      "max_chars": 44
+      "max_chars": 44,
+      "description": "The name of list item 6, under its code, in the grid of ten."
     },
     "track_7_code": {
       "type": "text",
       "label": "List: item 7's short code",
-      "max_chars": 8
+      "max_chars": 8,
+      "description": "A short code or abbreviation on list item 7, above its name."
     },
     "track_7_name": {
       "type": "text",
       "label": "List: item 7's name",
-      "max_chars": 44
+      "max_chars": 44,
+      "description": "The name of list item 7, under its code, in the grid of ten."
     },
     "track_8_code": {
       "type": "text",
       "label": "List: item 8's short code",
-      "max_chars": 8
+      "max_chars": 8,
+      "description": "A short code or abbreviation on list item 8, above its name."
     },
     "track_8_name": {
       "type": "text",
       "label": "List: item 8's name",
-      "max_chars": 44
+      "max_chars": 44,
+      "description": "The name of list item 8, under its code, in the grid of ten."
     },
     "track_9_code": {
       "type": "text",
       "label": "List: item 9's short code",
-      "max_chars": 8
+      "max_chars": 8,
+      "description": "A short code or abbreviation on list item 9, above its name."
     },
     "track_9_name": {
       "type": "text",
       "label": "List: item 9's name",
-      "max_chars": 44
+      "max_chars": 44,
+      "description": "The name of list item 9, under its code, in the grid of ten."
     },
     "track_10_code": {
       "type": "text",
       "label": "List: item 10's short code",
-      "max_chars": 8
+      "max_chars": 8,
+      "description": "A short code or abbreviation on list item 10, above its name."
     },
     "track_10_name": {
       "type": "text",
       "label": "List: item 10's name",
-      "max_chars": 44
+      "max_chars": 44,
+      "description": "The name of list item 10, under its code, the last in the grid of ten."
     },
     "end_line": {
       "type": "text",
       "label": "End card: the line under the name",
-      "max_chars": 28
+      "max_chars": 28,
+      "description": "On the end card, under the logo and the app's name, over the end card footage. A few words."
     },
     "end_accent": {
       "type": "text",
-      "label": "End card: the closing words, in the brand colour",
-      "max_chars": 12
+      "label": "End card: the closing words",
+      "max_chars": 12,
+      "description": "Large closing words in the brand colour, under the line on the end card. Two or three words."
     },
     "end_url": {
       "type": "text",
-      "label": "End card: the address",
-      "max_chars": 28
+      "label": "End card: the web address",
+      "max_chars": 28,
+      "description": "The web address at the foot of the end card, written without https://."
     },
     "end_note": {
       "type": "text",
       "label": "End card: the small print",
       "max_chars": 110,
-      "description": "e.g. a non-affiliation note the copy rules require.",
+      "description": "Small print under the web address, such as a note the copy rules require. Leave empty for none.",
       "default": ""
     },
     "cap_practice": {
       "type": "text",
-      "label": "Caption and voice: the first screen",
-      "max_chars": 60
+      "label": "Phone: the voice line",
+      "max_chars": 60,
+      "description": "Said by the voice and shown as the caption while the phone's first screen plays. One short sentence, about ten words."
     },
     "cap_tutor": {
       "type": "text",
-      "label": "Caption and voice: the help",
-      "max_chars": 60
+      "label": "Help screen: the voice line",
+      "max_chars": 60,
+      "description": "Said by the voice and shown as the caption while the help screen plays. One short sentence, about ten words."
     },
     "cap_mock": {
       "type": "text",
-      "label": "Caption and voice: the big moment",
-      "max_chars": 60
+      "label": "Big moment: the voice line",
+      "max_chars": 60,
+      "description": "Said by the voice and shown as the caption over the big moment and the goals. One short sentence, about ten words."
     },
     "beat_1": {
       "type": "text",
-      "label": "Caption and voice: beat 1",
+      "label": "List: the first spoken words",
       "max_chars": 18,
-      "description": "Highlights as the voice says it; beats 2-5 light list items 1, 2, 4 and 5."
+      "description": "Said as the list appears and shown first in the caption under it: two or three words that sum up the list."
     },
     "beat_2": {
       "type": "text",
-      "label": "Caption and voice: beat 2",
+      "label": "List: the spoken word for item 1",
       "max_chars": 18,
-      "description": "Highlights as the voice says it; beats 2-5 light list items 1, 2, 4 and 5."
+      "description": "Said next and shown in the caption under the list; list item 1 lights up as it is said. A word or two naming item 1."
     },
     "beat_3": {
       "type": "text",
-      "label": "Caption and voice: beat 3",
+      "label": "List: the spoken word for item 2",
       "max_chars": 18,
-      "description": "Highlights as the voice says it; beats 2-5 light list items 1, 2, 4 and 5."
+      "description": "Said next and shown in the caption under the list; list item 2 lights up as it is said. A word or two naming item 2."
     },
     "beat_4": {
       "type": "text",
-      "label": "Caption and voice: beat 4",
+      "label": "List: the spoken word for item 4",
       "max_chars": 18,
-      "description": "Highlights as the voice says it; beats 2-5 light list items 1, 2, 4 and 5."
+      "description": "Said next and shown in the caption under the list; list item 4 lights up as it is said. A word or two naming item 4."
     },
     "beat_5": {
       "type": "text",
-      "label": "Caption and voice: beat 5",
+      "label": "List: the spoken word for item 5",
       "max_chars": 18,
-      "description": "Highlights as the voice says it; beats 2-5 light list items 1, 2, 4 and 5."
+      "description": "Said last and shown in the caption under the list; list item 5 lights up as it is said. A word or two naming item 5."
     },
     "reveal_voice": {
       "type": "text",
-      "label": "Voice: the reveal",
+      "label": "Reveal: the voice line",
       "max_chars": 60,
-      "description": "Spoken on the drop, e.g. 'Meet <app>. <slogan>.'"
+      "description": "Said by the voice as the app is revealed, and not shown on screen: usually the app's name, then its slogan."
     },
     "grade_voice": {
       "type": "text",
-      "label": "Voice: the result",
+      "label": "Result: the voice line",
       "max_chars": 36,
-      "description": "The result as it is spoken, e.g. 'A-plus, or not yet.'"
+      "description": "Said by the voice as the big result appears, and not shown on screen. Write the result as it is said, in words, not symbols."
     },
     "end_voice": {
       "type": "text",
-      "label": "Voice: the end card",
-      "max_chars": 60
+      "label": "End card: the voice line",
+      "max_chars": 60,
+      "description": "Said by the voice over the end card, and not shown on screen: usually the app's name and the closing words."
     }
   },
   "slots": {

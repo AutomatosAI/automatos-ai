@@ -6,7 +6,7 @@
  * window of its own). Paid media tools are connected in Composio only (PRD-251 D15). The
  * page that shows it reads its choices again when the window reports back (CONNECTED_MESSAGE).
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Plug } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -21,6 +21,23 @@ interface ConnectToolkitProps {
   label: string
   /** What connecting it brings, e.g. "your Fish Audio voices". */
   purpose: string
+}
+
+/** The connect flow ends in a window of its own: read the page's choices again when it reports
+ * back (CONNECTED_MESSAGE from this origin) or when the page gets the focus back. */
+export function useRefetchOnConnect(refetch: () => unknown): void {
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin === window.location.origin && event.data?.type === CONNECTED_MESSAGE) void refetch()
+    }
+    const onFocus = () => void refetch()
+    window.addEventListener('message', onMessage)
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.removeEventListener('message', onMessage)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [refetch])
 }
 
 export function ConnectToolkit({ toolkit, label, purpose }: ConnectToolkitProps) {

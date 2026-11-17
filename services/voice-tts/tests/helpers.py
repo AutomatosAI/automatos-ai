@@ -37,8 +37,11 @@ class FakeEngine:
         self.spoken: List[Tuple[str, str, float, str]] = []
         self.hold: Optional[threading.Event] = None
         self.started = threading.Event()
+        # What ``load`` was asked to warm with: (voice id, language), or None for no warm-up.
+        self.warmed: Optional[Tuple[str, str]] = None
 
-    def load(self) -> float:
+    def load(self, warm: Optional[Tuple[str, str]] = None) -> float:
+        self.warmed = warm
         self.loaded = True
         return 0.5
 

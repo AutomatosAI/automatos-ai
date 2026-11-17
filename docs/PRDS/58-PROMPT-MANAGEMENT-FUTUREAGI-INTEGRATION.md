@@ -1157,8 +1157,8 @@ run = SystemPromptEvalRun(
 AGENT_OPT_WORKER_URL=http://agent-opt-worker.railway.internal:8080
 
 # FutureAGI credentials (on worker service, not orchestrator)
-FUTUREAGI_API_KEY=9f3b49d56df74dff9dd671dc631efb02
-FUTUREAGI_SECRET_KEY=650ff31fcc554d42b8e71cb6b6c86c0f
+FUTUREAGI_API_KEY=<redacted>
+FUTUREAGI_SECRET_KEY=<redacted>
 ```
 
 ---
@@ -1300,7 +1300,7 @@ Railway deploys `automatos-ai-api` and `automotas-ai-frontend` from this branch.
 ### Database Access (Railway)
 
 ```bash
-PGPASSWORD=alrckxcy2fgvy7zxzhhv0wa37gtc690w psql -h shortline.proxy.rlwy.net -p 47906 -U postgres -d railway
+PGPASSWORD=<redacted> psql -h <host> -p <port> -U postgres -d railway
 ```
 
 ### Railway CLI
@@ -1320,8 +1320,8 @@ railway logs -d --filter "FutureAGI"  # filtered
 AGENT_OPT_WORKER_URL=http://agent-opt-worker.railway.internal:8080
 
 # Worker env vars:
-FUTUREAGI_API_KEY=9f3b49d56df74dff9dd671dc631efb02
-FUTUREAGI_SECRET_KEY=650ff31fcc554d42b8e71cb6b6c86c0f
+FUTUREAGI_API_KEY=<redacted>
+FUTUREAGI_SECRET_KEY=<redacted>
 ```
 
 ### Git History (futureAGI branch, most recent first)

@@ -2,10 +2,14 @@
 
 ``file_report`` runs these steps, in this order, and stops at the first that fails:
 
-1. the reporter: the request's person (``resolve_user_pk``); an API key or an SDK
-   key has none and cannot report (``ReportNeedsAPerson``);
+1. the reporter (``reporter``): the request's person (``resolve_user_pk``), or a
+   server key's own service user for the end user it names. Any other caller has
+   no person and cannot report (``ReportNeedsAPerson``); a key that has never
+   chatted holds no chat, and an end user whose consent is gone or whose erase
+   has started is not reported for: either is ``ReportTargetNotFound``;
 2. the per-reporter rate limit (``check_rate_limit``; over it the limiter raises
-   its own 429, before anything is written);
+   its own 429, before anything is written). A key counts per end user, and for
+   its own chats with no end user per key, at its own limit;
 3. the target, found in the caller's workspace (``targets``), else
    ``ReportTargetNotFound``;
 4. a duplicate check: the same reporter's earlier report of the same target
@@ -31,13 +35,13 @@ from typing import Any, Optional
 from uuid import UUID
 
 from config import config
-from core.auth.principal import resolve_user_pk
 from core.models.workspaces import Workspace
 from core.security import rate_limiter
 from core.services.notification_dispatcher import NotificationDispatcher
 from core.workspaces.audit import AuditLog, AuditService
 from core.workspaces.owner import workspace_owner
 from services.content_reports import AUDIT_ACTION
+from services.content_reports.reporter import Reporter, end_user_gone, reporter_of
 from services.content_reports.targets import canonical_target_id, resolve_target
 
 logger = logging.getLogger(__name__)
@@ -46,8 +50,10 @@ logger = logging.getLogger(__name__)
 # 20 an hour unless RATE_LIMIT_CONTENT_REPORT_MAX / _WINDOW_SECONDS say otherwise.
 RATE_LIMIT_OPERATION = "content_report"
 CONTENT_REPORT_RATE_LIMIT: tuple[int, int] = config.rate_limit_for(RATE_LIMIT_OPERATION, 20, 3600)
-
-REPORTER_ACTOR_TYPE = "user"
+# A server key reporting a reply in its own chats for no end user (a key's own turn): one bucket per
+# key, 60 an hour unless RATE_LIMIT_CONTENT_REPORT_KEY_MAX / _WINDOW_SECONDS say otherwise.
+KEY_RATE_LIMIT_OPERATION = "content_report_key"
+KEY_CONTENT_REPORT_RATE_LIMIT: tuple[int, int] = config.rate_limit_for(KEY_RATE_LIMIT_OPERATION, 60, 3600)
 
 # The owner's notice (K9). The bell opens Command Center -> Governance for this link type.
 NOTICE_TITLE = "Content reported"
@@ -57,7 +63,7 @@ TARGET_KIND_LABELS: dict[str, str] = {"message": "An Auto message", "deliverable
 
 
 class ReportNeedsAPerson(Exception):
-    """The caller is no person (an API key, an SDK key): only a person can report."""
+    """The caller is no person and no server key (another API key or SDK key): it cannot report."""
 
 
 class ReportTargetNotFound(Exception):
@@ -88,15 +94,22 @@ def notice_message(target_type: str, reason: str) -> str:
     return f"{kind} was reported as {reason}. Open Governance to review it."
 
 
-async def _within_rate_limit(workspace_id: UUID, reporter_pk: int) -> None:
+def _limit_of(reporter: Reporter) -> tuple[str, tuple[int, int]]:
+    """The limiter's operation and limits: a key's own chats count per key; anyone else per reporter."""
+    if reporter.is_key and reporter.end_user_id is None:
+        return KEY_RATE_LIMIT_OPERATION, KEY_CONTENT_REPORT_RATE_LIMIT
+    return RATE_LIMIT_OPERATION, CONTENT_REPORT_RATE_LIMIT
+
+
+async def _within_rate_limit(workspace_id: UUID, reporter: Reporter) -> None:
     """Count this report against the reporter's bucket; the limiter raises 429 over it."""
-    max_requests, window_seconds = CONTENT_REPORT_RATE_LIMIT
+    operation, (max_requests, window_seconds) = _limit_of(reporter)
     await rate_limiter.check_rate_limit(
         str(workspace_id),
-        RATE_LIMIT_OPERATION,
+        operation,
         max_requests=max_requests,
         window_seconds=window_seconds,
-        subject_id=str(reporter_pk),
+        subject_id=reporter.limit_subject,
     )
 
 
@@ -119,16 +132,20 @@ def _earlier_report_id(
     return int(row.id) if row is not None else None
 
 
-def _record(db: Any, *, reporter_pk: int, report: FiledReport) -> int:
-    """Write the report's one audit row (``AuditService.log`` commits it); its id."""
+def _record(db: Any, *, reporter: Reporter, report: FiledReport) -> int:
+    """Write the report's one audit row (``AuditService.log`` commits it); its id.
+
+    A key's row names the key beside the reason, note and excerpt; never the end user.
+    """
     entry = AuditService(db).log(
         workspace_id=report.workspace_id,
-        user_id=reporter_pk,
-        actor_type=REPORTER_ACTOR_TYPE,
+        user_id=reporter.pk,
+        actor_type=reporter.actor_type,
         action=AUDIT_ACTION,
         resource_type=report.target_type,
         resource_id=report.target_id,
-        details={"reason": report.reason, "note": report.note, "excerpt": report.excerpt},
+        details={"reason": report.reason, "note": report.note, "excerpt": report.excerpt,
+                 **reporter.audit_details()},
     )
     if entry is None:
         raise ReportNotRecorded()
@@ -164,25 +181,30 @@ async def _notify_owner(db: Any, report: FiledReport) -> None:
 
 
 async def file_report(
-    db: Any, ctx: Any, *, target_type: str, target_id: str, reason: str, note: Optional[str]
+    db: Any, ctx: Any, *, target_type: str, target_id: str, reason: str, note: Optional[str],
+    end_user_id: Optional[str] = None,
 ) -> FiledReport:
-    """File one report of ``target_type``/``target_id`` by the request's person.
+    """File one report of ``target_type``/``target_id`` by the request's person, or by a server
+    key for the end user ``end_user_id`` names (the route takes it from a key only).
 
     Raises ``ReportNeedsAPerson``, ``ReportTargetNotFound`` or ``ReportNotRecorded``;
     the rate limiter raises its own ``HTTPException(429)``. A duplicate answers the
     earlier report (``duplicate=True``) and writes and sends nothing.
     """
-    reporter_pk = resolve_user_pk(db, ctx)
-    if reporter_pk is None:
-        raise ReportNeedsAPerson()
+    reporter = reporter_of(db, ctx, end_user_id)
+    if reporter.pk is None:
+        raise ReportTargetNotFound() if reporter.is_key else ReportNeedsAPerson()
+    reporter_pk = reporter.pk
     workspace_id = getattr(ctx, "workspace_id", None)
-    await _within_rate_limit(workspace_id, reporter_pk)
+    if end_user_gone(db, workspace_id, reporter):
+        raise ReportTargetNotFound()
+    await _within_rate_limit(workspace_id, reporter)
 
     canonical_id = canonical_target_id(target_id)
     excerpt = None
     if workspace_id is not None and canonical_id is not None:
         excerpt = await resolve_target(
-            db, workspace_id=workspace_id, reporter_pk=reporter_pk,
+            db, workspace_id=workspace_id, reporter=reporter,
             target_type=target_type, target_id=canonical_id,
         )
     if excerpt is None:
@@ -199,7 +221,7 @@ async def file_report(
     if earlier is not None:
         return _with_id(report, earlier, duplicate=True)
 
-    filed = _with_id(report, _record(db, reporter_pk=reporter_pk, report=report), duplicate=False)
+    filed = _with_id(report, _record(db, reporter=reporter, report=report), duplicate=False)
     await _notify_owner(db, filed)
     return filed
 
@@ -212,6 +234,8 @@ def _with_id(report: FiledReport, report_id: int, *, duplicate: bool) -> FiledRe
 __all__ = [
     "CONTENT_REPORT_RATE_LIMIT",
     "FiledReport",
+    "KEY_CONTENT_REPORT_RATE_LIMIT",
+    "KEY_RATE_LIMIT_OPERATION",
     "NOTICE_LINK_TYPE",
     "NOTICE_TITLE",
     "RATE_LIMIT_OPERATION",

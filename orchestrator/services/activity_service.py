@@ -1070,7 +1070,7 @@ class ActivityService:
         return scheduled_task_items(self.db, self.workspace_id, now, horizon)
 
     def _social_post_items(self, now: datetime, horizon: datetime) -> List[Dict[str, Any]]:
-        """PRD-251 D10 (US-307): scheduled social posts (services/activity_social_items.py)."""
+        """PRD-251 D10 (US-307): the social posts still to go out (services/activity_social_items.py)."""
         return social_post_items(self.db, self.workspace_id, now, horizon)
 
     def _board_task_sla_items(

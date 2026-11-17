@@ -46,6 +46,7 @@ class RenderedSection:
     content: str
     token_estimate: int
     max_tokens: Optional[int] = None
+    render_ms: float = 0.0  # wall time of the section's render(); copies made after it keep 0.0
 
 
 class TokenBudgetManager:

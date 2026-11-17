@@ -113,6 +113,8 @@ _NOT_MOVED = (
     not_moved("workspace_signing_secrets", "The secret this install signs callbacks with; the new install makes "
               "its own, and the receiver is given it.", secret_table=True, secret_columns=("secret_encrypted",)),
     not_moved("run_callbacks", "Where this install POSTs a run's ending, and how the delivery went."),
+    not_moved("chat_turn_keys", "Which of a server key's chat turns ran under an Idempotency-Key, kept a day; "
+              "the key stays behind, as keys do.", secret_columns=("api_key_id",)),
     not_moved("user_api_keys", _CONNECTION, secret_table=True, secret_columns=("encrypted_key",)),
     not_moved("channel_connections", _CONNECTION, secret_table=True, secret_columns=("webhook_url",)),
     not_moved("composio_entities", _CONNECTION, secret_table=True),

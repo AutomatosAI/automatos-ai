@@ -61,6 +61,11 @@ VISUAL_PROMPTS_NOTE = (
     "or footage shows, in one or two sentences, following brand_style when it is given. No words, letters, "
     "numbers or logos in it: every word on screen is template text."
 )
+# The fields the owner wrote themselves stay theirs: Auto writes the rest around them.
+GIVEN_FIELDS_NOTE = (
+    "given_fields are fields of the template the owner wrote themselves. Each stays exactly as written: leave "
+    "them out of variables, and write every other field to fit them."
+)
 # F382 (night 11): "|" in a feature's text printed as it is. Only a display line breaks on it.
 LINE_BREAK_NOTE = (
     'Only a variable whose description says to use | to break the line takes "|"; write every other '
@@ -161,6 +166,8 @@ class ComposeContext:
     handles: Mapping[str, str] = field(default_factory=dict)
     # F378: on a retake, the post as it is now ({copy, variables: {name: value}}), the take to start from.
     current_take: Mapping[str, Any] = field(default_factory=dict)
+    # The template fields the owner filled in themselves (name → value): kept as written, never rewritten.
+    given_fields: Mapping[str, Any] = field(default_factory=dict)
 
 
 # ── the prompt ──────────────────────────────────────────────────────────────
@@ -196,6 +203,7 @@ def _turn_notes(ctx: ComposeContext) -> List[str]:
         (ctx.format != TEXT_FORMAT, LINE_BREAK_NOTE),
         (ctx.visual_slots, VISUAL_PROMPTS_NOTE),
         (ctx.current_take, RETAKE_RULES_NOTE),
+        (ctx.given_fields, GIVEN_FIELDS_NOTE),
         (ctx.recent_openings, RECENT_OPENINGS_NOTE),
         (ctx.voice_examples, VOICE_EXAMPLES_NOTE),
         (ctx.skills, SKILLS_NOTE),
@@ -247,6 +255,8 @@ def build_messages(ctx: ComposeContext) -> List[Dict[str, str]]:
         material["voice_examples"] = [dict(example) for example in ctx.voice_examples]
     if ctx.current_take:
         material["current_take"] = dict(ctx.current_take)  # F378: the take a retake starts from
+    if ctx.given_fields:
+        material["given_fields"] = dict(ctx.given_fields)  # the owner's own words, kept as written
     return [
         {"role": "system", "content": _system(ctx)},
         {"role": "user", "content": json.dumps(material, default=str, ensure_ascii=False)},

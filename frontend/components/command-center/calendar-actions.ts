@@ -8,13 +8,14 @@
  *   recipe    → the playbook in the Assignments hub
  *   mission   → the mission page
  *   task_due  → the board, with the card opened (?task_id=)
- *   social    → the post in the Socials tab, or reschedule it
- *               (POST /api/socials/posts/{id}/schedule: the slot moves, the approval stands)
+ *   social    → the post in the Socials tab (the Queue while it waits for approval), or move it
+ *               (PUT /api/socials/posts/{id}/slot: the slot moves, an approval stands)
  */
 
 import type { ScheduleItem } from '@/hooks/use-activity-api'
 import type { ScheduledTaskStatus } from '@/hooks/use-scheduled-tasks-api'
 import { missionHref, ticketHref } from '@/lib/ticket-links'
+import { WAITS_FOR_APPROVAL } from './calendar-social'
 
 export interface EventAction {
   label: string
@@ -48,8 +49,10 @@ export function playbookHref(playbookId: number): string {
   return `/assignments?tab=playbooks&id=${playbookId}`
 }
 
-export function socialPostHref(postId: string): string {
-  return `/deliverables?tab=socials&post=${encodeURIComponent(postId)}`
+/** The post in Socials: in the Queue while it waits for approval (where it is approved), else its own page. */
+export function socialPostHref(postId: string, status?: string): string {
+  const view = status === WAITS_FOR_APPROVAL ? '&view=queue' : ''
+  return `/deliverables?tab=socials${view}&post=${encodeURIComponent(postId)}`
 }
 
 const ACTIVITY_FALLBACK_HREF = '/command-center?tab=activity'
@@ -96,7 +99,7 @@ const socialActions: KindActions = (item, deps) => {
   const postId = item.post_id
   if (!postId) return []
   return [
-    { label: 'Open post', run: () => deps.navigate(socialPostHref(postId)) },
+    { label: 'Open post', run: () => deps.navigate(socialPostHref(postId, item.status)) },
     { label: 'Reschedule…', run: () => deps.rescheduleSocialPost(item) },
   ]
 }

@@ -56,6 +56,7 @@ import type { ScheduleItemType } from './calendar-kinds'
 import type { ViewMode } from './calendar-model'
 import { MonthGrid } from './calendar-month-grid'
 import { AlwaysOnBand, HealthBanner, LoadError, NextUp } from './calendar-panels'
+import { useInvalidateSocials } from '@/hooks/use-socials-api'
 import { useSocialReschedule } from './calendar-social-reschedule'
 import { CalendarToolbar } from './calendar-toolbar'
 import { shiftedAnchor, titleFor, useCalendarView } from './calendar-view'
@@ -89,7 +90,9 @@ export function CalendarTab() {
   const { data: health } = useSchedulerHealth()
   const { mutate: toggleHeartbeat } = useToggleHeartbeat()
   const { mutate: updateScheduledTask } = useUpdateScheduledTaskStatus()
-  const social = useSocialReschedule(() => void refetch())
+  // A post moved here is moved in Socials too: both read it again (this feed included).
+  const postsChanged = useInvalidateSocials()
+  const social = useSocialReschedule(() => void postsChanged())
   const { hiddenKinds, toggleKind } = useHiddenKinds()
 
   const actionDeps = useMemo<EventActionDeps>(

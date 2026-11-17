@@ -2323,6 +2323,77 @@ class Config:
     PARTNER_TOOLS_ENABLED: bool = os.getenv("PARTNER_TOOLS_ENABLED", "false").strip().lower() == "true"
     SPOKEN_MODE_MODEL: str = os.getenv("SPOKEN_MODE_MODEL", "claude-haiku-5-5").strip()
     SPOKEN_MODE_PROVIDER: str = os.getenv("SPOKEN_MODE_PROVIDER", "anthropic").strip().lower()
+    # A spoken turn's narration and retraction frames carry the speechified text the client was
+    # sent for that round (modules/voice/spoken_stream.py), so a phone can take it out by exact
+    # match, and the round's open text is spoken as the frame passes. false (the default) = the
+    # frames pass unchanged, as before. Turn it on together with ANTHROPIC_STREAMING: a streamed
+    # spoken turn is where these frames appear on Anthropic. A spoken provider that already
+    # streams sends them today, which is why this is a switch and not always on.
+    SPOKEN_MODE_NARRATION_AS_SPOKEN: bool = os.getenv("SPOKEN_MODE_NARRATION_AS_SPOKEN", "false").strip().lower() == "true"
+    # Anthropic calls hand their text to a listening caller as it is generated
+    # (core/llm/clients/anthropic_client.py): "off" (or any unknown value) = every call answers
+    # whole, as before 10 Nov 2026; "quick-ask" = turns sent to POST /api/chat with spokenMode
+    # (the phone's and the web's voice turns); "spoken" = those and Auto Live
+    # calls; "all" = every chat turn, typed and widgets too. A call nobody listens to (no
+    # on_delta) and a headless agent run never stream.
+    ANTHROPIC_STREAMING: str = os.getenv("ANTHROPIC_STREAMING", "off").strip().lower()
+    # Discovery lists `spoken_unit_ends` while this is true. A phone that knows the name then
+    # speaks a sentence as soon as a spoken turn's text so far ends at its terminator, without
+    # waiting for the whitespace the next unit brings. false = the name is not listed and phones
+    # cut sentences as before.
+    SPOKEN_MODE_UNIT_ENDS: bool = os.getenv("SPOKEN_MODE_UNIT_ENDS", "false").strip().lower() == "true"
+    # A spoken turn (POST /api/chat with spokenMode) skips the connected-apps (Composio) search
+    # before its first model call (consumers/chatbot/spoken_apps.py), as Auto Live does: no
+    # typed per-app tools, scope message or hint lines; the generic composio_execute tool
+    # stays. false = spoken turns search connected apps like typed ones, as before.
+    SPOKEN_MODE_SKIP_COMPOSIO: bool = os.getenv("SPOKEN_MODE_SKIP_COMPOSIO", "false").strip().lower() == "true"
+    # A spoken turn that SPOKEN_MODE_SKIP_COMPOSIO skipped runs the connected-apps search after
+    # all when the person's words name an app Auto may use ("check my Gmail"): Auto's own lane
+    # only, never with agentId or on a hand-off; the name check is bounded at 0.5 s
+    # (consumers/chatbot/spoken_apps.py). false = naming an app does not bring the typed tools back.
+    SPOKEN_MODE_APPS_WHEN_NAMED: bool = os.getenv("SPOKEN_MODE_APPS_WHEN_NAMED", "false").strip().lower() == "true"
+    # A spoken turn with no agentId (POST /api/chat with spokenMode) is classified by the tiers
+    # that cost no model call: the hand-off table, the onboarding pin, the cache and the regex
+    # fast paths. The decision engine and the Tier 3 completion are not asked; a turn no tier
+    # matched runs with no assessment, as Auto Live's do (consumers/chatbot/spoken_lane.py). It
+    # gives up the light path for general questions, role-based hand-offs and mission cards by
+    # voice, so some turns get slower: turn it on only after measuring. false = spoken turns run
+    # the full AutoBrain, as before.
+    SPOKEN_MODE_SKIP_CLASSIFIER: bool = os.getenv("SPOKEN_MODE_SKIP_CLASSIFIER", "false").strip().lower() == "true"
+    # A spoken turn (POST /api/chat with spokenMode) reads this many of its chat's newest messages
+    # (api/chat_turn_history.py), not the whole chat twice: a quick-ask lands in the person's typed
+    # chat, which can be long. Its own setting, not Auto Live's VOICE_LIVE_TURN_HISTORY_MESSAGES.
+    # 0 (or under 4) = spoken turns read and send the whole chat, as before.
+    SPOKEN_MODE_HISTORY_MESSAGES: int = int(os.getenv("SPOKEN_MODE_HISTORY_MESSAGES", "0"))
+    # A chat turn's clock (core/monitoring/turn_clock.py): where the time went between the
+    # request and the reply, as one `chat_turn_timing` log line and a `timing` key on the
+    # reply's trace. Ids and numbers only. false = no turn is timed: no clock, no line, no key.
+    CHAT_TURN_TIMING_ENABLED: bool = os.getenv("CHAT_TURN_TIMING_ENABLED", "true").strip().lower() == "true"
+    # The per-stage times of a turn (agent context, tools, context, apps, knowledge) are taken
+    # by wrapping five of the turn's methods for its length. false = those five are left alone
+    # and the stages are absent; the marks, the line and the trace key stay.
+    CHAT_TURN_TIMING_STAGES_ENABLED: bool = (
+        os.getenv("CHAT_TURN_TIMING_STAGES_ENABLED", "true").strip().lower() == "true"
+    )
+    # One Anthropic SDK client per key (core/llm/clients/shared_clients.py), kept for five
+    # minutes, in place of a new client and HTTP pool for every provider object. It reaches
+    # every Anthropic call in the worker, not only spoken turns. false = a client per
+    # provider, as before. KEEPALIVE is how long the shared client's pool keeps an idle
+    # connection, read only while REUSE is true; 0 = the SDK's own pool (5 seconds).
+    LLM_CLIENT_REUSE: bool = os.getenv("LLM_CLIENT_REUSE", "false").strip().lower() == "true"
+    LLM_CLIENT_KEEPALIVE_SECONDS: float = float(os.getenv("LLM_CLIENT_KEEPALIVE_SECONDS", "0"))
+    # A chat turn embeds each text once (core/llm/embed_once.py): memory, the knowledge search
+    # and the owner's-documents leg share one embedding of the same text for the turn's
+    # length, so fewer embedding calls are made and booked. false = every embed call is made,
+    # as before. Remove the switch once the count of reused calls has been read on a live server.
+    TURN_EMBED_ONCE: bool = os.getenv("TURN_EMBED_ONCE", "false").strip().lower() == "true"
+    # A chat turn starts its two late lookups (connected apps, and the knowledge prefetch for a
+    # question or a drafting turn) as soon as its agent is active, beside tool loading and the
+    # prompt build, and collects each where it used to run (consumers/chatbot/early_lookups.py).
+    # An early lookup that failed, or was asked for something else, is made again in place. A
+    # question turn can then hold up to four pool connections for a moment, not one. false = each
+    # lookup runs in place, as before. Remove the off path once the before/after numbers are accepted.
+    CHAT_EARLY_LOOKUPS: bool = os.getenv("CHAT_EARLY_LOOKUPS", "false").strip().lower() == "true"
     # Auto's server voice (services/voice-tts): POST /api/voice/speech streams a reply
     # as MP3 for the phone and the web quick-ask (modules/voice/speech.py). Empty URL =
     # off: the route answers 503 tts_off and discovery does not list `tts`, so clients
@@ -2336,6 +2407,10 @@ class Config:
     VOICE_TTS_CONNECT_TIMEOUT_SECONDS: float = float(os.getenv("VOICE_TTS_CONNECT_TIMEOUT_SECONDS", "2"))
     VOICE_TTS_DEFAULT_VOICE: str = os.getenv("VOICE_TTS_DEFAULT_VOICE", "af_heart").strip()
     VOICE_TTS_RATE_PER_MINUTE: int = int(os.getenv("VOICE_TTS_RATE_PER_MINUTE", "60"))
+    # Discovery lists `tts_first_clause` while this is true and VOICE_TTS_URL is set. A phone
+    # that knows the name then asks for the first clause of a long first sentence as its own
+    # speech request, so the first audio is a shorter synthesis. false = no clause cut.
+    VOICE_TTS_FIRST_CLAUSE: bool = os.getenv("VOICE_TTS_FIRST_CLAUSE", "false").strip().lower() == "true"
     # The ONE public host (PRD-258 US-003; it was defined twice): Retell's
     # custom-LLM socket + events webhook (arming builds the agent's URLs from
     # it) and the channels' inbound webhook URLs (PRD-142 W3-S5 / G7). Railway

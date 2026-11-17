@@ -61,9 +61,12 @@ def test_a_bad_shard_is_refused(text):
 def test_the_driver_takes_every_render_through_the_shard():
     driver = (_ROOT / "scripts" / "ci" / "social_template_previews.py").read_text()
     kits = (_ROOT / "scripts" / "ci" / "social_template_kits.py").read_text()
+    looks = (_ROOT / "scripts" / "ci" / "social_template_looks.py").read_text()  # PRD-251D US-D301
     assert "for starter in SHARD.mine(videos):" in driver
     assert "for starter in SHARD.mine(images):" in driver
     assert "in SHARD.mine(INFOGRAPHIC_RENDERS):" in driver
     assert "if not SHARD.take():\n        return []" in driver  # the heading-font card
     assert "in driver.SHARD.mine(night_bundles(driver, name, kit)):" in kits
+    assert "in driver.SHARD.mine(look_units(driver, kit)):" in looks
+    assert '_sibling("social_template_looks").run_looks(' in driver  # the looks run in every shard's walk
     assert '"--shard", default="0/1"' in driver  # by default, every unit

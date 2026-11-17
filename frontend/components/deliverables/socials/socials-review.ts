@@ -78,6 +78,12 @@ export function approvalWasVoided(post: Pick<SocialPost, 'review_log'>): boolean
   return log.length > 0 && log[log.length - 1].action === 'approval_voided'
 }
 
+/** PRD-251D US-D108: the server's own refusal of an approval whose file is older than the post's
+ * words (core/social_file_current.py FILE_OLDER_THAN_WORDS; a backend test holds the two to the same
+ * words). The approve controls show it in place of a working Approve, and the approve hook knows a
+ * 409 that says it from a review that went stale. */
+export const FILE_OLDER_THAN_WORDS = 'This file was made before the post last changed, so it does not show the post as it is now. Render it again, then approve it.'
+
 /** The claims a 422 UnsourcedClaims answer names (its detail rides the Error's message as JSON). */
 export function unsourcedClaimsOf(error: unknown): string[] | null {
   if (!(error instanceof Error)) return null

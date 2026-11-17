@@ -557,6 +557,9 @@ export interface SocialPost {
   status: SocialPostStatus
   /** P256-FIX-SOC-5: where its render stands (when it started, when it gives up, why it waits or failed). */
   render?: SocialPostRender | null
+  /** PRD-251D US-D108: false when its file was made before its last change to what a render reads, so
+   * Approve waits for a render. The server always sends it; a post read without it counts as current. */
+  file_current?: boolean
   content_hash: string
   approved_hash: string | null
   approved_by: string | null
@@ -580,6 +583,8 @@ export interface SocialPost {
   /** PRD-251C: the batch a weekly or monthly plan made it in ("2026-W43", "2026-11"). */
   batch_key?: string | null
   music?: SocialPostMusic
+  /** PRD-251D US-D301: the post's own look on its template, each key optional (absent: the kit's own); a render setting. */
+  look?: { mode?: 'light' | 'dark'; accent?: 'bold' | 'sparing'; logo?: boolean } | null
   /** F378: on a retake's answer, what the composer had to say (its warnings, its questions for the owner). */
   take?: { warnings: string[]; questions: string[] }
   created_at: string
@@ -687,6 +692,8 @@ export interface CreateSocialPostInput {
   length_seconds?: number | null
   /** Slot name → `{ prompt }`; `null` asks for no footage. */
   footage?: Record<string, { prompt: string }> | null
+  /** PRD-251D US-D301: the post's look (light or dark, the accent, the logo); `null` is the kit's own. */
+  look?: SocialPost['look']
 }
 
 /** POST /api/socials/compose (US-207): what the composer asks for. */
@@ -698,6 +705,8 @@ export interface SocialComposeInput {
   /** PRD-251B (US-B103): the editor's chosen template and length, honoured by the proposal. */
   template_id?: string | null
   length_seconds?: number | null
+  /** The template fields the person filled in (name → value): kept as written; Auto writes the rest. */
+  given_variables?: Record<string, string | number | boolean>
 }
 
 /** The composer's draft proposal: checked by the server, never saved until "Save draft". */
@@ -735,6 +744,8 @@ export interface UpdateSocialPostInput {
   media?: Record<string, string[]>
   /** PRD-251B: the music (a render setting): null the template's track, {track: null} none. */
   music?: SocialPostMusic
+  /** PRD-251D US-D301: the post's look (a render setting); `null` is the kit's own. */
+  look?: SocialPost['look']
 }
 
 /** GET /api/socials/voices: what a post can be spoken with (D11, D15). */
@@ -834,8 +845,35 @@ export interface SocialTemplateSummary {
   fields_cut_out?: Record<string, string[]>
   /** F377: 'software' for a video told on a software product's own screens; null for any business. */
   made_for?: string | null
+  /** PRD-251D US-D301: the look choices it takes: 'mode' (light or dark) only when built on paper, 'accent' and 'logo' always. */
+  looks?: Array<'mode' | 'accent' | 'logo'>
   /** The sample text of those fields (what the thumbnail shows): greyed in as each empty field's example. */
   sample_data?: Record<string, string | number | boolean>
+}
+
+/** POST /api/socials/templates/{id}/preview-page (PRD-251D US-D201): what the editor has on screen. */
+export interface SocialPreviewPageInput {
+  /** Each filled field's value; a field left out is empty. */
+  values: Record<string, string | number | boolean>
+  /** One of the template's sizes ("1080x1350"); null for its first. */
+  size: string | null
+  /** A ticked channel posts it as a story: a 9:16 keeps the story's safe zone. */
+  story: boolean
+  /** The photo spots the post holds a picture for: each shows a marker where the picture goes. */
+  photos: string[]
+  /** PRD-251D US-D301: the look on screen, sent only when the post has one. */
+  look?: SocialPost['look']
+}
+
+/** The template as one self-contained page, and the version of the kit's font faces it expects. */
+export interface SocialPreviewPage {
+  html: string
+  fonts_version: string
+}
+
+/** GET /api/socials/brand-kit/preview-fonts: the kit's @font-face rules, each file a data: URI. */
+export interface SocialPreviewFonts {
+  css: string
 }
 
 /** GET /api/socials/footage (D12, D15): the generation toolkit a render would use per kind, or why none. */
@@ -3597,6 +3635,22 @@ class ApiClient {
   async listSocialTemplates(format?: string): Promise<SocialTemplateSummary[]> {
     const query = format ? `?format=${encodeURIComponent(format)}` : ''
     return this.request<SocialTemplateSummary[]>(`/api/socials/templates${query}`)
+  }
+
+  /** POST /api/socials/templates/{id}/preview-page (PRD-251D US-D201): the image template as one
+   * self-contained page for the words on screen, filled and escaped on the server. It runs only in
+   * a frame with sandbox="allow-scripts"; 422 says why a template or a value cannot make one. */
+  async getSocialTemplatePreviewPage(templateId: string, input: SocialPreviewPageInput): Promise<SocialPreviewPage> {
+    return this.request<SocialPreviewPage>(`/api/socials/templates/${templateId}/preview-page`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  }
+
+  /** GET /api/socials/brand-kit/preview-fonts (PRD-251D US-D201): the kit's font faces for the
+   * instant preview, fetched once per kit (the page's `fonts_version`). */
+  async getSocialPreviewFonts(): Promise<SocialPreviewFonts> {
+    return this.request<SocialPreviewFonts>('/api/socials/brand-kit/preview-fonts')
   }
 
   /** The workspace's connected social channels and the post kinds each can publish (D8). */

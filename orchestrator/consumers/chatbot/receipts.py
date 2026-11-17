@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import functools
 import re
+from contextlib import aclosing
 from contextvars import ContextVar
 from typing import Any, AsyncGenerator, Callable, Dict, FrozenSet, Iterable, List, Optional, Sequence, Tuple
 
@@ -507,7 +508,9 @@ def _frames_once(chat: Any, receipts: List[Receipt], model: Optional[str],
 
 def writes_its_receipts(turn: Stream) -> Stream:
     """Wrap ``StreamingChatService.stream_response_with_agent``: every turn has receipts,
-    whichever agent answers it. A turn that ran no loop sends its frame before its finish."""
+    whichever agent answers it. A turn that ran no loop sends its frame before its finish. A turn
+    closed early (``aclose``: the reader went away) is closed here too, in the same task, so the
+    scopes it opened (whose turn it is, PRD-274) end with it instead of when it is collected."""
     @functools.wraps(turn)
     async def wrapped(chat: Any, *args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:
         for var, fresh in ((_IN_TURN, True), (_PREFETCHED, ()), (_LOOP, None), (_MODEL, None), (_SENT, False),
@@ -517,12 +520,13 @@ def writes_its_receipts(turn: Stream) -> Stream:
         handler = getattr(chat, "streaming_handler", None)
         finish = handler.format_aisdk_finish() if handler is not None else None
         try:
-            async for chunk in turn(chat, *args, **kwargs):
-                frames = (_frames_once(chat, current_receipts() or [], _MODEL.get(), _ABOVE.get() or ())
-                          if finish and chunk == finish else ())
-                for frame in frames:
-                    yield frame
-                yield chunk
+            async with aclosing(turn(chat, *args, **kwargs)) as chunks:
+                async for chunk in chunks:
+                    frames = (_frames_once(chat, current_receipts() or [], _MODEL.get(), _ABOVE.get() or ())
+                              if finish and chunk == finish else ())
+                    for frame in frames:
+                        yield frame
+                    yield chunk
         finally:
             _IN_TURN.set(False)
     return wrapped

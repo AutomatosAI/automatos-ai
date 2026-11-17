@@ -295,6 +295,7 @@ async def prefetch(
     header: Optional[str] = None,
     viewer: Optional[str] = None,
     drafting: bool = False,
+    counted: Optional[int] = None,
 ) -> Optional[Prefetch]:
     """Search the documents for a question before the model answers, or None
     when this turn does not qualify (dial off, not a question, no documents)
@@ -303,11 +304,12 @@ async def prefetch(
     A message asking several questions is searched once per question (F227).
     ``viewer`` (the turn's person, P256-FIX-N13-3): their standing rules go
     above the passages, which they outrank. ``drafting`` (P256-FIX-N17-11): the passages
-    are for something the owner asked Auto to write (``DRAFTING_HEADER``)."""
+    are for something the owner asked Auto to write (``DRAFTING_HEADER``). ``counted``: the
+    workspace's document count when the caller already read it, so it is not read again here."""
     if not enabled or (question_only and not asks_the_documents(message)):
         return None
     try:
-        if documents_in(db, workspace_id) < 1:
+        if (documents_in(db, workspace_id) if counted is None else counted) < 1:
             return None
     except Exception:  # noqa: BLE001 — cannot tell: the turn runs as it did
         logger.warning("[F085] retrieval first skipped: could not count documents", exc_info=True)

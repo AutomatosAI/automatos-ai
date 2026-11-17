@@ -8,6 +8,7 @@ Over either is a 429 with ``Retry-After``. Real database, real keys.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import uuid
 
@@ -84,7 +85,9 @@ def _ctx(new_session, ws, **limits):
     request = Request({"type": "http", "method": "POST", "path": "/", "headers": pairs, "query_string": b""})
     from core.auth.hybrid import _sdk_key_context_in_own_session
 
-    return _sdk_key_context_in_own_session(request, AGENTS_EXECUTE), key
+    # On a copy of the context, as the gate runs it in the threadpool: the log context it sets
+    # (workspace_id_var) never outlives this test and reaches another one's usage rows.
+    return contextvars.copy_context().run(_sdk_key_context_in_own_session, request, AGENTS_EXECUTE), key
 
 
 def _ticket_with_usage(new_session, ws, filed_by, tokens, seconds_ago=0):

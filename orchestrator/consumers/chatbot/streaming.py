@@ -87,9 +87,14 @@ class StreamingHandler:
             {"limit": limit, "value": value, "message": message},
         )
 
-    def format_aisdk_chat_id(self, chat_id: str) -> str:
-        """Format chat-id data event: the assistant message's first frame, marked AI-generated."""
-        return f'd:{{"type":"chat-id","chatId":"{chat_id}",{_AI_GENERATED}}}\n'
+    def format_aisdk_chat_id(self, chat_id: str, message_id: Optional[str] = None) -> str:
+        """Format chat-id data event: the assistant message's first frame, marked AI-generated.
+
+        ``message_id``, when given, is the id the turn's reply is saved under (``reply_id``), so a
+        client that only streams the turn through can name the saved reply later.
+        """
+        message = f'"messageId":"{message_id}",' if message_id else ""
+        return f'd:{{"type":"chat-id","chatId":"{chat_id}",{message}{_AI_GENERATED}}}\n'
 
     def format_aisdk_tool_data(self, tool_data: Dict[str, Any]) -> str:
         """Format tool-data event for AI SDK."""

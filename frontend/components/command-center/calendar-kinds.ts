@@ -1,8 +1,8 @@
 /**
  * Calendar kinds — what an item IS decides its colour; the agent is the dot.
  *
- * The feed (GET /api/activity/schedule) carries six kinds (a scheduled social post
- * is the sixth, PRD-251 US-307). Colouring by agent
+ * The feed (GET /api/activity/schedule) carries six kinds (a social post still to go
+ * out is the sixth, PRD-251 US-307). Colouring by agent
  * (the old scheme) made a heartbeat, a playbook run and a deadline for the same
  * agent indistinguishable, and a calendar full of WATCHTOWER grey said nothing
  * about what was actually scheduled. The legend in the calendar toolbar uses

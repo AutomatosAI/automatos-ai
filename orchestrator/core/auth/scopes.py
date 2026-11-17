@@ -26,9 +26,18 @@ MEMORY_READ = "memory:read"
 MEMORY_WRITE = "memory:write"
 # A server key starts a Playbook (POST /api/workflow-recipes/{id}/execute) and writes a Deliverable
 # (POST /api/documents/generate). A run it starts is an outside product's input, never the owner's
-# words (services/playbook_given.TRIGGER_STARTS).
+# words (services/playbook_given.TRIGGER_STARTS). documents:write also uploads (POST
+# /api/documents/upload) and deletes (DELETE /api/documents/{id}) the workspace's knowledge
+# documents, as memory:write also erases.
 PLAYBOOKS_EXECUTE = "playbooks:execute"
 DOCUMENTS_WRITE = "documents:write"
+# A server key lists (GET /api/documents), gets (GET /api/documents/{id}) and searches (POST
+# /api/documents/search) the workspace's knowledge documents. It reaches only documents no team
+# limits and none private to a person (services/document_key_access.py).
+DOCUMENTS_READ = "documents:read"
 # A server key chats with a lean agent (POST /api/chat, api/chat_server_key.py), as its own
 # service user. Not "chat": that scope is the widget's, and would grant this by accident.
 AGENTS_CHAT = "agents:chat"
+# A server key reports an agent's reply (POST /api/v1/reports) in a chat its own service user holds,
+# for the end user it names (services/content_reports/reporter.py). It reaches no other chat.
+REPORTS_WRITE = "reports:write"

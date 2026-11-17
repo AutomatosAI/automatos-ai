@@ -27,6 +27,8 @@ import logging
 import posixpath
 from typing import Any, Dict, List, Optional
 
+from core.security.end_user_turn import KEYS_OWN, on_a_keys_own_turn
+
 logger = logging.getLogger(__name__)
 
 # The one virtual root the memory tool operates in. Not a real filesystem dir —
@@ -90,6 +92,11 @@ class MemoryStore:
         raise NotImplementedError
 
 
+class MemoryNotKept(Exception):
+    """A write this turn does not keep (PRD-274 §5.5: a server key's own turn, or an erased end user's):
+    the command saved nothing, and its answer says so (F103)."""
+
+
 class MemoryToolBackend:
     """Executes Anthropic memory-tool commands against a :class:`MemoryStore`.
 
@@ -121,6 +128,8 @@ class MemoryToolBackend:
             return f"Error: unknown memory command {cmd!r}"
         except MemoryPathError as exc:
             return f"Error: {exc}"
+        except MemoryNotKept as exc:
+            return f"Error: memory is not kept on this turn ({exc}); nothing was saved"
         except Exception as exc:  # never fail the tool loop
             logger.warning("[memory-tool] command %s failed: %s", cmd, exc)
             return f"Error: memory command failed: {exc}"
@@ -222,14 +231,19 @@ class DurableMemoryStoreBackend(MemoryStore):
         return None
 
     async def put_text(self, workspace_id: Any, path: str, text: str) -> None:
+        # PRD-274 §5.5: a server key's own turn keeps no memory, so it drops no prior entry either.
+        if on_a_keys_own_turn():
+            raise MemoryNotKept(KEYS_OWN)
         # Overwrite semantics: drop any prior entry at this path first.
         await self.delete(workspace_id, path)
-        await self._svc().store_long_term(
+        result = await self._svc().store_long_term(
             workspace_id=workspace_id,
             content=text,
             category=self._CATEGORY,
             metadata={"memory_path": path},
         )
+        if isinstance(result, dict) and result.get("skipped"):  # F103: never "Created" over a held write
+            raise MemoryNotKept(result["skipped"])
 
     async def delete(self, workspace_id: Any, path: str) -> None:
         svc = self._svc()

@@ -250,7 +250,10 @@ def test_the_weekly_playbook_proposes_five_posts_by_default_and_is_seeded_unsche
     plan, draft = spec["steps"]
     for source in ("platform_list_deliverables", "platform_list_blog_posts", "platform_browse_reports"):
         assert source in plan["prompt_template"]
-    assert "Proposed for:" in draft["prompt_template"] and "render true" in draft["prompt_template"]
+    assert "render true" in draft["prompt_template"]
+    # PRD-251D (US-D106): the draft sets each post's planned slot; the brief no longer carries the day as text.
+    assert "planned_for" in draft["prompt_template"] and "timezone" in draft["prompt_template"]
+    assert "Proposed for:" not in draft["prompt_template"]
 
 
 def test_a_run_has_the_time_a_render_takes():

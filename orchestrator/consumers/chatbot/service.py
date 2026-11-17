@@ -20,7 +20,6 @@ import time
 from types import SimpleNamespace
 from typing import List, Optional, Dict, Any, AsyncGenerator, Set, Tuple
 from datetime import datetime, timedelta, timezone
-from uuid import UUID
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 
@@ -35,7 +34,7 @@ from modules.tools.execution.nudges import is_nudge  # F295: the loop's nudges a
 from modules.tools.execution.draft_here import a_bare_pointer_goes_through_the_loop  # F419 (night 14)
 from modules.tools.execution.telemetry import resolve_action_name
 
-from core.models import Chat, Message, Vote, Workspace
+from core.models import Chat, Message, Vote
 from core.services.image_store import get_image_store
 from config import config
 from core.database.read_release import release_if_read_only
@@ -56,9 +55,13 @@ from consumers.chatbot.lean_turn import (  # Wave 2: a lean agent's turn, step b
     a_lean_turns_prompt, lean_grant_for, no_app_search_on_a_lean_turn, no_pinned_documents_on_a_lean_turn,
     no_prefetch_on_a_lean_turn, offers_a_lean_turn_its_grants,
 )
+from consumers.chatbot.early_lookups import once_the_agent_is_active, starts_its_lookups_early  # voice latency D-2
+from consumers.chatbot.turn_embeddings import embeds_each_text_once  # voice latency D-3
 from consumers.chatbot.turn_timing import keeps_the_turns_timing, records_the_first_token
+from consumers.chatbot.reply_id import says_its_replys_id  # the reply's id on its chat-id frame
+from consumers.chatbot.message_workspace import message_workspace
 from consumers.chatbot.lean_request import NOTHING_ASKED
-from core.security.end_user_turn import end_user_turn, turn_subject
+from core.security.end_user_turn import end_user_turn, keys_own_turn, on_a_keys_own_turn, turn_subject
 from core.security.memory_audience import memory_reader, reader_for_agent_id
 
 # Import from modules — SINGLE SOURCE for tool schemas
@@ -397,8 +400,10 @@ class ChatService:
         retrieval_context: Optional[Dict[str, Any]] = None,
         context_trace: Optional[Dict[str, Any]] = None,
         source: Optional[Dict[str, Any]] = None,
+        message_id: Optional[uuid.UUID] = None,
     ) -> Message:
-        """Save a message to the database.
+        """Save a message to the database, under ``message_id`` when given (a turn's reply, whose id
+        its stream already said: ``consumers.chatbot.reply_id``), else a new id.
 
         ``retrieval_context`` (PRD-185 S7) carries the turn's retrieved
         ``{document_ids, chunk_ids, query}`` on assistant messages; NULL for
@@ -418,40 +423,12 @@ class ChatService:
         except ValueError:
             raise ValueError(f"Invalid chat_id format: {chat_id}")
 
-        if not workspace_id:
-            raise ValueError("workspace_id is required to save messages")
-
-        if isinstance(workspace_id, str):
-            try:
-                workspace_id = uuid.UUID(workspace_id)
-            except ValueError:
-                raise ValueError("Invalid workspace_id format")
-
-        dev_fallback = UUID("00000000-0000-0000-0000-000000000001")
-        existing_ws = self.db.query(Workspace).filter(Workspace.id == workspace_id).first()
-        if not existing_ws:
-            if workspace_id == dev_fallback:
-                ws = Workspace(
-                    id=workspace_id,
-                    name="Dev Workspace",
-                    slug="dev",
-                    plan="basic",  # PRD-222 W2·S1: entry tier (renamed from 'starter')
-                    plan_limits={},
-                    settings={},
-                    is_personal=True,
-                    is_active=True,
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow(),
-                )
-                self.db.add(ws)
-                self.db.commit()
-            else:
-                raise ValueError(f"workspace_id does not exist: {workspace_id}")
+        workspace_uuid = message_workspace(self.db, workspace_id)
 
         message = Message(
-            id=uuid.uuid4(),
+            id=message_id or uuid.uuid4(),
             chat_id=chat_uuid,
-            workspace_id=workspace_id,
+            workspace_id=workspace_uuid,
             role=role,
             parts=parts,
             attachments=attachments or [],
@@ -763,6 +740,7 @@ class StreamingChatService:
         return next((message_text(m) for m in reversed(llm_messages)
                      if m.get("role") == "user" and not is_nudge(m)), "")
 
+    @once_the_agent_is_active  # CHAT_EARLY_LOOKUPS: the turn's two late lookups start here
     async def _load_agent_context(self, agent_runtime) -> dict:
         """
         Load agent-specific context: persona, description for chatbot identity injection.
@@ -1207,71 +1185,13 @@ class StreamingChatService:
         Returns (updated use_tools, composio_result). F105: both lookups run
         off the loop (core.composio.off_loop).
         """
-        from core.composio.off_loop import ComposioLookupTimeout, composio_lookup
+        from consumers.chatbot.app_lookup import apply_app_lookup, asks_the_apps, tool_hints_of
+        from consumers.chatbot.early_lookups import the_turns_app_lookup
 
-        _composio_result = None
-        _tool_hints = (
-            complexity_assessment.tool_hints
-            if complexity_assessment and hasattr(complexity_assessment, 'tool_hints')
-            else []
-        )
-        try:
-            if latest_text and agent_id and self.workspace_id and not skip_composio:
-                from modules.tools.services.composio_tool_service import ComposioToolService
-
-                workspace_id = self.workspace_id
-                _search_prompt = (
-                    " ".join(_tool_hints) if _tool_hints else latest_text
-                )
-                _composio_result = await composio_lookup(
-                    lambda db: ComposioToolService(db).get_tools_for_step(
-                        agent_id=agent_id,
-                        workspace_id=workspace_id,
-                        task_prompt=_search_prompt,
-                        tool_hints=_tool_hints,
-                    ),
-                    step=f"chat turn (agent {agent_id}): tool search",
-                )
-                if _composio_result and _composio_result.tools:
-                    if use_tools:
-                        use_tools = [
-                            t for t in use_tools
-                            if t.get("function", {}).get("name") != "composio_execute"
-                        ] + _composio_result.tools
-                    else:
-                        use_tools = _composio_result.tools
-                    from api.recipe_executor import _composio_scope_message
-                    llm_messages.insert(2, {
-                        "role": "system",
-                        "content": _composio_scope_message(_composio_result.app_names),
-                    })
-                    logger.info(
-                        f"[ComposioToolService] Agent {agent_id}: strategy={_composio_result.strategy} "
-                        f"actions={len(_composio_result.action_set)} search_ms={_composio_result.search_ms}"
-                    )
-                else:
-                    from modules.tools.services.composio_hint_service import ComposioHintService
-
-                    hint_result = await composio_lookup(
-                        lambda db: ComposioHintService(db).build_hints(
-                            agent_id=agent_id,
-                            prompt=latest_text,
-                            workspace_id=workspace_id,
-                        ),
-                        step=f"chat turn (agent {agent_id}): action hints",
-                    )
-                    if hint_result.hint_lines:
-                        llm_messages.insert(2, {"role": "system", "content": "\n".join(hint_result.hint_lines)})
-                        logger.info(
-                            f"[Composio Hints fallback] Agent {agent_id}: strategy={hint_result.strategy_used} "
-                            f"apps={hint_result.allowed_apps} matches={len(hint_result.matched_actions)}"
-                        )
-        except ComposioLookupTimeout:
-            pass  # warned where it gave up; the turn goes on without Composio tools
-        except Exception as exc:
-            logger.warning(f"Composio tool injection failed for agent {agent_id}: {exc}")
-
-        return use_tools, _composio_result
+        if not asks_the_apps(latest_text, agent_id, self.workspace_id, skip_composio):
+            return use_tools, None
+        lookup = await the_turns_app_lookup(self, agent_id, latest_text, tool_hints_of(complexity_assessment))
+        return apply_app_lookup(llm_messages, use_tools, lookup, agent_id), lookup.found
 
     def _bind_turn_person(self, user_id: Optional[int]) -> None:
         """Remember who this turn is for.
@@ -1357,8 +1277,8 @@ class StreamingChatService:
         # are DEFERRED to when those lanes' memory writes go live (Gerard's call).
         subject_id = turn_subject(f"user:{user_id}" if user_id else None)  # PRD-274 W3: the end user's
 
-        # F154: a widget turn is an anonymous visitor's, so it stores no memory.
-        if not (latest_text and full_response and smart_chat) or self.widget_mode:
+        # F154: a widget turn is an anonymous visitor's and a server key's own turn nobody's (PRD-274): neither stores memory.
+        if not (latest_text and full_response and smart_chat) or self.widget_mode or on_a_keys_own_turn():
             return
         try:
             _stored = await smart_chat.store(latest_text, full_response, chat_id, subject_id=subject_id,
@@ -1424,29 +1344,13 @@ class StreamingChatService:
         """F085-A: search the documents for a question (N17-11: or a drafting turn)
         before the first model call. Yields the activity-trail frames; appends the cited passages to
         ``llm_messages`` and what ran to ``prefetched``. Never breaks a turn."""
-        from consumers.chatbot.knowledge_prefetch import PREFETCH_TOOL, prefetch, searched_first
+        from consumers.chatbot.early_lookups import the_turns_prefetch
+        from consumers.chatbot.knowledge_prefetch import PREFETCH_TOOL, searched_first
 
         if (how := searched_first(latest_text)) is None:  # P256-FIX-N17-11 (F443): a question, or a drafting turn
             return
-
-        async def _search(args: Dict[str, Any]) -> Dict[str, Any]:
-            from services.draft_guides import owners_own  # F269/F287 (night 8): never an agent's writing as facts
-            result = owners_own(self.db, await self.tool_router.execute_and_format(
-                tool_name=PREFETCH_TOOL, tool_args=args,
-                agent_id=agent_runtime.agent_id if hasattr(agent_runtime, "agent_id") else 1,
-                workspace_id=self.workspace_id,
-                original_intent=latest_text,
-                caller_context={"user_query": latest_text, "conversation_id": chat_id, "retrieval_first": True},
-            ), self.workspace_id)
-            self._collect_tool_retrieval(PREFETCH_TOOL, result)
-            return result
-
         try:
-            found = await prefetch(
-                self.db, self.workspace_id, latest_text, search=_search, viewer=getattr(self, "_viewer_subject_id", None),
-                enabled=config.CHATBOT_KNOWLEDGE_PREFETCH, **how,
-                limit=config.KNOWLEDGE_PREFETCH_PASSAGES, min_score=config.KNOWLEDGE_PREFETCH_MIN_SCORE,
-            )
+            found = await the_turns_prefetch(self, latest_text, agent_runtime, chat_id, how)
         except Exception:
             logger.warning("[F085] retrieval first skipped", exc_info=True)
             return
@@ -2453,7 +2357,7 @@ class StreamingChatService:
                 turn_surface(WIDGET if self.widget_mode else None, self.widget_scopes, self.widget_team,
                              self.widget_agent_lock), \
                 self._hidden_action_scope(agent_id), lean_grants(self._lean_actions), memory_reader(reader), \
-                end_user_turn(getattr(self._lean_request, "end_user", None)):  # PRD-274 W3: whose turn it is
+                end_user_turn(getattr(self._lean_request, "end_user", None)), keys_own_turn(self._lean_request):  # PRD-274: whose turn it is
             async for chunk in self._stream_response_with_agent_scoped(
                 chat_id, messages, agent_id, user_id,
                 use_orchestrator_llm=use_orchestrator_llm, skip_composio=skip_composio,
@@ -2482,9 +2386,12 @@ class StreamingChatService:
                 logger.debug("[chat] the turn's workspace could not be resolved for its tool scope", exc_info=True)
         return hidden_scope(hidden_categories_for_workspace(getattr(self, "workspace_id", None), getattr(self, "db", None)))
 
+    @says_its_replys_id  # outermost: the chat-id frame names the id the turn's reply is saved under
     @keeps_one_answer_on_screen  # FX-017: the turn records what each streamed call put on the screen
     @answers_on_the_turns_model  # a spoken turn answers on the spoken model; every turn logs its model
     @keeps_the_turns_timing  # the saved reply's trace says when the first token came
+    @embeds_each_text_once  # TURN_EMBED_ONCE: one embedding per text for the turn's lookups
+    @starts_its_lookups_early  # CHAT_EARLY_LOOKUPS: innermost, so its tasks start inside the clock and the embedding scope
     async def _stream_response_with_agent_scoped(
         self,
         chat_id: str,

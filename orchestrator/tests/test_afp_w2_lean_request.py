@@ -93,7 +93,7 @@ def test_the_route_refuses_with_422_before_it_saves_the_message(monkeypatch):
     with pytest.raises(HTTPException) as refused:
         chat._checked_lean_request(db, SimpleNamespace(workspace_id="ws"), request)
     assert refused.value.status_code == 422
-    source = inspect.getsource(chat.stream_chat)
+    source = inspect.getsource(chat._chat_turn)  # the turn the route runs
     assert source.index("_checked_lean_request(") < source.index("save_message(")
 
 

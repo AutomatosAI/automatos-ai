@@ -3,17 +3,20 @@
 /**
  * PRD-251B US-B109 — what ?post= opens (global search, notifications and the calendar link
  * there): the editor for a post the caller drafts and can still change; the post's own
- * view (its status, receipts, history and the approver's actions) for one being made,
- * posted or archived, or for a role that only reads; New post opens an empty editor.
+ * read-only view for one being made, publishing, posted, partly posted or archived, or for a
+ * role that only reads; New post opens an empty editor.
+ * PRD-251D US-D203: that view is the Studio's own (socials-post-view.tsx: the post, its
+ * receipts with Retry, its publish controls and its history), so this page covers every
+ * status and every role, and the older detail pane is gone.
  */
 import { ArrowLeft, Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import type { Workspace } from '@/components/workspace-provider'
 import type { SocialPost } from '@/lib/api-client'
-import { SocialsPostDetail } from '../socials-post-detail'
 import { canAuthorPosts } from '../socials-status'
 import { SocialsEditor } from './socials-editor'
+import { SocialsPostView } from './socials-post-view'
 import { NEW_POST, type GoTo } from './studio-route'
 
 /** The statuses a post can still be edited in (modules/socials/service.py EDITABLE_STATUSES). */
@@ -58,7 +61,7 @@ export function SocialsPostPage({ role, posts, postId, loading, go }: SocialsPos
     return (
       <div className="flex flex-col gap-3">
         <Back go={go} />
-        <SocialsPostDetail post={post} role={role} />
+        <SocialsPostView post={post} role={role} />
       </div>
     )
   }

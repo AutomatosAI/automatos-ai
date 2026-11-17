@@ -8,6 +8,8 @@ why a slot is empty and which batch makes it; and one over the workspace's histo
 Their handlers (``handlers_socials.py``) run the flows the /api/socials routes
 run. None of them approves, schedules or publishes, and no parameter does (D6,
 D14): a person approves in the Socials tab, and the platform publishes (Wave 3).
+PRD-251D (E6): create and update take ``planned_for`` and ``timezone``, the slot a post
+waits in for that approval; approving it is what schedules it there.
 
 The five post tools' parameters come from ``core/social_post_schema.py`` (PRD-256
 F430), the one definition a CLI session's Socials tools are built from too; it holds
@@ -63,9 +65,11 @@ def _register_create_social_post(registry: ActionRegistry) -> None:
             "By default the template is rendered at once, within the plan's render minutes: when "
             "the render finishes the post waits for approval, or is failed with the reason in its "
             "history; a render refused at once fails the call, which says why and how to fix the "
-            "saved draft. With render false it stays a draft until platform_submit_social_post. A "
-            "person approves every post in the Socials tab and the platform publishes it; this "
-            "tool never approves, schedules or publishes."
+            "saved draft. With render false it stays a draft until platform_submit_social_post. "
+            "With planned_for and timezone (\"post it Friday at nine\") the post sits on that day and "
+            "time in the Socials calendar while it waits for approval, and approving it schedules it "
+            "there. A person approves every post in the Socials tab and the platform publishes it; "
+            "this tool never approves, schedules or publishes."
         ),
         category="socials",
         parameters={"type": "object", "properties": create_properties(), "required": ["title"]},
@@ -89,8 +93,10 @@ def _register_update_social_post(registry: ActionRegistry) -> None:
             "sources merge into the post's own, and channels replaces where it publishes. Changing an "
             "approved or scheduled post (its channels included) voids its "
             "approval, so a person approves it again in the Socials tab. With render true the post "
-            "is rendered again after the change, which is how a failed render is fixed. Never "
-            "approves, schedules or publishes."
+            "is rendered again after the change, which is how a failed render is fixed. planned_for "
+            "and timezone move the day and time it is planned for while it is a draft, waits for "
+            "approval or was sent back; an approved or scheduled post's slot is the owner's to move. "
+            "Never approves, schedules or publishes."
         ),
         category="socials",
         parameters={"type": "object", "properties": update_properties(), "required": ["post_id"]},
@@ -131,7 +137,8 @@ def _register_get_social_post(registry: ActionRegistry) -> None:
         name="platform_get_social_post",
         description=(
             "Read one Socials post: where it publishes and each channel's receipt (when it went out, "
-            "the platform's id and the link), its status, times, approval and what it still needs, then "
+            "the platform's id and the link), its status, the day and time it is planned for (in its own "
+            "timezone) and its other times, approval and what it still needs, then "
             "its copy, template and variables, sources, rendered media, voice and footage, and its last "
             "history entries (who drafted or changed it, a reviewer's comments, why a render failed)."
         ),
@@ -152,7 +159,8 @@ def _register_list_social_posts(registry: ActionRegistry) -> None:
         name="platform_list_social_posts",
         description=(
             "List the workspace's Socials posts, newest first: how many match, then one row each "
-            "with its status and what it still needs (the owner's approval, a render that failed and "
+            "with its status, the day and time it is planned for, and what it still needs (the owner's "
+            "approval, a render that failed and "
             "why, a render not made yet, a caption). Pick them by status, or by queue: what waits for "
             "the owner's approval, what has not rendered, or every post not yet approved or out."
         ),

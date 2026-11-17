@@ -17,7 +17,11 @@ and media-render refuses the render.
   (:func:`social_accent`), lightened only as far as they must be to read on the
   ink (display words, shapes, glows);
 * ``primary-light``: the primary a little lighter again, for small accent text
-  on tinted pills (the reference's own fix: #E96235 became #F07A50 there).
+  on tinted pills (the reference's own fix: #E96235 became #F07A50 there);
+* ``ink-card``: the ink lifted for a card laid on it (PRD-251D US-D301, a paper
+  template in the dark look). It is lifted only as far as the stage's dimmest
+  words (``on-ink-dim``, 5.3:1 on the ink) still read on it at the paper's text
+  target (4.7:1), so every stage tone reads on the card as it does on the paper's.
 
 A kit colour that already meets its target is used exactly as it is, so the
 Automatos Studio Dark kit reproduces the reference palette.
@@ -96,7 +100,8 @@ SEARCH_STEPS = 24
 
 INK, ON_INK, ON_INK_MUTED, ON_INK_DIM = "ink", "on-ink", "on-ink-muted", "on-ink-dim"
 PRIMARY_ON_INK, PRIMARY_LIGHT, ACCENT_ON_INK = "primary-on-ink", "primary-light", "accent-on-ink"
-STAGE_TOKENS = (INK, ON_INK, ON_INK_MUTED, ON_INK_DIM, PRIMARY_ON_INK, PRIMARY_LIGHT, ACCENT_ON_INK)
+INK_CARD = "ink-card"
+STAGE_TOKENS = (INK, ON_INK, ON_INK_MUTED, ON_INK_DIM, PRIMARY_ON_INK, PRIMARY_LIGHT, ACCENT_ON_INK, INK_CARD)
 
 # The paper's targets. automatos-social's cream (#f1e9dd) is 0.82 luminance, and its
 # card (#e3d9c8) sits 1.16:1 below it; the muted and dim tones reuse the stage's
@@ -107,6 +112,10 @@ CARD_CONTRAST = 1.16
 ON_PAPER_MIN_CONTRAST = 10.0
 PAPER_TEXT_MIN_CONTRAST = 4.7
 LARGE_TEXT_MIN_CONTRAST = 3.2
+# PRD-251D US-D301: how far the ink may lift for a card. The stage's tones are measured on the ink, and a
+# light tone on a lighter card loses exactly the card's own contrast with the ink, so the dimmest one
+# (5.3:1) keeps the paper's text target (4.7:1) on the card. A little under the paper card's 1.16.
+INK_CARD_CONTRAST = DIM_CONTRAST / PAPER_TEXT_MIN_CONTRAST
 
 PAPER, PAPER_CARD, ON_PAPER = "paper", "paper-card", "on-paper"
 ON_PAPER_MUTED, ON_PAPER_DIM = "on-paper-muted", "on-paper-dim"
@@ -230,7 +239,7 @@ def stage_palette(kit: Mapping[str, Any]) -> Dict[str, str]:
     if secondary is None:
         return {}
     ink = _least(secondary, BLACK, lambda c: luminance(c) <= INK_MAX_LUMINANCE)
-    palette = {INK: ink}
+    palette = {INK: ink, INK_CARD: _most(ink, WHITE, lambda c: contrast(c, ink) <= INK_CARD_CONTRAST)}
     text = parse_hex(kit.get("text_color"))
     if text is not None:
         on_ink = _least(text, WHITE, lambda c: contrast(c, ink) >= ON_INK_MIN_CONTRAST)
@@ -445,6 +454,7 @@ def effective_palette(kit: Mapping[str, Any]) -> Tuple[Dict[str, str], Dict[str,
 
 
 __all__ = [
+    "INK_CARD",
     "PALETTE_ROLES",
     "PAPER_TOKENS",
     "STAGE_TOKENS",

@@ -425,10 +425,14 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # a new nullable column and a partial index; the guard follows it.
     spent = (versions / "credit_ledger_sub_tenant_20261113.py").read_text()
     assert 'down_revision = "product_workspaces_20261113"' in spent
-    # 2026-11-13 (Automatos for products, spend cap): product_spend_cap_20261113 chains onto that —
-    # a new column and a new table; the guard follows it.
+    # 2026-11-16 (PRD-251D Wave 3, US-D301): prd251d_wave3 chains onto that —
+    # social_posts.look, a new nullable column.
+    looks = (versions / "prd251d_wave3.py").read_text()
+    assert 'down_revision = "credit_ledger_sub_tenant_20261113"' in looks
+    # 2026-11-13 (Automatos for products, spend cap): product_spend_cap_20261113 joins prd251d_wave3
+    # and chat_turn_keys_20261116 (both written on credit_ledger_sub_tenant_20261113); the guard follows it.
     capped = (versions / "product_spend_cap_20261113.py").read_text()
-    assert 'down_revision = "credit_ledger_sub_tenant_20261113"' in capped
+    assert '"chat_turn_keys_20261116",\n    "prd251d_wave3",' in capped
     assert 'EXPECTED_HEAD = "product_spend_cap_20261113"' in guard
 
 

@@ -12,6 +12,10 @@ setting). Auto is told to reply in that variant (``consumers.chatbot.reply_local
 turn and a typed one alike; without it the model picked the variant itself, and from Lisbon a
 Brazilian speaker got European Portuguese. A value that is not a tag is dropped, never a 422, so
 no client's turn fails over it; left out, the turn is exactly as before.
+
+``turnRef``: a voice turn's reference, built by the phone (``vt-<send time>-<count>``), so the
+turn's timing line and its speech requests can be read together (``core.monitoring.turn_clock``).
+A value that does not fit ``core.monitoring.turn_ref.REF_PATTERN`` is dropped, never a 422.
 """
 
 import re
@@ -19,7 +23,9 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
 
-from core.models.end_users import END_USER_ID_MAX
+from core.models.end_users import END_USER_ID_PATTERN
+
+from core.monitoring.turn_ref import clean_ref
 
 # A language, then up to two subtags (``pt-BR``, ``zh-Hant-TW``); RFC 5646 §4.4.1 recommends
 # at most 35 characters for a tag.
@@ -90,7 +96,7 @@ class ChatRequest(BaseModel):
     appContext: Optional[Union[Dict[str, Any], List[Any], str]] = None
     # PRD-274 W3: the end user a server key's turn is for, the product's own id for the person
     # (/api/memory/end-users). Their consent must be on record; a person's turn names none.
-    endUserId: Optional[str] = Field(None, pattern=rf"^[A-Za-z0-9._:@-]{{1,{END_USER_ID_MAX}}}$")
+    endUserId: Optional[str] = Field(None, pattern=END_USER_ID_PATTERN)
     selectedVisibilityType: Optional[str] = "private"
     context: Optional[dict] = None
     # PRD: Unified Agent-Chat System
@@ -104,10 +110,18 @@ class ChatRequest(BaseModel):
     # The person's language and region (BCP 47, ``pt-BR``): the variant Auto replies in.
     locale: Optional[str] = None
 
+    # A voice turn's reference from the phone: it joins the turn's timing to its speech requests.
+    turnRef: Optional[str] = None
+
     @field_validator("locale", mode="before")
     @classmethod
     def _not_a_tag_is_dropped(cls, value: Any) -> Optional[str]:
         return clean_locale(value)
+
+    @field_validator("turnRef", mode="before")
+    @classmethod
+    def _not_a_ref_is_dropped(cls, value: Any) -> Optional[str]:
+        return clean_ref(value)
 
 
 __all__ = ["ChatMessageRequest", "ChatRequest", "MessagePart", "clean_locale"]

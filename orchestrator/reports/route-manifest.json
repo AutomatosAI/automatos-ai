@@ -1,5 +1,5 @@
 {
-  "route_count": 1048,
+  "route_count": 1050,
   "routes": [
     {
       "method": "GET",
@@ -2447,6 +2447,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/socials/brand-kit/preview-fonts"
+    },
+    {
+      "method": "GET",
       "path": "/api/socials/campaigns"
     },
     {
@@ -2700,6 +2704,10 @@
     {
       "method": "GET",
       "path": "/api/socials/templates"
+    },
+    {
+      "method": "POST",
+      "path": "/api/socials/templates/{template_id}/preview-page"
     },
     {
       "method": "GET",

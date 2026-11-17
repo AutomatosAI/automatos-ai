@@ -8,9 +8,11 @@ all of them to one 404, so a reporter learns nothing about content they cannot
 see (never a 403, never a 500).
 
 * A **message** is an assistant message of this workspace, in a chat of this
-  workspace that the reporter owns or that is public.
+  workspace that the reporter owns or that is public. For a server key it is a
+  chat its own service user holds, tagged with the end user the key names, and
+  never a public one (``reporter``).
 * A **Deliverable** is one ``DeliverableService.get_deliverable`` finds in this
-  workspace (it already leaves out deleted ones).
+  workspace (it already leaves out deleted ones). A server key reports none.
 """
 
 from __future__ import annotations
@@ -18,11 +20,12 @@ from __future__ import annotations
 from typing import Any, Optional
 from uuid import UUID
 
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 
 from core.models.core import Chat, Message
 from modules.memory.thread_checkpoint import extract_message_text
 from services.content_reports import EXCERPT_MAX_CHARS
+from services.content_reports.reporter import Reporter
 from services.deliverable_service import DeliverableService
 
 ASSISTANT_ROLE = "assistant"
@@ -49,8 +52,21 @@ def clip_excerpt(text: str) -> str:
     return " ".join((text or "").split())[:EXCERPT_MAX_CHARS]
 
 
+def chats_it_may_report(reporter: Reporter) -> Any:
+    """The chats whose replies ``reporter`` may report, as a filter on ``Chat``.
+
+    A person: their own chats and the workspace's public ones. A server key: the chats its
+    service user holds for the end user it names (or for none, when it names none).
+    """
+    if not reporter.is_key:
+        return or_(Chat.user_id == reporter.pk, Chat.visibility == PUBLIC_VISIBILITY)
+    if reporter.end_user_id is None:
+        return and_(Chat.user_id == reporter.pk, Chat.end_user_id.is_(None))
+    return and_(Chat.user_id == reporter.pk, Chat.end_user_id == reporter.end_user_id)
+
+
 def message_excerpt(
-    db: Any, *, workspace_id: UUID, reporter_pk: int, message_id: str
+    db: Any, *, workspace_id: UUID, reporter: Reporter, message_id: str
 ) -> Optional[str]:
     """The excerpt of an assistant message the reporter may see, or ``None``."""
     row = (
@@ -61,7 +77,7 @@ def message_excerpt(
             Message.workspace_id == workspace_id,
             Message.role == ASSISTANT_ROLE,
             Chat.workspace_id == workspace_id,
-            or_(Chat.user_id == reporter_pk, Chat.visibility == PUBLIC_VISIBILITY),
+            chats_it_may_report(reporter),
         )
         .first()
     )
@@ -81,23 +97,25 @@ async def deliverable_excerpt(db: Any, *, workspace_id: UUID, deliverable_id: st
 
 
 async def resolve_target(
-    db: Any, *, workspace_id: UUID, reporter_pk: int, target_type: str, target_id: str
+    db: Any, *, workspace_id: UUID, reporter: Reporter, target_type: str, target_id: str
 ) -> Optional[str]:
     """The excerpt of the reported content, or ``None`` when it is not the reporter's to report.
 
-    ``target_id`` must already be canonical (``canonical_target_id``).
+    ``target_id`` must already be canonical (``canonical_target_id``). A server key reports a
+    message only.
     """
     if target_type == "message":
         return message_excerpt(
-            db, workspace_id=workspace_id, reporter_pk=reporter_pk, message_id=target_id
+            db, workspace_id=workspace_id, reporter=reporter, message_id=target_id
         )
-    if target_type == "deliverable":
+    if target_type == "deliverable" and not reporter.is_key:
         return await deliverable_excerpt(db, workspace_id=workspace_id, deliverable_id=target_id)
     return None
 
 
 __all__ = [
     "canonical_target_id",
+    "chats_it_may_report",
     "clip_excerpt",
     "deliverable_excerpt",
     "message_excerpt",
