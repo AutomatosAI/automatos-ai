@@ -253,6 +253,47 @@ def test_an_end_user_whose_erase_started_is_not_reported_for(new_session, floor,
     assert _rows(new_session, floor.ws) == [] and fakes.notices == []
 
 
+def _after_the_first_check(monkeypatch, new_session, sql: str, floor):
+    """Runs ``sql`` (as another request would) right after the report's first consent check."""
+    seen = []
+    real = service.consent_seen
+
+    def then_meanwhile(db, workspace_id, reporter):
+        record = real(db, workspace_id, reporter)
+        seen.append(record)
+        s = new_session()
+        s.execute(text(sql), {"w": floor.ws, "e": ALPHA})
+        s.commit()
+        s.close()
+        return record
+
+    monkeypatch.setattr(service, "consent_seen", then_meanwhile)
+    return seen
+
+
+def test_an_erase_that_starts_after_the_first_check_still_stops_the_report(new_session, floor, fakes, monkeypatch):
+    """The erase marks its start between the first check and the write: the held re-check sees it."""
+    seen = _after_the_first_check(
+        monkeypatch, new_session,
+        "UPDATE end_users SET erasing_at = now() WHERE workspace_id = CAST(:w AS uuid) AND end_user_id = :e", floor)
+    with pytest.raises(service.ReportTargetNotFound):
+        _report(new_session, floor.a, floor.msgs["alphas_reply"])
+    assert len(seen) == 1 and seen[0]
+    assert _rows(new_session, floor.ws) == [] and fakes.notices == []
+
+
+def test_an_erase_and_a_fresh_consent_meanwhile_still_stop_the_report(new_session, floor, fakes, monkeypatch):
+    """Both finish between the first check and the write: the new record is not the one the report saw."""
+    _after_the_first_check(
+        monkeypatch, new_session,
+        "DELETE FROM end_users WHERE workspace_id = CAST(:w AS uuid) AND end_user_id = :e; "
+        "INSERT INTO end_users (id, workspace_id, end_user_id) VALUES (gen_random_uuid(), CAST(:w AS uuid), :e)",
+        floor)
+    with pytest.raises(service.ReportTargetNotFound):
+        _report(new_session, floor.a, floor.msgs["alphas_reply"])
+    assert _rows(new_session, floor.ws) == [] and fakes.notices == []
+
+
 def test_a_key_naming_no_end_user_reaches_only_its_chats_for_no_one(new_session, floor, fakes):
     filed = _report(new_session, floor.a, floor.msgs["the_keys_own_reply"], end_user=None)
     assert filed.duplicate is False
