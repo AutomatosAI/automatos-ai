@@ -122,7 +122,9 @@ def test_the_seeds_are_idempotent_and_general_is_todays_prompt(new_session):
 WELLBEING_KEEP = (("people", "turn to"), ("helped", "hasn't"), ("routines",), ("plans", "open_loop"),
                   ("spoken to", "prefer"))
 WELLBEING_SKIP = (("heart rate", "sleep numbers", "steps", "weight"), ("condition", "diagnosis"),
-                  ("medicine", "dose"), ("safety concern", "self-harm", "suicide", "crisis", "even in passing"),
+                  ("symptom", "without a number"), ("medicine", "dose"),
+                  ("treatment", "therapy", "appointment", "doctor"),
+                  ("whole exchange", "safety concern", "self-harm", "suicide", "crisis", "even in passing"),
                   ("different person's health",))
 NOT_IN_A_WELLBEING_EXAMPLE = ("heart", "sleep", "steps", "weight", "diagnos", "medic", "dose", "self-harm",
                               "suicide", "crisis")
@@ -132,7 +134,8 @@ def test_the_seeded_wellbeing_profile_keeps_what_helps_and_never_a_health_record
     from modules.memory.write_contract import MEMORY_FACT_TYPES
 
     (row,) = _seeded_rows(new_session, "wellbeing")
-    assert row.name == "Wellbeing" and row.focus
+    assert row.name == "Wellbeing" and "overrides preserving specifics" in row.focus
+    assert "empty array for the whole exchange" in row.focus
     for items, wanted in ((row.keep, WELLBEING_KEEP), (row.skip, WELLBEING_SKIP)):
         assert len(items) == len(wanted)
         for item, words in zip(items, wanted):

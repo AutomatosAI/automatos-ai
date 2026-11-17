@@ -117,8 +117,9 @@ EXCHANGES: Tuple[Exchange, ...] = (
             "lunch with Ella on Saturday": (("ella", "saturday"),),
             "prefers short replies": (("short", "repl"), ("brief", "repl"), ("short", "message")),
         },
-        unwanted={"a body reading": (("four hours",), ("4 hours",), ("88",), ("bpm",), ("heart rate",)),
-                  "a medicine or dose": (("50mg",), ("50 mg",), ("tablets",))},
+        unwanted={"a body reading": (("four hours",), ("4 hours",), ("88", "bpm"), ("heart rate",)),
+                  "a medicine or dose": (("50mg",), ("50 mg",), ("tablets",)),
+                  "a treatment or doctor": (("doctor",), ("back on",))},
     ),
 )
 

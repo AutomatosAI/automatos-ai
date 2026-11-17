@@ -113,8 +113,11 @@ SEEDED_PROFILES: List[Dict[str, Any]] = [
         "focus": "This agent supports one person through stress and hard days. Keep what would help the next "
                  "conversation support this person: the people in their life, what has helped and what hasn't, "
                  "their routines, their plans, and how they like to be spoken to. Never keep their health "
-                 "record: no body or health readings, no conditions or diagnoses, no medicines, nothing about "
-                 "another person's health, and nothing at all from a message that raised a safety concern.",
+                 "record: no body or health readings, no conditions, diagnoses or symptoms, no medicines, "
+                 "treatment or appointments, and nothing about another person's health. This overrides "
+                 "preserving specifics: leave out the figure, the dose and the condition even when it is stated "
+                 "exactly. If the exchange raised a safety concern (self-harm, suicide, crisis), return an empty "
+                 "array for the whole exchange, including anything in it you would otherwise keep.",
         "keep": [
             "the people in their life, and who they turn to when things are hard",
             "what has helped them before, and what hasn't",
@@ -125,8 +128,10 @@ SEEDED_PROFILES: List[Dict[str, Any]] = [
         "skip": [
             "any body or health reading, such as heart rate, sleep numbers, steps or weight",
             "any named medical or mental-health condition or diagnosis",
+            "any symptom, even without a number, such as sleeping badly or panic attacks",
             "any medicine or dose",
-            "the whole of any message that raised a safety concern (self-harm, suicide, crisis), even in passing",
+            "any treatment, therapy, appointment or doctor's visit",
+            "the whole exchange when it raised a safety concern (self-harm, suicide, crisis), even in passing",
             "anything about a different person's health",
         ],
         "examples": [
