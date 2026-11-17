@@ -35,17 +35,28 @@ import re
 import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Callable, Dict, FrozenSet, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from . import secret_reach, shell_words
+from .shell_words import GLOBAL_OPTIONS as _GLOBAL_OPTIONS, strip_globals as _strip_globals
 from .adapters.base import ToolClass, ToolIntent
 from .permission_modes import (
     DEFAULT_MODE, MANUAL_EDIT, MODE_AUTO, MODE_MANUAL, MODE_PLAN, PLAN_CARD, PLAN_EDIT_REFUSED, PLAN_EDIT_REFUSED_TURN,
+)
+from .shell_data import (  # which words a tool reads as a pattern or a program: data, never a command or a path
+    AWK_ESCAPE_RE as _AWK_ESCAPE_RE,  # noqa: F401 (the backtracking test reads it here)
+    SCRIPT_VERBS,
+    SED_ESCAPE_RE as _SED_ESCAPE_RE,  # noqa: F401 (the backtracking test reads it here)
+    data_positions,
+    non_path_positions,
+    read_program,
+    runs_a_program,
 )
 from .shell_text import (  # here-documents and substitutions, read before the words
     SUBSTITUTION_MARK,
     backtick_bodies as _backtick_bodies,
     heredocs as _heredocs,
+    substitution_spans as _substitution_spans,
     substitutions as _substitutions,
     without_substitutions as _without_substitutions,
 )
@@ -62,6 +73,9 @@ NEVER_ALLOWED_BASH = (
     re.compile(r"(^|[;&|(]\s*)(sudo|su)\b"),
     re.compile(r"(^|[;&|(]\s*)rm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+/(\s|$)"),
     re.compile(r"(^|[;&|(]\s*)curl\b.*\|\s*(ba|z)?sh\b"),
+    # ``RIPGREP_CONFIG_PATH`` names a config rg reads before its arguments, and a
+    # config can carry ``--pre`` (a program rg runs). Set, exported or env-assigned.
+    re.compile(r"(^|[\s;&|(])(export\s+)?RIPGREP_CONFIG_PATH\b"),
 )
 
 # Always a card, even in Auto mode, and even when the verb
@@ -164,57 +178,7 @@ FIND_EXEC_OPTIONS = ("-exec", "-execdir", "-ok", "-okdir")
 FIND_WRITE_OPTIONS = ("-delete", "-fls", "-fprint", "-fprint0", "-fprintf")
 FIND_PLACEHOLDERS = ("{}", "+")
 
-# A verb whose ARGUMENT is a program can run commands of its own. The verb stays
-# on the allowlist (a ticket needs ``sed -n`` and ``awk '{print $1}'``); its
-# program is read for the constructs that escape, and a program the gate cannot
-# read at all (``-f progfile``) is refused.
-# Every quantifier here is BOUNDED and no alternation is ambiguous: the program
-# is a session's own text, so a pattern that can backtrack exponentially on it
-# would hang the hook thread the gate answers from (CodeQL py/redos).
-_AWK_ESCAPE_RE = re.compile(r"system\s{0,8}\(|\bgetline\b|\||print(?:f)?[^;}\n]{0,200}>")
-# ``e`` as a COMMAND — after an address (``1e cmd``, ``/x/e cmd``, ``$e cmd``)
-# and followed by its command; never a letter's neighbour (``line`` ends in one)
-# and never followed by a delimiter (``/e/d`` is an ``e`` inside a regex). Then
-# ``e`` among the FLAGS of an ``s`` command (``s/a/b/e``), recognised by the
-# delimiter that closes it and the command boundary after the flags — matching
-# the two delimited halves instead would need an ambiguous alternation, and an
-# untrusted program must never be able to make this pattern backtrack.
-# …and ``w``/``W`` (write the pattern space to a FILE), ``r``/``R`` (read a
-# file in) and the ``w`` flag of ``s`` — a program text is exempt from the path
-# check, so a filename inside one would otherwise be a write or read anywhere.
-# ``awk``'s ``print > file`` is caught by its own pattern; sed's was not.
-_SED_ESCAPE_RE = re.compile(
-    r"(?<![a-zA-Z\\])e(?:[ \t;]|$)"
-    r"|[^a-zA-Z0-9\s][a-zA-Z0-9]{0,16}e[a-zA-Z0-9]{0,16}(?:[;\n}]|$)"
-    r"|(?<![a-zA-Z\\])[wWrR][ \t]+\S"
-)
-
-# Global options that may sit between ``git`` and its subcommand. Peeled before
-# the verb is judged, so no spelling of a global hides a ``push`` from the
-# never-allowed list; the ones that name a path are confined like any argument.
-_GIT_PATH_OPTIONS = ("-C", "--git-dir", "--work-tree", "--exec-path")
-_GIT_VALUE_OPTIONS = ("-c", "--namespace", "--config-env", "--super-prefix")
-_GIT_FLAG_OPTIONS = ("-p", "-P", "--paginate", "--no-pager", "--bare", "--no-replace-objects",
-                     "--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs",
-                     "--icase-pathspecs", "--no-optional-locks", "--no-lazy-fetch")
-# ``gh`` names a repository, never a path.
-_GH_VALUE_OPTIONS = ("-R", "--repo")
-
-
-@dataclass(frozen=True)
-class ScriptVerb:
-    """How one program-taking verb spells its program (design: one row per verb)."""
-    escape: Any                      # the constructs in a program that run a command
-    text_options: Tuple[str, ...]    # options whose VALUE is program text
-    file_options: Tuple[str, ...]    # options naming a program FILE — refused
-    value_options: Tuple[str, ...]   # options with a value that is not a program
-
-
-SCRIPT_VERBS: Mapping[str, ScriptVerb] = {
-    "awk": ScriptVerb(_AWK_ESCAPE_RE, ("-e", "--source"), ("-f", "--file", "--include"),
-                      ("-v", "--assign", "-F", "--field-separator")),
-    "sed": ScriptVerb(_SED_ESCAPE_RE, ("-e", "--expression"), ("-f", "--file"), ()),
-}
+# git's and gh's global options are peeled before the verb is judged (``shell_words.strip_globals``).
 
 # A code ticket must be able to RUN what it just wrote — that is "build and
 # test", not "publish". An interpreter may run a file inside the session
@@ -250,6 +214,9 @@ MAX_EXPANSIONS = 64          # values one word may take across the line's variab
 # ``$'…'`` / ``$"…"`` only where the ``$`` begins a word. Night 1 held every
 # ``grep -v '^$' | …`` on earth because the ``$`` ending a quoted regex sat next to the quote.
 _ANSI_C_RE = re.compile(r"""(?:^|[\s=(|;&])\$['"]""")
+# A ``..`` segment in the words, quotes gone (``_traversal_text``): ``$'../x'`` leaves ``$../x``.
+_TRAVERSAL_RE = re.compile(r"(^|[\s'\"=:;|&(/$])\.\.([/\\]|[\s'\");|&]|$)")
+_TRAVERSAL_MARK = "../"      # a word the ``..`` check cannot expand in full reads as a traversal
 MAX_NESTING = 8              # ``$(…)`` inside ``$(…)`` …
 _SEVERITY = {"allow": 0, "ask": 1, "deny": 2}
 
@@ -575,12 +542,13 @@ def _strip_comments(command: str) -> str:
     return "".join(out)
 
 
-def _tokens(command: str) -> List[str]:
+def _tokens(command: str, keep_comments: bool = False) -> List[str]:
     """Quote-aware tokens, the way a POSIX shell reads them; a run of
     punctuation (``&&``, ``2>``'s ``>``, a newline) is its own token, and a
     parenthesis is always its own. Comments are dropped first, as bash drops
-    them (F056). Raises ``ValueError`` on an unbalanced quote."""
-    text = _strip_comments(_LINE_CONTINUATION_RE.sub(" ", _heredocs(command)[0]))
+    them (F056), unless a raw net keeps them. Raises ``ValueError`` on an unbalanced quote."""
+    text = _LINE_CONTINUATION_RE.sub(" ", _heredocs(command)[0])
+    text = text if keep_comments else _strip_comments(text)
     lex = shlex.shlex(text, posix=True, punctuation_chars=_PUNCTUATION)
     lex.whitespace = " \t\r"       # a newline separates commands, like ';'
     lex.whitespace_split = True    # words end on whitespace and punctuation only
@@ -676,6 +644,14 @@ def _strip_keywords(words: Sequence[str]) -> List[str]:
     return rest
 
 
+def _verb_onward(words: Sequence[str]) -> List[str]:
+    """The words from the verb on: the leading keywords and ``NAME=value`` words peeled."""
+    rest = _strip_keywords(words)
+    while rest and _ASSIGNMENT_RE.match(rest[0]):
+        rest = rest[1:]
+    return rest
+
+
 def _bind_assignments(words: Sequence[str], bindings: Bindings) -> Tuple[List[str], Bindings]:
     """Leading ``NAME=value`` words are remembered for the rest of the line (a
     value the gate cannot resolve makes NAME unknown) and peeled off."""
@@ -731,7 +707,9 @@ def _judge_args(verb: str, args: Sequence[str], bindings: Bindings, roots: Seque
     question; a path built from a reference nothing on the line defined is a
     question."""
     verdicts: List[Decision] = []
-    for value in (v for arg in args for v in _expand(arg, bindings)):
+    # Braces expand before the path is read (``{x,/etc/shadow}`` is two words, one a
+    # real path), as for the ``..`` check; then the line's variables.
+    for value in (v for arg in args for a in secret_reach.expand_braces(arg)[0] for v in _expand(a, bindings)):
         path = _path_argument(value)
         if path is not None:
             verdict = _judge_path(path, roots)
@@ -818,7 +796,8 @@ def _never_allowed(words: Sequence[str], bindings: Bindings, ctx: "PolicyContext
     is a card, in Auto mode too. ``floor`` is the verdict on the command's own
     redirections, kept in every case. ``None`` = judge it as the verb it is."""
     joined = " ".join(words)
-    if any(pattern.search(joined) for pattern in NEVER_ALLOWED_BASH) or shell_words.gh_writes(words):
+    refused = any(pattern.search(joined) for pattern in NEVER_ALLOWED_BASH) or shell_words.gh_writes(words)
+    if refused or runs_a_program(words):        # ``rg --pre``, ``git grep -O`` run a program of their own
         return Decision("deny", f"never allowed in a session: {_first_words(joined)!r} (sessions do not push or escalate)")
     for text in shell_words.inline_commands(words):
         if any(pattern.search(text) for pattern in NEVER_ALLOWED_BASH):    # the line nets, as on a raw line
@@ -851,82 +830,66 @@ def _peel_globals(words: Sequence[str], bindings: Bindings, roots: Sequence[Path
     option is peeled off before the verb meets the never-allowed list and the
     allowlist, and every path one names is confined. ``--git-dir=…``, a repeated
     ``-C`` and ``gh -R owner/name`` are the same shape."""
-    head = Path(words[0]).name if words else ""
-    if head == "git":
-        path_options, value_options, flag_options = _GIT_PATH_OPTIONS, _GIT_VALUE_OPTIONS, _GIT_FLAG_OPTIONS
-    elif head == "gh":
-        path_options, value_options, flag_options = (), _GH_VALUE_OPTIONS, ()
-    else:
-        return list(words), Decision("allow")
-    rest = list(words[1:])
-    paths: List[str] = []
-    while rest:
-        name, glued, value = rest[0].partition("=")
-        if name in path_options or name in value_options:
-            if glued:
-                rest = rest[1:]
-            elif len(rest) >= 2:
-                value, rest = rest[1], rest[2:]
-            else:
-                break
-            if name in path_options:
-                paths = [*paths, value]
-        elif name in flag_options and not glued:
-            rest = rest[1:]
-        else:
-            break
-    return [head, *rest], _judge_args(f"{head} {' '.join(path_options[:1]) or 'global option'}", paths, bindings, roots)
+    peeled, paths = _strip_globals(words)
+    head = peeled[0] if peeled else ""
+    if head not in _GLOBAL_OPTIONS:
+        return peeled, Decision("allow")
+    label = f"{head} {' '.join(_GLOBAL_OPTIONS[head][0][:1]) or 'global option'}"
+    return peeled, _judge_args(label, paths, bindings, roots)
 
 
-def _script_texts(spec: ScriptVerb, args: Sequence[str]) -> Tuple[List[str], bool]:
-    """The program text a script verb was given, and whether it reads its
-    program from a FILE (which the gate cannot judge). Everything after the
-    program is data."""
-    texts: List[str] = []
-    explicit = False
-    rest = list(args)
-    while rest:
-        name, glued, value = rest[0].partition("=")
-        if name in spec.file_options:
-            return texts, True
-        if name in spec.text_options:
-            explicit = True
-            if glued:
-                texts, rest = [*texts, value], rest[1:]
-            elif len(rest) >= 2:
-                texts, rest = [*texts, rest[1]], rest[2:]
-            else:
-                break
-            continue
-        if name in spec.value_options:
-            rest = rest[1:] if glued else rest[2:]
-            continue
-        if rest[0].startswith("-") and rest[0] != "-":
-            rest = rest[1:]
-            continue
-        if not explicit and not texts:
-            texts = [*texts, rest[0]]      # the first positional IS the program
-        break
-    return texts, False
+# ── the words a tool reads as data (shell_data) ──────────────────────────────
+
+def _data_indexes(words: Sequence[str], reader: Callable[[Sequence[str]], Tuple[int, ...]] = data_positions,
+                  ) -> FrozenSet[int]:
+    """Which words of a simple command (from its verb on) are a pattern or a program
+    its tool reads (``reader``: ``shell_data``). A wrapper (``xargs``, ``time``) and
+    git's global options are stepped over to reach the tool; the indexes are the caller's."""
+    inner = _unwrapped(words)
+    offset = len(words) - len(inner)
+    peeled, _ = _strip_globals(inner)
+    gap = len(inner) - len(peeled)
+    return frozenset(offset + index + (gap if index else 0) for index in reader(peeled))
 
 
-def _judge_script(head: str, args: Sequence[str]) -> Tuple[Decision, List[str]]:
-    """The program an allowed script verb would run, and the program texts
-    themselves — a program is NOT a path (``sed '/foo/d'`` opens with a regex
-    address that reads like one), so the caller leaves them out of the path
-    check. Refused when the program can run a command of its own
-    (``awk 'BEGIN{system(…)}'``, ``sed 's///e'``) or when the gate cannot read
-    it at all (``-f progfile``)."""
+def _command_text(words: Sequence[str]) -> str:
+    """A simple command as the command-word rules read it: its words without the
+    patterns and programs its tool reads (``awk '!/alembic/'`` runs no migration)."""
+    data = _data_indexes(words)
+    return " ".join(word for index, word in enumerate(words) if index not in data)
+
+
+def _operands(words: Sequence[str]) -> List[str]:
+    """The arguments the path check reads: every word after the verb but a pattern or
+    a program (``grep -v /tests/ f`` reads ``f``, not ``/tests/``)."""
+    data = _data_indexes(words, non_path_positions)
+    return [word for index, word in enumerate(words) if index and index not in data]
+
+
+def _asked_always(words: Sequence[str], inner: Sequence[str]) -> Optional[str]:
+    """Why ALWAYS_ASK_BASH puts this command in front of the operator, or None. Read
+    on the command's own words and on what a wrapper runs (``time alembic upgrade``,
+    ``env PGPASSWORD=… psql``), with their patterns and programs left out."""
+    texts = (_command_text(words), _command_text(inner))
+    return next((why for pattern, why in ALWAYS_ASK_BASH if any(pattern.search(text) for text in texts)), None)
+
+
+def _judge_script(head: str, words: Sequence[str], bindings: Bindings) -> Decision:
+    """The program an allowed script verb (the verb first) would run, as written and
+    as the line's own variables make it (``A='e id'; sed "$A"``). Refused when it can
+    run a command of its own (``awk 'BEGIN{system(…)}'``, ``sed 's///e'``) or when the
+    gate cannot read it at all (``-f progfile``)."""
     spec = SCRIPT_VERBS.get(head)
     if spec is None:
-        return Decision("allow"), []
-    texts, from_file = _script_texts(spec, args)
-    if from_file:
-        return Decision("deny", f"{head} reads its program from a file the gate cannot judge"), texts
-    for text in texts:
-        if spec.escape.search(text):
-            return Decision("deny", f"{head} program runs a command of its own: {text[:60]!r}"), texts
-    return Decision("allow"), texts
+        return Decision("allow")
+    program = read_program(spec, words)
+    if program.from_file or program.unreadable:
+        where = "from a file" if program.from_file else "through an option"
+        return Decision("deny", f"{head} reads its program {where} the gate cannot judge")
+    for candidate in (value for _, text in program.texts for value in {text, *_expand(text, bindings)}):
+        if spec.runs_a_command(candidate):
+            return Decision("deny", f"{head} program runs a command of its own: {candidate[:60]!r}")
+    return Decision("allow")
 
 
 def _exec_split(words: Sequence[str]) -> Tuple[List[str], List[str], Optional[str]]:
@@ -952,26 +915,23 @@ def _judge_simple(words: Sequence[str], targets: Sequence[str], bindings: Bindin
     if on_globals.behavior == "deny":
         return on_globals
     joined = " ".join(words)
-    refused = _never_allowed(words, bindings, ctx, roots, depth, on_targets)
+    inner = _unwrapped(words)
+    # ``xargs git push``, ``timeout 5 git push``, ``env X=1 git push``: the wrapper
+    # is off the allowlist and would be HELD — an operator can approve a hold, and
+    # approving it runs the push. Refuse it here, before any question is asked.
+    refused = _never_allowed(words, bindings, ctx, roots, depth, on_targets) or (
+        _never_allowed(inner, bindings, ctx, roots, depth, on_targets) if inner != list(words) else None)
     if refused is not None:
         return refused
-    for pattern, why in ALWAYS_ASK_BASH:
-        if pattern.search(joined):
-            # Not a refusal — the operator decides. It just never happens silently.
-            return _worst([on_targets, Decision("ask", f"this command {why}")])
-    inner = _unwrapped(words)
-    if inner != list(words):
-        # ``xargs git push``, ``timeout 5 git push``, ``env X=1 git push``: the
-        # wrapper is off the allowlist and would be HELD — an operator can
-        # approve a hold, and approving it runs the push. Refuse it here.
-        refused = _never_allowed(inner, bindings, ctx, roots, depth, on_targets)
-        if refused is not None:
-            return refused
-        if words[0] in FIND_EXEC_OPTIONS:
-            # an orphan ``-exec cmd ;`` (a second exec clause the ``;`` split off)
-            # is judged as the command it runs, like the first clause is
-            return _judge_simple(inner, targets, bindings, ctx, roots, depth + 1) if inner else _worst(
-                [on_targets, Decision("ask", f"'find {words[0]}' with no command — the operator decides")])
+    why = _asked_always(words, inner)
+    if why is not None:
+        # Not a refusal — the operator decides. It just never happens silently.
+        return _worst([on_targets, Decision("ask", f"this command {why}")])
+    if inner != list(words) and words[0] in FIND_EXEC_OPTIONS:
+        # an orphan ``-exec cmd ;`` (a second exec clause the ``;`` split off)
+        # is judged as the command it runs, like the first clause is
+        return _judge_simple(inner, targets, bindings, ctx, roots, depth + 1) if inner else _worst(
+            [on_targets, Decision("ask", f"'find {words[0]}' with no command — the operator decides")])
     if not (_matches_prefix(joined, ctx.allowed_bash) or _runs_own_code(words)):
         if _matches_prefix(joined, ctx.ask_bash):
             return _worst([on_targets, Decision("ask", f"{_first_words(joined)!r} needs the operator's approval")])
@@ -979,19 +939,12 @@ def _judge_simple(words: Sequence[str], targets: Sequence[str], bindings: Bindin
         # refusal — the session holds the call while a card is shown on the ticket's
         # Canvas; no answer in time is a deny (the ticket lands in review).
         if ctx.permission_mode == MODE_AUTO:
-            # Auto mode (``--unlisted-bash allow`` until 2026-09-29): the operator chose to run what the
-            # list does not name. NEVER_ALLOWED_BASH was refused above, the explicit
-            # ask-list still asks — and the ARGUMENTS are still judged as paths.
-            #
-            # They were not. This returned ``on_targets`` (redirections) alone, so an
-            # unlisted verb could read any file on the machine: ``xxd /etc/passwd``,
-            # ``od -c ~/.ssh/id_rsa``, ``strings``, ``base64`` — all allowed, while
-            # ``cat`` of the same path was refused. The comment here and
-            # test_auto_mode_runs_unknown_verbs_but_keeps_the_hard_lines (then test_unlisted_bash_allow_…) both
-            # said otherwise; found 2026-09-22 when that test's stand-in verb changed.
-            # "Allow what the list does not name" means the VERB, never the path.
+            # Auto mode (``--unlisted-bash allow``): the operator chose to run what the
+            # list does not name — but "allow what is not named" means the VERB, never the
+            # path. The ARGUMENTS are still judged, or an unlisted ``xxd``/``od``/``base64``
+            # could read any file on the machine while ``cat`` of it was refused (2026-09-22).
             return _worst([Decision("allow", ALLOWED_UNLISTED_BASH.format(command=_first_words(joined))),
-                           on_targets, on_globals, _judge_args(words[0], list(words[1:]), bindings, roots)])
+                           on_targets, on_globals, _judge_args(words[0], _operands(words), bindings, roots)])
         return _worst([on_targets, Decision("ask", f"{_first_words(joined)!r} is outside this ticket's Bash allowlist")])
     head = Path(words[0]).name
     outer, inner, exec_option = _exec_split(words) if head == "find" else (list(words), [], None)
@@ -1003,11 +956,9 @@ def _judge_simple(words: Sequence[str], targets: Sequence[str], bindings: Bindin
     if exec_option:
         verdicts = [*verdicts, _judge_simple(inner, [], bindings, ctx, roots, depth) if inner
                     else Decision("ask", f"'find {exec_option}' with no command — the operator decides")]
-    on_script, programs = _judge_script(head, outer[1:])
-    verdicts = [*verdicts, on_script]
+    verdicts = [*verdicts, _judge_script(head, outer, bindings)]
     if depth > 0 or head not in PATH_FREE_VERBS:
-        arguments = [a for a in outer[1:] if a not in programs]
-        verdicts = [*verdicts, _judge_args(outer[0], arguments, bindings, roots)]
+        verdicts = [*verdicts, _judge_args(outer[0], _operands(outer), bindings, roots)]
     return _worst(verdicts)
 
 
@@ -1085,14 +1036,12 @@ def _moved(words: Sequence[str], bindings: Bindings, bases: Bases) -> Bases:
 
 def _read_operands(words: Sequence[str]) -> List[str]:
     """The words a command reads as files: options, a grep/rg pattern and an
-    awk/sed program are not files."""
+    awk/sed/jq program are not files — by POSITION, so a file that happens to
+    spell the program (``awk /x/ /x/``) is still one."""
     head = Path(words[0]).name
     if head in secret_reach.GREP_VERBS or head == "rg":
         return secret_reach.search_operands(words)
-    programs: List[str] = []
-    if head in SCRIPT_VERBS:
-        programs, _ = _script_texts(SCRIPT_VERBS[head], words[1:])
-    return [w for w in words[1:] if not w.startswith("-") and w not in programs]
+    return [w for w in _operands(words) if not w.startswith("-")]
 
 
 def _operand_reach(value: str, bases: Bases, inv: secret_reach.Inventory, ctx: PolicyContext,
@@ -1249,6 +1198,54 @@ def _secret_reach_on_line(visible: str, ctx: PolicyContext) -> Optional[Decision
     return None
 
 
+def _traversal_word(word: str, data: bool, depth: int) -> str:
+    """One word as the ``..`` check reads it. A pattern or a program is left out, but
+    not a ``$(…)`` inside it: that runs wherever it sits (and is read the same way).
+    Braces are expanded (``..{/,}x`` is ``../x``); past their bound, a word with a dot reads as one."""
+    spans = _substitution_spans(word)
+    if data:
+        return " ".join(f"$({_traversal_text(body, depth + 1)})" for _, _, body in spans)
+    out, last = "", 0
+    for start, end, body in spans:
+        out, last = f"{out}{word[last:start]}$({_traversal_text(body, depth + 1)})", end
+    alternatives, finished = secret_reach.expand_braces(out + word[last:])
+    return " ".join(alternatives) if finished or "." not in word else _TRAVERSAL_MARK
+
+
+def _traversal_segment(tokens: Sequence[str], depth: int) -> str:
+    """One simple command as the ``..`` check reads it: a redirection target is a path,
+    and the line a shell's ``-c`` or an ``eval`` runs is a command line of its own."""
+    words, targets = _peel_redirections(tokens)
+    verb = len(words) - len(_verb_onward(words))
+    data = {verb + index for index in _data_indexes(words[verb:])}
+    inline = set(shell_words.inline_commands(words[verb:]))
+    read = [_traversal_text(word, depth + 1) if word in inline else _traversal_word(word, index in data, depth)
+            for index, word in enumerate(words)]
+    return " ".join([*read, *(_traversal_word(target, False, depth) for target in targets)])
+
+
+def _traversal_text(command: str, depth: int = 0) -> str:
+    """A command line as the ``..`` check reads it: its words, quotes gone, with the
+    patterns and programs a tool reads left out (``shell_data``): ``jq '.. | objects'``
+    walks a document, not a folder. Comments stay, as they do for the never-allowed
+    list: a mistake in stripping them must not hide a path. A line the gate cannot
+    tokenise, or one nested past ``MAX_NESTING``, is read as written."""
+    if depth > MAX_NESTING:
+        return command
+    try:
+        tokens = _tokens(command, keep_comments=True)
+    except ValueError:
+        return command
+    parts: List[str] = []
+    segment: List[str] = []
+    for token in tokens:
+        if _is_run_of(token, _SEPARATOR_CHARS):
+            parts, segment = [*parts, _traversal_segment(segment, depth), token], []
+        else:
+            segment = [*segment, token]
+    return " ".join([*parts, _traversal_segment(segment, depth)])
+
+
 def decide_bash(command: str, ctx: PolicyContext) -> Decision:
     # The raw nets read the COMMAND LINE. A here-document's body is data the
     # line writes, not a command in it: an unquoted body's substitutions are
@@ -1262,7 +1259,8 @@ def decide_bash(command: str, ctx: PolicyContext) -> Decision:
     secret = _secret_on_line(visible, ctx) or _secret_reach_on_line(visible, ctx)
     if secret is not None:
         return secret
-    if ".." in visible and re.search(r"(^|[\s'\"=:;|&(/])\.\.([/\\]|[\s'\");|&]|$)", visible):
+    # ``..`` is read on the words (``."."/x`` is ``../x``; a pattern or program is data).
+    if _TRAVERSAL_RE.search(_traversal_text(visible)):
         return Decision("deny", "path traversal ('..') in a shell command")
     if _ANSI_C_RE.search(visible):  # a ``$`` that OPENS a word — ``'^$'`` closing a regex is not quoting
         # ``$'…'`` is ANSI-C quoting: ``$'/etc/passwd'`` IS ``/etc/passwd`` and
