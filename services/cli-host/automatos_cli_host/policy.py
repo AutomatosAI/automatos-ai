@@ -875,17 +875,17 @@ def _asked_always(words: Sequence[str], inner: Sequence[str]) -> Optional[str]:
 
 
 def _judge_script(head: str, words: Sequence[str], bindings: Bindings) -> Decision:
-    """The program an allowed script verb (the verb first) would run, as written and
-    as the line's own variables make it (``A='e id'; sed "$A"``). Refused when it can
-    run a command of its own (``awk 'BEGIN{system(…)}'``, ``sed 's///e'``) or when the
-    gate cannot read it at all (``-f progfile``)."""
+    """The program an allowed script verb would run, as written and as the line's own variables make it
+    (``A='e id'; sed "$A"``). Refused when it can run a command of its own (``awk 'BEGIN{system(…)}'``,
+    ``sed 's///e'``) or when the gate cannot read it (``-f progfile``, an option it cannot resolve)."""
     spec = SCRIPT_VERBS.get(head)
     if spec is None:
         return Decision("allow")
     program = read_program(spec, words)
-    if program.from_file or program.unreadable:
-        where = "from a file" if program.from_file else "through an option"
-        return Decision("deny", f"{head} reads its program {where} the gate cannot judge")
+    if program.from_file:  # each reason spelled out whole: session_denials classifies by these words
+        return Decision("deny", f"{head} reads its program from a file the gate cannot judge")
+    if program.unreadable:
+        return Decision("deny", f"{head} reads its program through an option the gate cannot judge")
     for candidate in (value for _, text in program.texts for value in {text, *_expand(text, bindings)}):
         if spec.runs_a_command(candidate):
             return Decision("deny", f"{head} program runs a command of its own: {candidate[:60]!r}")
