@@ -21,6 +21,7 @@ TASK_REPORT_TYPE = "task"
 HEARTBEAT_REPORT_TYPE = "heartbeat"  # v_workspace_outputs classes it as a heartbeat (outputs_heartbeat_reports)
 HEARTBEAT_SOURCE = "heartbeat"
 RESULT_KEYS = ("result", "response", "output", "content")
+REPORT_SUBMITTED = "report_submitted"
 
 
 def _agent_name(db: Session, agent_id: Optional[int]) -> str:
@@ -91,7 +92,16 @@ def report_type_for(task: Any) -> str:
 
 async def auto_create_task_report(db: Session, workspace_id: str, task: Any, exec_result: Dict[str, Any]) -> None:
     """File an agent_reports row for a finished ticket, so it shows in Reports,
-    Deliverables and the Activity Feed. Never raises: a failure is logged."""
+    Deliverables and the Activity Feed. Never raises: a failure is logged.
+
+    Every ending of a ticket files its report here (its run, a session's result,
+    the stall sweep, the boot reaper), after the ticket's own notice
+    (``task_complete``, ``task_failed`` or ``review_pending``) has told the owner,
+    so the report raises no ``report_submitted``: the owner got two notices with
+    the same text for every ticket. A report an agent submits itself
+    (``submit_report``) still raises one.
+    """
+    from core.services.notification_dispatcher import holding
     from services.heartbeats.session_ticks import report_finished_session
     from services.report_metrics import settled_execution_metrics
     from services.report_service import ReportService
@@ -104,12 +114,13 @@ async def auto_create_task_report(db: Session, workspace_id: str, task: Any, exe
             extra={"task_id": task.id, "task_status": task.status, "trigger": "task",
                    "reported_tokens": _reported_tokens(exec_result)},
         )
-        filed = await ReportService(db, workspace_id).create_report(
-            agent_id=task.assigned_agent_id, agent_name=agent_name, title=f"Task: {task.title}",
-            content=task_report_content(task, agent_name, answer, exec_result, metrics), report_type=report_type_for(task),
-            status=_report_status(task), summary=_summary(answer, task.error_message), metrics=metrics,
-            linked_task_ids=[task.id],
-        )
+        with holding(REPORT_SUBMITTED):
+            filed = await ReportService(db, workspace_id).create_report(
+                agent_id=task.assigned_agent_id, agent_name=agent_name, title=f"Task: {task.title}",
+                content=task_report_content(task, agent_name, answer, exec_result, metrics),
+                report_type=report_type_for(task), status=_report_status(task),
+                summary=_summary(answer, task.error_message), metrics=metrics, linked_task_ids=[task.id],
+            )
         if not filed.get("success"):
             logger.warning("[BoardTasks] Auto-report creation failed for task=%s: %s", task.id, filed.get("error"))
         # A Claude Code agent's heartbeat reports now, with what its session found (13 Nov 2026).

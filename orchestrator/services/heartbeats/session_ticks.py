@@ -42,6 +42,12 @@ def only_queued_a_session(actions: Any) -> bool:
     return all(isinstance(a, dict) and a.get("action") == FILE_CLI_TICKET for a in items)
 
 
+def is_heartbeat_ticket(task: Any) -> bool:
+    """A heartbeat's own ticket or Auto's review of one: ``cli_ticket_lane`` and
+    ``auto_review`` both file theirs with source ``heartbeat``, whatever their title."""
+    return getattr(task, "source_type", None) == HEARTBEAT_SOURCE
+
+
 def is_session_heartbeat_ticket(task: Any) -> bool:
     """A Claude Code agent's heartbeat ticket (``cli_ticket_lane``: source ``heartbeat``,
     ``agent:<id>``), never Auto's review ticket (whose source is the tick's own id)."""
@@ -74,5 +80,5 @@ async def report_finished_session(workspace_id: str, task: Any, *, answer: str) 
     return True
 
 
-__all__ = ["finished_session_result", "is_session_heartbeat_ticket", "only_queued_a_session",
-           "report_finished_session"]
+__all__ = ["finished_session_result", "is_heartbeat_ticket", "is_session_heartbeat_ticket",
+           "only_queued_a_session", "report_finished_session"]

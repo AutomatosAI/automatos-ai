@@ -30,6 +30,12 @@ class _DB:
     def add(self, obj):
         self.added.append(obj)
 
+    def flush(self):
+        # a flush gives the new row its id (the consent staged with it carries it)
+        for obj in self.added:
+            if getattr(obj, "id", None) is None:
+                obj.id = 4242
+
     def commit(self):
         self.commits += 1
 
@@ -45,8 +51,8 @@ def _quiet(monkeypatch, *, existing=None, online=True):
     monkeypatch.setattr(lane, "agent_cli_provider", lambda db, agent_id: "claude")
     monkeypatch.setattr(lane, "no_cli_host_reason_for", lambda db, ws, cli: None)
     monkeypatch.setattr(lane, "_notify", lambda db, ws, task: None)
-    # The lane also records the operator's standing consent on the local edition
-    # (its own commit; covered by test_prd234_lane_consent.py) — not this shape.
+    # The lane also stages the operator's standing consent on the local edition
+    # (committed with the ticket; covered by test_prd234_lane_consent.py) — not this shape.
     import services.board_consent as consent
 
     monkeypatch.setattr(consent, "consent_for_lane_ticket", lambda db, **kw: "skipped")

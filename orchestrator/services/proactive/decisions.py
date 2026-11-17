@@ -16,7 +16,8 @@
 5. One ``UPDATE … WHERE status = 'open' RETURNING`` moves it to ``started`` with
    ``decided_via`` and ``decided_at``. Of two Starts at once, the second waits on the first's
    row lock, then matches nothing, and is refused by the state it finds: one Start wins.
-6. ``board_task``: the ticket (``start_ticket.file_ticket``), its watch
+6. ``board_task``: the ticket (``start_ticket.file_ticket``), its approval on the local
+   edition (``start_ticket.approve``, so it commits with the ticket), its watch
    (``start_ticket.watch_ticket``, FR-8), and ``started_ref`` ``{board_task_id, watch_id}``;
    ``chat``: nothing is made, and the answer's ``opens`` is
    ``{type: 'chat', suggestion_id}`` (the client opens the Auto thread with the suggestion as
@@ -162,11 +163,11 @@ def _changed(db: Session, row: ProactiveSuggestion, status: str) -> None:
     suggestion_changed(db, workspace_id=row.workspace_id, suggestion_id=row.id, user_id=row.user_id, status=status)
 
 
-def _wake(db: Session, task: Any, decider: Decider) -> None:
+def _wake(db: Session, task: Any) -> None:
     """The committed ticket's wake; a failure is logged and costs only dispatch latency, since
     the dispatch loop's poll still finds the ticket, and never undoes the Start or its audit."""
     try:
-        start_ticket.wake(db, task, decider.actor)
+        start_ticket.wake(db, task)
     except SQLAlchemyError:
         db.rollback()
         logger.exception("[proactive] the started ticket %s could not be woken", getattr(task, "id", "?"))
@@ -191,6 +192,7 @@ def _begin(db: Session, row: ProactiveSuggestion, kind: str, decider: Decider,
     if kind == CHAT:
         return {"type": OPENS_CHAT, "suggestion_id": str(row.id)}, None
     task = start_ticket.file_ticket(db, row, decider.created_by, locale)
+    start_ticket.approve(db, task, decider.actor)
     watch = start_ticket.watch_ticket(db, task, decider.created_by)
     row.started_ref = {"board_task_id": task.id, "watch_id": str(watch.id)}
     db.flush()
@@ -215,7 +217,7 @@ def start(db: Session, workspace_id: UUID, suggestion_id: UUID, decider: Decider
     answer = Started(suggestion=row.to_dict(), opens=opens)
     _changed(db, row, SUGGESTION_STARTED)
     if task is not None:
-        _wake(db, task, decider)
+        _wake(db, task)
     logger.info("[proactive] suggestion %s started (%s) in workspace %s", row.id, kind, workspace_id)
     made = {"board_task_id": opens["board_task_id"]} if task is not None else {}
     _audit(db, row, decider, STARTED_ACTION, {"kind": kind, **made})

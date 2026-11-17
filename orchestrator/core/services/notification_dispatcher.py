@@ -36,13 +36,18 @@ Design notes:
   ``push`` row is each person's switch, read by the fan-out. After the
   destinations, the three push types go to ``services.push.fanout.hand_over``
   with the in-app row's id; quiet hours hold them unless urgent or security.
+* **Held by the caller** (``holding``): inside the block, the named events are
+  not sent at all. The report a ticket's ending files holds its
+  ``report_submitted``, since the ticket's own notice said the same thing.
 """
 
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 from uuid import UUID
 
 from sqlalchemy import text
@@ -143,6 +148,23 @@ _PUSH = "push"
 # Severities quiet hours never hold.
 _THROUGH_QUIET_HOURS: frozenset[str] = frozenset({"urgent", "security"})
 
+# The events a running ``holding`` block keeps back, and what such a dispatch returns as held_back.
+_HELD_EVENTS: ContextVar[frozenset[str]] = ContextVar("notification_held_events", default=frozenset())
+HELD_BY_CALLER = "held_by_caller"
+
+
+@contextmanager
+def holding(*event_types: str) -> Iterator[None]:
+    """Inside the block, ``dispatch`` sends nothing for ``event_types``: for a caller that has
+    already told the owner what those events would say again. A ContextVar scopes it to the
+    running task, so a dispatch made anywhere else at the same moment goes out as usual."""
+    token = _HELD_EVENTS.set(_HELD_EVENTS.get() | frozenset(event_types))
+    try:
+        yield
+    finally:
+        _HELD_EVENTS.reset(token)
+
+
 # The bell's row (``_insert_in_app``); bound parameters only, its values cut to fit first.
 _INSERT_IN_APP = text(
     "INSERT INTO notifications "
@@ -240,8 +262,12 @@ class NotificationDispatcher:
         Returns a dict with a ``dispatched_to`` list naming every
         destination that was actually fired (``in_app``, ``telegram``,
         ``slack``, ``webhook``, ``channel:<uuid>``, ``push``). Silent and failed
-        destinations are not included.
+        destinations are not included. An event a ``holding`` block keeps back
+        goes nowhere and says so (``held_back``).
         """
+        if event_type in _HELD_EVENTS.get():
+            logger.info("[notify] %s held back: the caller already told the owner", event_type)
+            return {"dispatched_to": [], "held_back": HELD_BY_CALLER}
         notice = _Notice(
             event_type=event_type,
             title=title,
