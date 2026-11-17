@@ -84,6 +84,16 @@ def spreadsheet_tables(filename: str, content: bytes) -> List[Tuple[str, str]]:
     return []
 
 
+def table_paths_may_meet(filename: str, other: str) -> bool:
+    """Whether two files' tables could be written to the same workspace path, read from their
+    names alone. A file's tables are ``documents/<stem>.csv`` or ``documents/<stem>.<sheet>.csv``
+    (``spreadsheet_tables``), so two files may meet when their stems are the same, or one is the
+    other's followed by a dot and more (a sheet's name). PRD-274 §5.2: a server key may not write
+    over the copy of a spreadsheet it can't read (services/document_key_access)."""
+    mine, theirs = _safe(Path(filename).stem), _safe(Path(other).stem)
+    return mine == theirs or mine.startswith(f"{theirs}.") or theirs.startswith(f"{mine}.")
+
+
 def row_count(text: str) -> int:
     """Data rows in a CSV text, counted in code: every non-blank row after the header."""
     rows = [row for row in csv.reader(io.StringIO(text)) if any(cell.strip() for cell in row)]

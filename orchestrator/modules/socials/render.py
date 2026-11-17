@@ -101,7 +101,7 @@ from modules.socials.post_fields import resolved_fields
 from core.social_templates import (
     SOCIAL_VIDEO, SocialTemplateError, empty_required_slots, is_social_format, validate_social_blocks,
 )
-from modules.socials import ai_media, channel_sizes, deepfake_label, notify, service, spoken_fields
+from modules.socials import ai_media, channel_sizes, deepfake_label, notify, post_look, service, spoken_fields
 from modules.socials.media_store import MediaNameError, MediaStore, content_type_for, media_key, media_route
 from modules.socials.recipes import footage as footage_recipes
 from modules.socials.recipes import voice as voice_recipes
@@ -239,7 +239,7 @@ def bundle_for(
         reference=f"{EXECUTION_PREFIX}{post.id}",
         blocks=blocks,
         values=resolved.values,
-        brand_kit=brand_kit,
+        brand_kit=post_look.kit_with_look(brand_kit, getattr(post, "look", None)),  # PRD-251D US-D301: its accent
         fallback_name=fallback_name,
         keep_slots=footage_slots,
         fmt=template.format,
@@ -247,7 +247,7 @@ def bundle_for(
         story_safe=is_story(post),
     )
     bundle = ai_media.with_inputs(bundle, post, footage_slots, blocks.get("slots"))  # PRD-264 EUAI-06a
-    return deepfake_label.with_label(bundle, post)  # PRD-264 EUAI-08a: the AI-generated label
+    return deepfake_label.with_label(post_look.with_look(bundle, blocks, getattr(post, "look", None), brand_kit), post)  # US-D301, EUAI-08a
 
 
 def is_story(post: Any) -> bool:

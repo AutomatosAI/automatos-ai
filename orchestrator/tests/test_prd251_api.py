@@ -318,6 +318,10 @@ def test_the_router_serves_exactly_the_socials_routes():
             ("GET", "/api/socials/voice-examples"),  # PRD-251C US-C406: the owner's voice examples
             ("DELETE", "/api/socials/voice-examples/{example_id}"),
             ("GET", "/api/socials/posts/{post_id}/ai-labels"), ("PUT", "/api/socials/posts/{post_id}/ai-label"),  # PRD-264 EUAI-05, EUAI-08a
+            # PRD-251D US-D201: an image post's instant preview, and the kit's font faces for it
+            # (api/socials_instant_preview.py).
+            ("POST", "/api/socials/templates/{template_id}/preview-page"),
+            ("GET", "/api/socials/brand-kit/preview-fonts"),
         ]
         + [("POST", f"/api/socials/posts/{{post_id}}/{a}") for a in ACTION_PATHS]
     )

@@ -3,7 +3,8 @@
  * the order the groups show in, and which actions a role and a status allow.
  * Wave 1 (S1.1c) adds rendering: a post with a template renders from any status
  * that holds no approval, and a failed render can be edited and rendered again.
- * Wave 2 (S2.1) adds the board's columns, from the list's own grouping.
+ * PRD-251D US-D202: the calendar's List groups the posts with `groupPostsByStatus` (the Board
+ * that kept every status as a column is gone).
  * The server enforces all of it; this only decides which buttons to show.
  */
 import type { SocialPost, SocialPostStatus } from '@/lib/api-client'
@@ -110,6 +111,12 @@ const RENDERABLE: ReadonlySet<SocialPostStatus> = new Set<SocialPostStatus>([
   'draft', 'changes_requested', 'needs_approval', 'failed',
 ])
 
+/** Whether a render can start from `status`. A post that holds an approval (approved, scheduled,
+ * missed) cannot render, so its file is the one it was approved with whatever was saved since. */
+export function rendersFrom(status: SocialPostStatus): boolean {
+  return RENDERABLE.has(status)
+}
+
 // 3 Oct 2026: deleting a post is documents:delete (owner and admin hold documents:*); one
 // rendering or publishing waits, and one that went out on a channel stays (api/socials_delete.py).
 const DELETABLE: ReadonlySet<SocialPostStatus> = new Set<SocialPostStatus>([
@@ -212,10 +219,4 @@ function statusGroups(posts: ReadonlyArray<SocialPost>): StatusGroup[] {
 /** The list's groups: posts by status in SOCIAL_STATUS_ORDER, newest first; empty groups omitted. */
 export function groupPostsByStatus(posts: ReadonlyArray<SocialPost>): StatusGroup[] {
   return statusGroups(posts).filter((group) => group.posts.length > 0)
-}
-
-/** S2.1: the board's columns, one per status in SOCIAL_STATUS_ORDER, empty ones kept. The
- * same grouping as the list's, so the two views show the same posts and the same counts. */
-export function boardColumns(posts: ReadonlyArray<SocialPost>): StatusGroup[] {
-  return statusGroups(posts)
 }

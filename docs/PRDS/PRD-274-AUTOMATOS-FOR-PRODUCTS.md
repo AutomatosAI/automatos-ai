@@ -278,6 +278,13 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
 - Memory read and write on keys (`memory:read`, `memory:write`); a key reads only facts no audience limits and none
   private to a person, and what it stores names the key (#1471).
 - Starting a Playbook (`playbooks:execute`) and writing a Deliverable (`documents:write`) on keys (#1475).
+- Knowledge documents on keys: a server key that already holds `documents:write` can now also upload
+  (`POST /api/documents/upload`) and delete (`DELETE /api/documents/{id}`) knowledge documents in its own
+  workspace, and one holding `documents:read` lists (`GET /api/documents`), gets (`GET /api/documents/{id}`) and
+  searches (`POST /api/documents/search`) them. A key reaches only documents no team and no person limits; any
+  other id answers 404. Its search maps a hit only by the hit's own document id. A server key's upload refuses a
+  filename that a document the key can't reach already has, or whose workspace copy belongs to a document the key
+  can't reach; the refusal tells the key such a filename exists in its own workspace.
 - The headless chat turn: `POST /api/chat` with a key listing `agents:chat`, to a lean agent, with `model` and app
   context (§8-10); the model allow-list on the key (§8-5) (#1476).
 - Alongside: the caller's address read one way, from the header the proxy sets (#1474); stacked PRs get every
@@ -295,7 +302,9 @@ Each wave is its own branch and PR, opened as a draft and merged after this PRD.
 ### Wave 3: end-user memory and the memory write API (built)
 
 - The end-user subject, asserted by the product's server key (§8-6), with its consent record, retention and
-  erasure (#1479). A key deletes one end-user memory, and only one it wrote (#1480).
+  erasure (#1479). A key deletes one end-user memory (#1480): at first only one it wrote; now any of the end
+  user's facts whoever wrote it, so a product can forget a fact the platform distilled from the person's own
+  conversation. Never one outside their namespace, one an audience limits, or one private to anyone but them.
 - End-user chat turns: `endUserId` on a server key's `POST /api/chat`. Their consent must be on record (409), and
   a person's turn names no end user (422) (#1486). Held by the turn's end user (`core/security/end_user_turn.py`):
   - their turn writes only to their namespace, and nothing to the workspace's L2, its mirror or the daily log

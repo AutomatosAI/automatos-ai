@@ -58,3 +58,9 @@ e529b36f576f03225b9a3bb7b4d45cc47033d04b:orchestrator/tests/test_prd251w2_media_
 0a04f9391ae60db5152bfc2de7c400608b3d1a3c:orchestrator/tests/test_prd266_ai_providers_route.py:generic-api-key:289
 0a04f9391ae60db5152bfc2de7c400608b3d1a3c:orchestrator/tests/test_prd266_ai_providers_route.py:generic-api-key:309
 0a04f9391ae60db5152bfc2de7c400608b3d1a3c:orchestrator/tests/test_prd266_ai_providers_route.py:generic-api-key:315
+
+# PRD-274 W1 documents keys: a test's local variable named for the server key, passed
+# before a spreadsheet's file name, matched generic-api-key on the word and the name's
+# entropy. No secret: the name is a fixture's file name. The variable is renamed in the
+# next commit; the original line lives only in this blob. Flagged by the #1535 history scan.
+7160f7b55f1b69356e52a93c5c0b8d614185cee0:orchestrator/tests/test_afp_w1_document_keys.py:generic-api-key:589

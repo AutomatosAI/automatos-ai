@@ -60,7 +60,9 @@ LEFT_NOT_WAITING = "not_waiting"
 LEFT_NOT_IN_CAMPAIGN = "not_in_campaign"
 LEFT_NOT_SHOWN = "not_shown"
 LEFT_NOT_IN_BATCH = "not_in_batch"  # PRD-251C (C2): approving a plan's week, a post of another batch
-LEFT_RENDER_AGAIN = "render_again"  # PRD-264 EUAI-08a: its video shows the AI-generated label other than the post sets it
+# PRD-264 EUAI-08a: its video shows the AI-generated label other than the post sets it. PRD-251D US-D108: its
+# file was made before its last change to what a render reads (``core/social_file_current.py``).
+LEFT_RENDER_AGAIN = "render_again"
 
 SERIES_OFF_FOR_WORKSPACE = (
     "Series approval is off for this workspace, so each post is approved on its own. "
@@ -338,7 +340,7 @@ def _approve_one(
         return None, _left(post, LEFT_CHANGED, message, content_hash=exc.current_hash)
     except service.UnsourcedClaims as exc:
         return None, _left(post, LEFT_UNSOURCED, str(exc), claims=exc.names, unresolved=exc.unresolved)
-    except service.NotPublishable as exc:  # PRD-264 EUAI-08a: ai_media.label_mismatch
+    except service.NotPublishable as exc:  # EUAI-08a's label_mismatch, or US-D108's file older than its words
         return None, _left(post, LEFT_RENDER_AGAIN, exc.reason)
     except service.IllegalTransition:
         # Its status moved after the check (another reviewer acted first): left, never an abort.

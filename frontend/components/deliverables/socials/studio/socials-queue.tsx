@@ -31,7 +31,7 @@ import { QueueWaiting } from './queue-waiting'
 import {
   inBatch, isMonthBatch, queueBatches, queueGroups, queueHeading, waitingForInput, waitingToday, type QueueBatch, type QueueGroup,
 } from './queue-model'
-import { SocialsPostDetail } from '../socials-post-detail'
+import { SocialsPostView } from './socials-post-view'
 
 export { queuedPosts } from './queue-model'
 
@@ -117,7 +117,8 @@ export function SocialsQueue({ role, posts, selectedId, onSelect, onEdit }: Soci
             // never carries over to the next one the pane falls back to once the first leaves the queue.
             ? <QueuePane key={selected.id} post={selected} campaignName={campaignName} now={now} role={role}
                 onEdit={onEdit ? () => onEdit(selected.id) : undefined} />
-            : <SocialsPostDetail key={selected.id} post={selected} role={role} />)}
+            // PRD-251D US-D203: a person who may not approve reads the post as it is.
+            : <SocialsPostView key={selected.id} post={selected} role={role} />)}
         </div>
       )}
     </section>

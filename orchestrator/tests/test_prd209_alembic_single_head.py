@@ -182,9 +182,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # products.reuse_existing_key (a new column) and a unique partial index on workspaces: one per (product, external id).
 # 2026-11-13 (Automatos for products, Wave 5d): credit_ledger_sub_tenant_20261113 chains onto that —
 # credit_ledger.sub_tenant_id (a new nullable column) and its partial index: what each product workspace spent.
-# 2026-11-16 (Automatos for products, Wave 1): chat_turn_keys_20261116 chains onto that —
-# chat_turn_keys (a new table only): a server key's chat turn under an Idempotency-Key runs once.
-EXPECTED_HEAD = "chat_turn_keys_20261116"
+# 2026-11-16 (PRD-251D Wave 3, US-D301): prd251d_wave3 chains onto that — the ONE migration of
+# the wave: social_posts.look (a new nullable JSON column), a post's own look on its template.
+EXPECTED_HEAD = "prd251d_wave3"
 
 
 def _literal(node: ast.AST):

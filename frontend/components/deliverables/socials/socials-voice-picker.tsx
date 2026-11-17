@@ -19,7 +19,7 @@ import { Input } from '@/components/ui/input'
 import type { SocialPost, SocialPostVoice, SocialToolkitVoice, SocialVoiceSource } from '@/lib/api-client'
 import { debounce } from '@/lib/utils'
 import { useSocialToolkitVoices, useSocialVoiceSources, useUpdateSocialPost } from '@/hooks/use-socials-api'
-import { CONNECTED_MESSAGE, ConnectToolkit } from './connect-toolkit'
+import { ConnectToolkit, useRefetchOnConnect } from './connect-toolkit'
 
 /** The built-in voice's toolkit name (modules/socials/service.py KOKORO). */
 export const KOKORO = 'kokoro'
@@ -104,22 +104,6 @@ function TypedVoiceId({ source, placeholder, busy, onUse }: { source: SocialVoic
       </Button>
     </form>
   )
-}
-
-/** The connect flow ends in its own window: read the choices again when it reports back. */
-function useRefetchOnConnect(refetch: () => unknown) {
-  useEffect(() => {
-    const onMessage = (event: MessageEvent) => {
-      if (event.origin === window.location.origin && event.data?.type === CONNECTED_MESSAGE) void refetch()
-    }
-    const onFocus = () => void refetch()
-    window.addEventListener('message', onMessage)
-    window.addEventListener('focus', onFocus)
-    return () => {
-      window.removeEventListener('message', onMessage)
-      window.removeEventListener('focus', onFocus)
-    }
-  }, [refetch])
 }
 
 export function SocialsVoicePicker({ post, editable }: SocialsVoicePickerProps) {

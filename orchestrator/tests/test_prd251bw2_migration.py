@@ -46,6 +46,7 @@ from tests.test_prd251w2_campaigns import (  # noqa: E402
     WAVE2,
     WAVE2B,
     WAVE2C,
+    WAVE3D,
     _assert_same_schema,
     _load,
     _run,
@@ -101,6 +102,7 @@ def test_the_migration_builds_exactly_the_model_schema():
         with engine.begin() as conn:
             _run(conn, WAVE2B, "upgrade")
             _run(conn, WAVE2C, "upgrade")  # the model carries PRD-251C Wave 2's batch_key too
+            _run(conn, WAVE3D, "upgrade")  # and PRD-251D Wave 3's look
         migrated, model = _schema(engine, TABLES), _schema(model_engine, TABLES)
         _assert_same_schema(migrated, model, "the migration path through prd251b_wave2")
         campaigns, posts, topics = migrated["social_campaigns"], migrated["social_posts"], migrated["social_topics"]
@@ -124,6 +126,7 @@ def test_create_all_first_then_the_upgrade_twice_leaves_the_model_schema(start):
             _run(conn, WAVE2B, "upgrade")
             _run(conn, WAVE2B, "upgrade")
             _run(conn, WAVE2C, "upgrade")
+            _run(conn, WAVE3D, "upgrade")
         _assert_same_schema(_schema(engine, TABLES), _schema(model_engine, TABLES), f"create_all first, from {start}")
         checks = [name for name, _sql in _schema(engine, TABLES)["social_campaigns"]["checks"]]
         assert all(checks.count(name) == 1 for name in checks)
@@ -184,6 +187,7 @@ def test_the_downgrade_drops_what_it_added_and_the_upgrade_works_again():
         with engine.begin() as conn:
             _run(conn, WAVE2B, "upgrade")
             _run(conn, WAVE2C, "upgrade")
+            _run(conn, WAVE3D, "upgrade")
         _assert_same_schema(_schema(engine, TABLES), _schema(_model_engine(), TABLES), "upgraded again")
     finally:
         engine.dispose()

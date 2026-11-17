@@ -8,9 +8,20 @@
  * * PRD-251B: with a template marked Photo, an upload or a Library picture fills its photo spot
  *   (the template's words over it), or the whole post when asked; the spot shows its picture.
  * * AI-made (PRD-251B US-B305) has its own tests: socials-editor-ai.test.tsx.
+ * * PRD-251D US-D107 (E7): each template card says what the template is for (its description,
+ *   cut to two lines); a search over the name and the description and the chips All, With a
+ *   photo and No photo narrow the gallery, and say so when nothing matches; "Let Auto pick"
+ *   stays first and the chosen template stays shown. The model has its own tests:
+ *   socials-template-gallery-model.test.ts.
+ * * PRD-251D US-D301 (E10): under the gallery, the post's own look: light or dark for a template
+ *   built on paper only (its entry's `looks`), the accent and the logo for every template and for
+ *   "Let Auto pick", each at the kit's own until chosen. The choices save with the draft and mark
+ *   the preview out of date. The model has its own tests: socials-look-options-model.test.ts.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
-import { screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
+
+import type { SocialTemplateSummary } from '@/lib/api-client'
 
 vi.mock('@/lib/api-client', async () => (await import('./socials-editor-harness')).apiModule)
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
@@ -28,10 +39,15 @@ vi.mock('@/components/widgets/FileWidget/FilePreview', () => ({
 
 import { SocialsEditor } from '@/components/deliverables/socials/studio/socials-editor'
 import { DROP_HINT, DROP_TITLE } from '@/components/deliverables/socials/studio/editor-look-sources'
-import { AUTO_PICK_NOTE } from '@/components/deliverables/socials/studio/editor-look-card'
+import { AUTO_PICK, AUTO_PICK_NOTE, PHOTO_BADGE, TemplateGallery } from '@/components/deliverables/socials/studio/editor-look-card'
+import { FILTER_LABEL, SEARCH_LABEL, noMatchLine } from '@/components/deliverables/socials/studio/template-gallery-model'
 import { DROP_PHOTO_TITLE } from '@/components/deliverables/socials/studio/editor-look-sources'
 import { PHOTO_SPOT_HINT, PHOTO_TARGET, WHOLE_POST_HINT } from '@/components/deliverables/socials/studio/editor-look-photo'
 import { OWN_PICTURE } from '@/components/deliverables/socials/studio/editor-look-ai'
+import {
+  ACCENT_LABEL, LOGO_LABEL, LOOK_OPTIONS_LABEL, MODE_LABEL, NO_MODE_NOTE,
+} from '@/components/deliverables/socials/studio/editor-look-options'
+import { PREVIEW_STALE } from '@/components/deliverables/socials/studio/preview-model'
 import { IMAGE_TEMPLATE, PHOTO_TEMPLATE, api, post, renderWith, resetApi } from './socials-editor-harness'
 
 const go = vi.fn()
@@ -143,5 +159,196 @@ describe('the Look card', () => {
     source('Upload')
     expect(await within(look()).findByText(OWN_PICTURE)).toBeInTheDocument()
     expect(within(look()).getByRole('img', { name: OWN_PICTURE })).toHaveAttribute('src', 'blob:/api/socials/posts/post-1/media/upload-1.png')
+  })
+})
+
+/** PRD-251D US-D107: templates as the gallery gets them, in the server's order (by name). Fact card has no description. */
+const QUOTE_ABOUT = "A pull-quote set large on the brand's paper, one phrase in the brand colour, with who said it."
+const REVIEW_ABOUT = "A customer's words on a card over your photo, with their stars and name. For a review, a testimonial or a thank-you."
+const QUOTE: SocialTemplateSummary = { ...IMAGE_TEMPLATE, id: 'tpl-quote', name: 'Quote card', description: QUOTE_ABOUT }
+const REVIEW: SocialTemplateSummary = { ...PHOTO_TEMPLATE, id: 'tpl-review', name: 'Review', description: REVIEW_ABOUT }
+const GALLERY = [IMAGE_TEMPLATE, QUOTE, REVIEW]
+const CARD_NAMES = new Set([AUTO_PICK, IMAGE_TEMPLATE.name, QUOTE.name, REVIEW.name])
+
+const templateList = () => screen.getByRole('list', { name: 'Templates' })
+/** The names on the cards the gallery shows, in order: each name is its own element's text. */
+const shown = () => within(templateList()).getAllByText((text) => CARD_NAMES.has(text)).map((name) => name.textContent)
+const search = (words: string) => fireEvent.change(screen.getByLabelText(SEARCH_LABEL), { target: { value: words } })
+const chip = (label: string) => within(screen.getByRole('group', { name: FILTER_LABEL })).getByRole('button', { name: label })
+
+function renderGallery(chosen: string | null = null, templates: ReadonlyArray<SocialTemplateSummary> = GALLERY) {
+  const onPick = vi.fn()
+  render(<TemplateGallery templates={templates} loading={false} chosen={chosen} onPick={onPick} />)
+  return onPick
+}
+
+describe('the template gallery says what each template is for (PRD-251D US-D107)', () => {
+  it('each card shows its description under its name, cut to two lines; a template without one shows its name', () => {
+    renderGallery()
+    const review = within(templateList()).getByRole('button', { name: /Review/ })
+    const about = within(review).getByText(REVIEW_ABOUT)
+    expect(about).toHaveClass('line-clamp-2')
+    expect(within(review).getByText(REVIEW.name).nextElementSibling).toBe(about)
+    expect(within(review).getByText(PHOTO_BADGE)).toBeInTheDocument()
+    expect(within(templateList()).getByRole('button', { name: /Quote card/ })).toHaveTextContent(QUOTE_ABOUT)
+    expect(within(templateList()).getByRole('button', { name: /Fact card/ })).toHaveTextContent(/^Fact card$/)
+  })
+
+  it('the search narrows the list by name and by description as the person types, and says when nothing matches', () => {
+    const onPick = renderGallery()
+    expect(screen.getByLabelText(SEARCH_LABEL)).toHaveAttribute('type', 'search')
+    search('quote')
+    expect(shown()).toEqual([AUTO_PICK, QUOTE.name])
+    search('TESTIMONIAL') // only in Review's description, and in another case
+    expect(shown()).toEqual([AUTO_PICK, REVIEW.name])
+    expect(screen.queryByRole('status')).toBeNull()
+    fireEvent.click(within(templateList()).getByRole('button', { name: /Review/ }))
+    expect(onPick).toHaveBeenCalledWith(REVIEW.id)
+    search('zebra')
+    expect(shown()).toEqual([AUTO_PICK])
+    expect(screen.getByRole('status')).toHaveTextContent(noMatchLine('zebra', 'all'))
+    search('')
+    expect(shown()).toEqual([AUTO_PICK, IMAGE_TEMPLATE.name, QUOTE.name, REVIEW.name])
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('the chips filter to With a photo and No photo, All shows every one, and Let Auto pick stays first', () => {
+    renderGallery()
+    const chips = screen.getByRole('group', { name: FILTER_LABEL })
+    expect(within(chips).getAllByRole('button').map((b) => b.textContent)).toEqual(['All', 'With a photo', 'No photo'])
+    expect(chip('All')).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(chip('With a photo'))
+    expect(chip('With a photo')).toHaveAttribute('aria-pressed', 'true')
+    expect(chip('All')).toHaveAttribute('aria-pressed', 'false')
+    expect(shown()).toEqual([AUTO_PICK, REVIEW.name])
+    fireEvent.click(chip('No photo'))
+    expect(shown()).toEqual([AUTO_PICK, IMAGE_TEMPLATE.name, QUOTE.name])
+    search('testimonial') // Review's words, but Review shows a photo
+    expect(shown()).toEqual([AUTO_PICK])
+    expect(screen.getByRole('status')).toHaveTextContent(noMatchLine('testimonial', 'no_photo'))
+    search('')
+    fireEvent.click(chip('All'))
+    expect(shown()).toEqual([AUTO_PICK, IMAGE_TEMPLATE.name, QUOTE.name, REVIEW.name])
+  })
+
+  it('a chip no template fits says so, and with no templates there is nothing to search', () => {
+    renderGallery(null, [IMAGE_TEMPLATE, QUOTE])
+    fireEvent.click(chip('With a photo'))
+    expect(shown()).toEqual([AUTO_PICK])
+    expect(screen.getByRole('status')).toHaveTextContent(noMatchLine('', 'photo'))
+    cleanup()
+
+    renderGallery(null, [])
+    expect(shown()).toEqual([AUTO_PICK])
+    expect(screen.queryByLabelText(SEARCH_LABEL)).toBeNull()
+    expect(screen.queryByRole('group', { name: FILTER_LABEL })).toBeNull()
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('the chosen template stays shown, in its place, when the search or a chip would hide it', () => {
+    renderGallery(REVIEW.id)
+    fireEvent.click(chip('No photo'))
+    expect(shown()).toEqual([AUTO_PICK, IMAGE_TEMPLATE.name, QUOTE.name, REVIEW.name])
+    expect(within(templateList()).getByRole('button', { name: /Review/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByRole('status')).toBeNull()
+    search('zebra')
+    expect(shown()).toEqual([AUTO_PICK, REVIEW.name])
+    expect(screen.getByRole('status')).toHaveTextContent(noMatchLine('zebra', 'no_photo'))
+  })
+
+  it("the editor's Look shows what each template is for, and its search narrows the gallery", async () => {
+    api.listSocialTemplates.mockResolvedValue([IMAGE_TEMPLATE, REVIEW])
+    renderWith(<SocialsEditor role="owner" post={null} go={go} />)
+    expect(await within(look()).findByText(REVIEW_ABOUT)).toBeInTheDocument()
+    fireEvent.change(within(look()).getByLabelText(SEARCH_LABEL), { target: { value: 'testimonial' } })
+    expect(within(within(look()).getByRole('list', { name: 'Templates' })).getAllByRole('button')).toHaveLength(2)
+    expect(within(look()).queryByRole('button', { name: /Fact card/ })).toBeNull()
+    expect(within(look()).getByRole('button', { name: /Review/ })).toBeInTheDocument()
+  })
+})
+
+/** PRD-251D US-D301: a template built on paper (it takes light or dark) and one on a photo, as the gallery gets them. */
+const PAPER_CARD: SocialTemplateSummary = { ...IMAGE_TEMPLATE, id: 'tpl-paper', name: 'Quote card', looks: ['mode', 'accent', 'logo'] }
+const ON_A_PHOTO: SocialTemplateSummary = { ...PHOTO_TEMPLATE, id: 'tpl-on-photo', name: 'Photo headline', looks: ['accent', 'logo'] }
+const WIDE_FILE = {
+  aspect: '16:9', deliverable_id: 'd-wide', name: 'image-16x9.png', url: 'https://cdn.test/wide.png', content_type: 'image/png', bytes: 10, error: null,
+}
+const lookOptions = () => within(look()).findByRole('group', { name: LOOK_OPTIONS_LABEL })
+const pressedIn = (group: HTMLElement) =>
+  within(group).getAllByRole('button').filter((button) => button.getAttribute('aria-pressed') === 'true').map((button) => button.textContent)
+const choose = (options: HTMLElement, label: string, choice: string) =>
+  fireEvent.click(within(within(options).getByRole('group', { name: label })).getByRole('button', { name: choice }))
+
+describe('the look options under the gallery (PRD-251D US-D301)', () => {
+  it("a template built on paper offers light or dark, the accent and the logo, each at the kit's own", async () => {
+    api.listSocialTemplates.mockResolvedValue([PAPER_CARD, ON_A_PHOTO])
+    renderWith(<SocialsEditor role="owner" post={post({ template_id: 'tpl-paper' })} go={go} />)
+    const options = await lookOptions()
+    expect(pressedIn(await within(options).findByRole('group', { name: MODE_LABEL }))).toEqual(['Light'])
+    expect(pressedIn(within(options).getByRole('group', { name: ACCENT_LABEL }))).toEqual(['As your kit'])
+    expect(pressedIn(within(options).getByRole('group', { name: LOGO_LABEL }))).toEqual(['On'])
+    expect(within(options).queryByText(NO_MODE_NOTE)).toBeNull()
+  })
+
+  it('a template on a photo takes no light or dark: picking one hides the choice, says why and drops a dark choice', async () => {
+    api.listSocialTemplates.mockResolvedValue([PAPER_CARD, ON_A_PHOTO])
+    renderWith(<SocialsEditor role="owner" post={post({ template_id: 'tpl-paper' })} go={go} />)
+    const options = await lookOptions()
+    await within(options).findByRole('group', { name: MODE_LABEL })
+    choose(options, MODE_LABEL, 'Dark')
+    fireEvent.click(within(within(look()).getByRole('list', { name: 'Templates' })).getByRole('button', { name: /Photo headline/ }))
+    expect(within(options).queryByRole('group', { name: MODE_LABEL })).toBeNull()
+    expect(within(options).getByRole('group', { name: ACCENT_LABEL })).toBeInTheDocument()
+    expect(within(options).getByRole('group', { name: LOGO_LABEL })).toBeInTheDocument()
+    expect(within(options).getByText(NO_MODE_NOTE)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }))
+    // No hidden choice rides on: the dark choice went with the template that took it.
+    await waitFor(() =>
+      expect(api.updateSocialPost).toHaveBeenCalledWith('post-1', expect.objectContaining({ template_id: 'tpl-on-photo', look: null })),
+    )
+  })
+
+  it('Let Auto pick offers the accent and the logo, and no light or dark', async () => {
+    api.listSocialTemplates.mockResolvedValue([PAPER_CARD])
+    renderWith(<SocialsEditor role="owner" post={null} go={go} />)
+    const options = await lookOptions()
+    expect(within(options).queryByRole('group', { name: MODE_LABEL })).toBeNull()
+    expect(within(options).getByRole('group', { name: ACCENT_LABEL })).toBeInTheDocument()
+    expect(within(options).getByRole('group', { name: LOGO_LABEL })).toBeInTheDocument()
+    expect(within(options).queryByText(NO_MODE_NOTE)).toBeNull()
+  })
+
+  it("the choices save with the draft, the kit's own left out", async () => {
+    api.listSocialTemplates.mockResolvedValue([PAPER_CARD])
+    renderWith(<SocialsEditor role="owner" post={post({ template_id: 'tpl-paper' })} go={go} />)
+    const options = await lookOptions()
+    await within(options).findByRole('group', { name: MODE_LABEL })
+    choose(options, MODE_LABEL, 'Dark')
+    choose(options, LOGO_LABEL, 'Off')
+    choose(options, ACCENT_LABEL, 'Strong')
+    choose(options, ACCENT_LABEL, 'As your kit')
+    expect(pressedIn(within(options).getByRole('group', { name: MODE_LABEL }))).toEqual(['Dark'])
+    expect(pressedIn(within(options).getByRole('group', { name: ACCENT_LABEL }))).toEqual(['As your kit'])
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }))
+    await waitFor(() =>
+      expect(api.updateSocialPost).toHaveBeenCalledWith('post-1', expect.objectContaining({ look: { mode: 'dark', logo: false } })),
+    )
+  })
+
+  it('a look change marks the preview out of date', async () => {
+    api.listSocialTemplates.mockResolvedValue([PAPER_CARD])
+    api.getSocialPostMedia.mockResolvedValue([WIDE_FILE])
+    const shown = post({
+      template_id: 'tpl-paper', media: { '16:9': ['d-wide'] },
+      targets: [{ id: 't-twitter', toolkit: 'twitter', post_kind: 'image', options: {} } as any],
+    })
+    renderWith(<SocialsEditor role="owner" post={shown} go={go} />)
+    const frame = await within(screen.getByRole('region', { name: 'Preview' })).findByTestId('socials-preview-frame')
+    await within(frame).findByTestId('file-preview')
+    expect(within(frame).queryByText(PREVIEW_STALE)).toBeNull()
+    const options = await lookOptions()
+    await within(options).findByRole('group', { name: MODE_LABEL })
+    choose(options, MODE_LABEL, 'Dark')
+    expect(within(frame).getByText(PREVIEW_STALE)).toBeInTheDocument()
   })
 })

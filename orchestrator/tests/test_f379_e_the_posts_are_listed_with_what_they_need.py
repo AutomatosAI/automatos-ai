@@ -27,7 +27,7 @@ from tests.test_prd251w1_social_post_tools import ACTOR, _created, _row, _tool  
 env = harness.env  # the US-116 fixture: SQLite, the real router and executor
 
 ROW_KEYS = {"id", "title", "status", "format", "template_id", "created_at", "scheduled_for", "rendered",
-            "has_caption", "needs"}
+            "has_caption", "needs", "planned"}  # PRD-251D (US-D106): the planned slot, in words
 
 
 def _post(status, **fields):

@@ -27,8 +27,12 @@ format sent as the post's, a template named in other words, a field the template
 a post to render with no template: ``social_post_checks``), and create and update answer in a
 few lines, a refused render as a failed call that says why (``social_post_results``).
 
-Nothing here approves, schedules or publishes (D6, D14). With Socials off for
-the workspace (either switch, D1), every tool refuses and reads or writes
+Nothing here approves, schedules or publishes (D6, D14). PRD-251D (E6): ``planned_for`` with its
+``timezone`` is the post's planned slot, where it waits for the owner, never its schedule: checked
+before anything is saved (``social_post_checks.slot_asked``), then written alone with
+``service.set_planned_for`` and the slot route's compare-and-set, on a draft, a post waiting for
+approval or one sent back only. A person's approval schedules it there (``service.approve``).
+With Socials off for the workspace (either switch, D1), every tool refuses and reads or writes
 nothing. Each tool acts as its agent (``_agent_id`` / ``_agent_name``, minted
 by the server): ``agent:<id>`` is the actor of every ``review_log`` entry it
 causes, and a draft or an edit names the agent.
@@ -42,7 +46,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from core.social_post_schema import LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT
+from core.social_post_schema import LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT, PLANNED_FOR, PLANNED_ZONE
 from modules.tools.discovery.actions_socials import HISTORY_MAX_DAYS, HISTORY_MAX_LIMIT
 
 logger = logging.getLogger(__name__)
@@ -64,6 +68,7 @@ SENT_FOR_APPROVAL = (
     "Sent for approval: a person approves it, asks for changes or rejects it in the Socials tab, "
     "and the platform publishes an approved post."
 )
+NOTHING_TO_CHANGE = "Nothing to change: send the fields to change, or render true."
 
 
 class _Refused(Exception):
@@ -357,6 +362,41 @@ async def _answer(db: Session, workspace: Any, post: Any, actor: str, template: 
     return results.not_rendered(post.to_dict(), template, error, names)
 
 
+def _slot(fields: Dict[str, Any], post: Any = None) -> Any:
+    """PRD-251D (E6): the planned slot ``fields`` asks for (``social_post_checks.slot_asked``), refused
+    before anything is saved; None when it asks for none."""
+    from modules.tools.discovery.social_post_checks import slot_asked
+
+    slot, problem = slot_asked(fields.pop(PLANNED_FOR, None), fields.pop(PLANNED_ZONE, None), post)
+    if problem is not None:
+        raise _Refused(problem)
+    return slot
+
+
+def _planned(db: Session, post: Any, slot: Any, template: Any) -> Optional[Dict[str, Any]]:
+    """PRD-251D (E6): the slot written alone once the post is saved, as PUT /posts/{id}/slot writes it
+    before approval (``set_planned_for``, then the compare-and-set commit, nothing between): the hash,
+    the status and an approval stay. None when written or not asked; else the failed answer."""
+    from api import socials as socials_api
+    from modules.socials import service
+    from modules.tools.discovery.social_post_checks import slot_held
+    from modules.tools.discovery.social_post_results import slot_not_set
+
+    if slot is None:
+        return None
+    held = slot_held(post)  # checked before the save too; the save never moves these statuses
+    why = None if held is None else f"it {held}"
+    if why is None:
+        status, content_hash = post.status, post.content_hash
+        try:
+            service.set_planned_for(post, *slot)
+            socials_api._commit_unchanged(db, post, status=status, content_hash=content_hash)
+        except service.SocialsError as exc:
+            db.rollback()
+            why = str(exc)
+    return None if why is None else slot_not_set(post.to_dict(), getattr(template, "name", None), why)
+
+
 def _set_format(fields: Dict[str, Any]) -> None:
     """F379: the post format ``fields`` sends, a template's format taken as the one it names."""
     from modules.tools.discovery.social_post_checks import post_format
@@ -409,14 +449,15 @@ async def _create_fields(db: Session, workspace_id: UUID, fields: Dict[str, Any]
 
 
 async def create_social_post(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """A new draft, through ``create_post``; then its render unless ``render`` is false or it is
-    a text post. The answer is compact, and a refused render is a failed call (F379)."""
+    """A new draft, through ``create_post``; then its planned slot when it asks for one (PRD-251D), and
+    its render unless ``render`` is false or it is a text post. The answer is compact, and a refused
+    render is a failed call (F379)."""
     from pydantic import ValidationError
 
     from api import socials as socials_api
     from modules.socials import service
     from modules.tools.discovery.social_post_checks import TEXT_POST
-    from modules.tools.discovery.social_post_results import DRAFT_SAVED
+    from modules.tools.discovery.social_post_results import DRAFT_SAVED, planned_note
 
     workspace, refusal = _open(db, workspace_id)
     if refusal:
@@ -426,6 +467,7 @@ async def create_social_post(db: Session, workspace_id: UUID, params: Dict[str, 
     try:
         render_now = _flag(fields, "render", True)
         channels = fields.pop(CHANNELS, None)
+        slot = _slot(fields)  # PRD-251D (E6): refused before the post is made
         template = await _create_fields(db, workspace_id, fields, render_now)
         body = socials_api.CreateSocialPostRequest.model_validate(
             {**fields, "template_id": template.id if template is not None else None}
@@ -439,8 +481,12 @@ async def create_social_post(db: Session, workspace_id: UUID, params: Dict[str, 
     except service.SocialsError as exc:
         db.rollback()
         return _refusal(exc)
+    unset = _planned(db, post, slot, template)
+    if unset:
+        return unset
     render_now = render_now and post.format != TEXT_POST
-    return await _answer(db, workspace, post, actor, template, render_now=render_now, message=DRAFT_SAVED)
+    answer = await _answer(db, workspace, post, actor, template, render_now=render_now, message=DRAFT_SAVED)
+    return planned_note(answer, slot)
 
 
 async def _update_fields(db: Session, workspace_id: UUID, post: Any, fields: Dict[str, Any]) -> Any:
@@ -478,14 +524,27 @@ async def _update_fields(db: Session, workspace_id: UUID, post: Any, fields: Dic
     return template
 
 
+async def _edited(db: Session, post: Any, actor: str, agent: str, changes: Dict[str, Any], *, slot: Any,
+                  render_now: bool) -> None:
+    """The update's own save: its changes through ``edit_post`` (one compare-and-set commit). A call
+    that changes nothing, sets no planned slot and renders nothing is refused."""
+    from api import socials as socials_api
+
+    if not changes and slot is None and not render_now:
+        raise _Refused(NOTHING_TO_CHANGE)
+    if changes:
+        await socials_api.edit_post(db, post, actor, changes, agent=agent)
+
+
 async def update_social_post(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Change a post, through ``edit_post``; then render it again when ``render`` is true. The
-    answer is compact, and a refused render is a failed call (F379)."""
+    """Change a post, through ``edit_post``; then move its planned slot when it asks to (PRD-251D), and
+    render it again when ``render`` is true. The answer is compact, and a refused render is a failed
+    call (F379)."""
     from pydantic import ValidationError
 
     from api import socials as socials_api
     from modules.socials import service
-    from modules.tools.discovery.social_post_results import CHANGED
+    from modules.tools.discovery.social_post_results import CHANGED, planned_note
 
     workspace, refusal = _open(db, workspace_id)
     if refusal:
@@ -496,16 +555,14 @@ async def update_social_post(db: Session, workspace_id: UUID, params: Dict[str, 
         post = _post(db, workspace_id, fields.pop("post_id", None))
         render_now = _flag(fields, "render", False)
         channels = fields.pop(CHANNELS, None)
+        slot = _slot(fields, post)  # PRD-251D (E6): the post's status and the time, before anything is saved
         template = await _update_fields(db, workspace_id, post, fields)
         changes = socials_api.UpdateSocialPostRequest.model_validate(fields).model_dump(
             exclude_unset=True, by_alias=True
         )
         targets = _channel_targets(db, workspace_id, channels, changes.get("format", post.format))
         changes = changes if targets is None else {**changes, "targets": targets}  # one compare-and-set commit
-        if not changes and not render_now:
-            raise _Refused("Nothing to change: send the fields to change, or render true.")
-        if changes:
-            await socials_api.edit_post(db, post, actor, changes, agent=agent)
+        await _edited(db, post, actor, agent, changes, slot=slot, render_now=render_now)
     except _Refused as exc:
         return _refused(str(exc))
     except ValidationError as exc:
@@ -513,7 +570,11 @@ async def update_social_post(db: Session, workspace_id: UUID, params: Dict[str, 
     except service.SocialsError as exc:
         db.rollback()
         return _refusal(exc)
-    return await _answer(db, workspace, post, actor, template, render_now=render_now, message=CHANGED)
+    unset = _planned(db, post, slot, template)
+    if unset:
+        return unset
+    answer = await _answer(db, workspace, post, actor, template, render_now=render_now, message=CHANGED)
+    return planned_note(answer, slot)
 
 
 async def submit_social_post(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:

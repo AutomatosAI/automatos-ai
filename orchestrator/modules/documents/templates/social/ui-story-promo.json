@@ -41,426 +41,462 @@
   "variables_schema": {
     "hook_eyebrow": {
       "type": "text",
-      "label": "Hook: eyebrow above the clock",
+      "label": "Hook: the line above the clock",
       "max_chars": 44,
-      "description": "Mono caps line, e.g. the day and the business name."
+      "description": "Written in capitals above the big clock as the video opens: the day and the business's name, separated by ' · '."
     },
     "hook_time_before": {
       "type": "text",
-      "label": "Hook: the clock before the cut",
+      "label": "Hook: the clock, first",
       "max_chars": 5,
-      "description": "HH:MM, the minute before the hook's moment."
+      "description": "The big clock as the video opens, as HH:MM: the minute before the moment the headline is about."
     },
     "hook_time_after": {
       "type": "text",
-      "label": "Hook: the clock after the cut",
+      "label": "Hook: the clock, then",
       "max_chars": 5,
-      "description": "HH:MM, the hook's moment."
+      "description": "The time the big clock flips to, as HH:MM: the moment the headline is about."
     },
     "hook_line": {
       "type": "text",
       "label": "Hook: the headline",
       "max_chars": 24,
-      "description": "Spoken and shown word by word; the accent words follow it."
+      "description": "The large line under the clock, landing word by word as the voice says it. The accent words follow it. Four or five words."
     },
     "hook_accent": {
       "type": "text",
       "label": "Hook: the accent words",
       "max_chars": 6,
-      "description": "Shown in the brand colour, in italics, after the headline.",
+      "description": "One short word that ends the headline, in italics in the brand colour, spoken with it. Leave empty for none.",
       "default": ""
     },
     "problem_line": {
       "type": "text",
       "label": "Problem: the line",
       "max_chars": 24,
-      "description": "The turn after the hook, spoken and shown word by word."
+      "description": "The next line, on its own once the screen goes dark: the problem the hook sets up, word by word and spoken. The accent words follow it."
     },
     "problem_accent": {
       "type": "text",
       "label": "Problem: the accent words",
       "max_chars": 14,
+      "description": "Words that end the problem line, in italics in the brand colour, spoken with it. Leave empty for none.",
       "default": ""
     },
     "tagline_lead": {
       "type": "text",
       "label": "Reveal: the tagline before its accent",
       "max_chars": 24,
-      "description": "Under the logo and the brand name, word by word."
+      "description": "Under the logo and the brand's name in the reveal, word by word, and spoken. The tagline reads this part, the accent word, then the rest."
     },
     "tagline_accent": {
       "type": "text",
       "label": "Reveal: the tagline's accent word",
       "max_chars": 12,
+      "description": "One word of the tagline in italics in the brand colour, between its two parts, spoken with it. Leave empty for none.",
       "default": ""
     },
     "tagline_tail": {
       "type": "text",
       "label": "Reveal: the tagline after its accent",
       "max_chars": 18,
+      "description": "The end of the tagline, after the accent word, spoken with it. Leave empty for none.",
       "default": ""
     },
     "chat_crumb": {
       "type": "text",
-      "label": "Chat: the breadcrumb",
+      "label": "Chat: the page name at the top",
       "max_chars": 30,
+      "description": "Small text at the top left of the product's chat screen, before the conversation's title, like a folder name.",
       "default": "Messages ›"
     },
     "chat_title": {
       "type": "text",
       "label": "Chat: the conversation's title",
-      "max_chars": 28
+      "max_chars": 28,
+      "description": "At the top of the chat screen, after the page name, in brighter text: what this conversation is about, in a few words."
     },
     "chat_counter_label": {
       "type": "text",
-      "label": "Chat: the counter's label",
+      "label": "Chat: the counter's word",
       "max_chars": 12,
+      "description": "A short word in capitals in the pill at the top right of the chat screen, before its number.",
       "default": "ACTIVE"
     },
     "chat_counter": {
       "type": "text",
-      "label": "Chat: the counter",
+      "label": "Chat: the counter's number",
       "max_chars": 3,
+      "description": "The number in the pill at the top right of the chat screen, such as how many conversations are open. Digits only.",
       "default": "3"
     },
     "chat_greeting": {
       "type": "text",
       "label": "Chat: the assistant's greeting",
       "max_chars": 60,
-      "description": "Shown before the request is typed."
+      "description": "The product's greeting at the top of the chat, in large type, shown before the request is typed. One short sentence."
     },
     "chat_request": {
       "type": "text",
       "label": "Chat: the request",
       "max_chars": 100,
-      "description": "Typed into the composer, then sent as the user's message."
+      "description": "What the person asks the product for: typed into the message box, then sent as their message. One sentence."
     },
     "chat_thinking": {
       "type": "text",
-      "label": "Chat: the thinking label",
+      "label": "Chat: the thinking word",
       "max_chars": 16,
+      "description": "Shown with three moving dots in the product's reply while it works out its answer.",
       "default": "Thinking"
     },
     "chat_reply": {
       "type": "text",
       "label": "Chat: the assistant's reply",
       "max_chars": 40,
+      "description": "The first line of the product's reply, above the three steps it takes.",
       "default": "On it. Here's the plan."
     },
     "step_1_label": {
       "type": "text",
-      "label": "Chat: step 1",
+      "label": "Chat: reply step 1",
       "max_chars": 22,
+      "description": "The first step listed in the reply: what the product does first. Its detail and its time follow on the same row.",
       "default": "Looking up"
     },
     "step_1_detail": {
       "type": "text",
-      "label": "Chat: step 1's detail",
+      "label": "Chat: reply step 1's detail",
       "max_chars": 24,
-      "description": "Starts with ' · ', e.g. '· 4 notes'."
+      "description": "What step 1 works on, after its name, starting with '· ', such as a count of notes or a document's name."
     },
     "step_1_time": {
       "type": "text",
-      "label": "Chat: step 1's time",
+      "label": "Chat: reply step 1's time",
       "max_chars": 6,
+      "description": "How long step 1 took, at the end of its row, in seconds with an 's'.",
       "default": "0.4s"
     },
     "step_2_label": {
       "type": "text",
-      "label": "Chat: step 2",
+      "label": "Chat: reply step 2",
       "max_chars": 22,
+      "description": "The second step listed in the reply: what the product does next.",
       "default": "Checking"
     },
     "step_2_detail": {
       "type": "text",
-      "label": "Chat: step 2's detail",
+      "label": "Chat: reply step 2's detail",
       "max_chars": 24,
-      "description": "Starts with ' · ', e.g. '· 4 notes'."
+      "description": "What step 2 works on, after its name, starting with '· ', such as the document it checks."
     },
     "step_2_time": {
       "type": "text",
-      "label": "Chat: step 2's time",
+      "label": "Chat: reply step 2's time",
       "max_chars": 6,
+      "description": "How long step 2 took, at the end of its row, in seconds with an 's'.",
       "default": "0.9s"
     },
     "step_3_label": {
       "type": "text",
-      "label": "Chat: step 3",
+      "label": "Chat: reply step 3",
       "max_chars": 22,
+      "description": "The third step listed in the reply: what the product does last.",
       "default": "Setting up"
     },
     "step_3_detail": {
       "type": "text",
-      "label": "Chat: step 3's detail",
+      "label": "Chat: reply step 3's detail",
       "max_chars": 24,
-      "description": "Starts with ' · ', e.g. '· 4 notes'."
+      "description": "What step 3 works on, after its name, starting with '· ', such as how many tasks it sets up for the board."
     },
     "step_3_time": {
       "type": "text",
-      "label": "Chat: step 3's time",
+      "label": "Chat: reply step 3's time",
       "max_chars": 6,
+      "description": "How long step 3 took, at the end of its row, in seconds with an 's'.",
       "default": "1.2s"
     },
     "route_label": {
       "type": "text",
-      "label": "Chat: where the work was routed",
+      "label": "Chat: where the work went",
       "max_chars": 32,
-      "description": "e.g. 'Routed to: NEWSROOM 87%'."
+      "description": "The last line of the reply: who the work went to and how sure the product is, written as 'Routed to:', a name in capitals and a percentage."
     },
     "chat_placeholder": {
       "type": "text",
-      "label": "Chat: the composer's placeholder",
+      "label": "Chat: the message box's hint",
       "max_chars": 30,
+      "description": "The hint in the empty message box at the foot of the chat screen, before the request is typed.",
       "default": "Send a message..."
     },
     "board_eyebrow": {
       "type": "text",
-      "label": "Board: eyebrow",
+      "label": "Board: the line above the title",
       "max_chars": 44,
-      "description": "The workspace, the date and the time, e.g. 'Operations · Tue 22 Sep · 22:47 London'."
+      "description": "Small text at the top of the task board: the team or workspace, the day and date, the time and the city, separated by ' · '."
     },
     "board_title": {
       "type": "text",
-      "label": "Board: title",
+      "label": "Board: the title",
       "max_chars": 24,
+      "description": "The task board's large title, under the line above it.",
       "default": "Today"
     },
     "board_working_label": {
       "type": "text",
-      "label": "Board: the first counter's label",
+      "label": "Board: counter 1's label",
       "max_chars": 12,
+      "description": "The word over the board's first counter, which counts up as each task starts.",
       "default": "ACTIVE"
     },
     "board_agents_label": {
       "type": "text",
-      "label": "Board: the second counter's label",
+      "label": "Board: counter 2's label",
       "max_chars": 12,
+      "description": "The word over the board's second counter, whose number is set below.",
       "default": "TEAM"
     },
     "board_agents": {
       "type": "text",
-      "label": "Board: the second counter",
+      "label": "Board: counter 2's number",
       "max_chars": 3,
       "default": "4",
-      "description": "A number, e.g. how many people work the board."
+      "description": "The number under counter 2's label, such as how many people work the board. Digits only."
     },
     "board_queue_label": {
       "type": "text",
-      "label": "Board: the third counter's label",
+      "label": "Board: counter 3's label",
       "max_chars": 12,
+      "description": "The word over the board's third counter, which counts down as each task starts.",
       "default": "WAITING"
     },
     "board_attention_label": {
       "type": "text",
-      "label": "Board: the fourth counter's label",
+      "label": "Board: counter 4's label",
       "max_chars": 12,
       "default": "FLAGGED",
-      "description": "It counts the question the board raises."
+      "description": "The word over the board's fourth counter, which goes from 0 to 1 when the question card comes up."
     },
     "board_column_1": {
       "type": "text",
-      "label": "Board: column 1",
+      "label": "Board: column 1's name",
       "max_chars": 14,
+      "description": "The heading of the board's first column, where the four tasks start.",
       "default": "TO DO"
     },
     "board_column_2": {
       "type": "text",
-      "label": "Board: column 2",
+      "label": "Board: column 2's name",
       "max_chars": 14,
+      "description": "The heading of the board's second column, where each task moves as the voice names it.",
       "default": "IN PROGRESS"
     },
     "board_column_3": {
       "type": "text",
-      "label": "Board: column 3",
+      "label": "Board: column 3's name",
       "max_chars": 14,
+      "description": "The heading of the board's third column, where task 1 lands when it is finished.",
       "default": "DONE"
     },
     "task_1_kind": {
       "type": "text",
-      "label": "Board: task 1's kind",
+      "label": "Board: task 1's type",
       "max_chars": 12,
+      "description": "A short word in capitals at the top of task 1's card, before its flag.",
       "default": "☑ TASK"
     },
     "task_1_flag": {
       "type": "text",
       "label": "Board: task 1's flag",
       "max_chars": 10,
-      "description": "e.g. '· HIGH'.",
+      "description": "A short mark after task 1's type, starting with '· ', such as a priority. Leave empty for none.",
       "default": ""
     },
     "task_1_title": {
       "type": "text",
       "label": "Board: task 1's title",
       "max_chars": 40,
-      "description": "Task i moves to In Progress on voice beat i; task 1 then lands in Done."
+      "description": "What task 1 is, on its card. It moves to In Progress as the voice says the word for task 1, then lands in Done."
     },
     "task_1_agent": {
       "type": "text",
       "label": "Board: who takes task 1",
       "max_chars": 16,
-      "description": "A name, a team or a tool."
+      "description": "The name on task 1's card once it is taken, in place of the not-yet-taken label: a person, a team or a tool."
     },
     "task_2_kind": {
       "type": "text",
-      "label": "Board: task 2's kind",
+      "label": "Board: task 2's type",
       "max_chars": 12,
+      "description": "A short word in capitals at the top of task 2's card, before its flag.",
       "default": "☑ TASK"
     },
     "task_2_flag": {
       "type": "text",
       "label": "Board: task 2's flag",
       "max_chars": 10,
-      "description": "e.g. '· HIGH'.",
+      "description": "A short mark after task 2's type, starting with '· ', such as a priority. Leave empty for none.",
       "default": ""
     },
     "task_2_title": {
       "type": "text",
       "label": "Board: task 2's title",
       "max_chars": 40,
-      "description": "Task i moves to In Progress on voice beat i; task 1 then lands in Done."
+      "description": "What task 2 is, on its card. It moves to In Progress as the voice says the word for task 2."
     },
     "task_2_agent": {
       "type": "text",
       "label": "Board: who takes task 2",
       "max_chars": 16,
-      "description": "A name, a team or a tool."
+      "description": "The name on task 2's card once it is taken, in place of the not-yet-taken label: a person, a team or a tool."
     },
     "task_3_kind": {
       "type": "text",
-      "label": "Board: task 3's kind",
+      "label": "Board: task 3's type",
       "max_chars": 12,
+      "description": "A short word in capitals at the top of task 3's card, before its flag.",
       "default": "☑ TASK"
     },
     "task_3_flag": {
       "type": "text",
       "label": "Board: task 3's flag",
       "max_chars": 10,
-      "description": "e.g. '· HIGH'.",
+      "description": "A short mark after task 3's type, starting with '· ', such as a priority. Leave empty for none.",
       "default": ""
     },
     "task_3_title": {
       "type": "text",
       "label": "Board: task 3's title",
       "max_chars": 40,
-      "description": "Task i moves to In Progress on voice beat i; task 1 then lands in Done."
+      "description": "What task 3 is, on its card. It moves to In Progress as the voice says the word for task 3."
     },
     "task_3_agent": {
       "type": "text",
       "label": "Board: who takes task 3",
       "max_chars": 16,
-      "description": "A name, a team or a tool."
+      "description": "The name on task 3's card once it is taken, in place of the not-yet-taken label: a person, a team or a tool."
     },
     "task_4_kind": {
       "type": "text",
-      "label": "Board: task 4's kind",
+      "label": "Board: task 4's type",
       "max_chars": 12,
+      "description": "A short word in capitals at the top of task 4's card, before its flag.",
       "default": "☑ TASK"
     },
     "task_4_flag": {
       "type": "text",
       "label": "Board: task 4's flag",
       "max_chars": 10,
-      "description": "e.g. '· HIGH'.",
+      "description": "A short mark after task 4's type, starting with '· ', such as a priority. Leave empty for none.",
       "default": ""
     },
     "task_4_title": {
       "type": "text",
       "label": "Board: task 4's title",
       "max_chars": 40,
-      "description": "Task i moves to In Progress on voice beat i; task 1 then lands in Done."
+      "description": "What task 4 is, on its card. It moves to In Progress as the voice says the word for task 4."
     },
     "task_4_agent": {
       "type": "text",
       "label": "Board: who takes task 4",
       "max_chars": 16,
-      "description": "A name, a team or a tool."
+      "description": "The name on task 4's card once it is taken, in place of the not-yet-taken label: a person, a team or a tool."
     },
     "task_unassigned": {
       "type": "text",
-      "label": "Board: the unassigned label",
+      "label": "Board: the not-yet-taken label",
       "max_chars": 16,
+      "description": "Shown on every task card before someone takes it, then replaced by the name of who takes it.",
       "default": "● UNASSIGNED"
     },
     "ask_meta": {
       "type": "text",
-      "label": "Ask: who asks",
+      "label": "Question card: who asks",
       "max_chars": 36,
-      "description": "e.g. a name and a reference."
+      "description": "Small text at the top of the question card, which comes up over the board: who raises the question, such as a name and a reference."
     },
     "ask_badge": {
       "type": "text",
-      "label": "Ask: the badge",
+      "label": "Question card: the badge",
       "max_chars": 12,
+      "description": "A small badge at the top right of the question card.",
       "default": "QUESTION"
     },
     "ask_question": {
       "type": "text",
-      "label": "Ask: the question",
-      "max_chars": 60
+      "label": "Question card: the question",
+      "max_chars": 60,
+      "description": "The question put to the owner, in large type: a decision only they can make. One sentence."
     },
     "ask_block_title": {
       "type": "text",
-      "label": "Ask: what it blocks",
+      "label": "Question card: the box's title",
       "max_chars": 36,
-      "description": "e.g. 'BLOCKING 2 DOWNSTREAM TASKS'."
+      "description": "Written in capitals over the box under the question: what the question holds up, or what it is about."
     },
     "ask_block_line_1": {
       "type": "text",
-      "label": "Ask: blocked line 1",
+      "label": "Question card: box line 1",
       "max_chars": 56,
-      "description": "Starts with '↳ '."
+      "description": "The first line in the box under the question, starting with '↳ ': something the question holds up, or what someone said."
     },
     "ask_block_line_2": {
       "type": "text",
-      "label": "Ask: blocked line 2",
+      "label": "Question card: box line 2",
       "max_chars": 56,
-      "description": "Starts with '↳ '."
+      "description": "The second line in the box under the question, starting with '↳ '."
     },
     "ask_option_a": {
       "type": "text",
-      "label": "Ask: the answer chosen",
-      "max_chars": 44
+      "label": "Question card: the answer picked",
+      "max_chars": 44,
+      "description": "The first answer button. It is tapped and lights up, so it is the owner's choice."
     },
     "ask_option_b": {
       "type": "text",
-      "label": "Ask: the other answer",
-      "max_chars": 40
+      "label": "Question card: the other answer",
+      "max_chars": 40,
+      "description": "The second answer button, the one not picked."
     },
     "ask_own_words": {
       "type": "text",
-      "label": "Ask: the free-answer link",
+      "label": "Question card: the write-your-own link",
       "max_chars": 40,
+      "description": "A small link under the two answers, for answering in one's own words.",
       "default": "Answer in your own words instead"
     },
     "ask_toast": {
       "type": "text",
-      "label": "Ask: the confirmation",
+      "label": "Question card: the confirmation",
       "max_chars": 40,
+      "description": "The note that pops up once the answer is picked.",
       "default": "Answered — back to work"
     },
     "night_date": {
       "type": "text",
       "label": "Morning: the night's date line",
       "max_chars": 28,
-      "description": "e.g. 'TUE 22 SEP · LONDON'."
+      "description": "Written in capitals above the big clock: the evening the work starts, as the day, the date and the city, separated by ' · '."
     },
     "morning_date": {
       "type": "text",
       "label": "Morning: the morning's date line",
-      "max_chars": 28
+      "max_chars": 28,
+      "description": "Takes the night's place as the clock rolls on: the next morning, written the same way as the night's date line."
     },
     "night_hour": {
       "type": "number",
       "label": "Morning: the night's hour",
       "min": 0,
       "max": 23,
-      "description": "The clock rolls from this hour to the morning's.",
+      "description": "The hour the big clock starts at, 0 to 23. The hours roll from it to the morning's hour.",
       "default": 22
     },
     "night_minute": {
       "type": "text",
       "label": "Morning: the night's minutes",
       "max_chars": 2,
+      "description": "The minutes the big clock starts at, two digits.",
       "default": "47"
     },
     "morning_hour": {
@@ -468,280 +504,317 @@
       "label": "Morning: the morning's hour",
       "min": 0,
       "max": 23,
+      "description": "The hour the big clock stops at, 0 to 23.",
       "default": 7
     },
     "morning_minute": {
       "type": "text",
       "label": "Morning: the morning's minutes",
       "max_chars": 2,
+      "description": "The minutes the big clock stops at, two digits.",
       "default": "00"
     },
     "done_1": {
       "type": "text",
       "label": "Morning: done item 1",
-      "max_chars": 42
+      "max_chars": 42,
+      "description": "The first of six things finished by morning, ticked off under the clock. A few words."
     },
     "done_2": {
       "type": "text",
       "label": "Morning: done item 2",
-      "max_chars": 42
+      "max_chars": 42,
+      "description": "The second of six things finished by morning, ticked off under the clock. A few words."
     },
     "done_3": {
       "type": "text",
       "label": "Morning: done item 3",
-      "max_chars": 42
+      "max_chars": 42,
+      "description": "The third of six things finished by morning, ticked off under the clock. A few words."
     },
     "done_4": {
       "type": "text",
       "label": "Morning: done item 4",
-      "max_chars": 42
+      "max_chars": 42,
+      "description": "The fourth of six things finished by morning, ticked off under the clock. A few words."
     },
     "done_5": {
       "type": "text",
       "label": "Morning: done item 5",
-      "max_chars": 42
+      "max_chars": 42,
+      "description": "The fifth of six things finished by morning, ticked off under the clock. A few words."
     },
     "done_6": {
       "type": "text",
       "label": "Morning: done item 6",
-      "max_chars": 42
+      "max_chars": 42,
+      "description": "The last of six things finished by morning, ticked off under the clock. A few words."
     },
     "outputs_eyebrow": {
       "type": "text",
-      "label": "Outputs: eyebrow",
+      "label": "Results: the line above the title",
       "max_chars": 44,
+      "description": "Small text at the top of the screen of what came back, over its title.",
       "default": "Results · What came back"
     },
     "outputs_title": {
       "type": "text",
-      "label": "Outputs: title",
+      "label": "Results: the title",
       "max_chars": 24,
+      "description": "The large title of the screen of what came back.",
       "default": "Finished work"
     },
     "outputs_lead": {
       "type": "text",
-      "label": "Outputs: the line before the count",
+      "label": "Results: the words before the count",
       "max_chars": 24,
-      "description": "e.g. 'Your team made'."
+      "description": "The start of the line under the title, before the count, such as who made the work."
     },
     "outputs_count": {
       "type": "text",
-      "label": "Outputs: the count, in the brand colour",
+      "label": "Results: the count",
       "max_chars": 14,
-      "description": "e.g. '6 things'.",
+      "description": "In the brand colour in the middle of the line: how much was made, as a number and a word. It is a fact, so it needs its source.",
       "claim": true
     },
     "outputs_tail": {
       "type": "text",
-      "label": "Outputs: the line after the count",
+      "label": "Results: the words after the count",
       "max_chars": 16,
-      "description": "e.g. 'today'."
+      "description": "The end of the line, after the count, such as when the work was made."
     },
     "outputs_pill_1": {
       "type": "text",
-      "label": "Outputs: filter 1",
+      "label": "Results: filter tab 1",
       "max_chars": 12,
+      "description": "The first of four filter tabs under the line, shown as the selected one.",
       "default": "All"
     },
     "outputs_pill_2": {
       "type": "text",
-      "label": "Outputs: filter 2",
+      "label": "Results: filter tab 2",
       "max_chars": 12,
+      "description": "The second of four filter tabs under the line.",
       "default": "New"
     },
     "outputs_pill_3": {
       "type": "text",
-      "label": "Outputs: filter 3",
+      "label": "Results: filter tab 3",
       "max_chars": 12,
+      "description": "The third of four filter tabs under the line.",
       "default": "Shared"
     },
     "outputs_pill_4": {
       "type": "text",
-      "label": "Outputs: filter 4",
+      "label": "Results: filter tab 4",
       "max_chars": 12,
+      "description": "The last of four filter tabs under the line.",
       "default": "Saved"
     },
     "output_1_agent": {
       "type": "text",
-      "label": "Outputs: who made card 1",
-      "max_chars": 16
+      "label": "Results: who made card 1",
+      "max_chars": 16,
+      "description": "Small text at the top of result card 1: the person, team or tool that made it."
     },
     "output_1_kind": {
       "type": "text",
-      "label": "Outputs: card 1's kind",
-      "max_chars": 10
+      "label": "Results: card 1's type",
+      "max_chars": 10,
+      "description": "A tag at the top right of result card 1: what kind of work it is, in one word."
     },
     "output_1_title": {
       "type": "text",
-      "label": "Outputs: card 1's title",
-      "max_chars": 36
+      "label": "Results: card 1's title",
+      "max_chars": 36,
+      "description": "The title of result card 1, under its preview: the piece of work itself."
     },
     "output_2_agent": {
       "type": "text",
-      "label": "Outputs: who made card 2",
-      "max_chars": 16
+      "label": "Results: who made card 2",
+      "max_chars": 16,
+      "description": "Small text at the top of result card 2: the person, team or tool that made it."
     },
     "output_2_kind": {
       "type": "text",
-      "label": "Outputs: card 2's kind",
-      "max_chars": 10
+      "label": "Results: card 2's type",
+      "max_chars": 10,
+      "description": "A tag at the top right of result card 2: what kind of work it is, in one word."
     },
     "output_2_title": {
       "type": "text",
-      "label": "Outputs: card 2's title",
-      "max_chars": 36
+      "label": "Results: card 2's title",
+      "max_chars": 36,
+      "description": "The title of result card 2, under its preview: the piece of work itself."
     },
     "output_3_agent": {
       "type": "text",
-      "label": "Outputs: who made card 3",
-      "max_chars": 16
+      "label": "Results: who made card 3",
+      "max_chars": 16,
+      "description": "Small text at the top of result card 3: the person, team or tool that made it."
     },
     "output_3_kind": {
       "type": "text",
-      "label": "Outputs: card 3's kind",
-      "max_chars": 10
+      "label": "Results: card 3's type",
+      "max_chars": 10,
+      "description": "A tag at the top right of result card 3: what kind of work it is, in one word."
     },
     "output_3_title": {
       "type": "text",
-      "label": "Outputs: card 3's title",
-      "max_chars": 36
+      "label": "Results: card 3's title",
+      "max_chars": 36,
+      "description": "The title of result card 3, under its preview: the piece of work itself."
     },
     "output_4_agent": {
       "type": "text",
-      "label": "Outputs: who made card 4",
-      "max_chars": 16
+      "label": "Results: who made card 4",
+      "max_chars": 16,
+      "description": "Small text at the top of result card 4: the person, team or tool that made it."
     },
     "output_4_kind": {
       "type": "text",
-      "label": "Outputs: card 4's kind",
-      "max_chars": 10
+      "label": "Results: card 4's type",
+      "max_chars": 10,
+      "description": "A tag at the top right of result card 4: what kind of work it is, in one word."
     },
     "output_4_title": {
       "type": "text",
-      "label": "Outputs: card 4's title",
-      "max_chars": 36
+      "label": "Results: card 4's title",
+      "max_chars": 36,
+      "description": "The title of result card 4, under its preview: the piece of work itself."
     },
     "team_line_1": {
       "type": "text",
       "label": "Team: the line about the team",
       "max_chars": 24,
-      "description": "What the team does with the product, e.g. One place for the team. Spoken."
+      "description": "The first line of the team screen, large, and spoken: what the team does with the product."
     },
     "team_line_2": {
       "type": "text",
       "label": "Team: line 2",
       "max_chars": 12,
       "default": "",
-      "description": "Leave empty for none."
+      "description": "A second line under the first, spoken after it. Leave empty for none."
     },
     "team_line_2_accent": {
       "type": "text",
       "label": "Team: line 2's accent",
       "max_chars": 10,
       "default": "",
-      "description": "In the brand colour. Leave empty for none."
+      "description": "Words in italics in the brand colour at the end of line 2, spoken with it. Leave empty for none."
     },
     "team_line_3": {
       "type": "text",
       "label": "Team: line 3",
       "max_chars": 12,
       "default": "",
-      "description": "Leave empty for none."
+      "description": "A third line under the second, spoken after it. Leave empty for none."
     },
     "team_line_3_accent": {
       "type": "text",
       "label": "Team: line 3's accent",
       "max_chars": 10,
       "default": "",
-      "description": "In the brand colour. Leave empty for none."
+      "description": "Words in italics in the brand colour at the end of line 3, spoken with it. Leave empty for none."
     },
     "team_roster": {
       "type": "text",
-      "label": "Team: the names on the board",
+      "label": "Team: the names",
       "max_chars": 160,
-      "description": "Up to nine names, separated by commas: people, teams or tools."
+      "description": "The names on the cards under the team's lines: up to nine people, teams or tools, separated by commas. Each card shows a status beside its name."
     },
     "team_idle": {
       "type": "text",
-      "label": "Team: the idle status",
+      "label": "Team: the status before",
       "max_chars": 10,
+      "description": "The word each name card shows first, before the team gets to work.",
       "default": "active"
     },
     "team_busy": {
       "type": "text",
-      "label": "Team: the working status",
+      "label": "Team: the status after",
       "max_chars": 10,
+      "description": "The word each name card switches to when the team gets to work.",
       "default": "working"
     },
     "end_line": {
       "type": "text",
       "label": "End card: line 1",
-      "max_chars": 26
+      "max_chars": 26,
+      "description": "Large, under the logo and the brand's name on the end card, and spoken after the name."
     },
     "end_accent": {
       "type": "text",
-      "label": "End card: line 2, in the brand colour",
-      "max_chars": 26
+      "label": "End card: line 2",
+      "max_chars": 26,
+      "description": "In italics in the brand colour under line 1, spoken after it. Together the two lines close the video."
     },
     "end_url": {
       "type": "text",
-      "label": "End card: the address",
-      "max_chars": 28
+      "label": "End card: the web address",
+      "max_chars": 28,
+      "description": "Under the two lines on the end card, written without https://."
     },
     "end_note": {
       "type": "text",
       "label": "End card: the small print",
       "max_chars": 36,
+      "description": "Small text in capitals under the web address, such as where to find the link. Leave empty for none.",
       "default": ""
     },
     "cap_ask": {
       "type": "text",
-      "label": "Caption and voice: the chat",
-      "max_chars": 48
+      "label": "Chat: the voice line",
+      "max_chars": 48,
+      "description": "Said by the voice and shown as the caption as the chat screen opens. A few words."
     },
     "cap_handoff": {
       "type": "text",
-      "label": "Caption and voice: the hand-off",
-      "max_chars": 30
+      "label": "Board: the voice line",
+      "max_chars": 30,
+      "description": "Said by the voice and shown as the caption as the task board comes up. A few words; the words for tasks 1 to 4 follow it."
     },
     "beat_1": {
       "type": "text",
-      "label": "Caption and voice: beat 1",
+      "label": "Board: the word for task 1",
       "max_chars": 12,
-      "description": "Highlights as the voice says it; board task 1 moves on it."
+      "description": "Said by the voice and lit in the caption as task 1 moves to In Progress: a word or two naming task 1's work."
     },
     "beat_2": {
       "type": "text",
-      "label": "Caption and voice: beat 2",
+      "label": "Board: the word for task 2",
       "max_chars": 12,
-      "description": "Highlights as the voice says it; board task 2 moves on it."
+      "description": "Said by the voice and lit in the caption as task 2 moves to In Progress: a word or two naming task 2's work."
     },
     "beat_3": {
       "type": "text",
-      "label": "Caption and voice: beat 3",
+      "label": "Board: the word for task 3",
       "max_chars": 12,
-      "description": "Highlights as the voice says it; board task 3 moves on it."
+      "description": "Said by the voice and lit in the caption as task 3 moves to In Progress: a word or two naming task 3's work."
     },
     "beat_4": {
       "type": "text",
-      "label": "Caption and voice: beat 4",
+      "label": "Board: the word for task 4",
       "max_chars": 12,
-      "description": "Highlights as the voice says it; board task 4 moves on it."
+      "description": "Said by the voice and lit in the caption as task 4 moves to In Progress: a word or two naming task 4's work."
     },
     "cap_question": {
       "type": "text",
-      "label": "Caption and voice: the question",
-      "max_chars": 48
+      "label": "Question card: the voice line",
+      "max_chars": 48,
+      "description": "Said by the voice and shown as the caption as the question card comes up. One short sentence."
     },
     "cap_morning": {
       "type": "text",
-      "label": "Caption and voice: the morning",
-      "max_chars": 48
+      "label": "Morning: the voice line",
+      "max_chars": 48,
+      "description": "Said by the voice and shown as the caption over the big clock and the list of work done. One short sentence."
     },
     "cap_outputs": {
       "type": "text",
-      "label": "Caption and voice: the outputs",
-      "max_chars": 48
+      "label": "Results: the voice line",
+      "max_chars": 48,
+      "description": "Said by the voice and shown as the caption over the screen of what came back. One short sentence."
     }
   },
   "audio_plan": {

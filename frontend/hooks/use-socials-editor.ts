@@ -6,8 +6,9 @@
  * and video Deliverables, what footage a template's slots can be filled with) and what it
  * writes, each through apiClient: Save draft creates the post (POST /posts) or edits it
  * (PATCH), then sets its channels (PUT /targets) and its slot (PUT /slot); Render preview
- * and Submit for approval save first; Redraft with Auto asks the composer with the
- * editor's choices; an upload or a Library pick saves a new post first, then sets its
+ * and Submit for approval save first, and Submit makes the post's file with the full render
+ * when it has a visual (PRD-251D E1); Write with Auto asks the composer with the
+ * editor's choices and the fields the person filled in; an upload or a Library pick saves a new post first, then sets its
  * media. The server checks everything again.
  */
 import { useMutation, useQuery } from '@tanstack/react-query'
@@ -24,8 +25,9 @@ import type {
   SocialPostTargetInput,
   SocialTemplateSummary,
 } from '@/lib/api-client'
-import { useInvalidateSocials, useSocialsOn } from '@/hooks/use-socials-api'
+import { HTTP_CONFLICT, SOCIAL_POST_CHANGED_MESSAGE, httpStatusOf, useInvalidateSocials, useSocialsOn } from '@/hooks/use-socials-api'
 import { useWorkspace } from '@/components/workspace-provider'
+import { RENDERING_FOR_APPROVAL, SENT_FOR_APPROVAL } from '@/components/deliverables/socials/studio/editor-submit'
 
 export const socialsEditorKeys = {
   brandName: (workspaceId: string | null) => ['socials', workspaceId, 'brand-name'] as const,
@@ -36,6 +38,8 @@ export const socialsEditorKeys = {
 
 export const LIBRARY_KINDS = ['image', 'video'] as const
 export const LIBRARY_LIMIT = 24
+/** The status the render route answers with: the render started, and the post goes for approval once it ends. */
+const RENDERING: SocialPost['status'] = 'rendering'
 
 /** The name the preview's post frame shows (PRD-251B US-B110): the brand kit's, else the
  * workspace's. */
@@ -108,23 +112,32 @@ export async function saveEditor({ postId, fields, targets, slot, onCreated }: E
   return saved
 }
 
-function useEditorMutation<Input>(run: (input: Input) => Promise<SocialPost>, success: string | null, failure: string) {
+/** What a call says once it worked: one sentence, one that depends on the post it answered, or nothing. */
+type SuccessMessage = string | null | ((post: SocialPost) => string)
+
+/** `conflict`: what a 409 says in place of the server's own words (a call whose only 409 is "another
+ * writer saved first"); without it the server's sentence shows, as for every other refusal. */
+function useEditorMutation<Input>(run: (input: Input) => Promise<SocialPost>, success: SuccessMessage, failure: string, conflict?: string) {
   const invalidate = useInvalidateSocials()
   return useMutation<SocialPost, Error, Input>({
     mutationFn: run,
-    onSuccess: async () => {
+    onSuccess: async (post) => {
       await invalidate()
-      if (success) toast.success(success)
+      const message = typeof success === 'function' ? success(post) : success
+      if (message) toast.success(message)
     },
     onError: async (error) => {
       await invalidate()
-      toast.error(error.message || failure)
+      const changed = conflict && httpStatusOf(error) === HTTP_CONFLICT ? conflict : null
+      toast.error(changed || error.message || failure)
     },
   })
 }
 
+/** Save draft. A 409 is another writer's save landing first: it says the post changed (the posts are
+ * read again, so the editor shows the server's version), as every other post write does. */
 export function useSaveEditor() {
-  return useEditorMutation<EditorSave>(saveEditor, 'Draft saved', 'Could not save the draft')
+  return useEditorMutation<EditorSave>(saveEditor, 'Draft saved', 'Could not save the draft', SOCIAL_POST_CHANGED_MESSAGE)
 }
 
 /** Save, then render: a video at half resolution (the preview), an image for real. */
@@ -136,10 +149,18 @@ export function useRenderEditorPreview() {
   )
 }
 
+/** PRD-251D (E1, US-D108): Submit for approval saves, then makes the file: with `render` (editor-submit.ts
+ * `submitRenders`), the full render (never the preview), which ends the post in needs_approval by itself;
+ * without, the submit. The save's own answer can still ask for the render: a save that left the post's
+ * file older than what it holds (`file_current` false, a change the editor does not compare, such as a
+ * footage prompt) renders too. A refusal (422, 429) leaves the post as it was. */
 export function useSubmitEditor() {
-  return useEditorMutation<EditorSave>(
-    async (save) => apiClient.submitSocialPost((await saveEditor(save)).id),
-    'Sent for approval',
+  return useEditorMutation<EditorSave & { render: boolean }>(
+    async ({ render, ...save }) => {
+      const saved = await saveEditor(save)
+      return render || saved.file_current === false ? apiClient.renderSocialPost(saved.id, {}) : apiClient.submitSocialPost(saved.id)
+    },
+    (post) => (post.status === RENDERING ? RENDERING_FOR_APPROVAL : SENT_FOR_APPROVAL),
     'Could not send the post for approval',
   )
 }
@@ -190,7 +211,7 @@ export function usePickLibraryMedia() {
   )
 }
 
-/** Redraft with Auto: the composer's proposal for the editor's brief and choices (not saved). */
+/** Write with Auto: the composer's proposal for the editor's brief and choices (not saved). */
 export function useRedraft() {
   return useMutation<SocialComposeProposal, Error, SocialComposeInput>({
     mutationFn: (input) => apiClient.composeSocialPost(input),

@@ -55,6 +55,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from core.database.base import Base
+from core.social_file_current import file_current
 from core.social_render_state import render_block
 
 # D2: the twelve post statuses. Wave 0 moves posts through draft,
@@ -299,6 +300,10 @@ class SocialPost(Base):
     # "2026-W42" or "2026-11"; NULL for a daily plan's post and every other post. Not
     # content. Added by the prd251c_wave2 migration.
     batch_key = Column(String(16), nullable=True)
+    # PRD-251D (E10, US-D301): the post's look, {"mode": "light"|"dark", "accent": "bold"|"sparing",
+    # "logo": true|false}, each key optional; NULL is the kit's own (modules/socials/post_look.py). A
+    # render setting like voice: outside the content hash. Added by the prd251d_wave3 migration.
+    look = Column(_json_type(), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
@@ -332,6 +337,8 @@ class SocialPost(Base):
             "status": self.status,
             # P256-FIX-SOC-5 (F437): where its render stands, from its history, right after the status
             "render": render_block(self.status, self.review_log),
+            # PRD-251D US-D108: whether its last render was made from what it holds now (Approve needs it)
+            "file_current": file_current(self),
             "content_hash": self.content_hash,
             "approved_hash": self.approved_hash,
             "approved_by": self.approved_by,
@@ -344,6 +351,7 @@ class SocialPost(Base):
             "length_seconds": self.length_seconds,
             "slot_key": self.slot_key,
             "music": self.music or None,
+            "look": self.look or None,
             "batch_key": self.batch_key,
             "targets": [
                 target.to_dict()

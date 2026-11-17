@@ -22,7 +22,7 @@ import re
 from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
 
 from core.chart_binding import chip_text, max_chars_of
-from modules.socials.compose_given import figures
+from modules.socials.compose_given import figures, owner_words
 
 BRIEF_TERMS = 4  # the brief's words a candidate search is run for
 TERM_MIN_CHARS = 4
@@ -95,7 +95,8 @@ def _bound_label(sources: Mapping[str, Any], ctx: Any, limit: Optional[int]) -> 
 
 
 def _in_brief(text: str, ctx: Any) -> bool:
-    return bool(text.strip()) and text.strip().lower() in str(getattr(ctx, "brief", "") or "").lower()
+    """Whether the owner wrote ``text``: in the brief, or in a field they filled in themselves."""
+    return bool(text.strip()) and text.strip().lower() in owner_words(ctx).lower()
 
 
 def checked_label(proposal: Mapping[str, Any], sources: Mapping[str, Any], ctx: Any) -> Tuple[Dict[str, Any], List[str]]:

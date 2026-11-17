@@ -15,13 +15,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from api.documents import router
-from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 
 MANIFEST = Path(__file__).resolve().parent.parent / "reports" / "route-manifest.json"
 
 
-def _who_are_you():
+async def _who_are_you(request=None):
     raise HTTPException(status_code=401, detail="Sign in to list documents.")
 
 
@@ -30,16 +29,18 @@ def _no_database():
     raise AssertionError("the list opened the database for a caller who is not signed in")
 
 
-def _client() -> TestClient:
+def _client(monkeypatch) -> TestClient:
+    """PRD-274 §5.2: the list signs a member in through the member-or-server-key gate, which
+    calls the shared sign-in itself, so the stub stands in for it there."""
     app = FastAPI()
     app.include_router(router)
-    app.dependency_overrides[get_request_context_hybrid] = _who_are_you
+    monkeypatch.setattr("core.auth.server_key_gate.get_request_context_hybrid", _who_are_you)
     app.dependency_overrides[get_db] = _no_database
     return TestClient(app)
 
 
-def test_the_plain_path_answers_the_same_as_the_slashed_one():
-    client = _client()
+def test_the_plain_path_answers_the_same_as_the_slashed_one(monkeypatch):
+    client = _client(monkeypatch)
     plain = client.get("/api/documents", follow_redirects=False)
     slashed = client.get("/api/documents/", follow_redirects=False)
     assert plain.status_code == slashed.status_code == 401        # never a 307 with an empty body
