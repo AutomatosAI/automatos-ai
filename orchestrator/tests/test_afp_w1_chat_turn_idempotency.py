@@ -72,13 +72,13 @@ def workspace(new_session, lean_on):
     ws = str(uuid.uuid4())
     s = new_session()
     s.execute(text("INSERT INTO workspaces (id, name) VALUES (CAST(:id AS uuid), 'w1-chat-turn-keys')"), {"id": ws})
-    agent = s.execute(text(
-        "INSERT INTO agents (name, agent_type, workspace_id, status, configuration) "
-        "VALUES ('GM', 'custom', CAST(:w AS uuid), 'active', CAST(:c AS jsonb)) RETURNING id"),
+    agent = s.execute(text(  # a key names its agent by public id (api.chat_server_key.with_its_agents_id)
+        "INSERT INTO agents (name, agent_type, workspace_id, status, configuration, public_id) "
+        "VALUES ('GM', 'custom', CAST(:w AS uuid), 'active', CAST(:c AS jsonb), gen_random_uuid()) RETURNING public_id"),
         {"w": ws, "c": json.dumps(LEAN)}).scalar()
     s.commit()
     s.close()
-    yield ws, agent
+    yield ws, str(agent)
     s = new_session.sweep()
     users = s.execute(text("SELECT service_user_id FROM sdk_api_keys WHERE workspace_id = CAST(:id AS uuid) "
                            "AND service_user_id IS NOT NULL"), {"id": ws}).scalars().all()
@@ -216,6 +216,15 @@ def _rows(new_session, ws):
     try:
         return s.execute(text("SELECT * FROM chat_turn_keys WHERE workspace_id = CAST(:w AS uuid) ORDER BY created_at"),
                          {"w": ws}).mappings().all()
+    finally:
+        s.close()
+
+
+def _agent_id(new_session, public_id):
+    """The agent's integer id: how a person names it (a key names it by ``public_id``)."""
+    s = new_session()
+    try:
+        return s.execute(text("SELECT id FROM agents WHERE public_id = CAST(:p AS uuid)"), {"p": public_id}).scalar_one()
     finally:
         s.close()
 
@@ -363,6 +372,8 @@ def test_a_turn_refused_before_it_starts_leaves_its_key_free(new_session, worksp
     ws, agent = workspace
     key = _key(new_session, ws)
     assert _refused(lambda: _ask(new_session, key)) == (422, chat_server_key.NAME_A_LEAN_AGENT)  # no agent named
+    assert _refused(lambda: _ask(new_session, key, agentId=_agent_id(new_session, agent))) == (
+        422, chat_server_key.NAME_IT_BY_PUBLIC_ID)  # named by integer
     assert _rows(new_session, ws) == [] and route.turns == []
     _ask(new_session, key, agentId=agent)  # the corrected request, under the same key
     assert len(route.turns) == 1 and [r["state"] for r in _rows(new_session, ws)] == [DONE]
@@ -400,9 +411,10 @@ def test_no_header_and_a_persons_turn_run_as_before(new_session, workspace, monk
     person = NS(workspace_id=uuid.UUID(ws), auth_type="clerk", api_key_id=None,
                 user=NS(id="user_1", email=None, clerk_user_id="user_1"))
     monkeypatch.setattr(chat, "ChatService", _route_ran)
-    for ctx, header in ((key, None), (person, KEY), (person, "has space")):  # a person's header is ignored
-        with pytest.raises(_RouteRan):
-            _call(new_session, ctx, header, agentId=agent)
+    by_integer = _agent_id(new_session, agent)  # a person names the agent by integer, as before
+    for ctx, header, named in ((key, None, agent), (person, KEY, by_integer), (person, "has space", by_integer)):
+        with pytest.raises(_RouteRan):  # a person's header is ignored
+            _call(new_session, ctx, header, agentId=named)
     assert _rows(new_session, ws) == []
 
 

@@ -16,10 +16,15 @@ no client's turn fails over it; left out, the turn is exactly as before.
 ``turnRef``: a voice turn's reference, built by the phone (``vt-<send time>-<count>``), so the
 turn's timing line and its speech requests can be read together (``core.monitoring.turn_clock``).
 A value that does not fit ``core.monitoring.turn_ref.REF_PATTERN`` is dropped, never a 422.
+
+``agentId``: an integer (``agents.id``, what the web app's agent picker sends) or a UUID (the agent's
+``public_id``); anything else is a 422. A person's turn names the agent by integer, a server key's by
+UUID; ``api.chat_server_key.with_its_agents_id`` checks which and hands the turn the integer.
 """
 
 import re
 from typing import Any, Dict, List, Optional, Union
+from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -100,7 +105,7 @@ class ChatRequest(BaseModel):
     selectedVisibilityType: Optional[str] = "private"
     context: Optional[dict] = None
     # PRD: Unified Agent-Chat System
-    agentId: Optional[int] = None  # Selected agent ID (default: system agent id=1)
+    agentId: Optional[Union[int, UUID]] = None  # the chosen agent: its integer id, or its public_id (a key's)
     # PRD-82A: Mission mode — conversational mission planning
     missionMode: Optional[bool] = False
     # Plan mode — research and strategy output, no execution

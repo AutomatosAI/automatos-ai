@@ -9,7 +9,9 @@ never takes that path:
   (``sdk_api_keys.service_user_id``): no Clerk id, an address on the reserved ``.invalid`` domain,
   never a workspace member. Its chats are its own; a chat id from anyone else is refused.
 * **It chats only with a lean agent** of its own workspace (``consumers.chatbot.lean_turn``), named
-  in ``agentId``. Auto, mission, plan and spoken modes are a person's.
+  in ``agentId`` by its public id (``agents.public_id``, a UUID), so no product keeps a sequential id;
+  an integer is refused (422). A person names the agent by integer, as the web app's picker does.
+  Auto, mission, plan and spoken modes are a person's.
 * **A model it names** must be on the key's ``model_allow_list`` and on the agent's (§8-5). A key
   with no list names none; the agent answers on its own model.
 * **The end user it names** (``endUserId``, Wave 3, §5.5) must have their consent on record
@@ -26,7 +28,7 @@ never takes that path:
 
 Five decorators wire this into ``api/chat.py``, a line each: ``get_user_id``, ``_checked_lean_request``,
 ``_open_chat``, ``_chat_turn`` (the turn the route ``stream_chat`` runs) and ``_after_the_turn`` are wrapped;
-everyone else passes straight through.
+everyone else passes straight through. ``with_its_agents_id`` is the first line of ``_chat_turn``.
 """
 from __future__ import annotations
 
@@ -37,6 +39,7 @@ import logging
 from contextvars import ContextVar
 from dataclasses import replace
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
@@ -52,6 +55,8 @@ SERVICE_USER_NAME = "sdk-{key_id}"
 SERVICE_USER_EMAIL = "sdk-{key_id}@keys.automatos.invalid"  # .invalid never resolves: no mail, no sign-in
 SERVICE_USER_DISPLAY = "Server key: {name}"
 NAME_A_LEAN_AGENT = "A server key chats with a lean agent of its workspace: name one in agentId."
+NAME_IT_BY_PUBLIC_ID = "A server key's agentId is a UUID: name the agent by its public id."
+NAME_IT_BY_ITS_ID = "A person's chat turn names its agent in agentId by the agent's integer id."
 NOT_A_KEYS_MODE = "missionMode, planMode and spokenMode are a person's, not a server key's."
 NOT_A_PERSONS = "endUserId is a server key's: a person's chat turn is their own."
 NOT_THIS_END_USERS_CHAT = "This conversation is not this end user's: start a new one for them."
@@ -93,6 +98,38 @@ def acts_as_its_service_user(get_user_id: Callable[..., int]) -> Callable[..., i
         return get_user_id(db, ctx)
 
     return resolved
+
+
+def with_its_agents_id(db: Any, ctx: Any, request: Any) -> Any:
+    """``request`` as the turn reads it, ``agentId`` the agent's integer id or none. ``api.chat._chat_turn``
+    calls it first, so every reader after it sees an integer.
+
+    A person names the agent by integer, as before; a UUID is a 422. A key names it by UUID, found in the
+    key's own workspace (``core.utils.agent_resolver``); an integer is a 422."""
+    agent_ref = getattr(request, "agentId", None)
+    if not is_server_key(ctx):
+        if isinstance(agent_ref, UUID):
+            raise _refuse(NAME_IT_BY_ITS_ID)
+        return request
+    if agent_ref is None:  # the lean check refuses it (NAME_A_LEAN_AGENT)
+        return request
+    if not isinstance(agent_ref, UUID):
+        raise _refuse(NAME_IT_BY_PUBLIC_ID)
+    return request.model_copy(update={"agentId": _its_agent(db, ctx.workspace_id, agent_ref)})
+
+
+def _its_agent(db: Any, workspace_id: Any, public_id: UUID) -> int:
+    """The integer id of the agent ``public_id`` names. One of another workspace, or of none, is refused as
+    an integer naming one is (``_refuse_unless_allowed``); one no workspace owns resolves, and the lean
+    check, which holds a key to its own workspace's agents, then refuses it."""
+    from core.utils.agent_resolver import resolve_agent_id
+
+    try:
+        return resolve_agent_id(db, public_id, workspace_id)
+    except HTTPException as missing:
+        if missing.status_code != status.HTTP_404_NOT_FOUND:
+            raise
+        raise _refuse(NAME_A_LEAN_AGENT) from None
 
 
 def what_a_server_key_may_ask(checked: Callable[..., Any]) -> Callable[..., Any]:
