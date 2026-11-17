@@ -38,3 +38,6 @@ DOCUMENTS_READ = "documents:read"
 # A server key chats with a lean agent (POST /api/chat, api/chat_server_key.py), as its own
 # service user. Not "chat": that scope is the widget's, and would grant this by accident.
 AGENTS_CHAT = "agents:chat"
+# A server key reports an agent's reply (POST /api/v1/reports) in a chat its own service user holds,
+# for the end user it names (services/content_reports/reporter.py). It reaches no other chat.
+REPORTS_WRITE = "reports:write"

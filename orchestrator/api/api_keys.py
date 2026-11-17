@@ -20,7 +20,8 @@ from core.auth.workspace_permission import require_workspace_permission
 from core.auth.step_up import require_step_up
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.scopes import (
-    AGENTS_CHAT, DOCUMENTS_READ, DOCUMENTS_WRITE, MEMORY_READ, MEMORY_WRITE, TASKS_READ, TASKS_WRITE,
+    AGENTS_CHAT, DOCUMENTS_READ, DOCUMENTS_WRITE, MEMORY_READ, MEMORY_WRITE, REPORTS_WRITE, TASKS_READ,
+    TASKS_WRITE,
 )
 from core.database.database import get_db
 from core.services.api_key_service import ApiKeyService
@@ -60,6 +61,7 @@ VALID_PERMISSIONS = [
     MEMORY_READ,  # PRD-274 W1: a server key reads and stores the workspace's memory
     MEMORY_WRITE,
     AGENTS_CHAT,  # PRD-274 W1: a server key chats with a lean agent (api/chat_server_key.py)
+    REPORTS_WRITE,  # a server key reports a reply in its own chats (api/content_reports.py)
 ]
 
 

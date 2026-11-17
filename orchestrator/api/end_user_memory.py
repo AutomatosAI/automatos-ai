@@ -41,7 +41,7 @@ from core.auth.dependencies import RequestContext
 from core.auth.scopes import MEMORY_READ, MEMORY_WRITE
 from core.auth.server_key_gate import is_server_key, require_workspace_permission_or_server_key
 from core.database.database import get_db
-from core.models.end_users import END_USER_ID_MAX
+from core.models.end_users import END_USER_ID_PATTERN
 from core.security.memory_audience import audience_of
 from modules.memory.injection_filter import WRITTEN_BY_KEY, deletable_by, visible_to_viewer, without_server_keys
 
@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/memory/end-users", tags=["End-user memory"])
 
-END_USER_ID = Path(..., pattern=rf"^[A-Za-z0-9._:@-]{{1,{END_USER_ID_MAX}}}$",
+END_USER_ID = Path(..., pattern=END_USER_ID_PATTERN,
                    description="The product's own id for the person (letters, digits and . _ : @ -)")
 RETENTION_MAX_DAYS = 3650
 NO_CONSENT = "Record this end user's consent first: PUT /api/memory/end-users/{end_user_id}."

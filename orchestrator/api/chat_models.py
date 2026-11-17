@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
 
-from core.models.end_users import END_USER_ID_MAX
+from core.models.end_users import END_USER_ID_PATTERN
 
 from core.monitoring.turn_ref import clean_ref
 
@@ -96,7 +96,7 @@ class ChatRequest(BaseModel):
     appContext: Optional[Union[Dict[str, Any], List[Any], str]] = None
     # PRD-274 W3: the end user a server key's turn is for, the product's own id for the person
     # (/api/memory/end-users). Their consent must be on record; a person's turn names none.
-    endUserId: Optional[str] = Field(None, pattern=rf"^[A-Za-z0-9._:@-]{{1,{END_USER_ID_MAX}}}$")
+    endUserId: Optional[str] = Field(None, pattern=END_USER_ID_PATTERN)
     selectedVisibilityType: Optional[str] = "private"
     context: Optional[dict] = None
     # PRD: Unified Agent-Chat System
