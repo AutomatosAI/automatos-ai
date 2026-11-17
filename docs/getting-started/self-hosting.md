@@ -779,8 +779,10 @@ every agent has:
 
 **Search engines, resolved in this order** (`WEB_SEARCH_PROVIDER=auto`):
 
-1. **OpenRouter** — any OpenRouter key the platform can see (env, the
-   operator workspace's key, or this workspace's Settings → Model keys). The
+1. **OpenRouter** — an OpenRouter key from the environment
+   (`OPENROUTER_API_KEY`), the credential store, or the operator workspace's
+   Settings → Model keys (on a local install, the operator workspace is yours).
+   A key saved only in another workspace's Model keys is not used. The
    action runs one cheap completion (`WEB_SEARCH_OPENROUTER_MODEL`, default
    `openai/gpt-4o-mini`) carrying OpenRouter's `openrouter:web_search` server
    tool; the engine (Exa by default) does the searching and the pages come

@@ -24,7 +24,7 @@ import { apiClient } from '@/lib/api-client'
 import { isLocal } from '@/lib/auth-edition'
 
 export const FIRST_RUN_NUDGE_STORAGE_KEY = 'automatos:local-first-run-nudge:dismissed'
-export const FIRST_RUN_NUDGE_SETTINGS_HREF = '/settings'
+export const FIRST_RUN_NUDGE_SETTINGS_HREF = '/settings?tab=model-keys'
 export const FIRST_RUN_NUDGE_MESSAGE = 'Add an LLM key to bring Auto to life'
 export const FIRST_RUN_NUDGE_LINK_LABEL = 'Settings → Model keys'
 

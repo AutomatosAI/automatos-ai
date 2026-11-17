@@ -17,8 +17,9 @@ LIST_API_KEYS_DESCRIPTION = (
     "(public/server), permission scopes, expiry and last-used time. "
     "Keys are always masked; the full key only exists at creation. "
     "Use before revoking a key or when auditing API access. Auto "
-    "cannot create a key: an owner or admin creates one in Settings → "
-    "API keys, which shows the full key once."
+    "cannot create a key: in the hosted edition, an owner or admin creates "
+    "one in Settings → API keys, which shows the full key once. The local "
+    "edition has no API keys tab."
 )
 
 
