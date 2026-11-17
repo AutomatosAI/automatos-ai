@@ -14,6 +14,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from core.models.composio import ComposioConnection, ComposioEntity
+from core.read_only_call import only_reading
 
 
 class EntityManager:
@@ -120,12 +121,15 @@ class EntityManager:
             elif status == "pending" and c.get("connection_id"):
                 # OAuth completed on Composio side but our callback missed —
                 # treat as connected and lazily upgrade status to 'active'.
-                self.update_connection_status(
-                    entity_id=str(entity["id"]),
-                    app_name=app,
-                    status="active",
-                    connection_id=c["connection_id"],
-                )
+                # A check-in writes nothing (PRD-268 K17): it reads platform_list_connected_apps,
+                # so there the row is counted connected and left as it is.
+                if not only_reading():
+                    self.update_connection_status(
+                        entity_id=str(entity["id"]),
+                        app_name=app,
+                        status="active",
+                        connection_id=c["connection_id"],
+                    )
                 result.append(app)
         return result
 

@@ -2,12 +2,13 @@
 
 import asyncio
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Set
 from uuid import UUID
 
-from sqlalchemy import func, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from core.composio.pending_connections import CONNECTED, NOT_CONNECTED, PENDING
 from modules.tools.discovery.memory_off import NOT_SAVED, memory_is_off, memory_off_answer, off_when_nothing_is_found
 from modules.tools.discovery.memory_owner import owned_by_the_driver
 from modules.tools.discovery.memory_source import defaults_the_source_type
@@ -15,6 +16,23 @@ from modules.tools.discovery.memory_write import memory_metadata, memory_params_
 from modules.tools.discovery.rule_replaces import retires_what_it_replaces
 
 logger = logging.getLogger(__name__)
+
+# platform_list_connected_apps: the statuses it lists (the ones the Tools page lists), and what the
+# answer means. An agent's use of a connected app is gated by core/composio/tool_executor.py
+# (assignment, then connection), with the rule in core/composio/agent_apps.py; the note says that rule.
+LISTED_STATUSES = frozenset({CONNECTED, PENDING, NOT_CONNECTED})
+EXTERNAL_APP = "EXTERNAL"  # the assignments agent_apps.assignment_state counts as an agent's apps
+CONNECTED_APPS_NOTE = (
+    "Apps with status active are connected for the whole workspace. pending is as recorded here, not yet "
+    "checked with Composio; added means it is in the workspace but not connected, so the owner reconnects "
+    "it on Tools & Integrations. assigned_to_agents counts the agents that have the app assigned and "
+    "switched on. An agent with no apps assigned can use every active app through composio_execute; an "
+    "agent with apps assigned can use only the active apps assigned and switched on for it."
+)
+CONNECTED_APPS_UNREAD = (
+    "Could not read this workspace's connected apps. Tell the owner the connections could not be checked "
+    "just now, never that an app is not connected."
+)
 
 
 def _resolve_owner_subject(db: Session, raw_user_id: Any) -> Optional[str]:
@@ -139,35 +157,95 @@ async def get_memory_stats(db: Session, workspace_id: UUID, params: Dict[str, An
         return {"success": False, "error": f"Memory service error: {e}"}
 
 
-async def list_connected_apps(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+def _assignment_counts(db: Session, workspace_id: UUID) -> Dict[str, int]:
+    """How many of the workspace's agents have each app assigned and switched on: the
+    EXTERNAL rows the executor's rule counts (``agent_apps.assignment_state``), each agent
+    once per upper-cased app name (connections are upper-cased; assignments are not always)."""
     from core.models import Agent
     from core.models.composio_cache import AgentAppAssignment
 
     assignments = (
-        db.query(
-            AgentAppAssignment.app_name,
-            AgentAppAssignment.app_type,
-            func.count(AgentAppAssignment.id).label("agent_count"),
-        )
-        .filter(AgentAppAssignment.is_active == True)
+        db.query(AgentAppAssignment.app_name, AgentAppAssignment.agent_id)
         .join(Agent, AgentAppAssignment.agent_id == Agent.id)
-        .filter(Agent.workspace_id == workspace_id)
-        .group_by(AgentAppAssignment.app_name, AgentAppAssignment.app_type)
+        .filter(
+            Agent.workspace_id == workspace_id,
+            AgentAppAssignment.is_active == True,  # noqa: E712
+            AgentAppAssignment.app_type == EXTERNAL_APP,
+        )
         .all()
     )
+    agents_by_app: Dict[str, Set[Any]] = {}
+    for row in assignments:
+        agents_by_app.setdefault((row.app_name or "").upper().strip(), set()).add(row.agent_id)
+    return {app: len(agents) for app, agents in agents_by_app.items()}
 
+
+def _roll_back(db: Session) -> None:
+    """Leave the caller's session usable after a failed read: a failed statement aborts its transaction."""
+    try:
+        db.rollback()
+    except Exception:
+        logger.exception("[PlatformExecutor] rollback after a failed connected-apps read failed too")
+
+
+def _app_name(connection: Dict[str, Any]) -> str:
+    return (connection.get("app_name") or "").upper().strip()
+
+
+def _is_listed(connection: Dict[str, Any]) -> bool:
+    """The statuses the Tools page lists: active, pending and added (disconnected). Unlike that
+    page, a pending row is not checked with Composio here; it is read as recorded, as
+    ``composio_execute`` reads it."""
+    return bool(_app_name(connection)) and (connection.get("status") or "").lower() in LISTED_STATUSES
+
+
+def _listed_app(connection: Dict[str, Any], connected: Set[str], counts: Dict[str, int]) -> Dict[str, Any]:
+    """One connection: active when ``get_connected_apps`` counts it connected, else its own status.
+    ``connected_at`` is given only for a connected app; an added one's is from before it was disconnected."""
+    app = _app_name(connection)
+    is_connected = app in connected
+    connected_at = connection.get("connected_at") if is_connected else None
+    return {
+        "app_name": app,
+        "status": CONNECTED if is_connected else (connection.get("status") or "").lower(),
+        "connected_at": connected_at.isoformat() if connected_at else None,
+        "assigned_to_agents": counts.get(app, 0),
+    }
+
+
+def _connected_apps_answer(listed: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {
         "success": True,
-        "connected_apps": [
-            {
-                "app_name": a.app_name,
-                "app_type": a.app_type,
-                "assigned_to_agents": a.agent_count,
-            }
-            for a in assignments
-        ],
-        "count": len(assignments),
+        "connected_apps": listed,
+        "count": len(listed),
+        "connected_count": sum(1 for app in listed if app["status"] == CONNECTED),
+        "note": CONNECTED_APPS_NOTE,
     }
+
+
+async def list_connected_apps(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """The workspace's Composio connections, read through ``EntityManager`` as Socials and
+    ``composio_execute`` read them. Before, this listed the apps assigned to some agent, so an
+    app connected for the workspace but assigned to no agent was missing and Auto told the
+    owner it was not connected. ``get_connected_apps`` decides which are connected, and
+    settles a pending row that holds its Composio account id (nothing asks Composio); each
+    app also says how many agents have it assigned. A failed read rolls the session back."""
+    from core.composio.entity_manager import EntityManager
+
+    try:
+        manager = EntityManager(db)
+        entity = manager.get_entity_by_workspace(workspace_id)
+        if not entity:
+            return _connected_apps_answer([])
+        connected = {app.upper().strip() for app in manager.get_connected_apps(workspace_id)}
+        connections = manager.get_entity_connections(entity["id"])  # read after the settle above
+        counts = _assignment_counts(db, workspace_id)
+    except Exception:
+        # Never an empty list here: that would read as "nothing is connected".
+        logger.exception("[PlatformExecutor] could not read the connected apps of workspace %s", workspace_id)
+        _roll_back(db)
+        return {"success": False, "error": CONNECTED_APPS_UNREAD}
+    return _connected_apps_answer([_listed_app(c, connected, counts) for c in connections if _is_listed(c)])
 
 
 @defaults_the_source_type  # PRD-256 FX-013: source_type is optional; the turn's driver sets its default

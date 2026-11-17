@@ -121,9 +121,13 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_list_connected_apps",
         description=(
-            "List external apps connected to the workspace via Composio (Slack, "
-            "Gmail, GitHub, etc.) with connection status. Use to check what "
-            "integrations are available before using Composio tools."
+            "List the workspace's Composio apps (Gmail, GitHub, Instagram, etc.), each "
+            "with its status (active = connected for the whole workspace; pending = as "
+            "recorded here, not yet checked with Composio; added = in the workspace but "
+            "disconnected, so the owner reconnects it), when it was connected, and "
+            "assigned_to_agents, how many agents have it assigned. "
+            "Use it before saying an app is or is not connected, and before using "
+            "Composio tools."
         ),
         category="integrations",
         parameters={
