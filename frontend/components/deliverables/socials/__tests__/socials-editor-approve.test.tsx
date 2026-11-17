@@ -7,7 +7,9 @@
  * * Approve sends the post's content hash (D6); while the editor holds unsaved edits it is off
  *   and the card says to save first.
  * * A viewer, and a post in any other status, see no approve controls.
- * * Once approved, the editor shows the post as approved, with its Activity card.
+ * * Once approved, the editor shows the post as approved, with its Activity card. Approved with no
+ *   time, the line where the Approve card was says nothing will post, and that Schedule and Publish
+ *   now are in Activity further down (the last card on the page).
  * * US-D108: a post whose file is older than its words (its own `file_current`, which the server
  *   keeps) shows the Queue's sentence in place of a working Approve, with Render again, and is
  *   offered Submit, which makes the file again. The editor holds nothing for the sitting: Approve
@@ -24,8 +26,12 @@ vi.mock('@/components/workspace-provider', () => ({
   useWorkspace: () => ({ workspace: { id: 'w1', role: 'owner', socials: { available: true, enabled: true } } }),
 }))
 vi.mock('@/components/deliverables/socials/socials-voice-picker', () => ({ SocialsVoicePicker: () => null }))
+// The Activity card has its own tests; here it shows whether the editor asks it to leave out the
+// no-time line the editor already shows at its top.
 vi.mock('@/components/deliverables/socials/studio/socials-editor-activity', () => ({
-  SocialsEditorActivity: () => <div data-testid="editor-activity" />,
+  SocialsEditorActivity: ({ hideNoTime }: { hideNoTime?: boolean }) => (
+    <div data-testid="editor-activity" data-hide-no-time={String(Boolean(hideNoTime))} />
+  ),
 }))
 vi.mock('@/components/widgets/FileWidget/FilePreview', () => ({
   FilePreview: ({ url }: { url: string }) => <div data-testid="file-preview" data-url={url} />,
@@ -39,6 +45,7 @@ import { APPROVE_CARD, SAVE_BEFORE_APPROVING, SEND_BACK_SUBMIT } from '@/compone
 import { RENDER_AGAIN } from '@/components/deliverables/socials/socials-post-review'
 import { FILE_OLDER_THAN_WORDS } from '@/components/deliverables/socials/socials-review'
 import { POST_NOW_LABEL } from '@/components/deliverables/socials/socials-approve-post-now'
+import { APPROVED_NO_TIME_NOTE, CONTROLS_IN_ACTIVITY } from '@/components/deliverables/socials/studio/post-notices'
 import { api, post, renderWith, resetApi } from './socials-editor-harness'
 
 const go = vi.fn()
@@ -193,5 +200,38 @@ describe('approving in the editor', () => {
     expect(screen.getByTestId('socials-editor-status')).toHaveTextContent('Approved')
     expect(card()).toBeNull()
     expect(screen.getByTestId('editor-activity')).toBeInTheDocument()
+  })
+
+  it('approved with no time, the line where the Approve card was says nothing will post, and where Schedule and Publish now are', async () => {
+    const UNTIMED = post({ ...WAITING, planned_for: null })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const editor = (p: SocialPost) => (
+      <QueryClientProvider client={client}><SocialsEditor role="owner" post={p} go={go} /></QueryClientProvider>
+    )
+    const view = render(editor(UNTIMED))
+    // With no slot, Approve says nothing about when it publishes.
+    fireEvent.click(within(await screen.findByRole('region', { name: APPROVE_CARD })).getByRole('button', { name: 'Approve' }))
+    await waitFor(() => expect(api.approveSocialPost).toHaveBeenCalledWith('post-1', 'h-wait'))
+    expect(screen.queryByText(APPROVED_NO_TIME_NOTE, { exact: false })).toBeNull()
+
+    // The server leaves it approved with no time, "for a person to schedule".
+    view.rerender(editor(post({ ...UNTIMED, status: 'approved', approved_hash: 'h-wait', updated_at: '2026-10-14T09:00:00Z' })))
+    const notice = screen.getByText(`${APPROVED_NO_TIME_NOTE} ${CONTROLS_IN_ACTIVITY}`)
+    // Said once: the Activity card is asked to leave its own copy of the line out.
+    expect(screen.getAllByText(APPROVED_NO_TIME_NOTE, { exact: false })).toHaveLength(1)
+    expect(screen.getByTestId('editor-activity')).toHaveAttribute('data-hide-no-time', 'true')
+    // At the top, before the first card, not with the Activity card at the bottom.
+    const following = (later: Element) => notice.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING
+    expect(following(screen.getByRole('textbox', { name: 'Brief' }))).toBeTruthy()
+    expect(following(screen.getByTestId('editor-activity'))).toBeTruthy()
+    cleanup()
+
+    // Approved with a slot, or scheduled, it says nothing of the kind.
+    for (const status of ['approved', 'scheduled'] as const) {
+      renderEditor(post({ ...WAITING, status }))
+      await screen.findByText('TikTok')
+      expect(screen.queryByText(APPROVED_NO_TIME_NOTE, { exact: false }), status).toBeNull()
+      cleanup()
+    }
   })
 })

@@ -27,7 +27,7 @@ import { canAuthorPosts } from '../socials-status'
 import { SocialsCalendar } from './socials-calendar'
 import { SocialsPosted } from './socials-posted'
 import { SocialsPostPage } from './socials-post-page'
-import { queuedPosts } from './queue-model'
+import { queueCount } from './queue-model'
 import { SocialsQueue } from './socials-queue'
 import { SocialsStudioNav } from './studio-nav'
 import { BRAND_VIEW, NEW_PLAN, NEW_POST, useSocialsRoute, type GoTo, type SocialsRoute } from './studio-route'
@@ -76,7 +76,7 @@ export function SocialsStudio({ role, postId = null }: SocialsStudioProps) {
     <div className="socials-studio space-y-5">
       <SocialsStudioNav
         view={route.view}
-        queueCount={queuedPosts(posts).length}
+        queueCount={queueCount(posts)}
         canAuthor={canAuthorPosts(role)}
         onView={(view) => go({ view, post: null, plan: null })}
         onNewPlan={() => go({ view: 'plans', plan: NEW_PLAN, post: null })}

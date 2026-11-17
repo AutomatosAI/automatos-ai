@@ -8,6 +8,11 @@
  *   (the server's `render`), and a plan's draft that waits for you says what it waits for (SOC-2's
  *   `needs_input`);
  * - S1.1c: a failed post says why its last render failed.
+ * - An approved post with no time says nothing will post until a time is picked or it is posted
+ *   now (the server schedules an approval only into a slot still ahead), and, to a role that
+ *   schedules, that Schedule and Publish now are below (socials-publish-controls.tsx). The editor
+ *   shows the line at its top instead, where its Approve card was (`EditorNoTimeNotice`), since its
+ *   Activity card is the last on the page: it passes `hideNoTime`, so the page says it once.
  *
  * And the older pane's Render (S1.1c), the full render (POST /render), where the editor has none:
  * for a post with a template that failed or waits for approval, to a role that authors. The
@@ -26,9 +31,9 @@ import type { Workspace } from '@/components/workspace-provider'
 import type { SocialPost, SocialPostStatus } from '@/lib/api-client'
 import { useRenderSocialPost } from '@/hooks/use-socials-api'
 import { RENDER_AGAIN } from '../socials-post-review'
-import { postActions } from '../socials-status'
+import { canAuthorPosts, postActions } from '../socials-status'
 import { HINT, Hint } from './editor-ui'
-import { inputAsked, waitsForInput } from './queue-model'
+import { approvedWithNoTime, inputAsked, waitsForInput } from './queue-model'
 
 /** What a rendering post says when the server gives no start time. */
 export const RENDERING_NOTE = 'Rendering. This can take a few minutes; the post moves to Needs approval when it is done.'
@@ -36,6 +41,13 @@ export const RENDERING_NOTE = 'Rendering. This can take a few minutes; the post 
 export const RENDER_FAILED = 'The last render failed:'
 export const RENDER = 'Render'
 export const RENDERS_AS_SAVED = 'It renders the post as it is saved: save your edits first.'
+/** An approved post with no time: nothing posts it until a person acts. */
+export const APPROVED_NO_TIME_NOTE = 'Approved, but it has no time yet: nothing will post until a time is picked or it is posted now.'
+/** After it, in the Activity card, for a role that schedules: the publish controls follow in the same card. */
+export const CONTROLS_BELOW = 'Schedule and Publish now are below.'
+/** After it, at the top of the editor: the Activity card is the last on the page. */
+export const CONTROLS_IN_ACTIVITY = 'Schedule and Publish now are in Activity, further down this page.'
+const NOTICE = 'm-0 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-foreground'
 const CLOCK = 'HH:mm'
 /** The review_log action of a render that failed (modules/socials/service.py ACTION_RENDER_FAILED). */
 const RENDER_FAILED_ACTION = 'render_failed'
@@ -53,6 +65,20 @@ export function renderingLine(post: Pick<SocialPost, 'render'>): string {
 /** P256-FIX-SOC-5: what a plan's draft that waits for you waits for (SOC-2's `needs_input`), else null. */
 export function waitingLine(post: Pick<SocialPost, 'status' | 'review_log'>): string | null {
   return waitsForInput(post) ? `Waiting for you: ${inputAsked(post)}` : null
+}
+
+/** An approved post with no time: that nothing will post, and, to a role that schedules, where the controls
+ * are (the publish controls show only to such a role); else null. */
+export function noTimeLine(post: Pick<SocialPost, 'status' | 'planned_for' | 'scheduled_for'>, role: Workspace['role']): string | null {
+  if (!approvedWithNoTime(post)) return null
+  return canAuthorPosts(role) ? `${APPROVED_NO_TIME_NOTE} ${CONTROLS_BELOW}` : APPROVED_NO_TIME_NOTE
+}
+
+/** The editor's line for an approved post with no time, where its Approve card was: the person lands there
+ * after Approve, and the Activity card, with Schedule and Publish now, is the last on the page. */
+export function EditorNoTimeNotice({ post }: { post: SocialPost }) {
+  if (!approvedWithNoTime(post)) return null
+  return <p className={NOTICE}>{`${APPROVED_NO_TIME_NOTE} ${CONTROLS_IN_ACTIVITY}`}</p>
 }
 
 /** S1.1c: "The last render failed: <the reason the render gave>", for a failed post; else null. */
@@ -86,15 +112,23 @@ function RenderButton({ post, role, dirty }: { post: SocialPost; role: Workspace
   )
 }
 
-export function SocialsPostNotices({ post, role, dirty = false }: { post: SocialPost; role: Workspace['role']; dirty?: boolean }) {
+interface SocialsPostNoticesProps {
+  post: SocialPost
+  role: Workspace['role']
+  dirty?: boolean
+  /** The page already says the post has no time (the editor's `EditorNoTimeNotice`): the line is left out here. */
+  hideNoTime?: boolean
+}
+
+export function SocialsPostNotices({ post, role, dirty = false, hideNoTime = false }: SocialsPostNoticesProps) {
   const waiting = waitingLine(post)
   const failed = renderFailedLine(post)
+  const noTime = hideNoTime ? null : noTimeLine(post, role)
   return (
     <>
       {post.status === 'rendering' && <p role="status" className={cn(HINT, 'm-0')}>{renderingLine(post)}</p>}
-      {waiting && (
-        <p role="alert" className="m-0 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-foreground">{waiting}</p>
-      )}
+      {waiting && <p role="alert" className={NOTICE}>{waiting}</p>}
+      {noTime && <p role="status" className={NOTICE}>{noTime}</p>}
       {failed && (
         <p role="alert" className="m-0 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">{failed}</p>
       )}
