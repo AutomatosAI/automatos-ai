@@ -212,11 +212,13 @@ def test_a_key_names_its_agent_by_uuid_and_a_person_by_integer_before_any_lookup
     by_uuid = ChatRequest(message=ASKED, agentId=str(uuid.uuid4()))
     nobody = ChatRequest(message=ASKED)
     db = None  # neither refusal nor a person's integer reads the database
-    for ctx, request in ((key, by_integer), (key, ChatRequest(message=ASKED, agentId="7"))):
-        assert _refused(lambda c=ctx, r=request: chat_server_key.with_its_agents_id(db, c, r)) == (
+    as_integers = [by_integer] + [ChatRequest(message=ASKED, agentId=v) for v in ("7", True, 7.0)]  # each an int
+    for request in as_integers:
+        assert _refused(lambda r=request: chat_server_key.with_its_agents_id(db, key, r)) == (
             422, chat_server_key.NAME_IT_BY_PUBLIC_ID)
     assert "name the agent by its public id" in chat_server_key.NAME_IT_BY_PUBLIC_ID
-    assert chat_server_key.with_its_agents_id(db, person, by_integer) is by_integer
+    for persons in (by_integer, ChatRequest(message=ASKED, agentId=0), ChatRequest(message=ASKED, agentId=True)):
+        assert chat_server_key.with_its_agents_id(db, person, persons) is persons  # a person's integer, as before
     assert _refused(lambda: chat_server_key.with_its_agents_id(db, person, by_uuid)) == (
         422, chat_server_key.NAME_IT_BY_ITS_ID)
     assert chat_server_key.with_its_agents_id(db, key, nobody) is nobody  # the lean check refuses it
@@ -230,6 +232,8 @@ def test_a_key_naming_its_agent_by_public_id_gets_that_agents_turn(new_session, 
     assert named.agentId == agents["GM"] and lean.server_key and lean.model is None
     named, lean = _turn(new_session, key, agentId=public_id, model="claude-haiku-5-5")
     assert lean.model.model == "claude-haiku-5-5"
+    named, _ = _turn(new_session, key, agentId=str(public_id).upper())  # any case of the same public id
+    assert named.agentId == agents["GM"]
     assert _refused(lambda: _turn(new_session, key, agentId=_public_id(new_session, agents["Generalist"]))) == (
         422, chat_server_key.NAME_A_LEAN_AGENT)                                               # not lean
     assert _refused(lambda: _turn(new_session, key, agentId=agents["GM"])) == (
