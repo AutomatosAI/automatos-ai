@@ -416,7 +416,6 @@ async def stream_chat(
 async def _chat_turn(request: ChatRequest, ctx: RequestContext, db: Session, idempotency_key: Optional[str] = None):
     """The route's turn; ``idempotency_key`` is read by its wrapper only."""
     request = with_its_agents_id(db, ctx, request)  # a key names its agent by UUID; from here, an integer id
-    logger.info("[chat] RequestContext workspace_id=%s agentId=%s", ctx.workspace_id, request.agentId)
     chat_service = ChatService(db)
     # F145: an admin_only tool is an admin's when the call is made for an active
     # owner/admin of the workspace (the chat threads the driving user) or for a
