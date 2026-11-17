@@ -7,8 +7,8 @@
  * `preview`), which ends it in needs_approval by itself, when its file does not show it yet: it has
  * no rendered file, its file is not current (the post's `file_current`: the server records what each
  * render was made from, US-D108), or the editor holds unsaved changes to what the file shows
- * (`unsavedFileChanges`: a field, the template, the length or the format; not the brief, which is
- * what Auto writes from and is not on the file). Otherwise its file already shows it, and it is saved and
+ * (`unsavedFileChanges`: a field, the template, the length, the format or the look; not the brief,
+ * which is what Auto writes from and is not on the file). Otherwise its file already shows it, and it is saved and
  * submitted as it was before Wave 1. A still of the person's own is cropped every time: its crops
  * follow its channels, which the record does not cover. A text post, and a post whose visual is the
  * person's own video or slides, have nothing to render: they are saved and submitted.
@@ -35,9 +35,9 @@ export interface SubmitInput {
   unsaved: boolean
 }
 
-/** What the file shows of a draft: its fields, template, length and format. */
+/** What the file shows of a draft: its fields, template, length and format, and its own look (US-D301). */
 function fileInputs(draft: EditorDraft): string {
-  return JSON.stringify([draft.variables, draft.templateId, draft.lengthSeconds, draft.format])
+  return JSON.stringify([draft.variables, draft.templateId, draft.lengthSeconds, draft.format, draft.look])
 }
 
 /** Whether the editor holds unsaved changes to what the post's file shows. An edit to the brief alone

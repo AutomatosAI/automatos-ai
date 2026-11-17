@@ -15,9 +15,9 @@
 import { describe, it, expect } from 'vitest'
 
 import type { SocialChannel, SocialPost, SocialPostTarget } from '@/lib/api-client'
-import { startingKinds, withStartingChannels, newDraft } from '@/components/deliverables/socials/studio/editor-model'
+import { draftFromPost, startingKinds, withStartingChannels, newDraft } from '@/components/deliverables/socials/studio/editor-model'
 import {
-  SUBMIT_CROPS, SUBMIT_RENDERS, submitNote, submitRenders,
+  SUBMIT_CROPS, SUBMIT_RENDERS, submitNote, submitRenders, unsavedFileChanges,
 } from '@/components/deliverables/socials/studio/editor-submit'
 import { SUPPORTED_CHANNELS, unconnectedChannels } from '@/components/deliverables/socials/studio/editor-connect-channels'
 import { fullRenderCost, renderNote } from '@/components/deliverables/socials/studio/preview-model'
@@ -71,6 +71,19 @@ describe('what Submit for approval makes first (US-D102, US-D108)', () => {
   /** A post as the server has it, with a rendered file unless `media` says otherwise. */
   const rendered = (over: Partial<SocialPost> = {}) => ({ media: { '1:1': ['d-square'] }, ...over }) as unknown as SocialPost
   const NEW = { post: null, unsaved: false }
+
+  it('an unsaved change to a field or to the look changes what the file shows; the brief alone does not (US-D301)', () => {
+    const saved = {
+      title: 'Open late', brief: 'Say we open late', format: 'image', template_id: 'tpl-img', length_seconds: null,
+      variables: { headline: { value: 'Open late', claim: false } }, sources: {}, targets: [], look: null,
+    } as unknown as SocialPost
+    const onScreen = draftFromPost(saved)
+    expect(unsavedFileChanges(saved, onScreen)).toBe(false)
+    expect(unsavedFileChanges(saved, { ...onScreen, brief: 'Another angle' })).toBe(false)
+    expect(unsavedFileChanges(saved, { ...onScreen, variables: { headline: { value: 'Open early', claim: false } } })).toBe(true)
+    expect(unsavedFileChanges(saved, { ...onScreen, look: { logo: false } })).toBe(true)
+    expect(unsavedFileChanges(null, onScreen)).toBe(false)  // a new post has nothing saved to differ from
+  })
 
   it('renders a post with a visual that has no rendered file yet, and says so', () => {
     expect(submitRenders({ format: 'image', ownFile: false, ...NEW })).toBe(true)
