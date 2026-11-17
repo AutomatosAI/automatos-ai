@@ -3,7 +3,9 @@
 ``POST /api/socials/templates/{id}/preview-page`` (``api/socials_instant_preview.py``)
 answers with it, and the editor shows it in a frame with ``sandbox="allow-scripts"`` and no
 same origin, a moment after the person stops typing. It is labelled a preview: the file a
-person approves is always the render.
+person approves is always the render. The route answers only for a starter the platform ships,
+unchanged: the page runs the template's own script, and no script but the platform's runs in
+the editor.
 
 The page is the template's own document, put together as a render puts it together, from
 the same pieces:
@@ -30,9 +32,10 @@ the same pieces:
 * the page opens with its own content security policy (:data:`POLICY_META`), before any
   script: inline script and style, data: images and fonts, and no request the policy covers.
   The policy does not cover WebRTC, so the stand-in script, which runs first, takes the
-  peer-connection API off the page's window. The frame's sandbox is the boundary: no same
-  origin, no top navigation, no forms, no popups (``instant-preview-frame.tsx``). The page
-  holds only what the editor sent for it: the words on screen, the kit's logos and tokens.
+  peer-connection API off the page's window. The frame's sandbox keeps the page from the app:
+  no same origin, no top navigation, no forms, no popups (``instant-preview-frame.tsx``).
+  None of this keeps a script from sending out what its own page holds, which is why the
+  route previews the platform's own starters only.
 
 Each marker holds a bare ``&``, which an escaped value never holds (it is always ``&amp;``,
 ``&lt;`` or another entity), so no typed word can be taken for one. Pure: the caller reads
@@ -82,7 +85,8 @@ PHOTO_MARKER = "&automatos-preview-photo-{slot};"
 # nothing. "then" is not answered, so nothing that awaits it waits forever.
 # It runs before any script of the template's, so it also takes the peer-connection API off the
 # page's window first: a content security policy does not cover WebRTC. That narrows what a
-# template's script can reach from this window; the frame's sandbox is what keeps it from the app.
+# script can reach from this window, no more: the frame's sandbox keeps it from the app, and the
+# route's starters-only rule is what keeps a script that is not the platform's out of the editor.
 TIMELINE_STUB = """<script>
 (function () {
   "use strict";

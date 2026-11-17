@@ -8,9 +8,14 @@ one self-contained page, filled and escaped by the renderer's rules
 ``{"css"}``: the kit's font faces as data: URIs, which the editor fetches once per
 ``fonts_version`` and puts where the page marks them, so they never travel with a keystroke.
 
-Both answer JSON, never a page of HTML. A workspace may save its own template, script and
-all, so the page runs only inside the editor's sandboxed frame, never as a document of the
-API's origin.
+Both answer JSON, never a page of HTML: the page runs only inside the editor's sandboxed frame,
+never as a document of the API's origin.
+
+Only a starter the platform ships, unchanged, previews this way (:func:`ships_with_the_platform`).
+A template runs its own script to lay itself out, and a frame's sandbox keeps a script from the
+app but cannot keep it from sending out what its own page holds (the words on screen, the kit's
+logos). So a script that is not the platform's never runs in the editor: a workspace's own
+template, or a starter someone edited, is refused and keeps its rendered preview.
 
 Included into the Socials router (``api/socials.py``), so both take the ``/api/socials``
 prefix and the Socials gate. Every read is of the caller's workspace: another workspace's
@@ -20,7 +25,9 @@ logos and none of its fonts, uploaded or bundled. Plain ``def`` routes (F105): n
 """
 from __future__ import annotations
 
-from typing import Annotated, Any, Dict, List, Optional, Union
+import hashlib
+from functools import lru_cache
+from typing import Annotated, Any, Dict, FrozenSet, List, Mapping, Optional, Union
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -37,12 +44,15 @@ from core.models.workspaces import Workspace
 from core.social_templates import MAX_SLOTS, MAX_TEXT_CHARS, MAX_VARIABLES
 from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.documents.brand_kit import get_brand_kit
+from modules.documents.social_starters import social_starters
 from modules.socials import instant_preview, post_look, service
 
 router = APIRouter()
 
 CAN_DRAFT = Depends(require_workspace_permission("documents:create"))
 TEMPLATE_NOT_FOUND = "Template not found"
+# The refusal for a template whose script is not the platform's own; the editor shows it under the frame.
+STARTERS_ONLY = "only a starter template previews as you type; a template of your own shows after Render preview"
 WORKSPACE_NOT_FOUND = "Workspace not found"
 # A template field's or slot's name: letters, digits and _, 64 at most (core/social_templates.py).
 NAME_MAX_CHARS = 64
@@ -68,6 +78,25 @@ class PreviewPageRequest(BaseModel):
     photos: List[SlotName] = Field(default_factory=list, max_length=MAX_SLOTS)
     # PRD-251D US-D301: the look on screen (mode, accent, logo); null is the kit's own.
     look: Optional[Dict[str, Any]] = Field(None, max_length=LOOK_MAX_KEYS)
+
+
+def _markup_digest(blocks: Any) -> str:
+    """sha256 of a composition's markup, its inline script included."""
+    html = blocks.get("html") if isinstance(blocks, Mapping) else None
+    return hashlib.sha256(str(html or "").encode("utf-8")).hexdigest()
+
+
+@lru_cache(maxsize=1)
+def starter_markups() -> FrozenSet[str]:
+    """The digest of each starter's markup as the platform ships it, read once."""
+    return frozenset(_markup_digest(starter["blocks"]) for starter in social_starters())
+
+
+def ships_with_the_platform(template: Any) -> bool:
+    """Whether the template's markup is a starter's, unchanged, so the script it runs is the
+    platform's own. A workspace's own template is not, nor is a starter someone edited (the
+    seeder puts a platform-owned row back to its seed)."""
+    return _markup_digest(getattr(template, "blocks", None)) in starter_markups()
 
 
 def _template(db: Session, ctx: RequestContext, template_id: UUID) -> Any:
@@ -100,11 +129,14 @@ def social_template_preview_page(
 
     ``html`` is the page and ``fonts_version`` names the kit's faces it expects at its font
     marker (``GET /brand-kit/preview-fonts``). 404 for a template of another workspace; 422,
-    saying why, for a template that is not an image of one still, a value that does not fit its
-    field, a size or a photo spot the template does not have, a look that is not one of its choices,
-    or a composition a render refuses. The look is applied as a render applies it (US-D301).
+    saying why, for a template that is not a starter the platform ships, or not an image of one
+    still, a value that does not fit its field, a size or a photo spot the template does not
+    have, a look that is not one of its choices, or a composition a render refuses. The look is
+    applied as a render applies it (US-D301).
     """
     template = _template(db, ctx, template_id)
+    if not ships_with_the_platform(template):
+        raise HTTPException(status_code=422, detail=STARTERS_ONLY)
     workspace = _workspace(db, ctx)
     stored_kit = get_brand_kit(workspace.settings)
     # The logos and tokens a render reads. No font goes into the page's bundle: the uploaded ones are
