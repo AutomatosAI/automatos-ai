@@ -426,10 +426,10 @@ def test_the_migration_chains_onto_the_head_and_creates_the_models_table():
     index = next(i for i in ChatTurnKey.__table__.indexes if i.name == UNIQUE_INDEX)
     assert index.unique and [c.name for c in index.columns] == ["api_key_id", "idempotency_key"]
     assert ChatTurnKey.__table__.c.idempotency_key.type.length == agent_execute.IDEMPOTENCY_KEY_MAX
-    # prd251d_wave3 was written on the same head the same day; product_spend_cap_20261113 joins the two
-    # and is the one head the guard pins.
-    merge = (VERSIONS / "product_spend_cap_20261113.py").read_text()
-    assert f'"{MIGRATION}",' in merge
+    # prd251d_wave3 was written on the same head and merged the same morning: merge_heads_20261117
+    # joins the two, and the spend cap (product_spend_cap_20261113) chains onto it as the one head.
+    merge = (VERSIONS / "merge_heads_20261117.py").read_text()
+    assert f'"{MIGRATION}"' in merge and '"prd251d_wave3"' in merge
     guard = (Path(__file__).resolve().parent / "test_prd209_alembic_single_head.py").read_text()
     assert 'EXPECTED_HEAD = "product_spend_cap_20261113"' in guard
 

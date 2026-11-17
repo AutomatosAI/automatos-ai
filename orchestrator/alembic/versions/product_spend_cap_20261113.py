@@ -10,20 +10,14 @@ PRD-274 Wave 5, the spend cap proposed in #1520. Two additions, no row changed:
 ``core/models/products.py`` declares the same. Create_all-first safe: ``ADD COLUMN IF NOT EXISTS``, the check added
 only when missing, ``CREATE TABLE IF NOT EXISTS``. The downgrade drops both.
 
-It is also the merge point for the two heads main gained on 16 Nov 2026, chat_turn_keys_20261116 and prd251d_wave3,
-both written on credit_ledger_sub_tenant_20261113 (as f049_prd251_merge_heads joined two before it).
-
 Revision ID: product_spend_cap_20261113
-Revises: chat_turn_keys_20261116, prd251d_wave3
+Revises: merge_heads_20261117
 Create Date: 2026-11-13
 """
 from alembic import op
 
 revision = "product_spend_cap_20261113"
-down_revision = (
-    "chat_turn_keys_20261116",
-    "prd251d_wave3",
-)
+down_revision = "merge_heads_20261117"
 branch_labels = None
 depends_on = None
 

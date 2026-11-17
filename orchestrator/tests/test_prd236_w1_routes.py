@@ -426,13 +426,25 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     spent = (versions / "credit_ledger_sub_tenant_20261113.py").read_text()
     assert 'down_revision = "product_workspaces_20261113"' in spent
     # 2026-11-16 (PRD-251D Wave 3, US-D301): prd251d_wave3 chains onto that —
-    # social_posts.look, a new nullable column.
+    # social_posts.look, a new nullable column; the guard follows it.
     looks = (versions / "prd251d_wave3.py").read_text()
     assert 'down_revision = "credit_ledger_sub_tenant_20261113"' in looks
-    # 2026-11-13 (Automatos for products, spend cap): product_spend_cap_20261113 joins prd251d_wave3
-    # and chat_turn_keys_20261116 (both written on credit_ledger_sub_tenant_20261113); the guard follows it.
+    # 2026-11-16 (Automatos for products, Wave 1): chat_turn_keys_20261116 chains onto
+    # credit_ledger_sub_tenant_20261113 too — a new table only. A second head beside prd251d_wave3:
+    # the two merged minutes apart on 17 Nov, each green without the other.
+    turn_keys = (versions / "chat_turn_keys_20261116.py").read_text()
+    assert 'down_revision = "credit_ledger_sub_tenant_20261113"' in turn_keys
+    # 2026-11-17: merge_heads_20261117 joins the two. A database deployed from the two-headed main
+    # is stamped at both (alembic upgrade heads, plural), so neither is re-chained (the
+    # prd266_merge_heads lesson). Pure merge, no schema operations; the guard follows it.
+    joined = (versions / "merge_heads_20261117.py").read_text()
+    assert 'down_revision = (' in joined
+    assert '"prd251d_wave3"' in joined and '"chat_turn_keys_20261116"' in joined
+    assert "from alembic import op" not in joined
+    # 2026-11-13 (Automatos for products, spend cap): product_spend_cap_20261113 chains onto the
+    # merge; the guard follows it.
     capped = (versions / "product_spend_cap_20261113.py").read_text()
-    assert '"chat_turn_keys_20261116",\n    "prd251d_wave3",' in capped
+    assert 'down_revision = "merge_heads_20261117"' in capped
     assert 'EXPECTED_HEAD = "product_spend_cap_20261113"' in guard
 
 
