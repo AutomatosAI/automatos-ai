@@ -292,7 +292,7 @@ Sources:
 
 ## Model keys Tab
 
-`ApiKeysSettingsTab` holds the person's own model-provider keys (BYOK): OpenRouter, Anthropic, OpenAI and the other providers in the registry. A toggle per provider chooses which key chat and agents use. It is in both editions, at `/settings?tab=model-keys`. The platform's own provider keys are under System Settings → Model keys, for admins.
+`ApiKeysSettingsTab` holds the person's own model-provider keys (BYOK): OpenRouter, Anthropic, OpenAI and the other providers in the registry. A toggle per provider chooses which key chat and agents use. It is in both editions, at `/settings?tab=model-keys`. The platform's own provider keys are under System Settings → API Keys, for admins.
 
 Sources:
 * [frontend/components/settings/ApiKeysSettingsTab.tsx]()

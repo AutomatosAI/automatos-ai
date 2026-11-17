@@ -199,7 +199,7 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
           </TabsTrigger>
           <TabsTrigger value="system_logging">Logging</TabsTrigger>
           <TabsTrigger value="api_rate_limiting">Rate Limiting</TabsTrigger>
-          <TabsTrigger value="backend_api_keys">Model keys</TabsTrigger>
+          <TabsTrigger value="backend_api_keys">API Keys</TabsTrigger>
           <TabsTrigger value="audit_logs">
             <Shield className="w-3.5 h-3.5 mr-1 shrink-0" />
             Audit Logs
