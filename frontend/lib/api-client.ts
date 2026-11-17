@@ -3531,20 +3531,20 @@ class ApiClient {
     return this.request<SocialPost>(`/api/socials/posts/${postId}/submit`, { method: 'POST' })
   }
 
-  /** Approve the version the reviewer saw (D6): `contentHash` is that version's
-   * `content_hash`. A post that changed since answers 409; one with unsourced claims
-   * answers 422 naming them unless `overrideUnsourced` (D7, the second confirmation). */
+  /** Approve the version the reviewer saw (D6). `postNow` (its button said "Approve & post now"): the server publishes
+   * it at once if it agrees (no slot, no schedule). It answers scheduled, publishing (`posting_not_started` if that did
+   * not start) or approved; 409 when changed since; 422 naming unsourced claims unless `overrideUnsourced` (D7). */
   async approveSocialPost(
     postId: string,
     contentHash: string,
-    options: { comment?: string; overrideUnsourced?: boolean } = {},
-  ): Promise<SocialPost> {
-    return this.request<SocialPost>(`/api/socials/posts/${postId}/approve`, {
+    options: { comment?: string; overrideUnsourced?: boolean; postNow?: boolean } = {},
+  ): Promise<SocialPost & { posting_not_started?: boolean }> {
+    return this.request<SocialPost & { posting_not_started?: boolean }>(`/api/socials/posts/${postId}/approve`, {
       method: 'POST',
       body: JSON.stringify({
         content_hash: contentHash,
         comment: options.comment || null,
-        override_unsourced: !!options.overrideUnsourced,
+        override_unsourced: !!options.overrideUnsourced, post_now: !!options.postNow,
       }),
     })
   }

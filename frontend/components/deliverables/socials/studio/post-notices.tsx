@@ -9,7 +9,8 @@
  *   `needs_input`);
  * - S1.1c: a failed post says why its last render failed.
  * - An approved post with no time says nothing will post until a time is picked or it is posted
- *   now (the server schedules an approval only into a slot still ahead), and, to a role that
+ *   now (a post's own Approve publishes one with no slot at once, but an unscheduled post, or one
+ *   approved in bulk or from the phone app, can stand approved with no time), and, to a role that
  *   schedules, that Schedule and Publish now are below (socials-publish-controls.tsx). The editor
  *   shows the line at its top instead, where its Approve card was (`EditorNoTimeNotice`), since its
  *   Activity card is the last on the page: it passes `hideNoTime`, so the page says it once.

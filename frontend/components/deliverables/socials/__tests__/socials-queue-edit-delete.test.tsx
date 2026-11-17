@@ -2,9 +2,14 @@
  * 3 Oct 2026 (Gerard: "I see Needs you ... I can't add channels or remove, delete") — the
  * Queue's pane opens the post in the editor (Edit post), and a post with no channel says so
  * with a link that does the same. An owner or admin deletes a post after one confirmation;
- * an editor sees no Delete. Approve & post now approves the version on screen and publishes
- * it at once, after a confirmation that names its channels; it waits for a channel, and a
- * post with unsourced claims goes through Approve.
+ * an editor sees no Delete.
+ *
+ * One Approve (17 Nov 2026, Gerard: "are you sure, are you really sure?"): a post with no slot has
+ * one Approve, "Approve & post now to X", which approves the version on screen on its one click;
+ * the server publishes it (the approve route), so the screen never calls publish-now itself, and
+ * no second question is asked. There is no separate Approve & post now. It waits for a channel, a
+ * post with unsourced claims still asks to confirm them by name first (D7), and that confirmation
+ * never carries over to the next post the pane shows (11 Oct 2026).
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
@@ -38,7 +43,7 @@ import { apiClient } from '@/lib/api-client'
 import { SocialsQueue } from '@/components/deliverables/socials/studio/socials-queue'
 import { ADD_A_CHANNEL } from '@/components/deliverables/socials/socials-post-review'
 import { DELETE_CONFIRM } from '@/components/deliverables/socials/studio/delete-post-button'
-import { ApproveAndPostNow, POST_NOW_LABEL } from '@/components/deliverables/socials/socials-approve-post-now'
+import { APPROVE, APPROVE_AND_POST_NOW } from '@/components/deliverables/socials/studio/queue-model'
 import { renderWith } from './socials-editor-harness'
 
 const api = apiClient as unknown as Record<string, ReturnType<typeof vi.fn>>
@@ -103,50 +108,60 @@ describe('deleting a post', () => {
   })
 })
 
-describe('Approve & post now', () => {
-  it('approves the version on screen, then publishes it, after naming its channels', async () => {
+const POST_NOW = `${APPROVE_AND_POST_NOW} X`
+const CLAIMED = { variables: { members: { value: 1200, claim: true } }, sources: {} }
+
+describe('one Approve for a post with no slot', () => {
+  it('says it posts now to its channels, and approves the version on screen on one click', async () => {
     renderQueue(waiting('a'))
-    fireEvent.click(within(pane()).getByRole('button', { name: POST_NOW_LABEL }))
-    const ask = within(pane()).getByRole('alertdialog', { name: POST_NOW_LABEL })
-    expect(ask).toHaveTextContent('Approve and post now to X? It goes live at once.')
-    fireEvent.click(within(ask).getByRole('button', { name: 'Post now' }))
-    await waitFor(() => expect(api.publishSocialPostNow).toHaveBeenCalledWith('a'))
-    expect(api.approveSocialPost).toHaveBeenCalledWith('a', 'hash-a')
-    expect(api.approveSocialPost.mock.invocationCallOrder[0]).toBeLessThan(api.publishSocialPostNow.mock.invocationCallOrder[0])
+    expect(POST_NOW).toBe('Approve & post now to X')
+    fireEvent.click(within(pane()).getByRole('button', { name: POST_NOW }))
+    await waitFor(() => expect(api.approveSocialPost).toHaveBeenCalledWith('a', 'hash-a', { postNow: true }))
+    expect(api.approveSocialPost).toHaveBeenCalledTimes(1)
+    // No second question, and the server publishes it (asked by post_now): the screen never calls publish-now.
+    expect(within(pane()).queryByRole('alertdialog')).toBeNull()
+    expect(api.publishSocialPostNow).not.toHaveBeenCalled()
   })
 
-  // 11 Oct 2026: the confirmation was open on post A when A was approved; A left the queue,
-  // the pane fell back to the next post (B, no channels) with the confirmation still open,
-  // and Post now approved B and asked to publish it (409). A was never published.
+  it('is the only Approve: there is no separate Approve & post now', () => {
+    renderQueue(waiting('a'))
+    expect(within(pane()).getAllByRole('button', { name: /^Approve/ }).map((b) => b.textContent)).toEqual([POST_NOW])
+    expect(within(pane()).queryByRole('button', { name: 'Approve & post now' })).toBeNull()
+    expect(within(pane()).queryByRole('button', { name: 'Post now' })).toBeNull()
+  })
+
+  it('a claim with no source asks to confirm it by name first, and only the confirmation approves it', async () => {
+    renderQueue(waiting('a', CLAIMED))
+    fireEvent.click(within(pane()).getByRole('button', { name: POST_NOW }))
+    const ask = within(pane()).getByRole('alertdialog', { name: 'Approve with unsourced claims' })
+    expect(ask).toHaveTextContent('members')
+    expect(api.approveSocialPost).not.toHaveBeenCalled()
+    fireEvent.click(within(ask).getByRole('button', { name: 'Approve with unsourced claims' }))
+    await waitFor(() => expect(api.approveSocialPost).toHaveBeenCalledWith('a', 'hash-a', { overrideUnsourced: true, postNow: true }))
+    expect(api.publishSocialPostNow).not.toHaveBeenCalled()
+  })
+
+  // 11 Oct 2026: a confirmation was open on post A when A was approved; A left the queue, the pane
+  // fell back to the next post (B, no channels) with the confirmation still open, and its click
+  // approved B. Keyed by the post, a confirmation left open never moves to the next one.
   it('a confirmation left open never moves to the next post', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
     const queue = (posts: any[]) => withClient(client,
       <SocialsQueue role="owner" posts={posts} selectedId={null} onSelect={vi.fn()} onEdit={edit} />)
-    const view = render(queue([waiting('a')]))
-    fireEvent.click(within(pane()).getByRole('button', { name: POST_NOW_LABEL }))
-    expect(within(pane()).getByRole('alertdialog', { name: POST_NOW_LABEL })).toHaveTextContent('to X?')
+    const view = render(queue([waiting('a', CLAIMED)]))
+    fireEvent.click(within(pane()).getByRole('button', { name: POST_NOW }))
+    expect(within(pane()).getByRole('alertdialog', { name: 'Approve with unsourced claims' })).toBeInTheDocument()
     view.rerender(queue([waiting('b', { targets: [] })]))
     expect(within(pane()).getByRole('heading', { name: 'Post b' })).toBeInTheDocument()
-    expect(within(pane()).queryByRole('alertdialog', { name: POST_NOW_LABEL })).toBeNull()
-    expect(within(pane()).getByRole('button', { name: POST_NOW_LABEL })).toBeDisabled()
+    expect(within(pane()).queryByRole('alertdialog')).toBeNull()
+    expect(within(pane()).getByRole('button', { name: APPROVE })).toBeDisabled()
     expect(api.approveSocialPost).not.toHaveBeenCalled()
     expect(api.publishSocialPostNow).not.toHaveBeenCalled()
   })
 
-  it('Post now in an open confirmation waits whenever the button would', () => {
-    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
-    const post = waiting('a')
-    const view = render(withClient(client, <ApproveAndPostNow post={post} disabled={false} />))
-    fireEvent.click(screen.getByRole('button', { name: POST_NOW_LABEL }))
-    view.rerender(withClient(client, <ApproveAndPostNow post={post} disabled />))
-    expect(screen.getByRole('button', { name: 'Post now' })).toBeDisabled()
-  })
-
-  it('waits for a channel, and a post with unsourced claims goes through Approve', () => {
+  it('waits for a channel: with none it is a plain Approve, and off', () => {
     renderQueue(waiting('a', { targets: [] }))
-    expect(within(pane()).getByRole('button', { name: POST_NOW_LABEL })).toBeDisabled()
-    cleanup()
-    renderQueue(waiting('b', { variables: { members: { value: 1200, claim: true } }, sources: {} }))
-    expect(within(pane()).getByRole('button', { name: POST_NOW_LABEL })).toBeDisabled()
+    expect(within(pane()).getByRole('button', { name: APPROVE })).toBeDisabled()
+    expect(within(pane()).queryByRole('button', { name: /post now/ })).toBeNull()
   })
 })

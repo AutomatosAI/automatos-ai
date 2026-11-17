@@ -6,6 +6,12 @@ records, so ``service.py`` (over 800 lines) only gains its table rows:
 * ``start_publish``: approved or scheduled → publishing, only while the approval
   matches the content as it is NOW (``service.assert_publishable``, D6) and the post
   has channels to publish to.
+* ``publishes_on_approval``: whether a person's approval publishes the post at once (one
+  Approve, 17 Nov 2026): approved with no planned slot, no schedule and a channel. When the
+  click asked for it (``post_now``), the approve route (``api/socials_publish.publish_on_approval``)
+  then starts the same publish as publish-now; a slot still ahead (the planned one, else a schedule kept from before an
+  edit) was scheduled by the approval, and one that passed stays approved for a person to
+  reschedule (B11).
 * ``start_retry``: failed or partially_published → publishing, re-running the failed
   targets, under the same approval check (``assert_retryable``). A post that failed
   its render, whose content changed since its approval, or whose video shows the
@@ -59,6 +65,19 @@ def assert_retryable(post: Any) -> None:
     ai_media.assert_label_rendered(post)  # PRD-264 EUAI-08a: the video is rendered again first
     if not any(target.status == TARGET_FAILED for target in _targets(post)):
         raise NotPublishable(NOTHING_TO_RETRY)
+
+
+def publishes_on_approval(post: Any) -> bool:
+    """Whether a post a person has just approved, asking to post now, is published at once: it stayed approved
+    (``service.approve`` scheduled none into a slot), it has no planned slot and no schedule
+    (one that passed, planned or kept from before an edit, is left for a person to reschedule),
+    and it has channels to publish to."""
+    return (
+        getattr(post, "status", None) == service.APPROVED
+        and getattr(post, "planned_for", None) is None
+        and getattr(post, "scheduled_for", None) is None
+        and bool(_targets(post))
+    )
 
 
 def start_publish(post: SocialPost, actor: str) -> SocialPost:

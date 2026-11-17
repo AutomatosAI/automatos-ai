@@ -120,7 +120,7 @@ export function SocialsQueue({ role, posts, selectedId, onSelect, onEdit }: Soci
         <div className="grid items-start gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
           <QueueList groups={groups} selectedId={selected?.id ?? null} onSelect={onSelect} action={reviewer ? batchAction : undefined} />
           {selected && (reviewer
-            // Keyed by the post: a confirmation left open on one post (Approve & post now, Reject)
+            // Keyed by the post: a confirmation left open on one post (its unsourced claims, Reject)
             // never carries over to the next one the pane falls back to once the first leaves the queue.
             ? <QueuePane key={selected.id} post={selected} campaignName={campaignName} now={now} role={role}
                 onEdit={onEdit ? () => onEdit(selected.id) : undefined} />

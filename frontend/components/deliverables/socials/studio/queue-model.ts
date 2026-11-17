@@ -9,14 +9,18 @@
  * P256-FIX-SOC-2 (F433): a plan's draft the render refused waits for the owner's input
  * (the server's `service.waits_for_input`): listed apart as "Waits for you", never approved here.
  *
- * An approved post with no time posts nothing: the server schedules an approval only into a slot
- * still ahead (`service.approve`), so with neither slot it stays approved "for a person to
- * schedule", and the calendar's grids, which need a slot, leave it out. Listed apart as
- * "Approved, no time yet" and counted in the nav's Queue badge.
+ * An approved post with no time posts nothing. A post's own Approve publishes one with no slot at
+ * once (`approveLabel`, `post_now`), but a post unscheduled, approved in bulk (its plan's week, its
+ * series, Approve all shown) or from the phone app, can still stand approved with neither slot "for
+ * a person to schedule", and the calendar's grids,
+ * which need a slot, leave it out. Listed apart as "Approved, no time yet" and counted in the nav's
+ * Queue badge.
+ *
+ * One Approve (17 Nov 2026): Approve's label says what the server will do with the post (`approveLabel`).
  */
 import type { SocialPost } from '@/lib/api-client'
 import { hasChannels } from '../socials-review'
-import { channelLabel } from '../socials-status'
+import { channelLabel, channelNames } from '../socials-status'
 import { formatLabel, postTime } from './socials-calendar-model'
 
 export const QUEUE_STATUS = 'needs_approval'
@@ -25,6 +29,10 @@ export const APPROVED_STATUS = 'approved'
 /** The review_log action of a post that waits for the owner's input (modules/socials/service.py ACTION_NEEDS_INPUT). */
 export const NEEDS_INPUT = 'needs_input'
 export const NO_SLOT = 'No slot'
+/** Approve's three labels (approveLabel): it approves only, it posts at the slot, it posts now. */
+export const APPROVE = 'Approve'
+export const APPROVE_POSTS_AT = 'Approve · posts'
+export const APPROVE_AND_POST_NOW = 'Approve & post now to'
 const MINUTE_MS = 60_000
 const DAY_MS = 86_400_000
 const WEEK_KEY = /^(\d{4})-W(\d{2})$/
@@ -188,11 +196,32 @@ export function timeLeft(slot: string, now: Date): string {
   return `in ${Math.round(minutes / DAY_MIN)}d`
 }
 
-/** "Approve · publishes 12:00", or "Approve" for a post with no slot, or with no channel, which
- * publishes nothing (F256). */
-export function approveLabel(post: SocialPost): string {
-  const slot = slotOfQueued(post)
-  return slot && hasChannels(post) ? `Approve · publishes ${postTime(post, slot)}` : 'Approve'
+/** The time approving the post schedules it into, as `service.approve` picks it: its planned slot
+ * while still ahead, else a schedule kept from before an edit while still ahead; null when neither is. */
+export function approvalSlot(post: Pick<SocialPost, 'planned_for' | 'scheduled_for'>, now: Date): string | null {
+  const ahead = (slot: string | null | undefined): slot is string => typeof slot === 'string' && new Date(slot).getTime() > now.getTime()
+  return [post.planned_for, post.scheduled_for].find(ahead) ?? null
+}
+
+/** Whether Approve also posts it now, as its label says: it has channels and neither a planned slot
+ * nor a schedule. The click sends it (`post_now`), and the server publishes only if it agrees then,
+ * so a label gone stale (a slot cleared in another tab) never publishes. */
+export function approvePostsNow(post: SocialPost): boolean {
+  return hasChannels(post) && !post.planned_for && !post.scheduled_for
+}
+
+/** What Approve does, said on its button (one Approve, 17 Nov 2026), as the server decides it
+ * (`service.approve`, then `api/socials_publish.publish_on_approval`):
+ * - no planned slot and no schedule (`approvePostsNow`): "Approve & post now to X, LinkedIn", which
+ *   sends `post_now` and publishes it at once;
+ * - a slot still ahead (`approvalSlot`: the planned one, else a schedule kept from before an edit):
+ *   "Approve · posts 12:00", which schedules it there;
+ * - a slot or a kept schedule that passed, or no channel (F256): plain "Approve", which approves it
+ *   and posts nothing until a person gives it a time. */
+export function approveLabel(post: SocialPost, now: Date = new Date()): string {
+  if (approvePostsNow(post)) return `${APPROVE_AND_POST_NOW} ${channelNames(post)}`
+  const slot = hasChannels(post) ? approvalSlot(post, now) : null
+  return slot ? `${APPROVE_POSTS_AT} ${postTime(post, slot)}` : APPROVE
 }
 
 /** "12:00 · X, LinkedIn · Image · WebSummit countdown". */

@@ -153,9 +153,10 @@ describe('a role that cannot author', () => {
       const card = view()
       expect(screen.queryByRole('region', { name: 'Post to approve' })).toBeNull()
       expect(within(card).getByText(READ_ONLY_ROLE)).toBeInTheDocument()
-      for (const name of ['Approve', 'Approve & post now', 'Request changes', 'Reject', 'Make another take', 'Edit post']) {
+      for (const name of ['Request changes', 'Reject', 'Make another take', 'Edit post']) {
         expect(screen.queryByRole('button', { name })).toBeNull()
       }
+      expect(screen.queryByRole('button', { name: /^Approve/ })).toBeNull()  // no Approve, whatever it says it does
       expect(within(card).queryAllByRole('button')).toHaveLength(0)
       cleanup()
     }
@@ -284,7 +285,7 @@ describe('an approved post with no time', () => {
     expect(notice).toHaveTextContent(`${APPROVED_NO_TIME_NOTE} ${CONTROLS_BELOW}`)
     const publishing = within(card).getByRole('region', { name: 'Publishing' })
     expect(within(publishing).getByRole('button', { name: 'Schedule' })).toBeInTheDocument()
-    expect(within(publishing).getByRole('button', { name: 'Publish now' })).toBeInTheDocument()
+    expect(within(publishing).getByRole('button', { name: 'Publish now to LinkedIn' })).toBeInTheDocument()
     expect(notice.compareDocumentPosition(publishing) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
