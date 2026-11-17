@@ -39,11 +39,11 @@ const STYLE_CLOSE = /<\/style/i
 const SCRIPT_OPEN = /<script/i
 const SIZE = /^(\d{2,4})x(\d{2,4})$/
 
-/** Whether the post's rendered file shows what is on screen: it has one, and nothing a render
- * reads has changed since the post was saved. A saved edit after the render cannot be told yet:
- * the post does not record what its file was made from (US-D108). */
+/** Whether the post's rendered file shows what is on screen: it has one, the server says it was
+ * made from what the post holds now (`file_current`, US-D108: a saved edit after the render
+ * leaves it older than the words), and nothing a render reads has changed since the post was saved. */
 export function renderIsCurrent(post: SocialPost | null, draft: EditorDraft): boolean {
-  return !!post && Object.keys(post.media ?? {}).length > 0 && !previewStale(post, draft)
+  return !!post && Object.keys(post.media ?? {}).length > 0 && post.file_current !== false && !previewStale(post, draft)
 }
 
 /** Whether the preview shows the instant page: an image post with a template, not the person's

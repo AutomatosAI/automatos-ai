@@ -39,6 +39,8 @@ describe('which posts show the instant preview', () => {
     expect(renderIsCurrent(saved, onScreen)).toBe(true)
     expect(renderIsCurrent(saved, { ...onScreen, variables: { headline: { value: 'Open early' } } })).toBe(false)
     expect(renderIsCurrent({ ...saved, media: {} }, onScreen)).toBe(false)
+    // A saved edit after the render: the server says the file is older than the words (US-D108).
+    expect(renderIsCurrent({ ...saved, file_current: false }, onScreen)).toBe(false)
     expect(renderIsCurrent(null, onScreen)).toBe(false)
   })
 })
