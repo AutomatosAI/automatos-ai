@@ -71,13 +71,30 @@ def reporter_of(db: Any, ctx: Any, end_user_id: Optional[str] = None) -> Reporte
     return Reporter(pk=resolve_user_pk(db, ctx))
 
 
-def end_user_gone(db: Any, workspace_id: Any, reporter: Reporter) -> bool:
-    """For a key naming an end user: whether their consent is gone or their erase has started."""
+def end_user_gone(db: Any, workspace_id: Any, reporter: Reporter, *, hold: bool = False) -> bool:
+    """For a key naming an end user: whether their consent is gone or their erase has started.
+
+    With ``hold``, their consent record is read ``FOR SHARE``. The erase marks its start by updating
+    that row (``api.end_user_memory._mark_erasing``), so it waits until this transaction ends, and a
+    mark made first is seen here once it commits. The service checks again this way right before it
+    writes the audit row, in the transaction that commits it, so no report lands once an erase began.
+    """
     if not reporter.is_key or reporter.end_user_id is None:
         return False
-    from core.models.end_users import consented
+    if not hold:
+        from core.models.end_users import consented
 
-    return not consented(db, workspace_id, reporter.end_user_id)
+        return not consented(db, workspace_id, reporter.end_user_id)
+    from core.models.end_users import EndUser
+
+    held = (
+        db.query(EndUser.id)
+        .filter(EndUser.workspace_id == workspace_id, EndUser.end_user_id == reporter.end_user_id,
+                EndUser.erasing_at.is_(None))
+        .with_for_update(read=True)
+        .first()
+    )
+    return held is None
 
 
 def _service_user_of(db: Any, key_id: Any) -> Optional[int]:

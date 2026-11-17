@@ -220,6 +220,9 @@ async def file_report(
     )
     if earlier is not None:
         return _with_id(report, earlier, duplicate=True)
+    if end_user_gone(db, workspace_id, reporter, hold=True):  # held until _record commits
+        db.rollback()
+        raise ReportTargetNotFound()
 
     filed = _with_id(report, _record(db, reporter=reporter, report=report), duplicate=False)
     await _notify_owner(db, filed)
