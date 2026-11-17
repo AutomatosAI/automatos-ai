@@ -16,6 +16,8 @@ answers the template as one self-contained page for the words on screen; ``GET
   marker; a story's 9:16 keeps the safe zone;
 * a field left empty is empty text (an empty number is 0 and an empty true/false is false, so one
   in a script still previews); a value over its field's limit is refused, saying why;
+* only a starter the platform ships, unchanged, previews: a workspace's own template and an edited
+  starter are refused, so no script but the platform's runs in the editor;
 * only an image template of one still previews; a composition a render refuses is refused;
 * the request is bounded (values, their length, photos, the size, unknown keys);
 * another workspace's template is 404, a viewer is 403, a workspace with Socials off is 404;
@@ -33,6 +35,7 @@ import re
 import sys
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -51,10 +54,13 @@ import tests.test_prd251w1_render_lifecycle as render_harness  # noqa: E402
 from core.media_render_bundle import BUNDLED_FONT_FILES, NO_LOGO  # noqa: E402
 from core.models.workspaces import Workspace  # noqa: E402
 from modules.documents.brand_kit import get_brand_kit  # noqa: E402
+from modules.documents.social_starters import social_starters  # noqa: E402
 from modules.socials import instant_preview  # noqa: E402
 from tests.test_prd251w1_render_lifecycle import COMPOSITION, CREATED, WS, WS_OTHER, _ctx, _template  # noqa: E402
 
 env = render_harness.env
+# The real rule, kept before the fixture below stands in for it.
+SHIPS_WITH_THE_PLATFORM = instant_api.ships_with_the_platform
 MANIFEST = _ORCH / "reports" / "route-manifest.json"
 STUDIO = _ORCH.parent / "frontend" / "components" / "deliverables" / "socials" / "studio"
 WS_OFF = uuid.UUID("00000000-0000-0000-0000-0000000d201f")
@@ -91,6 +97,13 @@ PAGE_TEMPLATE = {
     "sizes": ["1080x1350", "1080x1920"],
     "slots": {"photo": {"kind": "image", "path": "assets/slots/photo.png", "label": "Photo"}},
 }
+
+
+@pytest.fixture(autouse=True)
+def _made_here_stands_for_a_starter(monkeypatch):
+    """The templates these tests make stand for starters the platform ships. The rule that only a
+    starter previews has its own test, which puts the real rule back."""
+    monkeypatch.setattr(instant_api, "ships_with_the_platform", lambda template: True)
 
 
 def _image(env, *, blocks=PAGE_TEMPLATE, workspace_id=WS):
@@ -149,6 +162,24 @@ def test_the_page_opens_with_its_own_policy_and_fetches_nothing(env):
     references = REFERENCE.findall(page)
     assert references and all(ref.startswith("data:") for ref in references), references
     assert f'<img class="logo" src="{NO_LOGO}" alt="" />' in page  # no uploaded logo: the renderer's empty one
+
+
+def test_only_a_starter_the_platform_ships_unchanged_previews_as_you_type(env, monkeypatch):
+    monkeypatch.setattr(instant_api, "ships_with_the_platform", SHIPS_WITH_THE_PLATFORM)
+    # A workspace's own template: its script is not the platform's, so it never runs in the editor.
+    own = _page(env, _image(env), values={"headline": "Open late"})
+    assert own.status_code == 422, own.text
+    assert own.json()["detail"] == instant_api.STARTERS_ONLY
+
+    starters = social_starters("social_image")
+    assert starters and all(SHIPS_WITH_THE_PLATFORM(SimpleNamespace(blocks=starter["blocks"])) for starter in starters)
+    blocks = starters[0]["blocks"]
+    # A starter someone edited is no longer the platform's: one more script is enough.
+    edited = {**blocks, "html": blocks["html"].replace("</body>", "<script>window.added = 1;</script></body>")}
+    assert edited["html"] != blocks["html"]
+    assert not SHIPS_WITH_THE_PLATFORM(SimpleNamespace(blocks=edited))
+    assert not SHIPS_WITH_THE_PLATFORM(SimpleNamespace(blocks=None))
+    assert not SHIPS_WITH_THE_PLATFORM(SimpleNamespace(blocks={"html": PAGE_HTML}))
 
 
 def test_a_value_in_an_event_attribute_is_refused_and_a_forbidden_element_is_too(env):
