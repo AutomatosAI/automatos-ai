@@ -7,6 +7,11 @@
  * overtook). The workspace comes through the REAL WorkspaceProvider (its
  * GET /api/workspaces/current is the only stubbed fetch), so turning Socials on
  * is proven to refetch the workspace and swap the card for the list in place.
+ *
+ * PRD-251D US-D202/D203: the calendar's List opens a post as a calendar chip does, so these
+ * tests follow it there: a post waiting for approval into the Queue's pane, a draft into the
+ * editor (which submits, approves with the Queue's controls, US-D101, and saves an edit), an
+ * archived post, or any post for a viewer, into the read-only view.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, within, waitFor } from '@testing-library/react'
@@ -111,6 +116,13 @@ vi.mock('@/lib/api-client', () => {
     }),
     requestSocialPostChanges: vi.fn(async (id: string, comment: string) => move(id, 'request_changes', comment)),
     rejectSocialPost: vi.fn(async (id: string) => move(id, 'reject')),
+    // PRD-251D: the editor saves a post's channels after its fields; the Queue reads the plans
+    // and, sending a post back to Auto, asks for another take (the post is left as it is here).
+    setSocialPostTargets: vi.fn(async (id: string) => find(id)),
+    listSocialCampaigns: vi.fn(async () => ({ campaigns: [] })),
+    retakeSocialPost: vi.fn(async (id: string) => find(id)),
+    // The brand kit's name and a post's AI-label lines: nothing to say here.
+    get: vi.fn(async () => ({ targets: [] })),
   }
   return { apiClient, default: apiClient }
 })
@@ -119,7 +131,9 @@ import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 import { WorkspaceProvider, useWorkspace } from '@/components/workspace-provider'
 import { SocialsTab } from '@/components/deliverables/socials/socials-tab'
-import { SOCIAL_POST_CHANGED_MESSAGE, SOCIAL_POST_REVIEW_STALE_MESSAGE } from '@/hooks/use-socials-api'
+import { APPROVE_CARD } from '@/components/deliverables/socials/studio/editor-approve-card'
+import { READ_ONLY_ROLE } from '@/components/deliverables/socials/studio/socials-post-view'
+import { SOCIAL_POST_REVIEW_STALE_MESSAGE } from '@/hooks/use-socials-api'
 
 const api = apiClient as unknown as Record<string, ReturnType<typeof vi.fn>>
 
@@ -170,8 +184,16 @@ function renderTab() {
   )
 }
 
+/** A post's read-only view (studio/socials-post-view.tsx) and the status it shows. */
 const detail = (title: string) => screen.getByRole('article', { name: `Post: ${title}` })
 const statusOf = (title: string) => within(detail(title)).getByTestId('socials-post-status')
+/** The editor's status, beside its title. */
+const editorStatus = () => screen.getByTestId('socials-editor-status')
+/** The Queue's pane, where a post that waits for approval opens. */
+const findPane = () => screen.findByRole('region', { name: 'Post to approve' })
+const nav = () => screen.getByRole('navigation', { name: 'Socials' })
+/** Back to the calendar, whose layout is still the List. */
+const toTheList = () => fireEvent.click(within(nav()).getByRole('button', { name: 'Calendar' }))
 
 beforeEach(() => {
   server.role = 'owner'
@@ -266,79 +288,92 @@ describe('Socials on', () => {
   })
 
   it('approving moves it to Approved; editing its copy afterwards moves it to Needs approval', async () => {
-    const post = seedPost({ title: 'Launch week teaser', copy: { base: 'v1' }, targets: [CHANNEL] })
+    // A text post: Submit sends it as it is (a post with a visual renders first, PRD-251D US-D102).
+    const post = seedPost({ title: 'Launch week teaser', format: 'text', copy: { base: 'v1' }, targets: [CHANNEL] })
     renderTab()
 
+    // The List opens the draft in its editor, which submits it.
     fireEvent.click(await screen.findByRole('button', { name: /Launch week teaser/ }))
-    fireEvent.click(within(detail('Launch week teaser')).getByRole('button', { name: 'Submit for approval' }))
-    await screen.findByRole('heading', { name: 'Needs approval 1' })
+    fireEvent.click(await screen.findByRole('button', { name: 'Submit for approval' }))
+    await waitFor(() => expect(editorStatus()).toHaveTextContent('Needs approval'))
+    expect(api.submitSocialPost).toHaveBeenCalledWith(post.id)
 
-    fireEvent.click(within(detail('Launch week teaser')).getByRole('button', { name: 'Approve' }))
-    await screen.findByRole('heading', { name: 'Approved 1' })
-    expect(statusOf('Launch week teaser')).toHaveTextContent('Approved')
-    expect(api.approveSocialPost).toHaveBeenCalledWith(post.id, post.content_hash)
+    // Waiting for approval, it is approved where it is (US-D101), by the hash of the version on screen.
+    fireEvent.click(within(await screen.findByRole('region', { name: APPROVE_CARD })).getByRole('button', { name: 'Approve' }))
+    await waitFor(() => expect(editorStatus()).toHaveTextContent('Approved'))
+    expect(api.approveSocialPost).toHaveBeenCalledWith(post.id, server.posts[0].content_hash)
     expect(server.posts[0].approved_hash).toBe(server.posts[0].content_hash)
 
-    fireEvent.change(within(detail('Launch week teaser')).getByLabelText('Copy'), { target: { value: 'v2, sharper' } })
-    fireEvent.click(within(detail('Launch week teaser')).getByRole('button', { name: 'Save copy' }))
+    // An edit saved afterwards voids the approval (D6).
+    fireEvent.change(screen.getByRole('textbox', { name: 'Copy' }), { target: { value: 'v2, sharper' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }))
 
+    await waitFor(() => expect(editorStatus()).toHaveTextContent('Needs approval'))
+    expect(api.updateSocialPost).toHaveBeenLastCalledWith(post.id, expect.objectContaining({ copy: { base: 'v2, sharper', channels: {} } }))
+    expect(server.posts[0].approved_hash).not.toBe(server.posts[0].content_hash)
+    expect(within(screen.getByRole('region', { name: 'History' })).getByText('Approval voided by an edit')).toBeInTheDocument()
+
+    // The List says the same.
+    fireEvent.click(screen.getByRole('button', { name: 'Back to calendar' }))
     await screen.findByRole('heading', { name: 'Needs approval 1' })
     expect(screen.queryByRole('heading', { name: /^Approved/ })).toBeNull()
-    expect(statusOf('Launch week teaser')).toHaveTextContent('Needs approval')
-    expect(api.updateSocialPost).toHaveBeenCalledWith(post.id, { copy: { base: 'v2, sharper' } })
-    expect(server.posts[0].approved_hash).not.toBe(server.posts[0].content_hash)
-    expect(within(detail('Launch week teaser')).getByText('Approval voided by an edit')).toBeInTheDocument()
   })
 
   it('Approve sends the hash of the version on screen; a 409 (changed while reviewed) says so and reloads the post', async () => {
     const post = seedPost({ title: 'Launch week teaser', status: 'needs_approval', copy: { base: 'v1' }, targets: [CHANNEL] })
     renderTab()
+    // From the List, a post waiting for approval opens in the Queue's pane, as from the calendar.
     fireEvent.click(await screen.findByRole('button', { name: /Launch week teaser/ }))
-    expect(within(detail('Launch week teaser')).getByLabelText('Copy')).toHaveValue('v1')
+    const pane = await findPane()
+    expect(within(pane).getByText('v1')).toBeInTheDocument()
 
     // Another editor changes the copy on the server; this screen still shows v1 (the list is cached).
     const edited = { ...server.posts[0], copy: { base: 'v2 from another editor' } }
     server.posts = [{ ...edited, content_hash: contentHashOf(edited) }]
     const fetches = api.listSocialPosts.mock.calls.length
 
-    fireEvent.click(within(detail('Launch week teaser')).getByRole('button', { name: 'Approve' }))
+    fireEvent.click(within(pane).getByRole('button', { name: 'Approve' }))
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(SOCIAL_POST_REVIEW_STALE_MESSAGE))
-    expect(within(detail('Launch week teaser')).getByRole('alert')).toHaveTextContent(SOCIAL_POST_REVIEW_STALE_MESSAGE)
+    expect(within(pane).getByRole('alert')).toHaveTextContent(SOCIAL_POST_REVIEW_STALE_MESSAGE)
     expect(api.approveSocialPost).toHaveBeenCalledWith(post.id, post.content_hash)
     await waitFor(() => expect(api.listSocialPosts.mock.calls.length).toBeGreaterThan(fetches))
-    expect(await within(detail('Launch week teaser')).findByDisplayValue('v2 from another editor')).toBeInTheDocument()
-    expect(statusOf('Launch week teaser')).toHaveTextContent('Needs approval')
+    expect(await within(pane).findByText('v2 from another editor')).toBeInTheDocument()
+    expect(server.posts[0].status).toBe('needs_approval')
     expect(server.posts[0].approved_hash).toBeNull()
     expect(toast.success).not.toHaveBeenCalled()
 
-    // Now shown the edit, the reviewer approves exactly it.
-    fireEvent.click(within(detail('Launch week teaser')).getByRole('button', { name: 'Approve' }))
-    await screen.findByRole('heading', { name: 'Approved 1' })
+    // Now shown the edit, the reviewer approves exactly it; it leaves the Queue and the List says Approved.
+    fireEvent.click(within(pane).getByRole('button', { name: 'Approve' }))
+    expect(await screen.findByText('Nothing is waiting for your approval.')).toBeInTheDocument()
     expect(api.approveSocialPost).toHaveBeenLastCalledWith(post.id, server.posts[0].content_hash)
     expect(server.posts[0].approved_hash).toBe(server.posts[0].content_hash)
+    toTheList()
+    await screen.findByRole('heading', { name: 'Approved 1' })
   })
 
-  it('Save copy answering 409 (another writer committed first) toasts and refetches the posts, as Approve does', async () => {
-    const post = seedPost({ title: 'Launch week teaser', status: 'needs_approval', copy: { base: 'v1' } })
+  it("Save draft answering 409 (another writer committed first) says so, refetches the posts and shows the server's version", async () => {
+    // PRD-251D: the List opens a draft in its editor, where the copy is saved with Save draft.
+    const post = seedPost({ title: 'Launch week teaser', copy: { base: 'v1' } })
     renderTab()
     fireEvent.click(await screen.findByRole('button', { name: /Launch week teaser/ }))
-    fireEvent.change(within(detail('Launch week teaser')).getByLabelText('Copy'), { target: { value: 'v2 mine' } })
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Copy' }), { target: { value: 'v2 mine' } })
 
     // Another editor's change commits first, so the server refuses this save.
-    const edited = { ...server.posts[0], copy: { base: 'v2 from another editor' } }
+    const edited = { ...server.posts[0], copy: { base: 'v2 from another editor' }, updated_at: '2026-09-23T10:00:00.000Z' }
     server.posts = [{ ...edited, content_hash: contentHashOf(edited) }]
     api.updateSocialPost.mockRejectedValueOnce(
       Object.assign(new Error('the post changed since you opened it'), { status: 409 }),
     )
     const fetches = api.listSocialPosts.mock.calls.length
 
-    fireEvent.click(within(detail('Launch week teaser')).getByRole('button', { name: 'Save copy' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }))
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(SOCIAL_POST_CHANGED_MESSAGE))
-    expect(api.updateSocialPost).toHaveBeenCalledWith(post.id, { copy: { base: 'v2 mine' } })
+    // The editor says what the server said, and reads the posts again.
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('the post changed since you opened it'))
+    expect(api.updateSocialPost).toHaveBeenCalledWith(post.id, expect.objectContaining({ copy: { base: 'v2 mine', channels: {} } }))
     await waitFor(() => expect(api.listSocialPosts.mock.calls.length).toBeGreaterThan(fetches))
-    expect(await within(detail('Launch week teaser')).findByDisplayValue('v2 from another editor')).toBeInTheDocument()
+    expect(await screen.findByDisplayValue('v2 from another editor')).toBeInTheDocument()
     expect(server.posts[0].copy).toEqual({ base: 'v2 from another editor' })
     expect(toast.success).not.toHaveBeenCalled()
   })
@@ -347,19 +382,28 @@ describe('Socials on', () => {
     const post = seedPost({ title: 'Needs work', status: 'needs_approval' })
     renderTab()
 
+    // PRD-251D: in the Queue's pane, Request changes sends the post back to Auto: the comment goes
+    // with the request, and Auto is asked for another take with it.
     fireEvent.click(await screen.findByRole('button', { name: /Needs work/ }))
-    fireEvent.click(within(detail('Needs work')).getByRole('button', { name: 'Request changes' }))
-    const send = within(detail('Needs work')).getByRole('button', { name: 'Send request' })
+    const pane = await findPane()
+    fireEvent.click(within(pane).getByRole('button', { name: 'Request changes' }))
+    const send = within(pane).getByRole('button', { name: 'Send back to Auto' })
     expect(send).toBeDisabled()
-    fireEvent.change(within(detail('Needs work')).getByLabelText('What needs to change?'), { target: { value: 'Tighten the hook' } })
+    fireEvent.change(within(pane).getByLabelText('What should change?'), { target: { value: 'Tighten the hook' } })
     fireEvent.click(send)
 
-    await screen.findByRole('heading', { name: 'Changes requested 1' })
+    await waitFor(() => expect(api.retakeSocialPost).toHaveBeenCalledWith(post.id, 'Tighten the hook'))
     expect(api.requestSocialPostChanges).toHaveBeenCalledWith(post.id, 'Tighten the hook')
-    expect(statusOf('Needs work')).toHaveTextContent('Changes requested')
-    expect(within(detail('Needs work')).getByText('Tighten the hook')).toBeInTheDocument()
-    // Changes requested → the author can resubmit.
-    expect(within(detail('Needs work')).getByRole('button', { name: 'Submit for approval' })).toBeInTheDocument()
+    expect(server.posts[0].status).toBe('changes_requested')
+
+    // The List shows it under Changes requested; it opens in its editor, which shows the comment
+    // in its history and lets the author resubmit.
+    toTheList()
+    const heading = await screen.findByRole('heading', { name: 'Changes requested 1' })
+    fireEvent.click(within(heading.closest('section')!).getByRole('button', { name: /Needs work/ }))
+    expect(await screen.findByRole('button', { name: 'Submit for approval' })).toBeInTheDocument()
+    expect(editorStatus()).toHaveTextContent('Changes requested')
+    expect(within(screen.getByRole('region', { name: 'History' })).getByText('Tighten the hook')).toBeInTheDocument()
   })
 
   it('reject takes an optional reason and archives the post', async () => {
@@ -367,11 +411,16 @@ describe('Socials on', () => {
     renderTab()
 
     fireEvent.click(await screen.findByRole('button', { name: /Off brand/ }))
-    fireEvent.click(within(detail('Off brand')).getByRole('button', { name: 'Reject' }))
-    fireEvent.change(within(detail('Off brand')).getByLabelText('Reason (optional)'), { target: { value: 'Not our voice' } })
-    fireEvent.click(within(detail('Off brand')).getByRole('button', { name: 'Reject post' }))
-    await screen.findByRole('heading', { name: 'Archived 1' })
-    expect(api.rejectSocialPost).toHaveBeenCalledWith(post.id, 'Not our voice')
+    const pane = await findPane()
+    fireEvent.click(within(pane).getByRole('button', { name: 'Reject' }))
+    fireEvent.change(within(pane).getByLabelText('Reason (optional)'), { target: { value: 'Not our voice' } })
+    fireEvent.click(within(pane).getByRole('button', { name: 'Reject post' }))
+    await waitFor(() => expect(api.rejectSocialPost).toHaveBeenCalledWith(post.id, 'Not our voice'))
+
+    // PRD-251D US-D202: the List shows it under Archived, and it opens in its read-only view.
+    toTheList()
+    const heading = await screen.findByRole('heading', { name: 'Archived 1' })
+    fireEvent.click(within(heading.closest('section')!).getByRole('button', { name: /Off brand/ }))
     expect(statusOf('Off brand')).toHaveTextContent('Archived')
   })
 
@@ -385,8 +434,10 @@ describe('Socials on', () => {
     })
     renderTab()
 
+    // PRD-251D: it opens in the Queue's pane; Edit post opens its editor, whose Activity card holds the history.
     fireEvent.click(await screen.findByRole('button', { name: /Agent draft/ }))
-    const history = within(detail('Agent draft')).getByRole('region', { name: 'History' })
+    fireEvent.click(within(await findPane()).getByRole('button', { name: 'Edit post' }))
+    const history = await screen.findByRole('region', { name: 'History' })
     expect(within(history).getByText('Drafted')).toBeInTheDocument()
     expect(within(history).getByText('Drafted by Social Media Director.')).toBeInTheDocument()
     expect(within(history).getByText('Sent for approval')).toBeInTheDocument()
@@ -398,19 +449,24 @@ describe('Socials on', () => {
     server.role = 'editor'
     renderTab()
     fireEvent.click(await screen.findByRole('button', { name: /For review/ }))
-    for (const name of ['Approve', 'Request changes', 'Reject', 'Save copy']) {
-      expect(within(detail('For review')).getByRole('button', { name })).toBeInTheDocument()
+    // PRD-251D: the Queue's pane; its copy is changed in the editor, which Edit post opens.
+    const pane = await findPane()
+    for (const name of ['Approve', 'Request changes', 'Reject', 'Edit post']) {
+      expect(within(pane).getByRole('button', { name })).toBeInTheDocument()
     }
     cleanup()
 
     server.role = 'viewer'
     renderTab()
     fireEvent.click(await screen.findByRole('button', { name: /For review/ }))
+    // PRD-251D US-D203: one who may not approve reads the post, in the Queue, with nothing to press.
     const card = detail('For review')
-    for (const name of ['Approve', 'Request changes', 'Reject', 'Save copy', 'Submit for approval']) {
+    for (const name of ['Approve', 'Request changes', 'Reject', 'Save copy', 'Submit for approval', 'Save draft', 'Edit post']) {
       expect(within(card).queryByRole('button', { name })).toBeNull()
     }
-    expect(within(card).getByText('Your role can read posts but not change them.')).toBeInTheDocument()
+    expect(within(card).queryAllByRole('button')).toHaveLength(0)
+    expect(within(card).getByText(READ_ONLY_ROLE)).toBeInTheDocument()
+    expect(READ_ONLY_ROLE).toBe('Your role can read posts but not change them.')
     expect(screen.queryByRole('button', { name: /New post/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /Blank draft/ })).toBeNull()
   })
