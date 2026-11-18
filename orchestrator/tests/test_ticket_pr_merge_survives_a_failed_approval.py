@@ -23,7 +23,10 @@ from core.models.core import BoardTask
 from services import ticket_pr_merge as tpm
 from services import ticket_pull_request as tpr
 from tests.test_prd256_done_needs_artifact import QUESTION, _body, _person
-from tests.test_prd256_done_needs_artifact import board, quiet  # noqa: F401 — the fixtures, as that suite builds them
+from tests import test_prd256_done_needs_artifact as _gate_suite
+
+board = _gate_suite.board  # the fixtures, as that suite builds them (assigned, not imported: tests take them by name)
+quiet = _gate_suite.quiet
 from tests.test_ticket_pr_merge_on_approve import BRANCH, GREEN_RUNS, MERGE_SHA, REPO, URL, _GitHub
 
 LATER_STEP_FAILED = "the database went away while the approval was written"
