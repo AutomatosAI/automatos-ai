@@ -40,7 +40,7 @@ import sys
 import threading
 import uuid
 from dataclasses import FrozenInstanceError
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -694,6 +694,64 @@ def test_hand_over_runs_deliver_on_the_push_threads_without_recipient_work(saas,
     assert on_loop is event and thread_name.startswith(f"{fanout.PUSH_THREAD_PREFIX}_")
     assert inline is event and inline_thread == threading.current_thread().name
     assert fanout._push_executor._max_workers == fanout.PUSH_DELIVERY_THREADS == 2
+
+
+def _notification(db, workspace_id, *, link_type, age_minutes, event_type="approval_pending") -> str:
+    """A bell row for ``event_type`` made ``age_minutes`` before the frozen clock (T0)."""
+    row_id = str(uuid.uuid4())
+    db.execute(text(
+        "INSERT INTO notifications (id, workspace_id, event_type, title, link_type, link_id, created_at) "
+        "VALUES (CAST(:id AS uuid), CAST(:ws AS uuid), :event_type, 'Social post needs approval: x', "
+        ":link_type, :link_id, :created_at)"),
+        {"id": row_id, "ws": workspace_id, "event_type": event_type, "link_type": link_type,
+         "link_id": str(uuid.uuid4()), "created_at": T0 - timedelta(minutes=age_minutes)})
+    _settle(db)
+    return row_id
+
+
+def _social_event(ws, notification_id) -> PushEvent:
+    return PushEvent(workspace_id=ws, event_type="approval_pending", notification_id=notification_id,
+                     link_type="social_post", link_id=str(uuid.uuid4()))
+
+
+def test_the_first_social_post_approval_of_a_run_is_pushed_and_the_next_ones_stay_in_the_bell(saas, ws, db_session,
+                                                                                                  monkeypatch):
+    recorder = _Recorder()
+    monkeypatch.setattr(fanout, "deliver", recorder)
+    _phone(db_session, ws, _owner(db_session, ws))
+    first = _notification(db_session, ws, link_type="social_post", age_minutes=0)
+
+    assert fanout.hand_over(db_session, _social_event(ws, first)) is True        # nothing before it: pushed
+    second = _notification(db_session, ws, link_type="social_post", age_minutes=0)
+    third = _notification(db_session, ws, link_type="social_post", age_minutes=0)
+    assert fanout.hand_over(db_session, _social_event(ws, second)) is False      # a sibling a moment ago
+    assert fanout.hand_over(db_session, _social_event(ws, third)) is False
+    assert len(recorder.calls) == 1
+
+
+def test_a_social_post_approval_after_the_window_is_pushed_again(saas, ws, db_session, monkeypatch):
+    recorder = _Recorder()
+    monkeypatch.setattr(fanout, "deliver", recorder)
+    _phone(db_session, ws, _owner(db_session, ws))
+    old_minutes = int(fanout.COALESCE_WINDOW.total_seconds() // 60) + 1
+    _notification(db_session, ws, link_type="social_post", age_minutes=old_minutes)
+    latest = _notification(db_session, ws, link_type="social_post", age_minutes=0)
+
+    assert fanout.hand_over(db_session, _social_event(ws, latest)) is True
+    assert len(recorder.calls) == 1
+
+
+def test_a_tool_approval_is_never_held_back_by_a_social_post_one(saas, ws, db_session, monkeypatch):
+    recorder = _Recorder()
+    monkeypatch.setattr(fanout, "deliver", recorder)
+    _phone(db_session, ws, _owner(db_session, ws))
+    _notification(db_session, ws, link_type="social_post", age_minutes=0)
+    grant_row = _notification(db_session, ws, link_type="approval_grant", age_minutes=0)
+    event = PushEvent(workspace_id=ws, event_type="approval_pending", notification_id=grant_row,
+                      link_type="approval_grant", link_id="12")
+
+    assert fanout.hand_over(db_session, event) is True
+    assert len(recorder.calls) == 1
 
 
 # --------------------------------------------------------------------------- the rules

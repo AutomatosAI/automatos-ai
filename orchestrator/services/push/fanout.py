@@ -44,7 +44,7 @@ import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from sqlalchemy import bindparam, text
@@ -97,6 +97,17 @@ _PUSH_SWITCHES_SQL = text(
 ).bindparams(bindparam("uids", expanding=True))
 
 COUNT_KEYS = ("recipients", "devices", "sent", "refused", "disabled")
+
+# A plan that makes a week of posts files one approval per post within minutes (18 Nov: five pushes in
+# eleven minutes). For these links the first push of a run is sent and the rest stay in the bell: a sibling
+# notification of the same type and link type, made in the last COALESCE_WINDOW, means the person was just told.
+COALESCED_LINK_TYPES = ("social_post",)
+COALESCE_WINDOW = timedelta(minutes=10)
+_RECENT_SIBLING_SQL = text(
+    "SELECT 1 FROM notifications "
+    "WHERE workspace_id = CAST(:ws AS uuid) AND event_type = :event_type AND link_type = :link_type "
+    "  AND id <> CAST(:notification_id AS uuid) AND created_at >= :since LIMIT 1"
+)
 
 # Push delivery's own threads (each holds one event's Expo requests while Expo answers),
 # never core.best_effort's, which write usage and billing rows.
@@ -473,15 +484,35 @@ def _worth_handing_over(db: Session, event: PushEvent) -> bool:
         return has_eligible_device(db, event.workspace_id)
 
 
+def _joins_a_recent_push(db: Session, event: PushEvent) -> bool:
+    """Whether this event is a later one of a run whose first push just went out (``COALESCED_LINK_TYPES``).
+
+    Read in a savepoint, so a failed read never aborts the caller's transaction.
+    """
+    if event.link_type not in COALESCED_LINK_TYPES or not event.notification_id:
+        return False
+    with db.begin_nested():
+        row = db.execute(_RECENT_SIBLING_SQL, {
+            "ws": str(event.workspace_id), "event_type": event.event_type, "link_type": event.link_type,
+            "notification_id": str(event.notification_id), "since": _now() - COALESCE_WINDOW,
+        }).first()
+    return row is not None
+
+
 def hand_over(db: Session, event: PushEvent) -> bool:
     """Hand the event's push to ``deliver`` off the event loop, when there is anyone to push to.
 
     No recipient work here (``deliver`` reads who, at send time). False, with nothing handed
-    over, when no phone in the workspace can be pushed; False and logged when the check
-    itself fails. Never raises.
+    over, when no phone in the workspace can be pushed or the event is a later one of a run
+    (``_joins_a_recent_push``: its bell row stands); False and logged when the check itself
+    fails. Never raises.
     """
     try:
         if not _worth_handing_over(db, event):
+            return False
+        if _joins_a_recent_push(db, event):
+            logger.info("Push hand-over: %s %s joins a run already pushed in workspace %s",
+                        event.event_type, event.notification_id, event.workspace_id)
             return False
         _deliver_off_loop(event)
     except SQLAlchemyError as failure:

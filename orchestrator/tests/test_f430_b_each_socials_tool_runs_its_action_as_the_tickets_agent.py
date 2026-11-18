@@ -37,6 +37,8 @@ env = harness.env  # the US-116 fixture: SQLite, the real router and executor
 CTX = st.SessionContext(task_id=2001, agent_id=268, agent_name="Social Media Director", workspace_id="ws-shop")
 SMUGGLED = {"workspace_id": "ws-other", "agent_id": 1, "_agent_id": 1, "_agent_name": "Someone else"}
 POST = "6f1c0d1e-2b7a-4c55-9a1e-1d2f3a4b5c6d"
+PLAN = "0d330e1f-228e-47c6-b84e-5c1d7a9b2e10"
+TOPICS = [{"title": "Start faster", "facts": [{"text": "The kit packs a theme.", "source": {"kind": "note"}}]}]
 
 CASES = [
     ("create_social_post",
@@ -93,6 +95,9 @@ def test_a_socials_tool_runs_its_action_as_the_tickets_agent(executor, name, arg
     ("update_social_post", {"render": True}, "needs the post_id"),
     ("submit_social_post", {"note": "please"}, "needs the post_id"),
     ("get_social_post", {}, "needs the post_id"),
+    ("get_social_plan", {}, "needs the plan_id"),
+    ("add_social_topics", {"topics": TOPICS}, "needs the plan_id"),
+    ("add_social_topics", {"plan_id": PLAN}, "needs the plan_id"),
 ])
 def test_a_call_missing_what_it_needs_is_refused_and_runs_nothing(executor, name, arguments, words):
     with pytest.raises(st.SessionToolRefused) as refused:
@@ -115,7 +120,8 @@ def test_each_socials_tool_takes_exactly_what_its_action_declares():
 def test_the_writes_say_so_and_the_reads_only_read():
     reads = {spec["name"]: st.get_tool(spec["name"]).reads_only for spec in SOCIAL_TOOL_SPECS}
     assert reads == {"create_social_post": False, "update_social_post": False, "submit_social_post": False,
-                     "get_social_post": True, "list_social_posts": True}
+                     "get_social_post": True, "list_social_posts": True, "get_social_plan": True,
+                     "add_social_topics": False, "get_social_history": True}
 
 
 def test_a_sessions_draft_and_its_submit_run_through_the_platform_as_its_agent(env):
