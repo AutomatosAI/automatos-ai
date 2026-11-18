@@ -164,7 +164,13 @@ jobs:
     name: orchestrator-tests shard ${{ matrix.shard }}/${{ needs.changes.outputs.backend_shard_count }} (${{ needs.changes.outputs.backend_mode }})
     needs: changes
     if: needs.changes.outputs.backend_mode == 'full' || needs.changes.outputs.backend_mode == 'select'
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: `ubuntu-latest` became Ubuntu 26.04 in November 2026 (actions/runner-images
+    # #14748), whose pg_dump / pg_restore are 18.6 against the `postgres:15` service below. An 18 dump
+    # starts with `SET transaction_timeout` (PostgreSQL 17+), which 15 refuses, so
+    # tests/test_dr_restore.py failed on every run from 17 Nov. The 24.04 image's client is 16.15
+    # (what the product runs: pgvector pg16), and a 16 dump restores into 15. Move to the newer image
+    # when the service and the client are one major.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
