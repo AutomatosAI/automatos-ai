@@ -4,27 +4,77 @@
 
 ### The open-source AI Operating System
 
-**Run a workforce of AI agents on your own machine — any model, 1,500+ tools, one Knowledge Graph, and Auto to run it all.**
+**Auto, one assistant, runs a team of AI agents on your own machine: any model, 1,500+ apps with your own Composio key, no Automatos account or licence key.**
+
+Apache-2.0 end to end. Runs on your own machine with no Automatos account. Hosted beta opens November 2026.
+
+<sub>You bring your model key, and a Composio key if you connect apps. The iPhone app uses Apple and Expo for notifications and updates.</sub>
 
 [![GitHub stars](https://img.shields.io/github/stars/AutomatosAI/automatos-ai?style=flat&logo=github)](https://github.com/AutomatosAI/automatos-ai/stargazers)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Discussions](https://img.shields.io/github/discussions/AutomatosAI/automatos-ai?logo=github)](https://github.com/AutomatosAI/automatos-ai/discussions)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/AutomatosAI/automatos-ai)
 
-[Quick start](#quick-start-local-edition) · [Self-hosting guide](docs/getting-started/self-hosting.md) · [Docs](docs/README.md) · [Discussions](https://github.com/AutomatosAI/automatos-ai/discussions) · [Hosted beta](https://studio.automatos.app)
+[Quick start](#quick-start-local-edition) · [Self-hosting guide](docs/getting-started/self-hosting.md) · [Docs](docs/README.md) · [Discussions](https://github.com/AutomatosAI/automatos-ai/discussions) · [Hosted beta: join the waitlist](https://studio.automatos.app/#waitlist)
 
 </div>
 
 https://github.com/user-attachments/assets/8e02444e-f05e-439c-a718-b4032ba7790e
 
+<p align="center"><sub>Illustrative · earlier build (4 October 2026)</sub></p>
+
 ---
 
-Automatos is an operating system for AI work. You command a workforce of specialised agents — equipped with skills, tools and knowledge — through one voice, **Auto**, and they produce real **Deliverables**: reports, code, content, analysis. Self-host it with `docker compose up`, bring any model (paid APIs, free hosted open models, or your own Claude Code subscription), and keep your agents, data and Deliverables on infrastructure you control.
+Automatos is an operating system for AI work. You talk to one assistant, **Auto**, and it hands the work to specialised agents, equipped with skills, tools and knowledge, that produce real **Deliverables**: reports, code, content, analysis. Run it yourself with `make up`, bring any model (paid APIs, free hosted open models, or your own Claude Code subscription), and keep your agents, data and Deliverables on infrastructure you control.
 
-```bash
-git clone --depth 1 https://github.com/AutomatosAI/automatos-ai.git && cd automatos-ai
-make up                # writes .env with three random secrets, then → http://localhost:3000, no login
-```
+## Three ways in
+
+- **Run it yourself** (the local edition). Two commands, then http://localhost:3000 with no login:
+
+  ```bash
+  git clone --depth 1 https://github.com/AutomatosAI/automatos-ai.git && cd automatos-ai
+  make up                # writes .env with three random secrets, then → http://localhost:3000, no login
+  ```
+
+- **Step by step.** New to Docker, or on Windows? [SETUP.md](SETUP.md) walks through every step for macOS, Linux and Windows (WSL2).
+- **Hosted.** Automatos Studio is the same code run as a service. The hosted beta opens November 2026: [join the waitlist](https://studio.automatos.app/#waitlist).
+
+## What works today, and what isn't ready yet
+
+*As of 18 November 2026.* **The local edition is Apache-2.0 end to end and runs with no Automatos account.**
+You bring your own AI model key. App connections go through Composio, with your own Composio key.
+
+| | Status |
+|---|---|
+| Local edition: free and open source on your own machine (`make up`, no login, no licence key) | `LIVE` |
+| Hosted Studio | `BUILDING NOW` · beta opens November 2026 · [join the waitlist](https://studio.automatos.app/#waitlist) |
+| Automatos Go, the iPhone app | `IN BETA` · TestFlight beta · App Store next |
+| Themes (Play, HUD): one theme restyles the web app and the phone app | `LIVE` on web · `IN BETA` on the phone |
+| Social posts wait for your approval | `LIVE` |
+| Board work can be set to ask first | `LIVE` |
+| Money actions are off by default | `LIVE` |
+| Approve with Face ID in the iPhone app | `IN BETA` |
+| Proactive Auto: Auto suggests the next job; it starts only when you tap Start | `BUILDING NOW` · in testing |
+| Tool choice that learns from how tools are used | `BUILDING NOW` · we switch it on only when it beats plain search by 5 points in our test |
+| Partner themes | `BUILDING NOW` |
+| Automatos for Shopify | `BUILDING NOW` |
+| Automatos Go on Android | `NEXT, WITH THIS FUNDING` |
+| Company sign-in, SOC 2, the enterprise edition | `NEXT, WITH THIS FUNDING` |
+| Auto Live voice calls | `NEXT, WITH THIS FUNDING` |
+| Microsoft Teams | Not built |
+
+<details>
+<summary><strong>What a local install talks to</strong></summary>
+
+- **Your model provider**, with your own key.
+- **Composio**, only if you connect apps, with your own Composio key.
+- **Automatos's theme withdrawal list**, read once an hour with no account or credentials, so a theme version Automatos withdraws stops running on your install too. Set `THEME_REVOCATIONS_URL=` to empty in `envs/api.local` to switch it off.
+- **Automatos Cloud's Marketplace**, only when an owner or admin presses **Sync with Automatos Cloud**: pull only, with no account, workspace or install id. Set `AUTOMATOS_CLOUD_URL=` to empty in `envs/api.local` to switch it off.
+- **For the iPhone app, Automatos Go:** Expo (app updates, checked at each launch, and the push relay), Apple (notifications, only if you turn them on), and crash reports to Automatos (scrubbed; on by default, and you can switch them off in Settings).
+
+The local edition sends no usage telemetry.
+
+</details>
 
 ## Why an operating system?
 
@@ -80,7 +130,7 @@ One workspace and one Auto, with the same agents, Knowledge and Deliverables, wh
   </tr>
 </table>
 
-**Voice.** Hold the microphone button and ask: your browser hears you, the words go to Auto, and the reply is spoken. That works on every plan and in both editions. **Auto Live** is a real-time voice call with Auto, where the server has it set up. Auto says it is an AI: once per browser session for a quick ask, and at the start of each call. The voice button sits in Studio's chat box, and every theme can place it through the theme SDK (Play and HUD do). Auto answers in the language you write or speak; a quick ask listens and speaks in your browser's language. Auto's natural voice, which the server runs itself (Kokoro, on CPU), can speak nine languages: the phone and the web's quick ask speak with it where the server runs it, and use the device's or the browser's own voice otherwise. Automatic language detection, for speaking in any of about 100 languages without choosing first, is planned and needs a GPU server: it is not built yet ([PRD-269](docs/PRDS/PRD-269-AUTOMATIC-LANGUAGE.md)).
+**Voice.** Hold the microphone button and ask: your browser hears you, the words go to Auto, and the reply is spoken. That works on every plan and in both editions. **Auto Live**, a real-time voice call with Auto, is not ready yet ([status](#what-works-today-and-what-isnt-ready-yet)): its web code is in this repository and runs on Retell, which the local stack doesn't set up. Auto says it is an AI once per browser session for a quick ask, and at the start of an Auto Live call. The voice button sits in Studio's chat box, and every theme can place it through the theme SDK (Play and HUD do). Auto answers in the language you write or speak; a quick ask listens and speaks in your browser's language. Auto's natural voice, which the server runs itself (Kokoro, on CPU), can speak nine languages: the phone and the web's quick ask speak with it where the server runs it, and use the device's or the browser's own voice otherwise. Automatic language detection, for speaking in any of about 100 languages without choosing first, is planned and needs a GPU server: it is not built yet ([PRD-269](docs/PRDS/PRD-269-AUTOMATIC-LANGUAGE.md)).
 
 <p align="center">
   <img src="docs/assets/showcase/hud-1440-voice-listening-arc.png" alt="HUD listening to a question by voice, with Mic live and the AI voice assistant caption" width="720">
@@ -149,7 +199,7 @@ Connect your agents to GitHub, Slack, Jira, Stripe, Shopify, Datadog, Notion, Hu
 
 ## Tools chosen by meaning, not by menu
 
-An agent with 200+ built-in platform actions cannot be handed all of them on every turn. Before the prompt is assembled, the platform embeds your message and ranks the action catalogue by semantic similarity, so the model is offered the handful of tools that fit what you asked — one ranking per turn, shared by every surface that needs it, cached, and never replaced by the full list when the embedding is slow. Selections and outcomes feed the Intent Graph, the learned layer that ranks by what worked for phrasings like yours; it is seeded from example utterances so it is useful on day one, and a measured uplift gate decides whether it is allowed to route.
+An agent with 200+ built-in platform actions cannot be handed all of them on every turn. Before the prompt is assembled, the platform embeds your message and ranks the action catalogue by semantic similarity, so the model is offered the handful of tools that fit what you asked — one ranking per turn, shared by every surface that needs it, cached, and never replaced by the full list when the embedding is slow. Selections and outcomes are recorded for the Intent Graph, a learned layer, seeded from example utterances, that ranks by what worked for phrasings like yours. It records today and does not route yet: it is off by default (`TOOL_ROUTING_GRAPH=false`) and switches on only after it beats plain search by 5 points in the uplift test (`orchestrator/evals/operating_graph_uplift.py`).
 
 ## Packages — a ready-made team in one install
 
@@ -215,7 +265,7 @@ Upload documents, sync folders from Dropbox and cloud storage (the cloud connect
 | Capability | What it does |
 |---|---|
 | **Universal Router** | Five-tier routing (your override, cache, rules, semantic similarity, LLM) sends each message to the best-matching agent or workflow |
-| **Semantic tool selection** | Ranks the action catalogue against each message before the prompt is built; the Intent Graph learns from outcomes |
+| **Semantic tool selection** | Ranks the action catalogue against each message before the prompt is built. The learned layer, the Intent Graph, records which tools worked today and switches on only after a measured uplift over plain search (off by default) |
 | **Session mode** | Your own Claude Code sessions as agents — tickets, persona, skills, Deliverables, approvals, and a Canvas terminal (local edition) |
 | **Provider registry** | One registry of model providers; models installed per route with per-route prices; paid, free and subscription side by side |
 | **Playbooks & Missions** | Multi-step automation with scheduling, triggers, and inter-agent coordination |
@@ -226,7 +276,7 @@ Upload documents, sync folders from Dropbox and cloud storage (the cloud connect
 | **Multi-Tenancy** | Full workspace isolation in the hosted edition — each team gets their own agents, data, and configuration |
 | **Plugin System** | Extend agents with skills, plugins, and custom tools from the marketplace or your own repos |
 | **Installable themes** | `.autotheme` packages that redraw the web app, each member choosing their own, with looks and a phone skin; built with the [Design Kit](https://github.com/AutomatosAI/automatos-design-kit) |
-| **Voice** | Hold-to-talk quick ask in the browser on every plan and edition; Auto Live real-time calls where the server has them set up; Auto's self-hosted natural voice in nine languages; automatic detection of about 100 spoken languages planned (needs a GPU, not built) |
+| **Voice** | Hold-to-talk quick ask in the browser on every plan and edition; Auto's self-hosted natural voice in nine languages; Auto Live real-time calls: not ready yet (`NEXT, WITH THIS FUNDING`); automatic detection of about 100 spoken languages planned (needs a GPU, not built) |
 
 ---
 
