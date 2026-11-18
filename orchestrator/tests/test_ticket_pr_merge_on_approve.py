@@ -37,7 +37,10 @@ from core.composio.deny_list import BLOCKED_PREFIX, DENIED_REASON, denied_result
 from services import ticket_pr_merge as tpm
 from services import ticket_pull_request as tpr
 from tests.test_prd256_done_needs_artifact import QUESTION, _body, _not_a_person, _notes, _person
-from tests.test_prd256_done_needs_artifact import board, quiet  # noqa: F401 — the fixtures, as that suite builds them
+from tests import test_prd256_done_needs_artifact as _gate_suite
+
+board = _gate_suite.board  # the fixtures, as that suite builds them (assigned, not imported: tests take them by name)
+quiet = _gate_suite.quiet
 
 WS = UUID("6f0e8a43-0c55-4c2b-9a1e-3f1d2b7c8e90")
 REPO = "automatos-ai/automatos-ai"
