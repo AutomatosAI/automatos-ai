@@ -20,7 +20,10 @@ from core.models.core import BoardTask
 from core.models.kept_runtime_keys import PULL_REQUEST_KEY
 from services import ticket_pull_request as tpr
 from tests.test_prd256_done_needs_artifact import QUESTION, _not_a_person, _person
-from tests.test_prd256_done_needs_artifact import board, quiet  # noqa: F401 — the fixtures, as that suite builds them
+from tests import test_prd256_done_needs_artifact as _gate_suite
+
+board = _gate_suite.board  # the fixtures, as that suite builds them (assigned, not imported: tests take them by name)
+quiet = _gate_suite.quiet
 
 URL = "https://github.com/automatos-ai/automatos-ai/pull/1559"
 ROUTE = {"method": "DELETE", "path": "/api/v1/tasks/{task_id}/pull-request"}
