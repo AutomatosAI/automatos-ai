@@ -3,7 +3,9 @@
 With ``config.TICKET_APPROVE_MERGES_PR`` on, a person's Approve of a ticket whose session reported
 a GitHub pull request (``runtime_ref.pull_request``, ``services/ticket_pull_request.py``) merges
 it. A person is the Done gate's person (``done_needs_an_artifact.a_persons_request``: a Clerk
-sign-in or a paired phone or browser). The merge runs after the approval's own action and before
+sign-in or a paired phone or browser), and only a workspace owner or admin merges
+(``MERGE_PERMISSION``, ``workspace:manage``): approving needs only ``missions:update``, which an
+editor holds too, and an editor's Approve closes the ticket and says the merge needs an owner. The merge runs after the approval's own action and before
 its result and notes are written (``api/board_card_moves.after_its_action``, called once from
 ``api/board_tasks.approve_task``), and only while the ticket is still that approval's Done.
 
@@ -72,6 +74,8 @@ HEAD_SHA_CHARS = 40
 # rides the approval's own transaction instead: logged).
 NOTE_LOCK_TIMEOUT_MS = 5000
 MERGE_MARK = "merged"
+# Merging is an owner's or admin's (modules/policy/roles.py): approving is ``missions:update``, an editor's too.
+MERGE_PERMISSION = "workspace:manage"
 MERGE_NOTE_BY = "you"   # the person who approved (ticket_verdict.OPERATOR_NOTE_BY)
 
 MERGED_NOTE = "Merged {url}"
@@ -98,6 +102,7 @@ NO_ANSWER = "GitHub could not be read through the workspace's connection ({error
 MERGE_REFUSED = "the merge was refused ({error})"
 COULD_NOT_TRY = "the merge could not be attempted"
 CHANGED_SINCE = "it changed since you looked"
+NEEDS_OWNER = "merging needs a workspace owner or admin"
 NO_REPOS = "no repository is set up to merge on approve (TICKET_APPROVE_MERGES_PR_REPOS is empty)"
 NOT_LISTED = "{repository} is not one of the repositories set up to merge on approve"
 NOT_ITS_OWN = "GitHub's answer does not say which repository and branch it comes from"
@@ -128,13 +133,14 @@ async def merge_on_approve(db: Any, ctx: Any, task_id: int, *, decided_at: Any,
     if not config.TICKET_APPROVE_MERGES_PR or not a_persons_request(ctx):
         return None
     try:
-        return await _merge(db, ctx.workspace_id, int(task_id), decided_at, shown)
+        return await _merge(db, ctx, int(task_id), decided_at, shown)
     except Exception:  # noqa: BLE001 — logged; the approval stands and the note says what happened
         logger.exception("[ticket-pr-merge] ticket #%s: the merge could not be attempted", task_id)
         return NOT_MERGED_NOTE.format(reason=COULD_NOT_TRY)
 
 
-async def _merge(db: Any, workspace_id: Any, task_id: int, decided_at: Any, shown: Any) -> Optional[str]:
+async def _merge(db: Any, ctx: Any, task_id: int, decided_at: Any, shown: Any) -> Optional[str]:
+    workspace_id = ctx.workspace_id
     view = await asyncio.to_thread(approved_pull_request, db, workspace_id, task_id, decided_at)
     if view is None:
         return None
@@ -146,6 +152,8 @@ async def _merge(db: Any, workspace_id: Any, task_id: int, decided_at: Any, show
     refused = refusal_before_github(address)
     if refused:
         return refused
+    if not await asyncio.to_thread(may_merge, db, ctx):
+        return not_merged(NEEDS_OWNER)
     if not await asyncio.to_thread(github_connected, db, workspace_id):
         return not_merged(NOT_CONNECTED)
     executor = _executor(db)
@@ -165,8 +173,12 @@ def not_merged(reason: str) -> str:
 
 def same_as_shown(view: Mapping, shown: Any) -> bool:
     """The pull request the owner was shown is the one on the ticket now: the same address and the
-    same stamp of its last write. A client that sends none (an older one, the phone today) agrees;
-    anything else that is not exactly the stored identity does not. Pure."""
+    same stamp of its last write. Anything that is not exactly the stored identity does not agree.
+
+    A client that sends none (an older one, the phone today) agrees, and that is safe: the pull
+    request is frozen once its ticket leaves In progress (``ticket_pull_request.write_pull_request``
+    refuses every write after that), and Approve works only on a ticket in Review, so nothing can be
+    swapped between the owner viewing the card and approving it. Pure."""
     if shown is None or shown == {}:
         return True
     if not isinstance(shown, Mapping):
@@ -185,6 +197,14 @@ def refusal_before_github(address: PullRequestAddress) -> Optional[str]:
     if address.repository.lower() not in allowed:
         return not_merged(NOT_LISTED.format(repository=address.repository))
     return None
+
+
+def may_merge(db: Any, ctx: Any) -> bool:
+    """The approving person may merge: a workspace owner or admin (``MERGE_PERMISSION``), the
+    platform super-admin included (``workspace_permission_granted``'s one bypass)."""
+    from core.auth.workspace_permission import workspace_permission_granted
+
+    return workspace_permission_granted(db, ctx, MERGE_PERMISSION)
 
 
 def approved_pull_request(db: Any, workspace_id: Any, task_id: int, decided_at: Any) -> Optional[Dict[str, Any]]:
@@ -440,5 +460,6 @@ def merged_by_this_approval(db: Any, workspace_id: Any, task_id: int, decided_at
 __all__ = [
     "ALREADY_MERGED_NOTE", "GET_PULL_REQUEST", "LIST_CHECK_RUNS", "MERGED_NOTE", "MERGE_METHOD", "MERGE_PULL_REQUEST",
     "MERGE_UNKNOWN_NOTE", "NOT_MERGED_ELSEWHERE_NOTE", "NOT_MERGED_NOTE", "Readiness", "checks_blocker",
-    "merge_on_approve", "merged_by_this_approval", "ownership_blocker", "payload_of", "pull_request_blocker",
+    "may_merge", "merge_on_approve", "merged_by_this_approval", "ownership_blocker", "payload_of",
+    "pull_request_blocker",
 ]

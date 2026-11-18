@@ -260,8 +260,9 @@ def merge_allowed_repos() -> frozenset:
 
 
 def merges_on_approve(address: Optional[PullRequestAddress]) -> bool:
-    """Whether a person's Approve would try to merge this pull request: the setting on, a
-    github.com pull request, and its repository listed. GitHub still has to say it can."""
+    """Whether an owner's or admin's Approve would try to merge this pull request: the setting on, a
+    github.com pull request, and its repository listed. The board's view cannot tell who is looking,
+    so the viewer's line says it needs an owner or admin; GitHub still has to say it can."""
     return bool(config.TICKET_APPROVE_MERGES_PR and address is not None and address.shape == GITHUB_SHAPE
                 and address.host == GITHUB_HOST and address.repository.lower() in merge_allowed_repos())
 

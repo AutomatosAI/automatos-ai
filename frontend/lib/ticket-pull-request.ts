@@ -28,7 +28,7 @@ export interface TicketPullRequest {
   tested: string | null
   /** When it was last written: sent back with an Approve, so a pull request changed since is not merged. */
   at: string | null
-  /** The server's word: a person's Approve would merge it (the install's setting on, its repository listed). */
+  /** The server's word: an owner's or admin's Approve would merge it (the install's setting on, its repository listed). */
   merges_on_approve: boolean
 }
 
@@ -45,7 +45,9 @@ export const BRANCH_LABEL = 'Branch'
 export const COMMITS_LABEL = 'Commits'
 export const TESTED_LABEL = 'Tested'
 export const OPEN_PULL_REQUEST = 'Opens the pull request in a new tab'
-export const APPROVE_WILL_MERGE = 'Approving will merge this pull request (squash) once its checks pass.'
+// The board's API cannot tell who is looking, and only an owner's or admin's Approve merges, so the line says so.
+export const APPROVE_WILL_MERGE =
+  'Approving will merge this pull request (squash) once its checks pass, if you are a workspace owner or admin.'
 export const REMOVE_PULL_REQUEST = 'Remove'
 export const REMOVE_PULL_REQUEST_TITLE = 'Take this pull request off the ticket?'
 export const REMOVE_PULL_REQUEST_BODY =

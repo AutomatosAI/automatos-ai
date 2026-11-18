@@ -5,7 +5,9 @@ and have that approval merge the pull request its session opened (``services/tic
 This pins:
 
 * off, nothing is read and nothing merges; on, only a person's Approve merges (a Clerk sign-in or a
-  paired device, the Done gate's lanes), never Auto's status tool or an agent's ``update_ticket``;
+  paired device, the Done gate's lanes), never Auto's status tool or an agent's ``update_ticket``,
+  and only a workspace owner's or admin's (``workspace:manage``): an editor may approve
+  (``missions:update``), and the ticket closes, but nothing merges and the note says why;
 * only what the owner was shown (the address and the ``at`` stamp the Approve carries), only a
   repository listed in ``TICKET_APPROVE_MERGES_PR_REPOS`` (empty: nothing), and only the ticket's own
   work: GitHub says it belongs to that repository, comes from a branch of it (no fork), on the
@@ -93,8 +95,9 @@ def merging(monkeypatch):
     monkeypatch.setattr(config, "TICKET_APPROVE_MERGES_PR", True)
     monkeypatch.setattr(config, "TICKET_APPROVE_MERGES_PR_REPOS", REPO)
     monkeypatch.setattr(tpm, "github_connected", lambda db, ws: True)
-    state = NS(github=_GitHub(), view=_view(), kept=[], keeps=True)
+    state = NS(github=_GitHub(), view=_view(), kept=[], keeps=True, may=True)
     monkeypatch.setattr(tpm, "approved_pull_request", lambda db, ws, task_id, decided_at: state.view)
+    monkeypatch.setattr(tpm, "may_merge", lambda db, ctx: state.may)
     monkeypatch.setattr(tpm, "_executor", lambda db: state.github)
 
     def _keep(workspace_id, task_id, note, decided_at, sha):
@@ -169,6 +172,26 @@ def test_a_client_that_sends_no_identity_merges_the_stored_pull_request(merging)
 def test_when_its_own_transaction_fails_the_merge_note_rides_the_approval(merging):
     merging.state.keeps = False
     assert _merge() == tpm.MERGED_NOTE.format(url=URL)
+
+
+def test_a_person_who_is_not_an_owner_or_admin_approves_but_merges_nothing(merging):
+    merging.state.may = False
+    assert _merge() == "Approved. The pull request was not merged: merging needs a workspace owner or admin. " \
+                       "Merge it on GitHub."
+    assert merging.state.github.calls == [] and merging.state.kept == []
+
+
+@pytest.mark.parametrize("role, merges", [("owner", True), ("admin", True), ("editor", False), ("viewer", False),
+                                          (None, False)])
+def test_merging_is_an_owners_or_admins_and_approving_is_not(monkeypatch, role, merges):
+    from core.auth import workspace_permission
+    from modules.policy.roles import workspace_has_permission
+
+    monkeypatch.setattr(workspace_permission, "resolve_workspace_role", lambda db, ctx: role)
+    person = NS(workspace_id=WS, user_id="2", auth_type="clerk", user=NS(id="2", clerk_user_id="user_2"))
+    assert tpm.MERGE_PERMISSION == "workspace:manage"
+    assert tpm.may_merge(None, person) is merges
+    assert workspace_has_permission("editor", "missions:update") is True      # an editor may approve
 
 
 def test_a_ticket_moved_while_the_approval_ran_merges_nothing(merging):
@@ -374,13 +397,17 @@ def _shown(db, task):
 
 @pytest.fixture
 def github_here(monkeypatch):
-    """The setting on, the repository listed, GitHub connected, a scripted GitHub; the ticket's own row is
-    read for real, and the merge's own transaction is the test's session (the board fixture's)."""
+    """The setting on, the repository listed, GitHub connected, a scripted GitHub, the approver an owner
+    (``role``: the real permission check, its role read from here); the ticket's own row is read for real,
+    and the merge's own transaction is the test's session (the board fixture's)."""
+    from core.auth import workspace_permission
+
     monkeypatch.setattr(config, "TICKET_APPROVE_MERGES_PR", True)
     monkeypatch.setattr(config, "TICKET_APPROVE_MERGES_PR_REPOS", REPO)
     monkeypatch.setattr(tpm, "github_connected", lambda db, ws: True)
-    state = NS(github=_GitHub())
+    state = NS(github=_GitHub(), role="owner")
     monkeypatch.setattr(tpm, "_executor", lambda db: state.github)
+    monkeypatch.setattr(workspace_permission, "resolve_workspace_role", lambda db, ctx: state.role)
     return state
 
 
@@ -395,6 +422,32 @@ def test_a_persons_approve_on_the_board_merges_the_pull_request_and_says_so(db_s
     assert github_here.github.actions()[-1] == tpm.MERGE_PULL_REQUEST
     assert _notes(db_session, task) == [("CODER", f"Pull request: {URL}"), ("you", f"Merged {URL}")]
     assert task.runtime_ref["pull_request"]["merged"]["sha"] == MERGE_SHA
+
+
+@pytest.mark.parametrize("role", ["owner", "admin"])
+def test_an_owner_or_admins_approve_merges_it(db_session, board, quiet, github_here, role):
+    from api.board_tasks import approve_task
+
+    github_here.role = role
+    task = _report_a_pull_request(db_session, board)
+    out = _run(approve_task(task.id, _body({}), ctx=_person(board.ws), db=db_session))
+    assert out["status"] == "done" and github_here.github.actions()[-1] == tpm.MERGE_PULL_REQUEST
+    assert _notes(db_session, task)[-1] == ("you", f"Merged {URL}")
+
+
+def test_an_editors_approve_closes_the_ticket_and_merges_nothing(db_session, board, quiet, github_here):
+    """An editor holds ``missions:update``, so Approve works; merging is an owner's or admin's."""
+    from api.board_tasks import approve_task
+
+    github_here.role = "editor"
+    task = _report_a_pull_request(db_session, board)
+    out = _run(approve_task(task.id, _body({"pull_request": _shown(db_session, task)}), ctx=_person(board.ws),
+                            db=db_session))
+    db_session.refresh(task)
+    assert out["success"] is True and out["status"] == "done" and task.status == "done"
+    assert github_here.github.calls == []
+    assert _notes(db_session, task)[-1] == (
+        "you", "Approved. The pull request was not merged: merging needs a workspace owner or admin. Merge it on GitHub.")
 
 
 def test_an_approve_that_shows_another_pull_request_closes_the_ticket_and_merges_nothing(db_session, board, quiet,

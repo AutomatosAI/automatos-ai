@@ -48,8 +48,10 @@ def db_session(test_engine):
 def approving(db_session, board, quiet, monkeypatch):
     """The setting on, the repository listed, GitHub connected and scripted; the merge's own short
     transaction is this session, committed as ``core.database.database.get_db_session`` commits."""
+    from core.auth import workspace_permission
     from core.database import database
 
+    monkeypatch.setattr(workspace_permission, "resolve_workspace_role", lambda db, ctx: "owner")   # an owner approves
     monkeypatch.setattr(config, "TICKET_APPROVE_MERGES_PR", True)
     monkeypatch.setattr(config, "TICKET_APPROVE_MERGES_PR_REPOS", REPO)
     monkeypatch.setattr(tpm, "github_connected", lambda db, ws: True)
