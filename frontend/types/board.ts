@@ -4,6 +4,7 @@
  */
 
 import type { RowStatus } from '@/lib/proactive/types'
+import type { TicketPullRequest } from '@/lib/ticket-pull-request'
 
 export type BoardStatus = 'inbox' | 'assigned' | 'in_progress' | 'review' | 'blocked' | 'done' | 'failed' | 'cancelled' | 'closed'
 
@@ -66,6 +67,8 @@ export interface BoardTask extends RowStatus {
   kept_draft?: string | null
   /** PRE-11: the owner's document its answer was added to Knowledge as, or null. */
   knowledge_document_id?: number | null
+  /** Ticket PR fields: the pull request its session reported (lib/ticket-pull-request.ts), or null. */
+  pull_request?: TicketPullRequest | null
 }
 
 export interface BoardColumn {

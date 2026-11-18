@@ -1,5 +1,5 @@
 {
-  "route_count": 1049,
+  "route_count": 1050,
   "routes": [
     {
       "method": "GET",
@@ -3476,6 +3476,10 @@
     {
       "method": "POST",
       "path": "/api/v1/tasks/{task_id}/cancel"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/tasks/{task_id}/pull-request"
     },
     {
       "method": "POST",

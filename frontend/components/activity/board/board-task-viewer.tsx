@@ -11,6 +11,8 @@ import { ReviewVerdict } from './review-verdict'
 import { MissionVerdict } from './mission-verdict'
 import { TicketQuestions } from './ticket-questions'
 import { TicketApprovals } from './ticket-approvals'
+import { TicketPullRequestSection } from './ticket-pull-request'
+import { useLiveTask } from './use-live-task'
 import { CancelledBanner, TicketActionsBar } from './ticket-actions-bar'
 import { stageReason } from './ticket-stage'
 import { runsInSession, ticketKind } from './ticket-kind'
@@ -24,8 +26,6 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { PremiumIcon } from '@/components/shared'
 import { formatDistanceToNow, format } from 'date-fns'
-import { useQuery } from '@tanstack/react-query'
-import { apiClient } from '@/lib/api-client'
 import type { BoardTask } from '@/types/board'
 import { PRIORITY_CONFIG, STATUS_CONFIG } from '@/types/board'
 import { useUpdateTaskStatus, useRunTask } from '@/hooks/use-board-tasks'
@@ -38,36 +38,6 @@ interface BoardTaskViewerProps {
   onOpenChange: (open: boolean) => void
   /** PRD-252 R1: opened from a question link — that question is highlighted. */
   focusQuestionId?: number | null
-}
-
-/**
- * Poll the backend for live task data when in_progress.
- * Falls back to the prop task when the query hasn't loaded yet.
- */
-function useLiveTask(task: BoardTask | null) {
-  const isActive = task?.status === 'in_progress'
-
-  const { data } = useQuery({
-    queryKey: ['board-task-live', task?.id],
-    queryFn: () => apiClient.request<any>(`/api/v1/tasks/${task?.source_id || task?.id}`),
-    enabled: !!task && isActive,
-    refetchInterval: isActive ? 5000 : false,
-    staleTime: 3000,
-  })
-
-  if (!task) return null
-  if (!data) return task
-
-  return {
-    ...task,
-    status: data.status ?? task.status,
-    result: data.result ?? task.result,
-    error_message: data.error_message ?? task.error_message,
-    started_at: data.started_at ?? task.started_at,
-    completed_at: data.completed_at ?? task.completed_at,
-    step_progress: data.step_progress ?? task.step_progress,
-    runtime_ref: data.runtime_ref ?? task.runtime_ref,
-  } as BoardTask
 }
 
 function formatElapsed(startedAt: string): string {
@@ -758,6 +728,7 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange, focusQuest
         <div className="flex-1 overflow-y-auto px-6 py-5">
           <TicketQuestions taskId={task.id} focusQuestionId={focusQuestionId} />
           <TicketApprovals taskId={task.id} blockedReason={task.status === 'blocked' ? task.blocked_reason : null} focusGrantId={focusQuestionId} />
+          <TicketPullRequestSection pullRequest={task.pull_request} taskId={task.id} />
           {(task.status === 'inbox' || task.status === 'assigned') && <AssignedContent task={task} />}
           {task.status === 'blocked' && <BlockedContent task={task} onStatusChange={handleStatusChange} />}
           {task.status === 'in_progress' && <InProgressContent task={task} />}

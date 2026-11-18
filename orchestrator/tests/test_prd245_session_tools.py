@@ -125,7 +125,8 @@ def test_a_session_notes_progress_on_its_own_ticket_and_moves_it_nowhere():
     # and it never reads ``blocked_reason`` at all. The note vanished and the
     # model was told it had landed.
     assert tool.runner is not None
-    assert sorted(tool.input_schema["properties"]) == ["note"]
+    # Ticket PR fields: the pull request a session opened rides the same tool (services/ticket_pull_request.py)
+    assert sorted(tool.input_schema["properties"]) == ["branch", "commits", "note", "pull_request_url", "tested"]
     assert tool.input_schema["required"] == ["note"]
 
     assert st.resolve_parameters(tool, {"note": "reading the brief"}, CTX) == {"note": "reading the brief"}

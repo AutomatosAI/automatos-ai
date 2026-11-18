@@ -792,6 +792,9 @@ class Config:
     # burst waits for a slot holding no pool connection; keep it well under the
     # pool (10 + 20), since each call can hold its own connection plus one more.
     SESSION_TOOL_CONCURRENCY: int = int(os.getenv("SESSION_TOOL_CONCURRENCY", "6"))
+    # Ticket PR fields: a person's Approve merges the ticket's GitHub pull request (services/ticket_pr_merge.py).
+    TICKET_APPROVE_MERGES_PR: bool = os.getenv("TICKET_APPROVE_MERGES_PR", "false").lower() == "true"
+    TICKET_APPROVE_MERGES_PR_REPOS: str = os.getenv("TICKET_APPROVE_MERGES_PR_REPOS", "").strip()  # owner/repo,…; empty: none
     # P256-FIX-N17-9 (F448): how long, from the call's arrival, a session's document or memory
     # read (services/session_read_deadline.DEADLINED_TOOLS) may take before it answers with a
     # worded failure, so the session's own client never gives up first ("The operation timed out.").

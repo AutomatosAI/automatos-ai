@@ -8,6 +8,7 @@ import type { BoardTask } from '@/types/board'
 import { PRIORITY_CONFIG } from '@/types/board'
 import { cn } from '@/lib/utils'
 import { TicketActionsMenu } from './ticket-actions-menu'
+import { PullRequestChip } from './ticket-pull-request'
 import { stageReason } from './ticket-stage'
 import { runsInSession, ticketKind } from './ticket-kind'
 import { RowStatusLabel } from '@/components/proactive/row-status'
@@ -153,6 +154,8 @@ function CardTopRow({ task, onDelete }: Pick<BoardCardProps, 'task' | 'onDelete'
       <CardKindBadge task={task} />
 
       <div className="flex items-center gap-1">
+        {/* Ticket PR fields: its session opened a pull request */}
+        <PullRequestChip pullRequest={task.pull_request} />
         {/* Child count badge */}
         {(task.child_count ?? 0) > 0 && (
           <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
