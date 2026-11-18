@@ -39,6 +39,8 @@ Automatos is an operating system for AI work. You talk to one assistant, **Auto*
 - **Step by step.** New to Docker, or on Windows? [SETUP.md](SETUP.md) walks through every step for macOS, Linux and Windows (WSL2).
 - **Hosted.** Automatos Studio is the same code run as a service. The hosted beta opens November 2026: [join the waitlist](https://studio.automatos.app/#waitlist).
 
+**Talk to Gerard, who built it:** [book a call](https://cards.automatos.app/?ref=readme).
+
 ## What works today, and what isn't ready yet
 
 *As of 18 November 2026.* **The local edition is Apache-2.0 end to end and runs with no Automatos account.**
