@@ -1,4 +1,4 @@
-"""PRD-256 F430: the Socials post tools, for a ticket session.
+"""PRD-256 F430: the Socials post tools, for a ticket session. Plan research tools too (see below).
 
 Socials day run (14 Oct): the Social Media Director (#348, runtime cli) refused three
 times, "platform_create_social_post isn't available in this session". A session's tool
@@ -13,6 +13,12 @@ built from ``core.social_post_schema``, and only the fields they declare are for
 Like an API agent, a session drafts, changes, re-renders, reads and submits posts; none
 of these approves, schedules or publishes (D6, D14).
 
+The Content bank research playbook's three tools (``get_social_plan``, ``add_social_topics``,
+``get_social_history``) are here too: on 18 Nov its ticket (#0363, runtime cli) stopped with "this
+session doesn't have the two tools the ticket depends on" and added no topics, which emptied the
+plan's content bank and set off a run of notifications. ``add_social_topics`` only adds topics to a
+bank; it never makes, approves, schedules or publishes a post.
+
 Plain specs, like ``session_work_tools``, which lists them last (the Socials group's
 place in the catalogue). This module imports nothing under ``modules`` at load time:
 ``modules.tools`` imports the registry, the executor and the router.
@@ -21,6 +27,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Tuple
 
+from core.social_plan_schema import add_topics_properties, get_plan_properties, history_properties
 from core.social_post_schema import (
     create_properties,
     get_properties,
@@ -33,6 +40,7 @@ from services.session_tool_scope import forward, object_schema
 
 TAGS: Tuple[str, ...] = ("socials",)
 NEEDS_A_TITLE = "create_social_post needs a title: what the post is about, as the Socials tab lists it."
+NEEDS_THE_PLAN = "{tool} needs the plan_id of the Socials plan (the ticket or playbook input names it)."
 NEEDS_THE_POST = "{tool} needs the post_id of the post (list_social_posts lists them)."
 
 
@@ -103,8 +111,38 @@ LIST_SOCIAL_POSTS_SPEC = _spec(
     list_properties(),
 )
 
+GET_SOCIAL_PLAN_SPEC = _spec(
+    "get_social_plan", "platform_get_social_plan",
+    "Read a Socials plan: its goal, audience and dates, its cadence (channels, formats and times), what to "
+    "research (sources, notes and the never-say list), its content bank (each topic's title, formats and "
+    "whether a post used it) and its history: what the workspace already posted, scheduled or has waiting "
+    "for approval.",
+    get_plan_properties(), ("plan_id",), NEEDS_THE_PLAN.format(tool="get_social_plan"),
+)
+
+ADD_SOCIAL_TOPICS_SPEC = _spec(
+    "add_social_topics", "platform_add_social_topics",
+    "Add researched topics to a Socials plan's content bank, each with the facts it rests on and every "
+    "fact's source (knowledge, deliverable, web, github or note; a reference and a label; a note needs no "
+    "reference). The bank refuses a fact without a source, a title it already holds, and anything on the "
+    "plan's never-say list; the answer lists what was added and what was refused, with why, and fails when "
+    "nothing was added. It only adds topics: posts are made from them on their day.",
+    add_topics_properties(), ("plan_id", "topics"), NEEDS_THE_PLAN.format(tool="add_social_topics"),
+    reads_only=False,
+)
+
+GET_SOCIAL_HISTORY_SPEC = _spec(
+    "get_social_history", "platform_get_social_history",
+    "Read what this workspace already posted on social media, newest first, across every plan and the "
+    "posts people made by hand: each post's title, topic, angle, format, channels, opening line, date and "
+    "state, and its numbers once read. Read it before researching or writing, so a topic or a hook already "
+    "used is not used again. With went_out true it lists only the posts that went out, with their receipts.",
+    history_properties(),
+)
+
 # The Socials group's tools, in its order (``session_tool_groups``).
 SOCIAL_TOOL_SPECS: Tuple[Dict[str, Any], ...] = (
     CREATE_SOCIAL_POST_SPEC, UPDATE_SOCIAL_POST_SPEC, SUBMIT_SOCIAL_POST_SPEC,
     GET_SOCIAL_POST_SPEC, LIST_SOCIAL_POSTS_SPEC,
+    GET_SOCIAL_PLAN_SPEC, ADD_SOCIAL_TOPICS_SPEC, GET_SOCIAL_HISTORY_SPEC,
 )

@@ -29,9 +29,10 @@ if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
 import tests.test_prd251_api as api_harness  # noqa: E402
+from core import social_plan_schema  # noqa: E402
 from core.models.socials import SocialPost, SocialPostTarget, SocialTopic  # noqa: E402
 from modules.socials import history  # noqa: E402
-from modules.tools.discovery import actions_socials, handlers_socials  # noqa: E402
+from modules.tools.discovery import handlers_socials  # noqa: E402
 from tests.test_prd251_api import WS_A, WS_B, WS_OFF  # noqa: E402
 from tests.test_prd251bw2_plans import _create as _create_plan  # noqa: E402
 
@@ -157,4 +158,4 @@ def test_the_tool_reads_the_history_and_the_plan_answer_carries_it(posts):
 
 
 def test_the_tools_caps_are_the_history_modules():
-    assert (actions_socials.HISTORY_MAX_DAYS, actions_socials.HISTORY_MAX_LIMIT) == (history.MAX_DAYS, history.MAX_LIMIT)
+    assert (social_plan_schema.HISTORY_MAX_DAYS, social_plan_schema.HISTORY_MAX_LIMIT) == (history.MAX_DAYS, history.MAX_LIMIT)

@@ -104,10 +104,11 @@ def test_the_writes_say_so_and_the_rest_only_read():
     writes = {t.name for t in st.SESSION_TOOLS[10:] if not t.reads_only}
     # PRD-255 US-013: create_template / update_template write the workspace's templates.
     # PRD-255 US-014: propose_brand_kit files a card; save_approved_brand_kit saves what the owner approved.
-    # PRD-256 F430: the Socials group drafts, changes and submits posts (never approves or publishes).
+    # PRD-256 F430: the Socials group drafts, changes and submits posts (never approves or publishes);
+    # add_social_topics adds researched topics to a plan's content bank (the research playbook's one write).
     assert writes == {"generate_document", "run_playbook", "create_template", "update_template",
                       "propose_brand_kit", "save_approved_brand_kit",
-                      "create_social_post", "update_social_post", "submit_social_post"}
+                      "create_social_post", "update_social_post", "submit_social_post", "add_social_topics"}
 
 
 @pytest.mark.parametrize("name, arguments, words", [

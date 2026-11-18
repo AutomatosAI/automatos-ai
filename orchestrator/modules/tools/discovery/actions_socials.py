@@ -17,8 +17,8 @@ the lifecycle's enums, and is stdlib-only, so the registry build stays light (th
 utterance-corpus linter leaf-loads this module).
 """
 
+from core.social_plan_schema import add_topics_properties, get_plan_properties, history_properties
 from core.social_post_schema import (
-    POST_FORMATS,
     create_properties,
     get_properties,
     list_properties,
@@ -28,18 +28,9 @@ from core.social_post_schema import (
 
 from .action_registry import ActionDefinition, ActionRegistry
 
-# modules/socials/topics.py FACT_SOURCE_KINDS and its limits (PRD-251B B8).
-FACT_SOURCE_KINDS = ["knowledge", "deliverable", "web", "github", "note"]
-TOPICS_MAX_PER_CALL = 30
-FACTS_MAX_PER_TOPIC = 12
-
 # modules/tools/discovery/social_plan_slots.py DEFAULT_DAYS and MAX_DAYS: the days a slots read covers.
 SLOTS_DEFAULT_DAYS = 7
 SLOTS_MAX_DAYS = 14
-
-# modules/socials/history.py MAX_DAYS and MAX_LIMIT: the most platform_get_social_history reads.
-HISTORY_MAX_DAYS = 365
-HISTORY_MAX_LIMIT = 200
 
 
 def register_socials_actions(registry: ActionRegistry) -> None:
@@ -176,47 +167,8 @@ def _register_list_social_posts(registry: ActionRegistry) -> None:
     ))
 
 
-def _topic_schema() -> dict:
-    fact = {
-        "type": "object",
-        "properties": {
-            "text": {"type": "string", "description": "The fact, in one sentence."},
-            "source": {
-                "type": "object",
-                "properties": {
-                    "kind": {"type": "string", "enum": FACT_SOURCE_KINDS},
-                    # F383 (night 11): where the id comes from, so research never asks the owner for one.
-                    "ref": {"type": "string", "description": (
-                        "Where the fact comes from, taken from your tool results: a search_knowledge source's "
-                        "document id (its 'document N'), a Deliverable's id, or the page's address. A note needs "
-                        "none. Never ask the owner for one.")},
-                    "label": {"type": "string", "description": "A short name for the source (a note's may be left out)."},
-                },
-                "required": ["kind"],
-            },
-        },
-        "required": ["text", "source"],
-    }
-    return {
-        "type": "object",
-        "properties": {
-            "title": {"type": "string", "description": "The idea, as a post's title."},
-            "angle": {"type": "string", "description": "Why it matters to the plan's audience."},
-            "facts": {"type": "array", "items": fact, "maxItems": FACTS_MAX_PER_TOPIC},
-            "formats": {"type": "array", "items": {"type": "string", "enum": POST_FORMATS}},
-            # PRD-251C (C9): a dated topic, such as an event's countdown, posted on its day.
-            "pinned_on": {
-                "type": "string",
-                "description": "A day within the plan's dates (YYYY-MM-DD) to post it on: an event's countdown or its day.",
-            },
-        },
-        "required": ["title", "facts"],
-    }
-
-
 def _register_plan_actions(registry: ActionRegistry) -> None:
     """PRD-251B (B8, US-B204): the Content bank research playbook's read and its one write."""
-    plan_id = {"type": "string", "description": "The Socials plan's id (the research playbook's plan_id input)."}
     registry.register(ActionDefinition(
         name="platform_get_social_plan",
         description=(
@@ -225,7 +177,7 @@ def _register_plan_actions(registry: ActionRegistry) -> None:
             "(each topic's title, formats and whether a post used it)."
         ),
         category="socials",
-        parameters={"type": "object", "properties": {"plan_id": plan_id}, "required": ["plan_id"]},
+        parameters={"type": "object", "properties": get_plan_properties(), "required": ["plan_id"]},
         permission_level="read",
         tags=["socials", "plan", "content bank", "research", "cadence"],
         examples=["read the Socials plan", "what's in our content bank?", "show the social media plan's cadence"],
@@ -243,10 +195,7 @@ def _register_plan_actions(registry: ActionRegistry) -> None:
         category="socials",
         parameters={
             "type": "object",
-            "properties": {
-                "plan_id": plan_id,
-                "topics": {"type": "array", "items": _topic_schema(), "minItems": 1, "maxItems": TOPICS_MAX_PER_CALL},
-            },
+            "properties": add_topics_properties(),
             "required": ["plan_id", "topics"],
         },
         permission_level="write",
@@ -309,28 +258,7 @@ def _register_history_action(registry: ActionRegistry) -> None:
         category="socials",
         parameters={
             "type": "object",
-            "properties": {
-                "days": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": HISTORY_MAX_DAYS,
-                    "description": "How many days back to read (the platform's default when left out).",
-                },
-                "limit": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": HISTORY_MAX_LIMIT,
-                    "description": "How many posts at most, newest first (the platform's default when left out).",
-                },
-                # P256-FIX-SOC-4 (F432-b): what went out, by when, with its receipts.
-                "went_out": {
-                    "type": "boolean",
-                    "description": (
-                        "Only the posts that went out in the last days (days 1 for today), newest first by "
-                        "when they went out, each with when, where, the platform's id and the link."
-                    ),
-                },
-            },
+            "properties": history_properties(),
             "required": [],
         },
         permission_level="read",
