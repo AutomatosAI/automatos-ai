@@ -6,21 +6,24 @@ runs (view, list, watch, rerun), workflows and repositories (view; clone), every
 read gh knows, and ``gh api`` for reads and for the writes a ticket's pull request needs.
 
 Refused, with the rule in the reason: merging (``gh pr merge``, auto-merge, the API's
-merge endpoints) and approving (``gh pr review --approve``, the API's ``event=APPROVE``);
+merge endpoints) and approving (``gh pr review --approve``, ``-a`` in any short-flag
+cluster or ``-a=…``, a cluster the gate cannot read whole, the API's ``event=APPROVE``);
 a repository's deletion, settings, name, visibility, ownership or forks; secrets,
 variables, keys, the login, codespaces, extensions, aliases and gh's own settings
 (reads included: they print or reach what a session never needs); any write to a
-repository whose owner is not origin's (``-R``/``--repo``, ``repos/<owner>/…``; reads of
-other repositories run); and through ``gh api``, DELETE anywhere, PUT, graphql, access,
-hooks, keys, protection, rules and environments, and any write outside issues, pulls,
-statuses and the session's own branch refs. An option the gate does not know fails
-closed. ``file_values`` names the files a gh command reads (``-F key=@file``,
-``--input``, ``--body-file``) for ``dev_box_policy`` to confine.
+repository whose owner is not origin's (``-R``/``--repo``, ``repos/<owner>/…``, a pull
+request or issue URL as the target, a target URL off github.com; reads of other
+repositories run); and through ``gh api``, DELETE anywhere, PUT, graphql, access, hooks,
+keys, protection, rules, environments, commit statuses (one can pass a required check),
+and any write outside issues, pulls and the session's own branch refs. An option the
+gate does not know fails closed. ``file_values`` names the files a gh command reads
+(``-F key=@file``, ``--input``, ``--body-file``) for ``dev_box_policy`` to confine.
 
 Pure functions over the words of one simple command; ``None`` = not refused here.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import FrozenSet, List, Mapping, Optional, Sequence, Tuple
 
@@ -59,9 +62,20 @@ GH_READS_ANYWHERE = frozenset({("repo", "clone")})
 REPO_OPTIONS = frozenset({"-R", "--repo"})
 REVIEW = ("pr", "review")
 APPROVE_LONG = "--approve"
-REVIEW_BOOL_SHORTS = frozenset("acr")              # gh pr review -a (approve), -c (comment), -r (request changes)
 APPROVE_SHORT = "a"
+REVIEW_PLAIN_SHORTS = frozenset("cr")              # gh pr review -c (comment), -r (request changes): bool flags
 APPROVING = "approving is the owner's: a session comments or requests changes, never approves"
+UNREADABLE_CLUSTER = ("a gh pr review flag cluster the gate cannot read whole: give -b and -F, which take a "
+                      "value, on their own")
+# A pull request's or an issue's target as a URL: github.com, origin's owner, and nothing else.
+TARGET_GROUPS = frozenset({"pr", "issue"})
+TARGET_URL_RE = re.compile(r"^(?:https?://)?(?:www\.)?github\.com/(?P<owner>[A-Za-z0-9-]+)/[A-Za-z0-9._-]+/"
+                           r"(?:pull|issues)/\d+(?:[/?#].*)?$", re.IGNORECASE)
+LOOKS_LIKE_URL_RE = re.compile(r"^(?:[a-z][a-z0-9+.-]*://|www\.|github\.com/)", re.IGNORECASE)
+# Options whose value is text (a body, a title, a closing comment), never the target.
+TEXT_OPTIONS = frozenset({"-b", "--body", "-t", "--title", "-F", "--body-file"})
+CLOSING_TEXT_OPTIONS = TEXT_OPTIONS | {"-c", "--comment", "-r", "--reason"}     # gh pr|issue close|reopen
+CLOSING_ACTIONS = frozenset({"close", "reopen"})
 BODY_FILE_OPTIONS = frozenset({"--body-file", "-F"})     # gh pr / gh issue: the body from a file
 BODY_FILE_GROUPS = frozenset({"pr", "issue"})
 
@@ -76,9 +90,9 @@ API_FIELD_OPTIONS = frozenset({"-f", "--raw-field", "-F", "--field"})
 API_INPUT_OPTION = "--input"
 API_GRAPHQL = "graphql"
 API_PLAIN_AREAS = frozenset({"issues", "pulls"})       # POST/PATCH under repos/<o>/<r>/ — not merge (below)
-API_STATUSES = "statuses"
 # A path segment that names what a session never writes, whatever the method.
 API_REFUSED_SEGMENTS: Mapping[str, str] = {
+    "statuses": "sets a commit status, which can pass a required check: only CI reports one",
     "merge": "merges: the owner merges", "merges": "merges: the owner merges",
     "collaborators": "changes who has access", "invitations": "changes who has access",
     "hooks": "changes the repository's webhooks", "keys": "changes deploy keys",
@@ -108,17 +122,67 @@ def _subcommand(peeled: Sequence[str]) -> Tuple[str, str]:
     return (peeled[1] if len(peeled) > 1 else "", peeled[2] if len(peeled) > 2 else "")
 
 
-def _approves(args: Sequence[str]) -> bool:
-    """``gh pr review --approve``, ``-a``, or ``-a`` among other bool flags (``-ca``)."""
-    return any(arg.startswith(APPROVE_LONG) or (arg.startswith("-") and not arg.startswith("--") and len(arg) > 1
-                                                and set(arg[1:]) <= REVIEW_BOOL_SHORTS and APPROVE_SHORT in arg)
-               for arg in args)
+def _short_cluster_refusal(arg: str) -> Optional[str]:
+    """One short-option word of ``gh pr review``: ``-a`` anywhere in it (``-ca``, ``-a=true``)
+    approves; a cluster beyond ``-c``/``-r`` (``-cb ok``, ``-bok``) is one the gate cannot read."""
+    if not arg.startswith("-") or arg.startswith("--") or len(arg) < 2:
+        return None
+    letters = arg[1:]
+    if APPROVE_SHORT in letters:
+        return APPROVING
+    return None if len(letters) == 1 or set(letters) <= REVIEW_PLAIN_SHORTS else UNREADABLE_CLUSTER
+
+
+def _review_flag_refusal(args: Sequence[str]) -> Optional[str]:
+    """``gh pr review``: ``--approve`` in any form, or a short cluster that approves or cannot be read."""
+    for arg in args:
+        why = APPROVING if arg.startswith(APPROVE_LONG) else _short_cluster_refusal(arg)
+        if why:
+            return why
+    return None
 
 
 def _gh_rule(sub: str, action: str, args: Sequence[str]) -> Optional[str]:
     """A refused group, a refused action, or an approval."""
-    approval = APPROVING if (sub, action) == REVIEW and _approves(args) else None
+    approval = _review_flag_refusal(args) if (sub, action) == REVIEW else None
     return GH_REFUSED_GROUPS.get(sub) or GH_REFUSED_ACTIONS.get((sub, action)) or approval
+
+
+def _target_words(action: str, args: Sequence[str]) -> List[str]:
+    """The operands of a ``gh pr``/``gh issue`` command: every word that is not an option or a
+    text option's value (a body, a title, a closing comment)."""
+    text = CLOSING_TEXT_OPTIONS if action in CLOSING_ACTIONS else TEXT_OPTIONS
+    out: List[str] = []
+    skip = False
+    for word in args:
+        if skip or word.startswith("-"):
+            skip = not skip and word in text
+            continue
+        out = [*out, word]
+    return out
+
+
+def _target_refusal(action: str, args: Sequence[str], rules: DevBoxRules) -> Optional[str]:
+    """A pull request or an issue named by URL: on github.com, of origin's owner. A number
+    or a branch name is this repository's."""
+    for word in _target_words(action, args):
+        if "://" not in word and not LOOKS_LIKE_URL_RE.match(word):
+            continue
+        match = TARGET_URL_RE.match(word)
+        if match is None:
+            return f"{word!r} is not a pull request or an issue on github.com: a session writes only there"
+        if not rules.origins_owner(match.group("owner")):
+            return f"{word!r} belongs to {match.group('owner')}: a session writes only to origin's owner's repositories"
+    return None
+
+
+def _foreign_write(words: Sequence[str], sub: str, action: str, args: Sequence[str],
+                   rules: DevBoxRules) -> Optional[str]:
+    """A write aimed at another owner: through ``-R``/``--repo``, or a target URL."""
+    repo = _foreign_repo(words, rules)
+    if repo is not None:
+        return f"writes to {repo!r}: a session writes only to repositories of origin's owner"
+    return _target_refusal(action, args, rules) if sub in TARGET_GROUPS else None
 
 
 def _named_repos(words: Sequence[str]) -> List[str]:
@@ -150,9 +214,9 @@ def gh_refusal(words: Sequence[str], rules: DevBoxRules) -> Optional[str]:
     if why:
         return refused(peeled, why)
     writes = gh_writes(peeled) and (sub, action) not in GH_READS_ANYWHERE
-    foreign = _foreign_repo(words, rules) if writes else None
+    foreign = _foreign_write(words, sub, action, peeled[3:], rules) if writes else None
     if foreign is not None:
-        return refused(peeled, f"writes to {foreign!r}: a session writes only to repositories of origin's owner")
+        return refused(peeled, foreign)
     if action in GH_ALLOWED.get(sub, frozenset()) or not writes:
         return None
     return refused(peeled, OUTSIDE_THE_LIST)
@@ -307,12 +371,12 @@ def _named_refusal(path: Sequence[str], method: str) -> Optional[str]:
 
 def _not_on_the_list(method: str, path: Sequence[str]) -> str:
     return (f"gh api {method} {'/'.join(path)} is not one of the API writes a dev-box session makes "
-            "(POST/PATCH issues and pulls, POST statuses, its own branch refs)")
+            "(POST/PATCH issues and pulls, its own branch refs)")
 
 
 def _plain_write(low: Sequence[str], method: str) -> bool:
-    """POST/PATCH under ``repos/<o>/<r>/issues`` or ``…/pulls``; POST ``…/statuses/<sha>``."""
-    return low[3] in API_PLAIN_AREAS or (low[3] == API_STATUSES and len(low) == 5 and method == "POST")
+    """POST/PATCH under ``repos/<o>/<r>/issues`` or ``…/pulls``."""
+    return low[3] in API_PLAIN_AREAS
 
 
 def _owner_refusal(path: Sequence[str], rules: DevBoxRules) -> Optional[str]:

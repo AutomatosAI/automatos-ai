@@ -68,6 +68,10 @@ ALLOWED = [
     "gh pr create --title t --body-file body.md", "gh pr create --repo Octo-Org/repo --title t --body b",
     "gh pr edit 12 --add-label ready", "gh pr ready 12", "gh pr comment 12 --body done",
     "gh pr review 12 --comment --body ok", "gh pr review 12 --request-changes -b fix", "gh pr review 12 -c -b 'a note'",
+    "gh pr review 12 -r -b fix",
+    "gh pr comment https://github.com/Octo-Org/repo/pull/3 --body hi",                  # origin's owner, by URL
+    "gh pr comment 12 --body https://example.com/report", "gh pr close feat/branch -c done",   # text, not a target
+    "gh issue close 9 --comment https://example.com/x", "gh pr view https://github.com/someone-else/x/pull/1",
     "gh pr view 12", "gh pr list", "gh pr diff 12", "gh pr checks 12", "gh pr close 12", "gh pr reopen 12",
     "gh issue create --title x --body y", "gh issue edit 3 --add-label bug", "gh issue comment 3 --body hi",
     "gh issue close 3", "gh issue reopen 3", "gh issue view 3", "gh issue list",
@@ -82,7 +86,6 @@ ALLOWED = [
     "gh api -X POST repos/octo-org/repo/issues -F body=@notes.md",                         # a file of its own
     "gh api -X PATCH repos/octo-org/repo/pulls/12 -f title=y",
     "gh api -X POST repos/octo-org/repo/pulls/12/reviews -f event=COMMENT -f body=x",
-    "gh api -X POST repos/octo-org/repo/statuses/abc123 -f state=success",
     "gh api -X POST repos/octo-org/repo/git/refs -f ref=refs/heads/feat/x -f sha=abc123",
     "gh api -X PATCH repos/octo-org/repo/git/refs/heads/feat/x -f sha=abc123 -F force=true",
     "gh api -X POST repos/{owner}/{repo}/issues -f title=x",                            # gh's placeholders: one word
@@ -181,7 +184,9 @@ REFUSED = [
     # gh
     ("gh pr merge 12 --squash", "merges"), ("gh pr merge 12 --auto", "merges"),
     ("gh pr review 12 --approve", "approving"), ("gh pr review 12 -a", "approving"),
-    ("gh pr review 12 -ca -b ok", "approving"),
+    ("gh pr review 12 -ca -b ok", "approving"), ("gh pr review 12 -ac", "approving"),
+    ("gh pr review 12 -a=true", "approving"),
+    ("gh pr review 12 -bok", "cannot read whole"), ("gh pr review 12 -cb ok", "cannot read whole"),
     ("gh repo delete octo-org/repo --yes", "gh repo delete"), ("gh repo edit --visibility public", "gh repo edit"),
     ("gh repo rename x", "gh repo rename"), ("gh repo archive", "gh repo archive"), ("gh repo create x", "gh repo create"),
     ("gh repo fork", "gh repo fork"), ("gh repo transfer x y", "gh repo transfer"),
@@ -196,6 +201,12 @@ REFUSED = [
     ("gh pr create --repo=github.com/someone-else/repo --title t --body b", "origin's owner"),
     ("gh issue create -Rsomeone-else/x --title t --body b", "origin's owner"),
     ("gh run rerun 9 -R someone-else/x", "origin's owner"),
+    ("gh pr comment https://github.com/someone-else/repo/pull/3 --body hi", "origin's owner"),
+    ("gh issue close https://github.com/Someone-Else/x/issues/9", "origin's owner"),
+    ("gh pr edit https://www.github.com/someone-else/x/pull/2 --add-label y", "origin's owner"),
+    ("gh pr reopen https://github.com/someone-else/x/pull/2 -c because", "origin's owner"),
+    ("gh pr review https://gitlab.com/o/r/pull/1 --comment -b x", "not a pull request or an issue on github.com"),
+    ("gh pr ready http://evil.example/octo-org/repo/pull/1", "not a pull request or an issue on github.com"),
     ("gh api -X POST repos/someone-else/x/issues -f title=y", "someone-else"),
     # gh api: the method and the path
     ("gh api -X DELETE repos/octo-org/repo/git/refs/heads/feat/x", "DELETE"),
@@ -205,6 +216,7 @@ REFUSED = [
     ("gh api -X POST repos/octo-org/repo/pulls/12/reviews -f event=approve", "approving"),
     ("gh api -X POST repos/octo-org/repo/pulls/12/reviews/5/events -f event=APPROVE", "approving"),
     ("gh api -X POST repos/octo-org/repo/pulls/12/reviews --input r.json", "review's event"),
+    ("gh api -X POST repos/octo-org/repo/statuses/abc123 -f state=success", "commit status"),   # a forged check
     ("gh api -X PUT repos/octo-org/repo/collaborators/bob", "access"),
     ("gh api -X POST repos/octo-org/repo/hooks -f name=web", "webhooks"),
     ("gh api -X POST repos/octo-org/repo/keys -f key=x", "deploy keys"),

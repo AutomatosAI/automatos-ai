@@ -350,14 +350,14 @@ new remote, a `gh -R` write or a `gh api repos/<owner>/…` write may name.
 | `gh pr create`, `edit`, `ready`, `comment`, `review` (comment or request changes), `view`, `list`, `diff`, `checks`, `close`, `reopen`, `status` | allowed | |
 | `gh issue create`, `edit`, `comment`, `close`, `reopen`, `view`, `list`, `status` | allowed | |
 | `gh run view`, `list`, `watch`, `rerun`; `gh workflow view`, `list`; `gh repo view`, `clone` | allowed | |
-| `gh pr merge` (`--auto` included); `gh pr review --approve` / `-a` | refused | the owner approves and merges |
-| any gh write with `-R`/`--repo` naming another owner's repository; `GH_REPO=…` | refused | a session writes only to origin's owner; reads of other repositories run |
+| `gh pr merge` (`--auto` included); `gh pr review --approve`, `-a` alone, in any short-flag cluster (`-ca`) or as `-a=…`; a `gh pr review` cluster the gate cannot read whole (`-bok`, `-cb ok`: give `-b` and `-F` on their own) | refused | the owner approves and merges |
+| any gh write with `-R`/`--repo` naming another owner's repository; `GH_REPO=…`; a `gh pr`/`gh issue` write (comment, edit, close, reopen, review, ready) whose target is a URL of another owner's pull request or issue, or a URL off github.com (a number or a branch name is this repository's; a body or a closing comment is text, not a target) | refused | a session writes only to origin's owner; reads of other repositories run |
 | `gh repo delete`, `edit`, `rename`, `archive`, `create`, `fork`, `transfer` | refused | the repository is the owner's |
 | `gh secret`, `variable`, `ssh-key`, `gpg-key`, `auth`, `codespace`, `extension`, `alias`, `config`, reads included | refused | secrets, keys, the login, code the gate cannot read |
 | any other gh subcommand | as outside the mode: a read runs (a card in Edit automatically), a write is refused | |
 | `gh api` GET or HEAD | allowed | |
-| `gh api` POST or PATCH to `repos/<origin's owner>/<r>/issues…` and `…/pulls…` (a review: comment or request changes); POST `…/statuses/<sha>`; POST `…/git/refs` with `-f ref=refs/heads/<unprotected>`; PATCH `…/git/refs/heads/<unprotected>` | allowed | what a ticket's pull request needs |
-| `gh api` DELETE anywhere; PUT; `graphql`; a path with `merge`, `merges`, `collaborators`, `invitations`, `hooks`, `keys`, `secrets`, `variables`, `protection`, `rulesets`, `environments`; a review with `event=APPROVE` (or an event it cannot read, `--input`); a write under another owner's `repos/<owner>/…`; any other write (`check-runs` included); a full URL, an encoded path or a variable in the path; `-X` twice; `git/refs` with `--input`; an option the gate does not know | refused | merging, approving, access, settings, and what the gate cannot read |
+| `gh api` POST or PATCH to `repos/<origin's owner>/<r>/issues…` and `…/pulls…` (a review: comment or request changes); POST `…/git/refs` with `-f ref=refs/heads/<unprotected>`; PATCH `…/git/refs/heads/<unprotected>` | allowed | what a ticket's pull request needs |
+| `gh api` DELETE anywhere; PUT; `graphql`; a path with `merge`, `merges`, `collaborators`, `invitations`, `hooks`, `keys`, `secrets`, `variables`, `protection`, `rulesets`, `environments`; a commit status (`…/statuses/<sha>`: one can pass a required check, so only CI reports them); a review with `event=APPROVE` (or an event it cannot read, `--input`); a write under another owner's `repos/<owner>/…`; any other write (`check-runs` included); a full URL, an encoded path or a variable in the path; `-X` twice; `git/refs` with `--input`; an option the gate does not know | refused | merging, approving, access, settings, and what the gate cannot read |
 | a file gh sends (`gh api -F/-f/--field/--raw-field key=@file`, `--input file`, `gh pr`/`gh issue --body-file`) outside the session's folders, or anywhere in the host's state directory | refused | gh would upload it |
 | `printenv`; `env` with no command; `set` with no arguments; `export`, `declare`, `typeset` with no names or with `-p`; `ps e`, `ps -E`; jq's `env` and `$ENV`; awk's `ENVIRON`; `/proc/*/environ` | refused | they print the environment, the token with it |
 | `GH_TOKEN` named anywhere on the line (a quoted here-document's body is data and may name it; to search code for the name, use the Grep tool); `${!name}` | refused | git and gh read the token themselves |
@@ -431,9 +431,9 @@ It cannot reach:
    repository admins to **"pull requests only"** (never "always"), so GitHub refuses a
    direct push to the default branch even from your own admin account. Leave no one else
    on the bypass list.
-3. With only those permissions `gh run …` and the statuses API answer 403 (they need
-   Actions read and Commit statuses write). Grant those two only if you want sessions to
-   use them; never Actions write.
+3. With only those permissions `gh run …` answers 403 (it needs Actions read). Grant
+   Actions read only if you want sessions to use it; never Actions write, and never
+   Commit statuses write (the gate refuses commit statuses anyway).
 4. The session's commits carry your git identity (step 3 of *Turning it on*), signed off
    with `git commit -s`.
 

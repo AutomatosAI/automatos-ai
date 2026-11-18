@@ -235,7 +235,7 @@ def test_the_identity_is_the_host_users_own_global_git_config(tmp_path, monkeypa
 
 def test_the_github_hosts_are_what_git_and_gh_need_and_no_upload_or_release_host():
     assert GITHUB_DOMAINS == ("github.com", "api.github.com", "codeload.github.com", "raw.githubusercontent.com")
-    assert "uploads.github.com" not in GITHUB_DOMAINS and "objects.githubusercontent.com" not in GITHUB_DOMAINS
+    assert GITHUB_DOMAINS.count("uploads.github.com") == 0 and GITHUB_DOMAINS.count("objects.githubusercontent.com") == 0
 
 
 def test_github_is_reachable_only_in_the_mode_and_the_deny_list_is_unchanged(tmp_path):
@@ -243,7 +243,7 @@ def test_github_is_reachable_only_in_the_mode_and_the_deny_list_is_unchanged(tmp
     on = claude_settings(SessionSandbox(), off_limits=(tmp_path / "state",), github=True)
     assert not set(GITHUB_DOMAINS) & set(off["network"]["allowedDomains"])
     assert set(GITHUB_DOMAINS) <= set(on["network"]["allowedDomains"])
-    assert "ghcr.io" not in on["network"]["allowedDomains"]
+    assert on["network"]["allowedDomains"].count("ghcr.io") == 0
     assert on["filesystem"] == off["filesystem"]
     deny = on["filesystem"]["denyRead"]
     assert "~/.config/gh" in deny and "~/.git-credentials" in deny
@@ -262,7 +262,8 @@ def test_a_dev_box_launch_writes_github_into_the_settings_and_never_the_token(sh
                             state_dir=short_tmp / "state", dev_box=carried)
         prepared = adapter.prepare(ctx)
         text = Path(prepared.args[prepared.args.index("--settings") + 1]).read_text()
-        assert ("github.com" in json.loads(text)["sandbox"]["network"]["allowedDomains"]) is carried
+        domains = json.loads(text)["sandbox"]["network"]["allowedDomains"]
+        assert (domains.count("github.com") == 1) is carried
         assert TOKEN not in text
 
 
@@ -342,7 +343,7 @@ def test_a_dev_box_session_carries_the_token_and_the_host_reports_none_of_it(sho
     for name in ("settings.json", "ticket.md", "system_prompt.md"):
         assert TOKEN not in (sdir / name).read_text(), name
     settings = json.loads((sdir / "settings.json").read_text())
-    assert "github.com" in settings["sandbox"]["network"]["allowedDomains"]
+    assert settings["sandbox"]["network"]["allowedDomains"].count("github.com") == 1
     assert session_prompt.DEV_BOX_SECTION in (sdir / "system_prompt.md").read_text()
     push = next(d for d in out.permission_denials if "git push" in json.dumps(d))
     assert "main is a protected branch" in push["reason"] and "dev-box mode" in push["reason"]
@@ -360,7 +361,8 @@ def test_a_dev_box_host_without_its_token_runs_the_session_as_before(short_tmp, 
     assert out.status == "success", out
     sdir = short_tmp / "state" / "sessions" / "42"
     assert session_prompt.DEV_BOX_SECTION not in (sdir / "system_prompt.md").read_text()
-    assert "github.com" not in json.loads((sdir / "settings.json").read_text())["sandbox"]["network"]["allowedDomains"]
+    domains = json.loads((sdir / "settings.json").read_text())["sandbox"]["network"]["allowedDomains"]
+    assert domains.count("github.com") == 0
     push = next(d for d in out.permission_denials if "git push" in json.dumps(d))
     assert "sessions do not push or escalate" in push["reason"]
     assert any("no GitHub token at" in r.getMessage() for r in caplog.records)
