@@ -110,6 +110,8 @@ class LaunchContext:
     # The host's hook socket: a CLI that runs its hooks inside its own sandbox must
     # let them reach it (F234, Copilot).
     hook_socket: Optional[Path] = None
+    # Dev-box mode (dev_box.py): this session carries the GitHub token, so its sandbox reaches GitHub too.
+    dev_box: bool = False
 
 
 @dataclass(frozen=True)

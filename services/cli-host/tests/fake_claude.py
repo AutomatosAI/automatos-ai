@@ -23,6 +23,10 @@ Scenario knobs (environment): ``FAKE_CLAUDE_SCENARIO`` = ``happy`` (default),
 ``FAKE_CLAUDE_API_ERROR_TEXT`` the words, ``FAKE_CLAUDE_OUTPUT_BEFORE`` a line printed before the error);
 ``FAKE_CLAUDE_SESSION_NOTE=1`` also writes ``note.md`` into the ticket folder (the
 ``--add-dir``) and reports an edit of the host's own ``ticket.md`` there (PRD-245 S0.7).
+``FAKE_CLAUDE_PRINT_ENV=A,B`` prints ``A=<value>`` lines on the terminal after SessionStart
+(dev-box mode: what reached the session, and what the host's terminal log keeps of it);
+``FAKE_CLAUDE_MKDIR_ENV=NAME`` creates the folder that variable names, as gh may create its
+config folder (dev-box mode: the host removes it when the session ends).
 """
 from __future__ import annotations
 
@@ -150,6 +154,12 @@ def main(argv) -> int:
             time.sleep(0.2)
 
     hook("SessionStart", source="startup", model=model)
+    for name in filter(None, os.environ.get("FAKE_CLAUDE_PRINT_ENV", "").split(",")):
+        sys.stdout.write(f"{name}={os.environ.get(name, '<unset>')}\r\n")
+    sys.stdout.flush()
+    folder = os.environ.get(os.environ.get("FAKE_CLAUDE_MKDIR_ENV", ""), "")
+    if folder:
+        os.makedirs(os.path.join(folder, "made-by-the-session"), exist_ok=True)
     transcript_line({"type": "user", "message": {"role": "user", "content": prompt}, "sessionId": session_id, "cwd": cwd})
     ctx = hook("UserPromptSubmit", prompt=prompt)
     extra_ctx = ((ctx.get("hookSpecificOutput") or {}).get("additionalContext")) if isinstance(ctx, dict) else None

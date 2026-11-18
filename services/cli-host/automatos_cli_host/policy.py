@@ -15,8 +15,8 @@ never what the CLI calls the tool — so the rules are the same for every CLI:
   ``git -C <path> <sub…>`` is ``git <sub…>`` run inside the roots; every
   absolute (or ``~``) path an allowed verb names, and every redirection target,
   must sit inside the session's roots — outside is a refusal, never a question.
-  ``git push`` and friends are always denied (sessions never push — the manager
-  integrates); a verb outside the allowlist is HELD for the operator;
+  ``git push`` and friends are denied (the manager integrates; in dev-box mode
+  ``dev_box_policy.py`` judges git and gh); an unlisted verb is HELD for the operator;
 * an Automatos tool over the loopback MCP bridge (PRD-245 W1) — allowed when
   its name is on the ticket's own list, denied otherwise (the backend enforces
   the scope inside each one; the gate enforces the surface);
@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, FrozenSet, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from . import secret_reach, shell_words
+from . import dev_box_policy, secret_reach, shell_words
 from .shell_words import GLOBAL_OPTIONS as _GLOBAL_OPTIONS, strip_globals as _strip_globals
 from .adapters.base import ToolClass, ToolIntent
 from .permission_modes import (
@@ -61,13 +61,12 @@ from .shell_text import (  # here-documents and substitutions, read before the w
     without_substitutions as _without_substitutions,
 )
 
-# Sessions never publish. The manager (Auto) integrates. Matched on the raw
-# command first, then on every simple command once ``git -C <path>``, the shell
-# keywords and the assignments are peeled off — so the ``-C`` spelling, a
-# newline and ``$(git push)`` meet the same wall.
+# Sessions never publish (the manager integrates), except in dev-box mode, where
+# ``dev_box_policy.nets`` lifts the git nets and judges git itself. Matched on the raw
+# command, then on every simple command once ``git -C <path>``, the keywords and the
+# assignments are peeled off — so ``-C``, a newline and ``$(git push)`` meet one wall.
 NEVER_ALLOWED_BASH = (
-    re.compile(r"(^|[;&|(]\s*)git\s+push\b"),
-    re.compile(r"(^|[;&|(]\s*)git\s+remote\s+(add|set-url)\b"),
+    *dev_box_policy.PUBLISH_NETS,       # ``git push``, ``git remote add|set-url``: marked for dev-box mode to lift
     # ``gh`` is not here: in a session it reads, and every subcommand not known to
     # be a read is refused per simple command (``shell_words.gh_writes``, PRD-253 S0.3).
     re.compile(r"(^|[;&|(]\s*)(sudo|su)\b"),
@@ -264,6 +263,8 @@ class PolicyContext:
     # turn (Claude Code's ExitPlanMode). Without one, the plan is the turn's final
     # message — and Plan's refusals say so.
     plan_tool: bool = False
+    # Dev-box mode (dev_box_policy.py): this repository's rules for git and gh. None = off, the gate as it was.
+    dev_box: Optional[dev_box_policy.DevBoxRules] = None
 
 
 @dataclass
@@ -796,11 +797,11 @@ def _never_allowed(words: Sequence[str], bindings: Bindings, ctx: "PolicyContext
     is a card, in Auto mode too. ``floor`` is the verdict on the command's own
     redirections, kept in every case. ``None`` = judge it as the verb it is."""
     joined = " ".join(words)
-    refused = any(pattern.search(joined) for pattern in NEVER_ALLOWED_BASH) or shell_words.gh_writes(words)
+    refused = any(p.search(joined) for p in dev_box_policy.nets(NEVER_ALLOWED_BASH, ctx.dev_box)) or dev_box_policy.gh_writes(words, ctx.dev_box)
     if refused or runs_a_program(words):        # ``rg --pre``, ``git grep -O`` run a program of their own
         return Decision("deny", f"never allowed in a session: {_first_words(joined)!r} (sessions do not push or escalate)")
     for text in shell_words.inline_commands(words):
-        if any(pattern.search(text) for pattern in NEVER_ALLOWED_BASH):    # the line nets, as on a raw line
+        if any(pattern.search(text) for pattern in dev_box_policy.nets(NEVER_ALLOWED_BASH, ctx.dev_box)):  # raw nets
             return Decision("deny", f"never allowed in a session: {_first_words(text)!r} (sessions do not push or escalate)")
         within = _judge_command(text, bindings, ctx, roots, depth + 1)
         if within.behavior != "allow":
@@ -906,7 +907,8 @@ def _judge_simple(words: Sequence[str], targets: Sequence[str], bindings: Bindin
                   ctx: PolicyContext, roots: Sequence[Path], depth: int = 0) -> Decision:
     """One simple command, keywords and assignments already peeled: the verb
     against the never-allowed list and the allowlist, then every path it names."""
-    on_targets = _judge_targets(targets, bindings, roots)
+    dev_box = dev_box_policy.refusal(words, _unwrapped(words), targets, ctx)   # dev-box mode: git, gh, .git, env
+    on_targets = Decision("deny", dev_box) if dev_box else _judge_targets(targets, bindings, roots)
     if not words:
         return on_targets
     if words[0] == "cd":
@@ -916,9 +918,8 @@ def _judge_simple(words: Sequence[str], targets: Sequence[str], bindings: Bindin
         return on_globals
     joined = " ".join(words)
     inner = _unwrapped(words)
-    # ``xargs git push``, ``timeout 5 git push``, ``env X=1 git push``: the wrapper
-    # is off the allowlist and would be HELD — an operator can approve a hold, and
-    # approving it runs the push. Refuse it here, before any question is asked.
+    # ``xargs git push``, ``env X=1 git push``: the wrapper is off the allowlist and would be
+    # HELD, and approving the hold runs the push — so it is refused here, before any question.
     refused = _never_allowed(words, bindings, ctx, roots, depth, on_targets) or (
         _never_allowed(inner, bindings, ctx, roots, depth, on_targets) if inner != list(words) else None)
     if refused is not None:
@@ -930,8 +931,8 @@ def _judge_simple(words: Sequence[str], targets: Sequence[str], bindings: Bindin
     if inner != list(words) and words[0] in FIND_EXEC_OPTIONS:
         # an orphan ``-exec cmd ;`` (a second exec clause the ``;`` split off)
         # is judged as the command it runs, like the first clause is
-        return _judge_simple(inner, targets, bindings, ctx, roots, depth + 1) if inner else _worst(
-            [on_targets, Decision("ask", f"'find {words[0]}' with no command — the operator decides")])
+        return _worst([_judge_simple(inner, targets, bindings, ctx, roots, depth + 1), on_targets] if inner else
+                      [on_targets, Decision("ask", f"'find {words[0]}' with no command — the operator decides")])
     if not (_matches_prefix(joined, ctx.allowed_bash) or _runs_own_code(words)):
         if _matches_prefix(joined, ctx.ask_bash):
             return _worst([on_targets, Decision("ask", f"{_first_words(joined)!r} needs the operator's approval")])
@@ -1247,16 +1248,15 @@ def _traversal_text(command: str, depth: int = 0) -> str:
 
 
 def decide_bash(command: str, ctx: PolicyContext) -> Decision:
-    # The raw nets read the COMMAND LINE. A here-document's body is data the
-    # line writes, not a command in it: an unquoted body's substitutions are
-    # judged as command lines of their own below (``_judge_command``), and a
-    # quoted body runs nothing at all — so a file whose text happens to contain
-    # ``$(git push)`` or ``..`` is not refused for what it says.
+    # The raw nets read the COMMAND LINE, not a here-document's body: that is data the
+    # line writes (an unquoted body's substitutions are judged below, a quoted body runs
+    # nothing), so a file whose text contains ``$(git push)`` or ``..`` is not refused for it.
     visible = _heredocs(command)[0]
-    for pattern in NEVER_ALLOWED_BASH:
+    for pattern in dev_box_policy.nets(NEVER_ALLOWED_BASH, ctx.dev_box):
         if pattern.search(visible):
             return Decision("deny", f"never allowed in a session: {_first_words(visible)!r} (sessions do not push or escalate)")
-    secret = _secret_on_line(visible, ctx) or _secret_reach_on_line(visible, ctx)
+    dev_box = dev_box_policy.line_refusal(command, ctx.dev_box)    # dev-box mode: the token, the environment
+    secret = Decision("deny", dev_box) if dev_box else _secret_on_line(visible, ctx) or _secret_reach_on_line(visible, ctx)
     if secret is not None:
         return secret
     # ``..`` is read on the words (``."."/x`` is ``../x``; a pattern or program is data).
@@ -1268,16 +1268,12 @@ def decide_bash(command: str, ctx: PolicyContext) -> Decision:
         # ``$``, so the path no longer looks like one and escapes the roots.
         return Decision("ask", "ANSI-C ($'…') or locale ($\"…\") quoting hides a word the gate cannot read")
     roots = [ctx.cwd, *ctx.extra_dirs]
-    # The BACKTICK substitutions on the line, judged as command lines of their
-    # own — quoted or not. An UNQUOTED backtick body splits on its own spaces
-    # when tokenized (`` echo `cat X` `` becomes three words), so the path inside
-    # it became an argument of ``echo``, which names no paths: a silent read of
-    # any file, the host's own credential included. Only backticks, though. A
-    # ``$(…)`` is kept whole when quoted and becomes its own depth-1 segment when
-    # not, and the segment pass judges it WITH the bindings in scope — ``for d in
-    # …`` binds ``$d`` — which a raw-line pass cannot know. Judging those here too
-    # held ``for d in a b; do echo "$(ls x/$d)"; done`` for a ``$d`` it could not
-    # resolve, and a real ticket sat in review on it.
+    # BACKTICK bodies, quoted or not, are judged as command lines of their own: an unquoted
+    # one splits on its spaces (`` echo `cat X` `` is three words), so its path became an
+    # argument of ``echo`` — a silent read of any file, the host's credential included. Not
+    # ``$(…)``: the segment pass judges it WITH the line's bindings (``for d in …`` binds
+    # ``$d``), which a raw-line pass cannot know; judging it here too held ``for d in a b;
+    # do echo "$(ls x/$d)"; done`` for a ``$d`` it could not resolve, and a ticket sat in review.
     inside = [_judge_command(body, {}, ctx, roots, 1) for body in _backtick_bodies(visible)]
     return _worst([*inside, _judge_command(command, {}, ctx, roots)])
 
@@ -1288,7 +1284,8 @@ def _decide_files(intent: ToolIntent, ctx: PolicyContext) -> Decision:
     # any other secrets file asks — as the same file read through Bash does.
     guards = [_guard_secret(str(target), ctx, ctx.cwd) for target in intent.paths]
     guards.append(_guard_search(intent.tool, getattr(intent, "globs", ()) or (), intent.paths, ctx))
-    guards = [g for g in guards if g is not None]
+    guards = [*(g for g in guards if g is not None),  # dev-box mode: never inside a .git folder
+              *(Decision("deny", why) for why in dev_box_policy.write_refusals(intent, ctx.cwd, ctx.dev_box))]
     if any(g.behavior == "deny" for g in guards):
         return _worst(guards)
     if not intent.paths and intent.cls is ToolClass.FILE_WRITE:
