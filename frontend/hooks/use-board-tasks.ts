@@ -11,6 +11,7 @@ import type { BoardTask, BoardStatus, BoardColumn } from '@/types/board'
 import { BOARD_COLUMNS } from '@/types/board'
 import { ticketNumber } from '@/lib/ticket-number'
 import { rowStatusOf } from '@/lib/proactive/row-status'
+import { pullRequestOf, type ApprovalPullRequest } from '@/lib/ticket-pull-request'
 
 // ============= TYPES =============
 
@@ -181,6 +182,15 @@ export function useUpdateTaskStatus() {
 }
 
 /**
+ * What an Approve sends: the owner's note when there is one, and (Ticket PR fields) the pull request
+ * the page showed, so the server merges nothing that changed since. Both optional: an older client,
+ * or the phone, sends neither.
+ */
+export function approveBody(note?: string, pullRequest?: ApprovalPullRequest | null): Record<string, unknown> {
+  return { ...(note ? { note } : {}), ...(pullRequest ? { pull_request: pullRequest } : {}) }
+}
+
+/**
  * Approve a task in review status — executes approval_action (e.g., publish blog).
  * PRD-252 R2: an optional note, kept on the ticket (F038: it was thrown away).
  */
@@ -188,12 +198,25 @@ export function useApproveTask() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ taskId, note }: { taskId: string; note?: string }) => {
+    mutationFn: async ({ taskId, note, pullRequest }: { taskId: string; note?: string; pullRequest?: ApprovalPullRequest | null }) => {
       return apiClient.request<ApproveResult>(`/api/v1/tasks/${taskId}/approve`, {
         method: 'POST',
-        body: JSON.stringify(note ? { note } : {}),
+        body: JSON.stringify(approveBody(note, pullRequest)),
       })
     },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: boardQueryKeys.all })
+    },
+  })
+}
+
+/** Ticket PR fields: the owner takes a wrong pull request off a ticket (a person only; the server checks). */
+export function useRemovePullRequest() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ taskId }: { taskId: string }) =>
+      apiClient.request(`/api/v1/tasks/${taskId}/pull-request`, { method: 'DELETE' }),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: boardQueryKeys.all })
     },
@@ -309,6 +332,7 @@ function mapTaskToBoardTask(item: any): BoardTask {
     times_sent_back: item.times_sent_back ?? 0,  // PRD-252 D3
     kept_draft: item.kept_draft ?? null,  // F243: a failed redo keeps the draft it corrected
     knowledge_document_id: item.knowledge_document_id ?? null,  // PRE-11: its answer is in Knowledge
+    pull_request: pullRequestOf(item.pull_request),  // Ticket PR fields: the pull request its session opened
     ...rowStatusOf(item),  // PRD-268 US-W04: display_state, next_step and retry, each checked
   }
 }

@@ -53,7 +53,7 @@ from services.board_drag_rules import (  # PRD-252 R6
     UNFINISHED_BY_HAND, drag_refusal, question_refusal,
 )
 from api import board_task_patch  # F259: the general PATCH's checks and writes
-from api.board_card_moves import approve_outside_review, call_off, done_by_hand, left_as_it_is  # F294
+from api.board_card_moves import after_its_action, approve_outside_review, call_off, done_by_hand, its_merge_stands, left_as_it_is  # F294
 from api.board_mission_card import (  # F291: a mission's card waiting for its plan
     approve_from_its_card, is_mission_card, mission_card_refusal, start_its_mission, starts_its_mission,
 )
@@ -63,7 +63,7 @@ from services.send_back_rules import send_back_refusal  # N17-2 (F444): the Reje
 from services.step_lessons import a_cards_answer_goes_on_the_card  # F297 (night 8)
 from services.social_ticket_post import a_social_card_has_its_post  # F380 (night 11)
 from services.claims_taken_out import a_cards_claims_taken_out_are_noted  # N15-CI
-from services.done_needs_an_artifact import closed_without, done_refusal  # PRD-256 US-005: Done needs its artifact
+from services.done_needs_an_artifact import done_refusal  # PRD-256 US-005: Done needs its artifact
 from services.result_document_links import a_cards_document_links_open_in_the_app  # F380
 from services.ticket_result_keep import kept_result as _kept_result  # F013: a shorter re-run never overwrites
 
@@ -739,12 +739,12 @@ async def approve_task(
     try:
         if approval_action:
             action_result = await _run_approval_action(db, ctx, approval_action)
-        missing = closed_without(db, task) if by_a_person else None  # after its action: a Deliverable it files counts
-        still_approved = record_approval(db, task_id, workspace_id=ctx.workspace_id, decided_at=decided_at,
-                                         action_result=action_result, note=note, missing=missing)
+        missing, merged = await after_its_action(db, ctx, task, by_a_person=by_a_person, decided_at=decided_at, shown=body.get("pull_request"))  # its PR, as shown
+        still_approved = record_approval(db, task_id, workspace_id=ctx.workspace_id, decided_at=decided_at, action_result=action_result, note=note, missing=missing, merged=merged)
         db.commit()  # the action's own writes and the ticket's result, together
     except Exception:
-        _reopen_review(db, task_id, decided_at=decided_at, finished_before=finished_before)
+        if not its_merge_stands(db, task_id, ctx.workspace_id, decided_at=decided_at):  # a merged PR keeps it Done
+            _reopen_review(db, task_id, decided_at=decided_at, finished_before=finished_before)
         raise
     _refreshed(db, task, task_id)
 
