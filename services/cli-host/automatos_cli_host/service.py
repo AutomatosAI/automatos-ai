@@ -65,6 +65,8 @@ def service_argv(cfg: HostConfig, passthrough: Optional[List[str]] = None) -> Li
         argv += ["--terminal-port", str(cfg.terminal_port)]
     if cfg.permission_mode:
         argv += ["--permission-mode", cfg.permission_mode]
+    if cfg.dev_box:
+        argv.append("--dev-box")
     argv += _sandbox_argv(cfg.session_sandbox)
     argv += list(passthrough or [])
     return argv

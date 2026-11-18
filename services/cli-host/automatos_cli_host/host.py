@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from . import dev_box
 from . import state
 from . import usage_limit
 from . import __version__
@@ -253,6 +254,8 @@ class Host:
         host_id = self.identity["host_id"]
         log.info("CLI host %s (v%s) serving %s — directories: %s", host_id, __version__, self.cfg.url, ", ".join(self.allow_roots))
         log.info("%s", secret_protection_summary())       # F042: a host with no checkout says so
+        if self.cfg.dev_box:
+            dev_box.log_summary(self.cfg)                  # dev-box mode: is the GitHub token there?
         state.write_pid(self.cfg.pid_path)
         try:
             while not self.stop.is_set():

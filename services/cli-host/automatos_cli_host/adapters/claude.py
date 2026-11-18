@@ -289,12 +289,14 @@ class ClaudeAdapter(PresetAdapter):
 
     def _sandbox_settings(self, ctx: LaunchContext) -> Optional[Dict[str, Any]]:
         """The session's ``sandbox`` block: what the gate refuses to name (F042 —
-        the platform's secrets, this host's state) the sandbox refuses to open."""
+        the platform's secrets, this host's state, the dev-box token file among them)
+        the sandbox refuses to open. A dev-box session also reaches GitHub."""
         if self.sandbox is None or not self.sandbox.enabled:
             return None
         from ..policy import platform_secret_roots  # policy imports the adapters' base
         off_limits = (ctx.state_dir,) if ctx.state_dir else ()
-        return claude_settings(self.sandbox, secret_roots=platform_secret_roots(), off_limits=off_limits)
+        return claude_settings(self.sandbox, secret_roots=platform_secret_roots(), off_limits=off_limits,
+                               github=ctx.dev_box)
 
     def prepare(self, ctx: LaunchContext) -> Prepared:
         """The session's settings.json in the session dir (``--settings``: hooks,

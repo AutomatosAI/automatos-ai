@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from . import __version__
-from . import turn_end, usage_limit
+from . import dev_box, turn_end, usage_limit
 from .adapters import NotServed, UnknownCli, adapter_for, adapters
 from .adapters.base import LaunchContext, Reply, ToolClass
 from .allowlist import NotAllowed, default_session_cwd, resolve_allowed, session_deliverables_dir
@@ -181,7 +181,8 @@ class Session:
             self.adapter = adapter_for(ticket.get("provider"), getattr(cfg, "cli_binaries", None), getattr(cfg, "session_sandbox", None))
         except (UnknownCli, NotServed) as exc:
             self._adapter_error = str(exc)
-        self.events: "queue.Queue[Dict[str, Any]]" = queue.Queue()
+        self._github = dev_box.SessionCredential.for_session(cfg, self.cli)   # --dev-box: its token, never reported
+        self.events: "queue.Queue[Dict[str, Any]]" = dev_box.ScrubbedQueue(self._github.scrub)
         self.cancel_requested = threading.Event()
         self.stopped_by_host: Optional[str] = None     # F015: why the HOST stopped this session
         self.stopped = threading.Event()
@@ -288,7 +289,7 @@ class Session:
         preset = self.adapter.preset
         if preset.system_prompt_flag:
             return ticket
-        return f"{build_system_prompt(self.ticket, preset.label)}\n{ticket}"
+        return f"{build_system_prompt(self.ticket, preset.label, dev_box=self._github.carried)}\n{ticket}"
 
     def _pre_tool_use(self, payload: Dict[str, Any]) -> Reply:
         tool = str(payload.get("tool_name") or "")
@@ -341,7 +342,7 @@ class Session:
         session. Declined: it keeps planning."""
         if self.plan is not None and not self.plan.get("approved_in_turn"):
             return Decision("deny", PLAN_WITH_OPERATOR), None, None     # already with the operator
-        save_plan(self._plan_dir, text)
+        save_plan(self._plan_dir, self._github.scrub(text))
         verdict, answer, request_id = self._ask_operator(tool, intent.subject, decision.reason)
         if verdict.allow:
             self._policy.permission_mode = MODE_EDITS                 # the plan is approved: work as Edit automatically
@@ -504,18 +505,17 @@ class Session:
         brand = brand_files_note(write_brand_files(self.ticket, brand_root))
         ticket_path.write_text(build_ticket_file(self.ticket, self.default_root, self.plan_turn) + brand, encoding="utf-8")
         system_prompt_path = session_dir / "system_prompt.md"
-        system_prompt_path.write_text(build_system_prompt(self.ticket, cli_label), encoding="utf-8")
+        system_prompt_path.write_text(build_system_prompt(self.ticket, cli_label, dev_box=self._github.carried),
+                                      encoding="utf-8")
         self.terminal_log = BoundedLog(session_dir / TERMINAL_LOG_FILENAME)
         return ticket_path, system_prompt_path
 
     def _set_policy(self, cwd: Path, preset: Any, session_tools: Optional[Dict[str, Any]]) -> None:
         """The gate for this session: its folders, its allowlist and its permission mode."""
         session_dir = self.session_dir
-        # The ticket file NAMES a deliverables folder, so the session has to be
-        # able to write there. For a folder-less ticket that folder IS the cwd,
-        # but a ticket with its own working directory runs somewhere else — and
-        # the instruction would then point at a path the gate refuses, which is
-        # an instruction that cannot be followed. Named and writable, or neither.
+        # The ticket file NAMES a deliverables folder, so the session must be able to write
+        # there. A folder-less ticket's IS the cwd; one with its own working directory runs
+        # elsewhere, and a named folder the gate refuses is an instruction nobody can follow.
         deliverables = session_deliverables_dir(self.default_root, str(self.task_id))
         extra_dirs = (session_dir,)
         if deliverables is not None and deliverables.resolve() != cwd.resolve():
@@ -525,7 +525,8 @@ class Session:
                 log.warning("deliverables folder %s not created: %s", deliverables, exc)
             extra_dirs = (*extra_dirs, deliverables)
         self._plan_dir = deliverables or session_dir
-        self._full_bash = bash_allowlist_from_config(self.ticket.get("allowed_tools"))
+        rules = dev_box.repo_rules(cwd) if self._github.carried else None    # dev-box mode: git and gh by its table
+        self._full_bash = (*bash_allowlist_from_config(self.ticket.get("allowed_tools")), *dev_box.allowed_bash(rules))
         self._policy = PolicyContext(
             permission_mode=self.permission_mode,
             cwd=cwd,
@@ -537,6 +538,7 @@ class Session:
             # (its token) are out of reach, whatever folder the ticket runs in.
             secret_roots=platform_secret_roots(),
             off_limits=(Path(self.cfg.state_dir).expanduser(),),
+            dev_box=rules,
         )
 
     def _launch_context(self, cwd: Path, ticket_path: Path, system_prompt_path: Path,
@@ -552,7 +554,7 @@ class Session:
             cwd=cwd, session_dir=session_dir, ticket_path=ticket_path, system_prompt_path=system_prompt_path,
             task_id=self.task_id, session_id=self.session_id, resume_session_id=self.ticket.get("resume_session_id"),
             model=self.ticket.get("model"), worktree_name=worktree, agent_id=str(self.ticket.get("agent_id") or "") or None,
-            state_dir=getattr(self.cfg, "state_dir", None),
+            state_dir=getattr(self.cfg, "state_dir", None), dev_box=self._github.carried,
             session_tools=session_tools, plan_first=self.permission_mode == MODE_PLAN,
             extra_dirs=tuple(self._policy.extra_dirs), hook_socket=self.sock_path,
         )
@@ -564,6 +566,7 @@ class Session:
         args = self.adapter.launch_args(ctx, prepared)
         assert_args_honour_invariant(args, preset.forbidden_args)
         assert_secret_not_in_args(args, (session_tools or {}).get("token"))
+        assert_secret_not_in_args(args, self._github.token)
         env = build_session_env(preset, extra={
             **(self.hook_env or {"AUTOMATOS_HOST_SOCK": str(self.sock_path)}),
             "AUTOMATOS_HOST_PID": str(os.getpid()),      # the shim talks to this process only (F234)
@@ -572,7 +575,7 @@ class Session:
             "AUTOMATOS_HOOK_WAIT_SECONDS": str(HOOK_WAIT_SECONDS),
             "PYTHONPATH": hook_pythonpath(),
             **prepared.env,
-        })
+        }, github=self._github.environment())
         self.proc = spawn_on_pty(args, cwd=cwd, env=env, rows=PTY_ROWS, cols=PTY_COLS)
         self.pgid = self.proc.pid
         threading.Thread(target=self._drain, args=(self.proc,), daemon=True, name=f"pty-drain-{self.task_id}").start()
@@ -615,6 +618,7 @@ class Session:
                                     session_started=self.session_started.is_set(), stopped=self.stopped.is_set())
 
     def _drain(self, child: PtyChild) -> None:
+        stream = self._github.stream()        # dev-box mode: the token's value never reaches the tail or the log
         try:
             while True:
                 try:
@@ -623,6 +627,7 @@ class Session:
                     break
                 if not chunk:
                     break
+                chunk = stream.feed(chunk)
                 self.output_tail.extend(chunk)
                 self._watch_for_parking(chunk)
                 if self.terminal_log is not None:
@@ -630,6 +635,7 @@ class Session:
         finally:
             child.close()
             if self.terminal_log is not None:
+                self.terminal_log.write(stream.flush())
                 self.terminal_log.close()
 
     def _watch_for_parking(self, chunk: bytes) -> None:
@@ -713,19 +719,16 @@ class Session:
             self.plan = {"text": text.strip(), "approved_in_turn": False}
         if self.plan is None:
             return files
-        saved = save_plan(self._plan_dir, self.plan["text"])
+        saved = save_plan(self._plan_dir, self._github.scrub(self.plan["text"]))
         self.events.put({"event": PLAN_EVENT, "at": time.time(), **self.plan})
         return [*files, str(saved)] if saved is not None and str(saved) not in files else files
 
     def _shred_session_credentials(self) -> None:
-        """The turn is over: delete the files holding this ticket's token.
-
-        The backend kills the credential on the row, but the PLAINTEXT is what
-        an attacker copies, and it sat in the session folder indefinitely —
-        every finished ticket leaving one more readable token behind. Deleting
-        it costs nothing: the config is rewritten from the claim on every spawn,
-        so a resume gets a fresh file with a fresh token.
-        """
+        """The turn is over: delete the files holding this ticket's token. The backend
+        kills it on the row, but the plaintext left in the session folder is what gets
+        copied; the config is rewritten from the claim on every spawn, so a resume gets
+        a fresh file with a fresh token."""
+        self._github.discard()                     # dev-box mode: gh's own config folder for this session
         if self.session_dir is None:
             return
         for name in CREDENTIAL_SESSION_FILES:
@@ -749,10 +752,11 @@ class Session:
     def _outcome(self, status: str, *, result_text: str = "", error: Optional[str] = None,
                  exit_reason: str = "", usage: Optional[Dict[str, Any]] = None, cwd: Optional[Path] = None,
                  files_touched: Optional[List[str]] = None) -> SessionOutcome:
+        scrub = self._github.scrub              # dev-box mode: the token's value is never in a result
         return SessionOutcome(
-            status=status, result_text=result_text, error=error, exit_reason=exit_reason,
+            status=status, result_text=scrub(result_text), error=scrub(error), exit_reason=exit_reason,
             usage=usage or {}, files_touched=list(self.files_touched if files_touched is None else files_touched),
-            permission_denials=list(self.denials),
+            permission_denials=scrub(list(self.denials)),
             session_id=self.reported_session_id or self.session_id or None,
             transcript_path=self.transcript_path,
             effective_cwd=str(self.effective_cwd or cwd) if (self.effective_cwd or cwd) else None,
@@ -788,6 +792,7 @@ def host_capabilities(cfg: HostConfig) -> Dict[str, Any]:
         "clis": clis,
         "providers": [cli_id for cli_id, info in clis.items() if info.get("served")],
         "worktrees": cfg.use_worktrees,
+        "dev_box": dev_box.enabled(cfg),     # dev-box mode (flag and sandbox): Claude Code sessions publish their work
         # PRD-239 S6: the directories this host may run sessions in — the backend
         # checks an agent's working_directory against them before it is saved.
         "allow_dirs": [str(p) for p in (cfg.allow_dirs or [])],

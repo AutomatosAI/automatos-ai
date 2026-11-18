@@ -19,9 +19,13 @@ Everything the host needs to know about ITS machine and the backend it serves:
   that is already isolated (a VM, a container, a dedicated user with no credentials)
 * ``--session-allow-domain HOST`` (repeatable) — a host sandboxed commands may
   reach, on top of the package registries
+* ``--dev-box``                     — this machine is the owner's development machine:
+  Claude Code sessions commit, push their own branch and open pull requests with
+  the GitHub token in ``<dir>/agent-github-token`` (``dev_box.py``); off by default
 
 No secrets are ever taken from flags or the environment: the host token is
-minted by the backend at pairing and lives only in the state directory.
+minted by the backend at pairing and lives only in the state directory, and the
+dev-box token is a file the owner puts there.
 """
 from __future__ import annotations
 
@@ -46,6 +50,8 @@ DEFAULT_SESSION_TIMEOUT_SECONDS = 4 * 3600
 DEFAULT_ASK_TIMEOUT_SECONDS = 3600.0
 DEFAULT_STARTUP_TIMEOUT_SECONDS = 180.0
 DEFAULT_CLAIM_BATCH = 5
+# Dev-box mode: the GitHub token sessions push with, mode 0600, in the state directory.
+DEV_BOX_TOKEN_FILENAME = "agent-github-token"
 
 
 @dataclass
@@ -83,6 +89,9 @@ class HostConfig:
     # loopback. 0 = an ephemeral port (announced in the host's capabilities).
     terminal_enabled: bool = True
     terminal_port: int = 0
+    # Dev-box mode (dev_box.py): Claude Code sessions publish their own work with the
+    # GitHub token in ``dev_box_token_path``. Off = sessions never push, as before.
+    dev_box: bool = False
 
     # service actions (PRD-235 W3): install | uninstall | status | restart | nudge | None (= run)
     service_action: Optional[str] = None
@@ -90,6 +99,10 @@ class HostConfig:
     @property
     def token_path(self) -> Path:
         return self.state_dir / "host.json"
+
+    @property
+    def dev_box_token_path(self) -> Path:
+        return self.state_dir / DEV_BOX_TOKEN_FILENAME
 
     @property
     def pid_path(self) -> Path:
@@ -167,6 +180,10 @@ def _add_session_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--session-allow-domain", action="append", default=[], metavar="HOST",
                    help="a host sandboxed session commands may reach, on top of the package registries "
                         f"({', '.join(DEFAULT_ALLOWED_DOMAINS)}); repeatable")
+    p.add_argument("--dev-box", action="store_true",
+                   help="this machine is your development machine: Claude Code sessions commit, push their own "
+                        f"branch and open pull requests with the GitHub token in <dir>/{DEV_BOX_TOKEN_FILENAME} "
+                        "(mode 0600). Pushing to the default and release branches, merging and access stay refused")
     p.add_argument("--ask-timeout", type=float, default=DEFAULT_ASK_TIMEOUT_SECONDS,
                    help=("seconds a session waits for the operator to answer a permission card before "
                          f"denying (default {int(DEFAULT_ASK_TIMEOUT_SECONDS)}); inside a turn never more than "
@@ -231,6 +248,7 @@ def parse_args(argv: Optional[List[str]] = None) -> HostConfig:
         service_action=ns.service_action,
         terminal_enabled=not ns.no_terminal,
         terminal_port=max(0, min(65535, int(ns.terminal_port or 0))),
+        dev_box=ns.dev_box,
     )
     if ns.name:
         cfg.name = ns.name
