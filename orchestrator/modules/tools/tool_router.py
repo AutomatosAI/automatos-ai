@@ -717,10 +717,15 @@ def _apply_named_prior(
 ) -> Tuple[Optional[List[str]], Optional[str], bool]:
     """The actions the query names first in the narrowed enum (``modules/tools/named_actions.py``),
     gate-filtered as ranking is, and never one of the workspace's hidden categories (the query may
-    be a person's own words): a Playbook step that says "call platform_X" is offered X."""
+    be a person's own words): a Playbook step that says "call platform_X" is offered X. A full
+    enum, or a query that names no action, is left as it is before anything else is read: a
+    failure here empties the whole tool list (``get_tools_for_agent`` logs it and returns none)."""
+    from modules.tools.named_actions import named_in, with_named_first
+
+    if narrowing[0] is None or not named_in(query):
+        return narrowing
     from config import config
     from modules.tools.discovery import get_action_registry
-    from modules.tools.named_actions import with_named_first
 
     def passes(name: str) -> bool:
         action = get_action_registry().get(name)
