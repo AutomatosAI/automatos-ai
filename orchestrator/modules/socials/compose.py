@@ -107,6 +107,12 @@ FACTS_NOTE = (
     "owner is asked, nothing is made up."
 )
 HANDLE_NOTE = "A handle is one of brand_handles, the brand kit's own; with none there, leave every handle empty."
+# 19 Nov 2026: every video's end card asks for the web address, and the composer was never given
+# the brand kit's own, so it stayed empty and the render waited on the owner.
+WEBSITE_NOTE = (
+    "A web address on the post is brand_website, the brand kit's own, written as its field asks; with none "
+    "there, leave it empty. Never write another."
+)
 # F378 (B11, B16): a retake starts from the post as it is and the guidance is a hard rule.
 RETAKE_RULES_NOTE = (
     "This is another take of a post: current_take is the post as it is now, its copy and its fields. Start from "
@@ -176,6 +182,8 @@ class ComposeContext:
     voice_examples: Tuple[Mapping[str, str], ...] = ()
     # F378 (night 11): the brand kit's social_handles (toolkit → handle), the only handles a post carries.
     handles: Mapping[str, str] = field(default_factory=dict)
+    # The brand kit's company website without its scheme (automatos.app): the only web address a post carries.
+    website: str = ""
     # F378: on a retake, the post as it is now ({copy, variables: {name: value}}), the take to start from.
     current_take: Mapping[str, Any] = field(default_factory=dict)
     # The template fields the owner filled in themselves (name → value): kept as written, never rewritten.
@@ -233,6 +241,7 @@ def _system(ctx: ComposeContext) -> str:
         "a source, a URL or a number. Follow the brand voice: use its tone and never its banned phrases.",
         FACTS_NOTE,
         HANDLE_NOTE,
+        WEBSITE_NOTE,
         PICK_NOTE,
     ]
     parts.extend(_turn_notes(ctx))
@@ -251,6 +260,7 @@ def build_messages(ctx: ComposeContext) -> List[Dict[str, str]]:
         "templates": [dict(t) for t in ctx.templates],
         "candidate_sources": _candidate_lines(ctx),
         "brand_handles": dict(ctx.handles),  # F378: the only handles a post may carry
+        "brand_website": ctx.website,  # the only web address a post may carry
     }
     if ctx.template_id:
         material["template_id"] = ctx.template_id

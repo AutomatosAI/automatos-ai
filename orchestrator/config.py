@@ -2696,7 +2696,9 @@ class Config:
     SOCIALS_POST_ACTIONS_CACHE_TTL_SECONDS: int = int(os.getenv("SOCIALS_POST_ACTIONS_CACHE_TTL_SECONDS", "30"))
     # PRD-251 S2.2a (US-207): how long the composer waits for the model to turn a
     # brief into a draft proposal (POST /api/socials/compose answers 504 after it).
-    SOCIALS_COMPOSE_TIMEOUT_SECONDS: int = int(os.getenv("SOCIALS_COMPOSE_TIMEOUT_SECONDS", "60"))
+    # 19 Nov 2026: 90, from 60. A video's whole proposal runs past 8,000 output tokens (its budget is
+    # now 16,000, core/llm/output_budget.py), at about 170 a second: 60 cut the longest ones.
+    SOCIALS_COMPOSE_TIMEOUT_SECONDS: int = int(os.getenv("SOCIALS_COMPOSE_TIMEOUT_SECONDS", "90"))
 
     def validate_security(self) -> None:
         """PRD-172: fail-closed validation of tenant-isolation secrets.
