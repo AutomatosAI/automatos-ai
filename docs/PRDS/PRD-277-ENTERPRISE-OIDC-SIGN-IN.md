@@ -1,6 +1,6 @@
 # PRD-277: Enterprise sign-in — a self-hosted install signs people in through the customer's own identity provider (OIDC)
 
-**Status:** Draft for Gerard and Dave, 19 Nov 2026. Nothing is approved and no code has been written. Every decision in §8 is **open** until Gerard answers it; sign-in decisions are his alone.
+**Status:** Draft for Gerard and Dave. Written 19 Nov 2026 and revised the same day after Dave's review: trimmed to basic sign-in (G5). No code has been written. A decision in §8 is **open** unless it is marked decided; sign-in decisions are Gerard's alone.
 **Owner:** Gerard · **Reviewer:** Dave (auth)
 **Grounded on:** `automatos-ai` `main @ abcc3f813` and `automatos-go` main, read on 19 Nov 2026. 277 is the next free number: 276 is the highest on main.
 **Labels:** **[T]** read in code at that commit; **[I]** inferred; **[G]** Gerard's decision; **[?]** not known.
@@ -14,6 +14,7 @@
 | G2 | Clerk stays for the hosted SaaS. Nothing about Clerk sign-in changes there or in any app. |
 | G3 | "It could be AWS, Azure, Google." The build is provider-neutral: standard OpenID Connect only, no provider-specific code. |
 | G4 | OIDC is built before the first customer install, and that install's development environment is the test bed. |
+| G5 | Basic OIDC sign-in is part of core, for every self-hosted install: "more people using Automatos the better". Roles taken from the identity provider, provisioning and removal driven by it, SAML and audit export are not part of this PRD. Agreed with Dave. |
 
 ---
 
@@ -63,7 +64,7 @@ This PRD adds a third edition, `enterprise`. People sign in through the customer
 
 - A person signs in to a self-hosted install with their work account, through any standards-compliant OIDC provider.
 - Every action is tied to that named person in `audit_logs`.
-- The customer controls who gets in and what they can do, from their own IdP where it can say so and in Automatos where it cannot.
+- The customer controls who gets in, through their own IdP and an access rule, and sets what each person can do in Automatos.
 - Access ends when the session expires, when an admin ends it, or when the person is deactivated.
 - The `local` and `saas` editions behave exactly as they do today. Their existing tests pass unchanged.
 - No Automatos code names a provider. One configuration shape works for all of them.
@@ -72,8 +73,10 @@ This PRD adds a third edition, `enterprise`. People sign in through the customer
 ## 4. Non-goals
 
 - **Changing Clerk sign-in** in the hosted SaaS or in any app (G2).
-- **SAML.** OIDC only in v1 (decision D-10).
-- **SCIM**, automatic removal pushed from the IdP, and back-channel logout. v1 ends access by session lifetime and by an admin (decision D-9).
+- **SAML.** This PRD is OIDC only (G5).
+- **Provisioning and removal driven by the IdP:** SCIM, logout notices, and re-checking a live session with the IdP. Access ends by session lifetime and by an admin (G5).
+- **Roles taken from the IdP's groups or roles.** Roles are set in Automatos (G5).
+- **Exporting the audit log.** Sign-in events are written to it. Sending it elsewhere is not in this PRD (G5).
 - **More than one identity provider per install** (decision D-11).
 - **Email invitations.** Core has no mail sender without Clerk.
 - **Billing, credits, plans and trial grants.** They are off in enterprise, as they are in `local`.
@@ -156,13 +159,11 @@ The web app and the API are served from one address (`/` and `/api` on one host)
 
 **First sign-in.** The person's row and identity link are created. No personal workspace and no trial grant. What they can reach is decided next.
 
-**Workspaces and roles (decision D-5).** Roles live in `workspace_members`, as today. Two ways to fill it:
-1. **Mapping rules** in the install's settings: "people whose `groups` claim contains `X` are `editor` in workspace `Y`". Applied at each sign-in. Optional, because not every IdP sends groups (Google does not).
-2. **In Automatos:** an admin sets a person's workspace and role on the Team page. A person who has signed in but is in no workspace is shown as waiting.
+**Workspaces and roles.** Roles live in `workspace_members`, as today, and are set in Automatos: an admin gives a person a workspace and a role on the Team page. A person who has signed in but is in no workspace is shown as waiting. Sign-in never changes a role someone already has.
 
 A default role for everyone who passes the access rule is a setting (decision D-4). The recommended default is none: signed in, in no workspace, sees a page saying to ask an admin.
 
-**Install admins (decision D-6).** `users` gains a nullable `system_role`, read only in enterprise. It is set two ways: a mapping rule (a group or role at the IdP means install admin), or `ENTERPRISE_BOOTSTRAP_ADMINS`, a list in settings that makes the named people admins when they first sign in. The list names subjects, or emails where the IdP marks the email verified. That is how the first admin gets in without anyone touching the database.
+**Install admins (decision D-6).** `users` gains a nullable `system_role`, read only in enterprise. `ENTERPRISE_BOOTSTRAP_ADMINS`, a list in settings, makes the named people install admins when they first sign in. The list names subjects, or emails where the IdP marks the email verified. That is how the first admin gets in without anyone touching the database. After that, an install admin can make another person one, in Automatos.
 
 ### 5.5 Step-up
 
@@ -172,7 +173,7 @@ The 25 sensitive routes keep their gate. In enterprise the gate reads when the p
 
 - **Sign out** revokes the session on the server, clears the cookie, and sends the browser to the IdP's end-session address when its metadata lists one.
 - **An admin can end** one session or all of a person's sessions, and can deactivate a person. `users.is_active` already exists and the device lane already checks it.
-- **A person removed at the IdP** cannot start a new session. Their existing session ends at its absolute lifetime at the latest (decision D-9).
+- **A person removed at the IdP** cannot start a new session. Their existing session ends at its absolute lifetime at the latest.
 
 ### 5.7 Phones
 
@@ -202,12 +203,14 @@ Automatos reads the provider's own metadata document (`<issuer>/.well-known/open
 
 | Provider | Issuer looks like | Groups in the ID token | What to watch |
 |---|---|---|---|
-| Microsoft Entra ID | `https://login.microsoftonline.com/<tenant>/v2.0` | Optional. Above 200 groups the list is left out of the token. App roles arrive in `roles`. | `email` is optional and unverified. Use the tenant's own issuer, never `common`. Prefer app roles to groups for mapping. |
-| Google Workspace | `https://accounts.google.com` | None | One issuer for every Google account, so the access rule must require the `hd` (domain) claim. Roles are set in Automatos. |
-| Okta, Auth0 | `https://<domain>` | Through a custom claim | The claim's name is the customer's choice, hence `OIDC_CLAIM_GROUPS`. |
+| Microsoft Entra ID | `https://login.microsoftonline.com/<tenant>/v2.0` | Optional. Above 200 groups the list is left out of the token. App roles arrive in `roles`. | `email` is optional and unverified. Use the tenant's own issuer, never `common`. An access rule on `groups` fails for a person over the limit; a rule on an app role does not. |
+| Google Workspace | `https://accounts.google.com` | None | One issuer for every Google account, so the access rule must require the `hd` (domain) claim. |
+| Okta, Auth0 | `https://<domain>` | Through a custom claim | The claim's name is the customer's choice; the access rule names it. |
 | Keycloak | `https://<host>/realms/<realm>` | Through a mapper | May sit on a private address with a private certificate authority (FR-9, FR-10). Used in CI. |
-| Amazon Cognito | `https://cognito-idp.<region>.amazonaws.com/<pool>` | `cognito:groups` | The claim name contains a colon; the mapping syntax must allow it. |
+| Amazon Cognito | `https://cognito-idp.<region>.amazonaws.com/<pool>` | `cognito:groups` | The claim name contains a colon; the access rule's syntax must allow it. |
 | AWS IAM Identity Center | **[?]** | **[?]** | AWS's FAQ says it supports only SAML applications; its user guide describes OAuth 2.0 applications. Confirm before telling an AWS customer it works. |
+
+Groups matter in this PRD only for the access rule. Roles are set in Automatos.
 
 Rows marked without **[T]** come from the providers' documentation and are **[I]** until the conformance run (US-703) proves them. The Microsoft rows were checked against Microsoft's documentation on 19 Nov 2026.
 
@@ -224,8 +227,7 @@ Names are provisional. Final names are fixed in each wave's PR and recorded in `
 | `OIDC_SCOPES` | `openid profile email` | What is asked for at sign-in. |
 | `OIDC_DISPLAY_NAME` | `your organisation` | The text on the sign-in button. |
 | `OIDC_REQUIRED_CLAIMS` | empty | Claims that must match before anyone is let in. Required for shared issuers. |
-| `OIDC_CLAIM_EMAIL`, `OIDC_CLAIM_NAME`, `OIDC_CLAIM_GROUPS` | `email`, `name`, empty | Which claims carry these. |
-| `OIDC_ROLE_RULES` | empty | Mapping from a claim value to a workspace and role, or to install admin. |
+| `OIDC_CLAIM_EMAIL`, `OIDC_CLAIM_NAME` | `email`, `name` | Which claims carry these. |
 | `OIDC_CA_BUNDLE_FILE` | empty | A certificate authority file for an IdP with a private certificate. |
 | `ENTERPRISE_BOOTSTRAP_ADMINS` | empty | People who become install admins at first sign-in. |
 | `ENTERPRISE_DEFAULT_ROLE` | `none` | Role in the default workspace for anyone who passes the access rule. |
@@ -251,6 +253,15 @@ These are requirements, each with a test.
 
 New `audit_logs` actions, each with the person's id where one is known, the IP and the browser:
 `auth:sign_in`, `auth:sign_in_refused` (with the reason: access rule, email conflict, deactivated, invalid token), `auth:sign_out`, `auth:session_revoked`, `auth:step_up`, `auth:identity_linked`, `auth:bootstrap_admin`. Role changes are already recorded.
+
+### 5.13 Where more can plug in
+
+Sign-in is built so that more can be added later without changing the code that issues sessions or checks permissions.
+
+- **One interface for proving who someone is.** `start` sends the person to sign in. `finish` returns a verified identity: issuer, subject, email, name, when they signed in, and the claims. OIDC is the one implementation in core.
+- **One hook, after the identity is verified and before the session is issued.** Code registered there may refuse the sign-in or set the person's memberships. With nothing registered, sign-in behaves exactly as this PRD describes.
+- **One service for people.** Creating a person, linking an identity, setting a membership, deactivating a person and ending their sessions are functions in one module. Sign-in and the Team page call them, and so can other code.
+- **Registration closes at startup.** Nothing can be registered after the first request, and registering the same thing twice is an error.
 
 ## 6. Waves and user stories
 
@@ -337,6 +348,7 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 - [ ] The resolver accepts the token from the `Authorization` header, or from the `__Host-` cookie when there is no header.
 - [ ] An expired, revoked or unknown session gets 401 with a code the web app recognises.
 - [ ] A session for a deactivated person is refused.
+- [ ] The session records the ID token's `sid` when the IdP sends one.
 - [ ] `last seen` is written at most every 5 minutes, as the device lane does.
 - [ ] The resolver is registered only in enterprise. In `local` and `saas` an `ams_` token is refused.
 
@@ -398,14 +410,14 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 - [ ] A claim name containing a colon or a dot can be named.
 
 #### US-404: First sign-in · M
-**Description:** As a new person, I want my first sign-in to put me in the right workspaces, so that I can start work.
+**Description:** As a new person, I want my first sign-in to work without anyone preparing my account, so that I can start as soon as an admin gives me a workspace.
 
 **Acceptance Criteria:**
 - [ ] A `users` row and an identity link are created. No personal workspace, no trial grant.
-- [ ] `OIDC_ROLE_RULES` are applied at every sign-in: memberships they name are created or updated.
-- [ ] A membership set by hand in Automatos is not removed by a rule that no longer matches, unless the rule set says rules are authoritative.
-- [ ] With no matching rule and `ENTERPRISE_DEFAULT_ROLE=none`, the person is signed in and in no workspace, and the API tells the web app so.
-- [ ] A groups claim that is absent (for example Microsoft's overage case) is treated as "no groups", is logged once as a warning, and never as an error.
+- [ ] With `ENTERPRISE_DEFAULT_ROLE=none`, the person is signed in and in no workspace, and the API tells the web app so.
+- [ ] With `ENTERPRISE_DEFAULT_ROLE` set to a role, the person gets that role in the default workspace at first sign-in only.
+- [ ] A later sign-in changes no membership. A test proves a role an admin changed survives the next sign-in.
+- [ ] Sign-in succeeds when the ID token carries only a subject and an email.
 
 #### US-405: The first admin · S
 **Description:** As the operator, I want to name the first admins in settings, so that nobody edits the database to get in.
@@ -413,6 +425,7 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Acceptance Criteria:**
 - [ ] A person listed in `ENTERPRISE_BOOTSTRAP_ADMINS` becomes an install admin and owner of the default workspace at first sign-in. It is audited.
 - [ ] An entry given as an email matches only when the token marks the email verified.
+- [ ] An install admin can make another person an install admin. It requires step-up and is audited.
 - [ ] The migration Job creates the default workspace with no owner, as the local first-run seed does.
 
 #### US-406: Step-up by signing in again · M
@@ -431,6 +444,17 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 - [ ] A test helper serves metadata, keys, an authorize step that approves at once, and a token endpoint, on a loopback address, using `PyJWT` and `cryptography` only.
 - [ ] It can be told to misbehave: wrong signature, rotated key, missing claim, shared issuer.
 - [ ] A separate CI job runs the sign-in flow against a real Keycloak container. It is allowed to fail at first and becomes required at the end of the wave.
+
+#### US-408: One interface and one hook for sign-in · M
+**Description:** As a developer, I want sign-in written against a small interface with a hook, so that another way of proving identity can be added without touching sessions or permissions.
+
+**Acceptance Criteria:**
+- [ ] The start and callback routes call an identity interface. OIDC is its implementation in core.
+- [ ] A hook runs after the identity is verified and before the session is issued. It can refuse the sign-in, or set memberships through the people service.
+- [ ] Creating a person, linking an identity, setting a membership and deactivating a person are functions in one module, used by sign-in and by the Team routes.
+- [ ] Registration is refused after startup, and registering the same thing twice raises an error.
+- [ ] A test registers a second, fake implementation and a hook, and signs in through them with no change to the session or permission code.
+- [ ] With no hook registered, every US-402 and US-404 test passes unchanged.
 
 ### Wave 5: Web app
 
@@ -537,7 +561,7 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As the team, I want the edition proven against real providers on the dev install, so that we know it works before a customer relies on it.
 
 **Acceptance Criteria:**
-- [ ] On the dev install: sign-in, first-admin bootstrap, a role rule, step-up, sign-out, session expiry and a paired phone, each recorded with the evidence.
+- [ ] On the dev install: sign-in, first-admin bootstrap, a role set by an admin, step-up, sign-out, session expiry and a paired phone, each recorded with the evidence.
 - [ ] The same run against at least three providers from §5.9, with the differences found written into the table.
 - [ ] One independent security review of Waves 2 to 4, with findings fixed or recorded.
 
@@ -559,7 +583,7 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 - **FR-14:** Session tokens must be resolved through `BEARER_RESOLVERS`. `hybrid.py` must gain no branch.
 - **FR-15:** First sign-in must create the person and their identity link, and must not create a personal workspace or a trial grant.
 - **FR-16:** Workspace roles must be stored in `workspace_members` and checked by the existing permission matrix.
-- **FR-17:** The system must support claim-to-role mapping rules and must work when the IdP sends no groups.
+- **FR-17:** Roles must be set in Automatos. Sign-in must work when the ID token carries only a subject and an email, and must never change a role a person already has.
 - **FR-18:** The first admin must be able to get in using settings alone.
 - **FR-19:** Step-up must require a fresh sign-in at the IdP and must fail closed without `auth_time`.
 - **FR-20:** Sign-out must revoke the session on the server. An admin must be able to revoke a person's sessions and deactivate them.
@@ -569,23 +593,24 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 - **FR-24:** Billing, credits, plans, quotas and the trial grant must be off in enterprise.
 - **FR-25:** `local` and `saas` must behave as before. Their existing tests must pass without being weakened.
 - **FR-26:** No source file may name an identity provider.
+- **FR-27:** Sign-in must be written against one identity interface, with one hook after verification, and registration must close at startup.
 
 ## 8. Decisions for Gerard
 
-All open. Options are lettered so they can be answered as "D-2 A, D-3 A". Sign-in is the owner's decision, so nothing in a wave is built until the rows it depends on are answered.
+Open unless marked decided. Options are lettered so they can be answered as "D-3 A, D-4 A". Sign-in is the owner's decision, so nothing in a wave is built until the rows it depends on are answered.
 
 | # | Decision | Options | Recommended |
 |---|---|---|---|
-| D-1 | How the OIDC provider code is packaged | Decided by the owner outside this PRD | Not for this PRD |
-| D-2 | The edition's name | A `enterprise` · B `oidc` | **A.** Editions are named for what the install is (`local`, `saas`), and the sign-in mode keeps the name `oidc`. |
+| D-1 | Where the OIDC sign-in code lives | **Decided (G5):** in core. | n/a |
+| D-2 | The edition's name | A `enterprise` · B `oidc` · C a neutral name such as `team` | **C.** Editions are named for what the install is (`local`, `saas`). After G5 this one is part of core and free to run, so a neutral name avoids confusion with anything sold as Enterprise. The sign-in mode keeps the name `oidc`. This text uses `enterprise` as a working name until the row is answered. |
 | D-3 | What a browser holds after sign-in | A a session Automatos issues, in a cookie scripts cannot read · B the IdP's own token, sent on every call · C a token in the page's storage, as a paired browser has today | **A.** It works the same on every provider, the IdP's tokens never leave the server, and we can end it. B depends on token shapes that differ by provider. C can be read by any script on the page. |
-| D-4 | What someone gets who passes the access rule but matches no role rule | A nothing: signed in, in no workspace, asks an admin · B `viewer` in the default workspace · C `editor` | **A** as the shipped default, with B or C one setting away for a proof of concept. |
-| D-5 | Where roles are managed | A in Automatos, with optional mapping rules from IdP claims · B mapping rules only · C in Automatos only | **A.** Rules suit Entra and Okta. Google sends no groups, so there must be a way without them. |
-| D-6 | Install admins | A a stored role, set by a mapping rule or by a bootstrap list in settings · B mapping rule only · C the first person to sign in | **A.** B fails on providers with no groups. C is a race. |
+| D-4 | What someone gets who passes the access rule and has not yet been given a workspace | A nothing: signed in, in no workspace, asks an admin · B `viewer` in the default workspace · C `editor` | **A** as the shipped default, with B or C one setting away for a proof of concept. |
+| D-5 | Where roles are managed | **Decided (G5):** in Automatos. | n/a |
+| D-6 | Install admins | A a stored role, set first from a list in settings and afterwards by install admins in Automatos · B the first person to sign in | **A.** B is a race. |
 | D-7 | Phones in the first release | A pairing from a signed-in browser now, sign-in on the phone in a later app release · B wait for sign-in on the phone · C no phones | **A.** Today's app release already pairs, so nothing waits on an app build. |
 | D-8 | How the phone signs in, when it does | A the phone talks to Automatos, Automatos talks to the IdP · B the phone talks to the IdP directly, as PRD-266 §4.11 sketched | **A.** One application and one redirect address for the customer to register, and no IdP token on a phone. It changes the `oidc` block PRD-266 reserved, which was never emitted. |
-| D-9 | How access ends when someone leaves the company | A session lifetime (12 hours) plus an admin's deactivate · B also re-check with the IdP during the session, using a refresh token · C also accept the IdP's logout notices and SCIM | **A** for v1, **B** as the next wave. C is a separate PRD. |
-| D-10 | SAML | A not in v1 · B in v1 | **A.** Revisit if a customer's only option is SAML; AWS IAM Identity Center may be one (§5.9). |
+| D-9 | How access ends when someone leaves the company | **Decided (G5):** the session's lifetime, plus an admin's deactivate. | n/a |
+| D-10 | SAML | **Decided (G5):** not in this PRD. | n/a |
 | D-11 | Identity providers per install | A one · B several | **A.** |
 | D-12 | Calls to Automatos's hosted services from an enterprise install | A off unless the operator switches each on · B on, as in `local` | **A.** A regulated customer will ask what leaves their account. |
 | D-13 | Step-up | A sign in again at the IdP · B no step-up in enterprise | **A.** |
@@ -624,18 +649,16 @@ All open. Options are lettered so they can be answered as "D-2 A, D-3 A". Sign-i
 | Email used as identity lets one person take another's account | FR-7: issuer and subject only |
 | The IdP is inside the customer's network and the outbound guard blocks it | FR-9, tested both ways |
 | Providers differ in ways the standard does not cover | Settings for claim names; the conformance run; a guide per provider |
-| A person removed at the IdP keeps a live session | Absolute lifetime; admin deactivate; D-9 B as the next wave |
-| The phone's device token has no enforced expiry | `ENTERPRISE_DEVICE_PAIRING` can be off; an enforced expiry is a candidate for D-9 B's wave |
+| A person removed at the IdP keeps a live session until it expires | Absolute lifetime; admin deactivate |
+| The phone's device token has no enforced expiry | `ENTERPRISE_DEVICE_PAIRING` can be off; an enforced expiry is a candidate for a later change |
 | The platform API key is an admin credential with no person behind it | D-14 |
 | Core has never issued sessions, so this is the first code of its kind here | Reuse the device-token kernel; one security review before the wave merges |
 
 ## 12. Open questions
 
-1. **[?] Does AWS IAM Identity Center serve an OIDC-only application?** AWS's own pages disagree. If the first customer uses it for staff, this decides D-10.
+1. **[?] Does AWS IAM Identity Center serve an OIDC-only application?** AWS's own pages disagree. If the first customer uses it for staff, OIDC sign-in may not reach them.
 2. **[?] Which identity provider does the first customer use?** The dev install's conformance run starts with it.
 3. **[?] What does the platform API key do today beyond the chat proxy?** Needed for D-14.
-4. **[?] Should a mapping rule be able to remove a membership** when the person leaves the group, or only add? US-404 keeps hand-set memberships by default.
-5. **[?] Does anything in the 25 API files that query by Clerk id run in `local` today?** If so, US-202 fixes a latent bug there; if not, those routes are `saas`-only and need a capability.
-6. **[?] Apple's rule on third-party sign-in** has an exemption for apps that sign in with an existing enterprise account. Confirm against the current text in the app PRD (US-604).
-7. **[?] Where pre-sign-in state is kept** for its 10 minutes: Redis with `SET NX EX`, as webhook dedup does, or a table. Decided in US-402's PR.
-8. **[?] Whether the audit log needs an export or retention setting** for the first customer. Out of scope here; raised so it is not lost.
+4. **[?] Does anything in the 25 API files that query by Clerk id run in `local` today?** If so, US-202 fixes a latent bug there; if not, those routes are `saas`-only and need a capability.
+5. **[?] Apple's rule on third-party sign-in** has an exemption for apps that sign in with an existing enterprise account. Confirm against the current text in the app PRD (US-604).
+6. **[?] Where pre-sign-in state is kept** for its 10 minutes: Redis with `SET NX EX`, as webhook dedup does, or a table. Decided in US-402's PR.
