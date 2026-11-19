@@ -71,6 +71,10 @@ DEFAULT_BUDGETS: Dict[str, int] = {
     "thread_checkpoint": 1024,       # p99 286
     "consistency_verifier": 1024,    # p99 477
     "graph_community_title": 1024,   # p99 54
+    # 19 Nov 2026: a video post's whole proposal (every channel's copy and up to 120 template
+    # fields) ran to the 8,000 settings default: 3 of 42 calls cut there, p90 7,267, and a cut
+    # answer is unreadable, so the post waited on the owner.
+    "socials_compose": 16000,
 }
 # The table serves managers built from settings (services). An agent's manager,
 # built by AgentFactory, keeps its configured budget whatever lane its run is

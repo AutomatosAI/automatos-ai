@@ -45,7 +45,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy.orm import Session
 
 from config import config
-from core.social_cuts import fields_cut_out
+from core.social_cuts import fields_cut_out, schema_for_length
 from core.social_field_order import ordered_schema
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
@@ -77,6 +77,7 @@ BRIEF_MAX_CHARS = 4000
 MAX_CHANNELS = 10
 # Candidate sources (F378): those matching each of the brief's words, per kind, and each address it quotes.
 CANDIDATES_PER_TERM = 3
+WEB_SCHEME = re.compile(r"^https?://", re.IGNORECASE)  # an end card writes a web address without it
 MAX_CANDIDATES = 24
 MAX_BRIEF_URLS = 5
 _URL = re.compile(r"https?://[^\s<>\"')]+")
@@ -256,6 +257,15 @@ def brand_handles(db: Session, workspace_id: UUID) -> Dict[str, str]:
     return dict(get_brand_kit(workspace.settings if workspace is not None else None).get("social_handles") or {})
 
 
+def brand_website(db: Session, workspace_id: UUID) -> str:
+    """The brand kit's company website as an end card writes it: no scheme and no trailing slash
+    (``https://automatos.app/`` → ``automatos.app``); empty without one."""
+    workspace = db.get(Workspace, workspace_id)
+    company = get_brand_kit(workspace.settings if workspace is not None else None).get("company") or {}
+    address = str(company.get("website") or "").strip()
+    return WEB_SCHEME.sub("", address).rstrip("/")
+
+
 def brand_style_text(db: Session, workspace_id: UUID) -> str:
     """The brand kit's style profile as one paragraph (PRD-251B US-B303); empty without one."""
     from modules.documents.brand_style import style_prompt
@@ -293,6 +303,7 @@ def compose_context(
         recent_openings=tuple(history.recent_openings(db, workspace_id)),  # PRD-251C US-C105
         voice_examples=tuple(voice_examples.for_composer(db, workspace_id)),  # PRD-251C US-C406
         handles=brand_handles(db, workspace_id),  # F378: the only handles a post carries
+        website=brand_website(db, workspace_id),  # an end card's web address
         current_take=dict(current_take or {}),
         given_fields=dict(given_fields or {}),
     )
@@ -498,6 +509,11 @@ async def auto_fields(db: Session, workspace_id: UUID, post: Any, *, caption: bo
         context = await asyncio.to_thread(compose_context, db, workspace_id, body, given_fields=given)
     except ChoiceRefused as exc:
         raise NotRenderable(f"{WRITE_FAILED}: {exc}") from exc
+    # A value the chosen template refuses (an earlier template's words) is not the owner's to keep: Auto writes it.
+    schema = schema_for_length(context.templates[0], post.length_seconds) if len(context.templates) == 1 else None
+    fitting = empty_fields.own_values(post, schema)
+    if fitting != given:
+        context = replace(context, given_fields=fitting)
     proposal = await _auto_proposal(context, workspace_id, post.id, WRITE_FAILED)
     edit = empty_fields.fields_edit(proposal, post)
     return {**edit, **empty_fields.caption_edit(proposal, post)} if caption else edit
@@ -517,11 +533,11 @@ def _still_needed(template: Mapping[str, Any], post: Any) -> None:
 def _record_auto_words(post: Any, actor: str, template: Mapping[str, Any], changes: Mapping[str, Any]) -> bool:
     """Apply what Auto wrote (the fields it newly gave a value, the caption) as one edit with one
     history line naming them; ``False``, and nothing applied, when it wrote neither."""
-    wrote = empty_fields.newly_written(changes, post)
+    schema = template.get("variables_schema") or {}
+    wrote = empty_fields.newly_written(changes, post, schema_for_length(template, getattr(post, "length_seconds", None)))
     caption = empty_fields.COPY in changes
     if not (wrote or caption):
         return False
-    schema = template.get("variables_schema") or {}
     labels = [compose_facts.field_label(name, schema.get(name)) for name in wrote]
     empty_fields.record_written(post, actor, changes, empty_fields.written_line(labels, caption))
     return True

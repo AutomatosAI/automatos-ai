@@ -32,7 +32,7 @@ Pure but for the post it edits; ``api/socials_compose.py`` asks the composer.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set
 
 from core.social_cuts import schema_for_length
 from core.social_templates import claim_names, resolve_variables
@@ -54,20 +54,39 @@ def _holds_a_value(value: Any) -> bool:
     return isinstance(value, GIVEN_TYPES)
 
 
-def own_values(post: Any) -> Dict[str, Any]:
-    """The post's fields that hold a value, ``{name: value}``: what Auto never rewrites."""
+def unfit_names(schema: Mapping[str, Any], values: Mapping[str, Any]) -> Set[str]:
+    """The fields whose value ``schema`` refuses (longer than its limit, the wrong type): a
+    render refuses each of them."""
+    return {problem.split(" ", 1)[0] for problem in resolve_variables(schema, values).invalid}
+
+
+def own_values(post: Any, schema: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+    """The post's fields that hold a value, ``{name: value}``: what Auto never rewrites. With the
+    chosen template's ``schema``, a value it refuses is not one of them (19 Nov 2026: a post moved
+    to another template kept the old one's words, which the new one refused, and every render of
+    it was refused): Auto writes that field again."""
     variables = post.variables if isinstance(post.variables, Mapping) else {}
-    return {
+    held = {
         name: spec.get("value") for name, spec in variables.items()
         if isinstance(spec, Mapping) and _holds_a_value(spec.get("value"))
     }
+    if not schema:
+        return held
+    unfit = unfit_names(schema, held)
+    return {name: value for name, value in held.items() if name not in unfit}
 
 
 def empty_required(template: Mapping[str, Any], post: Any) -> List[str]:
     """The required fields of ``template`` (a composer's entry) the post leaves empty, at its
-    length: a field with no value and no default, the ones a render refuses to start without."""
+    length, or holds a value the template refuses: the ones a render refuses to start without."""
     schema = schema_for_length(template, getattr(post, "length_seconds", None))
-    return resolve_variables(schema, own_values(post)).missing if schema else []
+    if not schema:
+        return []
+    fitting = own_values(post, schema)
+    missing = resolve_variables(schema, fitting).missing
+    # A refused value in a field with a default is not missing, but the render refuses it all the same.
+    unfit = set(own_values(post)) - set(fitting)
+    return [*missing, *(name for name in schema if name in unfit and name not in missing)]
 
 
 def render_refuses(template: Mapping[str, Any], post: Any) -> List[str]:
@@ -85,10 +104,15 @@ def fields_edit(proposal: Mapping[str, Any], post: Any) -> Dict[str, Any]:
     stays, a variable the template does not have included. A figure in a field the template
     marks a claim is one (F433). A source goes with the value it was given for: the post's own
     stays with a field that holds the post's value, Auto's goes only with a value Auto wrote,
-    and an empty field's old source never rides on to the value Auto wrote."""
-    schema = (proposal.get("template") or {}).get("variables_schema") or {}
-    held = own_values(post)
-    stored = dict(post.variables) if isinstance(post.variables, Mapping) else {}
+    and an empty field's old source never rides on to the value Auto wrote. A value the template
+    refuses at the post's length is not kept: Auto's goes in its place, or the field is left
+    empty for the render to ask for by its label."""
+    template = proposal.get("template") or {}
+    schema = template.get("variables_schema") or {}
+    held = own_values(post, schema_for_length(template, proposal.get("length_seconds")))
+    unfit = set(own_values(post)) - set(held)
+    stored = {name: spec for name, spec in (post.variables if isinstance(post.variables, Mapping) else {}).items()
+              if name not in unfit}
     written = {name: spec for name, spec in (proposal.get("variables") or {}).items() if name not in held}
     own_sources = {name: source for name, source in (post.sources or {}).items() if name in held}
     auto_sources = {name: source for name, source in (proposal.get("sources") or {}).items() if name in written}
@@ -98,9 +122,10 @@ def fields_edit(proposal: Mapping[str, Any], post: Any) -> Dict[str, Any]:
     }
 
 
-def newly_written(changes: Mapping[str, Any], post: Any) -> List[str]:
-    """The fields ``changes`` gives a value that the post held none for, in the edit's order."""
-    held = own_values(post)
+def newly_written(changes: Mapping[str, Any], post: Any, schema: Optional[Mapping[str, Any]] = None) -> List[str]:
+    """The fields ``changes`` gives a value that the post held none for (or one ``schema`` refuses),
+    in the edit's order."""
+    held = own_values(post, schema)
     return [
         name for name, spec in (changes.get("variables") or {}).items()
         if name not in held and isinstance(spec, Mapping) and _holds_a_value(spec.get("value"))

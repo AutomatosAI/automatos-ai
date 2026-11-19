@@ -369,7 +369,8 @@
       "type": "text",
       "label": "List: the line under the title",
       "max_chars": 56,
-      "description": "One line under the list's heading, such as how much the app holds. Each figure in it is a fact that needs its source.",
+      "description": "One line under the list's heading, such as how much the app holds. Each figure is a fact that needs its source; without one, leave it empty: the list shows without it.",
+      "default": "",
       "claim": true
     },
     "track_1_code": {

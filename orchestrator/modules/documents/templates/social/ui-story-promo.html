@@ -459,8 +459,8 @@
       <!-- ================= S6: by morning, the work is done ================= -->
       <section id="s6" class="clip" data-start="21.35" data-duration="3.0" data-track-index="1">
         <div id="s6wrap">
-          <div class="sky"></div>
-          <div id="dawn"></div>
+          <div class="sky" data-layout-allow-occlusion></div>
+          <div id="dawn" data-layout-allow-occlusion></div>
           <div class="ney"><div id="ney1">{{ night_date }}</div><div id="ney2">{{ morning_date }}</div></div>
           <div id="nclock">
             <div class="hh"><div id="hstrip" data-layout-allow-overflow data-layout-allow-occlusion></div></div>
@@ -490,16 +490,16 @@
           <div class="grid">
             <div class="rc" id="rc1"><div class="top"><span>{{ output_1_agent }}</span><span class="tag">{{ output_1_kind }}</span></div>
               <div class="thumb"><i style="width:92%"></i><i style="width:78%"></i><i style="width:86%"></i><i style="width:60%"></i><i style="width:72%"></i></div>
-              <div class="tt">{{ output_1_title }}</div><div class="sheen" id="sh1"></div></div>
+              <div class="tt">{{ output_1_title }}</div><div class="sheen" id="sh1" data-layout-allow-occlusion></div></div>
             <div class="rc" id="rc2"><div class="top"><span>{{ output_2_agent }}</span><span class="tag">{{ output_2_kind }}</span></div>
               <div class="thumb"><i class="a"></i><i style="width:96%"></i><i style="width:88%"></i><i style="width:70%"></i></div>
-              <div class="tt">{{ output_2_title }}</div><div class="sheen" id="sh2"></div></div>
+              <div class="tt">{{ output_2_title }}</div><div class="sheen" id="sh2" data-layout-allow-occlusion></div></div>
             <div class="rc" id="rc3"><div class="top"><span>{{ output_3_agent }}</span><span class="tag">{{ output_3_kind }}</span></div>
               <div class="thumb"><i class="a" style="width:100%"></i><i style="width:64%"></i><i style="width:82%"></i><i style="width:48%"></i></div>
-              <div class="tt">{{ output_3_title }}</div><div class="sheen" id="sh3"></div></div>
+              <div class="tt">{{ output_3_title }}</div><div class="sheen" id="sh3" data-layout-allow-occlusion></div></div>
             <div class="rc" id="rc4"><div class="top"><span>{{ output_4_agent }}</span><span class="tag">{{ output_4_kind }}</span></div>
               <div class="thumb"><i style="width:100%"></i><i style="width:100%"></i><i style="width:100%"></i><i style="width:100%"></i><i style="width:100%"></i></div>
-              <div class="tt">{{ output_4_title }}</div><div class="sheen" id="sh4"></div></div>
+              <div class="tt">{{ output_4_title }}</div><div class="sheen" id="sh4" data-layout-allow-occlusion></div></div>
           </div>
         </div>
       </section>
