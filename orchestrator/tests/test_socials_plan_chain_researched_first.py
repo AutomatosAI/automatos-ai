@@ -84,6 +84,14 @@ def test_the_router_gates_named_actions_as_ranking_does(monkeypatch):
     assert allowed == ["platform_get_social_plan", "platform_list_deliverables"]
 
 
+def test_a_named_action_of_a_hidden_category_stays_hidden(monkeypatch):
+    monkeypatch.setattr(tool_router, "_page_action_passes_gate", lambda name, admin, su: True)
+    narrowed = (["platform_list_deliverables"], None, False)
+    shown = tool_router._apply_named_prior(narrowed, "use platform_get_social_plan", False, False, ())
+    hidden = tool_router._apply_named_prior(narrowed, "use platform_get_social_plan", False, False, ("socials",))
+    assert shown[0][0] == "platform_get_social_plan" and hidden[0] == ["platform_list_deliverables"]
+
+
 # ── research gives the owner's topics their facts ──────────────────────────
 
 
@@ -183,6 +191,14 @@ def test_a_finished_run_that_gave_facts_is_not_told(playbooks):  # noqa: F811
     assert outcome.check_finished(playbooks.factory) == 0 and playbooks.told.plan == []
 
 
+def test_a_paused_run_still_holds_the_posts_and_is_not_checked_yet():
+    plan = NS(research={"last_run_id": "r", "last_run_at": (NOW - timedelta(minutes=1)).isoformat()},
+              workspace_id=WS_A, id="p", name="P")
+    db = NS(query=lambda *a: NS(filter=lambda *c: NS(first=lambda: NS(status="paused", execution_id="r",
+                                                                       started_at=None, output_data={}))))
+    assert outcome.in_flight(db, plan, NOW) is True and outcome.tell_if_empty(db, plan) is False
+
+
 def test_an_unfinished_run_is_not_checked_yet():
     plan = NS(research={"last_run_id": "r"}, workspace_id=WS_A, id="p", name="P")
     db = NS(query=lambda *a: NS(filter=lambda *c: NS(first=lambda: NS(status="running", execution_id="r",
@@ -230,8 +246,8 @@ def _refused_rig(monkeypatch, picked, refusal=None):
     return calls
 
 
-def _another(post):
-    plan, slot = NS(created_by="owner", id="plan"), NS(template_id="fact-card")
+def _another(post, slot_template=None):
+    plan, slot = NS(created_by="owner", id="plan"), NS(template_id=slot_template)
     return _in_a_worker(lambda: maker_mod._another_template(None, None, plan, slot, NS(), post, NOW))
 
 
@@ -246,6 +262,12 @@ def test_no_other_template_picked_leaves_the_post_to_wait(monkeypatch):
     calls = _refused_rig(monkeypatch, picked="fact-card")
     assert _another(NS(template_id="fact-card", id="post")) is None and calls.edited == []
     assert _another(NS(template_id=None, id="post")) is None
+
+
+def test_a_row_that_names_its_template_keeps_it(monkeypatch):
+    calls = _refused_rig(monkeypatch, picked="image-card")
+    assert _another(NS(template_id="fact-card", id="post"), slot_template="fact-card") is None
+    assert calls.proposed == [] and calls.edited == []
 
 
 def test_a_second_refusal_is_handed_back_for_the_owner(monkeypatch):

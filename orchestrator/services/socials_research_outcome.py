@@ -25,7 +25,8 @@ from modules.socials import plan_notify, plan_store
 
 logger = logging.getLogger(__name__)
 
-UNFINISHED = frozenset({"pending", "running", "queued"})
+# The engine's ending statuses: any other (pending, running, queued, paused) is still going.
+FINISHED = frozenset({"completed", "failed", "cancelled"})
 # A run still unfinished after this long no longer holds the plan's posts back.
 RESEARCH_WAIT = timedelta(minutes=30)
 CHECKED = "checked_run_id"
@@ -50,21 +51,20 @@ def _aware(moment: Optional[datetime]) -> Optional[datetime]:
 
 
 def _launched_at(plan: SocialCampaign, run: RecipeExecution) -> Optional[datetime]:
-    """When the run was asked for: its start, else the plan's ``last_run_at``."""
-    started = _aware(getattr(run, "started_at", None))
-    if started is not None:
-        return started
+    """When the run was asked for: the plan's ``last_run_at`` (an aware moment the launch wrote), else
+    the run's ``started_at`` (a column without a zone, read as UTC)."""
     raw = (plan.research or {}).get("last_run_at")
     try:
-        return _aware(datetime.fromisoformat(raw)) if raw else None
+        asked = _aware(datetime.fromisoformat(raw)) if raw else None
     except ValueError:
-        return None
+        asked = None
+    return asked or _aware(getattr(run, "started_at", None))
 
 
 def in_flight(db: Any, plan: SocialCampaign, now: datetime) -> bool:
     """The plan's latest research run has not finished, and was asked for within ``RESEARCH_WAIT``."""
     run = _latest_run(db, plan)
-    if run is None or (run.status or "").lower() not in UNFINISHED:
+    if run is None or (run.status or "").lower() in FINISHED:
         return False
     launched = _launched_at(plan, run)
     return launched is not None and now - launched < RESEARCH_WAIT
@@ -94,7 +94,7 @@ def tell_if_empty(db: Any, plan: SocialCampaign) -> bool:
     """A finished run that gave the bank nothing, told once (the plan remembers the run). Commits."""
     run = _latest_run(db, plan)
     research = dict(plan.research or {})
-    if run is None or (run.status or "").lower() in UNFINISHED or research.get(CHECKED) == run.execution_id:
+    if run is None or (run.status or "").lower() not in FINISHED or research.get(CHECKED) == run.execution_id:
         return False
     launched = _launched_at(plan, run)
     empty = launched is not None and gave_the_bank(db, plan, launched) == 0

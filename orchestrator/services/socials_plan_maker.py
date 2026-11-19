@@ -341,7 +341,7 @@ def write(db: Any, workspace: Workspace, plan: SocialCampaign, slot: plans.Slot,
     try:
         anyio.from_thread.run(posts_api.render_post, db, workspace, post, actor)
     except render.NotRenderable as refused:
-        retried = _another_template(db, workspace, plan, slot, topic, post, now)
+        retried = _another_template(db, workspace, plan, slot, topic, post, now, visual)
         if retried is None:
             return _wait(db, plan, post, actor, proposal, refused)
         proposal, refused = retried
@@ -351,19 +351,22 @@ def write(db: Any, workspace: Workspace, plan: SocialCampaign, slot: plans.Slot,
 
 
 def _another_template(db: Any, workspace: Workspace, plan: SocialCampaign, slot: plans.Slot, topic: SocialTopic,
-                      post: SocialPost, now: datetime) -> Optional[Tuple[Dict[str, Any], Optional[render.NotRenderable]]]:
+                      post: SocialPost, now: datetime,
+                      visual: str = plan_visuals.TEMPLATES) -> Optional[Tuple[Dict[str, Any], Optional[render.NotRenderable]]]:
     """19 Nov 2026: a render its template refused (a claim the topic has no fact for, such as a Fact
     card's figure) is tried once more with another template of the format that Auto picks, before
-    the post waits for the owner. ``None`` when no other template was picked; else the proposal and
-    the second render's refusal (``None`` when it rendered)."""
+    the post waits for the owner, with the slot's visual asked of the new template's slots. A row
+    that names its template keeps it: the owner chose it. ``None`` when no other template was
+    picked; else the proposal and the second render's refusal (``None`` when it rendered)."""
     posts_api, actor, refused_id = _posts_api(), plan.created_by, str(post.template_id or "")
-    if not refused_id:
+    if not refused_id or slot.template_id:
         return None
     proposal = _propose(db, plan, slot, topic, now, [], instead_of=refused_id)
     picked = proposal.get("template_id")
     if not picked or str(picked) == refused_id:
         return None
-    changes = {**_changes(proposal, slot), "template_id": picked}
+    asks = _visual_changes(db, plan, slot, topic, proposal, visual) if visual in plan_visuals.SLOT_KIND else {}
+    changes = {**_changes(proposal, slot), **asks, "template_id": picked}
     anyio.from_thread.run(functools.partial(posts_api.edit_post, db, post, actor, changes, agent=PLAN_AGENT))
     logger.info("[Socials] plan %s: post %s moved from template %s to %s", plan.id, post.id, refused_id, picked)
     try:
