@@ -79,20 +79,32 @@ FILL_BATCH = 25  # the most variables one follow-up asks for: its answer stays i
 # every follow-up) takes at most PROPOSE_BUDGET_CALLS model timeouts.
 FILL_ROUNDS = 3
 PROPOSE_BUDGET_CALLS = 4
+# 19 Nov 2026: a template's words are Auto's to write; only a claim waits for a fact. Answering null
+# for every field the brief did not spell out left a week of plan posts waiting on the owner for
+# headings, list labels and a phone screen's example text (55 of an App promo's 87 fields).
+TEMPLATE_WORDS_NOTE = (
+    "A variable not marked claim is the template's own words (a heading, a slogan, a label, a list item, a "
+    "button, a spoken line, the example text on a product's screen or in a chat): write it from the brief, its "
+    "facts and the brand voice, and never leave it empty. A product's screens show it in use with everyday "
+    "example content; that content states no figure, result or customer as the product's."
+)
 FILL_NOTE = (
     "Your answer left these variables of the template you chose without a value, and the post cannot be "
     'made without them. Answer with ONE JSON object only, shaped {"variables": {"<name>": "<value>"}}, giving '
     "each of them a value that fits its schema below, from the brief and in the brand voice. A variable marked "
     "refused had a value that does not fit, for the reason given: give one that does. The rules above still hold: "
-    "use only the facts the brief gives. Where it does not give the fact a variable needs, answer null for it and "
-    "the owner is asked; never invent a source, a URL, a number, a name, a date, a price or a product detail."
+    "use only the facts the brief gives for what the post states as true. " + TEMPLATE_WORDS_NOTE + " Only for a "
+    "variable marked claim whose fact the brief does not give, answer null and the owner is asked; never invent "
+    "a source, a URL, a figure, a price or a date."
 )
-# F378 (night 11): the composer uses the facts it is given and nothing else.
+# F378 (night 11): the composer uses the facts it is given and nothing else; 19 Nov 2026: for what the
+# post states as true. The template's words are written (TEMPLATE_WORDS_NOTE).
 FACTS_NOTE = (
-    "Use only the facts the brief gives. Never add a product detail, a tasting note, a price, an offer, shipping "
-    "or delivery, a handle, a growth claim, a name, a date or a source that nobody gave. Where a field the "
-    "template needs a fact the brief does not give, leave it out of variables and say what you need in questions, "
-    "in the owner's words: the owner is asked, nothing is made up."
+    "Use only the facts the brief gives for what the post states as true. Never add a product detail, a tasting "
+    "note, a price, an offer, shipping or delivery, a handle, a growth claim, a customer's name, a date or a "
+    "source that nobody gave. " + TEMPLATE_WORDS_NOTE + " Where a variable marked claim needs a fact the brief "
+    "does not give, leave it out of variables and say what you need in questions, in the owner's words: the "
+    "owner is asked, nothing is made up."
 )
 HANDLE_NOTE = "A handle is one of brand_handles, the brand kit's own; with none there, leave every handle empty."
 # F378 (B11, B16): a retake starts from the post as it is and the guidance is a hard rule.

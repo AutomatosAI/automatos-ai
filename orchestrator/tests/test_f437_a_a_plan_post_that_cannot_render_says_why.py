@@ -117,7 +117,7 @@ def test_a_renderers_fixed_messages_pass_and_anything_else_is_the_unreachable_on
 def test_a_compose_failure_logs_a_fixed_line_without_internals(week, monkeypatch):  # noqa: F811
     plan = _image_week(week, monkeypatch)
 
-    def propose(db, plan, slot, topic, now, visual_slots=()):
+    def propose(db, plan, slot, topic, now, visual_slots=(), **_options):
         raise RuntimeError(SECRET)
 
     monkeypatch.setattr(maker_mod, "_propose", propose)

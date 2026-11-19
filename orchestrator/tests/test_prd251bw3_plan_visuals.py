@@ -199,7 +199,7 @@ class _PostsApi:
 def _write(monkeypatch, mix, rows=(), visual_prompts=None):
     posts_api, asked = _PostsApi(), []
 
-    def propose(db, plan, slot, topic, now, visual_slots=()):
+    def propose(db, plan, slot, topic, now, visual_slots=(), **_options):
         asked.append(tuple(s["slot"] for s in visual_slots))
         return {"title": "Lisbon", "copy": {"base": "See you there."}, "variables": {}, "sources": {},
                 "template_id": str(TEMPLATE_ID), "visual_prompts": visual_prompts or {}}

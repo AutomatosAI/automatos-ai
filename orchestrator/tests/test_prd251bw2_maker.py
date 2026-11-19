@@ -79,7 +79,7 @@ def maker(api, monkeypatch):
     monkeypatch.setattr(socials_targets, "social_channels", lambda db, ws: CHANNELS)
     proposals = []
 
-    def propose(db, plan, slot, topic, now, visual_slots=()):
+    def propose(db, plan, slot, topic, now, visual_slots=(), **_options):
         proposals.append((slot.key, topic.title, maker_mod.fact_candidates(topic, now)))
         return {"title": f"Post: {topic.title}", "copy": {"base": f"About {topic.title}.", "channels": {}}, "variables": {}, "sources": {}}
 
