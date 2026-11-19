@@ -1,6 +1,6 @@
 # PRD-277: Enterprise sign-in — a self-hosted install signs people in through the customer's own identity provider (OIDC)
 
-**Status:** Draft for Gerard and Dave. Written 19 Nov 2026 and revised the same day after Dave's review: trimmed to basic sign-in (G5). No code has been written. A decision in §8 is **open** unless it is marked decided; sign-in decisions are Gerard's alone.
+**Status:** Draft for Dave's review. Written 19 Nov 2026 and revised the same day: trimmed to basic sign-in (G5), and every decision in §8 answered by Gerard (G6). No code has been written.
 **Owner:** Gerard · **Reviewer:** Dave (auth)
 **Grounded on:** `automatos-ai` `main @ abcc3f813` and `automatos-go` main, read on 19 Nov 2026. 277 is the next free number: 276 is the highest on main.
 **Labels:** **[T]** read in code at that commit; **[I]** inferred; **[G]** Gerard's decision; **[?]** not known.
@@ -15,6 +15,7 @@
 | G3 | "It could be AWS, Azure, Google." The build is provider-neutral: standard OpenID Connect only, no provider-specific code. |
 | G4 | OIDC is built before the first customer install, and that install's development environment is the test bed. |
 | G5 | Basic OIDC sign-in is part of core, for every self-hosted install: "more people using Automatos the better". Roles taken from the identity provider, provisioning and removal driven by it, SAML and audit export are not part of this PRD. Agreed with Dave. |
+| G6 | Every decision in §8 is answered (19 Nov 2026). |
 
 ---
 
@@ -138,12 +139,12 @@ sequenceDiagram
 
 ### 5.3 Sessions
 
-Decision D-3 recommends a session issued and stored by Automatos:
+A session issued and stored by Automatos (decision D-3):
 
 - **The token** is opaque: a prefix (`ams_`) and 32 random bytes. Only its SHA-256 is stored, the same way device tokens are.
 - **In a browser** it travels in a cookie the page's scripts cannot read: `__Host-` prefixed, `HttpOnly`, `Secure`, `SameSite=Lax`.
 - **It is resolved through the bearer registry.** A new entry maps the `ams_` prefix to a session resolver. The resolver reads the token from the `Authorization` header or, when there is none, from the cookie.
-- **Two clocks:** an idle timeout and an absolute lifetime. Defaults proposed: 2 hours idle, 12 hours absolute.
+- **Two clocks:** an idle timeout and an absolute lifetime. Defaults: 2 hours idle, 12 hours absolute (decision D-15).
 - **A new session is made at every sign-in.** A session from before sign-in is never upgraded.
 - **Cross-site request forgery:** a request that changes something and is authenticated by cookie must come from the install's own origin and carry a header a cross-site form cannot send. A request authenticated by an `Authorization` header is exempt.
 
@@ -161,7 +162,7 @@ The web app and the API are served from one address (`/` and `/api` on one host)
 
 **Workspaces and roles.** Roles live in `workspace_members`, as today, and are set in Automatos: an admin gives a person a workspace and a role on the Team page. A person who has signed in but is in no workspace is shown as waiting. Sign-in never changes a role someone already has.
 
-A default role for everyone who passes the access rule is a setting (decision D-4). The recommended default is none: signed in, in no workspace, sees a page saying to ask an admin.
+A default role for everyone who passes the access rule is a setting (decision D-4). The default is none: signed in, in no workspace, sees a page saying to ask an admin.
 
 **Install admins (decision D-6).** `users` gains a nullable `system_role`, read only in enterprise. `ENTERPRISE_BOOTSTRAP_ADMINS`, a list in settings, makes the named people install admins when they first sign in. The list names subjects, or emails where the IdP marks the email verified. That is how the first admin gets in without anyone touching the database. After that, an install admin can make another person one, in Automatos.
 
@@ -177,7 +178,7 @@ The 25 sensitive routes keep their gate. In enterprise the gate reads when the p
 
 ### 5.7 Phones
 
-Decision D-7 recommends two steps.
+Two steps (decision D-7).
 
 **Now: pairing, bound to a person.** The device lane is allowed in enterprise. A signed-in person creates a pairing code in Settings, and the phone that uses it acts as **that person**, with their role. In `local` a paired device acts as the operator; in enterprise it never does. Today's Automatos Go release already supports pairing, so phones work on day one with no app release.
 
@@ -247,7 +248,7 @@ These are requirements, each with a test.
 - **Keys rotate:** an unknown key id triggers one refetch of the keys, rate limited.
 - **Nothing sensitive is logged or shown:** no code, token, secret or raw IdP error reaches a log line, a span or the browser.
 - **Rate limits** on `/start` and `/callback`, per IP.
-- **Server keys and the platform key are unchanged** as machine credentials. They cannot pass step-up, as today. What the platform API key may do in enterprise is decision D-14.
+- **Server keys and the platform key are unchanged** as machine credentials. They cannot pass step-up, as today. The platform API key stays as it is (decision D-14).
 
 ### 5.12 Audit
 
@@ -273,9 +274,9 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As a maintainer, I want the §8 decisions answered and an issue opened before any code, because AGENTS.md requires an issue before changing authentication, permissions or tenancy.
 
 **Acceptance Criteria:**
-- [ ] Every row in §8 is marked decided, with Gerard's choice.
+- [x] Every row in §8 is marked decided, with Gerard's choice.
 - [ ] An issue in `automatos-ai` links this PRD and lists the waves.
-- [ ] This PRD's status line says which decisions are settled.
+- [x] This PRD's status line says which decisions are settled.
 
 ### Wave 1: One place that knows what an edition does
 
@@ -597,25 +598,25 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 
 ## 8. Decisions for Gerard
 
-Open unless marked decided. Options are lettered so they can be answered as "D-3 A, D-4 A". Sign-in is the owner's decision, so nothing in a wave is built until the rows it depends on are answered.
+All answered by Gerard on 19 Nov 2026. The options he was given are kept, so each choice can be read against them.
 
-| # | Decision | Options | Recommended |
+| # | Decision | Options | Decided |
 |---|---|---|---|
-| D-1 | Where the OIDC sign-in code lives | **Decided (G5):** in core. | n/a |
-| D-2 | The edition's name | A `enterprise` · B `oidc` · C a neutral name such as `team` | **C.** Editions are named for what the install is (`local`, `saas`). After G5 this one is part of core and free to run, so a neutral name avoids confusion with anything sold as Enterprise. The sign-in mode keeps the name `oidc`. This text uses `enterprise` as a working name until the row is answered. |
-| D-3 | What a browser holds after sign-in | A a session Automatos issues, in a cookie scripts cannot read · B the IdP's own token, sent on every call · C a token in the page's storage, as a paired browser has today | **A.** It works the same on every provider, the IdP's tokens never leave the server, and we can end it. B depends on token shapes that differ by provider. C can be read by any script on the page. |
-| D-4 | What someone gets who passes the access rule and has not yet been given a workspace | A nothing: signed in, in no workspace, asks an admin · B `viewer` in the default workspace · C `editor` | **A** as the shipped default, with B or C one setting away for a proof of concept. |
-| D-5 | Where roles are managed | **Decided (G5):** in Automatos. | n/a |
-| D-6 | Install admins | A a stored role, set first from a list in settings and afterwards by install admins in Automatos · B the first person to sign in | **A.** B is a race. |
-| D-7 | Phones in the first release | A pairing from a signed-in browser now, sign-in on the phone in a later app release · B wait for sign-in on the phone · C no phones | **A.** Today's app release already pairs, so nothing waits on an app build. |
-| D-8 | How the phone signs in, when it does | A the phone talks to Automatos, Automatos talks to the IdP · B the phone talks to the IdP directly, as PRD-266 §4.11 sketched | **A.** One application and one redirect address for the customer to register, and no IdP token on a phone. It changes the `oidc` block PRD-266 reserved, which was never emitted. |
-| D-9 | How access ends when someone leaves the company | **Decided (G5):** the session's lifetime, plus an admin's deactivate. | n/a |
-| D-10 | SAML | **Decided (G5):** not in this PRD. | n/a |
-| D-11 | Identity providers per install | A one · B several | **A.** |
-| D-12 | Calls to Automatos's hosted services from an enterprise install | A off unless the operator switches each on · B on, as in `local` | **A.** A regulated customer will ask what leaves their account. |
+| D-1 | Where the OIDC sign-in code lives | n/a | In core (G5). |
+| D-2 | The edition's name | A `enterprise` · B `oidc` · C a neutral name such as `team` | **A, `enterprise`.** The sign-in mode keeps the name `oidc`. |
+| D-3 | What a browser holds after sign-in | A a session Automatos issues, in a cookie scripts cannot read · B the IdP's own token, sent on every call · C a token in the page's storage, as a paired browser has today | **A.** It works the same on every provider, the IdP's tokens never leave the server, and Automatos can end it. |
+| D-4 | What someone gets who passes the access rule and has not yet been given a workspace | A nothing: signed in, in no workspace, asks an admin · B `viewer` in the default workspace · C `editor` | **A** as the shipped default. `ENTERPRISE_DEFAULT_ROLE` can loosen it on an install. |
+| D-5 | Where roles are managed | n/a | In Automatos (G5). |
+| D-6 | Install admins | A a stored role, set first from a list in settings and afterwards by install admins in Automatos · B the first person to sign in | **A.** |
+| D-7 | Phones in the first release | A pairing from a signed-in browser now, sign-in on the phone in a later app release · B wait for sign-in on the phone · C no phones | **A.** |
+| D-8 | How the phone signs in, when it does | A the phone talks to Automatos, Automatos talks to the IdP · B the phone talks to the IdP directly, as PRD-266 §4.11 sketched | **A.** This replaces the `oidc` block PRD-266 reserved, which was never emitted. |
+| D-9 | How access ends when someone leaves the company | n/a | The session's lifetime, plus an admin's deactivate (G5). |
+| D-10 | SAML | n/a | Not in this PRD (G5). |
+| D-11 | Identity providers per install | A one · B several | **A, one.** |
+| D-12 | Calls to Automatos's hosted services from an enterprise install | A off unless the operator switches each on · B on, as in `local` | **A.** |
 | D-13 | Step-up | A sign in again at the IdP · B no step-up in enterprise | **A.** |
-| D-14 | The platform API key in enterprise | A keep it as it is, an admin-level key held by the web app's server · B narrow it to what the web app's server needs · C remove it and give the web app's server its own credential | **B**, pending a read of what uses it. |
-| D-15 | Session clocks | A 2 hours idle, 12 hours absolute · B other (say which) | **A**, changeable per install. |
+| D-14 | The platform API key in enterprise | A keep it as it is, an admin-level key held by the web app's server · B narrow it to what the web app's server needs · C remove it and give the web app's server its own credential | **A, keep it as it is.** |
+| D-15 | Session clocks | A 2 hours idle, 12 hours absolute · B other | **A,** changeable per install. |
 
 ## 9. Technical considerations
 
@@ -651,14 +652,13 @@ Open unless marked decided. Options are lettered so they can be answered as "D-3
 | Providers differ in ways the standard does not cover | Settings for claim names; the conformance run; a guide per provider |
 | A person removed at the IdP keeps a live session until it expires | Absolute lifetime; admin deactivate |
 | The phone's device token has no enforced expiry | `ENTERPRISE_DEVICE_PAIRING` can be off; an enforced expiry is a candidate for a later change |
-| The platform API key is an admin credential with no person behind it | D-14 |
+| The platform API key is an admin credential with no person behind it | Accepted: it stays as it is (D-14) |
 | Core has never issued sessions, so this is the first code of its kind here | Reuse the device-token kernel; one security review before the wave merges |
 
 ## 12. Open questions
 
 1. **[?] Does AWS IAM Identity Center serve an OIDC-only application?** AWS's own pages disagree. If the first customer uses it for staff, OIDC sign-in may not reach them.
 2. **[?] Which identity provider does the first customer use?** The dev install's conformance run starts with it.
-3. **[?] What does the platform API key do today beyond the chat proxy?** Needed for D-14.
-4. **[?] Does anything in the 25 API files that query by Clerk id run in `local` today?** If so, US-202 fixes a latent bug there; if not, those routes are `saas`-only and need a capability.
-5. **[?] Apple's rule on third-party sign-in** has an exemption for apps that sign in with an existing enterprise account. Confirm against the current text in the app PRD (US-604).
-6. **[?] Where pre-sign-in state is kept** for its 10 minutes: Redis with `SET NX EX`, as webhook dedup does, or a table. Decided in US-402's PR.
+3. **[?] Does anything in the 25 API files that query by Clerk id run in `local` today?** If so, US-202 fixes a latent bug there; if not, those routes are `saas`-only and need a capability.
+4. **[?] Apple's rule on third-party sign-in** has an exemption for apps that sign in with an existing enterprise account. Confirm against the current text in the app PRD (US-604).
+5. **[?] Where pre-sign-in state is kept** for its 10 minutes: Redis with `SET NX EX`, as webhook dedup does, or a table. Decided in US-402's PR.
