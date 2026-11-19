@@ -26,6 +26,9 @@ a tick:
    ``modules/socials/plan_refusals.py``): a render the platform refused fails the draft with
    the reason, any other refusal or a composer failure leaves it waiting for the owner, and a
    post another writer has is left alone; the batch's notice counts both apart.
+   19 Nov 2026: before a refused post waits, Auto picks another template of the format and the
+   post is rendered with it once (``_another_template``); and no slot of a plan is made while
+   the plan's research run is unfinished (``services/socials_research_outcome.py``).
 5. Once per plan and day: "Today's posts are ready".
 
 PRD-251C (C1, US-C203): a weekly or monthly plan makes its whole batch once its moment
@@ -122,8 +125,12 @@ def _plan_due(db: Any, plan: SocialCampaign, now: datetime) -> Tuple[List[plans.
     """The plan's slots to make now, within its daily cap, and (P256-FIX-SOC-5) the taken keys of its
     latest batch when that batch's moment has come and it is not announced yet (``batches.unannounced``),
     from the one read of the plan's taken keys."""
+    from services import socials_research_outcome
+
     workspace = db.get(Workspace, plan.workspace_id)
     if workspace is None or socials_off_reason(workspace) is not None:
+        return [], []
+    if socials_research_outcome.in_flight(db, plan, now):  # 19 Nov 2026: posts are made from what research finds
         return [], []
     taken = plan_store.taken_keys(db, plan)
     if not batches.is_batched(plan):
@@ -232,14 +239,19 @@ def claim(db: Any, plan: SocialCampaign, slot: plans.Slot, topic: SocialTopic, n
 
 
 def _propose(db: Any, plan: SocialCampaign, slot: plans.Slot, topic: SocialTopic, now: datetime,
-             visual_slots: List[Dict[str, str]]) -> Dict[str, Any]:
+             visual_slots: List[Dict[str, str]], *, instead_of: Optional[str] = None) -> Dict[str, Any]:
+    """The composer's proposal for the slot. ``instead_of`` (19 Nov 2026): a template whose render was
+    refused; Auto picks another of the format's templates instead (``_another_template``)."""
     from api import socials_compose as compose_api
 
+    chosen = None if instead_of else (UUID(slot.template_id) if slot.template_id else None)
     request = compose_api.ComposeRequest(
         brief=topic_brief(topic)[: compose_api.BRIEF_MAX_CHARS], channels=list(slot.channels), format=slot.format,
-        template_id=UUID(slot.template_id) if slot.template_id else None, length_seconds=slot.length_seconds,
+        template_id=chosen, length_seconds=None if instead_of else slot.length_seconds,
     )
     context = compose_api.compose_context(db, plan.workspace_id, request)
+    if instead_of:
+        context = replace(context, templates=tuple(t for t in context.templates if str(t.get("id")) != instead_of))
     context = replace(context, candidates=[*fact_candidates(topic, now), *context.candidates], visual_slots=tuple(visual_slots))
     timeout = float(config.SOCIALS_COMPOSE_TIMEOUT_SECONDS)
     return anyio.from_thread.run(compose.propose, context, compose.llm_factory(plan.workspace_id), timeout)
@@ -329,8 +341,39 @@ def write(db: Any, workspace: Workspace, plan: SocialCampaign, slot: plans.Slot,
     try:
         anyio.from_thread.run(posts_api.render_post, db, workspace, post, actor)
     except render.NotRenderable as refused:
-        return _wait(db, plan, post, actor, proposal, refused)
+        retried = _another_template(db, workspace, plan, slot, topic, post, now, visual)
+        if retried is None:
+            return _wait(db, plan, post, actor, proposal, refused)
+        proposal, refused = retried
+        if refused is not None:
+            return _wait(db, plan, post, actor, proposal, refused)
     return MADE
+
+
+def _another_template(db: Any, workspace: Workspace, plan: SocialCampaign, slot: plans.Slot, topic: SocialTopic,
+                      post: SocialPost, now: datetime,
+                      visual: str = plan_visuals.TEMPLATES) -> Optional[Tuple[Dict[str, Any], Optional[render.NotRenderable]]]:
+    """19 Nov 2026: a render its template refused (a claim the topic has no fact for, such as a Fact
+    card's figure) is tried once more with another template of the format that Auto picks, before
+    the post waits for the owner, with the slot's visual asked of the new template's slots. A row
+    that names its template keeps it: the owner chose it. ``None`` when no other template was
+    picked; else the proposal and the second render's refusal (``None`` when it rendered)."""
+    posts_api, actor, refused_id = _posts_api(), plan.created_by, str(post.template_id or "")
+    if not refused_id or slot.template_id:
+        return None
+    proposal = _propose(db, plan, slot, topic, now, [], instead_of=refused_id)
+    picked = proposal.get("template_id")
+    if not picked or str(picked) == refused_id:
+        return None
+    asks = _visual_changes(db, plan, slot, topic, proposal, visual) if visual in plan_visuals.SLOT_KIND else {}
+    changes = {**_changes(proposal, slot), **asks, "template_id": picked}
+    anyio.from_thread.run(functools.partial(posts_api.edit_post, db, post, actor, changes, agent=PLAN_AGENT))
+    logger.info("[Socials] plan %s: post %s moved from template %s to %s", plan.id, post.id, refused_id, picked)
+    try:
+        anyio.from_thread.run(posts_api.render_post, db, workspace, post, actor)
+    except render.NotRenderable as again:
+        return proposal, again
+    return proposal, None
 
 
 def _skip(db: Any, plan: SocialCampaign, slot: plans.Slot, refusal: str, now: datetime) -> None:
@@ -500,7 +543,7 @@ def announce_batches(touched: Mapping[UUID, Iterable[str]], now: datetime) -> No
 async def run_tick(now: Optional[datetime] = None) -> Dict[str, int]:
     """One pass over every active plan's due slots, the batches', the evening reminders and the
     weekly notes (PRD-251C), then due research (US-B204)."""
-    from services import socials_plan_reminders, socials_plan_research, socials_weekly_notes
+    from services import socials_plan_reminders, socials_plan_research, socials_research_outcome, socials_weekly_notes
 
     now = now or datetime.now(timezone.utc)
     outcomes: Dict[str, int] = {}
@@ -524,6 +567,7 @@ async def run_tick(now: Optional[datetime] = None) -> Dict[str, int]:
     outcomes["reminded"] = await anyio.to_thread.run_sync(socials_plan_reminders.remind_due, _session, now)
     outcomes["weekly_notes"] = await anyio.to_thread.run_sync(socials_weekly_notes.send_due, _session, now)
     outcomes["research"] = await anyio.to_thread.run_sync(socials_plan_research.launch_due, now)
+    outcomes["research_empty"] = await anyio.to_thread.run_sync(socials_research_outcome.check_finished, _session)
     return outcomes
 
 

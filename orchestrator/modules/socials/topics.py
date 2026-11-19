@@ -15,6 +15,10 @@ and the formats it suits. Research (the seeded playbook, through
   workspace's banks, or to a post of its history within the plan's repeat window
   (``modules/socials/repeats.py``). A person's topic is added, with a warning.
 
+19 Nov 2026: a title the bank holds that has no facts yet (an idea the owner approved as a title
+only) is not a duplicate to research: research sending it with facts gives that topic its facts.
+A post made from a topic with no facts has nothing true to say about the product.
+
 The make tick takes the next unused topic that suits a slot's format, a topic pinned
 to the slot's day first, and records the post that used it. Nothing here commits.
 """
@@ -172,18 +176,50 @@ def _refuse_a_repeat(title: Any, earlier: Sequence[repeats.Earlier]) -> None:
         raise InvalidTopic(repeats.refusal(found))
 
 
+def factless_namesake(db: Any, plan: SocialCampaign, title: Any) -> Optional[SocialTopic]:
+    """The plan's unused topic with ``title`` (case and spacing aside) that holds no facts yet: an
+    idea the owner approved as a title, which research gives its facts (19 Nov 2026)."""
+    if not isinstance(title, str) or not title.strip():
+        return None
+    found = (
+        db.query(SocialTopic)
+        .filter(SocialTopic.campaign_id == plan.id, SocialTopic.used_at.is_(None),
+                func.lower(SocialTopic.title) == _same_title(title))
+        .first()
+    )
+    return found if found is not None and not found.facts else None
+
+
+def give_facts(plan: SocialCampaign, topic: SocialTopic, fields: Mapping[str, Any]) -> SocialTopic:
+    """``topic`` with the facts research sent for it, checked as a new topic's are; its own title
+    stays, and so do its angle and formats when it has them. Refused (``InvalidTopic``) with no fact."""
+    clean = validate_topic({**fields, "title": topic.title}, plan_never_say(plan))
+    if not clean["facts"]:
+        raise InvalidTopic(f'"{topic.title}" is already in the bank: send it with its facts, or leave it out')
+    topic.facts = clean["facts"]
+    topic.angle = topic.angle or clean["angle"]
+    topic.formats = topic.formats or clean["formats"]
+    return topic
+
+
 def add_topics(
     db: Any, plan: SocialCampaign, topics: Sequence[Any], *, created_by: str, origin: str = RESEARCH
 ) -> Tuple[List[SocialTopic], List[Dict[str, str]]]:
     """Each of ``topics`` added or refused with its reason (the research tool's write). Research's
-    are held against everything the workspace has, the ones this call adds included (US-C104)."""
+    are held against everything the workspace has, the ones this call adds included (US-C104).
+    Research that sends a title the bank holds with no facts gives that topic its facts
+    (:func:`give_facts`), listed with the added: the owner's own ideas are researched first."""
     if not isinstance(topics, (list, tuple)) or not 0 < len(topics) <= MAX_ADDED_AT_ONCE:
         raise InvalidTopic(f"topics must list 1 to {MAX_ADDED_AT_ONCE} topics")
     earlier = repeats.earlier_for(db, plan) if origin == RESEARCH else ()
     added, refused = [], []
     for i, item in enumerate(topics):
         fields = item if isinstance(item, Mapping) else {}
+        namesake = factless_namesake(db, plan, fields.get("title")) if origin == RESEARCH else None
         try:  # every refusal comes before the topic's write, so nothing is left to undo
+            if namesake is not None:
+                added.append(give_facts(plan, namesake, fields))
+                continue
             _refuse_a_repeat(fields.get("title"), earlier)
             topic = add_topic(db, plan, fields, created_by=created_by, origin=origin)
         except InvalidTopic as exc:

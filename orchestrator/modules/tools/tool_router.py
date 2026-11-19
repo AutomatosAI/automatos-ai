@@ -708,6 +708,28 @@ def _apply_page_prior(
     return merged, (reason or "page_prior"), from_pins
 
 
+def _apply_named_prior(
+    narrowing: Tuple[Optional[List[str]], Optional[str], bool],
+    query: Optional[str],
+    is_admin: bool,
+    is_super_admin: bool,
+    hidden: Tuple[str, ...] = (),
+) -> Tuple[Optional[List[str]], Optional[str], bool]:
+    """The actions the query names first in the narrowed enum (``modules/tools/named_actions.py``),
+    gate-filtered as ranking is, and never one of the workspace's hidden categories (the query may
+    be a person's own words): a Playbook step that says "call platform_X" is offered X."""
+    from config import config
+    from modules.tools.discovery import get_action_registry
+    from modules.tools.named_actions import with_named_first
+
+    def passes(name: str) -> bool:
+        action = get_action_registry().get(name)
+        shown = action is not None and getattr(action, "category", None) not in hidden
+        return shown and _page_action_passes_gate(name, is_admin, is_super_admin)
+
+    return with_named_first(narrowing, query, passes, int(config.TOOL_ROUTING_ENUM_CAP))
+
+
 def _apply_onboarding_prior(
     narrowing: Tuple[Optional[List[str]], Optional[str], bool],
     session,
@@ -1246,6 +1268,7 @@ def get_tools_for_agent(
         # (PRD-232 integration: narrowing stays workspace-keyed — US-003's single
         # ranking pass is scoped per tenant — and the #662 priors apply on top.)
         narrowing = _apply_page_prior(narrowing, None, is_admin, is_super_admin)
+        narrowing = _apply_named_prior(narrowing, query, is_admin, is_super_admin, hidden)
         narrowing = _apply_onboarding_prior(
             narrowing, session_used, workspace_id, is_admin, is_super_admin
         )
@@ -1352,6 +1375,8 @@ async def get_tools_for_agent_async(
         # Gate-filtered by the SAME predicate as ranking — a manifest can never
         # expose an admin/su tool to an unauthorized principal.
         narrowing = _apply_page_prior(narrowing, page_actions, is_admin, is_super_admin)
+        # 19 Nov 2026: the actions the query names by name survive narrowing too.
+        narrowing = _apply_named_prior(narrowing, query, is_admin, is_super_admin, hidden)
         # PRD-222: while onboarding is active, the spine's actions survive
         # narrowing — the section instructs Auto to call them by name.
         narrowing = _apply_onboarding_prior(

@@ -118,7 +118,7 @@ def test_research_reads_the_plan_and_adds_what_passes(bank):
     _add(bank, plan)
     read = _tool(handlers_socials.get_social_plan, bank, plan_id=plan["id"])
     assert read["success"] is True and read["plan"]["sources"]["never_say"] == ["cheapest"]
-    assert read["bank"] == [{"title": "Three weeks to Lisbon", "formats": ["image"], "used": False}]
+    assert read["bank"] == [{"title": "Three weeks to Lisbon", "formats": ["image"], "used": False, "facts": 1}]
     answer = _tool(handlers_socials.add_social_topics, bank, plan_id=plan["id"], topics=[
         _topic(title="A new release", facts=[{"text": "v2 shipped on Monday.", "source": {"kind": "github", "ref": "https://github.com/org/repo/releases/v2", "label": "Release v2"}}]),
         _topic(),  # the bank holds it
