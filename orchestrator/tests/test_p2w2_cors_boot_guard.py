@@ -113,12 +113,10 @@ def _security_baseline(monkeypatch):
 def test_saas_boot_requires_no_shopify_key(_security_baseline):
     """There is no Automatos-owned Shopify app in this deployment model —
     clients connect their own stores and merchants authenticate with widget
-    keys, so SHOPIFY_INTERNAL_API_KEY is intentionally absent. The machine
-    lanes it guards fail CLOSED at the endpoint (_verify_internal_key → 503);
-    a boot-abort demanding the key made every saas boot fail (the #616
-    outage). A bare-env saas boot must pass this guard."""
-    mp = _security_baseline
-    mp.setattr(cfg, "SHOPIFY_INTERNAL_API_KEY", "")
+    keys; the machine lanes fail CLOSED at the endpoint (_verify_internal_key
+    → 503 with no Shopify product record, PRD-274 W5f). A boot-abort
+    demanding the key made every saas boot fail (the #616 outage). A bare-env
+    saas boot must pass this guard."""
     cfg.validate_security()  # must not raise
 
 

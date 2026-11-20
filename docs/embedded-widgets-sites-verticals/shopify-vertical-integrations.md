@@ -89,7 +89,7 @@ The Shopify integration API layer (`orchestrator/api/shopify.py`) handles mercha
 
 ### Key Endpoints & Functions
 *   **`POST /api/shopify/provision`**: Implemented by `provision_workspace`, which seeds agents, establishes workspace settings, and issues a public widget API key [orchestrator/api/shopify.py:151-179](). It delegates to the `VerticalProvisioner` interface under `integrations.provisioning` [orchestrator/api/shopify.py:166-174]().
-*   **Internal Authentication**: Guarded by `_verify_internal_key`, which performs a constant-time comparison via `hmac.compare_digest` against `config.SHOPIFY_INTERNAL_API_KEY` [orchestrator/api/shopify.py:87-105]().
+*   **Internal Authentication**: Guarded by `_verify_internal_key`, which checks the presented key against the Shopify product record's key hash in constant time (PRD-274 Wave 5f, `api/verticals._verify_vertical_internal_key`). With no Shopify product record the routes answer 503; an admin creates the record, or replaces its key, at `/api/admin/products`.
 *   **Workspace Resolution**: Guarded by `_resolve_sync_workspace`, ensuring tenant isolation and rejecting unauthorized cross-workspace operations [orchestrator/api/shopify.py:63-84]().
 
 ```mermaid
