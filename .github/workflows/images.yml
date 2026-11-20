@@ -728,7 +728,9 @@ jobs:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           docker pull --quiet "${IMAGE}@${DIGEST}"
-          docker run --rm -i --entrypoint python "${IMAGE}@${DIGEST}" - < scripts/ci/image_worker_toolchain.py
+          # As root: the script checks root's paths and drops to the worker as the root start
+          # does. The image itself starts as uid 1000 (PRD-280 US-201).
+          docker run --rm -i --user 0 --entrypoint python "${IMAGE}@${DIGEST}" - < scripts/ci/image_worker_toolchain.py
 
       # PRD-262, the worker's Python layer (rows 27, 40 and 47, and the rows each check
       # names): every library the stable layer's strip touched still loads, as the

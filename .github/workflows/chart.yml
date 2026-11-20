@@ -8,10 +8,11 @@ name: chart
 #
 # `install` (PRD-280 US-100) installs the chart on a kind cluster, with the components
 # deploy/kind/strict-values.yaml turns on (its header lists what is on and what is not
-# exercised) and the three images built in this run, into a namespace held to the pod
-# security levels, and fails unless every pod is ready, every pod the release makes passes
-# "restricted" (the worker excepted until PRD-280 Wave 2, for its listed violations only),
-# and every container's root file system is read-only (deploy/kind/strict.sh). It runs only
+# exercised) and the three images built in this run, into a namespace that enforces the
+# "restricted" pod security level, and fails unless every pod is ready, every pod the
+# release makes passes "restricted", the worker's included (PRD-280 US-201), the worker
+# runs as uid 1000 and writes its volume, and every container's root file system is
+# read-only (deploy/kind/strict.sh). It runs only
 # when the chart, this lane, or an image's start-up changes (the paths below): it is the
 # chart's slowest lane. A change to Markdown files under charts/ alone runs neither job:
 # nothing either job checks reads them.

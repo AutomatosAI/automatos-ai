@@ -87,7 +87,7 @@ tests:
           value: ["ALL"]
       - notExists:
           path: spec.template.spec.containers[0].securityContext.capabilities.add
-  - it: gives the worker's container the same, with only the four capabilities its root entrypoint adds back until Wave 2
+  - it: gives the worker's container the same, with no capability, and its pod a non-root user (PRD-280 US-201)
     template: templates/worker.yaml
     documentIndex: 0
     asserts:
@@ -108,6 +108,11 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].securityContext.capabilities.drop
           value: ["ALL"]
-      - equal:
+      - notExists:
           path: spec.template.spec.containers[0].securityContext.capabilities.add
-          value: ["CHOWN", "DAC_OVERRIDE", "SETUID", "SETGID"]
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 1000

@@ -12,13 +12,13 @@
 #   deploy/kind/strict.sh diagnostics  pods, events and logs (and each container's last
 #                                      crash), after a failure
 #
-# The chart's namespace holds the chart's pods and nothing else. It enforces the
-# "baseline" level and warns and audits at "restricted": the worker starts as root until
-# PRD-280 Wave 2 (US-201), so it is the one pod let run at "baseline". `check` creates
-# every pod the release makes, the migration Job's included, as a server-side dry run in
-# a second namespace that ENFORCES "restricted", and fails on any refusal but the worker's
-# for exactly the violations listed below. From the same pod specs it requires a read-only
-# root on every container and init container, then tries a write in each running one.
+# The chart's namespace holds the chart's pods and nothing else, and enforces, warns and
+# audits at "restricted": every pod, the worker's included (PRD-280 US-201), must pass it.
+# `check` also creates every pod the release makes, the migration Job's included (its pod
+# is gone once the hook succeeds), as a server-side dry run in a second namespace that
+# enforces "restricted", and fails on any refusal, naming the pod and each violation. From
+# the same pod specs it requires a read-only root on every container and init container,
+# then tries a write in each running one.
 #
 # Needs: kubectl and helm on a cluster kubectl already reaches, openssl, python3.
 # =============================================================================
@@ -30,17 +30,8 @@ STORES_NS=automatos-datastores
 PROBE_NS=automatos-restricted-probe
 RELEASE=automatos
 POD_SPECS="$ROOT/scripts/ci/chart_pod_specs.py"
-# The pod the probe namespace may refuse until Wave 2, and the pods it must see.
-BASELINE_POD="$RELEASE-worker"
+# The pods the probe namespace must see, and admit.
 EXPECTED_PODS=("$RELEASE-api" "$RELEASE-frontend" "$RELEASE-worker" "$RELEASE-migrate")
-# The violations of "restricted" the worker's pod has today, exactly as Pod Security names
-# them ("<reason> (<detail>)"). The worker may be refused for these and for no other; any
-# other violation fails the lane. This list shrinks to nothing in PRD-280 Wave 2 (US-201),
-# and BASELINE_POD goes with it.
-WORKER_EXPECTED_VIOLATIONS=(
-    'runAsNonRoot != true (pod or container "worker" must set securityContext.runAsNonRoot=true)'
-    'unrestricted capabilities (container "worker" must not include "CHOWN", "DAC_OVERRIDE", "SETGID", "SETUID" in securityContext.capabilities.add)'
-)
 # The running containers whose root file system must refuse a write, each with a file of the image
 # that its process may write on a writable root (it owns it, or it is root), so a refusal
 # can only be the read-only root's. Opened for appending, nothing written. Then those
@@ -51,6 +42,10 @@ declare -A WRITABLE_ON_A_WRITABLE_ROOT=(
     [worker]=/app/main.py
 )
 SCRATCH_TMP=(api worker)
+# The worker's user (services/workspace-worker/Dockerfile's USER, the chart's runAsUser), and
+# the file it writes on its volume to show it can.
+WORKER_UID=1000
+WORKSPACE_PROBE=/workspaces/.strict-probe
 
 log() { printf '\n==> %s\n' "$*"; }
 
@@ -79,8 +74,8 @@ cmd_prepare() {
         --dry-run=client -o yaml | kubectl apply -f - >/dev/null
     kubectl -n "$STORES_NS" apply -f "$ROOT/deploy/kind/otel-collector.yaml" >/dev/null
 
-    log "The chart's namespace $NS: enforces baseline, warns and audits restricted"
-    label_namespace "$NS" baseline
+    log "The chart's namespace $NS: enforces, warns and audits restricted"
+    label_namespace "$NS" restricted
     kubectl -n "$NS" create secret generic automatos-secrets \
         --from-literal=DATABASE_URL="postgresql://postgres:$pg_password@postgres.$STORES_NS:5432/orchestrator_db" \
         --from-literal=REDIS_URL="redis://:$redis_password@redis.$STORES_NS:6379/0" \
@@ -119,32 +114,15 @@ release_objects() {
         | kubectl create --dry-run=client -o json -f -
 }
 
-# True when a refusal names exactly WORKER_EXPECTED_VIOLATIONS, no more and no fewer.
-expected_worker_refusal() {  # ANSWER
-    local found wanted
-    found="$(python3 "$POD_SPECS" violations <<<"$1" | sort)" || return 1
-    wanted="$(printf '%s\n' "${WORKER_EXPECTED_VIOLATIONS[@]}" | sort)"
-    [ -n "$found" ] && [ "$found" = "$wanted" ]
-}
-
-# A refused pod fails the check, except the worker's, for its expected violations, until Wave 2.
+# A refused pod fails the check; the refusal's violations are listed one per line.
 probe_one() {  # NAME POD-JSON
     local name="$1" answer
     if answer="$(printf '%s' "$2" | kubectl -n "$PROBE_NS" create --dry-run=server -f - 2>&1)"; then
         echo "  ✓ $name: admitted under restricted"
-        [ "$name" != "$BASELINE_POD" ] || echo "::notice title=PRD-280::$name now passes restricted: remove its exception from deploy/kind/strict.sh"
-        return 0
-    fi
-    if [ "$name" = "$BASELINE_POD" ] && expected_worker_refusal "$answer"; then
-        echo "  ~ $name: refused under restricted for its expected violations only, allowed at baseline until PRD-280 Wave 2 (US-201): $answer"
-        echo "::notice title=PRD-280 Wave 1::The worker runs at the baseline pod security level until Wave 2 (US-201). Every other pod passes restricted."
         return 0
     fi
     echo "  ✗ $name: refused under restricted: $answer"
-    if [ "$name" = "$BASELINE_POD" ]; then
-        echo "    the worker may be refused for exactly these violations, and no other:"
-        printf '      %s\n' "${WORKER_EXPECTED_VIOLATIONS[@]}"
-    fi
+    python3 "$POD_SPECS" violations <<<"$answer" | sed 's/^/      /' || true
     return 1
 }
 
@@ -203,6 +181,25 @@ check_read_only_root() {
     return "$failures"
 }
 
+# PRD-280 US-201: the worker runs as uid 1000, not root, and writes its volume without
+# having re-owned it.
+check_worker_start() {
+    log "The worker runs as uid 1000 and writes its volume"
+    local failures=0 uid
+    uid="$(kubectl -n "$NS" exec "deploy/$RELEASE-worker" -- id -u 2>&1)" || uid="(exec failed: $uid)"
+    if [ "$uid" = "$WORKER_UID" ]; then
+        echo "  ✓ worker: runs as uid $uid"
+    else
+        echo "  ✗ worker: runs as uid $uid, not $WORKER_UID"; failures=$((failures + 1))
+    fi
+    if kubectl -n "$NS" exec "deploy/$RELEASE-worker" -- sh -c "touch '$WORKSPACE_PROBE' && rm '$WORKSPACE_PROBE'" >/dev/null 2>&1; then
+        echo "  ✓ worker: writes /workspaces"
+    else
+        echo "  ✗ worker: cannot write /workspaces"; failures=$((failures + 1))
+    fi
+    return "$failures"
+}
+
 cmd_check() {
     local failures=0 objects
     # Read first, so a failure to read the release stops here with helm's or kubectl's error.
@@ -210,6 +207,7 @@ cmd_check() {
     check_restricted "$objects" || failures=$((failures + $?))
     check_read_only_spec "$objects" || failures=$((failures + $?))
     check_read_only_root || failures=$((failures + $?))
+    check_worker_start || failures=$((failures + $?))
     [ "$failures" -eq 0 ] || { log "$failures check(s) failed"; return 1; }
     log "Every check passed"
 }

@@ -9,9 +9,11 @@ capabilities with privilege escalation allowed. Pinned here as file reads:
 - entrypoint.sh drops to the worker with ``setpriv ... --no-new-privs``;
 - the Dockerfile's production stage strips every setuid and setgid bit after its last
   install, and no RUN follows that could bring one back;
-- the chart's worker container sets ``allowPrivilegeEscalation: false`` and drops every
-  capability except the four the entrypoint's root part uses, each commented with the
-  command that needs it (charts/automatos/tests/worker_frontend_test.yaml renders it);
+- the chart's worker container sets ``allowPrivilegeEscalation: false``, drops every
+  capability and adds none, and its pod runs as uid 1000 (PRD-280 US-201;
+  charts/automatos/tests/worker_frontend_test.yaml renders it). Compose, which starts the
+  worker as root on purpose, keeps the four the entrypoint's root part uses, its comment
+  naming the command that needs each;
 - scripts/ci/image_worker_toolchain.py, run in the image images.yml builds on both arches,
   finds no setuid or setgid file and reads NoNewPrivs 1 in the dropped process; test.yml's
   prod-image-parity checks both on the Railway build (test_prd262_worker_boot.py).
@@ -33,20 +35,20 @@ WORKER = ROOT / "services" / "workspace-worker"
 ENTRYPOINT = (WORKER / "entrypoint.sh").read_text()
 DOCKERFILE = (WORKER / "Dockerfile").read_text()
 CHART_WORKER = (ROOT / "charts" / "automatos" / "templates" / "worker.yaml").read_text()
+COMPOSE = (ROOT / "docker-compose.yml").read_text()
 TOOLCHAIN_SCRIPT = "scripts/ci/image_worker_toolchain.py"
 NO_NEW_PRIVS = "--no-new-privs"
 STRIP = "RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} +"
 SETID_BITS = 0o6000
-# Each capability the chart keeps, in the order its `add` list names them: (a phrase from
-# the chart's comment above the list, the entrypoint code that needs it while it runs as
-# root). DAC_OVERRIDE, not DAC_READ_SEARCH: #1311 measured the built image and found the
-# volume walk needs DAC_OVERRIDE on a mode-700 folder (see worker.yaml's reconciliation
-# note); an earlier draft of this fix used DAC_READ_SEARCH, untested against the image.
+# Each capability compose keeps for the root start, in the order its `cap_add` names them:
+# (a phrase from compose's comment above the list, the entrypoint code that needs it while
+# it runs as root). DAC_OVERRIDE, not DAC_READ_SEARCH: #1311 measured the built image and
+# found the volume walk needs DAC_OVERRIDE on a mode-700 folder.
 CAPABILITIES = {
-    "CHOWN": ("re-owns the volume", "-exec chown -h worker:worker {} +"),
-    "DAC_OVERRIDE": ("walk folders it doesn't", 'find "$WORKSPACE_VOLUME_PATH" -mindepth 1'),
-    "SETUID": ("setpriv drops to uid 1000", "setpriv --reuid=worker"),
-    "SETGID": ("setpriv drops to uid 1000", "--regid=worker --init-groups"),
+    "CHOWN": ("re-own the workspace volume (CHOWN", "-exec chown -h worker:worker {} +"),
+    "DAC_OVERRIDE": ("DAC_OVERRIDE to walk folders it doesn't own", 'find "$WORKSPACE_VOLUME_PATH" -mindepth 1'),
+    "SETUID": ("uid 1000 (SETUID, SETGID)", "setpriv --reuid=worker"),
+    "SETGID": ("uid 1000 (SETUID, SETGID)", "--regid=worker --init-groups"),
 }
 
 
@@ -112,34 +114,37 @@ def test_the_production_stage_strips_setuid_and_setgid_after_its_last_install():
 # --------------------------------------------------------------------------- the chart
 
 
-def _worker_security_context() -> tuple[dict, list[str]]:
-    """The worker container's securityContext block, parsed, and its lines as written."""
-    block = re.search(r"^( +)securityContext:\n(?:\1 .*\n)+", CHART_WORKER, re.M)
-    assert block, "the worker container sets no securityContext"
-    lines = block.group(0).splitlines()
-    # A Helm control line (`{{- if … }}`, `{{- end }}`) is not YAML: the block is parsed
+def _worker_security_contexts() -> list[dict]:
+    """The worker's two securityContext blocks, the pod's then the container's, parsed."""
+    blocks = [match.group(0) for match in re.finditer(r"^( +)securityContext:\n(?:\1 .*\n)+", CHART_WORKER, re.M)]
+    assert len(blocks) == 2, f"the worker sets {len(blocks)} securityContext blocks, not the pod's and the container's"
+    # A Helm control line (`{{- if … }}`, `{{- end }}`) is not YAML: each block is parsed
     # as it renders with the chart's defaults, where every such condition holds.
-    as_rendered = [line for line in lines if not line.strip().startswith("{{")]
-    return yaml.safe_load("\n".join(as_rendered)), lines
+    as_rendered = (
+        "\n".join(line for line in block.splitlines() if not line.strip().startswith("{{")) for block in blocks)
+    return [yaml.safe_load(text)["securityContext"] for text in as_rendered]
 
 
-def test_the_chart_s_worker_gains_no_privileges_and_keeps_only_what_the_entrypoint_needs():
-    parsed, _ = _worker_security_context()
-    assert parsed == {"securityContext": {
+def test_the_chart_s_worker_starts_as_uid_1000_and_gains_no_privilege_or_capability():
+    pod, container = _worker_security_contexts()
+    assert pod == {"runAsNonRoot": True, "runAsUser": 1000, "runAsGroup": 1000, "fsGroup": 1000}
+    assert container == {
         "allowPrivilegeEscalation": False,
         "readOnlyRootFilesystem": True,
-        "capabilities": {"drop": ["ALL"], "add": list(CAPABILITIES)},
+        "capabilities": {"drop": ["ALL"]},
         "seccompProfile": {"type": "RuntimeDefault"},
-    }}
+    }
     assert "privileged" not in CHART_WORKER
 
 
-def test_each_capability_the_chart_keeps_names_the_entrypoint_command_that_needs_it():
-    """The chart documents the four capabilities with one comment above the flat `add`
-    list (not one comment per item, as an earlier draft of this change had it)."""
-    _, lines = _worker_security_context()
+def test_each_capability_compose_keeps_names_the_entrypoint_command_that_needs_it():
+    """Compose documents the four capabilities of the root start with one comment above its
+    `cap_drop` and `cap_add` lists."""
+    worker = COMPOSE[COMPOSE.index("\n  workspace-worker:\n"):]
+    above = worker[:worker.index("    cap_drop:")].splitlines()
+    comment = " ".join(line.strip().lstrip("#").strip() for line in above if line.strip().startswith("#"))
     entrypoint = "\n".join(_code_lines(ENTRYPOINT))
-    comment = " ".join(line.strip() for line in lines if line.strip().startswith("#"))
+    assert yaml.safe_load(COMPOSE)["services"]["workspace-worker"]["cap_add"] == list(CAPABILITIES)
     for capability, (named, code) in CAPABILITIES.items():
         assert named in comment, (capability, comment)
         assert code in entrypoint, f"{capability}: the entrypoint no longer runs {code!r}"
@@ -165,7 +170,7 @@ def test_the_in_image_drop_sets_no_new_privs_and_reads_it_back(monkeypatch):
 
 
 def test_the_in_image_drop_leaves_the_worker_no_capability(monkeypatch):
-    """Security review: the chart adds CHOWN, DAC_READ_SEARCH, SETGID and SETUID back for the root part;
+    """Security review: compose adds CHOWN, DAC_OVERRIDE, SETGID and SETUID back for the root part;
     past the drop the worker's permitted and effective sets must be empty."""
     assert "CapPrm:" in toolchain.DROPPED_PROBE and "CapEff:" in toolchain.DROPPED_PROBE
     monkeypatch.setattr(toolchain.shutil, "which", lambda name: None)

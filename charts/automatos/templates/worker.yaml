@@ -22,10 +22,15 @@ spec:
     spec:
       serviceAccountName: {{ include "automatos.serviceAccountName" (dict "ctx" $ "component" "worker") }}
       automountServiceAccountToken: false
-      # No runAsNonRoot: the image's entrypoint starts as root to fix the workspace
-      # volume's ownership, then drops to the `worker` user (uid 1000) with setpriv
-      # --no-new-privs. The container's securityContext keeps that root start narrow,
-      # and a uid other than 0 holds none of the capabilities below.
+      # PRD-280 US-201: the worker starts as itself, uid 1000, as the image does. The
+      # storage hands the volume over to the pod's group (fsGroup), as it must for the API's
+      # volume, and the entrypoint re-owns nothing: it checks it can write the volume, and
+      # stops with a message that says what the storage must provide when it cannot.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
       containers:
         - name: worker
           image: {{ include "automatos.image" (dict "ctx" $ "image" .Values.worker.image) }}
@@ -86,8 +91,7 @@ spec:
             {{- if .Values.worker.readOnlyRootFilesystem }}
             # A read-only root (PRD-280 US-104): scratch volumes for the two paths the worker
             # writes outside its volume, /tmp and the home folder the entrypoint sets
-            # (docs/PRDS/PRD-280-US-103-WRITE-PATHS.md). The entrypoint's root start writes
-            # only to the volume.
+            # (docs/PRDS/PRD-280-US-103-WRITE-PATHS.md).
             - name: tmp
               mountPath: /tmp
             - name: home
@@ -95,19 +99,9 @@ spec:
             {{- end }}
           # F452 (#1309): the worker runs agent code. No process in it may gain a privilege
           # (a setuid-root binary such as su or passwd runs without root), every capability
-          # is dropped but the four the root entrypoint needs, and the runtime's default
-          # seccomp profile applies (compose already runs the worker under Docker's).
-          # This passes PodSecurity "baseline", not "restricted": the pod starts as root
-          # and keeps capabilities beyond NET_BIND_SERVICE, for the entrypoint above.
-          #
-          # NOTE (fix/f452-worker-extra-privs, reconcile against #1309/#1311 before merge):
-          # #1311 measured this exact set against the built image (see its PR description's
-          # table) and kept DAC_OVERRIDE, not DAC_READ_SEARCH -- without DAC_OVERRIDE the
-          # volume walk failed with EACCES on a mode-700 folder. An earlier, unmeasured
-          # draft of this change (13c03f89f) used DAC_READ_SEARCH instead; that capability
-          # set is NOT kept here because it was never run against the built image. Confirm
-          # DAC_OVERRIDE is still right now that the Dockerfile also strips every setuid/
-          # setgid bit (below) before dropping either set further.
+          # is dropped and none is added (PRD-280 US-201: nothing runs as root), and the
+          # runtime's default seccomp profile applies. With the pod's non-root settings
+          # above, this passes PodSecurity "restricted".
           securityContext:
             allowPrivilegeEscalation: false
             {{- if .Values.worker.readOnlyRootFilesystem }}
@@ -115,10 +109,6 @@ spec:
             {{- end }}
             capabilities:
               drop: ["ALL"]
-              # chown -h re-owns the volume (CHOWN; DAC_OVERRIDE to walk folders it doesn't
-              # own), then setpriv drops to uid 1000 (SETUID, SETGID). Measured: without
-              # DAC_OVERRIDE the walk fails on a mode-700 folder; FOWNER isn't needed.
-              add: ["CHOWN", "DAC_OVERRIDE", "SETUID", "SETGID"]
             seccompProfile:
               type: RuntimeDefault
           resources:
