@@ -207,6 +207,22 @@ def _usable_email(email: Optional[str]) -> Optional[str]:
     return email
 
 
+def _check_email_verified(email_verified: bool) -> None:
+    """``email_verified`` is the provider's own yes or no: a ``bool``, never a string or None."""
+    if not isinstance(email_verified, bool):
+        raise TypeError("email_verified must be True or False, as the provider's verified token states it")
+
+
+def _person_email(email: Optional[str], email_verified: bool) -> Optional[str]:
+    """The address the new person gets: the provider's email only when the provider verified it.
+
+    An unverified email is kept nowhere, so it can never hold an address its owner signs in
+    with later. Padded emails are refused whether verified or not (``_usable_email``).
+    """
+    usable = _usable_email(email)
+    return usable if email_verified else None
+
+
 def _is_unique_violation(error: IntegrityError) -> bool:
     """Whether a unique index refused the write (psycopg2's ``pgcode``, psycopg's ``sqlstate``)."""
     orig = error.orig
@@ -281,7 +297,8 @@ def _insert_person_with_link(
 
 
 def link_identity(
-    db, *, issuer: str, subject: str, email: Optional[str] = None, name: Optional[str] = None,
+    db, *, issuer: str, subject: str, email_verified: bool,
+    email: Optional[str] = None, name: Optional[str] = None,
 ) -> LinkedPerson:
     """The person signed in as ``(issuer, subject)``: found by that exact pair, or created.
 
@@ -289,6 +306,14 @@ def link_identity(
     (its signature, issuer, audience, times and nonce) is the caller's job (PRD-277 Wave 4).
     They are the only identifier. ``email`` and ``name`` are only the new person's profile:
     a person is never found by email, and a repeat sign-in changes no row, whatever its email.
+
+    ``email_verified`` is required, with no default, so every caller states it: it is the
+    provider's own statement that ``email`` is verified, which the caller takes from the
+    verified ID token (``email_verified``). The email becomes the person's address, and is
+    checked against other people's addresses, only when it is True. When it is False, or there
+    is no email, the person gets the per-identity placeholder, no address check runs, and
+    nothing of the unverified email is kept. A value that is not a ``bool`` is a ``TypeError``
+    before any query.
 
     A new person gets a ``users`` row and a link, and nothing more: no workspace, no
     membership, no role (``system_role`` stays NULL). Never a token. A linked person is
@@ -307,16 +332,17 @@ def link_identity(
     One person, one link, no error. Not committed: the caller commits with what it writes next.
     """
     _check_identity(issuer, subject)
+    _check_email_verified(email_verified)
     _check_profile(email, name)
-    usable_email = _usable_email(email)
+    address = _person_email(email, email_verified)
     existing = user_id_for_identity(db, issuer, subject)
     if existing is not None:
         return LinkedPerson(user_id=existing, created=False)
-    if usable_email:
-        holder = _row_with_email(db, usable_email)
+    if address:
+        holder = _row_with_email(db, address)
         if holder:
             return _linked_or_refused(db, issuer, subject, f"users.id={holder[0]} already has its email")
-    created = _insert_person_with_link(db, issuer, subject, usable_email, name)
+    created = _insert_person_with_link(db, issuer, subject, address, name)
     if created is not None:
         return LinkedPerson(user_id=created, created=True)
     return _linked_or_refused(db, issuer, subject, "another row holds its email or username")

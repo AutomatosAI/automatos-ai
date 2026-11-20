@@ -13,6 +13,9 @@ indexes on ``users`` and ``user_identities`` decide:
 * a second request whose link read came before the first request committed is never refused by
   the first's row: the pair is read again before any refusal;
 * an email in the placeholder domain, or a blank one, is no email; a padded one is refused;
+* an email the provider has not verified is no email: it is kept nowhere, is never an address
+  conflict, and never holds an address from the person who signs in with it verified;
+* every caller states ``email_verified``: there is no default, and it must be a ``bool``;
 * an issuer and a subject are compared exactly: another case, a space before or after, a
   prefix or a longer value is another identity.
 
@@ -98,9 +101,11 @@ class _People:
         self.users.append(uid)
         return uid
 
-    def link(self, subject: str, issuer: str = None, **profile) -> LinkedPerson:
+    def link(self, subject: str, issuer: str = None, email_verified: bool = True, **profile) -> LinkedPerson:
+        """Sign in as ``subject``; the email is verified unless a test says otherwise."""
         db = self._new_session()
-        linked = link_identity(db, issuer=issuer or self.issuer, subject=subject, **profile)
+        linked = link_identity(db, issuer=issuer or self.issuer, subject=subject,
+                               email_verified=email_verified, **profile)
         db.commit()
         self.users.append(linked.user_id)
         return linked
@@ -220,7 +225,8 @@ def test_an_email_held_by_another_row_is_refused_and_changes_no_row(people, new_
     db = new_session()
 
     with pytest.raises(IdentityLinkRefused) as refused:
-        link_identity(db, issuer=people.issuer, subject="person-held", email=held.lower(), name="Taker")
+        link_identity(db, issuer=people.issuer, subject="person-held", email_verified=True,
+                      email=held.lower(), name="Taker")
 
     _assert_refusal_leaks_nothing(refused.value, people.issuer, "person-held", held, people.tag)
     assert db.execute(text("SELECT 1")).scalar_one() == 1, "the caller's transaction is still usable"
@@ -236,7 +242,8 @@ def test_a_username_held_by_another_row_is_refused_and_changes_no_row(people, ne
     holder = people.holder(people.email("holder"), username=email)
 
     with pytest.raises(IdentityLinkRefused) as refused:
-        link_identity(new_session(), issuer=people.issuer, subject="person-username", email=email)
+        link_identity(new_session(), issuer=people.issuer, subject="person-username", email_verified=True,
+                      email=email)
 
     _assert_refusal_leaks_nothing(refused.value, people.issuer, "person-username", email)
     check = new_session()
@@ -258,13 +265,14 @@ def test_two_first_sign_ins_racing_end_with_one_person_and_one_link(engine, peop
     }[emails]
     first, second = new_session(), new_session()
     second_pid = second.execute(text("SELECT pg_backend_pid()")).scalar_one()
-    won = link_identity(first, issuer=people.issuer, subject=subject, email=first_email)   # not yet committed
+    won = link_identity(first, issuer=people.issuer, subject=subject, email_verified=True, email=first_email)   # not yet committed
     people.users.append(won.user_id)
     landed, failed, results = threading.Event(), [], []
 
     def second_sign_in() -> None:
         try:
-            results.append(link_identity(second, issuer=people.issuer, subject=subject, email=second_email))
+            results.append(link_identity(second, issuer=people.issuer, subject=subject, email_verified=True,
+                                         email=second_email))
             second.commit()
             landed.set()
         except Exception as exc:  # noqa: BLE001 — reported by the assertion below
@@ -302,7 +310,7 @@ def test_a_link_committed_between_the_link_read_and_the_email_check_is_returned_
 
     def email_check(db, address):
         if db is second and not won:
-            won.append(link_identity(first, issuer=people.issuer, subject=subject, email=email))
+            won.append(link_identity(first, issuer=people.issuer, subject=subject, email_verified=True, email=email))
             first.commit()
             people.users.append(won[0].user_id)
             steps.append(("first commits", won[0].user_id))
@@ -312,7 +320,7 @@ def test_a_link_committed_between_the_link_read_and_the_email_check_is_returned_
 
     monkeypatch.setattr(user_link, "user_id_for_identity", link_read)
     monkeypatch.setattr(user_link, "_row_with_email", email_check)
-    again = link_identity(second, issuer=people.issuer, subject=subject, email=email)
+    again = link_identity(second, issuer=people.issuer, subject=subject, email_verified=True, email=email)
     second.commit()
 
     winner = won[0].user_id
@@ -352,6 +360,54 @@ def test_a_blank_email_is_no_email(people, new_session, blank):
 
     email = _person(new_session(), linked.user_id)["email"]
     assert linked.created and email == user_link._pending_identity_email(people.issuer, "person-blank")
+
+
+# --------------------------------------------------------------------------- unverified emails
+
+
+def test_an_unverified_email_is_kept_nowhere_and_its_owner_later_gets_the_address(people, new_session):
+    address = people.email("unverified")
+
+    unverified = people.link("person-unverified", email=address, email_verified=False, name="Unverified")
+    check = new_session()
+    placeholder = user_link._pending_identity_email(people.issuer, "person-unverified")
+    assert unverified.created
+    assert {k: v for k, v in _person(check, unverified.user_id).items() if k in ("username", "email")} == {
+        "username": placeholder, "email": placeholder,
+    }
+    assert _count(check, "SELECT COUNT(*) FROM users WHERE LOWER(email) = LOWER(:e) OR LOWER(username) = LOWER(:e)",
+                  e=address) == 0
+
+    owner = people.link("person-owner", email=address, email_verified=True)
+
+    check = new_session()
+    assert owner.created and owner.user_id != unverified.user_id
+    assert _person(check, owner.user_id)["email"] == address
+    assert _person(check, unverified.user_id)["email"] == placeholder
+
+
+def test_an_unverified_email_equal_to_another_persons_address_is_no_conflict(people, new_session):
+    address = people.email("unverified-held")
+    holder = people.holder(address)
+    holder_before = _person(new_session(), holder)
+
+    linked = people.link("person-unverified-held", email=address.upper(), email_verified=False)
+
+    check = new_session()
+    assert linked.created and linked.user_id != holder
+    assert _person(check, linked.user_id)["email"] == user_link._pending_identity_email(
+        people.issuer, "person-unverified-held")
+    assert _person(check, holder) == holder_before and _links(check, holder) == []
+    assert _count(check, "SELECT COUNT(*) FROM users WHERE LOWER(email) = LOWER(:e)", e=address) == 1
+
+
+def test_an_unverified_email_is_never_checked_against_other_peoples_addresses(people, monkeypatch):
+    def no_address_check(db, address):
+        pytest.fail("an unverified email was checked against other people's addresses")
+
+    monkeypatch.setattr(user_link, "_row_with_email", no_address_check)
+    linked = people.link("person-unverified-unchecked", email=people.email("unchecked"), email_verified=False)
+    assert linked.created
 
 
 # --------------------------------------------------------------------------- exact comparison
@@ -394,7 +450,7 @@ class _NoDatabase:
     ("https://idp.example.test", "é" * (SUBJECT_MAX // 2 + 1)),   # within 255 characters, over 255 bytes
 ])
 def test_an_issuer_or_subject_that_cannot_be_stored_exactly_is_refused_before_any_query(issuer, subject):
-    for call in (lambda: link_identity(_NoDatabase(), issuer=issuer, subject=subject),
+    for call in (lambda: link_identity(_NoDatabase(), issuer=issuer, subject=subject, email_verified=True),
                  lambda: user_id_for_identity(_NoDatabase(), issuer, subject)):
         with pytest.raises(ValueError) as refused:
             call()
@@ -406,23 +462,37 @@ def test_an_issuer_or_subject_that_cannot_be_stored_exactly_is_refused_before_an
 @pytest.mark.parametrize("profile", [{"email": 7}, {"email": "e" * 256}, {"name": ["x"]}, {"email": "a\x00b"}])
 def test_an_email_or_name_a_users_row_cannot_hold_is_refused_before_any_query(profile):
     with pytest.raises(ValueError):
-        link_identity(_NoDatabase(), issuer="https://idp.example.test", subject="person", **profile)
+        link_identity(_NoDatabase(), issuer="https://idp.example.test", subject="person", email_verified=True,
+                      **profile)
 
 
+@pytest.mark.parametrize("verified", [True, False])
 @pytest.mark.parametrize("padded", [" someone@example.test", "someone@example.test ", "someone@example.test\n",
                                     "\tsomeone@example.test"])
-def test_an_email_with_leading_or_trailing_whitespace_is_refused_before_any_query(padded):
+def test_an_email_with_leading_or_trailing_whitespace_is_refused_before_any_query(padded, verified):
     with pytest.raises(ValueError) as refused:
-        link_identity(_NoDatabase(), issuer="https://idp.example.test", subject="person", email=padded)
+        link_identity(_NoDatabase(), issuer="https://idp.example.test", subject="person",
+                      email_verified=verified, email=padded)
     assert "someone@example.test" not in str(refused.value)
+
+
+@pytest.mark.parametrize("stated", ["true", "false", None, 1, 0])
+def test_email_verified_that_is_not_a_bool_is_refused_before_any_query(stated):
+    with pytest.raises(TypeError):
+        link_identity(_NoDatabase(), issuer="https://idp.example.test", subject="person",
+                      email_verified=stated, email="someone@example.test")
 
 
 def test_the_email_is_never_an_identifier_and_the_answer_is_the_person_never_a_token():
     params = inspect.signature(link_identity).parameters
-    assert list(params) == ["db", "issuer", "subject", "email", "name"]
-    assert all(params[name].kind is inspect.Parameter.KEYWORD_ONLY for name in ("issuer", "subject", "email", "name"))
+    assert list(params) == ["db", "issuer", "subject", "email_verified", "email", "name"]
+    assert all(params[name].kind is inspect.Parameter.KEYWORD_ONLY
+               for name in ("issuer", "subject", "email_verified", "email", "name"))
+    assert params["email_verified"].default is inspect.Parameter.empty, "every caller states it"
     assert params["email"].default is None and params["name"].default is None
     with pytest.raises(TypeError):
-        link_identity(_NoDatabase(), "https://idp.example.test", "person", "someone@example.test")
+        link_identity(_NoDatabase(), "https://idp.example.test", "person", True, "someone@example.test")
+    with pytest.raises(TypeError):
+        link_identity(_NoDatabase(), issuer="https://idp.example.test", subject="person", email="someone@example.test")
     assert [f.name for f in dataclasses.fields(LinkedPerson)] == ["user_id", "created"]
     assert LinkedPerson.__dataclass_params__.frozen
