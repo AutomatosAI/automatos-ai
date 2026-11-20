@@ -52,7 +52,7 @@ from sqlalchemy.orm import Session
 from api.marketplace_catalog import NOT_HOSTED
 from api.public_rate_limit import REFUSAL_HEADERS, per_ip_limit
 from api.themes_files import SERVING_HEADERS
-from config import config
+from core import editions
 from core.database.database import get_db
 from services.marketplace_bundles.catalog_items import bundle_bytes_for
 from services.marketplace_bundles.catalog_paths import BUNDLES_ROUTE, PLUGIN_PACKAGE_FILE, PLUGINS_ROUTE
@@ -94,7 +94,7 @@ def _refusal(status_code: int, detail: str, retry_after: Optional[int] = None) -
 def require_hosted_bundles() -> None:
     """404 in the local edition, before anything else runs, with the serving headers: a local install
     fetches bundles and plugin packages, it never serves them."""
-    if config.IS_LOCAL_EDITION:
+    if not editions.current().hosts_automatos_cloud:
         raise _refusal(NOT_FOUND, NOT_HOSTED)
 
 

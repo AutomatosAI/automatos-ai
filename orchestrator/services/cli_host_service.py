@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from config import config
+from core import editions
 from core.auth.pairing import PAIRING_CODE_TTL_SECONDS, hash_secret, mint_token, new_pairing_code, normalize_pairing_code, secrets_match
 from services.session_tool_groups import agent_tool_names as session_tool_names
 from services.session_tool_groups import default_definitions as session_tool_definitions
@@ -623,8 +624,7 @@ def session_mode_settings(db: Session, workspace_id: Any) -> Dict[str, Any]:
     return {
         "default_folder": choice,
         "default_folder_explicit": stored.get("default_folder") in DEFAULT_FOLDER_CHOICES,
-        # The workspace's default permission mode for sessions (core/session_permission_modes).
-        "permission_mode": workspace_permission_mode(stored, config.AUTH_EDITION),
+        "permission_mode": workspace_permission_mode(stored, editions.current().session_mode),  # core/session_permission_modes
         "local_projects_dir": projects_dir,
         "projects_mount": (getattr(config, "LOCAL_PROJECTS_MOUNT", "") or None),
         # The deliverables root on the host (AUTOMATOS_WORKSPACE_DIR as `make up`
@@ -670,7 +670,7 @@ def session_permission_mode(db: Session, workspace_id: Any) -> str:
     try:
         ws = _workspace_row(db, workspace_id)
         stored = ((getattr(ws, "settings", None) or {}).get(SESSION_MODE_SETTINGS_KEY) or {}) if ws is not None else {}
-        return workspace_permission_mode(stored, config.AUTH_EDITION)
+        return workspace_permission_mode(stored, editions.current().session_mode)
     except Exception:  # noqa: BLE001 — a settings problem must never block a claim
         logger.exception("[cli-host] session permission mode unreadable for workspace %s", workspace_id)
         return MODE_EDITS

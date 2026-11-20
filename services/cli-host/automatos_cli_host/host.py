@@ -66,12 +66,13 @@ class HostRefused(RuntimeError):
 
 
 def check_backend(api: BackendClient) -> Dict[str, Any]:
-    """The backend must be the local edition with session mode enabled."""
+    """The backend's edition must have session mode (``/health`` ``session_mode``), and it must be enabled."""
     health = api.health()
-    edition = health.get("edition")
-    if edition is None:
-        raise HostRefused("the backend does not report its edition — update Automatos to a build with PRD-234 S1b")
-    if edition != "local":
+    session_mode = health.get("session_mode")
+    if session_mode is None:
+        raise HostRefused("the backend does not report whether it has session mode — update Automatos to a build with PRD-277")
+    if not session_mode:
+        edition = health.get("edition")
         raise HostRefused(f"refusing to serve a '{edition}' edition backend: session mode is local-only (PRD-234 §Terms)")
     if not health.get("cli_runtime_enabled"):
         raise HostRefused("session mode is off on this backend — set CLI_RUNTIME_ENABLED=true in .env and restart the stack")

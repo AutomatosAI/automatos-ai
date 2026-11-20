@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from config import config
+from core import editions
 from core.llm.clients.base import LLMProvider
 
 KIND_DIRECT = "direct"          # the vendor's own API
@@ -246,21 +247,23 @@ def routable_provider_names() -> frozenset:
     return frozenset(names)
 
 
-def platform_key_allowed(provider: Optional[str], edition: Optional[str] = None) -> bool:
+def platform_key_allowed(provider: Optional[str], billing: Optional[bool] = None) -> bool:
     """May the operator hold a platform-level key for this provider?
 
-    ``byok_only`` providers are refused in the saas edition (PRD-236 §Terms).
-    In the local edition the operator IS the user, so their key is their own.
+    ``byok_only`` providers are refused where Automatos bills (PRD-236 §Terms): it
+    would be reselling the key. Where it does not bill, the operator pays the
+    provider, so their key is their own. ``billing`` defaults to the running
+    edition's capability (``core.editions``).
     """
     spec = get_spec(provider)
     if spec is None:
         return False
-    edition = (edition or config.AUTH_EDITION or "saas").lower()
-    return not (spec.byok_only and edition == "saas")
+    billing = editions.current().billing if billing is None else billing
+    return not (spec.byok_only and billing)
 
 
-def platform_key_slugs(edition: Optional[str] = None) -> List[str]:
-    return [s.slug for s in _SPECS if platform_key_allowed(s.slug, edition)]
+def platform_key_slugs(billing: Optional[bool] = None) -> List[str]:
+    return [s.slug for s in _SPECS if platform_key_allowed(s.slug, billing)]
 
 
 def enum_for(provider: Optional[str]) -> Optional[LLMProvider]:
@@ -353,7 +356,7 @@ def price_multiplier_for(provider: Optional[str]) -> float:
     return float(spec.price_multiplier) if spec else 1.0
 
 
-def to_public_dict(spec: ProviderSpec, edition: Optional[str] = None) -> Dict[str, object]:
+def to_public_dict(spec: ProviderSpec, billing: Optional[bool] = None) -> Dict[str, object]:
     """The registry as the UI sees it — never a key, never a config attribute name."""
     return {
         "slug": spec.slug,
@@ -362,7 +365,7 @@ def to_public_dict(spec: ProviderSpec, edition: Optional[str] = None) -> Dict[st
         "chat": spec.chat,
         "embeddings": spec.embeddings,
         "byok": True,
-        "platform_key": platform_key_allowed(spec.slug, edition),
+        "platform_key": platform_key_allowed(spec.slug, billing),
         "hosts_vendor_models": spec.hosts_vendor_models,
         "free": spec.free,
         "key_placeholder": spec.key_placeholder,
@@ -415,9 +418,10 @@ def describe_usage_provider(provider: Optional[str]) -> Dict[str, object]:
     }
 
 
-def public_registry(edition: Optional[str] = None) -> Dict[str, object]:
-    edition = (edition or config.AUTH_EDITION or "saas").lower()
+def public_registry() -> Dict[str, object]:
+    """The registry with the running edition's name, each provider's ``platform_key`` by its billing."""
+    billing = editions.current().billing
     return {
-        "edition": edition,
-        "providers": [to_public_dict(s, edition) for s in _SPECS],
+        "edition": (config.AUTH_EDITION or "saas").lower(),
+        "providers": [to_public_dict(s, billing) for s in _SPECS],
     }

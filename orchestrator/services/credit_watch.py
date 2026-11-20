@@ -49,9 +49,9 @@ def watches_the_credit(guard: Callable[..., Optional[str]]) -> Callable[..., Opt
 def _schedule_check(workspace_id: Any) -> None:
     """Start a balance check when one is due. The check runs on the event loop, also when
     the work starts from a threadpool route (the suggestion's Start, F105)."""
-    from config import config
+    from core import editions
 
-    if not config.IS_LOCAL_EDITION or not workspace_id:
+    if editions.current().billing or not workspace_id:
         return
     key, now = str(workspace_id), time.monotonic()
     if _due(key, now):

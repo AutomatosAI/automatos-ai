@@ -28,7 +28,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from config import config
+from core import editions
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.roles import caller_is_admin
@@ -53,7 +53,7 @@ def _require_admin(ctx: RequestContext) -> None:
 
 
 def _require_local_edition() -> None:
-    if not config.IS_LOCAL_EDITION:
+    if not editions.current().calls_automatos_cloud:
         raise HTTPException(status_code=NOT_FOUND, detail=HOSTED_NO_PULL)
 
 

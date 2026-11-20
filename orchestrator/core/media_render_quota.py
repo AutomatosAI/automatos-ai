@@ -53,6 +53,7 @@ from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from config import config
+from core import editions
 from core.llm.providers import MEDIA_RENDER_PROVIDER
 from core.llm.usage_context import LANE_MEDIA, usage_scope
 from core.llm.usage_tracker import UsageTracker
@@ -101,7 +102,7 @@ def _quota_minutes(value: Any, source: str) -> Optional[float]:
 
 def quota_minutes_for(workspace: Any) -> Optional[float]:
     """The workspace's monthly render quota in minutes, or ``None`` for none."""
-    if (config.AUTH_EDITION or "").strip().lower() == "local":
+    if not editions.current().billing:
         return None
     limits = getattr(workspace, "plan_limits", None) or {}
     if isinstance(limits, dict) and QUOTA_KEY in limits:
@@ -215,7 +216,7 @@ class RenderQuota:
 
 
 def _plan_label(workspace: Any) -> Optional[str]:
-    if (config.AUTH_EDITION or "").strip().lower() == "local":
+    if not editions.current().billing:
         return None
     tier = get_tier(getattr(workspace, "plan", None) or ENTRY_TIER) or {}
     return tier.get("display_name")

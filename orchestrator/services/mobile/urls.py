@@ -17,6 +17,7 @@ from __future__ import annotations
 from urllib.parse import urlsplit
 
 from config import HOSTED_PUBLIC_API_HOST, config
+from core import editions
 
 HTTPS_SCHEME = "https"
 WEB_SCHEMES = ("http", HTTPS_SCHEME)
@@ -47,7 +48,7 @@ def api_url(request_base_url: str) -> str:
     on a local install that has not set ``PUBLIC_API_HOST``.
     """
     host = config.PUBLIC_API_HOST
-    if config.IS_LOCAL_EDITION and host == HOSTED_PUBLIC_API_HOST:
+    if not editions.current().hosts_automatos_cloud and host == HOSTED_PUBLIC_API_HOST:
         return _web_address(request_base_url, "the request's base URL")
     return _web_address(f"{HTTPS_SCHEME}://{host}", "PUBLIC_API_HOST")
 

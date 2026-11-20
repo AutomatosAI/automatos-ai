@@ -31,18 +31,17 @@ MODE_EDITS = "edits"
 MODE_PLAN = "plan"
 MODE_AUTO = "auto"
 PERMISSION_MODES = (MODE_MANUAL, MODE_EDITS, MODE_PLAN, MODE_AUTO)
-LOCAL_EDITION = "local"
 
 
-def default_permission_mode(edition: str) -> str:
-    """Relaxed in the local (open-source) edition, Edit automatically when hosted."""
-    return MODE_AUTO if edition == LOCAL_EDITION else MODE_EDITS
+def default_permission_mode(session_mode: bool) -> str:
+    """Relaxed where the edition has session mode (``core.editions``: local), Edit automatically elsewhere."""
+    return MODE_AUTO if session_mode else MODE_EDITS
 
 
-def workspace_permission_mode(section: Mapping[str, Any], edition: str) -> str:
+def workspace_permission_mode(section: Mapping[str, Any], session_mode: bool) -> str:
     """The mode stored in a workspace's ``session_mode`` settings, else the edition's default."""
     choice = section.get(PERMISSION_MODE_KEY)
-    return choice if choice in PERMISSION_MODES else default_permission_mode(edition)
+    return choice if choice in PERMISSION_MODES else default_permission_mode(session_mode)
 
 
 def ticket_permission_mode(agent_configuration: Optional[Mapping[str, Any]], workspace_mode: str) -> str:

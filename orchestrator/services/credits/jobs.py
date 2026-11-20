@@ -34,9 +34,9 @@ OVERHEAD_MINUTE = 15
 
 
 def _metered_edition() -> bool:
-    from config import config
+    from core import editions
 
-    return config.AUTH_EDITION != "local"
+    return editions.current().billing
 
 
 def meter_tick() -> None:

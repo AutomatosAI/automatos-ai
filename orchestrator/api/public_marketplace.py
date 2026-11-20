@@ -40,7 +40,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from api.public_rate_limit import REFUSAL_HEADERS, per_ip_limit
-from config import config
+from core import editions
 from core.database.database import get_db
 from services.marketplace_public.counts import read_counts
 from services.marketplace_public.featured import read_featured
@@ -73,7 +73,7 @@ def _refusal(status_code: int, detail: str) -> HTTPException:
 
 def require_hosted_edition() -> None:
     """404 in the local edition, before anything else runs: the public Marketplace is the hosted edition's."""
-    if config.IS_LOCAL_EDITION:
+    if not editions.current().hosts_automatos_cloud:
         raise _refusal(NOT_FOUND, NOT_HOSTED)
 
 
