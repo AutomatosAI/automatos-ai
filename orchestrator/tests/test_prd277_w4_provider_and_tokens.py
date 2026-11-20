@@ -286,12 +286,35 @@ def test_several_audiences_need_azp_and_azp_must_be_this_client(idp):
 
 
 @pytest.mark.parametrize("changes", [
-    {"exp": -61}, {"iat": 61}, {"nbf": 61},
+    {"exp": -600}, {"iat": 600}, {"nbf": 600},
 ])
 def test_times_past_the_leeway_are_refused(idp, changes):
+    """A whole token, well past the leeway. The offsets are far from the edge on purpose:
+    the clock moves between making the token and checking it, so an offset one second past
+    the leeway is inside it again by the time a slow run verifies. The edge itself is the
+    next test, on a fixed clock."""
     now = int(time.time())
     shifted = {name: now + offset for name, offset in changes.items()}
     assert _refused(idp.id_token(_claims(idp, **shifted)))
+
+
+@pytest.mark.parametrize("claim,offset,refused", [
+    ("exp", -oidc_tokens.TIME_LEEWAY_SECONDS, True),
+    ("exp", -oidc_tokens.TIME_LEEWAY_SECONDS + 1, False),
+    ("iat", oidc_tokens.TIME_LEEWAY_SECONDS + 1, True),
+    ("iat", oidc_tokens.TIME_LEEWAY_SECONDS, False),
+    ("nbf", oidc_tokens.TIME_LEEWAY_SECONDS + 1, True),
+    ("nbf", oidc_tokens.TIME_LEEWAY_SECONDS, False),
+])
+def test_the_edge_of_the_leeway_on_a_fixed_clock(claim, offset, refused):
+    """The time rule itself, to the second, with the clock held still."""
+    now = 1_800_000_000
+    claims = {"exp": now + 300, "iat": now, claim: now + offset}
+    if refused:
+        with pytest.raises(InvalidIdToken):
+            oidc_tokens._check_times(claims, now)
+    else:
+        oidc_tokens._check_times(claims, now)
 
 
 def test_times_within_the_leeway_are_accepted(idp):
