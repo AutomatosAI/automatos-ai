@@ -19,6 +19,18 @@ from core.models.core import User
 import secrets
 from datetime import datetime, timedelta
 
+# PRD-277 §4: Clerk sends every invitation's email and accepting one verifies a Clerk
+# token, so an install that does not use Clerk (the enterprise edition) has no invitations.
+INVITATIONS_OFF = "Invitations are not available on this install."
+
+
+def invitations_available() -> bool:
+    """True where invitations can be sent and accepted: the install uses Clerk."""
+    from core.auth.clerk import clerk_in_use
+
+    return clerk_in_use()
+
+
 class WorkspaceInvitation(Base):
     """Pending invitations to join a workspace."""
     __tablename__ = "workspace_invitations"

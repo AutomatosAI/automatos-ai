@@ -110,7 +110,8 @@ Wave 1 builds the full table from the 91 call sites. The table above shows the i
 **Fail closed.** With `AUTH_EDITION=enterprise`:
 - startup refuses to run unless the issuer, client id, client secret and the install's public address are set;
 - `REQUIRE_AUTH` is forced on and cannot be turned off;
-- the anonymous operator does not exist.
+- the anonymous operator does not exist;
+- until US-704 builds the per-service settings, every call to Automatos's hosted services is off.
 
 ### 5.2 Signing in from a browser
 
@@ -225,6 +226,7 @@ Names are provisional. Final names are fixed in each wave's PR and recorded in `
 | `OIDC_ISSUER` | none, required | The IdP's address, `https` only. |
 | `OIDC_CLIENT_ID` | none, required | The application's id at the IdP. |
 | `OIDC_CLIENT_SECRET` | none, required | From the install's Secret, never from plain settings. |
+| `FRONTEND_URL` | none, required in enterprise | The install's public address, which the web app and the API share. An existing setting: its built-in `localhost` default does not count (US-103). |
 | `OIDC_SCOPES` | `openid profile email` | What is asked for at sign-in. |
 | `OIDC_DISPLAY_NAME` | `your organisation` | The text on the sign-in button. |
 | `OIDC_REQUIRED_CLAIMS` | empty | Claims that must match before anyone is let in. Required for shared issuers. |
@@ -234,6 +236,8 @@ Names are provisional. Final names are fixed in each wave's PR and recorded in `
 | `ENTERPRISE_DEFAULT_ROLE` | `none` | Role in the default workspace for anyone who passes the access rule. |
 | `ENTERPRISE_DEVICE_PAIRING` | `on` | Whether phones and browsers may pair. |
 | `SESSION_IDLE_MINUTES`, `SESSION_ABSOLUTE_HOURS` | `120`, `12` | The two session clocks. |
+
+`FRONTEND_URL` is not a new setting: the existing one is reused as the install's public address.
 
 ### 5.11 Security requirements
 
@@ -302,12 +306,12 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As an operator, I want a clear refusal at startup when a required setting is missing, so that an install never runs open.
 
 **Acceptance Criteria:**
-- [ ] `AUTH_EDITION=enterprise` is accepted. An unknown value still becomes `saas`.
-- [ ] Startup aborts, naming the missing setting and never its value, when any of the issuer, client id, client secret or public address is unset.
-- [ ] `REQUIRE_AUTH` is true in enterprise whatever the environment says.
-- [ ] A request with no credential gets 401. A test proves no operator context is ever returned.
-- [ ] Until Wave 4 merges, startup in enterprise aborts with "not available in this build", so a half-built edition cannot be run.
-- [ ] New settings are in `config-surface.json`.
+- [x] `AUTH_EDITION=enterprise` is accepted. An unknown value still becomes `saas`.
+- [x] Startup aborts, naming the missing setting and never its value, when any of the issuer, client id, client secret or public address is unset. The public address is the existing `FRONTEND_URL`, set in the environment (§5.10).
+- [x] `REQUIRE_AUTH` is true in enterprise whatever the environment says.
+- [x] A request with no credential gets 401. A test proves no operator context is ever returned (`orchestrator/tests/test_prd277_enterprise_no_operator.py`).
+- [x] Until Wave 4 merges, startup in enterprise aborts with "not available in this build", so a half-built edition cannot be run. One switch, `OIDC_SIGN_IN_IN_THIS_BUILD` in `orchestrator/core/edition_start_up.py`, which Wave 4 deletes.
+- [x] New settings are in `config-surface.json`: `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`.
 
 ### Wave 2: People without Clerk
 
@@ -514,6 +518,8 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 - [ ] The pairing code is made by a signed-in person and the device row carries their `user_id`.
 - [ ] The device's role is that person's membership role. A test proves a paired device in enterprise is never the operator and never `super_admin` by default.
 - [ ] Deactivating the person or removing their membership refuses the device, as `device.py` already checks.
+- [ ] In enterprise, agreeing that push notifications leave through the push service is an install admin's decision, not a workspace admin's.
+- [ ] A device paired while the install was `local` does not survive the install becoming `enterprise`: every paired device is revoked when the edition changes, and a test proves a token issued before the change is refused.
 
 #### US-602: Discovery says how to sign in · S
 **Description:** As the phone app, I want the server to say which sign-in it offers, so that one app works with every install.
@@ -566,6 +572,15 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 - [ ] The same run against at least three providers from §5.9, with the differences found written into the table.
 - [ ] One independent security review of Waves 2 to 4, with findings fixed or recorded.
 
+#### US-704: The operator switches on each call to Automatos's hosted services · M
+**Description:** As an operator, I want to choose which of Automatos's hosted services my install calls, so that nothing leaves the install unless I switched it on (D-12).
+
+**Acceptance Criteria:**
+- [ ] One named setting for each hosted service the code calls: theme revocations (the revocation pull, its schedule, its sync status and manual pull), Cloud sync (the Cloud Sync routes and the sync pull) and Cloud items (the "Items brought from Cloud" routes). The list is the `calls_automatos_cloud` rows of `PRD-277-EDITION-CHECKS.md`; a service added later gets its own setting.
+- [ ] Each setting is off by default in enterprise, and the code reads it through a capability, never the edition's name.
+- [ ] `local` and `saas` behave as before: `local` calls each service as today, and `saas` remains the host.
+- [ ] Tests prove each service is not called in enterprise with its setting off, is called with it on, and that `local` and `saas` are unchanged.
+
 ## 7. Functional requirements
 
 - **FR-1:** `AUTH_EDITION` must accept `enterprise`. Any unknown value must still resolve to `saas`.
@@ -595,6 +610,7 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 - **FR-25:** `local` and `saas` must behave as before. Their existing tests must pass without being weakened.
 - **FR-26:** No source file may name an identity provider.
 - **FR-27:** Sign-in must be written against one identity interface, with one hook after verification, and registration must close at startup.
+- **FR-28:** In enterprise the system must call each of Automatos's hosted services only when the operator has switched that service on with its own setting, each off by default, and `local` and `saas` must call them as before.
 
 ## 8. Decisions for Gerard
 
