@@ -27,7 +27,7 @@ from .clients.huggingface_client import HuggingFaceProvider
 from .clients.bedrock_client import BedrockProvider, DEFAULT_REGION as BEDROCK_DEFAULT_REGION
 from .clients.grok_client import GrokProvider
 from .clients.openai_compatible_client import OpenAICompatibleProvider
-from .providers import get_spec, env_api_key, stored_provider_enum, ADAPTER_OPENAI_COMPATIBLE
+from .providers import get_spec, env_api_key, runs_on_workload_identity, stored_provider_enum, ADAPTER_OPENAI_COMPATIBLE
 from .byok_endpoint import with_key_endpoint
 from .vendor_fit import fitted, keyless_via_openrouter
 from .key_resolver import with_workload_identity
@@ -432,14 +432,16 @@ def _settings_model(service_name: str) -> str:
 
 def _bedrock_fields(cred_data: Dict[str, Any]) -> _CredentialFields:
     """AWS Bedrock: a Bedrock API key (the recommended single key), else an IAM key pair.
-    The region rides in ``base_url`` for compatibility with LLMConfig."""
+    The region rides in ``base_url`` for compatibility with LLMConfig. With
+    ``AWS_USE_WORKLOAD_IDENTITY`` on, a credential that names no region is given none here:
+    ``key_resolver.with_workload_identity`` gives it the install's (PRD-278 US-105)."""
     api_key = cred_data.get("bedrock_api_key")
     secret_key = None
     if not api_key:
         api_key = cred_data.get("aws_access_key_id")
         secret_key = cred_data.get("aws_secret_access_key")
-    return _CredentialFields(api_key=api_key, base_url=cred_data.get("aws_region", BEDROCK_DEFAULT_REGION),
-                             secret_key=secret_key)
+    unnamed = None if runs_on_workload_identity(LLMProvider.AWS_BEDROCK.value) else BEDROCK_DEFAULT_REGION
+    return _CredentialFields(api_key=api_key, base_url=cred_data.get("aws_region", unnamed), secret_key=secret_key)
 
 
 _FIELDS_BY_PROVIDER = {

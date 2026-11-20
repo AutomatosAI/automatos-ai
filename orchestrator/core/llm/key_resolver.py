@@ -58,7 +58,7 @@ def resolve_provider_key(db: Any, provider_name: str, *, workspace_id: Any = Non
     """The key that pays for ``provider_name``'s calls in ``workspace_id``, or None."""
     own_key_lookup_failed = False
     if workspace_id:
-        byok = _byok_key(db, provider_name, workspace_id)
+        byok = _own_key(db, provider_name, workspace_id)
         own_key_lookup_failed = isinstance(byok, OwnKeyLookupFailed)
         if byok is not None and not own_key_lookup_failed:
             return byok
@@ -73,6 +73,30 @@ def resolve_provider_key(db: Any, provider_name: str, *, workspace_id: Any = Non
     if platform is not None:
         return platform
     return _role_key(provider_name, agent_name, own_key_lookup_failed=own_key_lookup_failed)
+
+
+def _own_key_names(provider_name: str) -> tuple:
+    """The names the workspace's own key is looked up under: the stored name; with
+    ``AWS_USE_WORKLOAD_IDENTITY`` on and a provider the install's role signs for (Bedrock),
+    its canonical slug first, the one a workspace's key is saved under (PRD-278 US-105)."""
+    from core.llm.providers import normalize_slug, runs_on_workload_identity
+
+    if not runs_on_workload_identity(provider_name):
+        return (provider_name,)
+    slug = normalize_slug(provider_name)
+    return (slug,) if slug == provider_name else (slug, provider_name)
+
+
+def _own_key(db: Any, provider_name: str, workspace_id: Any) -> Union[ResolvedKey, OwnKeyLookupFailed, None]:
+    """The workspace's own key under any of ``_own_key_names``: the first found wins; when
+    none is found and any lookup failed, ``OwnKeyLookupFailed``."""
+    failed: Optional[OwnKeyLookupFailed] = None
+    for name in _own_key_names(provider_name):
+        found = _byok_key(db, name, workspace_id)
+        if isinstance(found, ResolvedKey):
+            return found
+        failed = failed or (found if isinstance(found, OwnKeyLookupFailed) else None)
+    return failed
 
 
 def _role_key(provider_name: str, agent_name: str, *, own_key_lookup_failed: bool) -> Optional[ResolvedKey]:
@@ -109,9 +133,10 @@ def carries_calls(resolved: Optional[ResolvedKey]) -> bool:
 
 def with_workload_identity(llm_config: Any) -> Any:
     """A settings-tier config for a provider the install's role can sign for (Bedrock), with
-    ``AWS_USE_WORKLOAD_IDENTITY`` on: in the install's own region (``AWS_REGION``, PRD-278
-    US-105) and, when it has no key, marked to run on that role: the settings path's twin of
-    ``_platform_key``'s last tier. Any other config comes back unchanged."""
+    ``AWS_USE_WORKLOAD_IDENTITY`` on. With no key it is marked to run on that role, in the
+    install's region (``AWS_REGION``): the settings path's twin of ``_platform_key``'s last
+    tier. With a key it keeps the region its credential names, else ``AWS_REGION`` (PRD-278
+    US-105, ``providers.workload_identity_region``). Any other config comes back unchanged."""
     from dataclasses import replace
 
     from core.llm.providers import runs_on_workload_identity, workload_identity_region
@@ -119,8 +144,9 @@ def with_workload_identity(llm_config: Any) -> Any:
     provider = llm_config.provider.value
     if not runs_on_workload_identity(provider):
         return llm_config
-    return replace(llm_config, base_url=workload_identity_region(provider),
-                   workload_identity=llm_config.workload_identity or not llm_config.api_key)
+    on_role = llm_config.workload_identity or not llm_config.api_key
+    return replace(llm_config, workload_identity=on_role,
+                   base_url=workload_identity_region(provider, llm_config.base_url, on_role=on_role))
 
 
 def _byok_key(db: Any, provider_name: str, workspace_id: Any) -> Union[ResolvedKey, OwnKeyLookupFailed, None]:

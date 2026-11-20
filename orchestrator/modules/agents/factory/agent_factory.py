@@ -36,6 +36,17 @@ from core.observability.genai import traced_agent_run
 
 logger = logging.getLogger(__name__)
 
+
+def no_key_error(provider: str) -> ValueError:
+    """The error an agent gets when no key can pay for ``provider``'s calls: on creation, and
+    on activation for a provider the install's role signs for (PRD-278 US-105)."""
+    return ValueError(
+        f"No API key available for {provider}. "
+        f"Add one in Settings → Model keys, or set platform fallback "
+        f"({provider.upper()}_API_KEY env var on the API service)."
+    )
+
+
 # F040: statuses that mean "the owner has switched this agent off". Anything
 # else runs — a new status word should not silently disable a fleet.
 INACTIVE_AGENT_STATUSES = frozenset({"inactive", "disabled", "paused", "archived", "suspended"})
@@ -425,12 +436,16 @@ class AgentFactory:
             )
             return "openrouter", model_id
 
+        # PRD-278 US-105: with AWS_USE_WORKLOAD_IDENTITY on, a Bedrock agent's model ID is
+        # Bedrock's own (an inference profile's ARN carries a slash; a bare id names no other
+        # vendor): it is never moved. An ID Bedrock does not serve fails there, in Bedrock's words.
+        if runs_on_workload_identity(provider_str):
+            return provider_str, model_id
+
         # Slash-format model IDs belong to a provider that hosts vendor-prefixed
         # ids (OpenRouter, NVIDIA — registry ``hosts_vendor_models``). Any other
         # provider paired with a slash id is a mismatch → OpenRouter (legacy rule).
-        # PRD-278 US-105: with AWS_USE_WORKLOAD_IDENTITY on, a Bedrock model ID that carries a
-        # slash (an inference profile's ARN) is Bedrock's own, never an OpenRouter id.
-        if "/" in model_id and not hosts_vendor_models(provider_str) and not runs_on_workload_identity(provider_str):
+        if "/" in model_id and not hosts_vendor_models(provider_str):
             prefix = model_id.split("/")[0].lower()
             if prefix == provider_str.lower() or prefix not in DIRECT_PROVIDERS:
                 self.logger.info(
@@ -577,11 +592,7 @@ class AgentFactory:
 
             raise paused_error(unfunded)  # no credits, and no key of its own
         if not resolved:
-            raise ValueError(
-                f"No API key available for {effective_provider}. "
-                f"Add one in Settings → Model keys, or set platform fallback "
-                f"({effective_provider.upper()}_API_KEY env var on the API service)."
-            )
+            raise no_key_error(effective_provider)
         return provider, effective_provider, effective_model_id, resolved
 
     async def _verify_llm_connection(self, llm_manager: LLMManager) -> Dict[str, Any]:
@@ -988,6 +999,8 @@ class AgentFactory:
             from services.credits.routing import paused_error
 
             raise paused_error(unfunded)
+        if not carries_calls(resolved) and runs_on_workload_identity(provider_str):
+            raise no_key_error(provider_str)  # PRD-278 US-105: never the role, never another provider
         return provider_str, model_id_str, resolved
 
     async def _activation_llm_manager(

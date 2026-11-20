@@ -315,12 +315,22 @@ def stored_provider_enum(provider: Optional[str]) -> Optional[LLMProvider]:
         return None
 
 
-def workload_identity_region(provider: Optional[str]) -> Optional[str]:
-    """The install's own region (``AWS_REGION``) for a provider whose calls the install's role
-    signs, with ``AWS_USE_WORKLOAD_IDENTITY`` on (PRD-278 US-105); None otherwise, when the
-    config's own region stands. A Bedrock config carries its region in ``base_url``."""
+def workload_identity_region(provider: Optional[str], named: Optional[str] = None, *,
+                             on_role: bool = False) -> Optional[str]:
+    """The region a call for ``provider`` goes to, with ``AWS_USE_WORKLOAD_IDENTITY`` on and a
+    provider whose calls the install's role signs (Bedrock), PRD-278 US-105:
+
+    - a call on the install's role (``on_role``): the install's region, ``AWS_REGION``;
+    - a config that carries its own key: the region that key names (``named``), and
+      ``AWS_REGION`` when it names none.
+
+    None when the setting is off or for any other provider: the caller keeps its own region.
+    A Bedrock config carries its region in ``base_url``.
+    """
     if not runs_on_workload_identity(provider):
         return None
+    if named and not on_role:
+        return named
     from core.llm.clients.bedrock_client import DEFAULT_REGION
 
     return config.AWS_REGION or DEFAULT_REGION

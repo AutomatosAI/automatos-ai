@@ -52,10 +52,15 @@ INSTALL_REGION = "eu-west-1"
 CLIENT_DEFAULT_REGION = "us-east-1"
 STORED_REGION = "ap-southeast-2"
 BEDROCK_NAMES = ("bedrock", "aws_bedrock")
-ROLE_KEY_ID, ROLE_SECRET = "AKIAI44QH8DHBEXAMPLE", "je7MtGbClwBF/2Zp9Utk/h3yCo8nvbEXAMPLEKEY"
-BEDROCK_API_KEY = "ABSK-example-long-term"
-OPENROUTER_KEY = "or-example-key"
-WORKSPACE = "ws-1"
+# AWS's two documented example access key IDs: the chain's (the install's role) and a key of
+# its own. Every other secret-shaped value is put together at run time.
+ROLE_KEY_ID, OWN_KEY_ID = "AKIAI44QH8DHBEXAMPLE", "AKIAIOSFODNN7EXAMPLE"
+ROLE_SECRET, OWN_SECRET = "example-" + "role-secret", "example-" + "own-secret"
+BEDROCK_API_KEY = "ABSK" + "-example-long-term"
+WORKSPACE_API_KEY = "ABSK" + "-example-workspace"
+OPENROUTER_KEY = "or-" + "example"
+WORKSPACE = "6a0f3c1e-2b4d-4e8f-9a1b-5b0e40000001"
+BARE_OTHER_VENDOR_IDS = ("claude-opus-5-5", "gemini-2.5-flash")
 REPLY = {"output": {"message": {"role": "assistant", "content": [{"text": "ok"}]}}, "stopReason": "end_turn",
          "usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2}}
 
@@ -101,7 +106,7 @@ def _identity(monkeypatch, on: bool) -> None:
     monkeypatch.setattr(config, "AWS_USE_WORKLOAD_IDENTITY", on)
 
 
-def _sent(llm_config: LLMConfig):
+def _sent(llm_config: LLMConfig, status: int = 200, body: dict = None, error_type: str = None):
     """The one Converse request a client built from this config sends (provider checked)."""
     provider = llm_manager.LLMManager._create_provider(llm_config)
     assert isinstance(provider, BedrockProvider), "called on Bedrock"
@@ -109,7 +114,8 @@ def _sent(llm_config: LLMConfig):
 
     def send(request, **_kwargs):
         seen.append(request)
-        return AWSResponse(request.url, 200, {"content-type": "application/json"}, _Raw(json.dumps(REPLY).encode()))
+        headers = {"content-type": "application/json", **({"x-amzn-ErrorType": error_type} if error_type else {})}
+        return AWSResponse(request.url, status, headers, _Raw(json.dumps(body or REPLY).encode()))
 
     provider.client.meta.events.register("before-send.bedrock-runtime.Converse", send)
     provider.generate_response_sync([{"role": "user", "content": "hi"}])
@@ -120,14 +126,22 @@ def _endpoint_region(request) -> str:
     return urlsplit(request.url).hostname.split(".")[1]
 
 
-def _signed_by_the_role_in(llm_config: LLMConfig) -> str:
-    """The region a role-signed request goes to; fails unless the role signed it, in that region."""
+def _signed_with(llm_config: LLMConfig) -> tuple:
+    """(the access key ID or Bedrock API key the request carries, the region it goes to)."""
     request = _sent(llm_config)
-    credential = request.headers["Authorization"].decode().split("Credential=")[1].split(",")[0]
-    key_id, _date, scope_region, service, _end = credential.split("/")
-    assert (key_id, service) == (ROLE_KEY_ID, "bedrock"), "signed by the install's role"
-    assert scope_region == _endpoint_region(request)
-    return scope_region
+    authorization = request.headers["Authorization"].decode()
+    if authorization.startswith("Bearer "):
+        return authorization[len("Bearer "):], _endpoint_region(request)
+    key_id, _date, scope_region, service, _end = authorization.split("Credential=")[1].split(",")[0].split("/")
+    assert service == "bedrock" and scope_region == _endpoint_region(request)
+    return key_id, scope_region
+
+
+def _signed_by_the_role_in(llm_config: LLMConfig) -> str:
+    """The region a role-signed request goes to; fails unless the role signed it."""
+    key_id, region = _signed_with(llm_config)
+    assert key_id == ROLE_KEY_ID, "signed by the install's role"
+    return region
 
 
 def _factory(monkeypatch) -> AgentFactory:
@@ -139,12 +153,12 @@ def _factory(monkeypatch) -> AgentFactory:
     return factory
 
 
-def _activated(monkeypatch, name: str, model: str = NOVA):
+def _activated(monkeypatch, name: str, model: str = NOVA, workspace=None):
     return asyncio.run(_factory(monkeypatch)._activation_llm_manager(
-        {"provider": name, "model": model}, SimpleNamespace(name="agent"), 1, None))
+        {"provider": name, "model": model}, SimpleNamespace(name="agent"), 1, workspace))
 
 
-def _spoken(monkeypatch, name: str):
+def _spoken(monkeypatch, name: str, workspace=None):
     """An agent on another model, moved to a Bedrock spoken model for one turn."""
     monkeypatch.setattr(config, "SPOKEN_MODE_MODEL", NOVA)
     monkeypatch.setattr(config, "SPOKEN_MODE_PROVIDER", name)
@@ -152,7 +166,7 @@ def _spoken(monkeypatch, name: str):
     agent = SimpleNamespace(config=LLMConfig(provider=LLMProvider.ANTHROPIC, model="claude-opus-5-5", api_key="k"))
     runtime = AgentRuntime(agent_id=1, metadata=AgentMetadata(name="Auto", agent_type="orchestrator", persona="Auto"),
                            llm_manager=agent, lifecycle_state=AgentLifecycle.ACTIVE, created_at=datetime.now())
-    return asyncio.run(spoken_model.spoken_turn_runtime(_factory(monkeypatch), runtime, None))
+    return asyncio.run(spoken_model.spoken_turn_runtime(_factory(monkeypatch), runtime, workspace))
 
 
 def _settings_tier(monkeypatch, name: str, model: str = NOVA) -> LLMConfig:
@@ -177,6 +191,21 @@ def _warnings_of(logger_name: str, run):
         return run(), [record.getMessage() for record in records]
     finally:
         logger.removeHandler(handler)
+
+
+def _own_key_saved_under(monkeypatch, saved_as: str) -> list:
+    """The workspace's own Bedrock API key, saved under ``saved_as`` (the database matches the
+    name exactly). Returns the names it was looked up under."""
+    asked = []
+
+    def _byok_key(db, provider, ws):
+        asked.append(provider)
+        if provider != saved_as:
+            return None
+        return key_resolver.ResolvedKey(api_key=WORKSPACE_API_KEY, source="byok", is_byok=True, provider=provider)
+
+    monkeypatch.setattr(key_resolver, "_byok_key", _byok_key)
+    return asked
 
 
 def _own_key_lookup_fails_for_bedrock(monkeypatch) -> None:
@@ -238,14 +267,48 @@ def test_on_a_keyless_settings_tier_runs_on_bedrock_in_the_install_region(monkey
     assert _signed_by_the_role_in(tier) == INSTALL_REGION
 
 
-def test_on_a_stored_credentials_region_gives_way_to_the_install_region(monkeypatch, install):
+@pytest.mark.parametrize("credential, signed_with", [
+    ({"aws_region": STORED_REGION}, (ROLE_KEY_ID, INSTALL_REGION)),
+    ({"aws_access_key_id": OWN_KEY_ID, "aws_secret_access_key": OWN_SECRET, "aws_region": STORED_REGION},
+     (OWN_KEY_ID, STORED_REGION)),
+    ({"bedrock_api_key": BEDROCK_API_KEY, "aws_region": STORED_REGION}, (BEDROCK_API_KEY, STORED_REGION)),
+    ({"aws_access_key_id": OWN_KEY_ID, "aws_secret_access_key": OWN_SECRET}, (OWN_KEY_ID, INSTALL_REGION)),
+    ({"bedrock_api_key": BEDROCK_API_KEY}, (BEDROCK_API_KEY, INSTALL_REGION)),
+], ids=["the-role-in-the-install-region", "a-key-pair-in-its-own-region", "an-api-key-in-its-own-region",
+        "a-key-pair-naming-no-region", "an-api-key-naming-no-region"])
+def test_on_the_role_uses_the_install_region_and_a_key_keeps_the_region_it_names(monkeypatch, install,
+                                                                                 credential, signed_with):
     _identity(monkeypatch, True)
-    install.credentials["aws_bedrock"] = {"bedrock_api_key": BEDROCK_API_KEY, "aws_region": STORED_REGION}
+    install.credentials["aws_bedrock"] = credential
 
     tier = _settings_tier(monkeypatch, "aws_bedrock")
 
-    assert (tier.api_key, tier.base_url, tier.workload_identity) == (BEDROCK_API_KEY, INSTALL_REGION, False)
-    assert _endpoint_region(_sent(tier)) == INSTALL_REGION
+    assert tier.workload_identity is (signed_with[0] == ROLE_KEY_ID)
+    assert _signed_with(tier) == signed_with
+
+
+def test_on_a_workspaces_own_key_saved_as_bedrock_pays_for_an_agent_stored_as_aws_bedrock(monkeypatch):
+    _identity(monkeypatch, True)
+    asked = _own_key_saved_under(monkeypatch, "bedrock")
+
+    created, _ = asyncio.run(_factory(monkeypatch)._create_llm_manager(
+        ModelConfiguration("aws_bedrock", NOVA), "agent", WORKSPACE))
+    activated, resolved, _ = _activated(monkeypatch, "aws_bedrock", workspace=WORKSPACE)
+    spoken = _spoken(monkeypatch, "aws_bedrock", workspace=WORKSPACE)
+
+    assert resolved.is_byok and spoken.is_byok
+    assert set(asked) == {"bedrock"}, "found under the slug, first"
+    for llm_config in (created.config, activated.config, spoken.llm_manager.config):
+        assert llm_config.workload_identity is False, "the workspace's key, not the install's role"
+        assert _signed_with(llm_config) == (WORKSPACE_API_KEY, INSTALL_REGION)
+
+
+def test_off_a_workspaces_own_key_is_looked_up_under_the_stored_name_only_as_on_main(monkeypatch):
+    _identity(monkeypatch, False)
+    asked = _own_key_saved_under(monkeypatch, "bedrock")
+
+    assert key_resolver.resolve_provider_key(MagicMock(), "aws_bedrock", workspace_id=WORKSPACE) is None
+    assert asked == ["aws_bedrock"]
 
 
 def test_on_an_inference_profile_arn_stays_on_bedrock_on_every_path(monkeypatch):
@@ -276,15 +339,42 @@ def test_on_creation_never_moves_a_bedrock_agent_to_openrouter(monkeypatch):
 
 
 @pytest.mark.parametrize("name", BEDROCK_NAMES)
-def test_on_activation_never_moves_a_bedrock_agent_to_openrouter(monkeypatch, name):
+def test_on_activation_with_no_usable_key_fails_clearly_and_never_moves_to_openrouter(monkeypatch, name):
     _identity(monkeypatch, True)
     monkeypatch.setattr(config, "OPENROUTER_API_KEY", OPENROUTER_KEY)
     _own_key_lookup_fails_for_bedrock(monkeypatch)
+    factory = _factory(monkeypatch)
+    real_resolve, asked = factory._resolve_api_key, []
 
-    provider, model, resolved = asyncio.run(
-        _factory(monkeypatch)._activation_key({"provider": name, "model": NOVA}, "agent", WORKSPACE))
+    async def _resolve(provider, *args, **kwargs):
+        asked.append(provider)
+        return await real_resolve(provider, *args, **kwargs)
 
-    assert (provider, model, resolved) == (name, NOVA, None)
+    monkeypatch.setattr(factory, "_resolve_api_key", _resolve)
+
+    with pytest.raises(ValueError, match=f"No API key available for {name}"):
+        asyncio.run(factory._activation_key({"provider": name, "model": NOVA}, "agent", WORKSPACE))
+    assert asked == [name], "no other provider is tried"
+
+
+@pytest.mark.parametrize("model", BARE_OTHER_VENDOR_IDS)
+def test_on_a_bare_id_naming_another_vendor_stays_on_bedrock_and_fails_in_bedrocks_words(monkeypatch, model):
+    _identity(monkeypatch, True)
+    factory = _factory(monkeypatch)
+    assert factory._resolve_provider_for_model("bedrock", model) == ("bedrock", model)
+
+    activated, _, provider = _activated(monkeypatch, "aws_bedrock", model)
+
+    assert (provider, activated.config.provider) == ("aws_bedrock", LLMProvider.AWS_BEDROCK)
+    with pytest.raises(ValueError, match=f"AWS Bedrock won't serve {model}"):
+        _sent(activated.config, status=400, error_type="ValidationException",
+              body={"message": "The provided model identifier is invalid."})
+
+
+@pytest.mark.parametrize("model, vendor", list(zip(BARE_OTHER_VENDOR_IDS, ("anthropic", "google"))))
+def test_off_a_bare_id_naming_another_vendor_moves_to_that_vendor_as_on_main(monkeypatch, model, vendor):
+    _identity(monkeypatch, False)
+    assert _factory(monkeypatch)._resolve_provider_for_model("bedrock", model) == (vendor, model)
 
 
 # --------------------------------------------------------------------------- #
