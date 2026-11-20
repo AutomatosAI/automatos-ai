@@ -17,8 +17,8 @@
    ``DEFAULT_WORKSPACE_ID``. ``CLIENT_IP_HEADER`` must name the header the proxy in front sets to
    the caller's address: sign-in limits requests per address and writes it to the audit log, and
    without that header the address is whatever the caller wrote. ``OIDC_ENDPOINT_HOSTS``, when set,
-   must be host names (no scheme, port or wildcard), and ``OIDC_PENDING_SIGN_INS_MAX`` a whole number
-   of at least one. The refusal names the setting, never its value. ``config.py`` reads them so
+   must be host names (no scheme, port or wildcard), and ``OIDC_PENDING_SIGN_INS_MAX`` and
+   ``OIDC_PENDING_SIGN_INS_PER_ADDRESS`` whole numbers of at least one. The refusal names the setting, never its value. ``config.py`` reads them so
    that no value can stop another edition from starting.
 3. last, while ``OIDC_SIGN_IN_IN_THIS_BUILD`` is false: the edition is "not available in this
    build", so a half-built edition can never run. The pull request that finishes Wave 4 turns it
@@ -83,7 +83,7 @@ BAD_SESSION_SETTING = "AUTH_EDITION=enterprise cannot start: {name} {problem}."
 OIDC_SIGN_IN_SETTINGS: Tuple[str, ...] = (
     "OIDC_ISSUER", "FRONTEND_URL", "OIDC_SCOPES", "OIDC_CLAIM_EMAIL", "OIDC_CLAIM_NAME",
     "OIDC_CA_BUNDLE_FILE", "ENTERPRISE_DEFAULT_ROLE", "DEFAULT_WORKSPACE_ID",
-    "CLIENT_IP_HEADER", "OIDC_ENDPOINT_HOSTS", "OIDC_PENDING_SIGN_INS_MAX",
+    "CLIENT_IP_HEADER", "OIDC_ENDPOINT_HOSTS", "OIDC_PENDING_SIGN_INS_MAX", "OIDC_PENDING_SIGN_INS_PER_ADDRESS",
 )
 CLIENT_IP_HEADER_PROBLEM = (
     "must name the header the proxy in front sets to the caller's address: sign-in limits requests "
@@ -178,8 +178,9 @@ def _limit_and_host_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str,
         yield "CLIENT_IP_HEADER", CLIENT_IP_HEADER_PROBLEM
     if not all(is_host_name(name) for name in listed_hosts(settings.get("OIDC_ENDPOINT_HOSTS"))):
         yield "OIDC_ENDPOINT_HOSTS", "must be host names separated by commas, with no scheme, port or wildcard"
-    if not _whole_number_at_least_one(settings.get("OIDC_PENDING_SIGN_INS_MAX")):
-        yield "OIDC_PENDING_SIGN_INS_MAX", "must be a whole number of at least 1"
+    for name in ("OIDC_PENDING_SIGN_INS_MAX", "OIDC_PENDING_SIGN_INS_PER_ADDRESS"):
+        if not _whole_number_at_least_one(settings.get(name)):
+            yield name, "must be a whole number of at least 1"
 
 
 def check_start_up(capabilities: editions.EditionCapabilities, settings: Mapping[str, Optional[str]]) -> None:

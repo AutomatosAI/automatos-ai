@@ -10,7 +10,12 @@ connections, so two callbacks really race:
 * an expired state gets ``None`` and its row is deleted all the same;
 * starting a sign-in clears every row whose time is up, in one statement (more than the hundred
   an earlier draft cleared);
-* at ``OIDC_PENDING_SIGN_INS_MAX`` live sign-ins, a start is ``SignInsBusy`` and writes nothing;
+* one address at ``OIDC_PENDING_SIGN_INS_PER_ADDRESS`` keeps only its newest sign-ins when it starts
+  another, and another address's are untouched;
+* at ``OIDC_PENDING_SIGN_INS_MAX`` live sign-ins, a start ends the oldest and is stored, never
+  refused; a sign-in started before a flood from other addresses that stays under the ceiling
+  still completes;
+* a row keeps the hash of the address that started it, never the address;
 * an unknown or implausible state gets ``None``; only digests of the state, nonce and binding are
   stored.
 
@@ -54,14 +59,25 @@ def engine():
     eng.dispose()
 
 
+def _new_address() -> str:
+    """An address in its own IPv6 /64 of the documentation prefix (RFC 3849), so tests share no bucket."""
+    bits = uuid.uuid4().int
+    return f"2001:db8:{bits & 0xFFFF:x}:{(bits >> 16) & 0xFFFF:x}::1"
+
+
+def _ago(seconds: float) -> datetime:
+    return datetime.now(timezone.utc) - timedelta(seconds=seconds)
+
+
 @pytest.fixture
 def started(new_session):
-    """Start sign-ins on committing sessions; every row they wrote is deleted afterwards."""
-    states = []
+    """Start sign-ins on committing sessions (from one address of their own unless told another);
+    every row they wrote is deleted afterwards."""
+    states, own_address = [], _new_address()
 
-    def start(now=None):
+    def start(now=None, address=None):
         s = new_session()
-        begun = oidc_pending.begin(s, "/after", now=now)
+        begun = oidc_pending.begin(s, "/after", address or own_address, now=now)
         s.close()
         states.append(begun.state)
         return begun
@@ -149,8 +165,8 @@ def _stale_rows(new_session) -> list:
     """``STALE_ROWS`` sign-ins whose time was up an hour ago; their state digests."""
     hashes = [hash_secret(f"stale-{index}-{uuid.uuid4().hex}") for index in range(STALE_ROWS)]
     s = new_session()
-    s.execute(text("INSERT INTO oidc_pending_sign_ins (id, state_hash, nonce_hash, binding_hash, code_verifier, "
-                   "return_to, created_at, expires_at) VALUES (:id, :h, :h, :h, :h, '/', :at, :at)"),
+    s.execute(text("INSERT INTO oidc_pending_sign_ins (id, state_hash, nonce_hash, binding_hash, client_hash, "
+                   "code_verifier, return_to, created_at, expires_at) VALUES (:id, :h, :h, :h, :h, :h, '/', :at, :at)"),
               [{"id": uuid.uuid4(), "h": digest, "at": datetime.now(timezone.utc) - timedelta(hours=1)}
                for digest in hashes])
     s.commit()
@@ -177,15 +193,70 @@ def _live(new_session) -> int:
     return count
 
 
-def test_at_the_ceiling_a_start_is_busy_and_writes_nothing(started, new_session, monkeypatch):
-    monkeypatch.setattr(config, "OIDC_PENDING_SIGN_INS_MAX", _live(new_session) + 1)
-    started()
+PER_ADDRESS = 3
+
+
+def test_an_address_at_its_limit_keeps_only_its_newest_and_another_address_is_untouched(
+        started, new_session, monkeypatch):
+    monkeypatch.setattr(config, "OIDC_PENDING_SIGN_INS_PER_ADDRESS", PER_ADDRESS)
+    other = _new_address()
+    mine = [started(now=_ago(50)), started(now=_ago(40)), started(now=_ago(30))]
+    theirs = [started(now=_ago(45), address=other), started(now=_ago(35), address=other)]
+
+    mine += [started(now=_ago(20)), started(now=_ago(10))]
+
+    assert [_rows(new_session, begun.state) for begun in mine] == [0, 0, 1, 1, 1]
+    assert [_rows(new_session, begun.state) for begun in theirs] == [1, 1]
+
+
+def test_at_the_ceiling_the_oldest_sign_in_goes_and_the_new_one_is_stored(started, new_session, monkeypatch):
+    # Near its end, so it is older than any other row a test left: it is the oldest overall.
+    oldest = started(now=_ago(oidc_pending.SIGN_IN_TTL_SECONDS - 60), address=_new_address())
+    younger = started(now=_ago(200), address=_new_address())
+    monkeypatch.setattr(config, "OIDC_PENDING_SIGN_INS_MAX", _live(new_session))
     before = _live(new_session)
 
-    with pytest.raises(oidc_pending.SignInsBusy) as busy:
-        started()
+    newest = started(address=_new_address())
 
-    assert _live(new_session) == before and str(busy.value) == oidc_pending.BUSY_MESSAGE
+    assert _rows(new_session, oldest.state) == 0
+    assert _rows(new_session, younger.state) == 1 and _rows(new_session, newest.state) == 1
+    assert _live(new_session) == before
+
+
+FLOOD_ADDRESSES = 30
+
+
+def test_a_sign_in_started_before_a_flood_under_the_ceiling_still_completes(started, new_session, monkeypatch):
+    monkeypatch.setattr(config, "OIDC_PENDING_SIGN_INS_PER_ADDRESS", PER_ADDRESS)
+    person = started(now=_ago(5))
+    flooder = _new_address()
+    monkeypatch.setattr(config, "OIDC_PENDING_SIGN_INS_MAX", _live(new_session) + FLOOD_ADDRESSES + PER_ADDRESS)
+
+    for _ in range(FLOOD_ADDRESSES):
+        started(address=_new_address())
+    for _ in range(PER_ADDRESS * 4):
+        started(address=flooder)
+
+    s = new_session()
+    assert oidc_pending.claim(s, person.state, person.binding) is not None
+    count = s.execute(text("SELECT COUNT(*) FROM oidc_pending_sign_ins WHERE client_hash = :c"),
+                      {"c": oidc_pending.client_hash(flooder)}).scalar_one()
+    s.close()
+    assert count == PER_ADDRESS
+
+
+def test_a_row_keeps_the_hash_of_its_address_never_the_address(started, new_session):
+    address = "198.51.100.23"  # TEST-NET-2 (RFC 5737)
+    begun = started(address=address)
+    s = new_session()
+    row = s.execute(text("SELECT * FROM oidc_pending_sign_ins WHERE state_hash = :h"),
+                    {"h": hash_secret(begun.state)}).mappings().one()
+    s.close()
+
+    assert row["client_hash"] == oidc_pending.client_hash(address) == hash_secret(f"oidc_pending:{address}")
+    assert len(row["client_hash"]) == 64 and not any(address in str(value) for value in row.values())
+    same_64 = (oidc_pending.client_hash("2001:db8:1:2::a"), oidc_pending.client_hash("2001:db8:1:2::b"))
+    assert same_64[0] == same_64[1] != oidc_pending.client_hash("2001:db8:1:3::a")
 
 
 @pytest.mark.parametrize("state", ["unknown-state", "", None, "x" * 300, "état", 42])

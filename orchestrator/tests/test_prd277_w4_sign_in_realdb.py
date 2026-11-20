@@ -7,7 +7,8 @@ address) and the in-process provider (US-407), each test in a transaction rolled
   state, a nonce and a PKCE S256 challenge, keeps the sign-in server-side for ten minutes as
   digests, and binds it to this browser with a ``__Host-`` cookie holding a secret of its own (not
   the state). A callback with no cookie, another cookie, or the state as its cookie ends nothing.
-  At ``OIDC_PENDING_SIGN_INS_MAX`` sign-ins under way, a start is ``sign_in_busy`` and keeps nothing.
+  At ``OIDC_PENDING_SIGN_INS_MAX`` sign-ins under way, a start still starts (the oldest is ended to
+  make room), and its row counts it against the trusted client address, as a hash.
 * **First sign-in** creates the person and the identity link and nothing else (no personal
   workspace, no trial, no membership), is audited, and issues a session in the cookie. With
   ``ENTERPRISE_DEFAULT_ROLE=none`` the person is signed in and in no workspace, and the API says
@@ -54,7 +55,7 @@ os.environ.setdefault("POSTGRES_DB", "test")
 
 from api import auth_oidc as routes  # noqa: E402
 from config import config  # noqa: E402
-from core.auth import hybrid, oidc_provider, session_lane, sign_in_flow  # noqa: E402
+from core.auth import hybrid, oidc_pending, oidc_provider, session_lane, sign_in_flow  # noqa: E402
 from core.auth.oidc_sign_in import CALLBACK_PATH, CODE_MAX_LENGTH, OidcSignIn  # noqa: E402
 from core.auth.pairing import hash_secret  # noqa: E402
 from core.auth.sign_in_methods import (  # noqa: E402
@@ -450,16 +451,25 @@ def test_a_callback_with_more_parameters_than_the_cap_carries_none(install):
     assert install.idp.token_requests == [] and _pending_rows(install, callback) == 1
 
 
-def test_at_the_ceiling_a_start_is_busy_and_keeps_nothing(install, monkeypatch):
-    live = install.db.execute(text("SELECT COUNT(*) FROM oidc_pending_sign_ins WHERE expires_at > now()")).scalar_one()
-    monkeypatch.setattr(config, "OIDC_PENDING_SIGN_INS_MAX", live + 1)
+LIVE_ROWS = "SELECT COUNT(*) FROM oidc_pending_sign_ins WHERE expires_at > now()"
+# An address from TEST-NET-3 (RFC 5737), set by the "proxy" in CLIENT_IP_HEADER.
+CALLER_ADDRESS = "203.0.113.7"
+
+
+def test_at_the_ceiling_a_start_still_starts_and_is_counted_against_its_address(install, monkeypatch):
+    monkeypatch.setattr(config, "CLIENT_IP_HEADER", "X-Real-IP")
     _start(install)
+    live = install.db.execute(text(LIVE_ROWS)).scalar_one()
+    monkeypatch.setattr(config, "OIDC_PENDING_SIGN_INS_MAX", live)
 
-    busy = install.client.get(START, follow_redirects=False)
+    started = install.client.get(START, headers={"X-Real-IP": CALLER_ADDRESS}, follow_redirects=False)
 
-    assert _refusal(busy) == sign_in_flow.BUSY and routes.SIGN_IN_COOKIE not in busy.headers.get("set-cookie", "")
-    assert install.db.execute(text("SELECT COUNT(*) FROM oidc_pending_sign_ins WHERE expires_at > now()")
-                              ).scalar_one() == live + 1
+    assert started.status_code == 303 and routes.SIGN_IN_COOKIE in started.headers.get("set-cookie", "")
+    assert install.db.execute(text(LIVE_ROWS)).scalar_one() == live
+    state = parse_qs(urlsplit(started.headers["location"]).query)["state"][0]
+    kept = install.db.execute(text("SELECT client_hash FROM oidc_pending_sign_ins WHERE state_hash = :h"),
+                              {"h": hash_secret(state)}).scalar_one()
+    assert kept == oidc_pending.client_hash(CALLER_ADDRESS) and CALLER_ADDRESS not in kept
 
 
 # --------------------------------------------------------------------------- US-408
@@ -468,7 +478,7 @@ def test_at_the_ceiling_a_start_is_busy_and_keeps_nothing(install, monkeypatch):
 class _FakeMethod:
     """A second way of proving identity: whatever its callback names, verified by fiat."""
 
-    def start(self, db, return_to):
+    def start(self, db, return_to, client_address):
         return Started(redirect_to="/fake-sign-in", browser_binding="fake-binding")
 
     def finish(self, db, callback):

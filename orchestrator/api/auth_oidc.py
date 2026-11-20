@@ -14,7 +14,8 @@ shared limiter's store cannot be reached, these two routes count in this process
   answers 303 to the provider's sign-in page. ``return_to`` is kept only when it is a path on this
   install (``sign_in_methods.safe_return_path``), else ``/``. The sign-in's browser binding, a
   secret of its own that is never in an address, goes in a ``__Host-`` cookie (``SIGN_IN_COOKIE``:
-  Secure, HttpOnly, SameSite=Lax, ten minutes) that binds the callback to this browser.
+  Secure, HttpOnly, SameSite=Lax, ten minutes) that binds the callback to this browser. The same
+  client address bounds the sign-ins one caller may hold unfinished (``core.auth.oidc_pending``).
 * ``GET /callback`` finishes it (``sign_in_flow.finish_sign_in``): 303 to the stored path, with the
   session cookie set (``session_cookie.set_session_cookie``). A callback with more than
   ``CALLBACK_PARAMS_MAX`` parameters is read as carrying none, so it is refused.
@@ -134,10 +135,11 @@ def _params(request: Request) -> Dict[str, Tuple[str, ...]]:
 
 
 @router.get("/start", dependencies=[Depends(limit_starts_per_ip)])
-def start(return_to: str = Query(DEFAULT_RETURN_PATH), db: Session = Depends(get_db)) -> RedirectResponse:
+def start(request: Request, return_to: str = Query(DEFAULT_RETURN_PATH),
+          db: Session = Depends(get_db)) -> RedirectResponse:
     """303 to the provider's sign-in page, with this browser's sign-in bound to it by cookie."""
     try:
-        started = sign_in_flow.start_sign_in(db, return_to)
+        started = sign_in_flow.start_sign_in(db, return_to, get_client_ip(request))
     except sign_in_flow.SignInRefusal as refusal:
         return _refused(refusal.code)
     response = _redirect(started.redirect_to)

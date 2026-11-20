@@ -152,7 +152,7 @@ def test_a_refused_start_goes_to_the_sign_in_page_with_its_code_only(monkeypatch
     monkeypatch.setattr(config, "AUTH_EDITION", "enterprise")
     monkeypatch.setattr(auth_oidc, "_rate_store", SimpleNamespace(check=lambda *a, **k: (True, 300, 299, 600)))
 
-    def unavailable(db, return_to):
+    def unavailable(db, return_to, client_address):
         raise sign_in_flow.SignInRefusal(sign_in_flow.UNAVAILABLE)
 
     monkeypatch.setattr(sign_in_flow, "start_sign_in", unavailable)
@@ -173,7 +173,7 @@ def test_the_redirect_address_is_the_install_origin_and_the_callback_path(monkey
 
 
 def _unavailable_start(monkeypatch):
-    def unavailable(db, return_to):
+    def unavailable(db, return_to, client_address):
         raise sign_in_flow.SignInRefusal(sign_in_flow.UNAVAILABLE)
 
     monkeypatch.setattr(config, "AUTH_EDITION", "enterprise")

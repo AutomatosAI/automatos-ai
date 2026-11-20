@@ -163,11 +163,12 @@ def _claims_of(id_token: str, claimed: oidc_pending.ClaimedSignIn) -> Mapping[st
 class OidcSignIn:
     """Signing in with the organisation's OIDC provider: authorization code, PKCE S256, state, nonce."""
 
-    def start(self, db: Any, return_to: str) -> Started:
-        """Begin a sign-in that returns to ``return_to`` (a path on this install, else ``/``)."""
+    def start(self, db: Any, return_to: str, client_address: str) -> Started:
+        """Begin a sign-in that returns to ``return_to`` (a path on this install, else ``/``), counted
+        against ``client_address``'s pending sign-ins (``oidc_pending.begin``)."""
         metadata = oidc_provider.current_metadata()
         redirect_uri = callback_address()
-        started = oidc_pending.begin(db, safe_return_path(return_to))
+        started = oidc_pending.begin(db, safe_return_path(return_to), client_address)
         address = _authorize_address(metadata.authorization_endpoint, {
             "response_type": oidc_provider.CODE_FLOW, "client_id": config.OIDC_CLIENT_ID,
             "redirect_uri": redirect_uri, "scope": config.OIDC_SCOPES, "state": started.state,

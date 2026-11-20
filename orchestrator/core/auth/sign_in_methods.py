@@ -112,8 +112,9 @@ class SignedIn:
 class IdentityMethod(Protocol):
     """One way of proving who someone is (§5.13)."""
 
-    def start(self, db: Session, return_to: str) -> Started:
-        """Begin a sign-in that returns to ``return_to``; where to send the browser."""
+    def start(self, db: Session, return_to: str, client_address: str) -> Started:
+        """Begin a sign-in that returns to ``return_to``, for the browser at ``client_address`` (the
+        trusted client address, ``api.credentials.get_client_ip``); where to send the browser."""
 
     def finish(self, db: Session, callback: Callback) -> Finished:
         """The verified identity the callback proves, or one of the three refusals."""

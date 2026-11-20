@@ -2,11 +2,11 @@
 
 * The revision chains onto ``prd277_w3_sessions_20261120`` and is the one head; both head pins
   name it.
-* Its upgrade creates ``oidc_pending_sign_ins``, its unique state-hash index and its expiry index,
-  each only when missing, writing no row and touching no other table; its downgrade drops exactly
+* Its upgrade creates ``oidc_pending_sign_ins``, its unique state-hash index, its expiry index and
+  its per-address index, each only when missing, writing no row and touching no other table; its downgrade drops exactly
   the table.
 * The model (``core.models.oidc_pending_sign_ins``) and the DDL declare the same names and sizes.
-  No column can hold a raw state or nonce: each is a SHA-256 hex digest's length.
+  No column can hold a raw state, nonce, binding or address: each is a SHA-256 hex digest's length.
 * On Postgres, in a new empty schema inside a rolled-back transaction: the upgrade over a table
   ``create_all`` built changes nothing, twice; the migration builds what ``create_all`` builds;
   one state hash names one row; the downgrade drops the table and the upgrade rebuilds it.
@@ -30,6 +30,7 @@ from sqlalchemy.exc import IntegrityError
 import core.models  # noqa: F401  (registers every table on Base)
 from core.database.base import Base
 from core.models.oidc_pending_sign_ins import (
+    CLIENT_INDEX,
     CODE_VERIFIER_MAX,
     EXPIRES_INDEX,
     RETURN_TO_MAX,
@@ -43,7 +44,8 @@ VERSIONS = ORCH / "alembic" / "versions"
 REVISION, PARENT = "prd277_w4_oidc_sign_ins_20261120", "prd277_w3_sessions_20261120"
 MIGRATION = VERSIONS / f"{REVISION}.py"
 TABLE = "oidc_pending_sign_ins"
-COLUMNS = ("id", "state_hash", "nonce_hash", "binding_hash", "code_verifier", "return_to", "created_at", "expires_at")
+COLUMNS = ("id", "state_hash", "nonce_hash", "binding_hash", "client_hash", "code_verifier", "return_to", "created_at",
+           "expires_at")
 ROW_WRITES = re.compile(r"\b(DELETE FROM|TRUNCATE|UPDATE \w+ SET|INSERT INTO)\b")
 
 
@@ -111,6 +113,7 @@ def test_the_upgrade_builds_the_table_and_its_indexes_and_writes_no_row():
     assert constants["_INDEXES"] == (
         f"CREATE UNIQUE INDEX IF NOT EXISTS {STATE_HASH_INDEX} ON {TABLE} (state_hash);",
         f"CREATE INDEX IF NOT EXISTS {EXPIRES_INDEX} ON {TABLE} (expires_at);",
+        f"CREATE INDEX IF NOT EXISTS {CLIENT_INDEX} ON {TABLE} (client_hash, expires_at);",
     )
     assert not any(ROW_WRITES.search(statement) for statement in upgrade)
     assert not any("ALTER" in statement or "REFERENCES" in statement for statement in upgrade)
@@ -129,21 +132,24 @@ def test_the_model_and_the_ddl_declare_the_same_names_and_sizes():
     lines = _ddl_lines()
     assert [line.split()[0] for line in lines] == list(COLUMNS)
     sizes = {"state_hash": SHA256_HEX_LENGTH, "nonce_hash": SHA256_HEX_LENGTH, "binding_hash": SHA256_HEX_LENGTH,
-             "code_verifier": CODE_VERIFIER_MAX, "return_to": RETURN_TO_MAX}
+             "client_hash": SHA256_HEX_LENGTH, "code_verifier": CODE_VERIFIER_MAX, "return_to": RETURN_TO_MAX}
     for name, size in sizes.items():
         assert table.c[name].type.length == size, name
         assert any(line.startswith(f"{name} VARCHAR({size}) NOT NULL") for line in lines), name
     assert not table.foreign_keys
     indexes = {index.name: (index.unique, tuple(index.columns.keys())) for index in table.indexes}
-    assert indexes == {STATE_HASH_INDEX: (True, ("state_hash",)), EXPIRES_INDEX: (False, ("expires_at",))}
+    assert indexes == {STATE_HASH_INDEX: (True, ("state_hash",)), EXPIRES_INDEX: (False, ("expires_at",)),
+                       CLIENT_INDEX: (False, ("client_hash", "expires_at"))}
 
 
-def test_no_column_can_hold_a_raw_state_nonce_or_binding():
-    """A state, a nonce and a binding are 43 URL-safe characters; their only columns hold 64 hex."""
+def test_no_column_can_hold_a_raw_state_nonce_binding_or_address():
+    """A state, a nonce and a binding are 43 URL-safe characters; their only columns hold 64 hex, as the
+    address's does (an address is never kept, only its hash)."""
     assert SHA256_HEX_LENGTH == 64
     text_columns = [c.name for c in OidcPendingSignIn.__table__.columns if isinstance(c.type, sa.String)]
-    secrets_kept = [name for name in text_columns if any(word in name for word in ("state", "nonce", "binding"))]
-    assert secrets_kept == ["state_hash", "nonce_hash", "binding_hash"]
+    words = ("state", "nonce", "binding", "client", "address", "ip")
+    secrets_kept = [name for name in text_columns if any(word in name.split("_") for word in words)]
+    assert secrets_kept == ["state_hash", "nonce_hash", "binding_hash", "client_hash"]
 
 
 # --------------------------------------------------------------------------- Postgres (CI)
@@ -199,17 +205,17 @@ def _has_table(conn) -> bool:
 def _pending(conn, state_hash: str) -> None:
     now = datetime.now(timezone.utc)
     conn.execute(sa.text(
-        "INSERT INTO oidc_pending_sign_ins (id, state_hash, nonce_hash, binding_hash, code_verifier, return_to, "
-        "expires_at) VALUES (:id, :s, :n, :b, :v, '/', :e)"),
+        "INSERT INTO oidc_pending_sign_ins (id, state_hash, nonce_hash, binding_hash, client_hash, code_verifier, "
+        "return_to, expires_at) VALUES (:id, :s, :n, :b, :c, :v, '/', :e)"),
         {"id": uuid.uuid4(), "s": state_hash, "n": uuid.uuid4().hex * 2, "b": uuid.uuid4().hex * 2,
-         "v": uuid.uuid4().hex * 2,
+         "c": uuid.uuid4().hex * 2, "v": uuid.uuid4().hex * 2,
          "e": now + timedelta(minutes=10)})
 
 
 def test_over_create_all_the_upgrade_changes_nothing(pg):
     Base.metadata.create_all(pg, tables=[OidcPendingSignIn.__table__], checkfirst=False)
     by_model = _schema(pg)
-    assert len(by_model[1]) == 3                                         # the key and both indexes
+    assert len(by_model[1]) == 4                                         # the key and the three indexes
     _run(pg)
     _run(pg)
     assert _schema(pg) == by_model

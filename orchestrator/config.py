@@ -595,8 +595,7 @@ class Config:
     CLERK_AUTHORIZED_PARTIES: str = os.getenv("CLERK_AUTHORIZED_PARTIES", CLERK_DEFAULT_AUTHORIZED_PARTIES)
     # A token with no azp at all (Clerk omits it with no Origin: native apps, Backend API tokens). false = warn and accept; true = 401.
     CLERK_AZP_REQUIRED: bool = os.getenv("CLERK_AZP_REQUIRED", "false").strip().lower() in ("1", "true", "yes", "on")
-    # PRD-277 §5.10: the identity provider (enterprise). Read so no value stops a start; core/edition_start_up.py checks them where sign-in is OIDC.
-    OIDC_ISSUER: str = (os.getenv("OIDC_ISSUER") or "").strip()
+    OIDC_ISSUER: str = (os.getenv("OIDC_ISSUER") or "").strip()  # PRD-277 §5.10 (enterprise), to the next comment: read so no value stops a start; core/edition_start_up.py checks them where sign-in is OIDC
     OIDC_CLIENT_ID: str = (os.getenv("OIDC_CLIENT_ID") or "").strip()
     OIDC_CLIENT_SECRET: str = (os.getenv("OIDC_CLIENT_SECRET") or "").strip()
     OIDC_SCOPES: str = " ".join((os.getenv("OIDC_SCOPES") or "openid profile email").split())
@@ -606,6 +605,7 @@ class Config:
     ENTERPRISE_DEFAULT_ROLE: str = (os.getenv("ENTERPRISE_DEFAULT_ROLE") or "none").strip().lower()
     OIDC_ENDPOINT_HOSTS: str = (os.getenv("OIDC_ENDPOINT_HOSTS") or "").strip()  # hosts besides the issuer's the metadata may name
     OIDC_PENDING_SIGN_INS_MAX: int = _whole_number_setting("OIDC_PENDING_SIGN_INS_MAX", 10_000)  # unfinished sign-ins held at once
+    OIDC_PENDING_SIGN_INS_PER_ADDRESS: int = _whole_number_setting("OIDC_PENDING_SIGN_INS_PER_ADDRESS", 10)  # ...by one client address
     # PRD-277 §5.3, D-15: sessions (core/auth/sessions.py): two clocks, a __Host- cookie and the CSRF header; a bad clock stops enterprise only.
     SESSION_IDLE_MINUTES: int = _whole_number_setting("SESSION_IDLE_MINUTES", SESSION_IDLE_MINUTES_DEFAULT)
     SESSION_ABSOLUTE_HOURS: int = _whole_number_setting("SESSION_ABSOLUTE_HOURS", SESSION_ABSOLUTE_HOURS_DEFAULT)

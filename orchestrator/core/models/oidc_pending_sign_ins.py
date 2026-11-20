@@ -10,6 +10,10 @@
 * ``binding_hash`` is the SHA-256 of the browser binding: a random secret of its own, set in the
   browser's ``__Host-`` sign-in cookie at ``/start`` and never sent anywhere else. The callback must
   carry it, so a callback carried to another browser is not a sign-in there.
+* ``client_hash`` is the SHA-256 of the address that started the sign-in, as the per-address rate
+  limits count it (one IPv4 address or one IPv6 /64, ``core.security.ip_bucket``); the address is
+  never kept. One address holds at most ``OIDC_PENDING_SIGN_INS_PER_ADDRESS`` live rows
+  (``core.auth.oidc_pending``).
 * ``code_verifier`` is the PKCE verifier (RFC 7636: 43 to 128 characters), kept until the code is
   exchanged, because the exchange must present it. It never leaves the server.
 * ``return_to`` is where the person goes after signing in: a path on the install's own address,
@@ -34,6 +38,7 @@ RETURN_TO_MAX = 1024
 
 STATE_HASH_INDEX = "uq_oidc_pending_sign_ins_state_hash"
 EXPIRES_INDEX = "ix_oidc_pending_sign_ins_expires_at"
+CLIENT_INDEX = "ix_oidc_pending_sign_ins_client_hash_expires_at"
 
 
 class OidcPendingSignIn(Base):
@@ -45,6 +50,7 @@ class OidcPendingSignIn(Base):
     state_hash = Column(String(SHA256_HEX_LENGTH), nullable=False)
     nonce_hash = Column(String(SHA256_HEX_LENGTH), nullable=False)
     binding_hash = Column(String(SHA256_HEX_LENGTH), nullable=False)
+    client_hash = Column(String(SHA256_HEX_LENGTH), nullable=False)
     code_verifier = Column(String(CODE_VERIFIER_MAX), nullable=False)
     return_to = Column(String(RETURN_TO_MAX), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -55,11 +61,14 @@ class OidcPendingSignIn(Base):
         Index(STATE_HASH_INDEX, "state_hash", unique=True),
         # Clearing sign-ins that were started and never finished.
         Index(EXPIRES_INDEX, "expires_at"),
+        # One address's sign-ins, oldest first: the per-address bound's lookup.
+        Index(CLIENT_INDEX, "client_hash", "expires_at"),
         {"extend_existing": True},
     )
 
 
 __all__ = [
+    "CLIENT_INDEX",
     "CODE_VERIFIER_MAX",
     "EXPIRES_INDEX",
     "RETURN_TO_MAX",

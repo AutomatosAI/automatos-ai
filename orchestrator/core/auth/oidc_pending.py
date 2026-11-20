@@ -10,9 +10,26 @@ holding digests and an expiry, ended by the one call that uses it.
   enough to finish the sign-in in another browser. The row keeps only the SHA-256 of the state, the
   nonce and the binding (``core.auth.pairing.hash_secret``), the verifier, where the person returns,
   and the expiry, ``SIGN_IN_TTL_SECONDS`` (ten minutes) on. It returns the state, the nonce, the
-  binding and the S256 challenge, once. First it deletes every row whose time is up, in one
-  statement, and counts the live ones: at ``OIDC_PENDING_SIGN_INS_MAX`` it writes nothing and raises
-  ``SignInsBusy``, so callers nobody has authenticated cannot grow the table without bound.
+  binding and the S256 challenge, once.
+* ``begin`` also bounds the table, so callers nobody has authenticated cannot grow it, and so a
+  flood costs the flooder rather than everyone else. In the one transaction that writes the new
+  row it first deletes every row whose time is up, then:
+
+  - the per-address bound: the row records ``client_hash``, the SHA-256 of the address that
+    started it as the rate limits count it (one IPv4 address or one IPv6 /64,
+    ``core.security.ip_bucket``; the address itself is never kept). One address holds at most
+    ``OIDC_PENDING_SIGN_INS_PER_ADDRESS`` live rows: when it is at that limit, its OLDEST rows are
+    deleted to make room. A person who clicks sign-in again and again loses only their own
+    older attempts, and one address can never hold more than its share.
+  - the ceiling: when the live rows overall are at ``OIDC_PENDING_SIGN_INS_MAX``, the oldest
+    rows overall are deleted to make room. A start is never refused for want of room.
+
+  What this does not do: a sign-in whose row was deleted to make room ends as an expired one
+  does, and the person sees "sign-in expired, start again". With enough addresses a flood can
+  still push real sign-ins out at the ceiling, but only by starting ``OIDC_PENDING_SIGN_INS_MAX``
+  sign-ins inside the few seconds a real one takes to come back, and it can never stop a new
+  sign-in from starting. Two starts at the same moment may each see room for one, so the table
+  can pass the ceiling by the number of starts under way; the next start trims it again.
 * ``claim`` ends the sign-in a callback's state and binding name in ONE statement, ``DELETE …
   RETURNING``, committed at once, before the code is exchanged. A callback whose binding is missing
   or another browser's deletes nothing, so the person's own browser can still finish. Two callbacks
@@ -33,7 +50,7 @@ import logging
 import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, Optional, Tuple, TypeVar
 from uuid import uuid4
 
 from sqlalchemy import text
@@ -43,6 +60,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core.auth.pairing import hash_secret, secrets_match
 from core.models.oidc_pending_sign_ins import RETURN_TO_MAX, OidcPendingSignIn
+from core.security.ip_bucket import ip_rate_bucket
 
 logger = logging.getLogger(__name__)
 
@@ -53,17 +71,26 @@ STATE_BYTES = 32
 NONCE_BYTES = 32
 VERIFIER_BYTES = 64
 BINDING_BYTES = 32
-# config.OIDC_PENDING_SIGN_INS_MAX's default, for a value that start-up would have refused.
+# config.OIDC_PENDING_SIGN_INS_MAX's and _PER_ADDRESS's defaults, for values start-up would have refused.
 PENDING_SIGN_INS_MAX_DEFAULT = 10_000
+PENDING_SIGN_INS_PER_ADDRESS_DEFAULT = 10
+# The bucket name an address is counted under before it is hashed (core.security.ip_bucket).
+CLIENT_BUCKET_PREFIX = "oidc_pending"
 # A state this server made is 43 URL-safe characters; anything far longer is not one.
 STATE_MAX_LENGTH = 256
 FAILED_MESSAGE = "The sign-in could not be stored. Try again."
-BUSY_MESSAGE = "Too many sign-ins are under way. Try again shortly."
 
 _SWEEP = text("DELETE FROM oidc_pending_sign_ins WHERE expires_at <= :now")
-# Counts no further than the ceiling, so a full table costs no more than a full count of the cap.
-_LIVE = text(
-    "SELECT COUNT(*) FROM (SELECT 1 FROM oidc_pending_sign_ins WHERE expires_at > :now LIMIT :cap) AS live"
+# After the sweep every row is live. Each keeps the newest :keep rows (expires_at is created_at plus
+# the one TTL, so newest by expiry is newest by start) and deletes the rest; ix_..._client_hash_expires_at
+# serves the first, ix_..._expires_at the second.
+_EVICT_ADDRESS = text(
+    "DELETE FROM oidc_pending_sign_ins WHERE id IN (SELECT id FROM oidc_pending_sign_ins "
+    "WHERE client_hash = :client_hash ORDER BY expires_at DESC, id DESC OFFSET :keep)"
+)
+_EVICT_OLDEST = text(
+    "DELETE FROM oidc_pending_sign_ins WHERE id IN (SELECT id FROM oidc_pending_sign_ins "
+    "ORDER BY expires_at DESC, id DESC OFFSET :keep)"
 )
 _CLAIM = text(
     "DELETE FROM oidc_pending_sign_ins WHERE state_hash = :state_hash AND binding_hash = :binding_hash "
@@ -73,10 +100,6 @@ _CLAIM = text(
 
 class PendingSignInFailed(RuntimeError):
     """The sign-in's row could not be written or ended; nothing was kept. Its text never holds a value."""
-
-
-class SignInsBusy(RuntimeError):
-    """``OIDC_PENDING_SIGN_INS_MAX`` sign-ins are under way; this one was not started."""
 
 
 @dataclass(frozen=True)
@@ -128,43 +151,64 @@ def _committed(db: Session, work: Callable[[], T]) -> T:
     raise PendingSignInFailed(FAILED_MESSAGE)
 
 
+def _whole_number_or(value: Any, default: int) -> int:
+    usable = isinstance(value, int) and not isinstance(value, bool) and value >= 1
+    return value if usable else default
+
+
 def pending_sign_ins_max() -> int:
     """``OIDC_PENDING_SIGN_INS_MAX``; its default when it is not a whole number of at least one."""
-    cap = config.OIDC_PENDING_SIGN_INS_MAX
-    usable = isinstance(cap, int) and not isinstance(cap, bool) and cap >= 1
-    return cap if usable else PENDING_SIGN_INS_MAX_DEFAULT
+    return _whole_number_or(config.OIDC_PENDING_SIGN_INS_MAX, PENDING_SIGN_INS_MAX_DEFAULT)
 
 
-def _room_for_one_more(db: Session, moment: datetime) -> None:
-    """Delete every expired row, then ``SignInsBusy`` when the live ones are at the ceiling."""
-    cap = pending_sign_ins_max()
-
-    def sweep_and_count() -> int:
-        db.execute(_SWEEP, {"now": moment})
-        return int(db.execute(_LIVE, {"now": moment, "cap": cap}).scalar_one())
-
-    if _committed(db, sweep_and_count) >= cap:
-        logger.warning("A sign-in was not started: %d are under way, the most allowed", cap)
-        raise SignInsBusy(BUSY_MESSAGE)
+def pending_sign_ins_per_address() -> int:
+    """``OIDC_PENDING_SIGN_INS_PER_ADDRESS``; its default when it is not a whole number of at least one."""
+    return _whole_number_or(config.OIDC_PENDING_SIGN_INS_PER_ADDRESS, PENDING_SIGN_INS_PER_ADDRESS_DEFAULT)
 
 
-def begin(db: Session, return_to: str, now: Optional[datetime] = None) -> StartedSignIn:
-    """Start one sign-in: its row written and committed, its values returned once."""
+def client_hash(client_address: str) -> str:
+    """The SHA-256 of ``client_address``'s rate-limit bucket (one IPv4 address or one IPv6 /64)."""
+    return hash_secret(ip_rate_bucket(str(client_address or ""), CLIENT_BUCKET_PREFIX))
+
+
+def _make_room(db: Session, moment: datetime, client: str) -> Tuple[int, int]:
+    """Sweep, then delete this address's oldest rows past its limit less one, then the oldest overall
+    past the ceiling less one. The two counts deleted; not committed (the insert commits them)."""
+    db.execute(_SWEEP, {"now": moment})
+    own = db.execute(_EVICT_ADDRESS, {"client_hash": client, "keep": pending_sign_ins_per_address() - 1})
+    oldest = db.execute(_EVICT_OLDEST, {"keep": pending_sign_ins_max() - 1})
+    return max(own.rowcount or 0, 0), max(oldest.rowcount or 0, 0)
+
+
+def _log_room_made(own: int, oldest: int) -> None:
+    """Counts only: never an address, a hash or a value."""
+    if own:
+        logger.info("A sign-in start ended %d older sign-ins of its own address (at most %d per address)",
+                    own, pending_sign_ins_per_address())
+    if oldest:
+        logger.warning("A sign-in start ended the %d oldest sign-ins under way (at most %d at once)",
+                       oldest, pending_sign_ins_max())
+
+
+def begin(db: Session, return_to: str, client_address: str, now: Optional[datetime] = None) -> StartedSignIn:
+    """Start one sign-in for ``client_address``: room made, its row written, all in one committed
+    transaction; its values returned once."""
     if not isinstance(return_to, str) or not return_to or len(return_to) > RETURN_TO_MAX:
         raise ValueError(f"return_to must be a path of at most {RETURN_TO_MAX} characters")
-    moment = now or _now()
-    _room_for_one_more(db, moment)
+    moment, client = now or _now(), client_hash(client_address)
     state, nonce = secrets.token_urlsafe(STATE_BYTES), secrets.token_urlsafe(NONCE_BYTES)
     binding, verifier = secrets.token_urlsafe(BINDING_BYTES), secrets.token_urlsafe(VERIFIER_BYTES)
     expires_at = moment + timedelta(seconds=SIGN_IN_TTL_SECONDS)
 
-    def write() -> None:
+    def write() -> Tuple[int, int]:
+        made = _make_room(db, moment, client)
         db.add(OidcPendingSignIn(id=uuid4(), state_hash=hash_secret(state), nonce_hash=hash_secret(nonce),
-                                 binding_hash=hash_secret(binding), code_verifier=verifier,
+                                 binding_hash=hash_secret(binding), client_hash=client, code_verifier=verifier,
                                  return_to=return_to, created_at=moment, expires_at=expires_at))
         db.flush()
+        return made
 
-    _committed(db, write)
+    _log_room_made(*_committed(db, write))
     return StartedSignIn(state=state, nonce=nonce, binding=binding, code_challenge=code_challenge(verifier),
                          expires_at=expires_at)
 
@@ -199,10 +243,11 @@ __all__ = [
     "VERIFIER_BYTES",
     "ClaimedSignIn",
     "PendingSignInFailed",
-    "SignInsBusy",
     "StartedSignIn",
     "begin",
     "claim",
+    "client_hash",
     "code_challenge",
     "pending_sign_ins_max",
+    "pending_sign_ins_per_address",
 ]

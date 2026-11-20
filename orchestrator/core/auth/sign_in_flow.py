@@ -25,7 +25,8 @@ provider directly. ``finish_sign_in`` runs, in this order:
 
 Every refusal is a ``SignInRefusal`` whose ``code`` is all the person is shown:
 
-* ``sign_in_expired``: the callback belongs to no live sign-in of this browser. Logged, not audited
+* ``sign_in_expired``: the callback belongs to no live sign-in of this browser: unknown, used, out of
+  time, or ended to make room for newer ones (``core.auth.oidc_pending``). Logged, not audited
   (nobody is known, and anyone can send such a request).
 * ``sign_in_refused``: the token did not verify, the provider answered with an error, the email
   belongs to another person, the person is deactivated, or a hook refused. One code for all, so
@@ -33,7 +34,6 @@ Every refusal is a ``SignInRefusal`` whose ``code`` is all the person is shown:
   ``auth:sign_in_refused`` with its reason; anything pending is rolled back first.
 * ``identity_provider_unavailable``: the provider could not be reached or publishes settings sign-in
   cannot use. Logged, not audited.
-* ``sign_in_busy``: ``OIDC_PENDING_SIGN_INS_MAX`` sign-ins are under way; try again shortly. Logged.
 * ``sign_in_failed``: the sign-in could not be stored or recorded, or a hook failed. Logged; nothing
   was kept. A hook's failure is audited too.
 
@@ -52,7 +52,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core.auth import people, session_audit, sessions
 from core.auth.oidc_http import ProviderUnreachable
-from core.auth.oidc_pending import PendingSignInFailed, SignInsBusy
+from core.auth.oidc_pending import PendingSignInFailed
 from core.auth.oidc_sign_in import METHOD_NAME, OidcSignIn
 from core.auth.sign_in_methods import (
     Callback,
@@ -75,9 +75,8 @@ REGISTRY = SignInRegistry({METHOD_NAME: OidcSignIn()})
 EXPIRED = "sign_in_expired"
 REFUSED = "sign_in_refused"
 UNAVAILABLE = "identity_provider_unavailable"
-BUSY = "sign_in_busy"
 FAILED = "sign_in_failed"
-REFUSAL_CODES = (EXPIRED, REFUSED, UNAVAILABLE, BUSY, FAILED)
+REFUSAL_CODES = (EXPIRED, REFUSED, UNAVAILABLE, FAILED)
 # The roles a hook may set: a workspace role below owner, as ENTERPRISE_DEFAULT_ROLE.
 HOOK_ROLES = tuple(role for role in DEFAULT_ROLES if role != NO_DEFAULT_ROLE)
 
@@ -118,15 +117,14 @@ def apply_first_admin_rule(db: Session, identity: VerifiedIdentity, linked: Link
     return None
 
 
-def start_sign_in(db: Session, return_to: str, method: str = METHOD_NAME) -> Started:
-    """Where to send the browser to sign in; ``SignInRefusal`` when the provider cannot be used."""
+def start_sign_in(db: Session, return_to: str, client_address: str, method: str = METHOD_NAME) -> Started:
+    """Where to send the browser at ``client_address`` to sign in; ``SignInRefusal`` when the provider
+    cannot be used or the sign-in cannot be stored."""
     failure: Optional[str] = None
     try:
-        return REGISTRY.method(method).start(db, return_to)
+        return REGISTRY.method(method).start(db, return_to, client_address)
     except ProviderUnreachable:
         failure = UNAVAILABLE
-    except SignInsBusy:
-        failure = BUSY
     except PendingSignInFailed:
         failure = FAILED
     logger.warning("A sign-in could not start: %s", failure)
@@ -284,7 +282,6 @@ def finish_sign_in(db: Session, callback: Callback, browser: Browser, method: st
 
 
 __all__ = [
-    "BUSY",
     "EXPIRED",
     "FAILED",
     "HOOK_ROLES",
