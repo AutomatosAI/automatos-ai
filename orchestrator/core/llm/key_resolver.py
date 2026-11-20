@@ -9,9 +9,13 @@ The agent factory and the card now both use this resolver, in the calls' own ord
 1. the workspace's BYOK key, when its override is on;
 2. the operator workspace's key;
 3. the credential store;
-4. the config's env key.
+4. the config's env key;
+5. the pod's own cloud role, for a provider whose client can sign with it (Bedrock),
+   when ``AWS_USE_WORKLOAD_IDENTITY`` is on (PRD-278 US-103). It resolves with no key
+   (``api_key`` empty, ``source`` ``workload_identity``): ``carries_calls`` says it can
+   still pay for a call.
 
-A provider that is BYO-key only in this edition never resolves from 2-4 (PRD-236).
+A provider that is BYO-key only in this edition never resolves from 2-5 (PRD-236).
 ``own_keys_only`` (PRD-265) stops at 1: a workspace whose credits can't pay for the
 platform's keys runs on its own keys or not at all.
 """
@@ -22,6 +26,9 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+# PRD-278 US-103: the call is signed by the pod's own role; there is no key to send.
+SOURCE_WORKLOAD_IDENTITY = "workload_identity"
 
 
 @dataclass
@@ -50,6 +57,13 @@ def resolve_provider_key(db: Any, provider_name: str, *, workspace_id: Any = Non
         logger.info("No platform key lane for '%s' in this edition (BYO key only) - %s", provider_name, agent_name)
         return None
     return _platform_key(provider_name, agent_name)
+
+
+def carries_calls(resolved: Optional[ResolvedKey]) -> bool:
+    """Can ``resolved`` pay for a call: a key to send, or the pod's own role (PRD-278 US-103)?"""
+    if resolved is None:
+        return False
+    return bool(resolved.api_key) or getattr(resolved, "source", None) == SOURCE_WORKLOAD_IDENTITY
 
 
 def _byok_key(db: Any, provider_name: str, workspace_id: Any) -> Optional[ResolvedKey]:
@@ -94,9 +108,10 @@ def byok_endpoint(provider_name: str, workspace_id: Any) -> Optional[str]:
 
 
 def _platform_key(provider_name: str, agent_name: str) -> Optional[ResolvedKey]:
-    """The operator workspace's key, then the credential store's, then the env's."""
+    """The operator workspace's key, then the credential store's, then the env's, then
+    the pod's own role."""
     from core.credentials.resolver import get_credential_resolver
-    from core.llm.providers import env_api_key
+    from core.llm.providers import env_api_key, runs_on_workload_identity
     from core.llm.workspace_keys import get_platform_workspace_key
 
     ws_key = get_platform_workspace_key(provider_name)
@@ -114,6 +129,9 @@ def _platform_key(provider_name: str, agent_name: str) -> Optional[ResolvedKey]:
     if key:
         logger.info("Using config API key for %s for %s", provider_name, agent_name)
         return ResolvedKey(api_key=key, source="env", is_byok=False, provider=provider_name)
+    if runs_on_workload_identity(provider_name):
+        logger.info("Using the pod's own role for %s for %s (AWS_USE_WORKLOAD_IDENTITY)", provider_name, agent_name)
+        return ResolvedKey(api_key="", source=SOURCE_WORKLOAD_IDENTITY, is_byok=False, provider=provider_name)
     return None
 
 
@@ -124,4 +142,4 @@ def _credential(resolver: Any, name: str) -> Optional[str]:
         return None
 
 
-__all__ = ["ResolvedKey", "byok_endpoint", "resolve_provider_key"]
+__all__ = ["SOURCE_WORKLOAD_IDENTITY", "ResolvedKey", "byok_endpoint", "carries_calls", "resolve_provider_key"]

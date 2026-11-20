@@ -82,6 +82,9 @@ class ProviderSpec:
     endpoint_placeholder: Optional[str] = None  # set: a key carries its own endpoint (#873)
     # set: a key may carry the workspace it bills (an organization-level Anthropic key, 9 Oct 2026)
     workspace_id_placeholder: Optional[str] = None
+    # PRD-278 US-103: the client can sign with the pod's own cloud role (the SDK's chain)
+    # in place of a key, when AWS_USE_WORKLOAD_IDENTITY is on.
+    workload_identity: bool = False
 
     @property
     def chat(self) -> bool:
@@ -166,7 +169,7 @@ _SPECS: Tuple[ProviderSpec, ...] = (
     ProviderSpec(
         slug="bedrock", label="AWS Bedrock", kind=KIND_DIRECT, adapter=ADAPTER_BEDROCK,
         enum_value="aws_bedrock", env_key="AWS_ACCESS_KEY_ID", aliases=("aws_bedrock",),
-        docs_url="https://console.aws.amazon.com/bedrock",
+        docs_url="https://console.aws.amazon.com/bedrock", workload_identity=True,
     ),
     ProviderSpec(
         slug="grok", label="Grok / xAI", kind=KIND_DIRECT, adapter=ADAPTER_GROK,
@@ -278,6 +281,18 @@ def env_api_key(provider: Optional[str]) -> Optional[str]:
     if spec is None or not spec.env_key:
         return None
     return getattr(config, spec.env_key, None) or None
+
+
+def runs_on_workload_identity(provider: Optional[str]) -> bool:
+    """True when this provider's calls are signed by the pod's own cloud role, with no key.
+
+    PRD-278 US-103: the env tier knows a provider by its key (``env_key``), and Bedrock's
+    is ``AWS_ACCESS_KEY_ID``, which an install on the pod's role leaves unset. With
+    ``AWS_USE_WORKLOAD_IDENTITY`` on, that absence is not "not set up" for a provider
+    whose client can use the role.
+    """
+    spec = get_spec(provider)
+    return bool(spec and spec.workload_identity and config.AWS_USE_WORKLOAD_IDENTITY)
 
 
 def base_url_for(provider: Optional[str]) -> Optional[str]:

@@ -121,7 +121,9 @@ async def _spoken_key(factory: Any, runtime: Any, provider: str, workspace: Any)
 
 def _key_refusal(runtime: Any, provider: str, resolved: Any) -> Optional[str]:
     """Why the key found can't carry the turn, or None when it can."""
-    if resolved is None or not resolved.api_key:
+    from core.llm.key_resolver import carries_calls
+
+    if not carries_calls(resolved):  # a key, or the pod's own role (PRD-278 US-103)
         return f"no {provider} key is open to this workspace"
     if runtime.is_byok and not resolved.is_byok:
         return "the agent runs on the workspace's own key"

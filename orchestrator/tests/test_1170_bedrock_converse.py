@@ -234,3 +234,32 @@ def test_any_other_bedrock_error_is_raised_as_it_came():
                            error_type="AccessDeniedException")
     with pytest.raises(ClientError, match="access to the model"):
         asyncio.run(provider.generate_response([{"role": "user", "content": "hi"}]))
+
+
+def test_with_workload_identity_a_keyless_bedrock_model_resolves_and_signs_with_the_pods_role(monkeypatch):
+    """PRD-278 US-103, the role path: no key in config, the credential store or the operator workspace.
+    The model resolves, and the client is built on its default-chain branch: the SDK's chain (here its
+    environment provider, standing in for the pod's role) signs the request, for the region asked."""
+    import sys
+    import types
+
+    from config import config
+    from core.llm.key_resolver import resolve_provider_key
+
+    monkeypatch.setitem(sys.modules, "core.credentials.resolver", types.SimpleNamespace(
+        get_credential_resolver=lambda: types.SimpleNamespace(get_credential_field=lambda *a, **k: None)))
+    monkeypatch.setitem(sys.modules, "core.llm.workspace_keys",
+                        types.SimpleNamespace(get_platform_workspace_key=lambda *_a, **_k: None))
+    monkeypatch.setattr(config, "AWS_USE_WORKLOAD_IDENTITY", True)
+    monkeypatch.setattr(config, "AWS_ACCESS_KEY_ID", None)
+    monkeypatch.setattr(config, "AWS_SECRET_ACCESS_KEY", None)
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+
+    resolved = resolve_provider_key(None, "bedrock", agent_name="agent")
+    provider, seen = _bedrock(api_key=resolved.api_key, secret=config.AWS_SECRET_ACCESS_KEY, region="eu-central-1")
+    provider.generate_response_sync([{"role": "user", "content": "hi"}])
+
+    authorization = seen[0].headers["Authorization"].decode()
+    assert authorization.startswith("AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/")
+    assert "/eu-central-1/bedrock/aws4_request" in authorization

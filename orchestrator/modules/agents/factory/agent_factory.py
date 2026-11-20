@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core.llm import LLMConfig, LLMManager, LLMProvider, LLMResponse, create_llm_manager
 from core.llm.defaults import DEFAULT_MAX_OUTPUT_TOKENS
-from core.llm.key_resolver import ResolvedKey, resolve_provider_key  # noqa: F401  # ResolvedKey: re-exported
+from core.llm.key_resolver import ResolvedKey, carries_calls, resolve_provider_key  # noqa: F401  # ResolvedKey: re-exported
 from core.models import Agent, Base, PriorityLevel, Skill
 from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
 from core.security.memory_audience import reads_memory_as_its_agent
@@ -966,7 +966,7 @@ class AgentFactory:
         )
 
         # Fallback: if direct provider has no credential, try OpenRouter
-        if (not resolved or not resolved.api_key) and provider_str != "openrouter":
+        if not carries_calls(resolved) and provider_str != "openrouter":
             self.logger.warning(
                 f"No credential for provider '{provider_str}' — falling back to OpenRouter for '{model_id_str}'"
             )
@@ -976,7 +976,7 @@ class AgentFactory:
             resolved = await self._resolve_api_key(
                 provider_str, agent_name, workspace_id=effective_ws_id, own_keys_only=own_only,
             )
-        if own_only and (not resolved or not resolved.api_key):
+        if own_only and not carries_calls(resolved):
             from services.credits.routing import paused_error
 
             raise paused_error(unfunded)

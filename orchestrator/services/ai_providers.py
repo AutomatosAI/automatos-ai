@@ -168,13 +168,14 @@ def _overrides_on(workspace: Optional[Workspace]) -> List[str]:
 def _platform_routes(db: Session, workspace_id: uuid.UUID) -> ProviderNames:
     """(b) Chat providers this edition allows a platform key for, with a platform key present.
 
-    ``workspace_id`` is unused: a platform key serves every workspace.
+    ``workspace_id`` is unused: a platform key serves every workspace. The pod's own role
+    counts as Bedrock's key when ``AWS_USE_WORKLOAD_IDENTITY`` is on (PRD-278 US-103).
     """
     allowed = [slug for slug in registry.chat_slugs() if registry.platform_key_allowed(slug)]
     present = (
         set(_operator_workspace_slugs(db))
         | set(_credential_store_slugs(db, allowed))
-        | {slug for slug in allowed if registry.env_api_key(slug)}
+        | {slug for slug in allowed if registry.env_api_key(slug) or registry.runs_on_workload_identity(slug)}
     )
     return _registry_names(slug for slug in allowed if slug in present)
 
