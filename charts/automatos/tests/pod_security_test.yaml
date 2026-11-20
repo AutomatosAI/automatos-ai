@@ -1,5 +1,4 @@
 suite: Every container's security settings (PRD-280 US-102)
-# No `templates:`: every template the chart has, so a pod added later is checked too.
 set:
   existingSecret: automatos-secrets
   # Every optional component on.
@@ -17,23 +16,86 @@ set:
   otel:
     enabled: true
     endpoint: http://otel-collector:4318
+# Each pod has exactly one container and no init container, so checking containers[0]
+# checks every container: a second one, or an init container, fails here until it is
+# added to these checks.
 tests:
-  - it: gives every container the runtime's default system-call filter, no privilege escalation, and every capability dropped
-    # Every document with a pod template: the Deployments and the migration Job.
-    documentSelector:
-      path: spec.template.spec.containers
-      matchMany: true
+  - it: gives the API's container the default system-call filter, no privilege escalation and no capability
+    template: templates/api-deployment.yaml
     asserts:
-      # A container that lacks any of the three, or has no securityContext at all.
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 1
       - notExists:
-          path: "spec.template.spec.containers[?(!(@.securityContext.seccompProfile.type == 'RuntimeDefault' && @.securityContext.allowPrivilegeEscalation == false && @.securityContext.capabilities.drop[*] == 'ALL'))]"
+          path: spec.template.spec.initContainers
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.seccompProfile.type
+          value: RuntimeDefault
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          value: ["ALL"]
       - notExists:
-          path: "spec.template.spec.initContainers[?(!(@.securityContext.seccompProfile.type == 'RuntimeDefault' && @.securityContext.allowPrivilegeEscalation == false && @.securityContext.capabilities.drop[*] == 'ALL'))]"
-      # The same filter the other way round finds every pod's container, so the check
-      # above cannot pass by matching nothing.
-      - exists:
-          path: "spec.template.spec.containers[?(@.securityContext.seccompProfile.type == 'RuntimeDefault' && @.securityContext.allowPrivilegeEscalation == false && @.securityContext.capabilities.drop[*] == 'ALL')]"
-      # No container adds a capability back, but the worker's until Wave 2 (its exact
-      # set is pinned in worker_frontend_test.yaml).
+          path: spec.template.spec.containers[0].securityContext.capabilities.add
+  - it: gives the web app's container the default system-call filter, no privilege escalation and no capability
+    template: templates/frontend.yaml
+    documentIndex: 0
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 1
       - notExists:
-          path: "spec.template.spec.containers[?(@.securityContext.capabilities.add && @.name != 'worker')]"
+          path: spec.template.spec.initContainers
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.seccompProfile.type
+          value: RuntimeDefault
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          value: ["ALL"]
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.capabilities.add
+  - it: gives the migration Job's container the default system-call filter, no privilege escalation and no capability
+    template: templates/migrate-job.yaml
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 1
+      - notExists:
+          path: spec.template.spec.initContainers
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.seccompProfile.type
+          value: RuntimeDefault
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          value: ["ALL"]
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.capabilities.add
+  - it: gives the worker's container the same, with only the four capabilities its root entrypoint adds back until Wave 2
+    template: templates/worker.yaml
+    documentIndex: 0
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 1
+      - notExists:
+          path: spec.template.spec.initContainers
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.seccompProfile.type
+          value: RuntimeDefault
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          value: ["ALL"]
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.capabilities.add
+          value: ["CHOWN", "DAC_OVERRIDE", "SETUID", "SETGID"]

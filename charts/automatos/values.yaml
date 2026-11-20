@@ -163,7 +163,8 @@ workspaces:
 # reaches that component only. The chart creates <fullname>-api, -frontend (the web app),
 # -worker and -migrate, <fullname> being the prefix of every resource's name (release
 # `demo`: demo-automatos-api). The migration Job's account is created by a hook just
-# before the Job, and deleted once the Job is done. No pod mounts a token for the
+# before the Job and deleted once the hooks succeed; after a failed Job it can be left
+# behind until the next install or upgrade replaces it. No pod mounts a token for the
 # cluster's own API: nothing in Automatos calls it. Tokens a cloud's own webhook projects
 # (EKS IRSA) are separate and still work.
 #   create: false  the chart creates no account; each pod runs under the account its `name`
