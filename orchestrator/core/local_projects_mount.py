@@ -22,6 +22,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from config import config
+from core import editions
 
 PROJECTS_FOLDER = "projects"
 
@@ -45,9 +46,10 @@ def is_projects_path(path: Any) -> bool:
 
 def projects_mount_workspace() -> Optional[str]:
     """The workspace the projects folder is mounted under, when this stack mounts the
-    owner's folder there: the local edition, with ``LOCAL_PROJECTS_DIR`` and
-    ``DEFAULT_WORKSPACE_ID`` set. ``None`` otherwise (the hosted edition always)."""
-    if not config.IS_LOCAL_EDITION:
+    owner's folder there: where the person using the app runs the server
+    (``operator_is_user``), with ``LOCAL_PROJECTS_DIR`` and ``DEFAULT_WORKSPACE_ID`` set.
+    ``None`` otherwise (the hosted edition always)."""
+    if not editions.current().operator_is_user:
         return None
     if not (getattr(config, "LOCAL_PROJECTS_DIR", "") or "").strip():
         return None

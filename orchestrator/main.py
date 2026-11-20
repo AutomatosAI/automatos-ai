@@ -1346,7 +1346,7 @@ def health_check():
         "metrics": health_probe.host_metrics(),
         "extensions": deferred_init.as_dict() if deferred_init else None,
         # PRD-234 S1b: the CLI host serves only an edition with session mode, switched on. Names only.
-        "edition": config.AUTH_EDITION,
+        "edition": editions.current_name(),
         "session_mode": editions.current().session_mode,
         "cli_runtime_enabled": bool(getattr(config, "CLI_RUNTIME_ENABLED", False)),
     }

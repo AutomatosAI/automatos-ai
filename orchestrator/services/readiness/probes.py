@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 
 from api.system_health_checks import _database
 from config import config
+from core import editions
 from core.llm.embedding_status import provider_ready
 from services import web_search as search
 from services.proactive.runner import heartbeat_llm
@@ -102,7 +103,7 @@ def web_search(db: Session, workspace_id: UUID) -> Finding:
 
 def push(db: Session, workspace_id: UUID) -> Finding:
     """Notifications can leave for Expo's push service: always on SaaS, on a local install once agreed."""
-    if not config.IS_LOCAL_EDITION:
+    if not editions.current().push_needs_consent:
         return Finding(READY, i.PUSH_READY)
     state = consent.consent_state()
     if state.agreed:

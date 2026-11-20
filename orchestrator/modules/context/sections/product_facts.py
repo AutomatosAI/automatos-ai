@@ -84,10 +84,11 @@ def local_settings_tabs(cloud_sync_on: bool) -> tuple[str, ...]:
 
 
 def edition_facts() -> str:
-    """What this install is, and the Settings tabs it has."""
+    """What this install is, and the Settings tabs it has (``install_description``)."""
     from config import config
+    from core import editions
 
-    local = config.IS_LOCAL_EDITION
+    local = editions.current().install_description == editions.INSTALL_OWN_COMPUTER
     cloud_sync_on = bool(str(config.AUTOMATOS_CLOUD_URL or "").strip())
     tabs = local_settings_tabs(cloud_sync_on) if local else (*SETTINGS_TABS, *HOSTED_SETTINGS_TABS)
     edition = LOCAL_EDITION if local else HOSTED_EDITION

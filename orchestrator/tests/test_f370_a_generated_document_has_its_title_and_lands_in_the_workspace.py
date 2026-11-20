@@ -20,6 +20,7 @@ import openpyxl
 import pytest
 
 import modules.documents.generation_service as gs
+from config import config
 import services.deliverable_service as ds
 from modules.documents import workspace_documents
 from modules.documents.xlsx_render import sheet_name, sheet_title, write_xlsx
@@ -91,7 +92,7 @@ def test_nothing_outside_the_workspaces_own_documents_is_copied(generated, name)
 
 
 def test_only_documents_are_copied_and_only_from_a_running_loop(generated, monkeypatch):
-    monkeypatch.setattr(workspace_documents.config, "AUTH_EDITION", "local")  # 7 Oct: the copy is local-only
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")  # 7 Oct: the copy is local-only
 
     async def started(fmt: str) -> bool:
         return workspace_documents.copy_when_registered(WS, "20261006_invoice.pdf", fmt)

@@ -52,7 +52,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
-from config import config
+from core import editions
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.principal import resolve_user_pk
@@ -100,13 +100,13 @@ class PushSettingsRequest(BaseModel):
     redact_questions: StrictBool
 
 
-def _require_local_edition() -> None:
-    """404 outside the local edition: SaaS always pushes through the platform's Expo project."""
-    if not config.IS_LOCAL_EDITION:
+def _require_push_consent() -> None:
+    """404 unless push needs the operator's consent (``push_needs_consent``): SaaS always pushes."""
+    if not editions.current().push_needs_consent:
         raise HTTPException(status_code=404, detail=NOT_FOUND)
 
 
-@router.get("/push-consent", dependencies=[Depends(_require_local_edition)])
+@router.get("/push-consent", dependencies=[Depends(_require_push_consent)])
 def get_push_consent(
     ctx: RequestContext = Depends(require_workspace_admin),
 ) -> Dict[str, Any]:
@@ -118,7 +118,7 @@ def get_push_consent(
         raise HTTPException(status_code=503, detail=UNREADABLE) from failure
 
 
-@router.put("/push-consent", dependencies=[Depends(_require_local_edition)])
+@router.put("/push-consent", dependencies=[Depends(_require_push_consent)])
 def put_push_consent(
     body: PushConsentRequest,
     ctx: RequestContext = Depends(require_workspace_admin),

@@ -7,8 +7,11 @@ has to state every answer on purpose; it cannot inherit ``saas``'s answers by
 falling through a ``== "local"`` check.
 
 ``docs/PRDS/PRD-277-EDITION-CHECKS.md`` lists every call site that compares the
-edition today and the one capability it maps to. Call sites move here by directory,
-in later pull requests. Each value below is today's behaviour for that edition.
+edition and the one capability it maps to. Outside ``config.py``, this module, the
+migrations and the tests, no code compares the edition or reads its old helpers
+(``tests/test_prd277_no_raw_edition_checks.py``). Each value below is today's
+behaviour for that edition. Code that only reports the edition's name reads
+``current_name``.
 
 ``capabilities_for`` is strict: an edition with no row is refused (``UnknownEdition``),
 never given another edition's answers. ``current`` follows the flag's own rule
@@ -34,6 +37,10 @@ SIGN_IN_CLERK = "clerk"
 # How a sensitive action is confirmed (``EditionCapabilities.step_up``).
 STEP_UP_SKIP = "skip"
 STEP_UP_CLERK_FRESHNESS = "clerk_freshness"
+
+# What Auto is told the install is (``EditionCapabilities.install_description``).
+INSTALL_OWN_COMPUTER = "own_computer"
+INSTALL_HOSTED = "hosted"
 
 
 class UnknownEdition(ValueError):
@@ -70,6 +77,18 @@ class EditionCapabilities:
         ``docker compose`` fix commands and the operator's own folders are theirs.
     guards_user_endpoints: an AI endpoint a workspace saves must be public
         ``https`` and is called through the pinned client.
+    seeds_first_run_content: every boot seeds the default workspace's first-run
+        content: its workspace and operator rows, Auto, the starter roster, the demo
+        Playbook and the welcome Deliverable (``DEFAULT_WORKSPACE_ID`` still names it).
+    chat_seeds_user_name: chat seeds the driving person's name from their ``users``
+        row into Auto's state.
+    install_description: what Auto is told the install is, and the Settings tabs it
+        names (``INSTALL_*``).
+    live_agent_named_apart: a newly created Auto Live agent gets a name of its own,
+        so it is never mistaken for the hosted product's agent in a shared Retell
+        dashboard.
+    last_workspace_purge_deletes_person: purging the last workspace a person owns or
+        belongs to also deletes that person's account.
     """
 
     sign_in: str
@@ -85,6 +104,11 @@ class EditionCapabilities:
     push_needs_consent: bool
     operator_is_user: bool
     guards_user_endpoints: bool
+    seeds_first_run_content: bool
+    chat_seeds_user_name: bool
+    install_description: str
+    live_agent_named_apart: bool
+    last_workspace_purge_deletes_person: bool
 
 
 _LOCAL = EditionCapabilities(
@@ -101,6 +125,11 @@ _LOCAL = EditionCapabilities(
     push_needs_consent=True,
     operator_is_user=True,
     guards_user_endpoints=False,
+    seeds_first_run_content=True,
+    chat_seeds_user_name=True,
+    install_description=INSTALL_OWN_COMPUTER,
+    live_agent_named_apart=True,
+    last_workspace_purge_deletes_person=False,
 )
 
 _SAAS = EditionCapabilities(
@@ -117,6 +146,11 @@ _SAAS = EditionCapabilities(
     push_needs_consent=False,
     operator_is_user=False,
     guards_user_endpoints=True,
+    seeds_first_run_content=False,
+    chat_seeds_user_name=False,
+    install_description=INSTALL_HOSTED,
+    live_agent_named_apart=False,
+    last_workspace_purge_deletes_person=True,
 )
 
 CAPABILITIES: Mapping[str, EditionCapabilities] = MappingProxyType({
@@ -137,23 +171,34 @@ def capabilities_for(edition: str) -> EditionCapabilities:
         raise UnknownEdition(f"no capabilities are defined for the edition {edition!r}") from None
 
 
-def current() -> EditionCapabilities:
-    """The running edition's capabilities.
+def current_name() -> str:
+    """The running edition's name, for code that reports it and switches nothing.
 
-    Reads ``config.AUTH_EDITION`` on every call rather than once at import, so a test
-    that patches the edition sees the matching capabilities. As ``config.py`` does at
-    load, the name is trimmed and lower-cased and a value with no row is ``saas``.
+    Reads ``config.AUTH_EDITION`` on every call. As ``config.py`` does at load, the
+    name is trimmed and lower-cased and a value with no row is ``saas``. Code that
+    decides something asks ``current()`` for a capability instead of comparing this.
     """
     from config import config
 
     name = str(getattr(config, "AUTH_EDITION", "") or "").strip().lower()
-    return CAPABILITIES.get(name, CAPABILITIES[EDITION_SAAS])
+    return name if name in CAPABILITIES else EDITION_SAAS
+
+
+def current() -> EditionCapabilities:
+    """The running edition's capabilities.
+
+    Reads the edition on every call rather than once at import, so a test that
+    patches ``config.AUTH_EDITION`` sees the matching capabilities (``current_name``).
+    """
+    return CAPABILITIES[current_name()]
 
 
 __all__ = [
     "CAPABILITIES",
     "EDITION_LOCAL",
     "EDITION_SAAS",
+    "INSTALL_HOSTED",
+    "INSTALL_OWN_COMPUTER",
     "KNOWN_EDITIONS",
     "SIGN_IN_CLERK",
     "SIGN_IN_NONE",
@@ -163,4 +208,5 @@ __all__ = [
     "UnknownEdition",
     "capabilities_for",
     "current",
+    "current_name",
 ]

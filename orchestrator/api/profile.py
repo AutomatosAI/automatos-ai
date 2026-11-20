@@ -118,7 +118,7 @@ def _resolve_user_row(db: Session, ctx: RequestContext) -> Optional[User]:
 def _to_out(ctx: RequestContext, row: Optional[User]) -> ProfileOut:
     editable = editions.current().profile_editable
     return ProfileOut(
-        edition=config.AUTH_EDITION,
+        edition=editions.current_name(),
         editable=editable,
         id=row.id if row is not None else None,
         email=row.email if row is not None else ctx.user.email,

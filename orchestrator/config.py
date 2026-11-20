@@ -509,15 +509,6 @@ class Config:
     def IS_DEVELOPMENT(self) -> bool:
         return self.ENVIRONMENT.lower() == "development"
 
-    # PRD-175 (F008) — edition helpers (read the one AUTH_EDITION flag).
-    @property
-    def IS_LOCAL_EDITION(self) -> bool:
-        return self.AUTH_EDITION == "local"
-
-    @property
-    def IS_SAAS_EDITION(self) -> bool:
-        return self.AUTH_EDITION == "saas"
-
     # =============================================================================
     # PRD-240 — agents can read and search the web (platform capability, not an app)
     # =============================================================================
