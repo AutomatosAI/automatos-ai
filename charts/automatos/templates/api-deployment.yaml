@@ -25,7 +25,9 @@ spec:
       labels:
         {{- include "automatos.selectorLabels" (dict "ctx" $ "component" "api") | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "automatos.serviceAccountName" . }}
+      serviceAccountName: {{ include "automatos.serviceAccountName" (dict "ctx" $ "component" "api") }}
+      # Nothing in the API calls the cluster's own API (PRD-280 US-101).
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -96,6 +98,8 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
       volumes:
