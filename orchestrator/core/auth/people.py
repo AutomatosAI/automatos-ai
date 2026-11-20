@@ -115,9 +115,11 @@ _ADD_OR_SET = text(_ADD_MEMBER + "DO UPDATE SET role = EXCLUDED.role, is_active 
 
 # PRD-277 US-504: a person waiting for a workspace signed in with an identity (a user_identities
 # row), is active, and can open no usable workspace: no active membership of one, and owns none.
-# ``:only`` narrows it to one person (``give_workspace``'s check), or is NULL for everyone.
+# ``:only`` narrows it to one person (``give_workspace``'s check), or is NULL for everyone. Oldest
+# first, so whoever has waited longest is on the first page; ``total`` counts every row before the
+# page is cut (a window count is taken before LIMIT and OFFSET).
 _WAITING_SQL = text(
-    "SELECT u.id, u.email, u.name, u.created_at FROM users u "
+    "SELECT u.id, u.email, u.name, u.created_at, COUNT(*) OVER () AS total FROM users u "
     "WHERE (CAST(:only AS integer) IS NULL OR u.id = CAST(:only AS integer)) "
     "AND u.is_active IS NOT FALSE "
     "AND EXISTS (SELECT 1 FROM user_identities ui WHERE ui.user_id = u.id) "
@@ -125,9 +127,9 @@ _WAITING_SQL = text(
     "  WHERE wm.user_id = u.id AND wm.is_active = true AND w.is_active IS NOT FALSE AND w.deleted_at IS NULL) "
     "AND NOT EXISTS (SELECT 1 FROM workspaces w WHERE w.owner_id = u.id "
     "  AND w.is_active IS NOT FALSE AND w.deleted_at IS NULL) "
-    "ORDER BY u.created_at DESC, u.id DESC LIMIT :limit"
+    "ORDER BY u.created_at ASC, u.id ASC LIMIT :limit OFFSET :offset"
 )
-WAITING_LISTED_MAX = 200
+WAITING_PAGE_MAX = 100
 GIVEN_A_WORKSPACE = "member:added_from_waiting"
 NOT_WAITING_MESSAGE = "This person is not waiting for a workspace any more."
 WORKSPACE_NOT_GIVEN_MESSAGE = "The person was not added: the change could not be recorded. Try again."
@@ -412,13 +414,34 @@ def _waiting_person(row: Any) -> WaitingPerson:
     return WaitingPerson(user_id=int(row[0]), email=email, name=row[2] or None, signed_in_first_at=row[3])
 
 
-def waiting_people(db: Session, limit: int = WAITING_LISTED_MAX) -> Tuple[WaitingPerson, ...]:
-    """The people waiting for a workspace (``_WAITING_SQL``), newest first; never committed.
+@dataclass(frozen=True)
+class WaitingPage:
+    """One page of the people waiting, oldest first, and how many are waiting in all."""
 
-    A placeholder email (an identity whose provider verified no address) is shown as none.
+    people: Tuple[WaitingPerson, ...]
+    total: int
+
+
+def _waiting_rows(db: Session, limit: int, offset: int) -> list:
+    return db.execute(_WAITING_SQL, {"only": None, "limit": limit, "offset": offset}).fetchall()
+
+
+def waiting_people(db: Session, limit: int = WAITING_PAGE_MAX, offset: int = 0) -> WaitingPage:
+    """A page of the people waiting for a workspace (``_WAITING_SQL``), oldest first; never committed.
+
+    ``limit`` is capped at ``WAITING_PAGE_MAX``. A page past the end has no row to carry the
+    count, so the count is then read from the first row. A placeholder email (an identity whose
+    provider verified no address) is shown as none.
     """
-    rows = db.execute(_WAITING_SQL, {"only": None, "limit": limit}).fetchall()
-    return tuple(_waiting_person(row) for row in rows)
+    limit = max(1, min(int(limit), WAITING_PAGE_MAX))
+    offset = max(0, int(offset))
+    rows = _waiting_rows(db, limit, offset)
+    if rows:
+        total = int(rows[0][4])
+    else:
+        first = _waiting_rows(db, 1, 0) if offset else []
+        total = int(first[0][4]) if first else 0
+    return WaitingPage(people=tuple(_waiting_person(row) for row in rows), total=total)
 
 
 def give_workspace(db: Session, user_id: int, workspace_id: Union[UUID, str], role: str,
@@ -435,7 +458,7 @@ def give_workspace(db: Session, user_id: int, workspace_id: Union[UUID, str], ro
     if role not in SETTABLE_MEMBER_ROLES:
         raise MembershipRefused(f"Invalid role: {role}")
     _lock_person(db, user_id)
-    if db.execute(_WAITING_SQL, {"only": user_id, "limit": 1}).fetchone() is None:
+    if db.execute(_WAITING_SQL, {"only": user_id, "limit": 1, "offset": 0}).fetchone() is None:
         db.rollback()
         raise NotWaiting(NOT_WAITING_MESSAGE)
     set_membership(db, user_id, workspace_id, role)
@@ -473,6 +496,8 @@ __all__ = [
     "MembershipRefused",
     "NotWaiting",
     "Requester",
+    "WAITING_PAGE_MAX",
+    "WaitingPage",
     "WaitingPerson",
     "WorkspaceNotGiven",
     "change_member_role",

@@ -11,6 +11,7 @@
 import { createContext, useContext } from 'react'
 
 import { signOutAtApi, type SystemRole, type WhoAmI } from './auth-api'
+import { forgetChatDraft, setDraftOwner } from './kept-chat-draft'
 
 export type EnterpriseSessionStatus = 'loading' | 'signed-in' | 'signed-out'
 
@@ -50,8 +51,9 @@ function forgetWorkspace(): void {
 }
 
 /**
- * Sign out: the API ends the session and clears its cookie, then the browser goes to the
- * provider's end-session address when the API gives one, else to the sign-in page. The promise
+ * Sign out: the API ends the session and clears its cookie, the stored workspace and any kept chat
+ * draft are removed, then the browser goes to the provider's end-session address when the API gives
+ * a safe one (auth-api.ts `safeEndSessionAddress`), else to the sign-in page. The promise
  * never settles: the page is leaving. A refusal (the session had already ended) still signs out here.
  */
 export async function signOutOfEnterprise(navigate: (url: string) => void = (url) => window.location.assign(url)): Promise<void> {
@@ -62,6 +64,8 @@ export async function signOutOfEnterprise(navigate: (url: string) => void = (url
     console.warn('[session] the API did not confirm the sign-out', error)
   }
   forgetWorkspace()
+  forgetChatDraft()
+  setDraftOwner(null)
   navigate(redirectTo ?? '/sign-in')
   return new Promise<void>(() => {})
 }

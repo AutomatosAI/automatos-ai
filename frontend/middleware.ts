@@ -1,8 +1,9 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { isSaaS } from "@/lib/auth-edition";
 import { isEnterprise } from "@/lib/edition-name";
 import { enterpriseMiddleware } from "@/lib/enterprise/session-middleware";
+import { isPublicPath, PUBLIC_ROUTES } from "@/lib/public-routes";
 
 // PRD-175 (F008): the middleware is edition-conditional.
 //   saas  → clerkMiddleware + auth.protect() on every non-public route (unchanged).
@@ -10,34 +11,9 @@ import { enterpriseMiddleware } from "@/lib/enterprise/session-middleware";
 //           is served. `local` treats the whole app as public — there is no login.
 // Gated on the build-time edition flag so no Clerk symbol executes under `local`.
 
-const isPublicRoute = createRouteMatcher([
-  "/sign-in(.*)",
-  "/sign-up(.*)",
-  "/reset-password(.*)",
-  "/sso-callback(.*)",
-  "/accept-invitation(.*)",
-  "/api/webhooks(.*)",
-  // PRD-261 A-08b (maintainer OK at D1-g, 18 Oct): an installed theme's files proxy. Its
-  // handler authenticates (signed out → 401); auth.protect() would answer a module import()
-  // or a <video> range request with a 404 before the handler runs, which reads as a broken
-  // theme instead of an expired session.
-  "/api/themes/files/(.*)",
-  // PRD-264 EUAI-10: anyone can check a file for an Automatos AI mark, signed in or not.
-  // Segment-bounded (like the theme host's isHostOwned): "/verify(.*)" would also make
-  // /verify-email or /verification public.
-  "/verify",
-  "/verify/(.*)",
-  // PRD-266 US-018c: the app-association files iOS and Android fetch signed out (Automatos Go's
-  // universal links). Exact paths, never /.well-known/(.*). The matcher below already skips
-  // assetlinks.json (it has an extension), but the extensionless AASA reaches auth.protect().
-  "/.well-known/apple-app-site-association",
-  "/.well-known/assetlinks.json",
-  // PRD-266 US-018d: where a pairing QR opens in a phone's browser. It calls nothing and never pairs.
-  // The exact path, like /verify: /go, /go/pairing and /gopher stay protected.
-  "/go/pair",
-  // PRD-270 US-270-08a: the Marketplace's shop window, browsed signed out. The exact path: /marketplace/publish and the rest stay protected.
-  "/marketplace",
-]);
+// The public routes are one list (lib/public-routes.ts), read here and by the enterprise session
+// provider, so neither sends a public page to sign in.
+const isPublicRoute = createRouteMatcher([...PUBLIC_ROUTES]);
 
 const saasMiddleware = clerkMiddleware(async (auth, request) => {
   if (!isPublicRoute(request)) {
@@ -50,7 +26,10 @@ const localMiddleware = () => NextResponse.next();
 
 // PRD-277 US-502: in `enterprise`, a page asked for with no session cookie goes to /sign-in and
 // comes back afterwards; no clerkMiddleware, no auth.protect(). The API judges every request.
-export default isSaaS ? saasMiddleware : isEnterprise ? enterpriseMiddleware(isPublicRoute) : localMiddleware;
+// The list is read with isPublicPath there, exactly as the session provider reads it.
+const isEnterprisePublic = (request: NextRequest) => isPublicPath(request.nextUrl.pathname);
+
+export default isSaaS ? saasMiddleware : isEnterprise ? enterpriseMiddleware(isEnterprisePublic) : localMiddleware;
 
 export const config = {
   matcher: ["/((?!.+\\.[\\w]+$|_next).*)", "/", "/(api|trpc)(.*)"],

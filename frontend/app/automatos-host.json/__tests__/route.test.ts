@@ -29,6 +29,7 @@ import * as route from '../route'
 const HOST_FILE = '/automatos-host.json'
 const API_URL_ENV = 'NEXT_PUBLIC_API_URL'
 const MIDDLEWARE_SOURCE = path.resolve(__dirname, '..', '..', '..', 'middleware.ts')
+const PUBLIC_ROUTES_SOURCE = path.resolve(__dirname, '..', '..', '..', 'lib', 'public-routes.ts')
 // A transpiled module may carry this marker; it is no export (lib/theme-sdk/__tests__/shim.test.ts skips it too).
 const ES_MODULE_FLAG = '__esModule'
 
@@ -94,7 +95,8 @@ describe('PRD-261 B-03j — no middleware runs for /automatos-host.json, so no a
     },
   )
 
-  it('is not in the SaaS public list: middleware.ts never names it', () => {
+  it('is not in the SaaS public list: middleware.ts and the public routes never name it', () => {
     expect(readFileSync(MIDDLEWARE_SOURCE, 'utf8')).not.toContain('automatos-host')
+    expect(readFileSync(PUBLIC_ROUTES_SOURCE, 'utf8')).not.toContain('automatos-host')
   })
 })

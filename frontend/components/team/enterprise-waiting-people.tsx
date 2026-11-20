@@ -2,8 +2,9 @@
 
 /**
  * PRD-277 US-504 — the Team page's "Waiting for a workspace" card (enterprise, install admins):
- * each person who signed in and holds no workspace, when they first signed in, a role to give them
- * and "Add to workspace". Drawn like the members card (members-table.tsx, member-row.tsx).
+ * each person who signed in and holds no workspace, oldest first, when they first signed in, a role
+ * to give them and "Add to workspace"; a page at a time, with Previous and Next. Drawn like the
+ * members card (members-table.tsx, member-row.tsx).
  */
 import { useState } from 'react'
 import { Mail, UserCheck } from 'lucide-react'
@@ -11,15 +12,15 @@ import { Mail, UserCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { formatAbsoluteDate } from '@/lib/format-relative'
 import { PLACEABLE_ROLES, type PlaceableRole, type WaitingPerson } from '@/lib/enterprise/auth-api'
+import { NEXT_PAGE, PREVIOUS_PAGE, WAITING_PAGE_LABEL } from '@/lib/enterprise/messages'
 
-interface WaitingPeopleProps {
-  readonly people: readonly WaitingPerson[]
-  readonly onPlace: (userId: number, role: PlaceableRole) => void
-}
+import type { WaitingPeopleState } from './use-enterprise-waiting-people'
+
+type OnPlace = (userId: number, role: PlaceableRole) => void
 
 const ROLE_LABELS: Readonly<Record<PlaceableRole, string>> = { viewer: 'Viewer', editor: 'Editor', admin: 'Admin' }
 
-function WaitingRow({ person, onPlace }: { person: WaitingPerson; onPlace: WaitingPeopleProps['onPlace'] }) {
+function WaitingRow({ person, onPlace }: { person: WaitingPerson; onPlace: OnPlace }) {
   const [role, setRole] = useState<PlaceableRole>('viewer')
   const label = person.name || person.email || `Person ${person.user_id}`
 
@@ -60,8 +61,28 @@ function WaitingRow({ person, onPlace }: { person: WaitingPerson; onPlace: Waiti
   )
 }
 
-export function WaitingPeople({ people, onPlace }: WaitingPeopleProps) {
-  if (people.length === 0) return null
+type PagerProps = Pick<WaitingPeopleState, 'total' | 'offset' | 'pageSize' | 'loading' | 'goTo'> & { readonly shown: number }
+
+function WaitingPager({ total, offset, pageSize, loading, goTo, shown }: PagerProps) {
+  if (total <= pageSize && offset === 0) return null
+  return (
+    <div className="flex items-center justify-between gap-2 p-4 border-t border-border/30 text-sm text-muted-foreground">
+      <span>{WAITING_PAGE_LABEL(offset + 1, offset + shown, total)}</span>
+      <div className="flex gap-2">
+        <Button variant="outline" size="sm" disabled={loading || offset === 0} onClick={() => goTo(offset - pageSize)}>
+          {PREVIOUS_PAGE}
+        </Button>
+        <Button variant="outline" size="sm" disabled={loading || offset + shown >= total} onClick={() => goTo(offset + pageSize)}>
+          {NEXT_PAGE}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+export function EnterpriseWaitingPeople({ waiting }: { readonly waiting: WaitingPeopleState }) {
+  if (waiting.total === 0 && waiting.people.length === 0) return null
+  const onPlace: OnPlace = (userId, role) => void waiting.handlePlace(userId, role)
   return (
     <section aria-labelledby="waiting-people-title" className="glass-card rounded-xl border border-border/30 overflow-hidden">
       <div className="p-4 border-b border-border/30 bg-white/5">
@@ -71,10 +92,11 @@ export function WaitingPeople({ people, onPlace }: WaitingPeopleProps) {
         </p>
       </div>
       <div className="divide-y divide-white/5">
-        {people.map((person) => (
+        {waiting.people.map((person) => (
           <WaitingRow key={person.user_id} person={person} onPlace={onPlace} />
         ))}
       </div>
+      <WaitingPager {...waiting} shown={waiting.people.length} />
     </section>
   )
 }

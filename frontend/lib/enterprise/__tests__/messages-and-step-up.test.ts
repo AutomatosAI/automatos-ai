@@ -5,18 +5,33 @@
  *     address bar cannot make the page say anything the app did not write. None says whether a
  *     person is known.
  *   - `step_up_no_auth_time` tells the admin what to set at the identity provider (PRD-277 §5.5).
- *   - The chat draft keeps only its text and expiry, for 30 minutes, once.
+ *   - The chat draft keeps only its text, its person and its expiry, for 30 minutes, once, and
+ *     only for that person; it is removed at sign-out, for another person, and once expired.
+ *   - "Your session ended" says why when the API's `session_ended` gave a reason.
  *   - A `step_up_required` refusal naming the API's start route sends the browser there with the
  *     page as `return_to`, after keeping the draft; any other `start` is not followed.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { RETURN_TO_PARAM, SIGN_IN_START_PATH } from '@/lib/enterprise/auth-api'
-import { DRAFT_STORAGE_KEY, DRAFT_TTL_MS, keepChatDraft, takeChatDraft, type DraftStorage } from '@/lib/enterprise/kept-chat-draft'
 import {
+  DRAFT_STORAGE_KEY,
+  DRAFT_TTL_MS,
+  forgetChatDraft,
+  keepChatDraft,
+  setDraftOwner,
+  settleKeptDraft,
+  takeChatDraft,
+  type DraftStorage,
+} from '@/lib/enterprise/kept-chat-draft'
+import {
+  SESSION_ENDED_BODY,
   SIGN_IN_REFUSALS,
   SIGN_IN_REFUSAL_FALLBACK,
+  actionErrorMessage,
   isSessionEnded,
+  sessionEndedBody,
+  sessionEndedReason,
   signInRefusalMessage,
 } from '@/lib/enterprise/messages'
 import { signInAgainFor, signInAgainStartOf } from '@/lib/enterprise/step-up'
@@ -66,25 +81,77 @@ describe('sign-in refusal messages', () => {
     expect(isSessionEnded({ detail: 'Not authenticated' })).toBe(false)
     expect(isSessionEnded(undefined)).toBe(false)
   })
-})
 
-describe('the kept chat draft', () => {
-  it('keeps only the text and its expiry, and gives it back once', () => {
-    const storage = memoryStorage()
-    keepChatDraft('half a question', storage, 1_000)
-    expect(JSON.parse(storage.items.get(DRAFT_STORAGE_KEY) ?? '')).toEqual({ text: 'half a question', expiresAt: 1_000 + DRAFT_TTL_MS })
-    expect(takeChatDraft(storage, 2_000)).toBe('half a question')
-    expect(takeChatDraft(storage, 2_000)).toBeNull()
+  it('says why the session ended when the API said, and the general words for any other 401', () => {
+    expect(sessionEndedReason({ detail: { code: 'session_ended', reason: 'expired' } })).toBe('expired')
+    expect(sessionEndedReason({ detail: { code: 'session_ended', reason: 'unknown' } })).toBeNull()
+    expect(sessionEndedReason({ detail: { code: 'session_ended', reason: 'constructor' } })).toBeNull()
+    expect(sessionEndedReason({ detail: 'Not authenticated' })).toBeNull()
+    expect(sessionEndedReason(undefined)).toBeNull()
+    expect(sessionEndedBody('revoked')).toMatch(/administrator/)
+    expect(sessionEndedBody('revoked').endsWith(SESSION_ENDED_BODY)).toBe(true)
+    expect(sessionEndedBody(null)).toBe(SESSION_ENDED_BODY)
   })
 
-  it('keeps nothing for an empty box, and gives nothing back once expired or malformed', () => {
+  it("an admin action's refusal reads as the session ending on any 401, else the API's sentence", () => {
+    expect(actionErrorMessage(Object.assign(new Error('HTTP 401: Unauthorized'), { body: undefined }))).toContain(SESSION_ENDED_BODY)
+    expect(actionErrorMessage(Object.assign(new Error('x'), { status: 409, body: { detail: 'No longer waiting.' } }))).toBe('No longer waiting.')
+    expect(actionErrorMessage(Object.assign(new Error('x'), { body: { detail: { message: 'Not now.' } } }))).toBe('Not now.')
+    expect(actionErrorMessage('odd')).toBe('Something went wrong. Try again.')
+  })
+})
+
+const ADA = '7'
+const GRACE = '8'
+
+describe('the kept chat draft', () => {
+  it('keeps only the text, its person and its expiry, and gives it back once, to that person', () => {
     const storage = memoryStorage()
-    keepChatDraft('   ', storage, 0)
+    keepChatDraft('half a question', storage, 1_000, ADA)
+    expect(JSON.parse(storage.items.get(DRAFT_STORAGE_KEY) ?? '')).toEqual({
+      text: 'half a question', owner: ADA, expiresAt: 1_000 + DRAFT_TTL_MS,
+    })
+    expect(takeChatDraft(storage, 2_000, ADA)).toBe('half a question')
+    expect(takeChatDraft(storage, 2_000, ADA)).toBeNull()
+  })
+
+  it('keeps nothing for an empty box or with nobody signed in, and gives nothing back once expired or malformed', () => {
+    const storage = memoryStorage()
+    keepChatDraft('   ', storage, 0, ADA)
+    keepChatDraft('no one yet', storage, 0, null)
     expect(storage.items.size).toBe(0)
-    keepChatDraft('late', storage, 0)
-    expect(takeChatDraft(storage, DRAFT_TTL_MS + 1)).toBeNull()
+    keepChatDraft('late', storage, 0, ADA)
+    expect(takeChatDraft(storage, DRAFT_TTL_MS + 1, ADA)).toBeNull()
     storage.setItem(DRAFT_STORAGE_KEY, '{"text": 5}')
-    expect(takeChatDraft(storage, 0)).toBeNull()
+    expect(takeChatDraft(storage, 0, ADA)).toBeNull()
+  })
+
+  it('never gives one person the draft another typed, and removes it', () => {
+    const storage = memoryStorage()
+    keepChatDraft('private words', storage, 0, ADA)
+    expect(takeChatDraft(storage, 1, GRACE)).toBeNull()
+    expect(storage.items.size).toBe(0)
+  })
+
+  it('is removed as soon as another person signs in, or once expired, not only when the chat box asks', () => {
+    const storage = memoryStorage()
+    keepChatDraft('mine', storage, 0, ADA)
+    setDraftOwner(ADA, storage, 1)
+    expect(storage.items.size).toBe(1)
+    setDraftOwner(GRACE, storage, 1)
+    expect(storage.items.size).toBe(0)
+
+    keepChatDraft('mine again', storage, 0, ADA)
+    settleKeptDraft(null, storage, DRAFT_TTL_MS + 1)
+    expect(storage.items.size).toBe(0)
+    setDraftOwner(null, storage, 0)
+  })
+
+  it('is removed at sign-out, whoever typed it', () => {
+    const storage = memoryStorage()
+    keepChatDraft('mine', storage, 0, ADA)
+    forgetChatDraft(storage)
+    expect(storage.items.size).toBe(0)
   })
 
   it('never throws when the storage refuses', () => {
@@ -98,8 +165,9 @@ describe('the kept chat draft', () => {
       removeItem: () => {},
     }
     vi.spyOn(console, 'warn').mockImplementation(() => {})
-    expect(() => keepChatDraft('text', refusing, 0)).not.toThrow()
-    expect(takeChatDraft(refusing, 0)).toBeNull()
+    expect(() => keepChatDraft('text', refusing, 0, ADA)).not.toThrow()
+    expect(takeChatDraft(refusing, 0, ADA)).toBeNull()
+    expect(() => settleKeptDraft(ADA, refusing, 0)).not.toThrow()
   })
 })
 

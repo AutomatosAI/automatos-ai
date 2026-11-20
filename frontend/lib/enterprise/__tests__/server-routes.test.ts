@@ -85,6 +85,22 @@ describe('the chat route', () => {
     expect(headers).not.toHaveProperty('x-api-key')
   })
 
+  it('does not warn about a missing API key or Authorization: enterprise sends neither', async () => {
+    asEnterprise()
+    vi.stubEnv('API_KEY', '')
+    stubBackend(() => new Response('ok', { status: 200 }))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { POST } = await import('@/app/api/chat/route')
+    const request = new Request(`${ORIGIN}/api/chat`, {
+      method: 'POST',
+      body: '{"id":""}',
+      headers: { cookie: `${COOKIE_NAME}=${SESSION}`, origin: ORIGIN, 'X-Automatos-CSRF': '1', 'content-type': 'application/json' },
+    })
+    await POST(request as never)
+
+    expect(warn.mock.calls.filter((call) => String(call[0]).includes('No API_KEY'))).toEqual([])
+  })
+
   it("hands a 401 back with the API's own body", async () => {
     asEnterprise()
     const ended = JSON.stringify({ detail: { code: 'session_ended', reason: 'expired', message: 'Sign in again.' } })

@@ -10,8 +10,8 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft, Briefcase, Mail, User } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { PageHeader } from '@/components/shared'
-import { initialsFor } from '@/components/auth/user-profile-button'
+import { PageHeader } from '@/components/shared/page-header'
+import { initialsFor } from '@/lib/initials'
 import { PROFILE_MANAGED_NOTE } from '@/lib/enterprise/messages'
 import { useEnterpriseSession } from '@/lib/enterprise/session-context'
 
@@ -91,7 +91,7 @@ export function EnterpriseProfile() {
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <ReadOnlyField id="profile-workspace" label="Workspace" value={workspace.name} />
-                <ReadOnlyField id="profile-workspace-role" label="Your role" value={workspace.role} />
+                <ReadOnlyField id="profile-workspace-role" label="Your role" value={workspace.role ?? ''} />
               </div>
             </div>
           )}

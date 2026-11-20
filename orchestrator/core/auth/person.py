@@ -84,10 +84,12 @@ _DEFAULT_WORKSPACE_SQL = (
 
 
 # PRD-277 US-501: every usable workspace the person can open (owned, or an active membership),
-# with their role in it (an owner with no member row is ``owner``), in the default workspace's
-# order: owned or owner-role first, then the most recent join, then the newest workspace.
+# with the role the permission gate uses (core/auth/workspace_permission.py ``_role_of``): the
+# active member row's role as it is, else ``owner`` for the workspace's owner with no member row.
+# In the default workspace's order: owned or owner-role first, then the most recent join, then the
+# newest workspace.
 _WORKSPACES_OF_SQL = (
-    "SELECT w.id, w.name, COALESCE(wm.role, 'owner') AS role FROM users u "
+    "SELECT w.id, w.name, CASE WHEN wm.id IS NULL THEN 'owner' ELSE wm.role END AS role FROM users u "
     "JOIN workspaces w "
     "  ON w.owner_id = u.id "
     "  OR EXISTS ("
@@ -110,11 +112,11 @@ WORKSPACES_LISTED_MAX = 200
 
 @dataclass(frozen=True)
 class HeldWorkspace:
-    """A workspace a person can open, and their role in it."""
+    """A workspace a person can open, and their role in it (None when the member row holds none)."""
 
     id: str
     name: str
-    role: str
+    role: Optional[str]
 
 
 @dataclass(frozen=True)

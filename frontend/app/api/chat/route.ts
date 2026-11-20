@@ -55,7 +55,8 @@ export async function POST(request: NextRequest) {
       request.headers.get('X-Workspace-ID') ||
       request.headers.get('X-Workspace')
 
-    if (!process.env.API_KEY && !authHeader) {
+    // Enterprise sends neither: the session cookie travels instead (forwardedSession).
+    if (!isEnterprise && !process.env.API_KEY && !authHeader) {
       console.warn('[Chat Proxy] No API_KEY env var and no Authorization header')
     }
 

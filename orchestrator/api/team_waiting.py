@@ -9,9 +9,11 @@ Unless the edition issues sessions (``issues_sessions``: enterprise), each route
 declared method with 404 before any authentication or database work, so ``local`` and ``saas``
 serve exactly what they served before.
 
-* ``GET /waiting`` — the people waiting, newest first (``core.auth.people.waiting_people``):
-  ``user_id``, ``email`` (none for an identity with no verified address), ``name`` and when they
-  first signed in. Never a token, an identity's subject or its issuer.
+* ``GET /waiting?limit=&offset=`` — a page of the people waiting, oldest first, so whoever has
+  waited longest is never pushed off the list (``core.auth.people.waiting_people``): ``user_id``,
+  ``email`` (none for an identity with no verified address), ``name`` and when they first signed
+  in; with ``total`` (everyone waiting), ``limit`` (1 to ``WAITING_PAGE_MAX``, default
+  ``WAITING_PAGE_DEFAULT``) and ``offset``. Never a token, an identity's subject or its issuer.
 * ``POST /waiting/{user_id}`` with ``{"role": "admin" | "editor" | "viewer"}`` — makes the person
   an active member of this workspace in that role (``people.give_workspace``), audited
   ``member:added_from_waiting`` in this workspace. 409 when they are no longer waiting, so an admin's
@@ -26,10 +28,10 @@ Registered through ``RouterSpec("api.team_waiting")`` in ``router_manifest.py``.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -46,6 +48,8 @@ from core.database.database import get_db
 from core.models.workspaces import Workspace
 
 WAITING_PERMISSION = "members:invite"
+WAITING_PAGE_DEFAULT = 50
+WAITING_OFFSET_MAX = 1_000_000
 ROLE_MAX = 32
 NO_SUCH_WORKSPACE = "Workspace not found"
 NO_SUCH_PERSON = "No such person."
@@ -81,12 +85,17 @@ def _view(person: people.WaitingPerson) -> Dict[str, Any]:
 
 
 @router.get("/waiting", dependencies=[Depends(require_workspace_permission(WAITING_PERMISSION))])
-def list_waiting(workspace_id: str, ctx: RequestContext = Depends(get_request_context_hybrid),
-                 db: Session = Depends(get_db)) -> Dict[str, List[Dict[str, Any]]]:
-    """The people waiting for a workspace, for an install admin on this workspace's Team page."""
+def list_waiting(workspace_id: str,
+                 limit: int = Query(WAITING_PAGE_DEFAULT, ge=1, le=people.WAITING_PAGE_MAX),
+                 offset: int = Query(0, ge=0, le=WAITING_OFFSET_MAX),
+                 ctx: RequestContext = Depends(get_request_context_hybrid),
+                 db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """A page of the people waiting for a workspace, oldest first, for an install admin on this Team page."""
     _require_admin(ctx)
     _usable_workspace(db, workspace_id)
-    return {"people": [_view(person) for person in people.waiting_people(db)]}
+    page = people.waiting_people(db, limit=limit, offset=offset)
+    return {"people": [_view(person) for person in page.people], "total": page.total,
+            "limit": limit, "offset": offset}
 
 
 @router.post("/waiting/{user_id}",

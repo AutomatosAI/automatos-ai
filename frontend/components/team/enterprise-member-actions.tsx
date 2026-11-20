@@ -5,28 +5,33 @@
  *   End sessions  → POST /api/v1/auth/people/{user_id}/sessions/revoke (signed out everywhere)
  *   Deactivate    → POST /api/v1/auth/people/{user_id}/deactivate (no sign-in until reactivated)
  * Each asks first, and each needs a recent sign-in (step-up: the browser signs in again, and the
- * admin presses the button once more on return). The API checks the admin; the buttons only
- * spare a request it would refuse.
+ * admin presses the button once more on return). TeamManagement renders this only in enterprise;
+ * anyone but an install admin (the API's role, through the enterprise session) sees nothing. The
+ * API checks the admin; the buttons only spare a request it would refuse.
  */
 import { LogOut, UserX } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { deactivatePerson, endSessionsOf } from '@/lib/enterprise/auth-api'
-import { themeErrorMessage, useStepUp } from '@/lib/theme-host/api'
+import { actionErrorMessage } from '@/lib/enterprise/messages'
+import { isInstallAdmin, systemRoleOf, useEnterpriseSession } from '@/lib/enterprise/session-context'
+import { useEnterpriseStepUp } from '@/lib/enterprise/step-up'
 
 import { displayName } from './team-format'
 import type { TeamMember } from './team-types'
 
-interface PersonAccessActionsProps {
+interface EnterpriseMemberActionsProps {
   readonly member: TeamMember
   readonly onChanged: () => void
 }
 
-export function PersonAccessActions({ member, onChanged }: PersonAccessActionsProps) {
-  const endSessions = useStepUp(endSessionsOf)
-  const deactivate = useStepUp(deactivatePerson)
+export function EnterpriseMemberActions({ member, onChanged }: EnterpriseMemberActionsProps) {
+  const installAdmin = isInstallAdmin(systemRoleOf(useEnterpriseSession()))
+  const endSessions = useEnterpriseStepUp(endSessionsOf)
+  const deactivate = useEnterpriseStepUp(deactivatePerson)
   const userId = Number(member.user_id)
   const who = displayName(member)
+  if (!installAdmin) return null
 
   const run = async (question: string, action: (id: number) => Promise<unknown>) => {
     if (!Number.isSafeInteger(userId) || !confirm(question)) return
@@ -35,7 +40,7 @@ export function PersonAccessActions({ member, onChanged }: PersonAccessActionsPr
       onChanged()
     } catch (error) {
       console.error('[team] the access change failed', error)
-      alert(themeErrorMessage(error))
+      alert(actionErrorMessage(error))
     }
   }
 

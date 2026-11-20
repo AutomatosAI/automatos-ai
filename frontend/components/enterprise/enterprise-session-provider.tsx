@@ -6,15 +6,19 @@
  *
  * - apiClient's token getter answers null: the API's session cookie, which scripts cannot read,
  *   travels with every same-origin request by itself (lib/enterprise/session-transport.ts).
+ * - A request made outside apiClient gets the session too: the wrapper over `window.fetch`
+ *   (lib/enterprise/session-fetch.ts), put on once here and taken off when this unmounts.
  * - Who the person is and their install role come from `GET /api/v1/auth/me`, never the browser.
  * - The app renders once the API has answered and the workspace is stored. A person in no
- *   workspace sees "ask an administrator to add you"; a 401 sends the browser to sign in.
- * - When a later request meets `session_ended`, "Your session ended" opens over the page.
+ *   workspace sees "ask an administrator to add you"; a 401 sends the browser to sign in. A
+ *   public page (lib/public-routes.ts) renders whatever the API answers.
+ * - When a later request from the app's own API answers 401, "Your session ended" opens over the page.
  */
-import { useMemo, useRef, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { usePathname } from 'next/navigation'
 
 import { apiClient } from '@/lib/api-client'
+import { settleKeptDraft } from '@/lib/enterprise/kept-chat-draft'
 import {
   LOADING,
   SIGN_OUT,
@@ -29,6 +33,7 @@ import {
   signOutOfEnterprise,
   type EnterpriseSession,
 } from '@/lib/enterprise/session-context'
+import { installSessionFetch } from '@/lib/enterprise/session-fetch'
 import { useSessionState, type SessionState } from '@/lib/enterprise/use-session-state'
 
 import { EnterpriseNotice } from './enterprise-notice'
@@ -38,7 +43,7 @@ const signOut = () => signOutOfEnterprise()
 
 /** What renders in place of the app, or null when the app itself renders. */
 function noticeFor(state: SessionState): ReactNode {
-  if (state.onSignInPage) return null
+  if (state.onSignInPage || state.onPublicPage) return null
   if (state.load === 'failed') {
     return <EnterpriseNotice title={UNREACHABLE_TITLE} body={UNREACHABLE_BODY} action={{ label: TRY_AGAIN, onClick: state.reload }} />
   }
@@ -49,14 +54,31 @@ function noticeFor(state: SessionState): ReactNode {
   return null
 }
 
-export function EnterpriseSessionProvider({ children }: { children: ReactNode }) {
-  // Installed during render, before any child can send a request (as LocalAuthProvider does).
+/**
+ * The one-time setup, during the first render so it is in place before any child sends a request
+ * (as LocalAuthProvider does): apiClient's null token getter and the session fetch. The effect puts
+ * the fetch back when this unmounts, and on again after a remount (React's strict mode).
+ */
+function useOneTimeSetup(): void {
   const configuredRef = useRef(false)
+  const restoreRef = useRef<(() => void) | null>(null)
   if (!configuredRef.current) {
     apiClient.setClerkTokenGetter(async () => null)
+    if (typeof window !== 'undefined') restoreRef.current = installSessionFetch(window)
     configuredRef.current = true
   }
+  useEffect(() => {
+    if (restoreRef.current === null) restoreRef.current = installSessionFetch(window)
+    settleKeptDraft()
+    return () => {
+      restoreRef.current?.()
+      restoreRef.current = null
+    }
+  }, [])
+}
 
+export function EnterpriseSessionProvider({ children }: { children: ReactNode }) {
+  useOneTimeSetup()
   const state = useSessionState(usePathname())
   const session = useMemo<EnterpriseSession>(
     () => ({
@@ -72,7 +94,7 @@ export function EnterpriseSessionProvider({ children }: { children: ReactNode })
   return (
     <EnterpriseSessionContext.Provider value={session}>
       {notice ?? children}
-      {state.ended && state.load === 'signed-in' && !state.onSignInPage && <SessionEndedDialog />}
+      {state.ended && state.load === 'signed-in' && !state.onSignInPage && <SessionEndedDialog reason={state.endedReason} />}
     </EnterpriseSessionContext.Provider>
   )
 }
