@@ -46,6 +46,7 @@ if str(_ORCH) not in sys.path:
 from config import config  # noqa: E402
 from core.auth import bearer_registry, hybrid  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
+from core.editions import capabilities_for  # noqa: E402
 from services.mobile import remote_access  # noqa: E402
 
 WS = uuid.UUID("00000000-0000-0000-0000-0000000266a5")
@@ -56,6 +57,9 @@ EVERYWHERE = "0.0.0.0"
 PAIR = "/api/v1/mobile/pair"
 PAIRING_CODES = "/api/v1/mobile/pairing-codes"
 MAX_CODE_LINES = 50
+# PRD-277: the boot decision takes the edition's ``anonymous_operator`` capability, not its name.
+LOCAL_OPERATOR = capabilities_for("local").anonymous_operator
+SAAS_OPERATOR = capabilities_for("saas").anonymous_operator
 
 
 def _addresses(api: str, web: str) -> dict:
@@ -94,7 +98,7 @@ PAIRS = [
 
 @pytest.mark.parametrize("api,web,published", PAIRS)
 def test_off_refuses_a_published_install_and_names_the_fix(api, web, published):
-    decision = remote_access.boot_decision("local", "off", _addresses(api, web))
+    decision = remote_access.boot_decision(LOCAL_OPERATOR, "off", _addresses(api, web))
 
     assert decision.warning is None
     if not published:
@@ -108,12 +112,12 @@ def test_off_refuses_a_published_install_and_names_the_fix(api, web, published):
 
 @pytest.mark.parametrize("api,web,published", PAIRS)
 def test_paired_starts_whatever_the_addresses(api, web, published):
-    assert remote_access.boot_decision("local", "paired", _addresses(api, web)) == remote_access.BootDecision()
+    assert remote_access.boot_decision(LOCAL_OPERATOR, "paired", _addresses(api, web)) == remote_access.BootDecision()
 
 
 @pytest.mark.parametrize("api,web,published", PAIRS)
 def test_open_starts_and_warns_only_while_published(api, web, published):
-    decision = remote_access.boot_decision("local", "open", _addresses(api, web))
+    decision = remote_access.boot_decision(LOCAL_OPERATOR, "open", _addresses(api, web))
 
     assert decision.refusal is None
     assert (decision.warning is not None) is published
@@ -123,7 +127,7 @@ def test_open_starts_and_warns_only_while_published(api, web, published):
 
 @pytest.mark.parametrize("mode", ["banana", "", "PAIRED ", "on", "true"])
 def test_an_unknown_mode_refuses_even_on_loopback(mode):
-    decision = remote_access.boot_decision("local", mode, _addresses(LOOPBACK, LOOPBACK))
+    decision = remote_access.boot_decision(LOCAL_OPERATOR, mode, _addresses(LOOPBACK, LOOPBACK))
 
     assert decision.refusal and "LOCAL_REMOTE_ACCESS" in decision.refusal
 
@@ -131,14 +135,14 @@ def test_an_unknown_mode_refuses_even_on_loopback(mode):
 @pytest.mark.parametrize("mode", ["off", "paired", "open", "banana"])
 @pytest.mark.parametrize("api,web,published", PAIRS)
 def test_saas_is_never_checked(mode, api, web, published):
-    assert remote_access.boot_decision("saas", mode, _addresses(api, web)) == remote_access.BootDecision()
+    assert remote_access.boot_decision(SAAS_OPERATOR, mode, _addresses(api, web)) == remote_access.BootDecision()
 
 
 def test_open_warns_at_every_boot(caplog):
     caplog.set_level(logging.WARNING, logger=remote_access.__name__)
 
     for _boot in range(2):
-        remote_access.enforce_boot_decision("local", "open", _addresses(EVERYWHERE, LOOPBACK))
+        remote_access.enforce_boot_decision(LOCAL_OPERATOR, "open", _addresses(EVERYWHERE, LOOPBACK))
 
     warnings = [r for r in caplog.records if r.name == remote_access.__name__ and r.levelno == logging.WARNING]
     assert len(warnings) == 2
@@ -147,7 +151,7 @@ def test_open_warns_at_every_boot(caplog):
 
 def test_a_refused_boot_is_a_runtime_error():
     with pytest.raises(RuntimeError) as refused:
-        remote_access.enforce_boot_decision("local", "off", _addresses(LOOPBACK, EVERYWHERE))
+        remote_access.enforce_boot_decision(LOCAL_OPERATOR, "off", _addresses(LOOPBACK, EVERYWHERE))
 
     assert isinstance(refused.value, remote_access.RemoteAccessRefused)
     assert "WEB_PUBLISH_ADDRESS=0.0.0.0" in str(refused.value)

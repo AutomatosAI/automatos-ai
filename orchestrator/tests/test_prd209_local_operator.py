@@ -27,7 +27,7 @@ def test_entrypoint_seeds_the_local_operator_fail_closed():
 
 def test_local_anonymous_session_carries_operator_email_only_in_local():
     hybrid = (_ORCH / "core" / "auth" / "hybrid.py").read_text(encoding="utf-8")
-    assert re.search(r'if config\.AUTH_EDITION == "local":\s*\n(?:.*\n){0,4}.*UserContext\(email=config\.LOCAL_OPERATOR_EMAIL, system_role="super_admin"\)', hybrid), (
+    assert re.search(r'if editions\.current\(\)\.anonymous_operator:\s*\n(?:.*\n){0,4}.*UserContext\(email=config\.LOCAL_OPERATOR_EMAIL, system_role="super_admin"\)', hybrid), (
         "local anonymous lane must carry LOCAL_OPERATOR_EMAIL + super_admin"
     )
     assert "anon_user = UserContext()" in hybrid, "saas anonymous lane must stay the plain default UserContext()"

@@ -8,9 +8,9 @@ fetch: ``core/auth/hybrid.py`` then resolves a default workspace). So they never
 * A signed-in person (``auth_type`` ``clerk``): every usable workspace (not paused, not
   deleted) where they have an active ``workspace_members`` row or are the owner
   (``workspaces.owner_id``, the fallback ``core/auth/workspace_permission.py`` also reads).
-* The local edition's one anonymous operator (``AUTH_EDITION=local``): the owner of every
-  workspace on the instance (PRD-175, ``hybrid.py``'s local lane). Gated by the edition,
-  never by role.
+* The local edition's one anonymous operator (``anonymous_operator``, ``core.editions``): the
+  owner of every workspace on the instance (PRD-175, ``hybrid.py``'s local lane). Gated by the
+  edition, never by role.
 * A paired phone or browser (``auth_type`` ``device``, PRD-266): exactly the workspace its
   row is bound to (``core/auth/device.py`` checked that it is usable), never every
   workspace, the operator's own phone included.
@@ -26,10 +26,9 @@ from uuid import UUID
 
 from sqlalchemy import text
 
-from config import config
+from core import editions
 from core.auth.principal import resolve_user_pk
 
-LOCAL_EDITION = "local"
 ANONYMOUS_AUTH = "anonymous"
 DEVICE_AUTH = "device"  # core.auth.device.DEVICE_AUTH_TYPE
 PERSON_AUTH_TYPES = frozenset({"clerk", DEVICE_AUTH})
@@ -69,7 +68,7 @@ NO_MEMBERSHIP = Membership(user_pk=None, workspace_ids=frozenset(), every_worksp
 
 def is_local_operator(ctx: Any) -> bool:
     """The local edition's anonymous operator: the one owner of the instance."""
-    return config.AUTH_EDITION == LOCAL_EDITION and getattr(ctx, "auth_type", None) == ANONYMOUS_AUTH
+    return editions.current().anonymous_operator and getattr(ctx, "auth_type", None) == ANONYMOUS_AUTH
 
 
 def member_workspace_ids(db: Any, user_pk: int) -> FrozenSet[UUID]:

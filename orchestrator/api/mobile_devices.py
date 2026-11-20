@@ -65,6 +65,7 @@ from sqlalchemy.orm import Session
 from api.credentials import get_client_ip
 from api.widgets.rate_limit import RateLimitStore
 from config import config
+from core import editions
 from core.auth.bearer_registry import bearer_token
 from core.auth.dependencies import RequestContext
 from core.auth.device import DEVICE_AUTH_TYPE
@@ -211,15 +212,15 @@ class UpdateDeviceRequest(BaseModel):
         return value
 
 
-def _require_local_edition() -> None:
-    """404 outside the local edition: saas phones sign in with Clerk and never pair."""
-    if not config.IS_LOCAL_EDITION:
+def _require_device_pairing() -> None:
+    """404 where devices never pair (``device_pairing`` off): saas phones sign in with Clerk."""
+    if not editions.current().device_pairing:
         raise HTTPException(status_code=404, detail=NOT_FOUND)
 
 
 def _require_paired_mode() -> None:
     """404 unless this local install takes paired devices (``LOCAL_REMOTE_ACCESS=paired``)."""
-    _require_local_edition()
+    _require_device_pairing()
     if config.LOCAL_REMOTE_ACCESS != PAIRED_MODE:
         raise HTTPException(status_code=404, detail=NOT_FOUND)
 
@@ -332,7 +333,7 @@ def _found(value: Optional[T]) -> T:
     return value
 
 
-@router.post("/pairing-codes", dependencies=[Depends(_require_local_edition)])
+@router.post("/pairing-codes", dependencies=[Depends(_require_device_pairing)])
 def create_pairing_code(
     request: Request,
     response: Response,

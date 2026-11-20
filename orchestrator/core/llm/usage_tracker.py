@@ -59,7 +59,8 @@ CACHE_WRITE_PRICE_MULTIPLIER: Dict[str, float] = {"anthropic": CACHE_WRITE_MULTI
 
 
 def resolve_workspace_id(workspace_id: Any = None) -> Optional[Any]:
-    """Explicit → the request's ContextVar → the local edition's one workspace."""
+    """Explicit → the request's ContextVar → the one workspace of an install one person runs
+    (``multi_person`` off: the local edition)."""
     if workspace_id:
         return workspace_id
     try:
@@ -72,8 +73,9 @@ def resolve_workspace_id(workspace_id: Any = None) -> Optional[Any]:
         pass
     try:
         from config import config
+        from core import editions
 
-        if (config.AUTH_EDITION or "").lower() == "local" and config.DEFAULT_WORKSPACE_ID:
+        if not editions.current().multi_person and config.DEFAULT_WORKSPACE_ID:
             return config.DEFAULT_WORKSPACE_ID
     except Exception:
         pass

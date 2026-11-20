@@ -120,13 +120,13 @@ def _runs_live(db: Session, card: Any) -> bool:
 def _may(db: Session, workspace_id: Any, driver: Optional[str]) -> Callable[[str], bool]:
     """Whether the person behind the call may stop a run, as its own page asks. The
     local edition's one operator owns the workspace. A call no person drives may not."""
-    from config import config
+    from core import editions
     from core.auth.workspace_permission import workspace_permission_granted
 
     if not driver:
         return lambda permission: False
     ctx = SimpleNamespace(user=SimpleNamespace(clerk_user_id=driver, system_role=None), workspace_id=workspace_id,
-                          auth_type="anonymous" if config.IS_LOCAL_EDITION else "clerk")
+                          auth_type="anonymous" if editions.current().anonymous_operator else "clerk")
     return lambda permission: workspace_permission_granted(db, ctx, permission)
 
 

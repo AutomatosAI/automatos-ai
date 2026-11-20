@@ -39,6 +39,7 @@ from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from config import config
+from core import editions
 from core.auth.roles import caller_is_admin
 from core.models.themes import ThemeInstallation, ThemePackage, ThemeWorkspaceSettings
 from core.models.workspaces import Workspace
@@ -129,7 +130,7 @@ def default_private_uploads(db: Session, workspace_id: Any, switch: str) -> str:
     """The workspace setting's value while it is unset (NULL), under ``switch``."""
     if switch == SWITCH_OFF:
         return SETTING_OFF
-    if switch != SWITCH_AUTO or config.IS_LOCAL_EDITION:
+    if switch != SWITCH_AUTO or not editions.current().multi_person:
         return SETTING_ON
     return SETTING_ON if people_count(db, workspace_id) <= SINGLE_PERSON else SETTING_OFF
 

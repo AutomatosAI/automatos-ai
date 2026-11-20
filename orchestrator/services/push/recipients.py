@@ -29,6 +29,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from config import config
+from core import editions
 from core.auth.workspace_admin import WORKSPACE_ANSWERER_ROLES
 from modules.policy.roles import WorkspaceRole, workspace_has_permission
 from services.push.payload import NEEDS_ANSWER, SUGGESTION
@@ -89,7 +90,7 @@ def _roles_by_person(db: Session, workspace_id: Any, user_id: Optional[int]) -> 
         "ws": str(workspace_id),
         "uid": user_id,
         "owner": OWNER_ROLE,
-        "local": bool(config.IS_LOCAL_EDITION and operator),
+        "local": bool(editions.current().anonymous_operator and operator),
         "operator": operator,
     }).fetchall()
     roles: Dict[int, Set[str]] = {}

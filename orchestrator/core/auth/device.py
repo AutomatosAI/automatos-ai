@@ -3,7 +3,7 @@
 Reached only through the bearer-prefix registry (``core/auth/bearer_registry.py``), which
 runs it BEFORE the Clerk lane, so a device token is never shown to Clerk.
 
-* Local edition only (``AUTH_EDITION=local``, read through ``config.IS_LOCAL_EDITION``). On
+* Only where devices pair (``core.editions`` ``device_pairing``: the local edition). On
   saas an ``amd_`` bearer is 401 and nothing is looked up: a paired row never exists there (§8).
 * The row is found by the SHA-256 of the token (``token_hash``) and confirmed in constant
   time (``core.auth.pairing.secrets_match``), or by ``prev_token_hash`` while the rotation
@@ -41,6 +41,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from config import config
+from core import editions
 from core.auth.dependencies import RequestContext, UserContext
 from core.auth.pairing import hash_secret, secrets_match, within_rotation_overlap
 from core.auth.principal import MOBILE_DEVICE_CLAIM_SOURCE
@@ -214,10 +215,10 @@ def _resolve_in_own_session(request: Request, token: str) -> RequestContext:
 async def resolve_device_context(request: Request, token: str) -> RequestContext:
     """The registry's resolver for ``amd_`` bearers: the caller's ``RequestContext``, or 401/403.
 
-    Local edition only (saas: 401, nothing looked up). The lookup runs off the event loop;
-    the log context is set here, on the request's own context.
+    Only where devices pair (``device_pairing``; saas: 401, nothing looked up). The lookup runs
+    off the event loop; the log context is set here, on the request's own context.
     """
-    if not config.IS_LOCAL_EDITION:
+    if not editions.current().device_pairing:
         raise _unauthorized("device tokens are a local-edition credential")
     context = await run_in_threadpool(_resolve_in_own_session, request, token)
     _hybrid()._enrich_log_context(context)

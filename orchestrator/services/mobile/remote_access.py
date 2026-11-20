@@ -1,7 +1,8 @@
 """PRD-266 §4.3 — remote access on a local install: the boot check and the anonymous lane.
 
 Pure: values in, a decision out. Nothing here reads config, a database or a request.
-``config.validate_auth_edition`` hands it the edition, ``LOCAL_REMOTE_ACCESS`` and the two
+``config.validate_auth_edition`` hands it the edition's ``anonymous_operator`` capability
+(``core.editions``: a request with no credential is the operator), ``LOCAL_REMOTE_ACCESS`` and the two
 addresses compose publishes the API and the web app on (``API_PUBLISH_ADDRESS``,
 ``WEB_PUBLISH_ADDRESS``: docker-compose.yml passes both into the API container), and
 ``core/auth/bearer_registry.py`` asks it whether a request with no credential may still be
@@ -13,8 +14,9 @@ the operator.
   API key, …); a request with none is ``401 {"code": "device_pairing_required"}``.
 * ``open``: today's behaviour on a published install, for an operator who accepts the risk:
   a WARNING at every boot while either address reaches beyond this machine.
-* An unknown mode refuses boot. The saas edition is never checked: Clerk is its boundary,
-  and these answer "allowed" / "open" for it whatever the other values are.
+* An unknown mode refuses boot. An edition with no anonymous operator (saas) is never
+  checked: Clerk is its boundary, and these answer "allowed" / "open" for it whatever the
+  other values are.
 
 Loopback is 127.0.0.0/8, ``::1`` and ``localhost``; every other address, ``0.0.0.0`` and
 ``::`` among them, reaches beyond this machine. The address is the one compose PUBLISHES
@@ -31,7 +33,6 @@ from typing import Mapping, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-LOCAL_EDITION = "local"
 MODE_OFF = "off"
 MODE_PAIRED = "paired"
 MODE_OPEN = "open"
@@ -78,9 +79,10 @@ def published_beyond_loopback(addresses: Mapping[str, str]) -> Tuple[str, ...]:
     return tuple(f"{name}={addresses[name]}" for name in sorted(addresses) if not is_loopback(addresses[name]))
 
 
-def boot_decision(edition: str, mode: str, addresses: Mapping[str, str]) -> BootDecision:
-    """Refuse, warn or start, for this edition, ``LOCAL_REMOTE_ACCESS`` and publish addresses."""
-    if edition != LOCAL_EDITION:
+def boot_decision(anonymous_operator: bool, mode: str, addresses: Mapping[str, str]) -> BootDecision:
+    """Refuse, warn or start, for the edition's ``anonymous_operator``, ``LOCAL_REMOTE_ACCESS`` and
+    publish addresses. With no anonymous operator there is no lane to protect: just start."""
+    if not anonymous_operator:
         return BootDecision()
     if mode not in MODES:
         return BootDecision(refusal=f"LOCAL_REMOTE_ACCESS={mode!r} is not one of {', '.join(MODES)}.")
@@ -100,23 +102,24 @@ def boot_decision(edition: str, mode: str, addresses: Mapping[str, str]) -> Boot
     ))
 
 
-def enforce_boot_decision(edition: str, mode: str, addresses: Mapping[str, str]) -> None:
+def enforce_boot_decision(anonymous_operator: bool, mode: str, addresses: Mapping[str, str]) -> None:
     """Raise ``RemoteAccessRefused`` for a refused boot; log the warning of an ``open`` one."""
-    decision = boot_decision(edition, mode, addresses)
+    decision = boot_decision(anonymous_operator, mode, addresses)
     if decision.refusal:
         raise RemoteAccessRefused(decision.refusal)
     if decision.warning:
         logger.warning(decision.warning)
 
 
-def anonymous_lane_open(edition: str, mode: str) -> bool:
+def anonymous_lane_open(anonymous_operator: bool, mode: str) -> bool:
     """Whether remote access leaves a request with no credential its anonymous lane.
 
-    False only on a local install that is not ``off`` or ``open`` (``paired``, and an unknown
-    mode, which boot refuses anyway: fail closed). On saas it is always True: remote access
-    never applies there, and ``REQUIRE_AUTH`` still governs that lane.
+    False only where that request is the operator (``anonymous_operator``: local) and the mode
+    is not ``off`` or ``open`` (``paired``, and an unknown mode, which boot refuses anyway: fail
+    closed). With no anonymous operator (saas) it is always True: remote access never applies
+    there, and ``REQUIRE_AUTH`` still governs that lane.
     """
-    return edition != LOCAL_EDITION or mode in ANONYMOUS_MODES
+    return not anonymous_operator or mode in ANONYMOUS_MODES
 
 
 __all__ = [
