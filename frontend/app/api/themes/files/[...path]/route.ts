@@ -23,6 +23,8 @@ import { auth } from '@clerk/nextjs/server'
 
 import { isSaaS } from '@/lib/auth-edition'
 import { deviceAuthorizationFromCookies } from '@/lib/device-token'
+import { isEnterprise } from '@/lib/edition-name'
+import { sessionCookieFrom, sessionCookieHeader } from '@/lib/enterprise/server-session'
 import { THEME_DIGEST_PATTERN, THEME_FILES_PATH } from '@/lib/theme-host/constants'
 
 export const dynamic = 'force-dynamic'
@@ -60,7 +62,10 @@ const SERVING_HEADERS: Readonly<Record<string, string>> = {
 }
 
 type RouteContext = { params: Promise<{ path: string[] }> }
-type Credential = { readonly ok: true; readonly authorization: string | null } | { readonly ok: false }
+/** `cookie`: enterprise only, the session cookie alone (PRD-277 US-503). */
+type Credential =
+  | { readonly ok: true; readonly authorization: string | null; readonly cookie?: string }
+  | { readonly ok: false }
 
 function refusal(status: number, text: string): Response {
   return new Response(text, {
@@ -78,8 +83,18 @@ function backendFilePath(segments: readonly string[] | undefined): string | null
   return `${THEME_FILES_PATH}${digest}/${file.join('/')}`
 }
 
-/** SaaS: the Clerk session's token, or not ok when signed out. Local: the device cookie's token, or none. */
+/** Enterprise: the API's session cookie, passed on alone, or not ok when the browser sent none. */
+function enterpriseCredential(request: Request): Credential {
+  const session = sessionCookieFrom(request.headers.get('cookie'))
+  return session === null ? { ok: false } : { ok: true, authorization: null, cookie: sessionCookieHeader(session) }
+}
+
+/**
+ * SaaS: the Clerk session's token, or not ok when signed out. Local: the device cookie's token, or
+ * none. Enterprise (PRD-277 US-503): the session cookie, never a bearer.
+ */
 async function backendCredential(request: Request): Promise<Credential> {
+  if (isEnterprise) return enterpriseCredential(request)
   if (!isSaaS) return { ok: true, authorization: deviceAuthorizationFromCookies(request.headers.get('cookie')) }
   try {
     const session = await auth()
@@ -92,13 +107,14 @@ async function backendCredential(request: Request): Promise<Credential> {
   }
 }
 
-function forwardedHeaders(request: Request, authorization: string | null): Headers {
+function forwardedHeaders(request: Request, authorization: string | null, cookie?: string): Headers {
   const headers = new Headers()
   for (const name of FORWARDED_REQUEST_HEADERS) {
     const value = request.headers.get(name)
     if (value !== null) headers.set(name, value)
   }
   if (authorization !== null) headers.set('Authorization', authorization)
+  if (cookie !== undefined) headers.set('Cookie', cookie)
   return headers
 }
 
@@ -143,7 +159,7 @@ export async function GET(request: Request, { params }: RouteContext): Promise<R
   if (!credential.ok) return refusal(401, REFUSAL_TEXT[401])
   try {
     const backend = await fetch(`${BACKEND_URL}${filePath}`, {
-      headers: forwardedHeaders(request, credential.authorization),
+      headers: forwardedHeaders(request, credential.authorization, credential.cookie),
       cache: 'no-store',
       redirect: 'manual',
       signal: request.signal,

@@ -517,7 +517,7 @@ def _findings_to_payload(findings: list) -> List[Dict[str, Any]]:
 def _resolve_user_id(ctx: RequestContext, db: Session) -> Optional[int]:
     """Look up the integer users.id for the current Clerk user (or None)."""
     from core.models.core import User as UserModel
-
+    from core.auth.clerk_person import clerk_person_query
     clerk_id = getattr(ctx.user, "id", None)
     if not clerk_id:
         return None
@@ -528,7 +528,7 @@ def _resolve_user_id(ctx: RequestContext, db: Session) -> Optional[int]:
     except (TypeError, ValueError):
         pass
 
-    user = db.query(UserModel).filter(UserModel.clerk_user_id == clerk_id).first()
+    user = clerk_person_query(db, UserModel, clerk_id).first()
     if not user and getattr(ctx.user, "email", None):
         user = db.query(UserModel).filter(UserModel.email == ctx.user.email).first()
     return user.id if user else None

@@ -25,6 +25,7 @@ Each one answers one question the code asks. None of them means "is this edition
 | `profile_editable` | Is a person's name and email edited in Automatos? | yes | no (Clerk) | no (the IdP) |
 | `step_up` | How is a sensitive action confirmed? | `skip` | `clerk_freshness` | `reauth` (D-13) |
 | `device_pairing` | Can a phone or browser pair with a one-time code and hold an `amd_` token? | yes (by `LOCAL_REMOTE_ACCESS`) | no | yes, by setting (D-7) |
+| `issues_sessions` | Does Automatos issue and resolve its own sign-in sessions: the `ams_` bearer lane, the session cookie and its cross-site check, the `/api/v1/auth` sign-out and session routes, and the session settings checked at start-up? No call site in the table below reads it: it gates only code Wave 3 added. | no | no | yes (D-3, §5.3; Wave 3) |
 | `session_mode` | Can the operator's own CLI sessions run as agents (PRD-234)? | yes (by `CLI_RUNTIME_ENABLED`) | no | no (PRD-253 O1) |
 | `hosts_automatos_cloud` | Is this install Automatos Cloud itself: the public Marketplace, the catalogue, bundles, the theme revocation feed, the moderation inbox, the isolated theme review? | no | yes | no |
 | `calls_automatos_cloud` | May this install call Automatos's hosted services: theme revocations, Cloud sync, Cloud items? | yes, on by default | no (it is the host) | no: only what the operator switches on (D-12). US-704 builds those per-service switches; until then every one is off |

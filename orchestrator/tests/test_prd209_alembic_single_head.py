@@ -190,7 +190,16 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-11-17: merge_heads_20261117 joins the two — a pure merge, no schema operations. Neither
 # is re-chained: a database that ran `alembic upgrade heads` is stamped at both, and refuses a
 # rewritten lineage (the prd266_merge_heads lesson).
-EXPECTED_HEAD = "merge_heads_20261117"
+# 2026-11-20 (PRD-277 Wave 2, US-201 and US-203): prd277_w2_identities_20261120 chains onto
+# merge_heads_20261117 — user_identities (a new table) and users.system_role (a new nullable
+# column with its CHECK): a person's (issuer, subject) link and an install-wide role.
+# 2026-11-20 (PRD-277 Wave 3, US-301): prd277_w3_sessions_20261120 chains onto
+# prd277_w2_identities_20261120 — auth_sessions, a new table: the sessions Automatos issues.
+# 2026-11-20 (PRD-277 Wave 4, US-402): prd277_w4_oidc_sign_ins_20261120 chains onto
+# prd277_w3_sessions_20261120 — oidc_pending_sign_ins, a new table: sign-ins started, not finished.
+# 2026-11-20 (PRD-277 Wave 4 part 2, US-406): prd277_w4b_step_up_20261120 chains onto
+# prd277_w4_oidc_sign_ins_20261120 — oidc_pending_sign_ins.step_up_session_id, a new nullable column.
+EXPECTED_HEAD = "prd277_w4b_step_up_20261120"
 
 
 def _literal(node: ast.AST):

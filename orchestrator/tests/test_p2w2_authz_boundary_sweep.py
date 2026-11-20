@@ -98,6 +98,12 @@ OWN_AUTH_ROUTES = {
     # credential is the product's own key (Authorization: Bearer, checked against the product's stored hash in
     # constant time; 401 otherwise), NOT the shared hybrid dependency: no person or workspace calls it.
     ("POST", "/api/products/{product_id}/workspaces"),
+    # PRD-277 US-303 (api/auth_sessions.py): sign-out's credential is the caller's own session
+    # (Authorization: Bearer ams_… or the session cookie, which must pass the cross-site check),
+    # found by its token's hash and confirmed in constant time; NOT the shared hybrid dependency,
+    # so a person in no workspace can still sign out. It ends that one session and nothing else.
+    # 404 unless the edition issues sessions.
+    ("POST", "/api/v1/auth/sign-out"),
     # PRD-274 W5c: the same key closes and restores one of the product's own workspaces (404 for any other).
     ("DELETE", "/api/products/{product_id}/workspaces/{workspace_id}"),
     ("POST", "/api/products/{product_id}/workspaces/{workspace_id}/restore"),
@@ -182,6 +188,15 @@ ADMIN_GATED_IN_HANDLER = {
     # Skills git import is admin-only until a safe user-facing flow exists
     # (PRD-70 FIX-01).
     ("POST", "/api/v1/skills/sources/git"),
+    # PRD-277 US-303 (api/auth_sessions.py): an install admin on the session lane (_require_admin:
+    # caller_is_admin on a session context, nothing else), after step-up, ends sessions or
+    # deactivates a person whose install role theirs satisfies. 404 unless sessions are issued.
+    ("POST", "/api/v1/auth/sessions/{session_id}/revoke"),
+    ("POST", "/api/v1/auth/people/{user_id}/sessions/revoke"),
+    ("POST", "/api/v1/auth/people/{user_id}/deactivate"),
+    # PRD-277 US-405: the same install admin, after step-up, gives a person an install-wide role
+    # their own satisfies, and never leaves the install without an active install admin.
+    ("POST", "/api/v1/auth/people/{user_id}/system-role"),
     # PRD-196 S7 DONE: api/gdpr.py's hand-rolled workspace-admin gate was
     # consolidated onto the canonical ``require_workspace_admin`` DEPENDENCY, so
     # /api/v1/gdpr/erase + /erase-subject now classify as workspace-admin (not

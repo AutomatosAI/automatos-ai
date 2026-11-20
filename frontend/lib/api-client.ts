@@ -37,6 +37,8 @@ import type {
 } from './socials-results-types'
 import { reportUnauthorized } from './api-unauthorized'
 import { cloudInstallGate } from './marketplace/cloud-install-gate'
+// PRD-277 US-302: the enterprise session's cookie and cross-site header, added here and nowhere else.
+import { sessionHeadersForAnyMethod, withSession } from './enterprise/session-transport'
 
 interface ApiResponse<T = any> {
   data: T
@@ -1485,7 +1487,7 @@ class ApiClient {
 
   /** Auth headers (Clerk JWT + workspace) for use with raw fetch. */
   async getAuthHeaders(): Promise<Record<string, string>> {
-    const headers: Record<string, string> = {}
+    const headers: Record<string, string> = { ...sessionHeadersForAnyMethod() }
     if (typeof window !== 'undefined') {
       const workspaceId = _adminWorkspaceOverride || localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
       if (workspaceId) headers['X-Workspace-ID'] = workspaceId
@@ -1567,10 +1569,10 @@ class ApiClient {
     }
 
     try {
-      const response = await fetch(url, {
+      const response = await fetch(url, withSession({
         ...config,
         redirect: 'follow' // Follow redirects automatically
-      })
+      }))
 
       if (!response.ok) throw await httpErrorOf(response)
 
@@ -1595,10 +1597,10 @@ class ApiClient {
    */
   async requestBlob(endpoint: string, options: RequestInit = {}): Promise<Blob> {
     const token = await this.clerkTokenOrNull()
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+    const response = await fetch(`${this.baseUrl}${endpoint}`, withSession({
       ...options,
       headers: this.requestHeaders(options, options.body, token),
-    })
+    }))
     if (!response.ok) throw await httpErrorOf(response)
     return response.blob()
   }
@@ -2291,11 +2293,11 @@ class ApiClient {
     const url = `${BACKEND_URL}/api/knowledge/graph/import`
     console.log('[GraphImport] Uploading to:', url, 'file:', file.name, file.size, 'bytes')
 
-    const response = await fetch(url, {
+    const response = await fetch(url, withSession({
       method: 'POST',
       headers,
       body: formData,
-    })
+    }))
 
     console.log('[GraphImport] Response:', response.status, response.statusText)
 
@@ -2324,7 +2326,7 @@ class ApiClient {
       } catch (_) {}
     }
 
-    const response = await fetch(url, { method: 'POST', headers })
+    const response = await fetch(url, withSession({ method: 'POST', headers }))
     if (!response.ok) {
       const errorText = await response.text()
       throw new Error(errorText || `HTTP ${response.status}`)
@@ -2376,11 +2378,11 @@ class ApiClient {
     const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || ''
     const url = `${BACKEND_URL}/api/attachments`
 
-    const response = await fetch(url, {
+    const response = await fetch(url, withSession({
       method: 'POST',
       headers,
       body: formData,
-    })
+    }))
 
     if (!response.ok) {
       const errorText = await response.text()
@@ -3093,11 +3095,11 @@ class ApiClient {
     // Use raw fetch for multipart upload — don't set Content-Type header
     const headers = await this.getAuthHeaders()
     const url = `${this.baseUrl}/api/admin/plugins/upload`
-    const response = await fetch(url, {
+    const response = await fetch(url, withSession({
       method: 'POST',
       headers,
       body: formData
-    })
+    }))
     if (!response.ok) {
       let detail = response.statusText
       try {

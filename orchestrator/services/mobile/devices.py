@@ -48,6 +48,8 @@ from an id that does not exist.
   cleared (switch off, Expo token and push key gone), so nothing is pushed to it and the
   phone's Expo token is free for its next registration. Revoking a revoked device changes
   nothing.
+* ``revoke_persons_devices``: every device of one person, in every workspace, when that person
+  is deactivated (PRD-277 US-303); each revoked as ``revoke_device`` revokes one.
 * ``rotate_token``: the device lane on its own device, presenting its CURRENT token. The
   new token is returned once; the old one stays valid for
   ``MOBILE_TOKEN_ROTATION_OVERLAP_SECONDS``. A token already rotated out may not rotate
@@ -377,19 +379,42 @@ def revoke_device(db: Session, caller: DeviceCaller, device_id: UUID) -> Optiona
     device = query.with_for_update().first()
     if device is None or device.status == MobileDeviceStatus.REVOKED.value:
         return device
-    now = _now()
-    _assign(device, {
+    _assign(device, _revoked(device, caller.user_pk, _now()))
+    db.flush()
+    return device
+
+
+def _revoked(device: MobileDevice, revoked_by: Optional[int], now: datetime) -> Dict[str, Any]:
+    """What a revoke writes: the status, who and when, the push state cleared, and the event."""
+    return {
         "status": MobileDeviceStatus.REVOKED.value,
         "revoked_at": now,
-        "revoked_by": caller.user_pk,
+        "revoked_by": revoked_by,
         "push_enabled": False,
         "push_disabled_reason": PUSH_OFF_REVOKED,
         "expo_push_token": None,
         "push_key": None,
         "events": with_event(device.events, REVOKED, now),
-    })
+    }
+
+
+def revoke_persons_devices(db: Session, user_id: int, revoked_by: Optional[int],
+                           now: Optional[datetime] = None) -> int:
+    """Cut off every device ``user_id`` holds, in every workspace, a pending code included (PRD-277 US-303).
+
+    Each is revoked as ``revoke_device`` revokes one, its token hash kept so its next call is
+    told ``device_revoked``. Deactivating a person calls this in the same transaction that
+    deactivates them. Returns how many were revoked; flushes, never commits.
+    """
+    rows = db.query(MobileDevice).filter(
+        MobileDevice.user_id == user_id,
+        MobileDevice.status != MobileDeviceStatus.REVOKED.value,
+    ).with_for_update().all()
+    moment = now or _now()
+    for device in rows:
+        _assign(device, _revoked(device, revoked_by, moment))
     db.flush()
-    return device
+    return len(rows)
 
 
 def rotate_token(db: Session, caller: DeviceCaller, device_id: UUID,

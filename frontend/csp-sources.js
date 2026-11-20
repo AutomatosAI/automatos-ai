@@ -79,11 +79,14 @@ const NO_STRIPE = Object.freeze({ script: '', frame: '', connect: '', img: '' })
 
 /**
  * Stripe's sources for the build's edition (NEXT_PUBLIC_AUTH_EDITION, read the way
- * lib/auth-edition.ts reads it): the local edition has no billing, so its policy names no
- * Stripe host at all; anything else is the hosted edition.
+ * lib/auth-edition.ts reads it): the local and enterprise editions have no billing (PRD-277
+ * FR-24: billing is off in enterprise, as in local), so their policy names no Stripe host at all;
+ * anything else is the hosted edition.
  */
+const EDITIONS_WITHOUT_BILLING = new Set(['local', 'enterprise'])
+
 function stripeCspFor(edition) {
-  return String(edition || '').trim().toLowerCase() === 'local' ? NO_STRIPE : STRIPE_CSP
+  return EDITIONS_WITHOUT_BILLING.has(String(edition || '').trim().toLowerCase()) ? NO_STRIPE : STRIPE_CSP
 }
 
 /**

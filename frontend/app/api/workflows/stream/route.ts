@@ -7,6 +7,9 @@
 
 import { NextRequest } from 'next/server'
 
+import { isEnterprise } from '@/lib/edition-name'
+import { forwardedSession } from '@/lib/enterprise/server-session'
+
 export const runtime = 'edge' // Edge runtime for true streaming
 
 // SECURITY: UUID v4 validation to prevent SSRF via path injection (OWASP A10:2021 - SSRF)
@@ -21,6 +24,9 @@ function getAuthHeaders(request: NextRequest): Record<string, string> {
     'Accept': 'text/plain',
     'Cache-Control': 'no-cache',
   }
+  // PRD-277 US-503: enterprise passes the browser's session cookie and workspace on (the backend
+  // call is a GET), and no key or bearer, which would stop the API reading the cookie.
+  if (isEnterprise) return { ...headers, ...forwardedSession(request, 'GET') }
   const authHeader = request.headers.get('authorization')
   const apiKey = request.headers.get('x-api-key')
   const workspaceId =
