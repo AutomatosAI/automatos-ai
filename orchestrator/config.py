@@ -35,6 +35,26 @@ DEFAULT_PUBLISH_ADDRESS = "127.0.0.1"
 # only joins the waitlist and never calls this API with a session token.
 CLERK_DEFAULT_AUTHORIZED_PARTIES = "https://ui.automatos.app,http://localhost:3000"
 
+# PRD-277 §5.3, D-15: the session clocks' defaults (2 hours idle, 12 hours absolute).
+SESSION_IDLE_MINUTES_DEFAULT = 120
+SESSION_ABSOLUTE_HOURS_DEFAULT = 12
+
+
+def _whole_number_setting(name: str, default: int):
+    """``name`` as an int; ``default`` when unset; the text as it was when it is not a number.
+
+    Never raises, so a value an edition never reads cannot stop it from starting. Where the value
+    is read (an edition that issues sessions), start-up refuses anything but a whole number
+    (``core.edition_start_up.check_session_settings``).
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return raw
+
 # Load .env file
 env_path = Path(__file__).parent.parent / '.env'
 load_dotenv(env_path)
@@ -582,6 +602,15 @@ class Config:
     OIDC_ISSUER: str = (os.getenv("OIDC_ISSUER") or "").strip()
     OIDC_CLIENT_ID: str = (os.getenv("OIDC_CLIENT_ID") or "").strip()
     OIDC_CLIENT_SECRET: str = (os.getenv("OIDC_CLIENT_SECRET") or "").strip()
+    # PRD-277 §5.3, D-15: the session Automatos issues after sign-in (enterprise; core/auth/sessions.py):
+    # its two clocks, the browser's cookie (a __Host- name) and the header a cookie-authenticated
+    # request that changes something must carry. Checked at boot (core/edition_start_up.py).
+    # The clocks never raise here: a value that is not a whole number is refused at boot, and only
+    # where sessions are issued.
+    SESSION_IDLE_MINUTES: int = _whole_number_setting("SESSION_IDLE_MINUTES", SESSION_IDLE_MINUTES_DEFAULT)
+    SESSION_ABSOLUTE_HOURS: int = _whole_number_setting("SESSION_ABSOLUTE_HOURS", SESSION_ABSOLUTE_HOURS_DEFAULT)
+    SESSION_COOKIE_NAME: str = (os.getenv("SESSION_COOKIE_NAME") or "__Host-automatos_session").strip()
+    SESSION_CSRF_HEADER: str = (os.getenv("SESSION_CSRF_HEADER") or "X-Automatos-CSRF").strip()
     DEFAULT_WORKSPACE_ID: str = os.getenv("DEFAULT_WORKSPACE_ID")
     WORKSPACE_ID: str = os.getenv("WORKSPACE_ID")
     CREDENTIAL_ENCRYPTION_KEY: str = os.getenv("CREDENTIAL_ENCRYPTION_KEY")
@@ -2819,12 +2848,14 @@ class Config:
           to (W6 seeds it). It requires NO Clerk env.
         - PRD-266 §4.3: a ``local`` install published beyond loopback needs
           ``LOCAL_REMOTE_ACCESS`` paired or open (``services.mobile.remote_access``).
+        - PRD-277 Wave 3: where the edition issues sessions, their clocks, cookie and header
+          settings must hold (``core.edition_start_up.check_session_settings``).
         - PRD-277 US-103, last: OIDC sign-in (``enterprise``, ``core.edition_start_up``).
 
         Raises ``RuntimeError`` (aborting boot) on a contradiction.
         """
         # PRD-266 §4.3: imported here, at boot, so config.py never imports the app.
-        from core.edition_start_up import check_start_up
+        from core.edition_start_up import SESSION_SETTINGS, check_session_settings, check_start_up
         from core.editions import SIGN_IN_CLERK, capabilities_for
         from services.mobile import remote_access
         capabilities = capabilities_for(self.AUTH_EDITION)
@@ -2865,6 +2896,7 @@ class Config:
 
         addresses = {"API_PUBLISH_ADDRESS": self.API_PUBLISH_ADDRESS, "WEB_PUBLISH_ADDRESS": self.WEB_PUBLISH_ADDRESS}
         remote_access.enforce_boot_decision(capabilities.anonymous_operator, self.LOCAL_REMOTE_ACCESS, addresses)
+        check_session_settings(capabilities, {name: getattr(self, name) for name in SESSION_SETTINGS})
         check_start_up(capabilities, {"OIDC_ISSUER": self.OIDC_ISSUER, "OIDC_CLIENT_ID": self.OIDC_CLIENT_ID,
                                       "OIDC_CLIENT_SECRET": self.OIDC_CLIENT_SECRET,
                                       "FRONTEND_URL": self._FRONTEND_URL_FROM_ENV})

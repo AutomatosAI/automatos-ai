@@ -45,6 +45,7 @@ TRUTH_TABLE = {
         "install_description": "own_computer",
         "live_agent_named_apart": True,
         "last_workspace_purge_deletes_person": False,
+        "issues_sessions": False,
     },
     "saas": {
         "sign_in": "clerk",
@@ -65,6 +66,7 @@ TRUTH_TABLE = {
         "install_description": "hosted",
         "live_agent_named_apart": False,
         "last_workspace_purge_deletes_person": True,
+        "issues_sessions": False,
     },
     "enterprise": {
         "sign_in": "oidc",                              # §5.1
@@ -85,6 +87,7 @@ TRUTH_TABLE = {
         "install_description": "organisation",          # G-5
         "live_agent_named_apart": False,                # G-7
         "last_workspace_purge_deletes_person": False,   # G-8: never
+        "issues_sessions": True,                        # D-3, §5.3 (Wave 3)
     },
 }
 
@@ -100,6 +103,9 @@ SAAS_TRUE = (
     "multi_person", "billing", "hosts_automatos_cloud", "guards_user_endpoints",
     "last_workspace_purge_deletes_person",
 )
+# Capabilities no comparison ever made: new with enterprise, so off in local and saas (PRD-277
+# Wave 3 sessions). Each is False on both, so neither edition's behaviour moves.
+ENTERPRISE_ONLY = ("issues_sessions",)
 
 
 @pytest.mark.parametrize("edition", ["local", "saas", "enterprise"])
@@ -116,8 +122,9 @@ def test_enterprise_never_has_the_operator_and_never_bills():
 
 def test_the_boolean_lists_cover_every_boolean_capability():
     booleans = {f.name for f in dataclasses.fields(EditionCapabilities) if f.type in (bool, "bool")}
-    assert booleans == set(LOCAL_TRUE) | set(SAAS_TRUE)
+    assert booleans == set(LOCAL_TRUE) | set(SAAS_TRUE) | set(ENTERPRISE_ONLY)
     assert not set(LOCAL_TRUE) & set(SAAS_TRUE)
+    assert not (set(LOCAL_TRUE) | set(SAAS_TRUE)) & set(ENTERPRISE_ONLY)
 
 
 def test_exactly_local_saas_and_enterprise_have_rows():
@@ -181,6 +188,13 @@ def test_capabilities_match_todays_edition_comparisons(monkeypatch, edition):
         assert getattr(caps, name) is (config.AUTH_EDITION == "local"), name
     for name in SAAS_TRUE:
         assert getattr(caps, name) is (config.AUTH_EDITION == "saas"), name
+    for name in ENTERPRISE_ONLY:
+        assert getattr(caps, name) is False, name
+
+
+def test_only_enterprise_issues_sessions():
+    """PRD-277 US-301: the session lane exists in enterprise alone."""
+    assert [name for name in KNOWN_EDITIONS if capabilities_for(name).issues_sessions] == ["enterprise"]
 
 
 def test_the_configured_edition_always_has_a_row():

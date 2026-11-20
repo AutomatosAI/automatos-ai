@@ -442,8 +442,11 @@ def test_the_migration_chains_onto_the_head_and_creates_the_models_table():
     # joins the two, and the head guard follows the merge.
     merge = (VERSIONS / "merge_heads_20261117.py").read_text()
     assert f'"{MIGRATION}"' in merge and '"prd251d_wave3"' in merge
+    # PRD-277 Wave 2 chained prd277_w2_identities_20261120 onto the merge, so the guard names the
+    # merge as the head's parent rather than as the head.
     guard = (Path(__file__).resolve().parent / "test_prd209_alembic_single_head.py").read_text()
-    assert 'EXPECTED_HEAD = "merge_heads_20261117"' in guard
+    assert "merge_heads_20261117" in guard
+    assert 'down_revision = "merge_heads_20261117"' in (VERSIONS / "prd277_w2_identities_20261120.py").read_text()
 
 
 def test_the_table_stays_behind_on_a_workspace_move_and_names_its_key_as_secret():
