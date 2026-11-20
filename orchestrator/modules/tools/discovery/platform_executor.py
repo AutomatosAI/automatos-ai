@@ -442,9 +442,9 @@ def _human_directed_admin(db, workspace_id, caller_context) -> bool:
             return False
         role = _workspace_role_for_clerk(db, workspace_id, clerk_id)
         return role in ("owner", "admin")
-    from config import config as app_config
+    from core import editions
 
-    if not app_config.IS_LOCAL_EDITION:
+    if editions.current().sign_in != editions.SIGN_IN_NONE:
         return False
     from core.security.driving_user import driver_is_workspace_admin
 

@@ -113,12 +113,12 @@ def test_creation_is_consent_follows_the_edition(monkeypatch):
 
     assert hasattr(app_config, "AUTH_EDITION"), "the canonical config object carries the edition"
     monkeypatch.setattr(app_config, "AUTH_EDITION", "local")
-    assert board_consent.edition() == "local"
     assert board_consent.creation_is_consent() is True
     monkeypatch.setattr(app_config, "AUTH_EDITION", "saas")
     assert board_consent.creation_is_consent() is False
+    # PRD-277: config.py has already normalised the name; one with no capability row keeps asking.
     monkeypatch.setattr(app_config, "AUTH_EDITION", "LOCAL")
-    assert board_consent.creation_is_consent() is True
+    assert board_consent.creation_is_consent() is False
 
 
 def test_created_ticket_is_pre_approved_on_local_only(monkeypatch):

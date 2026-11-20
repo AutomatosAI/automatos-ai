@@ -51,7 +51,7 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from config import config
+from core import editions
 from core.models.approval_grants import ApprovalGrant, GrantStatus
 from core.models.core import BoardTask
 from core.models.mobile_devices import MobileDevice, MobileDeviceKind, MobileDeviceStatus
@@ -170,8 +170,8 @@ def _workspace_uuid(workspace_id: Any) -> uuid.UUID:
 
 
 def _edition_kind() -> str:
-    """§8: SaaS phones sign in with Clerk; a local install's phones are paired."""
-    return (MobileDeviceKind.PAIRED if config.IS_LOCAL_EDITION else MobileDeviceKind.CLERK).value
+    """§8: SaaS phones sign in with Clerk; where devices pair (``device_pairing``: local) they are paired."""
+    return (MobileDeviceKind.PAIRED if editions.current().device_pairing else MobileDeviceKind.CLERK).value
 
 
 def _device_filters(workspace_id: Any) -> Tuple[Any, ...]:

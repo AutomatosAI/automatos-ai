@@ -48,6 +48,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from config import config
+from core import editions
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.principal import resolve_user_pk
@@ -86,7 +87,6 @@ SOURCE_REQUIRED_STATUS = 422
 SOURCE_REQUIRED = (
     "A Marketplace theme ships its source: pack it with a source/ folder, from which the review rebuilds dist/."
 )
-LOCAL_EDITION = "local"
 CLAIM_SCOPE = "marketplace"
 
 
@@ -140,10 +140,9 @@ def _require_source(checked: CheckedThemePackage) -> None:
 
 
 def _submitter(db: Session, ctx: RequestContext) -> Submitter:
-    """The caller as a submitter; in SaaS one with no ``users`` row is refused (403)."""
+    """The caller as a submitter; without an anonymous operator, one with no ``users`` row is refused (403)."""
     user_pk = resolve_user_pk(db, ctx)
-    local = str(getattr(config, "AUTH_EDITION", "") or "").strip().lower() == LOCAL_EDITION
-    if user_pk is None and not local:
+    if user_pk is None and not editions.current().anonymous_operator:
         raise HTTPException(status_code=403, detail=NO_PERSON)
     return Submitter(user_pk=user_pk, is_admin=caller_is_admin(getattr(ctx, "user", None)))
 

@@ -34,6 +34,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from config import config
+from core import editions
 # The bearer prefix names the lane: the registry routes amd_ to the device lane.
 from core.auth.bearer_registry import DEVICE_TOKEN_PREFIX
 from core.auth.pairing import (
@@ -93,8 +94,8 @@ def _unexpired(expires_at: Optional[datetime], now: datetime) -> bool:
     return now < deadline
 
 
-def _require_local_edition() -> None:
-    if not config.IS_LOCAL_EDITION:
+def _require_device_pairing() -> None:
+    if not editions.current().device_pairing:
         raise PairingUnavailable("pairing is a local-edition feature; saas phones sign in with Clerk")
 
 
@@ -128,7 +129,7 @@ def create_pairing_code(
     (``--review --ttl-hours N``, D13) and nothing else: no route, request field or setting
     passes it, so Studio's codes always last ten minutes.
     """
-    _require_local_edition()
+    _require_device_pairing()
     code = new_pairing_code()
     qr_payload = pair_link(api_url(request_base_url), code)
     now = _now()
@@ -219,7 +220,7 @@ def pair_device(
     ``rotate_after`` is ``paired_at + MOBILE_TOKEN_ROTATE_DAYS``. A phone already paired to
     this workspace and person keeps its row, and the pending row is deleted (module docstring).
     """
-    _require_local_edition()
+    _require_device_pairing()
     now = _now()
     pending = _claimable(db, code, now)
     if pending is None:

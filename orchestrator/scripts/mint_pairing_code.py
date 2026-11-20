@@ -45,6 +45,7 @@ from sqlalchemy.exc import SQLAlchemyError  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
 from config import config  # noqa: E402
+from core import editions  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.pairing import PAIRING_CODE_TTL_SECONDS  # noqa: E402
 from core.auth.principal import resolve_user_pk  # noqa: E402
@@ -154,7 +155,7 @@ def _workspace_id() -> Optional[UUID]:
 
 def refusal() -> Optional[str]:
     """Why this install may not mint a code now, or ``None`` when it may."""
-    if not config.IS_LOCAL_EDITION:
+    if not editions.current().device_pairing:
         return SAAS_REFUSAL
     if _workspace_id() is None:
         return NO_WORKSPACE_REFUSAL
