@@ -134,6 +134,7 @@ def _spoken_manager(factory: Any, runtime: Any, provider: str, model: str, resol
     """The spoken model's manager: the agent's settings and output budget, capped by the spoken
     model's own ceiling, on the resolved key, booked to the agent and the workspace."""
     from core.llm import LLMConfig, LLMManager
+    from core.llm.key_resolver import is_workload_identity
     from core.llm.providers import enum_for
 
     agent = runtime.llm_manager.config
@@ -143,6 +144,7 @@ def _spoken_manager(factory: Any, runtime: Any, provider: str, model: str, resol
         max_tokens=factory._output_budget(agent.max_tokens, ceiling), output_ceiling=ceiling,
         api_key=resolved.api_key, top_p=agent.top_p, frequency_penalty=agent.frequency_penalty,
         presence_penalty=agent.presence_penalty, stop=agent.stop, timeout=agent.timeout,
+        workload_identity=is_workload_identity(resolved),
     )
     return LLMManager(config=llm_config, workspace_id=workspace, agent_id=runtime.agent_id,
                       is_byok=resolved.is_byok)

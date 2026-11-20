@@ -59,11 +59,33 @@ def resolve_provider_key(db: Any, provider_name: str, *, workspace_id: Any = Non
     return _platform_key(provider_name, agent_name)
 
 
+def is_workload_identity(resolved: Optional[ResolvedKey]) -> bool:
+    """Did the resolver answer with the install's own role (PRD-278 US-103)?
+
+    The one signal that lets a Bedrock client use the SDK's default chain: it rides on
+    ``LLMConfig.workload_identity`` to ``bedrock_client.runtime_client``.
+    """
+    return resolved is not None and getattr(resolved, "source", None) == SOURCE_WORKLOAD_IDENTITY
+
+
 def carries_calls(resolved: Optional[ResolvedKey]) -> bool:
     """Can ``resolved`` pay for a call: a key to send, or the pod's own role (PRD-278 US-103)?"""
     if resolved is None:
         return False
-    return bool(resolved.api_key) or getattr(resolved, "source", None) == SOURCE_WORKLOAD_IDENTITY
+    return bool(resolved.api_key) or is_workload_identity(resolved)
+
+
+def with_workload_identity(llm_config: Any) -> Any:
+    """A settings-tier config with no key, marked to run on the install's own role when its
+    provider can (Bedrock) and ``AWS_USE_WORKLOAD_IDENTITY`` is on: the settings path's twin of
+    ``_platform_key``'s last tier. Any other config comes back unchanged."""
+    from dataclasses import replace
+
+    from core.llm.providers import runs_on_workload_identity
+
+    if llm_config.api_key or not runs_on_workload_identity(llm_config.provider.value):
+        return llm_config
+    return replace(llm_config, workload_identity=True)
 
 
 def _byok_key(db: Any, provider_name: str, workspace_id: Any) -> Optional[ResolvedKey]:
@@ -142,4 +164,7 @@ def _credential(resolver: Any, name: str) -> Optional[str]:
         return None
 
 
-__all__ = ["SOURCE_WORKLOAD_IDENTITY", "ResolvedKey", "byok_endpoint", "carries_calls", "resolve_provider_key"]
+__all__ = [
+    "SOURCE_WORKLOAD_IDENTITY", "ResolvedKey", "byok_endpoint", "carries_calls", "is_workload_identity",
+    "resolve_provider_key", "with_workload_identity",
+]

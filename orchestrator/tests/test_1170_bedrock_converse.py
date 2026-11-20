@@ -244,7 +244,7 @@ def test_with_workload_identity_a_keyless_bedrock_model_resolves_and_signs_with_
     import types
 
     from config import config
-    from core.llm.key_resolver import resolve_provider_key
+    from core.llm.key_resolver import is_workload_identity, resolve_provider_key
 
     monkeypatch.setitem(sys.modules, "core.credentials.resolver", types.SimpleNamespace(
         get_credential_resolver=lambda: types.SimpleNamespace(get_credential_field=lambda *a, **k: None)))
@@ -255,9 +255,13 @@ def test_with_workload_identity_a_keyless_bedrock_model_resolves_and_signs_with_
     monkeypatch.setattr(config, "AWS_SECRET_ACCESS_KEY", None)
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+    import boto3
+
+    monkeypatch.setattr(boto3, "DEFAULT_SESSION", None)  # a fresh chain: no credentials cached by another test
 
     resolved = resolve_provider_key(None, "bedrock", agent_name="agent")
-    provider, seen = _bedrock(api_key=resolved.api_key, secret=config.AWS_SECRET_ACCESS_KEY, region="eu-central-1")
+    provider, seen = _bedrock(api_key=resolved.api_key, secret=config.AWS_SECRET_ACCESS_KEY, region="eu-central-1",
+                              workload_identity=is_workload_identity(resolved))
     provider.generate_response_sync([{"role": "user", "content": "hi"}])
 
     authorization = seen[0].headers["Authorization"].decode()
