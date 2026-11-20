@@ -21,6 +21,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from config import config
+from core import editions
 from services.workspace_move.auto_part import auto_document, workspace_document
 from services.workspace_move.bundles import AGENT_TYPE, external_id, write_bundles
 from services.workspace_move.crypto import new_file_key
@@ -122,7 +123,7 @@ def write_workspace_file(db: Session, workspace_id: UUID | str, out: BinaryIO, *
         encryption = key.manifest_block() if key else None
         workspace, contents = _write_parts(db, writer, workspace_id, chosen, encryption)
         source = Source(
-            edition=config.AUTH_EDITION, alembic_head=alembic_head(db), workspace_id=str(workspace_id),
+            edition=editions.current_name(), alembic_head=alembic_head(db), workspace_id=str(workspace_id),
             workspace_name=workspace["name"], exported_at=stamp, exported_by=exported_by,
         )
         manifest = build_manifest(source, contents)

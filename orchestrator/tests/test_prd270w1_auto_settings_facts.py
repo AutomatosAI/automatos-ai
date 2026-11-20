@@ -21,7 +21,7 @@ def install(monkeypatch):
     from config import config
 
     def _set(local: bool, cloud_url: str) -> None:
-        monkeypatch.setattr(type(config), "IS_LOCAL_EDITION", local)
+        monkeypatch.setattr(config, "AUTH_EDITION", "local" if local else "saas")
         monkeypatch.setattr(config, "AUTOMATOS_CLOUD_URL", cloud_url)
     return _set
 

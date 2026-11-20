@@ -242,8 +242,8 @@ def test_load_seed_data_calls_the_seed_gated_inside_its_own_try_except():
     assert "from core.seeds.seed_local_first_run import seed_local_first_run" in before
     assert "try:" in before
     assert "except Exception" in after, "a seed failure must not abort the other seeders"
-    # the gate lives in the seed itself (config.AUTH_EDITION), not in the loader
-    assert 'config.AUTH_EDITION != "local"' in _SEED_SRC
+    # the gate lives in the seed itself (the edition's capability), not in the loader
+    assert "if not editions.current().seeds_first_run_content:" in _SEED_SRC
 
 
 # --------------------------------------------------------------------------- #

@@ -6,7 +6,7 @@ app binary can talk to hosted Studio and to a self-hosted install alike:
 * ``schema`` is ``automatos-discovery/v1``. When ``auth.modes`` later gains ``"oidc"``
   (PRD-257, §4.11) the schema stays v1: the app treats a mode it does not know as "not
   supported by this app version". This build never emits ``"oidc"``.
-* ``edition`` is ``AUTH_EDITION``. saas signs in with Clerk: ``auth.modes ["clerk"]`` and
+* ``edition`` is the edition's name (``editions.current_name``). saas signs in with Clerk: ``auth.modes ["clerk"]`` and
   ``clerk {publishable_key, frontend_api}``, the frontend API decoded from the publishable key
   (``clerk_frontend_api``; no setting of its own). local signs in with a paired device:
   ``auth.modes ["device"]``, ``clerk`` null, and ``pairing.enabled`` only while the install
@@ -190,7 +190,7 @@ def build_discovery(request_base_url: str) -> Dict[str, Any]:
     return {
         "schema": DISCOVERY_SCHEMA,
         "name": SERVER_NAME,
-        "edition": config.AUTH_EDITION,
+        "edition": editions.current_name(),
         **addresses,
         "auth": auth,
         "pairing": pairing,

@@ -422,6 +422,6 @@ def public_registry() -> Dict[str, object]:
     """The registry with the running edition's name, each provider's ``platform_key`` by its billing."""
     billing = editions.current().billing
     return {
-        "edition": (config.AUTH_EDITION or "saas").lower(),
+        "edition": editions.current_name(),
         "providers": [to_public_dict(s, billing) for s in _SPECS],
     }

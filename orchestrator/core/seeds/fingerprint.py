@@ -64,6 +64,7 @@ INPUT_FILES = (
     "core/cli_runtime.py",
     "core/database/credential_types_seed.json",
     "core/database/load_seed_data.py",
+    "core/editions.py",
     "core/llm/auto_model_sync.py",
     "core/llm/defaults.py",
     "core/llm/list_prices.py",
@@ -80,7 +81,7 @@ INPUT_GLOBS = ("scripts/seed_*.py",)
 # The orchestrator modules a seeder may import without hashing them.
 UNHASHED_MODULES = ("core.models", "core.database", "config")
 # The config values the seeders read (seed_local_first_run, seed_system_settings,
-# seed_brand_designer).
+# seed_brand_designer). AUTH_EDITION is read through core.editions (seed_local_first_run).
 CONFIG_NAMES = (
     "AUTH_EDITION",
     "CLI_RUNTIME_ENABLED",

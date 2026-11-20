@@ -40,6 +40,11 @@ TRUTH_TABLE = {
         "push_needs_consent": True,
         "operator_is_user": True,
         "guards_user_endpoints": False,
+        "seeds_first_run_content": True,
+        "chat_seeds_user_name": True,
+        "install_description": "own_computer",
+        "live_agent_named_apart": True,
+        "last_workspace_purge_deletes_person": False,
     },
     "saas": {
         "sign_in": "clerk",
@@ -55,17 +60,26 @@ TRUTH_TABLE = {
         "push_needs_consent": False,
         "operator_is_user": False,
         "guards_user_endpoints": True,
+        "seeds_first_run_content": False,
+        "chat_seeds_user_name": False,
+        "install_description": "hosted",
+        "live_agent_named_apart": False,
+        "last_workspace_purge_deletes_person": True,
     },
 }
 
-# Each capability against the comparison its call sites make today. A capability
-# that is True on local is today's ``IS_LOCAL_EDITION``; one True on saas is today's
-# ``IS_SAAS_EDITION``. The enum-valued two are checked by the truth table alone.
+# Each capability against the comparison its call sites made before they moved. A
+# capability that is True on local is ``AUTH_EDITION == "local"``; one True on saas is
+# ``AUTH_EDITION == "saas"``. The enum-valued ones are checked by the truth table alone.
 LOCAL_TRUE = (
     "anonymous_operator", "profile_editable", "device_pairing", "session_mode",
     "calls_automatos_cloud", "push_needs_consent", "operator_is_user",
+    "seeds_first_run_content", "chat_seeds_user_name", "live_agent_named_apart",
 )
-SAAS_TRUE = ("multi_person", "billing", "hosts_automatos_cloud", "guards_user_endpoints")
+SAAS_TRUE = (
+    "multi_person", "billing", "hosts_automatos_cloud", "guards_user_endpoints",
+    "last_workspace_purge_deletes_person",
+)
 
 
 @pytest.mark.parametrize("edition", ["local", "saas"])
@@ -111,18 +125,28 @@ def test_current_reads_an_unknown_or_unfolded_value_as_config_does(monkeypatch, 
 
     monkeypatch.setattr(config, "AUTH_EDITION", value)
     assert editions.current() == capabilities_for(edition)
+    assert editions.current_name() == edition
 
 
 @pytest.mark.parametrize("edition", ["local", "saas"])
-def test_capabilities_match_todays_edition_helpers(monkeypatch, edition):
+def test_current_name_reports_the_configured_edition(monkeypatch, edition):
+    """The R rows (profile, /health, discovery, providers, export, traces) report this name."""
+    from config import config
+
+    monkeypatch.setattr(config, "AUTH_EDITION", edition)
+    assert editions.current_name() == edition
+
+
+@pytest.mark.parametrize("edition", ["local", "saas"])
+def test_capabilities_match_todays_edition_comparisons(monkeypatch, edition):
     from config import config
 
     monkeypatch.setattr(config, "AUTH_EDITION", edition)
     caps = editions.current()
     for name in LOCAL_TRUE:
-        assert getattr(caps, name) is config.IS_LOCAL_EDITION, name
+        assert getattr(caps, name) is (config.AUTH_EDITION == "local"), name
     for name in SAAS_TRUE:
-        assert getattr(caps, name) is config.IS_SAAS_EDITION, name
+        assert getattr(caps, name) is (config.AUTH_EDITION == "saas"), name
 
 
 def test_the_configured_edition_always_has_a_row():
