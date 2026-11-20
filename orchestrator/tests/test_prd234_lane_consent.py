@@ -14,6 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from config import config
 from services import board_consent as bc
 
 
@@ -23,7 +24,7 @@ def _task(status="assigned", agent_id=15, task_id=75, blocked_reason=None):
 
 def test_lane_ticket_is_consented_on_the_local_edition(monkeypatch):
     calls = []
-    monkeypatch.setattr(bc, "edition", lambda: "local")
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
     monkeypatch.setattr(bc, "record_operator_consent", lambda db, **kw: calls.append(kw) or "created")
     out = bc.consent_for_lane_ticket(object(), workspace_id="ws", task=_task(), source_type="heartbeat")
     assert out == "created"
@@ -33,13 +34,13 @@ def test_lane_ticket_is_consented_on_the_local_edition(monkeypatch):
 
 
 def test_lane_ticket_keeps_asking_on_saas(monkeypatch):
-    monkeypatch.setattr(bc, "edition", lambda: "saas")
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
     monkeypatch.setattr(bc, "record_operator_consent", lambda db, **kw: pytest.fail("must not consent on saas"))
     assert bc.consent_for_lane_ticket(object(), workspace_id="ws", task=_task(), source_type="heartbeat") == bc.SKIPPED
 
 
 def test_only_a_dispatchable_ticket_is_consented(monkeypatch):
-    monkeypatch.setattr(bc, "edition", lambda: "local")
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
     monkeypatch.setattr(bc, "record_operator_consent", lambda db, **kw: pytest.fail("not dispatchable"))
     assert bc.consent_for_lane_ticket(object(), workspace_id="ws", task=_task(status="blocked"), source_type="heartbeat") == bc.SKIPPED
     assert bc.consent_for_lane_ticket(object(), workspace_id="ws", task=_task(agent_id=None), source_type="heartbeat") == bc.SKIPPED
