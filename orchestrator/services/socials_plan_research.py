@@ -29,7 +29,7 @@ from uuid import UUID, uuid4
 
 import anyio
 
-from config import config
+from core import editions
 from core.models.core import RecipeExecution, WorkflowTemplate
 from core.models.socials import SocialCampaign
 from core.models.workspaces import Workspace
@@ -130,7 +130,7 @@ def background_allowed(workspace: Optional[Workspace]) -> bool:
     results' reads (PRD-251C US-C402)."""
     if workspace is None or socials_off_reason(workspace) is not None:
         return False
-    if (config.AUTH_EDITION or "").strip().lower() == "local":
+    if not editions.current().billing:
         return True
     from sqlalchemy.orm import object_session
 

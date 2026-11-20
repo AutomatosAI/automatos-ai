@@ -107,9 +107,9 @@ def meter_call(db: Any, call: PendingCall, plan: Optional[str], *, free: bool = 
     """Debit one call (if the platform paid for it) and mark it charged. Commits.
     Returns True when credits were debited. A free owner's call is recorded, never debited. ``plan``
     and ``free`` are those of ``payer``, the workspace that pays (a product's workspace: its owner)."""
-    from config import config
+    from core import editions
 
-    funding = funding_for(plan, Balance(), edition=config.AUTH_EDITION,
+    funding = funding_for(plan, Balance(), billing=editions.current().billing,
                           background=is_background_lane(call.request_type), free=free)
     cost = billable_cost(call) if funding.funded_by == FUNDED_BY_CREDITS else 0.0
     credits = credits_for(cost)

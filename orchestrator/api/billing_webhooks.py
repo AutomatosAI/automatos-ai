@@ -64,9 +64,9 @@ def _receive_stripe(payload: bytes, signature: str) -> Dict[str, Any]:
 @router.post(STRIPE_PATH)
 async def stripe_webhook(request: Request) -> Dict[str, Any]:
     """Stripe's events: verified, stored once, then applied to plans and credits."""
-    from config import config
+    from core import editions
 
-    if config.AUTH_EDITION == "local":
+    if not editions.current().billing:
         raise HTTPException(status_code=404, detail="Not found")
     payload = await request.body()
     signature = request.headers.get("stripe-signature", "")

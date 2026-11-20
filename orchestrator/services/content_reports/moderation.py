@@ -30,6 +30,7 @@ from urllib.parse import urlsplit
 
 from channels.drivers.webhook import post_webhook
 from config import config
+from core import editions
 from modules.policy.ai_disclosure import mark_ai_generated
 from services.content_reports import EXCERPT_MAX_CHARS
 from services.content_reports.service import FiledReport
@@ -103,7 +104,7 @@ def _warn_unusable_setting() -> None:
 
 def moderation_url() -> Optional[str]:
     """The inbox URL when this install posts reports (SaaS and an https URL), else ``None``."""
-    if not config.IS_SAAS_EDITION:
+    if not editions.current().hosts_automatos_cloud:
         return None
     value = (config.MODERATION_WEBHOOK_URL or "").strip()
     if not value:

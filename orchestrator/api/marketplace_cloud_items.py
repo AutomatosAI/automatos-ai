@@ -29,7 +29,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from config import config
+from core import editions
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
@@ -46,7 +46,7 @@ NOT_A_CLOUD_ITEM = "That isn't an item this install brought from Automatos Cloud
 
 def require_local_edition() -> None:
     """404 in the hosted edition, before the caller is looked at: only a local install holds Cloud items."""
-    if not config.IS_LOCAL_EDITION:
+    if not editions.current().calls_automatos_cloud:
         raise HTTPException(status_code=NOT_FOUND, detail=HOSTED_NO_CLOUD_ITEMS)
 
 

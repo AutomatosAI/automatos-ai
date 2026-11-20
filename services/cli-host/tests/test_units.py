@@ -333,6 +333,18 @@ def test_check_backend_refuses_non_local_or_disabled():
     assert check_backend(_Api({"edition": "local", "cli_runtime_enabled": True}))["edition"] == "local"
 
 
+def test_check_backend_reads_session_mode_when_the_backend_reports_it():
+    """A backend that says whether it has session mode is believed over its edition's name."""
+    with pytest.raises(HostRefused):
+        check_backend(_Api({"edition": "saas", "session_mode": False, "cli_runtime_enabled": True}))
+    with pytest.raises(HostRefused):
+        check_backend(_Api({"edition": "local", "session_mode": False, "cli_runtime_enabled": True}))
+    with pytest.raises(HostRefused):
+        check_backend(_Api({"edition": "local", "session_mode": True, "cli_runtime_enabled": False}))
+    health = {"edition": "local", "session_mode": True, "cli_runtime_enabled": True}
+    assert check_backend(_Api(health))["edition"] == "local"
+
+
 # The one sanctioned mention of the keychain: GitHub Copilot's sandbox setting that
 # DENIES it to every sandboxed command (PRD-253 S2.2). Only this exact deny is
 # exempt; code that reads, writes or allows the keychain still fails the guard.

@@ -88,7 +88,7 @@ def check_alerts(db: Any, workspace_id: str) -> Optional[int]:
     """Send the low / run-out alert once per crossing, and reset the level when
     credits were added. Returns the level alerted, or None. Commits. For a product's workspace, its
     owner's balance is checked and alerted (``services.credits.payer``): the owner pays for it."""
-    from config import config
+    from core import editions
     from services.credits.payer import paying_workspace
 
     workspace_id = paying_workspace(db, workspace_id)
@@ -100,7 +100,7 @@ def check_alerts(db: Any, workspace_id: str) -> Optional[int]:
     if row is None:
         return None
     plan, stored = row[0], int(row[1] or 0)
-    funding = funding_for(plan, read_balance(db, workspace_id), edition=config.AUTH_EDITION,
+    funding = funding_for(plan, read_balance(db, workspace_id), billing=editions.current().billing,
                           free=is_free_workspace(db, workspace_id))
     if funding.funded_by != FUNDED_BY_CREDITS:
         return None

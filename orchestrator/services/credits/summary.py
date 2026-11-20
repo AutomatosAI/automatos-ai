@@ -49,13 +49,15 @@ def _paid_by_product(db: Any, workspace: Any, payer: str) -> dict:
     owner pays. Whether that owner's platform-funded work is paused shows, and none of the owner's figures. The
     shape is every summary's (the web app reads ``balance`` and its buckets), with nothing in it."""
     from config import config
+    from core import editions
     from services.credits.alerts import LEVEL_OUT, level_for
 
     from core.models.workspaces import Workspace
 
     owner = db.query(Workspace).get(payer)
     plan = getattr(owner, "plan", None)
-    funding = funding_for(plan, read_balance(db, payer), edition=config.AUTH_EDITION, free=is_free_workspace(db, payer))
+    funding = funding_for(plan, read_balance(db, payer), billing=editions.current().billing,
+                          free=is_free_workspace(db, payer))
     paused = funding.funded_by == FUNDED_BY_CREDITS and level_for(funding.spendable, plan) == LEVEL_OUT
     return {"paid_by_product": True, "plan": None, "plan_name": None, "price_usd": None, "price_label": None,
             "billing_open": bool(config.BILLING_OPEN), "status": "paused" if paused else "active",
@@ -67,6 +69,7 @@ def _paid_by_product(db: Any, workspace: Any, payer: str) -> dict:
 def billing_summary(db: Any, workspace: Any) -> dict:
     """Plan, status, renewal date and balance by bucket for one workspace."""
     from config import config
+    from core import editions
     from services.credits.alerts import LEVEL_LOW, LEVEL_OUT, level_for
     from services.credits.payer import payer_of
     from services.plan_tiers import exposure_for_plan, platform_ai_allowed
@@ -77,7 +80,7 @@ def billing_summary(db: Any, workspace: Any) -> dict:
 
     plan = getattr(workspace, "plan", None)
     balance = read_balance(db, workspace.id)
-    funding = funding_for(plan, balance, edition=config.AUTH_EDITION, free=is_free_workspace(db, workspace.id))
+    funding = funding_for(plan, balance, billing=editions.current().billing, free=is_free_workspace(db, workspace.id))
     metered = funding.funded_by == FUNDED_BY_CREDITS
     level = level_for(funding.spendable, plan) if metered else None
     paused = level == LEVEL_OUT

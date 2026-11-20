@@ -41,9 +41,9 @@ LEDGER_PAGE_SIZE_MAX = 200
 
 
 def hosted_workspace(db: Session, ctx: RequestContext) -> Workspace:
-    from config import config
+    from core import editions
 
-    if config.AUTH_EDITION == "local":
+    if not editions.current().billing:
         raise HTTPException(status_code=404, detail="Not found")
     if not ctx.workspace_id:
         raise HTTPException(status_code=400, detail="Workspace context required")

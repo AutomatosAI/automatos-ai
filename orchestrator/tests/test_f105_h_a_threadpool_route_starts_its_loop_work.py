@@ -272,7 +272,7 @@ def credit(monkeypatch):
     from config import config
     from services import credit_watch
 
-    monkeypatch.setattr(type(config), "IS_LOCAL_EDITION", True)
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
     monkeypatch.setattr(credit_watch, "_last_check", {})
     checked = []
 

@@ -51,6 +51,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from config import config
+from core import editions
 from core.cli_presets import USAGE_PROVIDER_LABELS, usage_provider_slug
 from core.cli_runtime import is_cli_agent, session_cli
 from core.llm import embedding_manager, rerank_manager
@@ -268,7 +269,7 @@ def _session_runtimes(db: Session, workspace_id: uuid.UUID) -> ProviderNames:
     CLI with no preset adds none: no host runs it, and its text is never shown.
     Nothing on saas, where session mode cannot be switched on.
     """
-    if not (config.IS_LOCAL_EDITION and config.CLI_RUNTIME_ENABLED):
+    if not (editions.current().session_mode and config.CLI_RUNTIME_ENABLED):
         return {}
     rows = db.query(Agent.configuration).filter(Agent.workspace_id == workspace_id).all()
     slugs = {
@@ -309,7 +310,7 @@ def _plan_allows_voice(plan: Optional[str]) -> bool:
     an unknown plan resolves to the entry tier, which does. A local install is
     never plan-gated.
     """
-    if not config.IS_SAAS_EDITION:
+    if not editions.current().billing:
         return True
     plan_name = plan or DEFAULT_PLAN
     if bool(plan_tiers.exposure_for_plan(plan_name)["families"].get(VOICE_FAMILY)):

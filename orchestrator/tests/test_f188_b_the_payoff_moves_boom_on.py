@@ -66,7 +66,7 @@ def edition(monkeypatch):
     from config import config
 
     def set_edition(local):
-        monkeypatch.setattr(type(config), "IS_LOCAL_EDITION", local)
+        monkeypatch.setattr(config, "AUTH_EDITION", "local" if local else "saas")
     set_edition(False)
     return set_edition
 
