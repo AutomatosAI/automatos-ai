@@ -68,7 +68,7 @@ BAD = [
     ("OIDC_ENDPOINT_HOSTS", "oauth2.example.test:443"), ("OIDC_ENDPOINT_HOSTS", "good.example.test, 10.0.0.1"),
     ("OIDC_PENDING_SIGN_INS_MAX", "0"), ("OIDC_PENDING_SIGN_INS_MAX", "lots"), ("OIDC_PENDING_SIGN_INS_MAX", "1.5"),
     ("OIDC_PENDING_SIGN_INS_PER_ADDRESS", "0"), ("OIDC_PENDING_SIGN_INS_PER_ADDRESS", "-3"),
-    ("OIDC_PENDING_SIGN_INS_PER_ADDRESS", "few"),
+    ("OIDC_PENDING_SIGN_INS_PER_ADDRESS", "few"), ("OIDC_PENDING_SIGN_INS_PER_ADDRESS", "10001"),
 ]
 
 
@@ -110,7 +110,7 @@ def test_the_defaults_are_the_prds_and_every_name_is_in_the_surface():
     assert (cfg.OIDC_SCOPES, cfg.OIDC_CLAIM_EMAIL, cfg.OIDC_CLAIM_NAME) == ("openid profile email", "email", "name")
     assert (cfg.OIDC_CA_BUNDLE_FILE, cfg.ENTERPRISE_DEFAULT_ROLE) == ("", "none")
     assert (cfg.OIDC_ENDPOINT_HOSTS, cfg.OIDC_PENDING_SIGN_INS_MAX) == ("", 10_000)
-    assert cfg.OIDC_PENDING_SIGN_INS_PER_ADDRESS == 10
+    assert cfg.OIDC_PENDING_SIGN_INS_PER_ADDRESS == 100
     surface = json.loads((ORCH / "reports" / "config-surface.json").read_text(encoding="utf-8"))["settings"]
     assert set(NEW_SETTINGS) <= set(surface) and surface == sorted(surface)
     assert set(NEW_SETTINGS) <= set(OIDC_SIGN_IN_SETTINGS)

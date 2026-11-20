@@ -151,6 +151,7 @@ def test_a_ca_bundle_is_trusted_on_top_of_the_system_authorities(resolver, monke
 
     assert isinstance(context, ssl.SSLContext)
     assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname is True
+    assert context.minimum_version == ssl.TLSVersion.TLSv1_2
     assert context.cert_store_stats()["x509_ca"] == system + 1
 
 

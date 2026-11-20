@@ -142,6 +142,7 @@ class FakeIdentityProvider:
         self.ca_file = cert_file
         self._server = ThreadingHTTPServer((LOOPBACK, 0), _handler_for(self))
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(str(cert_file), str(key_file))
         self._server.socket = context.wrap_socket(self._server.socket, server_side=True)
         self.port = self._server.server_address[1]
@@ -317,6 +318,22 @@ def _tampered(token: str) -> str:
     return ".".join((header, _b64url(json.dumps(claims).encode("utf-8")), signature))
 
 
+def _answer_get(provider: FakeIdentityProvider, address: str) -> Tuple[int, Optional[Mapping[str, Any]],
+                                                                     Optional[Mapping[str, str]]]:
+    """The provider's answer to a GET: its status, its JSON body and its headers."""
+    parts, behaviour = urlsplit(address), provider.behaviour
+    if parts.path == ISSUER_PATH + "/.well-known/openid-configuration":
+        if behaviour.redirect_metadata_to:
+            return 302, None, {"Location": behaviour.redirect_metadata_to}
+        return behaviour.metadata_status, provider.metadata(), None
+    if parts.path == ISSUER_PATH + "/keys":
+        return behaviour.keys_status, provider.keys(), None
+    if parts.path == "/authorize":
+        status, headers = provider.authorize(parse_qs(parts.query))
+        return status, None, headers
+    return 404, None, None
+
+
 def _handler_for(provider: FakeIdentityProvider):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args: Any) -> None:  # the provider's own access lines stay quiet
@@ -333,17 +350,8 @@ def _handler_for(provider: FakeIdentityProvider):
             self.wfile.write(raw)
 
         def do_GET(self) -> None:  # noqa: N802 - the http.server name
-            parts, behaviour = urlsplit(self.path), provider.behaviour
-            if parts.path == ISSUER_PATH + "/.well-known/openid-configuration":
-                if behaviour.redirect_metadata_to:
-                    return self._send(302, headers={"Location": behaviour.redirect_metadata_to})
-                return self._send(behaviour.metadata_status, provider.metadata())
-            if parts.path == ISSUER_PATH + "/keys":
-                return self._send(behaviour.keys_status, provider.keys())
-            if parts.path == "/authorize":
-                status, headers = provider.authorize(parse_qs(parts.query))
-                return self._send(status, headers=headers)
-            return self._send(404)
+            status, body, headers = _answer_get(provider, self.path)
+            return self._send(status, body, headers)
 
         def do_POST(self) -> None:  # noqa: N802 - the http.server name
             if urlsplit(self.path).path != "/token":
@@ -367,7 +375,7 @@ def install_settings(provider: FakeIdentityProvider, **overrides: Any) -> Dict[s
         "OIDC_CLIENT_SECRET": provider.client_secret, "OIDC_CA_BUNDLE_FILE": str(provider.ca_file),
         "OIDC_SCOPES": "openid profile email", "OIDC_CLAIM_EMAIL": "email", "OIDC_CLAIM_NAME": "name",
         "ENTERPRISE_DEFAULT_ROLE": "none", "OIDC_ENDPOINT_HOSTS": "", "OIDC_PENDING_SIGN_INS_MAX": 10_000,
-        "OIDC_PENDING_SIGN_INS_PER_ADDRESS": 10,
+        "OIDC_PENDING_SIGN_INS_PER_ADDRESS": 100,
         **overrides,
     }
 

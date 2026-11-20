@@ -73,7 +73,7 @@ VERIFIER_BYTES = 64
 BINDING_BYTES = 32
 # config.OIDC_PENDING_SIGN_INS_MAX's and _PER_ADDRESS's defaults, for values start-up would have refused.
 PENDING_SIGN_INS_MAX_DEFAULT = 10_000
-PENDING_SIGN_INS_PER_ADDRESS_DEFAULT = 10
+PENDING_SIGN_INS_PER_ADDRESS_DEFAULT = 100
 # The bucket name an address is counted under before it is hashed (core.security.ip_bucket).
 CLIENT_BUCKET_PREFIX = "oidc_pending"
 # A state this server made is 43 URL-safe characters; anything far longer is not one.

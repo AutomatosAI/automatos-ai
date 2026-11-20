@@ -185,11 +185,13 @@ def pin(url: str, purpose: str) -> OutboundTarget:
 
 
 def _tls_verify() -> Any:
-    """httpx's default authorities; with ``OIDC_CA_BUNDLE_FILE``, the system's plus that file's."""
+    """httpx's default authorities; with ``OIDC_CA_BUNDLE_FILE``, the system's plus that file's, at
+    TLS 1.2 or later, verifying the certificate and the host name."""
     bundle = (config.OIDC_CA_BUNDLE_FILE or "").strip()
     if not bundle:
         return True
     context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_verify_locations(cafile=bundle)
     return context
 

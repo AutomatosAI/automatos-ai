@@ -605,7 +605,7 @@ class Config:
     ENTERPRISE_DEFAULT_ROLE: str = (os.getenv("ENTERPRISE_DEFAULT_ROLE") or "none").strip().lower()
     OIDC_ENDPOINT_HOSTS: str = (os.getenv("OIDC_ENDPOINT_HOSTS") or "").strip()  # hosts besides the issuer's the metadata may name
     OIDC_PENDING_SIGN_INS_MAX: int = _whole_number_setting("OIDC_PENDING_SIGN_INS_MAX", 10_000)  # unfinished sign-ins held at once
-    OIDC_PENDING_SIGN_INS_PER_ADDRESS: int = _whole_number_setting("OIDC_PENDING_SIGN_INS_PER_ADDRESS", 10)  # ...by one client address
+    OIDC_PENDING_SIGN_INS_PER_ADDRESS: int = _whole_number_setting("OIDC_PENDING_SIGN_INS_PER_ADDRESS", 100)  # ...by one client address
     # PRD-277 §5.3, D-15: sessions (core/auth/sessions.py): two clocks, a __Host- cookie and the CSRF header; a bad clock stops enterprise only.
     SESSION_IDLE_MINUTES: int = _whole_number_setting("SESSION_IDLE_MINUTES", SESSION_IDLE_MINUTES_DEFAULT)
     SESSION_ABSOLUTE_HOURS: int = _whole_number_setting("SESSION_ABSOLUTE_HOURS", SESSION_ABSOLUTE_HOURS_DEFAULT)
