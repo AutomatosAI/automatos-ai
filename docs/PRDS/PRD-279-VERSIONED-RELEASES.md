@@ -137,27 +137,27 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As a maintainer, I want the version path proven end to end on a release candidate, so that the first real release is not the first time it runs.
 
 **Acceptance Criteria:**
-- [ ] A ruleset lets only maintainers create a `v*` tag. A page records the setting. It is a repository setting: a person sets it, and CI cannot check it.
-- [ ] A release-candidate tag publishes every image with the version tag, and does not move `MAJOR.MINOR` or `edge`.
-- [ ] The workflow run is linked from the pull request that follows it, with what was published.
-- [ ] Anything on the tag path that did not work is fixed in this wave.
+- [ ] A ruleset lets only maintainers create a `v*` tag. A page records the setting. It is a repository setting: a person sets it, and CI cannot check it. *(Page written: `docs/deployment-infrastructure/releases.md`. Needs a repository setting: an admin creates the ruleset.)*
+- [ ] A release-candidate tag publishes every image with the version tag, and does not move `MAJOR.MINOR` or `edge`. *(Built: the merge job publishes each image only under a staging tag, and one job adds `X.Y.Z` (and `X.Y` for a full release only) after every image is signed and its signature checked. No `sha-<7>` on a tag; smoke-images never runs on a tag. Needs a real tag to show.)*
+- [ ] The workflow run is linked from the pull request that follows it, with what was published. *(Needs a real tag.)*
+- [ ] Anything on the tag path that did not work is fixed in this wave. *(Found by reading and fixed: a tag run re-pushed `sha-<7>`, and applied version tags before the signature was made or checked. The rest needs a real tag.)*
 
 #### US-102: A release fails on a failing scan · S
 **Description:** As an operator, I want no release published from an image with a fixable critical finding, so that a version number means the scan passed.
 
 **Acceptance Criteria:**
-- [ ] On a `v*` tag the policy step runs in `fail` mode, whatever `POLICY_MODE` is for branches.
-- [ ] A failing image is neither tagged with the version nor signed.
-- [ ] The allow-list's rules are unchanged: an entry still needs a reason and an expiry.
-- [ ] The scan policy's own tests cover the tag case.
+- [x] On a `v*` tag the policy step runs in `fail` mode, whatever `POLICY_MODE` is for branches.
+- [x] A failing image is neither tagged with the version nor signed. *(The merge job needs every build job, and the version tags come only after every merge leg; `test_prd279_release_workflow.py`.)*
+- [x] The allow-list's rules are unchanged: an entry still needs a reason and an expiry.
+- [x] The scan policy's own tests cover the tag case.
 
 #### US-103: The workflow checks its own signatures · S
 **Description:** As an operator, I want a published image to have a signature that was checked before I ever see it, so that "signed" means something.
 
 **Acceptance Criteria:**
-- [ ] After signing, the workflow verifies each image against this repository's image workflow at the tag that ran.
-- [ ] A failed check fails the run.
-- [ ] A signature made by a pull request build, or from a branch, does not pass the same check. A test of the command's arguments shows it.
+- [ ] After signing, the workflow verifies each image against this repository's image workflow at the tag that ran. *(Built: on the staging digest, before any version tag exists. Needs a real tag to run.)*
+- [ ] A failed check fails the run. *(Built: no image gets the version, and the chart is not published. Needs a real tag to run.)*
+- [x] A signature made by a pull request build, or from a branch, does not pass the same check. A test of the command's arguments shows it.
 
 ### Wave 2: The chart is published
 
@@ -165,26 +165,26 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As an operator, I want a chart that installs exactly the images it was released with, so that the version I name is the version I get.
 
 **Acceptance Criteria:**
-- [ ] On a version tag, the chart is packaged with its version and `appVersion` set to the tag's version.
-- [ ] The packaged chart's default values name every image by digest, with one web image digest for each published edition.
-- [ ] Rendering the packaged chart with only `existingSecret` set, once for each published edition, shows no image named by a tag. The job fails if one is.
-- [ ] The chart in the repository keeps `appVersion: "edge"`, and its tests pass unchanged.
+- [ ] On a version tag, the chart is packaged with its version and `appVersion` set to the tag's version. *(Built. Needs a real tag to run.)*
+- [ ] The packaged chart's default values name every image by digest, with one web image digest for each published edition. *(Built for the one edition published today, `local`. A second edition needs a web image slot per edition in the chart's templates; the packaging step refuses one until then. Needs a real tag to run.)*
+- [ ] Rendering the packaged chart with only `existingSecret` set, once for each published edition, shows no image named by a tag. The job fails if one is. *(Built. Needs a real tag to run.)*
+- [x] The chart in the repository keeps `appVersion: "edge"`, and its tests pass unchanged.
 
 #### US-202: Publishing and signing the chart · M
 **Description:** As an operator, I want to pull the chart from the registry and check where it came from, so that I do not need a checkout to install.
 
 **Acceptance Criteria:**
-- [ ] The packaged chart is pushed to the registry as an OCI artifact, under the release's version.
-- [ ] It is signed with the workflow's identity, and the signature is checked in the same run.
-- [ ] A version that already exists is never overwritten: a second push of the same version fails. Shown once, on a release candidate, and recorded in the pull request.
-- [ ] The chart's README gives the command to install a named version from the registry.
+- [ ] The packaged chart is pushed to the registry as an OCI artifact, under the release's version. *(Built. Needs a real tag to run.)*
+- [ ] It is signed with the workflow's identity, and the signature is checked in the same run. *(Built. `helm push` tags the chart before it can be signed; a chart not proven is deleted again through GitHub's packages API with the built-in token (public preview), or the job names what a maintainer must delete. Needs a real tag to run.)*
+- [ ] A version that already exists is never overwritten: a second push of the same version fails. Shown once, on a release candidate, and recorded in the pull request. *(GHCR overwrites a tag, so the job reads the registry first and refuses an existing version, or a registry it cannot read. Needs a real tag to show.)*
+- [x] The chart's README gives the command to install a named version from the registry.
 
 #### US-203: The chart checked against each supported Kubernetes version · S
 **Description:** As an operator, I want the chart checked against the Kubernetes versions I might run, so that "supported" is tested.
 
 **Acceptance Criteria:**
-- [ ] The chart workflow renders and checks the chart against the oldest supported version and the newest, not one.
-- [ ] The README states both versions, and a test fails if the README and the workflow disagree.
+- [x] The chart workflow renders and checks the chart against the oldest supported version and the newest, not one.
+- [x] The README states both versions, and a test fails if the README and the workflow disagree.
 
 ### Wave 3: A release says what it is
 
@@ -250,7 +250,7 @@ Each wave is one pull request or a short series. CI is the only gate.
 - FR-3: On a `v*` tag the scan policy must fail the release for any finding it would fail in `fail` mode.
 - FR-4: Every published image and chart must be signed, and the signature must be checked by the workflow before the release is complete.
 - FR-5: A released chart's default values must name every image by digest.
-- FR-6: A published version must never be overwritten.
+- FR-6: A published version must never be overwritten. *(The registry does not enforce it. Images: a preflight before any build refuses a version any published image has, and the tag step refuses a version on another digest. The chart: the release job refuses an existing version. Both rest on the `v*` tag ruleset too. Needs a real tag to show.)*
 - FR-7: Every release must have notes that say whether it changes the database.
 - FR-8: The API must report the version it was built as.
 - FR-9: A release candidate must not move the `MAJOR.MINOR` tag or `edge`.

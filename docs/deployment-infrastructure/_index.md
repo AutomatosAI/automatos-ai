@@ -43,6 +43,7 @@ For implementation and operational details, follow the child pages below.
 - For GitHub Actions and deployment automation, see [CI/CD & Automation Scripts](#20.5).
 - For Railway topology and production operations, see [Production Deployment](#20.6).
 - For Helm and Kind-based deployment, see [Kubernetes & Helm Chart](#20.7).
+- For version tags, the published chart and checking a release's signatures, see [Releases](releases.md).
 
 Sources: [docker-compose.yml:25-28]()
 

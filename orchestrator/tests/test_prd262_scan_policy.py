@@ -284,3 +284,60 @@ def test_the_allowlist_lane_runs_every_day_and_on_allowlist_changes():
     assert {".grype.yaml", "scripts/ci/image_scan_policy.py"} <= set(triggers["pull_request"]["paths"])
     run = "\n".join(step.get("run", "") for step in ALLOWLIST_WORKFLOW["jobs"]["allowlist"]["steps"])
     assert "scripts/ci/image_scan_policy.py allowlist --allowlist .grype.yaml" in run
+
+
+# --------------------------------------------------------------------------- PRD-279 US-102: a version tag
+
+
+def _check_on(tmp_path: Path, ref: str, entries: list, mode: str = "report", report_only: str = "false") -> int:
+    scan, allowlist = _files(tmp_path, entries)
+    return policy.main(["check", "--report", str(scan), "--allowlist", str(allowlist), "--mode", mode,
+                        "--ref", ref, "--report-only", report_only, "--name", "api", "--arch", "amd64",
+                        "--summary", str(tmp_path / "summary.md"), "--today", TODAY.isoformat()])
+
+
+@pytest.mark.parametrize("mode,ref,report_only,expected", [
+    ("report", "refs/tags/v0.7.0", False, "fail"),
+    ("report", "refs/tags/v0.8.0-rc.1", False, "fail"),
+    ("fail", "refs/tags/v0.7.0", False, "fail"),
+    ("report", "refs/heads/main", False, "report"),
+    ("fail", "refs/heads/main", False, "fail"),
+    ("report", "refs/pull/1577/merge", False, "report"),
+    ("report", "refs/heads/v0.7.0", False, "report"),
+    ("report", "refs/tags/archive-2026", False, "report"),
+    ("report", "", False, "report"),
+    ("report", "refs/tags/v0.7.0", True, "report"),
+    ("fail", "refs/heads/main", True, "report"),
+])
+def test_a_version_tag_raises_the_mode_to_fail_and_report_only_still_lowers_it(mode, ref, report_only, expected):
+    assert policy.effective_mode(mode, ref, report_only) == expected
+
+
+def test_on_a_version_tag_a_blocking_row_fails_whatever_policy_mode_says(tmp_path, capsys):
+    assert _check_on(tmp_path, "refs/tags/v0.8.0-rc.1", []) == 1
+    out = capsys.readouterr().out
+    assert "::error title=Scan policy::api (amd64): curl" in out and "(fail mode)" in out
+    assert "(fail mode;" in (tmp_path / "summary.md").read_text(encoding="utf-8")
+
+
+def test_on_a_branch_the_same_scan_still_only_warns(tmp_path, capsys):
+    assert _check_on(tmp_path, "refs/heads/main", []) == 0
+    assert "::error" not in capsys.readouterr().out
+
+
+def test_on_a_version_tag_the_allowlist_rules_are_unchanged(tmp_path, capsys):
+    assert _check_on(tmp_path, "refs/tags/v0.7.0", COVERED) == 0
+    assert "::error" not in capsys.readouterr().out
+    stale = [*COVERED[:2], _entry(STARLETTE_KEV, expires=TODAY - timedelta(days=1))]
+    assert _check_on(tmp_path, "refs/tags/v0.7.0", stale) == 1, "an expired entry covers nothing on a tag either"
+
+
+def test_on_a_version_tag_an_image_scanned_report_only_still_warns(tmp_path):
+    assert _check_on(tmp_path, "refs/tags/v0.7.0", [], report_only="true") == 0
+
+
+def test_the_policy_step_hands_the_policy_the_ref_and_the_report_only_switch():
+    step = _step("Scan policy")
+    for flag in ('--ref "$GITHUB_REF"', '--report-only "$SCAN_REPORT_ONLY"', '--mode "$POLICY_MODE"'):
+        assert flag in step["run"], flag
+    assert "${{" not in step["run"], "the ref reaches the script through the environment, quoted"
