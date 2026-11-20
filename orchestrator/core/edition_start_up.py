@@ -19,11 +19,17 @@
    without that header the address is whatever the caller wrote. ``OIDC_ENDPOINT_HOSTS``, when set,
    must be host names (no scheme, port or wildcard), and ``OIDC_PENDING_SIGN_INS_MAX`` and
    ``OIDC_PENDING_SIGN_INS_PER_ADDRESS`` whole numbers of at least one, the second no greater than
-   the first. The refusal names the setting, never its value. ``config.py`` reads them so
-   that no value can stop another edition from starting.
-3. last, while ``OIDC_SIGN_IN_IN_THIS_BUILD`` is false: the edition is "not available in this
-   build", so a half-built edition can never run. The pull request that finishes Wave 4 turns it
-   on.
+   the first.
+3. when the access rule or the first admins cannot be used (US-403, US-405):
+   ``OIDC_REQUIRED_CLAIMS`` must be in the rule language (``core.auth.access_rule``), and must name
+   at least one rule when ``OIDC_ISSUER`` is an issuer many organisations share (without one,
+   anyone with an account there could sign in); ``ENTERPRISE_BOOTSTRAP_ADMINS`` must be a list of
+   ``sub:`` and ``email:`` entries (``core.auth.bootstrap_admins``); and ``DEFAULT_WORKSPACE_ID``
+   must be the id of the install's default workspace, which sign-ins are recorded in and the
+   first admins own.
+
+Each refusal names the setting, never its value. ``config.py`` reads these settings so that no
+value can stop another edition from starting. A correctly configured install starts.
 
 ``check_session_settings`` (PRD-277 Wave 3) is called just before it. Where the edition issues its
 own sessions (``issues_sessions``) it refuses to start unless both clocks are whole numbers of at
@@ -37,7 +43,8 @@ that is not a number reaches this check as the text it was, and is refused here.
 
 Every other edition passes untouched: nothing here reads a setting it does not use.
 
-Imports no config and reads no setting itself: ``config.py`` hands the values in.
+Imports no config and reads no setting itself: ``config.py`` hands the values in. The two parsers it
+imports (``core.auth.access_rule``, ``core.auth.bootstrap_admins``) are pure standard library.
 """
 from __future__ import annotations
 
@@ -45,11 +52,10 @@ import os
 import re
 from typing import Any, Iterator, Mapping, Optional, Tuple
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from core import editions
-
-# The pull request that finishes PRD-277 Wave 4 turns this on; until then enterprise cannot start.
-OIDC_SIGN_IN_IN_THIS_BUILD = False
+from core.auth import access_rule, bootstrap_admins
 
 # The issuer, client id and client secret (PRD-277 §5.10), then the install's public address.
 OIDC_START_UP_SETTINGS: Tuple[str, ...] = ("OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "FRONTEND_URL")
@@ -58,11 +64,6 @@ MISSING_SETTINGS = (
     "AUTH_EDITION=enterprise cannot start: {names} {verb} unset. An install whose people sign in "
     "through the organisation's identity provider never starts half-configured; set {them} and "
     "start it again."
-)
-NOT_AVAILABLE = (
-    "AUTH_EDITION=enterprise is not available in this build: signing people in through the "
-    "organisation's identity provider is not built yet (PRD-277 Wave 4). Set AUTH_EDITION=local "
-    "or AUTH_EDITION=saas."
 )
 
 
@@ -85,11 +86,20 @@ OIDC_SIGN_IN_SETTINGS: Tuple[str, ...] = (
     "OIDC_ISSUER", "FRONTEND_URL", "OIDC_SCOPES", "OIDC_CLAIM_EMAIL", "OIDC_CLAIM_NAME",
     "OIDC_CA_BUNDLE_FILE", "ENTERPRISE_DEFAULT_ROLE", "DEFAULT_WORKSPACE_ID",
     "CLIENT_IP_HEADER", "OIDC_ENDPOINT_HOSTS", "OIDC_PENDING_SIGN_INS_MAX", "OIDC_PENDING_SIGN_INS_PER_ADDRESS",
+    "OIDC_REQUIRED_CLAIMS", "ENTERPRISE_BOOTSTRAP_ADMINS",
 )
 CLIENT_IP_HEADER_PROBLEM = (
     "must name the header the proxy in front sets to the caller's address: sign-in limits requests "
     "by that address and writes it to the audit log, and without it the address is whatever the caller "
     "sent"
+)
+SHARED_ISSUER_PROBLEM = (
+    "must name at least one rule: OIDC_ISSUER is an issuer many organisations share, so without a rule "
+    "anyone with an account there could sign in"
+)
+DEFAULT_WORKSPACE_PROBLEM = (
+    "must be the id (a UUID) of the install's default workspace: sign-ins are recorded in it, and the "
+    "first admins own it"
 )
 # RFC 1123 host names, lower-case: labels of letters, digits and hyphens. No scheme, port or wildcard.
 _HOST_NAME = re.compile(r"^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$")
@@ -103,7 +113,7 @@ _SCOPE_TOKEN = re.compile(r"^[\x21\x23-\x5B\x5D-\x7E]+$")
 
 
 class EditionNotReady(RuntimeError):
-    """Start-up refused: this edition is missing a setting, or is not in this build."""
+    """Start-up refused: this edition is missing a setting, or one it has cannot be used."""
 
 
 def missing_settings(settings: Mapping[str, Optional[str]]) -> Tuple[str, ...]:
@@ -192,24 +202,48 @@ def _pending_limit_problems(ceiling: Any, per_address: Any) -> Iterator[Tuple[st
         yield "OIDC_PENDING_SIGN_INS_PER_ADDRESS", "must be no greater than OIDC_PENDING_SIGN_INS_MAX"
 
 
+def _is_uuid(value: Any) -> bool:
+    try:
+        UUID(str(value or "").strip())
+    except ValueError:
+        return False
+    return True
+
+
+def _rule_and_admin_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str, str]]:
+    """The access rule (US-403), the first admins (US-405) and the default workspace; never a value."""
+    try:
+        rules = access_rule.parse_rules(settings.get("OIDC_REQUIRED_CLAIMS"))
+    except access_rule.MalformedRule as malformed:
+        yield "OIDC_REQUIRED_CLAIMS", f"must be claim=value rules separated by ';': {malformed}"
+    else:
+        if not rules and access_rule.is_shared_issuer(settings.get("OIDC_ISSUER")):
+            yield "OIDC_REQUIRED_CLAIMS", SHARED_ISSUER_PROBLEM
+    try:
+        bootstrap_admins.parse_entries(settings.get("ENTERPRISE_BOOTSTRAP_ADMINS"))
+    except bootstrap_admins.MalformedEntry as malformed:
+        yield "ENTERPRISE_BOOTSTRAP_ADMINS", f"must be sub: and email: entries separated by commas: {malformed}"
+    if not _is_uuid(settings.get("DEFAULT_WORKSPACE_ID")):
+        yield "DEFAULT_WORKSPACE_ID", DEFAULT_WORKSPACE_PROBLEM
+
+
 def check_start_up(capabilities: editions.EditionCapabilities, settings: Mapping[str, Optional[str]]) -> None:
     """Raise ``EditionNotReady`` when an OIDC edition may not start; return for every other one.
 
     ``settings`` maps each name in ``OIDC_START_UP_SETTINGS`` and ``OIDC_SIGN_IN_SETTINGS`` to its
-    value (``None`` when unset). The missing settings are checked first, then the sign-in settings;
-    "not available in this build" is the last check.
+    value (``None`` when unset). The missing settings are checked first, then the sign-in settings,
+    then the access rule, the first admins and the default workspace. A correctly configured
+    install passes.
     """
     if capabilities.sign_in != editions.SIGN_IN_OIDC:
         return
     missing = missing_settings(settings)
     if missing:
         raise EditionNotReady(_missing_message(missing))
-    first = next(_sign_in_setting_problems(settings), None)
+    first = next(_sign_in_setting_problems(settings), None) or next(_rule_and_admin_problems(settings), None)
     if first is not None:
         name, problem = first
         raise EditionNotReady(BAD_SESSION_SETTING.format(name=name, problem=problem))
-    if not OIDC_SIGN_IN_IN_THIS_BUILD:
-        raise EditionNotReady(NOT_AVAILABLE)
 
 
 def _whole_number_at_least_one(value: Any) -> bool:
@@ -251,10 +285,10 @@ def check_session_settings(capabilities: editions.EditionCapabilities, settings:
 
 __all__ = [
     "BAD_SESSION_SETTING",
+    "DEFAULT_WORKSPACE_PROBLEM",
     "MISSING_SETTINGS",
     "DEFAULT_ROLES",
-    "NOT_AVAILABLE",
-    "OIDC_SIGN_IN_IN_THIS_BUILD",
+    "SHARED_ISSUER_PROBLEM",
     "OIDC_SIGN_IN_SETTINGS",
     "OIDC_START_UP_SETTINGS",
     "SESSION_COOKIE_PREFIX",

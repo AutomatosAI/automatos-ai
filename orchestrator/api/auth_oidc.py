@@ -16,9 +16,14 @@ shared limiter's store cannot be reached, these two routes count in this process
   secret of its own that is never in an address, goes in a ``__Host-`` cookie (``SIGN_IN_COOKIE``:
   Secure, HttpOnly, SameSite=Lax, ten minutes) that binds the callback to this browser. The same
   client address bounds the sign-ins one caller may hold unfinished (``core.auth.oidc_pending``).
+* ``GET /start?step_up=1&return_to=<path>`` (US-406) starts a step-up for the live session this
+  browser's session cookie holds (``sign_in_flow.start_step_up``), sending the provider
+  ``max_age=0``; with no live session it is refused (``step_up_refused``) and nothing is stored.
 * ``GET /callback`` finishes it (``sign_in_flow.finish_sign_in``): 303 to the stored path, with the
-  session cookie set (``session_cookie.set_session_cookie``). A callback with more than
-  ``CALLBACK_PARAMS_MAX`` parameters is read as carrying none, so it is refused.
+  session cookie set (``session_cookie.set_session_cookie``). After a step-up no session is issued
+  and the cookie is left as it is: the browser's own session now carries a fresh ``auth_time``. A
+  callback with more than ``CALLBACK_PARAMS_MAX`` parameters is read as carrying none, so it is
+  refused.
 
 Every answer carries ``Cache-Control: no-store`` and ``Referrer-Policy: no-referrer`` (the
 callback's address holds the one-time code, which must never be sent on as a referrer), and a refusal is 303 to ``/sign-in?error=<code>``, the code one of ``sign_in_flow.REFUSAL_CODES``,
@@ -39,6 +44,7 @@ from api.credentials import get_client_ip
 from api.widgets.rate_limit import RateLimitStore
 from core import editions
 from core.auth import session_cookie, sign_in_flow
+from core.auth.bearer_registry import session_cookie_token
 from core.auth.oidc_pending import SIGN_IN_TTL_SECONDS
 from core.auth.sign_in_methods import DEFAULT_RETURN_PATH, Callback
 from core.database.database import get_db
@@ -134,12 +140,21 @@ def _params(request: Request) -> Dict[str, Tuple[str, ...]]:
     return grouped
 
 
+def _started(request: Request, db: Session, return_to: str, step_up: bool):
+    if step_up:
+        return sign_in_flow.start_step_up(db, session_cookie_token(request), return_to, get_client_ip(request))
+    return sign_in_flow.start_sign_in(db, return_to, get_client_ip(request))
+
+
 @router.get("/start", dependencies=[Depends(limit_starts_per_ip)])
-def start(request: Request, return_to: str = Query(DEFAULT_RETURN_PATH),
+def start(request: Request, return_to: str = Query(DEFAULT_RETURN_PATH), step_up: bool = Query(False),
           db: Session = Depends(get_db)) -> RedirectResponse:
-    """303 to the provider's sign-in page, with this browser's sign-in bound to it by cookie."""
+    """303 to the provider's sign-in page, with this browser's sign-in bound to it by cookie.
+
+    ``step_up=1`` (US-406) signs the person in again for the session this browser's cookie holds.
+    """
     try:
-        started = sign_in_flow.start_sign_in(db, return_to, get_client_ip(request))
+        started = _started(request, db, return_to, step_up)
     except sign_in_flow.SignInRefusal as refusal:
         return _refused(refusal.code)
     response = _redirect(started.redirect_to)
@@ -159,7 +174,8 @@ def callback(request: Request, db: Session = Depends(get_db)) -> RedirectRespons
         response = _refused(refusal.code)
     else:
         response = _redirect(done.return_to)
-        session_cookie.set_session_cookie(response, done.session.token, done.session.absolute_expires_at)
+        if done.session is not None:  # None after a step-up: the browser keeps its own, refreshed session
+            session_cookie.set_session_cookie(response, done.session.token, done.session.absolute_expires_at)
     _clear_binding(response)
     return response
 

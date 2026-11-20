@@ -18,9 +18,12 @@
   exchanged, because the exchange must present it. It never leaves the server.
 * ``return_to`` is where the person goes after signing in: a path on the install's own address,
   checked before it is stored (``core.auth.sign_in_methods.safe_return_path``).
+* ``step_up_session_id`` (US-406) is the live session that asked for a step-up
+  (``/start?step_up=1``), NULL on every other sign-in. Its callback refreshes that session's
+  ``auth_time`` and issues no session. No foreign key: the callback looks the session up itself.
 
-No person or workspace is named: nobody is known until the callback. The Alembic revision
-``prd277_w4_oidc_sign_ins_20261120`` declares the same names.
+No person or workspace is named: nobody is known until the callback. The Alembic revisions
+``prd277_w4_oidc_sign_ins_20261120`` and ``prd277_w4b_step_up_20261120`` declare the same names.
 """
 from __future__ import annotations
 
@@ -55,6 +58,7 @@ class OidcPendingSignIn(Base):
     return_to = Column(String(RETURN_TO_MAX), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
+    step_up_session_id = Column(PGUUID(as_uuid=True), nullable=True)
 
     __table_args__ = (
         # The callback's one lookup: a state names at most one started sign-in.

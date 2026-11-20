@@ -13,7 +13,7 @@
 * The cookie: ``__Host-`` name, ``Secure``, ``HttpOnly``, ``SameSite=Lax``, ``Path=/``, no
   ``Domain``, and a ``Max-Age`` of what is left of the session.
 * Start-up: the session settings are checked where sessions are issued, and nowhere else.
-* Step-up in enterprise goes through one seam that still refuses a session context.
+* Step-up in enterprise goes through one seam, which reads the session's ``auth_time`` (US-406).
 * The 401 the web app recognises names its reason and never the token.
 """
 from __future__ import annotations
@@ -391,11 +391,14 @@ def test_the_refusal_names_its_reason_and_never_the_token(caplog):
 # --------------------------------------------------------------------------- step-up
 
 
-def test_step_up_in_enterprise_goes_through_one_seam_that_still_refuses_a_session(enterprise, monkeypatch):
+def test_step_up_in_enterprise_goes_through_one_seam_that_reads_the_sessions_auth_time(enterprise, monkeypatch):
+    """PRD-277 US-406 filled the seam: a session whose person signed in at 1.0 passes for ten minutes."""
     ctx = _Lane()(None, _token())
-    with pytest.raises(HTTPException) as refused:
-        step_up.check_step_up(ctx, 10, 2.0)
-    assert refused.value.detail["code"] == step_up.STEP_UP_UNAVAILABLE_CODE
+    assert step_up.check_step_up(ctx, 10, 2.0) is None
+    with pytest.raises(step_up.StepUpRequired) as stale:
+        step_up.check_step_up(ctx, 10, 1.0 + 10 * 60)
+    assert stale.value.content["code"] == step_up.STEP_UP_CODE
+    assert stale.value.content["step_up"] == {"start": step_up.SIGN_IN_AGAIN_START, "max_age_minutes": 10}
 
     seen = []
     monkeypatch.setattr(step_up, "confirm_by_signing_in_again", lambda *args: seen.append(args))

@@ -22,7 +22,7 @@ os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
 from core import edition_start_up  # noqa: E402
-from core.edition_start_up import NOT_AVAILABLE, EditionNotReady  # noqa: E402
+from core.edition_start_up import EditionNotReady  # noqa: E402
 
 CLOCKS = ("SESSION_IDLE_MINUTES", "SESSION_ABSOLUTE_HOURS")
 ENV_KEYS = (
@@ -37,6 +37,8 @@ OIDC_ENV = {
     "FRONTEND_URL": "https://automatos.example.test",
     # Wave 4: where sign-in is OIDC, the address it limits and audits by must come from the proxy.
     "CLIENT_IP_HEADER": "X-Real-IP",
+    # Wave 4 part 2: the workspace sign-ins are recorded in and the first admins own.
+    "DEFAULT_WORKSPACE_ID": "00000000-0000-0000-0000-0000000277c2",
 }
 EDITION_ENV = {
     "local": {"AUTH_EDITION": "local", "DEFAULT_WORKSPACE_ID": "00000000-0000-0000-0000-0000000277c1"},
@@ -117,6 +119,4 @@ def test_an_idle_limit_below_the_last_seen_interval_is_refused_in_enterprise():
     assert f"at least {edition_start_up.SESSION_IDLE_MINUTES_MIN}" in str(refused.value)
 
     at_floor = str(edition_start_up.SESSION_IDLE_MINUTES_MIN)
-    with pytest.raises(EditionNotReady) as later:
-        _fresh_config(**EDITION_ENV["enterprise"], SESSION_IDLE_MINUTES=at_floor).validate_auth_edition()
-    assert str(later.value) == NOT_AVAILABLE  # the session check passed; the build switch refuses next
+    _fresh_config(**EDITION_ENV["enterprise"], SESSION_IDLE_MINUTES=at_floor).validate_auth_edition()  # starts

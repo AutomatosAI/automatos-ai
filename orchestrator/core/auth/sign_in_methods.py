@@ -34,6 +34,7 @@ from datetime import datetime
 from types import MappingProxyType
 from typing import Any, Callable, Mapping, Optional, Protocol, Tuple
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -94,10 +95,17 @@ class Callback:
 
 @dataclass(frozen=True)
 class Finished:
-    """A verified identity, and the path the person goes to next."""
+    """A verified identity, and the path the person goes to next.
+
+    For a step-up (US-406): ``step_up_session_id`` is the session that asked, and ``started_at`` when
+    the step-up started, which the identity's ``auth_time`` must not be older than. A method that
+    offers no step-up leaves both None, and its callbacks are ordinary sign-ins.
+    """
 
     identity: VerifiedIdentity
     return_to: str
+    step_up_session_id: Optional[UUID] = None
+    started_at: Optional[datetime] = None
 
 
 @dataclass(frozen=True)
@@ -114,7 +122,12 @@ class IdentityMethod(Protocol):
 
     def start(self, db: Session, return_to: str, client_address: str) -> Started:
         """Begin a sign-in that returns to ``return_to``, for the browser at ``client_address`` (the
-        trusted client address, ``api.credentials.get_client_ip``); where to send the browser."""
+        trusted client address, ``api.credentials.get_client_ip``); where to send the browser.
+
+        A method that offers step-up (US-406) also takes ``step_up_session_id``, the live session
+        asking for it: it then makes the person prove who they are again, whatever session the
+        provider holds, and its ``finish`` hands the id back. Sign-in passes it only for a step-up.
+        """
 
     def finish(self, db: Session, callback: Callback) -> Finished:
         """The verified identity the callback proves, or one of the three refusals."""

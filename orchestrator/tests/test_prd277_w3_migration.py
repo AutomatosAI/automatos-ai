@@ -46,6 +46,7 @@ ORCH = Path(__file__).resolve().parents[1]
 VERSIONS = ORCH / "alembic" / "versions"
 REVISION, PARENT = "prd277_w3_sessions_20261120", "prd277_w2_identities_20261120"
 WAVE_4 = "prd277_w4_oidc_sign_ins_20261120"
+HEAD = "prd277_w4b_step_up_20261120"  # Wave 4 part 2's revision, chained onto WAVE_4
 MIGRATION = VERSIONS / f"{REVISION}.py"
 TABLE = "auth_sessions"
 COLUMNS = ("id", "user_id", "token_hash", "created_at", "last_seen_at", "idle_expires_at",
@@ -102,14 +103,14 @@ def test_the_revision_chains_onto_wave_2_and_wave_4_chains_onto_it():
     assert (constants["revision"], constants["down_revision"]) == (REVISION, PARENT)
     revisions = _revisions()
     assert [rev for rev, down in revisions.items() if PARENT in _parents(down)] == [REVISION]
-    # PRD-277 Wave 4 chained prd277_w4_oidc_sign_ins_20261120 onto this revision, so the one head
-    # is Wave 4's and the head guard names this revision as its parent
-    # (tests/test_prd277_w4_migration.py pins that head).
+    # PRD-277 Wave 4 chained prd277_w4_oidc_sign_ins_20261120 onto this revision, and its second
+    # part prd277_w4b_step_up_20261120 onto that, so the one head is HEAD and the head guard names
+    # this revision in its history (tests/test_prd277_w4b_migration.py pins that head).
     assert [rev for rev, down in revisions.items() if REVISION in _parents(down)] == [WAVE_4]
     heads = set(revisions) - {parent for down in revisions.values() for parent in _parents(down)}
-    assert heads == {WAVE_4}
+    assert heads == {HEAD}
     single_head = (ORCH / "tests" / "test_prd209_alembic_single_head.py").read_text(encoding="utf-8")
-    assert REVISION in single_head and f'EXPECTED_HEAD = "{WAVE_4}"' in single_head
+    assert REVISION in single_head and f'EXPECTED_HEAD = "{HEAD}"' in single_head
     chain = (ORCH / "tests" / "test_prd236_w1_routes.py").read_text(encoding="utf-8")
     assert f'(versions / "{REVISION}.py")' in chain and f'down_revision = "{PARENT}"' in chain
 

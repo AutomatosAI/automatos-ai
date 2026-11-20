@@ -36,7 +36,8 @@ holding digests and an expiry, ended by the one call that uses it.
   with one state: the second's delete waits on the first's row lock, then finds the row gone.
   Exactly one wins; the other gets ``None``, as an unknown, used or expired state does (an expired
   row is deleted all the same). The digests find the row; the state and the binding are then
-  confirmed in constant time (``secrets_match``).
+  confirmed in constant time (``secrets_match``). It returns when the sign-in started, and the
+  session a step-up was asked for (US-406), which ``begin`` kept on the row.
 
 Nothing here logs a value. A database error is rolled back and raised as ``PendingSignInFailed``
 outside the handler, so the driver's text, which carries the statement's values, is neither its
@@ -51,7 +52,7 @@ import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional, Tuple, TypeVar
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -94,7 +95,8 @@ _EVICT_OLDEST = text(
 )
 _CLAIM = text(
     "DELETE FROM oidc_pending_sign_ins WHERE state_hash = :state_hash AND binding_hash = :binding_hash "
-    "RETURNING state_hash, binding_hash, nonce_hash, code_verifier, return_to, expires_at"
+    "RETURNING state_hash, binding_hash, nonce_hash, code_verifier, return_to, expires_at, created_at, "
+    "step_up_session_id"
 )
 
 
@@ -120,6 +122,9 @@ class ClaimedSignIn:
     nonce_hash: str = field(repr=False)
     code_verifier: str = field(repr=False)
     return_to: str
+    # When the sign-in started, and (US-406) the session that asked for a step-up, else None.
+    started_at: Optional[datetime] = None
+    step_up_session_id: Optional[UUID] = None
 
 
 def _now() -> datetime:
@@ -190,9 +195,11 @@ def _log_room_made(own: int, oldest: int) -> None:
                        oldest, pending_sign_ins_max())
 
 
-def begin(db: Session, return_to: str, client_address: str, now: Optional[datetime] = None) -> StartedSignIn:
+def begin(db: Session, return_to: str, client_address: str, now: Optional[datetime] = None,
+          step_up_session_id: Optional[UUID] = None) -> StartedSignIn:
     """Start one sign-in for ``client_address``: room made, its row written, all in one committed
-    transaction; its values returned once."""
+    transaction; its values returned once. ``step_up_session_id`` (US-406) is the session a step-up
+    was asked for, kept on the row for the callback."""
     if not isinstance(return_to, str) or not return_to or len(return_to) > RETURN_TO_MAX:
         raise ValueError(f"return_to must be a path of at most {RETURN_TO_MAX} characters")
     moment, client = now or _now(), client_hash(client_address)
@@ -204,7 +211,8 @@ def begin(db: Session, return_to: str, client_address: str, now: Optional[dateti
         made = _make_room(db, moment, client)
         db.add(OidcPendingSignIn(id=uuid4(), state_hash=hash_secret(state), nonce_hash=hash_secret(nonce),
                                  binding_hash=hash_secret(binding), client_hash=client, code_verifier=verifier,
-                                 return_to=return_to, created_at=moment, expires_at=expires_at))
+                                 return_to=return_to, created_at=moment, expires_at=expires_at,
+                                 step_up_session_id=step_up_session_id))
         db.flush()
         return made
 
@@ -232,7 +240,8 @@ def claim(db: Session, state: Any, binding: Any, now: Optional[datetime] = None)
         return None
     if (now or _now()) >= _as_utc(row.expires_at):
         return None
-    return ClaimedSignIn(nonce_hash=row.nonce_hash, code_verifier=row.code_verifier, return_to=row.return_to)
+    return ClaimedSignIn(nonce_hash=row.nonce_hash, code_verifier=row.code_verifier, return_to=row.return_to,
+                         started_at=_as_utc(row.created_at), step_up_session_id=row.step_up_session_id)
 
 
 __all__ = [

@@ -133,6 +133,7 @@ class FakeIdentityProvider:
         self.behaviour = Behaviour()
         self.person = Person()
         self.token_requests: List[Dict[str, Any]] = []
+        self.authorize_requests: List[Dict[str, str]] = []  # each sign-in page's query, as sent
         self.issued: List[str] = []          # every code, ID token and access token it handed out
         self._lock = threading.Lock()
         self._codes: Dict[str, _Code] = {}
@@ -248,6 +249,7 @@ class FakeIdentityProvider:
 
     def authorize(self, query: Mapping[str, List[str]]) -> Tuple[int, Dict[str, str]]:
         one = {name: values[0] for name, values in query.items() if values}
+        self.authorize_requests.append(dict(one))
         if one.get("response_type") != "code" or one.get("code_challenge_method") != "S256":
             return 400, {}
         code = secrets.token_urlsafe(24)
@@ -375,7 +377,7 @@ def install_settings(provider: FakeIdentityProvider, **overrides: Any) -> Dict[s
         "OIDC_CLIENT_SECRET": provider.client_secret, "OIDC_CA_BUNDLE_FILE": str(provider.ca_file),
         "OIDC_SCOPES": "openid profile email", "OIDC_CLAIM_EMAIL": "email", "OIDC_CLAIM_NAME": "name",
         "ENTERPRISE_DEFAULT_ROLE": "none", "OIDC_ENDPOINT_HOSTS": "", "OIDC_PENDING_SIGN_INS_MAX": 10_000,
-        "OIDC_PENDING_SIGN_INS_PER_ADDRESS": 100,
+        "OIDC_PENDING_SIGN_INS_PER_ADDRESS": 100, "OIDC_REQUIRED_CLAIMS": "", "ENTERPRISE_BOOTSTRAP_ADMINS": "",
         **overrides,
     }
 

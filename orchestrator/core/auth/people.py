@@ -23,25 +23,58 @@ PRD-277 US-408 (§5.13) makes this the one module for people. It also holds:
   only when they have no membership there yet, so a role an admin set is never changed.
 
 These three do not commit: sign-in commits them with its audit row (``core.auth.sign_in_flow``).
+
+The Team page's routes (``api/team.py``) use it too, with the same statements they ran before:
+``workspace_member`` (a membership by id in one workspace), ``change_member_role`` and
+``end_membership`` (each commits), and, accepting an invitation, ``person_for_invitee`` (the person,
+found by Clerk id or created) and ``join_from_invitation`` (the membership the invitation grants;
+not committed).
+
+**Install admins** (US-405). ``set_install_role`` gives a person an install-wide role
+(``core.auth.system_role.set_system_role``, audited ``user:system_role_changed`` in the workspace the
+admin acted from, else the default workspace). The install always keeps an active install admin:
+``set_install_role`` taking the role away and ``deactivate_person`` both refuse
+(``LastInstallAdmin``, nothing changed) when the person is the last one. Every active install
+admin's row is locked in ``id`` order first, so two admins removing each other at once cannot both
+succeed.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional, Union
+from typing import Any, Optional, Union
 from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from core.auth import session_audit, sessions
-from core.auth.system_role import UnknownPerson
-from core.auth.user_link import LinkedPerson, link_identity
-from modules.policy.roles import WorkspaceRole
+from core.auth.system_role import (
+    SystemRoleAuditFailed,
+    SystemRoleChange,
+    UnknownPerson,
+    set_system_role,
+    stored_system_role,
+)
+from core.auth.user_link import LinkedPerson, link_identity, user_id_for_invitee
+from core.workspaces.models import WorkspaceMember
+from modules.policy.roles import ADMIN, SUPER_ADMIN, USER, WorkspaceRole
 from services.mobile.devices import revoke_persons_devices
 
 UNKNOWN_PERSON_MESSAGE = "No such person."
 MEMBERSHIP_ROLES = tuple(role.value for role in WorkspaceRole)
+# The install-wide roles that make an install admin (core.auth.roles.caller_is_admin).
+INSTALL_ADMIN_ROLES = (ADMIN, SUPER_ADMIN)
+LAST_INSTALL_ADMIN_MESSAGE = (
+    "This person is the install's last active admin. Make another person an install admin first."
+)
+_LOCK_ACTIVE_ADMINS = text(
+    "SELECT id FROM users WHERE system_role = ANY(:roles) AND is_active IS NOT FALSE ORDER BY id FOR UPDATE"
+)
+
+
+class LastInstallAdmin(RuntimeError):
+    """The change would leave the install with no active install admin; nothing was changed."""
 
 _IS_ACTIVE = text("SELECT is_active FROM users WHERE id = :id")
 _ADD_MEMBER = (
@@ -135,9 +168,28 @@ def _deactivate(db: Session, user_id: int, revoked_by: Optional[int], now: datet
     return Deactivation(user_id=user_id, sessions_ended=ended, devices_revoked=revoked)
 
 
+def _assert_not_last_install_admin(db: Session, user_id: int) -> None:
+    """``LastInstallAdmin`` when ``user_id`` is the install's only active install admin.
+
+    Every active install admin's row is locked, in ``id`` order, until the transaction ends, so two
+    admins removing each other at once are serialised and the second sees the first's change. A
+    person who is no install admin locks nothing.
+    """
+    if (stored_system_role(db, user_id) or USER) not in INSTALL_ADMIN_ROLES:
+        return
+    admins = [row[0] for row in db.execute(_LOCK_ACTIVE_ADMINS, {"roles": list(INSTALL_ADMIN_ROLES)})]
+    if admins == [user_id]:
+        db.rollback()
+        raise LastInstallAdmin(LAST_INSTALL_ADMIN_MESSAGE)
+
+
 def deactivate_person(db: Session, user_id: int, requester: Requester) -> Deactivation:
-    """Deactivate ``user_id``: the person, every session and every device in one commit, audited."""
+    """Deactivate ``user_id``: the person, every session and every device in one commit, audited.
+
+    ``LastInstallAdmin`` (nothing changed) when they are the install's last active install admin.
+    """
     now = _now()
+    _assert_not_last_install_admin(db, user_id)
     return session_audit.commit_removal(
         db,
         lambda: _deactivate(db, user_id, requester.user_id, now),
@@ -146,6 +198,23 @@ def deactivate_person(db: Session, user_id: int, requester: Requester) -> Deacti
                           details={"sessions": done.sessions_ended, "devices": done.devices_revoked}),
         session_audit.PERSON_DEACTIVATED,
     )
+
+
+def set_install_role(db: Session, user_id: int, role: str, requester: Requester) -> SystemRoleChange:
+    """Give ``user_id`` the install-wide ``role`` (US-405), audited, and commit.
+
+    ``user:system_role_changed`` is recorded in the workspace the admin acted from, else the
+    install's default workspace (PRD-277 §12, entry 7). ``LastInstallAdmin`` (nothing changed) when
+    the change would leave no active install admin; ``UnknownPerson`` for no such person.
+    """
+    workspace_id = session_audit.audit_workspace(requester.workspace_id)
+    if workspace_id is None:
+        raise SystemRoleAuditFailed(session_audit.NO_WORKSPACE_MESSAGE)
+    if role not in INSTALL_ADMIN_ROLES:
+        _assert_not_last_install_admin(db, user_id)
+    return set_system_role(db, user_id=user_id, role=role, workspace_id=workspace_id,
+                           actor_user_id=requester.user_id, ip_address=requester.ip_address,
+                           user_agent=requester.user_agent)
 
 
 def link_person(db: Session, *, issuer: str, subject: str, email_verified: bool,
@@ -168,6 +237,71 @@ def person_is_active(db: Session, user_id: int) -> bool:
     return row[0] is not False
 
 
+def workspace_member(db: Session, workspace_id: Union[UUID, str], member_id: int) -> Optional[WorkspaceMember]:
+    """The membership ``member_id`` in ``workspace_id``, or None (the Team page's lookup)."""
+    return db.query(WorkspaceMember).filter(
+        WorkspaceMember.id == member_id,
+        WorkspaceMember.workspace_id == workspace_id,
+    ).first()
+
+
+def change_member_role(db: Session, member: WorkspaceMember, role: str) -> str:
+    """Set an existing membership's role and commit; the role it had. Its active flag is untouched.
+
+    Which roles a caller may set (never ``owner``) is the caller's check.
+    """
+    old_role = member.role
+    member.role = role
+    db.commit()
+    return old_role
+
+
+def end_membership(db: Session, member: WorkspaceMember) -> None:
+    """Deactivate one membership (the person leaves the workspace) and commit."""
+    member.is_active = False
+    db.commit()
+
+
+def person_for_invitee(db: Session, clerk_user_id: str, email: Optional[str], *, name: Optional[str] = None) -> int:
+    """The person accepting an invitation, found by their Clerk id or created; not committed.
+
+    ``core.auth.user_link.user_id_for_invitee``: an email another row holds is refused, never attached.
+    """
+    return user_id_for_invitee(db, clerk_user_id, email, name=name)
+
+
+def join_from_invitation(db: Session, invitation: Any, user_id: int) -> bool:
+    """Make ``user_id`` an active member in the invitation's role; True when they already were.
+
+    Idempotent: an existing inactive row is reactivated. Marks the invitation accepted the first
+    time. Not committed: the caller commits.
+    """
+    member = db.query(WorkspaceMember).filter(
+        WorkspaceMember.workspace_id == invitation.workspace_id,
+        WorkspaceMember.user_id == user_id,
+    ).first()
+
+    already_member = bool(member and member.is_active)
+    if member:
+        member.is_active = True
+        member.role = invitation.role
+    else:
+        db.add(WorkspaceMember(
+            workspace_id=invitation.workspace_id,
+            user_id=user_id,
+            role=invitation.role,
+            invited_by=invitation.invited_by,
+            invited_at=invitation.created_at,
+            joined_at=datetime.utcnow(),
+            is_active=True,
+        ))
+
+    if not invitation.accepted_at:
+        invitation.accepted_at = datetime.utcnow()
+        invitation.accepted_by_user_id = user_id
+    return already_member
+
+
 def set_membership(db: Session, user_id: int, workspace_id: Union[UUID, str], role: str, *,
                    if_absent: bool = False) -> bool:
     """Give ``user_id`` ``role`` in ``workspace_id``; whether a row was written. Not committed.
@@ -182,14 +316,23 @@ def set_membership(db: Session, user_id: int, workspace_id: Union[UUID, str], ro
 
 
 __all__ = [
+    "INSTALL_ADMIN_ROLES",
+    "LAST_INSTALL_ADMIN_MESSAGE",
     "MEMBERSHIP_ROLES",
     "Deactivation",
+    "LastInstallAdmin",
     "Requester",
+    "change_member_role",
     "deactivate_person",
+    "end_membership",
     "end_session",
     "end_sessions_of",
+    "join_from_invitation",
     "link_person",
+    "person_for_invitee",
     "person_is_active",
+    "set_install_role",
     "set_membership",
     "sign_out",
+    "workspace_member",
 ]

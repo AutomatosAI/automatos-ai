@@ -194,6 +194,9 @@ ADMIN_GATED_IN_HANDLER = {
     ("POST", "/api/v1/auth/sessions/{session_id}/revoke"),
     ("POST", "/api/v1/auth/people/{user_id}/sessions/revoke"),
     ("POST", "/api/v1/auth/people/{user_id}/deactivate"),
+    # PRD-277 US-405: the same install admin, after step-up, gives a person an install-wide role
+    # their own satisfies, and never leaves the install without an active install admin.
+    ("POST", "/api/v1/auth/people/{user_id}/system-role"),
     # PRD-196 S7 DONE: api/gdpr.py's hand-rolled workspace-admin gate was
     # consolidated onto the canonical ``require_workspace_admin`` DEPENDENCY, so
     # /api/v1/gdpr/erase + /erase-subject now classify as workspace-admin (not

@@ -16,8 +16,16 @@ declare still answers 405, as FastAPI answers it in every edition, so the paths 
 * ``POST /people/{user_id}/sessions/revoke`` — an install admin ends every session of a person.
 * ``POST /people/{user_id}/deactivate`` — an install admin deactivates a person: their sessions and
   their devices end in the same transaction (``core.auth.people.deactivate_person``).
+* ``POST /people/{user_id}/system-role`` — an install admin gives a person an install-wide role
+  (US-405: ``{"role": "admin"}`` makes another install admin), audited
+  ``user:system_role_changed``. Only a role the admin's own satisfies (else 403).
 
-The three admin changes require step-up (``require_step_up(STEP_UP_MAX_AGE_MINUTES)``). An install
+The last active install admin can neither be deactivated nor lose the role: 409, nothing changed
+(``people.LastInstallAdmin``). Sign-out, where the provider's metadata lists an end-session address,
+answers 200 ``{"redirect_to": <address>}`` instead of 204 (``oidc_sign_in.end_session_address``):
+the web app sends the browser there to sign out at the provider too (§5.6).
+
+The four admin changes require step-up (``require_step_up(STEP_UP_MAX_AGE_MINUTES)``). An install
 admin is a person on the session lane whose stored install-wide role is ``admin`` or
 ``super_admin`` (``_require_admin(ctx)``): no key, device or other lane passes. An admin acts only
 on a person whose install-wide role theirs satisfies, and never deactivates themselves. An unknown
@@ -33,6 +41,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api.credentials import get_client_ip
@@ -42,14 +51,16 @@ from core.auth import people, session_cookie, sessions
 from core.auth.bearer_registry import bearer_token, session_cookie_token
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.oidc_sign_in import end_session_address
 from core.auth.principal import claimed_user_pk
 from core.auth.roles import caller_is_admin, caller_role
 from core.auth.session_lane import SESSION_AUTH_TYPE, SESSION_ENDED, SESSION_ENDED_MESSAGE
 from core.auth.step_up import require_step_up
-from core.auth.system_role import UnknownPerson
+from core.auth.system_role import SystemRoleAuditFailed, UnknownPerson
 from core.database.database import get_db
 from core.models.auth_sessions import AuthSession
 from core.models.core import User
+from core.models.user_identities import SYSTEM_ROLES
 from modules.policy.roles import USER, role_satisfies
 
 # What FastAPI answers for a path it does not serve: the body a closed route answers with.
@@ -59,6 +70,10 @@ OUTRANKED = "This person's install role is above yours."
 NOT_YOURSELF = "You cannot deactivate yourself."
 NO_SUCH_PERSON = "No such person."
 NO_SUCH_SESSION = "No such session."
+ABOVE_YOUR_ROLE = "You can give a person only an install role yours includes."
+NOT_RECORDED = "The role was not changed: the change could not be recorded. Try again."
+NOT_A_SYSTEM_ROLE = "That is not an install role: use super_admin, admin or user."
+SYSTEM_ROLE_MAX = 32
 LISTED_SESSIONS_MAX = 100
 
 
@@ -117,7 +132,11 @@ def sign_out(request: Request, db: Session = Depends(get_db)) -> Response:
     ip, agent = _browser(request)
     people.sign_out(db, row.id, people.Requester(user_id=row.user_id, workspace_id=None,
                                                  ip_address=ip, user_agent=agent))
-    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    at_provider = end_session_address()
+    if at_provider is None:
+        response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    else:
+        response = JSONResponse(content={"redirect_to": at_provider}, headers={"Cache-Control": "no-store"})
     session_cookie.clear_session_cookie(response)
     return response
 
@@ -206,4 +225,44 @@ def deactivate_person(user_id: int, request: Request, ctx: RequestContext = Depe
         done = people.deactivate_person(db, user_id, _requester(request, ctx, actor))
     except UnknownPerson:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=NO_SUCH_PERSON) from None
+    except people.LastInstallAdmin:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=people.LAST_INSTALL_ADMIN_MESSAGE) from None
     return {"sessions_revoked": done.sessions_ended, "devices_revoked": done.devices_revoked}
+
+
+class InstallRoleChange(BaseModel):
+    """The install-wide role to give a person."""
+
+    role: str = Field(max_length=SYSTEM_ROLE_MAX)
+
+
+def _assert_may_grant(ctx: RequestContext, role: str) -> None:
+    """422 for a role that is not an install-wide one; 403 unless the admin's own role satisfies it."""
+    if role not in SYSTEM_ROLES:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=NOT_A_SYSTEM_ROLE)
+    if not role_satisfies(caller_role(ctx.user), role):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ABOVE_YOUR_ROLE)
+
+
+@router.post("/people/{user_id}/system-role",
+             dependencies=[Depends(require_step_up(config.STEP_UP_MAX_AGE_MINUTES))])
+def set_install_role(user_id: int, change: InstallRoleChange, request: Request,
+                     ctx: RequestContext = Depends(get_request_context_hybrid),
+                     db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Give a person an install-wide role (US-405): make another install admin, or take it away.
+
+    The admin acts only on a person whose role theirs satisfies, gives only a role theirs satisfies,
+    and never leaves the install without an active install admin (409). Audited.
+    """
+    actor = _require_admin(ctx)
+    _assert_may_act_on(db, ctx, user_id)
+    _assert_may_grant(ctx, change.role)
+    try:
+        done = people.set_install_role(db, user_id, change.role, _requester(request, ctx, actor))
+    except UnknownPerson:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=NO_SUCH_PERSON) from None
+    except people.LastInstallAdmin:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=people.LAST_INSTALL_ADMIN_MESSAGE) from None
+    except SystemRoleAuditFailed:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=NOT_RECORDED) from None
+    return {"user_id": done.user_id, "old_role": done.old_role, "new_role": done.new_role, "changed": done.changed}

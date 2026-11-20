@@ -1,5 +1,5 @@
 {
-  "route_count": 1057,
+  "route_count": 1058,
   "routes": [
     {
       "method": "GET",
@@ -3080,6 +3080,10 @@
     {
       "method": "POST",
       "path": "/api/v1/auth/people/{user_id}/sessions/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/people/{user_id}/system-role"
     },
     {
       "method": "POST",

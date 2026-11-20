@@ -1,7 +1,7 @@
 """PRD-277 Wave 4 (US-402): prd277_w4_oidc_sign_ins_20261120, the first part's one migration.
 
-* The revision chains onto ``prd277_w3_sessions_20261120`` and is the one head; both head pins
-  name it.
+* The revision chains onto ``prd277_w3_sessions_20261120``, and Wave 4 part 2's
+  ``prd277_w4b_step_up_20261120`` (one more column on this table) chains onto it and is the head.
 * Its upgrade creates ``oidc_pending_sign_ins``, its unique state-hash index, its expiry index and
   its per-address index, each only when missing, writing no row and touching no other table; its downgrade drops exactly
   the table.
@@ -43,6 +43,9 @@ ORCH = Path(__file__).resolve().parents[1]
 VERSIONS = ORCH / "alembic" / "versions"
 REVISION, PARENT = "prd277_w4_oidc_sign_ins_20261120", "prd277_w3_sessions_20261120"
 MIGRATION = VERSIONS / f"{REVISION}.py"
+# Wave 4 part 2 (US-406) adds one column to the table this revision builds.
+PART_2 = "prd277_w4b_step_up_20261120"
+PART_2_COLUMNS = ("step_up_session_id",)
 TABLE = "oidc_pending_sign_ins"
 COLUMNS = ("id", "state_hash", "nonce_hash", "binding_hash", "client_hash", "code_verifier", "return_to", "created_at",
            "expires_at")
@@ -60,8 +63,8 @@ def _constants() -> dict:
     return found
 
 
-def _load():
-    spec = importlib.util.spec_from_file_location(f"{MIGRATION.stem}_{uuid.uuid4().hex[:8]}", MIGRATION)
+def _load(migration: Path = MIGRATION):
+    spec = importlib.util.spec_from_file_location(f"{migration.stem}_{uuid.uuid4().hex[:8]}", migration)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -92,15 +95,18 @@ def _revisions() -> dict:
     return revisions
 
 
-def test_the_revision_chains_onto_wave_3_and_is_the_one_head():
+def test_the_revision_chains_onto_wave_3_and_part_2_chains_onto_it():
     constants = _constants()
     assert (constants["revision"], constants["down_revision"]) == (REVISION, PARENT)
     revisions = _revisions()
     assert [rev for rev, down in revisions.items() if PARENT in _parents(down)] == [REVISION]
+    # PRD-277 Wave 4 part 2 chained prd277_w4b_step_up_20261120 onto this revision, so the one head
+    # is part 2's (tests/test_prd277_w4b_migration.py pins it).
+    assert [rev for rev, down in revisions.items() if REVISION in _parents(down)] == [PART_2]
     heads = set(revisions) - {parent for down in revisions.values() for parent in _parents(down)}
-    assert heads == {REVISION}
+    assert heads == {PART_2}
     single_head = (ORCH / "tests" / "test_prd209_alembic_single_head.py").read_text(encoding="utf-8")
-    assert f'EXPECTED_HEAD = "{REVISION}"' in single_head
+    assert REVISION in single_head and f'EXPECTED_HEAD = "{PART_2}"' in single_head
     chain = (ORCH / "tests" / "test_prd236_w1_routes.py").read_text(encoding="utf-8")
     assert f'(versions / "{REVISION}.py")' in chain and f'down_revision = "{PARENT}"' in chain
 
@@ -127,7 +133,7 @@ def _ddl_lines() -> list:
 
 def test_the_model_and_the_ddl_declare_the_same_names_and_sizes():
     table = OidcPendingSignIn.__table__
-    assert tuple(table.columns.keys()) == COLUMNS
+    assert tuple(table.columns.keys()) == COLUMNS + PART_2_COLUMNS
     assert Base.metadata.tables[TABLE] is table
     lines = _ddl_lines()
     assert [line.split()[0] for line in lines] == list(COLUMNS)
@@ -179,9 +185,9 @@ def pg(engine):
             trans.rollback()
 
 
-def _run(conn, step: str = "upgrade") -> None:
+def _run(conn, step: str = "upgrade", migration: Path = MIGRATION) -> None:
     with Operations.context(MigrationContext.configure(conn)):
-        getattr(_load(), step)()
+        getattr(_load(migration), step)()
 
 
 _SNAPSHOT = (
@@ -226,6 +232,7 @@ def test_the_migration_builds_what_create_all_builds(pg):
     by_model = _schema(pg)
     pg.execute(sa.text(f"DROP TABLE {TABLE}"))
     _run(pg)
+    _run(pg, migration=VERSIONS / f"{PART_2}.py")  # the model carries part 2's column too
     assert _schema(pg) == by_model
 
 

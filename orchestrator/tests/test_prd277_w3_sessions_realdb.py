@@ -447,6 +447,7 @@ def test_a_removal_lands_even_when_its_row_cannot_be_written(db_session, install
 def client(db_session, install):
     app = FastAPI()
     app.include_router(routes.router)
+    step_up.install_step_up_handler(app)  # as main.py does: a step-up refusal answers its own body
     app.dependency_overrides[get_db] = lambda: db_session
     return TestClient(app)
 
@@ -482,22 +483,26 @@ def test_sign_out_by_cookie_needs_the_install_origin(client, db_session, install
 
 
 @pytest.fixture
-def admin(db_session, install, monkeypatch):
-    """An install admin's session, with step-up's seam passing (Wave 4 fills it, US-406)."""
+def admin(db_session, install):
+    """An install admin's session, signed in just now, so step-up passes on its auth_time (US-406)."""
     admin_pk = _seed_person(db_session, role="admin")
     db_session.commit()
-    monkeypatch.setattr(step_up, "confirm_by_signing_in_again", lambda ctx, max_age, now: None)
     return SimpleNamespace(pk=admin_pk, headers={"authorization": "Bearer " + _issue(db_session, admin_pk).token})
 
 
 def test_an_admin_route_needs_step_up(client, db_session, install):
+    """A session whose person signed in longer ago than STEP_UP_MAX_AGE_MINUTES is sent to sign in again."""
     admin_pk = _seed_person(db_session, role="admin")
     victim = _issue(db_session, install.person)
-    headers = {"authorization": "Bearer " + _issue(db_session, admin_pk).token}
+    long_ago = _now() - timedelta(minutes=config.STEP_UP_MAX_AGE_MINUTES + 1)
+    stale = sessions.issue_session(db_session, user_id=admin_pk, auth_time=long_ago, now=_now())
+    headers = {"authorization": "Bearer " + stale.token}
 
     answer = client.post(f"/api/v1/auth/sessions/{victim.session_id}/revoke", headers=headers)
 
-    assert answer.status_code == 403 and answer.json()["detail"]["code"] == step_up.STEP_UP_UNAVAILABLE_CODE
+    assert answer.status_code == 403 and answer.json()["code"] == step_up.STEP_UP_CODE
+    assert answer.json()["step_up"]["start"] == step_up.SIGN_IN_AGAIN_START
+    assert "clerk_error" not in answer.json()
     assert _row(db_session, victim.session_id).revoked_at is None
 
 

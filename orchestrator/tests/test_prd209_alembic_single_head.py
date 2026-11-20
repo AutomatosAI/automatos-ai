@@ -197,7 +197,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # prd277_w2_identities_20261120 — auth_sessions, a new table: the sessions Automatos issues.
 # 2026-11-20 (PRD-277 Wave 4, US-402): prd277_w4_oidc_sign_ins_20261120 chains onto
 # prd277_w3_sessions_20261120 — oidc_pending_sign_ins, a new table: sign-ins started, not finished.
-EXPECTED_HEAD = "prd277_w4_oidc_sign_ins_20261120"
+# 2026-11-20 (PRD-277 Wave 4 part 2, US-406): prd277_w4b_step_up_20261120 chains onto
+# prd277_w4_oidc_sign_ins_20261120 — oidc_pending_sign_ins.step_up_session_id, a new nullable column.
+EXPECTED_HEAD = "prd277_w4b_step_up_20261120"
 
 
 def _literal(node: ast.AST):

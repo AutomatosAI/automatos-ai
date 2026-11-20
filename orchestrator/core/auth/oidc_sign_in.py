@@ -10,7 +10,9 @@ address of the provider's own sign-in page, with:
 * ``response_type=code``, ``client_id``, ``scope`` (``OIDC_SCOPES``), ``state``, ``nonce``, and the
   PKCE ``code_challenge`` with ``code_challenge_method=S256``;
 * ``redirect_uri``: exactly ``<FRONTEND_URL's origin>/api/v1/auth/oidc/callback``, the one address
-  the customer registers (§5.2). The web app and the API share that origin (§5.3).
+  the customer registers (§5.2). The web app and the API share that origin (§5.3);
+* for a step-up (US-406, §5.5) ``max_age=0`` as well, and the sign-in's row keeps the session that
+  asked, which ``finish`` hands back with when the step-up started.
 
 The browser binding is a secret of its own, never in an address: the route puts it in a
 ``__Host-`` cookie only this browser holds, so a callback carried to another browser (login
@@ -37,9 +39,11 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Mapping, Optional, Tuple
 from urllib.parse import urlencode
+from uuid import UUID
 
 from config import config
-from core.auth import oidc_exchange, oidc_pending, oidc_provider, oidc_tokens
+from core import editions
+from core.auth import oidc_exchange, oidc_http, oidc_pending, oidc_provider, oidc_tokens
 from core.auth.session_cookie import install_origin
 from core.auth.sign_in_methods import (
     Callback,
@@ -62,6 +66,11 @@ CODE_MAX_LENGTH = 4096
 # A token without ``auth_time`` is recorded as signed in at the epoch, so a check of how recently
 # the person proved who they are (step-up, US-406) can never pass on it.
 NO_AUTH_TIME = datetime(1970, 1, 1, tzinfo=timezone.utc)
+# OIDC Core §3.1.2.1: max_age=0 makes the provider authenticate the person again, as prompt=login
+# does, and makes auth_time a required claim of the ID token it returns.
+STEP_UP_MAX_AGE = "0"
+# Where the provider sends the browser back after signing out there (§5.6): the sign-in page.
+SIGNED_OUT_PATH = "/sign-in"
 
 
 def callback_address() -> str:
@@ -160,21 +169,52 @@ def _claims_of(id_token: str, claimed: oidc_pending.ClaimedSignIn) -> Mapping[st
     raise InvalidSignIn(f"the ID token was refused: {rule}")
 
 
+def end_session_address() -> Optional[str]:
+    """Where to send a browser that signed out, to sign out at the provider too (§5.6), or None.
+
+    Only where people sign in with OIDC, and only when the provider's metadata lists an
+    ``end_session_endpoint`` (an https address, ``oidc_provider.parse_metadata``). The address
+    carries exactly two parameters (OpenID Connect RP-Initiated Logout 1.0 §2): ``client_id``, and
+    ``post_logout_redirect_uri``, the install's own ``SIGNED_OUT_PATH``, which the customer
+    registers at the provider. No ID token is kept, so none is sent as a hint. None when the
+    provider cannot be read: the session has ended here all the same.
+    """
+    if editions.current().sign_in != editions.SIGN_IN_OIDC or not config.OIDC_ISSUER:
+        return None
+    origin = install_origin()
+    try:
+        endpoint = oidc_provider.current_metadata().end_session_endpoint
+    except oidc_http.ProviderUnreachable:
+        logger.warning("Signed out here; the provider could not be read, so not at the provider")
+        return None
+    if not endpoint or origin is None:
+        return None
+    return _authorize_address(endpoint, {"client_id": config.OIDC_CLIENT_ID,
+                                         "post_logout_redirect_uri": origin + SIGNED_OUT_PATH})
+
+
 class OidcSignIn:
     """Signing in with the organisation's OIDC provider: authorization code, PKCE S256, state, nonce."""
 
-    def start(self, db: Any, return_to: str, client_address: str) -> Started:
+    def start(self, db: Any, return_to: str, client_address: str,
+              step_up_session_id: Optional[UUID] = None) -> Started:
         """Begin a sign-in that returns to ``return_to`` (a path on this install, else ``/``), counted
-        against ``client_address``'s pending sign-ins (``oidc_pending.begin``)."""
+        against ``client_address``'s pending sign-ins (``oidc_pending.begin``). For a step-up
+        (``step_up_session_id``, US-406) the address also carries ``max_age=0``: the provider must
+        make the person sign in again, and report when in ``auth_time``."""
         metadata = oidc_provider.current_metadata()
         redirect_uri = callback_address()
-        started = oidc_pending.begin(db, safe_return_path(return_to), client_address)
-        address = _authorize_address(metadata.authorization_endpoint, {
+        started = oidc_pending.begin(db, safe_return_path(return_to), client_address,
+                                     step_up_session_id=step_up_session_id)
+        values = {
             "response_type": oidc_provider.CODE_FLOW, "client_id": config.OIDC_CLIENT_ID,
             "redirect_uri": redirect_uri, "scope": config.OIDC_SCOPES, "state": started.state,
             "nonce": started.nonce, "code_challenge": started.code_challenge,
             "code_challenge_method": oidc_provider.PKCE_S256,
-        })
+        }
+        if step_up_session_id is not None:
+            values = {**values, "max_age": STEP_UP_MAX_AGE}
+        address = _authorize_address(metadata.authorization_endpoint, values)
         return Started(redirect_to=address, browser_binding=started.binding)
 
     def finish(self, db: Any, callback: Callback) -> Finished:
@@ -184,7 +224,8 @@ class OidcSignIn:
             raise SignInExpired("the callback names no live sign-in of this browser")
         code = _code_of(callback.params)
         claims = _claims_of(_id_token_for(code, claimed), claimed)
-        return Finished(identity=verified_identity(claims), return_to=claimed.return_to)
+        return Finished(identity=verified_identity(claims), return_to=claimed.return_to,
+                        step_up_session_id=claimed.step_up_session_id, started_at=claimed.started_at)
 
 
 __all__ = [
@@ -192,7 +233,10 @@ __all__ = [
     "CODE_MAX_LENGTH",
     "METHOD_NAME",
     "NO_AUTH_TIME",
+    "SIGNED_OUT_PATH",
+    "STEP_UP_MAX_AGE",
     "OidcSignIn",
     "callback_address",
+    "end_session_address",
     "verified_identity",
 ]

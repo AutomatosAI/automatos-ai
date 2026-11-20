@@ -8,8 +8,8 @@ falling through a ``== "local"`` check.
 
 ``enterprise`` (PRD-277 US-103) is a self-hosted install whose people sign in through the
 organisation's own identity provider. Its row is decided (PRD-277 §5.1, D-7, D-12, D-13
-and the owner's answers G-1 to G-8 in ``PRD-277-EDITION-CHECKS.md``). Until OIDC sign-in
-is built (Wave 4), start-up refuses that edition (``core/edition_start_up.py``).
+and the owner's answers G-1 to G-8 in ``PRD-277-EDITION-CHECKS.md``). Start-up refuses it
+only when it is half-configured, naming what is missing (``core/edition_start_up.py``).
 
 ``docs/PRDS/PRD-277-EDITION-CHECKS.md`` lists every call site that compares the
 edition and the one capability it maps to. Outside ``config.py``, this module, the

@@ -13,9 +13,11 @@ under each value:
   not hold, an empty claim name, a CA file that cannot be read, a default role that is not
   ``none``, viewer, editor or admin, a role without ``DEFAULT_WORKSPACE_ID``, no
   ``CLIENT_IP_HEADER`` (the address sign-in limits and audits by would be the caller's to write),
-  an endpoint host that is not a host name (a scheme, a port, a wildcard or an address), and a
-  ceiling on unfinished sign-ins that is not a whole number of at least one;
-* a good value of each passes, so only the build switch stops the start.
+  an endpoint host that is not a host name (a scheme, a port, a wildcard or an address), a
+  ceiling on unfinished sign-ins that is not a whole number of at least one, an access rule that is
+  not in the rule language (US-403) and a first-admin list that is not ``sub:``/``email:`` entries
+  (US-405);
+* a good value of each passes, and the install starts.
 """
 from __future__ import annotations
 
@@ -32,11 +34,12 @@ os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
 os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
-from core.edition_start_up import NOT_AVAILABLE, OIDC_SIGN_IN_SETTINGS, EditionNotReady  # noqa: E402
+from core.edition_start_up import OIDC_SIGN_IN_SETTINGS, EditionNotReady  # noqa: E402
 
 ORCH = Path(__file__).resolve().parents[1]
 NEW_SETTINGS = ("OIDC_SCOPES", "OIDC_CLAIM_EMAIL", "OIDC_CLAIM_NAME", "OIDC_CA_BUNDLE_FILE", "ENTERPRISE_DEFAULT_ROLE",
-                "OIDC_ENDPOINT_HOSTS", "OIDC_PENDING_SIGN_INS_MAX", "OIDC_PENDING_SIGN_INS_PER_ADDRESS")
+                "OIDC_ENDPOINT_HOSTS", "OIDC_PENDING_SIGN_INS_MAX", "OIDC_PENDING_SIGN_INS_PER_ADDRESS",
+                "OIDC_REQUIRED_CLAIMS", "ENTERPRISE_BOOTSTRAP_ADMINS")
 ENV_KEYS = (
     "AUTH_EDITION", "REQUIRE_AUTH", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "FRONTEND_URL",
     "CLI_RUNTIME_ENABLED", "DEFAULT_WORKSPACE_ID", "CLERK_JWKS_URL", "CLERK_SECRET_KEY",
@@ -52,7 +55,8 @@ EDITION_ENV = {
     "local": {"AUTH_EDITION": "local", "DEFAULT_WORKSPACE_ID": "00000000-0000-0000-0000-0000000277d1"},
     "saas": {"AUTH_EDITION": "saas", "CLERK_JWKS_URL": "https://clerk.example.test/.well-known/jwks.json",
              "CLERK_SECRET_KEY": "prd277" + "-" + "w4-stand-in"},
-    "enterprise": {"AUTH_EDITION": "enterprise", "CLIENT_IP_HEADER": "X-Real-IP", **OIDC_ENV},
+    "enterprise": {"AUTH_EDITION": "enterprise", "CLIENT_IP_HEADER": "X-Real-IP",
+                   "DEFAULT_WORKSPACE_ID": "00000000-0000-0000-0000-0000000277d3", **OIDC_ENV},
 }
 # Each a value that must stop enterprise, and must not stop local or saas.
 BAD = [
@@ -69,6 +73,11 @@ BAD = [
     ("OIDC_PENDING_SIGN_INS_MAX", "0"), ("OIDC_PENDING_SIGN_INS_MAX", "lots"), ("OIDC_PENDING_SIGN_INS_MAX", "1.5"),
     ("OIDC_PENDING_SIGN_INS_PER_ADDRESS", "0"), ("OIDC_PENDING_SIGN_INS_PER_ADDRESS", "-3"),
     ("OIDC_PENDING_SIGN_INS_PER_ADDRESS", "few"), ("OIDC_PENDING_SIGN_INS_PER_ADDRESS", "10001"),
+    ("OIDC_REQUIRED_CLAIMS", "hd"), ("OIDC_REQUIRED_CLAIMS", "hd=example.test;"), ("OIDC_REQUIRED_CLAIMS", "=x"),
+    ("OIDC_REQUIRED_CLAIMS", "a b=c"), ("OIDC_REQUIRED_CLAIMS", "groups="),
+    ("ENTERPRISE_BOOTSTRAP_ADMINS", "someone@example.test"), ("ENTERPRISE_BOOTSTRAP_ADMINS", "email:*@example.test"),
+    ("ENTERPRISE_BOOTSTRAP_ADMINS", "sub:abc,,"), ("ENTERPRISE_BOOTSTRAP_ADMINS", "email:nobody@localhost"),
+    ("ENTERPRISE_BOOTSTRAP_ADMINS", "SUB:abc"), ("ENTERPRISE_BOOTSTRAP_ADMINS", "sub:  , email:a@example.test"),
 ]
 
 
@@ -155,21 +164,20 @@ def test_saas_and_local_still_start_without_the_client_ip_header():
 
 
 def test_a_default_role_needs_the_default_workspace():
+    env = {name: value for name, value in EDITION_ENV["enterprise"].items() if name != "DEFAULT_WORKSPACE_ID"}
     with pytest.raises(EditionNotReady) as refused:
-        _fresh_config(**EDITION_ENV["enterprise"], ENTERPRISE_DEFAULT_ROLE="viewer").validate_auth_edition()
+        _fresh_config(**env, ENTERPRISE_DEFAULT_ROLE="viewer").validate_auth_edition()
     assert "ENTERPRISE_DEFAULT_ROLE" in str(refused.value) and "DEFAULT_WORKSPACE_ID" in str(refused.value)
 
 
 @pytest.mark.parametrize("role", ["none", "viewer", "editor", "admin"])
-def test_good_values_reach_only_the_build_switch(role, tmp_path):
+def test_good_values_start_enterprise(role, tmp_path):
     bundle = tmp_path / "ca.pem"
     bundle.write_text("placeholder certificate file", encoding="utf-8")
     env = {**EDITION_ENV["enterprise"], "ENTERPRISE_DEFAULT_ROLE": role, "OIDC_CA_BUNDLE_FILE": str(bundle),
            "OIDC_SCOPES": "openid email groups", "DEFAULT_WORKSPACE_ID": "00000000-0000-0000-0000-0000000277d2",
            "OIDC_ENDPOINT_HOSTS": "oauth2.example.test, Keys.Example.Test.", "OIDC_PENDING_SIGN_INS_MAX": "50",
-           "OIDC_PENDING_SIGN_INS_PER_ADDRESS": "4"}
+           "OIDC_PENDING_SIGN_INS_PER_ADDRESS": "4", "OIDC_REQUIRED_CLAIMS": "cognito:groups=automatos; hd=example.test",
+           "ENTERPRISE_BOOTSTRAP_ADMINS": "sub:248289761001, email:First.Admin@Example.Test"}
 
-    with pytest.raises(EditionNotReady) as refused:
-        _fresh_config(**env).validate_auth_edition()
-
-    assert str(refused.value) == NOT_AVAILABLE
+    _fresh_config(**env).validate_auth_edition()  # must not raise

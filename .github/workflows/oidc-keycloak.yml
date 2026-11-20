@@ -1,0 +1,197 @@
+name: oidc-keycloak
+
+# PRD-277 US-407 (line 3): the enterprise sign-in flow against a real Keycloak container, beside
+# the in-process fake provider the backend suite signs in against.
+#
+# Everything the run needs is made at run time and lives only for the job: a TLS certificate for
+# localhost (openssl), the client secret and the person's password (openssl rand, masked), and a
+# realm made from them (one confidential client with PKCE S256 and the install's callback and
+# sign-out addresses, one person, and a hard-coded `automatos:team` claim for the access rule).
+# No secret is stored in the repository or in GitHub. Keycloak imports the realm at start.
+#
+# tests/test_prd277_w4_keycloak_sign_in.py then signs in through Keycloak's own login form, checks
+# the access rule against its claim, steps up with max_age=0 and signs out at Keycloak.
+#
+# Runs only when the sign-in code, its tests or this file change. NON-REQUIRED and allowed to fail
+# (continue-on-error) for now: PRD-277 makes it required at the end of the wave, which is the repo
+# admin's call. The image is pinned by tag and digest.
+
+on:
+  pull_request:
+    paths:
+      - "orchestrator/core/auth/**"
+      - "orchestrator/api/auth_oidc.py"
+      - "orchestrator/api/auth_sessions.py"
+      - "orchestrator/core/edition_start_up.py"
+      - "orchestrator/tests/test_prd277_w4*"
+      - "orchestrator/tests/helpers_fake_oidc_provider.py"
+      - ".github/workflows/oidc-keycloak.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "orchestrator/core/auth/**"
+      - "orchestrator/api/auth_oidc.py"
+      - "orchestrator/api/auth_sessions.py"
+      - "orchestrator/core/edition_start_up.py"
+      - "orchestrator/tests/test_prd277_w4*"
+      - "orchestrator/tests/helpers_fake_oidc_provider.py"
+      - ".github/workflows/oidc-keycloak.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  keycloak:
+    name: Sign-in against a real Keycloak (allowed to fail)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    continue-on-error: true
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d test_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Throwaway credentials for the job's own Postgres container, as test.yml's: not secrets.
+      DATABASE_URL: postgresql://test:test@127.0.0.1:5432/test_db
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: test_db
+      ENVIRONMENT: development
+      AUTH_EDITION: local
+      DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
+      SYSTEM_PACKAGES: libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libcairo2 libffi-dev libmagic1 fonts-dejavu-core fonts-urw-base35
+      KEYCLOAK_IMAGE: quay.io/keycloak/keycloak:26.8.2-0@sha256:3879c623248408de29a5303178b5816c77e8dfef3890c361f8c0bbeaa979ba3b
+      INSTALL: https://automatos.example.test
+      REALM: automatos
+
+    defaults:
+      run:
+        working-directory: orchestrator
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            orchestrator/requirements.lock
+            orchestrator/requirements-dev.lock
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update || echo "::warning::apt-get update reported errors (a third-party index?) - continuing"
+          # shellcheck disable=SC2086 # the package list splits on spaces on purpose
+          sudo apt-get install -y --no-install-recommends $SYSTEM_PACKAGES
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements.lock -r requirements-dev.lock
+
+      - name: Make the certificate, the credentials and the realm
+        run: |
+          set -euo pipefail
+          kc="$RUNNER_TEMP/keycloak"
+          mkdir -p "$kc/tls" "$kc/import"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=localhost" \
+            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+            -keyout "$kc/tls/key.pem" -out "$kc/tls/cert.pem"
+          chmod 0644 "$kc/tls/key.pem" "$kc/tls/cert.pem"
+          client_secret=$(openssl rand -hex 24)
+          password=$(openssl rand -hex 18)
+          echo "::add-mask::$client_secret"
+          echo "::add-mask::$password"
+          {
+            echo "PRD277_KEYCLOAK_ISSUER=https://localhost:8443/realms/$REALM"
+            echo "PRD277_KEYCLOAK_CLIENT_ID=automatos-ci"
+            echo "PRD277_KEYCLOAK_CLIENT_SECRET=$client_secret"
+            echo "PRD277_KEYCLOAK_CA_FILE=$kc/tls/cert.pem"
+            echo "PRD277_KEYCLOAK_USERNAME=ci-person"
+            echo "PRD277_KEYCLOAK_PASSWORD=$password"
+          } >> "$GITHUB_ENV"
+          CLIENT_SECRET="$client_secret" PASSWORD="$password" OUT="$kc/import/realm.json" python3 - <<'PY'
+          import json, os
+          install = os.environ["INSTALL"]
+          realm = {
+              "realm": os.environ["REALM"], "enabled": True, "sslRequired": "all",
+              "clients": [{
+                  "clientId": "automatos-ci", "enabled": True, "protocol": "openid-connect",
+                  "publicClient": False, "clientAuthenticatorType": "client-secret",
+                  "secret": os.environ["CLIENT_SECRET"], "standardFlowEnabled": True,
+                  "directAccessGrantsEnabled": False, "implicitFlowEnabled": False,
+                  "redirectUris": [install + "/api/v1/auth/oidc/callback"],
+                  "attributes": {"pkce.code.challenge.method": "S256",
+                                 "post.logout.redirect.uris": install + "/sign-in"},
+                  "protocolMappers": [{
+                      "name": "automatos-team", "protocol": "openid-connect",
+                      "protocolMapper": "oidc-hardcoded-claim-mapper",
+                      "config": {"claim.name": "automatos:team", "claim.value": "ops", "jsonType.label": "String",
+                                 "id.token.claim": "true", "access.token.claim": "false",
+                                 "userinfo.token.claim": "false"},
+                  }],
+              }],
+              "users": [{
+                  "username": "ci-person", "enabled": True, "email": "ci-person@example.test",
+                  "emailVerified": True, "firstName": "CI", "lastName": "Person", "requiredActions": [],
+                  "credentials": [{"type": "password", "value": os.environ["PASSWORD"], "temporary": False}],
+              }],
+          }
+          with open(os.environ["OUT"], "w", encoding="utf-8") as out:
+              json.dump(realm, out)
+          PY
+          chmod 0644 "$kc/import/realm.json"
+
+      - name: Start Keycloak
+        run: |
+          set -euo pipefail
+          kc="$RUNNER_TEMP/keycloak"
+          docker run -d --name keycloak -p 127.0.0.1:8443:8443 \
+            -v "$kc/tls:/opt/keycloak/conf/tls:ro" -v "$kc/import:/opt/keycloak/data/import:ro" \
+            "$KEYCLOAK_IMAGE" start-dev --import-realm --http-enabled=false --https-port=8443 \
+            --https-certificate-file=/opt/keycloak/conf/tls/cert.pem \
+            --https-certificate-key-file=/opt/keycloak/conf/tls/key.pem
+          for _ in $(seq 1 60); do
+            if curl -fsS --cacert "$PRD277_KEYCLOAK_CA_FILE" \
+                "$PRD277_KEYCLOAK_ISSUER/.well-known/openid-configuration" > /dev/null; then
+              echo "Keycloak is up"; exit 0
+            fi
+            sleep 3
+          done
+          docker logs keycloak | tail -n 80
+          exit 1
+
+      - name: Initialise test database schema
+        run: python scripts/init_test_db.py
+
+      - name: Sign in against Keycloak
+        run: pytest tests/test_prd277_w4_keycloak_sign_in.py -v -rs -p no:cacheprovider
+
+      - name: Keycloak's log, when the run failed
+        if: failure()
+        run: docker logs keycloak 2>&1 | tail -n 200

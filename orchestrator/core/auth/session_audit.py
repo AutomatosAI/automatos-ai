@@ -7,8 +7,9 @@ records only its reason, one of ``REFUSAL_REASONS``, and anything else is a ``Va
 The actions (§5.12) are all named here. Wave 3 writes ``auth:sign_in`` (``issue_session``),
 ``auth:sign_in_refused`` (a deactivated person; Wave 4's callback adds the other reasons),
 ``auth:sign_out`` and ``auth:session_revoked``, and ``user:deactivated`` for a person an admin
-deactivates. ``auth:step_up``, ``auth:identity_linked`` and ``auth:bootstrap_admin`` are written by
-the Wave 4 code whose events they are.
+deactivates. Wave 4 writes ``auth:identity_linked`` (a first sign-in), ``auth:bootstrap_admin`` (a
+first admin, ``stage_bootstrap_admin``), ``auth:step_up`` (a step-up confirmed or refused, with its
+reason, ``record_step_up``) and the access rule's refusal (``access_rule``).
 
 Which workspace a row goes in: ``audit_logs.workspace_id`` is required, and signing in or out
 belongs to no workspace. Such a row goes in the workspace the caller names, else the install's
@@ -65,6 +66,17 @@ REFUSED_ACCESS_RULE = "access_rule"
 REFUSED_DEACTIVATED = "deactivated"
 REFUSED_INVALID_TOKEN = "invalid_token"
 REFUSAL_REASONS = (REFUSED_ACCESS_RULE, REFUSED_EMAIL_CONFLICT, REFUSED_DEACTIVATED, REFUSED_INVALID_TOKEN)
+
+# Why a step-up was refused (``auth:step_up`` with ``confirmed`` false, US-406): someone other than the
+# session's person signed in, the token carried no ``auth_time``, or one older than the step-up, the
+# session that asked has ended, or its person is deactivated.
+STEP_UP_ANOTHER_PERSON = "another_person"
+STEP_UP_NO_AUTH_TIME = "no_auth_time"
+STEP_UP_STALE = "stale_auth_time"
+STEP_UP_SESSION_ENDED = "session_ended"
+STEP_UP_DEACTIVATED = "deactivated"
+STEP_UP_REASONS = (STEP_UP_ANOTHER_PERSON, STEP_UP_NO_AUTH_TIME, STEP_UP_STALE, STEP_UP_SESSION_ENDED,
+                   STEP_UP_DEACTIVATED)
 
 SESSION_RESOURCE = "auth_session"
 PERSON_RESOURCE = "user"
@@ -175,6 +187,42 @@ def stage_membership_set(db, *, user_id: int, workspace_id: Union[UUID, str], ro
                     ip_address=ip_address, user_agent=user_agent))
 
 
+def stage_bootstrap_admin(db, *, user_id: int, workspace_id: Union[UUID, str], matched_by: str,
+                          ip_address: Optional[str], user_agent: Optional[str]) -> None:
+    """``auth:bootstrap_admin`` for a first admin (US-405), added to the first sign-in's transaction.
+
+    Not committed here: the row lands with the sign-in that granted the roles, or is rolled back
+    with it. ``matched_by`` is the kind of entry that named the person (``sub`` or ``email``), never
+    the entry itself.
+    """
+    ip_address, user_agent = browser_fields(ip_address, user_agent)
+    db.add(AuditLog(workspace_id=UUID(str(workspace_id)), user_id=user_id, actor_type=ACTOR_SYSTEM,
+                    action=BOOTSTRAP_ADMIN, resource_type=PERSON_RESOURCE, resource_id=str(user_id),
+                    details={"matched_by": matched_by, "system_role": "admin", "workspace_role": "owner"},
+                    ip_address=ip_address, user_agent=user_agent))
+
+
+def record_step_up(db, *, user_id: Optional[int], session_id: UUID, reason: Optional[str],
+                   ip_address: Optional[str], user_agent: Optional[str]) -> None:
+    """``auth:step_up`` (US-406): confirmed when ``reason`` is None, else refused with that reason.
+
+    A confirmation is granting: it commits the session's new ``auth_time`` with its row, or both are
+    rolled back and ``SessionAuditFailed`` is raised. A refusal changes nothing, so a failed row is
+    logged and the refusal stands. ``user_id`` is the person of the session that asked.
+    """
+    if reason is not None and reason not in STEP_UP_REASONS:
+        raise ValueError(f"unknown step-up refusal reason {reason!r}")
+    details: Dict[str, Any] = {"confirmed": reason is None, **({"reason": reason} if reason else {})}
+    entry = _write(db, action=STEP_UP, workspace_id=None, user_id=user_id, resource_type=SESSION_RESOURCE,
+                   resource_id=session_id, details=details, ip_address=ip_address, user_agent=user_agent)
+    if entry is not None:
+        return
+    if reason is None:
+        logger.error("users.id=%s: step-up rolled back, its audit row failed", user_id)
+        raise SessionAuditFailed(AUDIT_FAILED_MESSAGE)
+    logger.error("A refused step-up (%s) could not be recorded", reason)
+
+
 def commit_removal(db, remove: Callable[[], T], record: Callable[[T], Optional[object]], action: str) -> T:
     """Apply ``remove``, then ``record`` its audit row, committing both; the removal always lands.
 
@@ -223,13 +271,16 @@ __all__ = [
     "SIGN_IN_REFUSED",
     "SIGN_OUT",
     "STEP_UP",
+    "STEP_UP_REASONS",
     "SessionAuditFailed",
     "audit_workspace",
     "browser_fields",
     "commit_removal",
+    "stage_bootstrap_admin",
     "stage_membership_set",
     "record_identity_linked",
     "record_sign_in",
     "record_sign_in_refused",
+    "record_step_up",
     "session_ended_row",
 ]

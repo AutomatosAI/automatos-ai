@@ -5,7 +5,7 @@
   same path answers 405, as in every edition).
 * Sign-out is authenticated by the session itself (its own credential, so it is in the boundary
   sweep's ``OWN_AUTH_ROUTES``) and never by the shared request context.
-* The three admin changes carry step-up at ``STEP_UP_MAX_AGE_MINUTES`` and call
+* The four admin changes (Wave 4 added the install role, US-405) carry step-up at ``STEP_UP_MAX_AGE_MINUTES`` and call
   ``_require_admin(ctx)`` in their handler (the sweep's ``ADMIN_GATED_IN_HANDLER``); the listing
   calls it too. ``SESSION_STEP_UP_ROUTES`` is the app-wide pin's share
   (``test_prd261_c1_wire.py``).
@@ -36,6 +36,7 @@ SESSION_STEP_UP_ROUTES = {
     ("POST", PREFIX + "/sessions/{session_id}/revoke"),
     ("POST", PREFIX + "/people/{user_id}/sessions/revoke"),
     ("POST", PREFIX + "/people/{user_id}/deactivate"),
+    ("POST", PREFIX + "/people/{user_id}/system-role"),  # PRD-277 US-405
 }
 SESSION_ROUTES = {SIGN_OUT, LIST_SESSIONS} | SESSION_STEP_UP_ROUTES
 
