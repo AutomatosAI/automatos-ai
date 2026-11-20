@@ -298,6 +298,34 @@ def runs_on_workload_identity(provider: Optional[str]) -> bool:
     return bool(spec and spec.workload_identity and config.AWS_USE_WORKLOAD_IDENTITY)
 
 
+def stored_provider_enum(provider: Optional[str]) -> Optional[LLMProvider]:
+    """The ``LLMProvider`` a provider name stored on an agent or a settings tier runs as, or None.
+
+    The name's own value (``LLMProvider(name)``), for the paths that accept nothing else: agent
+    activation and the settings loader. PRD-278 US-105: with ``AWS_USE_WORKLOAD_IDENTITY`` on, a
+    provider whose calls the install's role signs (Bedrock) runs as its member under any name the
+    registry knows for it (``bedrock``, ``aws_bedrock``), through ``enum_for``, as agent creation
+    and the spoken model already do.
+    """
+    if runs_on_workload_identity(provider):
+        return enum_for(provider)
+    try:
+        return LLMProvider(provider)
+    except ValueError:
+        return None
+
+
+def workload_identity_region(provider: Optional[str]) -> Optional[str]:
+    """The install's own region (``AWS_REGION``) for a provider whose calls the install's role
+    signs, with ``AWS_USE_WORKLOAD_IDENTITY`` on (PRD-278 US-105); None otherwise, when the
+    config's own region stands. A Bedrock config carries its region in ``base_url``."""
+    if not runs_on_workload_identity(provider):
+        return None
+    from core.llm.clients.bedrock_client import DEFAULT_REGION
+
+    return config.AWS_REGION or DEFAULT_REGION
+
+
 def base_url_for(provider: Optional[str]) -> Optional[str]:
     spec = get_spec(provider)
     if spec is None or not spec.base_url_key:

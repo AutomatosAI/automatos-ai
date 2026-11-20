@@ -108,16 +108,19 @@ def carries_calls(resolved: Optional[ResolvedKey]) -> bool:
 
 
 def with_workload_identity(llm_config: Any) -> Any:
-    """A settings-tier config with no key, marked to run on the install's own role when its
-    provider can (Bedrock) and ``AWS_USE_WORKLOAD_IDENTITY`` is on: the settings path's twin of
+    """A settings-tier config for a provider the install's role can sign for (Bedrock), with
+    ``AWS_USE_WORKLOAD_IDENTITY`` on: in the install's own region (``AWS_REGION``, PRD-278
+    US-105) and, when it has no key, marked to run on that role: the settings path's twin of
     ``_platform_key``'s last tier. Any other config comes back unchanged."""
     from dataclasses import replace
 
-    from core.llm.providers import runs_on_workload_identity
+    from core.llm.providers import runs_on_workload_identity, workload_identity_region
 
-    if llm_config.api_key or not runs_on_workload_identity(llm_config.provider.value):
+    provider = llm_config.provider.value
+    if not runs_on_workload_identity(provider):
         return llm_config
-    return replace(llm_config, workload_identity=True)
+    return replace(llm_config, base_url=workload_identity_region(provider),
+                   workload_identity=llm_config.workload_identity or not llm_config.api_key)
 
 
 def _byok_key(db: Any, provider_name: str, workspace_id: Any) -> Union[ResolvedKey, OwnKeyLookupFailed, None]:

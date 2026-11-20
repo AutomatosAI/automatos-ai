@@ -10,6 +10,7 @@ import re
 import time
 import asyncio
 import logging
+from dataclasses import dataclass, replace
 from typing import Tuple, Dict, Any, List, Optional
 from functools import lru_cache
 
@@ -23,10 +24,10 @@ from .clients.google_client import GoogleProvider
 from .turn_order import reprompts_in_the_users_turn
 from .clients.azure_client import AzureProvider
 from .clients.huggingface_client import HuggingFaceProvider
-from .clients.bedrock_client import BedrockProvider
+from .clients.bedrock_client import BedrockProvider, DEFAULT_REGION as BEDROCK_DEFAULT_REGION
 from .clients.grok_client import GrokProvider
 from .clients.openai_compatible_client import OpenAICompatibleProvider
-from .providers import get_spec, env_api_key, ADAPTER_OPENAI_COMPATIBLE
+from .providers import get_spec, env_api_key, stored_provider_enum, ADAPTER_OPENAI_COMPATIBLE
 from .byok_endpoint import with_key_endpoint
 from .vendor_fit import fitted, keyless_via_openrouter
 from .key_resolver import with_workload_identity
@@ -389,6 +390,104 @@ def get_credential_data(provider: str, environment: str = None, service_name: st
         return {}
 
 
+@dataclass(frozen=True)
+class _CredentialFields:
+    """What a settings tier's stored credential gives its config (``_credential_fields``)."""
+
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None  # a Bedrock config's region
+    organization_id: Optional[str] = None
+    secret_key: Optional[str] = None  # for AWS Bedrock IAM auth
+
+
+def _settings_provider(provider_str: str, model_override: Optional[str]) -> LLMProvider:
+    """The provider a settings tier names (``providers.stored_provider_enum``; with
+    ``AWS_USE_WORKLOAD_IDENTITY`` on, Bedrock under either stored name: PRD-278 US-105).
+
+    An unknown provider with a slash-format model runs on OpenRouter (provider="qwen" +
+    model="qwen/qwen3-coder-next"); any other unknown provider is an error.
+    """
+    provider = stored_provider_enum(provider_str)
+    if provider is not None:
+        return provider
+    if model_override and "/" in model_override:
+        logger.info(f"Unknown provider '{provider_str}', routing '{model_override}' through OpenRouter")
+        return LLMProvider.OPENROUTER
+    raise ValueError(
+        f"Unknown LLM provider: '{provider_str}'. "
+        f"Supported providers: {[p.value for p in LLMProvider]}"
+    )
+
+
+def _settings_model(service_name: str) -> str:
+    """The model a service's settings tier names; an error when none is set."""
+    _, model = get_provider_and_model_from_settings(service_name)
+    if not model:
+        raise ValueError(
+            f"No model configured for service '{service_name}'. "
+            f"Please set the model in Settings > System LLM."
+        )
+    return model
+
+
+def _bedrock_fields(cred_data: Dict[str, Any]) -> _CredentialFields:
+    """AWS Bedrock: a Bedrock API key (the recommended single key), else an IAM key pair.
+    The region rides in ``base_url`` for compatibility with LLMConfig."""
+    api_key = cred_data.get("bedrock_api_key")
+    secret_key = None
+    if not api_key:
+        api_key = cred_data.get("aws_access_key_id")
+        secret_key = cred_data.get("aws_secret_access_key")
+    return _CredentialFields(api_key=api_key, base_url=cred_data.get("aws_region", BEDROCK_DEFAULT_REGION),
+                             secret_key=secret_key)
+
+
+_FIELDS_BY_PROVIDER = {
+    LLMProvider.OPENAI: lambda c: _CredentialFields(c.get("api_key"), c.get("base_url"), c.get("organization_id")),
+    LLMProvider.ANTHROPIC: lambda c: _CredentialFields(c.get("api_key"), c.get("base_url")),
+    LLMProvider.GOOGLE: lambda c: _CredentialFields(c.get("api_key")),
+    LLMProvider.AZURE: lambda c: _CredentialFields(c.get("api_key"), c.get("endpoint_url") or c.get("base_url")),
+    LLMProvider.HUGGINGFACE: lambda c: _CredentialFields(c.get("api_token") or c.get("api_key")),
+    LLMProvider.AWS_BEDROCK: _bedrock_fields,
+    LLMProvider.GROK: lambda c: _CredentialFields(c.get("api_key") or c.get("api_token")),
+}
+
+
+def _credential_fields(provider: LLMProvider, cred_data: Dict[str, Any]) -> _CredentialFields:
+    """The key, base URL, organization and secret a stored credential gives ``provider``.
+    OpenRouter / NVIDIA / DeepSeek (PRD-236): the key, and the credential's base URL if it
+    carries one (else the registry's, in the client)."""
+    read = _FIELDS_BY_PROVIDER.get(provider)
+    if read is not None:
+        return read(cred_data)
+    spec = get_spec(provider.value)
+    if spec is not None and spec.adapter == ADAPTER_OPENAI_COMPATIBLE:
+        return _CredentialFields(api_key=cred_data.get("api_key") or cred_data.get("api_token"),
+                                 base_url=cred_data.get("base_url") or None)
+    return _CredentialFields()
+
+
+def _with_platform_keys(provider: LLMProvider, fields: _CredentialFields) -> _CredentialFields:
+    """``fields`` with the operator workspace's key over a drifted credential-store copy (the
+    stored platform slot held a provider-side-deleted key for months while every background
+    LLM call 401'd, 2026-07-30), then the env key when there is still none (PRD-236: the
+    registry knows each provider's config attribute). HuggingFace has no env key: a missing
+    credential is an error."""
+    from core.llm.workspace_keys import get_platform_workspace_key
+
+    ws_key = get_platform_workspace_key(provider.value)
+    if ws_key:
+        fields = _CredentialFields(api_key=ws_key)
+    if not fields.api_key and provider != LLMProvider.HUGGINGFACE:
+        fields = replace(fields, api_key=env_api_key(provider.value))
+    if not fields.api_key and provider == LLMProvider.HUGGINGFACE:
+        raise ValueError(
+            "HuggingFace credential not found. Create an active credential such as "
+            "'development_huggingface' (or environment-specific variation) in the credential store."
+        )
+    return fields
+
+
 class LLMManager:
     """Main LLM manager that handles provider selection and configuration"""
     
@@ -478,12 +577,12 @@ class LLMManager:
     ) -> LLMConfig:
         """
         Load LLM configuration from system settings or environment.
-        
+
         Args:
             service_name: Service name for per-service settings
             provider_override: Optional provider override
             model_override: Optional model override
-            
+
         Returns:
             LLMConfig instance
         """
@@ -492,114 +591,26 @@ class LLMManager:
             provider_str = provider_override.lower()
         else:
             provider_str, _ = get_provider_and_model_from_settings(service_name)
-        
-        # Validate provider - route unknown providers with slash-format models
-        # through OpenRouter (e.g. provider="qwen" + model="qwen/qwen3-coder-next")
-        try:
-            provider = LLMProvider(provider_str)
-        except ValueError:
-            if model_override and "/" in model_override:
-                logger.info(f"Unknown provider '{provider_str}', routing '{model_override}' through OpenRouter")
-                provider = LLMProvider.OPENROUTER
-            else:
-                raise ValueError(
-                    f"Unknown LLM provider: '{provider_str}'. "
-                    f"Supported providers: {[p.value for p in LLMProvider]}"
-                )
-        
-        # Get model from settings or use override
-        if model_override:
-            model = model_override
-        else:
-            _, model = get_provider_and_model_from_settings(service_name)
-            if not model:
-                raise ValueError(
-                    f"No model configured for service '{service_name}'. "
-                    f"Please set the model in Settings > System LLM."
-                )
-        
+        provider = _settings_provider(provider_str, model_override)
+        model = model_override if model_override else _settings_model(service_name)
+
         # Get other settings with defaults
         category = SERVICE_CATEGORY_MAP.get(service_name, "orchestrator_llm")
-        
         temperature = float(get_system_setting(category, "temperature", "0.7"))
         max_tokens = int(get_system_setting(category, "max_tokens", "2000"))
-        
+
         # Get credential data (pass service_name for settings lookup)
         cred_data = get_credential_data(provider.value, service_name=service_name)
-        
-        # Extract API key and other credential fields
-        api_key = None
-        base_url = None
-        organization_id = None
-        secret_key = None  # For AWS Bedrock IAM auth
-        
-        _spec = get_spec(provider.value)
-        if provider == LLMProvider.OPENAI:
-            api_key = cred_data.get("api_key")
-            base_url = cred_data.get("base_url")
-            organization_id = cred_data.get("organization_id")
-        elif provider == LLMProvider.ANTHROPIC:
-            api_key = cred_data.get("api_key")
-            base_url = cred_data.get("base_url")
-        elif provider == LLMProvider.GOOGLE:
-            api_key = cred_data.get("api_key")
-        elif provider == LLMProvider.AZURE:
-            api_key = cred_data.get("api_key")
-            base_url = cred_data.get("endpoint_url") or cred_data.get("base_url")
-        elif provider == LLMProvider.HUGGINGFACE:
-            api_key = cred_data.get("api_token") or cred_data.get("api_key")
-        elif provider == LLMProvider.AWS_BEDROCK:
-            # AWS Bedrock - simplified to use new API Keys by default
-            # Primary method: New Bedrock API Key (single key - recommended)
-            api_key = cred_data.get("bedrock_api_key")
-            
-            # Fallback: Traditional IAM method (if API key not found)
-            if not api_key:
-                api_key = cred_data.get("aws_access_key_id")
-                secret_key = cred_data.get("aws_secret_access_key")
-            
-            # Region is stored in base_url for compatibility with LLMConfig
-            aws_region = cred_data.get("aws_region", "us-east-1")
-            base_url = aws_region  # Store region in base_url field
-        elif provider == LLMProvider.GROK:
-            api_key = cred_data.get("api_key") or cred_data.get("api_token")
-        elif _spec is not None and _spec.adapter == ADAPTER_OPENAI_COMPATIBLE:
-            # OpenRouter / NVIDIA / DeepSeek (PRD-236): key from the credential,
-            # base URL from the credential if it carries one, else the registry.
-            api_key = cred_data.get("api_key") or cred_data.get("api_token")
-            base_url = cred_data.get("base_url") or None
-
-        # Operator workspace key overrides a drifted credential-store copy —
-        # the stored platform slot held a provider-side-deleted key for months
-        # while every background LLM call 401'd (2026-07-30).
-        from core.llm.workspace_keys import get_platform_workspace_key
-        ws_key = get_platform_workspace_key(provider.value)
-        if ws_key:
-            api_key = ws_key
-            base_url = None
-            organization_id = None
-            secret_key = None
-
-        # Fallback to environment variables if credentials not found (except HuggingFace)
-        if not api_key and provider != LLMProvider.HUGGINGFACE:
-            # PRD-236: the registry knows each provider's config attribute.
-            api_key = env_api_key(provider.value)
-
-        if not api_key and provider == LLMProvider.HUGGINGFACE:
-            raise ValueError(
-                "HuggingFace credential not found. Create an active credential such as "
-                "'development_huggingface' (or environment-specific variation) in the credential store."
-            )
-        
+        fields = _with_platform_keys(provider, _credential_fields(provider, cred_data))
         return LLMConfig(
             provider=provider,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
-            api_key=api_key,
-            base_url=base_url,
-            organization_id=organization_id,
-            secret_key=secret_key if provider == LLMProvider.AWS_BEDROCK else None
+            api_key=fields.api_key,
+            base_url=fields.base_url,
+            organization_id=fields.organization_id,
+            secret_key=fields.secret_key if provider == LLMProvider.AWS_BEDROCK else None
         )
     
     # Patterns that indicate the configured model is dead/removed, not a transient error

@@ -23,9 +23,10 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from sqlalchemy.orm import Session
 
 from config import config
-from core.llm import LLMConfig, LLMManager, LLMProvider, LLMResponse, create_llm_manager
+from core.llm import LLMConfig, LLMManager
 from core.llm.defaults import DEFAULT_MAX_OUTPUT_TOKENS
 from core.llm.key_resolver import ResolvedKey, carries_calls, is_workload_identity, resolve_provider_key  # noqa: F401  # ResolvedKey: re-exported
+from core.llm.providers import runs_on_workload_identity, stored_provider_enum, workload_identity_region
 from core.models import Agent, Base, PriorityLevel, Skill
 from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
 from core.security.memory_audience import reads_memory_as_its_agent
@@ -427,7 +428,9 @@ class AgentFactory:
         # Slash-format model IDs belong to a provider that hosts vendor-prefixed
         # ids (OpenRouter, NVIDIA — registry ``hosts_vendor_models``). Any other
         # provider paired with a slash id is a mismatch → OpenRouter (legacy rule).
-        if "/" in model_id and not hosts_vendor_models(provider_str):
+        # PRD-278 US-105: with AWS_USE_WORKLOAD_IDENTITY on, a Bedrock model ID that carries a
+        # slash (an inference profile's ARN) is Bedrock's own, never an OpenRouter id.
+        if "/" in model_id and not hosts_vendor_models(provider_str) and not runs_on_workload_identity(provider_str):
             prefix = model_id.split("/")[0].lower()
             if prefix == provider_str.lower() or prefix not in DIRECT_PROVIDERS:
                 self.logger.info(
@@ -549,7 +552,9 @@ class AgentFactory:
         resolved = await self._resolve_api_key(
             effective_provider, agent_name, workspace_id=workspace_id, own_keys_only=own_only,
         )
-        if not resolved and effective_provider != "openrouter":
+        if not resolved and effective_provider != "openrouter" and not runs_on_workload_identity(effective_provider):
+            # PRD-278 US-105: a provider the install's role signs for, with
+            # AWS_USE_WORKLOAD_IDENTITY on, is never moved to OpenRouter.
             # 2026-08-29 (Gerard, the Harbourline failure): provider resolution is
             # KEY-AVAILABILITY-DRIVEN. A vendor model with no direct vendor key
             # must route via OpenRouter when that key exists — never error while
@@ -934,11 +939,11 @@ class AgentFactory:
         provider_str = llm_config_dict.get("provider") or DEFAULT_LLM_PROVIDER
         model_id_str = llm_config_dict.get("model", DEFAULT_LLM_MODEL)
         provider_str, model_id_str = self._resolve_provider_for_model(provider_str, model_id_str)
-        try:
-            LLMProvider(provider_str)
-        except ValueError:
+        if stored_provider_enum(provider_str) is None:
             # Safety net: any provider that survived the resolver without being
             # normalised (e.g. stale enum value) is forced through OpenRouter.
+            # With AWS_USE_WORKLOAD_IDENTITY on, Bedrock under either stored name
+            # is a provider of its own here (PRD-278 US-105).
             self.logger.warning(
                 f"Provider '{provider_str}' is not a valid LLMProvider enum; forcing OpenRouter"
             )
@@ -966,8 +971,10 @@ class AgentFactory:
             provider_str, agent_name, workspace_id=effective_ws_id, own_keys_only=own_only,
         )
 
-        # Fallback: if direct provider has no credential, try OpenRouter
-        if not carries_calls(resolved) and provider_str != "openrouter":
+        # Fallback: if direct provider has no credential, try OpenRouter. Never for a
+        # provider the install's role signs for, with AWS_USE_WORKLOAD_IDENTITY on: its
+        # calls stay on it, or fail (PRD-278 US-105).
+        if not carries_calls(resolved) and provider_str != "openrouter" and not runs_on_workload_identity(provider_str):
             self.logger.warning(
                 f"No credential for provider '{provider_str}' — falling back to OpenRouter for '{model_id_str}'"
             )
@@ -991,8 +998,9 @@ class AgentFactory:
             llm_config_dict, db_agent.name, effective_ws_id,
         )
         llm_config = LLMConfig(
-            provider=LLMProvider(provider_str),
+            provider=stored_provider_enum(provider_str),
             model=model_id_str,
+            base_url=workload_identity_region(provider_str),  # Bedrock's region; None leaves the client's
             temperature=llm_config_dict.get("temperature", 0.7),
             max_tokens=llm_config_dict.get("max_tokens", DEFAULT_MAX_OUTPUT_TOKENS),
             output_ceiling=llm_config_dict.get("output_ceiling"),

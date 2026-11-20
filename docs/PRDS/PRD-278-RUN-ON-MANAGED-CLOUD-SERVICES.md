@@ -196,11 +196,11 @@ Each wave is one pull request or a short series. CI is the only gate: nothing he
 **Description:** As an operator who runs models on Bedrock in my own account, I want every Bedrock agent called on Bedrock, in the install's region, so that its calls stay in that account and region whichever path makes them.
 
 **Acceptance Criteria:**
-- [ ] With `AWS_USE_WORKLOAD_IDENTITY` on, an agent stored as `bedrock` or `aws_bedrock` is called on Bedrock in chat, in agent creation and in the spoken model.
-- [ ] The region is `AWS_REGION` on every path.
-- [ ] A Bedrock tier with no key uses the role and is never rerouted to another provider.
-- [ ] With the setting off, today's behaviour is unchanged, and a test pins it.
-- [ ] The pull request states what main does today, with file and line.
+- [x] With `AWS_USE_WORKLOAD_IDENTITY` on, an agent stored as `bedrock` or `aws_bedrock` is called on Bedrock in chat, in agent creation and in the spoken model.
+- [x] The region is `AWS_REGION` on every path.
+- [x] A Bedrock tier with no key uses the role and is never rerouted to another provider.
+- [x] With the setting off, today's behaviour is unchanged, and a test pins it.
+- [ ] The pull request states what main does today, with file and line. Open until the pull request is written.
 
 ### Wave 2: TLS to Redis
 
