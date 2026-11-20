@@ -91,6 +91,7 @@ One function turns the Redis settings into connection arguments, and every clien
 - When the address is put together from `REDIS_HOST`, `REDIS_PORT` and `REDIS_PASSWORD`, a new `REDIS_TLS` setting chooses the scheme.
 - The task queue stops reading the three parts itself and uses the same function.
 - A test fails if anything in the orchestrator builds a Redis client another way, as the storage module's test already does for its clients.
+- This is stricter than `from_url`, which the shared-context adapter and the intake progress client used: the address's query string is not read, so an address cannot switch certificate checking off, and only `redis://` and `rediss://` are accepted (no `unix://`).
 
 ### 5.3 TLS to the database, checked
 
@@ -195,21 +196,21 @@ Each wave is one pull request or a short series. CI is the only gate: nothing he
 **Description:** As a developer, I want one function that turns the settings into connection arguments, so that TLS is decided in one place.
 
 **Acceptance Criteria:**
-- [ ] One function returns the arguments for a sync client, an async client and a pool.
-- [ ] `rediss://` gives TLS with certificate checking on. `redis://` gives none.
-- [ ] A user name in the address is kept.
-- [ ] `REDIS_TLS` exists and chooses the scheme when the address is built from its parts.
-- [ ] Unit tests cover each scheme, with and without a user name and a password.
+- [x] One function returns the arguments for a sync client, an async client and a pool.
+- [x] `rediss://` gives TLS with certificate checking on. `redis://` gives none.
+- [x] A user name in the address is kept.
+- [x] `REDIS_TLS` exists and chooses the scheme when the address is built from its parts.
+- [x] Unit tests cover each scheme, with and without a user name and a password.
 
 #### US-202: Every client through it · M
 **Description:** As an operator, I want every Redis connection core opens to honour TLS, so that a managed Redis that requires it works.
 
 **Acceptance Criteria:**
-- [ ] The main pool, the async publish and subscribe client, `chat_turns` and the task queue are all built from US-201's function.
-- [ ] The task queue no longer reads `REDIS_HOST`, `REDIS_PORT` or `REDIS_PASSWORD` itself.
-- [ ] A test fails if any file in the orchestrator outside that module constructs a Redis client or pool directly. A connection made to test a user's own saved Redis credential is not covered.
+- [x] The main pool, the async publish and subscribe client, `chat_turns` and the task queue are all built from US-201's function.
+- [x] The task queue no longer reads `REDIS_HOST`, `REDIS_PORT` or `REDIS_PASSWORD` itself.
+- [x] A test fails if any file in the orchestrator outside that module constructs a Redis client or pool directly. A connection made to test a user's own saved Redis credential is not covered.
 - [ ] `test_redis_client_timeouts.py` passes with its timeouts unchanged.
-- [ ] The chart's documented example address is unchanged for `local`, and a TLS example is added.
+- [x] The chart's documented example address is unchanged for `local`, and a TLS example is added.
 
 ### Wave 3: TLS to the database, checked
 
