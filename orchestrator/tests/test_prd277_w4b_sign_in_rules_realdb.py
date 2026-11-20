@@ -14,7 +14,7 @@ on the install's address) and the in-process provider, each test in a transactio
   makes the default workspace with no owner, once, and only where sign-in is OIDC. (The rest of
   US-405's sign-in rules: ``test_prd277_w4b_first_admin_realdb.py``.)
 * **Step-up** (US-406): ``/start?step_up=1`` needs a live session, sends ``max_age=0`` and keeps
-  the session's id; the callback refreshes that session's ``auth_time`` for the same person only,
+  the session's id (every parameter it sends: ``test_prd277_w4b_auth_time_request_realdb.py``); the callback refreshes that session's ``auth_time`` for the same person only,
   issues no session and sets no cookie, audited ``auth:step_up``. Another person, a token with no
   (its own code, ``step_up_no_auth_time``) or an old ``auth_time``, and an ended session are
   refused, changing nothing and creating nobody; the step-up runs before anything that finds or

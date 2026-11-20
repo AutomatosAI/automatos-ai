@@ -10,8 +10,8 @@ is skipped. Against Postgres, each test in a transaction rolled back at the end:
   linked to Keycloak's issuer and subject;
 * the access rule reads Keycloak's claim with a colon in its name: it lets the person in when it
   holds and refuses them, keeping no person, when it does not;
-* a step-up sends ``max_age=0``, Keycloak asks for the password again, and the session's
-  ``auth_time`` is refreshed;
+* a step-up sends ``max_age=0``, ``prompt=login`` and the ``claims`` request for ``auth_time``,
+  Keycloak asks for the password again, and the session's ``auth_time`` is refreshed;
 * sign-out answers Keycloak's end-session address with ``client_id`` and the install's
   ``post_logout_redirect_uri``, which Keycloak accepts.
 """
@@ -40,7 +40,7 @@ from api import auth_oidc as routes  # noqa: E402
 from api import auth_sessions  # noqa: E402
 from config import config  # noqa: E402
 from core.auth import hybrid, oidc_provider, session_lane, sign_in_flow  # noqa: E402
-from core.auth.oidc_sign_in import OidcSignIn, SIGNED_OUT_PATH  # noqa: E402
+from core.auth.oidc_sign_in import AUTH_TIME_CLAIMS_REQUEST, OidcSignIn, SIGNED_OUT_PATH  # noqa: E402
 from core.auth.pairing import hash_secret  # noqa: E402
 from core.auth.sign_in_methods import SignInRegistry  # noqa: E402
 from core.database.database import get_db  # noqa: E402
@@ -174,7 +174,9 @@ def test_a_step_up_makes_keycloak_ask_again_and_refreshes_the_session(install):
 
     started, at_keycloak, stepped_up = _sign_in(install, step_up_too=True)
 
-    assert parse_qs(urlsplit(started.headers["location"]).query)["max_age"] == ["0"]
+    sent = parse_qs(urlsplit(started.headers["location"]).query)
+    # Keycloak's metadata says it takes the claims parameter and lists login among its prompt values.
+    assert (sent["max_age"], sent["prompt"], sent["claims"]) == (["0"], ["login"], [AUTH_TIME_CLAIMS_REQUEST])
     assert at_keycloak.asked  # signed in at Keycloak already, and asked for the password all the same
     assert stepped_up.status_code == 303 and stepped_up.headers["location"] == "/settings"
     install.db.expire_all()

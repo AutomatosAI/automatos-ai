@@ -17,8 +17,11 @@ secret and every code. Nothing is a literal.
 It can be told to misbehave (``misbehave``, which replaces the frozen ``Behaviour``): a wrong
 signature, ``alg: none``, HS256 signed with the public key, a rotated key, a missing or extra claim,
 a wrong or missing nonce, an issuer shared by many organisations, metadata that names another
-issuer or another host, a status or a redirect in place of an answer. It records each token
-request (``token_requests``) so a test can count exchanges.
+issuer or another host, a status or a redirect in place of an answer, an ``auth_time`` sent always,
+only when the sign-in page asked for it (``claims`` naming it, or ``max_age``) or never, and a
+``prompt`` value it answers with ``invalid_request``. It records each token request
+(``token_requests``) so a test can count exchanges, and each sign-in page's query
+(``authorize_requests``) so a test can read exactly what was sent.
 """
 from __future__ import annotations
 
@@ -111,6 +114,8 @@ class Behaviour:
     redirect_metadata_to: Optional[str] = None
     callback_iss: Optional[str] = None
     callback_error: Optional[str] = None
+    auth_time: str = "always"           # always | when_asked (claims or max_age) | never
+    refused_prompts: Tuple[str, ...] = ()  # prompt values answered with error=invalid_request
 
 
 @dataclass
@@ -120,7 +125,22 @@ class _Code:
     challenge: str
     nonce: Optional[str]
     person: Person
+    asked_auth_time: bool = False
     used: bool = False
+
+
+AUTH_TIME_ASKED = {"id_token": {"auth_time": {"essential": True}}}
+
+
+def _asks_auth_time(query: Mapping[str, str]) -> bool:
+    """Whether a sign-in page's query asks for ``auth_time``: a ``max_age``, or ``claims`` naming it."""
+    if "max_age" in query:
+        return True
+    try:
+        asked = json.loads(query.get("claims", "null"))
+    except ValueError:
+        return False
+    return isinstance(asked, dict) and "auth_time" in (asked.get("id_token") or {})
 
 
 class FakeIdentityProvider:
@@ -218,9 +238,16 @@ class FakeIdentityProvider:
             claims["nonce"] = secrets.token_urlsafe(32)
         if behaviour.shared_issuer_domain:
             claims["hd"] = behaviour.shared_issuer_domain
+        if not self._sends_auth_time(code):
+            del claims["auth_time"]
         claims.update(behaviour.claims)
         return {name: value for name, value in claims.items()
                 if name not in behaviour.remove_claims and value is not None}
+
+    def _sends_auth_time(self, code: _Code) -> bool:
+        """Whether this code's ID token carries ``auth_time``, as ``Behaviour.auth_time`` says."""
+        mode = self.behaviour.auth_time
+        return mode == "always" or (mode == "when_asked" and code.asked_auth_time)
 
     def id_token(self, claims: Mapping[str, Any]) -> str:
         """``claims`` signed as the behaviour says."""
@@ -256,10 +283,14 @@ class FakeIdentityProvider:
         self.issued.append(code)
         with self._lock:
             self._codes[code] = _Code(one.get("client_id", ""), one.get("redirect_uri", ""),
-                                      one.get("code_challenge", ""), one.get("nonce"), self.person)
+                                      one.get("code_challenge", ""), one.get("nonce"), self.person,
+                                      asked_auth_time=_asks_auth_time(one))
         answer = {"code": code, "state": one.get("state", ""), "iss": self.behaviour.callback_iss or self.issuer}
-        if self.behaviour.callback_error:
-            answer = {"error": self.behaviour.callback_error, "state": one.get("state", "")}
+        error = self.behaviour.callback_error
+        if one.get("prompt") in self.behaviour.refused_prompts:
+            error = "invalid_request"
+        if error:
+            answer = {"error": error, "state": one.get("state", "")}
         return 302, {"Location": one.get("redirect_uri", "") + "?" + urlencode(answer)}
 
     # ------------------------------------------------------------------ the server's step

@@ -11,8 +11,16 @@ address of the provider's own sign-in page, with:
   PKCE ``code_challenge`` with ``code_challenge_method=S256``;
 * ``redirect_uri``: exactly ``<FRONTEND_URL's origin>/api/v1/auth/oidc/callback``, the one address
   the customer registers (§5.2). The web app and the API share that origin (§5.3);
-* for a step-up (US-406, §5.5) ``max_age=0`` as well, and the sign-in's row keeps the session that
-  asked, which ``finish`` hands back with when the step-up started.
+* ``claims`` (OIDC Core §5.5) asking for ``auth_time`` in the ID token as essential
+  (``AUTH_TIME_CLAIMS_REQUEST``), so a provider that honours it reports when the person signed in;
+  left out only when the metadata says the provider refuses the parameter
+  (``ProviderMetadata.takes_claims_request``). A provider that ignores it signs people in as before;
+* for a step-up (US-406, §5.5) ``max_age=0`` and ``prompt=login`` as well (the second only where
+  ``ProviderMetadata.takes_prompt_login``), and the sign-in's row keeps the session that asked,
+  which ``finish`` hands back with when the step-up started.
+
+These only ask. Freshness is judged from the returned token's ``auth_time`` alone
+(``core.auth.step_up_sign_in``): a provider that sends none, or an old one, is refused all the same.
 
 The browser binding is a secret of its own, never in an address: the route puts it in a
 ``__Host-`` cookie only this browser holds, so a callback carried to another browser (login
@@ -35,10 +43,11 @@ provider said in ``error`` or ``error_description`` is never read into a log lin
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
 from datetime import datetime, timezone
-from typing import Any, Mapping, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 from urllib.parse import urlencode
 from uuid import UUID
 
@@ -71,6 +80,8 @@ NO_AUTH_TIME = datetime(1970, 1, 1, tzinfo=timezone.utc)
 # OIDC Core §3.1.2.1: max_age=0 makes the provider authenticate the person again, as prompt=login
 # does, and makes auth_time a required claim of the ID token it returns.
 STEP_UP_MAX_AGE = "0"
+# OIDC Core §5.5.1: auth_time asked for in the ID token as an essential claim.
+AUTH_TIME_CLAIMS_REQUEST = json.dumps({"id_token": {"auth_time": {"essential": True}}}, separators=(",", ":"))
 # Where the provider sends the browser back after signing out there (§5.6): the sign-in page.
 SIGNED_OUT_PATH = "/sign-in"
 
@@ -86,6 +97,20 @@ def callback_address() -> str:
 def _authorize_address(endpoint: str, values: Mapping[str, str]) -> str:
     joiner = "&" if "?" in endpoint else "?"
     return endpoint + joiner + urlencode(values)
+
+
+def auth_time_values(metadata: oidc_provider.ProviderMetadata, step_up: bool) -> Dict[str, str]:
+    """What the sign-in page is asked for so the ID token can say when the person signed in.
+
+    Every sign-in: ``claims`` with ``AUTH_TIME_CLAIMS_REQUEST``, unless the metadata says the
+    provider refuses it. A step-up also: ``max_age=0``, and ``prompt=login`` where the metadata
+    or the provider's documentation says it is taken (``oidc_provider.parse_metadata``).
+    """
+    asked = {"claims": AUTH_TIME_CLAIMS_REQUEST} if metadata.takes_claims_request else {}
+    if not step_up:
+        return asked
+    again = {"prompt": oidc_provider.PROMPT_LOGIN} if metadata.takes_prompt_login else {}
+    return {**asked, "max_age": STEP_UP_MAX_AGE, **again}
 
 
 def _one(params: Mapping[str, Tuple[str, ...]], name: str) -> Optional[str]:
@@ -233,9 +258,9 @@ class OidcSignIn:
     def start(self, db: Any, return_to: str, client_address: str,
               step_up_session_id: Optional[UUID] = None) -> Started:
         """Begin a sign-in that returns to ``return_to`` (a path on this install, else ``/``), counted
-        against ``client_address``'s pending sign-ins (``oidc_pending.begin``). For a step-up
-        (``step_up_session_id``, US-406) the address also carries ``max_age=0``: the provider must
-        make the person sign in again, and report when in ``auth_time``."""
+        against ``client_address``'s pending sign-ins (``oidc_pending.begin``). The address asks
+        for ``auth_time`` (``auth_time_values``); for a step-up (``step_up_session_id``, US-406)
+        it also asks the provider to make the person sign in again."""
         metadata = oidc_provider.current_metadata()
         redirect_uri = callback_address()
         started = oidc_pending.begin(db, safe_return_path(return_to), client_address,
@@ -245,9 +270,8 @@ class OidcSignIn:
             "redirect_uri": redirect_uri, "scope": config.OIDC_SCOPES, "state": started.state,
             "nonce": started.nonce, "code_challenge": started.code_challenge,
             "code_challenge_method": oidc_provider.PKCE_S256,
+            **auth_time_values(metadata, step_up=step_up_session_id is not None),
         }
-        if step_up_session_id is not None:
-            values = {**values, "max_age": STEP_UP_MAX_AGE}
         address = _authorize_address(metadata.authorization_endpoint, values)
         return Started(redirect_to=address, browser_binding=started.binding)
 
@@ -263,6 +287,7 @@ class OidcSignIn:
 
 
 __all__ = [
+    "AUTH_TIME_CLAIMS_REQUEST",
     "CALLBACK_PATH",
     "CODE_MAX_LENGTH",
     "METHOD_NAME",
@@ -270,6 +295,7 @@ __all__ = [
     "SIGNED_OUT_PATH",
     "STEP_UP_MAX_AGE",
     "OidcSignIn",
+    "auth_time_values",
     "callback_address",
     "end_session_address",
     "verified_identity",

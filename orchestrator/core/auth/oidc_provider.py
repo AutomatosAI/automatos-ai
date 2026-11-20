@@ -15,6 +15,10 @@ own host the one host that may resolve to a private address. It is used only whe
   one of ``SIGNING_ALGORITHMS``, and a client authentication this client uses
   (``client_secret_basic``, else ``client_secret_post``).
 
+Two more things are read from it, never a reason to refuse it: whether the sign-in page may be sent
+the ``claims`` parameter (``takes_claims_request``) and, on a step-up, ``prompt=login``
+(``takes_prompt_login``); ``core.auth.oidc_sign_in`` sends them.
+
 It is held for ``METADATA_LIFESPAN_SECONDS`` and read again after.
 
 **Keys** follow ``core/auth/clerk.py``'s ``PyJWKClient`` pattern: the key set at ``jwks_uri`` is held
@@ -72,6 +76,19 @@ PKCE_S256 = "S256"
 AUTH_BASIC = "client_secret_basic"
 AUTH_POST = "client_secret_post"
 
+# What the sign-in page is asked for beyond the code flow (US-406, §5.5): the ``claims`` parameter
+# (OIDC Core §5.5) and, on a step-up, ``prompt=login`` (§3.1.2.1). Discovery 1.0 §3 names the
+# field that says whether the first is taken; Initiating User Registration 1.0 §4.2 the list of
+# prompt values a provider takes.
+CLAIMS_PARAMETER_FIELD = "claims_parameter_supported"
+PROMPT_VALUES_FIELD = "prompt_values_supported"
+PROMPT_LOGIN = "login"
+# Issuers whose metadata lists no prompt values but whose own documentation does, without
+# ``login``: Google's lists ``none``, ``consent`` and ``select_account``
+# (developers.google.com/identity/openid-connect/openid-connect). OIDC Core §3.1.2.1 lets a
+# provider answer an error for a prompt value it does not understand, so it is not sent to them.
+PROMPT_LOGIN_UNLISTED_HOSTS: Tuple[str, ...] = ("accounts.google.com",)
+
 MISCONFIGURED_MESSAGE = "The organisation's identity provider publishes settings sign-in cannot use."
 UNKNOWN_KEY_MESSAGE = "The ID token names a signing key the identity provider does not publish."
 
@@ -94,6 +111,8 @@ class ProviderMetadata:
     jwks_uri: str
     end_session_endpoint: Optional[str]
     token_auth_method: str
+    takes_claims_request: bool
+    takes_prompt_login: bool
 
 
 @dataclass(frozen=True)
@@ -185,6 +204,34 @@ def _token_auth_method(doc: Mapping[str, Any]) -> str:
     raise _misconfigured("no client authentication with a secret is offered")
 
 
+def _takes_claims_request(doc: Mapping[str, Any]) -> bool:
+    """Whether to send the ``claims`` parameter: unless the metadata says the provider refuses it.
+
+    Discovery 1.0 §3 reads an absent ``claims_parameter_supported`` as false, but OIDC Core says
+    sending it then does no harm: a provider that does not support it "SHOULD return a set of
+    Claims" it judges useful (§5.5), unrecognised parameters are ignored (§3.1.2.2), and a claim
+    not returned, even an essential one, is never an error (§5.5.1). Google, Microsoft, Okta and
+    Auth0 publish no such field, and Google documents the parameter as the way to ask for
+    ``auth_time``. So only the provider's own word counts: any value but ``true`` there.
+    """
+    return CLAIMS_PARAMETER_FIELD not in doc or doc[CLAIMS_PARAMETER_FIELD] is True
+
+
+def _takes_prompt_login(doc: Mapping[str, Any], issuer: str) -> bool:
+    """Whether a step-up may send ``prompt=login``.
+
+    A provider listing its prompt values takes it when ``login`` is listed (one that is not
+    listed "SHOULD" be answered with ``invalid_request``, Initiating User Registration 1.0 §4.1);
+    a value that is not a list is read as not listing it. A provider whose metadata lists no prompt
+    values takes it, as OIDC Core §15.1 requires of every provider ("including ... none and
+    login"), unless its issuer is in ``PROMPT_LOGIN_UNLISTED_HOSTS``.
+    """
+    if PROMPT_VALUES_FIELD in doc:
+        listed = doc[PROMPT_VALUES_FIELD]
+        return isinstance(listed, list) and PROMPT_LOGIN in listed
+    return oidc_http.host_of(issuer) not in PROMPT_LOGIN_UNLISTED_HOSTS
+
+
 def parse_metadata(doc: Any, issuer: str) -> ProviderMetadata:
     """The usable part of a metadata document, or ``ProviderMisconfigured`` naming what is wrong."""
     if not isinstance(doc, dict):
@@ -203,6 +250,8 @@ def parse_metadata(doc: Any, issuer: str) -> ProviderMetadata:
         jwks_uri=_called_endpoint(doc, "jwks_uri", issuer),
         end_session_endpoint=_endpoint(doc, "end_session_endpoint", required=False),
         token_auth_method=_token_auth_method(doc),
+        takes_claims_request=_takes_claims_request(doc),
+        takes_prompt_login=_takes_prompt_login(doc, issuer),
     )
 
 
@@ -312,6 +361,8 @@ __all__ = [
     "KEY_REFETCH_INTERVAL_SECONDS",
     "METADATA_LIFESPAN_SECONDS",
     "METADATA_PATH",
+    "PROMPT_LOGIN",
+    "PROMPT_LOGIN_UNLISTED_HOSTS",
     "SIGNING_ALGORITHMS",
     "ProviderMetadata",
     "ProviderMisconfigured",
