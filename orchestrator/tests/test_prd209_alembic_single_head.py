@@ -195,7 +195,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # column with its CHECK): a person's (issuer, subject) link and an install-wide role.
 # 2026-11-20 (PRD-277 Wave 3, US-301): prd277_w3_sessions_20261120 chains onto
 # prd277_w2_identities_20261120 — auth_sessions, a new table: the sessions Automatos issues.
-EXPECTED_HEAD = "prd277_w3_sessions_20261120"
+# 2026-11-20 (PRD-277 Wave 4, US-402): prd277_w4_oidc_sign_ins_20261120 chains onto
+# prd277_w3_sessions_20261120 — oidc_pending_sign_ins, a new table: sign-ins started, not finished.
+EXPECTED_HEAD = "prd277_w4_oidc_sign_ins_20261120"
 
 
 def _literal(node: ast.AST):

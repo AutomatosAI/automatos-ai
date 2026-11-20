@@ -389,22 +389,22 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As the platform, I want to read the IdP's published metadata and signing keys safely, so that I can verify what it sends.
 
 **Acceptance Criteria:**
-- [ ] The metadata is fetched from `<OIDC_ISSUER>/.well-known/openid-configuration` over `https` only. Its `issuer` must equal the setting.
-- [ ] Keys are fetched with the `PyJWKClient` pattern already in `core/auth/clerk.py`. An unknown key id causes one rate-limited refetch.
-- [ ] The configured issuer's host is reachable even on a private address. No other private address becomes reachable through sign-in. A test proves both. (PRD-282 covers the private addresses an operator may name for other purposes.)
-- [ ] `OIDC_CA_BUNDLE_FILE` is honoured.
-- [ ] If the IdP cannot be reached, the API still starts; sign-in answers with a clear error and `/health/bootstrap` reports it.
-- [ ] No new Python dependency.
+- [x] The metadata is fetched from `<OIDC_ISSUER>/.well-known/openid-configuration` over `https` only. Its `issuer` must equal the setting. `core/auth/oidc_provider.py`, through `core/auth/oidc_http.py`; its endpoints must be `https` too, and it must offer the code flow, PKCE S256, an allowed algorithm and a secret-based client authentication.
+- [x] Keys are fetched with the `PyJWKClient` pattern already in `core/auth/clerk.py`. An unknown key id causes one rate-limited refetch. The same pattern (a key set held five minutes, a key picked by `kid` among signing keys, built by PyJWT's `PyJWK`), fetched through `oidc_http` rather than by `PyJWKClient` itself, which opens addresses with `urllib` where the pinned connection and the private-address rule cannot apply. At most one refetch a minute.
+- [x] The configured issuer's host is reachable even on a private address. No other private address becomes reachable through sign-in. A test proves both. (PRD-282 covers the private addresses an operator may name for other purposes.) The token endpoint and key address come from the metadata; any host other than the issuer's must resolve to public addresses only, and the checked address is the one connected to. `test_prd277_w4_oidc_http.py`.
+- [x] `OIDC_CA_BUNDLE_FILE` is honoured. Trusted on top of the operating system's authorities; start-up refuses a file it cannot read. `test_prd277_w4_provider_and_tokens.py` signs in against a provider whose certificate only that file trusts.
+- [x] If the IdP cannot be reached, the API still starts; sign-in answers with a clear error and `/health/bootstrap` reports it. The `oidc_provider` stage of the background boot (`core/auth/sign_in_start_up.py`); sign-in sends the person to `/sign-in?error=identity_provider_unavailable`.
+- [x] No new Python dependency. `httpx`, `PyJWT` and `cryptography`, already pinned.
 
 #### US-402: Start and callback · L · security review + Dave
 **Description:** As a person, I want to sign in with my work account, so that I can use Automatos.
 
 **Acceptance Criteria:**
-- [ ] `GET /api/v1/auth/oidc/start` makes `state`, `nonce` and a PKCE verifier, keeps them server-side for 10 minutes, and redirects to the IdP.
-- [ ] `GET /api/v1/auth/oidc/callback` exchanges the code, verifies the ID token against every rule in §5.11, and issues a session.
-- [ ] Tests, each against the fake issuer (US-407): wrong signature, `alg: none`, wrong issuer, wrong audience, expired, missing or wrong nonce, reused state, replayed code, redirect to another host.
-- [ ] No token, code or secret appears in any log line or response body. A test scans the captured logs.
-- [ ] Both routes are public, rate limited per IP, and in `route-manifest.json`.
+- [x] `GET /api/v1/auth/oidc/start` makes `state`, `nonce` and a PKCE verifier, keeps them server-side for 10 minutes, and redirects to the IdP. In `oidc_pending_sign_ins` (§12, entry 5), as digests of the state and nonce; the state is also bound to the browser by a `__Host-` cookie, so a callback carried to another browser is not a sign-in there.
+- [x] `GET /api/v1/auth/oidc/callback` exchanges the code, verifies the ID token against every rule in §5.11, and issues a session. The state is ended in one `DELETE … RETURNING` before the code is exchanged, so two callbacks with one state cannot both use it (`core/auth/oidc_pending.py`); the rules are `core/auth/oidc_tokens.py`.
+- [x] Tests, each against the fake issuer (US-407): wrong signature, `alg: none`, wrong issuer, wrong audience, expired, missing or wrong nonce, reused state, replayed code, redirect to another host. `test_prd277_w4_sign_in_realdb.py`, `test_prd277_w4_provider_and_tokens.py`, `test_prd277_w4_pending_realdb.py`.
+- [x] No token, code or secret appears in any log line or response body. A test scans the captured logs. Over a sign-in that succeeds and each way one fails; the access log replaces a sign-in path's query with `?{redacted}`.
+- [x] Both routes are public, rate limited per IP, and in `route-manifest.json`. `oidc_start_ip` and `oidc_callback_ip`, 300 per IP per 10 minutes each; both 404 unless the edition signs in with OIDC.
 
 #### US-403: The access rule · M
 **Description:** As an operator, I want to say which claims a person must have, so that only my organisation's people get in.
@@ -419,13 +419,13 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As a new person, I want my first sign-in to work without anyone preparing my account, so that I can start as soon as an admin gives me a workspace.
 
 **Acceptance Criteria:**
-- [ ] A `users` row and an identity link are created. No personal workspace, no trial grant.
-- [ ] With `ENTERPRISE_DEFAULT_ROLE=none`, the person is signed in and in no workspace, and the API tells the web app so.
-- [ ] With `ENTERPRISE_DEFAULT_ROLE` set to a role, the person gets that role in the default workspace at first sign-in only.
-- [ ] A later sign-in changes no membership. A test proves a role an admin changed survives the next sign-in.
-- [ ] Sign-in succeeds when the ID token carries only a subject and an email.
-- [ ] The caller passes the provider's own statement that the email is verified, taken from the verified ID token, as `email_verified`; the link service (US-201) enforces it: an email the token does not mark verified is no email.
-- [ ] The refusal a person sees never differs by whether an address is already known to the install.
+- [x] A `users` row and an identity link are created. No personal workspace, no trial grant. Through `people.link_person`, with one `auth:identity_linked` row.
+- [x] With `ENTERPRISE_DEFAULT_ROLE=none`, the person is signed in and in no workspace, and the API tells the web app so. `403 {"code": "workspace_required"}` from the session lane.
+- [x] With `ENTERPRISE_DEFAULT_ROLE` set to a role, the person gets that role in the default workspace at first sign-in only. `viewer`, `editor` or `admin`; start-up refuses any other value, and a role without `DEFAULT_WORKSPACE_ID`.
+- [x] A later sign-in changes no membership. A test proves a role an admin changed survives the next sign-in.
+- [x] Sign-in succeeds when the ID token carries only a subject and an email. With no `auth_time`, the session records the epoch, so a step-up can never pass on it.
+- [x] The caller passes the provider's own statement that the email is verified, taken from the verified ID token, as `email_verified`; the link service (US-201) enforces it: an email the token does not mark verified is no email. Only the JSON `true` counts: absent, `false`, `"true"` and `1` are not verified.
+- [x] The refusal a person sees never differs by whether an address is already known to the install. An email conflict and a bad token give the same answer (`/sign-in?error=sign_in_refused`); only the audit row's reason differs.
 
 #### US-405: The first admin · S
 **Description:** As the operator, I want to name the first admins in settings, so that nobody edits the database to get in.
@@ -449,20 +449,20 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As a developer, I want a small OIDC issuer that runs inside the test process, so that every flow is tested without a real provider.
 
 **Acceptance Criteria:**
-- [ ] A test helper serves metadata, keys, an authorize step that approves at once, and a token endpoint, on a loopback address, using `PyJWT` and `cryptography` only.
-- [ ] It can be told to misbehave: wrong signature, rotated key, missing claim, shared issuer.
+- [x] A test helper serves metadata, keys, an authorize step that approves at once, and a token endpoint, on a loopback address, using `PyJWT` and `cryptography` only. `orchestrator/tests/helpers_fake_oidc_provider.py`, over TLS with a certificate made at run time.
+- [x] It can be told to misbehave: wrong signature, rotated key, missing claim, shared issuer. Also `alg: none`, HS256 with the public key, a wrong or missing nonce, other metadata, an error status and a redirect.
 - [ ] A separate CI job runs the sign-in flow against a real Keycloak container. It is allowed to fail at first and becomes required at the end of the wave.
 
 #### US-408: One interface and one hook for sign-in · M
 **Description:** As a developer, I want sign-in written against a small interface with a hook, so that another way of proving identity can be added without touching sessions or permissions.
 
 **Acceptance Criteria:**
-- [ ] The start and callback routes call an identity interface. OIDC is its implementation in core.
-- [ ] A hook runs after the identity is verified and before the session is issued. It can refuse the sign-in, or set memberships through the people service.
-- [ ] Creating a person, linking an identity, setting a membership and deactivating a person are functions in one module, used by sign-in and by the Team routes.
-- [ ] Registration is refused after startup, and registering the same thing twice raises an error.
-- [ ] A test registers a second, fake implementation and a hook, and signs in through them with no change to the session or permission code.
-- [ ] With no hook registered, every US-402 and US-404 test passes unchanged.
+- [x] The start and callback routes call an identity interface. OIDC is its implementation in core. `core/auth/sign_in_methods.py` (`IdentityMethod`), `core/auth/oidc_sign_in.py`, called through `core/auth/sign_in_flow.py`.
+- [x] A hook runs after the identity is verified and before the session is issued. It can refuse the sign-in, or set memberships through the people service. A refusal is audited as the access rule's.
+- [ ] Creating a person, linking an identity, setting a membership and deactivating a person are functions in one module, used by sign-in and by the Team routes. In `core/auth/people.py` (`link_person`, `set_membership`, `deactivate_person`) and used by sign-in; the Team routes do not call them yet.
+- [x] Registration is refused after startup, and registering the same thing twice raises an error. Closed when the background boot runs and by the first sign-in.
+- [x] A test registers a second, fake implementation and a hook, and signs in through them with no change to the session or permission code. `test_prd277_w4_sign_in_realdb.py`.
+- [ ] With no hook registered, every US-402 and US-404 test passes unchanged. They register none; CI proves it.
 
 ### Wave 5: Web app
 
@@ -680,7 +680,7 @@ All answered by Gerard on 19 Nov 2026. The options he was given are kept, so eac
 2. **[?] Which identity provider does the first customer use?** The dev install's conformance run starts with it.
 3. **[?] Does anything in the 25 API files that query by Clerk id run in `local` today?** If so, US-202 fixes a latent bug there; if not, those routes are `saas`-only and need a capability.
 4. **[?] Apple's rule on third-party sign-in** has an exemption for apps that sign in with an existing enterprise account. Confirm against the current text in the app PRD (US-604).
-5. **[?] Where pre-sign-in state is kept** for its 10 minutes: Redis with `SET NX EX`, as webhook dedup does, or a table. Decided in US-402's PR.
+5. **[decided, US-402] Where pre-sign-in state is kept** for its 10 minutes: Redis with `SET NX EX`, as webhook dedup does, or a table. A table, `oidc_pending_sign_ins` (`prd277_w4_oidc_sign_ins_20261120`), holding digests of the state and nonce, the PKCE verifier, the return path and the expiry. Single use is one `DELETE … RETURNING`, committed before the code is exchanged, which Postgres serialises: of two callbacks with one state, exactly one gets it, and a test races two. Redis was not chosen because the rate limiter lets requests through when it is unreachable, and single use must never fail open.
 6. **[?] Emails that differ only by case must belong to one person**, on the OIDC path and on the Clerk path. The check before an insert compares emails case-insensitively; for it to hold when two sign-ins arrive at the same moment, `users` needs a unique index on `LOWER(email)`. Adding it needs the owner's decision and a check of existing data for rows it would refuse.
 7. **[?] Which workspace an install-wide role change is audited under.** A change to `users.system_role` belongs to no workspace, and `audit_logs.workspace_id` is required. Today the caller of `set_system_role` passes it. US-405 settles it.
-8. **[?] Whether a person's placeholder address becomes their real address** once a later sign-in carries it verified. Today a repeat sign-in never rewrites a stored address. Open: Wave 4 decides it.
+8. **[decided, US-404] Whether a person's placeholder address becomes their real address** once a later sign-in carries it verified. No, in v1: a repeat sign-in never rewrites a stored address, placeholder or not. A person is found by issuer and subject only, so a placeholder never stops anyone signing in; rewriting it safely needs the address conflict check under concurrent sign-ins, which waits on entry 6.

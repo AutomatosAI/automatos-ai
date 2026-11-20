@@ -143,6 +143,21 @@ def record_sign_in_refused(db, *, reason: str, user_id: Optional[int] = None, ip
         logger.error("A refused sign-in (%s) could not be recorded", reason)
 
 
+def record_identity_linked(db, *, user_id: int, details: Dict[str, Any], ip_address: Optional[str],
+                           user_agent: Optional[str], workspace_id: Union[UUID, str, None] = None) -> None:
+    """``auth:identity_linked`` for a first sign-in, committed with the new person and link.
+
+    Granting access: when the row cannot be written, the person and the link are rolled back with
+    it and ``SessionAuditFailed`` is raised. ``details`` names what was granted, never a claim.
+    """
+    entry = _write(db, action=IDENTITY_LINKED, workspace_id=workspace_id, user_id=user_id,
+                   resource_type=PERSON_RESOURCE, resource_id=user_id, details=dict(details),
+                   ip_address=ip_address, user_agent=user_agent)
+    if entry is None:
+        logger.error("users.id=%s: first sign-in rolled back, its audit row failed", user_id)
+        raise SessionAuditFailed(AUDIT_FAILED_MESSAGE)
+
+
 def commit_removal(db, remove: Callable[[], T], record: Callable[[T], Optional[object]], action: str) -> T:
     """Apply ``remove``, then ``record`` its audit row, committing both; the removal always lands.
 
@@ -194,6 +209,7 @@ __all__ = [
     "audit_workspace",
     "browser_fields",
     "commit_removal",
+    "record_identity_linked",
     "record_sign_in",
     "record_sign_in_refused",
     "session_ended_row",

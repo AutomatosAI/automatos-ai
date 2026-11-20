@@ -9,9 +9,16 @@
    client id are the customer's own. ``FRONTEND_URL`` is the install's public address (PRD-277
    §5.1): the web app and the API share it, and the sign-in redirect is built on it. Its
    built-in default is a developer's ``localhost``, so only a value set in the environment counts.
-2. last, while ``OIDC_SIGN_IN_IN_THIS_BUILD`` is false: the edition is "not available in this
-   build", so a half-built edition can never run. Wave 4 (US-401 to US-408), which builds OIDC
-   sign-in, deletes that switch and this check.
+2. when a sign-in setting (``OIDC_SIGN_IN_SETTINGS``, PRD-277 Wave 4) cannot be used: the issuer
+   and ``FRONTEND_URL`` must be ``https`` addresses with a host; ``OIDC_SCOPES`` must be scope
+   tokens including ``openid``; ``OIDC_CLAIM_EMAIL`` and ``OIDC_CLAIM_NAME`` must name a claim;
+   ``OIDC_CA_BUNDLE_FILE``, when set, must be a file this process can read; and
+   ``ENTERPRISE_DEFAULT_ROLE`` must be ``none`` or a workspace role below owner, and a role needs
+   ``DEFAULT_WORKSPACE_ID``. The refusal names the setting, never its value. ``config.py`` reads
+   them so that no value can stop another edition from starting.
+3. last, while ``OIDC_SIGN_IN_IN_THIS_BUILD`` is false: the edition is "not available in this
+   build", so a half-built edition can never run. The pull request that finishes Wave 4 turns it
+   on.
 
 ``check_session_settings`` (PRD-277 Wave 3) is called just before it. Where the edition issues its
 own sessions (``issues_sessions``) it refuses to start unless both clocks are whole numbers of at
@@ -29,12 +36,14 @@ Imports no config and reads no setting itself: ``config.py`` hands the values in
 """
 from __future__ import annotations
 
+import os
 import re
-from typing import Any, Mapping, Optional, Tuple
+from typing import Any, Iterator, Mapping, Optional, Tuple
+from urllib.parse import urlsplit
 
 from core import editions
 
-# Wave 4 of PRD-277 deletes this switch, and the check that reads it, when OIDC sign-in lands.
+# The pull request that finishes PRD-277 Wave 4 turns this on; until then enterprise cannot start.
 OIDC_SIGN_IN_IN_THIS_BUILD = False
 
 # The issuer, client id and client secret (PRD-277 §5.10), then the install's public address.
@@ -66,6 +75,19 @@ _TOKEN = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 BAD_SESSION_SETTING = "AUTH_EDITION=enterprise cannot start: {name} {problem}."
 
 
+# The sign-in settings ``check_start_up`` reads after the missing ones (PRD-277 §5.10, Wave 4).
+OIDC_SIGN_IN_SETTINGS: Tuple[str, ...] = (
+    "OIDC_ISSUER", "FRONTEND_URL", "OIDC_SCOPES", "OIDC_CLAIM_EMAIL", "OIDC_CLAIM_NAME",
+    "OIDC_CA_BUNDLE_FILE", "ENTERPRISE_DEFAULT_ROLE", "DEFAULT_WORKSPACE_ID",
+)
+OPENID_SCOPE = "openid"
+NO_DEFAULT_ROLE = "none"
+# modules.policy.roles.WorkspaceRole below owner: sign-in never makes anyone a workspace's owner.
+DEFAULT_ROLES: Tuple[str, ...] = (NO_DEFAULT_ROLE, "viewer", "editor", "admin")
+# RFC 6749 §3.3: scope-token = 1*( %x21 / %x23-5B / %x5D-7E ).
+_SCOPE_TOKEN = re.compile(r"^[\x21\x23-\x5B\x5D-\x7E]+$")
+
+
 class EditionNotReady(RuntimeError):
     """Start-up refused: this edition is missing a setting, or is not in this build."""
 
@@ -82,17 +104,67 @@ def _missing_message(missing: Tuple[str, ...]) -> str:
     return MISSING_SETTINGS.format(names=names, verb="are" if plural else "is", them="them" if plural else "it")
 
 
+def _is_https_address(value: Any) -> bool:
+    try:
+        parts = urlsplit(str(value or "").strip())
+        _ = parts.port
+    except ValueError:
+        return False
+    return parts.scheme == "https" and bool(parts.hostname)
+
+
+def _scopes_problem(scopes: str) -> Optional[str]:
+    tokens = scopes.split()
+    if not tokens or not all(_SCOPE_TOKEN.match(token) for token in tokens):
+        return "must be scope names separated by spaces"
+    return None if OPENID_SCOPE in tokens else f"must include {OPENID_SCOPE}"
+
+
+def _readable_file(path: str) -> bool:
+    return os.path.isfile(path) and os.access(path, os.R_OK)
+
+
+def _sign_in_setting_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str, str]]:
+    """Each ``(name, problem)`` among ``OIDC_SIGN_IN_SETTINGS``, in that order; the value is never quoted."""
+    for name in ("OIDC_ISSUER", "FRONTEND_URL"):
+        if not _is_https_address(settings.get(name)):
+            yield name, "must be an https address with a host"
+    scopes = _scopes_problem(str(settings.get("OIDC_SCOPES") or ""))
+    if scopes:
+        yield "OIDC_SCOPES", scopes
+    for name in ("OIDC_CLAIM_EMAIL", "OIDC_CLAIM_NAME"):
+        if not str(settings.get(name) or "").strip():
+            yield name, "must name a claim"
+    yield from _bundle_and_role_problems(settings)
+
+
+def _bundle_and_role_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str, str]]:
+    bundle = str(settings.get("OIDC_CA_BUNDLE_FILE") or "")
+    if bundle and not _readable_file(bundle):
+        yield "OIDC_CA_BUNDLE_FILE", "must be a certificate file this process can read"
+    role = settings.get("ENTERPRISE_DEFAULT_ROLE") or NO_DEFAULT_ROLE
+    if role not in DEFAULT_ROLES:
+        yield "ENTERPRISE_DEFAULT_ROLE", f"must be one of {', '.join(DEFAULT_ROLES)}"
+    elif role != NO_DEFAULT_ROLE and not str(settings.get("DEFAULT_WORKSPACE_ID") or "").strip():
+        yield "ENTERPRISE_DEFAULT_ROLE", "needs DEFAULT_WORKSPACE_ID, the workspace the role is in"
+
+
 def check_start_up(capabilities: editions.EditionCapabilities, settings: Mapping[str, Optional[str]]) -> None:
     """Raise ``EditionNotReady`` when an OIDC edition may not start; return for every other one.
 
-    ``settings`` maps each name in ``OIDC_START_UP_SETTINGS`` to its value (``None`` when unset).
-    The missing settings are checked first; "not available in this build" is the last check.
+    ``settings`` maps each name in ``OIDC_START_UP_SETTINGS`` and ``OIDC_SIGN_IN_SETTINGS`` to its
+    value (``None`` when unset). The missing settings are checked first, then the sign-in settings;
+    "not available in this build" is the last check.
     """
     if capabilities.sign_in != editions.SIGN_IN_OIDC:
         return
     missing = missing_settings(settings)
     if missing:
         raise EditionNotReady(_missing_message(missing))
+    first = next(_sign_in_setting_problems(settings), None)
+    if first is not None:
+        name, problem = first
+        raise EditionNotReady(BAD_SESSION_SETTING.format(name=name, problem=problem))
     if not OIDC_SIGN_IN_IN_THIS_BUILD:
         raise EditionNotReady(NOT_AVAILABLE)
 
@@ -137,8 +209,10 @@ def check_session_settings(capabilities: editions.EditionCapabilities, settings:
 __all__ = [
     "BAD_SESSION_SETTING",
     "MISSING_SETTINGS",
+    "DEFAULT_ROLES",
     "NOT_AVAILABLE",
     "OIDC_SIGN_IN_IN_THIS_BUILD",
+    "OIDC_SIGN_IN_SETTINGS",
     "OIDC_START_UP_SETTINGS",
     "SESSION_COOKIE_PREFIX",
     "SESSION_IDLE_MINUTES_MIN",

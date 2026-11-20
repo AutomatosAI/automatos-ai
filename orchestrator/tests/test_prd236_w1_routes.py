@@ -450,7 +450,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # revision — auth_sessions, a new table; the guard follows it.
     sessions = (versions / "prd277_w3_sessions_20261120.py").read_text()
     assert 'down_revision = "prd277_w2_identities_20261120"' in sessions
-    assert 'EXPECTED_HEAD = "prd277_w3_sessions_20261120"' in guard
+    # 2026-11-20 (PRD-277 Wave 4, US-402): prd277_w4_oidc_sign_ins_20261120 chains onto Wave 3's
+    # revision — oidc_pending_sign_ins, a new table; the guard follows it.
+    sign_ins = (versions / "prd277_w4_oidc_sign_ins_20261120.py").read_text()
+    assert 'down_revision = "prd277_w3_sessions_20261120"' in sign_ins
+    assert 'EXPECTED_HEAD = "prd277_w4_oidc_sign_ins_20261120"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

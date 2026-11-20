@@ -18,9 +18,10 @@ token exactly as they did before this lane existed.
   ``401 session_ended`` (``revoked``). Their install-wide role is the one the install stores
   (``core.auth.system_role.stored_system_role``), else ``user``.
 * **The workspace** is the one the request names (``X-Workspace-ID``, ``X-Workspace`` or
-  ``?workspace_id=``), else ``DEFAULT_WORKSPACE_ID``. The person must be an active member of it
-  (hybrid's ``_user_pk_is_workspace_member``, reused), or an install admin, who may open any
-  workspace as on the Clerk lane; otherwise 403 (``workspace_required`` when nothing was named).
+  ``?workspace_id=``), else ``DEFAULT_WORKSPACE_ID``. The person must own it or be an active
+  member of it, read by ``users.id`` (``core.auth.person.may_open_workspace``, the rule the Clerk
+  lane applies), or be an install admin, who may open any workspace as on the Clerk lane; otherwise
+  403 (``workspace_required`` when nothing was named).
   It must exist (400) and be usable (hybrid's ``_assert_workspace_usable``: paused is 403 for a
   non-admin). An install admin's ``X-Workspace-ID: __all__`` asks for every workspace, as there.
 * **The context** binds the person as the device lane binds its person: ``id`` and ``email`` are
@@ -46,6 +47,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from config import config
+from core.auth import person as person_resolver
 from core.auth import session_cookie, sessions
 from core.auth.dependencies import RequestContext, UserContext
 from core.auth.device import WORKSPACE_HEADERS, WORKSPACE_QUERY_PARAM
@@ -138,7 +140,8 @@ def _bound_workspace(db: Session, request: Any, person: Person, is_admin: bool, 
         raise _not_in_workspace(named)
     if not hybrid._workspace_exists(db, workspace_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=INVALID_WORKSPACE)
-    if not is_admin and not hybrid._user_pk_is_workspace_member(db, workspace_id, person.user_pk):
+    if not is_admin and not person_resolver.may_open_workspace(db, person_resolver.by_user_pk(person.user_pk),
+                                                               workspace_id):
         raise _not_in_workspace(named)
     hybrid._assert_workspace_usable(db, workspace_id, is_admin=is_admin)
     return workspace_id

@@ -557,20 +557,20 @@ async def _boot_in_background(
 ) -> None:
     """PRD-262 US-034: the rest of the boot, as one task, once the server listens.
 
-    In order: the starters pass (the leader stage's last part), the Composio
-    catalogue, Phase 2 (scheduler, channels), then board dispatch, which starts
-    after Phase 2 as it always has. Each of the first three is a stage of the
-    bootstrap report, so a failure shows in /health/bootstrap. app.state.ready
-    (/health/ready 200) is set once all of them finished, whether or not a stage
-    failed, as before. A crash outside a stage is logged and leaves /health/ready
-    at 503.
+    In order: the starters pass (the leader stage's last part), the Composio catalogue,
+    sign-in's start-up (PRD-277: registration closes; in enterprise, an oidc_provider
+    stage), Phase 2 (scheduler, channels), then board dispatch, as always last. Each stage
+    shows in /health/bootstrap. app.state.ready (/health/ready 200) is set once all of them
+    finished, whether or not a stage failed. A crash outside a stage leaves it at 503.
     """
+    from core.auth.sign_in_start_up import finish_sign_in_start_up
     from core.models.bootstrap import BootstrapStage, run_stage
 
     try:
         await run_stage(report, BootstrapStage.SEED_SYSTEM_DATA, functools.partial(_run_starters, seeds))
         # PRD-233 S2: Composio catalogue — sync on the first keyed boot, re-bind seeds.
         await run_stage(report, BootstrapStage.TOOL_SYNC, _bootstrap_composio_catalog)
+        await finish_sign_in_start_up(report)
         await _boot_phase_2_stage(app_instance, report, trust_passed)
         _start_board_dispatch(app_instance, trust_passed)
     except Exception:

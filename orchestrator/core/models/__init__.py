@@ -128,6 +128,7 @@ from .jobs import Job, JobSchedule  # noqa: F401  # PRD-276: the durable job que
 from .products import Product  # noqa: F401  # PRD-274 W5: a product, and the workspaces it runs for its customers
 from .user_identities import UserIdentity  # noqa: F401  # PRD-277 W2: a person's (issuer, subject) sign-in link
 from .auth_sessions import AuthSession  # noqa: F401  # PRD-277 W3: the sessions Automatos issues after sign-in
+from .oidc_pending_sign_ins import OidcPendingSignIn  # noqa: F401  # PRD-277 W4: sign-ins started, not finished
 
 # PRD-38.4: SDK API Keys (safe — standalone table, no FK deps on workspaces)
 try:

@@ -590,23 +590,23 @@ class Config:
     CLERK_PUBLISHABLE_KEY: str = os.getenv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY")
     CLERK_JWKS_URL: str = os.getenv("CLERK_JWKS_URL")
     CLERK_AUDIENCE: str = os.getenv("CLERK_AUDIENCE", "")
-    # The `azp` check (core/auth/clerk_azp.py): the browser origins whose Clerk
-    # session tokens the API accepts, comma-separated. FRONTEND_URL's origin is
-    # always added. A token whose azp names any other origin gets a 401.
+    # The `azp` check (core/auth/clerk_azp.py): the browser origins whose Clerk session tokens the API
+    # accepts, comma-separated. FRONTEND_URL's origin is always added. Any other origin's azp gets a 401.
     CLERK_AUTHORIZED_PARTIES: str = os.getenv("CLERK_AUTHORIZED_PARTIES", CLERK_DEFAULT_AUTHORIZED_PARTIES)
-    # A token with no azp at all (Clerk omits it when the minting request had no
-    # Origin: native apps, tokens minted through the Backend API). false = log a
-    # warning and accept it; true = 401.
+    # A token with no azp at all (Clerk omits it with no Origin: native apps, Backend API tokens). false = warn and accept; true = 401.
     CLERK_AZP_REQUIRED: bool = os.getenv("CLERK_AZP_REQUIRED", "false").strip().lower() in ("1", "true", "yes", "on")
-    # PRD-277 §5.10: the organisation's identity provider (enterprise; core/edition_start_up.py).
+    # PRD-277 §5.10: the organisation's identity provider (enterprise). Read so that no value can stop a start;
+    # core/edition_start_up.py checks them, only where sign-in is OIDC. ENTERPRISE_DEFAULT_ROLE: none or a role.
     OIDC_ISSUER: str = (os.getenv("OIDC_ISSUER") or "").strip()
     OIDC_CLIENT_ID: str = (os.getenv("OIDC_CLIENT_ID") or "").strip()
     OIDC_CLIENT_SECRET: str = (os.getenv("OIDC_CLIENT_SECRET") or "").strip()
-    # PRD-277 §5.3, D-15: the session Automatos issues after sign-in (enterprise; core/auth/sessions.py):
-    # its two clocks, the browser's cookie (a __Host- name) and the header a cookie-authenticated
-    # request that changes something must carry. Checked at boot (core/edition_start_up.py).
-    # The clocks never raise here: a value that is not a whole number is refused at boot, and only
-    # where sessions are issued.
+    OIDC_SCOPES: str = " ".join((os.getenv("OIDC_SCOPES") or "openid profile email").split())
+    OIDC_CLAIM_EMAIL: str = (os.getenv("OIDC_CLAIM_EMAIL") or "email").strip()
+    OIDC_CLAIM_NAME: str = (os.getenv("OIDC_CLAIM_NAME") or "name").strip()
+    OIDC_CA_BUNDLE_FILE: str = (os.getenv("OIDC_CA_BUNDLE_FILE") or "").strip()
+    ENTERPRISE_DEFAULT_ROLE: str = (os.getenv("ENTERPRISE_DEFAULT_ROLE") or "none").strip().lower()
+    # PRD-277 §5.3, D-15: sessions (core/auth/sessions.py): two clocks, a __Host- cookie and the CSRF header a
+    # cookie request that changes something carries. A clock that is not a whole number is refused at boot, there only.
     SESSION_IDLE_MINUTES: int = _whole_number_setting("SESSION_IDLE_MINUTES", SESSION_IDLE_MINUTES_DEFAULT)
     SESSION_ABSOLUTE_HOURS: int = _whole_number_setting("SESSION_ABSOLUTE_HOURS", SESSION_ABSOLUTE_HOURS_DEFAULT)
     SESSION_COOKIE_NAME: str = (os.getenv("SESSION_COOKIE_NAME") or "__Host-automatos_session").strip()
@@ -2848,7 +2848,8 @@ class Config:
         Raises ``RuntimeError`` (aborting boot) on a contradiction.
         """
         # PRD-266 §4.3: imported here, at boot, so config.py never imports the app.
-        from core.edition_start_up import SESSION_SETTINGS, check_session_settings, check_start_up
+        from core.edition_start_up import (OIDC_SIGN_IN_SETTINGS, OIDC_START_UP_SETTINGS, SESSION_SETTINGS,
+                                           check_session_settings, check_start_up)
         from core.editions import SIGN_IN_CLERK, capabilities_for
         from services.mobile import remote_access
         capabilities = capabilities_for(self.AUTH_EDITION)
@@ -2890,9 +2891,8 @@ class Config:
         addresses = {"API_PUBLISH_ADDRESS": self.API_PUBLISH_ADDRESS, "WEB_PUBLISH_ADDRESS": self.WEB_PUBLISH_ADDRESS}
         remote_access.enforce_boot_decision(capabilities.anonymous_operator, self.LOCAL_REMOTE_ACCESS, addresses)
         check_session_settings(capabilities, {name: getattr(self, name) for name in SESSION_SETTINGS})
-        check_start_up(capabilities, {"OIDC_ISSUER": self.OIDC_ISSUER, "OIDC_CLIENT_ID": self.OIDC_CLIENT_ID,
-                                      "OIDC_CLIENT_SECRET": self.OIDC_CLIENT_SECRET,
-                                      "FRONTEND_URL": self._FRONTEND_URL_FROM_ENV})
+        sign_in = {name: getattr(self, name) for name in OIDC_START_UP_SETTINGS + OIDC_SIGN_IN_SETTINGS}
+        check_start_up(capabilities, {**sign_in, "FRONTEND_URL": self._FRONTEND_URL_FROM_ENV})
 
     def validate(self) -> bool:
         """

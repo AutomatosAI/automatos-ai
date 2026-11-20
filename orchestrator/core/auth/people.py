@@ -12,6 +12,17 @@
 Taking access away always lands, even when its audit row cannot be written
 (``session_audit.commit_removal``). Each function commits. Who may call them is the caller's
 check (``api/auth_sessions.py``: an install admin after step-up; sign-out: the session itself).
+
+PRD-277 US-408 (§5.13) makes this the one module for people. It also holds:
+
+* ``link_person``: the person a verified identity signs in as, found by ``(issuer, subject)`` or
+  created (``core.auth.user_link.link_identity``), with ``email_verified`` exactly as the identity
+  method verified it;
+* ``person_is_active``: whether a person may sign in;
+* ``set_membership``: a person's role in one workspace, written or, with ``if_absent``, written
+  only when they have no membership there yet, so a role an admin set is never changed.
+
+These three do not commit: sign-in commits them with its audit row (``core.auth.sign_in_flow``).
 """
 from __future__ import annotations
 
@@ -25,9 +36,20 @@ from sqlalchemy.orm import Session
 
 from core.auth import session_audit, sessions
 from core.auth.system_role import UnknownPerson
+from core.auth.user_link import LinkedPerson, link_identity
+from modules.policy.roles import WorkspaceRole
 from services.mobile.devices import revoke_persons_devices
 
 UNKNOWN_PERSON_MESSAGE = "No such person."
+MEMBERSHIP_ROLES = tuple(role.value for role in WorkspaceRole)
+
+_IS_ACTIVE = text("SELECT is_active FROM users WHERE id = :id")
+_ADD_MEMBER = (
+    "INSERT INTO workspace_members (workspace_id, user_id, role, is_active, joined_at) "
+    "VALUES (CAST(:ws AS uuid), :uid, :role, true, now()) ON CONFLICT (workspace_id, user_id) "
+)
+_ADD_IF_ABSENT = text(_ADD_MEMBER + "DO NOTHING RETURNING id")
+_ADD_OR_SET = text(_ADD_MEMBER + "DO UPDATE SET role = EXCLUDED.role, is_active = true RETURNING id")
 
 
 @dataclass(frozen=True)
@@ -126,11 +148,48 @@ def deactivate_person(db: Session, user_id: int, requester: Requester) -> Deacti
     )
 
 
+def link_person(db: Session, *, issuer: str, subject: str, email_verified: bool,
+                email: Optional[str] = None, name: Optional[str] = None) -> LinkedPerson:
+    """The person ``(issuer, subject)`` signs in as, found or created; not committed.
+
+    ``email_verified`` is the provider's own statement, from the verified ID token; ``link_identity``
+    keeps an email only when it is True, and refuses (``IdentityLinkRefused``) an email another
+    person holds. A repeat sign-in changes no row (PRD-277 §12, entry 8).
+    """
+    return link_identity(db, issuer=issuer, subject=subject, email_verified=email_verified,
+                         email=email, name=name)
+
+
+def person_is_active(db: Session, user_id: int) -> bool:
+    """Whether ``user_id`` may sign in; ``UnknownPerson`` when there is no such row."""
+    row = db.execute(_IS_ACTIVE, {"id": user_id}).fetchone()
+    if row is None:
+        raise UnknownPerson(UNKNOWN_PERSON_MESSAGE)
+    return row[0] is not False
+
+
+def set_membership(db: Session, user_id: int, workspace_id: Union[UUID, str], role: str, *,
+                   if_absent: bool = False) -> bool:
+    """Give ``user_id`` ``role`` in ``workspace_id``; whether a row was written. Not committed.
+
+    With ``if_absent`` an existing membership, active or not, is left exactly as it is.
+    """
+    if role not in MEMBERSHIP_ROLES:
+        raise ValueError(f"a membership role is one of {', '.join(MEMBERSHIP_ROLES)}")
+    statement = _ADD_IF_ABSENT if if_absent else _ADD_OR_SET
+    written = db.execute(statement, {"ws": str(workspace_id), "uid": user_id, "role": role}).fetchone()
+    return written is not None
+
+
 __all__ = [
+    "MEMBERSHIP_ROLES",
     "Deactivation",
     "Requester",
     "deactivate_person",
     "end_session",
     "end_sessions_of",
+    "link_person",
+    "person_is_active",
+    "set_membership",
     "sign_out",
 ]
