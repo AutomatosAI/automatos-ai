@@ -1,5 +1,5 @@
 {
-  "route_count": 1050,
+  "route_count": 1057,
   "routes": [
     {
       "method": "GET",
@@ -3060,6 +3060,34 @@
     {
       "method": "GET",
       "path": "/api/v1/approval-grants/{grant_id}/view"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/auth/oidc/callback"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/auth/oidc/start"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/people/{user_id}/deactivate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/auth/people/{user_id}/sessions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/people/{user_id}/sessions/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/sessions/{session_id}/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/sign-out"
     },
     {
       "method": "POST",

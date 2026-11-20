@@ -43,7 +43,7 @@ from core.editions import capabilities_for  # noqa: E402
 ENV_KEYS = (
     "AUTH_EDITION", "REQUIRE_AUTH", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "FRONTEND_URL",
     "CLI_RUNTIME_ENABLED", "DEFAULT_WORKSPACE_ID", "CLERK_JWKS_URL", "CLERK_SECRET_KEY",
-    "LOCAL_REMOTE_ACCESS", "API_PUBLISH_ADDRESS", "WEB_PUBLISH_ADDRESS",
+    "LOCAL_REMOTE_ACCESS", "API_PUBLISH_ADDRESS", "WEB_PUBLISH_ADDRESS", "CLIENT_IP_HEADER",
 )
 # Distinct values, so a test can prove that none of them ever reaches a message. A value that
 # stands in for a secret is built from parts, so no literal looks like a credential.
@@ -52,6 +52,8 @@ OIDC_ENV = {
     "OIDC_CLIENT_ID": "prd277-client-id-marker",
     "OIDC_CLIENT_SECRET": "prd277" + "-" + "client" + "-" + "marker",
     "FRONTEND_URL": "https://automatos.example.test",
+    # Wave 4: where sign-in is OIDC, the address it limits and audits by must come from the proxy.
+    "CLIENT_IP_HEADER": "X-Real-IP",
 }
 STAND_IN_CLERK_SECRET = "prd277" + "-" + "stand-in"
 LOCAL_WS = "00000000-0000-0000-0000-0000000277aa"

@@ -43,7 +43,7 @@ This PRD adds a third edition, `enterprise`. People sign in through the customer
 | Edition checks | 91 places outside tests compare the edition, almost all as `== "local"`. A third value would take the `saas` branch in every one: billing on, Clerk expected. | grep at `abcc3f813` **[T]** | Replace with named capabilities (Wave 1). This is the largest hidden risk. |
 | Where a request gets its identity | `get_request_context_hybrid`. Registered token prefixes are resolved first; today only `amd_` (a paired device). Every other bearer token goes to Clerk. Then the platform API key, then the anonymous lane. | `core/auth/bearer_registry.py:60-62, 112-125`; `core/auth/hybrid.py:799-826` **[T]** | Reuse the registry. Its own header says new token kinds add an entry there, "never another branch in `hybrid.py`". |
 | Who a person is | `users.clerk_user_id` (unique, nullable). `users` has no role column. | `core/models/core.py:1122-1131` **[T]** | Add a neutral identity link. Do not reuse the Clerk column. |
-| Linking a sign-in to a person | `ensure_user_row` finds the row by Clerk id or inserts it. If another row already has the email it answers 409 and changes nothing. It never attaches an identity to an existing row by email. | `core/auth/user_link.py:64-101` **[T]** | Keep the rule: never link by email. |
+| Linking a sign-in to a person | `ensure_user_row` finds the row by Clerk id or inserts it. If another row already has the email it answers 409 and changes nothing. It never attaches an identity to an existing row by email. | `core/auth/user_link.py:95-132` **[T]** | Keep the rule: never link by email. |
 | Reading someone's role | By joining `users.clerk_user_id`. The device lane is the exception: it reads by `users.id`. About 25 API files also query by Clerk id. | `core/auth/workspace_permission.py:99-129` **[T]**; sweep **[T]** | Route every read through one resolver keyed on `users.id` (Wave 2). The device lane proves a non-Clerk person works end to end. |
 | Install-wide role | `super_admin`, `admin` or `user`, read only from Clerk token claims. | `core/auth/clerk.py:131-143` **[T]** | Needs a home that is not a Clerk claim. |
 | Workspace roles | `owner`, `admin`, `editor`, `viewer` in `workspace_members`, with one permission matrix. One person can be in many workspaces. | `modules/policy/roles.py:105-150`; `core/workspaces/models.py:6-19` **[T]** | Reuse unchanged. |
@@ -214,6 +214,16 @@ Automatos reads the provider's own metadata document (`<issuer>/.well-known/open
 
 Groups matter in this PRD only for the access rule. Roles are set in Automatos.
 
+**Endpoint hosts.** Automatos calls two addresses the metadata names: the token endpoint and the keys address (`jwks_uri`). Each must be on the issuer's own host, or on a host listed in `OIDC_ENDPOINT_HOSTS`. The sign-in page (`authorization_endpoint`) is opened by the browser, not by Automatos, so its host is not limited. Some providers publish the two on other hosts:
+
+| Provider | Token endpoint and keys address | What to list in `OIDC_ENDPOINT_HOSTS` |
+|---|---|---|
+| Google Workspace | Token endpoint `https://oauth2.googleapis.com/token`; keys `https://www.googleapis.com/oauth2/v3/certs` | `oauth2.googleapis.com, www.googleapis.com` |
+| Amazon Cognito | Token endpoint on the user pool's domain (`https://<prefix>.auth.<region>.amazoncognito.com/oauth2/token`, or the pool's custom domain) | That domain |
+| Microsoft Entra ID | Both on `login.microsoftonline.com`, the issuer's host | Nothing |
+
+Google's and Entra's rows were checked against their published metadata documents, and Cognito's against Amazon's token endpoint documentation, on 20 Nov 2026. Other providers are not listed until their metadata is checked.
+
 Rows marked without **[T]** come from the providers' documentation and are **[I]** until the conformance run (US-703) proves them. The Microsoft rows were checked against Microsoft's documentation on 19 Nov 2026.
 
 ### 5.10 Settings
@@ -234,6 +244,10 @@ Names are provisional. Final names are fixed in each wave's PR and recorded in `
 | `OIDC_CA_BUNDLE_FILE` | empty | A certificate authority file for an IdP with a private certificate. |
 | `ENTERPRISE_BOOTSTRAP_ADMINS` | empty | People who become install admins at first sign-in. |
 | `ENTERPRISE_DEFAULT_ROLE` | `none` | Role in the default workspace for anyone who passes the access rule. |
+| `OIDC_ENDPOINT_HOSTS` | empty | Host names, comma separated, besides the issuer's own, on which the metadata may put the token endpoint and the keys address (§5.9). Host names only: no scheme, port, wildcard or address. |
+| `OIDC_PENDING_SIGN_INS_MAX` | `10000` | Sign-ins started and not finished that may be held at once. At the ceiling a new start is never refused: the oldest sign-ins under way are ended to make room for it (§5.11). A whole number of at least 1. |
+| `OIDC_PENDING_SIGN_INS_PER_ADDRESS` | `100` | Sign-ins started and not finished that one client address (one IPv4 address or one IPv6 /64, as the per-address rate limits count) may hold at once. The bound exists so that one address can never hold more than a small share of the table: when an address starts another, its own oldest are ended to make room. The default leaves room for a whole office or VPN signing in through one shared address in the same minute. Lower it where people reach the install from addresses of their own, so that one address's flood ends fewer of the others' sign-ins; raise it only for a shared address busier than that. A whole number of at least 1, and no greater than `OIDC_PENDING_SIGN_INS_MAX`: start-up refuses either otherwise. |
+| `CLIENT_IP_HEADER` | none, required in enterprise | An existing setting: the header the proxy in front sets to the caller's address. Sign-in limits requests by that address and writes it to the audit log, so where sign-in is OIDC start-up refuses to start without it. |
 | `ENTERPRISE_DEVICE_PAIRING` | `on` | Whether phones and browsers may pair. |
 | `SESSION_IDLE_MINUTES`, `SESSION_ABSOLUTE_HOURS` | `120`, `12` | The two session clocks. |
 
@@ -252,6 +266,7 @@ These are requirements, each with a test.
 - **Keys rotate:** an unknown key id triggers one refetch of the keys, rate limited.
 - **Nothing sensitive is logged or shown:** no code, token, secret or raw IdP error reaches a log line, a span or the browser.
 - **Rate limits** on `/start` and `/callback`, per IP.
+- **Unfinished sign-ins are bounded so that a flood costs the flooder.** Each one records the SHA-256 of the client address that started it, never the address. One address holds at most `OIDC_PENDING_SIGN_INS_PER_ADDRESS`: starting another ends that address's oldest, so a person who clicks sign-in again and again loses only their own older attempts. Overall, at `OIDC_PENDING_SIGN_INS_MAX`, a start ends the oldest sign-ins under way and is stored, in the same transaction; a start is never refused for want of room. What this does not do: a sign-in ended to make room comes back as "sign-in expired, start again". With enough addresses a flood can still end real sign-ins at the ceiling, but only by starting more than the ceiling inside the few seconds a real sign-in takes to come back, and it can never stop a new sign-in from starting.
 - **Server keys and the platform key are unchanged** as machine credentials. They cannot pass step-up, as today. The platform API key stays as it is (decision D-14).
 
 ### 5.12 Audit
@@ -319,17 +334,18 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As the platform, I want to record which issuer and subject a person signs in with, so that a person is recognised without a Clerk id.
 
 **Acceptance Criteria:**
-- [ ] A migration adds `user_identities` (`user_id`, `issuer`, `subject`, timestamps), unique on (`issuer`, `subject`). It chains onto the single head, is idempotent, and survives a database built by `create_all`. The two head-pin tests move.
-- [ ] A link service finds or creates the link. It never matches on email.
-- [ ] When the token's email is already on another person's row, the service raises a refusal that carries a clear message and changes no row.
-- [ ] Tests cover: first link, repeat sign-in, email held by another row, and two first requests racing.
+- [x] A migration adds `user_identities` (`user_id`, `issuer`, `subject`, timestamps), unique on (`issuer`, `subject`). It chains onto the single head, is idempotent, and survives a database built by `create_all`. The two head-pin tests move. `prd277_w2_identities_20261120`, which also carries US-203's column; the model is `core/models/user_identities.py`.
+- [x] A link service finds or creates the link. It never matches on email. `link_identity` in `core/auth/user_link.py`.
+- [x] When the token's email is already on another person's row, the service raises a refusal that carries a clear message and changes no row. `IdentityLinkRefused`, whose message names no issuer, subject or email.
+- [x] The link service uses an email only when the provider verified it. `link_identity` takes a required `email_verified` with no default. Only a verified email becomes the person's address and is checked against other people's addresses; an unverified one gets the per-identity placeholder, is no conflict, and is kept nowhere, so it never holds an address from its real owner.
+- [x] Tests cover: first link, repeat sign-in, email held by another row, and two first requests racing. `orchestrator/tests/test_prd277_w2_identity_link_realdb.py`, with exact comparison of issuer and subject; the migration in `test_prd277_w2_migration.py`.
 
 #### US-202: One way to ask who this person is · L · security review + Dave
 **Description:** As a developer, I want every membership and role read to go through one resolver keyed on `users.id`, so that it works for any way of signing in.
 
 **Acceptance Criteria:**
-- [ ] `workspace_permission.py`, `workspace_admin.py` and the workspace lookups in `hybrid.py` read by `users.id`.
-- [ ] No SQL outside `core/auth/clerk*.py` and `core/auth/user_link.py` mentions `clerk_user_id`. A test fails if one does. The API files that query by Clerk id are changed to the resolver and listed in the PR.
+- [x] `workspace_permission.py`, `workspace_admin.py` and the workspace lookups in `hybrid.py` read by `users.id`. The reads are `core/auth/person.py`; a Clerk caller's `users.id` is read inside the same statement (`core/auth/clerk_person.py`), so each check makes the round trips it made before.
+- [ ] No SQL outside `core/auth/clerk*.py` and `core/auth/user_link.py` mentions `clerk_user_id`. A test fails if one does. The API files that query by Clerk id are changed to the resolver and listed in the PR. The test is `orchestrator/tests/test_prd277_us202_no_clerk_id_sql.py`. One statement is still on its allow-list, keyed on the statement itself so a second use in the same function fails: in `_stream_tool_loop` in `consumers/chatbot/service.py`, the read of the driving user's Clerk user ID from their `users.id` (the way back, not a lookup by Clerk user ID). That function is far over the 50-line limit, so moving the read to `clerk_id_row` in `core/auth/clerk_person.py` means splitting the function first.
 - [ ] In `saas`, every existing auth, permission and boundary-sweep test passes unchanged.
 - [ ] Dave and the security reviewer sign off before merge.
 
@@ -337,9 +353,9 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As an install admin, I want my admin role stored by the install, so that it does not depend on a Clerk token.
 
 **Acceptance Criteria:**
-- [ ] A migration adds nullable `users.system_role`.
-- [ ] It is read only when the edition's sign-in capability is OIDC. In `saas` the role still comes from Clerk claims, and a test proves the column is ignored there.
-- [ ] Changing it is audited.
+- [x] A migration adds nullable `users.system_role`. `prd277_w2_identities_20261120`, with a CHECK to `super_admin`, `admin` and `user`; no such column or equivalent existed.
+- [x] It is read only when the edition's sign-in capability is OIDC. In `saas` the role still comes from Clerk claims, and a test proves the column is ignored there. `core/auth/system_role.py`; `orchestrator/tests/test_prd277_w2_system_role_realdb.py`.
+- [x] Changing it is audited. `set_system_role` writes one `audit_logs` row (`user:system_role_changed`) through `AuditService.log`, in the same commit as the change.
 
 ### Wave 3: Sessions
 
@@ -347,40 +363,40 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As a signed-in person, I want a session that lasts while I work and ends when it should, so that I do not sign in on every request.
 
 **Acceptance Criteria:**
-- [ ] A migration adds `auth_sessions` (person, token hash, created, last seen, idle and absolute expiry, `auth_time`, revoked at and why, IP, browser).
-- [ ] Tokens are `ams_` plus 32 random bytes. Only the SHA-256 is stored, using the hashing kernel device tokens use.
-- [ ] `BEARER_RESOLVERS` gains an `ams_` entry. `hybrid.py` gains no branch.
-- [ ] The resolver accepts the token from the `Authorization` header, or from the `__Host-` cookie when there is no header.
-- [ ] An expired, revoked or unknown session gets 401 with a code the web app recognises.
-- [ ] A session for a deactivated person is refused.
-- [ ] The session records the ID token's `sid` when the IdP sends one.
-- [ ] `last seen` is written at most every 5 minutes, as the device lane does.
-- [ ] The resolver is registered only in enterprise. In `local` and `saas` an `ams_` token is refused.
+- [x] A migration adds `auth_sessions` (person, token hash, created, last seen, idle and absolute expiry, `auth_time`, revoked at and why, IP, browser). `prd277_w3_sessions_20261120`, unique on the token hash and indexed on the person; the model is `core/models/auth_sessions.py`, and the two head pins moved.
+- [x] Tokens are `ams_` plus 32 random bytes. Only the SHA-256 is stored, using the hashing kernel device tokens use. `issue_session` in `core/auth/sessions.py` (`mint_token`, `hash_secret`); a lookup is confirmed in constant time (`secrets_match`).
+- [x] `BEARER_RESOLVERS` gains an `ams_` entry. `hybrid.py` gains no branch. The lane is `core/auth/session_lane.py`.
+- [x] The resolver accepts the token from the `Authorization` header, or from the `__Host-` cookie when there is no header. The cookie is read only when there is no `Authorization` header of any scheme and no API key; its name is `SESSION_COOKIE_NAME`, which start-up refuses without the `__Host-` prefix.
+- [x] An expired, revoked or unknown session gets 401 with a code the web app recognises. `{"code": "session_ended", "reason": "expired" | "revoked" | "unknown"}`. When the token came from the cookie, the answer also clears the cookie.
+- [x] A session for a deactivated person is refused. At resolution (`session_ended`, `revoked`), and `issue_session` issues none (`SignInRefused`).
+- [x] The session records the ID token's `sid` when the IdP sends one. `auth_sessions.idp_session_id`; Wave 4's callback passes it to `issue_session`.
+- [x] `last seen` is written at most every 5 minutes, as the device lane does. With the idle clock, by the device lane's own `LAST_SEEN_WRITE_INTERVAL`.
+- [x] The resolver is registered only in enterprise. In `local` and `saas` an `ams_` token is refused. The new capability `issues_sessions` gates the registry entry (`LANE_REGISTERED_WHEN`); elsewhere an `ams_` token reaches the Clerk lane as before and is refused there. Tests: `test_prd277_w3_session_lane.py`, `test_prd277_w3_sessions_realdb.py`, `test_prd277_w3_migration.py`.
 
 #### US-302: Requests that change things cannot be forged from another site · M · security review
 **Description:** As a signed-in person, I want another website to be unable to act as me, so that a session cookie is safe.
 
 **Acceptance Criteria:**
-- [ ] A cookie-authenticated request with an unsafe method is refused unless its origin is the install's own and it carries the required header.
-- [ ] A request authenticated by the `Authorization` header is not subject to the check.
-- [ ] Tests cover: cross-site form post refused, same-origin fetch allowed, header-authenticated call allowed.
+- [x] A cookie-authenticated request with an unsafe method is refused unless its origin is the install's own and it carries the required header. `core/auth/session_cookie.py`: the `Origin` (else the `Referer`) must equal `FRONTEND_URL`'s origin, and `SESSION_CSRF_HEADER` must be present; checked before the session is looked up.
+- [x] A request authenticated by the `Authorization` header is not subject to the check.
+- [x] Tests cover: cross-site form post refused, same-origin fetch allowed, header-authenticated call allowed. `test_prd277_w3_session_lane.py`.
 
 #### US-303: Ending a session · M
 **Description:** As a person or an admin, I want to end a session now, so that access stops when it should.
 
 **Acceptance Criteria:**
-- [ ] `POST /api/v1/auth/sign-out` revokes the caller's session and clears the cookie.
-- [ ] An admin route revokes one session or every session of a person. It requires step-up.
-- [ ] Deactivating a person revokes their sessions and device tokens in the same transaction.
-- [ ] New routes are in `route-manifest.json`, authenticated and authorised.
+- [x] `POST /api/v1/auth/sign-out` revokes the caller's session and clears the cookie. `api/auth_sessions.py`. Sending the browser to the IdP's end-session address (§5.6) needs the IdP metadata, which Wave 4 reads.
+- [x] An admin route revokes one session or every session of a person. It requires step-up. `POST /api/v1/auth/sessions/{session_id}/revoke` and `POST /api/v1/auth/people/{user_id}/sessions/revoke`, with `GET /api/v1/auth/people/{user_id}/sessions` to list them. Step-up in enterprise goes through `step_up.confirm_by_signing_in_again`, which refuses until US-406 fills it.
+- [x] Deactivating a person revokes their sessions and device tokens in the same transaction. `deactivate_person` in `core/auth/people.py`, served as `POST /api/v1/auth/people/{user_id}/deactivate` (step-up).
+- [x] New routes are in `route-manifest.json`, authenticated and authorised. Sign-out by the session itself; the others by an install admin on the session lane, in the boundary sweep. In `local` and `saas` each route's declared method answers 404 before any authentication or database work; another method on the same path answers 405, as it does in every edition.
 
 #### US-304: Sign-ins are in the audit log · S
 **Description:** As a compliance reviewer, I want every sign-in, refusal and sign-out recorded, so that I can show who had access and when.
 
 **Acceptance Criteria:**
-- [ ] The actions in §5.12 are written through `AuditService.log`.
-- [ ] A refusal records its reason and never the token.
-- [ ] A test asserts one row per event with the person's id where known.
+- [ ] The actions in §5.12 are written through `AuditService.log`. Wave 3 writes `auth:sign_in`, `auth:sign_in_refused` (deactivated), `auth:sign_out`, `auth:session_revoked` and `user:deactivated`. `auth:step_up`, `auth:identity_linked`, `auth:bootstrap_admin` and the other refusal reasons are named in `core/auth/session_audit.py` and written by Wave 4's code (US-401 to US-406).
+- [x] A refusal records its reason and never the token. `record_sign_in_refused` in `core/auth/session_audit.py` writes only the reason, one of the four in §5.12.
+- [x] A test asserts one row per event with the person's id where known. `test_prd277_w3_sessions_realdb.py`: sign-in, refusal, sign-out, ended sessions and deactivation.
 
 ### Wave 4: OIDC
 
@@ -388,22 +404,22 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As the platform, I want to read the IdP's published metadata and signing keys safely, so that I can verify what it sends.
 
 **Acceptance Criteria:**
-- [ ] The metadata is fetched from `<OIDC_ISSUER>/.well-known/openid-configuration` over `https` only. Its `issuer` must equal the setting.
-- [ ] Keys are fetched with the `PyJWKClient` pattern already in `core/auth/clerk.py`. An unknown key id causes one rate-limited refetch.
-- [ ] The configured issuer's host is reachable even on a private address. No other private address becomes reachable through sign-in. A test proves both. (PRD-282 covers the private addresses an operator may name for other purposes.)
-- [ ] `OIDC_CA_BUNDLE_FILE` is honoured.
-- [ ] If the IdP cannot be reached, the API still starts; sign-in answers with a clear error and `/health/bootstrap` reports it.
-- [ ] No new Python dependency.
+- [x] The metadata is fetched from `<OIDC_ISSUER>/.well-known/openid-configuration` over `https` only. Its `issuer` must equal the setting. `core/auth/oidc_provider.py`, through `core/auth/oidc_http.py`; its endpoints must be `https` too, and it must offer the code flow, PKCE S256, an allowed algorithm and a secret-based client authentication.
+- [x] Keys are fetched with the `PyJWKClient` pattern already in `core/auth/clerk.py`. An unknown key id causes one rate-limited refetch. The same pattern (a key set held five minutes, a key picked by `kid` among signing keys, built by PyJWT's `PyJWK`), fetched through `oidc_http` rather than by `PyJWKClient` itself, which opens addresses with `urllib` where the pinned connection and the private-address rule cannot apply. At most one refetch a minute.
+- [x] The configured issuer's host is reachable even on a private address. No other private address becomes reachable through sign-in. A test proves both. (PRD-282 covers the private addresses an operator may name for other purposes.) The token endpoint and key address come from the metadata; any host other than the issuer's must resolve to public addresses only, and the checked address is the one connected to. `test_prd277_w4_oidc_http.py`.
+- [x] `OIDC_CA_BUNDLE_FILE` is honoured. Trusted on top of the operating system's authorities; start-up refuses a file it cannot read. `test_prd277_w4_provider_and_tokens.py` signs in against a provider whose certificate only that file trusts.
+- [x] If the IdP cannot be reached, the API still starts; sign-in answers with a clear error and `/health/bootstrap` reports it. The `oidc_provider` stage of the background boot (`core/auth/sign_in_start_up.py`); sign-in sends the person to `/sign-in?error=identity_provider_unavailable`.
+- [x] No new Python dependency. `httpx`, `PyJWT` and `cryptography`, already pinned.
 
 #### US-402: Start and callback · L · security review + Dave
 **Description:** As a person, I want to sign in with my work account, so that I can use Automatos.
 
 **Acceptance Criteria:**
-- [ ] `GET /api/v1/auth/oidc/start` makes `state`, `nonce` and a PKCE verifier, keeps them server-side for 10 minutes, and redirects to the IdP.
-- [ ] `GET /api/v1/auth/oidc/callback` exchanges the code, verifies the ID token against every rule in §5.11, and issues a session.
-- [ ] Tests, each against the fake issuer (US-407): wrong signature, `alg: none`, wrong issuer, wrong audience, expired, missing or wrong nonce, reused state, replayed code, redirect to another host.
-- [ ] No token, code or secret appears in any log line or response body. A test scans the captured logs.
-- [ ] Both routes are public, rate limited per IP, and in `route-manifest.json`.
+- [x] `GET /api/v1/auth/oidc/start` makes `state`, `nonce` and a PKCE verifier, keeps them server-side for 10 minutes, and redirects to the IdP. In `oidc_pending_sign_ins` (§12, entry 5), as digests of the state and nonce; the state is also bound to the browser by a `__Host-` cookie, so a callback carried to another browser is not a sign-in there.
+- [x] `GET /api/v1/auth/oidc/callback` exchanges the code, verifies the ID token against every rule in §5.11, and issues a session. The state is ended in one `DELETE … RETURNING` before the code is exchanged, so two callbacks with one state cannot both use it (`core/auth/oidc_pending.py`); the rules are `core/auth/oidc_tokens.py`.
+- [x] Tests, each against the fake issuer (US-407): wrong signature, `alg: none`, wrong issuer, wrong audience, expired, missing or wrong nonce, reused state, replayed code, redirect to another host. `test_prd277_w4_sign_in_realdb.py`, `test_prd277_w4_provider_and_tokens.py`, `test_prd277_w4_pending_realdb.py`.
+- [x] No token, code or secret appears in any log line or response body. A test scans the captured logs. Over a sign-in that succeeds and each way one fails; the access log replaces a sign-in path's query with `?{redacted}`.
+- [x] Both routes are public, rate limited per IP, and in `route-manifest.json`. `oidc_start_ip` and `oidc_callback_ip`, 300 per IP per 10 minutes each; both 404 unless the edition signs in with OIDC.
 
 #### US-403: The access rule · M
 **Description:** As an operator, I want to say which claims a person must have, so that only my organisation's people get in.
@@ -418,11 +434,13 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As a new person, I want my first sign-in to work without anyone preparing my account, so that I can start as soon as an admin gives me a workspace.
 
 **Acceptance Criteria:**
-- [ ] A `users` row and an identity link are created. No personal workspace, no trial grant.
-- [ ] With `ENTERPRISE_DEFAULT_ROLE=none`, the person is signed in and in no workspace, and the API tells the web app so.
-- [ ] With `ENTERPRISE_DEFAULT_ROLE` set to a role, the person gets that role in the default workspace at first sign-in only.
-- [ ] A later sign-in changes no membership. A test proves a role an admin changed survives the next sign-in.
-- [ ] Sign-in succeeds when the ID token carries only a subject and an email.
+- [x] A `users` row and an identity link are created. No personal workspace, no trial grant. Through `people.link_person`, with one `auth:identity_linked` row.
+- [x] With `ENTERPRISE_DEFAULT_ROLE=none`, the person is signed in and in no workspace, and the API tells the web app so. `403 {"code": "workspace_required"}` from the session lane.
+- [x] With `ENTERPRISE_DEFAULT_ROLE` set to a role, the person gets that role in the default workspace at first sign-in only. `viewer`, `editor` or `admin`; start-up refuses any other value, and a role without `DEFAULT_WORKSPACE_ID`.
+- [x] A later sign-in changes no membership. A test proves a role an admin changed survives the next sign-in.
+- [x] Sign-in succeeds when the ID token carries only a subject and an email. With no `auth_time`, the session records the epoch, so a step-up can never pass on it.
+- [x] The caller passes the provider's own statement that the email is verified, taken from the verified ID token, as `email_verified`; the link service (US-201) enforces it: an email the token does not mark verified is no email. Only the JSON `true` counts: absent, `false`, `"true"` and `1` are not verified.
+- [x] The refusal a person sees never differs by whether an address is already known to the install. An email conflict and a bad token give the same answer (`/sign-in?error=sign_in_refused`); only the audit row's reason differs.
 
 #### US-405: The first admin · S
 **Description:** As the operator, I want to name the first admins in settings, so that nobody edits the database to get in.
@@ -446,20 +464,20 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As a developer, I want a small OIDC issuer that runs inside the test process, so that every flow is tested without a real provider.
 
 **Acceptance Criteria:**
-- [ ] A test helper serves metadata, keys, an authorize step that approves at once, and a token endpoint, on a loopback address, using `PyJWT` and `cryptography` only.
-- [ ] It can be told to misbehave: wrong signature, rotated key, missing claim, shared issuer.
+- [x] A test helper serves metadata, keys, an authorize step that approves at once, and a token endpoint, on a loopback address, using `PyJWT` and `cryptography` only. `orchestrator/tests/helpers_fake_oidc_provider.py`, over TLS with a certificate made at run time.
+- [x] It can be told to misbehave: wrong signature, rotated key, missing claim, shared issuer. Also `alg: none`, HS256 with the public key, a wrong or missing nonce, other metadata, an error status and a redirect.
 - [ ] A separate CI job runs the sign-in flow against a real Keycloak container. It is allowed to fail at first and becomes required at the end of the wave.
 
 #### US-408: One interface and one hook for sign-in · M
 **Description:** As a developer, I want sign-in written against a small interface with a hook, so that another way of proving identity can be added without touching sessions or permissions.
 
 **Acceptance Criteria:**
-- [ ] The start and callback routes call an identity interface. OIDC is its implementation in core.
-- [ ] A hook runs after the identity is verified and before the session is issued. It can refuse the sign-in, or set memberships through the people service.
-- [ ] Creating a person, linking an identity, setting a membership and deactivating a person are functions in one module, used by sign-in and by the Team routes.
-- [ ] Registration is refused after startup, and registering the same thing twice raises an error.
-- [ ] A test registers a second, fake implementation and a hook, and signs in through them with no change to the session or permission code.
-- [ ] With no hook registered, every US-402 and US-404 test passes unchanged.
+- [x] The start and callback routes call an identity interface. OIDC is its implementation in core. `core/auth/sign_in_methods.py` (`IdentityMethod`), `core/auth/oidc_sign_in.py`, called through `core/auth/sign_in_flow.py`.
+- [x] A hook runs after the identity is verified and before the session is issued. It can refuse the sign-in, or set memberships through the people service. A refusal is audited as the access rule's.
+- [ ] Creating a person, linking an identity, setting a membership and deactivating a person are functions in one module, used by sign-in and by the Team routes. In `core/auth/people.py` (`link_person`, `set_membership`, `deactivate_person`) and used by sign-in; the Team routes do not call them yet.
+- [x] Registration is refused after startup, and registering the same thing twice raises an error. Closed when the background boot runs and by the first sign-in.
+- [x] A test registers a second, fake implementation and a hook, and signs in through them with no change to the session or permission code. `test_prd277_w4_sign_in_realdb.py`.
+- [ ] With no hook registered, every US-402 and US-404 test passes unchanged. They register none; CI proves it.
 
 ### Wave 5: Web app
 
@@ -677,4 +695,7 @@ All answered by Gerard on 19 Nov 2026. The options he was given are kept, so eac
 2. **[?] Which identity provider does the first customer use?** The dev install's conformance run starts with it.
 3. **[?] Does anything in the 25 API files that query by Clerk id run in `local` today?** If so, US-202 fixes a latent bug there; if not, those routes are `saas`-only and need a capability.
 4. **[?] Apple's rule on third-party sign-in** has an exemption for apps that sign in with an existing enterprise account. Confirm against the current text in the app PRD (US-604).
-5. **[?] Where pre-sign-in state is kept** for its 10 minutes: Redis with `SET NX EX`, as webhook dedup does, or a table. Decided in US-402's PR.
+5. **[decided, US-402] Where pre-sign-in state is kept** for its 10 minutes: Redis with `SET NX EX`, as webhook dedup does, or a table. A table, `oidc_pending_sign_ins` (`prd277_w4_oidc_sign_ins_20261120`), holding digests of the state, the nonce, the browser binding and the client address, the PKCE verifier, the return path and the expiry; bounded per address and overall by ending the oldest (§5.11). Single use is one `DELETE … RETURNING`, committed before the code is exchanged, which Postgres serialises: of two callbacks with one state, exactly one gets it, and a test races two. Redis was not chosen because the rate limiter lets requests through when it is unreachable, and single use must never fail open.
+6. **[?] Emails that differ only by case must belong to one person**, on the OIDC path and on the Clerk path. The check before an insert compares emails case-insensitively; for it to hold when two sign-ins arrive at the same moment, `users` needs a unique index on `LOWER(email)`. Adding it needs the owner's decision and a check of existing data for rows it would refuse.
+7. **[?] Which workspace an install-wide role change is audited under.** A change to `users.system_role` belongs to no workspace, and `audit_logs.workspace_id` is required. Today the caller of `set_system_role` passes it. US-405 settles it.
+8. **[decided, US-404] Whether a person's placeholder address becomes their real address** once a later sign-in carries it verified. No, in v1: a repeat sign-in never rewrites a stored address, placeholder or not. A person is found by issuer and subject only, so a placeholder never stops anyone signing in; rewriting it safely needs the address conflict check under concurrent sign-ins, which waits on entry 6.

@@ -109,6 +109,12 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     # PRD-266 W1 Connect -- the Automatos Go backend: device discovery, pairing,
     # remote access (/api/v1/mobile/*).
     RouterSpec("api.mobile_devices"),
+    # PRD-277 US-303 -- signing out, and an install admin ending sessions or deactivating a
+    # person (/api/v1/auth/*). Every route 404s unless the edition issues sessions (enterprise).
+    RouterSpec("api.auth_sessions"),
+    # PRD-277 US-402 -- signing in with the organisation's identity provider
+    # (/api/v1/auth/oidc/start, /callback). Both 404 unless the edition signs in with OIDC.
+    RouterSpec("api.auth_oidc"),
     # PRD-266 W2 Push -- the operator's Expo answer (/api/v1/mobile/push-consent, local only)
     # and the workspace's question redaction (/api/v1/mobile/push-settings).
     RouterSpec("api.mobile_push"),
