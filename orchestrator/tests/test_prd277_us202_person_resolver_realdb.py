@@ -10,6 +10,8 @@ a person named by ``users.id`` and for the same person named by their Clerk user
 * "owns it, or is an active member", the request lane's access check;
 * the workspace a person lands in when the request names none;
 * a Clerk user ID no row carries names nobody: no role, no access, no workspace;
+* a found member row ends the role lookup whatever its role: an owner whose active row has a
+  NULL role gets that NULL, not ``owner``, on the Clerk lane and the paired-device lane alike;
 * the Clerk lane's last-seen stamp lands on the row its Clerk user ID names, and only there.
 
 The statement checks need no database. Skips the rest when no Postgres is reachable (CI
@@ -19,6 +21,8 @@ from __future__ import annotations
 
 import os
 import uuid
+from types import SimpleNamespace
+from typing import Optional
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -32,6 +36,8 @@ os.environ.setdefault("POSTGRES_DB", "test")
 from core.auth import hybrid  # noqa: E402
 from core.auth import person as people  # noqa: E402
 from core.auth.clerk_person import CLERK_PERSON_PK_SQL  # noqa: E402
+from core.auth.device import DEVICE_AUTH_TYPE  # noqa: E402
+from core.auth.workspace_permission import resolve_workspace_role  # noqa: E402
 from core.database.database import get_database_url  # noqa: E402
 
 pytestmark = pytest.mark.integration
@@ -85,10 +91,17 @@ class _Team:
         self.workspaces.append(ws)
         return ws
 
-    def _member(self, s, user_pk: int, role: str, active: bool) -> None:
+    def _member(self, s, user_pk: int, role: Optional[str], active: bool) -> None:
         s.execute(text("INSERT INTO workspace_members (workspace_id, user_id, role, is_active) "
                        "VALUES (CAST(:ws AS uuid), :uid, :role, :active)"),
                   {"ws": self.ws, "uid": user_pk, "role": role, "active": active})
+
+    def add_member(self, user_pk: int, role: Optional[str]) -> None:
+        """One more active member row, committed."""
+        s = self._new_session()
+        self._member(s, user_pk, role, True)
+        s.commit()
+        s.close()
 
     def both_ways(self, who: tuple) -> tuple:
         """The same person, named by ``users.id`` and by Clerk user ID."""
@@ -110,9 +123,14 @@ def team(engine, new_session):
     made.sweep()
 
 
+def _role(db, person, ws) -> Optional[str]:
+    row = people.member_row(db, person, ws)
+    return row[0] if row else None
+
+
 def _answers(db, person, ws) -> tuple:
     landed = people.default_workspace(db, person)
-    return (people.member_role(db, person, ws), people.owns_workspace(db, person, ws),
+    return (_role(db, person, ws), people.owns_workspace(db, person, ws),
             people.owns_or_holds_role(db, person, ws, ADMIN_ROLES), people.may_open_workspace(db, person, ws),
             str(landed) if landed else None)
 
@@ -176,3 +194,25 @@ def test_the_last_seen_stamp_lands_on_the_clerk_ids_row_only(team, new_session):
                                  {"u": team.users}).fetchall())
     hybrid._last_seen_touched.clear()
     assert stamped == {team.owner[0]: False, team.editor[0]: True, team.gone[0]: False, team.stranger[0]: False}
+
+
+def test_an_owners_member_row_with_no_role_ends_the_lookup_on_both_lanes(team, new_session):
+    team.add_member(team.owner[0], None)
+    db = new_session()
+    for person in team.both_ways(team.owner):
+        row = people.member_row(db, person, team.ws)
+        assert row is not None and row[0] is None
+    clerk = SimpleNamespace(user=SimpleNamespace(clerk_user_id=team.owner[1]), workspace_id=team.ws)
+    device = SimpleNamespace(auth_type=DEVICE_AUTH_TYPE, user=SimpleNamespace(id=team.owner[0]),
+                             workspace_id=team.ws)
+    assert resolve_workspace_role(db, clerk) is None
+    assert resolve_workspace_role(db, device) is None
+
+
+def test_an_owner_with_no_member_row_is_the_owner_on_both_lanes(team, new_session):
+    db = new_session()
+    clerk = SimpleNamespace(user=SimpleNamespace(clerk_user_id=team.owner[1]), workspace_id=team.ws)
+    device = SimpleNamespace(auth_type=DEVICE_AUTH_TYPE, user=SimpleNamespace(id=team.owner[0]),
+                             workspace_id=team.ws)
+    assert resolve_workspace_role(db, clerk) == "owner"
+    assert resolve_workspace_role(db, device) == "owner"

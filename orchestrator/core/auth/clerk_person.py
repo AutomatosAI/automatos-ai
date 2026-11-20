@@ -1,9 +1,10 @@
 """Where a Clerk user ID meets a person's own ``users.id`` (PRD-277 US-202).
 
-``users.clerk_user_id`` is Clerk's column. Outside the Clerk modules (``core/auth/clerk*.py``)
-and the sign-in link (``core/auth/user_link.py``) no SQL names it: code that holds only a
-Clerk user ID asks this module for the person, and reads everything else by ``users.id``.
-``tests/test_prd277_us202_no_clerk_id_sql.py`` fails when SQL anywhere else names the column.
+``users.clerk_user_id`` is Clerk's column. Outside the Clerk modules in ``core/auth/`` and the
+sign-in link (``core/auth/user_link.py``) no SQL names it: code that holds only a Clerk user ID
+asks this module for the person, and reads everything else by ``users.id``.
+``tests/test_prd277_us202_no_clerk_id_sql.py`` names the exempt files one by one and fails when
+SQL anywhere else names the column.
 
 Two ways across, both by the person's row:
 

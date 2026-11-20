@@ -1,8 +1,8 @@
 """PRD-277 US-202: no SQL outside the Clerk modules names ``users.clerk_user_id``.
 
 Membership and role reads are keyed on the person's own ``users.id``. A Clerk user ID becomes
-a ``users.id`` in one place: ``core/auth/clerk_person.py`` (with the rest of
-``core/auth/clerk*.py``) and the sign-in link, ``core/auth/user_link.py``. This test scans every
+a ``users.id`` in one place: ``core/auth/clerk_person.py`` (with the other Clerk modules
+named in ``EXEMPT_FILES``) and the sign-in link, ``core/auth/user_link.py``. This test scans every
 Python file under ``orchestrator/`` and fails, naming the file, the function and the line, when
 code anywhere else:
 
@@ -14,11 +14,14 @@ code anywhere else:
 * filters by it as a keyword (``filter_by(clerk_user_id=...)``), or names it to
   ``getattr`` on a class, ``column()`` or ``literal_column()``.
 
-Exempt: ``core/auth/clerk*.py``, ``core/auth/user_link.py``, ``alembic/versions/`` (history is
-not rewritten) and the tests. ``ALLOWED`` names each other function still allowed, and why.
+Exempt: the files named in ``EXEMPT_FILES`` (the Clerk modules in ``core/auth/`` today, and
+``core/auth/user_link.py``), ``alembic/versions/`` (history is not rewritten) and the tests. A new
+Clerk module is scanned like any other file until it is added to ``EXEMPT_FILES`` on purpose.
+``ALLOWED`` names each other statement still allowed, by its file, its function and its own line,
+and why; it allows that one statement once, and a second use in the same function fails.
 
-Not caught: SQL whose column name is put together at run time (``f"... WHERE {column} = :v"``
-with ``column = "clerk_user_id"``), a model reached through a lower-case alias
+Not caught: anything inside an exempt file, SQL whose column name is put together at run time
+(``f"... WHERE {column} = :v"`` with ``column = "clerk_user_id"``), a model reached through a lower-case alias
 (``u = aliased(User)``; ``u.clerk_user_id``), SQL with none of the keywords above, and SQL
 outside Python files. Reading the attribute off a row or a request context
 (``ctx.user.clerk_user_id``, ``user.clerk_user_id``) is not SQL and is left alone, as are
@@ -28,8 +31,9 @@ from __future__ import annotations
 
 import ast
 import re
+from collections import Counter
 from pathlib import Path
-from typing import Dict, FrozenSet, List, Optional, Set, Tuple
+from typing import Dict, List, Set, Tuple
 
 import pytest
 
@@ -38,23 +42,35 @@ COLUMN = "clerk_user_id"
 MENTION = re.compile(r"\bclerk_user_id\b")
 SQL_KEYWORD = re.compile(r"\b(SELECT|UPDATE|INSERT|DELETE|WHERE|JOIN)\b", re.IGNORECASE)
 COLUMN_CALLS = frozenset({"column", "literal_column"})
-EXEMPT_FILES = frozenset({"core/auth/user_link.py"})
+# Exact files, never a pattern: a new file is exempt only when it is added here.
+EXEMPT_FILES = frozenset({
+    "core/auth/clerk.py",
+    "core/auth/clerk_azp.py",
+    "core/auth/clerk_cutover.py",
+    "core/auth/clerk_mobile_template.py",
+    "core/auth/clerk_person.py",
+    "core/auth/user_link.py",
+})
 EXEMPT_PREFIXES = ("tests/", "alembic/versions/")
-CLERK_MODULES = re.compile(r"^core/auth/clerk[^/]*\.py$")
 SKIPPED_DIRS = frozenset({"__pycache__", ".venv", "venv", "node_modules", ".pytest_cache"})
 FUNCTION_NODES = (ast.FunctionDef, ast.AsyncFunctionDef)
 # Enough files that a scan rooted in the wrong place cannot pass by finding nothing.
 MIN_SCANNED_FILES = 500
 
-# file -> {function: why it still reads by Clerk user ID}. The one left is a site that converts
-# only by editing a function far over the 50-line limit the code-shape check holds a touched
-# function to, so it stays until that function is split. It still reads exactly as before.
-_OVER_THE_SHAPE_LIMIT = (
-    "US-202: the lookup sits inside a function far over the 50-line limit "
-    "(scripts/ci/check_changed_code_shape.py), so converting it means splitting that function first."
+# (file, function, the statement's own line, stripped) -> why it may still name the column. Each
+# key allows that one statement once. The one left reads the driving user's Clerk user ID FROM
+# their users.id (the way back, not a lookup by Clerk user ID). Moving it to
+# core/auth/clerk_person.py (clerk_id_row) means editing a function far over the 50-line limit
+# the code-shape check holds a touched function to, so it stays until that function is split.
+_DRIVING_CLERK_ID = (
+    "US-202: reads the driving user's Clerk user ID from their users.id, inside a function far over "
+    "the 50-line limit (scripts/ci/check_changed_code_shape.py); moving it to clerk_id_row means "
+    "splitting that function first."
 )
-ALLOWED: Dict[str, Dict[str, str]] = {
-    "consumers/chatbot/service.py": {"_stream_tool_loop": _OVER_THE_SHAPE_LIMIT},
+AllowedStatement = Tuple[str, str, str]
+ALLOWED: Dict[AllowedStatement, str] = {
+    ("consumers/chatbot/service.py", "_stream_tool_loop",
+     "_row = self.db.query(User.clerk_user_id).filter(User.id == _driving_user).first()"): _DRIVING_CLERK_ID,
 }
 
 
@@ -127,8 +143,7 @@ def clerk_id_sql(source: str) -> List[Tuple[int, str, str]]:
 
 
 def _is_exempt(relative: str) -> bool:
-    return (relative in EXEMPT_FILES or relative.startswith(EXEMPT_PREFIXES)
-            or CLERK_MODULES.match(relative) is not None)
+    return relative in EXEMPT_FILES or relative.startswith(EXEMPT_PREFIXES)
 
 
 def scanned_files() -> List[str]:
@@ -141,14 +156,31 @@ def _sql_in(relative: str) -> List[Tuple[int, str, str]]:
     return clerk_id_sql((ORCH / relative).read_text(encoding="utf-8"))
 
 
-def _allowed(relative: str, function: str) -> Optional[str]:
-    return ALLOWED.get(relative, {}).get(function)
+def _keyed(relative: str, source: str) -> List[Tuple[AllowedStatement, int, str]]:
+    """Each finding in ``source`` as ``((relative, function, its line stripped), line, what)``."""
+    lines = source.splitlines()
+    return [((relative, function, lines[line - 1].strip()), line, what)
+            for line, function, what in clerk_id_sql(source)]
+
+
+def _keyed_findings(relative: str) -> List[Tuple[AllowedStatement, int, str]]:
+    return _keyed(relative, (ORCH / relative).read_text(encoding="utf-8"))
+
+
+def offenders_in(relative: str, source: str) -> List[str]:
+    """Findings no allowance covers; an allowed statement found more than once is not covered."""
+    found = _keyed(relative, source)
+    seen = Counter(key for key, _, _ in found)
+    return [f"orchestrator/{relative}:{line} in {key[1]}(): {what}"
+            for key, line, what in found if key not in ALLOWED or seen[key] > 1]
+
+
+def _offenders(relative: str) -> List[str]:
+    return offenders_in(relative, (ORCH / relative).read_text(encoding="utf-8"))
 
 
 def test_no_sql_outside_the_clerk_modules_names_the_clerk_id():
-    offenders = [f"orchestrator/{rel}:{line} in {function}(): {what}"
-                 for rel in scanned_files()
-                 for line, function, what in _sql_in(rel) if not _allowed(rel, function)]
+    offenders = [offender for rel in scanned_files() for offender in _offenders(rel)]
     assert not offenders, (
         "read the person by users.id: a Clerk user ID becomes one through core/auth/clerk_person.py "
         "(clerk_person_row, clerk_person_query, clerk_person_pk_expression) or core/auth/person.py "
@@ -157,12 +189,17 @@ def test_no_sql_outside_the_clerk_modules_names_the_clerk_id():
 
 
 def test_every_allowance_is_still_needed():
-    for relative, functions in ALLOWED.items():
-        found: FrozenSet[str] = frozenset(function for _, function, _ in _sql_in(relative))
-        for function, reason in functions.items():
-            assert reason and function in found, (
-                f"{relative} {function}() no longer names clerk_user_id in SQL: drop its allowance"
-            )
+    for key, reason in ALLOWED.items():
+        found = Counter(found_key for found_key, _, _ in _keyed_findings(key[0]))
+        assert reason and found[key] == 1, (
+            f"{key[0]} {key[1]}() no longer holds exactly this statement once: {key[2]!r}. "
+            "Drop or correct its allowance."
+        )
+
+
+def test_every_exempt_file_exists():
+    missing = sorted(rel for rel in EXEMPT_FILES if not (ORCH / rel).is_file())
+    assert not missing, f"exempt files that no longer exist, drop them: {missing}"
 
 
 def test_the_scan_covers_the_backend_and_skips_only_the_clerk_modules():
@@ -209,3 +246,22 @@ def test_the_scan_leaves_alone(source):
 def test_the_scan_names_the_function_it_found_in():
     source = "def outer(db, User, cid):\n    def inner():\n        return User.clerk_user_id == cid\n    return inner\n"
     assert clerk_id_sql(source) == [(3, "inner", "reads the clerk_user_id column")]
+
+
+_ALLOWED_FILE, _ALLOWED_FUNCTION, _ALLOWED_LINE = next(iter(ALLOWED))
+
+
+def _in_the_allowed_function(*body: str) -> str:
+    return f"def {_ALLOWED_FUNCTION}(self, User, _driving_user):\n" + "".join(f"    {line}\n" for line in body)
+
+
+def test_the_allowance_covers_its_one_statement():
+    assert offenders_in(_ALLOWED_FILE, _in_the_allowed_function(_ALLOWED_LINE)) == []
+
+
+@pytest.mark.parametrize("body", [
+    (_ALLOWED_LINE, _ALLOWED_LINE),
+    (_ALLOWED_LINE, "return self.db.query(User).filter(User.clerk_user_id == _driving_user).first()"),
+])
+def test_a_second_use_in_the_allowed_function_fails(body):
+    assert offenders_in(_ALLOWED_FILE, _in_the_allowed_function(*body))

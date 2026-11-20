@@ -65,10 +65,10 @@ PERMISSION_MARKER_ATTR = "_workspace_permission"
 
 
 def _role_of(db: Any, person: people.Person, ws_id: Any) -> Optional[str]:
-    """The member row's role, else owner by the legacy ``workspaces.owner_id``, else None."""
-    role = people.member_role(db, person, ws_id)
-    if role:
-        return role
+    """The member row's role, whatever it is, else owner by the legacy ``workspaces.owner_id``, else None."""
+    row = people.member_row(db, person, ws_id)
+    if row:
+        return row[0]
     if people.owns_workspace(db, person, ws_id):
         return WorkspaceRole.OWNER.value
     return None

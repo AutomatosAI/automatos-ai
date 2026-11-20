@@ -574,8 +574,7 @@ def _record_agent_install(db: Session, marketplace_agent: Agent, cloned_agent: A
                           user_id_int: Optional[int]) -> None:
     """One marketplace_installs row, in a savepoint; a failure is logged and the install goes on.
 
-    item_id is NOT NULL in production (migration 20260326 was never applied),
-    so we populate it with the marketplace agent's id.
+    ``item_id`` is required, so it is set to the marketplace agent's id.
     """
     install_query = text("""
         INSERT INTO marketplace_installs (item_id, user_id, marketplace_agent_id, cloned_agent_id, version, installed_at)

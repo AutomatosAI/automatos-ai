@@ -116,10 +116,13 @@ def person_statement(template: str, person: Person, expanding: Tuple[str, ...] =
     return _statement(template, person.pk_sql, expanding), {**params, **person.params}
 
 
-def member_role(db: Any, person: Person, workspace_id: Any) -> Optional[str]:
-    """The person's role in their active ``workspace_members`` row for this workspace, or None."""
-    row = db.execute(*person_statement(_MEMBER_ROLE_SQL, person, ws=str(workspace_id))).fetchone()
-    return row[0] if row else None
+def member_row(db: Any, person: Person, workspace_id: Any) -> Optional[Any]:
+    """The person's active ``workspace_members`` row for this workspace (``row[0]`` is its role), or None.
+
+    The row, not just its role: a found row whose role is NULL is still a found row, and the
+    caller's rule ends the lookup on it (``workspace_permission._role_of``).
+    """
+    return db.execute(*person_statement(_MEMBER_ROLE_SQL, person, ws=str(workspace_id))).fetchone()
 
 
 def owns_workspace(db: Any, person: Person, workspace_id: Any) -> bool:
@@ -152,7 +155,7 @@ __all__ = [
     "by_user_pk",
     "default_workspace",
     "may_open_workspace",
-    "member_role",
+    "member_row",
     "owns_or_holds_role",
     "owns_workspace",
     "person_statement",
