@@ -74,19 +74,36 @@ libpq_url() {
     printf '%s' "$DATABASE_URL" | sed -E 's#^(postgres(ql)?)\+[A-Za-z0-9_]+://#\1://#'
 }
 
+# PRD-278 W3: DATABASE_SSLMODE and DATABASE_SSLROOTCERT, the settings the app's own
+# connections read, reach pg_isready and psql as libpq's PGSSLMODE and PGSSLROOTCERT.
+# They are exported in a subshell around the one command, never for this whole script:
+# the server it execs would pass them to every libpq connection, a user's own database
+# included. Neither set: neither is exported, and libpq behaves as before.
+with_database_tls() {
+    (
+        if [ -n "${DATABASE_SSLMODE:-}" ]; then
+            export PGSSLMODE="$DATABASE_SSLMODE"
+        fi
+        if [ -n "${DATABASE_SSLROOTCERT:-}" ]; then
+            export PGSSLROOTCERT="$DATABASE_SSLROOTCERT"
+        fi
+        "$@"
+    )
+}
+
 pg_ready() {
     if [ -n "${POSTGRES_HOST:-}" ]; then
-        pg_isready -h "$POSTGRES_HOST" -p "${POSTGRES_PORT:-5432}" -U "$POSTGRES_USER"
+        with_database_tls pg_isready -h "$POSTGRES_HOST" -p "${POSTGRES_PORT:-5432}" -U "$POSTGRES_USER"
     else
-        pg_isready -d "$(libpq_url)"
+        with_database_tls pg_isready -d "$(libpq_url)"
     fi
 }
 
 db_psql() {
     if [ -n "${POSTGRES_HOST:-}" ]; then
-        PGPASSWORD="${POSTGRES_PASSWORD:-}" psql -h "$POSTGRES_HOST" -p "${POSTGRES_PORT:-5432}" -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"
+        PGPASSWORD="${POSTGRES_PASSWORD:-}" with_database_tls psql -h "$POSTGRES_HOST" -p "${POSTGRES_PORT:-5432}" -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"
     else
-        psql "$(libpq_url)" "$@"
+        with_database_tls psql "$(libpq_url)" "$@"
     fi
 }
 

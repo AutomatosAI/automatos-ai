@@ -1,7 +1,7 @@
 import os
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config, create_engine
+from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
@@ -25,6 +25,7 @@ if config.config_file_name is not None:
 # add your model's MetaData object here
 # for 'autogenerate' support
 from core.models import Base
+from core.database.tls import create_app_engine, database_tls
 target_metadata = Base.metadata
 
 # Get database URL from environment variable (preferred) or config file
@@ -74,14 +75,16 @@ def run_migrations_online() -> None:
     """
     url = get_url()
     if url:
-        # Use direct URL from environment
-        connectable = create_engine(url, poolclass=pool.NullPool)
+        # Use direct URL from environment, secured like every other connection to the
+        # app's database (PRD-278 W3), so the migration Job connects the same way.
+        connectable = create_app_engine(url, poolclass=pool.NullPool)
     else:
         # Fall back to config file
         connectable = engine_from_config(
             config.get_section(config.config_ini_section, {}),
             prefix="sqlalchemy.",
             poolclass=pool.NullPool,
+            connect_args=database_tls().libpq_params(),
         )
 
     with connectable.connect() as connection:

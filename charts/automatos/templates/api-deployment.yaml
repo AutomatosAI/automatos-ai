@@ -89,6 +89,9 @@ spec:
             - name: data
               mountPath: /app/data
             {{- end }}
+            {{- with include "automatos.databaseCaMount" . | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -103,6 +106,9 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: {{ include "automatos.apiDataClaim" . }}
+        {{- end }}
+        {{- with include "automatos.databaseCaVolume" . | trim }}
+        {{- . | nindent 8 }}
         {{- end }}
       {{- with .Values.api.nodeSelector }}
       nodeSelector:

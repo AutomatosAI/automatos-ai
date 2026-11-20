@@ -120,6 +120,61 @@ partway through. A second replica on a single-attach volume would hang waiting f
 {{- end }}
 
 {{/*
+TLS to PostgreSQL (PRD-278 W3), for the API, the migration Job and the worker: the same
+two settings the app reads, and the CA file mounted from `database.caConfigMap`. Nothing
+when `database` is left empty. Stops rendering on values the app would refuse at start.
+*/}}
+{{- define "automatos.databaseCaDir" -}}
+/etc/automatos/database-ca
+{{- end }}
+
+{{- define "automatos.validateDatabaseTls" -}}
+{{- $config := .Values.config | default dict -}}
+{{- range $key := list "DATABASE_SSLMODE" "DATABASE_SSLROOTCERT" }}
+{{- if hasKey $config $key }}
+{{- fail (printf "config.%s: set database.sslmode and database.caConfigMap instead, so the worker gets it too" $key) }}
+{{- end }}
+{{- end }}
+{{- with .Values.database.sslmode }}
+{{- if not (has . (list "disable" "allow" "prefer" "require" "verify-ca" "verify-full")) }}
+{{- fail (printf "database.sslmode must be disable, allow, prefer, require, verify-ca or verify-full, got %q" .) }}
+{{- end }}
+{{- end }}
+{{- if and .Values.database.caConfigMap (not (has .Values.database.sslmode (list "verify-ca" "verify-full"))) }}
+{{- fail "database.caConfigMap needs database.sslmode verify-ca or verify-full: the CA file is used only to check the server's certificate" }}
+{{- end }}
+{{- end }}
+
+{{- define "automatos.databaseTlsEnv" -}}
+{{- include "automatos.validateDatabaseTls" . -}}
+{{- with .Values.database.sslmode }}
+- name: DATABASE_SSLMODE
+  value: {{ . | quote }}
+{{- end }}
+{{- if .Values.database.caConfigMap }}
+- name: DATABASE_SSLROOTCERT
+  value: {{ printf "%s/%s" (include "automatos.databaseCaDir" .) .Values.database.caKey | quote }}
+{{- end }}
+{{- end }}
+
+{{/* The CA file's volume and its read-only mount. Nothing without database.caConfigMap. */}}
+{{- define "automatos.databaseCaVolume" -}}
+{{- with .Values.database.caConfigMap }}
+- name: database-ca
+  configMap:
+    name: {{ . }}
+{{- end }}
+{{- end }}
+
+{{- define "automatos.databaseCaMount" -}}
+{{- if .Values.database.caConfigMap }}
+- name: database-ca
+  mountPath: {{ include "automatos.databaseCaDir" . }}
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{/*
 The API's environment, shared by the API pods and the migration Job. Rendered
 inline rather than through a ConfigMap: the Job is a pre-install hook, so it runs
 before any of the release's ordinary resources exist.
@@ -154,6 +209,7 @@ before any of the release's ordinary resources exist.
 - name: WORKER_INTERNAL_URL
   value: {{ printf "http://%s-worker:8081" (include "automatos.fullname" .) | quote }}
 {{- end }}
+{{- include "automatos.databaseTlsEnv" . }}
 {{- range $name, $value := .Values.config }}
 - name: {{ $name }}
   value: {{ $value | toString | quote }}
