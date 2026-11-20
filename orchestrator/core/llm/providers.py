@@ -298,6 +298,44 @@ def runs_on_workload_identity(provider: Optional[str]) -> bool:
     return bool(spec and spec.workload_identity and config.AWS_USE_WORKLOAD_IDENTITY)
 
 
+def stored_provider_enum(provider: Optional[str]) -> Optional[LLMProvider]:
+    """The ``LLMProvider`` a provider name stored on an agent or a settings tier runs as, or None.
+
+    The name's own value (``LLMProvider(name)``), for the paths that accept nothing else: agent
+    activation and the settings loader. PRD-278 US-105: with ``AWS_USE_WORKLOAD_IDENTITY`` on, a
+    provider whose calls the install's role signs (Bedrock) runs as its member under any name the
+    registry knows for it (``bedrock``, ``aws_bedrock``), through ``enum_for``, as agent creation
+    and the spoken model already do.
+    """
+    if runs_on_workload_identity(provider):
+        return enum_for(provider)
+    try:
+        return LLMProvider(provider)
+    except ValueError:
+        return None
+
+
+def workload_identity_region(provider: Optional[str], named: Optional[str] = None, *,
+                             on_role: bool = False) -> Optional[str]:
+    """The region a call for ``provider`` goes to, with ``AWS_USE_WORKLOAD_IDENTITY`` on and a
+    provider whose calls the install's role signs (Bedrock), PRD-278 US-105:
+
+    - a call on the install's role (``on_role``): the install's region, ``AWS_REGION``;
+    - a config that carries its own key: the region that key names (``named``), and
+      ``AWS_REGION`` when it names none.
+
+    None when the setting is off or for any other provider: the caller keeps its own region.
+    A Bedrock config carries its region in ``base_url``.
+    """
+    if not runs_on_workload_identity(provider):
+        return None
+    if named and not on_role:
+        return named
+    from core.llm.clients.bedrock_client import DEFAULT_REGION
+
+    return config.AWS_REGION or DEFAULT_REGION
+
+
 def base_url_for(provider: Optional[str]) -> Optional[str]:
     spec = get_spec(provider)
     if spec is None or not spec.base_url_key:

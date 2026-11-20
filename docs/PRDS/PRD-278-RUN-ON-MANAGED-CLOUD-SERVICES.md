@@ -37,7 +37,7 @@ Core is close. Its storage client already uses the pod's role when no key is set
 | Search index creation | Not at start-up: on first use, and again on every search, add and delete. Each of them calls `_ensure_setup`, which tries to create the vector bucket and the index and ignores only the answer "already exists". Any other answer fails that call. It refuses to run against an index of a different size, and never deletes one. | `s3_vectors_backend.py:92-128`, `:130-161`; called from `:187`, `:272`, `:335`, `:403` **[T]** | An operator who wants the index encrypted with their own key must create it first. A role that may not create one fails every search, add and delete, even when both exist. |
 | Bedrock chat | `bedrock-runtime`, with three ways to authenticate. With no key it uses the SDK's chain: "environment, profile, instance role". | `core/llm/clients/bedrock_client.py:60-72` **[T]** | The client works from a role. |
 | Bedrock, further up | The provider is registered with an access key as its "env key", and the agent factory passes the key settings through. | `core/llm/providers.py:167-169`, `modules/agents/factory/agent_factory.py:511-513` **[T]** | Whether a Bedrock model is offered at all with no key is not known **[?]**. |
-| Bedrock, provider and region | Agents store Bedrock as `bedrock` or `aws_bedrock`. Activation checks the stored name against the provider enum and sends any name the enum does not hold to OpenRouter. The client takes its region from `base_url`: agent creation sets `AWS_REGION`; activation and the spoken model set none, so the client's default applies; the settings path takes the stored credential's region. | `modules/agents/factory/agent_factory.py:513`, `:936-944`, `:993`; `consumers/chatbot/spoken_model.py:139-144`; `core/llm/manager.py:560-561`; `core/llm/clients/bedrock_client.py:63` **[T]** | US-105 makes both names reach Bedrock, in `AWS_REGION`, on every path. |
+| Bedrock, provider and region | Agents store Bedrock as `bedrock` or `aws_bedrock`. Activation checks the stored name against the provider enum and sends any name the enum does not hold to OpenRouter. The client takes its region from `base_url`: agent creation sets `AWS_REGION`; activation and the spoken model set none, so the client's default applies; the settings path takes the stored credential's region. | `modules/agents/factory/agent_factory.py:513`, `:936-944`, `:993`; `consumers/chatbot/spoken_model.py:139-144`; `core/llm/manager.py:560-561`; `core/llm/clients/bedrock_client.py:63` **[T]** | US-105 makes both names reach Bedrock on every path, in `AWS_REGION` on the install's role. |
 | SDK services in the image | The image keeps six: `s3`, `s3vectors`, `bedrock-runtime`, `sts`, `sso`, `sso-oidc`. A test requires every client to name one of them. | `orchestrator/tests/test_prd262_botocore_services.py` **[T]** | Embeddings through `bedrock-runtime` need nothing new. |
 | Redis, main client | Built from a host, port, password and database number. `get_redis_client()` parses `REDIS_URL` and keeps only those four. The scheme is never read. | `core/redis/client.py:26-44`, `:180-192` **[T]** | `rediss://` is treated as `redis://`. The connection is plain. A user name in the address is dropped. |
 | Redis, other clients | The async publish and subscribe client and the chat-turns client are built from the same four fields. The task queue builds two more from `REDIS_HOST`, `REDIS_PORT` and `REDIS_PASSWORD`, and ignores `REDIS_URL`. Two clients pass the whole address to `from_url` and do honour `rediss://`. A third does the same and falls back to the host fields. | `core/redis/client.py:62-82`, `services/chat_turns.py:93-110`, `core/task_runner/queued.py:109-135`, `modules/context/adapters/redis_context.py:37-50`, `modules/intake/progress.py:103`, `services/workspace-worker/main.py:101` **[T]** | TLS works only where the whole address is passed through. |
@@ -83,7 +83,7 @@ One new setting, `AWS_USE_WORKLOAD_IDENTITY`, off by default.
 - **Today the search index is not checked at start-up.** Core tries to create it on first use and on every search, add and delete. With `S3_VECTORS_CREATE_IF_MISSING` off, this wave adds a real start-up check of the index in a shared vector bucket. A vector bucket named per workspace is known only once a workspace uses it, so its index is still checked on first use.
 - **A Bedrock model is offered with no key.** US-103 finds whatever further up treats a missing key as "provider not set up" and makes the setting answer it.
 - **The search index can be left alone.** A second setting, `S3_VECTORS_CREATE_IF_MISSING`, on by default as today. With it off, a missing index is an error with a clear message, and core never tries to create one. An install whose role may not create an index needs it off, or none of its searches, adds and deletes can run.
-- **A Bedrock model runs on Bedrock, in the install's region.** US-105: whichever name an agent stores for Bedrock, and whichever path builds its client, the call goes to Bedrock in `AWS_REGION`.
+- **A Bedrock model runs on Bedrock, in the install's region.** US-105: whichever name an agent stores for Bedrock, and whichever path builds its client, the call goes to Bedrock. A call on the install's role goes to `AWS_REGION`. A configuration with its own key keeps the region it names, and one that names no region uses `AWS_REGION`. A workspace's own Bedrock key is found under either name.
 
 ### 5.2 TLS to Redis
 
@@ -196,11 +196,11 @@ Each wave is one pull request or a short series. CI is the only gate: nothing he
 **Description:** As an operator who runs models on Bedrock in my own account, I want every Bedrock agent called on Bedrock, in the install's region, so that its calls stay in that account and region whichever path makes them.
 
 **Acceptance Criteria:**
-- [ ] With `AWS_USE_WORKLOAD_IDENTITY` on, an agent stored as `bedrock` or `aws_bedrock` is called on Bedrock in chat, in agent creation and in the spoken model.
-- [ ] The region is `AWS_REGION` on every path.
-- [ ] A Bedrock tier with no key uses the role and is never rerouted to another provider.
-- [ ] With the setting off, today's behaviour is unchanged, and a test pins it.
-- [ ] The pull request states what main does today, with file and line.
+- [x] With `AWS_USE_WORKLOAD_IDENTITY` on, an agent stored as `bedrock` or `aws_bedrock` is called on Bedrock in chat, in agent creation and in the spoken model.
+- [x] On every path, a call on the install's role is in `AWS_REGION`; a configuration with its own key keeps the region it names, and uses `AWS_REGION` when it names none.
+- [x] A Bedrock tier with no key uses the role and is never rerouted to another provider.
+- [x] With the setting off, today's behaviour is unchanged, and a test pins it.
+- [ ] The pull request states what main does today, with file and line. Open until the pull request is written.
 
 ### Wave 2: TLS to Redis
 
@@ -352,7 +352,7 @@ Each wave is one pull request or a short series. CI is the only gate: nothing he
 - FR-11: An install must refuse to start when its embedding model produces fewer dimensions than an index expects.
 - FR-12: A provider that is set and unusable must raise, never fall back to stand-in vectors.
 - FR-13: With none of the new settings set, the `local` edition must behave as it does today.
-- FR-14: With `AWS_USE_WORKLOAD_IDENTITY` on, an agent whose provider is Bedrock, under either stored name, must be called on Bedrock in `AWS_REGION` on every path, and a Bedrock tier with no key must use the role, never another provider.
+- FR-14: With `AWS_USE_WORKLOAD_IDENTITY` on, an agent whose provider is Bedrock, under either stored name, must be called on Bedrock on every path, with the workspace's own Bedrock key found under either name. A call on the install's role must go to `AWS_REGION`; a configuration with its own key must keep the region it names, and use `AWS_REGION` when it names none. A Bedrock tier with no key must use the role, never another provider, and a Bedrock agent with no usable key must fail with a clear error rather than run on the role or on another provider.
 
 ## 8. Decisions for Gerard
 
