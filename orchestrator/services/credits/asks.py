@@ -55,6 +55,7 @@ class AskState:
     budget_credits: int = 0
     own_keys_plan: bool = False
     cost_usd: float = 0.0
+    capped: bool = False  # its budget is a product workspace's cap left, not the owner's balance (caps.py)
 
 
 _ASKS: dict[str, AskState] = {}
@@ -121,8 +122,9 @@ def runs_as_an_ask(
 
 
 def set_budget(state: Optional[AskState], *, funded_by: str, budget_credits: int = 0,
-               own_keys_plan: bool = False) -> None:
-    """Record on the live ask how it is paid for and what it may spend."""
+               own_keys_plan: bool = False, capped: bool = False) -> None:
+    """Record on the live ask how it is paid for and what it may spend (``capped``: the limit is a product
+    workspace's cap, not the owner's balance)."""
     if state is None:
         return
     with _LOCK:
@@ -130,6 +132,7 @@ def set_budget(state: Optional[AskState], *, funded_by: str, budget_credits: int
         state.funded_by = funded_by
         state.budget_credits = int(budget_credits)
         state.own_keys_plan = own_keys_plan
+        state.capped = capped
 
 
 def note_cost(cost_usd: float) -> None:

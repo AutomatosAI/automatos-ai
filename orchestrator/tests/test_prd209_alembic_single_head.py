@@ -190,7 +190,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-11-17: merge_heads_20261117 joins the two — a pure merge, no schema operations. Neither
 # is re-chained: a database that ran `alembic upgrade heads` is stamped at both, and refuses a
 # rewritten lineage (the prd266_merge_heads lesson).
-EXPECTED_HEAD = "merge_heads_20261117"
+# 2026-11-13 (Automatos for products, spend cap): product_spend_cap_20261113 chains onto the merge —
+# products.workspace_monthly_credit_cap (a new nullable column) and product_workspace_spend (a new table).
+EXPECTED_HEAD = "product_spend_cap_20261113"
 
 
 def _literal(node: ast.AST):

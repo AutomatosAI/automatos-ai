@@ -2258,6 +2258,10 @@
       "path": "/api/products/{product_id}/workspaces/{workspace_id}"
     },
     {
+      "method": "PATCH",
+      "path": "/api/products/{product_id}/workspaces/{workspace_id}"
+    },
+    {
       "method": "POST",
       "path": "/api/products/{product_id}/workspaces/{workspace_id}/restore"
     },

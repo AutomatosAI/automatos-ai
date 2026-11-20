@@ -441,7 +441,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     assert 'down_revision = (' in joined
     assert '"prd251d_wave3"' in joined and '"chat_turn_keys_20261116"' in joined
     assert "from alembic import op" not in joined
-    assert 'EXPECTED_HEAD = "merge_heads_20261117"' in guard
+    # 2026-11-13 (Automatos for products, spend cap): product_spend_cap_20261113 chains onto the
+    # merge; the guard follows it.
+    capped = (versions / "product_spend_cap_20261113.py").read_text()
+    assert 'down_revision = "merge_heads_20261117"' in capped
+    assert 'EXPECTED_HEAD = "product_spend_cap_20261113"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

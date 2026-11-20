@@ -15,6 +15,8 @@ work that can't be paid for:
 - a plan on an explicit allowance (enterprise) is never stopped;
 - otherwise the workspace needs spendable credits, or the call stops with
   ``CreditsExhaustedError``;
+- a product's workspace also stays under its month's cap (``caps.py``), the smaller of the two being the
+  budget, and stops with ``WorkspaceCapReachedError`` once it is reached;
 - inside an ask, the balance read at its first call is the ask's budget: once its
   running cost (in credits) reaches it, the next call stops — a long mission ends
   when the credits do, instead of overdrawing them by more than one call.
@@ -31,6 +33,7 @@ from services.credits.classification import is_overhead
 from services.credits.routing import (
     FUNDED_BY_CREDITS,
     CreditsExhaustedError,
+    WorkspaceCapReachedError,
     credits_for,
     paused_error,
     workspace_funding,
@@ -49,17 +52,21 @@ def _within_budget(state: asks.AskState) -> None:
     if state.funded_by != FUNDED_BY_CREDITS:
         return
     if credits_for(state.cost_usd) >= state.budget_credits:
-        logger.info("[credits] ask %s reached its workspace's balance (%d credits)",
-                    state.ask_id, state.budget_credits)
+        logger.info("[credits] ask %s reached its workspace's %s (%d credits)",
+                    state.ask_id, "cap" if state.capped else "balance", state.budget_credits)
+        if state.capped:
+            raise WorkspaceCapReachedError()
         raise CreditsExhaustedError(own_keys_plan=state.own_keys_plan)
 
 
 def _check_balance(workspace_id: Any, state: Optional[asks.AskState]) -> None:
     from core.database.database import SessionLocal
+    from services.credits.caps import cap_left
 
     db = SessionLocal()
     try:
         funding = workspace_funding(db, workspace_id, background=bool(state and state.background))
+        left = cap_left(db, workspace_id) if funding.funded_by == FUNDED_BY_CREDITS else None
     finally:
         db.close()
     if funding.funded_by != FUNDED_BY_CREDITS:
@@ -67,8 +74,11 @@ def _check_balance(workspace_id: Any, state: Optional[asks.AskState]) -> None:
         return
     if funding.spendable <= 0:
         raise paused_error(funding)
-    asks.set_budget(state, funded_by=funding.funded_by, budget_credits=funding.spendable,
-                    own_keys_plan=funding.own_keys_plan)
+    if left is not None and left <= 0:  # a product's workspace at its month's cap (services/credits/caps)
+        raise WorkspaceCapReachedError()
+    capped = left is not None and left < funding.spendable
+    asks.set_budget(state, funded_by=funding.funded_by, budget_credits=left if capped else funding.spendable,
+                    own_keys_plan=funding.own_keys_plan, capped=capped)
 
 
 def before_platform_call(*, workspace_id: Any, is_byok: bool, purpose: Optional[str]) -> None:
