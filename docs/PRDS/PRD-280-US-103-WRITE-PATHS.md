@@ -9,7 +9,7 @@ Each row is one path a component writes while it runs in the chart, what writes 
 - **Scratch:** nothing there has to outlive the pod. It becomes an `emptyDir`, emptied when the pod is replaced.
 - **Volume:** already on a volume the chart mounts. Unchanged.
 - **None:** not written in the chart, so nothing is mounted.
-- **For Gerard:** today on the container's own disk, lost when the container is replaced; it stays scratch until Gerard decides it needs a home (section 6).
+- **Owner decision:** today on the container's own disk, lost when the container is replaced; it stays scratch until the maintainers decide it needs a home (section 6).
 
 A path an operator sets in `config` (for example `WORKSPACE_EXPORT_TEMP_DIR`, `AUTOMATOS_WORKSPACE`, `DECISION_SHADOW_LOG_PATH`) must be under one of the writable paths below.
 
@@ -19,7 +19,7 @@ A path an operator sets in `config` (for example `WORKSPACE_EXPORT_TEMP_DIR`, `A
 |---|---|---|---|
 | `/app/data/uploads` (`DOCUMENT_UPLOAD_DIR`, set by the chart while `api.data` is on) | `api/document_upload_steps.py:108-111`; `modules/tools/discovery/handlers_documents.py:384-386` **[T]** | Yes | Volume: `api.data` |
 | `/app/data/documents` (`DOCUMENT_STORAGE_DIR`): generated documents, templates, thumbnails, brand files, provenance marks | `modules/documents/generation_service.py:751-752`, `:379`, `:421`, `:452`; `api/document_generation.py:394-398`; `modules/documents/thumbnails/store.py:61-63`; `modules/documents/brand_logo.py:193-194`, `:235-236`; `modules/documents/provenance_marks.py:130-135` (a temporary file beside the target, then a rename) **[T]** | Yes | Volume: `api.data` |
-| `/app/documents` (`config.py:1877`, `DOCUMENT_STORAGE_DIR`'s default `documents`, under the working directory), only with `api.data.enabled=false` | the same writers as the row above **[T]** | No volume holds it today | Scratch: `emptyDir` at `/app/documents`. For Gerard (section 6) |
+| `/app/documents` (`config.py:1877`, `DOCUMENT_STORAGE_DIR`'s default `documents`, under the working directory), only with `api.data.enabled=false` | the same writers as the row above **[T]** | No volume holds it today | Scratch: `emptyDir` at `/app/documents`. Owner decision (section 6) |
 | `/tmp/automotas_uploads` (`api/documents.py:153`, `DOCUMENT_UPLOAD_DIR`'s default), only with `api.data.enabled=false` | the upload writers above **[T]** | No volume holds it today | Scratch: `/tmp` |
 | `/tmp`, through `tempfile` (`TMPDIR` unset) | `api/wizard.py:887`; `api/documents.py:875`; `api/knowledge_multimodal.py:318`; `api/admin_plugins.py:565`; `api/socials_media_upload.py:174`; `modules/codegraph/codegraph_service.py:461` (repository clones); `modules/knowledge/graph_service.py:1123`; `modules/rag/services/cloud_file_downloader.py:205`; `modules/tools/discovery/handlers_documents.py:296`; `modules/socials/render.py:608`; `modules/socials/publishing.py:143` (with `publish_steps.py:109` inside it); `modules/socials/recipes/footage.py:278`; `modules/socials/recipes/voice.py:498`; `modules/agents/services/agent_action_executor.py:77`; `core/composio/tool_executor.py:110`; `services/knowledge_flywheel.py:398`; `services/owner_knowledge.py:92`; `services/workspace_move/jobs.py:161` and `services/workspace_move/files.py:163` (`WORKSPACE_EXPORT_TEMP_DIR`, `config.py:1106`, empty by default) **[T]** | No | Scratch: `emptyDir` at `/tmp` |
 | `/tmp/automatos_mission_uploads` | `api/missions.py:997-1004` **[T]** | No (passed on to the document manager) | Scratch: `/tmp` |
@@ -28,12 +28,12 @@ A path an operator sets in `config` (for example `WORKSPACE_EXPORT_TEMP_DIR`, `A
 | `/tmp/pandasai_charts` (`config.py:1870`) | `modules/tools/services/pandas_ai_service.py:58-59`, reached only after `import pandasai` at `:43`; `pandasai` is not in `orchestrator/requirements.lock` **[T]** | — | None (covered by `/tmp` if it is ever installed) |
 | An upload's body over 1 MB | Starlette's form parser spools it to a `SpooledTemporaryFile` in `/tmp` **[I]** | No | Scratch: `/tmp` |
 | OCR's input and output images | `pytesseract` writes them to `tempfile.gettempdir()` **[I]** | No | Scratch: `/tmp` |
-| `~/.automatos/skills/<source>` (`/home/automatos`) | `modules/agents/services/skill_loader.py:61`, `:260` (created when the loader first starts), `:389-392` (a `git clone`); later reads use the recorded path, `:495`, `:517`, `:1098`, `:1171` **[T]** | Recorded in `SkillSource.local_cache_path` and `Skill.filesystem_path` | Scratch: `emptyDir` at `/home/automatos`. For Gerard (section 6) |
-| `~/.automatos/ssh_known_hosts` | `core/security/ssh_host_keys.py:28`, `:51-52`; read at `:64-66` **[T]** | Read by later connections | Scratch: `/home/automatos`. For Gerard (section 6) |
+| `~/.automatos/skills/<source>` (`/home/automatos`) | `modules/agents/services/skill_loader.py:61`, `:260` (created when the loader first starts), `:389-392` (a `git clone`); later reads use the recorded path, `:495`, `:517`, `:1098`, `:1171` **[T]** | Recorded in `SkillSource.local_cache_path` and `Skill.filesystem_path` | Scratch: `emptyDir` at `/home/automatos`. Owner decision (section 6) |
+| `~/.automatos/ssh_known_hosts` | `core/security/ssh_host_keys.py:28`, `:51-52`; read at `:64-66` **[T]** | Read by later connections | Scratch: `/home/automatos`. Owner decision (section 6) |
 | `~/.composio/files/<toolkit>/<tool>/` | the Composio SDK (`composio` 0.12, `core/composio/client.py:145`): a tool result that carries a file is downloaded under `COMPOSIO_CACHE_DIR`, by default `~/.composio` **[I]** (the SDK's `core/models/_files.py`, read on GitHub, not in the image) | No (the result is passed on) | Scratch: `/home/automatos` |
 | `~/.cache/fontconfig` | fontconfig, under WeasyPrint, writes a user cache when the system cache (`/var/cache/fontconfig`, built at `orchestrator/Dockerfile:228`) does not cover a font folder **[I]** | No | Scratch: `/home/automatos` |
 | `~/.aws/sso/cache` | botocore, only for an SSO profile; keys from the environment or a projected web-identity token write nothing **[I]** | No | Scratch: `/home/automatos` |
-| `/app/logs/decision_shadow.jsonl` (`config.py:1956`, `DECISION_SHADOW_LOG_PATH`'s default `logs/…`) | `core/llm/decisions/engine.py:336-342` (`record_shadow`, called from `consumers/chatbot/auto.py:1014`, `core/llm/decisions/judgements.py:109`, `:219`, `modules/tools/discovery/decision_rerank.py:138`); a failed write is logged at debug **[T]** | Read later by `scripts/eval/decision_shadow` | Scratch: `emptyDir` at `/app/logs`. For Gerard (section 6) |
+| `/app/logs/decision_shadow.jsonl` (`config.py:1956`, `DECISION_SHADOW_LOG_PATH`'s default `logs/…`) | `core/llm/decisions/engine.py:336-342` (`record_shadow`, called from `consumers/chatbot/auto.py:1014`, `core/llm/decisions/judgements.py:109`, `:219`, `modules/tools/discovery/decision_rerank.py:138`); a failed write is logged at debug **[T]** | Read later by `scripts/eval/decision_shadow` | Scratch: `emptyDir` at `/app/logs`. Owner decision (section 6) |
 | `core/.credential_key` under `/app` | `core/credentials/encryption.py:80-82`, `:118`, only when `CREDENTIAL_ENCRYPTION_KEY` is empty; the chart reads that key from the Secret as a required key (`templates/_helpers.tpl:276`) **[T]** | — | None |
 | `/var/automatos/documents/reports` | `modules/tools/services/report_generator.py:17`, `:25`, `:69`; nothing constructs `ReportGenerator` **[T]** | — | None |
 | `workflow_<id>_<time>.log` in the working directory | `core/utils/logging_utils.py:106`; `EnhancedWorkflowLogger` is constructed only by that module's own `__main__` block (`:505`) **[T]** | — | None |
@@ -81,9 +81,9 @@ The image runs `node server.js`, Next.js's standalone server (`frontend/Dockerfi
 
 Not in the chart until PRD-280 Wave 6 (US-601). Nothing to list.
 
-## 6. For Gerard: rows on the container's own disk today that are read again later
+## 6. Owner decision: rows on the container's own disk today that are read again later
 
-The chart keeps each on a scratch volume, as it was on the container's disk before. Whether any should move to a volume or to object storage is Gerard's decision.
+The chart keeps each on a scratch volume, as it was on the container's disk before. Whether any should move to a volume or to object storage is a decision for the maintainers.
 
 | Row | Read again by |
 |---|---|

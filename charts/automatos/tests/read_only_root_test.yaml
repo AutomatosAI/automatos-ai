@@ -87,7 +87,7 @@ tests:
   # A failed render is reported against the first template it fails in, in reverse
   # alphabetical order: the check runs in the API's environment, which the migration Job
   # takes too and the worker does not, so that is the Job's.
-  - it: stops on an upload path of the operator's own with the data volume off and a read-only root
+  - it: stops on an upload path outside the scratch volumes with the data volume off and a read-only root
     template: templates/migrate-job.yaml
     set:
       api:
@@ -97,18 +97,87 @@ tests:
         DOCUMENT_UPLOAD_DIR: /elsewhere
     asserts:
       - failedTemplate:
-          errorPattern: "config.DOCUMENT_UPLOAD_DIR: with api.data.enabled=false and a read-only root"
-  - it: stops on a storage path of the operator's own with the data volume off and a read-only root
+          errorPattern: 'config.DOCUMENT_UPLOAD_DIR is "/elsewhere": with api.data.enabled=false and a read-only root \(api.readOnlyRootFilesystem\) the API can write only under its scratch volumes, /tmp, /home/automatos, /app/logs, /app/documents. Use a path under one of them, or set api.readOnlyRootFilesystem=false'
+  - it: stops on a storage path outside the scratch volumes with the data volume off and a read-only root
     template: templates/migrate-job.yaml
     set:
       api:
         data:
           enabled: false
       config:
-        DOCUMENT_STORAGE_DIR: /elsewhere
+        DOCUMENT_STORAGE_DIR: /app/data/documents
     asserts:
       - failedTemplate:
-          errorPattern: "config.DOCUMENT_STORAGE_DIR: with api.data.enabled=false and a read-only root"
+          errorPattern: 'config.DOCUMENT_STORAGE_DIR is "/app/data/documents": with api.data.enabled=false and a read-only root'
+  - it: stops on a path that leaves a scratch volume through ".."
+    template: templates/migrate-job.yaml
+    set:
+      api:
+        data:
+          enabled: false
+      config:
+        DOCUMENT_UPLOAD_DIR: /tmp/../etc/uploads
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.DOCUMENT_UPLOAD_DIR is "/tmp/../etc/uploads"'
+  - it: stops on a relative path outside the scratch volumes (it is under the working directory, /app)
+    template: templates/migrate-job.yaml
+    set:
+      api:
+        data:
+          enabled: false
+      config:
+        DOCUMENT_STORAGE_DIR: generated
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.DOCUMENT_STORAGE_DIR is "generated"'
+  - it: takes document paths under the scratch volumes with the data volume off and a read-only root
+    template: templates/api-deployment.yaml
+    set:
+      api:
+        data:
+          enabled: false
+      config:
+        DOCUMENT_UPLOAD_DIR: /tmp/uploads
+        DOCUMENT_STORAGE_DIR: documents/generated
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DOCUMENT_UPLOAD_DIR, value: /tmp/uploads}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DOCUMENT_STORAGE_DIR, value: documents/generated}
+  - it: takes a document path that is a scratch volume itself, with a trailing slash
+    template: templates/migrate-job.yaml
+    set:
+      api:
+        data:
+          enabled: false
+      config:
+        DOCUMENT_STORAGE_DIR: /app/documents/
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DOCUMENT_STORAGE_DIR, value: /app/documents/}
+  - it: stops on HOME in config while the API's root is read-only (the chart sets it)
+    template: templates/migrate-job.yaml
+    set:
+      config:
+        HOME: /elsewhere
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.HOME: with a read-only root \\(api.readOnlyRootFilesystem\\) the chart sets HOME to the API's home scratch volume, /home/automatos. Remove it from config, or set api.readOnlyRootFilesystem=false"
+  - it: takes HOME from config on a writable root, where the chart does not set it
+    template: templates/api-deployment.yaml
+    set:
+      api:
+        readOnlyRootFilesystem: false
+      config:
+        HOME: /home/operator
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: HOME, value: /home/operator}
 
   # ── the web app ────────────────────────────────────────────────────────────
   - it: gives the web app a read-only root and no volume (its server writes no file)

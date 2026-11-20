@@ -1,18 +1,40 @@
-# Values for chart.yml's install lane (deploy/kind/strict.sh, PRD-280 US-100): every
-# optional component the chart has, on, with the images the lane built in the same run
-# and loaded into the kind cluster, so none is pulled. The datastores and the collector
-# run in their own namespace (automatos-datastores), so the chart's namespace holds only
-# the chart's pods. Each later wave of PRD-280 adds what it builds here.
+# Values for chart.yml's install lane (deploy/kind/strict.sh, PRD-280 US-100), with the
+# images the lane built in the same run and loaded into the kind cluster, so none is
+# pulled. The datastores and the collector run in their own namespace
+# (automatos-datastores), so the chart's namespace holds only the chart's pods. Each later
+# wave of PRD-280 adds what it builds here.
+#
+# On here: the API with its data volume, the migration Job, the web app, the worker, the
+# read-only roots (the chart's default), OpenTelemetry to a real collector (with
+# OTEL_EXPORTER_OTLP_HEADERS from the Secret), session mode, the ingress objects (with a
+# class, a host, TLS and annotations; no controller is installed), every account renamed
+# and annotated, the optional Secret key WORKER_INTERNAL_TOKEN, ENVIRONMENT=production
+# (the chart's default) and database.sslmode.
+#
+# Not exercised here (the chart's unit tests render each):
+# - the database CA mount (database.caConfigMap, verify-ca/verify-full): the dev
+#   PostgreSQL has no TLS, so database.sslmode is `disable`. With ENVIRONMENT=production
+#   the API would otherwise ask for `require`, which that server refuses;
+# - api.data.enabled=false (the data volume is on here);
+# - an edition other than `local` (the published web app is the local edition);
+# - the optional Secret keys AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+#   ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN (no object storage or model to reach);
+# - serviceAccount.create=false;
+# - more than one API replica (kind's storage is ReadWriteOnce, and values.yaml keeps
+#   one replica for the schedulers).
 existingSecret: automatos-secrets
 
 config:
-  ENVIRONMENT: development
+  ENVIRONMENT: production
   LOG_LEVEL: INFO
   LOG_RELAY_ENABLED: "false"
   QDRANT_URL: ""
   AGENT_OPT_WORKER_URL: ""
   LOKI_URL: ""
   PROMETHEUS_URL: ""
+
+database:
+  sslmode: disable
 
 api:
   image:
@@ -49,6 +71,21 @@ worker:
   resources:
     requests: {cpu: 50m, memory: 256Mi}
 
+serviceAccount:
+  create: true
+  api:
+    name: automatos-ci-api
+    annotations: {ci.automatos.dev/account: api}
+  frontend:
+    name: automatos-ci-frontend
+    annotations: {ci.automatos.dev/account: frontend}
+  worker:
+    name: automatos-ci-worker
+    annotations: {ci.automatos.dev/account: worker}
+  migrate:
+    name: automatos-ci-migrate
+    annotations: {ci.automatos.dev/account: migrate}
+
 otel:
   enabled: true
   endpoint: http://otel-collector.automatos-datastores:4318
@@ -57,9 +94,16 @@ otel:
 sessionMode:
   enabled: true
 
-# The Ingress objects only: the lane installs no controller, and nothing is sent through it.
+# The Ingress objects only: the lane installs no controller, and nothing is sent through
+# them. The class and the TLS Secret they name do not exist; the API server accepts that.
 ingress:
   enabled: true
+  className: nginx
+  host: automatos.ci.invalid
+  annotations: {ci.automatos.dev/ingress: "true"}
+  tls:
+    - hosts: [automatos.ci.invalid]
+      secretName: automatos-ci-tls
 
 # kind's local-path storage is ReadWriteOnce; a single node shares it fine.
 workspaces:

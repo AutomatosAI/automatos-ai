@@ -101,7 +101,8 @@ spec:
             {{- end }}
             {{- if .Values.api.readOnlyRootFilesystem }}
             # A read-only root (PRD-280 US-104): a scratch volume for each path the API
-            # writes outside its volumes (docs/PRDS/PRD-280-US-103-WRITE-PATHS.md).
+            # writes outside its volumes (docs/PRDS/PRD-280-US-103-WRITE-PATHS.md). Keep
+            # automatos.apiScratchDirs, which config's document paths are checked against, in step.
             - name: tmp
               mountPath: /tmp
             - name: home

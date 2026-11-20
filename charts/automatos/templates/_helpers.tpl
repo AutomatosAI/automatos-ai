@@ -147,10 +147,33 @@ true
 {{- end }}
 
 {{/*
+The API's scratch volumes under a read-only root, space-separated; api-deployment.yaml
+mounts each of them (/app/documents only with api.data.enabled=false, the one case the
+document paths are checked against this list).
+*/}}
+{{- define "automatos.apiScratchDirs" -}}
+/tmp /home/automatos /app/logs /app/documents
+{{- end }}
+
+{{/*
+"true" when a path the API writes (a config value; a relative one is under its working
+directory, /app) is under one of its scratch volumes once cleaned of "." and "..".
+*/}}
+{{- define "automatos.apiScratchPath" -}}
+{{- $path := toString . -}}
+{{- if not (isAbs $path) }}{{ $path = printf "/app/%s" $path }}{{ end -}}
+{{- $path = clean $path -}}
+{{- range $dir := include "automatos.apiScratchDirs" $ | splitList " " -}}
+{{- if or (eq $path $dir) (hasPrefix (printf "%s/" $dir) $path) }}true{{ end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Stops a release at render time, before any hook runs, on values that can't work. A name
 in `config` that the chart also sets would be rendered twice, and an upgrade then fails
 partway through. A second replica on a single-attach volume would hang waiting for it. A
-document path of the operator's own, under a read-only root, would fail at the first upload.
+document path of the operator's own outside the API's scratch volumes, under a read-only
+root, would fail at the first upload.
 */}}
 {{- define "automatos.validateApi" -}}
 {{- $config := .Values.config | default dict -}}
@@ -166,10 +189,15 @@ document path of the operator's own, under a read-only root, would fail at the f
 {{- end }}
 {{- end }}
 {{- end }}
-{{- if and (not .Values.api.data.enabled) .Values.api.readOnlyRootFilesystem }}
+{{- if .Values.api.readOnlyRootFilesystem }}
+{{- if hasKey $config "HOME" }}
+{{- fail "config.HOME: with a read-only root (api.readOnlyRootFilesystem) the chart sets HOME to the API's home scratch volume, /home/automatos. Remove it from config, or set api.readOnlyRootFilesystem=false" }}
+{{- end }}
+{{- if not .Values.api.data.enabled }}
 {{- range $key := list "DOCUMENT_UPLOAD_DIR" "DOCUMENT_STORAGE_DIR" }}
-{{- if hasKey $config $key }}
-{{- fail (printf "config.%s: with api.data.enabled=false and a read-only root (api.readOnlyRootFilesystem) the API keeps its files on the scratch volumes the chart mounts, /app/documents and /tmp. Remove config.%s, or set api.readOnlyRootFilesystem=false" $key $key) }}
+{{- if and (hasKey $config $key) (not (include "automatos.apiScratchPath" (get $config $key))) }}
+{{- fail (printf "config.%s is %q: with api.data.enabled=false and a read-only root (api.readOnlyRootFilesystem) the API can write only under its scratch volumes, %s. Use a path under one of them, or set api.readOnlyRootFilesystem=false" $key (get $config $key | toString) (include "automatos.apiScratchDirs" $ | splitList " " | join ", ")) }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

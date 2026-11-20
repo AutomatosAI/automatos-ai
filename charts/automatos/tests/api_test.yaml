@@ -240,7 +240,8 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "config.DOCUMENT_STORAGE_DIR: api.data sets this"
-  # With a read-only root as well, such a path stops the render (read_only_root_test.yaml).
+  # With a read-only root as well, a path outside the API's scratch volumes stops the
+  # render (read_only_root_test.yaml).
   - it: takes the document paths from config once data is off, on a writable root
     set:
       api:

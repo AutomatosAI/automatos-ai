@@ -32,7 +32,9 @@ edition:
 # Extra non-secret settings for the API and the migration Job: any name config.py
 # reads. The chart already sets the edition, the worker URL and the workspace path, and
 # rendering fails on AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY here (they go in the
-# Secret), on DOCUMENT_UPLOAD_DIR and DOCUMENT_STORAGE_DIR while api.data is on, and on
+# Secret), on DOCUMENT_UPLOAD_DIR and DOCUMENT_STORAGE_DIR while api.data is on (and,
+# while it is off under api.readOnlyRootFilesystem, on either outside the API's scratch
+# volumes), on HOME under api.readOnlyRootFilesystem (the chart sets it), and on
 # DATABASE_SSLMODE and DATABASE_SSLROOTCERT (set `database` below).
 # Quote LOCAL_REMOTE_ACCESS: YAML reads a bare `off` as false, which the API refuses.
 config:

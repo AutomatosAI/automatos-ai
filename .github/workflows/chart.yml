@@ -6,12 +6,15 @@ name: chart
 # against the Kubernetes schemas (kubeconform), and the helm-unittest suites in
 # charts/automatos/tests. Seconds, not minutes.
 #
-# `install` (PRD-280 US-100) installs the chart on a kind cluster, with every optional
-# component on and the three images built in this run, into a namespace held to the pod
+# `install` (PRD-280 US-100) installs the chart on a kind cluster, with the components
+# deploy/kind/strict-values.yaml turns on (its header lists what is on and what is not
+# exercised) and the three images built in this run, into a namespace held to the pod
 # security levels, and fails unless every pod is ready, every pod the release makes passes
-# "restricted" (the worker excepted until PRD-280 Wave 2), and every root file system is
-# read-only (deploy/kind/strict.sh). It runs only when the chart, this lane, or an image's
-# start-up changes (the paths below): it is the chart's slowest lane.
+# "restricted" (the worker excepted until PRD-280 Wave 2, for its listed violations only),
+# and every container's root file system is read-only (deploy/kind/strict.sh). It runs only
+# when the chart, this lane, or an image's start-up changes (the paths below): it is the
+# chart's slowest lane. A change to Markdown files under charts/ alone runs neither job:
+# nothing either job checks reads them.
 #
 # The longer local end-to-end test (deploy/kind/e2e.sh: upgrades, request checks, traces)
 # still runs on a person's machine.
@@ -25,6 +28,7 @@ on:
       - main
     paths:
       - "charts/**"
+      - "!charts/**/*.md"
       - ".github/workflows/chart.yml"
       - "deploy/kind/**"
       - "deploy/otel/**"
@@ -40,6 +44,7 @@ on:
   pull_request:
     paths:
       - "charts/**"
+      - "!charts/**/*.md"
       - ".github/workflows/chart.yml"
       - "deploy/kind/**"
       - "deploy/otel/**"
@@ -108,7 +113,8 @@ jobs:
   install:
     name: install under a strict namespace (kind, the images built here)
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    # About twice the expected run (15 to 25 minutes on a warm image cache).
+    timeout-minutes: 45
     env:
       KIND_VERSION: v0.33.0
       KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d

@@ -183,6 +183,7 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Acceptance Criteria:**
 - [ ] A CI lane, run only when the chart or an image's start-up changes, installs the chart into a namespace that enforces the "restricted" level.
 - [ ] It enables every optional component the chart has at the time. Each later wave adds what it builds: the worker's namespace, the network rules, the memory store.
+  - *Wave 1 (`deploy/kind/strict-values.yaml`):* on: the API with its data volume, the migration Job, the web app, the worker, the read-only roots, OpenTelemetry to a real collector with its headers from the Secret, session mode, the ingress objects (class, host, TLS, annotations; no controller), every account renamed and annotated, `WORKER_INTERNAL_TOKEN`, `ENVIRONMENT=production` and `database.sslmode` (`disable`). Not exercised: the database CA mount (the dev PostgreSQL has no TLS), `api.data.enabled=false`, an edition other than `local`, the Secret keys `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN`, `serviceAccount.create=false`, and more than one API replica.
 - [ ] Every pod becomes ready, and the lane fails if the namespace refuses one.
 - [x] The lane uses images built in the same run, not published ones.
 - [ ] Until Wave 2 lands, the worker is the one pod the lane lets run at the "baseline" level, and the lane says so in its output.

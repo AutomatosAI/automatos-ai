@@ -74,7 +74,7 @@ See [`values.yaml`](values.yaml). The ones you're most likely to change:
 |---|---|---|
 | `existingSecret` | *(required)* | The Secret above. |
 | `edition.defaultWorkspaceId` | `00000000-…-0000000000c1` | The local workspace's id. |
-| `config` | optional services off | Extra non-secret settings for the API and the Job: a name `orchestrator/config.py` reads, e.g. `S3_ENDPOINT_URL`, `QDRANT_URL`. Rendering fails on `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (they go in the Secret), on `DOCUMENT_UPLOAD_DIR` and `DOCUMENT_STORAGE_DIR` while `api.data` is on, and on `DATABASE_SSLMODE` and `DATABASE_SSLROOTCERT` (set `database.*`). Quote `LOCAL_REMOTE_ACCESS`: YAML reads a bare `off` as `false`, which the API refuses. |
+| `config` | optional services off | Extra non-secret settings for the API and the Job: a name `orchestrator/config.py` reads, e.g. `S3_ENDPOINT_URL`, `QDRANT_URL`. Rendering fails on `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (they go in the Secret), on `DOCUMENT_UPLOAD_DIR` and `DOCUMENT_STORAGE_DIR` while `api.data` is on (and, while it is off under a read-only root, on either outside the API's scratch volumes), on `HOME` under the API's read-only root (the chart sets it), and on `DATABASE_SSLMODE` and `DATABASE_SSLROOTCERT` (set `database.*`). Quote `LOCAL_REMOTE_ACCESS`: YAML reads a bare `off` as `false`, which the API refuses. |
 | `database.sslmode`, `database.caConfigMap`, `database.caKey` | empty, empty, `ca.crt` | TLS on every connection to PostgreSQL, from the API, the migration Job and the worker. `sslmode` sets `DATABASE_SSLMODE`; `verify-full` checks the server's certificate and its host name. `caConfigMap` names a ConfigMap you create in the release's namespace holding the CA that signed the server's certificate (for a managed database, the provider's bundle), under the key `caKey`: the chart mounts it read-only at `/etc/automatos/database-ca` in all three and sets `DATABASE_SSLROOTCERT` to the file. It needs `sslmode` `verify-ca` or `verify-full`. When you change the ConfigMap, the kubelet updates the mounted file after its sync delay (a minute or so); each new connection then trusts the new file, while a connection already open keeps its session until it closes, and a file with no certificate in it stops a pod at its next start. Keep the old and the new CA in one bundle until the server presents its new certificate, and restart the pods to be certain. All empty: nothing is set or mounted, and each connection behaves as before. Example: `kubectl -n automatos create configmap database-ca --from-file=ca.crt=<bundle>.pem`, then `--set database.sslmode=verify-full --set database.caConfigMap=database-ca`. |
 | `api.image.tag`, `frontend.image.tag`, `worker.image.tag` | the chart's `appVersion` (`edge`) | Pin a `sha-…` or version tag for repeatable installs (below). |
 | `api.image.digest`, `frontend.image.digest`, `worker.image.digest` | empty | `sha256:<64 hex>`: the pod runs `repository@digest`, that exact build, whatever the tag. |
@@ -103,16 +103,19 @@ Every container's root file system is read-only, so what runs stays what was rel
 
 Each component's `readOnlyRootFilesystem` value turns it off for that component alone. A path of your own in `config` (a temporary folder, a log file) has to be under one of these, or the API cannot write it.
 
-CI installs the chart into a kind cluster on every change to the chart or to an image's start-up (`.github/workflows/chart.yml`, `deploy/kind/strict.sh`): every pod must become ready, every pod the release makes must be admitted by a namespace that enforces "restricted" (the worker excepted, as above), and every container must refuse a write to its root.
+CI installs the chart into a kind cluster on every change to the chart (Markdown aside) or to an image's start-up (`.github/workflows/chart.yml`, `deploy/kind/strict.sh`), with the values in `deploy/kind/strict-values.yaml`, whose header lists what they turn on and what they do not exercise. Every pod must become ready. Every pod the release makes, the migration Job's included, must be admitted by a namespace that enforces "restricted"; the worker, as above, may be refused only for the violations `strict.sh` lists. Every container and init container of those pods must set `readOnlyRootFilesystem: true` in its spec, and in the API, the web app and the worker, which keep running, a write to the root must fail.
 
 ## Upgrading to 0.9.0
 
 - **Every container's root file system becomes read-only** (`readOnlyRootFilesystem: true`), with the scratch volumes in the table above. Anything a pod wrote on its own disk outside them now fails with "read-only file system". To keep a component as it was, set its value to `false` (`--set api.readOnlyRootFilesystem=false`, and the same for `frontend`, `worker` and `migrations`).
 - **The API's home folder, `/tmp` and `/app/logs` start empty on every new pod,** as the container's own disk already did. The API's pods now set `HOME=/home/automatos`.
-- **With `api.data.enabled=false`, `DOCUMENT_UPLOAD_DIR` or `DOCUMENT_STORAGE_DIR` in `config` stops the render** while the API's root is read-only, with a message: the API keeps those files on the scratch volumes `/app/documents` and `/tmp`. Remove them from `config`, or set `api.readOnlyRootFilesystem=false`.
-- **Your own paths in `config`** (`WORKSPACE_EXPORT_TEMP_DIR`, `AUTOMATOS_WORKSPACE`, `DECISION_SHADOW_LOG_PATH` and the like) must be under a scratch volume or a volume, or set `api.readOnlyRootFilesystem=false`.
+- **Values that rendered on 0.8.0 and now stop the render,** with a message that names the value and the way out:
+  - with `api.data.enabled=false`, a `DOCUMENT_UPLOAD_DIR` or `DOCUMENT_STORAGE_DIR` in `config` that is not under one of the API's scratch volumes (`/tmp`, `/home/automatos`, `/app/logs`, `/app/documents`; a relative path is under `/app`). Fix it with a path under one of them (`/tmp/uploads`, `/app/documents`), or with `api.readOnlyRootFilesystem=false`;
+  - `HOME` in `config`, which the chart now sets for the API. Remove it, or set `api.readOnlyRootFilesystem=false`.
+- **Your own paths in `config`** (`WORKSPACE_EXPORT_TEMP_DIR`, `AUTOMATOS_WORKSPACE`, `DECISION_SHADOW_LOG_PATH` and the like) must be under a scratch volume or a volume, or set `api.readOnlyRootFilesystem=false`. The chart checks only the two document paths.
 - **The migration Job gets an `emptyDir` at `/tmp`,** and the worker one at `/tmp` and one at `/home/worker`.
-- **`helm upgrade --reuse-values`** keeps the values of the release as it was, without these new keys: an unset value means a writable root, as before.
+- **Start-up can take longer.** Python cannot write compiled files (`__pycache__`) to a read-only root, so a module the image does not ship compiled is compiled in memory at every start. The API's image ships its libraries and its start-up modules compiled, and its start-up probe allows five minutes (60 checks, 5 s apart); the worker's image ships its libraries compiled, not its own code.
+- **`helm upgrade --reuse-values` does not turn the read-only roots on.** It renders with the values of the release as it was, the old chart's defaults included, so the four new values are unset and each root stays writable as on 0.8.0. `--reset-then-reuse-values` (Helm 3.14 and later) takes the new chart's defaults and then your release's values over them, so the roots become read-only. To be certain either way, set the four values explicitly: `--set api.readOnlyRootFilesystem=true --set frontend.readOnlyRootFilesystem=true --set worker.readOnlyRootFilesystem=true --set migrations.readOnlyRootFilesystem=true` (or `false`).
 
 ## Upgrading to 0.7.0
 
@@ -152,9 +155,10 @@ install, pin one build instead, and the chart pulls it `IfNotPresent`:
   them with `helm lint` and a kubeconform schema check
   (`.github/workflows/chart.yml`).
 - **An install under a strict namespace, in CI:** `chart.yml`'s `install` job builds
-  the three images, installs the chart with every optional component on into a kind
-  cluster (`deploy/kind/strict.sh`, `deploy/kind/strict-values.yaml`) and checks the
-  pod security level and the read-only roots (above).
+  the three images, installs the chart into a kind cluster with the values in
+  `deploy/kind/strict-values.yaml` (its header lists what is on and what is not
+  exercised), and checks the pod security level and the read-only roots (above), with
+  `deploy/kind/strict.sh`.
 - **End to end, on a throwaway kind cluster:** `deploy/kind/e2e.sh cycle 2`
   creates a cluster, loads the images (the API built from your checkout), installs
   with dev PostgreSQL and Redis, runs the checks, upgrades, runs them again and
