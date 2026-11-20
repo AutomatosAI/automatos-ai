@@ -86,6 +86,9 @@ class LLMConfig:
     timeout: Optional[int] = None  # Request timeout in seconds
     output_ceiling: Optional[int] = None  # The model's own output maximum, when known (F196)
     endpoint_from_key: bool = False  # base_url is a workspace key's own endpoint: user input (#873)
+    # PRD-278 US-103: sign with the install's own role (the SDK's default chain), set only when the
+    # key resolver answered with the install's workload identity (key_resolver.is_workload_identity).
+    workload_identity: bool = False
 
 
 def request_max_tokens(config: Any) -> int:

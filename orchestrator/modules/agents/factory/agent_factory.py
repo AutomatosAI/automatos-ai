@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core.llm import LLMConfig, LLMManager, LLMProvider, LLMResponse, create_llm_manager
 from core.llm.defaults import DEFAULT_MAX_OUTPUT_TOKENS
-from core.llm.key_resolver import ResolvedKey, resolve_provider_key  # noqa: F401  # ResolvedKey: re-exported
+from core.llm.key_resolver import ResolvedKey, carries_calls, is_workload_identity, resolve_provider_key  # noqa: F401  # ResolvedKey: re-exported
 from core.models import Agent, Base, PriorityLevel, Skill
 from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
 from core.security.memory_audience import reads_memory_as_its_agent
@@ -505,11 +505,12 @@ class AgentFactory:
             presence_penalty=getattr(model_config, 'presence_penalty', None),
             stop=getattr(model_config, 'stop', None),
             timeout=getattr(model_config, 'timeout', None),
+            workload_identity=is_workload_identity(resolved),
         )
 
-        # Bedrock uses IAM auth
+        # Bedrock uses IAM auth. On the pod's role (PRD-278) the server holds no secret to give.
         if effective_provider in ("aws_bedrock", "bedrock"):
-            llm_config.secret_key = config.AWS_SECRET_ACCESS_KEY
+            llm_config.secret_key = None if config.AWS_USE_WORKLOAD_IDENTITY else config.AWS_SECRET_ACCESS_KEY
             llm_config.base_url = config.AWS_REGION or "us-east-1"
 
         self.logger.info(
@@ -966,7 +967,7 @@ class AgentFactory:
         )
 
         # Fallback: if direct provider has no credential, try OpenRouter
-        if (not resolved or not resolved.api_key) and provider_str != "openrouter":
+        if not carries_calls(resolved) and provider_str != "openrouter":
             self.logger.warning(
                 f"No credential for provider '{provider_str}' — falling back to OpenRouter for '{model_id_str}'"
             )
@@ -976,7 +977,7 @@ class AgentFactory:
             resolved = await self._resolve_api_key(
                 provider_str, agent_name, workspace_id=effective_ws_id, own_keys_only=own_only,
             )
-        if own_only and (not resolved or not resolved.api_key):
+        if own_only and not carries_calls(resolved):
             from services.credits.routing import paused_error
 
             raise paused_error(unfunded)
@@ -1001,6 +1002,7 @@ class AgentFactory:
             presence_penalty=llm_config_dict.get("presence_penalty"),
             stop=llm_config_dict.get("stop"),
             timeout=llm_config_dict.get("timeout"),
+            workload_identity=is_workload_identity(resolved),
         )
         llm_manager = LLMManager(
             config=llm_config,
