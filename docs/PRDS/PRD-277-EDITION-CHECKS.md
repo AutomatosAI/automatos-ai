@@ -10,7 +10,7 @@
 
 **Kinds:** **C** compares `config.AUTH_EDITION`. **H** reads `IS_LOCAL_EDITION` or `IS_SAAS_EDITION`. **P** passes `config.AUTH_EDITION` to a function that compares it. **F** compares an `edition` value it was passed. **R** reports the edition's name and switches nothing.
 
-**Count.** The PRD says 91. This sweep finds **98 lines in `orchestrator/` Python**: 80 that switch behaviour (C, H and F), 11 that pass the value on (P) and 7 that only report the name (R). That includes the 9 lines inside `config.py` itself. Outside `config.py` and the one migration, **71** lines switch behaviour. The PRD's figure was a grep at `abcc3f813`, and the same C and H greps give the same totals at that commit and at this one, so the difference from 91 is in what was counted (indirect P and F checks, `config.py`'s own lines), not in new code. Add **1** shell line (`orchestrator/docker-entrypoint.sh`), **1** line in `services/`, and **83** lines in `frontend/`.
+**Count.** The PRD says 91. This sweep finds **99 lines in `orchestrator/` Python**: 81 that switch behaviour (C, H and F), 11 that pass the value on (P) and 7 that only report the name (R). That includes the 9 lines inside `config.py` itself. Outside `config.py` and the one migration, **72** lines switch behaviour. The PRD's figure was a grep at `abcc3f813`, and the same C and H greps give the same totals at that commit and at this one, so the difference from 91 is in what was counted (indirect P and F checks, `config.py`'s own lines), not in new code. Add **1** shell line (`orchestrator/docker-entrypoint.sh`), **1** line in `services/`, and **83** lines in `frontend/`.
 
 ## The capabilities
 
@@ -101,7 +101,7 @@ A migration is history. Rewriting it to read a capability changes what an old re
 | 37 | `core/llm/providers.py:259` | F | A `byok_only` provider (NVIDIA) may hold a platform key | `billing` (on: Automatos would be reselling the key) | allowed | refused | allowed |
 | 38 | `core/llm/providers.py:419` | R | `edition` in `GET /api/keys/providers`, and passed to row 37 | (name) | `local` | `saas` | `enterprise` |
 | 39 | `core/llm/usage_tracker.py:76` | C | A usage row with no workspace is booked to `DEFAULT_WORKSPACE_ID` | `multi_person` | booked to it | dropped | dropped |
-| 40 | `core/local_projects_mount.py:50` | H | Reads of `projects/` are served from the projects mount's workspace | `session_mode` | mounted when set | never | never |
+| 40 | `core/local_projects_mount.py:50` | H | Reads of `projects/` are served from the projects mount's workspace, the operator's own folder | `operator_is_user` | mounted when set | never | **For Gerard** (G-2) |
 | 41 | `core/media_render_quota.py:104` | C | Monthly render quota | `billing` | none | from plan | none |
 | 42 | `core/media_render_quota.py:218` | C | Plan label on the render quota | `billing` | none | plan name | none |
 | 43 | `core/observability/otel.py:257` | R | `automatos.edition` trace attribute | (name) | `local` | `saas` | `enterprise` |
@@ -162,9 +162,10 @@ A migration is history. Rewriting it to read a capability changes what an old re
 | 78 | `services/marketplace_cloud/pull.py:128` | H | Cloud sync enabled | `calls_automatos_cloud` | when `AUTOMATOS_CLOUD_URL` is set | never | only when switched on (D-12) |
 | 79 | `services/mobile/discovery.py:166` | H | Discovery's `auth.modes` and `pairing` blocks | `sign_in` | `["device"]`, pairing by mode | `["clerk"]` | `["oidc"]`, pairing by setting (FR-23; Wave 6) |
 | 80 | `services/mobile/discovery.py:192` | R | `edition` in the discovery document | (name) | `local` | `saas` | `enterprise` |
+| 80a | `services/mobile/pairing.py:97` | H | Creating or redeeming a pairing code is refused (`_require_local_edition`) | `device_pairing` | allowed | refused | allowed when pairing is on (D-7; Wave 6) |
 | 81 | `services/mobile/remote_access.py:83` | F | `LOCAL_REMOTE_ACCESS` boot decision (refuse, warn, start) | `anonymous_operator` | applies | skipped | skipped (no anonymous lane to protect) |
-| 82 | `services/mobile/remote_access.py:119` | F | Remote access closes the anonymous lane | `anonymous_operator` | closed when `paired` | open (REQUIRE_AUTH governs) | open (REQUIRE_AUTH forced true governs) |
-| 83 | `services/mobile/urls.py:50` | H | With no `PUBLIC_API_HOST`, phones are told the request's own base URL instead of the hosted API | `hosts_automatos_cloud` | request's URL | hosted API host | request's URL (never point phones at the hosted API) |
+| 82 | `services/mobile/remote_access.py:119` | F | Remote access closes the anonymous lane | `anonymous_operator` | closed when `paired` | not closed here: an anonymous request is never the operator, and `REQUIRE_AUTH` decides whether it is served | not closed here: `REQUIRE_AUTH` is forced on, so it is refused |
+| 83 | `services/mobile/urls.py:50` | H | With no `PUBLIC_API_HOST`, phones are told the request's own base URL instead of the hosted API | `hosts_automatos_cloud` | request's URL | `PUBLIC_API_HOST`, whatever it holds | request's URL (never point phones at the hosted API) |
 | 84 | `services/onboarding_state.py:579` | H | Stage after the payoff | `billing` | `completed` | `powerup` | `completed` |
 | 85 | `services/push/consent.py:78` | H | `expo_push_allowed` | `push_needs_consent` | once agreed | always | **For Gerard** |
 | 86 | `services/push/fanout.py:174` | H | Which device kind receives a push | `device_pairing` | `paired` | `clerk` | `paired` now (D-7); `oidc` too after US-603 |
@@ -262,7 +263,7 @@ These are the rows where the enterprise answer is not obvious from the PRD or it
 - A. Consent required, as `local`: an enterprise install sends nothing to Expo until its operator agrees. `push_needs_consent` = yes.
 - B. Always on, as `saas`: phones get notifications from the first pairing. `push_needs_consent` = no.
 
-**G-2. Operator detail and fix commands** (rows 5, 47, 51, 52, 89). On `local` the person using the app runs the server: they see `docker compose` commands to start the worker or the renderer, the host and latency each readiness probe reached, web access on by default, and generated documents copied into their own deliverables folder. An enterprise install runs from the chart in the customer's cloud, and its users are staff, not the operator.
+**G-2. Operator detail and fix commands** (rows 5, 40, 47, 51, 52, 89). On `local` the person using the app runs the server: they see `docker compose` commands to start the worker or the renderer, the host and latency each readiness probe reached, web access on by default, and generated documents copied into their own deliverables folder. An enterprise install runs from the chart in the customer's cloud, and its users are staff, not the operator.
 - A. All off, as `saas`: staff see the hosted messages, no host detail, web access off until set, no `documents/` copy. `operator_is_user` = no.
 - B. All on, as `local`. `operator_is_user` = yes. The compose commands would be wrong on a chart install.
 - C. Split: answer each row separately (for example web access on, documents copied, but no compose commands and no host detail). `operator_is_user` then splits into one capability per answer.
@@ -312,8 +313,8 @@ Each pull request moves the call sites of one area to `core.editions` and delete
 
 1. **Billing and plans:** rows 12, 14 to 16, 30, 37, 41, 42, 53, 57, 58, 60, 62, 68 to 77, 84, 90: 25 call sites. `funding_for` and `platform_key_allowed` take a capability instead of an edition, which also changes row 38. About 120 changed lines.
 2. **Automatos Cloud, host and client:** rows 13, 17 to 21, 28, 29, 67, 78, 83, 91, 94 to 96: 15 call sites, plus rows 10 and 11 if the migration is not exempted. About 70 lines.
-3. **Auth and the operator:** rows 22, 23, 25, 27, 32 to 35, 39, 48, 54, 55, 59, 63, 64, 79, 81, 82, 86, 87, 92, 93: 22 call sites. `remote_access` and `board_consent` take a capability. About 110 lines. Needs Dave's review: it touches authentication.
-4. **Session mode:** rows 40, 46, 61, 65, 66, and S1 with a `session_mode` field in `/health`: 6 call sites, about 30 lines. Small enough to ride with pull request 3.
+3. **Auth and the operator:** rows 22, 23, 25, 27, 32 to 35, 39, 48, 54, 55, 59, 63, 64, 79, 80a, 81, 82, 86, 87, 92, 93: 23 call sites. `remote_access` and `board_consent` take a capability. About 110 lines. Needs Dave's review: it touches authentication.
+4. **Session mode:** rows 46, 61, 65, 66, and S1 with a `session_mode` field in `/health`: 5 call sites, about 30 lines. Small enough to ride with pull request 3.
 5. **The guard and the helpers:** the "no raw comparison" test (US-102), deleting `IS_LOCAL_EDITION` / `IS_SAAS_EDITION` once nothing reads them, and one accessor for the R rows that report the name. About 60 lines plus the test.
 6. **US-103:** the `enterprise` column, the For Gerard rows once answered, and `config.py`'s own rows 1, 2 and 5 to 9, which are the boot guards US-103 rewrites. `config.py` is over the 800-line limit, so those lines change in place and the file does not grow.
 
