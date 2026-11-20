@@ -10,9 +10,10 @@ falling through a ``== "local"`` check.
 edition today and the one capability it maps to. Call sites move here by directory,
 in later pull requests. Each value below is today's behaviour for that edition.
 
-An edition with no row is refused (``UnknownEdition``), never given another
-edition's answers. ``config.py`` already turns an unknown ``AUTH_EDITION`` into
-``saas`` before anything reads it here, so a running install never hits the refusal.
+``capabilities_for`` is strict: an edition with no row is refused (``UnknownEdition``),
+never given another edition's answers. ``current`` follows the flag's own rule
+(PRD-277 §5.1, ``config.py``): the name is trimmed and lower-cased, and a value with
+no row is ``saas``, so a value a test patches in decides what the old comparisons did.
 
 Importing this module reads no setting and imports no config, so ``config.py`` can
 use it while it is being built.
@@ -140,11 +141,13 @@ def current() -> EditionCapabilities:
     """The running edition's capabilities.
 
     Reads ``config.AUTH_EDITION`` on every call rather than once at import, so a test
-    that patches the edition sees the matching capabilities.
+    that patches the edition sees the matching capabilities. As ``config.py`` does at
+    load, the name is trimmed and lower-cased and a value with no row is ``saas``.
     """
     from config import config
 
-    return capabilities_for(config.AUTH_EDITION)
+    name = str(getattr(config, "AUTH_EDITION", "") or "").strip().lower()
+    return CAPABILITIES.get(name, CAPABILITIES[EDITION_SAAS])
 
 
 __all__ = [

@@ -157,11 +157,7 @@ def first_factor_is_fresh(claims: Any, max_age_minutes: int, now: float) -> bool
 
 
 def _skips_step_up() -> bool:
-    """True where nobody signs in again (``step_up`` is ``skip``); an edition with no row enforces it."""
-    try:
-        return editions.current().step_up == editions.STEP_UP_SKIP
-    except editions.UnknownEdition:
-        return False
+    return editions.current().step_up == editions.STEP_UP_SKIP
 
 
 def _refuse_without_person(auth_type: Any) -> HTTPException:
