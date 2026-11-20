@@ -2459,11 +2459,11 @@ class ApiClient {
     console.log('[Upload] Uploading DIRECTLY to backend:', url)
     console.log('[Upload] FormData entries:', Array.from(formData.entries()).map(([k, v]) => [k, typeof v === 'string' ? v : 'File']))
 
-    const response = await fetch(url, withSession({
+    const response = await fetch(url, {
       method: 'POST',
       headers: headers,
       body: formData
-    }))
+    })
 
     console.log('[Upload] Response status:', response.status, response.statusText)
 

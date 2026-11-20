@@ -49,8 +49,7 @@ import 'prismjs/components/prism-markdown'
 import 'prismjs/components/prism-docker'
 import { MarkdownView } from '@/components/shared/markdown-view'
 import { apiClient } from '@/lib/api-client'
-import { apiFileUrl, NOT_AN_API_FILE } from '@/lib/api-file-url'
-import { withSession } from '@/lib/enterprise/session-transport'
+import { apiFileCredentials, apiFileUrl, NOT_AN_API_FILE } from '@/lib/api-file-url'
 
 /**
  * Fetch a URL with Automatos Bearer auth. Relative URLs are prefixed with
@@ -62,9 +61,7 @@ export async function authenticatedArrayBufferFetch(url: string): Promise<ArrayB
   const apiUrl = isAbsolute ? null : apiFileUrl(apiClient.getBaseUrl(), url)  // F352: the token goes to the API only
   if (!isAbsolute && !apiUrl) throw new Error(NOT_AN_API_FILE)
   const headers = apiUrl ? await apiClient.getAuthHeaders() : {}
-  // PRD-277: an API file goes with the session in enterprise (withSession); an absolute address as before.
-  const init: RequestInit = isAbsolute ? { headers, credentials: 'include' } : withSession({ headers, credentials: 'omit' })
-  const resp = await fetch(apiUrl ?? url, init)
+  const resp = await fetch(apiUrl ?? url, { headers, credentials: apiFileCredentials(isAbsolute) })
   if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`)
   return resp.arrayBuffer()
 }
@@ -106,7 +103,7 @@ export function useAuthenticatedBlobUrl(url: string | undefined, forcedType?: st
         const fullUrl = apiFileUrl(apiClient.getBaseUrl(), url)
         if (!fullUrl) throw new Error(NOT_AN_API_FILE)
         const headers = await apiClient.getAuthHeaders()
-        const resp = await fetch(fullUrl, withSession({ headers }))
+        const resp = await fetch(fullUrl, { headers })
         if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`)
         const fetched = await resp.blob()
         const blob = forcedType ? new Blob([fetched], { type: forcedType }) : fetched

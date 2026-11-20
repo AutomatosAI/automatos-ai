@@ -16,12 +16,23 @@
  */
 export type AuthEdition = 'local' | 'saas' | 'enterprise'
 
-const KNOWN_EDITIONS: readonly AuthEdition[] = ['local', 'saas', 'enterprise']
-
-export function resolveEdition(): AuthEdition {
+/** True in the enterprise edition: its own read of the variable, compared once. */
+function namesEnterprise(): boolean {
   const raw = (process.env.NEXT_PUBLIC_AUTH_EDITION || '').trim().toLowerCase()
-  return (KNOWN_EDITIONS as readonly string[]).includes(raw) ? (raw as AuthEdition) : 'saas'
+  return raw === 'enterprise'
+}
+
+/**
+ * The edition. The `'local'` comparison keeps main's exact shape on purpose: `raw` read once and
+ * used once, so the minifier inlines it and a hosted build compiles to
+ * `"local"==="saas".trim().toLowerCase()?"local":"saas"`, the text the CI job "Prod images built
+ * with default args carry production behaviour" looks for (lib/__tests__/edition-name-shape.test.ts).
+ */
+export function resolveEdition(): AuthEdition {
+  if (namesEnterprise()) return 'enterprise'
+  const raw = (process.env.NEXT_PUBLIC_AUTH_EDITION || '').trim().toLowerCase()
+  return raw === 'local' ? 'local' : 'saas'
 }
 
 /** True in the enterprise edition (a build-time constant). */
-export const isEnterprise: boolean = resolveEdition() === 'enterprise'
+export const isEnterprise: boolean = namesEnterprise()

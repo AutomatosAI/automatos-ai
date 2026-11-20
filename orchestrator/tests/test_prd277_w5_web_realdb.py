@@ -172,7 +172,8 @@ def test_me_after_the_session_ended_is_session_ended(install):
     person = _person(install.db)
     install.db.commit()
     headers = _signed_in(install.db, person)
-    install.db.execute(text("UPDATE auth_sessions SET revoked_at = now() WHERE user_id = :u"), {"u": person})
+    # Ended as the product ends it: the revoke sets the time and the reason together.
+    assert sessions.revoke_sessions_of(install.db, person, sessions.REVOKED_BY_ADMIN) == 1
     install.db.commit()
 
     answer = install.client.get("/api/v1/auth/me", headers=headers)
