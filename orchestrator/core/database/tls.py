@@ -25,14 +25,25 @@ With neither setting, nothing is added to any connection, so each connects as it
 before the settings existed. The main engine keeps its own default: in production,
 ``sslmode=require`` when its address names no ``sslmode`` (``main_engine_url``).
 
-No message here quotes an address, a password or the CA file's path.
+``database_tls()`` also checks that the CA file is a readable file holding at least one
+certificate, so a missing or unusable file stops start-up (the main engine's module calls it
+on import) rather than the first connection.
+
+The asyncpg context is cached by the CA file's path, size and modification time: a file
+replaced at the same path (a ConfigMap update) is loaded again on the next connection, as
+libpq loads ``sslrootcert`` for every connection.
+
+The messages this module raises never quote an address, a password or the CA file's path.
+A driver's own errors are its own, and may.
 """
 from __future__ import annotations
 
+import os
 import ssl
+import stat
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Dict, Mapping, Optional, Union
+from typing import Any, Dict, Mapping, Optional, Tuple, Union
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from sqlalchemy import create_engine
@@ -48,8 +59,9 @@ SERVER_VERIFYING_MODE = "verify-full"
 PRODUCTION_ENVIRONMENT = "production"
 PRODUCTION_DEFAULT_SSLMODE = "require"
 DEFAULT_ENVIRONMENT = "development"
-# One SSLContext per CA file and host-name rule, reused by every asyncpg connection.
+# One SSLContext per CA file version and host-name rule, reused by every asyncpg connection.
 _CONTEXT_CACHE_SIZE = 4
+_UNUSABLE_CA = "DATABASE_SSLROOTCERT must name a readable file holding at least one PEM certificate"
 
 AsyncpgSSL = Union[str, ssl.SSLContext]
 
@@ -102,19 +114,47 @@ class DatabaseTLS:
         if self.sslmode is None:
             return {}
         if self.sslrootcert:
-            return {"ssl": _verifying_context(self.sslrootcert, self.verifies_server)}
+            return {"ssl": _current_context(self.sslrootcert, self.verifies_server)}
         return {"ssl": self.sslmode}
 
 
+def _ca_file_version(cafile: str) -> Tuple[int, int]:
+    """The CA file's modification time (ns) and size, from one ``os.stat``.
+
+    A file replaced at the same path has a new version, so the context is built again.
+    Raises ``DatabaseTLSConfigError`` when the path is not a regular file.
+    """
+    try:
+        found = os.stat(cafile)
+    except OSError:
+        raise DatabaseTLSConfigError(_UNUSABLE_CA) from None
+    if not stat.S_ISREG(found.st_mode):
+        raise DatabaseTLSConfigError(_UNUSABLE_CA)
+    return found.st_mtime_ns, found.st_size
+
+
+def _current_context(cafile: str, check_hostname: bool) -> ssl.SSLContext:
+    """The context for the CA file as it is on disk now (see ``_verifying_context``)."""
+    mtime_ns, size = _ca_file_version(cafile)
+    return _verifying_context(cafile, mtime_ns, size, check_hostname)
+
+
 @lru_cache(maxsize=_CONTEXT_CACHE_SIZE)
-def _verifying_context(cafile: str, check_hostname: bool) -> ssl.SSLContext:
+def _verifying_context(cafile: str, mtime_ns: int, size: int, check_hostname: bool) -> ssl.SSLContext:
     """A client context that trusts only ``cafile`` and requires the server's certificate.
 
-    ``create_default_context`` with a ``cafile`` loads that file and not the system's CAs,
-    as libpq's ``sslrootcert`` does, and starts with ``CERT_REQUIRED`` and host-name checks
-    on. ``verify-ca`` turns the host-name check off; the certificate stays required.
+    ``mtime_ns`` and ``size`` are part of the cache key only. ``create_default_context``
+    with a ``cafile`` loads that file and not the system's CAs, as libpq's ``sslrootcert``
+    does, and starts with ``CERT_REQUIRED`` and host-name checks on. ``verify-ca`` turns the
+    host-name check off; the certificate stays required. A file that holds no certificate
+    raises ``DatabaseTLSConfigError``.
     """
-    context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=cafile)
+    try:
+        context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=cafile)
+    except OSError:  # ssl.SSLError included: unreadable, or no certificate in it
+        raise DatabaseTLSConfigError(_UNUSABLE_CA) from None
+    if not context.cert_store_stats().get("x509"):
+        raise DatabaseTLSConfigError(_UNUSABLE_CA)
     context.check_hostname = check_hostname
     return context
 
@@ -136,8 +176,15 @@ def parse_database_tls(sslmode: Optional[str], sslrootcert: Optional[str]) -> Da
 
 
 def database_tls() -> DatabaseTLS:
-    """``DATABASE_SSLMODE`` and ``DATABASE_SSLROOTCERT`` from config, checked."""
-    return parse_database_tls(config.DATABASE_SSLMODE, config.DATABASE_SSLROOTCERT)
+    """``DATABASE_SSLMODE`` and ``DATABASE_SSLROOTCERT`` from config, checked.
+
+    A CA file must be a readable file holding at least one certificate; it is loaded once
+    per version of the file (``_verifying_context``), so later calls only ``stat`` it.
+    """
+    found = parse_database_tls(config.DATABASE_SSLMODE, config.DATABASE_SSLROOTCERT)
+    if found.sslrootcert:
+        _current_context(found.sslrootcert, found.verifies_server)
+    return found
 
 
 def main_engine_url(url: str, environment: Optional[str], tls: DatabaseTLS) -> str:

@@ -8,8 +8,12 @@ database is secured, and each driver gets it in the form it takes.
 * with ``verify-full`` and a CA file, libpq gets ``sslmode`` and ``sslrootcert`` (psycopg2,
   and SQLAlchemy through ``connect_args``), and asyncpg gets an ``ssl.SSLContext`` that
   requires the certificate, trusts that CA and checks the host name;
-* a mode libpq doesn't know, or a CA file without a mode that checks it, stops start-up
-  with a message that names the setting and never the file's path.
+* a mode libpq doesn't know, a CA file without a mode that checks it, or a CA file that is
+  missing or holds no certificate, stops start-up with a message that names the setting
+  and never the file's path;
+* a CA file replaced at the same path is loaded again for the next asyncpg connection.
+
+The CA files are made at run time (``tests/helpers_prd278_w3_ca.py``).
 
 No database: the drivers' ``connect`` and SQLAlchemy's ``create_engine`` are recorded.
 """
@@ -17,19 +21,19 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import os
 import ssl
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import certifi
 import pytest
 
 from config import config
 from core.database import tls
+from tests.helpers_prd278_w3_ca import write_ca_bundle
 
 ORCH = Path(__file__).resolve().parents[1]
-# A real PEM bundle on disk, so the asyncpg context is built from an actual CA file.
-CA_FILE = certifi.where()
+# A path that is never read: the settings are refused before the file is looked at.
 CA_IN_POD = "/etc/automatos/database-ca/ca.crt"
 
 
@@ -49,6 +53,12 @@ def settings(monkeypatch):
         monkeypatch.setattr(config, "DATABASE_SSLROOTCERT", sslrootcert)
 
     return apply
+
+
+@pytest.fixture
+def ca_file(tmp_path) -> str:
+    """A CA certificate made for this test, as a PEM file's path."""
+    return str(write_ca_bundle(tmp_path / "ca.crt"))
 
 
 # ── neither setting: every path as before ────────────────────────────────────
@@ -121,32 +131,32 @@ def test_create_app_engine_passes_the_callers_arguments_unchanged_with_neither_s
 # ── verify-full with a CA file ───────────────────────────────────────────────
 
 
-def test_verify_full_with_a_ca_gives_libpq_both_keywords(settings):
-    settings(sslmode="verify-full", sslrootcert=CA_IN_POD)
+def test_verify_full_with_a_ca_gives_libpq_both_keywords(settings, ca_file):
+    settings(sslmode="verify-full", sslrootcert=ca_file)
     found = tls.database_tls()
-    assert found.libpq_params() == {"sslmode": "verify-full", "sslrootcert": CA_IN_POD}
+    assert found.libpq_params() == {"sslmode": "verify-full", "sslrootcert": ca_file}
     assert found.configured and found.checks_certificate and found.verifies_server
 
 
-def test_the_settings_win_over_the_same_keys_and_the_callers_dict_is_not_changed(settings):
-    settings(sslmode="verify-full", sslrootcert=CA_IN_POD)
+def test_the_settings_win_over_the_same_keys_and_the_callers_dict_is_not_changed(settings, ca_file):
+    settings(sslmode="verify-full", sslrootcert=ca_file)
     given = {"host": "db", "sslmode": "disable"}
     merged = tls.database_tls().with_libpq_params(given)
-    assert merged == {"host": "db", "sslmode": "verify-full", "sslrootcert": CA_IN_POD}
+    assert merged == {"host": "db", "sslmode": "verify-full", "sslrootcert": ca_file}
     assert given == {"host": "db", "sslmode": "disable"}
 
 
-def test_create_app_engine_puts_the_settings_in_connect_args_over_the_callers(settings, monkeypatch):
-    settings(sslmode="verify-full", sslrootcert=CA_IN_POD)
+def test_create_app_engine_puts_the_settings_in_connect_args_over_the_callers(settings, monkeypatch, ca_file):
+    settings(sslmode="verify-full", sslrootcert=ca_file)
     recorder = _EngineRecorder()
     monkeypatch.setattr(tls, "create_engine", recorder)
     tls.create_app_engine(_address(), connect_args={"keepalives": 1, "sslmode": "prefer"})
     ((url, kwargs),) = recorder.calls
     assert url == _address()
-    assert kwargs["connect_args"] == {"keepalives": 1, "sslmode": "verify-full", "sslrootcert": CA_IN_POD}
+    assert kwargs["connect_args"] == {"keepalives": 1, "sslmode": "verify-full", "sslrootcert": ca_file}
 
 
-def test_psycopg2_receives_the_settings_over_the_addresses_own_sslmode(settings, monkeypatch):
+def test_psycopg2_receives_the_settings_over_the_addresses_own_sslmode(settings, monkeypatch, ca_file):
     """End to end through SQLAlchemy: the address's query becomes connect keywords, and
     connect_args, where the settings are, replace them. psycopg2.connect is recorded and
     refuses, so nothing is dialled."""
@@ -160,17 +170,17 @@ def test_psycopg2_receives_the_settings_over_the_addresses_own_sslmode(settings,
         raise RuntimeError("recorded; no connection is made")
 
     monkeypatch.setattr(psycopg2, "connect", refuse)
-    settings(sslmode="verify-full", sslrootcert=CA_IN_POD)
+    settings(sslmode="verify-full", sslrootcert=ca_file)
     engine = tls.create_app_engine(_address("?sslmode=disable"), poolclass=NullPool)
     with pytest.raises(Exception):
         engine.connect()
     assert seen, "psycopg2.connect was not reached"
-    assert seen[0]["sslmode"] == "verify-full" and seen[0]["sslrootcert"] == CA_IN_POD
+    assert seen[0]["sslmode"] == "verify-full" and seen[0]["sslrootcert"] == ca_file
     assert seen[0]["host"] == "db.example.invalid"
 
 
-def test_verify_full_with_a_ca_gives_asyncpg_a_context_that_checks_the_certificate_and_host(settings):
-    settings(sslmode="verify-full", sslrootcert=CA_FILE)
+def test_verify_full_with_a_ca_gives_asyncpg_a_context_that_checks_the_certificate_and_host(settings, ca_file):
+    settings(sslmode="verify-full", sslrootcert=ca_file)
     context = tls.database_tls().asyncpg_kwargs()["ssl"]
     assert isinstance(context, ssl.SSLContext)
     assert context.verify_mode == ssl.CERT_REQUIRED
@@ -178,15 +188,15 @@ def test_verify_full_with_a_ca_gives_asyncpg_a_context_that_checks_the_certifica
     assert context.get_ca_certs(), "the CA file was loaded"
 
 
-def test_verify_ca_with_a_ca_checks_the_certificate_but_not_the_host(settings):
-    settings(sslmode="verify-ca", sslrootcert=CA_FILE)
+def test_verify_ca_with_a_ca_checks_the_certificate_but_not_the_host(settings, ca_file):
+    settings(sslmode="verify-ca", sslrootcert=ca_file)
     found = tls.database_tls()
     context = found.asyncpg_kwargs()["ssl"]
     assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname is False
     assert found.checks_certificate and not found.verifies_server
 
 
-def test_the_asyncpg_context_trusts_only_the_named_ca(settings, monkeypatch):
+def test_the_asyncpg_context_trusts_only_the_named_ca(settings, monkeypatch, ca_file):
     """Like libpq's sslrootcert: the context is made from that file, not the system's CAs."""
     made = []
     real = ssl.create_default_context
@@ -197,10 +207,10 @@ def test_the_asyncpg_context_trusts_only_the_named_ca(settings, monkeypatch):
 
     tls._verifying_context.cache_clear()
     monkeypatch.setattr(tls.ssl, "create_default_context", spy)
-    settings(sslmode="verify-full", sslrootcert=CA_FILE)
+    settings(sslmode="verify-full", sslrootcert=ca_file)
     tls.database_tls().asyncpg_kwargs()
     tls._verifying_context.cache_clear()
-    assert made == [(ssl.Purpose.SERVER_AUTH, {"cafile": CA_FILE})]
+    assert made == [(ssl.Purpose.SERVER_AUTH, {"cafile": ca_file})], "built once, from that file only"
 
 
 @pytest.mark.parametrize("mode", ["disable", "allow", "prefer", "require", "verify-ca", "verify-full"])
@@ -237,6 +247,51 @@ def test_a_ca_without_a_checking_mode_is_refused_without_quoting_its_path(settin
     assert CA_IN_POD not in str(refused.value)
 
 
+def _no_certificate(tmp_path) -> str:
+    path = tmp_path / "not-a-ca.pem"
+    path.write_text("this file holds no certificate\n", encoding="utf-8")
+    return str(path)
+
+
+def _empty(tmp_path) -> str:
+    path = tmp_path / "empty.pem"
+    path.write_bytes(b"")
+    return str(path)
+
+
+@pytest.mark.parametrize("make_path", [
+    lambda tmp_path: str(tmp_path / "missing.crt"),
+    lambda tmp_path: str(tmp_path),
+    _no_certificate,
+    _empty,
+], ids=["missing", "a-directory", "no-certificate", "empty"])
+@pytest.mark.parametrize("mode", ["verify-ca", "verify-full"])
+def test_an_unusable_ca_file_stops_start_up_without_quoting_its_path(settings, tmp_path, make_path, mode):
+    path = make_path(tmp_path)
+    settings(sslmode=mode, sslrootcert=path)
+    with pytest.raises(tls.DatabaseTLSConfigError, match="DATABASE_SSLROOTCERT must name a readable file") as refused:
+        tls.database_tls()
+    assert path not in str(refused.value)
+    # The OS error, which names the path, is not chained into the traceback either.
+    assert refused.value.__cause__ is None
+    assert refused.value.__context__ is None or refused.value.__suppress_context__
+
+
+def test_a_ca_replaced_at_the_same_path_gives_the_next_asyncpg_connection_a_new_context(settings, tmp_path):
+    """A ConfigMap update replaces the file under a running process: the next connection
+    trusts the new file, as libpq would."""
+    path = write_ca_bundle(tmp_path / "ca.crt", ["first-ca"])
+    settings(sslmode="verify-full", sslrootcert=str(path))
+    first = tls.database_tls().asyncpg_kwargs()["ssl"]
+    assert tls.database_tls().asyncpg_kwargs()["ssl"] is first, "an unchanged file reuses its context"
+    before = os.stat(path)
+    write_ca_bundle(path, ["first-ca", "second-ca"])
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
+    second = tls.database_tls().asyncpg_kwargs()["ssl"]
+    assert second is not first
+    assert len(first.get_ca_certs()) == 1 and len(second.get_ca_certs()) == 2
+
+
 def test_the_two_settings_are_config_settings():
     import json
 
@@ -246,8 +301,7 @@ def test_the_two_settings_are_config_settings():
 
 
 def test_the_unused_config_database_url_helper_is_gone():
-    """Config.get_database_url() skipped TLS by a substring match on the address; the
-    main engine and core/database/tls.py decide it now."""
+    """Config.get_database_url() is gone; the main engine and core/database/tls.py decide TLS."""
     assert not hasattr(type(config), "get_database_url")
 
 
@@ -277,10 +331,10 @@ def test_the_bm25_leg_connects_with_the_settings(settings, mode, rootcert, expec
     assert kwargs == expected
 
 
-def test_the_chunk_hydration_connects_with_a_verifying_context(settings):
+def test_the_chunk_hydration_connects_with_a_verifying_context(settings, ca_file):
     from modules.rag import chunk_hydration
 
-    settings(sslmode="verify-full", sslrootcert=CA_FILE)
+    settings(sslmode="verify-full", sslrootcert=ca_file)
     connect = _connect_spy()
     with patch("asyncpg.connect", new=connect):
         asyncio.run(chunk_hydration.fetch_chunk_texts({(10, 1)}, None))
@@ -297,28 +351,28 @@ def test_the_chunk_hydration_adds_nothing_with_neither_setting(settings):
     assert connect.await_args.kwargs == {}
 
 
-def test_the_scheduler_lock_keeps_its_keepalive_and_gains_the_settings(settings, monkeypatch):
+def test_the_scheduler_lock_keeps_its_keepalive_and_gains_the_settings(settings, monkeypatch, ca_file):
     from core.jobs import leadership
 
     recorder = _EngineRecorder()
     monkeypatch.setattr(tls, "create_engine", recorder)
     leadership.SchedulerLock(_address())._connect()
-    settings(sslmode="verify-full", sslrootcert=CA_IN_POD)
+    settings(sslmode="verify-full", sslrootcert=ca_file)
     leadership.SchedulerLock(_address())._connect()
     (_, unset), (_, verified) = recorder.calls
     assert unset["connect_args"] == leadership.KEEPALIVE
-    assert verified["connect_args"] == {**leadership.KEEPALIVE, "sslmode": "verify-full", "sslrootcert": CA_IN_POD}
+    assert verified["connect_args"] == {**leadership.KEEPALIVE, "sslmode": "verify-full", "sslrootcert": ca_file}
 
 
-def test_the_seed_loader_connects_with_the_settings(settings, monkeypatch):
+def test_the_seed_loader_connects_with_the_settings(settings, monkeypatch, ca_file):
     from core.database import load_seed_data
 
     connect = MagicMock(name="psycopg2.connect")
     monkeypatch.setattr(load_seed_data.psycopg2, "connect", connect)
     monkeypatch.setattr("core.database.database.get_database_url", lambda: _address())
-    settings(sslmode="verify-full", sslrootcert=CA_IN_POD)
+    settings(sslmode="verify-full", sslrootcert=ca_file)
     load_seed_data._connect()
-    connect.assert_called_once_with(_address(), sslmode="verify-full", sslrootcert=CA_IN_POD)
+    connect.assert_called_once_with(_address(), sslmode="verify-full", sslrootcert=ca_file)
 
 
 class _StubEmbeddings:
@@ -326,7 +380,7 @@ class _StubEmbeddings:
         return {"provider": "stub"}
 
 
-def test_the_ingestion_managers_connections_carry_the_settings(settings, monkeypatch):
+def test_the_ingestion_managers_connections_carry_the_settings(settings, monkeypatch, ca_file):
     """Every psycopg2.connect(**self.db_config) in the manager, whoever built the dict."""
     pytest.importorskip("docx")
     from modules.rag.ingestion import manager as mgr_mod
@@ -334,6 +388,6 @@ def test_the_ingestion_managers_connections_carry_the_settings(settings, monkeyp
     monkeypatch.setattr("core.llm.create_embedding_manager", lambda *a, **kw: _StubEmbeddings())
     given = {"host": "db", "port": 5432, "database": "app", "user": "app"}
     assert mgr_mod.DocumentManager(db_config=given, workspace_id="ws").db_config == given
-    settings(sslmode="verify-full", sslrootcert=CA_IN_POD)
+    settings(sslmode="verify-full", sslrootcert=ca_file)
     secured = mgr_mod.DocumentManager(db_config=given, workspace_id="ws").db_config
-    assert secured == {**given, "sslmode": "verify-full", "sslrootcert": CA_IN_POD}
+    assert secured == {**given, "sslmode": "verify-full", "sslrootcert": ca_file}

@@ -95,7 +95,7 @@ Sources: [orchestrator/config.py:10-34](), [orchestrator/core/models/system_sett
 PostgreSQL serves as the primary relational database, supporting high-performance vector operations via the `pgvector` extension [orchestrator/config.py:37-44]().
 
 - **Connection Parameters**: Configured via individual variables (`POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT`) or overridden entirely by `DATABASE_URL` [orchestrator/config.py:39-44]().
-- **SSL Enforcement**: Production environments enforce `sslmode=require` automatically through `Config.get_database_url()` unless operating on recognized local hosts (`localhost`, `127.0.0.1`, `postgres`, `db`) [orchestrator/config.py:47-60]().
+- **TLS**: `DATABASE_SSLMODE` (libpq's `sslmode`; `verify-full` checks the server's certificate and host name) and `DATABASE_SSLROOTCERT` (the CA file, with `verify-ca` or `verify-full`) apply to every connection to the application's database [orchestrator/core/database/tls.py](). With neither set, the main engine adds `sslmode=require` in production when its address names no `sslmode`, and every other connection uses its address as given.
 - **SQL Debugging**: `SQL_DEBUG` toggles SQLAlchemy statement logging [orchestrator/config.py:45]().
 
 | Parameter | Required | Config Symbol | Description |
@@ -106,6 +106,8 @@ PostgreSQL serves as the primary relational database, supporting high-performanc
 | `POSTGRES_PASSWORD` | Yes | `Config.POSTGRES_PASSWORD` | Database password |
 | `POSTGRES_HOST` | Yes | `Config.POSTGRES_HOST` | Database host |
 | `POSTGRES_PORT` | No | `Config.POSTGRES_PORT` | Database port |
+| `DATABASE_SSLMODE` | No | `Config.DATABASE_SSLMODE` | libpq `sslmode` for the app's database connections |
+| `DATABASE_SSLROOTCERT` | No | `Config.DATABASE_SSLROOTCERT` | CA file for `verify-ca` / `verify-full` |
 | `SQL_DEBUG` | No | `Config.SQL_DEBUG` | ORM SQL logging toggle |
 
 Sources: [orchestrator/config.py:37-60]()

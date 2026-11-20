@@ -61,6 +61,11 @@ database:
   # server's certificate: for a managed database, the provider's bundle. Mounted read-only
   # at /etc/automatos/database-ca in the API, the Job and the worker, and
   # DATABASE_SSLROOTCERT names the file. Needs sslmode verify-ca or verify-full.
+  # Changing the ConfigMap: the kubelet updates the mounted file in place, after its sync
+  # delay (a minute or so). Each new connection then trusts the new file; a connection
+  # already open keeps the session it has until it closes. A file that holds no
+  # certificate stops a pod at its next start. Put the old and the new CA in one bundle
+  # until the server presents its new certificate. Restart the pods to be certain.
   caConfigMap: ""
   caKey: ca.crt         # the ConfigMap's key that holds the CA file
 
