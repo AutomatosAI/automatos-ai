@@ -330,12 +330,27 @@ def test_start_up_accepts_the_defaults_where_sessions_are_issued():
     ("SESSION_IDLE_MINUTES", 0),
     ("SESSION_ABSOLUTE_HOURS", -1),
     ("SESSION_IDLE_MINUTES", 12 * 60 + 1),
+    ("SESSION_IDLE_MINUTES", 4),            # below the last-seen interval: an active person cut off
+    ("SESSION_IDLE_MINUTES", ""),           # config.py hands a value that is not a number on as text
+    ("SESSION_ABSOLUTE_HOURS", "twelve"),
 ])
 def test_start_up_refuses_a_bad_session_setting_naming_it(name, value):
     with pytest.raises(edition_start_up.EditionNotReady) as refused:
         edition_start_up.check_session_settings(editions.capabilities_for("enterprise"), _settings(**{name: value}))
 
     assert name in str(refused.value)
+
+
+def test_the_idle_floor_is_the_last_seen_interval_and_is_named():
+    from core.auth.device import LAST_SEEN_WRITE_INTERVAL
+
+    assert timedelta(minutes=edition_start_up.SESSION_IDLE_MINUTES_MIN) == LAST_SEEN_WRITE_INTERVAL
+    with pytest.raises(edition_start_up.EditionNotReady) as refused:
+        edition_start_up.check_session_settings(editions.capabilities_for("enterprise"),
+                                                _settings(SESSION_IDLE_MINUTES=4))
+    assert "SESSION_IDLE_MINUTES" in str(refused.value) and "at least 5" in str(refused.value)
+    floor = _settings(SESSION_IDLE_MINUTES=edition_start_up.SESSION_IDLE_MINUTES_MIN)
+    assert edition_start_up.check_session_settings(editions.capabilities_for("enterprise"), floor) is None
 
 
 @pytest.mark.parametrize("edition", ["local", "saas"])
@@ -394,3 +409,80 @@ def test_the_seam_is_never_reached_elsewhere(monkeypatch, edition):
     monkeypatch.setattr(step_up, "confirm_by_signing_in_again", lambda *args: pytest.fail("reached"))
     fresh = SimpleNamespace(auth_type="clerk", user=SimpleNamespace(raw_claims={"fva": [0, -1], "iat": 2.0}))
     assert step_up.check_step_up(fresh, 10, 2.0) is None
+
+
+# --------------------------------------------------------------------------- a dead cookie is cleared
+
+
+def _cookie_app():
+    from fastapi import Depends, FastAPI
+
+    app = FastAPI()
+    session_cookie.install_cookie_session_ended_handler(app)
+
+    @app.api_route("/probe", methods=["GET", "POST"])
+    def probe(ctx=Depends(hybrid.get_request_context_hybrid)):
+        return {"auth_type": ctx.auth_type}
+
+    return app
+
+
+def _ending(reason):
+    def resolve(request, token):
+        raise session_lane.session_ended(reason)
+
+    return resolve
+
+
+def _cleared(answer) -> bool:
+    cookie = answer.headers.get("set-cookie", "")
+    return cookie.startswith(config.SESSION_COOKIE_NAME + "=") and "max-age=0" in cookie.lower()
+
+
+@pytest.mark.parametrize("reason", ["expired", "revoked", "unknown"])
+def test_an_ended_session_in_the_cookie_is_401_and_clears_the_cookie(enterprise, monkeypatch, reason):
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(session_lane, "_resolve_in_own_session", _ending(reason))
+
+    answer = TestClient(_cookie_app()).get("/probe", headers=_cookie(_token()))
+
+    assert answer.status_code == 401 and _cleared(answer)
+    assert answer.json() == {"detail": {"code": "session_ended", "reason": reason,
+                                        "message": session_lane.SESSION_ENDED_MESSAGE}}
+    parts = {part.strip().lower() for part in answer.headers["set-cookie"].split(";")}
+    assert {"secure", "httponly", "path=/", "samesite=lax"} <= parts
+
+
+def test_an_ended_session_in_a_header_is_answered_as_before(enterprise, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(session_lane, "_resolve_in_own_session", _ending("expired"))
+
+    answer = TestClient(_cookie_app()).get("/probe", headers={"authorization": "Bearer " + _token()})
+
+    assert answer.status_code == 401 and "set-cookie" not in answer.headers
+    assert answer.json()["detail"]["code"] == "session_ended"
+
+
+def test_any_other_refusal_on_the_cookie_path_keeps_the_cookie(enterprise, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    def not_in_workspace(request, token):
+        raise HTTPException(status_code=403, detail={"code": session_lane.WORKSPACE_REQUIRED, "message": "m"})
+
+    monkeypatch.setattr(session_lane, "_resolve_in_own_session", not_in_workspace)
+    client = TestClient(_cookie_app())
+
+    refused = client.get("/probe", headers=_cookie(_token()))
+    cross_site = client.post("/probe", headers={**_cookie(_token()), "origin": ELSEWHERE})
+
+    assert refused.status_code == 403 and "set-cookie" not in refused.headers
+    assert cross_site.status_code == 403 and "set-cookie" not in cross_site.headers
+    assert cross_site.json()["detail"]["code"] == session_cookie.CROSS_SITE_REFUSED
+
+
+def test_the_app_installs_the_cookie_handler_once():
+    main_source = (ORCH / "main.py").read_text(encoding="utf-8")
+    assert main_source.count("install_cookie_session_ended_handler(app)") == 1
+    assert issubclass(session_cookie.CookieSessionEnded, HTTPException)

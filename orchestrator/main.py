@@ -112,6 +112,7 @@ from api.themes_mobile import router as mobile_theme_router
 from api.themes_looks import router as themes_looks_router
 from api.themes_settings import router as themes_settings_router
 from core.auth.step_up import install_step_up_handler  # PRD-261 A-07c: the reverification 403 body
+from core.auth.session_cookie import install_cookie_session_ended_handler  # PRD-277 Wave 3
 from services.themes.package import THEME_IMPORT_ROUTE, cap_bytes as theme_cap_bytes
 # PRD-261 W-C1: the theme Marketplace (submit, the Themes tab listings, the admin review queue).
 from api.marketplace_themes_submit import router as marketplace_themes_submit_router
@@ -934,6 +935,8 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # PRD-261 A-07c: StepUpRequired renders Clerk's reverification body with clerk_error at the top level.
 install_step_up_handler(app)
+# PRD-277 Wave 3: a 401 for an ended session the cookie held also clears the cookie.
+install_cookie_session_ended_handler(app)
 # F040: actually enforce the limits — without this middleware the limiter above
 # is inert on every route. Registered ONLY under the policy-plane flag; OFF keeps
 # today's (placebo) behaviour so the rollout stays byte-for-byte reversible.

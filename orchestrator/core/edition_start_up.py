@@ -15,9 +15,13 @@
 
 ``check_session_settings`` (PRD-277 Wave 3) is called just before it. Where the edition issues its
 own sessions (``issues_sessions``) it refuses to start unless both clocks are whole numbers of at
-least one and the idle clock is no longer than the absolute one, the cookie's name is a ``__Host-``
+least one, the idle clock is at least ``SESSION_IDLE_MINUTES_MIN`` (the minutes between two writes
+of a session's last-seen stamp: a shorter one would end the session of a person still at work) and
+no longer than the absolute one, the cookie's name is a ``__Host-``
 name (so the browser only accepts it Secure, on ``/``, for this host alone) and the header a
-cookie-authenticated change must carry is a valid header name. The refusal names the setting.
+cookie-authenticated change must carry is a valid header name. The refusal names the setting,
+never its value. ``config.py`` reads the clocks so that no value stops another edition: a value
+that is not a number reaches this check as the text it was, and is refused here.
 
 Every other edition passes untouched: nothing here reads a setting it does not use.
 
@@ -53,6 +57,9 @@ SESSION_SETTINGS: Tuple[str, ...] = (
     "SESSION_IDLE_MINUTES", "SESSION_ABSOLUTE_HOURS", "SESSION_COOKIE_NAME", "SESSION_CSRF_HEADER",
 )
 SESSION_COOKIE_PREFIX = "__Host-"
+# core.auth.device.LAST_SEEN_WRITE_INTERVAL in minutes, which the session lane uses too; this module
+# imports nothing from core.auth, so a test pins the two together.
+SESSION_IDLE_MINUTES_MIN = 5
 MINUTES_PER_HOUR = 60
 # RFC 9110 §5.6.2 / RFC 6265 §4.1.1: a header name and a cookie name are each a "token".
 _TOKEN = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
@@ -100,6 +107,9 @@ def _session_setting_problems(settings: Mapping[str, Any]):
     for name, value in (("SESSION_IDLE_MINUTES", idle), ("SESSION_ABSOLUTE_HOURS", absolute)):
         if not _whole_number_at_least_one(value):
             yield name, "must be a whole number of at least 1"
+    if _whole_number_at_least_one(idle) and idle < SESSION_IDLE_MINUTES_MIN:
+        yield "SESSION_IDLE_MINUTES", (f"must be at least {SESSION_IDLE_MINUTES_MIN}, the minutes between two "
+                                       "writes of a session's last-seen time")
     if _whole_number_at_least_one(idle) and _whole_number_at_least_one(absolute) \
             and idle > absolute * MINUTES_PER_HOUR:
         yield "SESSION_IDLE_MINUTES", "must not be longer than SESSION_ABSOLUTE_HOURS"
@@ -131,6 +141,7 @@ __all__ = [
     "OIDC_SIGN_IN_IN_THIS_BUILD",
     "OIDC_START_UP_SETTINGS",
     "SESSION_COOKIE_PREFIX",
+    "SESSION_IDLE_MINUTES_MIN",
     "SESSION_SETTINGS",
     "EditionNotReady",
     "check_session_settings",

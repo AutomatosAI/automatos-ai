@@ -15,6 +15,10 @@
   deactivating ends the person's sessions and devices in the same commit; a removal lands even
   when its row cannot be written. The admin routes need step-up and an install admin.
 
+* **Hardening:** an oversized user agent and a junk address still give exactly one row; the
+  person's row is read ``FOR SHARE`` before the session is inserted, so a sign-in and a
+  deactivation order themselves; a failed insert raises a sign-in failure that names no value.
+
 Each test runs in a transaction rolled back at the end; ``commit`` releases a savepoint.
 """
 from __future__ import annotations
@@ -28,7 +32,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 os.environ.setdefault("POSTGRES_USER", "test")
 os.environ.setdefault("POSTGRES_PASSWORD", "test")
@@ -531,3 +535,92 @@ def test_a_member_cannot_end_sessions(client, db_session, install, admin):
     answer = client.post(f"/api/v1/auth/people/{admin.pk}/sessions/revoke", headers=member_headers)
 
     assert answer.status_code == 403 and answer.json()["detail"] == routes.ADMINS_ONLY
+
+
+# --------------------------------------------------------------------------- hardening
+
+LONG_AGENT = "Browser/" + "x" * 800
+JUNK_ADDRESS = "not-an-address-" + "9" * 60
+
+
+def _oversized(token: str) -> dict:
+    return {"authorization": "Bearer " + token, "user-agent": LONG_AGENT, "x-forwarded-for": JUNK_ADDRESS}
+
+
+def _only_row(db, workspace_id, before: int, action: str):
+    rows = _audits(db, workspace_id)[before:]
+    assert [row[0] for row in rows] == [action]
+    return rows[0]
+
+
+def test_an_oversized_agent_and_a_junk_address_still_write_one_sign_out_row(client, db_session, install,
+                                                                            monkeypatch):
+    monkeypatch.setattr(config, "CLIENT_IP_HEADER", "")
+    issued = _issue(db_session, install.person)
+    before = len(_audits(db_session, install.workspace_id))
+
+    assert client.post("/api/v1/auth/sign-out", headers=_oversized(issued.token)).status_code == 204
+
+    row = _only_row(db_session, install.workspace_id, before, "auth:sign_out")
+    assert (row[5], row[6]) == (None, LONG_AGENT[:500])
+
+
+def test_an_oversized_agent_and_a_junk_address_still_write_one_admin_row(client, db_session, install, admin,
+                                                                        monkeypatch):
+    monkeypatch.setattr(config, "CLIENT_IP_HEADER", "")
+    victim = _issue(db_session, install.person)
+    before = len(_audits(db_session, install.workspace_id))
+    headers = {**admin.headers, "user-agent": LONG_AGENT, "x-forwarded-for": JUNK_ADDRESS}
+
+    answer = client.post(f"/api/v1/auth/sessions/{victim.session_id}/revoke", headers=headers)
+
+    assert answer.json() == {"revoked": True}
+    row = _only_row(db_session, install.workspace_id, before, "auth:session_revoked")
+    assert (row[1], row[5], row[6]) == (admin.pk, None, LONG_AGENT[:500])
+
+
+def test_a_sign_in_keeps_a_real_address_and_drops_a_junk_one(db_session, install):
+    kept = _issue(db_session, install.person, ip_address=" 2001:db8::1 ", user_agent=LONG_AGENT)
+    dropped = _issue(db_session, install.person, ip_address=JUNK_ADDRESS)
+
+    assert (_row(db_session, kept.session_id).ip_address, _row(db_session, kept.session_id).user_agent) == (
+        "2001:db8::1", LONG_AGENT[:500])
+    assert _row(db_session, dropped.session_id).ip_address is None
+    assert [row[5] for row in _audits(db_session, install.workspace_id)] == ["2001:db8::1", None]
+
+
+def test_a_sign_in_reads_the_person_for_share_before_inserting(db_session, install):
+    statements = []
+    connection = db_session.connection()
+
+    def listener(conn, cursor, statement, params, context, many):
+        statements.append(statement)
+
+    event.listen(connection, "before_cursor_execute", listener)
+    try:
+        _issue(db_session, install.person)
+    finally:
+        event.remove(connection, "before_cursor_execute", listener)
+
+    locked = [i for i, sql in enumerate(statements) if "FROM users" in sql and "FOR SHARE" in sql]
+    inserted = [i for i, sql in enumerate(statements) if sql.lstrip().upper().startswith("INSERT INTO AUTH_SESSIONS")]
+    assert locked and inserted and locked[0] < inserted[0]
+
+
+def test_a_failed_insert_raises_a_sign_in_failure_that_names_no_value(db_session, install, monkeypatch, caplog):
+    first = _issue(db_session, install.person)
+    taken = _row(db_session, first.session_id).token_hash
+    fresh, _ = mint_token(sessions.SESSION_TOKEN_PREFIX, sessions.SESSION_TOKEN_BYTES)
+    monkeypatch.setattr(sessions, "mint_token", lambda prefix, nbytes: (fresh, taken))
+    before = len(_audits(db_session, install.workspace_id))
+
+    with caplog.at_level(logging.DEBUG, logger="core.auth"):
+        with pytest.raises(sessions.SignInFailed) as failed:
+            _issue(db_session, install.person, ip_address="198.51.100.23", user_agent="Agent/marker-77")
+
+    raised = failed.value
+    assert raised.__cause__ is None and raised.__context__ is None
+    for value in (taken, fresh, "198.51.100.23", "Agent/marker-77"):
+        assert value not in str(raised) and value not in caplog.text
+    assert db_session.query(AuthSession).filter(AuthSession.user_id == install.person).count() == 1
+    assert len(_audits(db_session, install.workspace_id)) == before

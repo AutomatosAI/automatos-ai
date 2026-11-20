@@ -352,7 +352,7 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 - [x] Tokens are `ams_` plus 32 random bytes. Only the SHA-256 is stored, using the hashing kernel device tokens use. `issue_session` in `core/auth/sessions.py` (`mint_token`, `hash_secret`); a lookup is confirmed in constant time (`secrets_match`).
 - [x] `BEARER_RESOLVERS` gains an `ams_` entry. `hybrid.py` gains no branch. The lane is `core/auth/session_lane.py`.
 - [x] The resolver accepts the token from the `Authorization` header, or from the `__Host-` cookie when there is no header. The cookie is read only when there is no `Authorization` header of any scheme and no API key; its name is `SESSION_COOKIE_NAME`, which start-up refuses without the `__Host-` prefix.
-- [x] An expired, revoked or unknown session gets 401 with a code the web app recognises. `{"code": "session_ended", "reason": "expired" | "revoked" | "unknown"}`.
+- [x] An expired, revoked or unknown session gets 401 with a code the web app recognises. `{"code": "session_ended", "reason": "expired" | "revoked" | "unknown"}`. When the token came from the cookie, the answer also clears the cookie.
 - [x] A session for a deactivated person is refused. At resolution (`session_ended`, `revoked`), and `issue_session` issues none (`SignInRefused`).
 - [x] The session records the ID token's `sid` when the IdP sends one. `auth_sessions.idp_session_id`; Wave 4's callback passes it to `issue_session`.
 - [x] `last seen` is written at most every 5 minutes, as the device lane does. With the idle clock, by the device lane's own `LAST_SEEN_WRITE_INTERVAL`.
@@ -373,7 +373,7 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 - [x] `POST /api/v1/auth/sign-out` revokes the caller's session and clears the cookie. `api/auth_sessions.py`. Sending the browser to the IdP's end-session address (§5.6) needs the IdP metadata, which Wave 4 reads.
 - [x] An admin route revokes one session or every session of a person. It requires step-up. `POST /api/v1/auth/sessions/{session_id}/revoke` and `POST /api/v1/auth/people/{user_id}/sessions/revoke`, with `GET /api/v1/auth/people/{user_id}/sessions` to list them. Step-up in enterprise goes through `step_up.confirm_by_signing_in_again`, which refuses until US-406 fills it.
 - [x] Deactivating a person revokes their sessions and device tokens in the same transaction. `deactivate_person` in `core/auth/people.py`, served as `POST /api/v1/auth/people/{user_id}/deactivate` (step-up).
-- [x] New routes are in `route-manifest.json`, authenticated and authorised. Sign-out by the session itself; the others by an install admin on the session lane, in the boundary sweep.
+- [x] New routes are in `route-manifest.json`, authenticated and authorised. Sign-out by the session itself; the others by an install admin on the session lane, in the boundary sweep. In `local` and `saas` each route's declared method answers 404 before any authentication or database work; another method on the same path answers 405, as it does in every edition.
 
 #### US-304: Sign-ins are in the audit log · S
 **Description:** As a compliance reviewer, I want every sign-in, refusal and sign-out recorded, so that I can show who had access and when.

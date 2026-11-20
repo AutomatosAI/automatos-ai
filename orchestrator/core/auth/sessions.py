@@ -8,13 +8,18 @@ A session is what a person holds after signing in, so they do not sign in on eve
   confirmed in constant time (``secrets_match``).
 * **Two clocks** (D-15): idle (``SESSION_IDLE_MINUTES``, default 120) and absolute
   (``SESSION_ABSOLUTE_HOURS``, default 12). The idle clock moves forward when the session is used,
-  written at most once every ``LAST_SEEN_WRITE_INTERVAL`` (five minutes, the device lane's own), so
-  a session left alone ends between five minutes before and at its idle limit. It never moves
-  past the absolute expiry, which never moves.
+  written at most once every ``LAST_SEEN_WRITE_INTERVAL`` (five minutes, the device lane's own). So
+  a session ends between its idle limit less five minutes and its idle limit after its last
+  request, never later; start-up refuses an idle limit shorter than that interval, which would
+  end the session of a person still at work (``core.edition_start_up``). It never moves past the
+  absolute expiry, which never moves.
 * **A new session at every sign-in.** ``issue_session`` always inserts a row; nothing upgrades an
   earlier one. Wave 4's OIDC callback calls it with the person's ``users.id``, the ID token's
   ``auth_time`` and ``sid``, and the browser's address and agent. A deactivated person is refused
-  (``SignInRefused``), and the refusal is audited.
+  (``SignInRefused``), and the refusal is audited. The person's row is read ``FOR SHARE``, in the
+  transaction that inserts the session, so a deactivation (which takes the row ``FOR UPDATE``
+  first, ``core.auth.people``) and a sign-in of the same person happen one after the other: the
+  sign-in sees the person deactivated, or the deactivation sees and revokes the new session.
 * **Ending one** keeps its hash and records when and why (``REVOKED_*``), so the next request with
   it is told the session was revoked.
 
@@ -41,7 +46,7 @@ from core.auth import session_audit
 from core.auth.device import LAST_SEEN_WRITE_INTERVAL
 from core.auth.pairing import hash_secret, mint_token, secrets_match
 from core.auth.system_role import UnknownPerson
-from core.models.auth_sessions import IDP_SESSION_ID_MAX, IP_ADDRESS_MAX, USER_AGENT_MAX, AuthSession
+from core.models.auth_sessions import IDP_SESSION_ID_MAX, AuthSession
 from core.models.core import User
 
 logger = logging.getLogger(__name__)
@@ -61,11 +66,16 @@ REVOKED_BY_ADMIN = "admin"
 REVOKED_DEACTIVATED = "deactivated"
 
 NOT_ISSUED_MESSAGE = "This edition does not issue sessions."
+SIGN_IN_FAILED_MESSAGE = "You were not signed in: the session could not be stored. Try again."
 UNKNOWN_PERSON_MESSAGE = "No such person."
 
 
 class SessionsNotIssued(RuntimeError):
     """The running edition does not issue sessions (``issues_sessions`` is off)."""
+
+
+class SignInFailed(RuntimeError):
+    """The new session could not be stored; nothing was kept. Its text never holds a value."""
 
 
 class SignInRefused(RuntimeError):
@@ -106,12 +116,6 @@ def absolute_lifetime() -> timedelta:
     return timedelta(hours=config.SESSION_ABSOLUTE_HOURS)
 
 
-def _clipped(value: Optional[str], limit: int) -> Optional[str]:
-    """A browser-supplied value cut to its column's size; blank is none."""
-    text = (value or "").strip()
-    return text[:limit] or None
-
-
 def _checked_sign_in(auth_time: datetime, sid: Optional[str]) -> None:
     """Fail fast on what the caller passes: an aware ``auth_time``, and a ``sid`` that fits."""
     if not isinstance(auth_time, datetime) or auth_time.tzinfo is None:
@@ -121,11 +125,34 @@ def _checked_sign_in(auth_time: datetime, sid: Optional[str]) -> None:
 
 
 def _person_is_active(db: Session, user_id: int) -> bool:
-    """Whether ``user_id`` may hold a session; ``UnknownPerson`` when there is no such row."""
-    row = db.query(User.is_active).filter(User.id == user_id).first()
+    """Whether ``user_id`` may hold a session, their row locked ``FOR SHARE``; ``UnknownPerson`` when none.
+
+    The lock is held until the sign-in commits, so a deactivation waits for it, and a sign-in
+    waits for a deactivation that locked the row first and then reads the person as deactivated.
+    """
+    row = db.query(User.is_active).filter(User.id == user_id).with_for_update(read=True).first()
     if row is None:
         raise UnknownPerson(UNKNOWN_PERSON_MESSAGE)
     return row[0] is not False
+
+
+def _store(db: Session, row: AuthSession) -> None:
+    """Insert the new session; on a database error, roll back and raise ``SignInFailed``.
+
+    Raised outside the handler, so the driver's error, whose text names the statement's values (the
+    token's hash, the address, the agent), is neither the cause nor the context of what is raised.
+    """
+    user_id, failure = row.user_id, None
+    try:
+        db.add(row)
+        db.flush()
+    except SQLAlchemyError as error:
+        failure = type(error).__name__
+    if failure is None:
+        return
+    db.rollback()
+    logger.error("users.id=%s: the new session could not be stored (%s)", user_id, failure)
+    raise SignInFailed(SIGN_IN_FAILED_MESSAGE)
 
 
 def issue_session(
@@ -145,12 +172,13 @@ def issue_session(
     session id when it sent one. The audit row goes in ``workspace_id``, or the install's default
     workspace (``session_audit.audit_workspace``). A deactivated person is ``SignInRefused`` with
     an ``auth:sign_in_refused`` row; when the sign-in row cannot be written, nothing is kept and
-    ``session_audit.SessionAuditFailed`` is raised. Call it with nothing else pending.
+    ``session_audit.SessionAuditFailed`` is raised; when the session itself cannot be stored,
+    nothing is kept and ``SignInFailed`` is raised. Call it with nothing else pending.
     """
     if not editions.current().issues_sessions:
         raise SessionsNotIssued(NOT_ISSUED_MESSAGE)
     _checked_sign_in(auth_time, sid)
-    ip, agent = _clipped(ip_address, IP_ADDRESS_MAX), _clipped(user_agent, USER_AGENT_MAX)
+    ip, agent = session_audit.browser_fields(ip_address, user_agent)
     if not _person_is_active(db, user_id):
         session_audit.record_sign_in_refused(db, reason=session_audit.REFUSED_DEACTIVATED, user_id=user_id,
                                              ip_address=ip, user_agent=agent, workspace_id=workspace_id)
@@ -163,8 +191,7 @@ def issue_session(
         idle_expires_at=min(moment + idle_lifetime(), absolute), absolute_expires_at=absolute,
         auth_time=auth_time, idp_session_id=sid, ip_address=ip, user_agent=agent,
     )
-    db.add(row)
-    db.flush()
+    _store(db, row)
     session_audit.record_sign_in(db, user_id=user_id, session_id=row.id, ip_address=ip, user_agent=agent,
                                  workspace_id=workspace_id)
     return IssuedSession(session_id=row.id, user_id=user_id, token=token,
@@ -237,6 +264,7 @@ __all__ = [
     "UNKNOWN",
     "IssuedSession",
     "SessionsNotIssued",
+    "SignInFailed",
     "SignInRefused",
     "absolute_lifetime",
     "find_session",

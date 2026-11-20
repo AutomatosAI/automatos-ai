@@ -12,7 +12,8 @@ token exactly as they did before this lane existed.
 * **The session.** Found by its token's digest and confirmed in constant time
   (``core.auth.sessions.find_session``). Unknown, revoked or expired is
   ``401 {"code": "session_ended", "reason": "unknown" | "revoked" | "expired", "message": …}``,
-  which the web app recognises; the reason goes to the log too, never the token.
+  which the web app recognises; the reason goes to the log too, never the token. When the token
+  came from the cookie, the answer also clears the cookie (``session_cookie.CookieSessionEnded``).
 * **The person** is the session's ``users`` row, by ``users.id``; a deactivated one is
   ``401 session_ended`` (``revoked``). Their install-wide role is the one the install stores
   (``core.auth.system_role.stored_system_role``), else ``user``.
@@ -199,10 +200,26 @@ async def resolve_session_bearer(request: Request, token: str) -> RequestContext
     return await _resolve(request, token)
 
 
+def _is_session_ended(refused: HTTPException) -> bool:
+    detail = refused.detail
+    return refused.status_code == status.HTTP_401_UNAUTHORIZED and isinstance(detail, dict) \
+        and detail.get("code") == SESSION_ENDED
+
+
 async def resolve_session_cookie(request: Request, token: str) -> RequestContext:
-    """The registry's resolver for the session cookie: the origin check first, then the session."""
+    """The registry's resolver for the session cookie: the origin check first, then the session.
+
+    An ended session is ``session_cookie.CookieSessionEnded``: the same 401, whose answer also
+    clears the cookie. Every other refusal is raised as it is.
+    """
     session_cookie.assert_cookie_request_allowed(request)
-    return await _resolve(request, token)
+    try:
+        return await _resolve(request, token)
+    except HTTPException as refused:
+        if not _is_session_ended(refused):
+            raise
+        ended = session_cookie.CookieSessionEnded(status_code=refused.status_code, detail=refused.detail)
+    raise ended
 
 
 def session_auth_time(ctx: Any) -> Optional[float]:

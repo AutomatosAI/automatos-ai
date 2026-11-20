@@ -1,7 +1,8 @@
 """PRD-277 US-303 (§5.6): signing out, and an install admin ending sessions (``/api/v1/auth``).
 
-Every route answers 404 unless the edition issues sessions (``issues_sessions``: enterprise), before
-anything else runs, so in ``local`` and ``saas`` they look absent.
+Unless the edition issues sessions (``issues_sessions``: enterprise), each route answers its
+declared method with 404 before any authentication or database work. A method a path does not
+declare still answers 405, as FastAPI answers it in every edition, so the paths are not hidden.
 
 * ``POST /sign-out`` — the caller's own session, presented as ``Authorization: Bearer ams_…`` or,
   with no ``Authorization`` header, as the session cookie (which must pass the cross-site check,
@@ -51,7 +52,7 @@ from core.models.auth_sessions import AuthSession
 from core.models.core import User
 from modules.policy.roles import USER, role_satisfies
 
-# What FastAPI answers for a route that is not there, so a closed route looks absent.
+# What FastAPI answers for a path it does not serve: the body a closed route answers with.
 NOT_FOUND = "Not Found"
 ADMINS_ONLY = "Only an install admin signed in to Automatos can end sessions or deactivate people."
 OUTRANKED = "This person's install role is above yours."
@@ -62,7 +63,7 @@ LISTED_SESSIONS_MAX = 100
 
 
 def _sessions_issued() -> None:
-    """404 every route of this router where the edition issues no sessions."""
+    """404 each route's declared method where the edition issues no sessions, before anything else."""
     if not editions.current().issues_sessions:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=NOT_FOUND)
 

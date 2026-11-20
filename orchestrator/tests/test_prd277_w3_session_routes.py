@@ -1,7 +1,8 @@
 """PRD-277 Wave 3 (US-303): the routes that end a session, as declared, without a database.
 
-* Every route of ``api/auth_sessions.py`` answers 404 where the edition issues no sessions, before
-  anything is looked up, so in ``local`` and ``saas`` they look absent.
+* Where the edition issues no sessions, each route of ``api/auth_sessions.py`` answers its
+  declared method with 404 before any authentication or database work (another method on the
+  same path answers 405, as in every edition).
 * Sign-out is authenticated by the session itself (its own credential, so it is in the boundary
   sweep's ``OWN_AUTH_ROUTES``) and never by the shared request context.
 * The three admin changes carry step-up at ``STEP_UP_MAX_AGE_MINUTES`` and call
@@ -100,7 +101,7 @@ def test_the_routes_are_in_the_boundary_sweep_and_the_manifests():
 
 
 @pytest.mark.parametrize("edition", ["local", "saas"])
-def test_every_route_is_absent_where_no_session_is_issued(monkeypatch, edition):
+def test_every_declared_method_is_404_where_no_session_is_issued(monkeypatch, edition):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -119,6 +120,8 @@ def test_every_route_is_absent_where_no_session_is_issued(monkeypatch, edition):
         url = path.replace("{user_id}", "7").replace("{session_id}", "00000000-0000-0000-0000-000000000001")
         answer = client.request(method, url, headers={"authorization": "Bearer " + token})
         assert (answer.status_code, answer.json()) == (404, {"detail": "Not Found"}), (method, path)
+    # A method a path does not declare is FastAPI's 405, as in every edition: the path is not hidden.
+    assert client.get("/api/v1/auth/sign-out").status_code == 405
 
 
 def _ctx(auth_type: str, role: str, claims: dict):

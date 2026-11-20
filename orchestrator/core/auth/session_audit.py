@@ -15,6 +15,11 @@ belongs to no workspace. Such a row goes in the workspace the caller names, else
 default workspace (``DEFAULT_WORKSPACE_ID``, ``audit_workspace``). An admin's action goes in the
 workspace the admin acted from.
 
+The browser's address and agent come from the request, so ``browser_fields`` makes them fit
+before any row is written: the agent is cut to its column's size, and the address is kept only
+when it is an IP address that fits, else none. Every row goes through it (``_write``), so an
+oversized header can never make a row fail.
+
 What happens when a row cannot be written:
 
 * **Granting access** (a sign-in) is rolled back with it: ``AuditService.log`` commits the session
@@ -27,12 +32,14 @@ What happens when a row cannot be written:
 """
 from __future__ import annotations
 
+import ipaddress
 import logging
-from typing import Any, Callable, Dict, Optional, TypeVar, Union
+from typing import Any, Callable, Dict, Optional, Tuple, TypeVar, Union
 from uuid import UUID
 
 from config import config
 from core.auth.user_link import REFUSED_EMAIL_CONFLICT
+from core.models.auth_sessions import IP_ADDRESS_MAX, USER_AGENT_MAX
 from core.workspaces.audit import AuditService
 
 logger = logging.getLogger(__name__)
@@ -78,10 +85,28 @@ def audit_workspace(workspace_id: Union[UUID, str, None] = None) -> Optional[str
         return None
 
 
+def _ip_or_none(value: Optional[str]) -> Optional[str]:
+    """``value`` when it is an IP address that fits its column, else None."""
+    text = (value or "").strip()
+    if not text or len(text) > IP_ADDRESS_MAX:
+        return None
+    try:
+        return str(ipaddress.ip_address(text))
+    except ValueError:
+        return None
+
+
+def browser_fields(ip_address: Optional[str], user_agent: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    """The browser's address and agent as a row may hold them: a real address or none; the agent cut to size."""
+    agent = (user_agent or "").strip()[:USER_AGENT_MAX]
+    return _ip_or_none(ip_address), agent or None
+
+
 def _write(db, *, action: str, workspace_id: Union[UUID, str, None], user_id: Optional[int],
            resource_type: str, resource_id: Any, details: Dict[str, Any],
            ip_address: Optional[str], user_agent: Optional[str]) -> Optional[object]:
     """One ``audit_logs`` row (committing whatever the session holds with it), or None."""
+    ip_address, user_agent = browser_fields(ip_address, user_agent)
     workspace = audit_workspace(workspace_id)
     if workspace is None:
         db.rollback()
@@ -167,6 +192,7 @@ __all__ = [
     "STEP_UP",
     "SessionAuditFailed",
     "audit_workspace",
+    "browser_fields",
     "commit_removal",
     "record_sign_in",
     "record_sign_in_refused",

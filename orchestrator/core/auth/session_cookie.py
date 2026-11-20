@@ -21,6 +21,13 @@ key, so a token in a header always wins and every other lane is untouched.
 
 A request authenticated by a header is never checked: no browser attaches one by itself. Nothing
 here reads a request that the cookie does not authenticate.
+
+**A dead cookie is cleared.** When the session a cookie holds has ended, the session lane raises
+``CookieSessionEnded`` (its ``401 session_ended``, raised only on the cookie path), and
+``cookie_session_ended_handler`` answers it exactly as FastAPI answers any ``HTTPException``, with
+the cookie cleared as sign-out clears it. Installed once on the app
+(``install_cookie_session_ended_handler``, in ``main.py``); a 401 for a token in a header is
+answered as before, and no other response changes.
 """
 from __future__ import annotations
 
@@ -29,7 +36,8 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import urlsplit
 
-from fastapi import HTTPException, Response, status
+from fastapi import FastAPI, HTTPException, Request, Response, status
+from fastapi.exception_handlers import http_exception_handler
 from starlette.requests import cookie_parser
 
 from config import config
@@ -125,13 +133,32 @@ def assert_cookie_request_allowed(request: Any) -> None:
                         detail={"code": CROSS_SITE_REFUSED, "message": CROSS_SITE_MESSAGE})
 
 
+class CookieSessionEnded(HTTPException):
+    """``401 session_ended`` for a session the cookie held: its answer also clears the cookie."""
+
+
+async def cookie_session_ended_handler(request: Request, exc: CookieSessionEnded) -> Response:
+    """FastAPI's own answer to ``exc``, with the session cookie cleared."""
+    response = await http_exception_handler(request, exc)
+    clear_session_cookie(response)
+    return response
+
+
+def install_cookie_session_ended_handler(app: FastAPI) -> None:
+    """Register ``cookie_session_ended_handler`` on ``app`` (once, in ``main.py``)."""
+    app.add_exception_handler(CookieSessionEnded, cookie_session_ended_handler)
+
+
 __all__ = [
     "CROSS_SITE_REFUSED",
     "SAFE_METHODS",
+    "CookieSessionEnded",
     "assert_cookie_request_allowed",
     "clear_session_cookie",
     "cookie_name",
+    "cookie_session_ended_handler",
     "cookie_token",
+    "install_cookie_session_ended_handler",
     "install_origin",
     "request_origin",
     "set_session_cookie",
