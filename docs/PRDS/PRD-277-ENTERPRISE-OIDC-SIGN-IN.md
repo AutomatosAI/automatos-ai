@@ -386,7 +386,7 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Acceptance Criteria:**
 - [ ] The metadata is fetched from `<OIDC_ISSUER>/.well-known/openid-configuration` over `https` only. Its `issuer` must equal the setting.
 - [ ] Keys are fetched with the `PyJWKClient` pattern already in `core/auth/clerk.py`. An unknown key id causes one rate-limited refetch.
-- [ ] The configured issuer's host is reachable even on a private address. No other private address becomes reachable. A test proves both.
+- [ ] The configured issuer's host is reachable even on a private address. No other private address becomes reachable through sign-in. A test proves both. (PRD-282 covers the private addresses an operator may name for other purposes.)
 - [ ] `OIDC_CA_BUNDLE_FILE` is honoured.
 - [ ] If the IdP cannot be reached, the API still starts; sign-in answers with a clear error and `/health/bootstrap` reports it.
 - [ ] No new Python dependency.
@@ -576,7 +576,7 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 - **FR-6:** The system must verify every ID token as listed in §5.11 and refuse on any failure.
 - **FR-7:** The system must identify a person only by issuer and subject, and must never attach a sign-in to an existing person by email.
 - **FR-8:** The system must apply `OIDC_REQUIRED_CLAIMS` before creating a person or a session, and must refuse to start with a shared issuer and no rule.
-- **FR-9:** The system must reach the configured issuer's host even on a private address, and must not make any other private address reachable.
+- **FR-9:** The system must reach the configured issuer's host even on a private address, and sign-in must not make any other private address reachable. PRD-282 covers the private addresses an operator may name for other purposes.
 - **FR-10:** The system must accept a certificate authority file for the IdP.
 - **FR-11:** The system must issue its own session after sign-in. A token from the IdP must never be sent to a browser or a phone.
 - **FR-12:** Session tokens must be stored only as hashes, must expire on an idle clock and an absolute clock, and must be revocable.
