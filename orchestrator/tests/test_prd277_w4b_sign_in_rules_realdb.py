@@ -14,8 +14,8 @@ on the install's address) and the in-process provider, each test in a transactio
   makes the default workspace with no owner, once, and only where sign-in is OIDC. (The rest of
   US-405's sign-in rules: ``test_prd277_w4b_first_admin_realdb.py``.)
 * **Step-up** (US-406): ``/start?step_up=1`` needs a live session, sends ``max_age=0`` and keeps
-  the session's id (every parameter it sends: ``test_prd277_w4b_auth_time_request_realdb.py``); the callback refreshes that session's ``auth_time`` for the same person only,
-  issues no session and sets no cookie, audited ``auth:step_up``. Another person, a token with no
+  the session's id (every parameter it sends: ``test_prd277_w4b_auth_time_request_realdb.py``);
+  the callback refreshes that session's ``auth_time`` for the same person only, issues no session and sets no cookie, audited ``auth:step_up``. Another person, a token with no
   (its own code, ``step_up_no_auth_time``) or an old ``auth_time``, and an ended session are
   refused, changing nothing and creating nobody; the step-up runs before anything that finds or
   creates a person. (Its edges: ``test_prd277_w4b_step_up_edges_realdb.py``.)
@@ -49,7 +49,7 @@ os.environ.setdefault("POSTGRES_DB", "test")
 from api import auth_oidc as routes  # noqa: E402
 from api import auth_sessions  # noqa: E402
 from config import config  # noqa: E402
-from core.auth import first_admin, hybrid, oidc_provider, people, session_lane, sign_in_flow  # noqa: E402
+from core.auth import first_admin, hybrid, oidc_provider, people, session_lane, sessions, sign_in_flow  # noqa: E402
 from core.auth import step_up, step_up_sign_in  # noqa: E402
 from core.auth.oidc_sign_in import OidcSignIn, SIGNED_OUT_PATH, STEP_UP_MAX_AGE  # noqa: E402
 from core.auth.pairing import hash_secret  # noqa: E402
@@ -369,7 +369,7 @@ def test_a_step_up_without_a_live_session_is_refused_and_stores_nothing(install)
 
     assert _refusal(answer) == sign_in_flow.STEP_UP_REFUSED
     assert _count(install.db, "SELECT COUNT(*) FROM oidc_pending_sign_ins") == before
-    assert install.idp.authorize_requests == []
+    assert "set-cookie" not in answer.headers  # no sign-in bound to this browser
 
 
 def test_a_step_up_sends_max_age_0_and_refreshes_only_the_asking_session(install):
@@ -432,7 +432,7 @@ def test_a_token_that_does_not_prove_a_fresh_sign_in_is_refused(install, behavio
 def test_a_session_that_ended_during_the_step_up_is_not_refreshed(install):
     me = _signed_in(install, "ended-meanwhile")
     started = _start(install, step_up_too=True)
-    install.db.execute(text("UPDATE auth_sessions SET revoked_at = now() WHERE id = :id"), {"id": me.session_id})
+    assert sessions.revoke_session(install.db, me.session_id, sessions.REVOKED_SIGN_OUT)
     install.db.commit()
 
     answer = install.client.get(install.idp.approve(started.headers["location"]), follow_redirects=False)

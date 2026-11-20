@@ -60,7 +60,9 @@ _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 # Issuers that many organisations share (FR-26: data, never a branch on a provider in code). Each is
 # compared after ``normalised_issuer``. NOT COMPLETE, and cannot be: the access rule is the control.
 # * Google: "Always https://accounts.google.com or accounts.google.com for Google ID tokens"
-#   (developers.google.com/identity/openid-connect/openid-connect, the ``iss`` claim).
+#   (developers.google.com/identity/openid-connect/openid-connect, the ``iss`` claim). Only the
+#   https form is listed: ``OIDC_ISSUER`` must be an https address, so start-up already refuses
+#   the other for that (``core.edition_start_up``), and it can never be a configured issuer.
 # * Microsoft: the ``common``, ``organizations`` and ``consumers`` authorities sign in people of
 #   any tenant, or any personal account (learn.microsoft.com/entra/identity-platform/
 #   v2-protocols-oidc), and 9188040d-6c67-4c5b-b112-36a304b66dad is the tenant of every personal
@@ -71,7 +73,6 @@ _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 _CONSUMER_TENANT = "9188040d-6c67-4c5b-b112-36a304b66dad"
 SHARED_ISSUERS: Tuple[str, ...] = (
     "https://accounts.google.com",
-    "accounts.google.com",
     *(f"https://login.microsoftonline.com/{tenant}{version}"
       for tenant in ("common", "organizations", "consumers", _CONSUMER_TENANT) for version in ("", "/v2.0")),
     f"https://sts.windows.net/{_CONSUMER_TENANT}",

@@ -40,6 +40,9 @@ from core.edition_start_up import EditionNotReady  # noqa: E402
 from core.editions import capabilities_for  # noqa: E402
 
 OWN_ISSUER = "https://idp.example.test/realms/prd277-w4b"
+# The fixed words of a malformed first-admin list's refusal, where the prefixes appear as written.
+BOOTSTRAP_WORDING = ("must be sub: and email: entries separated by commas: "
+                     "each entry must be sub:<subject> or email:<address>")
 
 
 def _settings(**overrides):
@@ -180,7 +183,6 @@ def test_every_rule_must_hold_and_a_name_given_twice_must_hold_both():
 
 @pytest.mark.parametrize("issuer", [
     "https://accounts.google.com", "https://accounts.google.com/", " HTTPS://Accounts.Google.com ",
-    "accounts.google.com",
     "https://login.microsoftonline.com/common/v2.0", "https://login.microsoftonline.com/organizations/v2.0",
     "https://login.microsoftonline.com/consumers/v2.0", "https://login.microsoftonline.com/common",
     "https://login.microsoftonline.com/9188040d-6c67-4c5b-b112-36a304b66dad/v2.0",
@@ -193,6 +195,15 @@ def test_a_shared_issuer_with_no_rule_stops_start_up_and_says_why(issuer):
     assert message.startswith("AUTH_EDITION=enterprise cannot start: OIDC_REQUIRED_CLAIMS ")
     assert edition_start_up.SHARED_ISSUER_PROBLEM in message and "anyone" in message
     _starts(OIDC_ISSUER=issuer, OIDC_REQUIRED_CLAIMS="hd=example.test")
+
+
+def test_googles_issuer_without_https_is_refused_as_an_issuer_rule_or_no_rule():
+    # Google's tokens may say "accounts.google.com", but OIDC_ISSUER must be an https address, so
+    # that form never reaches the shared-issuer rule and is not on its list.
+    assert not access_rule.is_shared_issuer("accounts.google.com")
+    for rules in ("", "hd=example.test"):
+        message = _refusal(OIDC_ISSUER="accounts.google.com", OIDC_REQUIRED_CLAIMS=rules)
+        assert message.startswith("AUTH_EDITION=enterprise cannot start: OIDC_ISSUER must be an https address")
 
 
 @pytest.mark.parametrize("issuer", [
@@ -232,10 +243,13 @@ def test_entries_are_subjects_and_addresses_in_order():
 def test_an_entry_that_could_name_someone_unintended_is_malformed(setting):
     with pytest.raises(MalformedEntry) as malformed:
         bootstrap_admins.parse_entries(setting)
-    assert setting.strip() not in str(malformed.value)
     message = _refusal(ENTERPRISE_BOOTSTRAP_ADMINS=setting)
     assert message.startswith("AUTH_EDITION=enterprise cannot start: ENTERPRISE_BOOTSTRAP_ADMINS ")
-    assert setting.strip() not in message.split("ENTERPRISE_BOOTSTRAP_ADMINS", 1)[1]
+    # The wording itself names the prefixes ("sub:<subject> or email:<address>"): a value that is
+    # only a prefix ("sub:", "email:") cannot be told apart from it, so for those only the refusal counts.
+    if setting.strip() not in BOOTSTRAP_WORDING:
+        assert setting.strip() not in str(malformed.value)
+        assert setting.strip() not in message.split("ENTERPRISE_BOOTSTRAP_ADMINS", 1)[1]
 
 
 def test_a_subject_entry_matches_that_subject_exactly():
