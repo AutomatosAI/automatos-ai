@@ -35,6 +35,7 @@ from core.storage import FAST_FAIL, get_s3_client, is_storage_configured, reset_
 from modules.search.vector_store.backends.s3_vectors_backend import (
     IndexDimensionMismatchError,
     S3VectorsBackend,
+    VectorIndexCheckError,
     VectorIndexMissingError,
     verify_vector_index,
 )
@@ -83,6 +84,12 @@ def _storage(monkeypatch, *, identity, key=None, secret=None, endpoint=""):
 
 def _error(code: str, op: str) -> ClientError:
     return ClientError({"Error": {"Code": code, "Message": AWS_MESSAGE}}, op)
+
+
+def _raised_without_its_cause(error: BaseException) -> None:
+    """The AWS exception is neither chained nor shown as context, so no traceback carries it."""
+    assert error.__cause__ is None
+    assert error.__suppress_context__ is True
 
 
 # --------------------------------------------------------------------------- #
@@ -213,6 +220,21 @@ def test_a_refusal_fails_start_up_naming_the_bucket_and_the_kind(monkeypatch, bo
     message = str(refused.value)
     assert DOCS_BUCKET in message and kind in message
     assert AWS_MESSAGE not in message, "AWS's own words (which may carry ARNs) are not quoted"
+    _raised_without_its_cause(refused.value)
+
+
+def test_a_refusal_is_logged_once_at_error_level_with_code_and_class(monkeypatch, boto_spy, caplog):
+    _storage(monkeypatch, identity=True)
+    get_s3_client(FAST_FAIL).head_bucket.side_effect = _error("AccessDenied", "HeadBucket")
+
+    with caplog.at_level("ERROR", logger=wi.__name__), pytest.raises(wi.WorkloadIdentityError):
+        asyncio.run(wi.verify_workload_identity())
+
+    errors = [r for r in caplog.records if r.name == wi.__name__ and r.levelname == "ERROR"]
+    assert len(errors) == 1
+    logged = errors[0].getMessage()
+    assert "AccessDenied" in logged and "ClientError" in logged
+    assert AWS_MESSAGE not in logged
 
 
 def test_no_credentials_from_the_chain_is_its_own_kind(monkeypatch, boto_spy):
@@ -282,6 +304,8 @@ def test_off_and_no_index_fails_naming_the_bucket_and_the_index(monkeypatch, bot
 
     assert VECTOR_BUCKET in str(missing.value) and INDEX in str(missing.value)
     assert "S3_VECTORS_CREATE_IF_MISSING" in str(missing.value)
+    assert AWS_MESSAGE not in str(missing.value)
+    _raised_without_its_cause(missing.value)
     _no_create(client)
 
 
@@ -343,12 +367,18 @@ def test_off_the_size_check_still_applies(monkeypatch, boto_spy):
     _no_create(client)
 
 
-def test_off_any_other_refusal_is_raised_as_it_came(monkeypatch, boto_spy):
+def test_off_any_other_refusal_names_the_bucket_the_index_and_the_code_only(monkeypatch, boto_spy):
     backend, client = _backend(monkeypatch, boto_spy, create=False)
     client.get_index.side_effect = _error("AccessDeniedException", "GetIndex")
 
-    with pytest.raises(ClientError, match="AccessDeniedException"):
+    with pytest.raises(VectorIndexCheckError) as refused:
         backend._ensure_setup()
+
+    message = str(refused.value)
+    assert VECTOR_BUCKET in message and INDEX in message and "AccessDeniedException" in message
+    assert AWS_MESSAGE not in message, "AWS's own words are not quoted"
+    assert not isinstance(refused.value, ClientError), "the raw AWS error is not re-raised"
+    _raised_without_its_cause(refused.value)
     _no_create(client)
 
 

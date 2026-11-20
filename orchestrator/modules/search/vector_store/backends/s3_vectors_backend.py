@@ -54,6 +54,20 @@ class VectorIndexMissingError(RuntimeError):
         )
 
 
+class VectorIndexCheckError(RuntimeError):
+    """The index check was refused for a reason other than "not found" (PRD-278 US-104).
+
+    Names the bucket, the index and AWS's error code only; AWS's own message stays out
+    of the error and its traceback.
+    """
+
+    def __init__(self, bucket: str, index: str, code: str) -> None:
+        super().__init__(
+            f"S3 Vectors could not check index '{index}' in vector bucket '{bucket}': "
+            f"AWS answered with error code {code or 'unknown'}."
+        )
+
+
 class IndexDimensionMismatchError(RuntimeError):
     """A populated S3 Vectors index reports a dimension different from config.
 
@@ -132,19 +146,26 @@ class S3VectorsBackend:
     def _require_existing_index(self) -> None:
         """Check the index is there, then its dimension; create nothing (PRD-278 US-104).
 
-        Checked once per backend. Any refusal other than "not found" is raised as AWS gave it.
+        Checked once per backend. A refusal raises ``VectorIndexMissingError`` ("not found")
+        or ``VectorIndexCheckError`` (any other code), without AWS's exception as its cause;
+        the code and the exception's class are logged once.
         """
         if self._setup_complete:
             return
         try:
             self.client.get_index(vectorBucketName=self.bucket_name, indexName=self.index_name)
         except ClientError as e:
-            if e.response.get("Error", {}).get("Code") in _INDEX_MISSING_CODES:
-                raise VectorIndexMissingError(self.bucket_name, self.index_name) from e
-            logger.error("S3 Vectors index check failed for %s/%s", self.bucket_name, self.index_name)
-            raise
-        self._assert_index_dimension()
-        self._setup_complete = True
+            code = str(e.response.get("Error", {}).get("Code", ""))
+            logger.error("S3 Vectors index check failed for %s/%s: %s [%s]",
+                         self.bucket_name, self.index_name, code, type(e).__name__)
+            failure: RuntimeError = (VectorIndexMissingError(self.bucket_name, self.index_name)
+                                     if code in _INDEX_MISSING_CODES
+                                     else VectorIndexCheckError(self.bucket_name, self.index_name, code))
+        else:
+            self._assert_index_dimension()
+            self._setup_complete = True
+            return
+        raise failure from None
 
     def _create_if_missing(self) -> None:
         """Create bucket and index if they don't already exist (the default)."""
@@ -512,11 +533,11 @@ async def verify_vector_index() -> None:
         return
     try:
         await asyncio.wait_for(asyncio.to_thread(_check_shared_index), timeout=STARTUP_CHECK_TIMEOUT_SECONDS)
-    except asyncio.TimeoutError as exc:
+    except asyncio.TimeoutError:
         message = (f"S3 Vectors index '{config.S3_VECTORS_INDEX_NAME}' in vector bucket "
                    f"'{config.S3_VECTORS_BUCKET}' gave no answer within {STARTUP_CHECK_TIMEOUT_SECONDS:g} seconds.")
         logger.error(message)
-        raise RuntimeError(message) from exc
+        raise RuntimeError(message) from None
 
 
 def _check_shared_index() -> None:

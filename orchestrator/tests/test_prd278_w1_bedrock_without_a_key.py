@@ -35,7 +35,14 @@ from config import config
 from consumers.chatbot.spoken_model import _key_refusal
 from core.llm import providers as registry
 from core.llm.clients.base import LLMProvider
-from core.llm.key_resolver import SOURCE_WORKLOAD_IDENTITY, ResolvedKey, carries_calls, resolve_provider_key
+from core.llm import key_resolver
+from core.llm.key_resolver import (
+    SOURCE_WORKLOAD_IDENTITY,
+    OwnKeyLookupFailed,
+    ResolvedKey,
+    carries_calls,
+    resolve_provider_key,
+)
 from core.llm.manager import LLMManager
 from modules.agents.factory.agent_factory import AgentFactory, ModelConfiguration
 from services import ai_providers
@@ -98,6 +105,58 @@ def test_off_with_no_key_bedrock_resolves_to_nothing_as_today(monkeypatch):
     assert resolve_provider_key(None, "bedrock", agent_name="agent") is None
     assert carries_calls(None) is False
     assert carries_calls(ResolvedKey(api_key="", source="env", is_byok=False)) is False
+
+
+# --------------------------------------------------------------------------- #
+# a workspace's own key that could not be read never ends on the role
+# --------------------------------------------------------------------------- #
+
+WORKSPACE = "ws-1"
+
+
+def _own_key_lookup(monkeypatch, answer) -> None:
+    monkeypatch.setattr(key_resolver, "_byok_key", lambda db, provider, ws: answer)
+
+
+def test_on_after_an_own_key_lookup_error_the_role_is_not_returned(monkeypatch):
+    _identity(monkeypatch, True)
+    _own_key_lookup(monkeypatch, OwnKeyLookupFailed(provider="bedrock"))
+    assert resolve_provider_key(MagicMock(), "bedrock", workspace_id=WORKSPACE, agent_name="agent") is None
+
+
+def test_on_with_no_own_key_saved_the_role_is_returned(monkeypatch):
+    _identity(monkeypatch, True)
+    _own_key_lookup(monkeypatch, None)
+    resolved = resolve_provider_key(MagicMock(), "bedrock", workspace_id=WORKSPACE, agent_name="agent")
+    assert resolved is not None and resolved.source == SOURCE_WORKLOAD_IDENTITY
+
+
+@pytest.mark.parametrize("on", [True, False])
+def test_after_an_own_key_lookup_error_the_platform_keys_are_still_tried(monkeypatch, on):
+    _identity(monkeypatch, on)
+    _own_key_lookup(monkeypatch, OwnKeyLookupFailed(provider="bedrock"))
+    platform = ResolvedKey(api_key="platform-key", source="env", is_byok=False, provider="bedrock")
+    monkeypatch.setattr(key_resolver, "_platform_key", lambda provider, name: platform)
+    assert resolve_provider_key(MagicMock(), "bedrock", workspace_id=WORKSPACE, agent_name="agent") == platform
+
+
+def test_off_after_an_own_key_lookup_error_nothing_resolves_as_today(monkeypatch):
+    _identity(monkeypatch, False)
+    _own_key_lookup(monkeypatch, OwnKeyLookupFailed(provider="bedrock"))
+    assert resolve_provider_key(MagicMock(), "bedrock", workspace_id=WORKSPACE, agent_name="agent") is None
+
+
+def test_on_the_creation_path_after_an_own_key_lookup_error_finds_no_key(monkeypatch):
+    _identity(monkeypatch, True)
+    _own_key_lookup(monkeypatch, OwnKeyLookupFailed(provider="bedrock"))
+    with pytest.raises(ValueError, match="No API key available for bedrock"):
+        asyncio.run(_factory(monkeypatch)._creation_key(ModelConfiguration("bedrock", NOVA), "agent", WORKSPACE))
+
+
+def test_a_lookup_that_raises_is_reported_as_a_failed_lookup_not_as_no_key():
+    db = MagicMock()
+    db.query.side_effect = RuntimeError("database unavailable")
+    assert key_resolver._byok_key(db, "bedrock", WORKSPACE) == OwnKeyLookupFailed(provider="bedrock")
 
 
 # --------------------------------------------------------------------------- #
