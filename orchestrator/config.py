@@ -1580,6 +1580,10 @@ class Config:
     AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
     AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY")
+    # PRD-278 US-101: credentials from the pod's own cloud role (the SDK's chain) for
+    # object storage, the search index and Bedrock. No key pair may be set with it:
+    # start-up refuses both, then proves the documents bucket (core/storage/workload_identity.py).
+    AWS_USE_WORKLOAD_IDENTITY: bool = os.getenv("AWS_USE_WORKLOAD_IDENTITY", "false").lower() in ("true", "1", "yes")
     # PRD-176 F089: S3 endpoint override for a local S3-compatible object store
     # (MinIO). Empty by default so prod/boto talks to real AWS S3; local compose
     # sets it to the MinIO endpoint so the knowledge flywheel persists outputs
@@ -1603,6 +1607,9 @@ class Config:
     S3_VECTORS_INDEX_NAME: str = os.getenv("S3_VECTORS_INDEX_NAME", "documents-index")
     S3_VECTORS_DIMENSION: int = int(os.getenv("S3_VECTORS_DIMENSION", "2048"))
     S3_VECTORS_METRIC: str = os.getenv("S3_VECTORS_METRIC", "cosine")
+    # PRD-278 US-104: off = core never creates the vector bucket or index; a missing
+    # index is an error. For an operator who creates the index with their own key.
+    S3_VECTORS_CREATE_IF_MISSING: bool = os.getenv("S3_VECTORS_CREATE_IF_MISSING", "true").lower() in ("true", "1", "yes")
 
     # S3 Documents (general storage bucket)
     S3_DOCUMENTS_BUCKET: str = os.getenv("S3_DOCUMENTS_BUCKET", "automatos-ai")

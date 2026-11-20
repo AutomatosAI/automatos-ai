@@ -34,9 +34,10 @@ Core is close. Its storage client already uses the pod's role when no key is set
 | Storage gate | `is_storage_configured()` is true only with a custom endpoint or a full key pair. Its docstring says the SDK's own chain "does not" count. `_get_client` raises `StorageNotConfigured` otherwise. | `core/storage/s3.py:93-100`, `:143-144` **[T]** | A pod with a role and no key is told storage is not configured. |
 | Who asks the gate | A dozen modules: document generation, thumbnails, brand assets, downloads, socials media, workspace purge and move. Most fall back to local disk or skip the step. | `modules/documents/generation_service.py:294`, `services/document_downloads.py:63`, `modules/documents/thumbnails/store.py:64` and others **[T]** | With a role and no key, each silently takes the local path. |
 | Search index client | Passes the two key settings as they are. When they are unset the SDK's chain is used. | `modules/search/vector_store/backends/s3_vectors_backend.py:77-81` **[T]** | Works from a role today. |
-| Search index creation | At start-up it always tries to create the vector bucket and the index, and ignores only the answer "already exists". Any other answer stops it. It refuses to run against an index of a different size, and never deletes one. | `s3_vectors_backend.py:100-125`, `:149-161` **[T]** | An operator who wants the index encrypted with their own key must create it first. A role that may not create one stops core at start-up, even when both exist. |
+| Search index creation | Not at start-up: on first use, and again on every search, add and delete. Each of them calls `_ensure_setup`, which tries to create the vector bucket and the index and ignores only the answer "already exists". Any other answer fails that call. It refuses to run against an index of a different size, and never deletes one. | `s3_vectors_backend.py:92-128`, `:130-161`; called from `:187`, `:272`, `:335`, `:403` **[T]** | An operator who wants the index encrypted with their own key must create it first. A role that may not create one fails every search, add and delete, even when both exist. |
 | Bedrock chat | `bedrock-runtime`, with three ways to authenticate. With no key it uses the SDK's chain: "environment, profile, instance role". | `core/llm/clients/bedrock_client.py:60-72` **[T]** | The client works from a role. |
 | Bedrock, further up | The provider is registered with an access key as its "env key", and the agent factory passes the key settings through. | `core/llm/providers.py:167-169`, `modules/agents/factory/agent_factory.py:511-513` **[T]** | Whether a Bedrock model is offered at all with no key is not known **[?]**. |
+| Bedrock, provider and region | Agents store Bedrock as `bedrock` or `aws_bedrock`. Activation checks the stored name against the provider enum and sends any name the enum does not hold to OpenRouter. The client takes its region from `base_url`: agent creation sets `AWS_REGION`; activation and the spoken model set none, so the client's default applies; the settings path takes the stored credential's region. | `modules/agents/factory/agent_factory.py:513`, `:936-944`, `:993`; `consumers/chatbot/spoken_model.py:139-144`; `core/llm/manager.py:560-561`; `core/llm/clients/bedrock_client.py:63` **[T]** | US-105 makes both names reach Bedrock, in `AWS_REGION`, on every path. |
 | SDK services in the image | The image keeps six: `s3`, `s3vectors`, `bedrock-runtime`, `sts`, `sso`, `sso-oidc`. A test requires every client to name one of them. | `orchestrator/tests/test_prd262_botocore_services.py` **[T]** | Embeddings through `bedrock-runtime` need nothing new. |
 | Redis, main client | Built from a host, port, password and database number. `get_redis_client()` parses `REDIS_URL` and keeps only those four. The scheme is never read. | `core/redis/client.py:26-44`, `:180-192` **[T]** | `rediss://` is treated as `redis://`. The connection is plain. A user name in the address is dropped. |
 | Redis, other clients | The async publish and subscribe client and the chat-turns client are built from the same four fields. The task queue builds two more from `REDIS_HOST`, `REDIS_PORT` and `REDIS_PASSWORD`, and ignores `REDIS_URL`. Two clients pass the whole address to `from_url` and do honour `rediss://`. A third does the same and falls back to the host fields. | `core/redis/client.py:62-82`, `services/chat_turns.py:93-110`, `core/task_runner/queued.py:109-135`, `modules/context/adapters/redis_context.py:37-50`, `modules/intake/progress.py:103`, `services/workspace-worker/main.py:101` **[T]** | TLS works only where the whole address is passed through. |
@@ -79,8 +80,10 @@ One new setting, `AWS_USE_WORKLOAD_IDENTITY`, off by default.
 - **With it on,** object storage counts as configured, and no key pair is passed to any client.
 - **With it on and a key pair also set,** the install refuses to start. Two sources of credentials is a mistake waiting to be found.
 - **At start-up the API proves it can reach the documents bucket** with one cheap call, and fails with a message that names the bucket and the role's problem. A wrong role is then found at install, not at the first upload.
+- **Today the search index is not checked at start-up.** Core tries to create it on first use and on every search, add and delete. With `S3_VECTORS_CREATE_IF_MISSING` off, this wave adds a real start-up check of the index in a shared vector bucket. A vector bucket named per workspace is known only once a workspace uses it, so its index is still checked on first use.
 - **A Bedrock model is offered with no key.** US-103 finds whatever further up treats a missing key as "provider not set up" and makes the setting answer it.
-- **The search index can be left alone.** A second setting, `S3_VECTORS_CREATE_IF_MISSING`, on by default as today. With it off, a missing index is an error with a clear message, and core never tries to create one. An install whose role may not create an index needs it off, or it cannot start.
+- **The search index can be left alone.** A second setting, `S3_VECTORS_CREATE_IF_MISSING`, on by default as today. With it off, a missing index is an error with a clear message, and core never tries to create one. An install whose role may not create an index needs it off, or none of its searches, adds and deletes can run.
+- **A Bedrock model runs on Bedrock, in the install's region.** US-105: whichever name an agent stores for Bedrock, and whichever path builds its client, the call goes to Bedrock in `AWS_REGION`.
 
 ### 5.2 TLS to Redis
 
@@ -155,39 +158,49 @@ Each wave is one pull request or a short series. CI is the only gate: nothing he
 **Description:** As an operator, I want to tell core to use the pod's own role, so that I store no cloud key.
 
 **Acceptance Criteria:**
-- [ ] `AWS_USE_WORKLOAD_IDENTITY` exists in `config.py` and in `config-surface.json`.
-- [ ] With it on and no key pair, `is_storage_configured()` is true and a client is built with no key arguments.
-- [ ] With it on and a key pair set, start-up fails with a message naming both.
-- [ ] With it off, every existing shape in `test_is_storage_configured_shapes` behaves as today.
-- [ ] `ruff check` and the backend test lanes pass in CI.
+- [x] `AWS_USE_WORKLOAD_IDENTITY` exists in `config.py` and in `config-surface.json`.
+- [x] With it on and no key pair, `is_storage_configured()` is true and a client is built with no key arguments.
+- [x] With it on and a key pair set, start-up fails with a message naming both.
+- [x] With it off, every existing shape in `test_is_storage_configured_shapes` behaves as today.
+- [ ] `ruff check` and the backend test lanes pass in CI. Open until CI shows it.
 
 #### US-102: Proving the role at start-up · S
 **Description:** As an operator, I want a wrong role found when the install starts, so that the first upload is not how I learn about it.
 
 **Acceptance Criteria:**
-- [ ] With the setting on, start-up makes one cheap call to the documents bucket.
-- [ ] A refusal fails start-up with a message that names the bucket and the kind of failure, and quotes no credential.
-- [ ] The call runs off the event loop and has a short time limit.
-- [ ] With the setting off, no call is made.
+- [x] With the setting on, start-up makes one cheap call to the documents bucket.
+- [x] A refusal fails start-up with a message that names the bucket and the kind of failure, and quotes no credential.
+- [x] The call runs off the event loop and has a short time limit.
+- [x] With the setting off, no call is made.
 
 #### US-103: Bedrock with no key · M
 **Description:** As an operator, I want Bedrock models offered and usable from the pod's role, so that the default model path needs no key either.
 
 **Acceptance Criteria:**
-- [ ] The pull request states what, above the client, treats a missing key as "not set up", with file and line.
-- [ ] With the setting on and no key, a Bedrock model resolves and the client is built on the role branch.
-- [ ] With the setting off, behaviour is unchanged.
-- [ ] `test_1170_bedrock_converse.py` passes, with a new case for the role path.
+- [ ] The pull request states what, above the client, treats a missing key as "not set up", with file and line. Open until the pull request is written.
+- [x] With the setting on and no key, a Bedrock model resolves and the client is built on the role branch.
+- [x] With the setting off, behaviour is unchanged.
+- [ ] `test_1170_bedrock_converse.py` passes, with a new case for the role path. The case is added; open until CI shows it passing.
 
 #### US-104: An index core does not create · S
 **Description:** As an operator who creates the search index myself, with my own key, I want core never to create one, so that a mistake in my setup is an error and not a second, unencrypted index.
 
 **Acceptance Criteria:**
-- [ ] `S3_VECTORS_CREATE_IF_MISSING` exists, on by default.
-- [ ] With it off and no index, start-up fails with a message naming the bucket and index it looked for.
-- [ ] With it off, no create call is ever made. A test asserts it.
-- [ ] With it off and a role that is refused both create calls, core starts against a bucket and an index that exist.
-- [ ] The existing size check is unchanged.
+- [x] `S3_VECTORS_CREATE_IF_MISSING` exists, on by default.
+- [ ] With it off and no index, start-up fails with a message naming the bucket and index it looked for. Delivered for a shared vector bucket. Open for a bucket named per workspace: its index is checked on that workspace's first use, and a missing one fails that call with the same message.
+- [x] With it off, no create call is ever made. A test asserts it.
+- [x] With it off and a role that is refused both create calls, core starts against a bucket and an index that exist.
+- [x] The existing size check is unchanged.
+
+#### US-105: A Bedrock model is called on Bedrock, in the install's region · M
+**Description:** As an operator who runs models on Bedrock in my own account, I want every Bedrock agent called on Bedrock, in the install's region, so that its calls stay in that account and region whichever path makes them.
+
+**Acceptance Criteria:**
+- [ ] With `AWS_USE_WORKLOAD_IDENTITY` on, an agent stored as `bedrock` or `aws_bedrock` is called on Bedrock in chat, in agent creation and in the spoken model.
+- [ ] The region is `AWS_REGION` on every path.
+- [ ] A Bedrock tier with no key uses the role and is never rerouted to another provider.
+- [ ] With the setting off, today's behaviour is unchanged, and a test pins it.
+- [ ] The pull request states what main does today, with file and line.
 
 ### Wave 2: TLS to Redis
 
@@ -339,6 +352,7 @@ Each wave is one pull request or a short series. CI is the only gate: nothing he
 - FR-11: An install must refuse to start when its embedding model produces fewer dimensions than an index expects.
 - FR-12: A provider that is set and unusable must raise, never fall back to stand-in vectors.
 - FR-13: With none of the new settings set, the `local` edition must behave as it does today.
+- FR-14: With `AWS_USE_WORKLOAD_IDENTITY` on, an agent whose provider is Bedrock, under either stored name, must be called on Bedrock in `AWS_REGION` on every path, and a Bedrock tier with no key must use the role, never another provider.
 
 ## 8. Decisions for Gerard
 

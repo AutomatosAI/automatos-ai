@@ -15,11 +15,18 @@ provider and never process-wide:
   Bedrock config);
 - an access key ID with its secret (``config.secret_key``): IAM, signed with SigV4;
 - otherwise the default AWS credential chain (environment, profile, instance role).
+
+PRD-278 US-103: with ``AWS_USE_WORKLOAD_IDENTITY`` on, the default chain is the install's
+own role, and a client uses it only when ``config.workload_identity`` says the key resolver
+answered with that role. A key ID without its secret, or no key at all, is then refused:
+it never falls through to the install's credentials.
 """
 
 import logging
 import re
 from typing import Any, Dict, List, Optional
+
+from config import config as app_config
 
 from .base import BaseLLMProvider, LLMResponse, accepts_sampling_params, request_max_tokens, run_blocking
 from .bedrock_converse import answer, converse_messages, converse_tools, history_tools
@@ -42,6 +49,10 @@ _NOT_CONFIGURED = (
     "AWS Bedrock credentials not configured. Cannot generate response. "
     "Please configure 'development_aws' credential or set AWS env vars."
 )
+_KEY_WITHOUT_SECRET = (
+    "AWS Bedrock credentials not configured: an access key ID was given without its secret "
+    "access key. Save the key with its secret, or use a Bedrock API key."
+)
 
 
 class _StaticToken:
@@ -56,8 +67,13 @@ class _StaticToken:
         return FrozenAuthToken(self._token)
 
 
-def runtime_client(api_key: Optional[str], secret_key: Optional[str], region: Optional[str]) -> Any:
-    """A ``bedrock-runtime`` client for these credentials (see the module docstring)."""
+def runtime_client(api_key: Optional[str], secret_key: Optional[str], region: Optional[str],
+                   use_role: bool = False) -> Any:
+    """A ``bedrock-runtime`` client for these credentials (see the module docstring).
+
+    ``use_role``: the key resolver answered with the install's own role (PRD-278), the only
+    case in which, with ``AWS_USE_WORKLOAD_IDENTITY`` on, the default chain is used.
+    """
     import botocore.session
 
     config = Config(region_name=region or DEFAULT_REGION, retries={"max_attempts": 3, "mode": "adaptive"})
@@ -69,7 +85,9 @@ def runtime_client(api_key: Optional[str], secret_key: Optional[str], region: Op
     if api_key and secret_key:
         return boto3.client("bedrock-runtime", aws_access_key_id=api_key, aws_secret_access_key=secret_key,
                             config=config)
-    return boto3.client("bedrock-runtime", config=config)
+    if not app_config.AWS_USE_WORKLOAD_IDENTITY or (use_role and not api_key):
+        return boto3.client("bedrock-runtime", config=config)
+    raise ValueError(_KEY_WITHOUT_SECRET if api_key else _NOT_CONFIGURED)
 
 
 def _plain_error(error: Exception, model_id: str) -> Optional[str]:
@@ -93,7 +111,8 @@ class BedrockProvider(BaseLLMProvider):
         if boto3 is None:
             raise ImportError("boto3 package not installed. Run: pip install boto3")
         self.model_id = self.config.model
-        self.client = runtime_client(self.config.api_key, self.config.secret_key, self.config.base_url)
+        self.client = runtime_client(self.config.api_key, self.config.secret_key, self.config.base_url,
+                                     use_role=self.config.workload_identity)
         logger.info(f"Initialized AWS Bedrock (Converse) client with model: {self.model_id}")
 
     def _request(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict]]) -> Dict[str, Any]:
