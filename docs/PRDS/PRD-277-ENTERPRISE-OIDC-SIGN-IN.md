@@ -284,17 +284,17 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As a maintainer, I want every place that compares the edition listed with what it decides, so that the third edition's behaviour is chosen on purpose in each one.
 
 **Acceptance Criteria:**
-- [ ] A table lists each of the 91 call sites: file, line, what it switches, and its value in `local`, `saas` and `enterprise`.
-- [ ] Each row names one capability from a short list. No capability means "is this edition X".
-- [ ] Rows where the enterprise answer is not obvious are listed for Gerard, not guessed.
+- [x] A table lists each call site: file, line, what it switches, and its value in `local`, `saas` and `enterprise`. It is [PRD-277-EDITION-CHECKS.md](PRD-277-EDITION-CHECKS.md), which finds 99 lines in the backend and says why that is more than the 91 first counted.
+- [x] Each row names one capability from a short list. No capability means "is this edition X".
+- [x] Rows where the enterprise answer is not obvious are listed for Gerard, not guessed: G-1 to G-11 in that file.
 
 #### US-102: Named capabilities replace raw comparisons · L
 **Description:** As a developer, I want code to ask "is billing on" instead of "is the edition local", so that adding an edition cannot silently switch a feature.
 
 **Acceptance Criteria:**
-- [ ] Capabilities are defined in one module beside `AUTH_EDITION` in `config.py`.
+- [x] Capabilities are defined in one module, `orchestrator/core/editions.py`. They are not in `config.py`, which is over the file-size limit and must not grow.
 - [ ] No file outside that module and the tests compares `AUTH_EDITION` or reads `IS_LOCAL_EDITION` / `IS_SAAS_EDITION`. A test fails if one does.
-- [ ] A truth-table test pins every capability for `local` and `saas` to today's behaviour.
+- [x] A truth-table test pins every capability for `local` and `saas` to today's behaviour.
 - [ ] All existing tests pass unchanged, except those that assert on the removed comparisons, which are listed in the PR.
 - [ ] `ruff check` and the backend test lanes pass in CI.
 
