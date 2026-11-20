@@ -159,10 +159,33 @@ workspaces:
   accessModes:
     - ReadWriteMany
 
+# One ServiceAccount for each component (PRD-280), so a cloud role tied to one account
+# reaches that component only. The chart creates <fullname>-api, -frontend (the web app),
+# -worker and -migrate, <fullname> being the prefix of every resource's name (release
+# `demo`: demo-automatos-api). The migration Job's account is created by a hook just
+# before the Job, and deleted once the Job is done. No pod mounts a token for the
+# cluster's own API: nothing in Automatos calls it. Tokens a cloud's own webhook projects
+# (EKS IRSA) are separate and still work.
+#   create: false  the chart creates no account; each pod runs under the account its `name`
+#                  names (several may name the same one), or the namespace's `default`.
+#   name           renames the chart's account, e.g. to keep a role already bound to a name.
+#   annotations    on that account only, e.g. eks.amazonaws.com/role-arn on the API's.
+# serviceAccount.name and serviceAccount.annotations (one account for every pod, before
+# chart 0.7.0) stop the render with a message that says what to set instead.
 serviceAccount:
   create: true
-  name: ""
-  annotations: {}
+  api:
+    name: ""
+    annotations: {}
+  frontend:
+    name: ""
+    annotations: {}
+  worker:
+    name: ""
+    annotations: {}
+  migrate:
+    name: ""
+    annotations: {}
 
 # OpenTelemetry (PRD-256): traces from the API, the worker and the web app's
 # server side, and the API's GenAI metrics, over OTLP/HTTP. OFF by default. Point

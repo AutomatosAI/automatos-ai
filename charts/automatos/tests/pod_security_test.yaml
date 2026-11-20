@@ -1,0 +1,39 @@
+suite: Every container's security settings (PRD-280 US-102)
+# No `templates:`: every template the chart has, so a pod added later is checked too.
+set:
+  existingSecret: automatos-secrets
+  # Every optional component on.
+  frontend:
+    enabled: true
+  worker:
+    enabled: true
+  api:
+    data:
+      enabled: true
+  ingress:
+    enabled: true
+  sessionMode:
+    enabled: true
+  otel:
+    enabled: true
+    endpoint: http://otel-collector:4318
+tests:
+  - it: gives every container the runtime's default system-call filter, no privilege escalation, and every capability dropped
+    # Every document with a pod template: the Deployments and the migration Job.
+    documentSelector:
+      path: spec.template.spec.containers
+      matchMany: true
+    asserts:
+      # A container that lacks any of the three, or has no securityContext at all.
+      - notExists:
+          path: "spec.template.spec.containers[?(!(@.securityContext.seccompProfile.type == 'RuntimeDefault' && @.securityContext.allowPrivilegeEscalation == false && @.securityContext.capabilities.drop[*] == 'ALL'))]"
+      - notExists:
+          path: "spec.template.spec.initContainers[?(!(@.securityContext.seccompProfile.type == 'RuntimeDefault' && @.securityContext.allowPrivilegeEscalation == false && @.securityContext.capabilities.drop[*] == 'ALL'))]"
+      # The same filter the other way round finds every pod's container, so the check
+      # above cannot pass by matching nothing.
+      - exists:
+          path: "spec.template.spec.containers[?(@.securityContext.seccompProfile.type == 'RuntimeDefault' && @.securityContext.allowPrivilegeEscalation == false && @.securityContext.capabilities.drop[*] == 'ALL')]"
+      # No container adds a capability back, but the worker's until Wave 2 (its exact
+      # set is pinned in worker_frontend_test.yaml).
+      - notExists:
+          path: "spec.template.spec.containers[?(@.securityContext.capabilities.add && @.name != 'worker')]"
