@@ -11,6 +11,8 @@ app binary can talk to hosted Studio and to a self-hosted install alike:
   (``clerk_frontend_api``; no setting of its own). local signs in with a paired device:
   ``auth.modes ["device"]``, ``clerk`` null, and ``pairing.enabled`` only while the install
   takes paired devices (``LOCAL_REMOTE_ACCESS=paired``, ``services.mobile.remote_access``).
+  Any other way of signing in (``oidc``, the enterprise edition, until PRD-277 US-602 fills
+  it in) raises ``DiscoveryUnavailable``: never a Clerk block it would not honour.
 * ``api_url`` and ``web_url`` are ``services.mobile.urls``'s, the helpers the pair link uses
   (K15): a local install never advertises the hosted API.
 * ``push.expo`` says whether this server sends notifications through Expo's push service
@@ -53,6 +55,8 @@ DISCOVERY_SCHEMA = "automatos-discovery/v1"
 SERVER_NAME = "Automatos"
 AUTH_MODE_CLERK = "clerk"
 AUTH_MODE_DEVICE = "device"
+# PRD-277: phones cannot sign in through an organisation's identity provider in this build.
+SIGN_IN_NOT_BUILT = "this build cannot tell phones how to sign in to this edition"
 # A Clerk publishable key is one of these prefixes, then base64 of "<frontend API host>$".
 CLERK_KEY_PREFIXES = ("pk_test_", "pk_live_")
 CLERK_KEY_TERMINATOR = "$"
@@ -164,10 +168,13 @@ def _clerk_block() -> Dict[str, str]:
 
 def _auth_and_pairing() -> Tuple[Dict[str, Any], Dict[str, bool]]:
     """The ``auth`` and ``pairing`` blocks for this edition's ``sign_in`` and remote-access mode."""
-    if editions.current().sign_in == editions.SIGN_IN_NONE:
+    sign_in = editions.current().sign_in
+    if sign_in == editions.SIGN_IN_NONE:
         auth = {"modes": [AUTH_MODE_DEVICE], "clerk": None}
         return auth, {"enabled": config.LOCAL_REMOTE_ACCESS == MODE_PAIRED}
-    return {"modes": [AUTH_MODE_CLERK], "clerk": _clerk_block()}, {"enabled": False}
+    if sign_in == editions.SIGN_IN_CLERK:
+        return {"modes": [AUTH_MODE_CLERK], "clerk": _clerk_block()}, {"enabled": False}
+    raise DiscoveryUnavailable(SIGN_IN_NOT_BUILT)
 
 
 def offered_capabilities() -> List[str]:

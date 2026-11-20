@@ -18,9 +18,58 @@ from functools import lru_cache
 import httpx
 
 from config import config
+from core import editions
 from core.auth.clerk_azp import azp_allowed
 
 logger = logging.getLogger(__name__)
+
+# PRD-277 US-103: the ways of signing in whose installs use Clerk at all: they verify a Clerk
+# token and call Clerk's API (invitations, user lookup, user deletion). ``saas`` signs people
+# in with Clerk; ``local`` signs nobody in and keeps today's behaviour. Any other way of
+# signing in (``oidc``, the enterprise edition) never trusts a Clerk token and never calls
+# Clerk, even with Clerk's settings left in its environment.
+CLERK_SIGN_INS = frozenset({editions.SIGN_IN_CLERK, editions.SIGN_IN_NONE})
+
+CLERK_NOT_USED = "This install does not sign people in with Clerk, so it does not call Clerk."
+
+
+class ClerkNotUsed(ValueError):
+    """A call to Clerk's API on an install that does not use Clerk (``CLERK_SIGN_INS``).
+
+    A ``ValueError``, as an unset Clerk secret already is, so every caller that handles
+    "Clerk is not set up" handles this too.
+    """
+
+
+def clerk_in_use() -> bool:
+    """True where this install signs people in with Clerk, or signs nobody in (``local``)."""
+    return editions.current().sign_in in CLERK_SIGN_INS
+
+
+def _clerk_api_refused(call: str) -> bool:
+    """True, with a log line naming the call, where this install must not call Clerk's API."""
+    if clerk_in_use():
+        return False
+    logger.warning("Clerk %s refused: %s", call, CLERK_NOT_USED)
+    return True
+
+
+def _primary_email(user: Dict[str, Any]) -> Optional[str]:
+    """A Clerk user object's primary email address, else its first one, else ``None``."""
+    email_addresses = user.get("email_addresses", [])
+    if not email_addresses:
+        return None
+    primary = next(
+        (e for e in email_addresses if e.get("id") == user.get("primary_email_address_id")),
+        email_addresses[0],
+    )
+    return primary.get("email_address")
+
+
+def _require_clerk_api(call: str) -> None:
+    """Raise ``ClerkNotUsed`` where this install must not call Clerk's API."""
+    if _clerk_api_refused(call):
+        raise ClerkNotUsed(CLERK_NOT_USED)
 
 
 class ClerkAuth:
@@ -74,8 +123,12 @@ class ClerkAuth:
             token: The JWT token from Authorization header
             
         Returns:
-            Dict with claims if valid, None if invalid or expired
+            Dict with claims if valid, None if invalid or expired, and None on an
+            install that does not sign people in with Clerk (``CLERK_SIGN_INS``)
         """
+        if not clerk_in_use():
+            logger.warning("Clerk token refused: this install does not sign people in with Clerk")
+            return None
         if not self.jwks_client:
             logger.error("JWKS client not initialized. Cannot verify token.")
             return None
@@ -248,7 +301,7 @@ class ClerkAuth:
         Users always have emails (required for signup), but they're not automatically
         included in JWTs - you must configure the Session Token Template in Clerk Dashboard.
         """
-        if not self.clerk_secret_key:
+        if _clerk_api_refused("user lookup") or not self.clerk_secret_key:
             return None
         
         try:
@@ -263,21 +316,11 @@ class ClerkAuth:
             # Use httpx with timeout to avoid hanging
             with httpx.Client(timeout=2.0) as client:
                 response = client.get(api_url, headers=headers)
-                if response.status_code == 200:
-                    data = response.json()
-                    # Extract primary email
-                    email_addresses = data.get("email_addresses", [])
-                    if email_addresses:
-                        # Find primary email
-                        primary = next(
-                            (e for e in email_addresses if e.get("id") == data.get("primary_email_address_id")),
-                            email_addresses[0]
-                        )
-                        email = primary.get("email_address")
-                        if email:
-                            logger.debug(f"✅ Fetched email from Clerk API (workaround) for user {clerk_user_id}: {email}")
-                            logger.debug("   ⚠️  Consider configuring Session Token Template to include email in JWT")
-                            return email
+                email = _primary_email(response.json()) if response.status_code == 200 else None
+                if email:
+                    logger.debug(f"✅ Fetched email from Clerk API (workaround) for user {clerk_user_id}: {email}")
+                    logger.debug("   ⚠️  Consider configuring Session Token Template to include email in JWT")
+                    return email
         except Exception as e:
             # Don't log errors for API fetch failures - it's just a fallback
             logger.debug(f"Failed to fetch email from Clerk API for user {clerk_user_id}: {e}")
@@ -290,7 +333,7 @@ class ClerkAuth:
 
     async def get_org_members(self, org_id: str) -> list[dict]:
         """Fetch members of a Clerk organization."""
-        if not self.clerk_secret_key:
+        if _clerk_api_refused("organisation member list") or not self.clerk_secret_key:
             return []
         
         api_url = f"{self.clerk_api_base}/v1/organizations/{org_id}/memberships"
@@ -308,6 +351,7 @@ class ClerkAuth:
 
     async def invite_to_org(self, org_id: str, email: str, role: str, inviter_user_id: str) -> dict:
         """Invite a user to a Clerk organization."""
+        _require_clerk_api("organisation invitation")
         if not self.clerk_secret_key:
             raise ValueError("Clerk secret key not configured")
 
@@ -349,8 +393,9 @@ class ClerkAuth:
         ``redirect_url`` and copies ``public_metadata`` onto the new User.
 
         Returns the Clerk invitation payload (includes ``id`` for revoke).
-        Raises ValueError on Clerk API failure.
+        Raises ValueError on Clerk API failure, and ``ClerkNotUsed`` where Clerk is not used.
         """
+        _require_clerk_api("user invitation")
         if not self.clerk_secret_key:
             raise ValueError("Clerk secret key not configured")
 
@@ -382,7 +427,7 @@ class ClerkAuth:
 
     async def revoke_user_invitation(self, clerk_invitation_id: str) -> bool:
         """Revoke a Clerk user invitation by ID. Idempotent on 404."""
-        if not self.clerk_secret_key or not clerk_invitation_id:
+        if _clerk_api_refused("invitation revoke") or not self.clerk_secret_key or not clerk_invitation_id:
             return False
         api_url = f"{self.clerk_api_base}/v1/invitations/{clerk_invitation_id}/revoke"
         headers = {"Authorization": f"Bearer {self.clerk_secret_key}"}
@@ -398,6 +443,7 @@ class ClerkAuth:
 
     async def remove_from_org(self, org_id: str, user_id: str) -> None:
         """Remove a user from a Clerk organization."""
+        _require_clerk_api("organisation member removal")
         if not self.clerk_secret_key:
             raise ValueError("Clerk secret key not configured")
 
@@ -422,6 +468,7 @@ class ClerkAuth:
 
         Used by admin workspace purge to fully remove a pilot/demo user.
         """
+        _require_clerk_api("user deletion")
         if not self.clerk_secret_key:
             raise ValueError("Clerk secret key not configured")
         if not clerk_user_id:
@@ -455,6 +502,7 @@ class ClerkAuth:
         ``offset`` until a page comes back shorter than ``limit``. Raises
         ValueError on any failure: an operator step must never act on half a list.
         """
+        _require_clerk_api("user list")
         if not self.clerk_secret_key:
             raise ValueError("Clerk secret key not configured")
         api_url = f"{self.clerk_api_base}/v1/users"

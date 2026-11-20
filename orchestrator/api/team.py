@@ -7,14 +7,16 @@ from typing import List, Optional
 from core.auth.hybrid import get_request_context_hybrid as get_request_context
 from core.auth.dependencies import RequestContext
 from core.auth.actor import resolve_internal_user_id
-from core.auth.clerk import get_clerk_auth
+from core.auth.clerk import clerk_in_use, get_clerk_auth
 from core.auth.user_link import user_id_for_invitee
 from core.database.database import get_db
 from core.auth.workspace_permission import require_workspace_permission, workspace_permission_granted
 from core.auth.step_up import require_step_up
 from config import config
 from modules.policy.roles import WorkspaceRole
-from core.workspaces.invitations import WorkspaceInvitation, invite_member_to_workspace
+from core.workspaces.invitations import (
+    INVITATIONS_OFF, WorkspaceInvitation, invitations_available, invite_member_to_workspace,
+)
 from core.workspaces.audit import AuditService
 from core.workspaces.models import WorkspaceMember
 from core.models.workspaces import Workspace
@@ -40,6 +42,13 @@ STEP_UP = require_step_up(config.STEP_UP_MAX_AGE_MINUTES)
 # Public router for accept-invitation — uses Clerk JWT directly without going
 # through workspace resolution (the invitee may not yet be a member of any workspace).
 public_router = APIRouter(prefix="/api/team", tags=["team"])
+
+
+def require_invitations() -> None:
+    """404 where the install has no invitations (PRD-277 §4: off in enterprise), before the
+    caller is looked at, so nothing is stored and nothing is sent to Clerk."""
+    if not invitations_available():
+        raise HTTPException(status_code=404, detail=INVITATIONS_OFF)
 
 
 # The canonical resolver lives in core.auth.actor; the module-level name is kept
@@ -214,7 +223,9 @@ def list_team_members(
     # A-07f asks for step-up when the role is not 'member'. 'member' is not a WorkspaceRole:
     # invite_member_to_workspace answers 400 for it, the body's default included. So every
     # invite that can succeed (admin, editor, viewer) grants access, and every invite needs it.
-    dependencies=[Depends(require_workspace_permission("members:invite")), Depends(STEP_UP)],
+    dependencies=[
+        Depends(require_invitations), Depends(require_workspace_permission("members:invite")), Depends(STEP_UP),
+    ],
 )
 async def invite_member(
     workspace_id: str,
@@ -331,7 +342,7 @@ async def remove_member(
     # Remove from Clerk Org
     # We need the Clerk User ID logic here. We assume member.user_id -> User -> clerk_user_id
     user = db.query(User).filter(User.id == member.user_id).first()
-    if user and user.clerk_user_id and ctx.user.org_id:
+    if user and user.clerk_user_id and ctx.user.org_id and clerk_in_use():
         clerk = get_clerk_auth()
         try:
             await clerk.remove_from_org(ctx.user.org_id, user.clerk_user_id)
@@ -365,7 +376,7 @@ async def remove_member(
 @router.get(
     "/invitations",
     response_model=List[InvitationResponse],
-    dependencies=[Depends(require_workspace_permission("members:invite"))],
+    dependencies=[Depends(require_invitations), Depends(require_workspace_permission("members:invite"))],
 )
 def list_pending_invitations(
     workspace_id: str,
@@ -394,7 +405,7 @@ def list_pending_invitations(
 
 @router.delete(
     "/invitations/{invitation_id}",
-    dependencies=[Depends(require_workspace_permission("members:invite"))],
+    dependencies=[Depends(require_invitations), Depends(require_workspace_permission("members:invite"))],
 )
 async def revoke_pending_invitation(
     workspace_id: str,
@@ -510,7 +521,9 @@ def _join_from_invitation(db: Session, invitation: WorkspaceInvitation, user_id:
     return already_member
 
 
-@public_router.post("/accept-invitation", response_model=AcceptInvitationResponse)
+@public_router.post(
+    "/accept-invitation", response_model=AcceptInvitationResponse, dependencies=[Depends(require_invitations)],
+)
 def accept_invitation(
     payload: AcceptInvitationRequest,
     request: Request,
@@ -560,7 +573,7 @@ def accept_invitation(
     )
 
 
-@public_router.get("/invitation-info")
+@public_router.get("/invitation-info", dependencies=[Depends(require_invitations)])
 def get_invitation_info(token: str, db: Session = Depends(get_db)):
     """Public lookup of invitation metadata by token (for UI rendering before
     the user is signed in). Returns workspace name, inviter email, role.

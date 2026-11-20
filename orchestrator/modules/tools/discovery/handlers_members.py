@@ -92,6 +92,11 @@ async def invite_member(db: Session, workspace_id: UUID, params: Dict[str, Any])
     if not email:
         return {"success": False, "error": "email is required"}
 
+    from core.workspaces.invitations import INVITATIONS_OFF, invitations_available
+
+    if not invitations_available():  # PRD-277 §4: nothing is stored, nothing is sent to Clerk
+        return {"success": False, "error": INVITATIONS_OFF}
+
     try:
         # F148: the person the call is made for sends the invitation (as REST
         # records its caller); the owner only when a lane names nobody.
