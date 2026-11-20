@@ -4,7 +4,8 @@ PRD-277, enterprise sign-in, Wave 4 (US-402, §5.2). The ONE migration of the wa
 
 * ``oidc_pending_sign_ins`` (a new table): one row per sign-in sent to the organisation's identity
   provider and not back yet, kept at most ten minutes and used once. It holds the SHA-256 of the
-  ``state`` and of the ``nonce``, never either value; the PKCE verifier, which the code exchange must
+  ``state``, of the ``nonce`` and of the browser binding (the secret in the browser's sign-in cookie),
+  never any of them; the PKCE verifier, which the code exchange must
   present; and where the person returns afterwards. It names no person and no workspace, so it has
   no foreign key.
 * ``uq_oidc_pending_sign_ins_state_hash`` on ``state_hash``, unique: the callback's one lookup, and
@@ -37,6 +38,7 @@ CREATE TABLE IF NOT EXISTS oidc_pending_sign_ins (
     id UUID PRIMARY KEY,
     state_hash VARCHAR(64) NOT NULL,
     nonce_hash VARCHAR(64) NOT NULL,
+    binding_hash VARCHAR(64) NOT NULL,
     code_verifier VARCHAR(128) NOT NULL,
     return_to VARCHAR(1024) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),

@@ -214,6 +214,16 @@ Automatos reads the provider's own metadata document (`<issuer>/.well-known/open
 
 Groups matter in this PRD only for the access rule. Roles are set in Automatos.
 
+**Endpoint hosts.** Automatos calls two addresses the metadata names: the token endpoint and the keys address (`jwks_uri`). Each must be on the issuer's own host, or on a host listed in `OIDC_ENDPOINT_HOSTS`. The sign-in page (`authorization_endpoint`) is opened by the browser, not by Automatos, so its host is not limited. Some providers publish the two on other hosts:
+
+| Provider | Token endpoint and keys address | What to list in `OIDC_ENDPOINT_HOSTS` |
+|---|---|---|
+| Google Workspace | Token endpoint `https://oauth2.googleapis.com/token`; keys `https://www.googleapis.com/oauth2/v3/certs` | `oauth2.googleapis.com, www.googleapis.com` |
+| Amazon Cognito | Token endpoint on the user pool's domain (`https://<prefix>.auth.<region>.amazoncognito.com/oauth2/token`, or the pool's custom domain) | That domain |
+| Microsoft Entra ID | Both on `login.microsoftonline.com`, the issuer's host | Nothing |
+
+Google's and Entra's rows were checked against their published metadata documents, and Cognito's against Amazon's token endpoint documentation, on 20 Nov 2026. Other providers are not listed until their metadata is checked.
+
 Rows marked without **[T]** come from the providers' documentation and are **[I]** until the conformance run (US-703) proves them. The Microsoft rows were checked against Microsoft's documentation on 19 Nov 2026.
 
 ### 5.10 Settings
@@ -234,6 +244,9 @@ Names are provisional. Final names are fixed in each wave's PR and recorded in `
 | `OIDC_CA_BUNDLE_FILE` | empty | A certificate authority file for an IdP with a private certificate. |
 | `ENTERPRISE_BOOTSTRAP_ADMINS` | empty | People who become install admins at first sign-in. |
 | `ENTERPRISE_DEFAULT_ROLE` | `none` | Role in the default workspace for anyone who passes the access rule. |
+| `OIDC_ENDPOINT_HOSTS` | empty | Host names, comma separated, besides the issuer's own, on which the metadata may put the token endpoint and the keys address (§5.9). Host names only: no scheme, port, wildcard or address. |
+| `OIDC_PENDING_SIGN_INS_MAX` | `10000` | Sign-ins started and not finished that may be held at once. At the ceiling a start answers "try again shortly" and stores nothing. A whole number of at least 1. |
+| `CLIENT_IP_HEADER` | none, required in enterprise | An existing setting: the header the proxy in front sets to the caller's address. Sign-in limits requests by that address and writes it to the audit log, so where sign-in is OIDC start-up refuses to start without it. |
 | `ENTERPRISE_DEVICE_PAIRING` | `on` | Whether phones and browsers may pair. |
 | `SESSION_IDLE_MINUTES`, `SESSION_ABSOLUTE_HOURS` | `120`, `12` | The two session clocks. |
 

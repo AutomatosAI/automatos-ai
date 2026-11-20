@@ -14,8 +14,12 @@
    tokens including ``openid``; ``OIDC_CLAIM_EMAIL`` and ``OIDC_CLAIM_NAME`` must name a claim;
    ``OIDC_CA_BUNDLE_FILE``, when set, must be a file this process can read; and
    ``ENTERPRISE_DEFAULT_ROLE`` must be ``none`` or a workspace role below owner, and a role needs
-   ``DEFAULT_WORKSPACE_ID``. The refusal names the setting, never its value. ``config.py`` reads
-   them so that no value can stop another edition from starting.
+   ``DEFAULT_WORKSPACE_ID``. ``CLIENT_IP_HEADER`` must name the header the proxy in front sets to
+   the caller's address: sign-in limits requests per address and writes it to the audit log, and
+   without that header the address is whatever the caller wrote. ``OIDC_ENDPOINT_HOSTS``, when set,
+   must be host names (no scheme, port or wildcard), and ``OIDC_PENDING_SIGN_INS_MAX`` a whole number
+   of at least one. The refusal names the setting, never its value. ``config.py`` reads them so
+   that no value can stop another edition from starting.
 3. last, while ``OIDC_SIGN_IN_IN_THIS_BUILD`` is false: the edition is "not available in this
    build", so a half-built edition can never run. The pull request that finishes Wave 4 turns it
    on.
@@ -79,7 +83,16 @@ BAD_SESSION_SETTING = "AUTH_EDITION=enterprise cannot start: {name} {problem}."
 OIDC_SIGN_IN_SETTINGS: Tuple[str, ...] = (
     "OIDC_ISSUER", "FRONTEND_URL", "OIDC_SCOPES", "OIDC_CLAIM_EMAIL", "OIDC_CLAIM_NAME",
     "OIDC_CA_BUNDLE_FILE", "ENTERPRISE_DEFAULT_ROLE", "DEFAULT_WORKSPACE_ID",
+    "CLIENT_IP_HEADER", "OIDC_ENDPOINT_HOSTS", "OIDC_PENDING_SIGN_INS_MAX",
 )
+CLIENT_IP_HEADER_PROBLEM = (
+    "must name the header the proxy in front sets to the caller's address: sign-in limits requests "
+    "by that address and writes it to the audit log, and without it the address is whatever the caller "
+    "sent"
+)
+# RFC 1123 host names, lower-case: labels of letters, digits and hyphens. No scheme, port or wildcard.
+_HOST_NAME = re.compile(r"^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$")
+_HOST_LIST_SEPARATORS = re.compile(r"[\s,]+")
 OPENID_SCOPE = "openid"
 NO_DEFAULT_ROLE = "none"
 # modules.policy.roles.WorkspaceRole below owner: sign-in never makes anyone a workspace's owner.
@@ -136,6 +149,7 @@ def _sign_in_setting_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str
         if not str(settings.get(name) or "").strip():
             yield name, "must name a claim"
     yield from _bundle_and_role_problems(settings)
+    yield from _limit_and_host_problems(settings)
 
 
 def _bundle_and_role_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str, str]]:
@@ -147,6 +161,25 @@ def _bundle_and_role_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str
         yield "ENTERPRISE_DEFAULT_ROLE", f"must be one of {', '.join(DEFAULT_ROLES)}"
     elif role != NO_DEFAULT_ROLE and not str(settings.get("DEFAULT_WORKSPACE_ID") or "").strip():
         yield "ENTERPRISE_DEFAULT_ROLE", "needs DEFAULT_WORKSPACE_ID, the workspace the role is in"
+
+
+def listed_hosts(value: Any) -> Tuple[str, ...]:
+    """The host names in an ``OIDC_ENDPOINT_HOSTS`` value (comma or space separated), lower-case."""
+    return tuple(name.lower().rstrip(".") for name in _HOST_LIST_SEPARATORS.split(str(value or "")) if name)
+
+
+def is_host_name(name: str) -> bool:
+    """A DNS host name: not an address, a scheme, a port or a wildcard."""
+    return bool(_HOST_NAME.match(name)) and not name.rsplit(".", 1)[-1].isdigit()
+
+
+def _limit_and_host_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str, str]]:
+    if not _TOKEN.match(str(settings.get("CLIENT_IP_HEADER") or "").strip()):
+        yield "CLIENT_IP_HEADER", CLIENT_IP_HEADER_PROBLEM
+    if not all(is_host_name(name) for name in listed_hosts(settings.get("OIDC_ENDPOINT_HOSTS"))):
+        yield "OIDC_ENDPOINT_HOSTS", "must be host names separated by commas, with no scheme, port or wildcard"
+    if not _whole_number_at_least_one(settings.get("OIDC_PENDING_SIGN_INS_MAX")):
+        yield "OIDC_PENDING_SIGN_INS_MAX", "must be a whole number of at least 1"
 
 
 def check_start_up(capabilities: editions.EditionCapabilities, settings: Mapping[str, Optional[str]]) -> None:
@@ -220,5 +253,7 @@ __all__ = [
     "EditionNotReady",
     "check_session_settings",
     "check_start_up",
+    "is_host_name",
+    "listed_hosts",
     "missing_settings",
 ]

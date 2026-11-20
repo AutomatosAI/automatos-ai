@@ -5,7 +5,9 @@ address) and the in-process provider (US-407), each test in a transaction rolled
 
 * **Start** redirects to the provider with ``code``, the exact callback address, the scopes, a
   state, a nonce and a PKCE S256 challenge, keeps the sign-in server-side for ten minutes as
-  digests, and binds it to this browser with a ``__Host-`` cookie.
+  digests, and binds it to this browser with a ``__Host-`` cookie holding a secret of its own (not
+  the state). A callback with no cookie, another cookie, or the state as its cookie ends nothing.
+  At ``OIDC_PENDING_SIGN_INS_MAX`` sign-ins under way, a start is ``sign_in_busy`` and keeps nothing.
 * **First sign-in** creates the person and the identity link and nothing else (no personal
   workspace, no trial, no membership), is audited, and issues a session in the cookie. With
   ``ENTERPRISE_DEFAULT_ROLE=none`` the person is signed in and in no workspace, and the API says
@@ -15,9 +17,14 @@ address) and the in-process provider (US-407), each test in a transaction rolled
 * **Every refusal** in US-402's list (wrong signature, ``alg: none``, wrong issuer, wrong
   audience, expired, missing or wrong nonce, reused state, replayed code, another host) ends
   without a session, at ``/sign-in?error=…``; one that is a refusal of the person is audited with
-  its reason, and looks the same whether or not their address is already known.
+  its reason, and looks the same whether or not their address is already known. So does a callback
+  with a repeated ``state`` or ``code``, a code over ``CODE_MAX_LENGTH``, or more parameters than
+  ``CALLBACK_PARAMS_MAX``.
 * **US-408**: a second, fake identity method and a hook sign a person in with no change to the
-  session or permission code; a hook can refuse, or set a membership through ``core.auth.people``.
+  session or permission code. A hook is handed ``HookPeople``, never the database session; it can
+  refuse, or set a membership, which is audited (``member:role_changed``) on a first and on a
+  repeat sign-in. A hook that fails any other way is ``sign_in_failed``, audited, with nothing kept
+  and the binding cookie cleared: never a 500.
 
 * **Nothing secret is logged or answered**: over a sign-in that succeeds and over each way one
   fails (a bad signature, a wrong nonce, the token endpoint failing, the provider's own error, a
@@ -32,7 +39,7 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -47,12 +54,13 @@ os.environ.setdefault("POSTGRES_DB", "test")
 
 from api import auth_oidc as routes  # noqa: E402
 from config import config  # noqa: E402
-from core.auth import hybrid, oidc_provider, people, session_lane, sign_in_flow  # noqa: E402
-from core.auth.oidc_sign_in import CALLBACK_PATH, OidcSignIn  # noqa: E402
+from core.auth import hybrid, oidc_provider, session_lane, sign_in_flow  # noqa: E402
+from core.auth.oidc_sign_in import CALLBACK_PATH, CODE_MAX_LENGTH, OidcSignIn  # noqa: E402
 from core.auth.pairing import hash_secret  # noqa: E402
 from core.auth.sign_in_methods import (  # noqa: E402
     Callback,
     Finished,
+    HookPeople,
     SignInRefusedByHook,
     SignInRegistry,
     Started,
@@ -166,14 +174,16 @@ def test_start_redirects_with_pkce_state_nonce_and_the_exact_callback(install):
     assert query["redirect_uri"] == INSTALL + CALLBACK_PATH and query["scope"] == "openid profile email"
     assert query["code_challenge_method"] == "S256" and len(query["code_challenge"]) == 43
     assert len(query["state"]) >= 43 and len(query["nonce"]) >= 43 and query["state"] != query["nonce"]
-    cookie = started.headers["set-cookie"]
-    assert cookie.startswith(f"{routes.SIGN_IN_COOKIE}={query['state']};")
+    cookie, binding = started.headers["set-cookie"], started.cookies[routes.SIGN_IN_COOKIE]
+    assert cookie.startswith(f"{routes.SIGN_IN_COOKIE}={binding};") and len(binding) >= 43
+    assert binding not in (query["state"], query["nonce"]) and binding not in started.headers["location"]
     assert all(part in cookie.lower() for part in ("secure", "httponly", "samesite=lax", "path=/", "max-age=600"))
     assert started.headers["cache-control"] == "no-store" and started.headers["referrer-policy"] == "no-referrer"
-    row = install.db.execute(text("SELECT state_hash, nonce_hash, code_verifier, return_to, created_at, expires_at "
-                                  "FROM oidc_pending_sign_ins WHERE state_hash = :h"),
+    row = install.db.execute(text("SELECT state_hash, nonce_hash, binding_hash, code_verifier, return_to, created_at, "
+                                  "expires_at FROM oidc_pending_sign_ins WHERE state_hash = :h"),
                              {"h": hash_secret(query["state"])}).one()
     assert row.nonce_hash == hash_secret(query["nonce"]) and row.return_to == "/projects?tab=1"
+    assert row.binding_hash == hash_secret(binding)
     assert 43 <= len(row.code_verifier) <= 128
     assert row.expires_at - row.created_at == timedelta(seconds=600)
 
@@ -318,9 +328,10 @@ def test_a_token_that_breaks_a_rule_ends_without_a_session_and_is_audited(instal
 
 
 def test_a_reused_state_is_expired_and_the_code_is_exchanged_once(install):
-    callback = install.idp.approve(_start(install).headers["location"])
+    started = _start(install)
+    callback = install.idp.approve(started.headers["location"])
     first = install.client.get(callback, follow_redirects=False)
-    install.client.cookies.set(routes.SIGN_IN_COOKIE, parse_qs(urlsplit(callback).query)["state"][0])
+    install.client.cookies.set(routes.SIGN_IN_COOKIE, started.cookies[routes.SIGN_IN_COOKIE])
 
     second = install.client.get(callback, follow_redirects=False)
 
@@ -341,12 +352,26 @@ def test_a_replayed_code_with_a_new_state_is_refused_by_the_provider(install):
     assert len(install.idp.token_requests) == 2 and _all_sessions(install.db) == 1
 
 
-def test_a_callback_carried_to_another_browser_is_not_a_sign_in_there(install):
-    callback = install.idp.approve(_start(install).headers["location"])
+def _pending_rows(install, callback) -> int:
+    state = parse_qs(urlsplit(callback).query)["state"][0]
+    return install.db.execute(text("SELECT COUNT(*) FROM oidc_pending_sign_ins WHERE state_hash = :h"),
+                              {"h": hash_secret(state)}).scalar_one()
+
+
+@pytest.mark.parametrize("cookie", ["none", "another", "the-state"])
+def test_a_callback_without_this_browsers_binding_ends_nothing(install, cookie):
+    started = _start(install)
+    callback = install.idp.approve(started.headers["location"])
+    state = parse_qs(urlsplit(callback).query)["state"][0]
     install.client.cookies.clear()
+    if cookie != "none":
+        install.client.cookies.set(routes.SIGN_IN_COOKIE, state if cookie == "the-state" else "x" * 43)
 
     assert _refusal(install.client.get(callback, follow_redirects=False)) == sign_in_flow.EXPIRED
     assert install.idp.token_requests == [] and _audits(install.db, install.workspace_id) == []
+    assert _pending_rows(install, callback) == 1                       # the person's own browser can still finish
+    install.client.cookies.set(routes.SIGN_IN_COOKIE, started.cookies[routes.SIGN_IN_COOKIE])
+    assert install.client.get(callback, follow_redirects=False).headers["location"] == "/projects?tab=1"
 
 
 def test_only_the_latest_sign_in_of_a_browser_can_finish(install):
@@ -390,6 +415,53 @@ def test_a_token_endpoint_that_gives_no_id_token_is_refused(install, behaviour):
     assert _refusal(_sign_in(install)) == sign_in_flow.REFUSED and _all_sessions(install.db) == 0
 
 
+def _with(callback, **extra) -> str:
+    """``callback`` with each of ``extra`` added to its query (a name may repeat one it has)."""
+    return callback + "".join(f"&{name}={value}" for name, value in extra.items())
+
+
+def test_a_repeated_state_is_not_a_state(install):
+    callback = install.idp.approve(_start(install).headers["location"])
+    state = parse_qs(urlsplit(callback).query)["state"][0]
+
+    assert _refusal(install.client.get(_with(callback, state=state), follow_redirects=False)) == sign_in_flow.EXPIRED
+    assert install.idp.token_requests == [] and _pending_rows(install, callback) == 1
+
+
+@pytest.mark.parametrize("code", ["repeated", "too-long"])
+def test_a_repeated_or_overlong_code_is_refused_unexchanged(install, code):
+    callback = install.idp.approve(_start(install).headers["location"])
+    if code == "repeated":
+        sent = _with(callback, code="another-code")
+    else:
+        query = {name: values[0] for name, values in parse_qs(urlsplit(callback).query).items()}
+        query["code"] = "c" * (CODE_MAX_LENGTH + 1)
+        sent = CALLBACK_PATH + "?" + urlencode(query)
+
+    assert _refusal(install.client.get(sent, follow_redirects=False)) == sign_in_flow.REFUSED
+    assert install.idp.token_requests == [] and _all_sessions(install.db) == 0
+
+
+def test_a_callback_with_more_parameters_than_the_cap_carries_none(install):
+    callback = install.idp.approve(_start(install).headers["location"])
+    padding = {f"p{index}": "x" for index in range(routes.CALLBACK_PARAMS_MAX)}
+
+    assert _refusal(install.client.get(_with(callback, **padding), follow_redirects=False)) == sign_in_flow.EXPIRED
+    assert install.idp.token_requests == [] and _pending_rows(install, callback) == 1
+
+
+def test_at_the_ceiling_a_start_is_busy_and_keeps_nothing(install, monkeypatch):
+    live = install.db.execute(text("SELECT COUNT(*) FROM oidc_pending_sign_ins WHERE expires_at > now()")).scalar_one()
+    monkeypatch.setattr(config, "OIDC_PENDING_SIGN_INS_MAX", live + 1)
+    _start(install)
+
+    busy = install.client.get(START, follow_redirects=False)
+
+    assert _refusal(busy) == sign_in_flow.BUSY and routes.SIGN_IN_COOKIE not in busy.headers.get("set-cookie", "")
+    assert install.db.execute(text("SELECT COUNT(*) FROM oidc_pending_sign_ins WHERE expires_at > now()")
+                              ).scalar_one() == live + 1
+
+
 # --------------------------------------------------------------------------- US-408
 
 
@@ -418,22 +490,85 @@ def _fake_registry(monkeypatch, hook):
 def test_a_second_method_and_a_hook_sign_a_person_in_and_set_a_membership(install, monkeypatch):
     seen = []
 
-    def hook(db, signed_in):
-        seen.append((signed_in.created, signed_in.identity.subject))
-        people.set_membership(db, signed_in.user_id, install.workspace_id, "viewer")
+    def hook(hook_people, signed_in):
+        seen.append((type(hook_people), signed_in.created, signed_in.identity.subject))
+        assert hook_people.set_membership(install.workspace_id, "viewer") is True
 
     _fake_registry(monkeypatch, hook)
-    done = sign_in_flow.finish_sign_in(install.db, Callback(params={"who": ("hooked",)}),
-                                       sign_in_flow.Browser(), method="fake")
+    done = _fake_sign_in(install, "hooked")
 
     user_id = _identity_user(install.db, "hooked")
-    assert done.return_to == "/after" and done.session.user_id == user_id and seen == [(True, "hooked")]
+    assert done.return_to == "/after" and done.session.user_id == user_id and seen == [(HookPeople, True, "hooked")]
     assert [row[0] for row in _membership(install.db, user_id, install.workspace_id)] == ["viewer"]
     assert _sessions_of(install.db, user_id) == 1
+    assert _membership_rows(install, user_id) == [{"new_role": "viewer", "set_by": "sign_in_hook", "hook": "test-hook"}]
+
+
+def _fake_sign_in(install, subject):
+    return sign_in_flow.finish_sign_in(install.db, Callback(params={"who": (subject,)}), sign_in_flow.Browser(),
+                                       method="fake")
+
+
+def _membership_rows(install, user_id) -> list:
+    return [row[0] for row in install.db.execute(text(
+        "SELECT details FROM audit_logs WHERE action = 'member:role_changed' AND user_id = :u "
+        "AND workspace_id = CAST(:ws AS uuid) ORDER BY id"), {"u": user_id, "ws": str(install.workspace_id)})]
+
+
+def test_a_membership_a_hook_sets_on_a_repeat_sign_in_is_audited_too(install, monkeypatch):
+    roles = iter(["viewer", "editor"])
+    _fake_registry(monkeypatch, lambda hook_people, signed_in: hook_people.set_membership(install.workspace_id,
+                                                                                          next(roles)))
+    _fake_sign_in(install, "returning")
+    _fake_sign_in(install, "returning")
+
+    user_id = _identity_user(install.db, "returning")
+    assert [row[0] for row in _membership(install.db, user_id, install.workspace_id)] == ["editor"]
+    assert [row["new_role"] for row in _membership_rows(install, user_id)] == ["viewer", "editor"]
+
+
+def test_a_hook_is_handed_no_database_session(install, monkeypatch):
+    handed = []
+    _fake_registry(monkeypatch, lambda hook_people, signed_in: handed.append((hook_people, signed_in)))
+    _fake_sign_in(install, "no-session")
+
+    (hook_people, signed_in), = handed
+    assert [name for name in vars(hook_people)] == ["set_membership"]
+    assert not any(isinstance(value, type(install.db)) for value in (*vars(hook_people).values(),
+                                                                       *vars(signed_in).values()))
+
+
+@pytest.mark.parametrize("failure", ["raises", "owner"])
+def test_a_hook_that_fails_is_a_failed_sign_in_audited_and_nothing_kept(install, monkeypatch, failure):
+    def hook(hook_people, signed_in):
+        if failure == "owner":
+            hook_people.set_membership(install.workspace_id, "owner")
+        raise RuntimeError("the hook broke")
+
+    _fake_registry(monkeypatch, hook)
+    with pytest.raises(sign_in_flow.SignInRefusal) as refused:
+        _fake_sign_in(install, "broken-hook")
+
+    assert refused.value.code == sign_in_flow.FAILED
+    assert _identity_user(install.db, "broken-hook") is None and _all_sessions(install.db) == 0
+    assert [(action, details) for action, _uid, details in _audits(install.db, install.workspace_id)] == [
+        ("auth:sign_in_refused", {"reason": "access_rule"})]
+
+
+def test_a_failing_hook_through_the_routes_is_the_sign_in_page_never_a_500(install, monkeypatch):
+    registry = SignInRegistry({"oidc": OidcSignIn()})
+    registry.register_hook("broken", lambda hook_people, signed_in: 1 / 0)
+    monkeypatch.setattr(sign_in_flow, "REGISTRY", registry)
+
+    answer = _sign_in(install)
+
+    assert _refusal(answer) == sign_in_flow.FAILED and _all_sessions(install.db) == 0
+    cleared = [line for line in answer.headers.get_list("set-cookie") if line.startswith(routes.SIGN_IN_COOKIE + "=")]
+    assert cleared and ("max-age=0" in cleared[0].lower() or "expires=" in cleared[0].lower())
 
 
 def test_a_hook_that_refuses_ends_the_sign_in_and_keeps_no_person(install, monkeypatch):
-    def hook(db, signed_in):
+    def hook(hook_people, signed_in):
         raise SignInRefusedByHook("not in the pilot group")
 
     _fake_registry(monkeypatch, hook)
@@ -461,12 +596,12 @@ def _one_round(install, behaviour, answers) -> list:
     install.idp.misbehave(**behaviour)
     started = _start(install)
     query = parse_qs(urlsplit(started.headers["location"]).query)
-    state, nonce = query["state"][0], query["nonce"][0]
+    state, nonce, binding = query["state"][0], query["nonce"][0], started.cookies[routes.SIGN_IN_COOKIE]
     verifier = install.db.execute(text("SELECT code_verifier FROM oidc_pending_sign_ins WHERE state_hash = :h"),
                                   {"h": hash_secret(state)}).scalar_one()
     callback = install.idp.approve(started.headers["location"])
     answers.extend(install.client.get(callback, follow_redirects=False) for _ in range(2))
-    return [state, nonce, verifier]
+    return [state, nonce, binding, verifier]
 
 
 def test_no_secret_reaches_a_log_line_or_an_answer_on_any_path(install, caplog):

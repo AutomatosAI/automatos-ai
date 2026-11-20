@@ -40,7 +40,7 @@ from uuid import UUID
 from config import config
 from core.auth.user_link import REFUSED_EMAIL_CONFLICT
 from core.models.auth_sessions import IP_ADDRESS_MAX, USER_AGENT_MAX
-from core.workspaces.audit import AuditService
+from core.workspaces.audit import AuditLog, AuditService
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +52,9 @@ SIGN_OUT = "auth:sign_out"
 SESSION_REVOKED = "auth:session_revoked"
 STEP_UP = "auth:step_up"
 IDENTITY_LINKED = "auth:identity_linked"
+# A workspace role change is already audited under this action (api/team.py); a sign-in hook's is too.
+MEMBERSHIP_CHANGED = "member:role_changed"
+MEMBER_RESOURCE = "member"
 BOOTSTRAP_ADMIN = "auth:bootstrap_admin"
 PERSON_DEACTIVATED = "user:deactivated"
 SESSION_ACTIONS = (SIGN_IN, SIGN_IN_REFUSED, SIGN_OUT, SESSION_REVOKED, STEP_UP, IDENTITY_LINKED, BOOTSTRAP_ADMIN)
@@ -158,6 +161,20 @@ def record_identity_linked(db, *, user_id: int, details: Dict[str, Any], ip_addr
         raise SessionAuditFailed(AUDIT_FAILED_MESSAGE)
 
 
+def stage_membership_set(db, *, user_id: int, workspace_id: Union[UUID, str], role: str, hook: str,
+                         ip_address: Optional[str], user_agent: Optional[str]) -> None:
+    """``member:role_changed`` for a membership a sign-in hook set, added to the sign-in's transaction.
+
+    Not committed here: the row lands with the sign-in that made the change, or is rolled back with
+    it, so a membership is never kept without its row.
+    """
+    ip_address, user_agent = browser_fields(ip_address, user_agent)
+    db.add(AuditLog(workspace_id=UUID(str(workspace_id)), user_id=user_id, actor_type=ACTOR_SYSTEM,
+                    action=MEMBERSHIP_CHANGED, resource_type=MEMBER_RESOURCE, resource_id=str(user_id),
+                    details={"new_role": role, "set_by": "sign_in_hook", "hook": hook},
+                    ip_address=ip_address, user_agent=user_agent))
+
+
 def commit_removal(db, remove: Callable[[], T], record: Callable[[T], Optional[object]], action: str) -> T:
     """Apply ``remove``, then ``record`` its audit row, committing both; the removal always lands.
 
@@ -191,6 +208,7 @@ def session_ended_row(db, *, action: str, actor_user_id: Optional[int], subject:
 __all__ = [
     "BOOTSTRAP_ADMIN",
     "IDENTITY_LINKED",
+    "MEMBERSHIP_CHANGED",
     "PERSON_DEACTIVATED",
     "PERSON_RESOURCE",
     "REFUSAL_REASONS",
@@ -209,6 +227,7 @@ __all__ = [
     "audit_workspace",
     "browser_fields",
     "commit_removal",
+    "stage_membership_set",
     "record_identity_linked",
     "record_sign_in",
     "record_sign_in_refused",

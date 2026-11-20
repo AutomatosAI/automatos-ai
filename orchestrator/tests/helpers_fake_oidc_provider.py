@@ -63,12 +63,13 @@ def _new_kid(prefix: str) -> str:
     return f"{prefix}-{secrets.token_hex(4)}"
 
 
-def _self_signed(tmp_path: Path) -> Tuple[Path, Path]:
-    """A certificate for 127.0.0.1 and localhost (its own authority: the CA file) and its key."""
+def _self_signed(tmp_path: Path, dns_names: Tuple[str, ...] = ("localhost",)) -> Tuple[Path, Path]:
+    """A certificate for 127.0.0.1 and ``dns_names`` (its own authority: the CA file) and its key."""
     key = ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "prd277 fake identity provider")])
     now = datetime.now(timezone.utc)
-    names = x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address(LOOPBACK)), x509.DNSName("localhost")])
+    names = x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address(LOOPBACK)),
+                                         *(x509.DNSName(dns) for dns in dns_names)])
     cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
             .serial_number(x509.random_serial_number()).not_valid_before(now - timedelta(minutes=5))
             .not_valid_after(now + timedelta(hours=2)).add_extension(names, critical=False)
@@ -125,7 +126,8 @@ class _Code:
 class FakeIdentityProvider:
     """An OIDC provider on loopback TLS; ``close()`` stops it."""
 
-    def __init__(self, tmp_path: Path, client_id: str = "prd277-client") -> None:
+    def __init__(self, tmp_path: Path, client_id: str = "prd277-client",
+                 dns_names: Tuple[str, ...] = ("localhost",)) -> None:
         self.client_id = client_id
         self.client_secret = secrets.token_urlsafe(24)
         self.behaviour = Behaviour()
@@ -136,7 +138,7 @@ class FakeIdentityProvider:
         self._codes: Dict[str, _Code] = {}
         self._rsa, self._rsa_kid = _rsa_key(), _new_kid("rsa")
         self._ec, self._ec_kid = ec.generate_private_key(ec.SECP256R1()), _new_kid("ec")
-        cert_file, key_file = _self_signed(tmp_path)
+        cert_file, key_file = _self_signed(tmp_path, dns_names)
         self.ca_file = cert_file
         self._server = ThreadingHTTPServer((LOOPBACK, 0), _handler_for(self))
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -364,7 +366,8 @@ def install_settings(provider: FakeIdentityProvider, **overrides: Any) -> Dict[s
         "OIDC_ISSUER": provider.issuer, "OIDC_CLIENT_ID": provider.client_id,
         "OIDC_CLIENT_SECRET": provider.client_secret, "OIDC_CA_BUNDLE_FILE": str(provider.ca_file),
         "OIDC_SCOPES": "openid profile email", "OIDC_CLAIM_EMAIL": "email", "OIDC_CLAIM_NAME": "name",
-        "ENTERPRISE_DEFAULT_ROLE": "none", **overrides,
+        "ENTERPRISE_DEFAULT_ROLE": "none", "OIDC_ENDPOINT_HOSTS": "", "OIDC_PENDING_SIGN_INS_MAX": 10_000,
+        **overrides,
     }
 
 

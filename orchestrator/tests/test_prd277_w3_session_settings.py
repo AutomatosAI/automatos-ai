@@ -28,13 +28,15 @@ CLOCKS = ("SESSION_IDLE_MINUTES", "SESSION_ABSOLUTE_HOURS")
 ENV_KEYS = (
     "AUTH_EDITION", "REQUIRE_AUTH", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "FRONTEND_URL",
     "CLI_RUNTIME_ENABLED", "DEFAULT_WORKSPACE_ID", "CLERK_JWKS_URL", "CLERK_SECRET_KEY",
-    "LOCAL_REMOTE_ACCESS", "API_PUBLISH_ADDRESS", "WEB_PUBLISH_ADDRESS", *CLOCKS,
+    "LOCAL_REMOTE_ACCESS", "API_PUBLISH_ADDRESS", "WEB_PUBLISH_ADDRESS", "CLIENT_IP_HEADER", *CLOCKS,
 )
 OIDC_ENV = {
     "OIDC_ISSUER": "https://idp.example.test/realms/prd277-w3",
     "OIDC_CLIENT_ID": "prd277-w3-client",
     "OIDC_CLIENT_SECRET": "prd277" + "-" + "w3" + "-" + "marker",
     "FRONTEND_URL": "https://automatos.example.test",
+    # Wave 4: where sign-in is OIDC, the address it limits and audits by must come from the proxy.
+    "CLIENT_IP_HEADER": "X-Real-IP",
 }
 EDITION_ENV = {
     "local": {"AUTH_EDITION": "local", "DEFAULT_WORKSPACE_ID": "00000000-0000-0000-0000-0000000277c1"},

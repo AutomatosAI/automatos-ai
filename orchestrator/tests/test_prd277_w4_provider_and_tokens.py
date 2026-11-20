@@ -4,15 +4,19 @@ Against the in-process fake provider (``tests/helpers_fake_oidc_provider.py``, U
 on loopback, trusted through ``OIDC_CA_BUNDLE_FILE``:
 
 * **Metadata** is read from ``<issuer>/.well-known/openid-configuration`` and used only when its
-  issuer is ``OIDC_ISSUER`` exactly, its endpoints are https, and it offers the code flow, PKCE
-  S256, an allowed algorithm and a secret-based client authentication. Without the CA bundle, or
-  answered with a redirect or an error, it is not read at all.
+  issuer is ``OIDC_ISSUER`` exactly, its endpoints are https (a control character in one is a
+  refusal), the token endpoint and keys address are on the issuer's host or one listed in
+  ``OIDC_ENDPOINT_HOSTS``, and it offers the code flow, PKCE S256, an allowed algorithm and a
+  secret-based client authentication. Without the CA bundle, or answered with a redirect or an
+  error, it is not read at all. A failed read is held for ``FAILED_READ_HOLD_SECONDS``: sign-ins
+  in that time are refused without calling the provider, and the next one after reads again.
 * **Keys**: a token's ``kid`` picks its key; an unknown ``kid`` (the provider rotated its keys)
   reads the keys once more, and a second unknown ``kid`` within a minute reads nothing.
 * **The ID token** (``oidc_tokens.verify_id_token``): each rule of §5.11 has a test that fails
   without it: the signature (wrong key, tampered, ``alg: none``, HS256 with the public key, no
   ``kid``), the issuer, the audience and ``azp``, the three times with 60 seconds of leeway, the
-  nonce, and the required claims. RS256, PS256 and ES256 are accepted.
+  nonce, and the required claims, ``sub`` a non-empty string. RS256, PS256 and ES256 are accepted.
+  A subject or issuer too long for an identity link is refused when the identity is read.
 """
 from __future__ import annotations
 
@@ -32,6 +36,9 @@ os.environ.setdefault("POSTGRES_DB", "test")
 from config import config  # noqa: E402
 from core.auth import oidc_http, oidc_provider, oidc_tokens  # noqa: E402
 from core.auth.oidc_provider import ProviderMisconfigured, parse_metadata  # noqa: E402
+from core.auth.oidc_sign_in import verified_identity  # noqa: E402
+from core.auth.sign_in_methods import InvalidSignIn  # noqa: E402
+from core.models.user_identities import ISSUER_MAX, SUBJECT_MAX  # noqa: E402
 from core.auth.oidc_tokens import InvalidIdToken, verify_id_token  # noqa: E402
 from core.auth.pairing import hash_secret  # noqa: E402
 from tests.helpers_fake_oidc_provider import FakeIdentityProvider, point_install_at  # noqa: E402
@@ -127,13 +134,27 @@ def _document(**changes):
     {"response_types_supported": ["id_token"]}, {"code_challenge_methods_supported": ["plain"]},
     {"id_token_signing_alg_values_supported": ["HS256", "none"]},
     {"token_endpoint_auth_methods_supported": ["private_key_jwt"]}, {"response_types_supported": "code"},
+    {"token_endpoint": "https://idp.example.test/t\nHost: x"}, {"jwks_uri": "https://idp.example.test/k\t"},
+    {"token_endpoint": "https://tokens.elsewhere.example.test/t"}, {"jwks_uri": "https://keys.elsewhere.example.test/k"},
 ])
-def test_metadata_sign_in_cannot_use_is_refused(changes):
+def test_metadata_sign_in_cannot_use_is_refused(changes, monkeypatch):
+    monkeypatch.setattr(config, "OIDC_ENDPOINT_HOSTS", "")
     with pytest.raises(ProviderMisconfigured):
         parse_metadata(_document(**changes), "https://idp.example.test")
 
 
-def test_metadata_that_lists_nothing_offers_the_standard_defaults():
+def test_an_endpoint_on_a_listed_host_is_accepted(monkeypatch):
+    monkeypatch.setattr(config, "OIDC_ENDPOINT_HOSTS", "Tokens.Elsewhere.Example.Test, keys.elsewhere.example.test")
+    metadata = parse_metadata(_document(token_endpoint="https://tokens.elsewhere.example.test/t",
+                                        jwks_uri="https://keys.elsewhere.example.test/k"), "https://idp.example.test")
+    assert metadata.token_endpoint == "https://tokens.elsewhere.example.test/t"
+    # The browser's sign-in page is not called by this server, so its host is not limited.
+    assert parse_metadata(_document(authorization_endpoint="https://login.elsewhere.example.test/a"),
+                          "https://idp.example.test").authorization_endpoint == "https://login.elsewhere.example.test/a"
+
+
+def test_metadata_that_lists_nothing_offers_the_standard_defaults(monkeypatch):
+    monkeypatch.setattr(config, "OIDC_ENDPOINT_HOSTS", "")
     metadata = parse_metadata(_document(), "https://idp.example.test")
     assert metadata.token_auth_method == oidc_provider.AUTH_BASIC and metadata.end_session_endpoint is None
     posted = parse_metadata(_document(token_endpoint_auth_methods_supported=["client_secret_post"]),
@@ -141,13 +162,47 @@ def test_metadata_that_lists_nothing_offers_the_standard_defaults():
     assert posted.token_auth_method == oidc_provider.AUTH_POST
 
 
-def test_a_token_endpoint_on_another_private_host_is_never_called(idp):
+def test_a_token_endpoint_on_another_private_host_is_never_called(idp, monkeypatch):
+    monkeypatch.setattr(config, "OIDC_ENDPOINT_HOSTS", "localhost")
     idp.misbehave(metadata={"token_endpoint": idp.address("/token", host="localhost")})
     metadata = oidc_provider.current_metadata()
 
     with pytest.raises(oidc_http.ProviderUnreachable):
         oidc_http.call("POST", metadata.token_endpoint, "token", data={"grant_type": "authorization_code"})
     assert idp.token_requests == []
+
+
+def test_a_token_endpoint_on_another_port_of_the_issuers_host_is_never_called(idp):
+    other_port = idp.address("/token").replace(f":{idp.port}/", f":{idp.port + 1 if idp.port < 65535 else 1}/")
+    idp.misbehave(metadata={"token_endpoint": other_port})
+    metadata = oidc_provider.current_metadata()
+
+    with pytest.raises(oidc_http.ProviderUnreachable):
+        oidc_http.call("POST", metadata.token_endpoint, "token", data={"grant_type": "authorization_code"})
+
+
+def test_a_token_endpoint_on_an_unlisted_host_is_refused_with_the_metadata(idp):
+    idp.misbehave(metadata={"token_endpoint": idp.address("/token", host="localhost")})
+
+    with pytest.raises(ProviderMisconfigured):
+        oidc_provider.current_metadata()
+
+
+def test_a_failed_read_is_held_briefly_then_read_again(idp, fetches, monkeypatch):
+    moment = [1000.0]
+    monkeypatch.setattr(oidc_provider, "_clock", lambda: moment[0])
+    idp.misbehave(metadata_status=500)
+    with pytest.raises(oidc_http.ProviderUnreachable):
+        oidc_provider.current_metadata()
+    idp.misbehave()
+
+    with pytest.raises(oidc_http.ProviderUnreachable):
+        oidc_provider.current_metadata()                             # held: the provider is not called
+    assert fetches == ["metadata"]
+
+    moment[0] += oidc_provider.FAILED_READ_HOLD_SECONDS
+    assert oidc_provider.current_metadata().issuer == idp.issuer
+    assert fetches == ["metadata", "metadata"]
 
 
 # --------------------------------------------------------------------------- keys
@@ -255,6 +310,29 @@ def test_the_nonce_must_be_this_sign_ins(idp, nonce):
 def test_a_required_claim_that_is_missing_is_refused(idp, claim):
     claims = {name: value for name, value in _claims(idp).items() if name != claim}
     assert _refused(idp.id_token(claims))
+
+
+@pytest.mark.parametrize("subject", ["", 42, ["subject-1"]])
+def test_a_subject_that_is_not_a_non_empty_string_is_refused(idp, subject):
+    assert _refused(idp.id_token(_claims(idp, sub=subject)))
+
+
+@pytest.mark.parametrize("subject", ["", 42, None, ["subject-1"]])
+def test_the_subject_rule_itself_refuses_anything_but_a_non_empty_string(idp, subject):
+    """The rule on its own, so it is proven even where PyJWT would refuse a value first."""
+    with pytest.raises(InvalidIdToken):
+        oidc_tokens._check_issuer_and_subject({"iss": idp.issuer, "sub": subject})
+
+
+@pytest.mark.parametrize("claims", [
+    {"iss": "https://idp.example.test", "sub": "s" * (SUBJECT_MAX + 1)},
+    {"iss": "https://idp.example.test/" + "i" * ISSUER_MAX, "sub": "subject-1"},
+], ids=["subject-too-long", "issuer-too-long"])
+def test_a_subject_or_issuer_too_long_for_an_identity_link_is_refused(claims):
+    with pytest.raises(InvalidSignIn):
+        verified_identity(claims)
+    within = {"iss": "https://idp.example.test", "sub": "s" * SUBJECT_MAX}
+    assert verified_identity(within).subject == within["sub"]
 
 
 @pytest.mark.parametrize("token", ["", "not-a-token", "a.b", "x" * (oidc_tokens.MAX_ID_TOKEN_LENGTH + 1), None, 7])

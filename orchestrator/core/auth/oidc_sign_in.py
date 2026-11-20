@@ -3,7 +3,8 @@
 ``OidcSignIn`` is core's one ``IdentityMethod`` (``core.auth.sign_in_methods``).
 
 **start** reads the provider's metadata (``oidc_provider.current_metadata``), starts a sign-in
-(``oidc_pending.begin``: a state, a nonce and a PKCE verifier, kept ten minutes) and returns the
+(``oidc_pending.begin``: a state, a nonce, a browser binding and a PKCE verifier, kept ten minutes)
+and returns the
 address of the provider's own sign-in page, with:
 
 * ``response_type=code``, ``client_id``, ``scope`` (``OIDC_SCOPES``), ``state``, ``nonce``, and the
@@ -11,28 +12,27 @@ address of the provider's own sign-in page, with:
 * ``redirect_uri``: exactly ``<FRONTEND_URL's origin>/api/v1/auth/oidc/callback``, the one address
   the customer registers (§5.2). The web app and the API share that origin (§5.3).
 
-The state is also the browser binding: the route puts it in a ``__Host-`` cookie only this
-browser holds, so a callback carried to another browser (login cross-site request forgery) is not
-a sign-in there.
+The browser binding is a secret of its own, never in an address: the route puts it in a
+``__Host-`` cookie only this browser holds, so a callback carried to another browser (login
+cross-site request forgery) is not a sign-in there, even by someone who has seen the state.
 
 **finish** refuses at the first rule that fails, in this order:
 
-1. The callback's ``state`` must equal the browser's cookie (constant time); else ``SignInExpired``.
-2. The state must name a live sign-in, which is ended there and then (``oidc_pending.claim``:
-   single use, atomic); else ``SignInExpired``. Everything after this point runs at most once per
-   sign-in, so the code is exchanged at most once.
-3. The provider must not have answered with ``error``; an RFC 9207 ``iss`` must equal
+1. The callback's one ``state`` and the browser's binding cookie must name a live sign-in, which is
+   ended there and then (``oidc_pending.claim``: single use, atomic; the binding confirmed in
+   constant time). A missing or other binding ends nothing. Else ``SignInExpired``. Everything after
+   this point runs at most once per sign-in, so the code is exchanged at most once.
+2. The provider must not have answered with ``error``; an RFC 9207 ``iss`` must equal
    ``OIDC_ISSUER``; a ``code`` must be present, once, and of a sane length. Else ``InvalidSignIn``.
-4. The code is exchanged (``oidc_exchange``) and the ID token verified (``oidc_tokens``, every rule
+3. The code is exchanged (``oidc_exchange``) and the ID token verified (``oidc_tokens``, every rule
    of §5.11, the nonce this sign-in's). A refusal is ``InvalidSignIn``.
-5. The identity is read from the verified claims (``verified_identity``).
+4. The identity is read from the verified claims (``verified_identity``).
 
 ``InvalidSignIn``'s text names the rule broken and nothing else: it is for the log. What the
 provider said in ``error`` or ``error_description`` is never read into a log line.
 """
 from __future__ import annotations
 
-import hmac
 import logging
 from datetime import datetime, timezone
 from typing import Any, Mapping, Optional, Tuple
@@ -81,12 +81,6 @@ def _one(params: Mapping[str, Tuple[str, ...]], name: str) -> Optional[str]:
     """The parameter's value when the callback carries it exactly once, else ``None``."""
     values = params.get(name) or ()
     return values[0] if len(values) == 1 else None
-
-
-def _same_text(left: Optional[str], right: Optional[str]) -> bool:
-    if not left or not right:
-        return False
-    return hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
 
 
 def _profile_value(value: Any, *, strip: bool) -> Optional[str]:
@@ -180,16 +174,13 @@ class OidcSignIn:
             "nonce": started.nonce, "code_challenge": started.code_challenge,
             "code_challenge_method": oidc_provider.PKCE_S256,
         })
-        return Started(redirect_to=address, browser_binding=started.state)
+        return Started(redirect_to=address, browser_binding=started.binding)
 
     def finish(self, db: Any, callback: Callback) -> Finished:
         """The verified identity the callback proves, or ``SignInExpired`` / ``InvalidSignIn``."""
-        state = _one(callback.params, "state")
-        if not _same_text(state, callback.browser_binding):
-            raise SignInExpired("the callback's state is not this browser's sign-in")
-        claimed = oidc_pending.claim(db, state)
+        claimed = oidc_pending.claim(db, _one(callback.params, "state"), callback.browser_binding)
         if claimed is None:
-            raise SignInExpired("the callback's state names no live sign-in")
+            raise SignInExpired("the callback names no live sign-in of this browser")
         code = _code_of(callback.params)
         claims = _claims_of(_id_token_for(code, claimed), claimed)
         return Finished(identity=verified_identity(claims), return_to=claimed.return_to)

@@ -4,6 +4,10 @@
   in ``route-manifest.json`` and in ``MANIFEST_ROUTERS``, and answer 404 before anything else in
   ``local`` and ``saas``. They are public (no request-context dependency), plain ``def``, and
   limited per client IP before any database work: over the limit is 429 with ``Retry-After``.
+  With the shared limiter's store unreachable they count in this process with the same limits
+  (``core.security.local_window``), so the limit still bites; with it up, nothing changes, and
+  every other caller of the shared limiter still fails open. A callback with more than
+  ``CALLBACK_PARAMS_MAX`` parameters carries none.
   The callback path is the exact address sign-in registers at the provider.
   They are GET routes, so the boundary sweep (which classifies changing methods only) has no
   entry for them; this file pins what it would: public by design, rate limited.
@@ -51,6 +55,8 @@ from core.auth.sign_in_methods import (  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 from core.models.bootstrap import BootstrapReport, BootstrapStage  # noqa: E402
 from core.monitoring.path_digests import DigestPathFilter  # noqa: E402
+from api.widgets.rate_limit import RateLimitStore  # noqa: E402
+from core.security.local_window import LocalWindow  # noqa: E402
 from core.security.rate_limiter import DEFAULT_LIMITS  # noqa: E402
 
 ORCH = Path(__file__).resolve().parents[1]
@@ -131,7 +137,7 @@ def test_over_the_limit_is_429_with_retry_after_and_no_database_work(monkeypatch
     monkeypatch.setattr(config, "AUTH_EDITION", "enterprise")
     asked = []
 
-    def refuse(bucket, limit, window, label):
+    def refuse(bucket, limit, window, label, when_unavailable):
         asked.append((bucket, limit, window))
         return False, limit, 0, 42
 
@@ -164,6 +170,82 @@ def test_a_refused_start_goes_to_the_sign_in_page_with_its_code_only(monkeypatch
 def test_the_redirect_address_is_the_install_origin_and_the_callback_path(monkeypatch):
     monkeypatch.setattr(config, "FRONTEND_URL", "HTTPS://Automatos.Example.Test:443/app/")
     assert callback_address() == "https://automatos.example.test" + CALLBACK_PATH
+
+
+def _unavailable_start(monkeypatch):
+    def unavailable(db, return_to):
+        raise sign_in_flow.SignInRefusal(sign_in_flow.UNAVAILABLE)
+
+    monkeypatch.setattr(config, "AUTH_EDITION", "enterprise")
+    monkeypatch.setattr(sign_in_flow, "start_sign_in", unavailable)
+    monkeypatch.setitem(DEFAULT_LIMITS, "oidc_start_ip", (2, 600))
+    app = FastAPI()
+    app.include_router(auth_oidc.router)
+    app.dependency_overrides[get_db] = lambda: None
+    return TestClient(app, base_url=INSTALL)
+
+
+@pytest.mark.parametrize("store_down", ["no_redis", "redis_fails"])
+def test_with_the_store_down_the_limit_still_bites(monkeypatch, store_down):
+    def broken():
+        raise ConnectionError("the store is down")
+
+    factory = (lambda: None) if store_down == "no_redis" else (lambda: SimpleNamespace(pipeline=broken))
+    monkeypatch.setattr(auth_oidc, "_rate_store", RateLimitStore(redis_factory=factory))
+    monkeypatch.setattr(auth_oidc, "_local_window", LocalWindow())
+    client = _unavailable_start(monkeypatch)
+
+    answers = [client.get(START[1], follow_redirects=False) for _ in range(3)]
+
+    assert [answer.status_code for answer in answers] == [303, 303, 429]
+    assert int(answers[2].headers["retry-after"]) >= 1
+
+
+def test_with_the_store_up_nothing_is_counted_in_this_process(monkeypatch):
+    asked = []
+
+    def store(bucket, limit, window, label, when_unavailable):
+        asked.append(bucket)
+        return True, limit, limit - 1, window
+
+    monkeypatch.setattr(auth_oidc, "_rate_store", SimpleNamespace(check=store))
+    monkeypatch.setattr(auth_oidc, "_local_window", SimpleNamespace(check=lambda *a: pytest.fail("counted here")))
+    client = _unavailable_start(monkeypatch)
+
+    assert [client.get(START[1], follow_redirects=False).status_code for _ in range(3)] == [303, 303, 303]
+    assert len(asked) == 3
+
+
+def test_every_other_caller_of_the_shared_limiter_still_fails_open():
+    down = RateLimitStore(redis_factory=lambda: None)
+
+    assert down.check("prd277-other-route", 1, 60)[0] is True
+    assert down.check("prd277-other-route", 1, 60)[0] is True
+    assert down.check("prd277-bounded", 1, 60, when_unavailable=lambda: (False, 1, 0, 9)) == (False, 1, 0, 9)
+
+
+def test_the_local_window_counts_slides_and_forgets_the_oldest_key():
+    now = [1000.0]
+    window = LocalWindow(max_keys=2, clock=lambda: now[0])
+
+    assert [window.check("a", 2, 60)[0] for _ in range(3)] == [True, True, False]
+    assert window.check("a", 2, 60)[3] == 61
+    now[0] += 61
+    assert window.check("a", 2, 60)[0] is True
+    window.check("b", 2, 60)
+    window.check("c", 2, 60)
+    assert "a" not in window._marks and set(window._marks) == {"b", "c"}
+
+
+def test_a_callback_with_more_parameters_than_the_cap_carries_none():
+    from starlette.datastructures import QueryParams
+
+    def request(count):
+        pairs = [("state", "s"), ("code", "c")] + [(f"p{index}", "x") for index in range(count - 2)]
+        return SimpleNamespace(query_params=QueryParams(pairs))
+
+    assert auth_oidc._params(request(auth_oidc.CALLBACK_PARAMS_MAX))["state"] == ("s",)
+    assert auth_oidc._params(request(auth_oidc.CALLBACK_PARAMS_MAX + 1)) == {}
 
 
 # --------------------------------------------------------------------------- US-408 registry

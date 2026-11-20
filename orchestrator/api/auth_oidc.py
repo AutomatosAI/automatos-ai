@@ -6,14 +6,18 @@ Unless the edition signs in with OIDC (``sign_in`` is ``oidc``: enterprise), bot
 Both are public (nobody is signed in yet), plain ``def`` (the sync session and the calls to the
 provider run in the threadpool), and limited per client IP before any database or provider work
 (``oidc_start_ip``, ``oidc_callback_ip``: 429 with ``Retry-After``, the ``/mobile/pair`` pattern).
+The address is ``CLIENT_IP_HEADER``'s, which start-up requires where sign-in is OIDC. When the
+shared limiter's store cannot be reached, these two routes count in this process instead
+(``core.security.local_window``), with the same limits, so they stay bounded.
 
 * ``GET /start?return_to=<path>`` starts a sign-in (``core.auth.sign_in_flow.start_sign_in``) and
   answers 303 to the provider's sign-in page. ``return_to`` is kept only when it is a path on this
-  install (``sign_in_methods.safe_return_path``), else ``/``. The sign-in's state goes in a
-  ``__Host-`` cookie (``SIGN_IN_COOKIE``: Secure, HttpOnly, SameSite=Lax, ten minutes) that binds
-  the callback to this browser.
+  install (``sign_in_methods.safe_return_path``), else ``/``. The sign-in's browser binding, a
+  secret of its own that is never in an address, goes in a ``__Host-`` cookie (``SIGN_IN_COOKIE``:
+  Secure, HttpOnly, SameSite=Lax, ten minutes) that binds the callback to this browser.
 * ``GET /callback`` finishes it (``sign_in_flow.finish_sign_in``): 303 to the stored path, with the
-  session cookie set (``session_cookie.set_session_cookie``).
+  session cookie set (``session_cookie.set_session_cookie``). A callback with more than
+  ``CALLBACK_PARAMS_MAX`` parameters is read as carrying none, so it is refused.
 
 Every answer carries ``Cache-Control: no-store`` and ``Referrer-Policy: no-referrer`` (the
 callback's address holds the one-time code, which must never be sent on as a referrer), and a refusal is 303 to ``/sign-in?error=<code>``, the code one of ``sign_in_flow.REFUSAL_CODES``,
@@ -38,6 +42,7 @@ from core.auth.oidc_pending import SIGN_IN_TTL_SECONDS
 from core.auth.sign_in_methods import DEFAULT_RETURN_PATH, Callback
 from core.database.database import get_db
 from core.security.ip_bucket import ip_rate_bucket
+from core.security.local_window import LocalWindow
 from core.security.rate_limiter import DEFAULT_LIMITS
 
 NOT_FOUND = "Not Found"
@@ -50,6 +55,8 @@ CALLBACK_PARAMS_MAX = 32
 
 # Module-level so a test can hand it a fake Redis (RateLimitStore's redis_factory seam).
 _rate_store = RateLimitStore()
+# Where these two routes count while the shared store cannot be reached (never fail open).
+_local_window = LocalWindow()
 
 
 @dataclass(frozen=True)
@@ -75,8 +82,10 @@ router = APIRouter(prefix="/api/v1/auth/oidc", tags=["auth"], dependencies=[Depe
 def _check_ip_limit(request: Request, ip_limit: _IpLimit) -> None:
     """429 with ``Retry-After`` once this client IP has spent ``ip_limit`` in its window."""
     limit, window = DEFAULT_LIMITS[ip_limit.operation]
+    bucket = ip_rate_bucket(get_client_ip(request), ip_limit.bucket_prefix)
     allowed, _limit, _remaining, reset_seconds = _rate_store.check(
-        ip_rate_bucket(get_client_ip(request), ip_limit.bucket_prefix), limit, window, label=ip_limit.label,
+        bucket, limit, window, label=ip_limit.label,
+        when_unavailable=lambda: _local_window.check(bucket, limit, window),
     )
     if not allowed:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=RATE_LIMITED_DETAIL,
@@ -111,9 +120,15 @@ def _browser(request: Request) -> sign_in_flow.Browser:
 
 
 def _params(request: Request) -> Dict[str, Tuple[str, ...]]:
-    """The callback's query, each name with every value it was sent (a repeated name is not one value)."""
+    """The callback's query, each name with every value it was sent (a repeated name is not one value).
+
+    More than ``CALLBACK_PARAMS_MAX`` parameters is not a callback: it is read as carrying none.
+    """
+    items = request.query_params.multi_items()
+    if len(items) > CALLBACK_PARAMS_MAX:
+        return {}
     grouped: Dict[str, Tuple[str, ...]] = {}
-    for name, value in request.query_params.multi_items()[:CALLBACK_PARAMS_MAX]:
+    for name, value in items:
         grouped = {**grouped, name: (*grouped.get(name, ()), value)}
     return grouped
 

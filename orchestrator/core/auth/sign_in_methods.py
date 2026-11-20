@@ -12,9 +12,13 @@ touching the code that issues sessions or checks permissions.
   the person is) and ``oidc_http.ProviderUnreachable`` (the provider could not be reached). OIDC is
   the one implementation in core (``core.auth.oidc_sign_in``).
 * **The hook.** A ``SignInHook`` runs after the identity is verified and the person is found or
-  created, and before the session is issued (``core.auth.sign_in_flow``). It may refuse the sign-in
-  (``SignInRefusedByHook``) or set the person's memberships through ``core.auth.people``. With
-  nothing registered, sign-in is exactly as PRD-277 describes.
+  created, and before the session is issued (``core.auth.sign_in_flow``). It is handed
+  ``HookPeople`` (the one thing it may change: this person's workspace memberships, through
+  ``core.auth.people``) and ``SignedIn`` (who signed in, and their verified identity), never the
+  database session, so it cannot commit or reach another table. It may refuse the sign-in
+  (``SignInRefusedByHook``). Any other exception from it is a failed sign-in: rolled back, audited
+  and refused. Each membership it sets is audited when the sign-in commits. With nothing
+  registered, sign-in is exactly as PRD-277 describes.
 * **Registration closes at start-up** (``SignInRegistry.close``, called when the boot finishes, and
   by the first sign-in, whichever is first). After that, registering is ``RegistrationClosed``;
   registering a name twice is ``AlreadyRegistered``.
@@ -115,7 +119,19 @@ class IdentityMethod(Protocol):
         """The verified identity the callback proves, or one of the three refusals."""
 
 
-SignInHook = Callable[[Session, SignedIn], None]
+@dataclass(frozen=True)
+class HookPeople:
+    """What a hook may change, for the person signing in only.
+
+    ``set_membership(workspace_id, role)`` gives the person ``role`` (viewer, editor or admin) in that
+    workspace, adding the membership or changing it, and returns whether a row was written. It is
+    committed, and audited, with the sign-in, or rolled back with it.
+    """
+
+    set_membership: Callable[[str, str], bool] = field(repr=False)
+
+
+SignInHook = Callable[[HookPeople, SignedIn], None]
 
 
 def safe_return_path(value: Any) -> str:
@@ -189,6 +205,7 @@ __all__ = [
     "AlreadyRegistered",
     "Callback",
     "Finished",
+    "HookPeople",
     "IdentityMethod",
     "InvalidSignIn",
     "RegistrationClosed",

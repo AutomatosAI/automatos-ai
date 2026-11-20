@@ -43,7 +43,7 @@ VERSIONS = ORCH / "alembic" / "versions"
 REVISION, PARENT = "prd277_w4_oidc_sign_ins_20261120", "prd277_w3_sessions_20261120"
 MIGRATION = VERSIONS / f"{REVISION}.py"
 TABLE = "oidc_pending_sign_ins"
-COLUMNS = ("id", "state_hash", "nonce_hash", "code_verifier", "return_to", "created_at", "expires_at")
+COLUMNS = ("id", "state_hash", "nonce_hash", "binding_hash", "code_verifier", "return_to", "created_at", "expires_at")
 ROW_WRITES = re.compile(r"\b(DELETE FROM|TRUNCATE|UPDATE \w+ SET|INSERT INTO)\b")
 
 
@@ -128,7 +128,7 @@ def test_the_model_and_the_ddl_declare_the_same_names_and_sizes():
     assert Base.metadata.tables[TABLE] is table
     lines = _ddl_lines()
     assert [line.split()[0] for line in lines] == list(COLUMNS)
-    sizes = {"state_hash": SHA256_HEX_LENGTH, "nonce_hash": SHA256_HEX_LENGTH,
+    sizes = {"state_hash": SHA256_HEX_LENGTH, "nonce_hash": SHA256_HEX_LENGTH, "binding_hash": SHA256_HEX_LENGTH,
              "code_verifier": CODE_VERIFIER_MAX, "return_to": RETURN_TO_MAX}
     for name, size in sizes.items():
         assert table.c[name].type.length == size, name
@@ -138,11 +138,12 @@ def test_the_model_and_the_ddl_declare_the_same_names_and_sizes():
     assert indexes == {STATE_HASH_INDEX: (True, ("state_hash",)), EXPIRES_INDEX: (False, ("expires_at",))}
 
 
-def test_no_column_can_hold_a_raw_state_or_nonce():
-    """A state and a nonce are 43 URL-safe characters; their only columns hold 64 hex."""
+def test_no_column_can_hold_a_raw_state_nonce_or_binding():
+    """A state, a nonce and a binding are 43 URL-safe characters; their only columns hold 64 hex."""
     assert SHA256_HEX_LENGTH == 64
     text_columns = [c.name for c in OidcPendingSignIn.__table__.columns if isinstance(c.type, sa.String)]
-    assert [name for name in text_columns if "state" in name or "nonce" in name] == ["state_hash", "nonce_hash"]
+    secrets_kept = [name for name in text_columns if any(word in name for word in ("state", "nonce", "binding"))]
+    assert secrets_kept == ["state_hash", "nonce_hash", "binding_hash"]
 
 
 # --------------------------------------------------------------------------- Postgres (CI)
@@ -198,9 +199,10 @@ def _has_table(conn) -> bool:
 def _pending(conn, state_hash: str) -> None:
     now = datetime.now(timezone.utc)
     conn.execute(sa.text(
-        "INSERT INTO oidc_pending_sign_ins (id, state_hash, nonce_hash, code_verifier, return_to, expires_at) "
-        "VALUES (:id, :s, :n, :v, '/', :e)"),
-        {"id": uuid.uuid4(), "s": state_hash, "n": uuid.uuid4().hex * 2, "v": uuid.uuid4().hex * 2,
+        "INSERT INTO oidc_pending_sign_ins (id, state_hash, nonce_hash, binding_hash, code_verifier, return_to, "
+        "expires_at) VALUES (:id, :s, :n, :b, :v, '/', :e)"),
+        {"id": uuid.uuid4(), "s": state_hash, "n": uuid.uuid4().hex * 2, "b": uuid.uuid4().hex * 2,
+         "v": uuid.uuid4().hex * 2,
          "e": now + timedelta(minutes=10)})
 
 

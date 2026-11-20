@@ -7,6 +7,8 @@ own host the one host that may resolve to a private address. It is used only whe
 * its ``issuer`` equals ``OIDC_ISSUER`` exactly (§5.11; Discovery §4.3);
 * ``authorization_endpoint``, ``token_endpoint`` and ``jwks_uri`` are https addresses, and so is
   ``end_session_endpoint`` when it lists one (kept for signing out, §5.6);
+* ``token_endpoint`` and ``jwks_uri``, the two this server calls, are on the issuer's own host or on
+  a host the operator lists in ``OIDC_ENDPOINT_HOSTS`` (§5.9: some providers publish them elsewhere);
 * what it lists, where it lists it, includes the authorization code flow (``code``), PKCE ``S256``,
   one of ``SIGNING_ALGORITHMS``, and a client authentication this client uses
   (``client_secret_basic``, else ``client_secret_post``).
@@ -27,7 +29,9 @@ make the server call the provider on every request.
 **Unreachable.** Nothing here runs at import or blocks start-up. ``check_provider`` is the boot's
 report stage (``core.auth.sign_in_start_up``): the API starts either way, ``/health/bootstrap`` says
 whether the metadata and keys could be read, and sign-in answers with a clear error until they can.
-A failure is never kept: the next sign-in asks again.
+A failed metadata read is held for ``FAILED_READ_HOLD_SECONDS``: sign-ins in that time are refused at
+once instead of each waiting on the provider, so an unreachable provider cannot hold a worker per
+request. The first sign-in after it asks again.
 
 Each read replaces one frozen snapshot under a lock; nothing is changed in place.
 """
@@ -44,6 +48,7 @@ import jwt
 
 from config import config
 from core.auth import oidc_http
+from core.edition_start_up import listed_hosts
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +57,7 @@ METADATA_LIFESPAN_SECONDS = 300
 # core/auth/clerk.py's PyJWKClient lifespan.
 KEYS_LIFESPAN_SECONDS = 300
 KEY_REFETCH_INTERVAL_SECONDS = 60
+FAILED_READ_HOLD_SECONDS = 5
 
 # §5.11: the only algorithms an ID token may be signed with. Never ``none``, never HMAC.
 SIGNING_ALGORITHMS: Tuple[str, ...] = ("RS256", "PS256", "ES256")
@@ -99,6 +105,7 @@ class _Snapshot:
     keys: Tuple[Mapping[str, Any], ...] = ()
     keys_at: float = 0.0
     refetched_at: Optional[float] = None
+    failed_at: Optional[float] = None
 
 
 _lock = threading.Lock()
@@ -142,6 +149,15 @@ def _endpoint(doc: Mapping[str, Any], name: str, *, required: bool = True) -> Op
     return value
 
 
+def _called_endpoint(doc: Mapping[str, Any], name: str, issuer: str) -> str:
+    """An endpoint this server calls: https, on the issuer's host or one in ``OIDC_ENDPOINT_HOSTS``."""
+    value = _endpoint(doc, name)
+    allowed = (oidc_http.host_of(issuer), *listed_hosts(config.OIDC_ENDPOINT_HOSTS))
+    if oidc_http.host_of(value) not in allowed:
+        raise _misconfigured(f"{name} is on a host that is neither the issuer's nor in OIDC_ENDPOINT_HOSTS")
+    return value
+
+
 def _offers(doc: Mapping[str, Any], name: str, wanted: Tuple[str, ...]) -> bool:
     """Whether ``doc[name]`` lists one of ``wanted``; an absent list offers everything."""
     listed = doc.get(name)
@@ -176,22 +192,34 @@ def parse_metadata(doc: Any, issuer: str) -> ProviderMetadata:
     return ProviderMetadata(
         issuer=issuer,
         authorization_endpoint=_endpoint(doc, "authorization_endpoint"),
-        token_endpoint=_endpoint(doc, "token_endpoint"),
-        jwks_uri=_endpoint(doc, "jwks_uri"),
+        token_endpoint=_called_endpoint(doc, "token_endpoint", issuer),
+        jwks_uri=_called_endpoint(doc, "jwks_uri", issuer),
         end_session_endpoint=_endpoint(doc, "end_session_endpoint", required=False),
         token_auth_method=_token_auth_method(doc),
     )
 
 
+def _held_for(issuer: str) -> _Snapshot:
+    fresh = _snapshot()
+    return fresh if fresh.issuer == issuer else _Snapshot(issuer=issuer)
+
+
 def current_metadata() -> ProviderMetadata:
-    """The provider's metadata, read again once ``METADATA_LIFESPAN_SECONDS`` have passed."""
+    """The provider's metadata, read again once ``METADATA_LIFESPAN_SECONDS`` have passed.
+
+    A failed read is held for ``FAILED_READ_HOLD_SECONDS``; in that time this raises at once.
+    """
     issuer, now, held = config.OIDC_ISSUER, _clock(), _snapshot()
     if held.issuer == issuer and held.metadata is not None and now - held.metadata_at < METADATA_LIFESPAN_SECONDS:
         return held.metadata
-    metadata = parse_metadata(oidc_http.get_json(metadata_address(issuer), "metadata"), issuer)
-    fresh = _snapshot()
-    kept = fresh if fresh.issuer == issuer else _Snapshot(issuer=issuer)
-    _store(replace(kept, issuer=issuer, metadata=metadata, metadata_at=now))
+    if held.issuer == issuer and held.failed_at is not None and now - held.failed_at < FAILED_READ_HOLD_SECONDS:
+        raise oidc_http.ProviderUnreachable(oidc_http.UNREACHABLE_MESSAGE)
+    try:
+        metadata = parse_metadata(oidc_http.get_json(metadata_address(issuer), "metadata"), issuer)
+    except oidc_http.ProviderUnreachable:
+        _store(replace(_held_for(issuer), failed_at=now))
+        raise
+    _store(replace(_held_for(issuer), metadata=metadata, metadata_at=now, failed_at=None))
     return metadata
 
 
@@ -272,6 +300,7 @@ def check_provider() -> None:
 __all__ = [
     "AUTH_BASIC",
     "AUTH_POST",
+    "FAILED_READ_HOLD_SECONDS",
     "KEYS_LIFESPAN_SECONDS",
     "KEY_REFETCH_INTERVAL_SECONDS",
     "METADATA_LIFESPAN_SECONDS",

@@ -595,8 +595,7 @@ class Config:
     CLERK_AUTHORIZED_PARTIES: str = os.getenv("CLERK_AUTHORIZED_PARTIES", CLERK_DEFAULT_AUTHORIZED_PARTIES)
     # A token with no azp at all (Clerk omits it with no Origin: native apps, Backend API tokens). false = warn and accept; true = 401.
     CLERK_AZP_REQUIRED: bool = os.getenv("CLERK_AZP_REQUIRED", "false").strip().lower() in ("1", "true", "yes", "on")
-    # PRD-277 §5.10: the organisation's identity provider (enterprise). Read so that no value can stop a start;
-    # core/edition_start_up.py checks them, only where sign-in is OIDC. ENTERPRISE_DEFAULT_ROLE: none or a role.
+    # PRD-277 §5.10: the identity provider (enterprise). Read so no value stops a start; core/edition_start_up.py checks them where sign-in is OIDC.
     OIDC_ISSUER: str = (os.getenv("OIDC_ISSUER") or "").strip()
     OIDC_CLIENT_ID: str = (os.getenv("OIDC_CLIENT_ID") or "").strip()
     OIDC_CLIENT_SECRET: str = (os.getenv("OIDC_CLIENT_SECRET") or "").strip()
@@ -605,8 +604,9 @@ class Config:
     OIDC_CLAIM_NAME: str = (os.getenv("OIDC_CLAIM_NAME") or "name").strip()
     OIDC_CA_BUNDLE_FILE: str = (os.getenv("OIDC_CA_BUNDLE_FILE") or "").strip()
     ENTERPRISE_DEFAULT_ROLE: str = (os.getenv("ENTERPRISE_DEFAULT_ROLE") or "none").strip().lower()
-    # PRD-277 §5.3, D-15: sessions (core/auth/sessions.py): two clocks, a __Host- cookie and the CSRF header a
-    # cookie request that changes something carries. A clock that is not a whole number is refused at boot, there only.
+    OIDC_ENDPOINT_HOSTS: str = (os.getenv("OIDC_ENDPOINT_HOSTS") or "").strip()  # hosts besides the issuer's the metadata may name
+    OIDC_PENDING_SIGN_INS_MAX: int = _whole_number_setting("OIDC_PENDING_SIGN_INS_MAX", 10_000)  # unfinished sign-ins held at once
+    # PRD-277 §5.3, D-15: sessions (core/auth/sessions.py): two clocks, a __Host- cookie and the CSRF header; a bad clock stops enterprise only.
     SESSION_IDLE_MINUTES: int = _whole_number_setting("SESSION_IDLE_MINUTES", SESSION_IDLE_MINUTES_DEFAULT)
     SESSION_ABSOLUTE_HOURS: int = _whole_number_setting("SESSION_ABSOLUTE_HOURS", SESSION_ABSOLUTE_HOURS_DEFAULT)
     SESSION_COOKIE_NAME: str = (os.getenv("SESSION_COOKIE_NAME") or "__Host-automatos_session").strip()

@@ -8,14 +8,19 @@ Sign-in makes three calls, and none goes to an address a request supplies:
 
 Every call:
 
-* is ``https``, with a host; anything else is refused before any connection;
+* is ``https``, with a host and no whitespace or control character; anything else is refused
+  before any connection, and an address the HTTP client cannot parse is a refusal too;
 * resolves the host and connects to exactly the address it checked, the hostname kept as ``Host``
   and as the TLS name (``core.security.web_access.build_pinned_request``), so a DNS answer that
   changes between the check and the connection changes nothing;
 * may reach a private, loopback, link-local or shared address (``url_validator.BLOCKED_NETWORKS``)
-  only when its host is the configured issuer's own host: an identity provider inside the
-  customer's network (FR-9). Every other host must resolve to public addresses only, so the
-  metadata can never turn sign-in into a way to reach anything else inside the network;
+  only when its host and port are the configured issuer's own: an identity provider inside the
+  customer's network (FR-9). Every other host, and every other port of that host, must resolve to
+  public addresses only, so the metadata can never turn sign-in into a way to reach anything else
+  inside the network;
+* never reaches the reserved ranges in ``SIGN_IN_RESERVED_NETWORKS`` (IETF protocol assignments,
+  benchmarking, multicast and the old site-local block), on any host, also when an IPv6 address
+  carries one (mapped, 6to4 or NAT64);
 * verifies TLS, hostname included: against httpx's default authorities, or, when
   ``OIDC_CA_BUNDLE_FILE`` is set, against the operating system's authorities and the ones in that
   file (FR-10: an identity provider whose certificate a private authority signed);
@@ -30,6 +35,7 @@ type, never a value.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import socket
@@ -55,6 +61,13 @@ HTTP_OK = 200
 JSON_ACCEPT = {"Accept": "application/json"}
 UNREACHABLE_MESSAGE = "The organisation's identity provider could not be reached."
 
+# Ranges no identity provider is on, refused on top of url_validator's, on every host.
+SIGN_IN_RESERVED_NETWORKS = tuple(ipaddress.ip_network(net) for net in (
+    "192.0.0.0/24", "198.18.0.0/15", "224.0.0.0/4", "ff00::/8", "fec0::/10",
+))
+# NAT64's well-known prefix (RFC 6052): ``64:ff9b::a.b.c.d`` is a.b.c.d.
+NAT64_PREFIX = ipaddress.ip_network("64:ff9b::/96")
+
 # The resolver seam: tests replace it; production is the system resolver.
 _getaddrinfo = socket.getaddrinfo
 
@@ -71,21 +84,35 @@ class ProviderAnswer:
     body: Any
 
 
-def _host_of(url: Optional[str]) -> str:
+def host_of(url: Optional[str]) -> str:
+    """``url``'s host, lower-case, with no trailing dot; empty when it has none."""
     try:
         return (urlsplit(url or "").hostname or "").lower().rstrip(".")
     except ValueError:
         return ""
 
 
+def _port_of(url: Optional[str]) -> Optional[int]:
+    try:
+        return urlsplit(url or "").port or HTTPS_PORT
+    except ValueError:
+        return None
+
+
 def issuer_host() -> str:
     """The configured issuer's host, the one host allowed to resolve to a private address."""
-    return _host_of(config.OIDC_ISSUER)
+    return host_of(config.OIDC_ISSUER)
 
 
 def is_https_address(url: Any) -> bool:
-    """Whether ``url`` is an ``https`` address with a host and a valid port."""
+    """Whether ``url`` is an ``https`` address with a host, a valid port and no space or control character.
+
+    The character check comes first: ``urlsplit`` quietly drops a tab, CR or LF, so the address it
+    reads would not be the one the HTTP client is handed.
+    """
     if not isinstance(url, str) or not url:
+        return False
+    if any(ch.isspace() or not ch.isprintable() for ch in url):
         return False
     try:
         parts = urlsplit(url)
@@ -113,24 +140,46 @@ def _addresses(host: str, port: int) -> List[str]:
     return found
 
 
+def _carried_v4(addr: ipaddress.IPv6Address) -> Optional[ipaddress.IPv4Address]:
+    """The v4 address an IPv6 address carries: IPv4-mapped, 6to4 or NAT64."""
+    if addr.ipv4_mapped is not None:
+        return addr.ipv4_mapped
+    if addr.sixtofour is not None:
+        return addr.sixtofour
+    return ipaddress.IPv4Address(int(addr) & 0xFFFFFFFF) if addr in NAT64_PREFIX else None
+
+
+def _reserved_for_sign_in(ip: str) -> bool:
+    """Whether ``ip``, or the v4 address it carries, is in ``SIGN_IN_RESERVED_NETWORKS`` (junk counts)."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return True
+    candidates = [addr] + ([_carried_v4(addr)] if addr.version == 6 else [])
+    return any(candidate is not None and candidate.version == network.version and candidate in network
+               for candidate in candidates for network in SIGN_IN_RESERVED_NETWORKS)
+
+
 def pin(url: str, purpose: str) -> OutboundTarget:
     """The checked address to connect to for ``url``, or ``ProviderUnreachable``.
 
     ``https`` only. The issuer's own host may resolve to a private address; any other host must
-    resolve to public addresses only, every answer checked.
+    resolve to public addresses only, every answer checked. ``SIGN_IN_RESERVED_NETWORKS`` never.
     """
     if not is_https_address(url):
         raise _refused(purpose, "not an https address")
     parts = urlsplit(url)
-    host, port = _host_of(url), parts.port or HTTPS_PORT
+    host, port = host_of(url), parts.port or HTTPS_PORT
     addresses = _addresses(host, port)
     if not addresses:
         raise _refused(purpose, "the host does not resolve")
-    private_allowed = host == issuer_host()
+    private_allowed = (host, port) == (issuer_host(), _port_of(config.OIDC_ISSUER))
     for ip in addresses:
         blocked = blocked_network_for(ip)
         if blocked == "invalid" or (blocked and not private_allowed):
             raise _refused(purpose, "the host resolves to an address sign-in may not reach")
+    if any(_reserved_for_sign_in(ip) for ip in addresses):
+        raise _refused(purpose, "the host resolves to a reserved address")
     pinned = next((ip for ip in addresses if ":" not in ip), addresses[0])
     return OutboundTarget(True, "OK", host, pinned, port, HTTPS)
 
@@ -193,7 +242,7 @@ def call(method: str, url: str, purpose: str, *, data: Optional[Mapping[str, str
     try:
         status, body = _send(method, url, purpose, data=dict(data) if data else None,
                              headers={**JSON_ACCEPT, **dict(headers or {})})
-    except (httpx.HTTPError, ssl.SSLError, OSError, ValueError) as error:
+    except (httpx.HTTPError, httpx.InvalidURL, ssl.SSLError, OSError, ValueError) as error:
         failure = type(error).__name__
     if failure is not None:
         raise _refused(purpose, failure)
@@ -217,11 +266,13 @@ __all__ = [
     "HTTPS",
     "MAX_RESPONSE_BYTES",
     "READ_TIMEOUT_SECONDS",
+    "SIGN_IN_RESERVED_NETWORKS",
     "UNREACHABLE_MESSAGE",
     "ProviderAnswer",
     "ProviderUnreachable",
     "call",
     "get_json",
+    "host_of",
     "is_https_address",
     "issuer_host",
     "pin",
