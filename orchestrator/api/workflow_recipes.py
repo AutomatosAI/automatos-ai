@@ -1537,6 +1537,15 @@ def submit_recipe_to_marketplace(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _approved_marketplace_recipe(db: Session, recipe_id: int):
+    """The approved marketplace Playbook with this id, or None."""
+    return db.query(WorkflowRecipe).filter(
+        WorkflowRecipe.id == recipe_id,
+        WorkflowRecipe.owner_type == 'marketplace',
+        WorkflowRecipe.is_approved == True
+    ).first()
+
+
 def _installed_recipe_name(db: Session, ctx: RequestContext, marketplace_recipe) -> str:
     """The installed copy's name: the Playbook's own, or "<name> (Copy)" when the workspace has one by that name."""
     # Check if recipe name already exists in workspace
@@ -1605,7 +1614,7 @@ def _clone_recipe_row(db: Session, ctx: RequestContext, marketplace_recipe, reci
 
 
 def _record_recipe_install(db: Session, marketplace_recipe, cloned_recipe,
-                           user_id_int: Optional[int]) -> Optional[str]:
+                           user_id_int: Optional[int]) -> tuple[str, ...]:
     """One marketplace_installs row, in a savepoint; on failure, log it and return the warning to show."""
     # Record installation in marketplace_installs using a savepoint so
     # failures don't roll back the main recipe install.
@@ -1628,8 +1637,8 @@ def _record_recipe_install(db: Session, marketplace_recipe, cloned_recipe,
     except Exception as e:
         # If marketplace_installs table doesn't have recipe columns yet, log warning
         logger.warning(f"Could not record recipe install in marketplace_installs: {e}")
-        return "Install tracking not available for recipes yet"
-    return None
+        return ("Install tracking not available for recipes yet",)
+    return ()
 
 
 @router.post("/install/{recipe_id}", dependencies=[Depends(require_workspace_permission("playbooks:create"))])
@@ -1645,11 +1654,7 @@ async def install_recipe_from_marketplace(
     """
     try:
         # Get the marketplace recipe
-        marketplace_recipe = db.query(WorkflowRecipe).filter(
-            WorkflowRecipe.id == recipe_id,
-            WorkflowRecipe.owner_type == 'marketplace',
-            WorkflowRecipe.is_approved == True
-        ).first()
+        marketplace_recipe = _approved_marketplace_recipe(db, recipe_id)
 
         if not marketplace_recipe:
             raise HTTPException(status_code=404, detail="Marketplace recipe not found")
@@ -1689,9 +1694,7 @@ async def install_recipe_from_marketplace(
         # Increment marketplace recipe install count
         marketplace_recipe.install_count = (marketplace_recipe.install_count or 0) + 1
 
-        install_warning = _record_recipe_install(db, marketplace_recipe, cloned_recipe, user_id_int)
-        if install_warning is not None:
-            warnings.append(install_warning)
+        warnings.extend(_record_recipe_install(db, marketplace_recipe, cloned_recipe, user_id_int))
 
         db.commit()
 

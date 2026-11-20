@@ -549,6 +549,15 @@ def _build_recipe_detail(recipe: WorkflowRecipe, db: Session) -> MarketplaceItem
 # POST /api/marketplace/items/:id/install
 # ===================================================================
 
+def _approved_marketplace_agent(db: Session, item_id: int) -> Optional[Agent]:
+    """The approved marketplace agent with this id, or None."""
+    return db.query(Agent).filter(
+        Agent.id == item_id,
+        Agent.owner_type == 'marketplace',
+        Agent.is_approved == True
+    ).first()
+
+
 def _installing_user_id(db: Session, ctx: RequestContext) -> Optional[int]:
     """The installer's users.id: the row their Clerk ID names, else the row with their email."""
     user_id_int = None
@@ -599,11 +608,7 @@ async def install_item(
     """
     try:
         # Get the marketplace agent
-        marketplace_agent = db.query(Agent).filter(
-            Agent.id == item_id,
-            Agent.owner_type == 'marketplace',
-            Agent.is_approved == True
-        ).first()
+        marketplace_agent = _approved_marketplace_agent(db, item_id)
 
         if not marketplace_agent:
             raise HTTPException(status_code=404, detail="Marketplace item not found")
