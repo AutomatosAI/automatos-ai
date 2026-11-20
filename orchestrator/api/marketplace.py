@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func, desc, text
 
+from core.auth.clerk_person import clerk_person_query
 from core.auth.dependencies import RequestContext
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.hybrid import get_request_context_hybrid
@@ -726,7 +727,7 @@ def check_updates(
         # Look up database user ID from Clerk user ID
         user_id_int = None
         if ctx.user.id:
-            user = db.query(UserModel).filter(UserModel.clerk_user_id == ctx.user.id).first()
+            user = clerk_person_query(db, UserModel, ctx.user.id).first()
             if not user and ctx.user.email:
                 user = db.query(UserModel).filter(UserModel.email == ctx.user.email).first()
             if user:
@@ -777,8 +778,7 @@ def _submit_item_trust(db, ctx):
     user = None
     user_id_int = None
     if ctx.user.id:
-        # Try to find user by clerk_user_id first
-        user = db.query(UserModel).filter(UserModel.clerk_user_id == ctx.user.id).first()
+        user = clerk_person_query(db, UserModel, ctx.user.id).first()
         if user:
             user_id_int = user.id
         # Fallback: try email lookup

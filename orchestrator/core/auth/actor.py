@@ -24,6 +24,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from core.auth.clerk_person import clerk_person_query
 from core.auth.dependencies import RequestContext
 from core.models.core import User
 
@@ -37,7 +38,7 @@ def resolve_recorded_person(db: Session, recorded: Optional[str]) -> Optional[in
     value = str(recorded or "").strip()
     if not value:
         return None
-    row = db.query(User.id).filter(User.clerk_user_id == value).first()
+    row = clerk_person_query(db, User.id, value).first()
     if row is None and "@" in value:
         row = db.query(User.id).filter(User.email == value).first()
     return int(row[0]) if row else None
@@ -49,7 +50,7 @@ def resolve_internal_user_id(db: Session, ctx: RequestContext) -> Optional[int]:
         return None
     user = None
     if ctx.user.clerk_user_id:
-        user = db.query(User).filter(User.clerk_user_id == ctx.user.clerk_user_id).first()
+        user = clerk_person_query(db, User, ctx.user.clerk_user_id).first()
     if not user and ctx.user.email:
         user = db.query(User).filter(User.email == ctx.user.email).first()
     return user.id if user else None

@@ -1368,11 +1368,11 @@ def list_recipe_executions(
 
 def _submit_recipe_user_id(db: Session, ctx: RequestContext) -> Optional[int]:
     """Database user id of the submitter (by Clerk id, else email), or None."""
-    # Look up database user ID
+    from core.auth.clerk_person import clerk_person_query
     from core.models.core import User as UserModel
     user_id_int = None
     if ctx.user and ctx.user.id:
-        user = db.query(UserModel).filter(UserModel.clerk_user_id == ctx.user.id).first()
+        user = clerk_person_query(db, UserModel, ctx.user.id).first()
         if not user and ctx.user.email:
             user = db.query(UserModel).filter(UserModel.email == ctx.user.email).first()
         if user:
