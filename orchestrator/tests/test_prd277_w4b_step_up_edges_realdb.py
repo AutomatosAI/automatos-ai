@@ -163,14 +163,13 @@ def test_an_auth_time_in_the_future_or_not_a_number_refuses_and_leaves_the_sessi
 def test_a_step_up_started_from_another_site_is_refused_and_stores_nothing(install, sent_from):
     _signed_in(install, "lured-to-step-up")
     pending = _count(install.db, "SELECT COUNT(*) FROM oidc_pending_sign_ins")
-    asked = len(install.idp.authorize_requests)
 
     answer = install.client.get(START, params={"step_up": "1"}, headers={"Sec-Fetch-Site": sent_from},
                                 follow_redirects=False)
 
     assert _refusal(answer) == sign_in_flow.STEP_UP_REFUSED
     assert _count(install.db, "SELECT COUNT(*) FROM oidc_pending_sign_ins") == pending
-    assert len(install.idp.authorize_requests) == asked
+    assert "set-cookie" not in answer.headers  # no sign-in bound to this browser
 
 
 @pytest.mark.parametrize("sent_from", ["same-origin", "none", None])

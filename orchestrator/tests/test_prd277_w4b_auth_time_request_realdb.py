@@ -37,6 +37,7 @@ from core.auth.pairing import hash_secret  # noqa: E402
 from tests.helpers_fake_oidc_provider import AUTH_TIME_ASKED, Person  # noqa: E402
 from tests.test_prd277_w4b_sign_in_rules_realdb import (  # noqa: E402
     _auth_time,
+    _query,
     _refusal,
     _sets_session_cookie,
     _sign_in,
@@ -125,10 +126,12 @@ def test_a_step_up_sends_the_claims_request_max_age_0_and_prompt_login(install):
 
     started = _start(install, step_up_too=True)
 
-    sent = install.idp.authorize_requests[-1]
+    # The start only answers with the address; the provider records it once the browser goes there.
+    sent = _query(started.headers["location"])
     assert set(sent) == CODE_FLOW | {"claims", "max_age", "prompt"}
     assert (json.loads(sent["claims"]), sent["max_age"], sent["prompt"]) == (AUTH_TIME_ASKED, "0", "login")
     answer = install.client.get(install.idp.approve(started.headers["location"]), follow_redirects=False)
+    assert install.idp.authorize_requests[-1] == sent
     assert answer.status_code == 303 and answer.headers["location"] == "/settings"
 
 
