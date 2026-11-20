@@ -39,6 +39,7 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Callable, Dict, Optional, Tuple
 
 from config import config
+from core import editions
 from core.monitoring.path_digests import redact_digest_segments
 
 logger = logging.getLogger(__name__)
@@ -254,7 +255,7 @@ def resource() -> Any:
     return Resource.create({
         "service.name": config.OTEL_SERVICE_NAME,
         "deployment.environment.name": str(getattr(config, "ENVIRONMENT", "") or "unknown"),
-        "automatos.edition": str(getattr(config, "AUTH_EDITION", "") or "unknown"),
+        "automatos.edition": editions.current_name(),
     })
 
 

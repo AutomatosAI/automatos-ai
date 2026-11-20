@@ -23,13 +23,13 @@ from typing import Any, Dict, Optional
 from sqlalchemy.orm import Session
 
 from config import config
+from core import editions
 from modules.voice import live_settings, retell_api
 
 logger = logging.getLogger(__name__)
 
 AGENT_NAME_SAAS = "Auto Live"
 AGENT_NAME_LOCAL = "Auto Live (local)"
-_LOCAL_EDITION = "local"
 # The voice a first arm gives the agent when the card names none.
 DEFAULT_AGENT_VOICE_ID = "retell-Cimo"
 # A Retell API key mis-filed into a workspace's voice field starts with this.
@@ -50,8 +50,9 @@ class ArmRefused(Exception):
 
 
 def agent_name() -> str:
-    """The name a newly created agent gets on this edition."""
-    if config.AUTH_EDITION == _LOCAL_EDITION:
+    """The name a newly created agent gets: one of its own where it must never be mistaken
+    for the hosted product's agent in a shared Retell dashboard (``live_agent_named_apart``)."""
+    if editions.current().live_agent_named_apart:
         return AGENT_NAME_LOCAL
     return AGENT_NAME_SAAS
 

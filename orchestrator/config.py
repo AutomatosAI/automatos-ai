@@ -192,21 +192,24 @@ class Config:
     # =============================================================================
     ORCHESTRATOR_API_KEY: str = os.getenv("ORCHESTRATOR_API_KEY") or os.getenv("AUTOMATOS_API_KEY") or os.getenv("API_KEY")
 
-    # PRD-175 (F008) — the open-core edition flag. One core, two editions, one seam.
+    # PRD-175 (F008) — the open-core edition flag. One core, three editions, one seam.
     #   saas  → Clerk is the identity boundary (the running product; the default).
     #   local → a single auto-authenticated local user in a single local workspace;
     #           no login, no external SaaS, no Clerk env (git clone && docker up).
+    #   enterprise → PRD-277: sign-in through the organisation's identity provider.
     # An unknown value falls back to `saas` so a typo never silently un-guards auth.
-    # This is the ONE flag the frontend mount-gate and the backend local-session
-    # posture both read (mirrored to the client as NEXT_PUBLIC_AUTH_EDITION).
+    # The names are core.editions.KNOWN_EDITIONS (a test holds them together). This is the
+    # ONE flag the frontend mount-gate and the backend local-session posture both read.
     _AUTH_EDITION_RAW = (os.getenv("AUTH_EDITION", "saas") or "saas").strip().lower()
-    AUTH_EDITION: str = _AUTH_EDITION_RAW if _AUTH_EDITION_RAW in ("local", "saas") else "saas"
+    AUTH_EDITION: str = _AUTH_EDITION_RAW if _AUTH_EDITION_RAW in ("local", "saas", "enterprise") else "saas"
 
     # The `local` edition *implies* the no-login posture: REQUIRE_AUTH is forced
     # false so operators set ONE flag, not three that can silently contradict
-    # (PRD §4.1/§4.3). In `saas`, REQUIRE_AUTH stays secure-by-default from env.
+    # (PRD §4.1/§4.3). `enterprise` forces it true: it can never be turned off there
+    # (PRD-277 §5.1). In `saas`, REQUIRE_AUTH stays secure-by-default from env.
     REQUIRE_AUTH: bool = (
         False if AUTH_EDITION == "local"
+        else True if AUTH_EDITION == "enterprise"
         else os.getenv("REQUIRE_AUTH", "true").strip().lower() in ("true", "1", "yes")
     )
     AUTH_DEBUG: bool = os.getenv("AUTH_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
@@ -498,15 +501,6 @@ class Config:
     def IS_DEVELOPMENT(self) -> bool:
         return self.ENVIRONMENT.lower() == "development"
 
-    # PRD-175 (F008) — edition helpers (read the one AUTH_EDITION flag).
-    @property
-    def IS_LOCAL_EDITION(self) -> bool:
-        return self.AUTH_EDITION == "local"
-
-    @property
-    def IS_SAAS_EDITION(self) -> bool:
-        return self.AUTH_EDITION == "saas"
-
     # =============================================================================
     # PRD-240 — agents can read and search the web (platform capability, not an app)
     # =============================================================================
@@ -573,6 +567,10 @@ class Config:
     # Origin: native apps, tokens minted through the Backend API). false = log a
     # warning and accept it; true = 401.
     CLERK_AZP_REQUIRED: bool = os.getenv("CLERK_AZP_REQUIRED", "false").strip().lower() in ("1", "true", "yes", "on")
+    # PRD-277 §5.10: the organisation's identity provider (enterprise; core/edition_start_up.py).
+    OIDC_ISSUER: str = (os.getenv("OIDC_ISSUER") or "").strip()
+    OIDC_CLIENT_ID: str = (os.getenv("OIDC_CLIENT_ID") or "").strip()
+    OIDC_CLIENT_SECRET: str = (os.getenv("OIDC_CLIENT_SECRET") or "").strip()
     DEFAULT_WORKSPACE_ID: str = os.getenv("DEFAULT_WORKSPACE_ID")
     WORKSPACE_ID: str = os.getenv("WORKSPACE_ID")
     CREDENTIAL_ENCRYPTION_KEY: str = os.getenv("CREDENTIAL_ENCRYPTION_KEY")
@@ -598,6 +596,8 @@ class Config:
     # =============================================================================
     BACKEND_URL: str = os.getenv("BACKEND_URL", "http://localhost:8000")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    # FRONTEND_URL as set, without the default: enterprise's public address (PRD-277 US-103).
+    _FRONTEND_URL_FROM_ENV: str = (os.getenv("FRONTEND_URL") or "").strip()
     API_URL: str = os.getenv("API_URL", "http://localhost:8000")
 
     # =============================================================================
@@ -1569,6 +1569,10 @@ class Config:
     AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
     AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY")
+    # PRD-278 US-101: credentials from the pod's own cloud role (the SDK's chain) for
+    # object storage, the search index and Bedrock. No key pair may be set with it:
+    # start-up refuses both, then proves the documents bucket (core/storage/workload_identity.py).
+    AWS_USE_WORKLOAD_IDENTITY: bool = os.getenv("AWS_USE_WORKLOAD_IDENTITY", "false").lower() in ("true", "1", "yes")
     # PRD-176 F089: S3 endpoint override for a local S3-compatible object store
     # (MinIO). Empty by default so prod/boto talks to real AWS S3; local compose
     # sets it to the MinIO endpoint so the knowledge flywheel persists outputs
@@ -1592,6 +1596,9 @@ class Config:
     S3_VECTORS_INDEX_NAME: str = os.getenv("S3_VECTORS_INDEX_NAME", "documents-index")
     S3_VECTORS_DIMENSION: int = int(os.getenv("S3_VECTORS_DIMENSION", "2048"))
     S3_VECTORS_METRIC: str = os.getenv("S3_VECTORS_METRIC", "cosine")
+    # PRD-278 US-104: off = core never creates the vector bucket or index; a missing
+    # index is an error. For an operator who creates the index with their own key.
+    S3_VECTORS_CREATE_IF_MISSING: bool = os.getenv("S3_VECTORS_CREATE_IF_MISSING", "true").lower() in ("true", "1", "yes")
 
     # S3 Documents (general storage bucket)
     S3_DOCUMENTS_BUCKET: str = os.getenv("S3_DOCUMENTS_BUCKET", "automatos-ai")
@@ -2788,35 +2795,42 @@ class Config:
     def validate_auth_edition(self) -> None:
         """PRD-175 (F008): fail-closed boot guard for the open-core edition flag.
 
-        Keeps the two editions from silently blending into the accidental
-        "auth-not-configured" fallthrough that made local undeployable:
+        Keeps the editions from silently blending into the accidental
+        "auth-not-configured" fallthrough that made local undeployable. Each rule
+        reads the edition's capability (``core.editions``), never its name:
 
-        - ``saas``  requires the Clerk env (``CLERK_JWKS_URL`` +
+        - Clerk sign-in (``saas``) requires the Clerk env (``CLERK_JWKS_URL`` +
           ``CLERK_SECRET_KEY``). A saas boot with no Clerk is a misconfiguration,
           not a silent anonymous downgrade (the one real danger, review §5.3) —
           it must be a loud boot failure.
-        - ``local`` requires a ``DEFAULT_WORKSPACE_ID`` — the single local
-          workspace the auto-authenticated local session resolves to (W6 seeds it).
-          It requires NO Clerk env.
+        - The anonymous operator (``local``) requires a ``DEFAULT_WORKSPACE_ID`` —
+          the single local workspace the auto-authenticated local session resolves
+          to (W6 seeds it). It requires NO Clerk env.
         - PRD-266 §4.3: a ``local`` install published beyond loopback needs
           ``LOCAL_REMOTE_ACCESS`` paired or open (``services.mobile.remote_access``).
+        - PRD-277 US-103, last: OIDC sign-in (``enterprise``, ``core.edition_start_up``).
 
         Raises ``RuntimeError`` (aborting boot) on a contradiction.
         """
+        # PRD-266 §4.3: imported here, at boot, so config.py never imports the app.
+        from core.edition_start_up import check_start_up
+        from core.editions import SIGN_IN_CLERK, capabilities_for
+        from services.mobile import remote_access
+        capabilities = capabilities_for(self.AUTH_EDITION)
         errors: list[str] = []
 
         # PRD-234 S1a: session mode is a local-edition feature. A saas boot with
         # CLI_RUNTIME_ENABLED set is a misconfiguration that would expose the CLI
         # host routes to tenants — abort, never a silent partial enable. Runs
         # outside run_stage (main.py) like the rest of this guard, so it is real.
-        if self.CLI_RUNTIME_ENABLED and self.AUTH_EDITION != "local":
+        if self.CLI_RUNTIME_ENABLED and not capabilities.session_mode:
             raise RuntimeError(
                 "CLI_RUNTIME_ENABLED=true requires AUTH_EDITION=local. Session mode "
                 "runs the user's own CLI sessions on their machine and has no meaning "
                 "in the hosted edition; unset CLI_RUNTIME_ENABLED or set AUTH_EDITION=local."
             )
 
-        if self.AUTH_EDITION == "saas":
+        if capabilities.sign_in == SIGN_IN_CLERK:
             if not (self.CLERK_JWKS_URL or "").strip():
                 errors.append("CLERK_JWKS_URL is unset")
             if not (self.CLERK_SECRET_KEY or "").strip():
@@ -2830,7 +2844,7 @@ class Config:
                     "unauthenticated). Set the Clerk env, or set AUTH_EDITION=local "
                     "for a no-login local instance."
                 )
-        elif self.AUTH_EDITION == "local":
+        elif capabilities.anonymous_operator:
             if not (self.DEFAULT_WORKSPACE_ID or "").strip():
                 raise RuntimeError(
                     "AUTH_EDITION=local requires DEFAULT_WORKSPACE_ID (the single "
@@ -2838,12 +2852,11 @@ class Config:
                     "to). Set DEFAULT_WORKSPACE_ID to the seeded local workspace."
                 )
 
-        # PRD-266 §4.3: imported here, at boot, so config.py never imports the app.
-        from core.editions import capabilities_for
-        from services.mobile import remote_access
         addresses = {"API_PUBLISH_ADDRESS": self.API_PUBLISH_ADDRESS, "WEB_PUBLISH_ADDRESS": self.WEB_PUBLISH_ADDRESS}
-        operator_lane = capabilities_for(self.AUTH_EDITION).anonymous_operator
-        remote_access.enforce_boot_decision(operator_lane, self.LOCAL_REMOTE_ACCESS, addresses)
+        remote_access.enforce_boot_decision(capabilities.anonymous_operator, self.LOCAL_REMOTE_ACCESS, addresses)
+        check_start_up(capabilities, {"OIDC_ISSUER": self.OIDC_ISSUER, "OIDC_CLIENT_ID": self.OIDC_CLIENT_ID,
+                                      "OIDC_CLIENT_SECRET": self.OIDC_CLIENT_SECRET,
+                                      "FRONTEND_URL": self._FRONTEND_URL_FROM_ENV})
 
     def validate(self) -> bool:
         """

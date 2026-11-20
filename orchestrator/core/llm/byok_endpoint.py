@@ -23,18 +23,19 @@ from typing import Any, Optional
 from urllib.parse import urlsplit
 
 from config import config
+from core import editions
 from core.llm import providers
 from core.llm.clients.azure_v1 import v1_base_url
-
-EDITION_SAAS = "saas"
 
 
 class EndpointRefused(ValueError):
     """The endpoint can't be used. The message is written for the user."""
 
 
-def _saas(edition: Optional[str] = None) -> bool:
-    return (edition or config.AUTH_EDITION) == EDITION_SAAS
+def _guarded(guarded: Optional[bool] = None) -> bool:
+    """``guarded`` when given, else whether this edition guards a workspace's endpoint
+    (``guards_user_endpoints``: saas), read now."""
+    return editions.current().guards_user_endpoints if guarded is None else guarded
 
 
 def takes_endpoint(provider: Optional[str]) -> bool:
@@ -43,7 +44,7 @@ def takes_endpoint(provider: Optional[str]) -> bool:
     return bool(spec and spec.endpoint_placeholder)
 
 
-def endpoint_required(provider: Optional[str], edition: Optional[str] = None) -> bool:
+def endpoint_required(provider: Optional[str], guarded: Optional[bool] = None) -> bool:
     """Must a key for this provider be saved with an endpoint?
 
     On saas the env endpoint belongs to the platform, never to a workspace, so the
@@ -52,10 +53,10 @@ def endpoint_required(provider: Optional[str], edition: Optional[str] = None) ->
     """
     if not takes_endpoint(provider):
         return False
-    return _saas(edition) or not config.AZURE_OPENAI_ENDPOINT
+    return _guarded(guarded) or not config.AZURE_OPENAI_ENDPOINT
 
 
-def clean_endpoint(provider: Optional[str], raw: Optional[str], edition: Optional[str] = None) -> Optional[str]:
+def clean_endpoint(provider: Optional[str], raw: Optional[str], guarded: Optional[bool] = None) -> Optional[str]:
     """The endpoint to store with a key, normalised to its v1 base URL; None when blank.
 
     Raises ``EndpointRefused`` for a provider that takes no endpoint, a URL with no
@@ -73,15 +74,15 @@ def clean_endpoint(provider: Optional[str], raw: Optional[str], edition: Optiona
         url = v1_base_url(text)
     except ValueError as exc:
         raise EndpointRefused(str(exc)) from exc
-    refusal = endpoint_refusal(url, edition)
+    refusal = endpoint_refusal(url, guarded)
     if refusal:
         raise EndpointRefused(refusal)
     return url
 
 
-def endpoint_refusal(url: str, edition: Optional[str] = None) -> Optional[str]:
+def endpoint_refusal(url: str, guarded: Optional[bool] = None) -> Optional[str]:
     """Why the server may not call ``url`` in this edition, or None when it may."""
-    if not _saas(edition):
+    if not _guarded(guarded):
         return None
     if not url.lower().startswith("https://"):
         return "The endpoint must start with https://."
@@ -91,9 +92,9 @@ def endpoint_refusal(url: str, edition: Optional[str] = None) -> Optional[str]:
     return None if target.ok else f"The endpoint can't be used: {target.reason}."
 
 
-def endpoint_http_client(timeout: float, edition: Optional[str] = None) -> Any:
+def endpoint_http_client(timeout: float, guarded: Optional[bool] = None) -> Any:
     """The httpx client for calls to a key's own endpoint: pinned on saas, else None (the SDK's own)."""
-    if not _saas(edition):
+    if not _guarded(guarded):
         return None
     from core.security.pinned_http import pinned_client
 

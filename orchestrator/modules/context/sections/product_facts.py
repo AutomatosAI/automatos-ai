@@ -41,6 +41,12 @@ HOSTED_EDITION = (
     "This is the hosted edition of Automatos: each person signs in with their own account, and the "
     "workspace's plan sets how many helpers it may have."
 )
+# PRD-277 G-5 (enterprise): a draft; the owner sets the final wording.
+ORGANISATION_EDITION = (
+    "This install belongs to an organisation and runs on its own infrastructure. People sign in with "
+    "their work accounts, through the organisation's own identity provider. There are no plans, credits "
+    "or billing here."
+)
 # The Settings tabs every owner has (frontend/components/settings/SettingsPanel.tsx;
 # System Settings is a platform admin's only). A test holds the two lists to the page.
 # PRD-251B US-B106 added Socials (the workspace's own Socials switch), in both editions.
@@ -64,6 +70,8 @@ LOCAL_LEADING_TABS = ("Profile", "Session mode")
 CLOUD_SYNC_TAB = "Automatos Cloud"
 LOCAL_SETTINGS_TABS = (*LOCAL_LEADING_TABS, CLOUD_SYNC_TAB)
 HOSTED_SETTINGS_TABS = ("API keys", "Billing")
+# PRD-277 G-10: an organisation's install shows the hosted tabs but Billing and the Widget SDK.
+ORGANISATION_LEFT_OUT_TABS = frozenset({"Billing", "Widget SDK"})
 NO_SUCH_TAB = "There is no Billing, Plans or Team Management tab."
 HOSTED_NO_SUCH_TAB = ("There is no Plans or Team Management tab: the plan, the credits and payments "
                       "are on the Billing tab.")
@@ -83,15 +91,34 @@ def local_settings_tabs(cloud_sync_on: bool) -> tuple[str, ...]:
     return (*LOCAL_LEADING_TABS, *SETTINGS_TABS, *((CLOUD_SYNC_TAB,) if cloud_sync_on else ()))
 
 
-def edition_facts() -> str:
-    """What this install is, and the Settings tabs it has."""
-    from config import config
+def hosted_settings_tabs() -> tuple[str, ...]:
+    """The hosted edition's tabs: the shared ones, then its own."""
+    return (*SETTINGS_TABS, *HOSTED_SETTINGS_TABS)
 
-    local = config.IS_LOCAL_EDITION
+
+def organisation_settings_tabs() -> tuple[str, ...]:
+    """An organisation's install: the hosted tabs, less Billing and the Widget SDK."""
+    return tuple(tab for tab in hosted_settings_tabs() if tab not in ORGANISATION_LEFT_OUT_TABS)
+
+
+def _install_facts(install: str, cloud_sync_on: bool) -> tuple[str, tuple[str, ...], str]:
+    """``(description, tabs, no-such-tab sentence)`` for one ``install_description``."""
+    from core import editions
+
+    if install == editions.INSTALL_OWN_COMPUTER:
+        return LOCAL_EDITION, local_settings_tabs(cloud_sync_on), NO_SUCH_TAB
+    if install == editions.INSTALL_ORGANISATION:
+        return ORGANISATION_EDITION, organisation_settings_tabs(), NO_SUCH_TAB
+    return HOSTED_EDITION, hosted_settings_tabs(), HOSTED_NO_SUCH_TAB
+
+
+def edition_facts() -> str:
+    """What this install is, and the Settings tabs it has (``install_description``)."""
+    from config import config
+    from core import editions
+
     cloud_sync_on = bool(str(config.AUTOMATOS_CLOUD_URL or "").strip())
-    tabs = local_settings_tabs(cloud_sync_on) if local else (*SETTINGS_TABS, *HOSTED_SETTINGS_TABS)
-    edition = LOCAL_EDITION if local else HOSTED_EDITION
-    no_such = NO_SUCH_TAB if local else HOSTED_NO_SUCH_TAB
+    edition, tabs, no_such = _install_facts(editions.current().install_description, cloud_sync_on)
     return f"{edition} Settings has these tabs: {', '.join(tabs)}. {no_such}"
 
 

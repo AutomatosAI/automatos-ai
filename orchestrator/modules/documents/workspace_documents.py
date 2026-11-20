@@ -32,7 +32,7 @@ import logging
 from pathlib import Path, PurePosixPath
 from typing import Any, AsyncIterator, Optional
 
-from config import config
+from core import editions
 from core.workspace_client import BINARY_PIECE_BYTES, WorkspaceClient
 
 logger = logging.getLogger(__name__)
@@ -106,7 +106,7 @@ def copy_when_registered(workspace_id: Any, filename: Any, fmt: Any) -> bool:
 
     if str(fmt or "").lower() not in COPIED_FORMATS or not workspace_id or documents_path(filename) is None:
         return False
-    if not config.IS_LOCAL_EDITION:
+    if not editions.current().operator_is_user:
         logger.info("[DocGen] hosted edition: %r is not copied to documents/ (local edition only)", filename)
         return False
     try:

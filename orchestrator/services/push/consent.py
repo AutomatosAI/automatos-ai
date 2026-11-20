@@ -28,7 +28,7 @@ from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
 
-from config import config
+from core import editions
 from core.llm.manager import get_system_setting, read_system_setting
 from core.models.system_settings import SettingCategory, SystemSetting
 
@@ -72,10 +72,11 @@ def _is_agreed(value: Optional[str]) -> bool:
 def expo_push_allowed() -> bool:
     """May this install send notifications through Expo's push service?
 
-    Always on SaaS. On a local install only once the operator agreed (``push_via_expo`` is
-    ``'true'``); not answered, declined, or a failed read is False.
+    Always on SaaS. Where push needs the operator's consent (``push_needs_consent``: a local
+    install) only once the operator agreed (``push_via_expo`` is ``'true'``); not answered,
+    declined, or a failed read is False.
     """
-    if not config.IS_LOCAL_EDITION:
+    if not editions.current().push_needs_consent:
         return True
     return _is_agreed(get_system_setting(CONSENT_CATEGORY, KEY_PUSH_VIA_EXPO, DECLINED))
 

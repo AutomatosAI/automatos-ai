@@ -72,6 +72,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from uuid import UUID
 
 from config import config
+from core import editions
 from core.media_render_bundle import build_bundle, render_size, voice_script, with_slot_files, with_voice_files
 from core.media_render_client import (
     BAD_RESPONSE,
@@ -157,13 +158,10 @@ class RenderFailure(Exception):
         self.report = {"code": code, **dict(report or {})}
 
 
-def _local_edition() -> bool:
-    return (config.AUTH_EDITION or "").strip().lower() == "local"
-
-
 def unavailable_message(exc: MediaRenderUnavailable) -> str:
-    """What a user is told when there is no renderer to reach."""
-    if _local_edition():
+    """What a user is told when there is no renderer to reach: the compose command where
+    the person using the app runs the server (``operator_is_user``)."""
+    if editions.current().operator_is_user:
         return MEDIA_PROFILE_MESSAGE
     return NOT_CONFIGURED_MESSAGE if exc.code == NOT_CONFIGURED else UNREACHABLE_MESSAGE
 

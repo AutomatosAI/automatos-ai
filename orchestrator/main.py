@@ -669,6 +669,13 @@ async def lifespan(app: FastAPI):
     # (create_tables, the idempotent column migrations) was skipped on every
     # boot. A fail-closed guard that serves traffic anyway is not a guard.
     config.validate_security()
+    # PRD-278: the pod's own cloud role, and an index core may not create, proven in the same
+    # hard-fail phase. Each is a no-op, with no call, while its setting is at its default.
+    from core.storage.workload_identity import verify_workload_identity
+    from modules.search.vector_store.backends.s3_vectors_backend import verify_vector_index
+
+    await verify_workload_identity()
+    await verify_vector_index()
 
     try:
         seeds, trust_passed = await _boot_core(app, report)
@@ -1346,7 +1353,7 @@ def health_check():
         "metrics": health_probe.host_metrics(),
         "extensions": deferred_init.as_dict() if deferred_init else None,
         # PRD-234 S1b: the CLI host serves only an edition with session mode, switched on. Names only.
-        "edition": config.AUTH_EDITION,
+        "edition": editions.current_name(),
         "session_mode": editions.current().session_mode,
         "cli_runtime_enabled": bool(getattr(config, "CLI_RUNTIME_ENABLED", False)),
     }

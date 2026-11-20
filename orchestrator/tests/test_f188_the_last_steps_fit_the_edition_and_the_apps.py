@@ -77,7 +77,7 @@ def test_autos_advance_to_powerup_fits_the_install(monkeypatch, local, stage):
     from config import config
     from modules.tools.discovery.handlers_onboarding import update_onboarding
 
-    monkeypatch.setattr(type(config), "IS_LOCAL_EDITION", local)
+    monkeypatch.setattr(config, "AUTH_EDITION", "local" if local else "saas")
     workspace = NS(id="ws-1", onboarding={"stage": "boom", "stages": {"boom": "2026-09-26T02:02:53+00:00"},
                                           "segment": {}})
     result = asyncio.run(update_onboarding(_Db(workspace), "ws-1", {"advance_to": "powerup"}))

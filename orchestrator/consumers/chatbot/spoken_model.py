@@ -121,7 +121,9 @@ async def _spoken_key(factory: Any, runtime: Any, provider: str, workspace: Any)
 
 def _key_refusal(runtime: Any, provider: str, resolved: Any) -> Optional[str]:
     """Why the key found can't carry the turn, or None when it can."""
-    if resolved is None or not resolved.api_key:
+    from core.llm.key_resolver import carries_calls
+
+    if not carries_calls(resolved):  # a key, or the pod's own role (PRD-278 US-103)
         return f"no {provider} key is open to this workspace"
     if runtime.is_byok and not resolved.is_byok:
         return "the agent runs on the workspace's own key"
@@ -132,15 +134,18 @@ def _spoken_manager(factory: Any, runtime: Any, provider: str, model: str, resol
     """The spoken model's manager: the agent's settings and output budget, capped by the spoken
     model's own ceiling, on the resolved key, booked to the agent and the workspace."""
     from core.llm import LLMConfig, LLMManager
-    from core.llm.providers import enum_for
+    from core.llm.key_resolver import is_workload_identity
+    from core.llm.providers import enum_for, workload_identity_region
 
     agent = runtime.llm_manager.config
     ceiling = factory._model_ceiling(model)
     llm_config = LLMConfig(
-        provider=enum_for(provider), model=model, temperature=agent.temperature,
+        provider=enum_for(provider), model=model, base_url=workload_identity_region(provider),  # PRD-278 US-105
+        temperature=agent.temperature,
         max_tokens=factory._output_budget(agent.max_tokens, ceiling), output_ceiling=ceiling,
         api_key=resolved.api_key, top_p=agent.top_p, frequency_penalty=agent.frequency_penalty,
         presence_penalty=agent.presence_penalty, stop=agent.stop, timeout=agent.timeout,
+        workload_identity=is_workload_identity(resolved),
     )
     return LLMManager(config=llm_config, workspace_id=workspace, agent_id=runtime.agent_id,
                       is_byok=resolved.is_byok)

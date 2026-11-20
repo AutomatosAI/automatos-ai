@@ -14,6 +14,7 @@ from uuid import UUID
 import pytest
 
 import modules.documents.generation_service as gs
+from config import config
 from modules.documents import workspace_documents
 
 WS = UUID("00000000-0000-0000-0000-0000000370b1")
@@ -50,14 +51,14 @@ async def _register_then_settle() -> bool:
 
 
 def test_the_local_edition_copies_the_document_into_documents(generated, monkeypatch):
-    monkeypatch.setattr(workspace_documents.config, "AUTH_EDITION", "local")
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
 
     assert asyncio.run(_register_then_settle()) is True
     assert _Worker.written == {(str(WS), f"documents/{NAME}"): b"%PDF-1.7 invoice"}
 
 
 def test_the_hosted_edition_skips_the_copy_and_says_so(generated, monkeypatch, caplog):
-    monkeypatch.setattr(workspace_documents.config, "AUTH_EDITION", "saas")
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
 
     with caplog.at_level(logging.INFO, logger=workspace_documents.__name__):
         assert asyncio.run(_register_then_settle()) is False
@@ -67,7 +68,7 @@ def test_the_hosted_edition_skips_the_copy_and_says_so(generated, monkeypatch, c
 
 
 def test_the_hosted_edition_does_not_log_for_what_is_never_copied(generated, monkeypatch, caplog):
-    monkeypatch.setattr(workspace_documents.config, "AUTH_EDITION", "saas")
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
 
     with caplog.at_level(logging.INFO, logger=workspace_documents.__name__):
         assert workspace_documents.copy_when_registered(WS, "render.png", "social_image") is False
