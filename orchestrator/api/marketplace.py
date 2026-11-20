@@ -549,6 +549,44 @@ def _build_recipe_detail(recipe: WorkflowRecipe, db: Session) -> MarketplaceItem
 # POST /api/marketplace/items/:id/install
 # ===================================================================
 
+def _installing_user_id(db: Session, ctx: RequestContext) -> Optional[int]:
+    """The installer's users.id: the row their Clerk ID names, else the row with their email."""
+    user_id_int = None
+    if ctx.user.id:
+        user = clerk_person_query(db, UserModel, ctx.user.id).first()
+        if not user and ctx.user.email:
+            user = db.query(UserModel).filter(UserModel.email == ctx.user.email).first()
+        if user:
+            user_id_int = user.id
+    return user_id_int
+
+
+def _record_agent_install(db: Session, marketplace_agent: Agent, cloned_agent: Agent,
+                          user_id_int: Optional[int]) -> None:
+    """One marketplace_installs row, in a savepoint; a failure is logged and the install goes on.
+
+    item_id is NOT NULL in production (migration 20260326 was never applied),
+    so we populate it with the marketplace agent's id.
+    """
+    install_query = text("""
+        INSERT INTO marketplace_installs (item_id, user_id, marketplace_agent_id, cloned_agent_id, version, installed_at)
+        VALUES (:item_id, :user_id, :marketplace_agent_id, :cloned_agent_id, :version, NOW())
+        ON CONFLICT DO NOTHING
+    """)
+
+    try:
+        with db.begin_nested():
+            db.execute(install_query, {
+                "item_id": marketplace_agent.id,
+                "user_id": user_id_int,
+                "marketplace_agent_id": marketplace_agent.id,
+                "cloned_agent_id": cloned_agent.id,
+                "version": marketplace_agent.version
+            })
+    except Exception as e:
+        logger.warning(f"Could not record agent install in marketplace_installs: {e}")
+
+
 @router.post("/items/{item_id}/install", response_model=InstallResponse, dependencies=[Depends(require_workspace_permission("agents:create"))])
 async def install_item(
     item_id: int,
@@ -575,13 +613,7 @@ async def install_item(
         warnings = []
 
         # Look up database user ID from Clerk user ID
-        user_id_int = None
-        if ctx.user.id:
-            user = db.query(UserModel).filter(UserModel.clerk_user_id == ctx.user.id).first()
-            if not user and ctx.user.email:
-                user = db.query(UserModel).filter(UserModel.email == ctx.user.email).first()
-            if user:
-                user_id_int = user.id
+        user_id_int = _installing_user_id(db, ctx)
 
         # Clone agent to workspace using shared helper
         from modules.tools.discovery.cascade_installer import (
@@ -610,25 +642,7 @@ async def install_item(
 
         # Record installation in marketplace_installs using a savepoint so
         # failures don't roll back the main agent install.
-        # item_id is NOT NULL in production (migration 20260326 was never applied),
-        # so we populate it with the marketplace agent's id.
-        install_query = text("""
-            INSERT INTO marketplace_installs (item_id, user_id, marketplace_agent_id, cloned_agent_id, version, installed_at)
-            VALUES (:item_id, :user_id, :marketplace_agent_id, :cloned_agent_id, :version, NOW())
-            ON CONFLICT DO NOTHING
-        """)
-
-        try:
-            with db.begin_nested():
-                db.execute(install_query, {
-                    "item_id": marketplace_agent.id,
-                    "user_id": user_id_int,
-                    "marketplace_agent_id": marketplace_agent.id,
-                    "cloned_agent_id": cloned_agent.id,
-                    "version": marketplace_agent.version
-                })
-        except Exception as e:
-            logger.warning(f"Could not record agent install in marketplace_installs: {e}")
+        _record_agent_install(db, marketplace_agent, cloned_agent, user_id_int)
 
         db.commit()
 

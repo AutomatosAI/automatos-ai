@@ -330,7 +330,7 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 
 **Acceptance Criteria:**
 - [x] `workspace_permission.py`, `workspace_admin.py` and the workspace lookups in `hybrid.py` read by `users.id`. The reads are `core/auth/person.py`; a Clerk caller's `users.id` is read inside the same statement (`core/auth/clerk_person.py`), so each check makes the round trips it made before.
-- [ ] No SQL outside `core/auth/clerk*.py` and `core/auth/user_link.py` mentions `clerk_user_id`. A test fails if one does. The API files that query by Clerk id are changed to the resolver and listed in the PR. The test is `orchestrator/tests/test_prd277_us202_no_clerk_id_sql.py`. Three functions are still on its allow-list, each inside a function over the 50-line limit: `install_item` in `api/marketplace.py`, `install_recipe_from_marketplace` in `api/workflow_recipes.py` and `_stream_tool_loop` in `consumers/chatbot/service.py`.
+- [ ] No SQL outside `core/auth/clerk*.py` and `core/auth/user_link.py` mentions `clerk_user_id`. A test fails if one does. The API files that query by Clerk id are changed to the resolver and listed in the PR. The test is `orchestrator/tests/test_prd277_us202_no_clerk_id_sql.py`. One function is still on its allow-list: `_stream_tool_loop` in `consumers/chatbot/service.py`, whose Clerk-id lookup sits inside a function far over the 50-line limit, so converting it means splitting that function first.
 - [ ] In `saas`, every existing auth, permission and boundary-sweep test passes unchanged.
 - [ ] Dave and the security reviewer sign off before merge.
 

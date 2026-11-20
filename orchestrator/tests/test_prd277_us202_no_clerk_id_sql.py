@@ -46,16 +46,14 @@ FUNCTION_NODES = (ast.FunctionDef, ast.AsyncFunctionDef)
 # Enough files that a scan rooted in the wrong place cannot pass by finding nothing.
 MIN_SCANNED_FILES = 500
 
-# file -> {function: why it still reads by Clerk user ID}. Each is a site that converts only by
-# editing a function far over the 50-line limit the code-shape check holds a touched function
-# to, so it stays until that function is split. Each still reads exactly as before.
+# file -> {function: why it still reads by Clerk user ID}. The one left is a site that converts
+# only by editing a function far over the 50-line limit the code-shape check holds a touched
+# function to, so it stays until that function is split. It still reads exactly as before.
 _OVER_THE_SHAPE_LIMIT = (
     "US-202: the lookup sits inside a function far over the 50-line limit "
     "(scripts/ci/check_changed_code_shape.py), so converting it means splitting that function first."
 )
 ALLOWED: Dict[str, Dict[str, str]] = {
-    "api/marketplace.py": {"install_item": _OVER_THE_SHAPE_LIMIT},
-    "api/workflow_recipes.py": {"install_recipe_from_marketplace": _OVER_THE_SHAPE_LIMIT},
     "consumers/chatbot/service.py": {"_stream_tool_loop": _OVER_THE_SHAPE_LIMIT},
 }
 
