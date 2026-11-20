@@ -117,13 +117,17 @@ def _worker_security_context() -> tuple[dict, list[str]]:
     block = re.search(r"^( +)securityContext:\n(?:\1 .*\n)+", CHART_WORKER, re.M)
     assert block, "the worker container sets no securityContext"
     lines = block.group(0).splitlines()
-    return yaml.safe_load("\n".join(lines)), lines
+    # A Helm control line (`{{- if … }}`, `{{- end }}`) is not YAML: the block is parsed
+    # as it renders with the chart's defaults, where every such condition holds.
+    as_rendered = [line for line in lines if not line.strip().startswith("{{")]
+    return yaml.safe_load("\n".join(as_rendered)), lines
 
 
 def test_the_chart_s_worker_gains_no_privileges_and_keeps_only_what_the_entrypoint_needs():
     parsed, _ = _worker_security_context()
     assert parsed == {"securityContext": {
         "allowPrivilegeEscalation": False,
+        "readOnlyRootFilesystem": True,
         "capabilities": {"drop": ["ALL"], "add": list(CAPABILITIES)},
         "seccompProfile": {"type": "RuntimeDefault"},
     }}
