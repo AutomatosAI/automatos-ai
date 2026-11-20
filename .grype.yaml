@@ -14,20 +14,4 @@
 # other key fails the policy. The scan-allowlist workflow fails every day once an
 # entry has expired: fix the image, or renew the entry with a current reason.
 
-ignore:
-  # API and workspace worker. PR builds take the apt layer from the GHA cache written
-  # on 6 Oct, which holds curl 8.14.1-2+deb13u5. Only the weekly uncached rebuild
-  # (PRD-262 US-011) installs deb13u7, which fixes both CVEs (DSA-6558-1). Remove
-  # these after the first schedule run.
-  - vulnerability: CVE-2026-8924
-    package: {version: 8.14.1-2+deb13u5, type: deb}
-    reason: >-
-      curl 8.14.1-2+deb13u5 comes from the apt layer PR builds read from the 6 Oct GHA
-      cache; only the weekly uncached rebuild (PRD-262 US-011) installs the fixed deb13u7.
-    expires: 2026-11-17
-  - vulnerability: CVE-2026-8927
-    package: {version: 8.14.1-2+deb13u5, type: deb}
-    reason: >-
-      curl 8.14.1-2+deb13u5 comes from the apt layer PR builds read from the 6 Oct GHA
-      cache; only the weekly uncached rebuild (PRD-262 US-011) installs the fixed deb13u7.
-    expires: 2026-11-17
+ignore: []
