@@ -31,6 +31,13 @@ Each one answers one question the code asks. None of them means "is this edition
 | `push_needs_consent` | Must the operator agree before notifications leave through Expo's push service? | yes | no | **For Gerard** |
 | `operator_is_user` | Is the person using the app the person who runs the server, so that host detail, `docker compose` fix commands and the operator's own folders are theirs? | yes | no | **For Gerard** |
 | `guards_user_endpoints` | Must an AI endpoint a workspace saves be public `https`, called through the pinned client? | no | yes | **For Gerard** |
+| `seeds_first_run_content` | Does every boot seed the default workspace's first-run content: its workspace and operator rows, Auto, the starter roster, the demo Playbook and the welcome Deliverable? | yes | no | **For Gerard** (G-4) |
+| `chat_seeds_user_name` | Does chat seed the driving person's name from their `users` row into Auto's state? | yes | no | **For Gerard** (G-6) |
+| `install_description` | What is Auto told the install is, and which Settings tabs does it name? | `own_computer` | `hosted` | **For Gerard** (G-5) |
+| `live_agent_named_apart` | Does a new Auto Live agent get a name of its own, so it is never mistaken for the hosted product's agent in a shared Retell dashboard? | yes | no | **For Gerard** (G-7) |
+| `last_workspace_purge_deletes_person` | Does purging the last workspace a person owns or belongs to also delete that person's account? | no | yes | **For Gerard** (G-8) |
+
+Rows of kind R, which only report the edition's name, read `editions.current_name()`: the name trimmed and lower-cased, `saas` for a value with no row, as `config.py` does.
 
 The PRD's §5.1 row "A personal workspace for each new person" has no edition check today: the Clerk first-sign-in path creates it unconditionally (`core/auth/hybrid.py:283-357`). It becomes a capability in Wave 4 (US-404), not in this table.
 
@@ -42,8 +49,8 @@ The PRD's §5.1 row "A personal workspace for each new person" has no edition ch
 |---|---|---|---|---|---|---|---|
 | 1 | `config.py:214` | C | Parses the flag: only `local` and `saas` are accepted, anything else becomes `saas` | (the flag itself) | `local` | `saas` | accepted from US-103; unknown still `saas` |
 | 2 | `config.py:220` | C | `REQUIRE_AUTH` forced false | `anonymous_operator` | forced false | from env, default true | forced true (US-103) |
-| 3 | `config.py:515` | C | Defines `IS_LOCAL_EDITION` | (helper) | true | false | removed once its last caller moves |
-| 4 | `config.py:519` | C | Defines `IS_SAAS_EDITION` | (helper) | false | true | removed once its last caller moves |
+| 3 | `config.py:515` | C | Defines `IS_LOCAL_EDITION` | (helper) | true | false | removed in US-102 |
+| 4 | `config.py:519` | C | Defines `IS_SAAS_EDITION` | (helper) | false | true | removed in US-102 |
 | 5 | `config.py:541` | C | `WEB_ACCESS` default when unset | `operator_is_user` | on | off | **For Gerard** |
 | 6 | `config.py:2823` | C | Boot refuses `CLI_RUNTIME_ENABLED` | `session_mode` | allowed | refused | refused |
 | 7 | `config.py:2830` | C | Boot requires the Clerk settings | `sign_in` (`clerk`) | not required | required | not required; OIDC settings required (US-103) |
@@ -57,7 +64,7 @@ The PRD's §5.1 row "A personal workspace for each new person" has no edition ch
 | 10 | `alembic/versions/auto_haiku_default_20261019.py:86` | F | Keeps a self-hoster's own platform default model instead of writing the new one | `hosts_automatos_cloud` | kept | overwritten | kept |
 | 11 | `alembic/versions/auto_haiku_default_20261019.py:172` | P | Passes the edition to row 10 | `hosts_automatos_cloud` | see 10 | see 10 | see 10 |
 
-A migration is history. Rewriting it to read a capability changes what an old revision does, so the follow-up pull request should exempt `alembic/versions/` from the guard test rather than edit it. That is a decision for the guard's pull request, not taken here.
+A migration is history. Rewriting it to read a capability changes what an old revision does, so the guard test (`orchestrator/tests/test_prd277_no_raw_edition_checks.py`) exempts `alembic/versions/` and these two rows stay as they are.
 
 ### `api/`
 
@@ -87,7 +94,7 @@ A migration is history. Rewriting it to read a capability changes what an old re
 
 | # | Where | Kind | What it switches | Capability | `local` | `saas` | `enterprise` |
 |---|---|---|---|---|---|---|---|
-| 31 | `consumers/chatbot/service.py:872` | C | Chat seeds the driving person's known name into Auto's state | **For Gerard** | seeded | not seeded (prompt kept byte-identical) | **For Gerard** |
+| 31 | `consumers/chatbot/service.py:872` | C | Chat seeds the driving person's known name into Auto's state | `chat_seeds_user_name` | seeded | not seeded (prompt kept byte-identical) | **For Gerard** |
 
 ### `core/`
 
@@ -97,7 +104,7 @@ A migration is history. Rewriting it to read a capability changes what an old re
 | 33 | `core/auth/device.py:220` | H | An `amd_` bearer is refused with 401 | `device_pairing` | resolved | 401 | resolved when pairing is on, as the person who paired (FR-22; Wave 6) |
 | 34 | `core/auth/hybrid.py:985` | C | The anonymous session is bound to the operator row and made super admin | `anonymous_operator` | super admin | plain user | never reached: no anonymous lane (FR-3) |
 | 35 | `core/auth/step_up.py:161` | C | `check_step_up` (line 177) passes every request | `step_up` | `skip` | `clerk_freshness` | `reauth` (US-406) |
-| 36 | `core/llm/byok_endpoint.py:37` | C | `_saas()`, used at lines 55, 84 and 96: a key's own endpoint must be `https`, public and pinned, and is required even when `AZURE_OPENAI_ENDPOINT` is set | `guards_user_endpoints` | not guarded | guarded | **For Gerard** |
+| 36 | `core/llm/byok_endpoint.py:37` | C | `_saas()` (now `_guarded()`, and its callers take `guarded` instead of an edition), used at lines 55, 84 and 96: a key's own endpoint must be `https`, public and pinned, and is required even when `AZURE_OPENAI_ENDPOINT` is set | `guards_user_endpoints` | not guarded | guarded | **For Gerard** |
 | 37 | `core/llm/providers.py:259` | F | A `byok_only` provider (NVIDIA) may hold a platform key | `billing` (on: Automatos would be reselling the key) | allowed | refused | allowed |
 | 38 | `core/llm/providers.py:419` | R | `edition` in `GET /api/keys/providers`, and passed to row 37 | (name) | `local` | `saas` | `enterprise` |
 | 39 | `core/llm/usage_tracker.py:76` | C | A usage row with no workspace is booked to `DEFAULT_WORKSPACE_ID` | `multi_person` | booked to it | dropped | dropped |
@@ -105,8 +112,8 @@ A migration is history. Rewriting it to read a capability changes what an old re
 | 41 | `core/media_render_quota.py:104` | C | Monthly render quota | `billing` | none | from plan | none |
 | 42 | `core/media_render_quota.py:218` | C | Plan label on the render quota | `billing` | none | plan name | none |
 | 43 | `core/observability/otel.py:257` | R | `automatos.edition` trace attribute | (name) | `local` | `saas` | `enterprise` |
-| 44 | `core/seeds/fingerprint.py:85` | R | `AUTH_EDITION` is part of the seed fingerprint | (name) | hashed | hashed | hashed |
-| 45 | `core/seeds/seed_local_first_run.py:763` | C | First-run seed: workspace row, operator row, Auto, starter roster, demo Playbook, welcome Deliverable | **For Gerard** | seeded | skipped | **For Gerard** |
+| 44 | `core/seeds/fingerprint.py:85` | R | `AUTH_EDITION` is part of the seed fingerprint (left as is: the guard test's one named exemption) | (name) | hashed | hashed | hashed |
+| 45 | `core/seeds/seed_local_first_run.py:763` | C | First-run seed: workspace row, operator row, Auto, starter roster, demo Playbook, welcome Deliverable | `seeds_first_run_content` | seeded | skipped | **For Gerard** |
 | 46 | `core/session_permission_modes.py:39` | F | A session's default permission mode | `session_mode` | `auto` | `edits` | `edits` (session mode is off; moot) |
 | 47 | `core/workspace_client.py:76` | H | A worker failure adds "start it with `docker compose up -d workspace-worker`" | `operator_is_user` | hint | no hint | **For Gerard** |
 | 48 | `core/workspaces/owner.py:53` | H | A workspace with no owner falls back to the operator row | `anonymous_operator` | operator | none | none |
@@ -121,13 +128,13 @@ A migration is history. Rewriting it to read a capability changes what an old re
 
 | # | Where | Kind | What it switches | Capability | `local` | `saas` | `enterprise` |
 |---|---|---|---|---|---|---|---|
-| 50 | `modules/context/sections/product_facts.py:90` | H | Auto's description of the install, and its Settings tabs | **For Gerard** | local text | hosted text | **For Gerard** |
+| 50 | `modules/context/sections/product_facts.py:90` | H | Auto's description of the install, and its Settings tabs | `install_description` | local text | hosted text | **For Gerard** |
 | 51 | `modules/documents/workspace_documents.py:109` | H | A generated document is copied into the workspace's `documents/` folder | `operator_is_user` | copied | skipped | **For Gerard** |
 | 52 | `modules/socials/render.py:161` | C | `_local_edition()` (line 166): "start the media profile with `docker compose`" | `operator_is_user` | compose hint | "not configured" / "unreachable" | **For Gerard** |
 | 53 | `modules/tools/discovery/handlers_onboarding.py:235` | H | Onboarding skips `powerup` (the bring-your-own-key card after the trial) | `billing` | skipped | shown | skipped |
 | 54 | `modules/tools/discovery/platform_executor.py:447` | H | A chat turn with no Clerk id may still count as an owner's instruction, by the driving user's role | `sign_in` | by driving user | refused | by the person's `users.id` (Wave 2 resolver) |
 | 55 | `modules/tools/discovery/ticket_cancel.py:129` | H | `auth_type` of the context used to check the driver's permission: `anonymous` makes the driver the workspace's owner | `anonymous_operator` | `anonymous` | `clerk` | never `anonymous`; the enterprise session's type (Wave 2) |
-| 56 | `modules/voice/arming.py:54` | C | Name of a newly created Retell agent | **For Gerard** | "Auto Live (local)" | "Auto Live" | **For Gerard** |
+| 56 | `modules/voice/arming.py:54` | C | Name of a newly created Retell agent | `live_agent_named_apart` | "Auto Live (local)" | "Auto Live" | **For Gerard** |
 | 57 | `modules/voice/mint.py:98` | H | Auto Live allowed by the plan | `billing` | always | by plan | always |
 | 58 | `modules/voice/mint.py:111` | H | Auto Live refused for plan or exhausted credits | `billing` | never | by plan and credits | never |
 
@@ -180,7 +187,7 @@ A migration is history. Rewriting it to read a capability changes what an old re
 | 95 | `services/themes/revocation_pull.py:118` | H | The revocation pull is enabled | `calls_automatos_cloud` | when a feed URL is set | never | only when switched on (D-12) |
 | 96 | `services/themes/revocation_sync_state.py:77` | H | Revoked key ids read from the stored pull | `calls_automatos_cloud` | stored ids | none | stored ids when pulled |
 | 97 | `services/workspace_move/export.py:125` | R | `edition` in a workspace export's manifest | (name) | `local` | `saas` | `enterprise` |
-| 98 | `services/workspace_purge.py:232` | C | Purging an owner's last workspace also deletes their account | **For Gerard** | never | yes | **For Gerard** |
+| 98 | `services/workspace_purge.py:232` | C | Purging an owner's last workspace also deletes their account | `last_workspace_purge_deletes_person` | never | yes | **For Gerard** |
 
 ### Shell
 
@@ -259,6 +266,8 @@ The phone app (`automatos-go`) reads discovery's `edition` and `auth.modes`. Tha
 
 These are the rows where the enterprise answer is not obvious from the PRD or its decisions. Nothing here is guessed in code: until each is answered, `enterprise` has no column.
 
+Since US-102 each backend row here reads its own capability, pinned to today's `local` and `saas` answers: G-1 `push_needs_consent`, G-2 `operator_is_user`, G-3 `guards_user_endpoints`, G-4 `seeds_first_run_content` (row 45; E1 is shell and W43 frontend), G-5 `install_description`, G-6 `chat_seeds_user_name`, G-7 `live_agent_named_apart`, G-8 `last_workspace_purge_deletes_person`. G-9 to G-11 are frontend rows only (Wave 5). An answer sets the capability's `enterprise` value; option C of G-2 splits `operator_is_user`.
+
 **G-1. Expo push consent** (rows 24, 85, 88; W41). On `local`, nothing leaves for Expo's push service until the operator agrees in Settings. On `saas` push is always on, through the platform's Expo project. D-12 covers Automatos's own hosted services; Expo is a third party, so D-12 does not settle it.
 - A. Consent required, as `local`: an enterprise install sends nothing to Expo until its operator agrees. `push_needs_consent` = yes.
 - B. Always on, as `saas`: phones get notifications from the first pairing. `push_needs_consent` = no.
@@ -316,6 +325,8 @@ Each pull request moves the call sites of one area to `core.editions` and delete
 3. **Auth and the operator:** rows 22, 23, 25, 27, 32 to 35, 39, 48, 54, 55, 59, 63, 64, 79, 80a, 81, 82, 86, 87, 92, 93: 23 call sites. `remote_access` and `board_consent` take a capability. About 110 lines. Needs Dave's review: it touches authentication.
 4. **Session mode:** rows 46, 61, 65, 66, and S1 with a `session_mode` field in `/health`: 5 call sites, about 30 lines. Small enough to ride with pull request 3.
 5. **The guard and the helpers:** the "no raw comparison" test (US-102), deleting `IS_LOCAL_EDITION` / `IS_SAAS_EDITION` once nothing reads them, and one accessor for the R rows that report the name. About 60 lines plus the test.
+US-102 is complete: outside `config.py`, `core/editions.py`, `alembic/versions/` and the tests, no backend file compares `AUTH_EDITION` or reads `IS_LOCAL_EDITION` / `IS_SAAS_EDITION` (both deleted), and `orchestrator/tests/test_prd277_no_raw_edition_checks.py` fails if one does; row 44 is its one named exemption. Left for US-103: the `enterprise` row of the capability table, the For Gerard answers, `config.py`'s rows 1, 2 and 5 to 9, and the shell line E1.
+
 6. **US-103:** the `enterprise` column, the For Gerard rows once answered, and `config.py`'s own rows 1, 2 and 5 to 9, which are the boot guards US-103 rewrites. `config.py` is over the 800-line limit, so those lines change in place and the file does not grow.
 
 The frontend rows move in Wave 5, against a frontend capability module beside `lib/auth-edition.ts`.

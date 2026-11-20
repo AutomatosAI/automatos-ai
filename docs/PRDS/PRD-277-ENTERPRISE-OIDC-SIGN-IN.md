@@ -293,7 +293,7 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 
 **Acceptance Criteria:**
 - [x] Capabilities are defined in one module, `orchestrator/core/editions.py`. They are not in `config.py`, which is over the file-size limit and must not grow.
-- [ ] No file outside that module and the tests compares `AUTH_EDITION` or reads `IS_LOCAL_EDITION` / `IS_SAAS_EDITION`. A test fails if one does.
+- [x] No file outside that module and the tests compares `AUTH_EDITION` or reads `IS_LOCAL_EDITION` / `IS_SAAS_EDITION`. A test fails if one does. `orchestrator/tests/test_prd277_no_raw_edition_checks.py`; `config.py` (the flag's own file, whose boot guards US-103 rewrites) and `alembic/versions/` (history) are exempt, and the two helpers are deleted.
 - [x] A truth-table test pins every capability for `local` and `saas` to today's behaviour.
 - [ ] All existing tests pass unchanged, except those that assert on the removed comparisons, which are listed in the PR.
 - [ ] `ruff check` and the backend test lanes pass in CI.
