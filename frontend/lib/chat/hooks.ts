@@ -9,6 +9,8 @@ import { CREDITS_EXHAUSTED_CODE as TRIAL_EXHAUSTED_CODE } from '@/lib/credits'
 import { completeRunningToolCalls, upsertTaskCard, upsertToolCall } from '@/lib/chat/tool-calls'
 import { errorFromDataPayload, parseErrorFrame } from '@/lib/chat/errors'
 import { withoutNarration } from '@/lib/chat/narration'
+import { reportedSessionRefusal } from '@/lib/enterprise/chat-refusal'
+import { csrfHeaders } from '@/lib/enterprise/session-transport'
 import { toast } from 'sonner'
 
 /** PRD-237 S7: the client-side placeholder shown while the server finishes a turn. */
@@ -195,6 +197,9 @@ export function useChat({
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            // PRD-277 US-503: the enterprise session's cross-site header, which the chat route passes
+            // on to the API; none in any other edition. The session cookie goes by itself (same origin).
+            ...csrfHeaders('POST'),
             ...(token ? { ...(token ? { Authorization: `Bearer ${token}` } : {}),} : {}),
             ...(apiKey ? { 'x-api-key': apiKey } : {}),
             // Ensure backend gets the correct workspace context (prevents dev fallback UUID)
@@ -239,6 +244,8 @@ export function useChat({
           // it so the exhausted banner appears immediately (before the snapshot
           // refreshes). The gate can trip pre-stream (this non-ok body).
           if (errorText.includes(TRIAL_EXHAUSTED_CODE)) setErrorCode(TRIAL_EXHAUSTED_CODE)
+          // PRD-277 US-502: enterprise's ended session opens "Your session ended" instead of a toast.
+          if (reportedSessionRefusal(response.status, errorText)) return
           toast.error(`Chat request failed (${response.status})${errorText ? `: ${errorText}` : ''}`)
           return
         }

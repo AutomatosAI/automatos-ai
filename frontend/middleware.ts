@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { isSaaS } from "@/lib/auth-edition";
+import { isEnterprise } from "@/lib/edition-name";
+import { enterpriseMiddleware } from "@/lib/enterprise/session-middleware";
 
 // PRD-175 (F008): the middleware is edition-conditional.
 //   saas  → clerkMiddleware + auth.protect() on every non-public route (unchanged).
@@ -46,7 +48,9 @@ const saasMiddleware = clerkMiddleware(async (auth, request) => {
 // In `local`, serve everything untouched — the app is fully public with no auth.
 const localMiddleware = () => NextResponse.next();
 
-export default isSaaS ? saasMiddleware : localMiddleware;
+// PRD-277 US-502: in `enterprise`, a page asked for with no session cookie goes to /sign-in and
+// comes back afterwards; no clerkMiddleware, no auth.protect(). The API judges every request.
+export default isSaaS ? saasMiddleware : isEnterprise ? enterpriseMiddleware(isPublicRoute) : localMiddleware;
 
 export const config = {
   matcher: ["/((?!.+\\.[\\w]+$|_next).*)", "/", "/(api|trpc)(.*)"],

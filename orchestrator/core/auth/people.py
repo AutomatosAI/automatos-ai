@@ -33,6 +33,12 @@ the target is looked up in the workspace named and nowhere else (``MemberNotFoun
 workspace keeps its one owner: the owner's role is never changed, nobody is made owner, and the
 owner's membership never ends (``MembershipRefused``). The two that change a row commit.
 
+**People waiting for a workspace** (US-504). ``waiting_people`` lists those who signed in with an
+identity and can open no workspace; ``give_workspace`` makes one of them a member of a workspace in
+a role below owner, with its ``member:added_from_waiting`` audit row in the same commit. The route
+(``api/team_waiting.py``) lets only an install admin with ``members:invite`` there do it, after
+step-up.
+
 **Install admins** (US-405). ``set_install_role`` gives a person an install-wide role
 (``core.auth.system_role.set_system_role``, audited ``user:system_role_changed`` in the workspace the
 admin acted from, else the default workspace). The install always keeps an active install admin:
@@ -60,7 +66,8 @@ from core.auth.system_role import (
     set_system_role,
     stored_system_role,
 )
-from core.auth.user_link import LinkedPerson, link_identity, user_id_for_invitee
+from core.auth.user_link import PENDING_EMAIL_DOMAIN, LinkedPerson, link_identity, user_id_for_invitee
+from core.workspaces.audit import AuditService
 from core.workspaces.models import WorkspaceMember
 from modules.policy.roles import ADMIN, SUPER_ADMIN, USER, WorkspaceRole
 from services.mobile.devices import revoke_persons_devices
@@ -105,6 +112,43 @@ _ADD_MEMBER = (
 )
 _ADD_IF_ABSENT = text(_ADD_MEMBER + "DO NOTHING RETURNING id")
 _ADD_OR_SET = text(_ADD_MEMBER + "DO UPDATE SET role = EXCLUDED.role, is_active = true RETURNING id")
+
+# PRD-277 US-504: a person waiting for a workspace signed in with an identity (a user_identities
+# row), is active, and can open no usable workspace: no active membership of one, and owns none.
+# ``:only`` narrows it to one person (``give_workspace``'s check), or is NULL for everyone.
+_WAITING_SQL = text(
+    "SELECT u.id, u.email, u.name, u.created_at FROM users u "
+    "WHERE (CAST(:only AS integer) IS NULL OR u.id = CAST(:only AS integer)) "
+    "AND u.is_active IS NOT FALSE "
+    "AND EXISTS (SELECT 1 FROM user_identities ui WHERE ui.user_id = u.id) "
+    "AND NOT EXISTS (SELECT 1 FROM workspace_members wm JOIN workspaces w ON w.id = wm.workspace_id "
+    "  WHERE wm.user_id = u.id AND wm.is_active = true AND w.is_active IS NOT FALSE AND w.deleted_at IS NULL) "
+    "AND NOT EXISTS (SELECT 1 FROM workspaces w WHERE w.owner_id = u.id "
+    "  AND w.is_active IS NOT FALSE AND w.deleted_at IS NULL) "
+    "ORDER BY u.created_at DESC, u.id DESC LIMIT :limit"
+)
+WAITING_LISTED_MAX = 200
+GIVEN_A_WORKSPACE = "member:added_from_waiting"
+NOT_WAITING_MESSAGE = "This person is not waiting for a workspace any more."
+WORKSPACE_NOT_GIVEN_MESSAGE = "The person was not added: the change could not be recorded. Try again."
+
+
+class NotWaiting(LookupError):
+    """The person is not waiting for a workspace (in one already, deactivated, or never signed in); nothing changed."""
+
+
+class WorkspaceNotGiven(RuntimeError):
+    """The membership's audit row could not be written, so the membership was rolled back."""
+
+
+@dataclass(frozen=True)
+class WaitingPerson:
+    """A person waiting for a workspace, as an install admin sees them."""
+
+    user_id: int
+    email: Optional[str]
+    name: Optional[str]
+    signed_in_first_at: Optional[datetime]
 
 
 @dataclass(frozen=True)
@@ -363,6 +407,47 @@ def join_from_invitation(db: Session, invitation: Any, user_id: int) -> bool:
     return already_member
 
 
+def _waiting_person(row: Any) -> WaitingPerson:
+    email = row[1] if row[1] and not str(row[1]).lower().endswith(PENDING_EMAIL_DOMAIN) else None
+    return WaitingPerson(user_id=int(row[0]), email=email, name=row[2] or None, signed_in_first_at=row[3])
+
+
+def waiting_people(db: Session, limit: int = WAITING_LISTED_MAX) -> Tuple[WaitingPerson, ...]:
+    """The people waiting for a workspace (``_WAITING_SQL``), newest first; never committed.
+
+    A placeholder email (an identity whose provider verified no address) is shown as none.
+    """
+    rows = db.execute(_WAITING_SQL, {"only": None, "limit": limit}).fetchall()
+    return tuple(_waiting_person(row) for row in rows)
+
+
+def give_workspace(db: Session, user_id: int, workspace_id: Union[UUID, str], role: str,
+                   requester: Requester) -> None:
+    """Make a waiting person an active member of ``workspace_id`` in ``role``, audited, and commit.
+
+    ``MembershipRefused`` for a role outside ``SETTABLE_MEMBER_ROLES`` (nobody is made owner);
+    ``UnknownPerson`` for no such person; ``NotWaiting`` when they are deactivated, have no identity
+    or are in a workspace already (an admin's later change is never overwritten). The person's row
+    is locked first, so two admins placing the same person at once are serialised. The membership
+    and its ``member:added_from_waiting`` row commit together, or neither does
+    (``WorkspaceNotGiven``).
+    """
+    if role not in SETTABLE_MEMBER_ROLES:
+        raise MembershipRefused(f"Invalid role: {role}")
+    _lock_person(db, user_id)
+    if db.execute(_WAITING_SQL, {"only": user_id, "limit": 1}).fetchone() is None:
+        db.rollback()
+        raise NotWaiting(NOT_WAITING_MESSAGE)
+    set_membership(db, user_id, workspace_id, role)
+    entry = AuditService(db).log(
+        workspace_id=str(workspace_id), user_id=requester.user_id, action=GIVEN_A_WORKSPACE,
+        resource_type="member", resource_id=str(user_id), details={"role": role},
+        ip_address=requester.ip_address, user_agent=requester.user_agent,
+    )
+    if entry is None:  # the log rolled the transaction back, the membership with it
+        raise WorkspaceNotGiven(WORKSPACE_NOT_GIVEN_MESSAGE)
+
+
 def set_membership(db: Session, user_id: int, workspace_id: Union[UUID, str], role: str, *,
                    if_absent: bool = False) -> bool:
     """Give ``user_id`` ``role`` in ``workspace_id``; whether a row was written. Not committed.
@@ -386,12 +471,16 @@ __all__ = [
     "LastInstallAdmin",
     "MemberNotFound",
     "MembershipRefused",
+    "NotWaiting",
     "Requester",
+    "WaitingPerson",
+    "WorkspaceNotGiven",
     "change_member_role",
     "deactivate_person",
     "end_membership",
     "end_session",
     "end_sessions_of",
+    "give_workspace",
     "join_from_invitation",
     "link_person",
     "locked_active_install_admins",
@@ -401,5 +490,6 @@ __all__ = [
     "set_install_role",
     "set_membership",
     "sign_out",
+    "waiting_people",
     "workspace_member",
 ]

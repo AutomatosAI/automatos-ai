@@ -1,6 +1,24 @@
 import { NextRequest } from 'next/server'
 
+import { isEnterprise } from '@/lib/edition-name'
+import { forwardedSession } from '@/lib/enterprise/server-session'
+
 export const runtime = 'edge'
+
+/**
+ * PRD-277 US-503 — enterprise: the API is called as the browser's person, with their session
+ * cookie, the cross-site header and Origin and the workspace (lib/enterprise/server-session.ts),
+ * and no API key or Authorization, which would stop the API reading the cookie. A 401 hands the
+ * API's own body back (its `session_ended` code), so the chat can say the session ended.
+ */
+function enterpriseHeaders(request: NextRequest, method: string, base: Record<string, string>): Record<string, string> {
+  return { ...base, ...forwardedSession(request, method) }
+}
+
+function enterpriseRefusal(status: number, errorText: string): Response | null {
+  if (!isEnterprise || status !== 401) return null
+  return new Response(errorText, { status, headers: { 'Content-Type': 'application/json' } })
+}
 
 const BACKEND_URL = // Server-side: BACKEND_INTERNAL_URL (container DNS, local edition) beats the
 // browser-facing NEXT_PUBLIC_API_URL — inside the frontend container 'localhost'
@@ -61,13 +79,17 @@ export async function POST(request: NextRequest) {
     // Forward to Python backend
     const backendResponse = await fetch(`${BACKEND_URL}/api/chat`, {
       method: 'POST',
-      headers,
+      headers: isEnterprise
+        ? enterpriseHeaders(request, 'POST', { 'Content-Type': 'application/json', 'Accept': 'text/plain' })
+        : headers,
       body: JSON.stringify(body),
     })
 
     if (!backendResponse.ok) {
       const errorText = await backendResponse.text()
       console.error('Backend error:', backendResponse.status, errorText)
+      const ended = enterpriseRefusal(backendResponse.status, errorText)
+      if (ended) return ended
       return new Response(
         JSON.stringify({ error: 'Chat proxy failed' }),
         { status: backendResponse.status, headers: { 'Content-Type': 'application/json' } }
@@ -145,13 +167,15 @@ export async function PATCH(request: NextRequest) {
     // Forward to Python backend with the same path
     const backendResponse = await fetch(`${BACKEND_URL}/api/chat${path}`, {
       method: 'PATCH',
-      headers,
+      headers: isEnterprise ? enterpriseHeaders(request, 'PATCH', { 'Content-Type': 'application/json' }) : headers,
       body: JSON.stringify(body),
     })
 
     if (!backendResponse.ok) {
       const errorText = await backendResponse.text()
       console.error('Backend PATCH error:', backendResponse.status, errorText)
+      const ended = enterpriseRefusal(backendResponse.status, errorText)
+      if (ended) return ended
       return new Response(
         JSON.stringify({ error: 'Chat proxy failed' }),
         { status: backendResponse.status, headers: { 'Content-Type': 'application/json' } }

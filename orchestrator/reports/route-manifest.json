@@ -1,5 +1,5 @@
 {
-  "route_count": 1058,
+  "route_count": 1062,
   "routes": [
     {
       "method": "GET",
@@ -3063,6 +3063,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/auth/me"
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/auth/oidc/callback"
     },
     {
@@ -3088,6 +3092,10 @@
     {
       "method": "POST",
       "path": "/api/v1/auth/sessions/{session_id}/revoke"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/auth/sign-in-page"
     },
     {
       "method": "POST",
@@ -4180,6 +4188,14 @@
     {
       "method": "PATCH",
       "path": "/api/workspaces/{workspace_id}/team/members/{member_id}/role"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/{workspace_id}/team/waiting"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/{workspace_id}/team/waiting/{user_id}"
     },
     {
       "method": "GET",

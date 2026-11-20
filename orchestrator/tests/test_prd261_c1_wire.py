@@ -69,6 +69,7 @@ from tests.test_prd261_b2_wire import ACCOUNT_STEP_UP_ROUTES  # noqa: E402
 from tests.test_prd261_b2_wire import STEP_UP_ROUTES as B2_STEP_UP_ROUTES  # noqa: E402
 from tests.test_prd261_c3_wire import C3_STEP_UP_ROUTES  # noqa: E402
 from tests.test_prd277_w3_session_routes import SESSION_STEP_UP_ROUTES  # noqa: E402
+from tests.test_prd277_w5_web_routes import WAITING_STEP_UP_ROUTES  # noqa: E402
 
 C1_MODULES = {
     "marketplace_themes_submit_router": submit_api, "marketplace_themes_router": listings_api,
@@ -321,9 +322,10 @@ def test_no_earlier_route_shadows_a_w_c1_route(live_app):
 def test_the_app_carries_step_up_on_the_w_b2_account_w_c1_and_w_c3_routes_only(live_app):
     # W-B2's theme routes, A-07f's account routes (role change, invite, API key), W-C1's and
     # W-C3's revocation create and lift (test_prd261_c3_wire.py), and PRD-277 Wave 3's install-admin
-    # session changes (test_prd277_w3_session_routes.py).
+    # session changes (test_prd277_w3_session_routes.py), and Wave 5's placing of a person waiting for a
+    # workspace (test_prd277_w5_web_routes.py), which grants rights as an invitation does.
     expected = (B2_STEP_UP_ROUTES | ACCOUNT_STEP_UP_ROUTES | C1_STEP_UP_ROUTES | C3_STEP_UP_ROUTES
-                | SESSION_STEP_UP_ROUTES)
+                | SESSION_STEP_UP_ROUTES | WAITING_STEP_UP_ROUTES)
     assert {_key(name) for name in live_app["step_up"]} == expected
 
 

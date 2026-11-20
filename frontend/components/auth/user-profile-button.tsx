@@ -5,7 +5,9 @@ import { useEffect, useState } from 'react'
 import { UserButton } from '@clerk/nextjs'
 import { useUser } from '@/lib/auth-hooks'
 import { isSaaS } from '@/lib/auth-edition'
+import { isEnterprise } from '@/lib/edition-name'
 import { apiClient, type ProfileResponse } from '@/lib/api-client'
+import { ProfileMenu } from './profile-menu'
 
 /**
  * PRD-37: User Profile Button Component
@@ -85,6 +87,12 @@ export function UserProfileButton({
     afterSignUpUrl = '/chat',
 }: UserProfileButtonProps) {
     const { isSignedIn, isLoaded } = useUser()
+
+    // PRD-277 US-502: enterprise has accounts but no Clerk — the same menu the SaaS header shows,
+    // fed by lib/auth-hooks (the API's who-am-I); its Sign out ends the session at the API.
+    if (isEnterprise) {
+        return <ProfileMenu />
+    }
 
     // Local edition: no Clerk, no account — the slot is the operator's profile.
     // (UserButton is a Clerk COMPONENT and would throw without ClerkProvider.)

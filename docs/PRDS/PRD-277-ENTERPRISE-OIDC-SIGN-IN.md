@@ -513,38 +513,38 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As a developer, I want the web app's sign-in hooks to work in enterprise, so that components do not change.
 
 **Acceptance Criteria:**
-- [ ] `resolveEdition()` accepts `enterprise`.
-- [ ] `auth-hooks.ts` returns the same shapes in enterprise, filled from a "who am I" API call.
-- [ ] The role comes from the API, not from Clerk session data.
-- [ ] No component outside the existing Clerk files imports `@clerk/*`. The existing rule's test covers it.
+- [x] `resolveEdition()` accepts `enterprise`. `frontend/lib/edition-name.ts` (re-exported by `lib/auth-edition.ts`, with `isEnterprise`); an unknown value is still `saas`.
+- [x] `auth-hooks.ts` returns the same shapes in enterprise, filled from a "who am I" API call. `GET /api/v1/auth/me` (`api/auth_web.py`: the person, their install role, their workspaces; it answers a person in no workspace, which the shared request context refuses), read by `components/enterprise/enterprise-session-provider.tsx` and handed to the five hooks by `lib/enterprise/auth-hooks.ts`; no token (the session cookie travels by itself).
+- [x] The role comes from the API, not from Clerk session data. `RoleProvider` reads `/me`'s `system_role` in enterprise (`lib/enterprise/session-context.ts`); `user` until it answers.
+- [x] No component outside the existing Clerk files imports `@clerk/*`. `lib/enterprise/__tests__/clerk-import-guard.test.ts` pins the files that import it to the sixteen that did before this wave, and none under `enterprise/`.
 - [ ] `tsc` and `vitest` pass in CI.
 
 #### US-502: Sign-in page, signed-out redirect and sign-out · M
 **Description:** As a person, I want one button that takes me to my organisation's sign-in, so that I never see a password field that is not my employer's.
 
 **Acceptance Criteria:**
-- [ ] `/sign-in` in enterprise shows one button with `OIDC_DISPLAY_NAME`. No sign-up, no reset.
-- [ ] A browser with no session cookie is sent to `/sign-in` and returned to where it was going afterwards.
-- [ ] A 401 from the API in the middle of work shows "your session ended" with a button to sign in again. Unsaved text in the chat box is kept.
-- [ ] Sign-out calls the API and then goes to the IdP's end-session address when there is one.
-- [ ] The browser e2e lane runs sign-in, a protected page and sign-out against the fake issuer.
+- [x] `/sign-in` in enterprise shows one button with `OIDC_DISPLAY_NAME`. No sign-up, no reset. `components/enterprise/enterprise-sign-in.tsx`; the name from the public `GET /api/v1/auth/sign-in-page`, checked at start-up to be plain text of 1 to 64 characters. `return_to` is passed through to the start route, whose own rule decides it; `?error=` shows one sentence per refusal code (`lib/enterprise/messages.ts`), none saying whether a person is known.
+- [x] A browser with no session cookie is sent to `/sign-in` and returned to where it was going afterwards. `lib/enterprise/session-middleware.ts` (middleware.ts's enterprise branch; `/api/…` and the public routes are left alone), and a 401 from `/me` does the same from the browser.
+- [x] A 401 from the API in the middle of work shows "your session ended" with a button to sign in again. Unsaved text in the chat box is kept. `session_ended` from apiClient or the chat route opens `session-ended-dialog.tsx` over the mounted page; the chat box's text is kept in the tab's sessionStorage for 30 minutes, text only (`lib/enterprise/kept-chat-draft.ts`).
+- [x] Sign-out calls the API and then goes to the IdP's end-session address when there is one. `signOutOfEnterprise` (`lib/enterprise/session-context.ts`), else `/sign-in`.
+- [ ] The browser e2e lane runs sign-in, a protected page and sign-out against the fake issuer. `e2e/browser/specs/enterprise-sign-in.spec.ts` (`@enterprise`) is written; it runs only where `E2E_ENTERPRISE_APP_URL` names an enterprise stack, which no lane job starts yet.
 
 #### US-503: Server routes forward the session · S
 **Description:** As a person, I want pages that load through the web app's own server to know who I am.
 
 **Acceptance Criteria:**
-- [ ] The theme files route and `boot-server.ts` forward the session cookie in enterprise, as they use Clerk's token in `saas`.
-- [ ] The chat and stream routes pass the cookie through.
-- [ ] A test covers each.
+- [x] The theme files route and `boot-server.ts` forward the session cookie in enterprise, as they use Clerk's token in `saas`. The session cookie alone, never a bearer (`lib/enterprise/server-session.ts`); the boot cache is keyed by the cookie's SHA-256.
+- [x] The chat and stream routes pass the cookie through. With the workspace, and for an unsafe call the browser's cross-site header and Origin; no API key or Authorization, which would stop the API reading the cookie. The chat route hands a 401's own body back.
+- [x] A test covers each. `lib/enterprise/__tests__/server-routes.test.ts`, `session-transport.test.ts`.
 
 #### US-504: Team and profile screens · M
 **Description:** As an admin, I want to see who has signed in and set their workspace and role.
 
 **Acceptance Criteria:**
-- [ ] The Team page lists members and people waiting for a workspace. Role changes work and require step-up.
-- [ ] Invitations are not shown in enterprise.
-- [ ] The profile page is read-only and says the account is managed by the organisation's identity provider.
-- [ ] An admin can end a person's sessions and deactivate them.
+- [x] The Team page lists members and people waiting for a workspace. Role changes work and require step-up. `GET` and `POST /api/workspaces/{workspace_id}/team/waiting[/{user_id}]` (`api/team_waiting.py`: `members:invite`, an install admin, step-up on the POST; `people.give_workspace` places the person in a role below owner, audited `member:added_from_waiting`). In enterprise `useStepUp` sends the browser to sign in again (`lib/enterprise/step-up.ts`), and the change is made again on return.
+- [x] Invitations are not shown in enterprise. No "Invite Member", no pending invitations, no invite dialog.
+- [x] The profile page is read-only and says the account is managed by the organisation's identity provider. `app/settings/profile/enterprise-profile.tsx`.
+- [x] An admin can end a person's sessions and deactivate them. Two buttons on each member's row for an install admin (`components/team/person-access-actions.tsx`), on the existing step-up routes.
 
 #### US-505: An enterprise web image · S
 **Description:** As an operator, I want a published web image for this edition, so that I do not build one myself.

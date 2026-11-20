@@ -601,6 +601,8 @@ class Config:
     OIDC_SCOPES: str = " ".join((os.getenv("OIDC_SCOPES") or "openid profile email").split())
     OIDC_CLAIM_EMAIL: str = (os.getenv("OIDC_CLAIM_EMAIL") or "email").strip()
     OIDC_CLAIM_NAME: str = (os.getenv("OIDC_CLAIM_NAME") or "name").strip()
+    # PRD-277 US-502: the sign-in button's name for the provider ("Sign in with <name>"); plain text, 1-64 characters.
+    OIDC_DISPLAY_NAME: str = (os.getenv("OIDC_DISPLAY_NAME") or "your organisation").strip()
     # "true" only when the provider puts ONLY addresses it has verified in the claim OIDC_CLAIM_EMAIL names (not `email`).
     # Off by default: a person who can edit that claim at the provider could take another person's address.
     OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES: str = (

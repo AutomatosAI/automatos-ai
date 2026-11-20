@@ -115,6 +115,13 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     # PRD-277 US-402 -- signing in with the organisation's identity provider
     # (/api/v1/auth/oidc/start, /callback). Both 404 unless the edition signs in with OIDC.
     RouterSpec("api.auth_oidc"),
+    # PRD-277 US-501/US-502 -- the web app's who-am-I (/api/v1/auth/me, its credential the session
+    # itself) and the sign-in page's provider name (/api/v1/auth/sign-in-page, public). Both 404
+    # unless the edition issues sessions (enterprise).
+    RouterSpec("api.auth_web"),
+    # PRD-277 US-504 -- the Team page's people waiting for a workspace
+    # (/api/workspaces/{workspace_id}/team/waiting): an install admin lists them and places one.
+    RouterSpec("api.team_waiting"),
     # PRD-266 W2 Push -- the operator's Expo answer (/api/v1/mobile/push-consent, local only)
     # and the workspace's question redaction (/api/v1/mobile/push-settings).
     RouterSpec("api.mobile_push"),

@@ -12,6 +12,12 @@ import { useAuth } from '@/lib/auth-hooks'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { PageHeader, SearchInput } from '@/components/shared'
+import { useSystemRoleOptional } from '@/contexts/role-context'
+import { isEnterprise } from '@/lib/edition-name'
+import { isInstallAdmin } from '@/lib/enterprise/session-context'
+import { PersonAccessActions } from './person-access-actions'
+import { useWaitingPeople } from './use-waiting-people'
+import { WaitingPeople } from './waiting-people'
 
 /**
  * The Team page: header with member count, refresh and invite; the search box; pending
@@ -32,6 +38,11 @@ export function TeamManagement() {
     } = useTeamMembers()
     const [isInviteOpen, setIsInviteOpen] = useState(false)
     const [searchTerm, setSearchTerm] = useState('')
+    // PRD-277 US-504: enterprise has no invitations (people sign in with the organisation's identity
+    // provider); an install admin (the API's role) places people waiting and ends a person's access.
+    const systemRole = useSystemRoleOptional()?.systemRole ?? 'user'
+    const installAdmin = isEnterprise && isInstallAdmin(systemRole)
+    const waiting = useWaitingPeople(workspaceId, installAdmin, fetchMembers)
 
     const filteredMembers = members.filter(m =>
         m.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -72,13 +83,15 @@ export function TeamManagement() {
                             Refresh
                         </Button>
 
-                        <Button
-                            onClick={() => setIsInviteOpen(true)}
-                            className="bg-brand-primary hover:bg-brand-primary/90"
-                        >
-                            <UserPlus className="w-4 h-4 mr-2" />
-                            Invite Member
-                        </Button>
+                        {!isEnterprise && (
+                            <Button
+                                onClick={() => setIsInviteOpen(true)}
+                                className="bg-brand-primary hover:bg-brand-primary/90"
+                            >
+                                <UserPlus className="w-4 h-4 mr-2" />
+                                Invite Member
+                            </Button>
+                        )}
                     </>
                 }
             />
@@ -91,9 +104,11 @@ export function TeamManagement() {
             />
 
             {/* Pending invitations */}
-            {pendingInvites.length > 0 && (
+            {!isEnterprise && pendingInvites.length > 0 && (
                 <PendingInvitations pendingInvites={pendingInvites} onRevoke={handleRevokeInvite} />
             )}
+
+            {installAdmin && <WaitingPeople people={waiting.people} onPlace={waiting.handlePlace} />}
 
             {/* Members List */}
             <MembersTable
@@ -101,14 +116,17 @@ export function TeamManagement() {
                 loading={loading}
                 onRoleChange={handleRoleChange}
                 onRemove={handleRemoveMember}
+                renderActions={installAdmin ? (member) => <PersonAccessActions member={member} onChanged={fetchMembers} /> : undefined}
             />
 
-            <InviteModal
-                isOpen={isInviteOpen}
-                onClose={() => setIsInviteOpen(false)}
-                onInvite={() => fetchMembers()}
-                workspaceId={workspaceId || ""}
-            />
+            {!isEnterprise && (
+                <InviteModal
+                    isOpen={isInviteOpen}
+                    onClose={() => setIsInviteOpen(false)}
+                    onInvite={() => fetchMembers()}
+                    workspaceId={workspaceId || ""}
+                />
+            )}
         </div>
     )
 }

@@ -9,6 +9,8 @@ import { useWorkspace } from '@/hooks/use-workspace'
 import { PageHeader } from '@/components/shared'
 import { isLocal } from '@/lib/auth-edition'
 import { LocalProfileForm } from './local-profile-form'
+import { isEnterprise } from '@/lib/edition-name'
+import { EnterpriseProfile } from './enterprise-profile'
 
 /**
  * Profile page — one route, two editions (PRD-233 S6).
@@ -22,6 +24,8 @@ import { LocalProfileForm } from './local-profile-form'
  * and the hooks inside it run unconditionally — the rules of hooks hold.
  */
 export default function ProfilePage() {
+    // PRD-277 US-504: enterprise shows the organisation-managed profile, read-only.
+    if (isEnterprise) return <EnterpriseProfile />
     return isLocal ? <LocalProfileForm /> : <ClerkProfilePage />
 }
 

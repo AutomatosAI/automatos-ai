@@ -90,6 +90,15 @@ OIDC_SIGN_IN_SETTINGS: Tuple[str, ...] = (
     "OIDC_CA_BUNDLE_FILE", "ENTERPRISE_DEFAULT_ROLE", "DEFAULT_WORKSPACE_ID",
     "CLIENT_IP_HEADER", "OIDC_ENDPOINT_HOSTS", "OIDC_PENDING_SIGN_INS_MAX", "OIDC_PENDING_SIGN_INS_PER_ADDRESS",
     "OIDC_REQUIRED_CLAIMS", "ENTERPRISE_BOOTSTRAP_ADMINS", "OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES",
+    "OIDC_DISPLAY_NAME",
+)
+# PRD-277 US-502: the provider's name on the sign-in button. Plain text the page shows as it is:
+# 1 to 64 characters, no control character (C0, DEL or C1) and no angle bracket.
+DISPLAY_NAME_MAX = 64
+_DISPLAY_NAME = re.compile(rf"^[^\x00-\x1f\x7f-\x9f<>]{{1,{DISPLAY_NAME_MAX}}}$")
+DISPLAY_NAME_PROBLEM = (
+    f"must be plain text of 1 to {DISPLAY_NAME_MAX} characters (no control characters, no < or >): "
+    "the sign-in page shows it on its one button"
 )
 # The standard claim whose address ``email_verified`` speaks for (OpenID Connect Core 1.0 §5.1).
 STANDARD_EMAIL_CLAIM = "email"
@@ -179,6 +188,9 @@ def _sign_in_setting_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str
     vouched = str(settings.get("OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES") or EMAIL_CLAIM_NOT_VOUCHED)
     if vouched.strip().lower() not in (EMAIL_CLAIM_VOUCHED, EMAIL_CLAIM_NOT_VOUCHED):
         yield "OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES", EMAIL_CLAIM_VOUCH_PROBLEM
+    display_name = settings.get("OIDC_DISPLAY_NAME")  # absent: config.py's default is used
+    if display_name is not None and not is_display_name(display_name):
+        yield "OIDC_DISPLAY_NAME", DISPLAY_NAME_PROBLEM
     yield from _bundle_and_role_problems(settings)
     yield from _limit_and_host_problems(settings)
 
@@ -197,6 +209,11 @@ def _bundle_and_role_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str
 def listed_hosts(value: Any) -> Tuple[str, ...]:
     """The host names in an ``OIDC_ENDPOINT_HOSTS`` value (comma or space separated), lower-case."""
     return tuple(name.lower().rstrip(".") for name in _HOST_LIST_SEPARATORS.split(str(value or "")) if name)
+
+
+def is_display_name(value: Any) -> bool:
+    """Plain text the sign-in page may show as the provider's name (``OIDC_DISPLAY_NAME``)."""
+    return isinstance(value, str) and value == value.strip() and bool(_DISPLAY_NAME.match(value))
 
 
 def is_host_name(name: str) -> bool:
@@ -316,6 +333,8 @@ __all__ = [
     "BAD_SESSION_SETTING",
     "DEFAULT_ROLE_NEEDS_RULE_PROBLEM",
     "DEFAULT_WORKSPACE_PROBLEM",
+    "DISPLAY_NAME_MAX",
+    "DISPLAY_NAME_PROBLEM",
     "EMAIL_CLAIM_VOUCHED",
     "STANDARD_EMAIL_CLAIM",
     "MISSING_SETTINGS",
@@ -329,6 +348,7 @@ __all__ = [
     "EditionNotReady",
     "check_session_settings",
     "check_start_up",
+    "is_display_name",
     "is_host_name",
     "listed_hosts",
     "missing_settings",
