@@ -4,6 +4,8 @@ The routes (``api/auth_oidc.py``) call only ``start_sign_in`` and ``finish_sign_
 the identity method registered in ``REGISTRY`` (OIDC, ``core.auth.oidc_sign_in``) and never a
 provider directly. ``finish_sign_in`` runs, in this order:
 
+0. **The default workspace** every row of the sign-in is recorded in is made, with no owner, when
+   it is missing, and committed (``ensure_audit_workspace``), so even the first refusal is audited.
 1. **The identity method's ``finish``**: the callback checked and the identity verified.
 2. **The access rule** (``apply_access_rule``, US-403): every ``OIDC_REQUIRED_CLAIMS`` rule must
    hold for the verified token's claims (``core.auth.access_rule``). A refusal is audited
@@ -16,17 +18,18 @@ provider directly. ``finish_sign_in`` runs, in this order:
    ``email_verified`` exactly as the verified ID token states it (absent is false).
 5. **A deactivated person** is refused here, before anything is granted.
 6. **First sign-in only**: ``ENTERPRISE_DEFAULT_ROLE`` in the default workspace, unless the person
-   already has a membership there; then the first-admin rule (``apply_first_admin_rule``, US-405,
+   already has a membership there. Then the first-admin rule (``apply_first_admin_rule``, US-405,
    ``core.auth.first_admin``): a person ``ENTERPRISE_BOOTSTRAP_ADMINS`` names becomes an install
-   admin and the default workspace's owner, audited. A repeat sign-in grants nothing and changes no
-   row (PRD-277 §12, entry 8).
+   admin and a member of the default workspace (its owner when it has none, else an admin),
+   audited: at their first sign-in, or at any sign-in while the install has no active install
+   admin. Otherwise a repeat sign-in grants nothing and changes no row (PRD-277 §12, entry 8).
 7. **The hooks** (``REGISTRY.hooks()``), in registration order, each handed ``HookPeople`` for this
    person and ``SignedIn``, never the database session. One may refuse (``SignInRefusedByHook``) or
    set memberships (viewer, editor or admin) through it. Any other exception is a failed sign-in:
    rolled back, audited as the access rule's refusal, and answered ``sign_in_failed``.
 8. **Commit**: each membership a hook set with its ``member:role_changed`` row, then a first
-   sign-in with its ``auth:identity_linked`` row (naming the default role it granted) and any
-   ``auth:bootstrap_admin`` row, a repeat one plainly. A failed row rolls the person back and
+   sign-in with its ``auth:identity_linked`` row (naming the default role it granted), a repeat one
+   plainly, each with any ``auth:bootstrap_admin`` row. A failed row rolls the person back and
    nobody gets in.
 9. **The session** (``sessions.issue_session``), committed with its ``auth:sign_in`` row.
 
@@ -42,8 +45,12 @@ Every refusal is a ``SignInRefusal`` whose ``code`` is all the person is shown:
 * ``sign_in_not_allowed``: the person signed in at the provider, but the access rule does not let
   them in. Audited as ``auth:sign_in_refused`` with reason ``access_rule``. It tells the person only
   that this install does not admit their account, which they already know they hold.
-* ``step_up_refused``: a step-up could not start (no live session in this browser) or did not
-  confirm the session's own person. Audited as ``auth:step_up`` when it got as far as the callback.
+* ``step_up_refused``: a step-up could not start (no live session in this browser, or a request
+  sent from another site) or did not confirm the session's own person with a fresh sign-in.
+  Audited as ``auth:step_up`` when it got as far as the callback.
+* ``step_up_no_auth_time``: the provider's ID token said nothing of when the person signed in
+  (``auth_time``), so a step-up cannot be confirmed; the provider must be set up to send it.
+  Audited as ``auth:step_up`` with reason ``no_auth_time``.
 * ``identity_provider_unavailable``: the provider could not be reached or publishes settings sign-in
   cannot use. Logged, not audited.
 * ``sign_in_failed``: the sign-in could not be stored or recorded, or a hook failed. Logged; nothing
@@ -81,6 +88,7 @@ from core.auth.sign_in_methods import (
 )
 from core.auth.user_link import IdentityLinkRefused, LinkedPerson
 from core.edition_start_up import DEFAULT_ROLES, NO_DEFAULT_ROLE
+from core.seeds.seed_default_workspace import ensure_default_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -90,9 +98,10 @@ EXPIRED = "sign_in_expired"
 REFUSED = "sign_in_refused"
 NOT_ALLOWED = "sign_in_not_allowed"
 STEP_UP_REFUSED = "step_up_refused"
+STEP_UP_NO_AUTH_TIME = "step_up_no_auth_time"
 UNAVAILABLE = "identity_provider_unavailable"
 FAILED = "sign_in_failed"
-REFUSAL_CODES = (EXPIRED, REFUSED, NOT_ALLOWED, STEP_UP_REFUSED, UNAVAILABLE, FAILED)
+REFUSAL_CODES = (EXPIRED, REFUSED, NOT_ALLOWED, STEP_UP_REFUSED, STEP_UP_NO_AUTH_TIME, UNAVAILABLE, FAILED)
 # The roles a hook may set: a workspace role below owner, as ENTERPRISE_DEFAULT_ROLE.
 HOOK_ROLES = tuple(role for role in DEFAULT_ROLES if role != NO_DEFAULT_ROLE)
 
@@ -150,11 +159,25 @@ def apply_access_rule(db: Session, identity: VerifiedIdentity, browser: Browser)
 
 def apply_first_admin_rule(db: Session, identity: VerifiedIdentity, linked: LinkedPerson,
                            browser: Browser) -> Optional[str]:
-    """US-405, on a first sign-in only: ``ENTERPRISE_BOOTSTRAP_ADMINS`` (``core.auth.first_admin``)."""
-    if not linked.created:
-        return None
-    return first_admin.grant_if_listed(db, identity, linked.user_id, ip_address=browser.ip_address,
-                                       user_agent=browser.user_agent)
+    """US-405: ``ENTERPRISE_BOOTSTRAP_ADMINS`` (``core.auth.first_admin``): at a first sign-in, or at
+    any sign-in while the install has no active install admin."""
+    return first_admin.grant_if_listed(db, identity, linked.user_id, created=linked.created,
+                                       ip_address=browser.ip_address, user_agent=browser.user_agent)
+
+
+def ensure_audit_workspace(db: Session) -> None:
+    """The default workspace, made (with no owner) when it is missing and committed, before anything
+    of this sign-in is audited in it; an existing row is never changed. A failure is logged as an
+    error and the sign-in goes on: its rows then fail as any unwritable row does."""
+    workspace_id = session_audit.audit_workspace()
+    if workspace_id is None:
+        return
+    try:
+        ensure_default_workspace(db, workspace_id)
+        db.commit()
+    except SQLAlchemyError as error:
+        db.rollback()
+        logger.error("The default workspace could not be made before sign-in (%s)", type(error).__name__)
 
 
 def _started(db: Session, method: str, return_to: str, client_address: str,
@@ -328,8 +351,8 @@ def _step_up(db: Session, finished: Finished, browser: Browser) -> SignInDone:
     try:
         step_up_sign_in.confirm_step_up(db, finished, ip_address=browser.ip_address,
                                         user_agent=browser.user_agent)
-    except step_up_sign_in.StepUpRefused:
-        failure = STEP_UP_REFUSED
+    except step_up_sign_in.StepUpRefused as refused:
+        failure = STEP_UP_NO_AUTH_TIME if str(refused) == session_audit.STEP_UP_NO_AUTH_TIME else STEP_UP_REFUSED
     except (session_audit.SessionAuditFailed, SQLAlchemyError) as error:
         db.rollback()
         logger.error("A step-up could not be recorded (%s)", type(error).__name__)
@@ -341,6 +364,7 @@ def _step_up(db: Session, finished: Finished, browser: Browser) -> SignInDone:
 
 def finish_sign_in(db: Session, callback: Callback, browser: Browser, method: str = METHOD_NAME) -> SignInDone:
     """The callback, to a session: every step in this module's docstring, or ``SignInRefusal``."""
+    ensure_audit_workspace(db)
     finished = _finished(db, callback, browser, method)
     identity = finished.identity
     apply_access_rule(db, identity, browser)
@@ -350,10 +374,8 @@ def finish_sign_in(db: Session, callback: Callback, browser: Browser, method: st
     if not linked.created and not people.person_is_active(db, linked.user_id):
         logger.warning("users.id=%s: sign-in refused, the person is deactivated", linked.user_id)
         raise _refuse(db, session_audit.REFUSED_DEACTIVATED, browser, linked.user_id)
-    default_role = None
-    if linked.created:
-        default_role = _grant_default_role(db, linked.user_id)
-        apply_first_admin_rule(db, identity, linked, browser)
+    default_role = _grant_default_role(db, linked.user_id) if linked.created else None
+    apply_first_admin_rule(db, identity, linked, browser)
     memberships = _run_hooks(db, SignedIn(user_id=linked.user_id, created=linked.created, identity=identity),
                              browser)
     _commit_person(db, linked, default_role, memberships, browser)
@@ -369,6 +391,7 @@ __all__ = [
     "REFUSAL_CODES",
     "REFUSED",
     "REGISTRY",
+    "STEP_UP_NO_AUTH_TIME",
     "STEP_UP_REFUSED",
     "UNAVAILABLE",
     "Browser",
@@ -376,6 +399,7 @@ __all__ = [
     "SignInRefusal",
     "apply_access_rule",
     "apply_first_admin_rule",
+    "ensure_audit_workspace",
     "finish_sign_in",
     "start_sign_in",
     "start_step_up",

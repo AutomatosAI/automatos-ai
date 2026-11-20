@@ -17,6 +17,10 @@ must hold given values, checked before anyone is created, linked or given a sess
   ``https://example.test/roles`` are each one claim's name, never a path into nested claims. A name
   is 1 to ``NAME_MAX`` characters with no space, control character, ``=`` or ``;``.
 * A value is 1 to ``VALUE_MAX`` characters with no control character and no ``;``.
+* A name is never one of ``PROTOCOL_CLAIMS``: the claims every valid ID token for this install
+  carries or that describe the token itself (``iss``, ``aud``, ``nonce`` and the rest), which say
+  nothing about who the person is. A rule on one would hold for everyone, so it is malformed, and
+  never counts as the rule a shared issuer needs.
 * At most ``RULES_MAX`` rules. An empty setting is no rule. Anything else (an empty rule, as a
   doubled or trailing ``;`` makes, a rule with no ``=``, an empty name or value) is malformed, and
   start-up refuses it (``core.edition_start_up``), naming the setting and never its value.
@@ -31,6 +35,9 @@ app role.
 
 **Shared issuers.** An issuer many organisations sign in through lets anyone with an account there
 finish signing in, so start-up refuses one with no rule (``is_shared_issuer``, ``SHARED_ISSUERS``).
+The list holds only issuers the provider's own documentation shows are shared by unrelated
+organisations or the public. It cannot be complete: any provider may run such an issuer, and a
+new one is not on it. The control is the access rule; the list only stops the plainest mistake.
 
 Pure standard library: start-up imports it before anything else is loaded.
 """
@@ -51,14 +58,28 @@ _NAME = re.compile(r"^[^\s\x00-\x1f\x7f=;]+$")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 # Issuers that many organisations share (FR-26: data, never a branch on a provider in code). Each is
-# compared after ``normalised_issuer``. Google's one issuer for every account; Microsoft's
-# multi-tenant addresses (v2.0 and v1) and the tenant every personal Microsoft account shares.
+# compared after ``normalised_issuer``. NOT COMPLETE, and cannot be: the access rule is the control.
+# * Google: "Always https://accounts.google.com or accounts.google.com for Google ID tokens"
+#   (developers.google.com/identity/openid-connect/openid-connect, the ``iss`` claim).
+# * Microsoft: the ``common``, ``organizations`` and ``consumers`` authorities sign in people of
+#   any tenant, or any personal account (learn.microsoft.com/entra/identity-platform/
+#   v2-protocols-oidc), and 9188040d-6c67-4c5b-b112-36a304b66dad is the tenant of every personal
+#   Microsoft account (.../id-token-claims-reference, ``iss`` and ``tid``), each in its v2.0 form.
+#   Their v1 forms (no ``/v2.0``, and ``sts.windows.net``) are not shown on those pages; they stay
+#   because an entry here can only make start-up stricter.
+# Other providers are added only once their own documentation shows such an issuer.
 _CONSUMER_TENANT = "9188040d-6c67-4c5b-b112-36a304b66dad"
 SHARED_ISSUERS: Tuple[str, ...] = (
     "https://accounts.google.com",
+    "accounts.google.com",
     *(f"https://login.microsoftonline.com/{tenant}{version}"
       for tenant in ("common", "organizations", "consumers", _CONSUMER_TENANT) for version in ("", "/v2.0")),
     f"https://sts.windows.net/{_CONSUMER_TENANT}",
+)
+# Claims that describe the token, not the person (OpenID Connect Core 1.0 §2 and §3.1.3.6; RFC 7519
+# §4.1): a rule on one holds for every valid token, so it is refused.
+PROTOCOL_CLAIMS: Tuple[str, ...] = (
+    "iss", "aud", "azp", "exp", "iat", "nbf", "nonce", "auth_time", "at_hash", "c_hash", "sid", "jti",
 )
 
 
@@ -80,6 +101,9 @@ def _rule(text: str) -> Rule:
     name, value = (part.strip() for part in text.split(NAME_VALUE_SEPARATOR, 1))
     if not name or len(name) > NAME_MAX or not _NAME.match(name):
         raise MalformedRule(f"each claim name must be 1 to {NAME_MAX} characters with no space, '=' or ';'")
+    if name in PROTOCOL_CLAIMS:
+        raise MalformedRule("a rule may not name a claim every valid token carries "
+                            f"({', '.join(PROTOCOL_CLAIMS)}): it would let everyone in")
     if not value or len(value) > VALUE_MAX or _CONTROL.search(value):
         raise MalformedRule(f"each value must be 1 to {VALUE_MAX} characters with no control character")
     return Rule(name=name, value=value)
@@ -122,6 +146,7 @@ def is_shared_issuer(issuer: Any) -> bool:
 
 __all__ = [
     "NAME_MAX",
+    "PROTOCOL_CLAIMS",
     "RULES_MAX",
     "SHARED_ISSUERS",
     "VALUE_MAX",

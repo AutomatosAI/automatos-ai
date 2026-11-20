@@ -25,7 +25,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 os.environ.setdefault("POSTGRES_USER", "test")
 os.environ.setdefault("POSTGRES_PASSWORD", "test")
@@ -221,6 +221,36 @@ def test_with_a_second_admin_one_may_step_down_and_be_deactivated(install):
     people.deactivate_person(install.db, first, _requester(install, second))
     install.db.expire_all()
     assert install.db.execute(text("SELECT is_active FROM users WHERE id = :u"), {"u": first}).scalar_one() is False
+
+
+def _statements_of(db, act) -> list:
+    """Every statement ``act`` sends on the test's connection, in order."""
+    statements = []
+    connection = db.connection()
+
+    def listener(conn, cursor, statement, params, context, many):
+        statements.append(statement)
+
+    event.listen(connection, "before_cursor_execute", listener)
+    try:
+        act()
+    finally:
+        event.remove(connection, "before_cursor_execute", listener)
+    return statements
+
+
+def test_the_guard_locks_the_admins_before_it_counts_them_and_before_any_change(install):
+    first, second = _person(install.db, "admin"), _person(install.db, "admin")
+    install.db.commit()
+
+    statements = _statements_of(install.db, lambda: people.set_install_role(install.db, first, "user",
+                                                                           _requester(install, second)))
+
+    admins_read = [i for i, sql in enumerate(statements) if "FROM users" in sql and "system_role = ANY" in sql]
+    changed = [i for i, sql in enumerate(statements) if sql.lstrip().upper().startswith("UPDATE USERS")]
+    assert admins_read and changed and admins_read[0] < changed[0]
+    assert all("FOR UPDATE" in statements[i] for i in admins_read)  # counted only through the lock
+    assert not any("COUNT(" in sql.upper() and "FROM USERS" in sql.upper() for sql in statements)
 
 
 def test_a_person_who_is_no_admin_is_never_held_by_the_guard(install):

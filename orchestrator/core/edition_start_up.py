@@ -12,6 +12,7 @@
 2. when a sign-in setting (``OIDC_SIGN_IN_SETTINGS``, PRD-277 Wave 4) cannot be used: the issuer
    and ``FRONTEND_URL`` must be ``https`` addresses with a host; ``OIDC_SCOPES`` must be scope
    tokens including ``openid``; ``OIDC_CLAIM_EMAIL`` and ``OIDC_CLAIM_NAME`` must name a claim;
+   ``OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES``, when set, must be ``true`` or ``false``;
    ``OIDC_CA_BUNDLE_FILE``, when set, must be a file this process can read; and
    ``ENTERPRISE_DEFAULT_ROLE`` must be ``none`` or a workspace role below owner, and a role needs
    ``DEFAULT_WORKSPACE_ID``. ``CLIENT_IP_HEADER`` must name the header the proxy in front sets to
@@ -21,9 +22,11 @@
    ``OIDC_PENDING_SIGN_INS_PER_ADDRESS`` whole numbers of at least one, the second no greater than
    the first.
 3. when the access rule or the first admins cannot be used (US-403, US-405):
-   ``OIDC_REQUIRED_CLAIMS`` must be in the rule language (``core.auth.access_rule``), and must name
-   at least one rule when ``OIDC_ISSUER`` is an issuer many organisations share (without one,
-   anyone with an account there could sign in); ``ENTERPRISE_BOOTSTRAP_ADMINS`` must be a list of
+   ``OIDC_REQUIRED_CLAIMS`` must be in the rule language (``core.auth.access_rule``: no rule on a
+   claim every valid token carries, such as ``iss`` or ``aud``), and must name at least one rule
+   when ``OIDC_ISSUER`` is an issuer many organisations share (without one, anyone with an account
+   there could sign in) and when ``ENTERPRISE_DEFAULT_ROLE`` is a role (without one, everyone the
+   provider lets sign in gets it); ``ENTERPRISE_BOOTSTRAP_ADMINS`` must be a list of
    ``sub:`` and ``email:`` entries (``core.auth.bootstrap_admins``); and ``DEFAULT_WORKSPACE_ID``
    must be the id of the install's default workspace, which sign-ins are recorded in and the
    first admins own.
@@ -86,7 +89,21 @@ OIDC_SIGN_IN_SETTINGS: Tuple[str, ...] = (
     "OIDC_ISSUER", "FRONTEND_URL", "OIDC_SCOPES", "OIDC_CLAIM_EMAIL", "OIDC_CLAIM_NAME",
     "OIDC_CA_BUNDLE_FILE", "ENTERPRISE_DEFAULT_ROLE", "DEFAULT_WORKSPACE_ID",
     "CLIENT_IP_HEADER", "OIDC_ENDPOINT_HOSTS", "OIDC_PENDING_SIGN_INS_MAX", "OIDC_PENDING_SIGN_INS_PER_ADDRESS",
-    "OIDC_REQUIRED_CLAIMS", "ENTERPRISE_BOOTSTRAP_ADMINS",
+    "OIDC_REQUIRED_CLAIMS", "ENTERPRISE_BOOTSTRAP_ADMINS", "OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES",
+)
+# The standard claim whose address ``email_verified`` speaks for (OpenID Connect Core 1.0 §5.1).
+STANDARD_EMAIL_CLAIM = "email"
+# ``OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES``: the operator's word that the provider puts only
+# addresses it has verified in the claim ``OIDC_CLAIM_EMAIL`` names. Off unless set to ``true``.
+EMAIL_CLAIM_VOUCHED = "true"
+EMAIL_CLAIM_NOT_VOUCHED = "false"
+EMAIL_CLAIM_VOUCH_PROBLEM = (
+    "must be true or false: true says the identity provider puts only addresses it has verified in the "
+    "claim OIDC_CLAIM_EMAIL names"
+)
+DEFAULT_ROLE_NEEDS_RULE_PROBLEM = (
+    "needs OIDC_REQUIRED_CLAIMS: with no access rule, everyone the identity provider lets sign in is given "
+    "that role in the default workspace. Set a rule, or set ENTERPRISE_DEFAULT_ROLE to none"
 )
 CLIENT_IP_HEADER_PROBLEM = (
     "must name the header the proxy in front sets to the caller's address: sign-in limits requests "
@@ -159,6 +176,9 @@ def _sign_in_setting_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str
     for name in ("OIDC_CLAIM_EMAIL", "OIDC_CLAIM_NAME"):
         if not str(settings.get(name) or "").strip():
             yield name, "must name a claim"
+    vouched = str(settings.get("OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES") or EMAIL_CLAIM_NOT_VOUCHED)
+    if vouched.strip().lower() not in (EMAIL_CLAIM_VOUCHED, EMAIL_CLAIM_NOT_VOUCHED):
+        yield "OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES", EMAIL_CLAIM_VOUCH_PROBLEM
     yield from _bundle_and_role_problems(settings)
     yield from _limit_and_host_problems(settings)
 
@@ -210,15 +230,24 @@ def _is_uuid(value: Any) -> bool:
     return True
 
 
-def _rule_and_admin_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str, str]]:
-    """The access rule (US-403), the first admins (US-405) and the default workspace; never a value."""
+def _access_rule_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str, str]]:
+    """The access rule (US-403): in the rule language, and present where it must be."""
     try:
         rules = access_rule.parse_rules(settings.get("OIDC_REQUIRED_CLAIMS"))
     except access_rule.MalformedRule as malformed:
         yield "OIDC_REQUIRED_CLAIMS", f"must be claim=value rules separated by ';': {malformed}"
-    else:
-        if not rules and access_rule.is_shared_issuer(settings.get("OIDC_ISSUER")):
-            yield "OIDC_REQUIRED_CLAIMS", SHARED_ISSUER_PROBLEM
+        return
+    if rules:
+        return
+    if access_rule.is_shared_issuer(settings.get("OIDC_ISSUER")):
+        yield "OIDC_REQUIRED_CLAIMS", SHARED_ISSUER_PROBLEM
+    if (settings.get("ENTERPRISE_DEFAULT_ROLE") or NO_DEFAULT_ROLE) != NO_DEFAULT_ROLE:
+        yield "ENTERPRISE_DEFAULT_ROLE", DEFAULT_ROLE_NEEDS_RULE_PROBLEM
+
+
+def _rule_and_admin_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str, str]]:
+    """The access rule (US-403), the first admins (US-405) and the default workspace; never a value."""
+    yield from _access_rule_problems(settings)
     try:
         bootstrap_admins.parse_entries(settings.get("ENTERPRISE_BOOTSTRAP_ADMINS"))
     except bootstrap_admins.MalformedEntry as malformed:
@@ -285,7 +314,10 @@ def check_session_settings(capabilities: editions.EditionCapabilities, settings:
 
 __all__ = [
     "BAD_SESSION_SETTING",
+    "DEFAULT_ROLE_NEEDS_RULE_PROBLEM",
     "DEFAULT_WORKSPACE_PROBLEM",
+    "EMAIL_CLAIM_VOUCHED",
+    "STANDARD_EMAIL_CLAIM",
     "MISSING_SETTINGS",
     "DEFAULT_ROLES",
     "SHARED_ISSUER_PROBLEM",

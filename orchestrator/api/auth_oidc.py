@@ -18,7 +18,8 @@ shared limiter's store cannot be reached, these two routes count in this process
   client address bounds the sign-ins one caller may hold unfinished (``core.auth.oidc_pending``).
 * ``GET /start?step_up=1&return_to=<path>`` (US-406) starts a step-up for the live session this
   browser's session cookie holds (``sign_in_flow.start_step_up``), sending the provider
-  ``max_age=0``; with no live session it is refused (``step_up_refused``) and nothing is stored.
+  ``max_age=0``; with no live session it is refused (``step_up_refused``) and nothing is stored, as
+  it is when the browser's ``Sec-Fetch-Site`` says another site sent it (``_step_up_sent_from_here``).
 * ``GET /callback`` finishes it (``sign_in_flow.finish_sign_in``): 303 to the stored path, with the
   session cookie set (``session_cookie.set_session_cookie``). After a step-up no session is issued
   and the cookie is left as it is: the browser's own session now carries a fresh ``auth_time``. A
@@ -59,6 +60,9 @@ NO_STORE_HEADERS = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer
 RATE_LIMITED_DETAIL = "Too many sign-in attempts from this address. Try again later."
 # A callback carries a handful of parameters; more than this is not one.
 CALLBACK_PARAMS_MAX = 32
+# Fetch Metadata: where the browser says a request came from. A step-up starts only from these.
+FETCH_SITE_HEADER = "sec-fetch-site"
+STEP_UP_FETCH_SITES = ("same-origin", "none")
 
 # Module-level so a test can hand it a fake Redis (RateLimitStore's redis_factory seam).
 _rate_store = RateLimitStore()
@@ -140,8 +144,24 @@ def _params(request: Request) -> Dict[str, Tuple[str, ...]]:
     return grouped
 
 
+def _step_up_sent_from_here(request: Request) -> bool:
+    """Whether a step-up start came from this install's own pages or the address bar.
+
+    ``Sec-Fetch-Site`` (Fetch Metadata) is set by the browser and cannot be set by a page. Only
+    ``same-origin`` (the web app shares the API's origin, §5.3) and ``none`` (typed or bookmarked)
+    may start one; ``same-site`` and ``cross-site`` may not. A request without the header (a
+    browser too old to send it) is let through: the start only sends the browser to the provider,
+    the callback is bound to this browser by its cookie, and a step-up confirms nobody but the
+    session's own person, so another site gains nothing it could not already cause.
+    """
+    sent_from = request.headers.get(FETCH_SITE_HEADER)
+    return sent_from is None or sent_from.strip().lower() in STEP_UP_FETCH_SITES
+
+
 def _started(request: Request, db: Session, return_to: str, step_up: bool):
     if step_up:
+        if not _step_up_sent_from_here(request):
+            raise sign_in_flow.SignInRefusal(sign_in_flow.STEP_UP_REFUSED)
         return sign_in_flow.start_step_up(db, session_cookie_token(request), return_to, get_client_ip(request))
     return sign_in_flow.start_sign_in(db, return_to, get_client_ip(request))
 

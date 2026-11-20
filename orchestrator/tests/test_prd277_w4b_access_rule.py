@@ -3,9 +3,13 @@
 * ``OIDC_REQUIRED_CLAIMS`` (``core.auth.access_rule``): ``name=value`` rules joined by ``;``, split at
   the first ``=``; a name is one top-level claim read literally, so ``cognito:groups`` and
   ``https://example.test/roles`` are nameable; a rule holds for an equal string or a list holding
-  one, and every rule must hold. Anything else is malformed, and the refusal never quotes it.
+  one, and every rule must hold (a null, or a value nested in a list, never does; spaces inside a
+  value and non-ASCII are compared as written). A rule on a claim every token carries (``iss``,
+  ``aud`` and the rest) is malformed. Anything else is malformed, and the refusal never quotes it.
 * A shared issuer (Google, Microsoft's multi-tenant addresses) with no rule stops start-up, which
-  says why; with a rule, or on an organisation's own issuer, it starts.
+  says why; with a rule, or on an organisation's own issuer, it starts. A protocol-claim rule is
+  never that rule. A default role with no rule stops start-up, naming both settings.
+* ``OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES`` is ``true`` or ``false``, or unset.
 * ``ENTERPRISE_BOOTSTRAP_ADMINS`` (``core.auth.bootstrap_admins``): ``sub:`` matches the subject
   exactly; ``email:`` matches only an ``email`` claim the token marks verified with ``true``; an
   entry that could name someone unintended (a pattern, an address without a dotted domain, no
@@ -115,6 +119,54 @@ def test_a_rule_holds_for_an_equal_string_or_a_list_that_holds_one(claims, holds
     assert access_rule.every_rule_holds(rules, MappingProxyType(claims)) is holds
 
 
+@pytest.mark.parametrize(("claims", "holds"), [
+    ({"groups": None}, False),                          # a null claim is no value
+    ({"groups": [None]}, False),
+    ({"groups": [None, "automatos"]}, True),            # a null beside it in the list changes nothing
+    ({"groups": [["automatos"]]}, False),               # never searched inside a nested list
+    ({"groups": [["automatos"], "other"]}, False),
+    ({"groups": ("automatos",)}, True),
+])
+def test_a_null_claim_and_a_nested_list_never_hold(claims, holds):
+    rules = access_rule.parse_rules("groups=automatos")
+    assert access_rule.every_rule_holds(rules, claims) is holds
+
+
+def test_a_value_keeps_its_inner_spaces_and_is_compared_as_written():
+    rules = access_rule.parse_rules("  dept =  Finance & Ops  ")
+    assert rules == (Rule("dept", "Finance & Ops"),)
+    assert access_rule.every_rule_holds(rules, {"dept": "Finance & Ops"}) is True
+    for other in ("Finance  & Ops", " Finance & Ops", "Finance & Ops ", "Finance & Ops", "finance & ops"):
+        assert access_rule.every_rule_holds(rules, {"dept": other}) is False
+
+
+def test_a_non_ascii_name_and_value_match_exactly_with_no_folding_or_normalising():
+    composed, decomposed = "équipe-rêve", "équipe-rêve"
+    rules = access_rule.parse_rules(f"équipe={composed}")
+    assert rules == (Rule("équipe", composed),)
+    assert access_rule.every_rule_holds(rules, {"équipe": composed}) is True
+    assert access_rule.every_rule_holds(rules, {"équipe": decomposed}) is False
+    assert access_rule.every_rule_holds(rules, {"equipe": composed}) is False
+    assert access_rule.every_rule_holds(rules, {"équipe": "EQUIPE-REVE"}) is False
+
+
+@pytest.mark.parametrize("name", access_rule.PROTOCOL_CLAIMS)
+def test_a_rule_on_a_claim_every_token_carries_is_malformed_and_stops_start_up(name):
+    setting = f"{name}=prd277-w4b-value"
+    with pytest.raises(MalformedRule):
+        access_rule.parse_rules(setting)
+    message = _refusal(OIDC_REQUIRED_CLAIMS=setting)
+    assert message.startswith("AUTH_EDITION=enterprise cannot start: OIDC_REQUIRED_CLAIMS ")
+    assert "prd277-w4b-value" not in message
+
+
+def test_a_protocol_claim_rule_never_counts_as_the_rule_a_shared_issuer_needs():
+    for setting in ("aud=prd277-w4b-client", "iss=https://accounts.google.com", "hd=example.test;azp=x"):
+        message = _refusal(OIDC_ISSUER="https://accounts.google.com", OIDC_REQUIRED_CLAIMS=setting)
+        assert message.startswith("AUTH_EDITION=enterprise cannot start: OIDC_REQUIRED_CLAIMS ")
+    _starts(OIDC_ISSUER="https://accounts.google.com", OIDC_REQUIRED_CLAIMS="hd=example.test")
+
+
 def test_every_rule_must_hold_and_a_name_given_twice_must_hold_both():
     rules = access_rule.parse_rules("tid=tenant-1;roles=Automatos.User;roles=Automatos.Admin")
     both = {"tid": "tenant-1", "roles": ["Automatos.User", "Automatos.Admin"]}
@@ -128,6 +180,7 @@ def test_every_rule_must_hold_and_a_name_given_twice_must_hold_both():
 
 @pytest.mark.parametrize("issuer", [
     "https://accounts.google.com", "https://accounts.google.com/", " HTTPS://Accounts.Google.com ",
+    "accounts.google.com",
     "https://login.microsoftonline.com/common/v2.0", "https://login.microsoftonline.com/organizations/v2.0",
     "https://login.microsoftonline.com/consumers/v2.0", "https://login.microsoftonline.com/common",
     "https://login.microsoftonline.com/9188040d-6c67-4c5b-b112-36a304b66dad/v2.0",
@@ -207,6 +260,29 @@ def test_a_subject_entry_matches_that_subject_exactly():
 def test_an_email_entry_matches_only_an_email_the_token_marks_verified(claims, kind):
     entries = bootstrap_admins.parse_entries("email:First.Admin@Example.Test")
     assert bootstrap_admins.names_person(entries, "someone", claims) == kind
+
+
+@pytest.mark.parametrize("role", ["viewer", "editor", "admin"])
+def test_a_default_role_with_no_access_rule_stops_start_up_naming_both_settings(role):
+    message = _refusal(ENTERPRISE_DEFAULT_ROLE=role)
+
+    assert message.startswith("AUTH_EDITION=enterprise cannot start: ENTERPRISE_DEFAULT_ROLE ")
+    assert edition_start_up.DEFAULT_ROLE_NEEDS_RULE_PROBLEM in message and "OIDC_REQUIRED_CLAIMS" in message
+    _starts(ENTERPRISE_DEFAULT_ROLE=role, OIDC_REQUIRED_CLAIMS="groups=automatos-users")
+    _starts(ENTERPRISE_DEFAULT_ROLE="none")
+
+
+@pytest.mark.parametrize("value", [None, "", "true", "false", "TRUE", " false "])
+def test_the_email_claim_setting_is_true_or_false(value):
+    _starts(OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES=value)
+
+
+@pytest.mark.parametrize("value", ["yes", "1", "maybe", "truthy", "enabled"])
+def test_any_other_email_claim_setting_stops_start_up_never_quoting_it(value):
+    message = _refusal(OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES=value)
+    name = "OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES"
+    assert message.startswith(f"AUTH_EDITION=enterprise cannot start: {name} ")
+    assert value not in message.split(name, 1)[1]
 
 
 def test_good_entries_and_rules_start_enterprise():

@@ -157,7 +157,7 @@ The web app and the API are served from one address (`/` and `/api` on one host)
 
 **Never by email.** A sign-in is matched to a person only by issuer and subject. If the email in the token is already on another person's row, the sign-in is refused with a clear message for an admin, and no row changes. This is today's rule in `ensure_user_row`, and it is also what Microsoft tells applications to do: its `email` claim "isn't guaranteed to be correct".
 
-**Who gets in (the access rule).** The first gate is the customer's own IdP: only people assigned to the application there can complete sign-in. Automatos adds a second gate, `OIDC_REQUIRED_CLAIMS`: named claims that must have given values. For an issuer shared by many organisations (Google's, or Microsoft's multi-tenant addresses) startup refuses to run without such a rule, because otherwise anyone with an account at that provider could sign in.
+**Who gets in (the access rule).** The first gate is the customer's own IdP: only people assigned to the application there can complete sign-in. Automatos adds a second gate, `OIDC_REQUIRED_CLAIMS`: named claims that must have given values. For an issuer shared by many organisations (Google's, or Microsoft's multi-tenant addresses) startup refuses to run without such a rule, because otherwise anyone with an account at that provider could sign in. That list of shared issuers cannot be complete; the rule is the control. Startup also refuses a default role (`ENTERPRISE_DEFAULT_ROLE`) with no rule, and a rule on a claim every valid token carries (`iss`, `aud`, `azp`, `exp`, `iat`, `nbf`, `nonce`, `auth_time`, `at_hash`, `c_hash`, `sid`, `jti`), which would let everyone in.
 
 **First sign-in.** The person's row and identity link are created. No personal workspace and no trial grant. What they can reach is decided next.
 
@@ -165,11 +165,11 @@ The web app and the API are served from one address (`/` and `/api` on one host)
 
 A default role for everyone who passes the access rule is a setting (decision D-4). The default is none: signed in, in no workspace, sees a page saying to ask an admin.
 
-**Install admins (decision D-6).** `users` gains a nullable `system_role`, read only in enterprise. `ENTERPRISE_BOOTSTRAP_ADMINS`, a list in settings, makes the named people install admins when they first sign in. The list names subjects, or emails where the IdP marks the email verified. That is how the first admin gets in without anyone touching the database. After that, an install admin can make another person one, in Automatos.
+**Install admins (decision D-6).** `users` gains a nullable `system_role`, read only in enterprise. `ENTERPRISE_BOOTSTRAP_ADMINS`, a list in settings, makes the named people install admins when they first sign in, and at any sign-in while the install has no active install admin (counted under the lock the last-admin guard takes), so a list corrected after a mistyped first try still works. Once an install admin exists, the list does nothing for people who already exist. The list names subjects, or emails where the IdP marks the email verified in the standard `email` claim. A listed person becomes the default workspace's owner when it has none, and an admin of it when it has one. That is how the first admin gets in without anyone touching the database. After that, an install admin can make another person one, in Automatos.
 
 ### 5.5 Step-up
 
-The 25 sensitive routes keep their gate. In enterprise the gate reads when the person last proved who they are, stored on the session (`auth_time` from the ID token). When that is older than `STEP_UP_MAX_AGE_MINUTES`, the route answers with a body the web app recognises. The web app sends the person through `/start` again with `max_age=0`, the IdP makes them sign in again, and the callback refreshes the session's `auth_time`. An IdP that returns no `auth_time` after being asked fails the step-up closed.
+The 25 sensitive routes keep their gate. In enterprise the gate reads when the person last proved who they are, stored on the session (`auth_time` from the ID token). When that is older than `STEP_UP_MAX_AGE_MINUTES`, the route answers with a body the web app recognises. The web app sends the person through `/start` again with `max_age=0`, the IdP makes them sign in again, and the callback refreshes the session's `auth_time`. An IdP that returns no `auth_time` after being asked fails the step-up closed (`step_up_no_auth_time`), so an install whose IdP never sends it cannot use the admin actions (§5.9). Fresh means not earlier than the step-up's start; the ID token's 60-second leeway allows only for the two clocks disagreeing, either way. A step-up starts only from the install's own pages or the address bar (`Sec-Fetch-Site` `same-origin` or `none`); a browser that sends no such header is let through, since a step-up can only refresh the session's own person.
 
 ### 5.6 Signing out and losing access
 
@@ -226,7 +226,24 @@ Groups matter in this PRD only for the access rule. Roles are set in Automatos.
 
 Google's and Entra's rows were checked against their published metadata documents, and Cognito's against Amazon's token endpoint documentation, on 20 Nov 2026. Keycloak's and Okta's were checked against their own documentation on 20 Nov 2026. Auth0 is left out: its documentation read that day did not settle the token endpoint's host for a tenant with a custom domain. Other providers are not listed until their metadata is checked.
 
-**Signing out at the provider (§5.6).** Automatos sends only `client_id` and `post_logout_redirect_uri` (`<install>/sign-in`, which the customer registers at the provider), and no `id_token_hint`, because no ID token is kept. Providers differ on that: Keycloak accepts it with `client_id` and shows its own confirm page; Okta's documentation requires `id_token_hint`, so the person may stay signed in at Okta; Auth0 asks the person to confirm. The conformance run (US-703) records what each does.
+**Signing out at the provider (§5.6).** Automatos sends only `client_id` and `post_logout_redirect_uri` (`<install>/sign-in`, which the customer registers at the provider), and no `id_token_hint`, because no ID token is kept. Providers differ on that: Keycloak accepts it with `client_id` and shows its own confirm page; Okta's documentation requires `id_token_hint`, so the person may stay signed in at Okta; Auth0 asks the person to confirm. The conformance run (US-703) records what each does. The end-session address must be on the issuer's host or a host in `OIDC_ENDPOINT_HOSTS`, as the token endpoint and the keys address must; one anywhere else is treated as no address, and the person is signed out of Automatos only.
+
+**Shared issuers.** Startup refuses these with no access rule: Google's (`https://accounts.google.com` or `accounts.google.com`, which Google's OpenID Connect page says every Google ID token carries), and Microsoft's `common`, `organizations` and `consumers` authorities and the personal-accounts tenant `9188040d-6c67-4c5b-b112-36a304b66dad` (Microsoft's v2.0 OpenID Connect and ID token claims pages), with their v1 forms. Checked on 20 Nov 2026. Others are added only when the provider's own documentation shows one. The list cannot be complete: the access rule is the control.
+
+**The email address.** `email_verified` speaks only for the standard `email` claim. An address read from any other claim (`OIDC_CLAIM_EMAIL` set to another name) counts as unverified and is not kept, unless the operator sets `OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES=true` to say the provider puts only addresses it has verified in that claim. Set it only when that is true: a person who can edit that claim at the provider can take another person's address. `ENTERPRISE_BOOTSTRAP_ADMINS` reads only the standard `email` claim, whatever this says.
+
+**`auth_time` (step-up, §5.5).** Automatos asks for it with `max_age=0`. What each provider's documentation says, read on 20 Nov 2026:
+
+| Provider | `auth_time` in the ID token | To make it send it |
+|---|---|---|
+| Okta | Always: one of the "base claims (always present)". `max_age` is an `/authorize` parameter. | Nothing. |
+| Auth0 | Included when the request carries `prompt=login` or `max_age=0`. | Nothing: Automatos sends `max_age=0`. |
+| Amazon Cognito | Listed among the ID token's claims; only `iss`, `sub`, `aud`, `exp` and `iat` are guaranteed. | Not settled by the documentation; the conformance run checks it. |
+| Microsoft Entra ID | An optional claim, not in the token by default. `max_age` is not among the documented request parameters. | Add `auth_time` to the ID token's optional claims in the app registration. |
+| Google Workspace | Only when the request asks for it with the `claims` parameter and it is enabled in the client's settings. `max_age` is not among the documented request parameters. | Automatos does not send `claims`, so Google's tokens carry no `auth_time`, and step-up cannot pass. |
+| Keycloak | Not settled by the documentation read. | The conformance run and the Keycloak CI job check it. |
+
+An install whose provider never sends `auth_time` signs in, but cannot use the admin actions: each refuses with `step_up_no_auth_time`.
 
 Rows marked without **[T]** come from the providers' documentation and are **[I]** until the conformance run (US-703) proves them. The Microsoft rows were checked against Microsoft's documentation on 19 Nov 2026.
 
@@ -243,11 +260,12 @@ Names are provisional. Final names are fixed in each wave's PR and recorded in `
 | `FRONTEND_URL` | none, required in enterprise | The install's public address, which the web app and the API share. An existing setting: its built-in `localhost` default does not count (US-103). |
 | `OIDC_SCOPES` | `openid profile email` | What is asked for at sign-in. |
 | `OIDC_DISPLAY_NAME` | `your organisation` | The text on the sign-in button. |
-| `OIDC_REQUIRED_CLAIMS` | empty | Claims that must match before anyone is let in. Required for shared issuers. |
+| `OIDC_REQUIRED_CLAIMS` | empty | Claims that must match before anyone is let in. Required for shared issuers and with a default role; never on a claim every token carries (§5.4). |
 | `OIDC_CLAIM_EMAIL`, `OIDC_CLAIM_NAME` | `email`, `name` | Which claims carry these. |
+| `OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES` | `false` | `true` says the provider puts only addresses it has verified in the claim `OIDC_CLAIM_EMAIL` names, when that is not `email`, so they are kept as verified. Off, an address from such a claim is unverified and not kept. Risk: a person who can edit that claim at the provider can take another person's address (§5.9). `true` or `false`; start-up refuses anything else. |
 | `OIDC_CA_BUNDLE_FILE` | empty | A certificate authority file for an IdP with a private certificate. |
-| `ENTERPRISE_BOOTSTRAP_ADMINS` | empty | People who become install admins at first sign-in. |
-| `ENTERPRISE_DEFAULT_ROLE` | `none` | Role in the default workspace for anyone who passes the access rule. |
+| `ENTERPRISE_BOOTSTRAP_ADMINS` | empty | People who become install admins at first sign-in, or at any sign-in while the install has no active install admin (§5.4). |
+| `ENTERPRISE_DEFAULT_ROLE` | `none` | Role in the default workspace for anyone who passes the access rule. A role needs `OIDC_REQUIRED_CLAIMS`: start-up refuses one with no rule. |
 | `OIDC_ENDPOINT_HOSTS` | empty | Host names, comma separated, besides the issuer's own, on which the metadata may put the token endpoint and the keys address (§5.9). Host names only: no scheme, port, wildcard or address. |
 | `OIDC_PENDING_SIGN_INS_MAX` | `10000` | Sign-ins started and not finished that may be held at once. At the ceiling a new start is never refused: the oldest sign-ins under way are ended to make room for it (§5.11). A whole number of at least 1. |
 | `OIDC_PENDING_SIGN_INS_PER_ADDRESS` | `100` | Sign-ins started and not finished that one client address (one IPv4 address or one IPv6 /64, as the per-address rate limits count) may hold at once. The bound exists so that one address can never hold more than a small share of the table: when an address starts another, its own oldest are ended to make room. The default leaves room for a whole office or VPN signing in through one shared address in the same minute. Lower it where people reach the install from addresses of their own, so that one address's flood ends fewer of the others' sign-ins; raise it only for a shared address busier than that. A whole number of at least 1, and no greater than `OIDC_PENDING_SIGN_INS_MAX`: start-up refuses either otherwise. |
@@ -277,7 +295,7 @@ These are requirements, each with a test.
 ### 5.12 Audit
 
 New `audit_logs` actions, each with the person's id where one is known, the IP and the browser:
-`auth:sign_in`, `auth:sign_in_refused` (with the reason: access rule, email conflict, deactivated, invalid token), `auth:sign_out`, `auth:session_revoked`, `auth:step_up`, `auth:identity_linked`, `auth:bootstrap_admin`. Role changes are already recorded.
+`auth:sign_in`, `auth:sign_in_refused` (with the reason: access rule, email conflict, deactivated, invalid token), `auth:sign_out`, `auth:session_revoked`, `auth:step_up` (confirmed, or refused: another person, no `auth_time`, a stale or a future one, an ended session, a deactivated person), `auth:identity_linked`, `auth:bootstrap_admin` (with the workspace role given). Role changes are already recorded. Every sign-in makes the default workspace, when it is missing, before its first row, so no row is lost to a missing workspace.
 
 ### 5.13 Where more can plug in
 
@@ -430,9 +448,9 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As an operator, I want to say which claims a person must have, so that only my organisation's people get in.
 
 **Acceptance Criteria:**
-- [x] `OIDC_REQUIRED_CLAIMS` is parsed at startup. A malformed value aborts startup. `core/auth/access_rule.py`: `name=value` rules joined by `;`, split at the first `=`; every rule must hold, and a rule holds for a claim that is that exact string or a list holding it. The refusal names the setting, never its value; `local` and `saas` never read it (`test_prd277_w4b_access_rule.py`).
+- [x] `OIDC_REQUIRED_CLAIMS` is parsed at startup. A malformed value aborts startup. `core/auth/access_rule.py`: `name=value` rules joined by `;`, split at the first `=`; every rule must hold, and a rule holds for a claim that is that exact string or a list holding it. The refusal names the setting, never its value; `local` and `saas` never read it (`test_prd277_w4b_access_rule.py`). A rule on a claim every token carries (`access_rule.PROTOCOL_CLAIMS`) is malformed, and a default role with no rule stops start-up.
 - [x] A sign-in whose token fails a rule is refused, audited, and shown a plain message. Before any person is found or created: `/sign-in?error=sign_in_not_allowed`, one `auth:sign_in_refused` row with reason `access_rule`, no person, link or session. Only the verified ID token's claims are read (`test_prd277_w4b_sign_in_rules_realdb.py`).
-- [x] With an issuer on the known shared list and no rule, startup aborts and says why. `access_rule.SHARED_ISSUERS`: Google's issuer, Microsoft's `common`, `organizations` and `consumers` addresses (v1 and v2.0) and the personal-accounts tenant.
+- [x] With an issuer on the known shared list and no rule, startup aborts and says why. `access_rule.SHARED_ISSUERS`: Google's issuer (with and without `https://`), Microsoft's `common`, `organizations` and `consumers` addresses (v1 and v2.0) and the personal-accounts tenant. The list cannot be complete; the rule is the control (§5.9).
 - [x] A claim name containing a colon or a dot can be named. A name is one top-level claim read literally: `cognito:groups`, `https://example.test/roles`.
 
 #### US-404: First sign-in · M
@@ -451,7 +469,7 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As the operator, I want to name the first admins in settings, so that nobody edits the database to get in.
 
 **Acceptance Criteria:**
-- [x] A person listed in `ENTERPRISE_BOOTSTRAP_ADMINS` becomes an install admin and owner of the default workspace at first sign-in. It is audited. `core/auth/first_admin.py`, after the access rule and on a first sign-in only: `system_role = admin`, an `owner` membership, `owner_id` when the workspace has none, one `auth:bootstrap_admin` row. Entries are `sub:<subject>` or `email:<address>`; a pattern, an address without a dotted domain or an entry without a prefix stops start-up. `DEFAULT_WORKSPACE_ID` is now required in enterprise.
+- [x] A person listed in `ENTERPRISE_BOOTSTRAP_ADMINS` becomes an install admin and owner of the default workspace at first sign-in, or at any sign-in while the install has no active install admin (counted under the last-admin guard's lock). Once an admin exists, the list does nothing for a person who already exists. It is audited. `core/auth/first_admin.py`, after the access rule: `system_role = admin`, an `owner` membership and `owner_id` when the workspace has no owner, else an `admin` membership (one owner stays one owner), one `auth:bootstrap_admin` row naming the workspace role. Entries are `sub:<subject>` or `email:<address>`; a pattern, an address without a dotted domain or an entry without a prefix stops start-up. `DEFAULT_WORKSPACE_ID` is now required in enterprise.
 - [x] An entry given as an email matches only when the token marks the email verified. The `email` claim with `email_verified` the JSON `true`; the domain compared without regard to case.
 - [x] An install admin can make another person an install admin. It requires step-up and is audited. `POST /api/v1/auth/people/{user_id}/system-role` (`people.set_install_role`): only a role the admin's own includes, never on a higher stored role, `user:system_role_changed`. The last active install admin can neither lose the role nor be deactivated (409, `people.LastInstallAdmin`; `test_prd277_w4b_install_admins_realdb.py`).
 - [x] The migration Job creates the default workspace with no owner, as the local first-run seed does. `core/seeds/seed_default_workspace.py`, in the full seed loader, only where sign-in is OIDC; insert-if-absent.
@@ -462,7 +480,7 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Acceptance Criteria:**
 - [x] In enterprise, `check_step_up` reads `auth_time` from the session. `step_up.confirm_by_signing_in_again`: older than `STEP_UP_MAX_AGE_MINUTES` is 403 `step_up_required` with `step_up.start`, never a `clerk_error`.
 - [x] `/start?step_up=1` sends `max_age=0`. The callback updates the session's `auth_time` only when the returned token carries a fresh one. Only for a live session, and only for the same person: another person, an ended session, or an `auth_time` older than the step-up's start is refused (`step_up_refused`), changes nothing and never switches the session's person. No session is issued; `auth:step_up` is written either way (`core/auth/step_up_sign_in.py`, migration `prd277_w4b_step_up_20261120`).
-- [x] No `auth_time` in the token means the step-up fails. Reason `no_auth_time`.
+- [x] No `auth_time` in the token means the step-up fails. Reason `no_auth_time`, shown as its own code, `step_up_no_auth_time`. An `auth_time` that is not a finite number, is before the epoch or is out of range refuses the sign-in (`sign_in_refused`), never an error. Fresh means not earlier than the step-up's start and not later than now, each allowing only the 60-second clock leeway (`future_auth_time`, `stale_auth_time`). A step-up started from another site (`Sec-Fetch-Site` neither `same-origin` nor `none`) is refused.
 - [ ] The `local` and `saas` step-up tests pass unchanged. Not edited in Wave 4 part 2; CI proves it.
 
 #### US-407: A fake identity provider for CI · M
@@ -471,7 +489,7 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Acceptance Criteria:**
 - [x] A test helper serves metadata, keys, an authorize step that approves at once, and a token endpoint, on a loopback address, using `PyJWT` and `cryptography` only. `orchestrator/tests/helpers_fake_oidc_provider.py`, over TLS with a certificate made at run time.
 - [x] It can be told to misbehave: wrong signature, rotated key, missing claim, shared issuer. Also `alg: none`, HS256 with the public key, a wrong or missing nonce, other metadata, an error status and a redirect.
-- [ ] A separate CI job runs the sign-in flow against a real Keycloak container. It is allowed to fail at first and becomes required at the end of the wave. `.github/workflows/oidc-keycloak.yml` and `test_prd277_w4_keycloak_sign_in.py`: the image pinned by digest, the certificate, credentials and realm made in the job, run only when the sign-in code or its tests change. Not yet seen green, and not yet required.
+- [ ] A separate CI job runs the sign-in flow against a real Keycloak container. It is allowed to fail at first and becomes required at the end of the wave. `.github/workflows/oidc-keycloak.yml` and `test_prd277_w4_keycloak_sign_in.py`: the image pinned by digest, the certificate, credentials and realm made in the job, run only when the sign-in code, its settings, the default workspace's seed, the Team routes or its tests change. A failure fails the job (no `continue-on-error`); the job is named non-required. Not yet seen green, and not yet required.
 
 #### US-408: One interface and one hook for sign-in · M
 **Description:** As a developer, I want sign-in written against a small interface with a hook, so that another way of proving identity can be added without touching sessions or permissions.
@@ -479,7 +497,7 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Acceptance Criteria:**
 - [x] The start and callback routes call an identity interface. OIDC is its implementation in core. `core/auth/sign_in_methods.py` (`IdentityMethod`), `core/auth/oidc_sign_in.py`, called through `core/auth/sign_in_flow.py`.
 - [x] A hook runs after the identity is verified and before the session is issued. It can refuse the sign-in, or set memberships through the people service. A refusal is audited as the access rule's.
-- [x] Creating a person, linking an identity, setting a membership and deactivating a person are functions in one module, used by sign-in and by the Team routes. In `core/auth/people.py` (`link_person`, `set_membership`, `deactivate_person`) and used by sign-in. Since Wave 4 part 2 the Team routes call it too: a role change (`workspace_member`, `change_member_role`), a removal (`end_membership`) and accepting an invitation (`person_for_invitee`, `join_from_invitation`), each the same statements the routes ran before, so `local` and `saas` behave as they did.
+- [x] Creating a person, linking an identity, setting a membership and deactivating a person are functions in one module, used by sign-in and by the Team routes. In `core/auth/people.py` (`link_person`, `set_membership`, `deactivate_person`) and used by sign-in. Since Wave 4 part 2 the Team routes call it too: a role change (`change_member_role`), a removal (`member_to_remove`, `end_membership`) and accepting an invitation (`person_for_invitee`, `join_from_invitation`), each the same statements the routes ran before, so `local` and `saas` behave as they did. The rules live in the service, not the route: the target is looked up in the workspace named only, the owner's role is never changed, nobody is made owner and the owner is never removed (`MemberNotFound` is 404, `MembershipRefused` 400, with the messages the routes gave before).
 - [x] Registration is refused after startup, and registering the same thing twice raises an error. Closed when the background boot runs and by the first sign-in.
 - [x] A test registers a second, fake implementation and a hook, and signs in through them with no change to the session or permission code. `test_prd277_w4_sign_in_realdb.py`.
 - [ ] With no hook registered, every US-402 and US-404 test passes unchanged. They register none; CI proves it.
@@ -584,7 +602,7 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 
 **Acceptance Criteria:**
 - [ ] Guides for Microsoft Entra ID, Google Workspace, Okta, Keycloak and Amazon Cognito, each with the application registration, the redirect address, the claims to send and the matching settings.
-- [ ] Each guide says what that provider cannot do (for example, Google sends no groups).
+- [ ] Each guide says what that provider cannot do (for example, Google sends no groups), and how to make it send `auth_time` where it can (§5.9). An install whose provider never sends `auth_time` cannot use the admin actions: each step-up refuses with `step_up_no_auth_time`.
 - [ ] AWS IAM Identity Center is either documented from a working run or listed as not supported, with the reason.
 
 #### US-703: Proof on the first install · M

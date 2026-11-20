@@ -9,14 +9,16 @@ on the install's address) and the in-process provider, each test in a transactio
   runs before any person is found or created (a test fails if that order changes).
 * **The first admins** (US-405): a person ``ENTERPRISE_BOOTSTRAP_ADMINS`` names by subject, or by an
   email the token marks verified, becomes an install admin and owner of the default workspace at
-  first sign-in, audited ``auth:bootstrap_admin``; an unverified email, a repeat sign-in and a
-  person the access rule refuses get nothing. The migration Job's seed makes the default
-  workspace with no owner, once, and only where sign-in is OIDC.
+  first sign-in, audited ``auth:bootstrap_admin``; an unverified email, a repeat sign-in once the
+  install has an admin, and a person the access rule refuses get nothing. The migration Job's seed
+  makes the default workspace with no owner, once, and only where sign-in is OIDC. (The rest of
+  US-405's sign-in rules: ``test_prd277_w4b_first_admin_realdb.py``.)
 * **Step-up** (US-406): ``/start?step_up=1`` needs a live session, sends ``max_age=0`` and keeps
   the session's id; the callback refreshes that session's ``auth_time`` for the same person only,
   issues no session and sets no cookie, audited ``auth:step_up``. Another person, a token with no
-  or an old ``auth_time``, and an ended session are refused, changing nothing and creating nobody;
-  the step-up runs before anything that finds or creates a person.
+  (its own code, ``step_up_no_auth_time``) or an old ``auth_time``, and an ended session are
+  refused, changing nothing and creating nobody; the step-up runs before anything that finds or
+  creates a person. (Its edges: ``test_prd277_w4b_step_up_edges_realdb.py``.)
 * **Sign-out at the provider** (§5.6): with an end-session address the answer is 200 with that
   address, carrying only ``client_id`` and ``post_logout_redirect_uri``; without one, or with the
   provider unreachable, it is 204. Either way the session ends here.
@@ -268,15 +270,27 @@ def test_an_email_the_token_does_not_mark_verified_makes_nobody_admin(install, m
     assert "auth:bootstrap_admin" not in [a for a, _uid, _d in _audits(install.db, install.workspace_id)]
 
 
-def test_a_repeat_sign_in_never_makes_an_admin(install, monkeypatch):
+def _an_install_admin(db) -> int:
+    """An active install admin made in this test's transaction."""
+    tag = uuid.uuid4().hex[:12]
+    admin = db.execute(text("INSERT INTO users (username, email, is_active, system_role) "
+                            "VALUES (:u, :e, true, 'admin') RETURNING id"),
+                       {"u": f"prd277-w4b-{tag}", "e": f"prd277-w4b-{tag}@example.test"}).scalar_one()
+    db.commit()
+    return admin
+
+
+def test_a_repeat_sign_in_makes_no_admin_once_the_install_has_one(install, monkeypatch):
+    _an_install_admin(install.db)
     install.idp.sign_in_as(Person(subject="listed-too-late"))
     _sign_in(install)
     monkeypatch.setattr(config, "ENTERPRISE_BOOTSTRAP_ADMINS", "sub:listed-too-late")
-    granted = _spy(monkeypatch, first_admin, "grant_if_listed")
 
     assert _sign_in(install).status_code == 303
 
-    assert granted == [] and _system_role(install.db, _identity_user(install.db, "listed-too-late")) != "admin"
+    user_id = _identity_user(install.db, "listed-too-late")
+    assert _system_role(install.db, user_id) != "admin" and _roles_in(install.db, user_id, install.workspace_id) == []
+    assert "auth:bootstrap_admin" not in [a for a, _uid, _d in _audits(install.db, install.workspace_id)]
 
 
 def test_a_listed_person_the_access_rule_refuses_gets_nothing(install, monkeypatch):
@@ -398,11 +412,11 @@ def test_another_person_signing_in_is_refused_and_never_switches_the_session(ins
     assert _step_ups(install) == [(me.user_id, {"confirmed": False, "reason": "another_person"})] * 2
 
 
-@pytest.mark.parametrize(("behaviour", "reason"), [
-    ({"remove_claims": ("auth_time",)}, "no_auth_time"),
-    ({"claims": {"auth_time": int(time.time()) - 3600}}, "stale_auth_time"),
+@pytest.mark.parametrize(("behaviour", "reason", "code"), [
+    ({"remove_claims": ("auth_time",)}, "no_auth_time", sign_in_flow.STEP_UP_NO_AUTH_TIME),
+    ({"claims": {"auth_time": int(time.time()) - 3600}}, "stale_auth_time", sign_in_flow.STEP_UP_REFUSED),
 ])
-def test_a_token_that_does_not_prove_a_fresh_sign_in_is_refused(install, behaviour, reason):
+def test_a_token_that_does_not_prove_a_fresh_sign_in_is_refused(install, behaviour, reason, code):
     me = _signed_in(install, "not-fresh")
     started = _start(install, step_up_too=True)
     install.idp.sign_in_as(Person(subject="not-fresh"))
@@ -410,7 +424,7 @@ def test_a_token_that_does_not_prove_a_fresh_sign_in_is_refused(install, behavio
 
     answer = install.client.get(install.idp.approve(started.headers["location"]), follow_redirects=False)
 
-    assert _refusal(answer) == sign_in_flow.STEP_UP_REFUSED
+    assert _refusal(answer) == code
     assert _auth_time(install.db, me.session_id) == me.old
     assert _step_ups(install) == [(me.user_id, {"confirmed": False, "reason": reason})]
 

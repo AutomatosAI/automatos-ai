@@ -25,10 +25,13 @@ PRD-277 US-408 (§5.13) makes this the one module for people. It also holds:
 These three do not commit: sign-in commits them with its audit row (``core.auth.sign_in_flow``).
 
 The Team page's routes (``api/team.py``) use it too, with the same statements they ran before:
-``workspace_member`` (a membership by id in one workspace), ``change_member_role`` and
-``end_membership`` (each commits), and, accepting an invitation, ``person_for_invitee`` (the person,
-found by Clerk id or created) and ``join_from_invitation`` (the membership the invitation grants;
-not committed).
+``workspace_member`` (a membership by id in one workspace), ``change_member_role``,
+``member_to_remove`` and ``end_membership``, and, accepting an invitation, ``person_for_invitee``
+(the person, found by Clerk id or created) and ``join_from_invitation`` (the membership the
+invitation grants; not committed). The rules of a membership change live here, not in the route:
+the target is looked up in the workspace named and nowhere else (``MemberNotFound``), and a
+workspace keeps its one owner: the owner's role is never changed, nobody is made owner, and the
+owner's membership never ends (``MembershipRefused``). The two that change a row commit.
 
 **Install admins** (US-405). ``set_install_role`` gives a person an install-wide role
 (``core.auth.system_role.set_system_role``, audited ``user:system_role_changed`` in the workspace the
@@ -36,13 +39,14 @@ admin acted from, else the default workspace). The install always keeps an activ
 ``set_install_role`` taking the role away and ``deactivate_person`` both refuse
 (``LastInstallAdmin``, nothing changed) when the person is the last one. Every active install
 admin's row is locked in ``id`` order first, so two admins removing each other at once cannot both
-succeed.
+succeed. ``locked_active_install_admins`` is that lock and count, which the first-admin rule uses
+too (``core.auth.first_admin``).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Optional, Union
+from typing import Any, Optional, Tuple, Union
 from uuid import UUID
 
 from sqlalchemy import text
@@ -75,6 +79,24 @@ _LOCK_ACTIVE_ADMINS = text(
 
 class LastInstallAdmin(RuntimeError):
     """The change would leave the install with no active install admin; nothing was changed."""
+
+
+# A workspace's memberships (the Team page). The messages are the ones the page has always shown.
+OWNER_ROLE = WorkspaceRole.OWNER.value
+SETTABLE_MEMBER_ROLES = tuple(role.value for role in WorkspaceRole if role != WorkspaceRole.OWNER)
+MEMBER_NOT_FOUND_MESSAGE = "Member not found"
+OWNER_ROLE_FIXED_MESSAGE = "The owner's role cannot be changed."
+ONE_OWNER_MESSAGE = "A workspace has one owner: make them an admin, editor or viewer."
+OWNER_NOT_REMOVABLE_MESSAGE = "Cannot remove workspace owner"
+
+
+class MemberNotFound(LookupError):
+    """No such membership in the workspace named; nothing was changed."""
+
+
+class MembershipRefused(ValueError):
+    """A membership change a workspace does not allow (its one owner stays its one owner); nothing changed."""
+
 
 _IS_ACTIVE = text("SELECT is_active FROM users WHERE id = :id")
 _ADD_MEMBER = (
@@ -168,6 +190,12 @@ def _deactivate(db: Session, user_id: int, revoked_by: Optional[int], now: datet
     return Deactivation(user_id=user_id, sessions_ended=ended, devices_revoked=revoked)
 
 
+def locked_active_install_admins(db: Session) -> Tuple[int, ...]:
+    """The ids of every active install admin, each row locked (in ``id`` order) until the
+    transaction ends. The one way this install counts its admins: the lock comes with the count."""
+    return tuple(row[0] for row in db.execute(_LOCK_ACTIVE_ADMINS, {"roles": list(INSTALL_ADMIN_ROLES)}))
+
+
 def _assert_not_last_install_admin(db: Session, user_id: int) -> None:
     """``LastInstallAdmin`` when ``user_id`` is the install's only active install admin.
 
@@ -177,8 +205,8 @@ def _assert_not_last_install_admin(db: Session, user_id: int) -> None:
     """
     if (stored_system_role(db, user_id) or USER) not in INSTALL_ADMIN_ROLES:
         return
-    admins = [row[0] for row in db.execute(_LOCK_ACTIVE_ADMINS, {"roles": list(INSTALL_ADMIN_ROLES)})]
-    if admins == [user_id]:
+    admins = locked_active_install_admins(db)
+    if admins == (user_id,):
         db.rollback()
         raise LastInstallAdmin(LAST_INSTALL_ADMIN_MESSAGE)
 
@@ -245,21 +273,54 @@ def workspace_member(db: Session, workspace_id: Union[UUID, str], member_id: int
     ).first()
 
 
-def change_member_role(db: Session, member: WorkspaceMember, role: str) -> str:
-    """Set an existing membership's role and commit; the role it had. Its active flag is untouched.
+def _member_in(db: Session, workspace_id: Union[UUID, str], member_id: int) -> WorkspaceMember:
+    """The membership ``member_id`` in ``workspace_id``; ``MemberNotFound`` for one in no workspace or another."""
+    member = workspace_member(db, workspace_id, member_id)
+    if member is None:
+        raise MemberNotFound(MEMBER_NOT_FOUND_MESSAGE)
+    return member
 
-    Which roles a caller may set (never ``owner``) is the caller's check.
+
+def change_member_role(db: Session, workspace_id: Union[UUID, str], member_id: int, role: str) -> str:
+    """Give the membership ``member_id`` of ``workspace_id`` the role ``role`` and commit; the role it had.
+
+    A workspace has one owner: the owner's role is never changed (``MembershipRefused``), nobody is
+    made owner, and ``role`` must be one of ``SETTABLE_MEMBER_ROLES``. ``MemberNotFound`` when the
+    membership is not in that workspace. Its active flag is untouched.
     """
+    member = _member_in(db, workspace_id, member_id)
+    if member.role == OWNER_ROLE:
+        raise MembershipRefused(OWNER_ROLE_FIXED_MESSAGE)
+    if str(role).strip().lower() == OWNER_ROLE:
+        raise MembershipRefused(ONE_OWNER_MESSAGE)
+    if role not in SETTABLE_MEMBER_ROLES:
+        raise MembershipRefused(f"Invalid role: {role}")
     old_role = member.role
     member.role = role
     db.commit()
     return old_role
 
 
-def end_membership(db: Session, member: WorkspaceMember) -> None:
-    """Deactivate one membership (the person leaves the workspace) and commit."""
+def member_to_remove(db: Session, workspace_id: Union[UUID, str], member_id: int) -> WorkspaceMember:
+    """The membership ``member_id`` of ``workspace_id`` when it may end; never the owner's.
+
+    ``MemberNotFound`` when it is not in that workspace; ``MembershipRefused`` for the owner.
+    """
+    member = _member_in(db, workspace_id, member_id)
+    if member.role == OWNER_ROLE:
+        raise MembershipRefused(OWNER_NOT_REMOVABLE_MESSAGE)
+    return member
+
+
+def end_membership(db: Session, workspace_id: Union[UUID, str], member_id: int) -> WorkspaceMember:
+    """Deactivate the membership ``member_id`` of ``workspace_id`` (the person leaves) and commit.
+
+    The same checks as ``member_to_remove``: never the owner's, never one in another workspace.
+    """
+    member = member_to_remove(db, workspace_id, member_id)
     member.is_active = False
     db.commit()
+    return member
 
 
 def person_for_invitee(db: Session, clerk_user_id: str, email: Optional[str], *, name: Optional[str] = None) -> int:
@@ -319,8 +380,12 @@ __all__ = [
     "INSTALL_ADMIN_ROLES",
     "LAST_INSTALL_ADMIN_MESSAGE",
     "MEMBERSHIP_ROLES",
+    "OWNER_ROLE",
+    "SETTABLE_MEMBER_ROLES",
     "Deactivation",
     "LastInstallAdmin",
+    "MemberNotFound",
+    "MembershipRefused",
     "Requester",
     "change_member_role",
     "deactivate_person",
@@ -329,6 +394,8 @@ __all__ = [
     "end_sessions_of",
     "join_from_invitation",
     "link_person",
+    "locked_active_install_admins",
+    "member_to_remove",
     "person_for_invitee",
     "person_is_active",
     "set_install_role",

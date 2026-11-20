@@ -9,9 +9,10 @@ enterprise), ``DEFAULT_WORKSPACE_ID`` names the workspace sign-ins are recorded 
 to sign in becomes its owner.
 
 It runs in the full seed loader (``docker-entrypoint.sh migrate``, which the migration Job runs,
-``core.database.load_seed_data``), and sign-in calls ``ensure_default_workspace`` before granting
-the first admin a membership, so an install whose Job has not run yet still works. Every other
-edition is left untouched: nothing is read or written.
+``core.database.load_seed_data``, which logs a failure at error level), and every sign-in calls
+``ensure_default_workspace`` before anything of it is audited
+(``core.auth.sign_in_flow.ensure_audit_workspace``), so an install whose Job has not run yet still
+records its sign-ins. Every other edition is left untouched: nothing is read or written.
 
 The caller owns the commit.
 """

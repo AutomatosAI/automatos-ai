@@ -8,7 +8,9 @@ own host the one host that may resolve to a private address. It is used only whe
 * ``authorization_endpoint``, ``token_endpoint`` and ``jwks_uri`` are https addresses, and so is
   ``end_session_endpoint`` when it lists one (kept for signing out, §5.6);
 * ``token_endpoint`` and ``jwks_uri``, the two this server calls, are on the issuer's own host or on
-  a host the operator lists in ``OIDC_ENDPOINT_HOSTS`` (§5.9: some providers publish them elsewhere);
+  a host the operator lists in ``OIDC_ENDPOINT_HOSTS`` (§5.9: some providers publish them elsewhere;
+  ``on_allowed_host``). Sign-out sends a browser to ``end_session_endpoint`` only under the same
+  rule (``core.auth.oidc_sign_in.end_session_address``);
 * what it lists, where it lists it, includes the authorization code flow (``code``), PKCE ``S256``,
   one of ``SIGNING_ALGORITHMS``, and a client authentication this client uses
   (``client_secret_basic``, else ``client_secret_post``).
@@ -149,11 +151,16 @@ def _endpoint(doc: Mapping[str, Any], name: str, *, required: bool = True) -> Op
     return value
 
 
+def on_allowed_host(address: Optional[str], issuer: str) -> bool:
+    """Whether ``address`` is on the issuer's own host or a host listed in ``OIDC_ENDPOINT_HOSTS``."""
+    allowed = (oidc_http.host_of(issuer), *listed_hosts(config.OIDC_ENDPOINT_HOSTS))
+    return oidc_http.host_of(address) in allowed
+
+
 def _called_endpoint(doc: Mapping[str, Any], name: str, issuer: str) -> str:
     """An endpoint this server calls: https, on the issuer's host or one in ``OIDC_ENDPOINT_HOSTS``."""
     value = _endpoint(doc, name)
-    allowed = (oidc_http.host_of(issuer), *listed_hosts(config.OIDC_ENDPOINT_HOSTS))
-    if oidc_http.host_of(value) not in allowed:
+    if not on_allowed_host(value, issuer):
         raise _misconfigured(f"{name} is on a host that is neither the issuer's nor in OIDC_ENDPOINT_HOSTS")
     return value
 
@@ -313,6 +320,7 @@ __all__ = [
     "current_metadata",
     "forget_provider",
     "metadata_address",
+    "on_allowed_host",
     "parse_metadata",
     "signing_key",
 ]

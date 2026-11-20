@@ -36,6 +36,7 @@ provider said in ``error`` or ``error_description`` is never read into a log lin
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timezone
 from typing import Any, Mapping, Optional, Tuple
 from urllib.parse import urlencode
@@ -57,6 +58,7 @@ from core.auth.sign_in_methods import (
 from core.models.auth_sessions import IDP_SESSION_ID_MAX
 from core.models.user_identities import ISSUER_MAX, SUBJECT_MAX
 from core.auth.user_link import PROFILE_VALUE_MAX
+from core.edition_start_up import EMAIL_CLAIM_VOUCHED, STANDARD_EMAIL_CLAIM
 
 logger = logging.getLogger(__name__)
 
@@ -102,27 +104,53 @@ def _profile_value(value: Any, *, strip: bool) -> Optional[str]:
     return text
 
 
+def _is_seconds(value: Any) -> bool:
+    """A JSON number that is a real count of seconds: not a boolean, NaN or an infinity."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return not isinstance(value, float) or math.isfinite(value)
+
+
 def _auth_time(value: Any, now: float) -> datetime:
+    """``auth_time`` as a moment: ``NO_AUTH_TIME`` when absent; ``InvalidSignIn`` when it is not a
+    finite number of seconds, is before the epoch, or is later than ``now`` and the leeway."""
     if value is None:
         return NO_AUTH_TIME
-    if not isinstance(value, (int, float)) or isinstance(value, bool):
+    if not _is_seconds(value):
         raise InvalidSignIn("its auth_time is not a number")
+    if value < 0:
+        raise InvalidSignIn("its auth_time is before the epoch")
     if value > now + oidc_tokens.TIME_LEEWAY_SECONDS:
         raise InvalidSignIn("its auth_time is in the future")
-    return datetime.fromtimestamp(value, tz=timezone.utc)
+    try:
+        return datetime.fromtimestamp(value, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        raise InvalidSignIn("its auth_time is out of range") from None
 
 
 def _fits(value: str, limit: int) -> bool:
     return "\x00" not in value and len(value.encode("utf-8")) <= limit
 
 
+def _email_verified(claims: Mapping[str, Any]) -> bool:
+    """Whether the address read from ``OIDC_CLAIM_EMAIL`` is one the provider verified.
+
+    ``email_verified`` speaks only for the standard ``email`` claim, so it counts only when that is
+    the claim read, and only as the JSON ``true``. An address from any other claim is unverified (and
+    not kept), unless the operator says the provider puts only verified addresses there
+    (``OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES``).
+    """
+    if config.OIDC_CLAIM_EMAIL == STANDARD_EMAIL_CLAIM:
+        return claims.get("email_verified") is True
+    return config.OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES == EMAIL_CLAIM_VOUCHED
+
+
 def verified_identity(claims: Mapping[str, Any], now: Optional[float] = None) -> VerifiedIdentity:
     """Who the verified claims say the person is.
 
-    The email counts as verified only when ``email_verified`` is the JSON ``true`` (absent, a
-    string or anything else is not verified). The email and name are read from the claims
-    ``OIDC_CLAIM_EMAIL`` and ``OIDC_CLAIM_NAME`` name; a value that is not a clean string a
-    ``users`` row can hold is no value. ``sid`` is kept when it fits its column.
+    The email is read from the claim ``OIDC_CLAIM_EMAIL`` names, and counts as verified only as
+    ``_email_verified`` says. The name is read from ``OIDC_CLAIM_NAME``'s claim. A value that is
+    not a clean string a ``users`` row can hold is no value. ``sid`` is kept when it fits its column.
     """
     issuer, subject = claims["iss"], claims["sub"]
     if not _fits(issuer, ISSUER_MAX) or not _fits(subject, SUBJECT_MAX):
@@ -132,7 +160,7 @@ def verified_identity(claims: Mapping[str, Any], now: Optional[float] = None) ->
     return VerifiedIdentity(
         issuer=issuer, subject=subject,
         email=_profile_value(claims.get(config.OIDC_CLAIM_EMAIL), strip=False),
-        email_verified=claims.get("email_verified") is True,
+        email_verified=_email_verified(claims),
         name=_profile_value(claims.get(config.OIDC_CLAIM_NAME), strip=True),
         auth_time=_auth_time(claims.get("auth_time"), moment),
         idp_session_id=sid if isinstance(sid, str) and sid and len(sid) <= IDP_SESSION_ID_MAX else None,
@@ -173,7 +201,9 @@ def end_session_address() -> Optional[str]:
     """Where to send a browser that signed out, to sign out at the provider too (§5.6), or None.
 
     Only where people sign in with OIDC, and only when the provider's metadata lists an
-    ``end_session_endpoint`` (an https address, ``oidc_provider.parse_metadata``). The address
+    ``end_session_endpoint`` (an https address, ``oidc_provider.parse_metadata``) on the issuer's
+    host or a host in ``OIDC_ENDPOINT_HOSTS``, as the token endpoint and the keys must be
+    (``oidc_provider.on_allowed_host``); one anywhere else is treated as none. The address
     carries exactly two parameters (OpenID Connect RP-Initiated Logout 1.0 §2): ``client_id``, and
     ``post_logout_redirect_uri``, the install's own ``SIGNED_OUT_PATH``, which the customer
     registers at the provider. No ID token is kept, so none is sent as a hint. None when the
@@ -188,6 +218,10 @@ def end_session_address() -> Optional[str]:
         logger.warning("Signed out here; the provider could not be read, so not at the provider")
         return None
     if not endpoint or origin is None:
+        return None
+    if not oidc_provider.on_allowed_host(endpoint, config.OIDC_ISSUER):
+        logger.warning("Signed out here only: the provider's end_session_endpoint is on a host that is "
+                       "neither the issuer's nor in OIDC_ENDPOINT_HOSTS")
         return None
     return _authorize_address(endpoint, {"client_id": config.OIDC_CLIENT_ID,
                                          "post_logout_redirect_uri": origin + SIGNED_OUT_PATH})

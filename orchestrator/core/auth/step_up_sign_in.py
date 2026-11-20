@@ -18,9 +18,13 @@ naming ``STEP_UP_START``. The web app sends the browser there:
      linked to someone else, or to nobody (``another_person``). Never an identity switch: the
      session keeps its person and its old ``auth_time``, and no session is issued;
    * that person has been deactivated (``deactivated``);
-   * the ID token carries no ``auth_time`` (``no_auth_time``): fails closed;
-   * its ``auth_time`` is older than the step-up's start, less ``TIME_LEEWAY_SECONDS``
-     (``stale_auth_time``): the provider did not make the person sign in again.
+   * the ID token carries no ``auth_time`` (``no_auth_time``): fails closed, and the person is told
+     so with a code of its own (``sign_in_flow.STEP_UP_NO_AUTH_TIME``): a provider that never sends
+     it can never confirm a step-up;
+   * its ``auth_time`` is later than now by more than ``CLOCK_SKEW`` (``future_auth_time``);
+   * its ``auth_time`` is earlier than the step-up's start by more than ``CLOCK_SKEW``
+     (``stale_auth_time``): the provider did not make the person sign in again. ``CLOCK_SKEW`` (the
+     ID token's ``TIME_LEEWAY_SECONDS``) allows only for the two clocks disagreeing.
 
    Otherwise the session's ``auth_time`` becomes the token's, committed with an ``auth:step_up``
    row (``confirmed: true``); when the row cannot be written, neither lands. Every refusal rolls
@@ -50,6 +54,8 @@ from core.models.auth_sessions import AuthSession
 logger = logging.getLogger(__name__)
 
 STEP_UP_START = "/api/v1/auth/oidc/start?step_up=1"
+# How far the provider's clock and ours may disagree: the ID token's own leeway (§5.11).
+CLOCK_SKEW = timedelta(seconds=TIME_LEEWAY_SECONDS)
 
 _REFRESH = text("UPDATE auth_sessions SET auth_time = :auth_time "
                 "WHERE id = :id AND user_id = :user_id AND revoked_at IS NULL")
@@ -88,7 +94,15 @@ def _refusal(db: Session, identity: VerifiedIdentity, row: Optional[AuthSession]
         return session_audit.STEP_UP_DEACTIVATED
     if identity.auth_time <= NO_AUTH_TIME:
         return session_audit.STEP_UP_NO_AUTH_TIME
-    if started_at is None or identity.auth_time < started_at - timedelta(seconds=TIME_LEEWAY_SECONDS):
+    return _freshness_refusal(identity.auth_time, started_at, now)
+
+
+def _freshness_refusal(auth_time: datetime, started_at: Optional[datetime], now: datetime) -> Optional[str]:
+    """Fresh: ``auth_time`` is not earlier than the step-up's start, nor later than now. ``CLOCK_SKEW``
+    is allowed either way, for the provider's clock and ours, and for nothing else."""
+    if auth_time > now + CLOCK_SKEW:
+        return session_audit.STEP_UP_FUTURE
+    if started_at is None or auth_time < started_at - CLOCK_SKEW:
         return session_audit.STEP_UP_STALE
     return None
 
@@ -115,4 +129,4 @@ def confirm_step_up(db: Session, finished: Finished, *, ip_address: Optional[str
     logger.info("users.id=%s: step-up confirmed", asked_by)
 
 
-__all__ = ["STEP_UP_START", "StepUpRefused", "confirm_step_up", "session_asking"]
+__all__ = ["CLOCK_SKEW", "STEP_UP_START", "StepUpRefused", "confirm_step_up", "session_asking"]

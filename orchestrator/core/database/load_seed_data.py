@@ -339,7 +339,9 @@ def _seed_enterprise_default_workspace() -> None:
             outcome = seed_default_workspace(db)
         logger.info("Default workspace: %s", outcome)
     except Exception:
-        logger.exception("Error seeding the default workspace")
+        # logger.exception logs at ERROR. Sign-in makes the workspace too, before its first audit row
+        # (core.auth.sign_in_flow.ensure_audit_workspace).
+        logger.exception("The default workspace could not be seeded")
 
 
 # Every platform-default section, in order: `migrate` and a manual run.

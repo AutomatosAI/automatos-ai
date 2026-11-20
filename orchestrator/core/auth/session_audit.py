@@ -68,15 +68,16 @@ REFUSED_INVALID_TOKEN = "invalid_token"
 REFUSAL_REASONS = (REFUSED_ACCESS_RULE, REFUSED_EMAIL_CONFLICT, REFUSED_DEACTIVATED, REFUSED_INVALID_TOKEN)
 
 # Why a step-up was refused (``auth:step_up`` with ``confirmed`` false, US-406): someone other than the
-# session's person signed in, the token carried no ``auth_time``, or one older than the step-up, the
-# session that asked has ended, or its person is deactivated.
+# session's person signed in, the token carried no ``auth_time``, one older than the step-up or one
+# later than now, the session that asked has ended, or its person is deactivated.
 STEP_UP_ANOTHER_PERSON = "another_person"
 STEP_UP_NO_AUTH_TIME = "no_auth_time"
 STEP_UP_STALE = "stale_auth_time"
+STEP_UP_FUTURE = "future_auth_time"
 STEP_UP_SESSION_ENDED = "session_ended"
 STEP_UP_DEACTIVATED = "deactivated"
-STEP_UP_REASONS = (STEP_UP_ANOTHER_PERSON, STEP_UP_NO_AUTH_TIME, STEP_UP_STALE, STEP_UP_SESSION_ENDED,
-                   STEP_UP_DEACTIVATED)
+STEP_UP_REASONS = (STEP_UP_ANOTHER_PERSON, STEP_UP_NO_AUTH_TIME, STEP_UP_STALE, STEP_UP_FUTURE,
+                   STEP_UP_SESSION_ENDED, STEP_UP_DEACTIVATED)
 
 SESSION_RESOURCE = "auth_session"
 PERSON_RESOURCE = "user"
@@ -188,17 +189,17 @@ def stage_membership_set(db, *, user_id: int, workspace_id: Union[UUID, str], ro
 
 
 def stage_bootstrap_admin(db, *, user_id: int, workspace_id: Union[UUID, str], matched_by: str,
-                          ip_address: Optional[str], user_agent: Optional[str]) -> None:
-    """``auth:bootstrap_admin`` for a first admin (US-405), added to the first sign-in's transaction.
+                          workspace_role: str, ip_address: Optional[str], user_agent: Optional[str]) -> None:
+    """``auth:bootstrap_admin`` for a first admin (US-405), added to the sign-in's transaction.
 
     Not committed here: the row lands with the sign-in that granted the roles, or is rolled back
     with it. ``matched_by`` is the kind of entry that named the person (``sub`` or ``email``), never
-    the entry itself.
+    the entry itself; ``workspace_role`` is the role they were given in the default workspace.
     """
     ip_address, user_agent = browser_fields(ip_address, user_agent)
     db.add(AuditLog(workspace_id=UUID(str(workspace_id)), user_id=user_id, actor_type=ACTOR_SYSTEM,
                     action=BOOTSTRAP_ADMIN, resource_type=PERSON_RESOURCE, resource_id=str(user_id),
-                    details={"matched_by": matched_by, "system_role": "admin", "workspace_role": "owner"},
+                    details={"matched_by": matched_by, "system_role": "admin", "workspace_role": workspace_role},
                     ip_address=ip_address, user_agent=user_agent))
 
 

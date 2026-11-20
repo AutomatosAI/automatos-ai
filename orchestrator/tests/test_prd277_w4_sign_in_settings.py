@@ -11,7 +11,8 @@ under each value:
 * in ``enterprise`` each is refused at start-up, naming the setting and never the value: an issuer
   or a public address that is not https, scopes without ``openid`` or with a character a scope may
   not hold, an empty claim name, a CA file that cannot be read, a default role that is not
-  ``none``, viewer, editor or admin, a role without ``DEFAULT_WORKSPACE_ID``, no
+  ``none``, viewer, editor or admin, a role without ``DEFAULT_WORKSPACE_ID`` or without an access
+  rule, an email-claim setting that is not ``true`` or ``false``, no
   ``CLIENT_IP_HEADER`` (the address sign-in limits and audits by would be the caller's to write),
   an endpoint host that is not a host name (a scheme, a port, a wildcard or an address), a
   ceiling on unfinished sign-ins that is not a whole number of at least one, an access rule that is
@@ -39,7 +40,7 @@ from core.edition_start_up import OIDC_SIGN_IN_SETTINGS, EditionNotReady  # noqa
 ORCH = Path(__file__).resolve().parents[1]
 NEW_SETTINGS = ("OIDC_SCOPES", "OIDC_CLAIM_EMAIL", "OIDC_CLAIM_NAME", "OIDC_CA_BUNDLE_FILE", "ENTERPRISE_DEFAULT_ROLE",
                 "OIDC_ENDPOINT_HOSTS", "OIDC_PENDING_SIGN_INS_MAX", "OIDC_PENDING_SIGN_INS_PER_ADDRESS",
-                "OIDC_REQUIRED_CLAIMS", "ENTERPRISE_BOOTSTRAP_ADMINS")
+                "OIDC_REQUIRED_CLAIMS", "ENTERPRISE_BOOTSTRAP_ADMINS", "OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES")
 ENV_KEYS = (
     "AUTH_EDITION", "REQUIRE_AUTH", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "FRONTEND_URL",
     "CLI_RUNTIME_ENABLED", "DEFAULT_WORKSPACE_ID", "CLERK_JWKS_URL", "CLERK_SECRET_KEY",
@@ -75,6 +76,10 @@ BAD = [
     ("OIDC_PENDING_SIGN_INS_PER_ADDRESS", "few"), ("OIDC_PENDING_SIGN_INS_PER_ADDRESS", "10001"),
     ("OIDC_REQUIRED_CLAIMS", "hd"), ("OIDC_REQUIRED_CLAIMS", "hd=example.test;"), ("OIDC_REQUIRED_CLAIMS", "=x"),
     ("OIDC_REQUIRED_CLAIMS", "a b=c"), ("OIDC_REQUIRED_CLAIMS", "groups="),
+    ("OIDC_REQUIRED_CLAIMS", "aud=prd277-w4-client"), ("OIDC_REQUIRED_CLAIMS", "hd=example.test;nonce=x"),
+    ("ENTERPRISE_DEFAULT_ROLE", "viewer"), ("ENTERPRISE_DEFAULT_ROLE", "editor"),
+    ("OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES", "maybe"),
+    ("OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES", "yes"),
     ("ENTERPRISE_BOOTSTRAP_ADMINS", "someone@example.test"), ("ENTERPRISE_BOOTSTRAP_ADMINS", "email:*@example.test"),
     ("ENTERPRISE_BOOTSTRAP_ADMINS", "sub:abc,,"), ("ENTERPRISE_BOOTSTRAP_ADMINS", "email:nobody@localhost"),
     ("ENTERPRISE_BOOTSTRAP_ADMINS", "SUB:abc"), ("ENTERPRISE_BOOTSTRAP_ADMINS", "sub:  , email:a@example.test"),
@@ -120,6 +125,7 @@ def test_the_defaults_are_the_prds_and_every_name_is_in_the_surface():
     assert (cfg.OIDC_CA_BUNDLE_FILE, cfg.ENTERPRISE_DEFAULT_ROLE) == ("", "none")
     assert (cfg.OIDC_ENDPOINT_HOSTS, cfg.OIDC_PENDING_SIGN_INS_MAX) == ("", 10_000)
     assert cfg.OIDC_PENDING_SIGN_INS_PER_ADDRESS == 100
+    assert cfg.OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES == "false"  # off unless the operator says so
     surface = json.loads((ORCH / "reports" / "config-surface.json").read_text(encoding="utf-8"))["settings"]
     assert set(NEW_SETTINGS) <= set(surface) and surface == sorted(surface)
     assert set(NEW_SETTINGS) <= set(OIDC_SIGN_IN_SETTINGS)

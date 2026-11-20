@@ -601,6 +601,10 @@ class Config:
     OIDC_SCOPES: str = " ".join((os.getenv("OIDC_SCOPES") or "openid profile email").split())
     OIDC_CLAIM_EMAIL: str = (os.getenv("OIDC_CLAIM_EMAIL") or "email").strip()
     OIDC_CLAIM_NAME: str = (os.getenv("OIDC_CLAIM_NAME") or "name").strip()
+    # "true" only when the provider puts ONLY addresses it has verified in the claim OIDC_CLAIM_EMAIL names (not `email`).
+    # Off by default: a person who can edit that claim at the provider could take another person's address.
+    OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES: str = (
+        os.getenv("OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES") or "false").strip().lower()
     OIDC_CA_BUNDLE_FILE: str = (os.getenv("OIDC_CA_BUNDLE_FILE") or "").strip()
     ENTERPRISE_DEFAULT_ROLE: str = (os.getenv("ENTERPRISE_DEFAULT_ROLE") or "none").strip().lower()
     OIDC_ENDPOINT_HOSTS: str = (os.getenv("OIDC_ENDPOINT_HOSTS") or "").strip()  # hosts besides the issuer's the metadata may name

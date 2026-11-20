@@ -12,9 +12,10 @@ name: oidc-keycloak
 # tests/test_prd277_w4_keycloak_sign_in.py then signs in through Keycloak's own login form, checks
 # the access rule against its claim, steps up with max_age=0 and signs out at Keycloak.
 #
-# Runs only when the sign-in code, its tests or this file change. NON-REQUIRED and allowed to fail
-# (continue-on-error) for now: PRD-277 makes it required at the end of the wave, which is the repo
-# admin's call. The image is pinned by tag and digest.
+# Runs only when the sign-in code, its settings, the default workspace's seed, the Team routes, its
+# tests or this file change. NON-REQUIRED (not a required check of the branch rules; PRD-277 makes it
+# required at the end of the wave, which is the repo admin's call), but a failure fails the job and
+# shows red. The image is pinned by tag and digest.
 
 on:
   pull_request:
@@ -22,7 +23,11 @@ on:
       - "orchestrator/core/auth/**"
       - "orchestrator/api/auth_oidc.py"
       - "orchestrator/api/auth_sessions.py"
+      - "orchestrator/api/team.py"
+      - "orchestrator/config.py"
       - "orchestrator/core/edition_start_up.py"
+      - "orchestrator/core/seeds/**"
+      - "orchestrator/core/database/load_seed_data.py"
       - "orchestrator/tests/test_prd277_w4*"
       - "orchestrator/tests/helpers_fake_oidc_provider.py"
       - ".github/workflows/oidc-keycloak.yml"
@@ -33,7 +38,11 @@ on:
       - "orchestrator/core/auth/**"
       - "orchestrator/api/auth_oidc.py"
       - "orchestrator/api/auth_sessions.py"
+      - "orchestrator/api/team.py"
+      - "orchestrator/config.py"
       - "orchestrator/core/edition_start_up.py"
+      - "orchestrator/core/seeds/**"
+      - "orchestrator/core/database/load_seed_data.py"
       - "orchestrator/tests/test_prd277_w4*"
       - "orchestrator/tests/helpers_fake_oidc_provider.py"
       - ".github/workflows/oidc-keycloak.yml"
@@ -48,10 +57,9 @@ permissions:
 
 jobs:
   keycloak:
-    name: Sign-in against a real Keycloak (allowed to fail)
+    name: Sign-in against a real Keycloak (non-required)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    continue-on-error: true
 
     services:
       postgres:
