@@ -26,13 +26,29 @@ tests:
           path: spec.template.spec.volumes
           content: {name: database-ca}
           any: true
-  - it: leaves the migration Job with no volume by default
+  - it: leaves the migration Job with no CA volume by default, only its scratch /tmp (PRD-280 US-104)
     template: templates/migrate-job.yaml
     asserts:
       - notContains:
           path: spec.template.spec.containers[0].env
           content: {name: DATABASE_SSLMODE}
           any: true
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts
+          value:
+            - name: tmp
+              mountPath: /tmp
+      - equal:
+          path: spec.template.spec.volumes
+          value:
+            - name: tmp
+              emptyDir: {}
+  - it: leaves the migration Job with no volume at all on a writable root
+    template: templates/migrate-job.yaml
+    set:
+      migrations:
+        readOnlyRootFilesystem: false
+    asserts:
       - notExists:
           path: spec.template.spec.containers[0].volumeMounts
       - notExists:
@@ -49,12 +65,17 @@ tests:
           path: spec.template.spec.containers[0].env
           content: {name: DATABASE_SSLROOTCERT}
           any: true
+      # The workspaces, and the scratch volumes of a read-only root (PRD-280 US-104).
       - equal:
           path: spec.template.spec.volumes
           value:
             - name: workspaces
               persistentVolumeClaim:
                 claimName: RELEASE-NAME-automatos-workspaces
+            - name: tmp
+              emptyDir: {}
+            - name: home
+              emptyDir: {}
 
   # ── verify-full with a CA from a ConfigMap ──────────────────────────────────
   - it: mounts the CA read-only in the API and names the file
@@ -85,18 +106,23 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content: {name: DATABASE_SSLROOTCERT, value: /etc/automatos/database-ca/db-ca-bundle.pem}
+      # The CA, then the scratch /tmp of a read-only root (PRD-280 US-104).
       - equal:
           path: spec.template.spec.containers[0].volumeMounts
           value:
             - name: database-ca
               mountPath: /etc/automatos/database-ca
               readOnly: true
+            - name: tmp
+              mountPath: /tmp
       - equal:
           path: spec.template.spec.volumes
           value:
             - name: database-ca
               configMap:
                 name: database-ca
+            - name: tmp
+              emptyDir: {}
   - it: mounts the CA read-only in the worker and gives it both settings
     template: templates/worker.yaml
     documentIndex: 0

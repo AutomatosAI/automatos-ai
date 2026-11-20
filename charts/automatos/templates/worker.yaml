@@ -83,6 +83,16 @@ spec:
             {{- with include "automatos.databaseCaMount" . | trim }}
             {{- . | nindent 12 }}
             {{- end }}
+            {{- if .Values.worker.readOnlyRootFilesystem }}
+            # A read-only root (PRD-280 US-104): scratch volumes for the two paths the worker
+            # writes outside its volume, /tmp and the home folder the entrypoint sets
+            # (docs/PRDS/PRD-280-US-103-WRITE-PATHS.md). The entrypoint's root start writes
+            # only to the volume.
+            - name: tmp
+              mountPath: /tmp
+            - name: home
+              mountPath: /home/worker
+            {{- end }}
           # F452 (#1309): the worker runs agent code. No process in it may gain a privilege
           # (a setuid-root binary such as su or passwd runs without root), every capability
           # is dropped but the four the root entrypoint needs, and the runtime's default
@@ -100,6 +110,9 @@ spec:
           # setgid bit (below) before dropping either set further.
           securityContext:
             allowPrivilegeEscalation: false
+            {{- if .Values.worker.readOnlyRootFilesystem }}
+            readOnlyRootFilesystem: true
+            {{- end }}
             capabilities:
               drop: ["ALL"]
               # chown -h re-owns the volume (CHOWN; DAC_OVERRIDE to walk folders it doesn't
@@ -116,6 +129,12 @@ spec:
             claimName: {{ include "automatos.workspacesClaim" . }}
         {{- with include "automatos.databaseCaVolume" . | trim }}
         {{- . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.worker.readOnlyRootFilesystem }}
+        - name: tmp
+          emptyDir: {}
+        - name: home
+          emptyDir: {}
         {{- end }}
 ---
 apiVersion: v1

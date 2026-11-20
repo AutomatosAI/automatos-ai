@@ -149,7 +149,8 @@ true
 {{/*
 Stops a release at render time, before any hook runs, on values that can't work. A name
 in `config` that the chart also sets would be rendered twice, and an upgrade then fails
-partway through. A second replica on a single-attach volume would hang waiting for it.
+partway through. A second replica on a single-attach volume would hang waiting for it. A
+document path of the operator's own, under a read-only root, would fail at the first upload.
 */}}
 {{- define "automatos.validateApi" -}}
 {{- $config := .Values.config | default dict -}}
@@ -162,6 +163,13 @@ partway through. A second replica on a single-attach volume would hang waiting f
 {{- range $key := list "DOCUMENT_UPLOAD_DIR" "DOCUMENT_STORAGE_DIR" }}
 {{- if hasKey $config $key }}
 {{- fail (printf "config.%s: api.data sets this. Remove it from config, or set api.data.enabled=false to manage the API's files yourself" $key) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if and (not .Values.api.data.enabled) .Values.api.readOnlyRootFilesystem }}
+{{- range $key := list "DOCUMENT_UPLOAD_DIR" "DOCUMENT_STORAGE_DIR" }}
+{{- if hasKey $config $key }}
+{{- fail (printf "config.%s: with api.data.enabled=false and a read-only root (api.readOnlyRootFilesystem) the API keeps its files on the scratch volumes the chart mounts, /app/documents and /tmp. Remove config.%s, or set api.readOnlyRootFilesystem=false" $key $key) }}
 {{- end }}
 {{- end }}
 {{- end }}

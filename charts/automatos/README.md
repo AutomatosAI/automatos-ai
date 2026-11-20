@@ -83,6 +83,7 @@ See [`values.yaml`](values.yaml). The ones you're most likely to change:
 | `api.data.enabled`, `api.data.size`, `api.data.storageClass`, `api.data.accessModes` | on, `10Gi`, cluster default, `ReadWriteOnce` | The API's files. Off, they're lost on every restart. `accessModes` can't change once the claim exists; more than one API replica needs a mode other than `ReadWriteOnce` or `ReadWriteOncePod`. The storage must honour the pod's `fsGroup`, or the API can't write here: some NFS-style drivers don't. |
 | `serviceAccount.create` | `true` | The chart creates one account for each component (above). `false`: it creates none, and each pod runs under the account `serviceAccount.<component>.name` names, or the namespace's `default`; several components may name the same one. |
 | `serviceAccount.api`, `.frontend`, `.worker`, `.migrate` (`.name`, `.annotations`) | `<fullname>-<component>`, none | `name` renames that account; `annotations` go on it alone, e.g. `eks.amazonaws.com/role-arn` or `iam.gke.io/gcp-service-account` on the API's. With `serviceAccount.create=true` each account needs a name of its own. Tying a role to an account is yours to do; a token a cloud's webhook projects for that role (EKS IRSA) is separate from the cluster token the chart turns off. |
+| `api.readOnlyRootFilesystem`, `frontend.readOnlyRootFilesystem`, `worker.readOnlyRootFilesystem`, `migrations.readOnlyRootFilesystem` | `true` | A read-only root file system for that component's container, with an `emptyDir` at each path it writes outside its volumes (below). `false`: the root stays writable and nothing is mounted for it, as before chart 0.9.0. |
 | `ingress.*` | off | |
 | `otel.enabled`, `otel.endpoint` | off | OpenTelemetry traces from the API, the worker and the web app's server side, and the API's GenAI metrics, over OTLP/HTTP to your collector ([`deploy/otel/`](../../deploy/otel/) has a reference config). Headers for the endpoint go in the Secret as `OTEL_EXPORTER_OTLP_HEADERS`. `otel.samplerRatio` keeps a share of new traces; `otel.resourceAttributes` adds to the pod and namespace names on every span. |
 | `sessionMode.enabled` | off | Session mode: your own Claude Code, Codex or Copilot sessions as agents, through the CLI host on your machine. Local edition only. Each session's files are uploaded into the workspace volume; the projects folder isn't browsable on a cluster. With the ingress on, `/api/v1/cli-hosts` gets its own Ingress (`sessionMode.ingressAnnotations`, a 64 MB body limit for ingress-nginx). |
@@ -90,6 +91,28 @@ See [`values.yaml`](values.yaml). The ones you're most likely to change:
 ## Pod security
 
 Every container runs with the runtime's default system-call filter (`seccompProfile: RuntimeDefault`), cannot gain privileges (`allowPrivilegeEscalation: false`) and drops every capability. The API, the web app and the migration Job also run as a non-root user. The worker is the exception until a later release: it starts as root and adds back the four capabilities in the table above, so it passes the "baseline" pod security level, not "restricted".
+
+Every container's root file system is read-only, so what runs stays what was released. Each component writes only to its volumes and to the scratch volumes below: `emptyDir`s, on the node's disk, emptied when the pod is replaced. [`docs/PRDS/PRD-280-US-103-WRITE-PATHS.md`](../../docs/PRDS/PRD-280-US-103-WRITE-PATHS.md) lists what writes each path, file and line.
+
+| Component | Read-only root | Scratch volumes |
+|---|---|---|
+| API | yes | `/tmp`, `/home/automatos` (its `HOME`, which the chart sets), `/app/logs`; with `api.data.enabled=false`, `/app/documents` too |
+| Migration Job | yes | `/tmp` |
+| Web app | yes | none: its server writes no file |
+| Worker | yes | `/tmp`, `/home/worker` (its `HOME`) |
+
+Each component's `readOnlyRootFilesystem` value turns it off for that component alone. A path of your own in `config` (a temporary folder, a log file) has to be under one of these, or the API cannot write it.
+
+CI installs the chart into a kind cluster on every change to the chart or to an image's start-up (`.github/workflows/chart.yml`, `deploy/kind/strict.sh`): every pod must become ready, every pod the release makes must be admitted by a namespace that enforces "restricted" (the worker excepted, as above), and every container must refuse a write to its root.
+
+## Upgrading to 0.9.0
+
+- **Every container's root file system becomes read-only** (`readOnlyRootFilesystem: true`), with the scratch volumes in the table above. Anything a pod wrote on its own disk outside them now fails with "read-only file system". To keep a component as it was, set its value to `false` (`--set api.readOnlyRootFilesystem=false`, and the same for `frontend`, `worker` and `migrations`).
+- **The API's home folder, `/tmp` and `/app/logs` start empty on every new pod,** as the container's own disk already did. The API's pods now set `HOME=/home/automatos`.
+- **With `api.data.enabled=false`, `DOCUMENT_UPLOAD_DIR` or `DOCUMENT_STORAGE_DIR` in `config` stops the render** while the API's root is read-only, with a message: the API keeps those files on the scratch volumes `/app/documents` and `/tmp`. Remove them from `config`, or set `api.readOnlyRootFilesystem=false`.
+- **Your own paths in `config`** (`WORKSPACE_EXPORT_TEMP_DIR`, `AUTOMATOS_WORKSPACE`, `DECISION_SHADOW_LOG_PATH` and the like) must be under a scratch volume or a volume, or set `api.readOnlyRootFilesystem=false`.
+- **The migration Job gets an `emptyDir` at `/tmp`,** and the worker one at `/tmp` and one at `/home/worker`.
+- **`helm upgrade --reuse-values`** keeps the values of the release as it was, without these new keys: an unset value means a writable root, as before.
 
 ## Upgrading to 0.7.0
 
@@ -128,6 +151,10 @@ install, pin one build instead, and the chart pulls it `IfNotPresent`:
   [helm-unittest](https://github.com/helm-unittest/helm-unittest) plugin). CI runs
   them with `helm lint` and a kubeconform schema check
   (`.github/workflows/chart.yml`).
+- **An install under a strict namespace, in CI:** `chart.yml`'s `install` job builds
+  the three images, installs the chart with every optional component on into a kind
+  cluster (`deploy/kind/strict.sh`, `deploy/kind/strict-values.yaml`) and checks the
+  pod security level and the read-only roots (above).
 - **End to end, on a throwaway kind cluster:** `deploy/kind/e2e.sh cycle 2`
   creates a cluster, loads the images (the API built from your checkout), installs
   with dev PostgreSQL and Redis, runs the checks, upgrades, runs them again and

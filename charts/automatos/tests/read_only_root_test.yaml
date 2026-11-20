@@ -1,0 +1,185 @@
+suite: A read-only root file system, with a scratch volume for each path written (PRD-280 US-104)
+templates:
+  - templates/api-deployment.yaml
+  - templates/frontend.yaml
+  - templates/migrate-job.yaml
+  - templates/worker.yaml
+set:
+  existingSecret: automatos-secrets
+# The scratch paths are the rows of docs/PRDS/PRD-280-US-103-WRITE-PATHS.md marked scratch.
+# The mounts are pinned whole, so a path the table doesn't list fails here.
+tests:
+  # ── the API ────────────────────────────────────────────────────────────────
+  - it: gives the API a read-only root, with /tmp, its home folder and /app/logs as scratch and its files on the data volume
+    template: templates/api-deployment.yaml
+    release:
+      name: demo
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts
+          value:
+            - {name: workspaces, mountPath: /workspaces, readOnly: true}
+            - {name: data, mountPath: /app/data}
+            - {name: tmp, mountPath: /tmp}
+            - {name: home, mountPath: /home/automatos}
+            - {name: logs, mountPath: /app/logs}
+      - equal:
+          path: spec.template.spec.volumes
+          value:
+            - {name: workspaces, persistentVolumeClaim: {claimName: demo-automatos-workspaces}}
+            - {name: data, persistentVolumeClaim: {claimName: demo-automatos-api-data}}
+            - {name: tmp, emptyDir: {}}
+            - {name: home, emptyDir: {}}
+            - {name: logs, emptyDir: {}}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: HOME, value: /home/automatos}
+  - it: gives the API /app/documents as scratch too when its data volume is off
+    template: templates/api-deployment.yaml
+    set:
+      api:
+        data:
+          enabled: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: documents, mountPath: /app/documents}
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: documents, emptyDir: {}}
+  - it: leaves the API's root writable, with no scratch volume and HOME unset, when api.readOnlyRootFilesystem is false
+    template: templates/api-deployment.yaml
+    release:
+      name: demo
+    set:
+      api:
+        readOnlyRootFilesystem: false
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts
+          value:
+            - {name: workspaces, mountPath: /workspaces, readOnly: true}
+            - {name: data, mountPath: /app/data}
+      - equal:
+          path: spec.template.spec.volumes
+          value:
+            - {name: workspaces, persistentVolumeClaim: {claimName: demo-automatos-workspaces}}
+            - {name: data, persistentVolumeClaim: {claimName: demo-automatos-api-data}}
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: HOME}
+          any: true
+  - it: mounts no /app/documents on a writable root with the data volume off
+    template: templates/api-deployment.yaml
+    set:
+      api:
+        readOnlyRootFilesystem: false
+        data:
+          enabled: false
+    asserts:
+      - notExists:
+          path: spec.template.spec.volumes[1]
+  # A failed render is reported against the first template it fails in, in reverse
+  # alphabetical order: the check runs in the API's environment, which the migration Job
+  # takes too and the worker does not, so that is the Job's.
+  - it: stops on an upload path of the operator's own with the data volume off and a read-only root
+    template: templates/migrate-job.yaml
+    set:
+      api:
+        data:
+          enabled: false
+      config:
+        DOCUMENT_UPLOAD_DIR: /elsewhere
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.DOCUMENT_UPLOAD_DIR: with api.data.enabled=false and a read-only root"
+  - it: stops on a storage path of the operator's own with the data volume off and a read-only root
+    template: templates/migrate-job.yaml
+    set:
+      api:
+        data:
+          enabled: false
+      config:
+        DOCUMENT_STORAGE_DIR: /elsewhere
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.DOCUMENT_STORAGE_DIR: with api.data.enabled=false and a read-only root"
+
+  # ── the web app ────────────────────────────────────────────────────────────
+  - it: gives the web app a read-only root and no volume (its server writes no file)
+    template: templates/frontend.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - notExists:
+          path: spec.template.spec.containers[0].volumeMounts
+      - notExists:
+          path: spec.template.spec.volumes
+  - it: leaves the web app's root writable when frontend.readOnlyRootFilesystem is false
+    template: templates/frontend.yaml
+    documentIndex: 0
+    set:
+      frontend:
+        readOnlyRootFilesystem: false
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+
+  # ── the worker ─────────────────────────────────────────────────────────────
+  - it: gives the worker a read-only root, with /tmp and its home folder as scratch
+    template: templates/worker.yaml
+    documentIndex: 0
+    release:
+      name: demo
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts
+          value:
+            - {name: workspaces, mountPath: /workspaces}
+            - {name: tmp, mountPath: /tmp}
+            - {name: home, mountPath: /home/worker}
+      - equal:
+          path: spec.template.spec.volumes
+          value:
+            - {name: workspaces, persistentVolumeClaim: {claimName: demo-automatos-workspaces}}
+            - {name: tmp, emptyDir: {}}
+            - {name: home, emptyDir: {}}
+  - it: leaves the worker's root writable, with no scratch volume, when worker.readOnlyRootFilesystem is false
+    template: templates/worker.yaml
+    documentIndex: 0
+    set:
+      worker:
+        readOnlyRootFilesystem: false
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts
+          value:
+            - {name: workspaces, mountPath: /workspaces}
+
+  # ── the migration Job (its volumes: database_tls_test.yaml) ───────────────────
+  - it: gives the migration Job a read-only root
+    template: templates/migrate-job.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+  - it: leaves the migration Job's root writable when migrations.readOnlyRootFilesystem is false
+    template: templates/migrate-job.yaml
+    set:
+      migrations:
+        readOnlyRootFilesystem: false
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem

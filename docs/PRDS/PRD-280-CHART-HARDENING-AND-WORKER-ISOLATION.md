@@ -184,7 +184,7 @@ Each wave is one pull request or a short series. CI is the only gate.
 - [ ] A CI lane, run only when the chart or an image's start-up changes, installs the chart into a namespace that enforces the "restricted" level.
 - [ ] It enables every optional component the chart has at the time. Each later wave adds what it builds: the worker's namespace, the network rules, the memory store.
 - [ ] Every pod becomes ready, and the lane fails if the namespace refuses one.
-- [ ] The lane uses images built in the same run, not published ones.
+- [x] The lane uses images built in the same run, not published ones.
 - [ ] Until Wave 2 lands, the worker is the one pod the lane lets run at the "baseline" level, and the lane says so in its output.
 
 #### US-101: A service account for each component · M
@@ -208,15 +208,15 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As a maintainer, I want every path each component writes to listed, so that a read-only root file system breaks nothing.
 
 **Acceptance Criteria:**
-- [ ] A table lists, for the API, the web app, the worker, the migration job and the memory store: each path written, by what, and whether it must survive a restart.
-- [ ] Each row is marked as scratch or as needing a home.
-- [ ] A row that needs a home and has none is listed for Gerard, not guessed.
+- [x] A table lists, for the API, the web app, the worker, the migration job and the memory store: each path written, by what, and whether it must survive a restart. ([PRD-280-US-103-WRITE-PATHS.md](PRD-280-US-103-WRITE-PATHS.md))
+- [x] Each row is marked as scratch or as needing a home.
+- [x] A row that needs a home and has none is listed for Gerard, not guessed.
 
 #### US-104: A read-only root file system · M
 **Description:** As an operator, I want no container able to change its own image at run time, so that what runs stays what was released.
 
 **Acceptance Criteria:**
-- [ ] Every container has a read-only root file system, with a scratch volume for each scratch row in US-103's table.
+- [x] Every container has a read-only root file system, with a scratch volume for each scratch row in US-103's table.
 - [ ] Each component starts and passes its health check in CI's install test (US-100).
 - [ ] No scratch volume holds anything US-103 marked as needing a home.
 

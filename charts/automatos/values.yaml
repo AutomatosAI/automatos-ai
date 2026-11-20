@@ -87,6 +87,13 @@ api:
   # uvicorn worker processes per pod. Prefer more pods over more workers once the
   # schedulers can run on several replicas.
   uvicornWorkers: 1
+  # A read-only root file system (PRD-280 US-104), so the running container cannot change
+  # its own image. The chart mounts an emptyDir, emptied when the pod is replaced, at each
+  # path the API writes outside its volumes: /tmp, the home folder /home/automatos, /app/logs
+  # and, with `data` off, /app/documents. docs/PRDS/PRD-280-US-103-WRITE-PATHS.md lists what
+  # writes each. A path of your own in `config` (a temporary folder, a log file) must be
+  # under one of these or on a volume. false: the root stays writable and none is mounted.
+  readOnlyRootFilesystem: true
   # The API's own files at /app/data: uploads, brand files and generated documents.
   # With this off they're on the container's disk and lost on every restart. Kept on
   # `helm uninstall`. With ReadWriteOnce or ReadWriteOncePod every rollout stops the old
@@ -117,6 +124,9 @@ api:
 migrations:
   backoffLimit: 1
   activeDeadlineSeconds: 900
+  # A read-only root file system (PRD-280 US-104), with an emptyDir at /tmp, the one path
+  # the Job writes. false: the root stays writable and nothing is mounted.
+  readOnlyRootFilesystem: true
   resources:
     requests:
       cpu: 250m
@@ -132,6 +142,9 @@ frontend:
     digest: ""
     pullPolicy: ""
   replicas: 1
+  # A read-only root file system (PRD-280 US-104). The web app's server writes no file, so
+  # nothing is mounted. false: the root stays writable.
+  readOnlyRootFilesystem: true
   resources:
     requests:
       cpu: 100m
@@ -148,6 +161,11 @@ worker:
     pullPolicy: ""
   concurrency: 3
   defaultQuotaGb: 5
+  # A read-only root file system (PRD-280 US-104), with an emptyDir at /tmp and at the home
+  # folder /home/worker: the coding agent's and the build tools' caches and scratch files.
+  # Commands the worker runs for an agent keep their files on the workspaces volume.
+  # false: the root stays writable and neither is mounted.
+  readOnlyRootFilesystem: true
   resources:
     requests:
       cpu: 250m

@@ -14,7 +14,7 @@ tests:
       - equal:
           path: spec.strategy.type
           value: Recreate
-  - it: lets no worker process gain a privilege, with only the four capabilities its entrypoint needs (F452)
+  - it: lets no worker process gain a privilege, with only the four capabilities its entrypoint needs (F452), on a read-only root (PRD-280 US-104)
     template: templates/worker.yaml
     documentIndex: 0
     asserts:
@@ -22,6 +22,7 @@ tests:
           path: spec.template.spec.containers[0].securityContext
           value:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
               add: ["CHOWN", "DAC_OVERRIDE", "SETUID", "SETGID"]
@@ -75,7 +76,7 @@ tests:
       - equal:
           path: spec.template.spec.serviceAccountName
           value: automatos-web-identity
-  - it: gives the web app the runtime's default system-call filter (PRD-280 US-102)
+  - it: gives the web app the runtime's default system-call filter (PRD-280 US-102) and a read-only root (US-104)
     template: templates/frontend.yaml
     documentIndex: 0
     asserts:
@@ -83,6 +84,7 @@ tests:
           path: spec.template.spec.containers[0].securityContext
           value:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
             seccompProfile:

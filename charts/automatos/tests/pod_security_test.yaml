@@ -1,4 +1,4 @@
-suite: Every container's security settings (PRD-280 US-102)
+suite: Every container's security settings (PRD-280 US-102, and the read-only root of US-104)
 set:
   existingSecret: automatos-secrets
   # Every optional component on.
@@ -35,6 +35,9 @@ tests:
           path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
           value: false
       - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
           path: spec.template.spec.containers[0].securityContext.capabilities.drop
           value: ["ALL"]
       - notExists:
@@ -55,6 +58,9 @@ tests:
           path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
           value: false
       - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
           path: spec.template.spec.containers[0].securityContext.capabilities.drop
           value: ["ALL"]
       - notExists:
@@ -73,6 +79,9 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
           value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
       - equal:
           path: spec.template.spec.containers[0].securityContext.capabilities.drop
           value: ["ALL"]
@@ -93,6 +102,9 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
           value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
       - equal:
           path: spec.template.spec.containers[0].securityContext.capabilities.drop
           value: ["ALL"]
