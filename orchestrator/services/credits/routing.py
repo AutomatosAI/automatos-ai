@@ -125,11 +125,12 @@ def is_free_workspace(db: Any, workspace_id: Any) -> bool:
     return str(workspace_id) in free_workspace_ids(db, [workspace_id])
 
 
-def funding_for(plan: Optional[str], balance: Balance, *, edition: str, background: bool = False,
+def funding_for(plan: Optional[str], balance: Balance, *, billing: bool, background: bool = False,
                 free: bool = False) -> Funding:
     """Pure: how platform-key calls for a workspace on ``plan`` are paid for.
+    ``billing`` is the edition's capability (``core.editions``): off, the owner pays the providers.
     ``free`` — a free owner's workspace — is an allowance whatever the plan."""
-    if edition == "local":
+    if not billing:
         return Funding(FUNDED_BY_LOCAL)
     metered, platform_ai = _plan_facts(plan)
     if free or not metered:
@@ -141,10 +142,11 @@ def funding_for(plan: Optional[str], balance: Balance, *, edition: str, backgrou
 def workspace_funding(db: Any, workspace_id: Any, *, background: bool = False) -> Funding:
     """:func:`funding_for` for a stored workspace: the plan and balance of the workspace that pays for it
     (itself, or a product's owner, ``services.credits.payer``)."""
-    from config import config
+    from core import editions
     from core.models.workspaces import Workspace
 
-    if config.AUTH_EDITION == "local":
+    billing = editions.current().billing
+    if not billing:
         return Funding(FUNDED_BY_LOCAL)
     from services.credits.payer import payer_of
 
@@ -153,7 +155,7 @@ def workspace_funding(db: Any, workspace_id: Any, *, background: bool = False) -
     if payer != str(workspace_id):  # PRD-274 W5d: a product's workspace spends its owner's credits, on its plan
         workspace = db.query(Workspace).get(payer)
     plan = getattr(workspace, "plan", None)
-    return funding_for(plan, read_balance(db, payer), edition=config.AUTH_EDITION, background=background,
+    return funding_for(plan, read_balance(db, payer), billing=billing, background=background,
                        free=is_free_workspace(db, payer))
 
 

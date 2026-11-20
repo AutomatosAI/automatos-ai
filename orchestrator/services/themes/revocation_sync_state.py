@@ -17,7 +17,7 @@ and the admin's sync status (``revocation_pull.sync_status``).
 * **A frozenset**, so a caller can test membership and fingerprint it; ``sorted`` gives the list
   a JSON answer carries.
 
-A leaf: it imports only the models, ``config`` and the standard library, so the revocation rule
+A leaf: it imports only the models, ``core.editions`` and the standard library, so the revocation rule
 (``revocations`` -> ``signature_state``) never reaches the pull or the feed, which would close an
 import cycle (``revocation_feed`` imports ``revocations``).
 """
@@ -29,7 +29,7 @@ import logging
 import threading
 from typing import Any, FrozenSet, Optional
 
-from config import config
+from core import editions
 from core.models.themes import THEME_REVOCATION_SYNC_ROW_ID, ThemeRevocationSync
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,7 @@ def revoked_key_ids(db: Any) -> FrozenSet[str]:
 
     Malformed stored data is logged once (module docstring); its string entries still count.
     """
-    if not config.IS_LOCAL_EDITION:
+    if not editions.current().calls_automatos_cloud:
         return NO_KEYS
     row = db.get(ThemeRevocationSync, THEME_REVOCATION_SYNC_ROW_ID)
     stored = None if row is None else row.revoked_key_ids

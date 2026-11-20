@@ -22,13 +22,13 @@ from services.credits.routing import (
 
 def test_a_free_owners_workspace_is_an_allowance_on_any_plan():
     for plan in ("basic", "pro", "business"):
-        funding = funding_for(plan, Balance(), edition="saas", free=True)
+        funding = funding_for(plan, Balance(), billing=True, free=True)
         assert funding.funded_by == FUNDED_BY_ALLOWANCE and can_pay(funding, 1_000_000)
 
 
 def test_everyone_else_still_pays_and_the_local_edition_still_never_meters():
-    assert funding_for("pro", Balance(), edition="saas").funded_by == FUNDED_BY_CREDITS
-    assert funding_for("pro", Balance(), edition="local", free=True).funded_by == FUNDED_BY_LOCAL
+    assert funding_for("pro", Balance(), billing=True).funded_by == FUNDED_BY_CREDITS
+    assert funding_for("pro", Balance(), billing=False, free=True).funded_by == FUNDED_BY_LOCAL
 
 
 def test_with_nobody_listed_nothing_is_looked_up(monkeypatch):

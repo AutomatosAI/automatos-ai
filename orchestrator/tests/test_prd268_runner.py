@@ -496,7 +496,7 @@ def test_check_in_is_a_background_lane_the_trial_never_pays_for():
     from services.credits.routing import can_pay, funding_for
 
     assert "check_in" in BACKGROUND_LANES and is_background_lane("check_in")
-    funding = funding_for("pro", Balance(trial=500), edition="saas", background=is_background_lane("check_in"))
+    funding = funding_for("pro", Balance(trial=500), billing=True, background=is_background_lane("check_in"))
     assert not can_pay(funding, 1)
 
 

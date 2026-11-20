@@ -39,7 +39,7 @@ from router_manifest import mount_manifest_routers  # PRD-155 S3: fail-loud rout
 # Import database and models
 from core.database.database import init_database, get_db, SessionLocal
 from core.database import pool_watch
-from core import health_probe  # GET /health's probes (F229, F458)
+from core import editions, health_probe  # GET /health's session mode (PRD-277) and probes (F229, F458)
 from core.models import Base
 
 # Import API routers
@@ -1345,9 +1345,9 @@ def health_check():
         "db_pool": pool_watch.pool_numbers(),
         "metrics": health_probe.host_metrics(),
         "extensions": deferred_init.as_dict() if deferred_init else None,
-        # PRD-234 S1b: the CLI host refuses to serve anything but a LOCAL edition
-        # with session mode on — it reads both here before pairing. Names only.
+        # PRD-234 S1b: the CLI host serves only an edition with session mode, switched on. Names only.
         "edition": config.AUTH_EDITION,
+        "session_mode": editions.current().session_mode,
         "cli_runtime_enabled": bool(getattr(config, "CLI_RUNTIME_ENABLED", False)),
     }
     status_code = health_probe.http_status(components)

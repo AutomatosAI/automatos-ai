@@ -54,11 +54,11 @@ def plan_agent_limit(workspace: Any) -> Tuple[str, int]:
     always unlimited: c1 (49 agents, plan 'basic') refused every new agent with
     "Your basic plan includes 5 agents", and so would any self-hoster past five.
     Every create path reads its limit here, so this one gate covers them all."""
-    from config import config
+    from core import editions
     from services.plan_tiers import get_tier
 
     plan = (getattr(workspace, "plan", None) or DEFAULT_PLAN) if workspace is not None else DEFAULT_PLAN
-    if config.IS_LOCAL_EDITION:
+    if not editions.current().billing:
         return plan, UNLIMITED
     return plan, int((get_tier(plan) or {}).get("max_agents", 0) or UNLIMITED)
 

@@ -47,8 +47,8 @@ def test_saas_tiers_unchanged():
 
 
 def test_current_workspace_branches_on_edition_not_role():
-    # One seam: api/workspaces.py picks the profile by AUTH_EDITION, and the
-    # saas branch is the exact pre-existing call.
-    assert re.search(r'exposure_for_local_edition\(\)\s*\n\s*if config\.AUTH_EDITION == "local"', _WORKSPACES_SRC)
+    # One seam: api/workspaces.py picks the profile by the billing capability (PRD-277),
+    # and the saas branch is the exact pre-existing call.
+    assert re.search(r'if editions\.current\(\)\.billing\s*\n\s*else exposure_for_local_edition\(\)', _WORKSPACES_SRC)
     assert 'exposure_for_plan(workspace.plan or "basic")' in _WORKSPACES_SRC
     assert _WORKSPACES_SRC.count("exposure_for_local_edition()") == 1

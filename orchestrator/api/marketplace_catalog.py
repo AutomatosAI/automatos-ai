@@ -59,7 +59,7 @@ from api.public_rate_limit import REFUSAL_HEADERS, per_ip_limit
 from api.themes_files import (
     NO_SERVICE_WORKER, SERVICE_WORKER_HEADER, SERVICE_WORKER_SCRIPT, SERVING_HEADERS, get_theme_file_reader,
 )
-from config import config
+from core import editions
 from core.database.database import get_db
 from core.models.themes import ThemePackage
 from services.marketplace_cloud.catalog import (
@@ -98,13 +98,13 @@ FILES_BUSY = "Automatos Cloud is busy preparing other packages. Try again in a m
 
 def require_hosted_edition() -> None:
     """404 in the local edition, before anything else runs: a local install syncs the catalogue, never serves it."""
-    if config.IS_LOCAL_EDITION:
+    if not editions.current().hosts_automatos_cloud:
         raise HTTPException(status_code=NOT_FOUND, detail=NOT_HOSTED, headers={**REFUSAL_HEADERS})
 
 
 def require_hosted_files() -> None:
     """The files route's edition check: 404 in the local edition, with the files' serving headers."""
-    if config.IS_LOCAL_EDITION:
+    if not editions.current().hosts_automatos_cloud:
         raise HTTPException(status_code=NOT_FOUND, detail=NOT_HOSTED, headers={**FILE_REFUSAL_HEADERS})
 
 

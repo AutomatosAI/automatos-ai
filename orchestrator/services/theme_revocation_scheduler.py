@@ -27,6 +27,7 @@ from typing import Any, Optional
 from apscheduler.triggers.interval import IntervalTrigger
 
 from config import config
+from core import editions
 from services.themes.revocation_pull import PullOutcome, feed_url, pull_feed
 
 logger = logging.getLogger(__name__)
@@ -76,7 +77,7 @@ class ThemeRevocationScheduler:
 
     def start(self, scheduler: Any) -> bool:
         """Register the pull job; False (nothing registered) in the hosted edition or with no feed URL."""
-        if not config.IS_LOCAL_EDITION:
+        if not editions.current().calls_automatos_cloud:
             logger.info("[ThemeRevocations] Hosted edition: it serves the revocation feed, no pull scheduled")
             return False
         if not feed_url():

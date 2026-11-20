@@ -53,6 +53,7 @@ class FakeBackend:
                 backend.calls.append(("GET", self.path))
                 if self.path == "/health":
                     return self._json(200, {"status": "healthy", "edition": backend.edition,
+                                            "session_mode": backend.edition == "local",
                                             "cli_runtime_enabled": backend.enabled})
                 return self._json(404, {"detail": "nope"})
 

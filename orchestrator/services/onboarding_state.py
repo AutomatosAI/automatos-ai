@@ -574,9 +574,9 @@ def advance_past_boom(db: Any, workspace: Any, reason: str, *, commit: bool = Tr
     stage it moved to, or None (not at boom, or the move was refused)."""
     if current_stage(workspace) != BUILD_EVIDENCE_STAGE:
         return None
-    from config import config
+    from core import editions
 
-    target = PAYOFF_NEXT_LOCAL if config.IS_LOCAL_EDITION else PAYOFF_NEXT_SAAS
+    target = PAYOFF_NEXT_SAAS if editions.current().billing else PAYOFF_NEXT_LOCAL
     try:
         advance_onboarding_stage(db, workspace, target, commit=commit)
     except InvalidStageTransition:

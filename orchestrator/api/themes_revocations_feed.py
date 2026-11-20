@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from config import config
+from core import editions
 from core.database.database import get_db
 from services.themes.revocation_feed import build_feed, etag_matches, feed_bytes, feed_etag, unreadable_size
 from services.themes.signature_verify import SigningKeysError
@@ -48,7 +48,7 @@ FEED_TOO_LARGE = "The revocation feed is too large to serve right now. Try again
 def get_revocation_feed(request: Request, db: Session = Depends(get_db)) -> Response:
     """The feed (200), or 304 when ``If-None-Match`` names its ETag; 404 in the local edition; 503 when
     the keys file doesn't load or the feed is too large for a local edition to read."""
-    if config.IS_LOCAL_EDITION:
+    if not editions.current().hosts_automatos_cloud:
         raise HTTPException(status_code=NOT_FOUND, detail=NOT_HOSTED)
     try:
         feed = build_feed(db)

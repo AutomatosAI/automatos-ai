@@ -108,7 +108,7 @@ def test_an_agents_own_mode_wins_and_an_unknown_one_falls_back():
     assert modes.ticket_permission_mode({"permission_mode": "plan"}, "auto") == "plan"
     assert modes.ticket_permission_mode({"permission_mode": "yolo"}, "auto") == "auto"
     assert modes.ticket_permission_mode(None, "manual") == "manual"
-    assert modes.workspace_permission_mode({"permission_mode": "yolo"}, "saas") == "edits"
+    assert modes.workspace_permission_mode({"permission_mode": "yolo"}, False) == "edits"
 
 
 def test_an_agent_configuration_accepts_only_the_four_modes():
