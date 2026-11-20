@@ -59,6 +59,9 @@ spec:
                   optional: true
             {{- end }}
             {{- include "automatos.otelEnv" (dict "ctx" $ "service" "automatos-workspace-worker") | nindent 12 }}
+            {{- with include "automatos.databaseTlsEnv" . | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 8081
@@ -77,6 +80,9 @@ spec:
           volumeMounts:
             - name: workspaces
               mountPath: /workspaces
+            {{- with include "automatos.databaseCaMount" . | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
           # F452 (#1309): the worker runs agent code. No process in it may gain a privilege
           # (a setuid-root binary such as su or passwd runs without root), every capability
           # is dropped but the four the root entrypoint needs, and the runtime's default
@@ -108,6 +114,9 @@ spec:
         - name: workspaces
           persistentVolumeClaim:
             claimName: {{ include "automatos.workspacesClaim" . }}
+        {{- with include "automatos.databaseCaVolume" . | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service
