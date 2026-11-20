@@ -348,40 +348,40 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As a signed-in person, I want a session that lasts while I work and ends when it should, so that I do not sign in on every request.
 
 **Acceptance Criteria:**
-- [ ] A migration adds `auth_sessions` (person, token hash, created, last seen, idle and absolute expiry, `auth_time`, revoked at and why, IP, browser).
-- [ ] Tokens are `ams_` plus 32 random bytes. Only the SHA-256 is stored, using the hashing kernel device tokens use.
-- [ ] `BEARER_RESOLVERS` gains an `ams_` entry. `hybrid.py` gains no branch.
-- [ ] The resolver accepts the token from the `Authorization` header, or from the `__Host-` cookie when there is no header.
-- [ ] An expired, revoked or unknown session gets 401 with a code the web app recognises.
-- [ ] A session for a deactivated person is refused.
-- [ ] The session records the ID token's `sid` when the IdP sends one.
-- [ ] `last seen` is written at most every 5 minutes, as the device lane does.
-- [ ] The resolver is registered only in enterprise. In `local` and `saas` an `ams_` token is refused.
+- [x] A migration adds `auth_sessions` (person, token hash, created, last seen, idle and absolute expiry, `auth_time`, revoked at and why, IP, browser). `prd277_w3_sessions_20261120`, unique on the token hash and indexed on the person; the model is `core/models/auth_sessions.py`, and the two head pins moved.
+- [x] Tokens are `ams_` plus 32 random bytes. Only the SHA-256 is stored, using the hashing kernel device tokens use. `issue_session` in `core/auth/sessions.py` (`mint_token`, `hash_secret`); a lookup is confirmed in constant time (`secrets_match`).
+- [x] `BEARER_RESOLVERS` gains an `ams_` entry. `hybrid.py` gains no branch. The lane is `core/auth/session_lane.py`.
+- [x] The resolver accepts the token from the `Authorization` header, or from the `__Host-` cookie when there is no header. The cookie is read only when there is no `Authorization` header of any scheme and no API key; its name is `SESSION_COOKIE_NAME`, which start-up refuses without the `__Host-` prefix.
+- [x] An expired, revoked or unknown session gets 401 with a code the web app recognises. `{"code": "session_ended", "reason": "expired" | "revoked" | "unknown"}`.
+- [x] A session for a deactivated person is refused. At resolution (`session_ended`, `revoked`), and `issue_session` issues none (`SignInRefused`).
+- [x] The session records the ID token's `sid` when the IdP sends one. `auth_sessions.idp_session_id`; Wave 4's callback passes it to `issue_session`.
+- [x] `last seen` is written at most every 5 minutes, as the device lane does. With the idle clock, by the device lane's own `LAST_SEEN_WRITE_INTERVAL`.
+- [x] The resolver is registered only in enterprise. In `local` and `saas` an `ams_` token is refused. The new capability `issues_sessions` gates the registry entry (`LANE_REGISTERED_WHEN`); elsewhere an `ams_` token reaches the Clerk lane as before and is refused there. Tests: `test_prd277_w3_session_lane.py`, `test_prd277_w3_sessions_realdb.py`, `test_prd277_w3_migration.py`.
 
 #### US-302: Requests that change things cannot be forged from another site · M · security review
 **Description:** As a signed-in person, I want another website to be unable to act as me, so that a session cookie is safe.
 
 **Acceptance Criteria:**
-- [ ] A cookie-authenticated request with an unsafe method is refused unless its origin is the install's own and it carries the required header.
-- [ ] A request authenticated by the `Authorization` header is not subject to the check.
-- [ ] Tests cover: cross-site form post refused, same-origin fetch allowed, header-authenticated call allowed.
+- [x] A cookie-authenticated request with an unsafe method is refused unless its origin is the install's own and it carries the required header. `core/auth/session_cookie.py`: the `Origin` (else the `Referer`) must equal `FRONTEND_URL`'s origin, and `SESSION_CSRF_HEADER` must be present; checked before the session is looked up.
+- [x] A request authenticated by the `Authorization` header is not subject to the check.
+- [x] Tests cover: cross-site form post refused, same-origin fetch allowed, header-authenticated call allowed. `test_prd277_w3_session_lane.py`.
 
 #### US-303: Ending a session · M
 **Description:** As a person or an admin, I want to end a session now, so that access stops when it should.
 
 **Acceptance Criteria:**
-- [ ] `POST /api/v1/auth/sign-out` revokes the caller's session and clears the cookie.
-- [ ] An admin route revokes one session or every session of a person. It requires step-up.
-- [ ] Deactivating a person revokes their sessions and device tokens in the same transaction.
-- [ ] New routes are in `route-manifest.json`, authenticated and authorised.
+- [x] `POST /api/v1/auth/sign-out` revokes the caller's session and clears the cookie. `api/auth_sessions.py`. Sending the browser to the IdP's end-session address (§5.6) needs the IdP metadata, which Wave 4 reads.
+- [x] An admin route revokes one session or every session of a person. It requires step-up. `POST /api/v1/auth/sessions/{session_id}/revoke` and `POST /api/v1/auth/people/{user_id}/sessions/revoke`, with `GET /api/v1/auth/people/{user_id}/sessions` to list them. Step-up in enterprise goes through `step_up.confirm_by_signing_in_again`, which refuses until US-406 fills it.
+- [x] Deactivating a person revokes their sessions and device tokens in the same transaction. `deactivate_person` in `core/auth/people.py`, served as `POST /api/v1/auth/people/{user_id}/deactivate` (step-up).
+- [x] New routes are in `route-manifest.json`, authenticated and authorised. Sign-out by the session itself; the others by an install admin on the session lane, in the boundary sweep.
 
 #### US-304: Sign-ins are in the audit log · S
 **Description:** As a compliance reviewer, I want every sign-in, refusal and sign-out recorded, so that I can show who had access and when.
 
 **Acceptance Criteria:**
-- [ ] The actions in §5.12 are written through `AuditService.log`.
-- [ ] A refusal records its reason and never the token.
-- [ ] A test asserts one row per event with the person's id where known.
+- [ ] The actions in §5.12 are written through `AuditService.log`. Wave 3 writes `auth:sign_in`, `auth:sign_in_refused` (deactivated), `auth:sign_out`, `auth:session_revoked` and `user:deactivated`. `auth:step_up`, `auth:identity_linked`, `auth:bootstrap_admin` and the other refusal reasons are named in `core/auth/session_audit.py` and written by Wave 4's code (US-401 to US-406).
+- [x] A refusal records its reason and never the token. `record_sign_in_refused` in `core/auth/session_audit.py` writes only the reason, one of the four in §5.12.
+- [x] A test asserts one row per event with the person's id where known. `test_prd277_w3_sessions_realdb.py`: sign-in, refusal, sign-out, ended sessions and deactivation.
 
 ### Wave 4: OIDC
 

@@ -19,8 +19,11 @@ edition     behaviour
             none of them has a person who can sign in again.
 ==========  ==================================================================
 
-``enterprise`` (``reauth``: sign in again at the identity provider, PRD-277 US-406)
-refuses every context until that is built: never a pass, and never Clerk's ``fva``.
+``enterprise`` (``reauth``: sign in again at the identity provider, PRD-277 US-406) goes
+through one seam, ``confirm_by_signing_in_again``, which refuses every context until US-406
+fills it: never a pass, and never Clerk's ``fva``. What it will read is already on the request:
+a session context carries the time its person last proved who they are
+(``core.auth.session_lane.session_auth_time``, from ``auth_sessions.auth_time``).
 
 The ``fva`` claim ("factor verification age") is Clerk's session-token claim
 ``[first_factor_minutes, second_factor_minutes]``, ``-1`` for a factor never
@@ -187,9 +190,28 @@ def _refuse_without_person(auth_type: Any) -> HTTPException:
     )
 
 
+def _confirms_by_signing_in_again() -> bool:
+    return editions.current().step_up == editions.STEP_UP_REAUTH
+
+
+def confirm_by_signing_in_again(ctx: Any, max_age_minutes: int, now: float) -> None:
+    """Step-up where people confirm by signing in again at the identity provider (``reauth``).
+
+    The seam PRD-277 US-406 fills, and the only place it changes: a session context passes
+    when ``session_lane.session_auth_time(ctx)`` is less than ``max_age_minutes`` before
+    ``now``, and is otherwise sent to sign in again; every other context (a device, a key,
+    no person) is refused, and a session with no ``auth_time`` fails closed. Until then it
+    refuses every context.
+    """
+    raise _refuse_not_built(getattr(ctx, "auth_type", None))
+
+
 def check_step_up(ctx: Any, max_age_minutes: int, now: float) -> None:
     """Raise unless ``ctx`` satisfies step-up in the current edition."""
     if _skips_step_up():
+        return
+    if _confirms_by_signing_in_again():
+        confirm_by_signing_in_again(ctx, max_age_minutes, now)
         return
     auth_type = getattr(ctx, "auth_type", None)
     if not _reads_clerk_freshness():

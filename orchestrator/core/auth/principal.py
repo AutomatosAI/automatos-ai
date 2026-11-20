@@ -23,14 +23,16 @@ from sqlalchemy import text
 
 
 # The only lanes that stash the integer PK on ``raw_claims``: the local
-# operator context in ``core/auth/hybrid.py`` (``"source": "local_operator"``)
-# and the paired-device lane in ``core/auth/device.py`` (PRD-266,
-# ``"source": "mobile_device"``). The Clerk lane's ``raw_claims`` is the RAW JWT
+# operator context in ``core/auth/hybrid.py`` (``"source": "local_operator"``),
+# the paired-device lane in ``core/auth/device.py`` (PRD-266,
+# ``"source": "mobile_device"``) and the session lane (PRD-277, ``"auth_session"``). The Clerk lane's ``raw_claims`` is the RAW JWT
 # payload; a claim that merely happens to be called ``user_id`` there must
 # never be trusted as our PK.
 LOCAL_OPERATOR_CLAIM_SOURCE = "local_operator"
 MOBILE_DEVICE_CLAIM_SOURCE = "mobile_device"
-_PK_CLAIM_SOURCES = frozenset({LOCAL_OPERATOR_CLAIM_SOURCE, MOBILE_DEVICE_CLAIM_SOURCE})
+# PRD-277 Wave 3: the session lane (``core/auth/session_lane.py``), a signed-in person by ``users.id``.
+AUTH_SESSION_CLAIM_SOURCE = "auth_session"
+_PK_CLAIM_SOURCES = frozenset({LOCAL_OPERATOR_CLAIM_SOURCE, MOBILE_DEVICE_CLAIM_SOURCE, AUTH_SESSION_CLAIM_SOURCE})
 # The lane whose raw_claims is that verified JWT's payload: whatever it says, it is
 # never one of the two lanes above (PRD-266 US-004b security review).
 CLERK_AUTH_TYPE = "clerk"
@@ -93,4 +95,4 @@ def resolve_user_pk(db: Any, ctx: Any) -> Optional[int]:
     return None
 
 
-__all__ = ["LOCAL_OPERATOR_CLAIM_SOURCE", "MOBILE_DEVICE_CLAIM_SOURCE", "claimed_user_pk", "resolve_user_pk"]
+__all__ = ["AUTH_SESSION_CLAIM_SOURCE", "LOCAL_OPERATOR_CLAIM_SOURCE", "MOBILE_DEVICE_CLAIM_SOURCE", "claimed_user_pk", "resolve_user_pk"]

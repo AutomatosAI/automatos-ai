@@ -446,7 +446,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # the guard follows it.
     people = (versions / "prd277_w2_identities_20261120.py").read_text()
     assert 'down_revision = "merge_heads_20261117"' in people
-    assert 'EXPECTED_HEAD = "prd277_w2_identities_20261120"' in guard
+    # 2026-11-20 (PRD-277 Wave 3, US-301): prd277_w3_sessions_20261120 chains onto Wave 2's
+    # revision — auth_sessions, a new table; the guard follows it.
+    sessions = (versions / "prd277_w3_sessions_20261120.py").read_text()
+    assert 'down_revision = "prd277_w2_identities_20261120"' in sessions
+    assert 'EXPECTED_HEAD = "prd277_w3_sessions_20261120"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

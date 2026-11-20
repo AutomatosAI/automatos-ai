@@ -13,13 +13,20 @@
    build", so a half-built edition can never run. Wave 4 (US-401 to US-408), which builds OIDC
    sign-in, deletes that switch and this check.
 
+``check_session_settings`` (PRD-277 Wave 3) is called just before it. Where the edition issues its
+own sessions (``issues_sessions``) it refuses to start unless both clocks are whole numbers of at
+least one and the idle clock is no longer than the absolute one, the cookie's name is a ``__Host-``
+name (so the browser only accepts it Secure, on ``/``, for this host alone) and the header a
+cookie-authenticated change must carry is a valid header name. The refusal names the setting.
+
 Every other edition passes untouched: nothing here reads a setting it does not use.
 
 Imports no config and reads no setting itself: ``config.py`` hands the values in.
 """
 from __future__ import annotations
 
-from typing import Mapping, Optional, Tuple
+import re
+from typing import Any, Mapping, Optional, Tuple
 
 from core import editions
 
@@ -39,6 +46,17 @@ NOT_AVAILABLE = (
     "organisation's identity provider is not built yet (PRD-277 Wave 4). Set AUTH_EDITION=local "
     "or AUTH_EDITION=saas."
 )
+
+
+# The session settings ``check_session_settings`` reads (PRD-277 §5.3, D-15).
+SESSION_SETTINGS: Tuple[str, ...] = (
+    "SESSION_IDLE_MINUTES", "SESSION_ABSOLUTE_HOURS", "SESSION_COOKIE_NAME", "SESSION_CSRF_HEADER",
+)
+SESSION_COOKIE_PREFIX = "__Host-"
+MINUTES_PER_HOUR = 60
+# RFC 9110 §5.6.2 / RFC 6265 §4.1.1: a header name and a cookie name are each a "token".
+_TOKEN = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+BAD_SESSION_SETTING = "AUTH_EDITION=enterprise cannot start: {name} {problem}."
 
 
 class EditionNotReady(RuntimeError):
@@ -72,12 +90,50 @@ def check_start_up(capabilities: editions.EditionCapabilities, settings: Mapping
         raise EditionNotReady(NOT_AVAILABLE)
 
 
+def _whole_number_at_least_one(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def _session_setting_problems(settings: Mapping[str, Any]):
+    """Each ``(name, problem)`` among ``SESSION_SETTINGS``, in that order; the value is never quoted."""
+    idle, absolute = settings.get("SESSION_IDLE_MINUTES"), settings.get("SESSION_ABSOLUTE_HOURS")
+    for name, value in (("SESSION_IDLE_MINUTES", idle), ("SESSION_ABSOLUTE_HOURS", absolute)):
+        if not _whole_number_at_least_one(value):
+            yield name, "must be a whole number of at least 1"
+    if _whole_number_at_least_one(idle) and _whole_number_at_least_one(absolute) \
+            and idle > absolute * MINUTES_PER_HOUR:
+        yield "SESSION_IDLE_MINUTES", "must not be longer than SESSION_ABSOLUTE_HOURS"
+    cookie = str(settings.get("SESSION_COOKIE_NAME") or "")
+    if not (cookie.startswith(SESSION_COOKIE_PREFIX) and _TOKEN.match(cookie)):
+        yield "SESSION_COOKIE_NAME", f"must be a cookie name that starts with {SESSION_COOKIE_PREFIX}"
+    if not _TOKEN.match(str(settings.get("SESSION_CSRF_HEADER") or "")):
+        yield "SESSION_CSRF_HEADER", "must be a header name"
+
+
+def check_session_settings(capabilities: editions.EditionCapabilities, settings: Mapping[str, Any]) -> None:
+    """Raise ``EditionNotReady`` for the first bad session setting where the edition issues sessions.
+
+    ``settings`` maps each name in ``SESSION_SETTINGS`` to its value. Every other edition returns
+    at once, reading nothing.
+    """
+    if not capabilities.issues_sessions:
+        return
+    first = next(_session_setting_problems(settings), None)
+    if first is not None:
+        name, problem = first
+        raise EditionNotReady(BAD_SESSION_SETTING.format(name=name, problem=problem))
+
+
 __all__ = [
+    "BAD_SESSION_SETTING",
     "MISSING_SETTINGS",
     "NOT_AVAILABLE",
     "OIDC_SIGN_IN_IN_THIS_BUILD",
     "OIDC_START_UP_SETTINGS",
+    "SESSION_COOKIE_PREFIX",
+    "SESSION_SETTINGS",
     "EditionNotReady",
+    "check_session_settings",
     "check_start_up",
     "missing_settings",
 ]
