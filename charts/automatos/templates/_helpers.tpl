@@ -147,9 +147,33 @@ true
 {{- end }}
 
 {{/*
+The API's scratch volumes under a read-only root, space-separated; api-deployment.yaml
+mounts each of them (/app/documents only with api.data.enabled=false, the one case the
+document paths are checked against this list).
+*/}}
+{{- define "automatos.apiScratchDirs" -}}
+/tmp /home/automatos /app/logs /app/documents
+{{- end }}
+
+{{/*
+"true" when a path the API writes (a config value; a relative one is under its working
+directory, /app) is under one of its scratch volumes once cleaned of "." and "..".
+*/}}
+{{- define "automatos.apiScratchPath" -}}
+{{- $path := toString . -}}
+{{- if not (isAbs $path) }}{{ $path = printf "/app/%s" $path }}{{ end -}}
+{{- $path = clean $path -}}
+{{- range $dir := include "automatos.apiScratchDirs" $ | splitList " " -}}
+{{- if or (eq $path $dir) (hasPrefix (printf "%s/" $dir) $path) }}true{{ end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Stops a release at render time, before any hook runs, on values that can't work. A name
 in `config` that the chart also sets would be rendered twice, and an upgrade then fails
-partway through. A second replica on a single-attach volume would hang waiting for it.
+partway through. A second replica on a single-attach volume would hang waiting for it. A
+document path of the operator's own outside the API's scratch volumes, under a read-only
+root, would fail at the first upload.
 */}}
 {{- define "automatos.validateApi" -}}
 {{- $config := .Values.config | default dict -}}
@@ -165,8 +189,75 @@ partway through. A second replica on a single-attach volume would hang waiting f
 {{- end }}
 {{- end }}
 {{- end }}
+{{- if .Values.api.readOnlyRootFilesystem }}
+{{- if hasKey $config "HOME" }}
+{{- fail "config.HOME: with a read-only root (api.readOnlyRootFilesystem) the chart sets HOME to the API's home scratch volume, /home/automatos. Remove it from config, or set api.readOnlyRootFilesystem=false" }}
+{{- end }}
+{{- if not .Values.api.data.enabled }}
+{{- range $key := list "DOCUMENT_UPLOAD_DIR" "DOCUMENT_STORAGE_DIR" }}
+{{- if and (hasKey $config $key) (not (include "automatos.apiScratchPath" (get $config $key))) }}
+{{- fail (printf "config.%s is %q: with api.data.enabled=false and a read-only root (api.readOnlyRootFilesystem) the API can write only under its scratch volumes, %s. Use a path under one of them, or set api.readOnlyRootFilesystem=false" $key (get $config $key | toString) (include "automatos.apiScratchDirs" $ | splitList " " | join ", ")) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- if and (include "automatos.apiDataSingleAttach" .) (gt (int .Values.api.replicas) 1) }}
 {{- fail "api.replicas above 1 needs api.data.accessModes without ReadWriteOnce or ReadWriteOncePod. A claim's access modes can't change after it's created, so set this at install" }}
+{{- end }}
+{{- end }}
+
+{{/*
+TLS to PostgreSQL (PRD-278 W3), for the API, the migration Job and the worker: the same
+two settings the app reads, and the CA file mounted from `database.caConfigMap`. Nothing
+when `database` is left empty. Stops rendering on values the app would refuse at start.
+*/}}
+{{- define "automatos.databaseCaDir" -}}
+/etc/automatos/database-ca
+{{- end }}
+
+{{- define "automatos.validateDatabaseTls" -}}
+{{- $config := .Values.config | default dict -}}
+{{- range $key := list "DATABASE_SSLMODE" "DATABASE_SSLROOTCERT" }}
+{{- if hasKey $config $key }}
+{{- fail (printf "config.%s: set database.sslmode and database.caConfigMap instead, so the worker gets it too" $key) }}
+{{- end }}
+{{- end }}
+{{- with .Values.database.sslmode }}
+{{- if not (has . (list "disable" "allow" "prefer" "require" "verify-ca" "verify-full")) }}
+{{- fail (printf "database.sslmode must be disable, allow, prefer, require, verify-ca or verify-full, got %q" .) }}
+{{- end }}
+{{- end }}
+{{- if and .Values.database.caConfigMap (not (has .Values.database.sslmode (list "verify-ca" "verify-full"))) }}
+{{- fail "database.caConfigMap needs database.sslmode verify-ca or verify-full: the CA file is used only to check the server's certificate" }}
+{{- end }}
+{{- end }}
+
+{{- define "automatos.databaseTlsEnv" -}}
+{{- include "automatos.validateDatabaseTls" . -}}
+{{- with .Values.database.sslmode }}
+- name: DATABASE_SSLMODE
+  value: {{ . | quote }}
+{{- end }}
+{{- if .Values.database.caConfigMap }}
+- name: DATABASE_SSLROOTCERT
+  value: {{ printf "%s/%s" (include "automatos.databaseCaDir" .) .Values.database.caKey | quote }}
+{{- end }}
+{{- end }}
+
+{{/* The CA file's volume and its read-only mount. Nothing without database.caConfigMap. */}}
+{{- define "automatos.databaseCaVolume" -}}
+{{- with .Values.database.caConfigMap }}
+- name: database-ca
+  configMap:
+    name: {{ . }}
+{{- end }}
+{{- end }}
+
+{{- define "automatos.databaseCaMount" -}}
+{{- if .Values.database.caConfigMap }}
+- name: database-ca
+  mountPath: {{ include "automatos.databaseCaDir" . }}
+  readOnly: true
 {{- end }}
 {{- end }}
 
@@ -205,6 +296,7 @@ before any of the release's ordinary resources exist.
 - name: WORKER_INTERNAL_URL
   value: {{ printf "http://%s-worker:8081" (include "automatos.fullname" .) | quote }}
 {{- end }}
+{{- include "automatos.databaseTlsEnv" . }}
 {{- range $name, $value := .Values.config }}
 - name: {{ $name }}
   value: {{ $value | toString | quote }}

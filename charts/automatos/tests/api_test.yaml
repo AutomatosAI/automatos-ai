@@ -66,12 +66,13 @@ tests:
       - equal:
           path: spec.template.spec.automountServiceAccountToken
           value: false
-  - it: has the runtime's default system-call filter (PRD-280 US-102)
+  - it: has the runtime's default system-call filter (PRD-280 US-102) and a read-only root (US-104)
     asserts:
       - equal:
           path: spec.template.spec.containers[0].securityContext
           value:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
             seccompProfile:
@@ -239,9 +240,12 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "config.DOCUMENT_STORAGE_DIR: api.data sets this"
-  - it: takes the document paths from config once data is off
+  # With a read-only root as well, a path outside the API's scratch volumes stops the
+  # render (read_only_root_test.yaml).
+  - it: takes the document paths from config once data is off, on a writable root
     set:
       api:
+        readOnlyRootFilesystem: false
         data:
           enabled: false
       config:

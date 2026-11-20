@@ -32,7 +32,10 @@ edition:
 # Extra non-secret settings for the API and the migration Job: any name config.py
 # reads. The chart already sets the edition, the worker URL and the workspace path, and
 # rendering fails on AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY here (they go in the
-# Secret), and on DOCUMENT_UPLOAD_DIR and DOCUMENT_STORAGE_DIR while api.data is on.
+# Secret), on DOCUMENT_UPLOAD_DIR and DOCUMENT_STORAGE_DIR while api.data is on (and,
+# while it is off under api.readOnlyRootFilesystem, on either outside the API's scratch
+# volumes), on HOME under api.readOnlyRootFilesystem (the chart sets it), and on
+# DATABASE_SSLMODE and DATABASE_SSLROOTCERT (set `database` below).
 # Quote LOCAL_REMOTE_ACCESS: YAML reads a bare `off` as false, which the API refuses.
 config:
   ENVIRONMENT: production
@@ -46,6 +49,27 @@ config:
   AGENT_OPT_WORKER_URL: ""  # the agent-optimisation worker
   LOKI_URL: ""              # log search
   PROMETHEUS_URL: ""        # metrics queries
+
+# TLS on the connection to PostgreSQL from the API, the migration Job and the worker
+# (PRD-278). All empty, the default: nothing is set or mounted, and each connection
+# behaves as it does today. Set these here, not in `config` (rendering fails there):
+# the worker doesn't read `config`.
+database:
+  # DATABASE_SSLMODE: disable, allow, prefer, require, verify-ca or verify-full.
+  # verify-full checks the server's certificate against the CA below and its host name
+  # against the address in DATABASE_URL.
+  sslmode: ""
+  # A ConfigMap in the release's namespace holding the CA certificate(s) that signed the
+  # server's certificate: for a managed database, the provider's bundle. Mounted read-only
+  # at /etc/automatos/database-ca in the API, the Job and the worker, and
+  # DATABASE_SSLROOTCERT names the file. Needs sslmode verify-ca or verify-full.
+  # Changing the ConfigMap: the kubelet updates the mounted file in place, after its sync
+  # delay (a minute or so). Each new connection then trusts the new file; a connection
+  # already open keeps the session it has until it closes. A file that holds no
+  # certificate stops a pod at its next start. Put the old and the new CA in one bundle
+  # until the server presents its new certificate. Restart the pods to be certain.
+  caConfigMap: ""
+  caKey: ca.crt         # the ConfigMap's key that holds the CA file
 
 # Each component's image. `tag` defaults to the chart's appVersion (edge, which moves
 # with main). `digest` (sha256:...) pins one exact build and wins over the tag: the pod
@@ -65,6 +89,13 @@ api:
   # uvicorn worker processes per pod. Prefer more pods over more workers once the
   # schedulers can run on several replicas.
   uvicornWorkers: 1
+  # A read-only root file system (PRD-280 US-104), so the running container cannot change
+  # its own image. The chart mounts an emptyDir, emptied when the pod is replaced, at each
+  # path the API writes outside its volumes: /tmp, the home folder /home/automatos, /app/logs
+  # and, with `data` off, /app/documents. docs/PRDS/PRD-280-US-103-WRITE-PATHS.md lists what
+  # writes each. A path of your own in `config` (a temporary folder, a log file) must be
+  # under one of these or on a volume. false: the root stays writable and none is mounted.
+  readOnlyRootFilesystem: true
   # The API's own files at /app/data: uploads, brand files and generated documents.
   # With this off they're on the container's disk and lost on every restart. Kept on
   # `helm uninstall`. With ReadWriteOnce or ReadWriteOncePod every rollout stops the old
@@ -95,6 +126,9 @@ api:
 migrations:
   backoffLimit: 1
   activeDeadlineSeconds: 900
+  # A read-only root file system (PRD-280 US-104), with an emptyDir at /tmp, the one path
+  # the Job writes. false: the root stays writable and nothing is mounted.
+  readOnlyRootFilesystem: true
   resources:
     requests:
       cpu: 250m
@@ -110,6 +144,9 @@ frontend:
     digest: ""
     pullPolicy: ""
   replicas: 1
+  # A read-only root file system (PRD-280 US-104). The web app's server writes no file, so
+  # nothing is mounted. false: the root stays writable.
+  readOnlyRootFilesystem: true
   resources:
     requests:
       cpu: 100m
@@ -126,6 +163,11 @@ worker:
     pullPolicy: ""
   concurrency: 3
   defaultQuotaGb: 5
+  # A read-only root file system (PRD-280 US-104), with an emptyDir at /tmp and at the home
+  # folder /home/worker: the coding agent's and the build tools' caches and scratch files.
+  # Commands the worker runs for an agent keep their files on the workspaces volume.
+  # false: the root stays writable and neither is mounted.
+  readOnlyRootFilesystem: true
   resources:
     requests:
       cpu: 250m
