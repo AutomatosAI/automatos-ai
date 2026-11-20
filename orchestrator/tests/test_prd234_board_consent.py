@@ -113,7 +113,6 @@ def test_creation_is_consent_follows_the_edition(monkeypatch):
 
     assert hasattr(app_config, "AUTH_EDITION"), "the canonical config object carries the edition"
     monkeypatch.setattr(app_config, "AUTH_EDITION", "local")
-    assert board_consent.edition() == "local"
     assert board_consent.creation_is_consent() is True
     monkeypatch.setattr(app_config, "AUTH_EDITION", "saas")
     assert board_consent.creation_is_consent() is False

@@ -20,6 +20,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
+from core import editions
+
 logger = logging.getLogger(__name__)
 
 WHY_MOVED_TO_IN_PROGRESS = "the operator moved the ticket to In Progress"
@@ -30,7 +32,6 @@ WHY_ASKED_IN_CHAT = "the operator asked Auto for it in chat"
 WHY_SCHEDULED_LANE = "the operator's standing schedule filed it (heartbeat / lane)"
 WHY_SCHEDULED_AND_ASSIGNED = "the operator scheduled the ticket and assigned it"
 
-LOCAL_EDITION = "local"
 SKIPPED = "skipped"
 # What record_operator_consent found or did (its return value).
 ACTIVE = "active"
@@ -70,22 +71,6 @@ def actor_from_user_id(user_id: Any) -> str:
     return f"user:{user_id}" if user_id else "user:unknown"
 
 
-def edition() -> str:
-    """The running edition (``local`` | ``saas``) from the canonical config object.
-
-    ``config.py`` exports the settings instance as ``config.config`` (the name
-    every service imports); the first cut looked for ``settings`` and fell back
-    to the bare module, which has no ``AUTH_EDITION`` — so the local edition read
-    as saas and ticket 85 was parked behind grant #21 like before.
-    """
-    try:
-        from config import config as app_config
-
-        return str(getattr(app_config, "AUTH_EDITION", "saas") or "saas").lower()
-    except Exception:  # noqa: BLE001 — an unreadable edition keeps the asking posture
-        return "saas"
-
-
 def driver_from_caller_context(caller_context: Any) -> Optional[str]:
     """The human behind a chat tool call, or None for an autonomous run.
 
@@ -100,8 +85,13 @@ def driver_from_caller_context(caller_context: Any) -> Optional[str]:
 
 
 def creation_is_consent() -> bool:
-    """True on the local edition only — one operator, so filing a ticket IS approving it."""
-    return edition() == LOCAL_EDITION
+    """True where one person runs the install (``multi_person`` off: the local edition), so
+    filing a ticket IS approving it. An edition that cannot be read keeps the asking posture."""
+    try:
+        return not editions.current().multi_person
+    except Exception:  # an unreadable edition keeps the asking posture
+        logger.exception("[board_consent] the edition could not be read; filing a ticket is not its approval")
+        return False
 
 
 def consent_for_lane_ticket(

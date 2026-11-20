@@ -2850,11 +2850,11 @@ class Config:
                 )
 
         # PRD-266 §4.3: imported here, at boot, so config.py never imports the app.
+        from core.editions import capabilities_for
         from services.mobile import remote_access
-        remote_access.enforce_boot_decision(self.AUTH_EDITION, self.LOCAL_REMOTE_ACCESS, {
-            "API_PUBLISH_ADDRESS": self.API_PUBLISH_ADDRESS,
-            "WEB_PUBLISH_ADDRESS": self.WEB_PUBLISH_ADDRESS,
-        })
+        addresses = {"API_PUBLISH_ADDRESS": self.API_PUBLISH_ADDRESS, "WEB_PUBLISH_ADDRESS": self.WEB_PUBLISH_ADDRESS}
+        operator_lane = capabilities_for(self.AUTH_EDITION).anonymous_operator
+        remote_access.enforce_boot_decision(operator_lane, self.LOCAL_REMOTE_ACCESS, addresses)
 
     def validate(self) -> bool:
         """

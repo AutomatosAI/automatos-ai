@@ -4,7 +4,9 @@ Every capability is pinned for ``local`` and ``saas`` to what the code does now
 (docs/PRDS/PRD-277-EDITION-CHECKS.md, one row per call site). Adding a capability
 without pinning it here fails ``test_every_capability_is_pinned``; changing an
 answer for ``local`` or ``saas`` fails it too. No edition beyond those two has a
-row yet: ``enterprise`` arrives with US-103, so here it must be refused.
+row yet: ``enterprise`` arrives with US-103, so ``capabilities_for`` must refuse it.
+``current()`` follows the flag's own rule instead (PRD-277 §5.1): trimmed, lower-cased,
+and ``saas`` for a value with no row, as ``config.py`` does at load.
 """
 from __future__ import annotations
 
@@ -97,6 +99,17 @@ def test_current_follows_the_configured_edition(monkeypatch, edition):
     from config import config
 
     monkeypatch.setattr(config, "AUTH_EDITION", edition)
+    assert editions.current() == capabilities_for(edition)
+
+
+@pytest.mark.parametrize("value, edition", [
+    ("LOCAL", "local"), (" local ", "local"), ("Saas", "saas"),
+    ("enterprise", "saas"), ("something-else", "saas"), ("", "saas"), (None, "saas"),
+])
+def test_current_reads_an_unknown_or_unfolded_value_as_config_does(monkeypatch, value, edition):
+    from config import config
+
+    monkeypatch.setattr(config, "AUTH_EDITION", value)
     assert editions.current() == capabilities_for(edition)
 
 

@@ -40,6 +40,7 @@ from types import MappingProxyType
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from config import config
+from core import editions
 from core.monitoring import turn_clock
 from modules.voice.speech import is_configured as voice_tts_configured
 from services.calibration.switch import calibration_enabled
@@ -162,8 +163,8 @@ def _clerk_block() -> Dict[str, str]:
 
 
 def _auth_and_pairing() -> Tuple[Dict[str, Any], Dict[str, bool]]:
-    """The ``auth`` and ``pairing`` blocks for this edition and remote-access mode."""
-    if config.IS_LOCAL_EDITION:
+    """The ``auth`` and ``pairing`` blocks for this edition's ``sign_in`` and remote-access mode."""
+    if editions.current().sign_in == editions.SIGN_IN_NONE:
         auth = {"modes": [AUTH_MODE_DEVICE], "clerk": None}
         return auth, {"enabled": config.LOCAL_REMOTE_ACCESS == MODE_PAIRED}
     return {"modes": [AUTH_MODE_CLERK], "clerk": _clerk_block()}, {"enabled": False}

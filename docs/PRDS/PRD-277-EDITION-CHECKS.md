@@ -74,9 +74,9 @@ A migration is history. Rewriting it to read a capability changes what an old re
 | 20 | `api/marketplace_cloud_items.py:49` | H | "Items brought from Cloud" routes answer 404 | `calls_automatos_cloud` | served | 404 | served only if Cloud sync is switched on |
 | 21 | `api/marketplace_cloud_sync.py:57` | H | Cloud Sync routes answer 404 | `calls_automatos_cloud` | served | 404 | served only if Cloud sync is switched on |
 | 22 | `api/marketplace_themes_submit.py:145` | C | A submitter with no `users` row is refused | `anonymous_operator` | allowed | 403 | 403 |
-| 23 | `api/mobile_devices.py:216` | H | Minting a pairing code answers 404 | `device_pairing` | served | 404 | served when pairing is on (D-7; Wave 6) |
+| 23 | `api/mobile_devices.py:216` | H | Minting a pairing code answers 404; the same guard also gates `POST /pair` through `_require_paired_mode` | `device_pairing` | served | 404 | served when pairing is on (D-7; Wave 6) |
 | 24 | `api/mobile_push.py:105` | H | Push-consent read and write answer 404 | `push_needs_consent` | served | 404 | **For Gerard** |
-| 25 | `api/profile.py:119` | C | `editable` in the profile answer | `profile_editable` | true | false | false |
+| 25 | `api/profile.py:119` | C | `editable` in the profile answer; the same check chooses the email note | `profile_editable` | true | false | false |
 | 26 | `api/profile.py:121` | R | `edition` in the profile answer | (name) | `local` | `saas` | `enterprise` |
 | 27 | `api/profile.py:158` | C | Profile update refused ("managed by your identity provider") | `profile_editable` | allowed | 403 | 403 |
 | 28 | `api/public_marketplace.py:76` | H | Public Marketplace answers 404 | `hosts_automatos_cloud` | 404 | served | 404 |
@@ -126,7 +126,7 @@ A migration is history. Rewriting it to read a capability changes what an old re
 | 52 | `modules/socials/render.py:161` | C | `_local_edition()` (line 166): "start the media profile with `docker compose`" | `operator_is_user` | compose hint | "not configured" / "unreachable" | **For Gerard** |
 | 53 | `modules/tools/discovery/handlers_onboarding.py:235` | H | Onboarding skips `powerup` (the bring-your-own-key card after the trial) | `billing` | skipped | shown | skipped |
 | 54 | `modules/tools/discovery/platform_executor.py:447` | H | A chat turn with no Clerk id may still count as an owner's instruction, by the driving user's role | `sign_in` | by driving user | refused | by the person's `users.id` (Wave 2 resolver) |
-| 55 | `modules/tools/discovery/ticket_cancel.py:129` | H | `auth_type` of the context used to check the driver's permission | `sign_in` | `anonymous` | `clerk` | the enterprise session's type (Wave 2) |
+| 55 | `modules/tools/discovery/ticket_cancel.py:129` | H | `auth_type` of the context used to check the driver's permission: `anonymous` makes the driver the workspace's owner | `anonymous_operator` | `anonymous` | `clerk` | never `anonymous`; the enterprise session's type (Wave 2) |
 | 56 | `modules/voice/arming.py:54` | C | Name of a newly created Retell agent | **For Gerard** | "Auto Live (local)" | "Auto Live" | **For Gerard** |
 | 57 | `modules/voice/mint.py:98` | H | Auto Live allowed by the plan | `billing` | always | by plan | always |
 | 58 | `modules/voice/mint.py:111` | H | Auto Live refused for plan or exhausted credits | `billing` | never | by plan and credits | never |

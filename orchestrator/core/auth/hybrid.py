@@ -12,6 +12,7 @@ from sqlalchemy import text
 from starlette.concurrency import run_in_threadpool
 
 from config import config
+from core import editions
 from core.auth.bearer_registry import (
     api_key as _get_api_key,
     bearer_token as _get_bearer_token,
@@ -977,12 +978,11 @@ def _anonymous_context(db, workspace_id: Optional[UUID], require_auth: bool) -> 
             detail="Workspace not resolved. Send X-Workspace-ID header or configure DEFAULT_WORKSPACE_ID.",
         )
     _assert_workspace_usable(db, resolved, is_admin=False)
-    # PRD-209 local edition: there is exactly one operator and it is their
-    # machine — the anonymous local session is the instance's SUPER admin
-    # (there is no platform above the operator of a self-hosted instance:
-    # system settings, credentials, admin analytics all belong to them).
-    # In saas, the anonymous dev-fallback remains a plain user.
-    if config.AUTH_EDITION == "local":
+    # PRD-209 (``anonymous_operator``, the local edition): one operator, their machine;
+    # the anonymous session is the instance's SUPER admin (no platform sits above a
+    # self-hosted instance's operator: system settings, credentials, admin analytics
+    # are theirs). In saas, the anonymous dev-fallback remains a plain user.
+    if editions.current().anonymous_operator:
         # PRD-233 S6: bind the operator's seeded users row (email-keyed; see
         # _local_operator_user_context for why `id` is the email, never the
         # PK). A missing row keeps PRD-209's email-only lane — never a 500.

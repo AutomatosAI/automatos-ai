@@ -41,6 +41,7 @@ from typing import Awaitable, Callable, Mapping, Optional
 from fastapi import HTTPException, Request, status
 
 from config import config
+from core import editions
 from core.auth.dependencies import RequestContext
 from core.auth.device import resolve_device_context
 
@@ -89,7 +90,7 @@ def anonymous_lane_closed() -> bool:
     """True on a local install whose remote-access mode closes the anonymous lane (``paired``)."""
     from services.mobile import remote_access
 
-    return not remote_access.anonymous_lane_open(config.AUTH_EDITION, config.LOCAL_REMOTE_ACCESS)
+    return not remote_access.anonymous_lane_open(editions.current().anonymous_operator, config.LOCAL_REMOTE_ACCESS)
 
 
 def _pairing_required() -> HTTPException:

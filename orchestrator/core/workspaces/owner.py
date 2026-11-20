@@ -16,6 +16,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from config import config
+from core import editions
 
 OWNER_ROLE = "owner"
 
@@ -40,8 +41,9 @@ def workspace_owner(db: Any, workspace: Any) -> Optional[Any]:
     """The owner's ``users`` row for ``workspace`` (a ``Workspace`` row), or ``None``.
 
     The workspace's ``owner_id``, else its active owner member. The local edition
-    seeds neither (one operator, no accounts): there the owner is the operator,
-    found by ``config.LOCAL_OPERATOR_EMAIL`` as the local sign-in finds them.
+    seeds neither (one operator, no accounts): where the anonymous caller is the
+    operator (``anonymous_operator``), the owner is the operator, found by
+    ``config.LOCAL_OPERATOR_EMAIL`` as the local sign-in finds them.
     """
     from core.models.core import User
 
@@ -50,7 +52,7 @@ def workspace_owner(db: Any, workspace: Any) -> Optional[Any]:
     owner_id = getattr(workspace, "owner_id", None) or owner_member_user_id(db, workspace.id)
     if owner_id:
         return db.query(User).filter(User.id == owner_id).first()
-    if config.IS_LOCAL_EDITION:
+    if editions.current().anonymous_operator:
         return db.query(User).filter(User.email == config.LOCAL_OPERATOR_EMAIL).first()
     return None
 

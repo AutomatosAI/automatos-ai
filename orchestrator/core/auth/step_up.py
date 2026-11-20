@@ -6,7 +6,7 @@ request unless the caller's first sign-in factor was verified within the last
 ``max_age_minutes`` minutes, so code running in the page as the user (an
 installed theme) cannot finish these routes silently.
 
-Edition gate (``AUTH_EDITION``, never the caller's role):
+Edition gate (the ``step_up`` capability, ``core.editions``; never the caller's role):
 
 ==========  ==================================================================
 edition     behaviour
@@ -52,7 +52,7 @@ from typing import Any, Callable, Dict, Optional
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
-from config import config
+from core import editions
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 
@@ -80,7 +80,6 @@ STEP_UP_UNAVAILABLE_CODE = "step_up_unavailable"
 STEP_UP_MARKER_ATTR = "_step_up_max_age_minutes"
 
 _CLERK_AUTH_TYPE = "clerk"
-_LOCAL_EDITION = "local"
 _SECONDS_PER_MINUTE = 60.0
 
 
@@ -157,8 +156,8 @@ def first_factor_is_fresh(claims: Any, max_age_minutes: int, now: float) -> bool
     return age + _minutes_since_issued(claims, now) < max_age_minutes
 
 
-def _is_local_edition() -> bool:
-    return str(getattr(config, "AUTH_EDITION", "") or "").strip().lower() == _LOCAL_EDITION
+def _skips_step_up() -> bool:
+    return editions.current().step_up == editions.STEP_UP_SKIP
 
 
 def _refuse_without_person(auth_type: Any) -> HTTPException:
@@ -174,7 +173,7 @@ def _refuse_without_person(auth_type: Any) -> HTTPException:
 
 def check_step_up(ctx: Any, max_age_minutes: int, now: float) -> None:
     """Raise unless ``ctx`` satisfies step-up in the current edition."""
-    if _is_local_edition():
+    if _skips_step_up():
         return
     auth_type = getattr(ctx, "auth_type", None)
     if auth_type != _CLERK_AUTH_TYPE:
