@@ -44,9 +44,10 @@ def resolve_caller_int_id(db: Session, ctx: Any) -> Optional[int]:
     clerk_uid = getattr(user, "clerk_user_id", None) or (uid if isinstance(uid, str) else None)
     if not clerk_uid:
         return None
+    from core.auth.clerk_person import clerk_person_query
     from core.models.core import User
 
-    row = db.query(User.id).filter(User.clerk_user_id == str(clerk_uid)).first()
+    row = clerk_person_query(db, User.id, str(clerk_uid)).first()
     return int(row[0]) if row else None
 
 

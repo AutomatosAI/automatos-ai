@@ -8,8 +8,8 @@ falling through a ``== "local"`` check.
 
 ``enterprise`` (PRD-277 US-103) is a self-hosted install whose people sign in through the
 organisation's own identity provider. Its row is decided (PRD-277 §5.1, D-7, D-12, D-13
-and the owner's answers G-1 to G-8 in ``PRD-277-EDITION-CHECKS.md``). Until OIDC sign-in
-is built (Wave 4), start-up refuses that edition (``core/edition_start_up.py``).
+and the owner's answers G-1 to G-8 in ``PRD-277-EDITION-CHECKS.md``). Start-up refuses it
+only when it is half-configured, naming what is missing (``core/edition_start_up.py``).
 
 ``docs/PRDS/PRD-277-EDITION-CHECKS.md`` lists every call site that compares the
 edition and the one capability it maps to. Outside ``config.py``, this module, the
@@ -98,6 +98,11 @@ class EditionCapabilities:
         dashboard.
     last_workspace_purge_deletes_person: purging the last workspace a person owns or
         belongs to also deletes that person's account.
+    issues_sessions: Automatos issues and resolves its own sign-in sessions (PRD-277 Wave 3):
+        an ``ams_`` token, carried by a browser in a ``__Host-`` cookie, that the bearer
+        registry resolves; a request the cookie authenticates that changes something must
+        come from the install's own origin. Where it is off, an ``ams_`` token belongs to no
+        lane and no cookie is read.
     """
 
     sign_in: str
@@ -118,6 +123,7 @@ class EditionCapabilities:
     install_description: str
     live_agent_named_apart: bool
     last_workspace_purge_deletes_person: bool
+    issues_sessions: bool
 
 
 _LOCAL = EditionCapabilities(
@@ -139,6 +145,7 @@ _LOCAL = EditionCapabilities(
     install_description=INSTALL_OWN_COMPUTER,
     live_agent_named_apart=True,
     last_workspace_purge_deletes_person=False,
+    issues_sessions=False,
 )
 
 _SAAS = EditionCapabilities(
@@ -160,11 +167,13 @@ _SAAS = EditionCapabilities(
     install_description=INSTALL_HOSTED,
     live_agent_named_apart=False,
     last_workspace_purge_deletes_person=True,
+    issues_sessions=False,
 )
 
 # PRD-277 §5.1 and its decisions. calls_automatos_cloud is off: an operator switches each
 # hosted service on (D-12), and no such switch exists yet. device_pairing is on, and
-# LOCAL_REMOTE_ACCESS still decides whether codes are minted (D-7).
+# LOCAL_REMOTE_ACCESS still decides whether codes are minted (D-7). issues_sessions is on: a
+# browser holds a session Automatos issues, in a cookie scripts cannot read (D-3, §5.3).
 _ENTERPRISE = EditionCapabilities(
     sign_in=SIGN_IN_OIDC,
     anonymous_operator=False,
@@ -184,6 +193,7 @@ _ENTERPRISE = EditionCapabilities(
     install_description=INSTALL_ORGANISATION,
     live_agent_named_apart=False,
     last_workspace_purge_deletes_person=False,
+    issues_sessions=True,
 )
 
 CAPABILITIES: Mapping[str, EditionCapabilities] = MappingProxyType({

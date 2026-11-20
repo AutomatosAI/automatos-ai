@@ -13,6 +13,7 @@ from starlette.concurrency import run_in_threadpool
 
 from config import config
 from core import editions
+from core.auth import person as people
 from core.auth.bearer_registry import (
     api_key as _get_api_key,
     bearer_token as _get_bearer_token,
@@ -133,24 +134,6 @@ def _assert_workspace_usable(db, workspace_id: UUID, *, is_admin: bool) -> None:
         )
 
 
-def _user_is_workspace_member(db, workspace_id: UUID, clerk_user_id: Optional[str]) -> bool:
-    """Return True if the Clerk user is an active member of the workspace."""
-    if not clerk_user_id:
-        return False
-    row = db.execute(
-        text(
-            "SELECT 1 FROM workspace_members wm "
-            "JOIN users u ON wm.user_id = u.id "
-            "WHERE wm.workspace_id = :workspace_id "
-            "AND u.clerk_user_id = :clerk_user_id "
-            "AND wm.is_active = true "
-            "LIMIT 1"
-        ),
-        {"workspace_id": str(workspace_id), "clerk_user_id": clerk_user_id},
-    ).fetchone()
-    return bool(row)
-
-
 def _user_pk_is_workspace_member(db, workspace_id: UUID, user_pk: int) -> bool:
     """Return True if the user (by internal PK, not clerk_user_id) is an active member.
 
@@ -175,21 +158,12 @@ def _user_has_workspace_access(db, clerk_user_id: Optional[str], workspace_id: U
     Verify that a Clerk user actually has access to the requested workspace.
 
     Prevents users from accessing other workspaces by spoofing X-Workspace-ID.
-    Access is granted if the user owns the workspace OR is a member.
+    Access is granted if the user owns the workspace OR is a member, read by the
+    ``users.id`` the Clerk ID names (``core.auth.person``, PRD-277 US-202).
     """
     if not clerk_user_id:
         return False
-    row = db.execute(
-        text(
-            "SELECT 1 FROM users u "
-            "LEFT JOIN workspaces w ON w.owner_id = u.id AND w.id = :ws_id "
-            "LEFT JOIN workspace_members wm ON wm.user_id = u.id AND wm.workspace_id = :ws_id AND wm.is_active = true "
-            "WHERE u.clerk_user_id = :cid AND (w.id IS NOT NULL OR wm.id IS NOT NULL) "
-            "LIMIT 1"
-        ),
-        {"cid": clerk_user_id, "ws_id": str(workspace_id)},
-    ).fetchone()
-    return bool(row)
+    return people.may_open_workspace(db, people.by_clerk_id(clerk_user_id), workspace_id)
 
 
 def _has_pending_invitations(db, email: Optional[str]) -> bool:
@@ -365,33 +339,10 @@ def _accessible_workspace_for_clerk_user(db, clerk_user_id: str) -> Optional[UUI
     invitees who joined a workspace as members (not owners) resolve correctly
     when no X-Workspace-ID header is present. Owner-bias keeps existing solo
     users on their personal workspace; recency tiebreaker favours the most
-    recent join for users with multiple memberships.
+    recent join for users with multiple memberships. Read by the ``users.id`` the
+    Clerk ID names (``core.auth.person``, PRD-277 US-202).
     """
-    ws_row = db.execute(
-        text(
-            "SELECT w.id FROM users u "
-            "JOIN workspaces w "
-            "  ON w.owner_id = u.id "
-            "  OR EXISTS ("
-            "    SELECT 1 FROM workspace_members wm "
-            "    WHERE wm.workspace_id = w.id "
-            "      AND wm.user_id = u.id "
-            "      AND wm.is_active = true "
-            "  ) "
-            "LEFT JOIN workspace_members wm2 "
-            "  ON wm2.workspace_id = w.id AND wm2.user_id = u.id AND wm2.is_active = true "
-            "WHERE u.clerk_user_id = :cid "
-            "  AND w.is_active = true "
-            "  AND w.deleted_at IS NULL "
-            "ORDER BY "
-            "  CASE WHEN w.owner_id = u.id OR COALESCE(wm2.role, '') = 'owner' THEN 0 ELSE 1 END, "
-            "  wm2.joined_at DESC NULLS LAST, "
-            "  w.created_at DESC "
-            "LIMIT 1"
-        ),
-        {"cid": clerk_user_id},
-    ).fetchone()
-    return ws_row[0] if ws_row and ws_row[0] else None
+    return people.default_workspace(db, people.by_clerk_id(clerk_user_id))
 
 
 def _resolve_workspace_for_clerk_user(
@@ -469,6 +420,13 @@ def _resolve_workspace_for_clerk_user(
 _LAST_SEEN_THROTTLE_SECONDS = 900.0  # 15 minutes
 _LAST_SEEN_CACHE_MAX = 2048
 _last_seen_touched: dict = {}
+# Keyed on the row the Clerk ID names (``core.auth.person``), in the one statement.
+_LAST_SEEN_SQL = (
+    "UPDATE users SET last_sign_in = now() "
+    "WHERE id = {person} "
+    "  AND (last_sign_in IS NULL "
+    "       OR last_sign_in < now() - make_interval(secs => :age))"
+)
 
 
 def _touch_last_seen(db, clerk_user_id: Optional[str]) -> None:
@@ -485,15 +443,9 @@ def _touch_last_seen(db, clerk_user_id: Optional[str]) -> None:
     if seen_at is not None and (now - seen_at) < _LAST_SEEN_THROTTLE_SECONDS:
         return
     try:
-        db.execute(
-            text(
-                "UPDATE users SET last_sign_in = now() "
-                "WHERE clerk_user_id = :cid "
-                "  AND (last_sign_in IS NULL "
-                "       OR last_sign_in < now() - make_interval(secs => :age))"
-            ),
-            {"cid": clerk_user_id, "age": _LAST_SEEN_THROTTLE_SECONDS},
-        )
+        db.execute(*people.person_statement(
+            _LAST_SEEN_SQL, people.by_clerk_id(clerk_user_id), age=_LAST_SEEN_THROTTLE_SECONDS,
+        ))
         db.commit()
     except Exception:
         db.rollback()

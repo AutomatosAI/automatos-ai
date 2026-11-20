@@ -177,9 +177,8 @@ Sources: [frontend/middleware.ts:3-49]()[frontend/components/settings/SettingsPa
 |---|---|
 | `_workspace_exists` | Queries for a workspace row whose `deleted_at` is null. A paused workspace still counts as existing; the separate usability check handles its disabled state. [orchestrator/core/auth/hybrid.py:97-113]() |
 | `_assert_workspace_usable` | Raises HTTP 403 for a paused workspace when the caller is not an admin; admins bypass this check. [orchestrator/core/auth/hybrid.py:115-132]() |
-| `_user_is_workspace_member` | Checks for an active workspace membership joined to a user with the specified Clerk user ID. [orchestrator/core/auth/hybrid.py:134-150]() |
-| `_user_pk_is_workspace_member` | Checks for an active workspace membership by internal user primary key. The source identifies device-lane auth as a use case without a Clerk identity. [orchestrator/core/auth/hybrid.py:152-168]() |
-| `_user_has_workspace_access` | Checks whether the Clerk user owns the requested workspace or has an active membership. Its docstring identifies protection against spoofing `X-Workspace-ID`. [orchestrator/core/auth/hybrid.py:171-190]() |
+| `_user_pk_is_workspace_member` | Checks for an active workspace membership by internal user primary key. The source identifies device-lane auth as a use case without a Clerk identity. [orchestrator/core/auth/hybrid.py:137-153]() |
+| `_user_has_workspace_access` | Checks whether the Clerk user owns the requested workspace or has an active membership. Its docstring identifies protection against spoofing `X-Workspace-ID`. The check is `may_open_workspace` in `core/auth/person.py`, keyed on the `users.id` the Clerk user ID names, read inside the same statement (PRD-277 US-202). [orchestrator/core/auth/hybrid.py:156-166](), [orchestrator/core/auth/person.py:140-142]() |
 
 ### Request Resolution: Concept-to-Code Map
 

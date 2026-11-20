@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core import editions
 from core.auth.clerk import get_clerk_auth
+from core.auth.clerk_person import clerk_id_row
 from core.database.database import SessionLocal
 from core.storage import get_s3_client, is_storage_configured
 from core.jobs.erasure import jobs_stop_first
@@ -248,10 +249,7 @@ def _owner_has_nothing_left(db: Session, owner_id: Optional[int], workspace_id: 
 def _resolve_owner_clerk_id(db: Session, owner_id: Optional[int]) -> Optional[str]:
     if not owner_id:
         return None
-    row = db.execute(
-        text("SELECT clerk_user_id FROM users WHERE id = :id"),
-        {"id": owner_id},
-    ).fetchone()
+    row = clerk_id_row(db, owner_id)
     return row[0] if row and row[0] else None
 
 
