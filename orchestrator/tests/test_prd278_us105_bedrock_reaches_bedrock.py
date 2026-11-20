@@ -317,7 +317,9 @@ def test_on_an_inference_profile_arn_stays_on_bedrock_on_every_path(monkeypatch)
         ModelConfiguration("bedrock", PROFILE_ARN), "agent"))
     activated, _, _ = _activated(monkeypatch, "bedrock", PROFILE_ARN)
     tier = _settings_tier(monkeypatch, "bedrock", PROFILE_ARN)
-    handed_on = _loaded("bedrock", PROFILE_ARN)
+    # A provider and model handed to a manager (create_llm_manager → vendor_fit.fitted): the
+    # manager builds the tier's config, and with_workload_identity marks it for the role.
+    handed_on = llm_manager.LLMManager(service_name="planner", provider="bedrock", model=PROFILE_ARN).config
 
     for llm_config in (created.config, activated.config, tier, handed_on):
         assert (llm_config.provider, llm_config.model) == (LLMProvider.AWS_BEDROCK, PROFILE_ARN)
