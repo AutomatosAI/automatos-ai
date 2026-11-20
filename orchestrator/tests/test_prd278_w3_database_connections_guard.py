@@ -231,8 +231,11 @@ def test_every_connection_is_listed_with_its_reason():
 
 def test_the_lists_do_not_overlap_and_name_files_that_still_connect():
     groups = [set(APP_DATABASE), set(USER_DATA_SOURCES), set(NOT_COVERED)]
-    every = [*groups, set(APP_DATABASE_ENGINES)]
-    assert sum(len(group) for group in every) == len(set().union(*every)), "a file is on two lists"
+    assert sum(len(group) for group in groups) == len(set().union(*groups)), "a file is on two lists"
+    # A file may hold a driver call and also build an engine (alembic/env.py does both), so
+    # the engines list may share a file with APP_DATABASE. It may not share one with an exempt list.
+    both = sorted(set(APP_DATABASE_ENGINES) & (set(USER_DATA_SOURCES) | set(NOT_COVERED)))
+    assert not both, f"built through create_app_engine and exempt at once: {both}"
     stale = sorted(set().union(*groups) - set(FOUND))
     assert not stale, f"listed but no longer connecting (take them off the list): {stale}"
 

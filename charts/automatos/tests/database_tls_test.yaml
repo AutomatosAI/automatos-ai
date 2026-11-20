@@ -133,8 +133,10 @@ tests:
           any: true
 
   # ── values the app would refuse stop the render ─────────────────────────────
+  # A failed render is reported against the first template it fails in, and that is the
+  # worker's for all three: it takes the same settings as the API and the Job.
   - it: stops on a CA without a mode that checks the certificate
-    template: templates/api-deployment.yaml
+    template: templates/worker.yaml
     set:
       database: {sslmode: require, caConfigMap: database-ca}
     asserts:
@@ -148,7 +150,7 @@ tests:
       - failedTemplate:
           errorPattern: "database.sslmode must be disable, allow, prefer, require, verify-ca or verify-full"
   - it: stops on the settings in config, which the worker would not get
-    template: templates/migrate-job.yaml
+    template: templates/worker.yaml
     set:
       config:
         DATABASE_SSLMODE: verify-full
