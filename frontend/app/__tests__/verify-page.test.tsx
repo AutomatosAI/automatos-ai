@@ -98,17 +98,18 @@ describe('/verify — check a file without uploading it', () => {
 describe('/verify — public in both editions, owned by the host', () => {
   const middleware = readFileSync(path.resolve(__dirname, '..', '..', 'middleware.ts'), 'utf8')
 
-  it('is a public route of the saas middleware', () => {
-    const publicList = middleware.slice(middleware.indexOf('createRouteMatcher(['), middleware.indexOf(']);'))
-    expect(publicList).toContain('"/verify"')
-    expect(publicList).toContain('"/verify/(.*)"')
+  it('is a public route of the saas middleware', async () => {
+    const { PUBLIC_ROUTES } = await import('@/lib/public-routes')
+    expect(middleware).toContain('createRouteMatcher([...PUBLIC_ROUTES])')
+    expect(PUBLIC_ROUTES).toContain('/verify')
+    expect(PUBLIC_ROUTES).toContain('/verify/(.*)')
   })
 
-  it('makes only /verify and its sub-paths public, not /verify-email or /verification', () => {
-    const publicList = middleware.slice(middleware.indexOf('createRouteMatcher(['), middleware.indexOf(']);'))
-    const patterns = Array.from(publicList.matchAll(/^\s*"([^"]+)",/gm), (match) => match[1])
-    const verifyPatterns = patterns.filter((pattern) => pattern.startsWith('/verif'))
+  it('makes only /verify and its sub-paths public, not /verify-email or /verification', async () => {
+    const { PUBLIC_ROUTES, isPublicPath } = await import('@/lib/public-routes')
+    const verifyPatterns = PUBLIC_ROUTES.filter((pattern) => pattern.startsWith('/verif'))
     expect(verifyPatterns).toEqual(['/verify', '/verify/(.*)'])
+    expect([isPublicPath('/verify'), isPublicPath('/verify/a'), isPublicPath('/verify-email')]).toEqual([true, true, false])
   })
 
   it('exists in the local edition', async () => {

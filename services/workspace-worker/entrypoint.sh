@@ -51,6 +51,29 @@ run_as_folder_owner() {  # UID GID
     fi
 }
 
+# PRD-280 US-201: the image starts as uid 1000, the Dockerfile's USER. Started as any user
+# but root, the worker repairs nothing: it changes no owner and takes no other uid. It
+# checks that it can write the folders it must write, its volume and (compose) your
+# deliverables folder, and stops when it cannot, saying what the storage must provide.
+# --no-new-privs (F452) needs no privilege, so it holds in this mode too.
+start_as_self() {  # ARGS...
+    local dir unwritable=""
+    for dir in "$WORKSPACE_VOLUME_PATH" ${LOCAL_WORKSPACE_ROOT:+"$LOCAL_WORKSPACE_ROOT"}; do
+        [ -w "$dir" ] || unwritable="${unwritable:+$unwritable, }$dir"
+    done
+    if [ -n "$unwritable" ]; then
+        echo "[entrypoint] uid $(id -u) cannot write $unwritable. Started as a user other than root, the worker changes no owner, so the storage must hand the volume over writable by uid $(id -u) or by its group, gid $(id -g): on Kubernetes, storage that applies the pod's fsGroup (the chart sets 1000); elsewhere, a volume that uid or group owns. Or start the container as root (user 0), and the entrypoint re-owns the volume before it drops to uid 1000" >&2
+        exit 1
+    fi
+    exec setpriv --no-new-privs env HOME=/home/worker python -m main "$@"
+}
+
+if [ "$(id -u)" != "0" ]; then
+    start_as_self "$@"
+fi
+
+# Started as root, as compose does (docker-compose.yml's `user`) and as a platform that
+# mounts its volumes as root must: what follows re-owns the volume, then drops to uid 1000.
 if [ -n "${LOCAL_WORKSPACE_ROOT:-}" ] && [ -d "$LOCAL_WORKSPACE_ROOT" ] \
     && ! setpriv --reuid=worker --regid=worker --init-groups test -w "$LOCAL_WORKSPACE_ROOT"; then
     # Owner and group from one stat, so both are the same moment's.
@@ -63,8 +86,9 @@ if [ -n "${LOCAL_WORKSPACE_ROOT:-}" ] && [ -d "$LOCAL_WORKSPACE_ROOT" ] \
     fi
 fi
 
-# Railway mounts persistent volumes as root. Fix ownership at runtime
-# so the non-root worker process can write to the workspace directory.
+# Railway mounts persistent volumes as root (its service then sets RAILWAY_RUN_UID=0 to
+# start the image as root). Fix ownership at runtime so the non-root worker process can
+# write to the workspace directory.
 if [ -d "$WORKSPACE_VOLUME_PATH" ] && [ "$(stat -c '%u' "$WORKSPACE_VOLUME_PATH" 2>/dev/null)" != "$(id -u worker)" ]; then
     echo "[entrypoint] Fixing ownership of $WORKSPACE_VOLUME_PATH (skipping mounted projects folders) ..."
     # PRD-239: <workspace>/projects is the OWNER'S folder bind-mounted in (LOCAL_PROJECTS_DIR)
@@ -86,7 +110,7 @@ fi
 # --no-new-privs (F452, #1309): the worker runs agent code, and the image carries
 # setuid-root binaries (su, mount, passwd, newgrp…). With no_new_privs set, exec never
 # grants a privilege again, so none of them can take the worker back to root. It holds
-# on Railway and in compose, where the chart's securityContext doesn't apply. The image
+# on Railway and in compose, where no chart's securityContext applies. The image
 # also carries no setuid or setgid file any more (the Dockerfile's last install step
 # strips them), and nothing after the drop needs one: no sudo or su, and git over ssh
 # authenticates with the workspace's key, which needs no ssh-keysign.

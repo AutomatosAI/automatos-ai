@@ -174,9 +174,12 @@ on:
       - "frontend/package-lock.json"
       - "frontend/next.config.js"
       - "frontend/csp-sources.js"
+      - "frontend/csp-policy.mjs"
+      - "frontend/enterprise-build.js"
       - "frontend/.npmrc"
       - "frontend/public/**"
       - "frontend/scripts/check-standalone-image.sh"
+      - "frontend/scripts/check-enterprise-image.sh"
       - "services/workspace-worker/**"
       - "services/agent-opt-worker/**"
       - "services/media-render/**"
@@ -297,7 +300,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The images images.yml's merge job publishes (a test holds the lists equal).
+      # The images images.yml's merge job publishes (a test holds the lists equal). The
+      # enterprise web image (PRD-277 US-505) is not part of the compose stack this lane boots;
+      # its own start was checked in images.yml's build job, on both arches, before the merge
+      # job published it (frontend/scripts/check-enterprise-image.sh), so it moves with the rest.
       - name: Move edge
         env:
           SHA: ${{ github.event.workflow_run.head_sha }}
@@ -309,7 +315,8 @@ jobs:
         run: |
           python3 scripts/ci/promote_edge.py --sha "$SHA" --tag "$TAG" --repo "$REPO" \
             --prefix "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/automatos-" \
-            --image api --image frontend --image workspace-worker --summary "$GITHUB_STEP_SUMMARY"
+            --image api --image frontend --image enterprise-frontend --image workspace-worker \
+            --summary "$GITHUB_STEP_SUMMARY"
 
   smoke-images-pr:
     name: smoke-images (pull request, amd64) — boot the images built in this job (non-required)

@@ -57,7 +57,7 @@ Sources: `charts/automatos/README.md:3-5`, `charts/automatos/README.md:14-24`, `
 
 ### Configuration and component mapping
 
-The chart’s documented settings include `existingSecret`, edition configuration, component image tags and digests, workspace storage, ingress, OpenTelemetry, and optional session mode. The README points operators to `values.yaml` for the chart’s settings. The worker template consumes worker-specific image, quota, concurrency, resource, and shared-secret values. [charts/automatos/README.md:66-81](), [charts/automatos/templates/worker.yaml:1-2](), [charts/automatos/templates/worker.yaml:29-60](), [charts/automatos/templates/worker.yaml:105-110]()
+The chart’s documented settings include `existingSecret`, edition configuration, component image tags and digests, workspace storage, ingress, OpenTelemetry, and optional session mode. The README points operators to `values.yaml` for the chart’s settings. The worker template consumes worker-specific image, quota, concurrency, resource, and shared-secret values. Since chart 0.10.0 (PRD-280 US-202) the worker can run in a namespace of its own (`worker.namespace`), reading a Secret of its own (`worker.existingSecret`), with each side of the agent-files volume on a claim the operator made (`workspaces.api.existingClaim`, `workspaces.worker.existingClaim`); the chart refuses a separate namespace without that Secret and both claims, and never creates the namespace. [charts/automatos/README.md]() [charts/automatos/README.md:66-81](), [charts/automatos/templates/worker.yaml:1-2](), [charts/automatos/templates/worker.yaml:29-60](), [charts/automatos/templates/worker.yaml:105-110]()
 
 **Diagram: Helm configuration names mapped to rendered worker resources**
 
@@ -110,9 +110,9 @@ Sources: `charts/automatos/README.md:14-24`, `charts/automatos/templates/worker.
 
 The worker mounts the workspace PVC at `/workspaces` and defines `/health` readiness and liveness probes on its HTTP port. [charts/automatos/templates/worker.yaml:62-79]()
 
-The worker template disables service-account token automounting and sets `allowPrivilegeEscalation: false`. It drops all capabilities, then adds `CHOWN`, `DAC_OVERRIDE`, `SETUID`, and `SETGID`; it also selects the runtime-default seccomp profile. These permissions support the image entrypoint’s volume-ownership setup and subsequent privilege drop. [charts/automatos/templates/worker.yaml:22-28](), [charts/automatos/templates/worker.yaml:80-104]()
+The worker template disables service-account token automounting and sets `allowPrivilegeEscalation: false`. Since chart 0.10.0 (PRD-280 US-201) its pod runs as uid 1000 (`runAsNonRoot`, `runAsUser` and `runAsGroup` 1000, `fsGroup` 1000), and its container drops all capabilities and adds none; it also selects the runtime-default seccomp profile, so it passes the "restricted" pod security level. The storage must hand the workspace volume over writable by the pod's group. [charts/automatos/templates/worker.yaml]() Since chart 0.9.0 its root file system is read-only, with `emptyDir` volumes at `/tmp` and `/home/worker` (`worker.readOnlyRootFilesystem`), as every other container's is; the chart README's "Pod security" section lists each component's., [charts/automatos/templates/worker.yaml:80-104]()
 
-The worker image entrypoint checks whether the worker can write to `LOCAL_WORKSPACE_ROOT`; where needed, it attempts to run as the folder owner, while avoiding root and IDs already assigned to image accounts. It adjusts workspace-volume ownership while skipping mounted projects and the local workspace root, then executes the application as the `worker` user with `--no-new-privs`. [services/workspace-worker/entrypoint.sh:4-19](), [services/workspace-worker/entrypoint.sh:21-64](), [services/workspace-worker/entrypoint.sh:66-93]()
+The worker image starts as uid 1000. Started as any user but root, as the chart starts it, the entrypoint repairs nothing: it checks that it can write the workspace volume (and `LOCAL_WORKSPACE_ROOT` when set), stops with a message that says what the storage must provide when it cannot, and otherwise starts the application with `--no-new-privs`. Compose starts the image as root on purpose (`user: "0:0"`), and so must a platform that mounts its volumes as root; started as root, the entrypoint checks whether the worker can write to `LOCAL_WORKSPACE_ROOT`; where needed, it attempts to run as the folder owner, while avoiding root and IDs already assigned to image accounts. It adjusts workspace-volume ownership while skipping mounted projects and the local workspace root, then executes the application as the `worker` user with `--no-new-privs`. [services/workspace-worker/entrypoint.sh:4-19](), [services/workspace-worker/entrypoint.sh:21-64](), [services/workspace-worker/entrypoint.sh:66-93]()
 
 **Diagram: Worker startup from PVC mount to application process**
 
@@ -221,5 +221,32 @@ Sources: `charts/automatos/README.md:99-110`
 Chart unit tests run without a cluster through `helm unittest charts/automatos`; CI also runs Helm lint and a kubeconform schema check. The Kind end-to-end command provides cluster-level install, upgrade, and telemetry verification. [charts/automatos/README.md:99-110]()
 
 Sources: `charts/automatos/README.md:99-110`
+
+## Automatos's hosted services in the enterprise edition
+
+An enterprise install (PRD-277 US-704, D-12) calls none of Automatos's hosted services until its operator switches one on. Each service is one chart value under `edition.enterprise.hostedServices`, rendered to one API setting; each is `false` unless set `true`, and the chart and the API both refuse any other value. One never switches on another. The local edition calls each service as it always has, and the hosted edition is the host, so it calls none; neither reads these settings.
+
+| Value | API setting | Host it calls | What it sends | What it brings back | When |
+|---|---|---|---|---|---|
+| `themeRevocations` | `ENTERPRISE_CALLS_THEME_REVOCATIONS` | `THEME_REVOCATIONS_URL` (default `https://api.automatos.app/api/themes/revocations`) | One `GET` with `Accept: application/json`, `Accept-Encoding: identity` and `User-Agent: Automatos-ThemeRevocations/1`. No credential, cookie, install id or workspace data. | Automatos's theme revocation list: the revoked Marketplace theme versions (a digest, or a theme id and version range, with a level and a reason) and the revoked signing key ids. The install stores them and refuses or warns on a theme they cover. | Every `THEME_REVOCATIONS_PULL_MINUTES` (60), first a minute after start, and when an install admin presses Check now. |
+| `cloudSync` | `ENTERPRISE_CALLS_CLOUD_SYNC` | `AUTOMATOS_CLOUD_URL` (default `https://api.automatos.app`) | `GET /api/marketplace/catalog`, and `GET /api/marketplace/catalog/files/<digest>/package.autotheme` for a Cloud theme being installed or updated, each with `Accept`, `Accept-Encoding: identity` and the `User-Agent` `Automatos/<version> (local)`, which carries the product's version. No credential, cookie, install id or workspace data. The web app's browsers load a Cloud theme's screenshots from `/api/marketplace/catalog/files/<digest>/<path>` on that host. | The catalogue (the Marketplace themes and items it lists, with their versions and digests) and each theme package, which the install checks against its digest and signature before storing it. | When an install admin presses Sync with Automatos Cloud (after a fresh sign-in), and when a Cloud theme is installed or updated. |
+| `cloudItems` | `ENTERPRISE_CALLS_CLOUD_ITEMS` | `AUTOMATOS_CLOUD_URL` | During a Sync, `GET` of each changed item's bundle and each listed plugin's package, at addresses the install derives from the setting and the catalogue's revision or slug and version, with the same headers. | The agents, Playbooks, packages and plugins the catalogue lists. Each is shown for review in the web app before a person adds it. | Only inside a Sync, so only with `cloudSync` on. |
+
+Every request is made from the API, so the host sees the address the install calls from, as it would for any request; the screenshot loads come from each person's browser, so the host sees that browser's address.
+
+What each service needs, which the chart checks when it renders and the API checks at start:
+
+- **`cloudSync` needs `themeRevocations`.** A theme brought from Automatos Cloud is withdrawn only through Automatos's revocation list, so an install that syncs themes must pull it.
+- **`cloudItems` needs `cloudSync`.** Items arrive only in a Sync.
+
+A setting that is off stops requests. It never stops the install reading what it already holds:
+
+- **`themeRevocations` off:** no pull is scheduled or made, and the revocation sync's status and Check now answer 404 with a sentence saying the operator hasn't switched it on. The install does not hear when Automatos revokes a theme version or a signing key. The revocations and revoked keys it already pulled still apply, and so do revocations an admin sets on the install itself.
+- **`cloudSync` off:** no catalogue or package is requested, the Sync and its status answer 404 with that sentence, and the Marketplace shows no Sync button and no Cloud screenshots. The install does not see new or updated themes from Automatos Cloud. Themes it already holds stay installed.
+- **`cloudItems` off:** a Sync brings themes only, and no item bundle or plugin package is requested. Items already brought stay, are still listed, and are still shown for review in the web app before a person adds one.
+
+The web app reads which services are on from `GET /api/hosted-services`. To consider before switching one on: what the table says it sends, that the host learns the install's address and product version, and, for `cloudItems`, that each item still needs a person to add it.
+
+Sources: `orchestrator/core/editions.py`, `orchestrator/core/edition_start_up.py`, `charts/automatos/templates/_enterprise_api.tpl`, `charts/automatos/README.md`
 
 ---

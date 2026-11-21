@@ -11,12 +11,22 @@
  * "http://localhost:9000" (the local edition's MinIO, docker-compose.yml) or
  * "https://*.amazonaws.com" (the Dockerfile's default: the hosted product). Anything that is not a
  * bare scheme://host[:port] origin is left out, so a stray path or keyword never widens the policy.
+ * The enterprise build does not read it: its media origins come from MEDIA_ORIGINS when the server
+ * starts (PRD-279 US-402, lib/enterprise/media-origins.ts).
  *
- * CommonJS on purpose: next.config.js requires it, and so does its test.
+ * CommonJS on purpose: next.config.js requires it, and so does its test. The directive list and the
+ * constants the Edge middleware needs too live in csp-policy.mjs, re-exported here unchanged.
  */
 'use strict'
 
-const ORIGIN = /^https?:\/\/(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)*(:\d{1,5})?$/i
+const {
+  ORIGIN,
+  CLERK_PROTECT_SOURCE,
+  CLERK_PROTECT_CONNECT_SOURCE,
+  AUTOMATOS_CLOUD_ORIGIN,
+  CLOUD_FILES_PATH,
+  cloudImageSources,
+} = require('./csp-policy.mjs')
 
 function mediaOrigins(raw) {
   return String(raw || '')
@@ -28,13 +38,9 @@ function mediaOrigins(raw) {
 /**
  * Clerk production readiness (19 Oct 2026). A development key (pk_test_) loads clerk-js from
  * *.clerk.accounts.dev; a production key (pk_live_) loads it from the instance's own Frontend API
- * host, e.g. clerk.automatos.app, which the policy must name. Clerk's CSP guide
- * (clerk.com/docs/guides/secure/best-practices/csp-headers) also needs its abuse and fraud
- * protection hosts in script-src and frame-src, and in connect-src with any port (they are not
- * served on 443 only).
+ * host, e.g. clerk.automatos.app, which the policy must name. Clerk's abuse and fraud protection
+ * hosts (CLERK_PROTECT_SOURCE and CLERK_PROTECT_CONNECT_SOURCE) are in csp-policy.mjs.
  */
-const CLERK_PROTECT_SOURCE = 'https://*.protect.clerk.com'
-const CLERK_PROTECT_CONNECT_SOURCE = `${CLERK_PROTECT_SOURCE}:*`
 
 // A publishable key is pk_test_ or pk_live_, then base64 of the Frontend API host and a '$'.
 const PUBLISHABLE_KEY = /^pk_(?:test|live)_([A-Za-z0-9+/=_-]+)$/
@@ -79,30 +85,18 @@ const NO_STRIPE = Object.freeze({ script: '', frame: '', connect: '', img: '' })
 
 /**
  * Stripe's sources for the build's edition (NEXT_PUBLIC_AUTH_EDITION, read the way
- * lib/auth-edition.ts reads it): the local edition has no billing, so its policy names no
- * Stripe host at all; anything else is the hosted edition.
+ * lib/auth-edition.ts reads it): the local and enterprise editions have no billing (PRD-277
+ * FR-24: billing is off in enterprise, as in local), so their policy names no Stripe host at all;
+ * anything else is the hosted edition.
  */
+const EDITIONS_WITHOUT_BILLING = new Set(['local', 'enterprise'])
+
 function stripeCspFor(edition) {
-  return String(edition || '').trim().toLowerCase() === 'local' ? NO_STRIPE : STRIPE_CSP
+  return EDITIONS_WITHOUT_BILLING.has(String(edition || '').trim().toLowerCase()) ? NO_STRIPE : STRIPE_CSP
 }
 
-/**
- * PRD-270 K15: a Cloud listing's screenshots load from the catalogue files route of Automatos Cloud
- * (lib/marketplace/cloud-files.ts names the same origin and path, AUTOMATOS_CLOUD_ORIGIN and
- * CLOUD_FILES_PATH), or of the API this build talks to (the hosted edition's own catalogue), straight
- * from the browser; the route serves the bytes itself, never a redirect. img-src names that path on
- * both origins, not the whole origin; an API origin that is not a bare origin, or is Automatos Cloud's
- * own, adds nothing.
- */
-const AUTOMATOS_CLOUD_ORIGIN = 'https://api.automatos.app'
-const CLOUD_FILES_PATH = '/api/marketplace/catalog/files/'
-
-/** img-src's sources for Cloud listings' screenshots, space-separated: Automatos Cloud's files route, then the build's API's. */
-function cloudImageSources(apiOrigin) {
-  const api = String(apiOrigin || '')
-  const origins = ORIGIN.test(api) && api !== AUTOMATOS_CLOUD_ORIGIN ? [AUTOMATOS_CLOUD_ORIGIN, api] : [AUTOMATOS_CLOUD_ORIGIN]
-  return origins.map((origin) => `${origin}${CLOUD_FILES_PATH}`).join(' ')
-}
+// PRD-270 K15: a Cloud listing's screenshots (AUTOMATOS_CLOUD_ORIGIN, CLOUD_FILES_PATH,
+// cloudImageSources) are in csp-policy.mjs, which builds img-src from them.
 
 module.exports = {
   mediaOrigins,

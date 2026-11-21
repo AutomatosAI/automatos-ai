@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from core.database.database import get_db
+from core.auth.clerk_person import clerk_person_row
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.auth.super_admin import require_super_admin
@@ -142,11 +143,7 @@ async def grade_report(
     # Resolve integer user ID from Clerk user_id string
     graded_by_id = None
     if ctx.user.id:
-        from sqlalchemy import text as _text
-        row = db.execute(
-            _text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
-            {"cid": ctx.user.id},
-        ).fetchone()
+        row = clerk_person_row(db, ctx.user.id)
         graded_by_id = row[0] if row else None
 
     result = await svc.grade_report(

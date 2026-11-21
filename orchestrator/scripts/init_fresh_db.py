@@ -28,9 +28,10 @@ Usage: python -m scripts.init_fresh_db   (from /app; exits non-zero on failure)
 
 import sys
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
 from config import config
+from core.database.tls import create_app_engine
 from scripts.generate_schema_baseline import INCOMPLETE_MARKER, build_schema
 
 BUILD, RESUME, NOTHING, REFUSE = "build", "resume", "nothing", "refuse"
@@ -57,7 +58,7 @@ def _inspect(engine) -> tuple[bool, bool, int]:
 
 
 def main() -> int:
-    engine = create_engine(config.DATABASE_URL)
+    engine = create_app_engine(config.DATABASE_URL)
     has_marker, has_version, table_count = _inspect(engine)
     action = fresh_db_action(has_marker, has_version, table_count)
 

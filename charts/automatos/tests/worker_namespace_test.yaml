@@ -1,0 +1,284 @@
+suite: The worker in a namespace of its own, with its own Secret and claims (PRD-280 US-202)
+templates:
+  - templates/worker.yaml
+  - templates/serviceaccount.yaml
+  - templates/workspaces-pvc.yaml
+  - templates/api-deployment.yaml
+  - templates/migrate-job.yaml
+release:
+  name: demo
+  namespace: automatos
+set:
+  existingSecret: automatos-secrets
+  worker:
+    namespace: automatos-worker
+    existingSecret: automatos-worker-secrets
+  workspaces:
+    api:
+      existingClaim: agent-files-api
+    worker:
+      existingClaim: agent-files-worker
+# The refusals (a namespace apart with no Secret or claim named for it) are in
+# worker_namespace_refusals_test.yaml, which renders the worker's template alone. With none of
+# the three values set, default_render_test.yaml pins the whole render.
+tests:
+  # ── the worker's objects move ─────────────────────────────────────────────────
+  - it: creates the worker's Deployment and Service in its namespace
+    template: templates/worker.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+      - equal:
+          path: metadata.namespace
+          value: automatos-worker
+        documentIndex: 0
+      - isKind:
+          of: Deployment
+        documentIndex: 0
+      - equal:
+          path: metadata.namespace
+          value: automatos-worker
+        documentIndex: 1
+      - isKind:
+          of: Service
+        documentIndex: 1
+  - it: creates the worker's account in its namespace, and every other account in the release's
+    template: templates/serviceaccount.yaml
+    asserts:
+      - equal:
+          path: metadata.name
+          value: demo-automatos-worker
+        documentIndex: 2
+      - equal:
+          path: metadata.namespace
+          value: automatos-worker
+        documentIndex: 2
+      - notExists:
+          path: metadata.namespace
+        documentIndex: 0
+      - notExists:
+          path: metadata.namespace
+        documentIndex: 1
+      - notExists:
+          path: metadata.namespace
+        documentIndex: 3
+  - it: runs the worker under that account
+    template: templates/worker.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: demo-automatos-worker
+
+  # ── the API follows ───────────────────────────────────────────────────────────
+  - it: points the API at the worker's Service in its namespace
+    template: templates/api-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: WORKER_INTERNAL_URL
+            value: http://demo-automatos-worker.automatos-worker.svc:8081
+      - notExists:
+          path: metadata.namespace
+  - it: gives the migration Job the same address, as it shares the API's settings
+    template: templates/migrate-job.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: WORKER_INTERNAL_URL
+            value: http://demo-automatos-worker.automatos-worker.svc:8081
+
+  # ── the worker's own Secret ───────────────────────────────────────────────────
+  - it: reads every key the worker takes from its own Secret, and from no other, the token required
+    template: templates/worker.yaml
+    documentIndex: 0
+    set:
+      otel:
+        enabled: true
+        endpoint: http://otel-collector.observability:4318
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env
+          value:
+            - {name: WORKSPACE_VOLUME_PATH, value: /workspaces}
+            - {name: WORKSPACE_DEFAULT_QUOTA_GB, value: "5"}
+            - {name: WORKER_CONCURRENCY, value: "3"}
+            - {name: WORKER_HEALTH_PORT, value: "8081"}
+            - {name: SERVICE_NAME, value: workspace-worker}
+            - {name: LOG_RELAY_ENABLED, value: "false"}
+            - name: DATABASE_URL
+              valueFrom: {secretKeyRef: {name: automatos-worker-secrets, key: DATABASE_URL}}
+            - name: REDIS_URL
+              valueFrom: {secretKeyRef: {name: automatos-worker-secrets, key: REDIS_URL}}
+            - name: WORKER_INTERNAL_TOKEN
+              valueFrom: {secretKeyRef: {name: automatos-worker-secrets, key: WORKER_INTERNAL_TOKEN}}
+            - name: ANTHROPIC_API_KEY
+              valueFrom: {secretKeyRef: {name: automatos-worker-secrets, key: ANTHROPIC_API_KEY, optional: true}}
+            - name: CLAUDE_CODE_OAUTH_TOKEN
+              valueFrom: {secretKeyRef: {name: automatos-worker-secrets, key: CLAUDE_CODE_OAUTH_TOKEN, optional: true}}
+            - {name: OTEL_ENABLED, value: "true"}
+            - {name: OTEL_SERVICE_NAME, value: automatos-workspace-worker}
+            - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://otel-collector.observability:4318"}
+            - {name: OTEL_TRACES_SAMPLER_RATIO, value: "1.0"}
+            - name: OTEL_EXPORTER_OTLP_HEADERS
+              valueFrom: {secretKeyRef: {name: automatos-worker-secrets, key: OTEL_EXPORTER_OTLP_HEADERS, optional: true}}
+            - name: OTEL_POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: OTEL_POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+            - {name: OTEL_RESOURCE_ATTRIBUTES, value: "k8s.pod.name=$(OTEL_POD_NAME),k8s.namespace.name=$(OTEL_POD_NAMESPACE)"}
+  - it: requires the worker's token from its own Secret in the release's namespace too
+    template: templates/worker.yaml
+    documentIndex: 0
+    set:
+      worker:
+        namespace: ""
+      workspaces:
+        api:
+          existingClaim: ""
+        worker:
+          existingClaim: ""
+    asserts:
+      - notExists:
+          path: metadata.namespace
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: WORKER_INTERNAL_TOKEN
+            valueFrom: {secretKeyRef: {name: automatos-worker-secrets, key: WORKER_INTERNAL_TOKEN}}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DATABASE_URL
+            valueFrom: {secretKeyRef: {name: automatos-worker-secrets, key: DATABASE_URL}}
+  - it: requires the same token in the API's Secret once the worker has its own, so both sides hold it
+    template: templates/api-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: WORKER_INTERNAL_TOKEN
+            valueFrom: {secretKeyRef: {name: automatos-secrets, key: WORKER_INTERNAL_TOKEN}}
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: WORKER_INTERNAL_TOKEN
+            valueFrom: {secretKeyRef: {name: automatos-secrets, key: WORKER_INTERNAL_TOKEN, optional: true}}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: AWS_ACCESS_KEY_ID
+            valueFrom: {secretKeyRef: {name: automatos-secrets, key: AWS_ACCESS_KEY_ID, optional: true}}
+
+  # ── the agent-files volume, a claim for each side ─────────────────────────────
+  - it: creates no claim when the sides name their own
+    template: templates/workspaces-pvc.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: mounts the API's claim in the API, read-only
+    template: templates/api-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: workspaces, persistentVolumeClaim: {claimName: agent-files-api}}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: workspaces, mountPath: /workspaces, readOnly: true}
+  - it: mounts the worker's claim in the worker, read-write
+    template: templates/worker.yaml
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: workspaces, persistentVolumeClaim: {claimName: agent-files-worker}}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: workspaces, mountPath: /workspaces}
+  - it: in one namespace, lets the API's claim serve the worker too
+    template: templates/worker.yaml
+    documentIndex: 0
+    set:
+      worker:
+        namespace: ""
+        existingSecret: ""
+      workspaces:
+        worker:
+          existingClaim: ""
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: workspaces, persistentVolumeClaim: {claimName: agent-files-api}}
+  - it: in one namespace, lets the worker's claim serve the API too
+    template: templates/api-deployment.yaml
+    set:
+      worker:
+        namespace: ""
+        existingSecret: ""
+      workspaces:
+        api:
+          existingClaim: ""
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: workspaces, persistentVolumeClaim: {claimName: agent-files-worker}}
+  - it: in one namespace, creates no claim when either side names one
+    template: templates/workspaces-pvc.yaml
+    set:
+      worker:
+        namespace: ""
+        existingSecret: ""
+      workspaces:
+        api:
+          existingClaim: ""
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # ── the release's own namespace named, or the worker off ──────────────────────
+  - it: treats worker.namespace naming the release's namespace as one namespace
+    template: templates/worker.yaml
+    set:
+      worker:
+        namespace: automatos
+        existingSecret: ""
+      workspaces:
+        api:
+          existingClaim: ""
+        worker:
+          existingClaim: ""
+    asserts:
+      - notExists:
+          path: metadata.namespace
+        documentIndex: 0
+      - notExists:
+          path: metadata.namespace
+        documentIndex: 1
+  - it: keeps the API's address in the release's namespace when worker.namespace names it
+    template: templates/api-deployment.yaml
+    set:
+      worker:
+        namespace: automatos
+        existingSecret: ""
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: WORKER_INTERNAL_URL, value: "http://demo-automatos-worker:8081"}
+  - it: renders no worker, and no worker address, for a worker that is off, whatever its namespace
+    template: templates/api-deployment.yaml
+    set:
+      worker:
+        enabled: false
+        existingSecret: ""
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: WORKER_INTERNAL_URL}
+          any: true
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: WORKER_INTERNAL_TOKEN
+            valueFrom: {secretKeyRef: {name: automatos-secrets, key: WORKER_INTERNAL_TOKEN, optional: true}}

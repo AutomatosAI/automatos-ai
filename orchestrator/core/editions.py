@@ -8,8 +8,8 @@ falling through a ``== "local"`` check.
 
 ``enterprise`` (PRD-277 US-103) is a self-hosted install whose people sign in through the
 organisation's own identity provider. Its row is decided (PRD-277 §5.1, D-7, D-12, D-13
-and the owner's answers G-1 to G-8 in ``PRD-277-EDITION-CHECKS.md``). Until OIDC sign-in
-is built (Wave 4), start-up refuses that edition (``core/edition_start_up.py``).
+and the owner's answers G-1 to G-8 in ``PRD-277-EDITION-CHECKS.md``). Start-up refuses it
+only when it is half-configured, naming what is missing (``core/edition_start_up.py``).
 
 ``docs/PRDS/PRD-277-EDITION-CHECKS.md`` lists every call site that compares the
 edition and the one capability it maps to. Outside ``config.py``, this module, the
@@ -23,14 +23,23 @@ never given another edition's answers. ``current`` follows the flag's own rule
 (PRD-277 §5.1, ``config.py``): the name is trimmed and lower-cased, and a value with
 no row is ``saas``, so a value a test patches in decides what the old comparisons did.
 
+**Automatos's hosted services** (PRD-277 US-704, D-12). Each one the code calls has its own
+capability: ``calls_theme_revocations``, ``calls_cloud_sync`` and ``calls_cloud_items``. In
+``local`` and ``saas`` the row decides them, and no setting can change them. In an edition whose
+row has ``hosted_services_by_setting`` (``enterprise``), the row holds each one off, and
+``current`` gives each one its setting's value (``HOSTED_SERVICE_SETTINGS``): on only for a
+plain true form (``SWITCH_ON``), off for anything else, so a malformed value never reads as on
+(``core/edition_start_up.py`` refuses one at start). ``with_hosted_service_settings`` is that one
+rule.
+
 Importing this module reads no setting and imports no config, so ``config.py`` can
 use it while it is being built.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
-from typing import Mapping, Tuple
+from typing import Any, FrozenSet, Mapping, Tuple
 
 EDITION_LOCAL = "local"
 EDITION_SAAS = "saas"
@@ -78,8 +87,20 @@ class EditionCapabilities:
     hosts_automatos_cloud: this install is Automatos Cloud: it serves the public
         Marketplace, the catalogue, bundles and the theme revocation feed, posts to
         the moderation inbox and runs the isolated theme review.
-    calls_automatos_cloud: this install may call Automatos's hosted services
-        (theme revocations, Cloud sync, Cloud items).
+    calls_theme_revocations: this install pulls Automatos's theme revocation list
+        (``THEME_REVOCATIONS_URL`` still names it): the scheduled pull, the admin's sync
+        status and Check now. What a pull stored (its revocations and revoked signing keys)
+        still applies while it is off: each of these three stops requests, never reads.
+    calls_cloud_sync: this install syncs Marketplace themes from Automatos Cloud
+        (``AUTOMATOS_CLOUD_URL`` still names it): the Cloud Sync routes and the catalogue
+        pull, a Cloud theme's package on install and update, and its screenshots.
+    calls_cloud_items: this install requests agents, Playbooks, packages and plugins from
+        Automatos Cloud: the Sync's item and plugin passes and their bundle and package
+        downloads. The "Items brought from Cloud" routes read what the install holds and
+        follow ``hosts_automatos_cloud``. Items arrive only in a Sync, so it needs
+        ``calls_cloud_sync``.
+    hosted_services_by_setting: each of the three above is off in the row and is the
+        operator's own setting (``HOSTED_SERVICE_SETTINGS``, D-12).
     push_needs_consent: notifications leave through Expo's push service only once
         the operator has agreed.
     operator_is_user: the person using the app runs the server, so host detail,
@@ -98,6 +119,11 @@ class EditionCapabilities:
         dashboard.
     last_workspace_purge_deletes_person: purging the last workspace a person owns or
         belongs to also deletes that person's account.
+    issues_sessions: Automatos issues and resolves its own sign-in sessions (PRD-277 Wave 3):
+        an ``ams_`` token, carried by a browser in a ``__Host-`` cookie, that the bearer
+        registry resolves; a request the cookie authenticates that changes something must
+        come from the install's own origin. Where it is off, an ``ams_`` token belongs to no
+        lane and no cookie is read.
     """
 
     sign_in: str
@@ -109,7 +135,10 @@ class EditionCapabilities:
     device_pairing: bool
     session_mode: bool
     hosts_automatos_cloud: bool
-    calls_automatos_cloud: bool
+    calls_theme_revocations: bool
+    calls_cloud_sync: bool
+    calls_cloud_items: bool
+    hosted_services_by_setting: bool
     push_needs_consent: bool
     operator_is_user: bool
     guards_user_endpoints: bool
@@ -118,6 +147,7 @@ class EditionCapabilities:
     install_description: str
     live_agent_named_apart: bool
     last_workspace_purge_deletes_person: bool
+    issues_sessions: bool
 
 
 _LOCAL = EditionCapabilities(
@@ -130,7 +160,10 @@ _LOCAL = EditionCapabilities(
     device_pairing=True,
     session_mode=True,
     hosts_automatos_cloud=False,
-    calls_automatos_cloud=True,
+    calls_theme_revocations=True,
+    calls_cloud_sync=True,
+    calls_cloud_items=True,
+    hosted_services_by_setting=False,
     push_needs_consent=True,
     operator_is_user=True,
     guards_user_endpoints=False,
@@ -139,6 +172,7 @@ _LOCAL = EditionCapabilities(
     install_description=INSTALL_OWN_COMPUTER,
     live_agent_named_apart=True,
     last_workspace_purge_deletes_person=False,
+    issues_sessions=False,
 )
 
 _SAAS = EditionCapabilities(
@@ -151,7 +185,10 @@ _SAAS = EditionCapabilities(
     device_pairing=False,
     session_mode=False,
     hosts_automatos_cloud=True,
-    calls_automatos_cloud=False,
+    calls_theme_revocations=False,
+    calls_cloud_sync=False,
+    calls_cloud_items=False,
+    hosted_services_by_setting=False,
     push_needs_consent=False,
     operator_is_user=False,
     guards_user_endpoints=True,
@@ -160,11 +197,13 @@ _SAAS = EditionCapabilities(
     install_description=INSTALL_HOSTED,
     live_agent_named_apart=False,
     last_workspace_purge_deletes_person=True,
+    issues_sessions=False,
 )
 
-# PRD-277 §5.1 and its decisions. calls_automatos_cloud is off: an operator switches each
-# hosted service on (D-12), and no such switch exists yet. device_pairing is on, and
-# LOCAL_REMOTE_ACCESS still decides whether codes are minted (D-7).
+# PRD-277 §5.1 and its decisions. Each hosted service is off here, and the operator switches each
+# one on with its own setting (D-12, US-704: hosted_services_by_setting). device_pairing is on, and
+# LOCAL_REMOTE_ACCESS still decides whether codes are minted (D-7). issues_sessions is on: a
+# browser holds a session Automatos issues, in a cookie scripts cannot read (D-3, §5.3).
 _ENTERPRISE = EditionCapabilities(
     sign_in=SIGN_IN_OIDC,
     anonymous_operator=False,
@@ -175,7 +214,10 @@ _ENTERPRISE = EditionCapabilities(
     device_pairing=True,
     session_mode=False,
     hosts_automatos_cloud=False,
-    calls_automatos_cloud=False,
+    calls_theme_revocations=False,
+    calls_cloud_sync=False,
+    calls_cloud_items=False,
+    hosted_services_by_setting=True,
     push_needs_consent=True,
     operator_is_user=False,
     guards_user_endpoints=True,
@@ -184,6 +226,7 @@ _ENTERPRISE = EditionCapabilities(
     install_description=INSTALL_ORGANISATION,
     live_agent_named_apart=False,
     last_workspace_purge_deletes_person=False,
+    issues_sessions=True,
 )
 
 CAPABILITIES: Mapping[str, EditionCapabilities] = MappingProxyType({
@@ -192,6 +235,48 @@ CAPABILITIES: Mapping[str, EditionCapabilities] = MappingProxyType({
     EDITION_ENTERPRISE: _ENTERPRISE,
 })
 KNOWN_EDITIONS: Tuple[str, ...] = tuple(CAPABILITIES)
+
+# PRD-277 US-704: each hosted service's capability, and the setting that decides it where the
+# row says ``hosted_services_by_setting``. Each setting names what it lets leave the install.
+HOSTED_SERVICE_SETTINGS: Mapping[str, str] = MappingProxyType({
+    "calls_theme_revocations": "ENTERPRISE_CALLS_THEME_REVOCATIONS",
+    "calls_cloud_sync": "ENTERPRISE_CALLS_CLOUD_SYNC",
+    "calls_cloud_items": "ENTERPRISE_CALLS_CLOUD_ITEMS",
+})
+# The forms config.py's other switches read as on ("1", "true", "yes", "on"), and their plain
+# off forms. A setting's value is trimmed and lower-cased first; unset is off.
+SWITCH_ON: FrozenSet[str] = frozenset({"1", "true", "yes", "on"})
+SWITCH_OFF: FrozenSet[str] = frozenset({"", "0", "false", "no", "off"})
+
+
+def _switch_text(value: Any) -> str:
+    return str("" if value is None else value).strip().lower()
+
+
+def is_switched_on(value: Any) -> bool:
+    """True only for a plain on form (``SWITCH_ON``); off for anything else, a malformed value included."""
+    return _switch_text(value) in SWITCH_ON
+
+
+def is_switch_form(value: Any) -> bool:
+    """True for a plain on or off form: what start-up accepts for a hosted service's setting."""
+    return _switch_text(value) in SWITCH_ON | SWITCH_OFF
+
+
+def with_hosted_service_settings(
+    capabilities: EditionCapabilities, settings: Mapping[str, Any],
+) -> EditionCapabilities:
+    """``capabilities``, with each hosted service its setting's value where the row says so.
+
+    The one place a setting and an edition combine. Where ``hosted_services_by_setting`` is off
+    (``local``, ``saas``) the row is returned as it is, whatever ``settings`` hold. Elsewhere each
+    capability in ``HOSTED_SERVICE_SETTINGS`` is on only when its setting is a plain on form.
+    ``settings`` maps each setting's name to its value; a missing one is off.
+    """
+    if not capabilities.hosted_services_by_setting:
+        return capabilities
+    switched = {field: is_switched_on(settings.get(name)) for field, name in HOSTED_SERVICE_SETTINGS.items()}
+    return replace(capabilities, **switched)
 
 
 def capabilities_for(edition: str) -> EditionCapabilities:
@@ -219,12 +304,18 @@ def current_name() -> str:
 
 
 def current() -> EditionCapabilities:
-    """The running edition's capabilities.
+    """The running edition's capabilities, with the hosted services' settings where its row takes them.
 
-    Reads the edition on every call rather than once at import, so a test that
-    patches ``config.AUTH_EDITION`` sees the matching capabilities (``current_name``).
+    Reads the edition, and those settings, on every call rather than once at import, so a test that
+    patches ``config.AUTH_EDITION`` or a setting sees the matching capabilities (``current_name``).
     """
-    return CAPABILITIES[current_name()]
+    row = CAPABILITIES[current_name()]
+    if not row.hosted_services_by_setting:
+        return row
+    from config import config
+
+    settings = {name: getattr(config, name, None) for name in HOSTED_SERVICE_SETTINGS.values()}
+    return with_hosted_service_settings(row, settings)
 
 
 __all__ = [
@@ -232,6 +323,7 @@ __all__ = [
     "EDITION_ENTERPRISE",
     "EDITION_LOCAL",
     "EDITION_SAAS",
+    "HOSTED_SERVICE_SETTINGS",
     "INSTALL_HOSTED",
     "INSTALL_ORGANISATION",
     "INSTALL_OWN_COMPUTER",
@@ -242,9 +334,14 @@ __all__ = [
     "STEP_UP_CLERK_FRESHNESS",
     "STEP_UP_REAUTH",
     "STEP_UP_SKIP",
+    "SWITCH_OFF",
+    "SWITCH_ON",
     "EditionCapabilities",
     "UnknownEdition",
     "capabilities_for",
     "current",
     "current_name",
+    "is_switch_form",
+    "is_switched_on",
+    "with_hosted_service_settings",
 ]

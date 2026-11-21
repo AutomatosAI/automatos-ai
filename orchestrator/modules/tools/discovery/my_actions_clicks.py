@@ -126,9 +126,9 @@ def board_numbers_said(db: Any, workspace_id: Any, card: str) -> List[str]:
 def actor_refs(db: Any, user_id: int) -> List[str]:
     """How the grants table names this person: 'user:<users.id>', and 'user:<Clerk id>' (the hosted
     edition's approval routes record the Clerk id, and so does Auto's send-back: P256-FIX-N17-6)."""
-    from core.models.core import User
+    from core.auth.clerk_person import clerk_id_query
 
-    clerk = db.query(User.clerk_user_id).filter(User.id == user_id).scalar()
+    clerk = clerk_id_query(db, user_id).scalar()
     return [f"{USER_ACTOR}{ref}" for ref in (user_id, clerk) if ref not in (None, "")]
 
 

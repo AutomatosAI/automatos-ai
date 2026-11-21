@@ -1,0 +1,391 @@
+suite: The enterprise edition's API settings (PRD-277 US-701)
+# Made-up values of the right shape: example.com is reserved for examples.
+templates:
+  - templates/api-deployment.yaml
+  - templates/migrate-job.yaml
+release:
+  name: demo
+  namespace: automatos
+set:
+  existingSecret: automatos-secrets
+  edition:
+    authEdition: enterprise
+    enterprise:
+      publicUrl: https://automatos.example.com
+      clientIpHeader: X-Real-IP
+      oidc:
+        issuer: https://id.example.com/realms/automatos
+        clientId: automatos
+tests:
+  - it: renders the edition, its workspace, its public address, the client address header and the provider
+    template: templates/api-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: AUTH_EDITION, value: enterprise}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DEFAULT_WORKSPACE_ID, value: "00000000-0000-0000-0000-0000000000c1"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: FRONTEND_URL, value: "https://automatos.example.com"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: CLIENT_IP_HEADER, value: X-Real-IP}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_ISSUER, value: "https://id.example.com/realms/automatos"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_CLIENT_ID, value: automatos}
+  - it: renders the proxy count beside the client address header, in the API and the migration Job
+    set:
+      edition: {enterprise: {clientIpHeader: X-Forwarded-For, clientIpProxyCount: 2}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: CLIENT_IP_HEADER, value: X-Forwarded-For}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: CLIENT_IP_PROXY_COUNT, value: "2"}
+  # What YAML hands the template for each way of writing 1, and what it renders.
+  - it: renders an unquoted 1 as "1"
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {clientIpHeader: X-Forwarded-For, clientIpProxyCount: 1}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: CLIENT_IP_PROXY_COUNT, value: "1"}
+  - it: renders a quoted "1" as "1"
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {clientIpHeader: X-Forwarded-For, clientIpProxyCount: "1"}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: CLIENT_IP_PROXY_COUNT, value: "1"}
+  - it: renders an unquoted 1.0 as "1", since YAML reads it as the number one
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {clientIpHeader: X-Forwarded-For, clientIpProxyCount: 1.0}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: CLIENT_IP_PROXY_COUNT, value: "1"}
+  - it: renders an unquoted 010 as "8", since YAML reads a leading zero as octal
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {clientIpHeader: X-Forwarded-For, clientIpProxyCount: 010}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: CLIENT_IP_PROXY_COUNT, value: "8"}
+  - it: leaves the proxy count out when it is empty, so the address is the first value of the header's last line
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: CLIENT_IP_PROXY_COUNT}
+          any: true
+  - it: reads the client secret from the existing Secret, as a required key
+    template: templates/api-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OIDC_CLIENT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: automatos-secrets
+                key: OIDC_CLIENT_SECRET
+  - it: gives the migration Job the same settings, the secret and the default workspace it makes
+    template: templates/migrate-job.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DEFAULT_WORKSPACE_ID, value: "00000000-0000-0000-0000-0000000000c1"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_ISSUER, value: "https://id.example.com/realms/automatos"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OIDC_CLIENT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: automatos-secrets
+                key: OIDC_CLIENT_SECRET
+  - it: leaves the local edition's settings out
+    template: templates/api-deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: LOCAL_OPERATOR_EMAIL, value: local@automatos.local}
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: PLATFORM_KEY_WORKSPACE_ID, value: "00000000-0000-0000-0000-0000000000c1"}
+  - it: leaves every optional setting to the API's default when it is empty, and mounts no CA
+    template: templates/api-deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_SCOPES}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_DISPLAY_NAME}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_REQUIRED_CLAIMS}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_ENDPOINT_HOSTS}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_DEFAULT_ROLE}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_BOOTSTRAP_ADMINS}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_CA_BUNDLE_FILE}
+          any: true
+      - notContains:
+          path: spec.template.spec.volumes
+          content: {name: oidc-ca}
+          any: true
+  - it: renders each optional setting it is given
+    template: templates/api-deployment.yaml
+    set:
+      edition:
+        enterprise:
+          bootstrapAdmins: "email:admin@example.com"
+          defaultRole: viewer
+          oidc:
+            displayName: Example Identity
+            scopes: openid profile email groups
+            requiredClaims: "groups=automatos"
+            endpointHosts: "login.example.com, keys.example.com"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_DISPLAY_NAME, value: Example Identity}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_SCOPES, value: openid profile email groups}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_REQUIRED_CLAIMS, value: "groups=automatos"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_ENDPOINT_HOSTS, value: "login.example.com, keys.example.com"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_DEFAULT_ROLE, value: viewer}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_BOOTSTRAP_ADMINS, value: "email:admin@example.com"}
+  - it: mounts the provider's CA read-only in the API and names the file
+    template: templates/api-deployment.yaml
+    set:
+      edition:
+        enterprise:
+          oidc:
+            caConfigMap: identity-ca
+            caKey: bundle.pem
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_CA_BUNDLE_FILE, value: /etc/automatos/oidc-ca/bundle.pem}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: oidc-ca, mountPath: /etc/automatos/oidc-ca, readOnly: true}
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: oidc-ca
+            configMap:
+              name: identity-ca
+  - it: mounts the database's CA and the provider's side by side in the Job
+    template: templates/migrate-job.yaml
+    set:
+      database:
+        sslmode: verify-full
+        caConfigMap: database-ca
+      edition:
+        enterprise:
+          oidc:
+            caConfigMap: identity-ca
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: database-ca, mountPath: /etc/automatos/database-ca, readOnly: true}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: oidc-ca, mountPath: /etc/automatos/oidc-ca, readOnly: true}
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: oidc-ca, configMap: {name: identity-ca}}
+  - it: never reads the client secret, or any enterprise setting, in the local edition
+    template: templates/api-deployment.yaml
+    set:
+      edition:
+        authEdition: local
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_CLIENT_SECRET}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_ISSUER}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: FRONTEND_URL}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_THEME_REVOCATIONS}
+          any: true
+  # PRD-277 US-704: each hosted service is its own value, off by default, rendered to its setting.
+  - it: renders every hosted service off by default, in the API
+    template: templates/api-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_THEME_REVOCATIONS, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_ITEMS, value: "false"}
+  - it: renders every hosted service off by default, in the migration Job
+    template: templates/migrate-job.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_THEME_REVOCATIONS, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_ITEMS, value: "false"}
+  - it: renders the revocation list alone switched on
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: true}}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_THEME_REVOCATIONS, value: "true"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_ITEMS, value: "false"}
+  - it: renders all three switched on
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: true, cloudSync: true, cloudItems: true}}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_THEME_REVOCATIONS, value: "true"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "true"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_ITEMS, value: "true"}
+  - it: renders the hosted services off with no hostedServices map at all, in the API
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {hostedServices: null}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_THEME_REVOCATIONS, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_ITEMS, value: "false"}
+  - it: renders the hosted services off with no hostedServices map at all, in the migration Job
+    template: templates/migrate-job.yaml
+    set:
+      edition: {enterprise: {hostedServices: null}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_THEME_REVOCATIONS, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_ITEMS, value: "false"}
+  # A null value drops that key from the merged values, so each of these is also the key left out.
+  - it: renders themeRevocations off when it is null or left out, in the API
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: null}}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_THEME_REVOCATIONS, value: "false"}
+  - it: renders themeRevocations off when it is null or left out, in the migration Job
+    template: templates/migrate-job.yaml
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: null}}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_THEME_REVOCATIONS, value: "false"}
+  - it: renders cloudSync off when it is null or left out, in the API
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: true, cloudSync: null}}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_THEME_REVOCATIONS, value: "true"}
+  - it: renders cloudSync off when it is null or left out, in the migration Job
+    template: templates/migrate-job.yaml
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: true, cloudSync: null}}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}
+  - it: renders cloudItems off when it is null or left out, in the API
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: true, cloudSync: true, cloudItems: null}}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_ITEMS, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "true"}
+  - it: renders cloudItems off when it is null or left out, in the migration Job
+    template: templates/migrate-job.yaml
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: true, cloudSync: true, cloudItems: null}}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_ITEMS, value: "false"}

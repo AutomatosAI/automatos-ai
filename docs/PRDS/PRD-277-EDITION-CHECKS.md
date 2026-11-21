@@ -25,9 +25,13 @@ Each one answers one question the code asks. None of them means "is this edition
 | `profile_editable` | Is a person's name and email edited in Automatos? | yes | no (Clerk) | no (the IdP) |
 | `step_up` | How is a sensitive action confirmed? | `skip` | `clerk_freshness` | `reauth` (D-13) |
 | `device_pairing` | Can a phone or browser pair with a one-time code and hold an `amd_` token? | yes (by `LOCAL_REMOTE_ACCESS`) | no | yes, by setting (D-7) |
+| `issues_sessions` | Does Automatos issue and resolve its own sign-in sessions: the `ams_` bearer lane, the session cookie and its cross-site check, the `/api/v1/auth` sign-out and session routes, and the session settings checked at start-up? No call site in the table below reads it: it gates only code Wave 3 added. | no | no | yes (D-3, §5.3; Wave 3) |
 | `session_mode` | Can the operator's own CLI sessions run as agents (PRD-234)? | yes (by `CLI_RUNTIME_ENABLED`) | no | no (PRD-253 O1) |
 | `hosts_automatos_cloud` | Is this install Automatos Cloud itself: the public Marketplace, the catalogue, bundles, the theme revocation feed, the moderation inbox, the isolated theme review? | no | yes | no |
-| `calls_automatos_cloud` | May this install call Automatos's hosted services: theme revocations, Cloud sync, Cloud items? | yes, on by default | no (it is the host) | no: only what the operator switches on (D-12). US-704 builds those per-service switches; until then every one is off |
+| `calls_theme_revocations` | May this install pull Automatos's theme revocation list (the pull, its schedule, its sync status and Check now)? US-704 replaced `calls_automatos_cloud` with this and the next two. Each stops requests only: what a pull stored still applies when it is off (row 96). | yes | no (it is the host) | only while `ENTERPRISE_CALLS_THEME_REVOCATIONS` is on (D-12, US-704); off by default |
+| `calls_cloud_sync` | May this install Sync with Automatos Cloud (the Sync routes and the catalogue pull, a Cloud theme's package download, the Cloud screenshot address)? | yes | no (it is the host) | only while `ENTERPRISE_CALLS_CLOUD_SYNC` is on; off by default; needs theme revocations (start-up refuses it alone) |
+| `calls_cloud_items` | May this install request agents, Playbooks, packages and plugins from Automatos Cloud (the Sync's item and plugin passes, and each bundle and package request: `services/marketplace_bundles/items_gate.py`)? The "Items brought from Cloud" routes and the web install gate read what the install holds, so they follow `hosts_automatos_cloud` instead (rows 20, W34, W36, W37). | yes | no (it is the host) | only while `ENTERPRISE_CALLS_CLOUD_ITEMS` is on; off by default; needs Cloud sync (start-up refuses it alone) |
+| `hosted_services_by_setting` | Are the three above each the operator's own setting, rather than the row's? No call site reads it: `editions.current()` does (`with_hosted_service_settings`), and start-up checks the settings where it is on. | no | no | yes (US-704) |
 | `push_needs_consent` | Must the operator agree before notifications leave through Expo's push service? | yes | no | yes (G-1) |
 | `operator_is_user` | Is the person using the app the person who runs the server, so that host detail, `docker compose` fix commands and the operator's own folders are theirs? | yes | no | no (G-2) |
 | `guards_user_endpoints` | Must an AI endpoint a workspace saves be public `https`, called through the pinned client? | no | yes | yes (G-3; PRD-282 adds named private hosts) |
@@ -71,15 +75,16 @@ A migration is history. Rewriting it to read a capability changes what an old re
 | # | Where | Kind | What it switches | Capability | `local` | `saas` | `enterprise` |
 |---|---|---|---|---|---|---|---|
 | 12 | `api/admin_credits.py:65` | C | Admin credit adjustments answer 404 | `billing` | 404 | served | 404 |
-| 13 | `api/admin_theme_revocation_sync.py:56` | H | Revocation sync status and manual pull answer 404 | `calls_automatos_cloud` | served | 404 | served only if the operator switched revocations on |
+| 13 | `api/admin_theme_revocation_sync.py:63` | H | Revocation sync status and manual pull answer 404 | `calls_theme_revocations` | served | 404 | served only while revocations are switched on; else 404, "its operator hasn't switched it on" (US-704) |
 | 14 | `api/billing.py:46` | C | Every billing route answers 404 | `billing` | 404 | served | 404 |
 | 15 | `api/billing_webhooks.py:69` | C | Stripe webhook answers 404 | `billing` | 404 | served | 404 |
 | 16 | `api/llm_analytics.py:887` | H | OpenRouter balance read from the key the calls actually use (the platform key), not only a workspace's own key | `billing` (off: the owner pays the provider) | platform key | workspace key only | platform key |
 | 17 | `api/marketplace_catalog.py:101` | H | Cloud catalogue routes answer 404 | `hosts_automatos_cloud` | 404 | served | 404 |
 | 18 | `api/marketplace_catalog.py:107` | H | Cloud catalogue file route answers 404 | `hosts_automatos_cloud` | 404 | served | 404 |
 | 19 | `api/marketplace_catalog_items.py:97` | H | Cloud bundle and plugin package routes answer 404 | `hosts_automatos_cloud` | 404 | served | 404 |
-| 20 | `api/marketplace_cloud_items.py:49` | H | "Items brought from Cloud" routes answer 404 | `calls_automatos_cloud` | served | 404 | served only if Cloud sync is switched on |
-| 21 | `api/marketplace_cloud_sync.py:57` | H | Cloud Sync routes answer 404 | `calls_automatos_cloud` | served | 404 | served only if Cloud sync is switched on |
+| 20 | `api/marketplace_cloud_items.py:51` | H | "Items brought from Cloud" routes answer 404 | `hosts_automatos_cloud` | served | 404 | served whatever `ENTERPRISE_CALLS_CLOUD_ITEMS` holds: they read only what the install holds, so an item brought earlier is still listed and reviewed (US-704) |
+| 21 | `api/marketplace_cloud_sync.py:73` | H | Cloud Sync routes answer 404 | `calls_cloud_sync` | served | 404 | served only while Cloud sync is switched on; else 404 before the caller is looked at (US-704) |
+| 21a | `api/marketplace_cloud_sync.py:81` | H | Who may run a Sync: past `workspace:manage`, an install admin, then a fresh step-up | `operator_is_user` (and the edition's `step_up`) | the operator, no install-admin check; step-up `skip` | 404 (row 21) | an install admin (`caller_is_admin`) who signed in again within `STEP_UP_MAX_AGE_MINUTES`; the status read stays `workspace:manage` (US-704) |
 | 22 | `api/marketplace_themes_submit.py:145` | C | A submitter with no `users` row is refused | `anonymous_operator` | allowed | 403 | 403 |
 | 23 | `api/mobile_devices.py:216` | H | Minting a pairing code answers 404; the same guard also gates `POST /pair` through `_require_paired_mode` | `device_pairing` | served | 404 | served when pairing is on (D-7; Wave 6) |
 | 24 | `api/mobile_push.py:105` | H | Push-consent read and write answer 404 | `push_needs_consent` | served | 404 | served (G-1) |
@@ -166,7 +171,7 @@ A migration is history. Rewriting it to read a capability changes what an old re
 | 75 | `services/credits/meter.py:112` | P | A call's debit (row 72) | `billing` | see 72 | see 72 | see 72 |
 | 76 | `services/credits/summary.py:58` | P | A product workspace's billing summary (row 72) | `billing` | see 72 | see 72 | see 72 |
 | 77 | `services/credits/summary.py:80` | P | A workspace's billing summary (row 72) | `billing` | see 72 | see 72 | see 72 |
-| 78 | `services/marketplace_cloud/pull.py:128` | H | Cloud sync enabled | `calls_automatos_cloud` | when `AUTOMATOS_CLOUD_URL` is set | never | only when switched on (D-12) |
+| 78 | `services/marketplace_cloud/pull.py:133` | H | Cloud sync enabled (the Sync, and a Cloud theme's package download, `package._download`) | `calls_cloud_sync` | when `AUTOMATOS_CLOUD_URL` is set | never | only while switched on, with the URL set (D-12, US-704) |
 | 79 | `services/mobile/discovery.py:166` | H | Discovery's `auth.modes` and `pairing` blocks | `sign_in` | `["device"]`, pairing by mode | `["clerk"]` | `["oidc"]`, pairing by setting (FR-23; Wave 6) |
 | 80 | `services/mobile/discovery.py:192` | R | `edition` in the discovery document | (name) | `local` | `saas` | `enterprise` |
 | 80a | `services/mobile/pairing.py:97` | H | Creating or redeeming a pairing code is refused (`_require_local_edition`) | `device_pairing` | allowed | refused | allowed when pairing is on (D-7; Wave 6) |
@@ -180,12 +185,12 @@ A migration is history. Rewriting it to read a capability changes what an old re
 | 88 | `services/readiness/probes.py:105` | H | Push readiness: always ready, or ready once agreed | `push_needs_consent` | once agreed | always | once agreed (G-1) |
 | 89 | `services/readiness/service.py:171` | H | Readiness detail adds the host and latency reached | `operator_is_user` | shown | hidden | hidden (G-2) |
 | 90 | `services/socials_plan_research.py:133` | C | Background Socials research allowed without credits | `billing` | always | by credits | always |
-| 91 | `services/theme_revocation_scheduler.py:79` | H | The revocation pull is scheduled | `calls_automatos_cloud` | when a feed URL is set | never | only when switched on (D-12) |
+| 91 | `services/theme_revocation_scheduler.py:85` | H | The revocation pull is scheduled | `calls_theme_revocations` | when a feed URL is set | never | only while switched on, with a feed URL set; else no job is registered (D-12, US-704) |
 | 92 | `services/themes/membership.py:72` | C | The anonymous operator is a member of every workspace | `anonymous_operator` | yes | no | no |
 | 93 | `services/themes/records.py:132` | H | Private theme uploads default under `auto` | `multi_person` | on | on only in a one-person workspace | on only in a one-person workspace |
 | 94 | `services/themes/review.py:185` | H | Approving a Marketplace theme needs a passing isolated-review note | `hosts_automatos_cloud` | not needed | needed | not needed (the admin's approval is the review) |
-| 95 | `services/themes/revocation_pull.py:118` | H | The revocation pull is enabled | `calls_automatos_cloud` | when a feed URL is set | never | only when switched on (D-12) |
-| 96 | `services/themes/revocation_sync_state.py:77` | H | Revoked key ids read from the stored pull | `calls_automatos_cloud` | stored ids | none | stored ids when pulled |
+| 95 | `services/themes/revocation_pull.py:123` | H | The revocation pull is enabled | `calls_theme_revocations` | when a feed URL is set | never | only while switched on, with a feed URL set (D-12, US-704) |
+| 96 | `services/themes/revocation_sync_state.py:81` | H | Revoked key ids read from the stored pull | `hosts_automatos_cloud` | stored ids | none | stored ids, whether or not revocations are switched on now: a key a pull revoked stays revoked once they are off (US-704) |
 | 97 | `services/workspace_move/export.py:125` | R | `edition` in a workspace export's manifest | (name) | `local` | `saas` | `enterprise` |
 | 98 | `services/workspace_purge.py:232` | C | Purging an owner's last workspace also deletes their account | `last_workspace_purge_deletes_person` | never | yes | never (G-8) |
 
@@ -244,10 +249,11 @@ The frontend has its own seam, `frontend/lib/auth-edition.ts`, fixed at build ti
 | W31 | `components/admin/themes/review-queue.tsx:65` | Review queue in hosted mode (isolated-review note) | `hosts_automatos_cloud` | local | hosted | local (row 94) |
 | W32 | `components/marketplace/public/marketplace-page.tsx:63` | Public Marketplace or the member Marketplace | `hosts_automatos_cloud` | member | public | member |
 | W33 | `lib/marketplace/share-card-read.ts:151` | Share card metadata | `hosts_automatos_cloud` | local metadata | read | local metadata |
-| W34 | `components/marketplace/cloud/cloud-item-badges.tsx:46`; `cloud-items-layer.tsx:105`; `sync-button.tsx:73` | Cloud item badges, layer and Sync button | `calls_automatos_cloud` | shown | hidden | shown when Cloud sync is switched on |
-| W35 | `components/settings/SettingsPanel.tsx:100`; `components/settings/automatos-cloud-panel.tsx:43` | Automatos Cloud tab and its panel | `calls_automatos_cloud` | shown | hidden | shown when switched on |
-| W36 | `hooks/use-cloud-items.ts:51, 66, 79` | Cloud item queries enabled | `calls_automatos_cloud` | on | off | on when switched on |
-| W37 | `lib/marketplace/cloud-install-gate.ts:142` | Install gate for Cloud items | `calls_automatos_cloud` | checked | none | checked when switched on |
+| W34 | `components/marketplace/cloud/cloud-item-badges.tsx:48`; `cloud-items-layer.tsx:107`; `sync-button.tsx:74` | Cloud item badges and layer; Sync button | `holdsCloudItems()` (lib/hosted-services.ts); `useHostedService('cloudSync')` (US-704) | shown | hidden | badges and layer always, as `local`; the button while Cloud sync is on |
+| W35 | `components/settings/SettingsPanel.tsx:100`; `components/settings/automatos-cloud-panel.tsx:50, 130` | Automatos Cloud tab and its panel; the panel's lede | `useHostedService('cloudSync')`, through `useHasAutomatosCloudTab`, the tab's one gate; the lede `useHostedService('cloudItems')` (US-704) | shown | hidden | shown while Cloud sync is on; the lede says a Sync brings themes only while Cloud items are off |
+| W36 | `hooks/use-cloud-items.ts:53, 68, 81` | Cloud item queries enabled | `holdsCloudItems()` (US-704) | on | off | on, as `local` |
+| W37 | `lib/marketplace/cloud-install-gate.ts:145` | Install gate for Cloud items | `holdsCloudItems()` (US-704) | checked | none | checked, as `local`: an item brought earlier is still reviewed |
+| W37a | `components/admin/themes/revocations-panel.tsx:131` | The revocation sync section and whether a feed row can be lifted | `useHostedService('themeRevocations')`, through `pullsRevocations` (US-704) | shown | hidden | shown while revocations are on; one plain "not switched on" line, no status asked and feed rows liftable while off |
 | W38 | `hooks/use-mobile-devices.ts:123` | Compares the discovery document's `edition` with `local` | `device_pairing` | pairing read | none | pairing by setting (Wave 6) |
 | W39 | `hooks/use-mobile-devices.ts:185, 187, 188, 193, 198, 199` | This browser's device token and pairing prompt | `device_pairing` | on | off | by setting (Wave 6) |
 | W40 | `components/settings/phones-devices/pair-phone-qr.tsx:59`; `phones-devices-tab.tsx:28` | Pairing QR and "browsers paired to it" copy | `device_pairing` | shown | hidden | by setting (Wave 6) |
