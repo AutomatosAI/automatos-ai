@@ -14,7 +14,7 @@ tests:
       - equal:
           path: spec.strategy.type
           value: Recreate
-  - it: lets no worker process gain a privilege, with only the four capabilities its entrypoint needs (F452)
+  - it: lets no worker process gain a privilege, with no capability (F452, PRD-280 US-201), on a read-only root (PRD-280 US-104)
     template: templates/worker.yaml
     documentIndex: 0
     asserts:
@@ -22,11 +22,39 @@ tests:
           path: spec.template.spec.containers[0].securityContext
           value:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
-              add: ["CHOWN", "DAC_OVERRIDE", "SETUID", "SETGID"]
             seccompProfile:
               type: RuntimeDefault
+  - it: starts the worker as uid 1000, never root, with the pod's group on its volume (PRD-280 US-201)
+    template: templates/worker.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext
+          value:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            fsGroupChangePolicy: OnRootMismatch
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.runAsUser
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.capabilities.add
+  - it: keeps the worker non-root with a writable root too (PRD-280 US-201)
+    template: templates/worker.yaml
+    documentIndex: 0
+    set:
+      worker:
+        readOnlyRootFilesystem: false
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.capabilities.add
   - it: runs the worker under its own account, with no cluster token (PRD-280 US-101)
     template: templates/worker.yaml
     documentIndex: 0
@@ -75,7 +103,7 @@ tests:
       - equal:
           path: spec.template.spec.serviceAccountName
           value: automatos-web-identity
-  - it: gives the web app the runtime's default system-call filter (PRD-280 US-102)
+  - it: gives the web app the runtime's default system-call filter (PRD-280 US-102) and a read-only root (US-104)
     template: templates/frontend.yaml
     documentIndex: 0
     asserts:
@@ -83,6 +111,7 @@ tests:
           path: spec.template.spec.containers[0].securityContext
           value:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
             seccompProfile:

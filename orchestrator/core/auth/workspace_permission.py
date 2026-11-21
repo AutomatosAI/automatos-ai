@@ -34,6 +34,9 @@ lane            behaviour
                 (``core.auth.principal.resolve_user_pk``), since the lane
                 carries no Clerk identity. The local operator's device is
                 ``super_admin`` and bypasses, as the operator does.
+``session``     a person signed in to Automatos (PRD-277 enterprise): the same
+                member-row-then-owner read, by the ``users.id`` the session lane
+                put on the context (``claimed_user_pk``), never by email.
 ==============  =============================================================
 
 Cross-workspace drift guard: when the route carries a ``workspace_id`` path
@@ -49,12 +52,13 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy import text
 
+from core.auth import person as people
 from core.auth.dependencies import RequestContext
 from core.auth.device import DEVICE_AUTH_TYPE
 from core.auth.hybrid import get_request_context_hybrid
-from core.auth.principal import resolve_user_pk
+from core.auth.principal import claimed_user_pk, resolve_user_pk
+from core.auth.session_lane import SESSION_AUTH_TYPE
 from core.auth.super_admin import SUPER_ADMIN_ROLE
 from core.database.database import get_db
 from modules.policy.roles import WorkspaceRole, workspace_has_permission
@@ -63,13 +67,15 @@ from modules.policy.roles import WorkspaceRole, workspace_has_permission
 # (tests/test_p2w2_authz_boundary_sweep.py) reads it off the live route table.
 PERMISSION_MARKER_ATTR = "_workspace_permission"
 
-# PRD-266: the member row, then the owner fallback, read by ``users.id`` for a
-# paired device (bound parameters only).
-_MEMBER_ROLE_BY_PK_SQL = text(
-    "SELECT role FROM workspace_members "
-    "WHERE workspace_id = :ws AND user_id = :uid AND is_active = true LIMIT 1"
-)
-_OWNER_BY_PK_SQL = text("SELECT 1 FROM workspaces WHERE id = :ws AND owner_id = :uid LIMIT 1")
+
+def _role_of(db: Any, person: people.Person, ws_id: Any) -> Optional[str]:
+    """The member row's role, whatever it is, else owner by the legacy ``workspaces.owner_id``, else None."""
+    row = people.member_row(db, person, ws_id)
+    if row:
+        return row[0]
+    if people.owns_workspace(db, person, ws_id):
+        return WorkspaceRole.OWNER.value
+    return None
 
 
 def _device_workspace_role(db: Any, ctx: Any) -> Optional[str]:
@@ -78,13 +84,16 @@ def _device_workspace_role(db: Any, ctx: Any) -> Optional[str]:
     user_pk = resolve_user_pk(db, ctx) if db is not None and ws_id else None
     if user_pk is None:
         return None
-    params = {"ws": str(ws_id), "uid": user_pk}
-    row = db.execute(_MEMBER_ROLE_BY_PK_SQL, params).fetchone()
-    if row:
-        return row[0]
-    if db.execute(_OWNER_BY_PK_SQL, params).fetchone():
-        return WorkspaceRole.OWNER.value
-    return None
+    return _role_of(db, people.by_user_pk(user_pk), ws_id)
+
+
+def _session_workspace_role(db: Any, ctx: Any) -> Optional[str]:
+    """A signed-in person's role in the session's workspace, by the ``users.id`` the lane bound."""
+    ws_id = getattr(ctx, "workspace_id", None)
+    user_pk = claimed_user_pk(ctx) if db is not None and ws_id else None
+    if user_pk is None:
+        return None
+    return _role_of(db, people.by_user_pk(user_pk), ws_id)
 
 
 def resolve_workspace_role(db: Any, ctx: Any) -> Optional[str]:
@@ -94,39 +103,20 @@ def resolve_workspace_role(db: Any, ctx: Any) -> Optional[str]:
     (member lookup + legacy ``workspaces.owner_id`` defence-in-depth). Returns
     ``None`` when the caller has no clerk identity, no workspace, or no
     membership — the gate fails closed on ``None``. A paired device (PRD-266)
-    has no clerk identity: its bound person is read by ``users.id``.
+    has no clerk identity: its bound person is read by ``users.id``. Both lanes
+    read by ``users.id`` (``core.auth.person``, PRD-277 US-202); a Clerk caller's
+    is the row its Clerk user ID names.
     """
     if getattr(ctx, "auth_type", None) == DEVICE_AUTH_TYPE:
         return _device_workspace_role(db, ctx)
+    if getattr(ctx, "auth_type", None) == SESSION_AUTH_TYPE:
+        return _session_workspace_role(db, ctx)
     user = getattr(ctx, "user", None)
     clerk_uid = getattr(user, "clerk_user_id", None) if user else None
     ws_id = getattr(ctx, "workspace_id", None)
     if db is None or not clerk_uid or not ws_id:
         return None
-
-    row = db.execute(
-        text(
-            "SELECT wm.role FROM workspace_members wm "
-            "JOIN users u ON u.id = wm.user_id "
-            "WHERE wm.workspace_id = :ws AND u.clerk_user_id = :cid "
-            "  AND wm.is_active = true LIMIT 1"
-        ),
-        {"ws": str(ws_id), "cid": clerk_uid},
-    ).fetchone()
-    if row:
-        return row[0]
-
-    owner_row = db.execute(
-        text(
-            "SELECT 1 FROM workspaces w "
-            "JOIN users u ON u.id = w.owner_id "
-            "WHERE w.id = :ws AND u.clerk_user_id = :cid LIMIT 1"
-        ),
-        {"ws": str(ws_id), "cid": clerk_uid},
-    ).fetchone()
-    if owner_row:
-        return WorkspaceRole.OWNER.value
-    return None
+    return _role_of(db, people.by_clerk_id(clerk_uid), ws_id)
 
 
 def workspace_permission_granted(db: Any, ctx: Any, permission: str) -> bool:
@@ -151,8 +141,8 @@ def workspace_permission_granted(db: Any, ctx: Any, permission: str) -> bool:
         # trusted single-user posture owns its resolved workspace (PRD-175).
         return workspace_has_permission(WorkspaceRole.OWNER.value, permission)
 
-    # clerk, device (its bound person, by users.id) and api_key (no clerk
-    # identity, so it refuses):
+    # clerk, device and session (their bound person, by users.id) and api_key
+    # (no clerk identity, so it refuses):
     role = resolve_workspace_role(db, ctx)
     return workspace_has_permission(role, permission)
 

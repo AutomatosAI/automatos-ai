@@ -7,23 +7,29 @@
  * header's mutation and toast, hooks/use-cloud-sync.ts) and how to turn it off. It mirrors the
  * revocation sync panel (components/admin/themes/revocation-sync-status.tsx).
  *
- * The tab is the local edition's only (by edition, never by role: lib/auth-edition.ts), for a
+ * The tab is the local edition's, and an enterprise install's while its operator has switched the Sync on
+ * (PRD-277 US-704, hooks/use-hosted-services.ts; by edition and setting, never by role), for a
  * workspace owner or admin (`canManageThemes`, the routes' `workspace:manage`), while the status says
  * the Sync is on: `AUTOMATOS_CLOUD_URL=` (empty) hides it with the Marketplace's button. On the hosted
  * edition and for a member nothing is asked. Should the status the panel reads say off, it says so
  * plainly and offers no Sync now. The server enforces every gate itself; its text renders as text.
+ * On an enterprise install the lede says whether a Sync also brings agents, Playbooks, packages and
+ * plugins (Cloud items, the other setting), and the turn-off line names the operator's settings; in an
+ * enterprise install Sync now is an install admin's, after a fresh sign-in (hooks/use-cloud-sync.ts).
  */
 import type { UseQueryResult } from '@tanstack/react-query'
 import { Cloud, Loader2, RefreshCw } from 'lucide-react'
 
 import {
   CLOUD_LEDE,
+  CLOUD_LEDE_THEMES_ONLY,
   CLOUD_TITLE,
   NOT_SYNCED_YET,
   READING_STATUS,
   SYNC_NOW,
   SYNC_OFF,
   TURN_OFF,
+  TURN_OFF_ENTERPRISE,
   countsLine,
   itemsHeldLine,
 } from '@/components/marketplace/cloud/copy'
@@ -32,19 +38,20 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useWorkspace } from '@/components/workspace-provider'
 import { useCloudSync, useCloudSyncStatus } from '@/hooks/use-cloud-sync'
-import { isLocal } from '@/lib/auth-edition'
+import { useHostedService } from '@/hooks/use-hosted-services'
+import { isEnterprise } from '@/lib/edition-name'
 import { formatRelative } from '@/lib/format-relative'
 import type { CloudSyncStatus } from '@/lib/marketplace/cloud-sync'
 import { themeErrorMessage } from '@/lib/theme-host/api'
 
-/** The Sync's status, asked only on the local edition by a workspace owner or admin. */
+/** The Sync's status, asked only where this install syncs (PRD-277 US-704), by a workspace owner or admin. */
 function useCloudAccess(): { asks: boolean; status: UseQueryResult<CloudSyncStatus> } {
   const { workspace } = useWorkspace()
-  const asks = isLocal && canManageThemes(workspace?.role)
+  const asks = useHostedService('cloudSync') === true && canManageThemes(workspace?.role)
   return { asks, status: useCloudSyncStatus(asks) }
 }
 
-/** Whether Settings shows Automatos Cloud: the local edition, an owner or admin, and the Sync on. */
+/** Whether Settings shows Automatos Cloud: this install syncs, an owner or admin, and the Sync on. */
 export function useHasAutomatosCloudTab(): boolean {
   const { asks, status } = useCloudAccess()
   return asks && status.data?.enabled === true
@@ -110,7 +117,9 @@ function CloudBody({ status }: { status: UseQueryResult<CloudSyncStatus> }) {
     <>
       <CloudFacts status={status.data} />
       <SyncNow />
-      <p className="text-xs text-muted-foreground" data-testid="automatos-cloud-turn-off">{TURN_OFF}</p>
+      <p className="text-xs text-muted-foreground" data-testid="automatos-cloud-turn-off">
+        {isEnterprise ? TURN_OFF_ENTERPRISE : TURN_OFF}
+      </p>
     </>
   )
 }
@@ -118,6 +127,7 @@ function CloudBody({ status }: { status: UseQueryResult<CloudSyncStatus> }) {
 /** Settings › Automatos Cloud: the local edition's Sync, for a workspace owner or admin. */
 export function AutomatosCloudPanel() {
   const { asks, status } = useCloudAccess()
+  const bringsItems = useHostedService('cloudItems') === true
   if (!asks) return null
   return (
     <Card data-testid="automatos-cloud">
@@ -126,7 +136,7 @@ export function AutomatosCloudPanel() {
           <Cloud className="h-5 w-5" aria-hidden />
           {CLOUD_TITLE}
         </CardTitle>
-        <CardDescription>{CLOUD_LEDE}</CardDescription>
+        <CardDescription>{bringsItems ? CLOUD_LEDE : CLOUD_LEDE_THEMES_ONLY}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <CloudBody status={status} />

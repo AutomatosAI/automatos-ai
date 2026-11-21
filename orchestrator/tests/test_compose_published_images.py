@@ -58,6 +58,10 @@ DEV = yaml.safe_load(_DEV.read_text(encoding="utf-8"))["services"]
 WORKFLOW = yaml.safe_load(_IMAGES_WORKFLOW.read_text(encoding="utf-8"))
 PICK = next(step for step in WORKFLOW["jobs"]["changes"]["steps"] if step.get("id") == "pick")
 IMAGES = [image for image in json.loads(PICK["env"]["IMAGES"]) if image["publish"]]
+# Published, but run by no compose service: the enterprise web app (PRD-277 US-505) needs an
+# identity provider and is installed with the Helm chart, never with `make up`.
+_OUTSIDE_COMPOSE = {"enterprise-frontend"}
+COMPOSE_IMAGES = [image for image in IMAGES if image["name"] not in _OUTSIDE_COMPOSE]
 MERGE = WORKFLOW["jobs"]["merge"]
 
 
@@ -81,7 +85,8 @@ def test_every_local_build_carries_its_commit(service):
 
 def test_the_names_and_contexts_match_what_images_yml_publishes():
     """A rename in images.yml, or a moved context, must break compose and the tag picker together."""
-    by_name = {f"automatos-{image['name']}": image for image in IMAGES}
+    assert _OUTSIDE_COMPOSE <= {image["name"] for image in IMAGES}, "every exception is a published image"
+    by_name = {f"automatos-{image['name']}": image for image in COMPOSE_IMAGES}
     assert set(by_name) == set(_PUBLISHED.values())
     for service, name in _PUBLISHED.items():
         assert BASE[service]["build"]["context"] == f"./{by_name[name]['context']}"

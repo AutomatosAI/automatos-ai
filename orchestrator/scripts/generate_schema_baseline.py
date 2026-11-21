@@ -40,9 +40,10 @@ from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 import functools
 import re
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
 from config import config
+from core.database.tls import create_app_engine
 from scripts.init_test_db import init_db
 
 
@@ -483,7 +484,7 @@ def _repair_passes(engine, script: ScriptDirectory) -> None:
 
 
 def main() -> int:
-    engine = create_engine(config.DATABASE_URL)
+    engine = create_app_engine(config.DATABASE_URL)
     with engine.connect() as conn:
         n = conn.execute(text("SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")).scalar()
     if n:

@@ -65,28 +65,120 @@ require_database_settings() {
         echo "❌ No database configured: set POSTGRES_HOST (with POSTGRES_PORT/USER/PASSWORD/DB) or DATABASE_URL"
         exit 1
     fi
+    read_database_tls
+    require_plain_query_names
+}
+
+# PRD-278 W3: DATABASE_SSLMODE and DATABASE_SSLROOTCERT, the settings the app's own
+# connections read, reach pg_isready and psql as libpq's PGSSLMODE and PGSSLROOTCERT.
+# read_database_tls reads them once, the way the app does: trimmed, the mode lowercased,
+# blank as unset. A mode libpq doesn't know, a CA file without verify-ca or verify-full,
+# or verify-ca or verify-full without a CA file, stops the script before it waits for the
+# database, with a line that names the settings and never the address or the file's path.
+# The CA must be a file: the Python steps after this one check that it holds a certificate.
+DB_TLS_SSLMODE=""
+DB_TLS_SSLROOTCERT=""
+
+trim() {
+    local value="$1"
+    value="${value#"${value%%[![:space:]]*}"}"
+    printf '%s' "${value%"${value##*[![:space:]]}"}"
+}
+
+read_database_tls() {
+    DB_TLS_SSLMODE="$(trim "${DATABASE_SSLMODE:-}")"
+    DB_TLS_SSLMODE="${DB_TLS_SSLMODE,,}"
+    DB_TLS_SSLROOTCERT="$(trim "${DATABASE_SSLROOTCERT:-}")"
+    case "$DB_TLS_SSLMODE" in
+        ""|disable|allow|prefer|require|verify-ca|verify-full) ;;
+        *)
+            echo "❌ DATABASE_SSLMODE must be one of disable, allow, prefer, require, verify-ca, verify-full"
+            exit 1
+            ;;
+    esac
+    if [ -n "$DB_TLS_SSLROOTCERT" ]; then
+        case "$DB_TLS_SSLMODE" in
+            verify-ca|verify-full) ;;
+            *)
+                echo "❌ DATABASE_SSLROOTCERT is used only with DATABASE_SSLMODE verify-ca or verify-full"
+                exit 1
+                ;;
+        esac
+    else
+        case "$DB_TLS_SSLMODE" in
+            verify-ca|verify-full)
+                echo "❌ DATABASE_SSLMODE verify-ca and verify-full need DATABASE_SSLROOTCERT: the path of a file holding the CA certificate(s) that signed the database server's certificate"
+                exit 1
+                ;;
+        esac
+    fi
+}
+
+# With DATABASE_SSLMODE set, libpq_url drops the address's own TLS keys by their plain
+# names. libpq (fe-connect.c, conninfo_uri_parse_params) percent-decodes a query key
+# before it matches it, so with the mode set a key holding a % stops the script here,
+# naming the setting, never the address. libpq matches keys case-sensitively and refuses
+# a key it does not know, so another letter case fails to connect rather than winning.
+# Neither setting set: nothing is checked and the address is passed as given.
+require_plain_query_names() {
+    [ -n "$DB_TLS_SSLMODE" ] && [ -z "${POSTGRES_HOST:-}" ] || return 0
+    case "$DATABASE_URL" in *\?*) ;; *) return 0 ;; esac
+    local param params
+    IFS='&' read -r -a params <<<"${DATABASE_URL#*\?}"
+    for param in "${params[@]}"; do
+        case "${param%%=*}" in
+            *%*)
+                echo "❌ DATABASE_SSLMODE is set, and a query parameter name in DATABASE_URL is percent-encoded: write each name plainly, so the setting replaces the address's own TLS keys"
+                exit 1
+                ;;
+        esac
+    done
 }
 
 # libpq tools accept postgresql:// or postgres:// only. Drop a SQLAlchemy driver
 # suffix (postgresql+psycopg2://, postgresql+asyncpg://), which the app accepts
-# but pg_isready and psql reject.
+# but pg_isready and psql reject. With DATABASE_SSLMODE set, the address's own keys that
+# libpq turns into sslmode or sslrootcert are dropped too: sslmode, sslrootcert, and
+# requiressl and ssl, which libpq translates to sslmode. libpq prefers the connection
+# string to PGSSLMODE and PGSSLROOTCERT, and the settings win here as they do in the app.
+# Neither set: the address is passed as given.
 libpq_url() {
-    printf '%s' "$DATABASE_URL" | sed -E 's#^(postgres(ql)?)\+[A-Za-z0-9_]+://#\1://#'
+    local url
+    url="$(printf '%s' "$DATABASE_URL" | sed -E 's#^(postgres(ql)?)\+[A-Za-z0-9_]+://#\1://#')"
+    if [ -n "$DB_TLS_SSLMODE" ]; then
+        url="$(printf '%s' "$url" | sed -E -e ':strip' -e 's/([?&])(sslmode|sslrootcert|requiressl|ssl)=[^&]*(&|$)/\1/' -e 't strip' -e 's/[?&]$//')"
+    fi
+    printf '%s' "$url"
+}
+
+# The settings are exported in a subshell around the one command, never for this whole
+# script: the server it execs would pass them to every libpq connection, a user's own
+# database included. Neither set: neither is exported, and libpq behaves as before.
+with_database_tls() {
+    (
+        if [ -n "$DB_TLS_SSLMODE" ]; then
+            export PGSSLMODE="$DB_TLS_SSLMODE"
+        fi
+        if [ -n "$DB_TLS_SSLROOTCERT" ]; then
+            export PGSSLROOTCERT="$DB_TLS_SSLROOTCERT"
+        fi
+        "$@"
+    )
 }
 
 pg_ready() {
     if [ -n "${POSTGRES_HOST:-}" ]; then
-        pg_isready -h "$POSTGRES_HOST" -p "${POSTGRES_PORT:-5432}" -U "$POSTGRES_USER"
+        with_database_tls pg_isready -h "$POSTGRES_HOST" -p "${POSTGRES_PORT:-5432}" -U "$POSTGRES_USER"
     else
-        pg_isready -d "$(libpq_url)"
+        with_database_tls pg_isready -d "$(libpq_url)"
     fi
 }
 
 db_psql() {
     if [ -n "${POSTGRES_HOST:-}" ]; then
-        PGPASSWORD="${POSTGRES_PASSWORD:-}" psql -h "$POSTGRES_HOST" -p "${POSTGRES_PORT:-5432}" -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"
+        PGPASSWORD="${POSTGRES_PASSWORD:-}" with_database_tls psql -h "$POSTGRES_HOST" -p "${POSTGRES_PORT:-5432}" -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"
     else
-        psql "$(libpq_url)" "$@"
+        with_database_tls psql "$(libpq_url)" "$@"
     fi
 }
 

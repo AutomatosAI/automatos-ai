@@ -1,5 +1,6 @@
 'use client'
 
+import type { ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { RefreshCw } from 'lucide-react'
 import { MemberRow } from './member-row'
@@ -10,13 +11,15 @@ interface MembersTableProps {
     loading: boolean
     onRoleChange: (memberId: number, newRole: string) => void
     onRemove: (memberId: number) => void
+    /** PRD-277 US-504: more buttons for a row (enterprise install admins); none otherwise. */
+    renderActions?: (member: TeamMember) => ReactNode
 }
 
 /**
  * The members card: the column headings, then a loading line, the "no members found" line,
  * or one row per member (`members` is already filtered by the search box).
  */
-export function MembersTable({ members, loading, onRoleChange, onRemove }: MembersTableProps) {
+export function MembersTable({ members, loading, onRoleChange, onRemove, renderActions }: MembersTableProps) {
     return (
         <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -47,6 +50,7 @@ export function MembersTable({ members, loading, onRoleChange, onRemove }: Membe
                             member={member}
                             onRoleChange={onRoleChange}
                             onRemove={onRemove}
+                            actions={renderActions?.(member)}
                         />
                     ))}
                 </div>

@@ -88,9 +88,10 @@ def _coerce_user_id(db: Session, raw: Any) -> Optional[int]:
     if cached is not None:
         return cached
     try:
+        from core.auth.clerk_person import clerk_person_query
         from core.models.core import User
 
-        row = db.query(User.id).filter(User.clerk_user_id == s).first()
+        row = clerk_person_query(db, User.id, s).first()
     except Exception:
         return None
     if not row:

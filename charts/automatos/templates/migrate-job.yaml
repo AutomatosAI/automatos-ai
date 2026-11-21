@@ -42,11 +42,41 @@ spec:
           args: ["migrate"]
           env:
             {{- include "automatos.apiEnv" . | nindent 12 }}
+          {{- $caMount := list (include "automatos.databaseCaMount" . | trim) (include "automatos.oidcCaMount" . | trim) | compact | join "\n" }}
+          {{- if or $caMount .Values.migrations.readOnlyRootFilesystem }}
+          volumeMounts:
+            {{- with $caMount }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- if .Values.migrations.readOnlyRootFilesystem }}
+            # A read-only root (PRD-280 US-104): /tmp is the one path the Job writes, for a
+            # here-document too large for a pipe (docs/PRDS/PRD-280-US-103-WRITE-PATHS.md).
+            - name: tmp
+              mountPath: /tmp
+            {{- end }}
+          {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
+            {{- if .Values.migrations.readOnlyRootFilesystem }}
+            readOnlyRootFilesystem: true
+            {{- end }}
             capabilities:
               drop: ["ALL"]
             seccompProfile:
               type: RuntimeDefault
           resources:
             {{- toYaml .Values.migrations.resources | nindent 12 }}
+      {{- $caVolume := list (include "automatos.databaseCaVolume" . | trim) (include "automatos.oidcCaVolume" . | trim) | compact | join "\n" }}
+      {{- if or $caVolume .Values.migrations.readOnlyRootFilesystem }}
+      volumes:
+        {{- with $caVolume }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.migrations.readOnlyRootFilesystem }}
+        - name: tmp
+          emptyDir: {}
+        {{- end }}
+      {{- end }}
+      {{- with include "automatos.placement" .Values.migrations | trim }}
+      {{- . | nindent 6 }}
+      {{- end }}
