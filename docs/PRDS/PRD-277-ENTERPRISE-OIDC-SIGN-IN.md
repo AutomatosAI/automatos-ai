@@ -559,9 +559,17 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As an operator, I want a published web image for this edition, so that I do not build one myself.
 
 **Acceptance Criteria:**
-- [ ] `images.yml` publishes an enterprise build beside the local one, signed and scanned the same way.
-- [ ] It calls the API by relative address, so the same image works on any install's address.
-- [ ] The chart selects it when `edition.authEdition=enterprise`.
+- [ ] `images.yml` publishes an enterprise build beside the local one, signed and scanned the same way. *Not in the pull request that built line 2; what it needs is in "US-505 notes" below.*
+- [ ] It calls the API by relative address, so the same image works on any install's address. *Built, and left unticked until CI runs the tests and an enterprise image is built from it. `apiClient`'s base address is `''` in enterprise (`lib/api-base-url.ts`), so every call is `/api/…` on the page's own origin; `lib/__tests__/api-base-url.test.ts` loads `apiClient` as each edition builds it and checks the address it fetches. The enterprise build refuses `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` (`enterprise-build.js`; `lib/enterprise/__tests__/runtime-csp.test.ts`). The WebSocket address comes from the page (PRD-279 US-401), the CLI's `/automatos-host.json` answers the request's own origin, and the workflow stream route's GET reaches the API at `BACKEND_INTERNAL_URL` (`lib/enterprise/__tests__/one-image-server.test.ts`). The server stops at start-up without `BACKEND_INTERNAL_URL` (`lib/enterprise/start-up.ts`). One reader is not changed: the Playbook webhook address shown in `components/workflows/playbook-schedule-config.tsx` reads `NEXT_PUBLIC_API_URL` inside a component over the 150-line limit, so in enterprise it shows `http://localhost:8000`.*
+- [ ] The chart selects it when `edition.authEdition=enterprise`. *Not in the pull request that built line 2; what it needs is in "US-505 notes" below.*
+
+#### US-505 notes
+
+- **Same origin is required, not chosen.** The session cookie is `__Host-` and same-origin, the cross-site header is added only to same-origin requests, and the CSRF check reads the Origin (§5.3). So the enterprise build does not accept an absolute API or WebSocket address at all: `next build` stops, naming the variable, rather than producing an image that sends its calls where the cookie does not go.
+- **Build arguments for the enterprise image:** `NEXT_PUBLIC_AUTH_EDITION=enterprise`, and `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` left empty (the Dockerfile's defaults). `NEXT_PUBLIC_MEDIA_ORIGINS` and the Clerk build arguments are not read by this edition.
+- **Settings the web app reads when it runs** (environment of the web container, not `NEXT_PUBLIC_*`): `BACKEND_INTERNAL_URL`, the API's address inside the cluster, required, `http` or `https`; `MEDIA_ORIGINS`, the media origins for the content security policy (PRD-279 US-402), optional. A bad or missing value stops the server at start-up with one line naming the setting.
+- **What the `images.yml` line needs:** a second frontend entry with the build arguments above and the same inputs as the local one (which now include `frontend/csp-policy.mjs` and `frontend/enterprise-build.js`), published, signed and scanned as the local one is, and its boot test given `BACKEND_INTERNAL_URL` or it will not start.
+- **What the chart line needs:** the web container on port 3000 with `BACKEND_INTERNAL_URL` (the API service's in-cluster address) and `MEDIA_ORIGINS`; the ingress sending `/api` and `/ws` to the API (as today) and also `/health` and `/.well-known/automatos.json`, which the browser calls on the page's origin; the web app's own `/.well-known/apple-app-site-association`, `/.well-known/assetlinks.json` and `/automatos-host.json` staying on the web app. Open for the owners: the web app's own `/api/chat`, `/api/workflows/stream`, `/api/themes/files/…` and `/api/generated-images/…` handlers have API routes at the same paths, so with `/api` sent to the API those handlers are not reached; whether the ingress sends those four paths to the web app is a decision, not settled here.
 
 ### Wave 6: Phones
 
@@ -691,7 +699,7 @@ All answered by Gerard on 19 Nov 2026. The options he was given are kept, so eac
 
 ## 9. Technical considerations
 
-- **The web app's build-time settings.** The enterprise image calls the API by relative address, which removes the per-install API address. Media origins in the content security policy are still fixed at build time, so an install whose stored media lives on another host needs the web app to read those settings at run time. That work is a sibling PRD, not yet written. The first development install can run before it lands.
+- **The web app's build-time settings.** The enterprise image calls the API by relative address, which removes the per-install API address. Media origins in the content security policy were fixed at build time; for the enterprise image they are now read when the server starts (`MEDIA_ORIGINS`), and the WebSocket address comes from the page. That work is PRD-279 Wave 4 (US-401, US-402), built with US-505's second line.
 - **PRD-257.** Its people sign-in (D5, question 4) moves here. Its runner identity (W2a) reuses US-401's key handling. The two should share one module.
 - **PRD-253.** Session mode in an enterprise edition stays out, as that PRD's own decision O1 says.
 - **PRD-276.** Sweeping expired sessions should be a scheduled job on the durable queue, not a new loop.
