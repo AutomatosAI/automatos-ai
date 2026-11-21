@@ -126,7 +126,7 @@ def test_the_patch_page_records_the_branch_the_cherry_pick_the_tag_and_the_branc
     page = (DOCS / "patching-a-release.md").read_text(encoding="utf-8")
     for part in ("release/MAJOR.MINOR", "git cherry-pick -x", "pull request", "git tag -a v0.11.3-rc.1",
                  "Target branches", "`release/*`", "Require a pull request before merging",
-                 "Require status checks to pass", "Block force pushes", "Restrict deletions",
+                 "Require status checks to pass", "Block force pushes", "Restrict deletions", "Restrict creations",
                  "A patch changes no database"):
         assert part in page, part
     assert "patching-a-release.md" in (DOCS / "releases.md").read_text(encoding="utf-8")

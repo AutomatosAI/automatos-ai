@@ -157,8 +157,12 @@ A passing check does not prove:
   and again over time.
 - **who wrote or reviewed the code.** It proves which workflow built it, from which commit.
   What reached that commit is the repository's history and its review rules.
-- **that the tag was pushed by a maintainer.** That rests on the repository's tag ruleset
-  (see [Releases](releases.md#who-can-create-a-version-tag)), which CI cannot check.
+- **that the tag was pushed by a maintainer.** For that, a repository admin must have set the
+  `Version tags` ruleset, which lets only maintainers create a `v*` tag, and, for a patch,
+  the `Release branch creation` ruleset, which lets only maintainers create a `release/*`
+  branch.
+  Both settings are recorded on [Releases](releases.md#who-can-create-a-version-tag) and
+  [Patching an older release](patching-a-release.md#the-branch-is-protected-as-main-is).
 - **that GitHub Actions, Sigstore's certificate authority and its transparency log worked
   as they say.** The check trusts them: a certificate is only as good as the issuer that
   gave it.

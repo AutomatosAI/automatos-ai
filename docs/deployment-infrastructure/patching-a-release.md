@@ -95,23 +95,30 @@ not something this workflow decides: check it before the first patch.
 
 ## The branch is protected as main is
 
-A release branch takes changes by pull request only, with the same checks as main, and cannot
-be force-pushed or deleted. That is a **repository ruleset**, which a repository admin sets by
-hand once, for every release branch at once. CI cannot check it: a ruleset is an admin setting
-of the repository, not a file in it, and the workflows' tokens have no admin rights. Look at it
-in the repository's settings after any change to main's rules, and keep the two the same.
+A release branch is made only by a maintainer, takes changes by pull request only, with the
+same checks as main, and cannot be force-pushed or deleted. That is two **repository
+rulesets**, which a repository admin sets by hand once, for every release branch at once. CI
+cannot check them: a ruleset is an admin setting of the repository, not a file in it, and the
+workflows' tokens have no admin rights. Look at them in the repository's settings after any
+change to main's rules, and keep the protection the same as main's.
 
-The setting, under **Settings → Rules → Rulesets → New ruleset → New branch ruleset**:
+Both are under **Settings → Rules → Rulesets → New ruleset → New branch ruleset**, each with
+Enforcement status **Active** and Target branches **include by pattern: `release/*`**:
 
-| Field | Value |
-|---|---|
-| Ruleset name | `Release branches` |
-| Enforcement status | Active |
-| Bypass list | the same as main's ruleset |
-| Target branches | include by pattern: `release/*` |
-| Rules | Restrict deletions; Require a pull request before merging, with the same approvals as main; Require status checks to pass, with the same required checks as main; Block force pushes |
+| Ruleset name | Bypass list | Rules |
+|---|---|---|
+| `Release branch creation` | the **Repository admin** and **Maintain** roles, Always allow | Restrict creations |
+| `Release branches` | the same as main's ruleset | Restrict deletions; Require a pull request before merging, with the same approvals as main; Require status checks to pass, with the same required checks as main; Block force pushes |
+
+They are two rulesets because a bypass covers every rule in its ruleset: maintainers bypass
+the creation rule so they can make the branch, and must not bypass the pull request rule with
+it.
 
 `release/*` matches `release/0.11` and not a deeper name such as `release/0.11/x`, which a
-release branch never has. Creating a release branch is not restricted by the ruleset: the tag
-ruleset on [Releases](releases.md#who-can-create-a-version-tag) is what limits who can cut a
-version from it.
+release branch never has.
+
+**Restrict creations** lets only those on its bypass list create a matching branch. It
+matters here because the image workflow publishes a version for a tag whose commit is on
+`release/MAJOR.MINOR`: with the rule set, anyone else's push of a new `release/…` branch is
+refused, and the tag ruleset on [Releases](releases.md#who-can-create-a-version-tag) then
+limits who can cut a version on it. Set all three before the first release branch is made.

@@ -98,7 +98,15 @@ checked.
 1. **The version and the preflight** (`changes` job). `scripts/ci/release_version.py`
    reads the version off the tag, and `scripts/ci/release_preflight.py` refuses the
    run if a published image already has that version or the commit is on no release
-   line. A registry or API that does not answer stops the run too.
+   line. A registry or API that does not answer stops the run too. Beside it, the
+   release page check (`scripts/ci/release_page.py check`) makes, before any image is
+   built, every check the release page makes later that needs no digest: it checks the
+   tagged commit out again with its full history (a shallow checkout is refused), reads
+   the upgrade file, finds the previous release, reads the history and both sets of
+   migrations, renders the notes with placeholder digests into the step summary, and
+   asks GitHub whether the tag already has a page. Anything the release page would be
+   refused for stops the run here, while nothing is published. That job's token may
+   only read the repository, so the check cannot create a page.
 2. **The scan fails, not warns** (`build` jobs). On a `v*` tag the scan policy
    (`scripts/ci/image_scan_policy.py`) runs in `fail` mode whatever `POLICY_MODE` is
    for branches. A fixable Critical, or a match on CISA's Known Exploited
@@ -135,8 +143,9 @@ checked.
    with five sections (PRD-279 §5.4), described under [The release page](#the-release-page).
    A candidate's page is marked as a pre-release. This is the only job that may write the
    repository's contents, which creating a release needs, and it may do nothing else: it
-   cannot sign or publish an image. If the page for the tag exists, it is left as it is and
-   the job fails.
+   cannot sign or publish an image. It makes the same checks as the early check again,
+   with the real digests, and creates the page on the tagged commit (`target_commitish`).
+   If the page for the tag exists, it is left as it is and the job fails.
 
 ## The release page
 
@@ -147,19 +156,24 @@ Its five sections, each worked out by the job, none written by hand:
   release is the highest full release below this version among the tags the tagged commit
   reaches: for a candidate, the full release before it, never an earlier candidate; for a
   patch cut on `release/MAJOR.MINOR`, the release before it on that branch. A title is shown
-  as written, as plain text: it cannot add a heading, a link or markup to the page.
+  as written, as plain text: it cannot add a heading, a link or markup to the page. A commit
+  with no message is listed as having no subject, with a link to the commit.
 - **Database:** whether the release changes the database, from the Alembic revision files
   at the two tags (read as text). It lists the migrations added, in the order they run, and
   any migration a shipped release had that was since removed or edited, which also counts
-  as a change. A release that changes the database can only be undone by restoring a
-  backup, because migrations go forward only.
+  as a change. A file in the versions folder that sets `revision` or `down_revision` in a
+  form the check cannot read as a plain literal stops the run, naming the file; a file that
+  sets neither is not a migration. A release that changes the database can only be undone
+  by restoring a backup, because migrations go forward only.
 - **Upgrading:** the earliest version that upgrades to this one in one step, read from
   [`scripts/ci/release_upgrade_from.txt`](../../scripts/ci/release_upgrade_from.txt). Its
   format is written in the file: one line, `MAJOR.MINOR.PATCH` of a tagged full release below
-  the one being cut, or `none`. The job fails, and creates no page, if the file is missing or
-  malformed or names a version that has no tag. It says `none` until the first release; set
-  it to the first release's version in the pull request after it, and move it up on purpose
-  whenever a change stops older installs upgrading in one step.
+  the one being cut, or `none`. The run stops before any image is built, and no page is
+  created, if the file is missing or malformed or names a version that has no tag. `none`
+  means "this is the first release: there is nothing to upgrade from", so it is refused once
+  the tagged commit reaches an earlier full release. It says `none` until the first release;
+  set it to the first release's version in the pull request after it, and move it up on
+  purpose whenever a change stops older installs upgrading in one step.
 - **What to install:** the chart's address, version and digest, the `helm install` command,
   and each image's digest.
 - **Checking it:** the `cosign verify` command for the chart and each image, by digest,
@@ -190,11 +204,15 @@ installs from them.
   error names the chart version a maintainer must delete by hand under the
   organisation's packages. Deleting package versions from a workflow is in public
   preview on GitHub.
-- **The release page:** the images and the chart are published by then. If GitHub did not
-  answer, "Re-run failed jobs". If the upgrade file at the tag is missing or wrong, the job
-  cannot make the page for that tag: fix the file and cut the next version. Once the notes
-  are written, the job's summary holds them, even when GitHub refuses the page. A page that
-  exists is never changed by the job.
+- **The release page check** (before anything builds): nothing is published, so fix the
+  cause (the upgrade file, a migration file) and cut the tag again, or re-run if GitHub did
+  not answer.
+- **The release page:** the images and the chart are published by then. The early check
+  has already refused anything in the tagged commit that would stop the page, so what is
+  left is GitHub: if it did not answer, "Re-run failed jobs". Once the notes are written, the
+  job's summary holds them, even when GitHub refuses the page. A page that exists is never
+  changed by the job. Once the page is created, a step summary that cannot be written is a
+  warning, not a failed job.
 
 ## A version is never replaced
 
