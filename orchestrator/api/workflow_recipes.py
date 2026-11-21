@@ -16,6 +16,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query, Body, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, func as sa_func
+from sqlalchemy.exc import SQLAlchemyError
 from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -1634,7 +1635,7 @@ def _record_recipe_install(db: Session, marketplace_recipe, cloned_recipe,
                 "cloned_recipe_id": cloned_recipe.id,
                 "version": marketplace_recipe.version
             })
-    except Exception as e:
+    except SQLAlchemyError as e:
         # If marketplace_installs table doesn't have recipe columns yet, log warning
         logger.warning(f"Could not record recipe install in marketplace_installs: {e}")
         return ("Install tracking not available for recipes yet",)

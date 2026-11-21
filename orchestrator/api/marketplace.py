@@ -19,6 +19,7 @@ from services.agent_quota import AGENT_LIMIT_STATUS, AgentLimitReached
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func, desc, text
+from sqlalchemy.exc import SQLAlchemyError
 
 from core.auth.clerk_person import clerk_person_query
 from core.auth.dependencies import RequestContext
@@ -591,7 +592,7 @@ def _record_agent_install(db: Session, marketplace_agent: Agent, cloned_agent: A
                 "cloned_agent_id": cloned_agent.id,
                 "version": marketplace_agent.version
             })
-    except Exception as e:
+    except SQLAlchemyError as e:
         logger.warning(f"Could not record agent install in marketplace_installs: {e}")
 
 
