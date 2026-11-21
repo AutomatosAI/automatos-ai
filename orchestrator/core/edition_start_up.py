@@ -18,9 +18,11 @@
    ``DEFAULT_WORKSPACE_ID``. ``CLIENT_IP_HEADER`` must name the header the proxy in front sets to
    the caller's address: sign-in limits requests per address and writes it to the audit log, and
    without that header the address is whatever the caller wrote. ``CLIENT_IP_PROXY_COUNT`` (how many
-   of the deployment's own proxies append to that header) must be set when the header is
-   ``X-Forwarded-For``, must be a whole number from 1 to ``PROXY_COUNT_MAX`` when set, and needs
-   ``CLIENT_IP_HEADER`` (``core.client_ip_settings``; checked before the header itself).
+   of the deployment's own proxies append to that header) must be set when the header is one
+   proxies append to (``X-Forwarded-For``, ``X-Original-Forwarded-For``), must be a plain whole
+   number from 1 to ``PROXY_COUNT_MAX`` when set, and needs ``CLIENT_IP_HEADER``; the header may
+   not be RFC 7239's ``Forwarded``, whose values are parameters, not addresses
+   (``core.client_ip_settings``; checked before the header's name).
    ``OIDC_ENDPOINT_HOSTS``, when set, must be host names (no scheme, port or wildcard), and ``OIDC_PENDING_SIGN_INS_MAX`` and
    ``OIDC_PENDING_SIGN_INS_PER_ADDRESS`` whole numbers of at least one, the second no greater than
    the first.

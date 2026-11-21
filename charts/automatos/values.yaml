@@ -51,9 +51,12 @@ edition:
     # (X-Forwarded-For behind an AWS application load balancer) with clientIpProxyCount.
     clientIpHeader: ""
     # How many of your own proxies append the caller's address to clientIpHeader
-    # (CLIENT_IP_PROXY_COUNT), from 1 to 8: 1 for one load balancer, 2 for a content network
-    # in front of one. The API reads the value that many from the header's end. Required when
-    # clientIpHeader is X-Forwarded-For. Empty: the header's first value is the address.
+    # (CLIENT_IP_PROXY_COUNT): a plain whole number, 1 to 8, written without a leading zero
+    # (YAML reads 010 as 8). 1 for one load balancer in its default append mode, 2 for a
+    # content network in front of one. The API reads the value that many from the header's
+    # end. Required when clientIpHeader is X-Forwarded-For or X-Original-Forwarded-For, or
+    # any other header your proxies append to. Empty: the address is the first value of the
+    # header's last line. Rendering stops on 0 or any other value outside 1 to 8.
     clientIpProxyCount: ""
     # People who become install admins at their first sign-in, or at any sign-in while the
     # install has no active install admin (ENTERPRISE_BOOTSTRAP_ADMINS): sub:<subject> and

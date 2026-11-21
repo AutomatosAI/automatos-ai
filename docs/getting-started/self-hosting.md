@@ -1927,10 +1927,12 @@ ones.
   web app, and only when the proxy is on another machine, or on a plain home
   network (above).
 - **An API port that clients can reach around the proxy.**
-  `POST /api/v1/mobile/pair` allows 10 tries per client address per 10 minutes. It
-  reads that address from the first `X-Forwarded-For` hop, so a client that reaches
-  the API directly can write the header itself. Caddy replaces the header by default.
-  Let only the proxy reach the published ports. The limit changes with
+  `POST /api/v1/mobile/pair` allows 10 tries per client address per 10 minutes. The
+  address comes from `orchestrator/core/security/client_ip.py` and its two settings:
+  `CLIENT_IP_HEADER`, the header your proxy writes the address to, and
+  `CLIENT_IP_PROXY_COUNT`, how many of your own proxies append to it. With neither set it
+  is the first `X-Forwarded-For` hop, which Caddy replaces by default. Let only the proxy
+  reach the published ports. The limit changes with
   `RATE_LIMIT_MOBILE_PAIR_IP_MAX` and `RATE_LIMIT_MOBILE_PAIR_IP_WINDOW_SECONDS` in
   `envs/api.local`.
 

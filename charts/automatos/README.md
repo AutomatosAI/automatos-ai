@@ -155,8 +155,8 @@ or is one the API would refuse at start.
 | Value | API setting | |
 |---|---|---|
 | `edition.enterprise.publicUrl` | `FRONTEND_URL` | Required. The install's public address, `https://<host>`, shared by the web app and the API. The sign-in callback and the session cookie are on its origin. |
-| `edition.enterprise.clientIpHeader` | `CLIENT_IP_HEADER` | Required. The header your ingress controller sets to the caller's address (`X-Real-IP` for ingress-nginx). Sign-in limits requests by it and the audit log records it. Name the header your proxy sets on every request, overwriting any value the caller sent, or the header your proxies append to, with `clientIpProxyCount`. |
-| `edition.enterprise.clientIpProxyCount` | `CLIENT_IP_PROXY_COUNT` | How many of your own proxies append the caller's address to `clientIpHeader`, from 1 to 8: 1 for one load balancer, 2 for a content network in front of one. Count every proxy of yours that appends to the header, an ingress controller set to append among them. The API reads the value that many from the header's end. Required when `clientIpHeader` is `X-Forwarded-For` (behind an AWS application load balancer, which appends to it: set 1). Empty: the header's first value. |
+| `edition.enterprise.clientIpHeader` | `CLIENT_IP_HEADER` | Required. The header your ingress controller sets to the caller's address (`X-Real-IP` for ingress-nginx). Sign-in limits requests by it and the audit log records it. Name the header your proxy sets on every request, overwriting any value the caller sent, or the header your proxies append to, with `clientIpProxyCount`. It must hold one IP address or IP addresses separated by commas; rendering stops on `Forwarded`, whose values are `for=` parameters. |
+| `edition.enterprise.clientIpProxyCount` | `CLIENT_IP_PROXY_COUNT` | How many of your own proxies append the caller's address to `clientIpHeader`: a plain whole number, 1 to 8. 1 for one load balancer, 2 for a content network in front of one. Count every proxy of yours that appends to the header, an ingress controller set to append among them. The API reads the value that many from the header's end. Required when `clientIpHeader` is `X-Forwarded-For` or `X-Original-Forwarded-For`; if your proxies append to any other header, state the count for it too. Empty: the address is the first value of the header's last line. Rendering stops on `0`, on anything outside 1 to 8 and on quoted text that is not a plain whole number (`"01"`, `"1.0"`). Write it unquoted without a leading zero: YAML reads `010` as 8 and `1.0` as 1, and the chart cannot tell them from 8 and 1. |
 | `edition.enterprise.oidc.issuer` | `OIDC_ISSUER` | Required. The provider's issuer address, `https` only. |
 | `edition.enterprise.oidc.clientId` | `OIDC_CLIENT_ID` | Required. The application's client id at the provider. |
 | `edition.enterprise.oidc.displayName` | `OIDC_DISPLAY_NAME` | The sign-in button's text, 1 to 64 characters, no `<` or `>`. Empty: "your organisation". |
@@ -174,7 +174,9 @@ session clocks (`SESSION_IDLE_MINUTES`, `SESSION_ABSOLUTE_HOURS`), the claim nam
 the pending sign-in limits (`OIDC_PENDING_SIGN_INS_MAX`, `OIDC_PENDING_SIGN_INS_PER_ADDRESS`)
 have working defaults and go in `config` when you change them; the API checks them at start.
 The session cookie's name and the CSRF header's are fixed in the enterprise web image, so
-`config` may not change them.
+`config` may not change them. Nor may it set `FORWARDED_ALLOW_IPS`: the API reads the
+caller's address from `clientIpHeader` and `clientIpProxyCount`, and leaves the server's own
+forwarded-header handling trusting only its own host.
 
 At the provider, register the sign-in callback `<publicUrl origin>/api/v1/auth/oidc/callback`
 and the address after sign-out `<publicUrl origin>/sign-in`; the install notes print both.
@@ -209,6 +211,14 @@ edition:
     clientIpProxyCount: 1   # 2 with a content network in front of the load balancer
 ```
 
+The count is for proxies that append, the load balancer's default mode (`append`). One that
+replaces the header with the address it saw leaves that one value: count it as 1, or name a
+header it sets. One that passes the header on unchanged (`preserve`) adds nothing: leave it out of
+the count. With the load balancer in `remove` mode the header never arrives: name another.
+Behind ingress-nginx with its default settings, which sets `X-Forwarded-For` and `X-Real-IP` to the
+address it saw and passes on the `X-Forwarded-For` it received as `X-Original-Forwarded-For`, name
+`X-Original-Forwarded-For` and count the proxies in front of ingress-nginx.
+
 ## The worker in a namespace of its own
 
 `worker.namespace` puts the worker in a namespace other than the release's, so it can have its own pod security level, network rules and quotas. A Secret, a ServiceAccount and a PersistentVolumeClaim belong to one namespace, and the chart never creates a namespace, so you provide, before `helm install`:
@@ -234,7 +244,7 @@ Rendering stops with a message on a combination that cannot work:
 - **The enterprise edition can be installed** (`edition.authEdition=enterprise`, PRD-277). It needs, before `helm install`:
   - `OIDC_CLIENT_SECRET` in the Secret `existingSecret` names: the API does not start without it;
   - `edition.enterprise.publicUrl`, `clientIpHeader`, `oidc.issuer` and `oidc.clientId`: rendering stops, naming the value, while one is missing or is one the API would refuse;
-  - behind proxies that append to the client address header, `edition.enterprise.clientIpProxyCount`: how many of your own proxies append to it (1 behind one AWS application load balancer with `clientIpHeader: X-Forwarded-For`). Rendering stops while `clientIpHeader` is `X-Forwarded-For` and the count is empty, while the count is not a whole number from 1 to 8, and while a count is set with no `clientIpHeader`;
+  - behind proxies that append to the client address header, `edition.enterprise.clientIpProxyCount`: how many of your own proxies append to it (1 behind one AWS application load balancer with `clientIpHeader: X-Forwarded-For`). Rendering stops while `clientIpHeader` is `X-Forwarded-For` or `X-Original-Forwarded-For` and the count is empty, while the count is not a plain whole number from 1 to 8, while a count is set with no `clientIpHeader`, while `clientIpHeader` is `Forwarded`, and while `config` sets `FORWARDED_ALLOW_IPS`;
   - the application registered at your identity provider with the two addresses the install notes print;
   - the ingress on, on the host of `publicUrl`, with TLS, so the web app and the API answer on one origin;
   - for a provider with a private certificate, a ConfigMap with its CA (`edition.enterprise.oidc.caConfigMap`).

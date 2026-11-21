@@ -65,6 +65,9 @@ edition.enterprise.clientIpProxyCount (CLIENT_IP_PROXY_COUNT) as trimmed text: e
 {{- fail (printf "config.%s: the enterprise web image sends the session cookie __Host-automatos_session and the header X-Automatos-CSRF, fixed when it is built, so the API must keep them. Remove it from config" $key) }}
 {{- end }}
 {{- end }}
+{{- if hasKey $config "FORWARDED_ALLOW_IPS" }}
+{{- fail "config.FORWARDED_ALLOW_IPS: in the enterprise edition the API reads the caller's address from edition.enterprise.clientIpHeader and clientIpProxyCount, and the server's own forwarded-header handling trusts only its own host. Remove it from config" }}
+{{- end }}
 {{- end }}
 
 {{/* Stops the render on a required enterprise value that is missing, in a fixed order. */}}
@@ -137,17 +140,21 @@ no "..", since it names the file under the mount.
 
 {{/*
 How many of the install's own proxies append to the client address header, as the API checks it
-(core/client_ip_settings.py): a whole number from 1 to 8 when set, and set when the header is
-X-Forwarded-For, the header proxies append to.
+(core/client_ip_settings.py): a plain whole number from 1 to 8 when set (no sign, point or leading
+zero in its text; YAML has already read a number written unquoted), and set when the header is
+one proxies append to. The header may not be RFC 7239's Forwarded, whose values are parameters.
 */}}
 {{- define "automatos.validateClientIpProxyCount" -}}
 {{- $header := toString ((.Values.edition.enterprise | default dict).clientIpHeader | default "") | trim | lower -}}
 {{- $count := include "automatos.clientIpProxyCount" . -}}
-{{- if and $count (or (not (regexMatch `^[0-9]{1,3}$` $count)) (lt (atoi $count) 1) (gt (atoi $count) 8)) }}
-{{- fail "edition.enterprise.clientIpProxyCount must be a whole number from 1 to 8 (CLIENT_IP_PROXY_COUNT): how many of your own proxies append the caller's address to edition.enterprise.clientIpHeader. The API refuses to start otherwise" }}
+{{- if and $count (or (not (regexMatch `^[1-9][0-9]{0,2}$` $count)) (gt (atoi $count) 8)) }}
+{{- fail "edition.enterprise.clientIpProxyCount must be a plain whole number from 1 to 8 (CLIENT_IP_PROXY_COUNT): how many of your own proxies append the caller's address to edition.enterprise.clientIpHeader. The API refuses to start otherwise" }}
 {{- end }}
-{{- if and (not $count) (eq $header "x-forwarded-for") }}
-{{- fail "edition.enterprise.clientIpProxyCount must be set (CLIENT_IP_PROXY_COUNT): edition.enterprise.clientIpHeader names the header proxies append to, so say how many of your own proxies append to it (1 for one load balancer, 2 for a content network in front of one)" }}
+{{- if eq $header "forwarded" }}
+{{- fail "edition.enterprise.clientIpHeader must name a header that holds one IP address, or IP addresses separated by commas, as X-Real-IP and X-Forwarded-For do (CLIENT_IP_HEADER): RFC 7239's for= parameters are not read, so the API refuses to start otherwise" }}
+{{- end }}
+{{- if and (not $count) (has $header (list "x-forwarded-for" "x-original-forwarded-for")) }}
+{{- fail "edition.enterprise.clientIpProxyCount must be set (CLIENT_IP_PROXY_COUNT): edition.enterprise.clientIpHeader names a header proxies append to, so say how many of your own proxies append to it (1 for one load balancer, 2 for a content network in front of one)" }}
 {{- end }}
 {{- end }}
 

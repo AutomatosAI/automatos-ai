@@ -8,6 +8,10 @@ appends to ``X-Forwarded-For``), say how many of your own proxies append to it i
 address is then the value your outermost proxy wrote, that many from the header's end, and the
 values before it are never read. Both settings' rules are ``core.client_ip_settings``.
 
+The count is for proxies that append (an AWS load balancer's default mode). One that replaces the
+header with the one address it saw is the only value there: count it as 1, or name a header it
+sets. One that passes the header on unchanged adds nothing: do not count it.
+
 With ``CLIENT_IP_HEADER`` named:
 
 * no count: the first value of the header's last line;
@@ -16,22 +20,27 @@ With ``CLIENT_IP_HEADER`` named:
   in brackets, as an AWS load balancer writes them; a value with a zone is not an address. At most
   ``ITEMS_EXAMINED_MAX`` items from the end are looked at;
 * either way, the socket peer when the header is missing, holds fewer values than the count, or the
-  value read is not an IP address. No other value is ever tried in its place;
-* a count that is not a whole number from 1 to ``PROXY_COUNT_MAX``: the socket peer, with an error
-  in the log at start. The ``enterprise`` edition refuses to start instead (``core.edition_start_up``).
+  value read is not an IP address. No other value is ever tried in its place. The first request that
+  carries the header with fewer values than the count logs one warning for the process;
+* an IPv4 address written as IPv4-mapped IPv6 (``::ffff:192.0.2.1``) is read as the IPv4 address;
+* a count that is not a plain whole number from 1 to ``PROXY_COUNT_MAX``: ignored, the address read
+  as if it were unset, with one error in the log at start. The ``enterprise`` edition refuses to
+  start instead (``core.edition_start_up``).
 
 ``TrustedClientAddressMiddleware`` puts the same address in the ASGI scope's ``client``, so code that
 reads the socket peer (the widget limiter) reads the caller too.
 
 With ``CLIENT_IP_HEADER`` unset, each caller reads the address as it always has: a route takes the
 first ``X-Forwarded-For`` hop of its last line, else the socket peer; the widget limiter takes the
-socket peer. A count without a header changes nothing, and is logged at start.
+socket peer. A count without a header changes nothing, and is logged at start. Each log line here is
+written at most once per process, and names a setting, never a value or an address.
 """
 from __future__ import annotations
 
 import ipaddress
 import logging
 import re
+import threading
 from itertools import islice
 from typing import Any, Iterable, Iterator, List, Optional, Sequence, Tuple
 
@@ -48,6 +57,28 @@ PORT_MAX = 65535
 # The two forms with a port an AWS load balancer writes: "[2001:db8::1]:8080" and "192.0.2.1:8080".
 _BRACKETED = re.compile(r"\[([0-9A-Fa-f:.]+)\](?::([0-9]{1,5}))?")
 _IPV4_WITH_PORT = re.compile(r"([0-9.]+):([0-9]{1,5})")
+
+# The once-per-process log lines already written, by key. Process state on purpose: a line that
+# names a misconfiguration is worth one entry, not one per request.
+_LOGGED_ONCE_LOCK = threading.Lock()
+_logged_once: set = set()
+UNUSABLE_COUNT_LOG = "unusable-count"
+FEWER_VALUES_LOG = "fewer-values"
+FEWER_VALUES_WARNING = (
+    "%s carried fewer values than %s on a request, so its caller's address was read from the "
+    "connection. Set the count to how many of your own proxies append to the header. Logged once "
+    "per process; later requests fall back the same way without a log line."
+)
+UNUSABLE_COUNT_ERROR = "%s %s. It is ignored until this is fixed: the address is read as if it were unset."
+
+
+def _log_once(key: str, level: int, message: str, *args: Any) -> None:
+    """Write ``message`` the first time ``key`` is logged in this process, and never again."""
+    with _LOGGED_ONCE_LOCK:
+        if key in _logged_once:
+            return
+        _logged_once.add(key)
+    logger.log(level, message, *args)
 
 
 def _settings() -> Tuple[Optional[str], Any]:
@@ -66,13 +97,17 @@ def _first_value(line: Optional[str]) -> Optional[str]:
 
 def _plain_address(value: Optional[str]) -> Optional[str]:
     """``value`` when it is an IP address, in its canonical form; None when missing or not one, so a
-    junk value (``garbage``, ``1.2.3.4:80``) falls back to the peer instead of naming a bucket."""
+    junk value (``garbage``, ``1.2.3.4:80``) falls back to the peer instead of naming a bucket.
+
+    The one place an address is made canonical: an IPv4-mapped IPv6 address is its IPv4 address
+    (``IPv6Address.ipv4_mapped``), so one client is one text for every consumer."""
     if value is None:
         return None
     try:
-        return str(ipaddress.ip_address(value))
+        address = ipaddress.ip_address(value)
     except ValueError:
         return None
+    return str(getattr(address, "ipv4_mapped", None) or address)
 
 
 def _port_is_valid(port: Optional[str]) -> bool:
@@ -87,8 +122,8 @@ def _appended_address(value: str) -> Optional[str]:
         return None
     bracketed = _BRACKETED.fullmatch(value)
     if bracketed:
-        address = _plain_address(bracketed.group(1)) if _port_is_valid(bracketed.group(2)) else None
-        return address if address and ":" in address else None
+        inner = bracketed.group(1)  # brackets hold IPv6 only, so an IPv4 address inside is refused
+        return _plain_address(inner) if ":" in inner and _port_is_valid(bracketed.group(2)) else None
     with_port = _IPV4_WITH_PORT.fullmatch(value)
     if with_port:
         return _plain_address(with_port.group(1)) if _port_is_valid(with_port.group(2)) else None
@@ -111,18 +146,29 @@ def _values_from_the_end(lines: Sequence[str]) -> Iterator[str]:
 
 def _counted_address(lines: Sequence[str], count: int) -> Optional[str]:
     """The value ``count`` from the end, as an address; None when there are fewer values or that
-    one is not an address. No value before it is ever read."""
+    one is not an address. No value before it is ever read. A header that is there with fewer
+    values than the count logs one warning for the process."""
     value = next(islice(_values_from_the_end(lines), count - 1, None), None)
-    return _appended_address(value) if value is not None else None
+    if value is None:
+        if lines:
+            _log_once(FEWER_VALUES_LOG, logging.WARNING, FEWER_VALUES_WARNING,
+                      client_ip_settings.HEADER_SETTING, client_ip_settings.COUNT_SETTING)
+        return None
+    return _appended_address(value)
+
+
+def _usable_count(count_setting: Any) -> Optional[int]:
+    """The count, or None when unset or not a count: a malformed count is ignored, never read as
+    another count (``enterprise`` refuses one at start; the log line is ``_log_an_unusable_count``)."""
+    try:
+        return client_ip_settings.proxy_count(count_setting)
+    except client_ip_settings.MalformedProxyCount:
+        return None
 
 
 def _header_address(lines: Sequence[str], count_setting: Any) -> Optional[str]:
-    """The address the configured header's ``lines`` hold, or None when the peer is the answer
-    (a malformed count among those: it is never read as some other count)."""
-    try:
-        count = client_ip_settings.proxy_count(count_setting)
-    except client_ip_settings.MalformedProxyCount:
-        return None
+    """The address the configured header's ``lines`` hold, or None when the peer is the answer."""
+    count = _usable_count(count_setting)
     if count is None:
         return _plain_address(_first_value(lines[-1])) if lines else None
     return _counted_address(lines, count)
@@ -154,16 +200,15 @@ def client_ip(request: Any) -> str:
 
 
 def _log_an_unusable_count() -> None:
-    """At start: an error naming the count's problem, never its value. ``enterprise`` then refuses
-    to start; every other edition starts, reading no count."""
+    """At start, once per process: an error naming the count's problem, never its value.
+    ``enterprise`` then refuses to start; every other edition starts, reading the address as if the
+    count were unset."""
     from config import config
 
     problem = client_ip_settings.count_problem(getattr(config, "CLIENT_IP_HEADER", None),
                                                getattr(config, "CLIENT_IP_PROXY_COUNT", None))
     if problem:
-        logger.error("%s %s. The count is not read until this is fixed, and while %s is named every "
-                     "caller's address is the socket peer.", client_ip_settings.COUNT_SETTING, problem,
-                     client_ip_settings.HEADER_SETTING)
+        _log_once(UNUSABLE_COUNT_LOG, logging.ERROR, UNUSABLE_COUNT_ERROR, client_ip_settings.COUNT_SETTING, problem)
 
 
 class TrustedClientAddressMiddleware:
