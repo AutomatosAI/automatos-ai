@@ -712,6 +712,9 @@ class Config:
     # overwrites it: no direct, TCP-proxy or private-network callers (on Railway, *.railway.internal
     # skips the edge and a caller there can send its own). Check that a forged one is replaced first.
     CLIENT_IP_HEADER: str = os.getenv("CLIENT_IP_HEADER", "")
+    # How many of your own proxies append to CLIENT_IP_HEADER (1 to 8; 1 for one load balancer): the address is that
+    # many values from its end. Unset: its first value. Text, checked in core/client_ip_settings.py.
+    CLIENT_IP_PROXY_COUNT: str = (os.getenv("CLIENT_IP_PROXY_COUNT") or "").strip()
     # PRD-274 W1: requests a minute any server key may make on the routes named for it
     # (services/key_limits.py); a key's own rate_limit_requests can only lower it.
     SERVER_KEY_REQUESTS_PER_MINUTE: int = int(os.getenv("SERVER_KEY_REQUESTS_PER_MINUTE", "600"))

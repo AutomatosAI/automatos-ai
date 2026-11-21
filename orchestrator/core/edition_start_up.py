@@ -17,8 +17,11 @@
    ``ENTERPRISE_DEFAULT_ROLE`` must be ``none`` or a workspace role below owner, and a role needs
    ``DEFAULT_WORKSPACE_ID``. ``CLIENT_IP_HEADER`` must name the header the proxy in front sets to
    the caller's address: sign-in limits requests per address and writes it to the audit log, and
-   without that header the address is whatever the caller wrote. ``OIDC_ENDPOINT_HOSTS``, when set,
-   must be host names (no scheme, port or wildcard), and ``OIDC_PENDING_SIGN_INS_MAX`` and
+   without that header the address is whatever the caller wrote. ``CLIENT_IP_PROXY_COUNT`` (how many
+   of the deployment's own proxies append to that header) must be set when the header is
+   ``X-Forwarded-For``, must be a whole number from 1 to ``PROXY_COUNT_MAX`` when set, and needs
+   ``CLIENT_IP_HEADER`` (``core.client_ip_settings``; checked before the header itself).
+   ``OIDC_ENDPOINT_HOSTS``, when set, must be host names (no scheme, port or wildcard), and ``OIDC_PENDING_SIGN_INS_MAX`` and
    ``OIDC_PENDING_SIGN_INS_PER_ADDRESS`` whole numbers of at least one, the second no greater than
    the first.
 3. when the access rule or the first admins cannot be used (US-403, US-405):
@@ -46,8 +49,9 @@ that is not a number reaches this check as the text it was, and is refused here.
 
 Every other edition passes untouched: nothing here reads a setting it does not use.
 
-Imports no config and reads no setting itself: ``config.py`` hands the values in. The two parsers it
-imports (``core.auth.access_rule``, ``core.auth.bootstrap_admins``) are pure standard library.
+Imports no config and reads no setting itself: ``config.py`` hands the values in. The three rule
+modules it imports (``core.auth.access_rule``, ``core.auth.bootstrap_admins``,
+``core.client_ip_settings``) are pure standard library.
 """
 from __future__ import annotations
 
@@ -57,7 +61,7 @@ from typing import Any, Iterator, Mapping, Optional, Tuple
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from core import editions
+from core import client_ip_settings, editions
 from core.auth import access_rule, bootstrap_admins
 
 # The issuer, client id and client secret (PRD-277 §5.10), then the install's public address.
@@ -90,7 +94,7 @@ OIDC_SIGN_IN_SETTINGS: Tuple[str, ...] = (
     "OIDC_CA_BUNDLE_FILE", "ENTERPRISE_DEFAULT_ROLE", "DEFAULT_WORKSPACE_ID",
     "CLIENT_IP_HEADER", "OIDC_ENDPOINT_HOSTS", "OIDC_PENDING_SIGN_INS_MAX", "OIDC_PENDING_SIGN_INS_PER_ADDRESS",
     "OIDC_REQUIRED_CLAIMS", "ENTERPRISE_BOOTSTRAP_ADMINS", "OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES",
-    "OIDC_DISPLAY_NAME",
+    "OIDC_DISPLAY_NAME", "CLIENT_IP_PROXY_COUNT",
 )
 # PRD-277 US-502: the provider's name on the sign-in button. Plain text the page shows as it is:
 # 1 to 64 characters, no control character (C0, DEL or C1) and no angle bracket.
@@ -222,6 +226,9 @@ def is_host_name(name: str) -> bool:
 
 
 def _limit_and_host_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str, str]]:
+    # The count first, so a count without a header is named before the missing header is.
+    yield from client_ip_settings.start_up_problems(settings.get("CLIENT_IP_HEADER"),
+                                                    settings.get("CLIENT_IP_PROXY_COUNT"))
     if not _TOKEN.match(str(settings.get("CLIENT_IP_HEADER") or "").strip()):
         yield "CLIENT_IP_HEADER", CLIENT_IP_HEADER_PROBLEM
     if not all(is_host_name(name) for name in listed_hosts(settings.get("OIDC_ENDPOINT_HOSTS"))):
