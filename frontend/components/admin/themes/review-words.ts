@@ -86,6 +86,8 @@ export const SYNC_TITLE = 'Revocation sync'
 export const CHECK_NOW = 'Check now'
 export const SYNC_OFF =
   "Revocation sync is off: this install has no feed address (THEME_REVOCATIONS_URL), so it doesn't follow the Automatos revocation list."
+export const SYNC_NOT_SWITCHED_ON =
+  "Revocation sync is off: this install's operator hasn't switched on Automatos's theme revocation list, so it doesn't follow that list. Revocations set here still apply."
 export const SYNC_STALE =
   "No check of the Automatos revocation list has worked in the last 7 days. Until one does, this install may miss a revocation, and feed rows can be lifted here."
 export const SYNC_CHECKED = 'Revocation list checked.'
