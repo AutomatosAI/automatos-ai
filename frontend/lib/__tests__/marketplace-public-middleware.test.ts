@@ -37,6 +37,7 @@ vi.mock('@clerk/nextjs/server', async () => {
 })
 
 import middleware from '@/middleware'
+import { PUBLIC_ROUTES } from '@/lib/public-routes'
 
 type Middleware = (request: { nextUrl: URL }) => Promise<unknown>
 
@@ -68,8 +69,7 @@ describe('PRD-270 US-270-08a — /marketplace is a public route in SaaS', () => 
 
   it('adds only the one marketplace pattern to the public list', () => {
     const source = readFileSync(path.resolve(__dirname, '..', '..', 'middleware.ts'), 'utf8')
-    const publicList = source.slice(source.indexOf('createRouteMatcher(['), source.indexOf(']);'))
-    const patterns = Array.from(publicList.matchAll(/^\s*"([^"]+)",/gm), (match) => match[1])
-    expect(patterns.filter((pattern) => pattern.includes('marketplace'))).toEqual(['/marketplace'])
+    expect(source).toContain('createRouteMatcher([...PUBLIC_ROUTES])')
+    expect(PUBLIC_ROUTES.filter((pattern) => pattern.includes('marketplace'))).toEqual(['/marketplace'])
   })
 })

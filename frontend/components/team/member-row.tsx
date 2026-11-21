@@ -1,5 +1,6 @@
 'use client'
 
+import type { ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { Trash2, Mail } from 'lucide-react'
 import { formatAbsoluteDate, formatRelative, isWithinDays } from '@/lib/format-relative'
@@ -17,6 +18,8 @@ interface MemberRoleCellProps extends MemberCellProps {
 
 interface MemberRowProps extends MemberRoleCellProps {
     onRemove: (memberId: number) => void
+    /** PRD-277 US-504: more buttons beside Remove (enterprise install admins: end sessions, deactivate). */
+    actions?: ReactNode
 }
 
 /** The avatar's initial, the display name and the email. */
@@ -116,7 +119,7 @@ function MemberJoinedCell({ member }: MemberCellProps) {
 }
 
 /** One member: identity, role, last active, activity and joined cells, and Remove (never for an owner). */
-export function MemberRow({ member, onRoleChange, onRemove }: MemberRowProps) {
+export function MemberRow({ member, onRoleChange, onRemove, actions }: MemberRowProps) {
     return (
         <motion.div
             initial={{ opacity: 0 }}
@@ -133,7 +136,8 @@ export function MemberRow({ member, onRoleChange, onRemove }: MemberRowProps) {
 
             <MemberJoinedCell member={member} />
 
-            <div className="absolute right-3 top-3 md:top-1/2 md:-translate-y-1/2">
+            <div className="absolute right-3 top-3 md:top-1/2 md:-translate-y-1/2 flex items-center">
+                {actions}
                 {/* Don't allow deleting owner */}
                 {member.role !== 'owner' && (
                     <Button

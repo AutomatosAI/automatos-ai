@@ -3,8 +3,15 @@
 import { SignIn } from '@clerk/nextjs'
 import { redirect } from 'next/navigation'
 import { isSaaS } from '@/lib/auth-edition'
+import { isEnterprise } from '@/lib/edition-name'
+import { EnterpriseSignIn } from '@/components/enterprise/enterprise-sign-in'
 
 export default function SignInPage() {
+  // PRD-277 US-502: enterprise signs in at the organisation's identity provider (one button).
+  if (isEnterprise) {
+    return <EnterpriseSignIn />
+  }
+
   // PRD-175 (F008): there is no login in the `local` edition — send visitors home.
   if (!isSaaS) {
     redirect('/')

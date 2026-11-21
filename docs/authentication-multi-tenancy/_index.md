@@ -118,7 +118,7 @@ graph LR
         Context["get_request_context_hybrid"]
         ResolveID["_get_workspace_id_from_request"]
         Access["_user_has_workspace_access"]
-        MemberCheck["_user_is_workspace_member"]
+        MemberCheck["may_open_workspace (core/auth/person.py)"]
         Endpoint["get_current_workspace"]
         Provider["WorkspaceProvider"]
         QueryCache["queryClient.invalidateQueries"]
@@ -135,7 +135,7 @@ graph LR
     Provider --> QueryCache
 ```
 
-Sources: [orchestrator/core/auth/hybrid.py:55-94](), [orchestrator/core/auth/hybrid.py:134-190](), [orchestrator/api/workspaces.py:70-83](), [frontend/components/workspace-provider.tsx:159-167](), [frontend/components/workspace-provider.tsx:169-190]()
+Sources: [orchestrator/core/auth/hybrid.py:55-94](), [orchestrator/core/auth/hybrid.py:137-166](), [orchestrator/core/auth/person.py:140-142](), [orchestrator/api/workspaces.py:70-83](), [frontend/components/workspace-provider.tsx:159-167](), [frontend/components/workspace-provider.tsx:169-190]()
 
 ---
 

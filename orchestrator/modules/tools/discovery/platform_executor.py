@@ -379,11 +379,11 @@ _DRIVER_AWARE_ACTIONS = (
 def _workspace_role_for_clerk(db, workspace_id, clerk_user_id) -> Optional[str]:
     """Resolve the driving user's workspace role, fresh, at the gate.
 
-    Keyed by the server-threaded clerk principal (``caller_context.user_id``)
-    — never by anything the model can write. Any failure returns ``None`` and
-    the caller falls closed to the ask.
-    """
+    Keyed by the ``users.id`` the server-threaded clerk principal names
+    (``caller_context.user_id``), never by anything the model can write. Any failure
+    returns ``None`` and the caller falls closed to the ask."""
     try:
+        from core.auth.clerk_person import clerk_person_pk_expression
         from core.models.core import User
         from core.workspaces.models import WorkspaceMember
 
@@ -393,7 +393,7 @@ def _workspace_role_for_clerk(db, workspace_id, clerk_user_id) -> Optional[str]:
             .filter(
                 WorkspaceMember.workspace_id == workspace_id,
                 WorkspaceMember.is_active.is_(True),
-                User.clerk_user_id == str(clerk_user_id),
+                User.id == clerk_person_pk_expression(str(clerk_user_id)),
             )
             .first()
         )

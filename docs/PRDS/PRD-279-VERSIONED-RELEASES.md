@@ -41,7 +41,7 @@ Most of the machinery exists. The image workflow already reacts to a `v*` tag, a
 | Release record | No release workflow, no change log, no version file. | not found **[T]** | Nothing says what a version contains. |
 | What the API says it is | `"version": "1.0.0"`, written in the code. | `orchestrator/main.py:1342`, `:1468` **[T]** | A running install cannot say what it is. |
 | Web image | One edition is published: `local`, with its API address, WebSocket address and media origins fixed when the image is built. | `images.yml:254-257`; `frontend/Dockerfile:73-101` **[T]** | An image built for one address cannot serve another. |
-| Media origins | Read from `NEXT_PUBLIC_MEDIA_ORIGINS` into the content security policy in `next.config.js`. | `frontend/next.config.js:22` **[T]** | Fixed at build time **[I]**. An install whose files sit on its own storage host needs its own value. |
+| Media origins | Read from `NEXT_PUBLIC_MEDIA_ORIGINS` into the content security policy in `next.config.js`. | `frontend/next.config.js:22` **[T]** | Fixed at build time **[T]**: the policy is a `headers()` rule, which `next build` evaluates (see US-402's first line). An install whose files sit on its own storage host needs its own value. |
 
 ## 3. Goals
 
@@ -122,7 +122,7 @@ The image is built with its version, and the API reports it wherever it reports 
 
 PRD-277 makes the `enterprise` web image call the API by a relative address, which removes the API address from the build. Two per-install settings remain.
 
-- **The WebSocket address** is worked out from the page's own address when none is set and the API address is relative. Today the web app takes it from its own setting, or works it out from an absolute API address, and otherwise has none (`frontend/lib/api-config.ts:99-110` **[T]**).
+- **The WebSocket address** is worked out from the page's own address when none is set and the API address is relative. Before Wave 4 the helper took it from its own setting, or worked it out from an absolute API address, and otherwise had none (`frontend/lib/api-config.ts` `getWebSocketUrl`, now `frontend/lib/websocket-url.ts` **[T]**). Correction: no module imports `lib/api-config.ts`, so that address reached no socket the web app opens; the only WebSocket the web app opens is the canvas terminal's, whose address the API hands it **[T]**. Wave 4 still gives the helper its third case, so any socket that reads it gets the right address.
 - **Media origins** are read when the server starts, not when the image is built. The content security policy is then built from the running server's settings.
 
 The `local` and `saas` images keep their build-time values and behave as today.
@@ -229,19 +229,19 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As an operator, I want the web app to find its WebSocket endpoint from its own address, so that one image serves any install.
 
 **Acceptance Criteria:**
-- [ ] With no WebSocket address set and no absolute API address, the web app uses the page's own host and scheme.
-- [ ] With either set, behaviour is as today.
-- [ ] The one helper that works the address out (`getWebSocketUrl`) gains the third case, and a test covers all three.
+- [x] With no WebSocket address set and no absolute API address, the web app uses the page's own host and scheme. In the `enterprise` edition: `wss://<host>/ws` on an https page, `ws://<host>/ws` on an http one. `local` and `saas` still answer none, as today (§5.7: they keep their build-time values). The address is worked out when it is read, so on the server, with no page, it is none.
+- [x] With either set, behaviour is as today. In every edition, including the old helper's answer for an https API address (`ws://`, not `wss://`).
+- [x] The one helper that works the address out (`getWebSocketUrl`) gains the third case, and a test covers all three. `frontend/lib/websocket-url.ts`, read by `WEBSOCKET_CONFIG.URL`; `frontend/lib/__tests__/websocket-url.test.ts` runs each case under each edition.
 
 #### US-402: Media origins read at start-up · M
 **Description:** As an operator, I want to give the web app my storage host when it starts, so that images and files stored on my own storage are not blocked.
 
 **Acceptance Criteria:**
-- [ ] The pull request states whether `next.config.js` fixes the content security policy at build time, with evidence.
-- [ ] In the `enterprise` image, the media origins come from a setting read when the server starts.
-- [ ] A response's content security policy contains the origins the running server was given.
-- [ ] The `local` and `saas` images behave as today, and the existing policy tests pass unchanged.
-- [ ] The chart passes the setting to the web app.
+- [x] The pull request states whether `next.config.js` fixes the content security policy at build time, with evidence. It does. The policy is a `next.config.js` `headers()` rule whose value is computed when the config file is loaded, from `NEXT_PUBLIC_MEDIA_ORIGINS`, and that load happens in `next build` (`frontend/Dockerfile:110`). The image then runs `node server.js` from the build's `.next/standalone` output (`frontend/Dockerfile:159-162`, `:183`), whose `server.js` Next writes with the configuration the build resolved; the image workflow lists `next.config.js` and `csp-sources.js` among the frontend image's build inputs, and `csp-sources.js` already said the headers are "baked into the standalone build". Next's content security policy guide shows the run-time way: the middleware sets the header on each response. *Read from the code and Next's documentation, not from a built image: no image was built for this pull request.*
+- [x] In the `enterprise` image, the media origins come from a setting read when the server starts. `MEDIA_ORIGINS` (the web container's environment, not a `NEXT_PUBLIC_*` variable): checked when the Node server starts (`instrumentation.ts` → `lib/enterprise/start-up.ts`; a bad value stops the server with one line naming the setting, never the value) and read by the middleware for each response. Each origin must be `https://host[:port]`, `https://*.<domain>.<suffix>`, or `http://localhost` / `http://127.0.0.1` with a port; nothing else gets in (`lib/enterprise/media-origins.ts`, `lib/enterprise/__tests__/media-origins.test.ts`, `start-up.test.ts`).
+- [x] A response's content security policy contains the origins the running server was given. In enterprise the middleware sets the policy on every answer it gives, through or redirected, built by the same function as the build's policy (`frontend/csp-policy.mjs`); the build keeps its policy only on the paths the middleware never runs for (`_next` and files with an extension), so no answer carries two. With no media origin it is exactly the build's enterprise policy. `lib/enterprise/__tests__/runtime-csp.test.ts`.
+- [ ] The `local` and `saas` images behave as today, and the existing policy tests pass unchanged. *None of the existing policy tests is changed; CI proves they pass. `runtime-csp.test.ts` also checks that the saas config and the local config (the published image's build arguments) give one rule and the same policy string as before, written out in full.*
+- [ ] The chart passes the setting to the web app. *Not in this pull request. The chart's web container needs `MEDIA_ORIGINS` and `BACKEND_INTERNAL_URL` (PRD-277 "US-505 notes").*
 
 ## 7. Functional requirements
 
@@ -297,6 +297,7 @@ Each has a recommendation, which stands unless he changes it.
 
 ## 12. Open questions
 
-1. **Is `next.config.js` evaluated at build for the standalone server?** US-402 confirms it before choosing how the policy is built at run time.
+1. **[answered, US-402] Is `next.config.js` evaluated at build for the standalone server?** Yes: its `headers()` rules are fixed by `next build` (evidence in US-402's first line). The enterprise policy is therefore set by the middleware on each response.
 2. **Should a release also carry the `media-assets` image?** It is published by a separate job today (`images.yml:962`) **[T]**.
 3. **How long is a `MAJOR.MINOR` line patched?** That is a support promise, not part of this PRD, and the patch page should state it once it is decided.
+4. **[open, not built] A tighter policy for the `enterprise` image.** Its content security policy (US-402) is exactly as strict as the build-time one it replaces: the same directive list, without the Clerk Frontend API host, the API origin, payment sources and the build's media origins. It still names the hosted product's origins (`https://*.automatos.app`, Automatos Cloud's catalogue files route) and third parties' (Clerk's development and protection hosts, Cloudflare's challenge host, the jsDelivr CDN, Google's and Composio's image hosts), and keeps `'unsafe-inline'` and `'unsafe-eval'` in `script-src`. Dropping any of them needs a browser lane that runs this edition's pages first, to prove none breaks.
