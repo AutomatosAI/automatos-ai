@@ -192,36 +192,36 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As an operator, I want each release to tell me what changed and whether my database will change, so that I can plan the upgrade and the way back.
 
 **Acceptance Criteria:**
-- [ ] The release job creates a release page with the five sections in section 5.4.
-- [ ] The "Database" section is worked out from the Alembic revisions at the two tags, and a test covers a release with a new migration and one without.
-- [ ] The earliest version that can be upgraded from is read from one file, and the job fails if the file is missing.
-- [ ] A release candidate is marked as a pre-release.
+- [ ] The release job creates a release page with the five sections in section 5.4. *(Built: the `release-notes` job in `images.yml`, after the chart is published and checked, runs `scripts/ci/release_page.py`; it holds `contents: write` and nothing else, and never replaces a page that exists. The five sections, in order, and the job's shape are tested (`tests/test_prd279_release_notes.py`). Needs a real tag to create a page.)*
+- [x] The "Database" section is worked out from the Alembic revisions at the two tags, and a test covers a release with a new migration and one without. *(`release_history.py` reads each `versions/*.py` at both tags with `git ls-tree` and `git show`, never importing it. Tested: a migration added, none added, a shipped one removed or edited (which reads as a change, never "does not change"), one added and another removed, a merge revision, and the first release.)*
+- [x] The earliest version that can be upgraded from is read from one file, and the job fails if the file is missing. *(`scripts/ci/release_upgrade_from.txt`, whose format is written in it: one line, `MAJOR.MINOR.PATCH` of a tagged full release below the version, or `none`. The job fails, and creates no page, when it is missing, malformed, or names a version that is not tagged or not below this one. It says `none` until the first release.)*
+- [x] A release candidate is marked as a pre-release. *(The request the job sends: `prerelease: true`, and never marked the latest. A full release is the latest only when no full release has a higher version, so a patch to an older line is not.)*
 
 #### US-302: A page on checking a release · S
 **Description:** As a security reviewer, I want the exact command and the identity to expect, so that I can check a release myself.
 
 **Acceptance Criteria:**
-- [ ] A page in `docs/` gives the command for an image and for the chart, with the workflow, repository and tag form to expect.
-- [ ] It says what the contents list and the build record are, and how to read them.
-- [ ] It says plainly what a passing check does and does not prove.
-- [ ] The release notes link to it.
+- [x] A page in `docs/` gives the command for an image and for the chart, with the workflow, repository and tag form to expect. *(`docs/deployment-infrastructure/checking-a-release.md`; a test holds every claim the workflow's own check pins (`release_signing.CLAIM_FLAGS`) on the page.)*
+- [x] It says what the contents list and the build record are, and how to read them. *(The SBOM and provenance attestations the build makes, read with `docker buildx imagetools inspect --format`.)*
+- [x] It says plainly what a passing check does and does not prove.
+- [x] The release notes link to it. *(At the release's own tag; tested in `tests/test_prd279_release_notes.py`.)*
 
 #### US-303: An install reports its version · S
 **Description:** As an operator, I want a running install to say which version it is, so that I never have to work it out from an image id.
 
 **Acceptance Criteria:**
-- [ ] The API image is built with its version: the tag's version on a release, the commit id otherwise.
-- [ ] Both places in `main.py` that return `"version": "1.0.0"` return that value.
-- [ ] The web app shows it where it shows the edition.
-- [ ] A test pins that the value is not the literal `1.0.0`.
+- [x] The API image is built with its version: the tag's version on a release, the commit id otherwise. *(images.yml passes `AUTOMATOS_VERSION` to the API alone: the tag's version, else `github.sha`, which on a pull request is its merge commit. The Dockerfile declares it after the last filesystem layer, so no layer is rebuilt for a new value, and the cache keys and `tree-<12>` tags are unchanged; a `tree-<12>` tag keeps the first image built from that tree, which reports that commit. `config.AUTOMATOS_VERSION` reads it; a build given none (compose, `make build`, Railway, the test suite) reports `dev`. `tests/test_prd279_install_version.py`.)*
+- [x] Both places in `main.py` that return `"version": "1.0.0"` return that value. *(Correction: there were three places that said `1.0.0`: the app's own version (OpenAPI), `GET /`, `GET /health`, and also `GET /api/system/health` in `api/system.py`. All four return it.)*
+- [x] The web app shows it where it shows the edition. *(On the profile page, beside the edition's name, in every edition: "Enterprise edition · version 0.12.0". Read through `apiClient` from the existing, authenticated `GET /api/system/health`, because in enterprise the chart exposes neither `/` nor `/health` to the browser. `frontend/app/settings/profile/install-version.tsx` and its test.)*
+- [x] A test pins that the value is not the literal `1.0.0`.
 
 #### US-304: Patching an older release · S
 **Description:** As a maintainer, I want a written way to fix a release that main has moved past, so that a customer on last month's version can get a security fix alone.
 
 **Acceptance Criteria:**
-- [ ] A page describes the `release/MAJOR.MINOR` branch, the cherry-pick by pull request, and the patch tag.
-- [ ] The branch is protected as main is. A repository setting, recorded on the page.
-- [ ] The image workflow publishes a patch tag cut from such a branch, shown once with a release candidate.
+- [x] A page describes the `release/MAJOR.MINOR` branch, the cherry-pick by pull request, and the patch tag. *(`docs/deployment-infrastructure/patching-a-release.md`. A patch carries no migration. Another repository that imports a release may require the release's commit to be on main: the page says to check that before the first patch.)*
+- [ ] The branch is protected as main is. A repository setting, recorded on the page. *(Page written: a branch ruleset on `release/*` with main's rules. Needs a repository setting: an admin creates the ruleset. images.yml now builds and scans a pull request into `release/**` as one into main, so main's required checks can run there; a merge into a release branch publishes nothing.)*
+- [ ] The image workflow publishes a patch tag cut from such a branch, shown once with a release candidate. *(Built: the preflight already accepts a commit on `release/MAJOR.MINOR` for the tag's own `MAJOR.MINOR` only. Tested through its entry point: a tag on main, a patch tag or candidate on its own release branch, a tag on neither, and a tag on another line's branch (`tests/test_prd279_patch_releases.py`). Needs a real patch tag to show.)*
 
 ### Wave 4: A web image that needs no rebuild
 
@@ -262,7 +262,7 @@ Each has a recommendation, which stands unless he changes it.
 
 | # | Decision | Recommendation | Why |
 |---|---|---|---|
-| D-1 | The first version number | `0.7.0`, for the chart and the application together | The chart is at 0.6.0 and must not go backwards. One number for both is simpler than two. |
+| D-1 | The first version number | `0.7.0`, for the chart and the application together | The chart is at 0.6.0 and must not go backwards. One number for both is simpler than two. *Correction (Wave 3): the chart is now at 0.11.0, and the workflow refuses a tag below the chart's version, so the first version is 0.11.0 or later.* |
 | D-2 | Where the chart is published | The same registry as the images, as an OCI artifact | One place, one signing method, no separate chart repository to run |
 | D-3 | Release notes | Generated from commit messages, with the database line worked out | The messages already follow a type and scope. A hand-written section can be added on top. |
 | D-4 | Whether a release fails on the scan before PRD-262 flips the default | Yes | A version number an organisation installs should not be the lenient case |
@@ -301,3 +301,5 @@ Each has a recommendation, which stands unless he changes it.
 2. **Should a release also carry the `media-assets` image?** It is published by a separate job today (`images.yml:962`) **[T]**.
 3. **How long is a `MAJOR.MINOR` line patched?** That is a support promise, not part of this PRD, and the patch page should state it once it is decided.
 4. **[open, not built] A tighter policy for the `enterprise` image.** Its content security policy (US-402) is exactly as strict as the build-time one it replaces: the same directive list, without the Clerk Frontend API host, the API origin, payment sources and the build's media origins. It still names the hosted product's origins (`https://*.automatos.app`, Automatos Cloud's catalogue files route) and third parties' (Clerk's development and protection hosts, Cloudflare's challenge host, the jsDelivr CDN, Google's and Composio's image hosts), and keeps `'unsafe-inline'` and `'unsafe-eval'` in `script-src`. Dropping any of them needs a browser lane that runs this edition's pages first, to prove none breaks.
+5. **[open, Wave 3] May a line's first release (`X.Y.0`) be cut on `release/X.Y`?** The preflight accepts any version of a line from that line's branch, `X.Y.0` included. The patch page cuts only patches there; refusing `X.Y.0` off main would be one more check in the preflight.
+6. **[open, Wave 3] The version a Railway build reports.** Railway builds the API without the workflow's build argument, so it reports `dev`. Passing Railway's commit id to the build would make the hosted API report its commit, as main's images do.
