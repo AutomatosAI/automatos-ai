@@ -6,6 +6,7 @@ Centralized manager for all embedding operations.
 Reads configuration from General Settings and provides unified interface.
 """
 
+import functools
 import inspect
 import logging
 import threading
@@ -111,17 +112,41 @@ def configured_provider() -> Optional[str]:
     return _provider_and_model()[0]
 
 
-def read_embedding_choice() -> EmbeddingChoice:
-    """What the settings choose, read as the manager loads its provider: a settings read, so
-    call it off the event loop. Raises ``ValueError`` on a size that is not a number."""
+@functools.lru_cache(maxsize=None)
+def _unreadable_size(stored: str) -> None:
+    """Log, once per process and value, a stored size that is not a number."""
+    logger.warning("The embeddings 'dimensions' system setting is %r, not a number: VECTOR_STORE_DIMENSIONS "
+                   "is used instead", stored[:40])
+
+
+def _cut_size(provider: Optional[str]) -> Tuple[int, str]:
+    """The size the provider's vectors are cut to, and the setting that gave it.
+
+    ``VECTOR_STORE_DIMENSIONS``, unless the ``dimensions`` system setting names another size
+    than its seeded 2048. For Bedrock, always ``VECTOR_STORE_DIMENSIONS``: its every setting
+    comes from the environment, so an operator can fix a size without the API (PRD-278 Wave 5).
+    A stored size that is not a number is logged once and ``VECTOR_STORE_DIMENSIONS`` used.
+    """
     from config import config as _config
 
-    provider, model = _provider_and_model()
-    stored = get_system_setting("dimensions") or DEFAULT_DIMENSION
+    from_config = int(_config.VECTOR_STORE_DIMENSIONS or DEFAULT_DIMENSION), DIMENSION_FROM_CONFIG
+    if provider == BEDROCK:
+        return from_config
+    stored = str(get_system_setting("dimensions") or DEFAULT_DIMENSION).strip()
     if stored == DEFAULT_DIMENSION:
-        dimension, source = int(_config.VECTOR_STORE_DIMENSIONS or DEFAULT_DIMENSION), DIMENSION_FROM_CONFIG
-    else:
-        dimension, source = int(stored), DIMENSION_FROM_SETTING
+        return from_config
+    try:
+        return int(stored), DIMENSION_FROM_SETTING
+    except ValueError:
+        _unreadable_size(stored)
+        return from_config
+
+
+def read_embedding_choice() -> EmbeddingChoice:
+    """What the settings choose, read as the manager loads its provider: a settings read, so
+    call it off the event loop."""
+    provider, model = _provider_and_model()
+    dimension, source = _cut_size(provider)
     cache_dir = get_system_setting("cache_dir") or "./model_cache"
     return EmbeddingChoice(provider=provider, model=model, dimension=dimension, dimension_setting=source,
                            cache_dir=cache_dir)
@@ -259,6 +284,15 @@ class EmbeddingManager:
         # Inside a chat turn's scope (TURN_EMBED_ONCE) a repeat of the same text is answered
         # from the turn's memo; with no scope open this is the provider's call, as before.
         return await embed_once(self._model_key(), text, self.provider.generate_embedding)
+
+    def space_key(self) -> str:
+        """What the vectors this manager makes are, for a cache to key them by: the provider, its
+        model and the size they come back at (as the action index keys its cache). Loads the
+        provider first: a settings read. A vector cached under another key never answers for
+        this one (PRD-278 Wave 5: a switch of model must not serve the old model's vectors)."""
+        self._ensure_provider()
+        info = self.get_provider_info()
+        return f"{info['provider']}:{info['model']}:{info['dimension']}"
 
     def _model_key(self) -> str:
         """What tells one embedding space from another: the provider's class, model and dimension."""

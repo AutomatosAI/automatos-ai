@@ -839,82 +839,83 @@ class CodeGraphService:
         
         return symbols, relationships
     
-    def _ensure_embedding_dimension(self):
-        """Ensure the embedding column dimension matches the current embedding model from database settings"""
-        try:
-            # Read dimension directly from database settings (no hardcoding).
-            # PRD-197 S2: canonical (embeddings, dimensions) key — the old
-            # long name was renamed by PRD-136 and missed on every read.
-            from core.llm.embedding_manager import get_system_setting
-            dimension_str = get_system_setting("dimensions")
+    def _wanted_embedding_dimension(self) -> int:
+        """The size the code index's embedding column must have.
 
-            if not dimension_str:
-                # Fallback to embedding manager if settings not found
-                current_dim = self.embedding_manager.get_dimension()
-                logger.warning(f"embeddings.dimensions not found in settings, using embedding_manager dimension: {current_dim}")
-            else:
-                current_dim = int(dimension_str)
-                logger.info(f"Read embedding dimension from database settings: {current_dim}")
-            
-            # Check current column dimension
-            result = self.db.execute(
-                text("""
-                    SELECT atttypmod 
-                    FROM pg_attribute 
-                    WHERE attrelid = 'codegraph_symbols'::regclass 
-                    AND attname = 'embedding'
-                """)
-            ).fetchone()
-            
-            if result and result[0]:
-                # atttypmod format: -1 means no dimension, positive means dimension
-                # For vector types, atttypmod = dimension + 4
-                current_col_dim = result[0] - 4 if result[0] > 0 else None
-            else:
-                current_col_dim = None
-            
+        The stored ``embeddings.dimensions`` setting (PRD-197 S2: the canonical key), else the
+        embedding manager's. With Bedrock, always the manager's: its vectors' real length, which
+        follows ``VECTOR_STORE_DIMENSIONS`` and the model and never the stored setting, so a
+        seeded 2048 cannot make a column its 1,024 vectors do not fit (PRD-278 Wave 5).
+        """
+        from core.llm.embedding_manager import BEDROCK, configured_provider, get_system_setting
+
+        dimension_str = None if configured_provider() == BEDROCK else get_system_setting("dimensions")
+        if not dimension_str:
+            current_dim = self.embedding_manager.get_dimension()
+            logger.info(f"Code index embedding size from the embedding manager: {current_dim}")
+            return current_dim
+        logger.info(f"Read embedding dimension from database settings: {dimension_str}")
+        return int(dimension_str)
+
+    def _embedding_column_dimension(self) -> Optional[int]:
+        """The embedding column's size now; None when it has none."""
+        result = self.db.execute(
+            text("""
+                SELECT atttypmod
+                FROM pg_attribute
+                WHERE attrelid = 'codegraph_symbols'::regclass
+                AND attname = 'embedding'
+            """)
+        ).fetchone()
+        # atttypmod: -1 means no dimension; for vector types it is the dimension + 4
+        if result and result[0]:
+            return result[0] - 4 if result[0] > 0 else None
+        return None
+
+    def _retype_embedding_column(self, current_dim: int) -> None:
+        """Make the embedding column ``vector(current_dim)``, with its IVFFlat index when pgvector allows one."""
+        for idx_name in ['idx_codegraph_symbols_embedding', 'codegraph_symbols_embedding_idx',
+                         'idx_codegraph_symbols_embedding_hnsw']:
+            try:
+                self.db.execute(text(f"DROP INDEX IF EXISTS {idx_name}"))
+            except Exception as e:  # noqa: BLE001 — as before: a missing index is no reason to stop
+                logger.warning(f"Could not drop index {idx_name}: {e}")
+        # A safe integer before it goes into DDL (type definitions take no bind parameters)
+        current_dim = int(current_dim)
+        if not (1 <= current_dim <= 10000):
+            raise ValueError(f"Invalid embedding dimension: {current_dim}")
+        self.db.execute(
+            text("ALTER TABLE codegraph_symbols ALTER COLUMN embedding TYPE vector(" + str(current_dim) + ")")
+        )
+        # pgvector limits: IVFFlat max 2000, HNSW max 2000
+        if current_dim <= 2000:
+            try:
+                self.db.execute(text(
+                    "CREATE INDEX idx_codegraph_symbols_embedding ON codegraph_symbols "
+                    "USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"
+                ))
+                logger.info(f"Created IVFFlat index for {current_dim}-dim embeddings")
+            except Exception as e:  # noqa: BLE001 — as before: search falls back to a sequential scan
+                logger.warning(f"Could not create IVFFlat index: {e}")
+        else:
+            logger.info(
+                f"Embedding dimension {current_dim} exceeds pgvector index limit (2000). "
+                f"Using sequential scan — fine for code repos."
+            )
+        self.db.commit()
+        logger.info(f"Updated embedding column dimension to {current_dim}")
+
+    def _ensure_embedding_dimension(self):
+        """Ensure the embedding column's size is the one the embeddings need (``_wanted_embedding_dimension``)."""
+        try:
+            current_dim = self._wanted_embedding_dimension()
+            current_col_dim = self._embedding_column_dimension()
             if current_col_dim != current_dim:
                 logger.info(f"Altering embedding column dimension from {current_col_dim} to {current_dim}")
-                
-                # Drop any existing embedding indexes (both possible names)
-                for idx_name in ['idx_codegraph_symbols_embedding', 'codegraph_symbols_embedding_idx',
-                                 'idx_codegraph_symbols_embedding_hnsw']:
-                    try:
-                        self.db.execute(text(f"DROP INDEX IF EXISTS {idx_name}"))
-                    except Exception as e:
-                        logger.warning(f"Could not drop index {idx_name}: {e}")
-
-                # Alter the column
-                # Validate current_dim is a safe integer before interpolating into DDL
-                # (DDL statements cannot use bind parameters for type definitions)
-                current_dim = int(current_dim)
-                if not (1 <= current_dim <= 10000):
-                    raise ValueError(f"Invalid embedding dimension: {current_dim}")
-                self.db.execute(
-                    text("ALTER TABLE codegraph_symbols ALTER COLUMN embedding TYPE vector(" + str(current_dim) + ")")
-                )
-
-                # Recreate index — pgvector limits: IVFFlat max 2000, HNSW max 2000
-                if current_dim <= 2000:
-                    try:
-                        self.db.execute(text(
-                            "CREATE INDEX idx_codegraph_symbols_embedding ON codegraph_symbols "
-                            "USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"
-                        ))
-                        logger.info(f"Created IVFFlat index for {current_dim}-dim embeddings")
-                    except Exception as e:
-                        logger.warning(f"Could not create IVFFlat index: {e}")
-                else:
-                    logger.info(
-                        f"Embedding dimension {current_dim} exceeds pgvector index limit (2000). "
-                        f"Using sequential scan — fine for code repos."
-                    )
-
-                self.db.commit()
-                logger.info(f"Updated embedding column dimension to {current_dim}")
+                self._retype_embedding_column(current_dim)
             else:
                 logger.debug(f"Embedding column dimension already correct: {current_dim}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — as before: indexing goes on, the write reports a mismatch
             logger.warning(f"Could not verify/update embedding dimension: {e}. Continuing anyway...")
     
     async def _store_symbols_with_embeddings(self, symbols_data: List[Dict[str, Any]]):
