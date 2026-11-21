@@ -7,11 +7,17 @@
       ``get_dimension()`` returns its dimension;
   (b) it signs with the pod's role in ``AWS_REGION``, or with a stored Bedrock key in the
       key's region, and its client is built by ``bedrock_client.runtime_client`` with exactly
-      the credentials and region the chat client's settings tier gets;
-  (c) the request is Titan Text Embeddings V2's documented body; the answer is checked;
+      the credentials and region the chat client's settings tier gets: the embeddings tier's
+      credential when it names one, else the one chat's tier finds, else the role;
+  (c) the request is Titan Text Embeddings V2's documented body; the answer is checked; an
+      empty or whitespace-only text is refused before any call;
   (d) a call runs in a worker thread, so a coroutine's loop keeps running, and a batch has
       at most ``max_concurrent`` calls in flight, each inside the embedding time limits;
-  (e) a refusal (``ThrottlingException``) raises; nothing stands in for it.
+  (e) a refusal that may get better (``ThrottlingException``) raises the provider's own error,
+      with the code and the model only; nothing stands in for it.
+
+``test_prd278_w5_bedrock_failures_and_cache.py`` holds the rest of the Wave 5 review: the
+process-wide bound, refusals that will not get better, readiness, and the ingestion cache.
 
 botocore's real request pipeline runs and stops just before sending (as in
 ``test_prd278_w1_bedrock_credential_sources.py``). The SDK's chain is given a key of its own
@@ -36,10 +42,11 @@ from botocore.exceptions import ClientError
 
 import core.llm.clients.bedrock_client as bedrock_client
 import core.llm.clients.bedrock_embedding as bedrock_embedding
+import core.llm.clients.bedrock_embedding_calls as calls
 import core.llm.embedding_manager as em
 import core.llm.manager as llm_manager
 from config import config
-from core.llm.clients.base import EmbeddingConfig, EmbeddingProvider
+from core.llm.clients.base import EmbeddingConfig, EmbeddingProvider, EmbeddingUnavailableError
 from core.llm.clients.bedrock_client import BedrockProvider
 from core.llm.clients.bedrock_embedding import (
     TITAN_TEXT_EMBEDDINGS_V2,
@@ -77,6 +84,9 @@ def chain_is_the_pod_role(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "EMBEDDING_BATCH_TIMEOUT_S", 60.0)
     monkeypatch.setattr(config, "EMBEDDING_MAX_RETRIES", 1)
     monkeypatch.setattr(bedrock_embedding, "record_embedding_usage", lambda *a, **k: None)
+    calls.HEALTH.answered()
+    yield
+    calls.HEALTH.answered()
 
 
 def _stored(monkeypatch, credential=None, *, identity: bool) -> None:
@@ -224,17 +234,84 @@ def _runtime_calls(monkeypatch) -> list:
 def test_its_client_gets_exactly_what_the_chat_clients_settings_tier_gets(monkeypatch, identity, credential):
     """The same settings read and the same client factory as chat: no second way to find either."""
     _stored(monkeypatch, credential, identity=identity)
-    calls = _runtime_calls(monkeypatch)
+    built = _runtime_calls(monkeypatch)
 
     chat_config = with_workload_identity(llm_manager.LLMManager._load_config_from_settings(
-        SimpleNamespace(), "embeddings", "aws_bedrock", TITAN_TEXT_EMBEDDINGS_V2))
+        SimpleNamespace(), "orchestrator", "aws_bedrock", TITAN_TEXT_EMBEDDINGS_V2))
     BedrockProvider(chat_config)
     _provider()
 
-    (chat_args, chat_kwargs), (own_args, own_kwargs) = calls
+    (chat_args, chat_kwargs), (own_args, own_kwargs) = built
     assert own_args == chat_args, "api key, secret and region"
     assert own_kwargs["use_role"] == chat_kwargs.get("use_role", False)
     assert own_kwargs["extra"] is not None and "extra" not in chat_kwargs, "only the time limits are its own"
+
+
+def _tiers(monkeypatch, mappings: dict, found: dict, *, identity: bool) -> list:
+    """Each tier's credential mapping (``credential_name_aws_bedrock``) and what each tier's lookup
+    finds; returns the tiers the lookup was asked for."""
+    asked = []
+    monkeypatch.setattr(config, "AWS_USE_WORKLOAD_IDENTITY", identity)
+    monkeypatch.setattr(llm_manager, "get_system_setting",
+                        lambda category, key, default=None: mappings.get(category, default)
+                        if key == "credential_name_aws_bedrock" else default)
+
+    def lookup(provider, environment=None, service_name="orchestrator"):
+        asked.append(service_name)
+        return dict(found.get(service_name) or {})
+
+    monkeypatch.setattr(llm_manager, "get_credential_data", lookup)
+    return asked
+
+
+EMBEDDINGS_KEY = {"bedrock_api_key": "embeddings-tier-key-for-tests", "aws_region": "eu-north-1"}
+CHAT_KEY = {"bedrock_api_key": STORED_API_KEY, "aws_region": KEY_REGION}
+
+
+@pytest.mark.parametrize("identity", [True, False])
+def test_a_credential_the_embeddings_tier_names_comes_first(monkeypatch, identity):
+    asked = _tiers(monkeypatch, {"embeddings": "bedrock-for-embeddings", "orchestrator_llm": "bedrock-for-chat"},
+                   {"embeddings": EMBEDDINGS_KEY, "orchestrator": CHAT_KEY}, identity=identity)
+    built = _runtime_calls(monkeypatch)
+
+    _provider()
+
+    assert asked == ["embeddings"]
+    assert built[0][0] == ("embeddings-tier-key-for-tests", None, "eu-north-1")
+
+
+@pytest.mark.parametrize("identity", [True, False])
+def test_with_no_mapping_of_its_own_it_uses_the_credential_chats_tier_finds(monkeypatch, identity):
+    asked = _tiers(monkeypatch, {"orchestrator_llm": "bedrock-for-chat"},
+                   {"embeddings": EMBEDDINGS_KEY, "orchestrator": CHAT_KEY}, identity=identity)
+    built = _runtime_calls(monkeypatch)
+
+    _provider()
+
+    assert asked == ["orchestrator"], "chat's lookup, not a guess of its own"
+    assert built[0][0] == (STORED_API_KEY, None, KEY_REGION)
+
+
+def test_with_no_mapping_and_no_credential_found_on_the_role_it_uses_the_role(monkeypatch):
+    asked = _tiers(monkeypatch, {}, {}, identity=True)
+    built = _runtime_calls(monkeypatch)
+
+    _provider()
+
+    assert asked == ["orchestrator"]
+    assert built[0][0] == (None, None, INSTALL_REGION) and built[0][1]["use_role"] is True
+
+
+def test_with_no_mapping_and_the_role_off_it_runs_chats_lookup(monkeypatch):
+    """Chat's tier's lookup: its mapping, then the shared name guesses and the first credential
+    of the type (``get_credential_data``), exactly as chat runs it."""
+    asked = _tiers(monkeypatch, {}, {"orchestrator": CHAT_KEY}, identity=False)
+    built = _runtime_calls(monkeypatch)
+
+    _provider()
+
+    assert asked == ["orchestrator"]
+    assert built[0][0] == (STORED_API_KEY, None, KEY_REGION) and built[0][1]["use_role"] is False
 
 
 def test_its_client_carries_the_embedding_time_limits(monkeypatch):
@@ -283,14 +360,17 @@ def test_an_answer_without_the_asked_embedding_raises(monkeypatch, answer):
         _sent(_provider(), answer)
 
 
-def test_an_empty_text_is_refused_without_a_call(monkeypatch):
+@pytest.mark.parametrize("text", ["", "   ", "\n\t "])
+def test_an_empty_or_blank_text_is_refused_without_a_call(monkeypatch, text):
     _stored(monkeypatch, identity=True)
     provider = _provider()
     provider.client = _FakeRuntime()
 
-    with pytest.raises(ValueError, match="empty"):
-        asyncio.run(provider.generate_embedding(""))
-    assert provider.client.threads == set()
+    with pytest.raises(ValueError, match="empty or whitespace-only"):
+        asyncio.run(provider.generate_embedding(text))
+    with pytest.raises(ValueError, match=r"positions \[1\]"):
+        asyncio.run(provider.generate_embeddings_batch(["a text", text, "another"]))
+    assert provider.client.threads == set(), "no call for any text of the batch"
 
 
 # --------------------------------------------------------------------------- (d) off the loop, bounded
@@ -357,7 +437,11 @@ def test_a_throttled_call_raises_and_nothing_stands_in(monkeypatch):
     manager = em.EmbeddingManager()
     manager.provider, manager._provider_loaded = provider, True
 
-    with pytest.raises(ClientError):
+    with pytest.raises(calls.BedrockEmbeddingError) as raised:
         asyncio.run(manager.generate_embedding("hello"))
-    with pytest.raises(ClientError):
+    assert str(raised.value) == f"Bedrock embedding with '{TITAN_TEXT_EMBEDDINGS_V2}' failed: ThrottlingException"
+    assert raised.value.__cause__ is throttled, "AWS's own error is kept as the cause, not in the message"
+    assert not isinstance(raised.value, EmbeddingUnavailableError), "it may get better"
+    with pytest.raises(calls.BedrockEmbeddingError):
         asyncio.run(manager.generate_embeddings_batch(["a", "b"]))
+    assert provider.is_degraded is False
