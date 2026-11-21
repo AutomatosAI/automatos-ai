@@ -74,6 +74,7 @@ from services.themes import revocation_pull, revocation_sync_state, signature_st
 from tests.test_prd261_revocation_pull import KEY_A  # noqa: E402
 from tests.test_prd261_revocation_pull import TABLES as THEME_TABLES  # noqa: E402
 from tests.test_prd261_revocation_pull import _feed as _revocation_feed  # noqa: E402
+from tests.test_prd277_us704_cloud_sync_admin import _person  # noqa: E402
 from tests.test_prd277_enterprise_start_up import (  # noqa: E402,F401  (the reload fixture travels with _enterprise)
     _assert_no_value_in,
     _enterprise,
@@ -480,7 +481,11 @@ def test_on_the_sync_routes_answer(monkeypatch):
     tried = []
     monkeypatch.setattr(pull, "sync_catalog", lambda db, factory: tried.append(1) or pull.SyncOutcome(
         ok=False, error="busy", busy=True))
-    answers = _answers(_client(sync_api.router, []), SYNC_ROUTES)
+    client = _client(sync_api.router, [])
+    # The Sync is an install admin's with a recent sign-in (test_prd277_us704_cloud_sync_admin.py holds that rule).
+    overrides = client.app.dependency_overrides
+    overrides[get_request_context_hybrid] = lambda: _person("super_admin", signed_in_minutes_ago=0)
+    answers = _answers(client, SYNC_ROUTES)
     assert answers == [(200, {"enabled": True}), (409, {"detail": "busy"})] and tried == [1]
 
 
