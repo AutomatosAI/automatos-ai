@@ -136,7 +136,8 @@ def _refuse_unless_active(device: MobileDevice) -> None:
 def _refuse_if_past_max_age(db: Session, request: Request, device: MobileDevice, now: datetime) -> None:
     """401 ``device_token_expired`` for a device past its token's maximum age, where tokens age out.
 
-    The refusal revokes it and records why, once (``services.mobile.token_age``).
+    The refusal revokes it and records why, once (``services.mobile.token_age``); a revoke that cannot be
+    made (a database error) is logged there, and the request is refused all the same.
     """
     if not editions.current().device_tokens_age_out:
         return
@@ -144,9 +145,10 @@ def _refuse_if_past_max_age(db: Session, request: Request, device: MobileDevice,
 
     if not token_age.is_past_max_age(device, now):
         return
-    token_age.revoke_aged_out(db, device.id, now, ip_address=client_ip(request),
+    device_id = device.id  # read before the revoke, which may roll the session back
+    token_age.revoke_aged_out(db, device_id, now, ip_address=client_ip(request),
                               user_agent=request.headers.get("user-agent"))
-    logger.warning("Device lane: device %s is past its token's maximum age", device.id)
+    logger.warning("Device lane: device %s is past its token's maximum age", device_id)
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail={"code": DEVICE_TOKEN_EXPIRED})
 
 

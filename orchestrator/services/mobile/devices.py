@@ -39,7 +39,8 @@ from an id that does not exist.
   device: it is never listed or acted on here. Each is its ``to_dict()``; a row that is
   not the caller's own adds ``owner_label`` (its person's name, else their email: W2
   US-019b), so Studio shows an owner or admin whose phone it is. The caller's own rows
-  carry none, and a member only ever sees their own.
+  carry none, and a member only ever sees their own. Where device tokens age out (PRD-277
+  US-601), an active device past its maximum age is listed with status ``expired``.
 * ``update_device``: the device's person only, an active device only, and only
   ``push_enabled``, ``digest_time`` and ``timezone``. Push on needs a registered Expo token
   (``push_token_missing``); push off keeps the token.
@@ -54,8 +55,9 @@ from an id that does not exist.
   a code) are not devices: they are deleted.
 * ``revoke_every_device_of``: every device of the given kinds on the install, when it starts as
   another edition or with pairing off (PRD-277 US-601, ``services.mobile.edition_change``).
-* ``revoke_if_still_active``: one device whose token is past its maximum age (PRD-277 US-601,
-  ``services.mobile.token_age``), only while it is still active, so it is revoked and audited once.
+* ``revoke_active_device_if``: one device whose token is past its maximum age (PRD-277 US-601,
+  ``services.mobile.token_age``), only while it is still active and still due, so it is revoked and
+  audited once.
 * ``rotate_token``: the device lane on its own device (paired, or signed in on the phone: the
   kinds that hold a token, ``TOKEN_KINDS``), presenting its CURRENT token. The
   new token is returned once; the old one stays valid for
@@ -71,7 +73,7 @@ from __future__ import annotations
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Query, Session
@@ -339,9 +341,15 @@ def _owner_labels(db: Session, caller: DeviceCaller, rows: List[MobileDevice]) -
     return {pk: (name or "").strip() or email for pk, name, email in people}
 
 
-def _view(device: MobileDevice, labels: Mapping[int, str]) -> Dict[str, Any]:
-    """The device as the API shows it, with ``owner_label`` when it is someone else's."""
-    shown = device.to_dict()
+def _view(device: MobileDevice, labels: Mapping[int, str], now: datetime) -> Dict[str, Any]:
+    """The device as the API shows it, with ``owner_label`` when it is someone else's.
+
+    Where device tokens age out (PRD-277 US-601), an active device past its maximum age shows as
+    ``expired`` (``token_age.view_status``); elsewhere the status is the row's.
+    """
+    from services.mobile import token_age  # token_age imports this module
+
+    shown = {**device.to_dict(), "status": token_age.view_status(device, now)}
     label = labels.get(device.user_id)
     return {**shown, "owner_label": label} if label else shown
 
@@ -356,7 +364,8 @@ def list_devices(db: Session, caller: DeviceCaller) -> List[Dict[str, Any]]:
         query = query.filter(MobileDevice.user_id == caller.user_pk)
     rows = query.order_by(MobileDevice.created_at, MobileDevice.id).all()
     labels = _owner_labels(db, caller, rows)
-    return [_view(row, labels) for row in rows]
+    now = _now()
+    return [_view(row, labels, now) for row in rows]
 
 
 def update_device(db: Session, caller: DeviceCaller, device_id: UUID,
@@ -473,17 +482,20 @@ def revoke_every_device_of(db: Session, kinds: Tuple[str, ...], now: datetime) -
     return rows
 
 
-def revoke_if_still_active(db: Session, device_id: UUID, now: datetime) -> Optional[MobileDevice]:
-    """Revoke the device ``device_id`` by nobody, locked, while it is still active; ``None`` when it is not.
+def revoke_active_device_if(db: Session, device_id: UUID, now: datetime, *,
+                            due: Callable[[MobileDevice], bool]) -> Optional[MobileDevice]:
+    """Revoke the active device ``device_id`` by nobody when ``due`` holds for its row read afresh under
+    its lock; ``None`` when it is not revoked.
 
-    Revoked as ``revoke_device`` revokes one, its token hash kept. A request that finds it already revoked
-    (another request got there first) changes nothing, so its caller records nothing twice. Flushes,
-    never commits.
+    The row is locked (one another transaction holds is skipped, never waited for) and read again, so
+    ``due`` and the event list see it as it is now. Revoked as ``revoke_device`` revokes one, its token
+    hash kept. A row already revoked, held elsewhere, or no longer due changes nothing, so its caller
+    records nothing twice. Flushes, never commits.
     """
     device = db.query(MobileDevice).filter(
         MobileDevice.id == device_id, MobileDevice.status == MobileDeviceStatus.ACTIVE.value,
-    ).with_for_update().first()
-    if device is None:
+    ).with_for_update(skip_locked=True).populate_existing().first()
+    if device is None or not due(device):
         return None
     _assign(device, _revoked(device, None, now))
     db.flush()

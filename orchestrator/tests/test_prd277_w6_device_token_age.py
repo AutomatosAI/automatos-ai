@@ -4,8 +4,10 @@
   whole number from 1 to 3650 and refuses anything else, naming the setting and never the value. There is
   no "off". ``local`` and ``saas`` never read it: no value stops them.
 * **The age** counts from the phone's last pairing or sign-in on the phone (``paired_at``), never from a
-  rotation, and from the row's creation where no pairing time was recorded. A device is past it from the
-  moment the age reaches the maximum.
+  rotation, from the row's creation where no pairing time was recorded, and from now for a pairing time
+  later than now. A device is past it from the moment the age reaches the maximum.
+* **One rule, three readers**: push fan-out leaves a device past its age out in enterprise and builds
+  exactly today's filters elsewhere; the device list shows such a device as ``expired`` in enterprise only.
 
 The device lane's refusal, the revoke and its one audit row are proved against Postgres
 (``test_prd277_w6_device_token_age_realdb.py``).
@@ -25,9 +27,13 @@ os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
 os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
+from sqlalchemy import select  # noqa: E402
+
 from config import config  # noqa: E402
 from core import edition_start_up, editions  # noqa: E402
+from core.models.mobile_devices import MobileDevice  # noqa: E402
 from services.mobile import token_age  # noqa: E402
+from services.push import fanout  # noqa: E402
 from tests.test_prd277_enterprise_start_up import (  # noqa: E402,F401  (the fixture restores config after a reload)
     ENV_KEYS,
     LOCAL_WS,
@@ -136,16 +142,16 @@ def _row(**columns):
 
 def test_the_age_counts_from_the_last_pairing_or_sign_in_never_from_a_rotation():
     row = _row(paired_at=NOW - timedelta(days=10), token_rotated_at=NOW - timedelta(minutes=1))
-    assert token_age.issued_at(row) == NOW - timedelta(days=10)
+    assert token_age.issued_at(row, NOW) == NOW - timedelta(days=10)
 
 
 def test_a_row_with_no_pairing_time_counts_from_its_creation():
-    assert token_age.issued_at(_row()) == NOW - timedelta(days=400)
+    assert token_age.issued_at(_row(), NOW) == NOW - timedelta(days=400)
 
 
 def test_a_pairing_time_without_a_zone_reads_as_utc():
     naive = (NOW - timedelta(days=3)).replace(tzinfo=None)
-    assert token_age.issued_at(_row(paired_at=naive)) == NOW - timedelta(days=3)
+    assert token_age.issued_at(_row(paired_at=naive), NOW) == NOW - timedelta(days=3)
 
 
 def test_a_device_is_past_its_maximum_age_from_the_moment_its_age_reaches_it(monkeypatch):
@@ -165,3 +171,49 @@ def test_the_maximum_age_follows_the_setting(monkeypatch):
     monkeypatch.setattr(config, SETTING, 1)
     assert token_age.max_age() == timedelta(days=1)
     assert token_age.is_past_max_age(_row(paired_at=NOW - timedelta(days=2)), NOW) is True
+
+
+def test_a_pairing_time_later_than_now_counts_as_now(monkeypatch):
+    monkeypatch.setattr(config, SETTING, 1)
+    row = _row(paired_at=NOW + timedelta(days=30))
+    assert token_age.issued_at(row, NOW) == NOW
+    assert token_age.is_past_max_age(row, NOW) is False
+    assert token_age.is_past_max_age(row, NOW + timedelta(days=1)) is True
+
+
+# --------------------------------------------------------------------------- push fan-out and the device list
+
+
+def _fanout_sql(monkeypatch, edition) -> str:
+    monkeypatch.setattr(config, "AUTH_EDITION", edition)
+    query = select(MobileDevice.id).where(*fanout._device_filters("00000000-0000-0000-0000-0000000277f1"))
+    return str(query.compile())
+
+
+@pytest.mark.parametrize("edition", ["local", "saas"])
+def test_fan_out_builds_todays_filters_where_tokens_never_age_out(monkeypatch, edition):
+    monkeypatch.setattr(config, "AUTH_EDITION", edition)
+    assert token_age.within_max_age_filters(NOW) == ()
+    assert len(fanout._device_filters("00000000-0000-0000-0000-0000000277f1")) == 7
+    assert "coalesce" not in _fanout_sql(monkeypatch, edition).lower()
+
+
+def test_fan_out_in_enterprise_keeps_only_devices_inside_their_maximum_age(monkeypatch):
+    monkeypatch.setattr(config, "AUTH_EDITION", "enterprise")
+    (kept,) = token_age.within_max_age_filters(NOW)
+    sql = str(kept.compile(compile_kwargs={"literal_binds": False})).lower()
+    assert "coalesce(mobile_devices.paired_at, mobile_devices.created_at) >" in sql
+    assert kept.right.value == token_age.cutoff(NOW)
+    assert "coalesce" in _fanout_sql(monkeypatch, "enterprise").lower()
+
+
+@pytest.mark.parametrize("edition, shown", [("enterprise", token_age.EXPIRED_STATUS), ("local", "active"),
+                                             ("saas", "active")])
+def test_the_device_list_shows_an_active_device_past_its_age_as_expired_in_enterprise_only(
+        monkeypatch, edition, shown):
+    monkeypatch.setattr(config, "AUTH_EDITION", edition)
+    monkeypatch.setattr(config, SETTING, 90)
+    old = _row(paired_at=NOW - timedelta(days=91), status="active")
+    assert token_age.view_status(old, NOW) == shown
+    assert token_age.view_status(_row(paired_at=NOW - timedelta(days=1), status="active"), NOW) == "active"
+    assert token_age.view_status(_row(paired_at=NOW - timedelta(days=91), status="revoked"), NOW) == "revoked"
