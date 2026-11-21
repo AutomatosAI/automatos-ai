@@ -398,3 +398,68 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "sessionMode.enabled needs edition.authEdition=local"
+
+  # ── the hosted services (PRD-277 US-704) ─────────────────────────────────────
+  - it: stops on the revocation list's setting in config
+    set:
+      config:
+        ENTERPRISE_CALLS_THEME_REVOCATIONS: "true"
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.ENTERPRISE_CALLS_THEME_REVOCATIONS: in the enterprise edition the chart sets it from edition.enterprise"
+  - it: stops on the Cloud sync's setting in config
+    set:
+      config:
+        ENTERPRISE_CALLS_CLOUD_SYNC: "true"
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.ENTERPRISE_CALLS_CLOUD_SYNC: in the enterprise edition the chart sets it from edition.enterprise"
+  - it: stops on the Cloud items' setting in config
+    set:
+      config:
+        ENTERPRISE_CALLS_CLOUD_ITEMS: "false"
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.ENTERPRISE_CALLS_CLOUD_ITEMS: in the enterprise edition the chart sets it from edition.enterprise"
+  - it: stops on a hosted service written as quoted text, naming it and its setting
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: "true"}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.hostedServices.themeRevocations must be true or false \\(ENTERPRISE_CALLS_THEME_REVOCATIONS\\)"
+  - it: stops on a hosted service written as a word other than true or false
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: true, cloudSync: "on"}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.hostedServices.cloudSync must be true or false \\(ENTERPRISE_CALLS_CLOUD_SYNC\\)"
+  - it: stops on a hosted service the chart does not know
+    set:
+      edition: {enterprise: {hostedServices: {marketplace: true}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.hostedServices.marketplace names no hosted service"
+  - it: stops on hostedServices that is not a map
+    set:
+      edition: {enterprise: {hostedServices: "all"}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.hostedServices must be a map of themeRevocations, cloudSync and cloudItems"
+  - it: stops on Cloud sync switched on without the revocation list
+    set:
+      edition: {enterprise: {hostedServices: {cloudSync: true}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.hostedServices.cloudSync needs themeRevocations"
+  - it: stops on Cloud items switched on without Cloud sync
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: true, cloudItems: true}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.hostedServices.cloudItems needs cloudSync"
+  - it: renders with the revocation list and Cloud sync switched on, Cloud items off
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: true, cloudSync: true}}}
+    asserts:
+      - hasDocuments:
+          count: 1

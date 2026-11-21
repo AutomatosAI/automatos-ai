@@ -249,3 +249,68 @@ tests:
           path: spec.template.spec.containers[0].env
           content: {name: FRONTEND_URL}
           any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_THEME_REVOCATIONS}
+          any: true
+  # PRD-277 US-704: each hosted service is its own value, off by default, rendered to its setting.
+  - it: renders every hosted service off by default, in the API
+    template: templates/api-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_THEME_REVOCATIONS, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_ITEMS, value: "false"}
+  - it: renders every hosted service off by default, in the migration Job
+    template: templates/migrate-job.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_THEME_REVOCATIONS, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_ITEMS, value: "false"}
+  - it: renders the revocation list alone switched on
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: true}}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_THEME_REVOCATIONS, value: "true"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_ITEMS, value: "false"}
+  - it: renders all three switched on
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: true, cloudSync: true, cloudItems: true}}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_THEME_REVOCATIONS, value: "true"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "true"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_ITEMS, value: "true"}
+  - it: renders the hosted services off with no hostedServices map at all
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {hostedServices: null}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}

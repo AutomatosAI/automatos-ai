@@ -36,7 +36,10 @@ TRUTH_TABLE = {
         "device_pairing": True,
         "session_mode": True,
         "hosts_automatos_cloud": False,
-        "calls_automatos_cloud": True,
+        "calls_theme_revocations": True,
+        "calls_cloud_sync": True,
+        "calls_cloud_items": True,
+        "hosted_services_by_setting": False,
         "push_needs_consent": True,
         "operator_is_user": True,
         "guards_user_endpoints": False,
@@ -57,7 +60,10 @@ TRUTH_TABLE = {
         "device_pairing": False,
         "session_mode": False,
         "hosts_automatos_cloud": True,
-        "calls_automatos_cloud": False,
+        "calls_theme_revocations": False,
+        "calls_cloud_sync": False,
+        "calls_cloud_items": False,
+        "hosted_services_by_setting": False,
         "push_needs_consent": False,
         "operator_is_user": False,
         "guards_user_endpoints": True,
@@ -78,7 +84,10 @@ TRUTH_TABLE = {
         "device_pairing": True,                         # D-7; LOCAL_REMOTE_ACCESS still decides
         "session_mode": False,                          # §5.1
         "hosts_automatos_cloud": False,                 # §5.1
-        "calls_automatos_cloud": False,                 # D-12: off until the operator switches one on
+        "calls_theme_revocations": False,               # D-12, US-704: off until the operator switches it on
+        "calls_cloud_sync": False,                      # D-12, US-704
+        "calls_cloud_items": False,                     # D-12, US-704
+        "hosted_services_by_setting": True,             # D-12, US-704: each one is its own setting
         "push_needs_consent": True,                     # G-1
         "operator_is_user": False,                      # G-2
         "guards_user_endpoints": True,                  # G-3
@@ -96,7 +105,7 @@ TRUTH_TABLE = {
 # ``AUTH_EDITION == "saas"``. The enum-valued ones are checked by the truth table alone.
 LOCAL_TRUE = (
     "anonymous_operator", "profile_editable", "device_pairing", "session_mode",
-    "calls_automatos_cloud", "push_needs_consent", "operator_is_user",
+    "calls_theme_revocations", "calls_cloud_sync", "calls_cloud_items", "push_needs_consent", "operator_is_user",
     "seeds_first_run_content", "chat_seeds_user_name", "live_agent_named_apart",
 )
 SAAS_TRUE = (
@@ -104,8 +113,8 @@ SAAS_TRUE = (
     "last_workspace_purge_deletes_person",
 )
 # Capabilities no comparison ever made: new with enterprise, so off in local and saas (PRD-277
-# Wave 3 sessions). Each is False on both, so neither edition's behaviour moves.
-ENTERPRISE_ONLY = ("issues_sessions",)
+# Wave 3 sessions, US-704's settings). Each is False on both, so neither edition's behaviour moves.
+ENTERPRISE_ONLY = ("issues_sessions", "hosted_services_by_setting")
 
 
 @pytest.mark.parametrize("edition", ["local", "saas", "enterprise"])
