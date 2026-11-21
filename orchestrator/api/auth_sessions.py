@@ -12,8 +12,11 @@ declare still answers 405, as FastAPI answers it in every edition, so the paths 
   context, so a person in no workspace can still sign out.
 * ``GET /people/{user_id}/sessions`` — an install admin lists a person's sessions, newest first:
   their clocks, address, browser and end, never a token or a hash.
-* ``POST /sessions/{session_id}/revoke`` — an install admin ends one session.
-* ``POST /people/{user_id}/sessions/revoke`` — an install admin ends every session of a person.
+* ``POST /sessions/{session_id}/revoke`` — an install admin ends one session; the person's phones stay.
+* ``POST /people/{user_id}/sessions/revoke`` — an install admin ends every session of a person. For
+  another person it also revokes every device they hold, in the same transaction, one
+  ``device:revoked`` row each (reason ``sessions_ended``; PRD-277 US-601); for the admin themselves,
+  sessions only: a person manages their own phones in Settings.
 * ``POST /people/{user_id}/deactivate`` — an install admin deactivates a person: their sessions and
   their devices end in the same transaction (``core.auth.people.deactivate_person``).
 * ``POST /people/{user_id}/system-role`` — an install admin gives a person an install-wide role
@@ -206,10 +209,18 @@ def revoke_session(session_id: UUID, request: Request, ctx: RequestContext = Dep
 def revoke_persons_sessions(user_id: int, request: Request,
                             ctx: RequestContext = Depends(get_request_context_hybrid),
                             db: Session = Depends(get_db)) -> Dict[str, int]:
-    """End every session of a person (US-303); how many were live."""
+    """End every session of a person (US-303); how many were live.
+
+    An admin ending ANOTHER person's sessions also revokes every device that person holds, in the
+    same transaction (PRD-277 US-601, ``people.end_access_of``): a paired phone is their access too.
+    An admin ending their own sessions leaves their phones, which they manage in Settings.
+    """
     actor = _require_admin(ctx)
     _assert_may_act_on(db, ctx, user_id)
-    return {"revoked": people.end_sessions_of(db, user_id, _requester(request, ctx, actor))}
+    requester = _requester(request, ctx, actor)
+    if actor == user_id:
+        return {"revoked": people.end_sessions_of(db, user_id, requester)}
+    return {"revoked": people.end_access_of(db, user_id, requester).sessions_ended}
 
 
 @router.post("/people/{user_id}/deactivate",

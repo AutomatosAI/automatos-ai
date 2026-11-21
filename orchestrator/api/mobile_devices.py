@@ -12,8 +12,8 @@
   no account yet, so the one-time code is its only credential. It answers 404 unless devices
   pair here and, on an install with an operator (local), ``LOCAL_REMOTE_ACCESS=paired``. A wrong, expired or used code is
   ``401 {"code": "invalid_pairing_code"}`` and nothing more, and never spends the pending
-  code. The token is in the answer exactly once. Without an operator (enterprise) only a
-  phone pairs: ``platform`` ``web`` is 403 before the code is read.
+  code. The token is in the answer exactly once. (The web app offers browser pairing in local
+  only; in enterprise a browser signs in.)
 * ``POST /devices`` — a device-lane caller (``Bearer amd_…``) updates its own row; a Clerk
   caller upserts a ``clerk`` row by (workspace, person, ``install_id``) with no token hash
   (§8). ``{device_id, push_key}``: the key is in clear only on the first registration
@@ -49,7 +49,10 @@ attempt through and logs an ERROR naming this limiter. ``POST /devices`` is limi
 way, with ``mobile_devices_ip`` (the W2 review: each registration can add a push target).
 
 In enterprise a code made, a phone paired and a device revoked are each one ``audit_logs`` row
-in the same commit (``services.mobile.device_audit``). Both pairing routes first ask that no
+in the same commit (``services.mobile.device_audit``); revoking a device already revoked writes
+none. There ``POST /pairing-codes`` is also limited per person (``mobile_pairing_codes_person``,
+counted the same way), and a person holds one pending code and makes none past the device cap
+(``services.mobile.pairing``). Both pairing routes first ask that no
 device paired under another edition is still live (``edition_change.ensure_confirmed``).
 
 Every answer that carries a code or a token is ``Cache-Control: no-store``. Nothing here logs
@@ -113,6 +116,10 @@ RATE_LIMITER_LABEL = "mobile pairing rate limiter"
 DEVICES_RATE_LIMIT_OPERATION = "mobile_devices_ip"
 DEVICES_RATE_BUCKET_PREFIX = "mobile_devices:ip"
 DEVICES_RATE_LIMITER_LABEL = "mobile device registration rate limiter"
+CODES_RATE_LIMIT_OPERATION = "mobile_pairing_codes_person"
+CODES_RATE_BUCKET_PREFIX = "mobile_pairing_codes:person"
+CODES_RATE_LIMITER_LABEL = "mobile pairing code rate limiter"
+CODES_RATE_LIMITED_DETAIL = "Too many pairing codes made. Try again in a few minutes."
 INVALID_PAIRING_CODE = "invalid_pairing_code"
 # Room for the spaces a person may type; the kernel normalises what is hashed.
 PAIRING_CODE_MAX_LENGTH = 32
@@ -125,9 +132,6 @@ NO_WORKSPACE = "Choose a workspace first."
 NO_PERSON = "A device is paired to a person, and this caller is not one."
 PAIR_FROM_THE_BROWSER = "Pair a phone from Automatos in your browser, signed in as yourself."
 PAIR_IN_YOUR_WORKSPACE = "Pair a phone from a workspace you are a member of."
-# Only where an install has an operator does a browser pair; elsewhere a browser signs in.
-WEB_PLATFORM = "web"
-PHONES_ONLY = "Only a phone pairs with this install: sign in to Automatos in your browser."
 RATE_LIMITED_DETAIL = "Too many pairing attempts from this address. Try again later."
 DEVICES_RATE_LIMITED_DETAIL = "Too many device registrations from this address. Try again later."
 CONCURRENT_CHANGE = "This device changed at the same moment. Try again."
@@ -280,7 +284,7 @@ def _browser(request: Request) -> Dict[str, Optional[str]]:
 
 @dataclass(frozen=True)
 class _IpLimit:
-    """One per-IP limit: its ``DEFAULT_LIMITS`` operation, Redis bucket, log label and 429 words."""
+    """One limit (per IP, or per person): its ``DEFAULT_LIMITS`` operation, Redis bucket, log label and 429 words."""
 
     operation: str
     bucket_prefix: str
@@ -291,18 +295,30 @@ class _IpLimit:
 _PAIR_LIMIT = _IpLimit(PAIR_RATE_LIMIT_OPERATION, PAIR_RATE_BUCKET_PREFIX, RATE_LIMITER_LABEL, RATE_LIMITED_DETAIL)
 _DEVICES_LIMIT = _IpLimit(DEVICES_RATE_LIMIT_OPERATION, DEVICES_RATE_BUCKET_PREFIX, DEVICES_RATE_LIMITER_LABEL,
                           DEVICES_RATE_LIMITED_DETAIL)
+_CODES_LIMIT = _IpLimit(CODES_RATE_LIMIT_OPERATION, CODES_RATE_BUCKET_PREFIX, CODES_RATE_LIMITER_LABEL,
+                        CODES_RATE_LIMITED_DETAIL)
+
+
+def _check_bucket(bucket: str, spec: _IpLimit) -> None:
+    """429 with ``Retry-After`` once ``bucket`` has spent ``spec``'s limit in its window."""
+    limit, window = DEFAULT_LIMITS[spec.operation]
+    allowed, _limit, _remaining, reset_seconds = _rate_store.check(bucket, limit, window, label=spec.label)
+    if not allowed:
+        raise HTTPException(status_code=429, detail=spec.detail, headers={"Retry-After": str(reset_seconds)})
 
 
 def _check_ip_limit(request: Request, ip_limit: _IpLimit) -> None:
     """429 with ``Retry-After`` once this client IP has spent ``ip_limit`` in its window."""
-    limit, window = DEFAULT_LIMITS[ip_limit.operation]
-    allowed, _limit, _remaining, reset_seconds = _rate_store.check(
-        ip_rate_bucket(get_client_ip(request), ip_limit.bucket_prefix), limit, window,
-        label=ip_limit.label,
-    )
-    if not allowed:
-        raise HTTPException(status_code=429, detail=ip_limit.detail,
-                            headers={"Retry-After": str(reset_seconds)})
+    _check_bucket(ip_rate_bucket(get_client_ip(request), ip_limit.bucket_prefix), ip_limit)
+
+
+def limit_codes_per_person(user_pk: int) -> None:
+    """429 once this person has made ``mobile_pairing_codes_person`` codes in its window.
+
+    Only where codes are a person's own (``pairing.codes_are_a_persons_own``: enterprise).
+    """
+    if pairing.codes_are_a_persons_own():
+        _check_bucket(f"{CODES_RATE_BUCKET_PREFIX}:{user_pk}", _CODES_LIMIT)
 
 
 def limit_pair_attempts_per_ip(request: Request) -> None:
@@ -393,8 +409,13 @@ def create_pairing_code(
     ctx: RequestContext = Depends(pairing_code_owner),
     db: Session = Depends(get_db),
 ) -> Dict[str, str]:
-    """Mint a one-time code that pairs a phone or a browser to the caller. Shown once; ten minutes."""
+    """Mint a one-time code that pairs a phone or a browser to the caller. Shown once; ten minutes.
+
+    In enterprise a person makes ``mobile_pairing_codes_person`` codes a window (429 beyond), holds
+    one at a time, and none while they hold the most active devices (409 ``device_limit_reached``).
+    """
     user_pk = _person(db, ctx)
+    limit_codes_per_person(user_pk)
     base_url = str(request.base_url)
 
     def issue() -> pairing.PairingCode:
@@ -417,9 +438,6 @@ def create_pairing_code(
 @router.post("/pair", dependencies=[Depends(_require_paired_mode), Depends(limit_pair_attempts_per_ip)])
 def pair(body: PairRequest, request: Request, response: Response, db: Session = Depends(get_db)) -> Dict[str, str]:
     """Exchange a one-time code for a device token, returned exactly once (PUBLIC: module docstring)."""
-
-    if body.platform == WEB_PLATFORM and not editions.current().anonymous_operator:
-        raise HTTPException(status_code=403, detail=PHONES_ONLY)  # before the code is read: it stays usable
 
     def claim() -> Optional[pairing.PairedDevice]:
         claimed = pairing.pair_device(db, body.code, body.name, body.platform, body.app_version, body.install_id)
@@ -493,13 +511,15 @@ def revoke_device(
     caller = _caller(db, ctx, workspace_view=True)
 
     def revoke() -> Optional[MobileDevice]:
-        revoked = devices.revoke_device(db, caller, device_id)
-        if revoked is not None and device_audit.records_devices():
+        done = devices.revoke_device(db, caller, device_id)
+        if done is None:
+            return None
+        if done.changed and device_audit.records_devices():  # a device already revoked: no second row
             device_audit.stage(db, action=device_audit.DEVICE_REVOKED, workspace_id=caller.workspace_id,
-                               actor=caller.user_pk, resource_id=revoked.id,
-                               details={"reason": device_audit.REVOKED_BY_PERSON, "person": revoked.user_id},
+                               actor=caller.user_pk, resource_id=done.device.id,
+                               details={"reason": device_audit.REVOKED_BY_PERSON, "person": done.device.user_id},
                                **_browser(request))
-        return revoked
+        return done.device
 
     return _found(_write(db, revoke)).to_dict()
 

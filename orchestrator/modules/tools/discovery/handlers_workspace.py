@@ -480,8 +480,9 @@ async def list_system_settings(db: Session, workspace_id: UUID, params: Dict[str
     returns them raw to admin sessions; the tool deliberately does not)."""
     try:
         from core.models.system_settings import SystemSetting
+        from services.mobile.edition_change import RESERVED_SETTING_CATEGORIES
 
-        query = db.query(SystemSetting)
+        query = db.query(SystemSetting).filter(SystemSetting.category.notin_(RESERVED_SETTING_CATEGORIES))
         category = params.get("category")
         if category:
             query = query.filter(SystemSetting.category == category)
@@ -519,10 +520,12 @@ async def update_system_setting(db: Session, workspace_id: UUID, params: Dict[st
         from datetime import datetime
 
         from core.models.system_settings import SystemSetting
+        from services.mobile.edition_change import RESERVED_SETTING_CATEGORIES
 
         setting = (
             db.query(SystemSetting)
-            .filter(SystemSetting.category == category, SystemSetting.key == key)
+            .filter(SystemSetting.category == category, SystemSetting.key == key,
+                    SystemSetting.category.notin_(RESERVED_SETTING_CATEGORIES))
             .first()
         )
         if not setting:

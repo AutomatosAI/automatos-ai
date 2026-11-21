@@ -136,6 +136,10 @@ class EditionCapabilities:
         hosts (its internal API and web hosts, and the loopback names), never Automatos's public
         API and web hosts: the platform's API is the install's own (D-12). Where it is off, those
         two hosts are on the tool's list as well (``modules/tools/execution/http_hosts.py``).
+    api_on_public_address: the API is reached on the install's one public address, the web app's
+        (``FRONTEND_URL``, which start-up requires to be ``https``): every address a phone is handed
+        (discovery's ``api_url`` and sign-in start, the pairing link) is built from it, never from
+        the request (``services/mobile/urls.py``, PRD-277 US-602).
     """
 
     sign_in: str
@@ -162,6 +166,7 @@ class EditionCapabilities:
     last_workspace_purge_deletes_person: bool
     issues_sessions: bool
     agent_http_own_hosts_only: bool
+    api_on_public_address: bool
 
 
 _LOCAL = EditionCapabilities(
@@ -189,6 +194,7 @@ _LOCAL = EditionCapabilities(
     last_workspace_purge_deletes_person=False,
     issues_sessions=False,
     agent_http_own_hosts_only=False,
+    api_on_public_address=False,
 )
 
 _SAAS = EditionCapabilities(
@@ -216,6 +222,7 @@ _SAAS = EditionCapabilities(
     last_workspace_purge_deletes_person=True,
     issues_sessions=False,
     agent_http_own_hosts_only=False,
+    api_on_public_address=False,
 )
 
 # PRD-277 §5.1 and its decisions. Each hosted service is off here, and the operator switches each
@@ -247,6 +254,7 @@ _ENTERPRISE = EditionCapabilities(
     last_workspace_purge_deletes_person=False,
     issues_sessions=True,
     agent_http_own_hosts_only=True,
+    api_on_public_address=True,
 )
 
 CAPABILITIES: Mapping[str, EditionCapabilities] = MappingProxyType({
@@ -269,6 +277,10 @@ SWITCH_ON: FrozenSet[str] = frozenset({"1", "true", "yes", "on"})
 SWITCH_OFF: FrozenSet[str] = frozenset({"", "0", "false", "no", "off"})
 # PRD-277 US-601: whether phones may pair, where the row says ``device_pairing_by_setting``.
 DEVICE_PAIRING_SETTING = "ENTERPRISE_DEVICE_PAIRING"
+# What the install started as (``started_as``), where the pairing setting is part of it.
+STARTED_AS_SEPARATOR = ":"
+STARTED_PAIRING_ON = "pairing_on"
+STARTED_PAIRING_OFF = "pairing_off"
 
 
 def _switch_text(value: Any) -> str:
@@ -337,13 +349,32 @@ def current_name() -> str:
     return name if name in CAPABILITIES else EDITION_SAAS
 
 
+def started_as() -> str:
+    """What the install is starting as: the edition's name and, where a setting decides pairing, whether it pairs.
+
+    ``local`` and ``saas`` are their names. ``enterprise`` is ``enterprise:pairing_on`` or
+    ``enterprise:pairing_off`` (``ENTERPRISE_DEVICE_PAIRING``). PRD-277 US-601 records it at every
+    start (``services/mobile/edition_change.py``).
+    """
+    name = current_name()
+    if not CAPABILITIES[name].device_pairing_by_setting:
+        return name
+    pairing = STARTED_PAIRING_ON if current().device_pairing else STARTED_PAIRING_OFF
+    return f"{name}{STARTED_AS_SEPARATOR}{pairing}"
+
+
 def started_as_another(earlier: str) -> bool:
-    """Whether ``earlier``, the edition the install last started as, is not the running one.
+    """Whether ``earlier``, what the install last started as (``started_as``), is not what it starts as now.
 
     The one comparison of edition names outside this module's capabilities: PRD-277 US-601
     revokes every paired device when it is true (``services/mobile/edition_change.py``).
     """
-    return earlier != current_name()
+    return earlier != started_as()
+
+
+def started_as_another_edition(earlier: str) -> bool:
+    """Whether ``earlier`` names another edition, not only another pairing state of this one."""
+    return earlier.split(STARTED_AS_SEPARATOR, 1)[0] != current_name()
 
 
 def current() -> EditionCapabilities:
@@ -377,6 +408,9 @@ __all__ = [
     "SIGN_IN_CLERK",
     "SIGN_IN_NONE",
     "SIGN_IN_OIDC",
+    "STARTED_AS_SEPARATOR",
+    "STARTED_PAIRING_OFF",
+    "STARTED_PAIRING_ON",
     "STEP_UP_CLERK_FRESHNESS",
     "STEP_UP_REAUTH",
     "STEP_UP_SKIP",
@@ -389,7 +423,9 @@ __all__ = [
     "current_name",
     "is_switch_form",
     "is_switched_on",
+    "started_as",
     "started_as_another",
+    "started_as_another_edition",
     "with_device_pairing_setting",
     "with_hosted_service_settings",
 ]

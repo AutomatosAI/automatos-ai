@@ -17,7 +17,9 @@ app binary can talk to hosted Studio and to a self-hosted install alike:
   The ``local`` and ``saas`` documents carry no ``oidc`` key. Any other way of signing in raises
   ``DiscoveryUnavailable``: never a Clerk block it would not honour.
 * ``api_url`` and ``web_url`` are ``services.mobile.urls``'s, the helpers the pair link uses
-  (K15): a local install never advertises the hosted API.
+  (K15): a local install never advertises the hosted API. In enterprise both, and so
+  ``oidc.start_url``, are the install's configured public address (``FRONTEND_URL``), whatever
+  the request's host or scheme.
 * ``push.expo`` says whether this server sends notifications through Expo's push service
   (``services.push.consent.expo_push_allowed``, W2 K13): always on SaaS; on a local install
   only once the operator agreed. It is read from the DB settings table on every call.

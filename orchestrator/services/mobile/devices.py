@@ -370,20 +370,31 @@ def update_device(db: Session, caller: DeviceCaller, device_id: UUID,
     return device
 
 
-def revoke_device(db: Session, caller: DeviceCaller, device_id: UUID) -> Optional[MobileDevice]:
+@dataclass(frozen=True)
+class Revocation:
+    """A device ``revoke_device`` found, and whether this call revoked it (False: it already was)."""
+
+    device: MobileDevice
+    changed: bool
+
+
+def revoke_device(db: Session, caller: DeviceCaller, device_id: UUID) -> Optional[Revocation]:
     """Cut a device off, keeping its token hash so its next call is told ``device_revoked``.
 
-    Its push state goes with it: the switch off, the Expo token and the push key cleared.
+    Its push state goes with it: the switch off, the Expo token and the push key cleared. A device
+    already revoked is left as it is (``changed`` False), so its caller records nothing twice.
     """
     query = _devices(db, caller).filter(MobileDevice.id == device_id)
     if not caller.sees_workspace:
         query = query.filter(MobileDevice.user_id == caller.user_pk)
     device = query.with_for_update().first()
-    if device is None or device.status == MobileDeviceStatus.REVOKED.value:
-        return device
+    if device is None:
+        return None
+    if device.status == MobileDeviceStatus.REVOKED.value:
+        return Revocation(device=device, changed=False)
     _assign(device, _revoked(device, caller.user_pk, _now()))
     db.flush()
-    return device
+    return Revocation(device=device, changed=True)
 
 
 def _revoked(device: MobileDevice, revoked_by: Optional[int], now: datetime) -> Dict[str, Any]:
@@ -408,6 +419,12 @@ def revoke_persons_devices(db: Session, user_id: int, revoked_by: Optional[int],
     told ``device_revoked``. Deactivating a person calls this in the same transaction that
     deactivates them. Returns how many were revoked; flushes, never commits.
     """
+    return len(revoke_and_list_persons_devices(db, user_id, revoked_by, now))
+
+
+def revoke_and_list_persons_devices(db: Session, user_id: int, revoked_by: Optional[int],
+                                    now: Optional[datetime] = None) -> List[MobileDevice]:
+    """``revoke_persons_devices``, answering the rows it revoked, so each can be audited."""
     rows = db.query(MobileDevice).filter(
         MobileDevice.user_id == user_id,
         MobileDevice.status != MobileDeviceStatus.REVOKED.value,
@@ -416,7 +433,16 @@ def revoke_persons_devices(db: Session, user_id: int, revoked_by: Optional[int],
     for device in rows:
         _assign(device, _revoked(device, revoked_by, moment))
     db.flush()
-    return len(rows)
+    return rows
+
+
+def assert_room_for_a_device(db: Session, workspace_id: UUID, user_pk: int) -> None:
+    """``DeviceConflict(device_limit_reached)`` when the person already holds the most active devices here.
+
+    The registration cap (``MAX_ACTIVE_DEVICES_PER_PERSON``), for a caller that is about to give a
+    person another device: making a pairing code in enterprise (PRD-277 US-601).
+    """
+    _check_room(db, DeviceCaller(workspace_id=workspace_id, user_pk=user_pk, device_id=None))
 
 
 def revoke_every_paired_device(db: Session, now: datetime) -> List[MobileDevice]:

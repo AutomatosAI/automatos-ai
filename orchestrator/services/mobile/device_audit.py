@@ -6,7 +6,9 @@ person's credential as a session is, so what happens to one is recorded as sessi
 with it (``device:paired``), a device revoked (``device:revoked``) and the install admin's answer to
 "Send notifications through Expo's push service?" (``push:consent_changed``). ``local`` and ``saas``
 write none of these (``records_devices``). The devices revoked when the install starts as another
-edition are recorded in every edition (``services.mobile.edition_change``), reason ``edition_changed``.
+edition, or with pairing switched off, are recorded in every edition (``services.mobile.edition_change``),
+reason ``edition_changed`` or ``pairing_switched_off``; those an install admin revokes by ending their
+person's sessions (``core.auth.people.end_access_of``), reason ``sessions_ended``.
 
 Each row is staged in the caller's transaction and never committed here, so a change and its row
 land together or not at all. A row holds the device's id, its person and why, the caller's address
@@ -29,9 +31,12 @@ PAIRING_CODE_CREATED = "device:pairing_code_created"
 DEVICE_PAIRED = "device:paired"
 DEVICE_REVOKED = "device:revoked"
 PUSH_CONSENT_CHANGED = "push:consent_changed"
-# Why a device was revoked: by a person (its own, or a workspace owner or admin), or at an edition change.
+# Why a device was revoked: by a person (its own, or a workspace owner or admin); by an install admin
+# ending its person's sessions; at the first start as another edition; at the first start with pairing off.
 REVOKED_BY_PERSON = "revoked"
+REVOKED_SESSIONS_ENDED = "sessions_ended"
 REVOKED_EDITION_CHANGED = "edition_changed"
+REVOKED_PAIRING_SWITCHED_OFF = "pairing_switched_off"
 
 
 def records_devices() -> bool:
@@ -64,6 +69,8 @@ __all__ = [
     "PUSH_CONSENT_RESOURCE",
     "REVOKED_BY_PERSON",
     "REVOKED_EDITION_CHANGED",
+    "REVOKED_PAIRING_SWITCHED_OFF",
+    "REVOKED_SESSIONS_ENDED",
     "records_devices",
     "stage",
 ]

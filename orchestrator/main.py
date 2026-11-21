@@ -299,7 +299,9 @@ async def _boot_phase_1_core():
     from services.mobile.edition_change import confirm_edition
     try:  # DDL — safe for all workers (idempotent, fast no-op when tables exist)
         create_tables()
-    finally:  # PRD-277 US-601: every worker, before it serves; no device of another edition stays live
+    finally:  # PRD-277 US-601: every worker, before it serves; no device of another edition stays live.
+        # In a finally so a worker whose DDL failed still marks the check run or FAILED. confirm_edition
+        # never raises, so an error from create_tables is the one that propagates, unchanged.
         confirm_edition()
 
     with boot_leader_lock(engine) as is_leader:

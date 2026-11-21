@@ -1,7 +1,9 @@
 """PRD-277 US-303 (§5.6): ending a person's access: their sessions, or the person.
 
 * ``end_session`` ends one session; ``end_sessions_of`` ends every session of one person. Each
-  writes one ``auth:session_revoked`` row.
+  writes one ``auth:session_revoked`` row. ``end_access_of`` is an admin ending ANOTHER person's
+  sessions: it also revokes every device they hold, in the same commit, with one ``device:revoked``
+  row per device (reason ``sessions_ended``) and the counts on the ``auth:session_revoked`` row.
 * ``sign_out`` ends the caller's own session and writes ``auth:sign_out``.
 * ``deactivate_person`` sets ``users.is_active`` false, ends every session of the person and
   revokes every device they hold, in every workspace (``services.mobile.devices``), all in ONE
@@ -70,7 +72,8 @@ from core.auth.user_link import PENDING_EMAIL_DOMAIN, LinkedPerson, link_identit
 from core.workspaces.audit import AuditService
 from core.workspaces.models import WorkspaceMember
 from modules.policy.roles import ADMIN, SUPER_ADMIN, USER, WorkspaceRole
-from services.mobile.devices import revoke_persons_devices
+from services.mobile import device_audit
+from services.mobile.devices import revoke_and_list_persons_devices, revoke_persons_devices
 
 UNKNOWN_PERSON_MESSAGE = "No such person."
 MEMBERSHIP_ROLES = tuple(role.value for role in WorkspaceRole)
@@ -216,6 +219,55 @@ def end_sessions_of(db: Session, user_id: int, requester: Requester) -> int:
         lambda: sessions.revoke_sessions_of(db, user_id, sessions.REVOKED_BY_ADMIN, now),
         lambda ended: _row(db, requester, action=session_audit.SESSION_REVOKED, subject=user_id,
                            resource_type=session_audit.PERSON_RESOURCE, details={"sessions": ended}),
+        session_audit.SESSION_REVOKED,
+    )
+
+
+@dataclass(frozen=True)
+class AccessEnded:
+    """What an admin ending another person's access ended: their sessions, and their devices as (id, workspace)."""
+
+    sessions_ended: int
+    devices: Tuple[Tuple[UUID, UUID], ...]
+
+    def __bool__(self) -> bool:
+        return bool(self.sessions_ended or self.devices)
+
+
+def _end_access(db: Session, user_id: int, revoked_by: Optional[int], now: datetime) -> AccessEnded:
+    """The person's sessions and every device they hold, in the caller's transaction."""
+    ended = sessions.revoke_sessions_of(db, user_id, sessions.REVOKED_BY_ADMIN, now)
+    revoked = revoke_and_list_persons_devices(db, user_id, revoked_by, now)
+    return AccessEnded(sessions_ended=ended, devices=tuple((row.id, row.workspace_id) for row in revoked))
+
+
+def _record_access_ended(db: Session, requester: Requester, user_id: int, done: AccessEnded):
+    """One ``device:revoked`` row per device (reason ``sessions_ended``), then the ``auth:session_revoked`` row.
+
+    Staged before that row is written, so they are committed with it, or rolled back with it when it fails.
+    """
+    for device_id, workspace_id in done.devices:
+        device_audit.stage(db, action=device_audit.DEVICE_REVOKED, workspace_id=workspace_id,
+                           actor=requester.user_id, resource_id=device_id,
+                           details={"reason": device_audit.REVOKED_SESSIONS_ENDED, "person": user_id},
+                           ip_address=requester.ip_address, user_agent=requester.user_agent)
+    return _row(db, requester, action=session_audit.SESSION_REVOKED, subject=user_id,
+                resource_type=session_audit.PERSON_RESOURCE,
+                details={"sessions": done.sessions_ended, "devices": len(done.devices)})
+
+
+def end_access_of(db: Session, user_id: int, requester: Requester) -> AccessEnded:
+    """An admin ends every session of ANOTHER person and revokes every device they hold, in one commit.
+
+    A paired phone would otherwise keep the access the admin meant to end. Audited as above. A person
+    ending their own sessions, and ending one session, use ``end_sessions_of`` and ``end_session``:
+    their phones stay, and they manage them in Settings.
+    """
+    now = _now()
+    return session_audit.commit_removal(
+        db,
+        lambda: _end_access(db, user_id, requester.user_id, now),
+        lambda done: _record_access_ended(db, requester, user_id, done),
         session_audit.SESSION_REVOKED,
     )
 
@@ -490,6 +542,7 @@ __all__ = [
     "MEMBERSHIP_ROLES",
     "OWNER_ROLE",
     "SETTABLE_MEMBER_ROLES",
+    "AccessEnded",
     "Deactivation",
     "LastInstallAdmin",
     "MemberNotFound",
@@ -503,6 +556,7 @@ __all__ = [
     "change_member_role",
     "deactivate_person",
     "end_membership",
+    "end_access_of",
     "end_session",
     "end_sessions_of",
     "give_workspace",
