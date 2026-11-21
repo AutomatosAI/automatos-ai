@@ -214,7 +214,8 @@ def test_a_device_with_the_operators_email_must_still_be_a_member(enterprise):
 @pytest.fixture
 def paired_phone(enterprise, monkeypatch):
     """One active paired device in ``WS`` whose person (users.id 7) has the operator's email."""
-    phone = SimpleNamespace(id=uuid.uuid4(), workspace_id=WS, user_id=7,
+    # Paired just now: inside the device token's maximum age (PRD-277 US-601).
+    phone = SimpleNamespace(id=uuid.uuid4(), workspace_id=WS, user_id=7, paired_at=datetime.now(timezone.utc),
                             status=MobileDeviceStatus.ACTIVE.value, last_seen_at=datetime.now(timezone.utc))
     state = SimpleNamespace(member=True, lookups=[])
 

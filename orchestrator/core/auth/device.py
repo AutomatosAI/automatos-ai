@@ -16,6 +16,11 @@ runs it BEFORE the Clerk lane, so a device token is never shown to Clerk.
   overlap lasts (strictly before ``prev_token_valid_until``). A revoked row is
   ``401 {"code": "device_revoked"}``, so the app knows to pair again; every other miss is a
   plain 401.
+* Where device tokens age out (``device_tokens_age_out``: enterprise), an active device whose
+  phone last paired or signed in ``ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS`` ago or more is
+  ``401 {"code": "device_token_expired"}``, so the app knows to sign in on the phone or pair
+  again; that first refusal revokes it and records why, once (``services.mobile.token_age``),
+  and every later one is ``device_revoked``. Elsewhere a device token has no maximum age.
 * The workspace is the ROW's. A request that names another one (``X-Workspace-ID``,
   ``X-Workspace`` or ``?workspace_id=``, the inputs hybrid reads) is 403; naming the same one,
   or none, is fine. The workspace must be usable by hybrid's own rules
@@ -60,11 +65,13 @@ from core.auth.principal import MOBILE_DEVICE_CLAIM_SOURCE
 from core.database.database import SessionLocal
 from core.models.core import User
 from core.models.mobile_devices import MobileDevice, MobileDeviceKind, MobileDeviceStatus
+from core.security.client_ip import client_ip
 
 logger = logging.getLogger(__name__)
 
 DEVICE_AUTH_TYPE = "device"
 DEVICE_REVOKED = "device_revoked"
+DEVICE_TOKEN_EXPIRED = "device_token_expired"
 LAST_SEEN_WRITE_INTERVAL = timedelta(minutes=5)
 LOCAL_OPERATOR_ROLE = "super_admin"
 PERSON_ROLE = "user"
@@ -124,6 +131,23 @@ def _refuse_unless_active(device: MobileDevice) -> None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail={"code": DEVICE_REVOKED})
     if device.status != MobileDeviceStatus.ACTIVE.value:
         raise _unauthorized(f"device {device.id} is {device.status}")
+
+
+def _refuse_if_past_max_age(db: Session, request: Request, device: MobileDevice, now: datetime) -> None:
+    """401 ``device_token_expired`` for a device past its token's maximum age, where tokens age out.
+
+    The refusal revokes it and records why, once (``services.mobile.token_age``).
+    """
+    if not editions.current().device_tokens_age_out:
+        return
+    from services.mobile import token_age  # at call time: it imports the registry that imports us
+
+    if not token_age.is_past_max_age(device, now):
+        return
+    token_age.revoke_aged_out(db, device.id, now, ip_address=client_ip(request),
+                              user_agent=request.headers.get("user-agent"))
+    logger.warning("Device lane: device %s is past its token's maximum age", device.id)
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail={"code": DEVICE_TOKEN_EXPIRED})
 
 
 def _named_workspaces(request: Request) -> Tuple[str, ...]:
@@ -221,6 +245,7 @@ def _resolve_in_own_session(request: Request, token: str) -> RequestContext:
         if device is None:
             raise _unauthorized("no live device holds this token")
         _refuse_unless_active(device)
+        _refuse_if_past_max_age(db, request, device, now)
         _assert_bound_workspace(request, device, hybrid)
         _assert_workspace_usable(db, device.workspace_id, hybrid)
         person = _bound_person(db, device.user_id)
@@ -255,4 +280,5 @@ async def resolve_device_context(request: Request, token: str) -> RequestContext
     return context
 
 
-__all__ = ["DEVICE_AUTH_TYPE", "DEVICE_REVOKED", "LAST_SEEN_WRITE_INTERVAL", "resolve_device_context", "token_kinds"]
+__all__ = ["DEVICE_AUTH_TYPE", "DEVICE_REVOKED", "DEVICE_TOKEN_EXPIRED", "LAST_SEEN_WRITE_INTERVAL",
+           "resolve_device_context", "token_kinds"]

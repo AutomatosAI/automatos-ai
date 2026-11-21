@@ -54,6 +54,8 @@ from an id that does not exist.
   a code) are not devices: they are deleted.
 * ``revoke_every_device_of``: every device of the given kinds on the install, when it starts as
   another edition or with pairing off (PRD-277 US-601, ``services.mobile.edition_change``).
+* ``revoke_if_still_active``: one device whose token is past its maximum age (PRD-277 US-601,
+  ``services.mobile.token_age``), only while it is still active, so it is revoked and audited once.
 * ``rotate_token``: the device lane on its own device (paired, or signed in on the phone: the
   kinds that hold a token, ``TOKEN_KINDS``), presenting its CURRENT token. The
   new token is returned once; the old one stays valid for
@@ -469,6 +471,23 @@ def revoke_every_device_of(db: Session, kinds: Tuple[str, ...], now: datetime) -
         _assign(device, _revoked(device, None, now))
     db.flush()
     return rows
+
+
+def revoke_if_still_active(db: Session, device_id: UUID, now: datetime) -> Optional[MobileDevice]:
+    """Revoke the device ``device_id`` by nobody, locked, while it is still active; ``None`` when it is not.
+
+    Revoked as ``revoke_device`` revokes one, its token hash kept. A request that finds it already revoked
+    (another request got there first) changes nothing, so its caller records nothing twice. Flushes,
+    never commits.
+    """
+    device = db.query(MobileDevice).filter(
+        MobileDevice.id == device_id, MobileDevice.status == MobileDeviceStatus.ACTIVE.value,
+    ).with_for_update().first()
+    if device is None:
+        return None
+    _assign(device, _revoked(device, None, now))
+    db.flush()
+    return device
 
 
 def rotate_token(db: Session, caller: DeviceCaller, device_id: UUID,

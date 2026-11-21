@@ -434,3 +434,44 @@ tests:
           path: spec.template.spec.containers[0].env
           content: {name: ENTERPRISE_DEVICE_PAIRING}
           any: true
+  # PRD-277 US-601: how many days a phone keeps its token, 90 by default.
+  - it: renders the device token's maximum age, 90 days by default, in the API
+    template: templates/api-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS, value: "90"}
+  - it: renders the device token's maximum age in the migration Job
+    template: templates/migrate-job.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS, value: "90"}
+  - it: renders the device token's maximum age as set, up to 3650 days
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {deviceTokenMaxAgeDays: 3650}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS, value: "3650"}
+  # A null value drops the key: the API's own default, 90 days, holds.
+  - it: leaves the device token's maximum age to the API when it is null
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {deviceTokenMaxAgeDays: null}}
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS}
+          any: true
+  - it: never renders the device token's maximum age in the local edition
+    template: templates/api-deployment.yaml
+    set:
+      edition:
+        authEdition: local
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS}
+          any: true
