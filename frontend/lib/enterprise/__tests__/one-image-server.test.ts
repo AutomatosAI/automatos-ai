@@ -6,8 +6,9 @@
  *     POST does (the browser-facing address is relative there, so there is nothing else to use);
  *     in local and saas it reads NEXT_PUBLIC_API_URL, as before.
  *   - /automatos-host.json tells the theme CLI where the API is: in enterprise the origin the request
- *     came in on (the API answers on the web app's own host), from its Host and X-Forwarded-Proto; a
- *     Host that is not a plain host name gets the 500 sentence, never an address built from it.
+ *     came in on (the API answers on the web app's own host), from its Host and X-Forwarded-Proto,
+ *     never X-Forwarded-Host, with `Vary: Host, X-Forwarded-Proto`; a Host that is not a plain host
+ *     name with a port from 1 to 65535 gets the 500 sentence, never an address built from it.
  *
  * Each module is loaded as each edition's build loads it (lib/edition-name mocked).
  */
@@ -68,7 +69,31 @@ describe('/automatos-host.json in enterprise', () => {
     const answer = await hostFile({ host: 'automatos.example.test', 'x-forwarded-proto': 'https' })
     expect(answer.status).toBe(200)
     expect(answer.headers.get('cache-control')).toBe('no-store')
+    expect(answer.headers.get('vary')).toBe('Host, X-Forwarded-Proto')
     expect(await answer.json()).toStrictEqual({ schema: 1, apiUrl: 'https://automatos.example.test' })
+  })
+
+  it('never reads X-Forwarded-Host', async () => {
+    const answer = await hostFile({ host: 'automatos.example.test', 'x-forwarded-host': 'evil.example.test' })
+    expect(await answer.json()).toStrictEqual({ schema: 1, apiUrl: 'https://automatos.example.test' })
+  })
+
+  it.each([
+    ['an empty label', 'automatos..example.test'],
+    ['a trailing dot', 'automatos.example.test.'],
+    ['port zero', 'automatos.example.test:0'],
+    ['a port above 65535', 'automatos.example.test:65536'],
+    ['no host', ''],
+  ])('answers the 500 sentence, saying what it varies by, for a Host with %s', async (_why, host) => {
+    const answer = await hostFile({ host })
+    expect(answer.status).toBe(500)
+    expect(answer.headers.get('vary')).toBe('Host, X-Forwarded-Proto')
+    expect(answer.headers.get('cache-control')).toBe('no-store')
+  })
+
+  it('takes the highest port', async () => {
+    const answer = await hostFile({ host: 'automatos.example.test:65535' })
+    expect(await answer.json()).toStrictEqual({ schema: 1, apiUrl: 'https://automatos.example.test:65535' })
   })
 
   it('keeps the port and the scheme the proxy names', async () => {
@@ -89,6 +114,7 @@ describe('/automatos-host.json in enterprise', () => {
     vi.stubEnv('NEXT_PUBLIC_API_URL', PUBLIC_API)
     const { GET } = await import('@/app/automatos-host.json/route')
     const answer = GET(cliRequest({ host: 'other.example.test' }))
+    expect(answer.headers.get('vary')).toBeNull()
     expect(await answer.json()).toStrictEqual({ schema: 1, apiUrl: PUBLIC_API })
   })
 })

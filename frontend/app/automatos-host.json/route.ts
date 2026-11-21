@@ -9,14 +9,16 @@
 // either edition (__tests__/route.test.ts holds the matcher to that).
 // PRD-277 US-505: the enterprise build has no API address (the API answers on the web app's own host, §5.3),
 // so there the answer is the origin the request came in on, from its Host and X-Forwarded-Proto
-// (share-card.ts requestOrigin, which takes a plain host name only).
+// (lib/enterprise/request-origin.ts, a plain host name and a valid port only), and it says it varies by both.
 import { isEnterprise } from '@/lib/edition-name'
-import { requestOrigin } from '@/lib/marketplace/share-card'
+import { hostFileOrigin } from '@/lib/enterprise/request-origin'
 
 export const dynamic = 'force-dynamic'
 
 const HOST_FILE_SCHEMA = 1
 const NO_STORE = 'no-store'
+/** Enterprise only: the answer depends on these request headers, so a cache must not share it across them. */
+const VARIES_BY = { Vary: 'Host, X-Forwarded-Proto' }
 const UNSET =
   'This web app has no NEXT_PUBLIC_API_URL set, so it cannot say where its API is. ' +
   'Set it to the API URL and rebuild, or give the CLI the API URL itself.'
@@ -26,7 +28,13 @@ const NO_HOST =
 
 /** The API's address: the build's NEXT_PUBLIC_API_URL, or in enterprise this request's own origin. */
 function apiUrlFor(request: Request): string | null | undefined {
-  return isEnterprise ? requestOrigin(request.headers) : process.env.NEXT_PUBLIC_API_URL
+  return isEnterprise ? hostFileOrigin(request.headers) : process.env.NEXT_PUBLIC_API_URL
+}
+
+/** The answer's headers: its type, never cached, and in enterprise what it varies by. */
+function answerHeaders(contentType: string): Record<string, string> {
+  const headers = { 'Content-Type': contentType, 'Cache-Control': NO_STORE }
+  return isEnterprise ? { ...headers, ...VARIES_BY } : headers
 }
 
 export function GET(request: Request): Response {
@@ -34,11 +42,11 @@ export function GET(request: Request): Response {
   if (!apiUrl) {
     return new Response(isEnterprise ? NO_HOST : UNSET, {
       status: 500,
-      headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': NO_STORE },
+      headers: answerHeaders('text/plain; charset=utf-8'),
     })
   }
   return new Response(JSON.stringify({ schema: HOST_FILE_SCHEMA, apiUrl }), {
     status: 200,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': NO_STORE },
+    headers: answerHeaders('application/json'),
   })
 }
