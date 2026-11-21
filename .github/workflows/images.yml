@@ -106,6 +106,17 @@ name: images
 #     existing version), signs it and checks the signature; a chart it could not prove
 #     is deleted again.
 #
+# - The enterprise web image (PRD-277 US-505): enterprise-frontend, published as
+#   ghcr.io/<owner>/automatos-enterprise-frontend beside the local one. Its own name, so
+#   the local image's name, tags, build inputs, cache scope and digests are what they
+#   were: a name that starts with `frontend-` would also match the merge job's
+#   `digests-frontend-*` download and join the local index. Built from the same context
+#   with NEXT_PUBLIC_AUTH_EDITION=enterprise and the API and WebSocket addresses empty
+#   (its build refuses any other value: it calls the API on the page's own address), and
+#   measured, scanned, signed, checked on a tag, tagged and released by the same steps as
+#   every other published image. Its server reads BACKEND_INTERNAL_URL and MEDIA_ORIGINS
+#   when it starts, so its boot step is its own (frontend/scripts/check-enterprise-image.sh).
+#
 # Build args match docker-compose.yml, i.e. the local edition: no bundled
 # Chromium, and the frontend built for AUTH_EDITION=local against
 # http://localhost:8000 (NEXT_PUBLIC_* are inlined at build time, for now).
@@ -164,6 +175,7 @@ on:
       - "frontend/.npmrc"
       - "frontend/public/**"
       - "frontend/scripts/check-standalone-image.sh"
+      - "frontend/scripts/check-enterprise-image.sh"
       - "services/workspace-worker/**"
       - "services/agent-opt-worker/**"
       - "services/media-render/**"
@@ -262,7 +274,8 @@ jobs:
           python3 scripts/ci/release_preflight.py --version "$VERSION" --sha "$GITHUB_SHA" \
             --repo "$GITHUB_REPOSITORY" --default-branch "$DEFAULT_BRANCH" \
             --prefix "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/automatos-" \
-            --image api --image frontend --image workspace-worker --summary "$GITHUB_STEP_SUMMARY"
+            --image api --image frontend --image enterprise-frontend --image workspace-worker \
+            --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Pick the images
         id: pick
@@ -326,6 +339,19 @@ jobs:
                           "frontend/csp-policy.mjs", "frontend/enterprise-build.js",
                           "frontend/.npmrc", "frontend/public/**",
                           "frontend/scripts/check-standalone-image.sh"]},
+              {"name": "enterprise-frontend", "context": "frontend", "target": "production",
+               "build_args": ["NEXT_PUBLIC_AUTH_EDITION=enterprise",
+                              "NEXT_PUBLIC_API_URL=",
+                              "NEXT_PUBLIC_WS_URL="],
+               "cache_mode": "max", "no_cache_filters": ["production"],
+               "arches": ["amd64", "arm64"], "publish": true,
+               "inputs": ["frontend/Dockerfile", "frontend/.dockerignore",
+                          "frontend/package.json", "frontend/package-lock.json",
+                          "frontend/next.config.js", "frontend/csp-sources.js",
+                          "frontend/csp-policy.mjs", "frontend/enterprise-build.js",
+                          "frontend/.npmrc", "frontend/public/**",
+                          "frontend/scripts/check-standalone-image.sh",
+                          "frontend/scripts/check-enterprise-image.sh"]},
               {"name": "workspace-worker", "context": "services/workspace-worker", "target": "",
                "build_args": ["INSTALL_BROWSER=false"],
                "cache_mode": "max", "no_cache_filters": ["production"],
@@ -780,6 +806,22 @@ jobs:
           docker pull --quiet "${IMAGE}@${DIGEST}"
           bash frontend/scripts/check-standalone-image.sh "${IMAGE}@${DIGEST}" /chat
 
+      # PRD-277 US-505, PRD-279 US-402: the enterprise web image this job pushed, on this arch,
+      # started as an install starts it. Its server refuses to start without BACKEND_INTERNAL_URL
+      # or with a bad MEDIA_ORIGINS; started with both, it passes the local image's checks above
+      # (with /sign-in, the page a signed-out request renders), and a page's content security
+      # policy names the media origin given when it started (frontend/scripts/
+      # check-enterprise-image.sh says what each check proves and what it does not). Same
+      # conditions as the step above; on main a failure leaves the digest untagged and unsigned.
+      - name: The enterprise web image starts with its run-time settings and stops without them
+        if: ${{ !cancelled() && matrix.name == 'enterprise-frontend' && steps.build.outcome == 'success' }}
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          docker pull --quiet "${IMAGE}@${DIGEST}"
+          bash frontend/scripts/check-enterprise-image.sh "${IMAGE}@${DIGEST}"
+
       # PRD-262, the worker's trims (rows 16 and 19 of the 19 Oct size breakdown, and
       # the rows each check names): in the image this job pushed, on this arch, the
       # agent toolchain still works. gcc -flto links without lto-dump; git makes,
@@ -892,6 +934,9 @@ jobs:
           - name: frontend
             context: frontend
             description: Automatos AI web app, local edition. The API address is currently fixed at build time to http://localhost:8000; a runtime setting is coming.
+          - name: enterprise-frontend
+            context: frontend
+            description: Automatos AI web app, enterprise edition. People sign in with their organisation's identity provider, and the web app calls the API on its own address, so serve both on one host. The server reads BACKEND_INTERNAL_URL (required) and MEDIA_ORIGINS when it starts.
           - name: workspace-worker
             context: services/workspace-worker
             description: Automatos AI workspace worker (Code Canvas runtime), built without Chromium.
@@ -1095,7 +1140,8 @@ jobs:
         run: |
           python3 scripts/ci/release_tags.py --digests "${RUNNER_TEMP}/release-digests" \
             --prefix "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/automatos-" --version "$VERSION" \
-            --image api --image frontend --image workspace-worker --summary "$GITHUB_STEP_SUMMARY"
+            --image api --image frontend --image enterprise-frontend --image workspace-worker \
+            --summary "$GITHUB_STEP_SUMMARY"
 
   # PRD-279 Wave 2 (US-201, US-202), on a `v*` tag only, once every image is signed,
   # checked and tagged with the version. charts/automatos is copied, each image's

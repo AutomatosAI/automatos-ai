@@ -9,8 +9,9 @@ Waves 1 and 2. The release notes and release page are Wave 3.
 
 ## What a release is
 
-- **The images.** `api`, `frontend` (the web app, local edition) and `workspace-worker`,
-  as `ghcr.io/automatosai/automatos-<name>`, each tagged with the version (`0.7.0`)
+- **The images.** `api`, `frontend` (the web app, local edition), `enterprise-frontend`
+  (the web app, enterprise edition: PRD-277 US-505) and `workspace-worker`, as
+  `ghcr.io/automatosai/automatos-<name>`, each tagged with the version (`0.7.0`)
   and, for a full release, its release line (`0.7`). Each one is signed by digest.
 - **The chart.** `oci://ghcr.io/automatosai/charts/automatos`, under the same version.
   Its `version` and `appVersion` are the release's version, and its default values
@@ -53,7 +54,7 @@ Before anything builds, the run stops when:
 The tag path has never run before the first candidate. Check, on its run:
 
 - each step marked `(v* tags only)` ran, and the step summaries list what was published;
-- `0.7.0-rc.1` is on all three images and on the chart, and `0.7` and `edge` did not move;
+- `0.7.0-rc.1` is on all four images and on the chart, and `0.7` and `edge` did not move;
 - the command under [Checking a signature](#checking-a-signature) passes for an image
   and for the chart;
 - pushing the same chart version again is refused (re-run the chart job once).
@@ -157,8 +158,14 @@ does:
 
 GHCR makes a new package private. After the first release candidate publishes the
 chart, an organisation owner makes `charts/automatos` public once, under the
-organisation's packages, so `helm install` works with no login. The image packages
-are public already.
+organisation's packages, so `helm install` works with no login. The `api`, `frontend`
+and `workspace-worker` image packages are public already.
+
+`automatos-enterprise-frontend` is new: the first push to main that builds it creates
+the package, private. An organisation owner makes it public once, as for the chart,
+before the next release candidate. Until then an install cannot pull it without a
+login, and the preflight, which reads the images anonymously, may not get the answer
+"not found" for its version tag and would then stop the run: its log shows the answer.
 
 ## Checking a signature
 
@@ -174,7 +181,7 @@ cosign verify \
   ghcr.io/automatosai/automatos-api@sha256:<digest>
 ```
 
-The same for `automatos-frontend`, `automatos-workspace-worker` and
+The same for `automatos-frontend`, `automatos-enterprise-frontend`, `automatos-workspace-worker` and
 `ghcr.io/automatosai/charts/automatos`. A tag's digest:
 `docker buildx imagetools inspect ghcr.io/automatosai/automatos-api:0.7.0`.
 
