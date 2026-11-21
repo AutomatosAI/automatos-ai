@@ -7,17 +7,19 @@ what it names is read back by that digest, its bytes must hash to it, and it mus
 exactly what this run built. Two commands, each writing ``digest=…`` to ``--outputs``:
 
 * ``index`` (the merge job, every publishing run): the digest of the index that
-  ``docker buildx imagetools create --metadata-file`` reports it pushed (the file's
-  ``containerimage.descriptor``, written from the bytes it pushed; buildx v0.32.0 and
-  later). The index's members must be exactly the members of this run's
-  per-architecture builds, the digests the build jobs pushed and scanned (``--built``:
-  one empty file per digest, named by its hex, as they export them), each read by
-  digest the same way. BuildKit pushes each build as an index of the image and its
-  attestation, and ``imagetools create`` lists those entries in the new index.
+  ``docker buildx imagetools create --metadata-file`` reports it pushed: the file's
+  ``containerimage.descriptor``, the descriptor of the bytes it pushed (buildx v0.32.0
+  and later; the merge job pins its buildx). The file's ``image.name`` is not relied on.
+  This run's builds are the digests the build jobs pushed and scanned (``--built``: one
+  empty file per digest, named by its hex, as they export them). BuildKit pushes each as
+  an index of one linux image and its attestation, and ``imagetools create`` lists those
+  entries in the new index. So, each read by digest the same way: there is one build per
+  architecture the build matrix published for this image (``--matrix``, the build job's
+  matrix), and the index's entries are exactly the builds' entries, none twice.
 * ``chart`` (the release-chart job): the manifest digest ``helm push`` prints with the
-  reference it pushed (``Pushed:`` and ``Digest:`` on its standard output). The reference
-  must be ``<chart>:<version>``, and the manifest's one layer the packaged ``.tgz``,
-  byte for byte (its sha256 and size).
+  reference it pushed (``Pushed:`` and ``Digest:`` on its standard output, printed here
+  again). The reference must be ``<chart>:<version>``, and the manifest's one layer the
+  packaged ``.tgz``, byte for byte (its sha256 and size).
 
 Standard library only, as the other release tools; the registry is read through
 ``scripts/ci/image_registry.py``. A problem prints ``::error`` and exits 1, so nothing
@@ -34,15 +36,14 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence
 
-DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
-INDEX_TYPES = ("application/vnd.oci.image.index.v1+json",
-               "application/vnd.docker.distribution.manifest.list.v2+json")
+DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 CHART_LAYER = "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
 CHART_CONFIG = "application/vnd.cncf.helm.config.v1+json"
+INDEX_TYPES = ("application/vnd.oci.image.index.v1+json",
+               "application/vnd.docker.distribution.manifest.list.v2+json")
 DESCRIPTOR_KEY = "containerimage.descriptor"
-NAME_KEY = "image.name"
 _PUSHED = re.compile(r"^Pushed: (\S+)\s*$", re.M)
 _PUSH_DIGEST = re.compile(r"^Digest: (\S+)\s*$", re.M)
 
@@ -55,7 +56,7 @@ class DigestError(ValueError):
 
 
 def _digest(value: object, what: str) -> str:
-    if not isinstance(value, str) or not DIGEST.match(value):
+    if not isinstance(value, str) or not DIGEST.fullmatch(value):
         raise DigestError(f"{what} is not a sha256 digest: {str(value)[:80]!r}")
     return value
 
@@ -66,19 +67,32 @@ def read_by_digest(fetch: Fetch, repository: str, digest: str) -> dict:
     served = "sha256:" + hashlib.sha256(body).hexdigest()
     if served != digest:
         raise DigestError(f"{repository}@{digest}: the registry served bytes that hash to {served}")
-    return json.loads(body)
+    manifest = json.loads(body)
+    if not isinstance(manifest, dict):
+        raise DigestError(f"{repository}@{digest} is not a JSON object")
+    return manifest
+
+
+def _objects(manifest: dict, digest: str) -> List[dict]:
+    """An index's entries, each an object."""
+    entries = manifest.get("manifests")
+    if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
+        raise DigestError(f"{digest} is not an index of descriptors")
+    return entries
+
+
+def _entries(manifest: dict, digest: str) -> List[str]:
+    return [_digest(entry.get("digest"), f"an entry of {digest}") for entry in _objects(manifest, digest)]
 
 
 # --------------------------------------------------------------------------- the images
 
 
-def created_index(metadata: dict, image: str) -> str:
+def created_index(metadata: object) -> str:
     """The digest of the index ``imagetools create`` pushed, from its metadata file."""
-    if metadata.get(NAME_KEY) != image:
-        raise DigestError(f"the create step pushed {metadata.get(NAME_KEY)!r}, not {image!r}")
-    descriptor = metadata.get(DESCRIPTOR_KEY) or {}
-    if descriptor.get("mediaType") not in INDEX_TYPES:
-        raise DigestError(f"the create step pushed a {descriptor.get('mediaType')!r}, not an index")
+    descriptor = metadata.get(DESCRIPTOR_KEY) if isinstance(metadata, dict) else None
+    if not isinstance(descriptor, dict) or descriptor.get("mediaType") not in INDEX_TYPES:
+        raise DigestError(f"the create step's metadata names no pushed index: {str(metadata)[:200]!r}")
     return _digest(descriptor.get("digest"), "the create step's digest")
 
 
@@ -90,21 +104,39 @@ def built_digests(directory: Path) -> List[str]:
     return [_digest(f"sha256:{name}", f"the build digest file {name!r}") for name in names]
 
 
-def _entries(manifest: dict, digest: str) -> List[str]:
-    return [_digest(entry.get("digest"), f"an entry of {digest}") for entry in manifest.get("manifests", [])]
+def expected_arches(matrix: object, image: str) -> List[str]:
+    """The architectures the build matrix pushed ``image`` for, as published builds."""
+    include = matrix.get("include") if isinstance(matrix, dict) else None
+    if not isinstance(include, list) or not all(isinstance(entry, dict) for entry in include):
+        raise DigestError("the build matrix is not {\"include\": [entries]}")
+    arches = sorted(str(entry.get("arch")) for entry in include
+                    if entry.get("image") == image and entry.get("publish") is True)
+    if not arches:
+        raise DigestError(f"the build matrix publishes no build of {image}")
+    return arches
 
 
-def check_index(fetch: Fetch, image: str, index: str, built: Sequence[str]) -> List[str]:
-    """Every way the index differs from this run's builds; an empty list passes."""
-    top = read_by_digest(fetch, image, index)
-    if "manifests" not in top:
-        return [f"{image}@{index} is not an index"]
-    held = _entries(top, index)
-    expected: List[str] = []
-    for digest in built:
-        build = read_by_digest(fetch, image, digest)
-        expected += _entries(build, digest) if "manifests" in build else [digest]
-    problems = [f"{image}@{index} lists an entry twice"] if len(set(held)) != len(held) else []
+def build_arch(build: dict, digest: str) -> str:
+    """The one linux architecture a per-arch build holds (its attestation is ``unknown``)."""
+    platforms = [entry.get("platform") for entry in _objects(build, digest)]
+    arches = [platform.get("architecture") for platform in platforms
+              if isinstance(platform, dict) and platform.get("os") == "linux"]
+    if len(arches) != 1:
+        raise DigestError(f"build {digest} holds {len(arches)} linux images, not one")
+    return str(arches[0])
+
+
+def check_index(fetch: Fetch, image: str, index: str, built: Sequence[str], arches: Sequence[str]) -> List[str]:
+    """Every way the index or the builds differ from what this run should publish; empty passes."""
+    builds: Dict[str, dict] = {digest: read_by_digest(fetch, image, digest) for digest in built}
+    found = sorted(build_arch(build, digest) for digest, build in builds.items())
+    problems = [] if found == sorted(arches) else [f"{image}: builds for {found}, not one for each of {sorted(arches)}"]
+    held = _entries(read_by_digest(fetch, image, index), index)
+    expected = [entry for digest, build in builds.items() for entry in _entries(build, digest)]
+    if not held or not expected:
+        return problems + [f"{image}@{index}: {len(held)} entries, the builds {len(expected)}; neither may be empty"]
+    if len(set(held)) != len(held) or len(set(expected)) != len(expected):
+        problems.append(f"{image}@{index}: an entry is listed twice")
     problems += [f"{image}@{index} holds {entry}, which this run did not build"
                  for entry in sorted(set(held) - set(expected))]
     problems += [f"{image}@{index} lacks {entry}, which this run built and scanned"
@@ -129,11 +161,14 @@ def check_chart(manifest: dict, package: bytes) -> List[str]:
     """Every way the pushed chart differs from the package; an empty list passes."""
     want = {"mediaType": CHART_LAYER, "digest": "sha256:" + hashlib.sha256(package).hexdigest(),
             "size": len(package)}
-    got = [{key: layer.get(key) for key in want} for layer in manifest.get("layers") or []]
+    layers, config = manifest.get("layers"), manifest.get("config")
+    if not isinstance(layers, list) or not all(isinstance(layer, dict) for layer in layers):
+        return ["the pushed chart's layers are not a list of descriptors"]
+    got = [{key: layer.get(key) for key in want} for layer in layers]
     problems = [] if got == [want] else [f"the pushed chart's layers are {got}, not the package {want}"]
-    config = (manifest.get("config") or {}).get("mediaType")
-    if config != CHART_CONFIG:
-        problems.append(f"the pushed chart's config is a {config!r}, not {CHART_CONFIG}")
+    config_type = config.get("mediaType") if isinstance(config, dict) else None
+    if config_type != CHART_CONFIG:
+        problems.append(f"the pushed chart's config is a {config_type!r}, not {CHART_CONFIG}")
     return problems
 
 
@@ -171,16 +206,19 @@ def _finish(problems: List[str], digest: str, args: argparse.Namespace, line: st
 
 
 def cmd_index(args: argparse.Namespace, fetch: Fetch) -> int:
-    metadata = json.loads(Path(args.metadata).read_text(encoding="utf-8"))
-    index = created_index(metadata, args.image)
+    index = created_index(json.loads(Path(args.metadata).read_text(encoding="utf-8")))
+    arches = expected_arches(json.loads(args.matrix), args.image)
     built = built_digests(Path(args.built))
-    problems = check_index(fetch, args.image, index, built)
-    return _finish(problems, index, args, f"Published {args.image}@{index}, holding the {len(built)} builds this run scanned")
+    problems = check_index(fetch, args.image, index, built, arches)
+    return _finish(problems, index, args, f"Published {args.image}@{index}, holding this run's scanned "
+                                          f"builds for {', '.join(arches)}")
 
 
 def cmd_chart(args: argparse.Namespace, fetch: Fetch) -> int:
     ref = f"{args.chart}:{args.version}"
-    digest = pushed_chart(Path(args.push_log).read_text(encoding="utf-8"), ref)
+    log = Path(args.push_log).read_text(encoding="utf-8")
+    print(f"helm push printed:\n{log}")
+    digest = pushed_chart(log, ref)
     problems = check_chart(read_by_digest(fetch, args.chart, digest), Path(args.package).read_bytes())
     return _finish(problems, digest, args, f"Pushed {ref} as {digest}, the packaged chart byte for byte")
 
@@ -190,7 +228,7 @@ def parser() -> argparse.ArgumentParser:
     commands = root.add_subparsers(dest="command", required=True)
     index = commands.add_parser("index", help="the index digest from imagetools create's metadata file")
     chart = commands.add_parser("chart", help="the chart digest from helm push's output")
-    for command, flags in ((index, ("--metadata", "--built", "--image")),
+    for command, flags in ((index, ("--metadata", "--built", "--image", "--matrix")),
                            (chart, ("--push-log", "--chart", "--version", "--package"))):
         for flag in flags:
             command.add_argument(flag, required=True)

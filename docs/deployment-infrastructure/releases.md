@@ -119,8 +119,13 @@ checked.
    signed is the one `docker buildx imagetools create` reports it pushed (its
    `--metadata-file`), never one read back from a tag, and only once the index, read by
    that digest, holds exactly the per-architecture builds this run pushed and scanned
-   (`scripts/ci/release_digests.py index`). The signature is checked with the identity
-   of this workflow at the tag (the command below). A failed check fails the run, and no version tag is applied.
+   (`scripts/ci/release_digests.py index`): one build for each architecture the build
+   matrix published, and every entry of those builds, none extra. The signature is checked
+   with the identity of this workflow at the tag (the command below). A failed check fails
+   the run. The create step tags the index as it pushes it, so when the check or signing
+   fails, the staging tag (on `main` the `sha-<7>` tag, on the weekly run
+   `weekly-<yyyymmdd>`) names an index that is not signed; the tree tag, `edge`, the
+   version tags and the chart are not applied.
 4. **The version tags, all at once** (`release-images` job, after every image is
    checked). `scripts/ci/release_tags.py` reads every image's tags first, then adds
    `X.Y.Z`, and `X.Y` for a full release, to each image's signed digest. `edge` does

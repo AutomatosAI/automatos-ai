@@ -249,9 +249,12 @@ def test_the_signed_index_digest_is_the_one_the_create_step_pushed_never_a_tags(
     assert _step("merge", "Download digests")["with"]["path"] == "${{ runner.temp }}/digests"
     index = _step("merge", "The index digest, from the create step")
     assert index["id"] == "index" and "if" not in index, "on every publishing run"
-    for part in ('release_digests.py index --metadata "${RUNNER_TEMP}/index-metadata.json"',
+    for part in ('release_digests.py index --metadata "${RUNNER_TEMP}/index-metadata.json"', '--matrix "$MATRIX"',
                  '--built "${RUNNER_TEMP}/digests"', '--image "$IMAGE"', '--outputs "$GITHUB_OUTPUT"'):
         assert part in index["run"], part
+    # One build per architecture the build job's own matrix published (the build job runs that matrix).
+    assert index["env"]["MATRIX"] == "${{ needs.changes.outputs.matrix }}"
+    assert JOBS["build"]["strategy"]["matrix"] == "${{ fromJSON(needs.changes.outputs.matrix) }}"
     for name in ("Sign (keyless)", "Verify the signature (v* tags only)", "Record the digest for the chart (v* tags only)",
                  "Tag the context's tree (tree-<12>, once per tree)"):
         assert _step("merge", name)["env"]["DIGEST"] == "${{ steps.index.outputs.digest }}", name
@@ -268,3 +271,20 @@ def test_the_signed_chart_digest_is_the_one_helm_push_printed_never_its_tags():
                  '--version "$VERSION"', '--package "$PACKAGE"', '--outputs "$GITHUB_OUTPUT"'):
         assert part in chart["run"], part
     assert not any("release_chart.py digest" in step.get("run", "") for step in _steps("release-chart"))
+
+
+def test_the_merge_jobs_buildx_is_pinned_to_one_with_the_metadata_file():
+    """`imagetools create --metadata-file` is in buildx v0.32.0 and later."""
+    setup = next(step for step in _steps("merge") if "docker/setup-buildx-action@" in step.get("uses", ""))
+    version = setup["with"]["version"]
+    assert re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", version)
+    assert tuple(int(part) for part in version[1:].split(".")) >= (0, 32, 0)
+
+
+def test_no_release_job_reads_a_digest_back_by_name_or_hides_a_failure():
+    readers = ("imagetools inspect", "docker manifest", "skopeo", "crane")
+    for job in ("merge", "release-images", "release-chart", "release-notes"):
+        for step in _steps(job):
+            assert not any(reader in step.get("run", "") for reader in readers), (job, step.get("name"))
+    text = (WORKFLOWS / "images.yml").read_text(encoding="utf-8")
+    assert "continue-on-error" not in text and "|| true" not in text

@@ -96,8 +96,8 @@ name: images
 #     nothing.
 #   - The merge job publishes each image only under `release-staging-<run>-<attempt>`
 #     (no version, and no `sha-<short>`: the tagged commit's main push published that),
-#     signs the digest its create step pushed once the index holds just this run's scanned
-#     builds (release_digests.py), and checks it against this workflow at the tag (release_signing.py).
+#     signs the digest its create step (buildx pinned) pushed once the index holds just this run's
+#     scanned builds, one per arch (release_digests.py), and checks it at the tag (release_signing.py).
 #   - The release-images job, once every merge leg has, tags every image `X.Y.Z`, and
 #     `X.Y` unless the tag has a suffix (a candidate, `v0.8.0-rc.1`), by digest, in one
 #     step (scripts/ci/release_tags.py). smoke-images never runs on a tag, so `edge`
@@ -1010,6 +1010,8 @@ jobs:
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.39.0
 
       - name: Log in to GHCR
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
@@ -1032,15 +1034,12 @@ jobs:
           # No `latest` until the maintainers choose to publish one. No `edge`
           # either: smoke-images.yml's promote-edge job moves it once this
           # `sha-<short>` has booted on both arches (PRD-262 US-003).
-          # A schedule run publishes only `weekly-<yyyymmdd>` (PRD-262 US-011):
-          # every other tag is off for it, so a `sha-<short>` is never re-pushed
-          # with other packages.
-          # A `v*` tag (PRD-279 US-101) publishes the index only under a staging tag,
-          # release-staging-<run id>-<attempt>, which is not a version: the merge job
-          # signs and checks its digest, and the release-images job adds the version
-          # tags after every image has been. No `sha-<short>` either: the tagged commit's
-          # main push published that, and a sha tag is never re-pushed. The staging line
-          # is on for `v*` tags only, so every other run pushes what it did before.
+          # A schedule run publishes only `weekly-<yyyymmdd>` (PRD-262 US-011): every other
+          # tag is off for it, so a `sha-<short>` is never re-pushed with other packages.
+          # A `v*` tag (PRD-279 US-101) publishes the index only under release-staging-<run id>-
+          # <attempt>, not a version and no `sha-<short>` (its main push made that): the release-images
+          # job adds the version tags once every image is signed and checked. Every other run
+          # pushes what it did before.
           flavor: |
             latest=false
           tags: |
@@ -1065,10 +1064,11 @@ jobs:
       - name: The index digest, from the create step
         id: index
         env:
+          MATRIX: ${{ needs.changes.outputs.matrix }}
           REGISTRY_USER: ${{ github.actor }}
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python3 scripts/ci/release_digests.py index --metadata "${RUNNER_TEMP}/index-metadata.json" \
+          python3 scripts/ci/release_digests.py index --metadata "${RUNNER_TEMP}/index-metadata.json" --matrix "$MATRIX" \
             --built "${RUNNER_TEMP}/digests" --image "$IMAGE" --outputs "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Install cosign

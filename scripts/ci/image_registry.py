@@ -45,6 +45,8 @@ MANIFEST_TYPES = ",".join((
     "application/vnd.docker.distribution.manifest.v2+json",
 ))
 ATTEMPTS = 3
+# The OCI distribution spec: implementations SHOULD support manifests of at least 4 megabytes.
+MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 TIMEOUT_SECONDS = 120
 LOCAL_HOSTS = ("localhost", "127.0.0.1")
 CHALLENGE_PARAM = re.compile(r'(\w+)="([^"]*)"')
@@ -164,10 +166,16 @@ def connect(ref: str) -> Tuple[Session, str]:
 
 
 def manifest_bytes(session: Session, reference: str) -> bytes:
-    """The bytes of the index or manifest ``reference`` (tag or digest) names, as served."""
+    """The bytes of the index or manifest ``reference`` (tag or digest) names, as served.
+
+    A body over ``MAX_MANIFEST_BYTES`` is refused (ValueError) rather than read whole.
+    """
     url = f"{session.base}/v2/{session.repo}/manifests/{reference}"
     with _open(_request(url, MANIFEST_TYPES, session.token)) as response:
-        return response.read()
+        body = response.read(MAX_MANIFEST_BYTES + 1)
+    if len(body) > MAX_MANIFEST_BYTES:
+        raise ValueError(f"{url} served a manifest over {MAX_MANIFEST_BYTES} bytes")
+    return body
 
 
 def manifest(session: Session, reference: str) -> dict:
