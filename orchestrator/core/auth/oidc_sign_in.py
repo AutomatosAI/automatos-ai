@@ -36,7 +36,8 @@ cross-site request forgery) is not a sign-in there, even by someone who has seen
    ``OIDC_ISSUER``; a ``code`` must be present, once, and of a sane length. Else ``InvalidSignIn``.
 3. The code is exchanged (``oidc_exchange``) and the ID token verified (``oidc_tokens``, every rule
    of §5.11, the nonce this sign-in's). A refusal is ``InvalidSignIn``.
-4. The identity is read from the verified claims (``verified_identity``).
+4. The identity is read from the verified claims (``verified_identity``): the person is the
+   issuer and the claim ``OIDC_CLAIM_SUBJECT`` names, which must be a non-empty string.
 
 For a phone's sign-in (US-603) a refusal at 2 to 4 is ``PhoneSignInFailed``, carrying the refusal
 and what the phone's start asked for, so its answer goes to the app; at 1 nothing is known of it.
@@ -176,14 +177,29 @@ def _email_verified(claims: Mapping[str, Any]) -> bool:
     return config.OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES == EMAIL_CLAIM_VOUCHED
 
 
+def _subject(claims: Mapping[str, Any]) -> str:
+    """The person's id at the provider: the claim ``OIDC_CLAIM_SUBJECT`` names (``sub`` unless set).
+
+    A token without it, or with anything but a non-empty string there, is refused as a token
+    without ``sub`` is (``oidc_tokens``, which still requires ``sub`` of every ID token).
+    """
+    subject = claims.get(config.OIDC_CLAIM_SUBJECT)
+    if not isinstance(subject, str) or not subject:
+        raise InvalidSignIn("the ID token was refused: it names no subject in OIDC_CLAIM_SUBJECT's claim")
+    return subject
+
+
 def verified_identity(claims: Mapping[str, Any], now: Optional[float] = None) -> VerifiedIdentity:
     """Who the verified claims say the person is.
 
+    The subject, which with the issuer is the person's identity link, is read from the claim
+    ``OIDC_CLAIM_SUBJECT`` names (``_subject``); every later use of the person's identity (the
+    link, step-up, the first-admin list's ``sub:`` entries, a phone's sign-in) reads it from here.
     The email is read from the claim ``OIDC_CLAIM_EMAIL`` names, and counts as verified only as
     ``_email_verified`` says. The name is read from ``OIDC_CLAIM_NAME``'s claim. A value that is
     not a clean string a ``users`` row can hold is no value. ``sid`` is kept when it fits its column.
     """
-    issuer, subject = claims["iss"], claims["sub"]
+    issuer, subject = claims["iss"], _subject(claims)
     if not _fits(issuer, ISSUER_MAX) or not _fits(subject, SUBJECT_MAX):
         raise InvalidSignIn("its issuer or subject does not fit an identity link")
     sid = claims.get("sid")

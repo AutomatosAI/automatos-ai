@@ -9,9 +9,11 @@ touching the database.
     ENTERPRISE_BOOTSTRAP_ADMINS = entry *( "," entry )
     entry                       = "sub:" subject / "email:" address
 
-* ``sub:<subject>`` matches the person whose verified ID token's ``sub`` is exactly ``<subject>``:
-  every character, case and all. The subject is the provider's own id for the person, which never
-  changes and is never reused, so it is the entry to prefer.
+* ``sub:<subject>`` matches the person whose subject is exactly ``<subject>``: every character,
+  case and all. The subject is the value of the claim ``OIDC_CLAIM_SUBJECT`` names in the verified
+  ID token (``sub`` unless set; ``oidc_sign_in.verified_identity``), the same value the person's
+  identity link holds. It is the provider's own id for the person, which never changes and is
+  never reused, so it is the entry to prefer.
 * ``email:<address>`` matches the person whose verified ID token has an ``email`` claim equal to
   ``<address>`` AND ``email_verified`` the JSON ``true`` (absent, ``false``, ``"true"`` or ``1`` is
   not verified, so the entry matches nobody). The part before the ``@`` is compared exactly; the

@@ -11,7 +11,8 @@
    built-in default is a developer's ``localhost``, so only a value set in the environment counts.
 2. when a sign-in setting (``OIDC_SIGN_IN_SETTINGS``, PRD-277 Wave 4) cannot be used: the issuer
    and ``FRONTEND_URL`` must be ``https`` addresses with a host; ``OIDC_SCOPES`` must be scope
-   tokens including ``openid``; ``OIDC_CLAIM_EMAIL`` and ``OIDC_CLAIM_NAME`` must name a claim;
+   tokens including ``openid``; ``OIDC_CLAIM_EMAIL``, ``OIDC_CLAIM_NAME`` and
+   ``OIDC_CLAIM_SUBJECT`` must name a claim, the last not one of ``access_rule.PROTOCOL_CLAIMS``;
    ``OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES``, when set, must be ``true`` or ``false``;
    ``OIDC_CA_BUNDLE_FILE``, when set, must be a file this process can read; and
    ``ENTERPRISE_DEFAULT_ROLE`` must be ``none`` or a workspace role below owner, and a role needs
@@ -104,7 +105,15 @@ OIDC_SIGN_IN_SETTINGS: Tuple[str, ...] = (
     "OIDC_CA_BUNDLE_FILE", "ENTERPRISE_DEFAULT_ROLE", "DEFAULT_WORKSPACE_ID",
     "CLIENT_IP_HEADER", "OIDC_ENDPOINT_HOSTS", "OIDC_PENDING_SIGN_INS_MAX", "OIDC_PENDING_SIGN_INS_PER_ADDRESS",
     "OIDC_REQUIRED_CLAIMS", "ENTERPRISE_BOOTSTRAP_ADMINS", "OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES",
-    "OIDC_DISPLAY_NAME", "CLIENT_IP_PROXY_COUNT",
+    "OIDC_DISPLAY_NAME", "CLIENT_IP_PROXY_COUNT", "OIDC_CLAIM_SUBJECT",
+)
+# The settings that name the claim each value is read from (PRD-277 §5.10).
+SUBJECT_CLAIM_SETTING = "OIDC_CLAIM_SUBJECT"
+CLAIM_NAME_SETTINGS: Tuple[str, ...] = ("OIDC_CLAIM_EMAIL", "OIDC_CLAIM_NAME", SUBJECT_CLAIM_SETTING)
+# A claim that describes the token (``access_rule.PROTOCOL_CLAIMS``) is not a person's id.
+SUBJECT_CLAIM_PROBLEM = (
+    "must name the claim that identifies the person, not one that describes the token itself, which is the same "
+    "for everyone or new at every sign-in"
 )
 # PRD-277 US-502: the provider's name on the sign-in button. Plain text the page shows as it is:
 # 1 to 64 characters, no control character (C0, DEL or C1) and no angle bracket.
@@ -219,9 +228,7 @@ def _sign_in_setting_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str
     scopes = _scopes_problem(str(settings.get("OIDC_SCOPES") or ""))
     if scopes:
         yield "OIDC_SCOPES", scopes
-    for name in ("OIDC_CLAIM_EMAIL", "OIDC_CLAIM_NAME"):
-        if not str(settings.get(name) or "").strip():
-            yield name, "must name a claim"
+    yield from _claim_name_problems(settings)
     vouched = str(settings.get("OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES") or EMAIL_CLAIM_NOT_VOUCHED)
     if vouched.strip().lower() not in (EMAIL_CLAIM_VOUCHED, EMAIL_CLAIM_NOT_VOUCHED):
         yield "OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES", EMAIL_CLAIM_VOUCH_PROBLEM
@@ -230,6 +237,15 @@ def _sign_in_setting_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str
         yield "OIDC_DISPLAY_NAME", DISPLAY_NAME_PROBLEM
     yield from _bundle_and_role_problems(settings)
     yield from _limit_and_host_problems(settings)
+
+
+def _claim_name_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str, str]]:
+    """Each claim setting names a claim; the subject's names one that can identify a person."""
+    for name in CLAIM_NAME_SETTINGS:
+        if not str(settings.get(name) or "").strip():
+            yield name, "must name a claim"
+    if str(settings.get(SUBJECT_CLAIM_SETTING) or "").strip() in access_rule.PROTOCOL_CLAIMS:
+        yield SUBJECT_CLAIM_SETTING, SUBJECT_CLAIM_PROBLEM
 
 
 def _bundle_and_role_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str, str]]:
@@ -436,6 +452,7 @@ __all__ = [
     "MISSING_SETTINGS",
     "DEFAULT_ROLES",
     "SHARED_ISSUER_PROBLEM",
+    "SUBJECT_CLAIM_PROBLEM",
     "OIDC_SIGN_IN_SETTINGS",
     "OIDC_START_UP_SETTINGS",
     "SESSION_COOKIE_PREFIX",

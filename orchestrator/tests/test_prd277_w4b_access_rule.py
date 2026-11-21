@@ -51,7 +51,7 @@ def _settings(**overrides):
         "OIDC_ISSUER": OWN_ISSUER, "OIDC_CLIENT_ID": "prd277-w4b-client",
         "OIDC_CLIENT_SECRET": secrets.token_urlsafe(24), "FRONTEND_URL": "https://automatos.example.test",
         "OIDC_SCOPES": "openid profile email", "OIDC_CLAIM_EMAIL": "email", "OIDC_CLAIM_NAME": "name",
-        "OIDC_CA_BUNDLE_FILE": "", "ENTERPRISE_DEFAULT_ROLE": "none",
+        "OIDC_CLAIM_SUBJECT": "sub", "OIDC_CA_BUNDLE_FILE": "", "ENTERPRISE_DEFAULT_ROLE": "none",
         "DEFAULT_WORKSPACE_ID": "00000000-0000-0000-0000-0000000277e1", "CLIENT_IP_HEADER": "X-Real-IP",
         "OIDC_ENDPOINT_HOSTS": "", "OIDC_PENDING_SIGN_INS_MAX": 10_000, "OIDC_PENDING_SIGN_INS_PER_ADDRESS": 100,
         "OIDC_REQUIRED_CLAIMS": "", "ENTERPRISE_BOOTSTRAP_ADMINS": "",

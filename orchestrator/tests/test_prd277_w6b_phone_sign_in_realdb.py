@@ -18,8 +18,9 @@ provider (US-407), each test in a transaction rolled back at the end (``commit``
   the one 401. Signing in again on the same phone keeps its device and replaces its token.
 * **Refusals once the person is known** (no workspace, several, the device cap) reach the confirmation page as
   ``?error=<code>``, never the app, are audited ``auth:sign_in_refused`` with that reason, and keep nothing. A
-  refusal before (an identity that does not verify) still goes to the app link. A paused workspace is not one
-  a device can belong to.
+  refusal before (an identity that does not verify, or a token without the claim ``OIDC_CLAIM_SUBJECT``
+  names) still goes to the app link. A paused workspace is not one a device can belong to. A phone signs
+  in as the person that claim names, as a browser does.
 * **One pending sign-in per person per workspace**, expired ones of anybody deleted; the device cap counted
   again inside the exchange; a phone someone else removed says so and its ``device:paired`` row names who.
 * **Nothing from the provider reaches the phone.**
@@ -515,6 +516,23 @@ def test_a_person_holding_the_most_devices_is_told_so_on_the_page_and_nothing_is
 
 def test_a_refused_identity_is_still_told_so_on_the_app_link(install):
     install.idp.misbehave(signature="wrong_key")
+    assert _app_answer(Phone(install).sign_in()) == {"error": sign_in_flow.REFUSED}
+
+
+def test_a_phone_signs_in_as_the_person_oidc_claim_subject_names(install, monkeypatch):
+    monkeypatch.setattr(config, "OIDC_CLAIM_SUBJECT", "oid")
+    install.idp.sign_in_as(Person(subject="phone-sub", extra={"oid": "phone-persons-own-id"}))
+
+    signed = _signed_in(Phone(install))
+
+    assert _row(install.db, signed.id).user_id == _person(install.db, "phone-persons-own-id")
+    linked_by_sub = text("SELECT COUNT(*) FROM user_identities WHERE subject = 'phone-sub'")
+    assert install.db.execute(linked_by_sub).scalar_one() == 0
+
+
+def test_a_phones_token_without_the_subject_claim_is_told_so_on_the_app_link(install, monkeypatch):
+    monkeypatch.setattr(config, "OIDC_CLAIM_SUBJECT", "oid")
+    install.idp.sign_in_as(Person(subject="phone-without-oid"))
     assert _app_answer(Phone(install).sign_in()) == {"error": sign_in_flow.REFUSED}
 
 

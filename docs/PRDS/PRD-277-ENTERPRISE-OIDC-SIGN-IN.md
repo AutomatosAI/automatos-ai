@@ -153,7 +153,7 @@ The web app and the API are served from one address (`/` and `/api` on one host)
 
 ### 5.4 People, identities and roles
 
-**Identity.** A new table, `user_identities`, links a person to `(issuer, subject)`, unique on the pair. `users.clerk_user_id` is untouched and stays Clerk's.
+**Identity.** A new table, `user_identities`, links a person to `(issuer, subject)`, unique on the pair. `users.clerk_user_id` is untouched and stays Clerk's. The subject is the value of the claim `OIDC_CLAIM_SUBJECT` names in the verified ID token (`sub` unless set). Every use of the person's identity reads that one value: the identity link, step-up, the first-admin list's `sub:` entries and a phone's sign-in. The ID token must still carry `sub` (OIDC Core §2, §5.11) whatever the setting names: the setting changes which claim identifies the person, not which tokens are valid.
 
 **Never by email.** A sign-in is matched to a person only by issuer and subject. If the email in the token is already on another person's row, the sign-in is refused with a clear message for an admin, and no row changes. This is today's rule in `ensure_user_row`, and it is also what Microsoft tells applications to do: its `email` claim "isn't guaranteed to be correct".
 
@@ -218,7 +218,7 @@ Automatos reads the provider's own metadata document (`<issuer>/.well-known/open
 
 | Provider | Issuer looks like | Groups in the ID token | What to watch |
 |---|---|---|---|
-| Microsoft Entra ID | `https://login.microsoftonline.com/<tenant>/v2.0` | Optional. Above 200 groups the list is left out of the token. App roles arrive in `roles`. | `email` is optional and unverified. Use the tenant's own issuer, never `common`. An access rule on `groups` fails for a person over the limit; a rule on an app role does not. |
+| Microsoft Entra ID | `https://login.microsoftonline.com/<tenant>/v2.0` | Optional. Above 200 groups the list is left out of the token. App roles arrive in `roles`. | `email` is optional and unverified. Use the tenant's own issuer, never `common`. An access rule on `groups` fails for a person over the limit; a rule on an app role does not. `sub` is different for each app registration, so an app registration made again gives everyone a new `sub`: set `OIDC_CLAIM_SUBJECT=oid`, the person's id in the tenant (Microsoft's ID token claims page says it is sent when `profile` is asked for, as it is by default), and require the tenant's id in the access rule (`OIDC_REQUIRED_CLAIMS=tid=<tenant id>`). |
 | Google Workspace | `https://accounts.google.com` | None | One issuer for every Google account, so the access rule must require the `hd` (domain) claim. |
 | Okta, Auth0 | `https://<domain>` | Through a custom claim | The claim's name is the customer's choice; the access rule names it. |
 | Keycloak | `https://<host>/realms/<realm>` | Through a mapper | May sit on a private address with a private certificate authority (FR-9, FR-10). Used in CI. |
@@ -280,6 +280,7 @@ Names are provisional. Final names are fixed in each wave's PR and recorded in `
 | `OIDC_DISPLAY_NAME` | `your organisation` | The text on the sign-in button. |
 | `OIDC_REQUIRED_CLAIMS` | empty | Claims that must match before anyone is let in. Required for shared issuers and with a default role; never on a claim every token carries (§5.4). |
 | `OIDC_CLAIM_EMAIL`, `OIDC_CLAIM_NAME` | `email`, `name` | Which claims carry these. |
+| `OIDC_CLAIM_SUBJECT` | `sub` | The claim that, with the issuer, identifies the person (§5.4). A token without it, or with anything but a non-empty string there, is refused as one without `sub` is. Start-up refuses an empty name and a claim that describes the token rather than the person (the access rule's list, §5.4). Choose it before the first sign-in: changing it on an install people already use changes who everyone is. Each person's next sign-in then matches no identity link, so it is handled as a first sign-in, and one whose email is already on their earlier row is refused by the email rule (§5.4). §5.9 says which provider needs another value than `sub`. |
 | `OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES` | `false` | `true` says the provider puts only addresses it has verified in the claim `OIDC_CLAIM_EMAIL` names, when that is not `email`, so they are kept as verified. Off, an address from such a claim is unverified and not kept. Risk: a person who can edit that claim at the provider can take another person's address (§5.9). `true` or `false`; start-up refuses anything else. |
 | `OIDC_CA_BUNDLE_FILE` | empty | A certificate authority file for an IdP with a private certificate. |
 | `ENTERPRISE_BOOTSTRAP_ADMINS` | empty | People who become install admins at first sign-in, or at any sign-in while the install has no active install admin (§5.4). |
@@ -301,6 +302,7 @@ These are requirements, each with a test.
 
 - **The ID token** is accepted only if its signature verifies against the IdP's published keys, with an allow-list of algorithms (RS256, PS256, ES256). `none` and the shared-secret algorithms are refused.
 - **Issuer** must equal `OIDC_ISSUER` exactly, and the metadata document must name the same issuer.
+- **Subject:** `sub` must be a non-empty string, as OIDC Core §2 requires of every ID token, and so must the claim `OIDC_CLAIM_SUBJECT` names when that is another (§5.4).
 - **Audience** must contain the client id. With several audiences, `azp` must equal the client id.
 - **Times:** `exp`, `iat` and `nbf` are checked with at most 60 seconds of leeway.
 - **`nonce`** must match the one made at `/start`. **`state`** must match and is single use.

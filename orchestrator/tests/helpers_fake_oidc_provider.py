@@ -407,7 +407,7 @@ def install_settings(provider: FakeIdentityProvider, **overrides: Any) -> Dict[s
         "OIDC_ISSUER": provider.issuer, "OIDC_CLIENT_ID": provider.client_id,
         "OIDC_CLIENT_SECRET": provider.client_secret, "OIDC_CA_BUNDLE_FILE": str(provider.ca_file),
         "OIDC_SCOPES": "openid profile email", "OIDC_CLAIM_EMAIL": "email", "OIDC_CLAIM_NAME": "name",
-        "ENTERPRISE_DEFAULT_ROLE": "none", "OIDC_ENDPOINT_HOSTS": "", "OIDC_PENDING_SIGN_INS_MAX": 10_000,
+        "OIDC_CLAIM_SUBJECT": "sub", "ENTERPRISE_DEFAULT_ROLE": "none", "OIDC_ENDPOINT_HOSTS": "", "OIDC_PENDING_SIGN_INS_MAX": 10_000,
         "OIDC_PENDING_SIGN_INS_PER_ADDRESS": 100, "OIDC_REQUIRED_CLAIMS": "", "ENTERPRISE_BOOTSTRAP_ADMINS": "",
         **overrides,
     }

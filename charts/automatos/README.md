@@ -195,9 +195,12 @@ configuration stopped.
 
 The client secret goes in the Secret as `OIDC_CLIENT_SECRET`, never in values. The
 session clocks (`SESSION_IDLE_MINUTES`, `SESSION_ABSOLUTE_HOURS`), the claim names
-(`OIDC_CLAIM_EMAIL`, `OIDC_CLAIM_NAME`, `OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES`) and
+(`OIDC_CLAIM_SUBJECT`, `OIDC_CLAIM_EMAIL`, `OIDC_CLAIM_NAME`,
+`OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES`) and
 the pending sign-in limits (`OIDC_PENDING_SIGN_INS_MAX`, `OIDC_PENDING_SIGN_INS_PER_ADDRESS`)
 have working defaults and go in `config` when you change them; the API checks them at start.
+Choose `OIDC_CLAIM_SUBJECT` before the first sign-in: it names the claim that identifies each
+person, so changing it later makes everyone's next sign-in a new person's (PRD-277 §5.10).
 The session cookie's name and the CSRF header's are fixed in the enterprise web image, so
 `config` may not change them. Nor may it set `FORWARDED_ALLOW_IPS`: the API reads the
 caller's address from `clientIpHeader` and `clientIpProxyCount`, and leaves the server's own

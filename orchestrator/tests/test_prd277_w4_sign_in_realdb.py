@@ -15,6 +15,9 @@ address) and the in-process provider (US-407), each test in a transaction rolled
   so; with a role, they get it in the default workspace at first sign-in only, and a role an
   admin changed survives the next sign-in. A token with only a subject and an email signs in.
   The email is the person's only when the token marks it verified with ``true``.
+* **The subject claim**: the person is the issuer and the claim ``OIDC_CLAIM_SUBJECT`` names. Set to
+  another claim, two tokens with different ``sub`` and the same value there are one person; a token
+  with no non-empty string there, or with no ``sub``, is refused and audited as a bad token.
 * **Every refusal** in US-402's list (wrong signature, ``alg: none``, wrong issuer, wrong
   audience, expired, missing or wrong nonce, reused state, replayed code, another host) ends
   without a session, at ``/sign-in?error=…``; one that is a refusal of the person is audited with
@@ -324,6 +327,36 @@ def test_a_token_that_breaks_a_rule_ends_without_a_session_and_is_audited(instal
     assert _refusal(_sign_in(install)) == sign_in_flow.REFUSED
 
     assert _all_sessions(install.db) == 0 and _identity_user(install.db, install.idp.person.subject) is None
+    assert [(action, details) for action, _uid, details in _audits(install.db, install.workspace_id)] == [
+        ("auth:sign_in_refused", {"reason": "invalid_token"})]
+
+
+def test_the_person_is_the_claim_oidc_claim_subject_names_whatever_sub_says(install, monkeypatch):
+    monkeypatch.setattr(config, "OIDC_CLAIM_SUBJECT", "oid")
+    install.idp.sign_in_as(Person(subject="sub-of-one-registration", extra={"oid": "the-persons-own-id"}))
+    _sign_in(install)
+    user_id = _identity_user(install.db, "the-persons-own-id")
+    install.idp.sign_in_as(Person(subject="sub-of-another-registration", extra={"oid": "the-persons-own-id"}))
+
+    assert _sign_in(install).headers["location"] == "/projects?tab=1"
+
+    assert user_id is not None and _sessions_of(install.db, user_id) == 2
+    assert _identity_user(install.db, "sub-of-one-registration") is None
+    assert _identity_user(install.db, "sub-of-another-registration") is None
+
+
+@pytest.mark.parametrize(("extra", "removed"), [({}, ()), ({"oid": ""}, ()), ({"oid": 4242}, ()),
+                                                ({"oid": ["a"]}, ()), ({"oid": "has-an-oid"}, ("sub",))],
+                         ids=["no-claim", "empty", "number", "list", "no-sub"])
+def test_a_token_without_the_subject_claim_or_without_sub_is_refused_as_a_bad_token(install, monkeypatch, extra,
+                                                                                    removed):
+    monkeypatch.setattr(config, "OIDC_CLAIM_SUBJECT", "oid")
+    install.idp.sign_in_as(Person(subject="has-a-sub", extra=extra))
+    install.idp.misbehave(remove_claims=removed)
+
+    assert _refusal(_sign_in(install)) == sign_in_flow.REFUSED
+
+    assert _all_sessions(install.db) == 0 and _identity_user(install.db, "has-a-sub") is None
     assert [(action, details) for action, _uid, details in _audits(install.db, install.workspace_id)] == [
         ("auth:sign_in_refused", {"reason": "invalid_token"})]
 

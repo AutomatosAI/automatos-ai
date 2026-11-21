@@ -7,6 +7,9 @@
   seconds (a string, a boolean, NaN, an infinity), one before the epoch, one later than now by more
   than the leeway, or one too large for a date is ``InvalidSignIn``: a refused sign-in, never an
   exception of another kind.
+* **The subject** is the claim ``OIDC_CLAIM_SUBJECT`` names (``sub`` unless set). Set to another claim,
+  ``sub`` no longer says who the person is, and the first-admin list's ``sub:`` entries match the
+  claim's value. A token without a non-empty string there is ``InvalidSignIn``, whose text holds no value.
 
 DB-free: the claims are handed in, as ``oidc_tokens.verify_id_token`` hands them over.
 """
@@ -24,6 +27,7 @@ os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
 from config import config  # noqa: E402
+from core.auth import bootstrap_admins  # noqa: E402
 from core.auth.oidc_sign_in import NO_AUTH_TIME, verified_identity  # noqa: E402
 from core.auth.oidc_tokens import TIME_LEEWAY_SECONDS  # noqa: E402
 from core.auth.sign_in_methods import InvalidSignIn  # noqa: E402
@@ -37,6 +41,7 @@ def settings(monkeypatch):
     """The email settings as an install starts with them; each test changes what it needs."""
     monkeypatch.setattr(config, "OIDC_CLAIM_EMAIL", "email")
     monkeypatch.setattr(config, "OIDC_CLAIM_NAME", "name")
+    monkeypatch.setattr(config, "OIDC_CLAIM_SUBJECT", "sub")
     monkeypatch.setattr(config, "OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES", "false")
     return monkeypatch
 
@@ -99,3 +104,35 @@ def test_an_auth_time_that_is_not_a_real_moment_refuses_the_sign_in(settings, va
 def test_an_auth_time_too_large_for_a_date_is_refused_even_on_a_clock_that_allows_it(settings):
     with pytest.raises(InvalidSignIn):
         verified_identity({**BASE, "auth_time": 1e18}, now=1e19)
+
+
+# --------------------------------------------------------------------------- the subject
+
+
+def test_the_subject_is_sub_by_default(settings):
+    identity = verified_identity({**BASE, "oid": "object-1"}, now=NOW)
+    assert (identity.issuer, identity.subject) == (BASE["iss"], "subject-1")
+
+
+def test_the_subject_is_the_claim_oidc_claim_subject_names(settings):
+    settings.setattr(config, "OIDC_CLAIM_SUBJECT", "oid")
+    identity = verified_identity({**BASE, "oid": "object-1"}, now=NOW)
+    assert (identity.issuer, identity.subject) == (BASE["iss"], "object-1")
+
+
+def test_a_first_admin_sub_entry_names_the_subject_claims_value(settings):
+    settings.setattr(config, "OIDC_CLAIM_SUBJECT", "oid")
+    identity = verified_identity({**BASE, "oid": "object-1"}, now=NOW)
+    entries = bootstrap_admins.parse_entries("sub:object-1")
+    assert bootstrap_admins.names_person(entries, identity.subject, identity.claims) == bootstrap_admins.SUBJECT_KIND
+    assert bootstrap_admins.names_person(bootstrap_admins.parse_entries("sub:subject-1"), identity.subject,
+                                         identity.claims) is None
+
+
+@pytest.mark.parametrize("value", [None, "", 42, True, ["object-1"], {"id": "object-1"}])
+def test_a_token_without_a_usable_subject_claim_refuses_the_sign_in(settings, value):
+    settings.setattr(config, "OIDC_CLAIM_SUBJECT", "oid")
+    claims = {**BASE, **({} if value is None else {"oid": value})}
+    with pytest.raises(InvalidSignIn) as refused:
+        verified_identity(claims, now=NOW)
+    assert "subject" in str(refused.value) and "object-1" not in str(refused.value)

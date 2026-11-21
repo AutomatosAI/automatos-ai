@@ -1,16 +1,16 @@
 """PRD-277 Wave 4 (§5.10): the sign-in settings can stop only an edition that signs in with OIDC.
 
-``config.py`` reads ``OIDC_SCOPES``, ``OIDC_CLAIM_EMAIL``, ``OIDC_CLAIM_NAME``,
+``config.py`` reads ``OIDC_SCOPES``, ``OIDC_CLAIM_EMAIL``, ``OIDC_CLAIM_NAME``, ``OIDC_CLAIM_SUBJECT``,
 ``OIDC_CA_BUNDLE_FILE``, ``ENTERPRISE_DEFAULT_ROLE``, ``OIDC_ENDPOINT_HOSTS`` and
 ``OIDC_PENDING_SIGN_INS_MAX`` so that importing it never raises. Proven by reloading ``config.py``
 under each value:
 
-* their defaults are the PRD's (``openid profile email``, ``email``, ``name``, none, ``none``, none,
-  10000) and every name is in ``reports/config-surface.json``;
+* their defaults are the PRD's (``openid profile email``, ``email``, ``name``, ``sub``, none,
+  ``none``, none, 10000) and every name is in ``reports/config-surface.json``;
 * in ``local`` and ``saas`` a blank or malformed value imports and starts normally;
 * in ``enterprise`` each is refused at start-up, naming the setting and never the value: an issuer
   or a public address that is not https, scopes without ``openid`` or with a character a scope may
-  not hold, an empty claim name, a CA file that cannot be read, a default role that is not
+  not hold, an empty claim name, a subject claim that describes the token, a CA file that cannot be read, a default role that is not
   ``none``, viewer, editor or admin, a role without ``DEFAULT_WORKSPACE_ID`` or without an access
   rule, an email-claim setting that is not ``true`` or ``false``, no
   ``CLIENT_IP_HEADER`` (the address sign-in limits and audits by would be the caller's to write),
@@ -40,7 +40,8 @@ from core.edition_start_up import OIDC_SIGN_IN_SETTINGS, EditionNotReady  # noqa
 ORCH = Path(__file__).resolve().parents[1]
 NEW_SETTINGS = ("OIDC_SCOPES", "OIDC_CLAIM_EMAIL", "OIDC_CLAIM_NAME", "OIDC_CA_BUNDLE_FILE", "ENTERPRISE_DEFAULT_ROLE",
                 "OIDC_ENDPOINT_HOSTS", "OIDC_PENDING_SIGN_INS_MAX", "OIDC_PENDING_SIGN_INS_PER_ADDRESS",
-                "OIDC_REQUIRED_CLAIMS", "ENTERPRISE_BOOTSTRAP_ADMINS", "OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES")
+                "OIDC_REQUIRED_CLAIMS", "ENTERPRISE_BOOTSTRAP_ADMINS", "OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES",
+                "OIDC_CLAIM_SUBJECT")
 ENV_KEYS = (
     "AUTH_EDITION", "REQUIRE_AUTH", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "FRONTEND_URL",
     "CLI_RUNTIME_ENABLED", "DEFAULT_WORKSPACE_ID", "CLERK_JWKS_URL", "CLERK_SECRET_KEY",
@@ -62,7 +63,8 @@ EDITION_ENV = {
 # Each a value that must stop enterprise, and must not stop local or saas.
 BAD = [
     ("OIDC_SCOPES", "profile email"), ("OIDC_SCOPES", "openid pro\"file"), ("OIDC_SCOPES", "openid \\x"),
-    ("OIDC_CLAIM_EMAIL", "   "), ("OIDC_CLAIM_NAME", "   "),
+    ("OIDC_CLAIM_EMAIL", "   "), ("OIDC_CLAIM_NAME", "   "), ("OIDC_CLAIM_SUBJECT", "   "),
+    ("OIDC_CLAIM_SUBJECT", "aud"), ("OIDC_CLAIM_SUBJECT", "nonce"), ("OIDC_CLAIM_SUBJECT", "iss"),
     ("OIDC_CA_BUNDLE_FILE", "/nonexistent/prd277-w4-ca.pem"),
     ("ENTERPRISE_DEFAULT_ROLE", "owner"), ("ENTERPRISE_DEFAULT_ROLE", "super_admin"),
     ("ENTERPRISE_DEFAULT_ROLE", "editorx"),
@@ -122,6 +124,7 @@ def test_the_defaults_are_the_prds_and_every_name_is_in_the_surface():
     cfg = _fresh_config(**EDITION_ENV["saas"])
 
     assert (cfg.OIDC_SCOPES, cfg.OIDC_CLAIM_EMAIL, cfg.OIDC_CLAIM_NAME) == ("openid profile email", "email", "name")
+    assert cfg.OIDC_CLAIM_SUBJECT == "sub"
     assert (cfg.OIDC_CA_BUNDLE_FILE, cfg.ENTERPRISE_DEFAULT_ROLE) == ("", "none")
     assert (cfg.OIDC_ENDPOINT_HOSTS, cfg.OIDC_PENDING_SIGN_INS_MAX) == ("", 10_000)
     assert cfg.OIDC_PENDING_SIGN_INS_PER_ADDRESS == 100
@@ -133,8 +136,9 @@ def test_the_defaults_are_the_prds_and_every_name_is_in_the_surface():
 
 def test_values_are_read_trimmed_and_the_role_folded():
     cfg = _fresh_config(**EDITION_ENV["saas"], OIDC_SCOPES="  openid   email ", ENTERPRISE_DEFAULT_ROLE=" Editor ",
-                        OIDC_CLAIM_EMAIL=" mail ")
+                        OIDC_CLAIM_EMAIL=" mail ", OIDC_CLAIM_SUBJECT=" oid ")
     assert (cfg.OIDC_SCOPES, cfg.ENTERPRISE_DEFAULT_ROLE, cfg.OIDC_CLAIM_EMAIL) == ("openid email", "editor", "mail")
+    assert cfg.OIDC_CLAIM_SUBJECT == "oid"
 
 
 @pytest.mark.parametrize("edition", ["local", "saas"])
@@ -184,6 +188,7 @@ def test_good_values_start_enterprise(role, tmp_path):
            "OIDC_SCOPES": "openid email groups", "DEFAULT_WORKSPACE_ID": "00000000-0000-0000-0000-0000000277d2",
            "OIDC_ENDPOINT_HOSTS": "oauth2.example.test, Keys.Example.Test.", "OIDC_PENDING_SIGN_INS_MAX": "50",
            "OIDC_PENDING_SIGN_INS_PER_ADDRESS": "4", "OIDC_REQUIRED_CLAIMS": "cognito:groups=automatos; hd=example.test",
+           "OIDC_CLAIM_SUBJECT": "oid",
            "ENTERPRISE_BOOTSTRAP_ADMINS": "sub:248289761001, email:First.Admin@Example.Test"}
 
     _fresh_config(**env).validate_auth_edition()  # must not raise
