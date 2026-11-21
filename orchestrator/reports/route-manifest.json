@@ -1,5 +1,5 @@
 {
-  "route_count": 1064,
+  "route_count": 1067,
   "routes": [
     {
       "method": "GET",
@@ -3072,6 +3072,18 @@
     {
       "method": "GET",
       "path": "/api/v1/auth/oidc/callback"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/oidc/phone/cancel"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/oidc/phone/continue"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/auth/oidc/phone/waiting"
     },
     {
       "method": "GET",

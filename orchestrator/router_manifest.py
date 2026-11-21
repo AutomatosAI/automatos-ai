@@ -115,6 +115,10 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     # PRD-277 US-402 -- signing in with the organisation's identity provider
     # (/api/v1/auth/oidc/start, /callback). Both 404 unless the edition signs in with OIDC.
     RouterSpec("api.auth_oidc"),
+    # PRD-277 US-603 -- the page a phone's sign-in waits on (/api/v1/auth/oidc/phone/waiting,
+    # /continue, /cancel): its confirmation cookie is the only credential. 404 unless the edition
+    # signs in with OIDC.
+    RouterSpec("api.phone_sign_in"),
     # PRD-277 US-501/US-502 -- the web app's who-am-I (/api/v1/auth/me, its credential the session
     # itself) and the sign-in page's provider name (/api/v1/auth/sign-in-page, public). Both 404
     # unless the edition issues sessions (enterprise).

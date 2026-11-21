@@ -69,6 +69,15 @@ DEFAULT_LIMITS: dict[str, tuple[int, int]] = {
     # an office behind one address signing in at nine; a script cannot fill the sign-in table.
     "oidc_start_ip":    config.rate_limit_for("oidc_start_ip", 300, 600),    # 300 sign-ins started per IP per 10 minutes
     "oidc_callback_ip": config.rate_limit_for("oidc_callback_ip", 300, 600), # 300 callbacks per IP per 10 minutes
+    # PRD-277 US-603: the confirmation page's routes (GET /api/v1/auth/oidc/phone/waiting, POST .../continue
+    # and .../cancel), one bucket per client IP, counted by api/auth_oidc.py as the callback is. A phone's
+    # sign-in makes two calls (the page's read, then Continue or Cancel) per callback: twice its room.
+    "oidc_phone_confirm_ip": config.rate_limit_for("oidc_phone_confirm_ip", 600, 600),  # 600 per IP per 10 minutes
+    # PRD-277 US-603: the public POST /api/v1/mobile/sign-in/exchange, one bucket per client IP, counted by
+    # api/mobile_devices.py as /pair is, in a bucket of its own. One exchange follows each callback a person
+    # confirmed, so it has the callback's room: an office behind one address signs its phones in at nine.
+    # A caller sending junk gets 300 tries in ten minutes at a 256-bit code that lives sixty seconds.
+    "phone_sign_in_exchange_ip": config.rate_limit_for("phone_sign_in_exchange_ip", 300, 600),  # 300 per IP per 10 min
 }
 
 

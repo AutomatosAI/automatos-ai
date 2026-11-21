@@ -15,7 +15,8 @@ app binary can talk to hosted Studio and to a self-hosted install alike:
   ``ENTERPRISE_DEVICE_PAIRING`` is off, with ``pairing.enabled`` to match, ``clerk`` null and
   ``oidc {start_url, exchange_url, app_link, code_challenge_method}``: Automatos's own start and
   code-exchange addresses, the app link key a phone names and ``S256`` (US-603), and nothing about
-  the identity provider.
+  the identity provider. Between the two, the install's own page asks the person to confirm the
+  sign-in; the code reaches the app link only after their Continue.
   The ``local`` and ``saas`` documents carry no ``oidc`` key. Any other way of signing in raises
   ``DiscoveryUnavailable``: never a Clerk block it would not honour.
 * ``api_url`` and ``web_url`` are ``services.mobile.urls``'s, the helpers the pair link uses

@@ -30,10 +30,17 @@ A phone (US-603, ``core.auth.phone_sign_in``) starts at the same address with
 ``app_link``, ``code_challenge``, ``code_challenge_method=S256``, ``install_id`` and ``platform``:
 all or none, each once, else 400 ``{"code": "invalid_phone_start"}`` before anything is stored or
 the provider is asked (with ``step_up`` too). They are kept with the sign-in, which is the
-browser's in every other step. Its callback sets NO session cookie (the system browser may share
-its cookies with the person's own browser): it answers 303 to the app link with the one-time code
-(``phone_sign_in.app_answer``), and a refusal once its start is found goes to the app link with
-``error=<code>`` too. A refusal before that (an unknown or used state) is the browser's.
+browser's in every other step but one: the provider is asked to make the person sign in again.
+Its callback sets NO session cookie (the system browser may share its cookies with the person's
+own browser) and makes no code: it sets the confirmation cookie (``phone_sign_in.CONFIRM_COOKIE``)
+and answers 303 to the web app's confirmation page (``phone_sign_in.CONFIRM_PAGE``), where only the
+person's Continue makes the code (``api/phone_sign_in.py``). A refusal once its start is found goes
+to the app link with ``error=<code>``, except ``phone_sign_in.PHONE_REFUSALS``, which go to the
+confirmation page with ``?error=<code>`` and never to the app. A refusal before that (an unknown or
+used state) is the browser's.
+
+``limit_phone_confirmations_per_ip`` counts the confirmation page's routes the same way
+(``oidc_phone_confirm_ip``); they are served by ``api/phone_sign_in.py``.
 
 Every answer carries ``Cache-Control: no-store`` and ``Referrer-Policy: no-referrer`` (the
 callback's address holds the one-time code, which must never be sent on as a referrer), and a refusal is 303 to ``/sign-in?error=<code>``, the code one of ``sign_in_flow.REFUSAL_CODES``,
@@ -56,7 +63,17 @@ from core import editions
 from core.auth import session_cookie, sign_in_flow
 from core.auth.bearer_registry import session_cookie_token
 from core.auth.oidc_pending import SIGN_IN_TTL_SECONDS
-from core.auth.phone_sign_in import START_PARAMS, InvalidPhoneStart, PhoneStart, app_answer, phone_start_from
+from core.auth.phone_sign_in import (
+    CONFIRM_PAGE,
+    PHONE_REFUSALS,
+    START_PARAMS,
+    InvalidPhoneStart,
+    PhoneStart,
+    app_answer,
+    phone_start_from,
+    refusal_page,
+    set_confirm_cookie,
+)
 from core.auth.sign_in_methods import DEFAULT_RETURN_PATH, Callback
 from core.database.database import get_db
 from core.security.ip_bucket import ip_rate_bucket
@@ -90,6 +107,7 @@ class _IpLimit:
 
 _START_LIMIT = _IpLimit("oidc_start_ip", "oidc_start:ip", "sign-in start rate limiter")
 _CALLBACK_LIMIT = _IpLimit("oidc_callback_ip", "oidc_callback:ip", "sign-in callback rate limiter")
+_CONFIRM_LIMIT = _IpLimit("oidc_phone_confirm_ip", "oidc_phone_confirm:ip", "phone sign-in confirmation rate limiter")
 
 
 def _signs_in_with_oidc() -> None:
@@ -124,15 +142,36 @@ def limit_callbacks_per_ip(request: Request) -> None:
     _check_ip_limit(request, _CALLBACK_LIMIT)
 
 
+def limit_phone_confirmations_per_ip(request: Request) -> None:
+    """429 once this client IP has used the confirmation page's routes too often. Runs before the cookie is read."""
+    _check_ip_limit(request, _CONFIRM_LIMIT)
+
+
 def _redirect(to: str) -> RedirectResponse:
     return RedirectResponse(to, status_code=status.HTTP_303_SEE_OTHER, headers=dict(NO_STORE_HEADERS))
 
 
 def _refused(code: str, phone: Optional[PhoneStart] = None) -> RedirectResponse:
-    """303 to the sign-in page with ``code``; a phone's refusal goes to its app link instead."""
+    """303 to the sign-in page with ``code``; a phone's refusal goes to its app link instead, or, for one
+    of ``PHONE_REFUSALS`` (its person known), to the confirmation page, never to the app."""
+    if phone is not None and code in PHONE_REFUSALS:
+        return _redirect(refusal_page(code))
     if phone is not None:
-        return _redirect(app_answer(phone, error=code))
+        return _redirect(app_answer(phone.app_link, error=code))
     return _redirect(f"{SIGN_IN_PAGE}?{urlencode({'error': code})}")
+
+
+def _signed_in(done: sign_in_flow.SignInDone) -> RedirectResponse:
+    """303 to where the person was going with the session cookie, or, for a phone, to the confirmation
+    page with its cookie. No session after a step-up (the browser keeps its own, refreshed one)."""
+    if done.phone_confirmation is not None:
+        response = _redirect(CONFIRM_PAGE)
+        set_confirm_cookie(response, done.phone_confirmation)
+        return response
+    response = _redirect(done.return_to)
+    if done.session is not None:
+        session_cookie.set_session_cookie(response, done.session.token, done.session.absolute_expires_at)
+    return response
 
 
 def _clear_binding(response: RedirectResponse) -> None:
@@ -223,8 +262,8 @@ def start(request: Request, return_to: str = Query(DEFAULT_RETURN_PATH), step_up
 def callback(request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
     """303 to where the person was going, signed in; or to the sign-in page with the refusal's code.
 
-    A phone's sign-in (US-603) goes to its app link with the one-time code, or the refusal's code,
-    and never gets a session cookie.
+    A phone's sign-in (US-603) goes to the confirmation page with its cookie and never gets a session
+    cookie; its refusals go to its app link, or to the confirmation page (``_refused``).
     """
     sent = Callback(params=_params(request), browser_binding=request.cookies.get(SIGN_IN_COOKIE))
     try:
@@ -232,12 +271,9 @@ def callback(request: Request, db: Session = Depends(get_db)) -> RedirectRespons
     except sign_in_flow.SignInRefusal as refusal:
         response = _refused(refusal.code, refusal.phone)
     else:
-        response = _redirect(done.app_answer or done.return_to)
-        # None after a step-up (the browser keeps its own, refreshed session) and after a phone's sign-in.
-        if done.session is not None:
-            session_cookie.set_session_cookie(response, done.session.token, done.session.absolute_expires_at)
+        response = _signed_in(done)
     _clear_binding(response)
     return response
 
 
-__all__ = ["SIGN_IN_COOKIE", "SIGN_IN_PAGE", "callback", "router", "start"]
+__all__ = ["SIGN_IN_COOKIE", "SIGN_IN_PAGE", "callback", "limit_phone_confirmations_per_ip", "router", "start"]

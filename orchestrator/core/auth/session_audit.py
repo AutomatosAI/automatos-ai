@@ -9,7 +9,9 @@ The actions (§5.12) are all named here. Wave 3 writes ``auth:sign_in`` (``issue
 ``auth:sign_out`` and ``auth:session_revoked``, and ``user:deactivated`` for a person an admin
 deactivates. Wave 4 writes ``auth:identity_linked`` (a first sign-in), ``auth:bootstrap_admin`` (a
 first admin, ``stage_bootstrap_admin``), ``auth:step_up`` (a step-up confirmed or refused, with its
-reason, ``record_step_up``) and the access rule's refusal (``access_rule``).
+reason, ``record_step_up``) and the access rule's refusal (``access_rule``). Wave 6 writes a
+phone's ``auth:sign_in`` when its person presses Continue (``record_phone_sign_in``) and its
+refusals once the person is known (``PHONE_REFUSAL_REASONS``).
 
 Which workspace a row goes in: ``audit_logs.workspace_id`` is required, and signing in or out
 belongs to no workspace. Such a row goes in the workspace the caller names, else the install's
@@ -65,7 +67,14 @@ SESSION_ACTIONS = (SIGN_IN, SIGN_IN_REFUSED, SIGN_OUT, SESSION_REVOKED, STEP_UP,
 REFUSED_ACCESS_RULE = "access_rule"
 REFUSED_DEACTIVATED = "deactivated"
 REFUSED_INVALID_TOKEN = "invalid_token"
-REFUSAL_REASONS = (REFUSED_ACCESS_RULE, REFUSED_EMAIL_CONFLICT, REFUSED_DEACTIVATED, REFUSED_INVALID_TOKEN)
+# PRD-277 US-603: a phone's sign-in refused once its person is known (core.auth.phone_sign_in
+# PHONE_REFUSALS, the same names): no workspace a device can belong to, several, or the device cap.
+REFUSED_NO_WORKSPACE = "no_workspace"
+REFUSED_SEVERAL_WORKSPACES = "several_workspaces"
+REFUSED_DEVICE_LIMIT = "device_limit_reached"
+PHONE_REFUSAL_REASONS = (REFUSED_NO_WORKSPACE, REFUSED_SEVERAL_WORKSPACES, REFUSED_DEVICE_LIMIT)
+REFUSAL_REASONS = (REFUSED_ACCESS_RULE, REFUSED_EMAIL_CONFLICT, REFUSED_DEACTIVATED, REFUSED_INVALID_TOKEN,
+                   *PHONE_REFUSAL_REASONS)
 
 # Why a step-up was refused (``auth:step_up`` with ``confirmed`` false, US-406): someone other than the
 # session's person signed in, the token carried no ``auth_time``, one older than the step-up or one
@@ -144,6 +153,23 @@ def record_sign_in(db, *, user_id: int, session_id: UUID, ip_address: Optional[s
                    ip_address=ip_address, user_agent=user_agent)
     if entry is None:
         logger.error("users.id=%s: sign-in rolled back, its audit row failed", user_id)
+        raise SessionAuditFailed(AUDIT_FAILED_MESSAGE)
+
+
+def record_phone_sign_in(db, *, user_id: int, workspace_id: Union[UUID, str], platform: Optional[str],
+                         ip_address: Optional[str], user_agent: Optional[str]) -> None:
+    """``auth:sign_in`` for a phone (PRD-277 US-603), committed with the one-time code it is written beside.
+
+    Its details mark it a phone's and name the platform, never the code or the challenge; it goes in
+    the workspace the phone's device will belong to. A failed row rolls the code back with it and
+    raises ``SessionAuditFailed``, as ``record_sign_in`` does for a session.
+    """
+    entry = _write(db, action=SIGN_IN, workspace_id=workspace_id, user_id=user_id,
+                   resource_type=PERSON_RESOURCE, resource_id=user_id,
+                   details={"phone": True, "platform": platform},
+                   ip_address=ip_address, user_agent=user_agent)
+    if entry is None:
+        logger.error("users.id=%s: a phone's sign-in rolled back, its audit row failed", user_id)
         raise SessionAuditFailed(AUDIT_FAILED_MESSAGE)
 
 
@@ -260,11 +286,15 @@ __all__ = [
     "MEMBERSHIP_CHANGED",
     "PERSON_DEACTIVATED",
     "PERSON_RESOURCE",
+    "PHONE_REFUSAL_REASONS",
     "REFUSAL_REASONS",
     "REFUSED_ACCESS_RULE",
     "REFUSED_DEACTIVATED",
+    "REFUSED_DEVICE_LIMIT",
     "REFUSED_EMAIL_CONFLICT",
     "REFUSED_INVALID_TOKEN",
+    "REFUSED_NO_WORKSPACE",
+    "REFUSED_SEVERAL_WORKSPACES",
     "SESSION_ACTIONS",
     "SESSION_RESOURCE",
     "SESSION_REVOKED",
@@ -280,6 +310,7 @@ __all__ = [
     "stage_bootstrap_admin",
     "stage_membership_set",
     "record_identity_linked",
+    "record_phone_sign_in",
     "record_sign_in",
     "record_sign_in_refused",
     "record_step_up",

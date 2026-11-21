@@ -10,11 +10,13 @@ One row per device a person uses with one workspace. Three kinds:
 * ``clerk`` — SaaS. The phone signs in with Clerk and registers for push only, so it
   never holds a code or token hash (``ck_mobile_devices_clerk_holds_no_token``).
 * ``oidc`` — enterprise (PRD-277 US-603). The person signed in on the phone at the install's own
-  OIDC start address; the callback leaves a PENDING row holding only the SHA-256 of a one-time
-  code, the app's PKCE challenge (``sign_in_challenge``) and its install id
-  (``sign_in_install_id``), and the app exchanges the code with its verifier for a device token,
-  kept as a paired row keeps it. Revision ``prd277_w6b_phone_sign_in_20261121`` widens
-  ``ck_mobile_devices_kind`` and adds the two columns.
+  OIDC start address; the callback leaves a PENDING row awaiting their confirmation, holding only
+  the SHA-256 of a confirmation token bound to their browser (``sign_in_confirm_hash``), the app's
+  PKCE challenge (``sign_in_challenge``), its install id (``sign_in_install_id``) and its app link's
+  key (``sign_in_app_link``). Continue swaps the confirmation hash for the SHA-256 of a one-time
+  code (``pairing_code_hash``), and the app exchanges the code with its verifier for a device
+  token, kept as a paired row keeps it. Revision ``prd277_w6b_phone_sign_in_20261121`` widens
+  ``ck_mobile_devices_kind`` and adds the four columns.
 
 A pending row is a code waiting for a phone, so ``install_id`` (the id the app keeps
 in SecureStore) is null until it pairs; it is unique per workspace and person.
@@ -97,7 +99,7 @@ INSTALL_ID_MIN_LENGTH = 8
 INSTALL_ID_PATTERN = rf"^[A-Za-z0-9_-]{{{INSTALL_ID_MIN_LENGTH},{INSTALL_ID_LENGTH}}}$"
 
 # Never leave the server through to_dict(): the hashes and the push signing key.
-SECRET_COLUMNS = ("pairing_code_hash", "token_hash", "prev_token_hash", "push_key")
+SECRET_COLUMNS = ("pairing_code_hash", "token_hash", "prev_token_hash", "push_key", "sign_in_confirm_hash")
 
 def _in_list(column: str, values: tuple) -> str:
     quoted = ", ".join(f"'{v}'" for v in values)
@@ -190,6 +192,11 @@ class MobileDevice(Base):
     # sign-in code is bound to, and the install id that signed in. Cleared when the code is exchanged.
     sign_in_challenge = Column(String(CODE_CHALLENGE_LENGTH), nullable=True)
     sign_in_install_id = Column(String(INSTALL_ID_LENGTH), nullable=True)
+    # The key of core.auth.phone_sign_in.APP_LINKS the code goes to, and, while the sign-in awaits the
+    # person's Continue, the SHA-256 of the token in their browser's cookie. The exchange never reads
+    # the second: it finds a code by pairing_code_hash only, which is null until Continue.
+    sign_in_app_link = Column(String(ENUM_LENGTH), nullable=True)
+    sign_in_confirm_hash = Column(String(SHA256_HEX_LENGTH), nullable=True)
 
     def to_dict(self) -> dict:
         """The device as the API shows it: never a hash, the push key or the push token."""

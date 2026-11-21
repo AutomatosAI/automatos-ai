@@ -15,10 +15,11 @@
   code. The token is in the answer exactly once. (The web app offers browser pairing in local
   only; in enterprise a browser signs in.)
 * ``POST /sign-in/exchange`` — **PUBLIC**, as ``/pair`` is (PRD-277 US-603): a phone that signed in
-  at the install's own OIDC start address exchanges the one-time code the callback sent its app link,
-  with its PKCE verifier, for a device token of kind ``oidc`` (``services.mobile.sign_in_codes``),
-  returned once. 404 unless the install takes such devices (enterprise, pairing on or off); limited
-  per IP with ``/pair``'s own bucket. Any code found is spent; every refusal is
+  at the install's own OIDC start address, and whose person pressed Continue on the install's own
+  page, exchanges the one-time code its app link received, with its PKCE verifier, for a device
+  token of kind ``oidc`` (``services.mobile.sign_in_codes``), returned once. 404 unless the install
+  takes such devices (enterprise, pairing on or off); limited per IP in a bucket of its own
+  (``phone_sign_in_exchange_ip``). Any code found is spent; every refusal is
   ``401 {"code": "invalid_sign_in_code"}``.
 * ``POST /devices`` — a device-lane caller (``Bearer amd_…``) updates its own row; a Clerk
   caller upserts a ``clerk`` row by (workspace, person, ``install_id``) with no token hash
@@ -127,6 +128,10 @@ CODES_RATE_LIMIT_OPERATION = "mobile_codes_person"
 CODES_RATE_BUCKET_PREFIX = "mobile_pairing_codes:person"
 CODES_RATE_LIMITER_LABEL = "mobile pairing code rate limiter"
 CODES_RATE_LIMITED_DETAIL = "Too many pairing codes made. Try again in a few minutes."
+EXCHANGE_RATE_LIMIT_OPERATION = "phone_sign_in_exchange_ip"
+EXCHANGE_RATE_BUCKET_PREFIX = "phone_sign_in_exchange:ip"
+EXCHANGE_RATE_LIMITER_LABEL = "phone sign-in exchange rate limiter"
+EXCHANGE_RATE_LIMITED_DETAIL = "Too many sign-in attempts from this address. Try again later."
 INVALID_PAIRING_CODE = "invalid_pairing_code"
 INVALID_SIGN_IN_CODE = "invalid_sign_in_code"
 # Room for the spaces a person may type; the kernel normalises what is hashed.
@@ -329,6 +334,8 @@ _DEVICES_LIMIT = _IpLimit(DEVICES_RATE_LIMIT_OPERATION, DEVICES_RATE_BUCKET_PREF
                           DEVICES_RATE_LIMITED_DETAIL)
 _CODES_LIMIT = _IpLimit(CODES_RATE_LIMIT_OPERATION, CODES_RATE_BUCKET_PREFIX, CODES_RATE_LIMITER_LABEL,
                         CODES_RATE_LIMITED_DETAIL)
+_EXCHANGE_LIMIT = _IpLimit(EXCHANGE_RATE_LIMIT_OPERATION, EXCHANGE_RATE_BUCKET_PREFIX, EXCHANGE_RATE_LIMITER_LABEL,
+                           EXCHANGE_RATE_LIMITED_DETAIL)
 
 
 def _check_bucket(bucket: str, spec: _IpLimit) -> None:
@@ -356,6 +363,11 @@ def limit_codes_per_person(user_pk: int) -> None:
 def limit_pair_attempts_per_ip(request: Request) -> None:
     """429 once this client IP has spent its pairing attempts. Runs before the code is read."""
     _check_ip_limit(request, _PAIR_LIMIT)
+
+
+def limit_sign_in_exchanges_per_ip(request: Request) -> None:
+    """429 once this client IP has spent its sign-in exchanges. Runs before the code is read."""
+    _check_ip_limit(request, _EXCHANGE_LIMIT)
 
 
 def limit_device_registrations_per_ip(request: Request) -> None:
@@ -493,24 +505,27 @@ def pair(body: PairRequest, request: Request, response: Response, db: Session = 
 
 
 @router.post("/sign-in/exchange",
-             dependencies=[Depends(_require_phone_sign_in), Depends(limit_pair_attempts_per_ip)])
+             dependencies=[Depends(_require_phone_sign_in), Depends(limit_sign_in_exchanges_per_ip)])
 def exchange_sign_in_code(body: SignInExchangeRequest, request: Request, response: Response,
                           db: Session = Depends(get_db)) -> Dict[str, str]:
     """Exchange a phone's one-time sign-in code and its PKCE verifier for a device token, returned once.
 
     PUBLIC, as ``/pair`` is (PRD-277 US-603): the code and the verifier are the phone's only
     credential. Any code found is spent, so a wrong verifier ends it. An unknown, used, expired or
-    wrong-verifier code is ``401 {"code": "invalid_sign_in_code"}`` and nothing more.
+    wrong-verifier code, or one whose person reached the device cap since Continue, is
+    ``401 {"code": "invalid_sign_in_code"}`` and nothing more. ``device:paired`` names a phone that
+    kept its earlier row, and who had revoked it (``Exchanged.re_enrolment``).
     """
     described = (body.name, body.app_version)
 
     def claim() -> Optional[sign_in_codes.Exchanged]:
         exchanged = sign_in_codes.exchange_code(db, body.code, body.code_verifier, described)
         if exchanged is not None and device_audit.records_devices():
+            details = {"platform": exchanged.platform, "kind": MobileDeviceKind.OIDC.value,
+                       **exchanged.re_enrolment}
             device_audit.stage(db, action=device_audit.DEVICE_PAIRED, workspace_id=exchanged.device.workspace_id,
                                actor=exchanged.user_pk, resource_id=exchanged.device.device_id,
-                               details={"platform": exchanged.platform, "kind": MobileDeviceKind.OIDC.value},
-                               **_browser(request))
+                               details=details, **_browser(request))
         return exchanged
 
     done = _write(db, claim)

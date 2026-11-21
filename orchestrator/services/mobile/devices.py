@@ -49,7 +49,9 @@ from an id that does not exist.
   phone's Expo token is free for its next registration. Revoking a revoked device changes
   nothing.
 * ``revoke_persons_devices``: every device of one person, in every workspace, when that person
-  is deactivated (PRD-277 US-303); each revoked as ``revoke_device`` revokes one.
+  is deactivated or their access is ended (PRD-277 US-303); each revoked as ``revoke_device``
+  revokes one. Their pending rows (a pairing code, a phone's sign-in awaiting Continue or holding
+  a code) are not devices: they are deleted.
 * ``revoke_every_device_of``: every device of the given kinds on the install, when it starts as
   another edition or with pairing off (PRD-277 US-601, ``services.mobile.edition_change``).
 * ``rotate_token``: the device lane on its own device (paired, or signed in on the phone: the
@@ -414,27 +416,32 @@ def _revoked(device: MobileDevice, revoked_by: Optional[int], now: datetime) -> 
 
 def revoke_persons_devices(db: Session, user_id: int, revoked_by: Optional[int],
                            now: Optional[datetime] = None) -> int:
-    """Cut off every device ``user_id`` holds, in every workspace, a pending code included (PRD-277 US-303).
+    """Cut off every device ``user_id`` holds, in every workspace, and delete their pending rows (PRD-277 US-303).
 
-    Each is revoked as ``revoke_device`` revokes one, its token hash kept so its next call is
-    told ``device_revoked``. Deactivating a person calls this in the same transaction that
-    deactivates them. Returns how many were revoked; flushes, never commits.
+    Each device is revoked as ``revoke_device`` revokes one, its token hash kept so its next call
+    is told ``device_revoked``. A pending row (a pairing code, or a phone's sign-in awaiting its
+    person's Continue or holding its one-time code) is deleted, never kept as revoked. Deactivating
+    a person calls this in the same transaction that deactivates them. Returns how many devices
+    were revoked; flushes, never commits.
     """
     return len(revoke_and_list_persons_devices(db, user_id, revoked_by, now))
 
 
 def revoke_and_list_persons_devices(db: Session, user_id: int, revoked_by: Optional[int],
                                     now: Optional[datetime] = None) -> List[MobileDevice]:
-    """``revoke_persons_devices``, answering the rows it revoked, so each can be audited."""
+    """``revoke_persons_devices``, answering the devices it revoked (no pending row), so each can be audited."""
     rows = db.query(MobileDevice).filter(
         MobileDevice.user_id == user_id,
         MobileDevice.status != MobileDeviceStatus.REVOKED.value,
     ).with_for_update().all()
     moment = now or _now()
-    for device in rows:
+    live = [row for row in rows if row.status != MobileDeviceStatus.PENDING.value]
+    for pending in (row for row in rows if row.status == MobileDeviceStatus.PENDING.value):
+        db.delete(pending)
+    for device in live:
         _assign(device, _revoked(device, revoked_by, moment))
     db.flush()
-    return rows
+    return live
 
 
 def assert_room_for_a_device(db: Session, workspace_id: UUID, user_pk: int) -> None:

@@ -32,13 +32,18 @@ provider directly. ``finish_sign_in`` runs, in this order:
    plainly, each with any ``auth:bootstrap_admin`` row. A failed row rolls the person back and
    nobody gets in.
 9. **The session** (``sessions.issue_session``), committed with its ``auth:sign_in`` row. A sign-in a
-   phone started (US-603, ``core.auth.phone_sign_in``) ends here instead with a one-time code for
-   the app (``services.mobile.sign_in_codes.issue_code``), committed, and no session: ``SignInDone``
-   carries the app link with the code (``app_answer``). Every step before is the browser's.
+   phone started (US-603, ``core.auth.phone_sign_in``) ends here instead with no code, no device and
+   no session: it is recorded as awaiting the person's confirmation on the install's own page
+   (``services.mobile.sign_in_confirmation.await_confirmation``), committed, and ``SignInDone``
+   carries the token that binds the record to this browser (``phone_confirmation``). The code and
+   the phone's ``auth:sign_in`` row come only with the person's Continue there. Every step before
+   is the browser's.
 
 A phone's refusal after its start was found carries what the start asked for (``SignInRefusal.phone``),
-so the route sends its code to the app link instead of the sign-in page; besides the codes below, a
-phone may be told ``phone_sign_in.PHONE_REFUSALS`` (no workspace, several, or too many devices).
+so the route sends its code to the app link instead of the sign-in page. A phone may also be refused
+once its person is known with ``phone_sign_in.PHONE_REFUSALS`` (no workspace, several, or too many
+devices): each is audited as ``auth:sign_in_refused`` with itself as the reason, and the route shows
+it on the confirmation page, never to the app.
 
 Every refusal is a ``SignInRefusal`` whose ``code`` is all the person is shown:
 
@@ -81,7 +86,7 @@ from core.auth import access_rule, first_admin, people, session_audit, sessions,
 from core.auth.oidc_http import ProviderUnreachable
 from core.auth.oidc_pending import PendingSignInFailed
 from core.auth.oidc_sign_in import METHOD_NAME, OidcSignIn
-from core.auth.phone_sign_in import PhoneStart, app_answer
+from core.auth.phone_sign_in import PHONE_REFUSALS, PhoneStart
 from core.auth.sign_in_methods import (
     Callback,
     Finished,
@@ -98,7 +103,7 @@ from core.auth.sign_in_methods import (
 from core.auth.user_link import IdentityLinkRefused, LinkedPerson
 from core.edition_start_up import DEFAULT_ROLES, NO_DEFAULT_ROLE
 from core.seeds.seed_default_workspace import ensure_default_workspace
-from services.mobile import sign_in_codes
+from services.mobile import sign_in_codes, sign_in_confirmation
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +127,8 @@ class SignInRefusal(Exception):
     """A sign-in that ends without a session; ``code`` (one of ``REFUSAL_CODES``) is what the person sees.
 
     ``phone`` (US-603) is what a phone's start asked for, when the refusal is a phone's: its code then
-    goes to that app link.
+    goes to that app link, unless it is one of ``phone_sign_in.PHONE_REFUSALS``, which the install's
+    own confirmation page shows instead.
     """
 
     def __init__(self, code: str, phone: Optional[PhoneStart] = None) -> None:
@@ -144,13 +150,13 @@ class SignInDone:
     """The new session and the path on this install the person goes to.
 
     ``session`` is None after a step-up: the browser's own session was refreshed, none was issued.
-    It is None after a phone's sign-in too (US-603): ``app_answer`` is then the app link carrying
-    the one-time code, where the browser goes instead.
+    It is None after a phone's sign-in too (US-603): ``phone_confirmation`` is then the token that
+    binds what awaits the person's Continue to this browser, for its cookie; no code exists yet.
     """
 
     session: Optional[sessions.IssuedSession] = field(repr=False)
     return_to: str
-    app_answer: Optional[str] = field(default=None, repr=False)
+    phone_confirmation: Optional[str] = field(default=None, repr=False)
 
 
 def _rules_hold(identity: VerifiedIdentity) -> bool:
@@ -388,31 +394,33 @@ def _step_up(db: Session, finished: Finished, browser: Browser) -> SignInDone:
     return SignInDone(session=None, return_to=finished.return_to)
 
 
-def _phone_answer(db: Session, finished: Finished, user_id: int) -> SignInDone:
-    """US-603: the person's one-time code for the app their phone's start named, committed; no session.
+def _phone_waits(db: Session, finished: Finished, user_id: int, browser: Browser) -> SignInDone:
+    """US-603: the phone's sign-in recorded as awaiting the person's Continue, committed; no code, no session.
 
-    ``SignInRefusal`` with the phone's own code (``phone_sign_in.PHONE_REFUSALS``) when the person
-    can hold no device here, or ``sign_in_failed`` when the code cannot be stored.
+    ``SignInRefusal`` with the phone's own code (``phone_sign_in.PHONE_REFUSALS``), audited as
+    ``auth:sign_in_refused`` with that reason, when the person can hold no device here; or
+    ``sign_in_failed`` when the record cannot be stored.
     """
     failure: Optional[str] = None
     try:
-        code = sign_in_codes.issue_code(db, user_id, finished.phone)
+        token = sign_in_confirmation.await_confirmation(db, user_id, finished.phone)
         db.commit()
     except sign_in_codes.NoSignInCode as refused:
         failure = refused.code
     except SQLAlchemyError as error:
-        logger.error("A phone's sign-in code could not be stored (%s)", type(error).__name__)
+        logger.error("A phone's sign-in could not be stored (%s)", type(error).__name__)
         failure = FAILED
     if failure is None:
-        return SignInDone(session=None, return_to=finished.return_to,
-                          app_answer=app_answer(finished.phone, code=code))
+        return SignInDone(session=None, return_to=finished.return_to, phone_confirmation=token)
+    logger.warning("users.id=%s: the phone's sign-in was refused (%s)", user_id, failure)
+    if failure in PHONE_REFUSALS:
+        raise _refuse(db, failure, browser, user_id, code=failure)
     db.rollback()
-    logger.warning("users.id=%s: no sign-in code for the phone (%s)", user_id, failure)
     raise SignInRefusal(failure)
 
 
 def _signed_in(db: Session, finished: Finished, browser: Browser) -> SignInDone:
-    """From a verified identity to a session, or a phone's code: steps 2 to 9 of this module's docstring."""
+    """From a verified identity to a session, or a phone's awaiting record: steps 2 to 9 of this module's docstring."""
     identity = finished.identity
     apply_access_rule(db, identity, browser)
     if finished.step_up_session_id is not None:
@@ -427,13 +435,13 @@ def _signed_in(db: Session, finished: Finished, browser: Browser) -> SignInDone:
                              browser)
     _commit_person(db, linked, default_role, memberships, browser)
     if finished.phone is not None:
-        return _phone_answer(db, finished, linked.user_id)
+        return _phone_waits(db, finished, linked.user_id, browser)
     issued = _issue(db, identity, linked.user_id, browser)
     return SignInDone(session=issued, return_to=finished.return_to)
 
 
 def finish_sign_in(db: Session, callback: Callback, browser: Browser, method: str = METHOD_NAME) -> SignInDone:
-    """The callback, to a session (or a phone's code): every step in this module's docstring, or
+    """The callback, to a session (or a phone's awaiting record): every step in this module's docstring, or
     ``SignInRefusal``, which carries the phone's start when the sign-in was a phone's."""
     ensure_audit_workspace(db)
     finished = _finished(db, callback, browser, method)

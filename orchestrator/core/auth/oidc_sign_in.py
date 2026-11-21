@@ -108,8 +108,9 @@ def auth_time_values(metadata: oidc_provider.ProviderMetadata, step_up: bool) ->
     """What the sign-in page is asked for so the ID token can say when the person signed in.
 
     Every sign-in: ``claims`` with ``AUTH_TIME_CLAIMS_REQUEST``, unless the metadata says the
-    provider refuses it. A step-up also: ``max_age=0``, and ``prompt=login`` where the metadata
-    or the provider's documentation says it is taken (``oidc_provider.parse_metadata``).
+    provider refuses it. A step-up (and a phone's start, which passes ``step_up=True``) also:
+    ``max_age=0``, and ``prompt=login`` where the metadata or the provider's documentation says it
+    is taken (``oidc_provider.parse_metadata``).
     """
     asked = {"claims": AUTH_TIME_CLAIMS_REQUEST} if metadata.takes_claims_request else {}
     if not step_up:
@@ -265,18 +266,22 @@ class OidcSignIn:
         """Begin a sign-in that returns to ``return_to`` (a path on this install, else ``/``), counted
         against ``client_address``'s pending sign-ins (``oidc_pending.begin``). The address asks
         for ``auth_time`` (``auth_time_values``); for a step-up (``step_up_session_id``, US-406)
-        it also asks the provider to make the person sign in again. ``phone`` (US-603) is kept with
-        the sign-in; towards the provider a phone's sign-in is exactly a browser's."""
+        and for a phone's start (``phone``, US-603) it also asks the provider to make the person
+        sign in again (``max_age=0``, and ``prompt=login`` where taken), so a sign-in the provider
+        already holds in this browser never answers for them unseen. ``phone`` is kept with the
+        sign-in. The callback does not check a phone's ``auth_time``: a step-up's does, because it
+        confirms a session; a phone's sign-in is confirmed by the person on the install's page."""
         metadata = oidc_provider.current_metadata()
         redirect_uri = callback_address()
         started = oidc_pending.begin(db, safe_return_path(return_to), client_address,
                                      step_up_session_id=step_up_session_id, phone=phone)
+        signs_in_again = step_up_session_id is not None or phone is not None
         values = {
             "response_type": oidc_provider.CODE_FLOW, "client_id": config.OIDC_CLIENT_ID,
             "redirect_uri": redirect_uri, "scope": config.OIDC_SCOPES, "state": started.state,
             "nonce": started.nonce, "code_challenge": started.code_challenge,
             "code_challenge_method": oidc_provider.PKCE_S256,
-            **auth_time_values(metadata, step_up=step_up_session_id is not None),
+            **auth_time_values(metadata, step_up=signs_in_again),
         }
         address = _authorize_address(metadata.authorization_endpoint, values)
         return Started(redirect_to=address, browser_binding=started.binding)
