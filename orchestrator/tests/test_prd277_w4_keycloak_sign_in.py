@@ -11,7 +11,8 @@ is skipped. Against Postgres, each test in a transaction rolled back at the end:
 * the access rule reads Keycloak's claim with a colon in its name: it lets the person in when it
   holds and refuses them, keeping no person, when it does not;
 * a step-up sends ``max_age=0``, ``prompt=login`` and the ``claims`` request for ``auth_time``,
-  Keycloak asks for the password again, and the session's ``auth_time`` is refreshed;
+  Keycloak asks for the password again, and the browser gets a new session with the fresh
+  ``auth_time`` in place of the one that asked;
 * sign-out answers Keycloak's end-session address with ``client_id`` and the install's
   ``post_logout_redirect_uri``, which Keycloak accepts.
 """
@@ -164,7 +165,7 @@ def test_the_access_rule_reads_keycloaks_claim_with_a_colon_in_its_name(install,
     assert allowed.headers["location"] == "/settings" and _linked_person(install.db) is not None
 
 
-def test_a_step_up_makes_keycloak_ask_again_and_refreshes_the_session(install):
+def test_a_step_up_makes_keycloak_ask_again_and_renews_the_session(install):
     _, _, answer = _sign_in(install)
     token = answer.cookies[config.SESSION_COOKIE_NAME]
     old = datetime.now(timezone.utc) - timedelta(hours=2)
@@ -180,9 +181,13 @@ def test_a_step_up_makes_keycloak_ask_again_and_refreshes_the_session(install):
     assert at_keycloak.asked  # signed in at Keycloak already, and asked for the password all the same
     assert stepped_up.status_code == 303 and stepped_up.headers["location"] == "/settings"
     install.db.expire_all()
-    refreshed = install.db.execute(text("SELECT auth_time FROM auth_sessions WHERE token_hash = :h"),
-                                   {"h": hash_secret(token)}).scalar_one()
-    assert refreshed > datetime.now(timezone.utc) - timedelta(minutes=5)
+    renewed = stepped_up.cookies[config.SESSION_COOKIE_NAME]
+    fresh = install.db.execute(text("SELECT auth_time FROM auth_sessions WHERE token_hash = :h"),
+                               {"h": hash_secret(renewed)}).scalar_one()
+    assert renewed != token and fresh > datetime.now(timezone.utc) - timedelta(minutes=5)
+    ended = install.db.execute(text("SELECT revoked_reason FROM auth_sessions WHERE token_hash = :h"),
+                               {"h": hash_secret(token)}).scalar_one()
+    assert ended == "step_up"
 
 
 def test_sign_out_sends_the_browser_to_keycloaks_end_session_address(install):

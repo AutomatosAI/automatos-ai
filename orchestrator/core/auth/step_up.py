@@ -25,8 +25,8 @@ context passes when the time its person last proved who they are
 (``core.auth.session_lane.session_auth_time``, from ``auth_sessions.auth_time``) is within the
 max age; an older one, or none, is sent to sign in again (``sign_in_again_body``: the code,
 a message and ``/api/v1/auth/oidc/start?step_up=1``, never a ``clerk_error``); every other context
-(a device, a key) is refused. ``core.auth.step_up_sign_in`` refreshes the session's
-``auth_time`` when the person signs in again.
+(a device, a key) is refused. When the person signs in again, ``core.auth.step_up_sign_in``
+replaces the session with a new one carrying the fresh ``auth_time``.
 
 The ``fva`` claim ("factor verification age") is Clerk's session-token claim
 ``[first_factor_minutes, second_factor_minutes]``, ``-1`` for a factor never

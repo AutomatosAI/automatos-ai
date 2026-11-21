@@ -4,8 +4,8 @@ A session is what a person holds after signing in, so they do not sign in on eve
 
 * **The token** is ``ams_`` and 32 random bytes, minted by the pairing kernel
   (``core.auth.pairing.mint_token``) as device tokens are. It is returned once, by
-  ``issue_session``; ``auth_sessions`` keeps only ``hash_secret`` of it, found by that digest and
-  confirmed in constant time (``secrets_match``).
+  ``issue_session`` or ``renew_session``; ``auth_sessions`` keeps only ``hash_secret`` of it, found
+  by that digest and confirmed in constant time (``secrets_match``).
 * **Two clocks** (D-15): idle (``SESSION_IDLE_MINUTES``, default 120) and absolute
   (``SESSION_ABSOLUTE_HOURS``, default 12). The idle clock moves forward when the session is used,
   written at most once every ``LAST_SEEN_WRITE_INTERVAL`` (five minutes, the device lane's own). So
@@ -20,6 +20,9 @@ A session is what a person holds after signing in, so they do not sign in on eve
   transaction that inserts the session, so a deactivation (which takes the row ``FOR UPDATE``
   first, ``core.auth.people``) and a sign-in of the same person happen one after the other: the
   sign-in sees the person deactivated, or the deactivation sees and revokes the new session.
+* **A confirmed step-up is a new session too** (US-406, ``renew_session``): the session that asked
+  ends (``REVOKED_STEP_UP``) and its successor keeps that session's person and absolute expiry, so
+  a step-up never lengthens a session. The browser gets the successor's token in its cookie.
 * **Ending one** keeps its hash and records when and why (``REVOKED_*``), so the next request with
   it is told the session was revoked.
 
@@ -34,7 +37,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Union
+from typing import Optional, Tuple, Union
 from uuid import UUID, uuid4
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -64,6 +67,7 @@ UNKNOWN = "unknown"
 REVOKED_SIGN_OUT = "sign_out"
 REVOKED_BY_ADMIN = "admin"
 REVOKED_DEACTIVATED = "deactivated"
+REVOKED_STEP_UP = "step_up"  # a confirmed step-up issued its successor (``renew_session``)
 
 NOT_ISSUED_MESSAGE = "This edition does not issue sessions."
 SIGN_IN_FAILED_MESSAGE = "You were not signed in: the session could not be stored. Try again."
@@ -124,11 +128,12 @@ def _checked_sign_in(auth_time: datetime, sid: Optional[str]) -> None:
         raise ValueError(f"sid must be a non-empty string of at most {IDP_SESSION_ID_MAX} characters")
 
 
-def _person_is_active(db: Session, user_id: int) -> bool:
+def person_is_active_locked(db: Session, user_id: int) -> bool:
     """Whether ``user_id`` may hold a session, their row locked ``FOR SHARE``; ``UnknownPerson`` when none.
 
-    The lock is held until the sign-in commits, so a deactivation waits for it, and a sign-in
-    waits for a deactivation that locked the row first and then reads the person as deactivated.
+    The lock is held until the sign-in (or step-up) commits, so a deactivation waits for it, and a
+    sign-in waits for a deactivation that locked the row first and then reads the person as
+    deactivated. Take it before any ``auth_sessions`` row, as a deactivation does.
     """
     row = db.query(User.is_active).filter(User.id == user_id).with_for_update(read=True).first()
     if row is None:
@@ -179,23 +184,54 @@ def issue_session(
         raise SessionsNotIssued(NOT_ISSUED_MESSAGE)
     _checked_sign_in(auth_time, sid)
     ip, agent = session_audit.browser_fields(ip_address, user_agent)
-    if not _person_is_active(db, user_id):
+    if not person_is_active_locked(db, user_id):
         session_audit.record_sign_in_refused(db, reason=session_audit.REFUSED_DEACTIVATED, user_id=user_id,
                                              ip_address=ip, user_agent=agent, workspace_id=workspace_id)
         raise SignInRefused(session_audit.REFUSED_DEACTIVATED)
     moment = now or _now()
+    token, row = _new_session(user_id, auth_time, sid, (ip, agent), moment, moment + absolute_lifetime())
+    _store(db, row)
+    session_audit.record_sign_in(db, user_id=user_id, session_id=row.id, ip_address=ip, user_agent=agent,
+                                 workspace_id=workspace_id)
+    return _issued(token, row)
+
+
+def renew_session(db: Session, asking: AuthSession, *, auth_time: datetime, sid: Optional[str],
+                  ip_address: Optional[str], user_agent: Optional[str], now: datetime) -> IssuedSession:
+    """US-406: end ``asking`` (``REVOKED_STEP_UP``) and store its successor, a new session; never commits.
+
+    The successor keeps ``asking``'s person and absolute expiry (a step-up never lengthens a
+    session), and the provider's session id: ``sid`` when the provider sent one, else ``asking``'s.
+    It has a new token, the new ``auth_time``, this browser's address and agent, and an idle clock
+    started at ``now`` and never past that expiry. The caller commits both with the step-up's audit
+    row; when the new row cannot be stored, everything is rolled back and ``SignInFailed`` raised.
+    """
+    _checked_sign_in(auth_time, sid)
+    browser = session_audit.browser_fields(ip_address, user_agent)
+    absolute = _as_utc(asking.absolute_expires_at)
+    token, row = _new_session(asking.user_id, auth_time, sid or asking.idp_session_id, browser, now, absolute)
+    revoke_session(db, asking.id, REVOKED_STEP_UP, now)
+    _store(db, row)
+    return _issued(token, row)
+
+
+def _new_session(user_id: int, auth_time: datetime, sid: Optional[str],
+                 browser: Tuple[Optional[str], Optional[str]], moment: datetime,
+                 absolute: datetime) -> Tuple[str, AuthSession]:
+    """A new token and the unsaved row that keeps only its hash, both clocks started at ``moment``."""
     token, digest = mint_token(SESSION_TOKEN_PREFIX, SESSION_TOKEN_BYTES)
-    absolute = moment + absolute_lifetime()
+    ip, agent = browser
     row = AuthSession(
         id=uuid4(), user_id=user_id, token_hash=digest, created_at=moment, last_seen_at=moment,
         idle_expires_at=min(moment + idle_lifetime(), absolute), absolute_expires_at=absolute,
         auth_time=auth_time, idp_session_id=sid, ip_address=ip, user_agent=agent,
     )
-    _store(db, row)
-    session_audit.record_sign_in(db, user_id=user_id, session_id=row.id, ip_address=ip, user_agent=agent,
-                                 workspace_id=workspace_id)
-    return IssuedSession(session_id=row.id, user_id=user_id, token=token,
-                         idle_expires_at=row.idle_expires_at, absolute_expires_at=absolute)
+    return token, row
+
+
+def _issued(token: str, row: AuthSession) -> IssuedSession:
+    return IssuedSession(session_id=row.id, user_id=row.user_id, token=token,
+                         idle_expires_at=row.idle_expires_at, absolute_expires_at=row.absolute_expires_at)
 
 
 def find_session(db: Session, token: Optional[str]) -> Optional[AuthSession]:
@@ -259,6 +295,7 @@ __all__ = [
     "REVOKED_BY_ADMIN",
     "REVOKED_DEACTIVATED",
     "REVOKED_SIGN_OUT",
+    "REVOKED_STEP_UP",
     "SESSION_TOKEN_BYTES",
     "SESSION_TOKEN_PREFIX",
     "UNKNOWN",
@@ -270,6 +307,8 @@ __all__ = [
     "find_session",
     "idle_lifetime",
     "issue_session",
+    "person_is_active_locked",
+    "renew_session",
     "revoke_session",
     "revoke_sessions_of",
     "session_state",

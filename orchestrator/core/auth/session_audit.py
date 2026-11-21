@@ -230,16 +230,23 @@ def stage_bootstrap_admin(db, *, user_id: int, workspace_id: Union[UUID, str], m
 
 
 def record_step_up(db, *, user_id: Optional[int], session_id: UUID, reason: Optional[str],
-                   ip_address: Optional[str], user_agent: Optional[str]) -> None:
+                   ip_address: Optional[str], user_agent: Optional[str],
+                   new_session_id: Optional[UUID] = None) -> None:
     """``auth:step_up`` (US-406): confirmed when ``reason`` is None, else refused with that reason.
 
-    A confirmation is granting: it commits the session's new ``auth_time`` with its row, or both are
-    rolled back and ``SessionAuditFailed`` is raised. A refusal changes nothing, so a failed row is
-    logged and the refusal stands. ``user_id`` is the person of the session that asked.
+    The row is on the session that asked (``session_id``). A confirmation is granting: it commits
+    the new session (``new_session_id``, named in its details) and the end of the one that asked
+    with its row, or all are rolled back and ``SessionAuditFailed`` is raised. A refusal changes
+    nothing, so a failed row is logged and the refusal stands. ``user_id`` is the person of the
+    session that asked.
     """
     if reason is not None and reason not in STEP_UP_REASONS:
         raise ValueError(f"unknown step-up refusal reason {reason!r}")
-    details: Dict[str, Any] = {"confirmed": reason is None, **({"reason": reason} if reason else {})}
+    details: Dict[str, Any] = {"confirmed": reason is None}
+    if reason is not None:
+        details = {**details, "reason": reason}
+    elif new_session_id is not None:
+        details = {**details, "new_session_id": str(new_session_id)}
     entry = _write(db, action=STEP_UP, workspace_id=None, user_id=user_id, resource_type=SESSION_RESOURCE,
                    resource_id=session_id, details=details, ip_address=ip_address, user_agent=user_agent)
     if entry is not None:

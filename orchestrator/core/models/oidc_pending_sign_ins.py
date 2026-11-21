@@ -19,8 +19,8 @@
 * ``return_to`` is where the person goes after signing in: a path on the install's own address,
   checked before it is stored (``core.auth.sign_in_methods.safe_return_path``).
 * ``step_up_session_id`` (US-406) is the live session that asked for a step-up
-  (``/start?step_up=1``), NULL on every other sign-in. Its callback refreshes that session's
-  ``auth_time`` and issues no session. No foreign key: the callback looks the session up itself.
+  (``/start?step_up=1``), NULL on every other sign-in. Its callback ends that session and issues
+  its successor. No foreign key: the callback looks the session up itself.
 * ``phone_app_link``, ``phone_code_challenge``, ``phone_install_id`` and ``phone_platform`` (US-603)
   are set together, only on a sign-in a phone started (``core.auth.phone_sign_in``): the key of the
   app link its answer goes to, the app's own PKCE S256 challenge, and the device that asked. NULL on

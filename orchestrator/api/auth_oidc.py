@@ -21,8 +21,8 @@ shared limiter's store cannot be reached, these two routes count in this process
   ``max_age=0``; with no live session it is refused (``step_up_refused``) and nothing is stored, as
   it is when the browser's ``Sec-Fetch-Site`` says another site sent it (``_step_up_sent_from_here``).
 * ``GET /callback`` finishes it (``sign_in_flow.finish_sign_in``): 303 to the stored path, with the
-  session cookie set (``session_cookie.set_session_cookie``). After a step-up no session is issued
-  and the cookie is left as it is: the browser's own session now carries a fresh ``auth_time``. A
+  session cookie set (``session_cookie.set_session_cookie``). After a step-up the cookie holds the
+  new session that replaced the browser's own (``step_up_sign_in.confirm_step_up``), which ended. A
   callback with more than ``CALLBACK_PARAMS_MAX`` parameters is read as carrying none, so it is
   refused.
 
@@ -163,7 +163,8 @@ def _refused(code: str, phone: Optional[PhoneStart] = None) -> RedirectResponse:
 
 def _signed_in(done: sign_in_flow.SignInDone) -> RedirectResponse:
     """303 to where the person was going with the session cookie, or, for a phone, to the confirmation
-    page with its cookie. No session after a step-up (the browser keeps its own, refreshed one)."""
+    page with its cookie. After a step-up the cookie is the new session's, in place of the one
+    that asked."""
     if done.phone_confirmation is not None:
         response = _redirect(CONFIRM_PAGE)
         set_confirm_cookie(response, done.phone_confirmation)

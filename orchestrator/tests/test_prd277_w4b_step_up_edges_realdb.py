@@ -6,6 +6,9 @@ transaction rolled back at the end.
 
 * **Fresh, on a fixed clock**: ``auth_time`` may be earlier than the step-up's start, or later than
   now, by ``CLOCK_SKEW`` and no more (``stale_auth_time``, ``future_auth_time``).
+* **The new session**: a confirmed step-up ends the session that asked (``step_up``; its token is
+  refused) and issues one that keeps its person, its absolute expiry and the provider's session id
+  (the token's ``sid``, else the old one); when the audit row cannot be written, no session changes.
 * **Refusals**: a person deactivated while signing in again (``deactivated``); a callback carried to
   another browser with a session of its own, or used twice (``sign_in_expired``, nothing changed);
   an ``auth_time`` in the future or not a number (``sign_in_refused``, the session untouched).
@@ -42,7 +45,9 @@ from tests.test_prd277_w4b_sign_in_rules_realdb import (  # noqa: E402
     SIGN_OUT,
     START,
     _auth_time,
+    _confirmed,
     _count,
+    _new_session,
     _refusal,
     _signed_in,
     _start,
@@ -75,20 +80,68 @@ def asking(db_session, seed_workspace, monkeypatch):
     return issued, subject
 
 
-def _confirm(db, issued, subject, auth_time) -> None:
+def _confirm(db, issued, subject, auth_time, sid=None) -> sessions.IssuedSession:
     identity = VerifiedIdentity(issuer=ISSUER, subject=subject, email=None, email_verified=False, name=None,
-                                auth_time=auth_time, idp_session_id=None)
+                                auth_time=auth_time, idp_session_id=sid)
     finished = Finished(identity=identity, return_to="/", step_up_session_id=issued.session_id, started_at=STARTED)
-    step_up_sign_in.confirm_step_up(db, finished, ip_address=None, user_agent=None, now=NOW)
+    return step_up_sign_in.confirm_step_up(db, finished, ip_address=None, user_agent=None, now=NOW)
 
 
 @pytest.mark.parametrize("auth_time", [STARTED, STARTED - CLOCK_SKEW, NOW, NOW + CLOCK_SKEW],
                          ids=["at-the-start", "skew-before-the-start", "now", "skew-after-now"])
 def test_an_auth_time_within_the_skew_of_start_and_now_confirms(db_session, asking, auth_time):
     issued, subject = asking
-    _confirm(db_session, issued, subject, auth_time)
+    renewed = _confirm(db_session, issued, subject, auth_time)
     db_session.expire_all()
-    assert db_session.get(AuthSession, issued.session_id).auth_time == auth_time
+    assert db_session.get(AuthSession, renewed.session_id).auth_time == auth_time
+    assert db_session.get(AuthSession, issued.session_id).auth_time == STARTED - timedelta(hours=2)
+
+
+# --------------------------------------------------------------------------- the new session
+
+
+@pytest.fixture
+def asking_with_sid(db_session, asking):
+    """``asking``'s person, with a session of their own that recorded the provider's ``sid``."""
+    old, subject = asking
+    person = db_session.get(AuthSession, old.session_id).user_id
+    issued = sessions.issue_session(db_session, user_id=person, auth_time=STARTED - timedelta(hours=2),
+                                    sid="provider-session-1", now=STARTED - timedelta(minutes=1))
+    return issued, subject
+
+
+@pytest.mark.parametrize(("sent", "kept"), [(None, "provider-session-1"), ("provider-session-2", "provider-session-2")],
+                         ids=["no-sid-keeps-the-old-one", "a-new-sid-is-taken"])
+def test_a_confirmed_step_up_issues_a_new_session_and_ends_the_one_that_asked(db_session, asking_with_sid,
+                                                                              sent, kept):
+    issued, subject = asking_with_sid
+
+    renewed = _confirm(db_session, issued, subject, NOW, sid=sent)
+
+    db_session.expire_all()
+    old, new = db_session.get(AuthSession, issued.session_id), db_session.get(AuthSession, renewed.session_id)
+    assert (old.revoked_at, old.revoked_reason) == (NOW, sessions.REVOKED_STEP_UP)
+    assert sessions.session_state(sessions.find_session(db_session, issued.token), NOW) == sessions.REVOKED
+    assert sessions.find_session(db_session, renewed.token).id == new.id
+    assert sessions.session_state(new, NOW) == sessions.LIVE
+    assert (new.user_id, new.auth_time, new.idp_session_id) == (old.user_id, NOW, kept)
+    assert new.absolute_expires_at == old.absolute_expires_at == renewed.absolute_expires_at
+    assert new.idle_expires_at == min(NOW + sessions.idle_lifetime(), old.absolute_expires_at)
+    assert (new.created_at, new.last_seen_at) == (NOW, NOW)
+
+
+def test_a_step_up_whose_audit_row_cannot_be_written_changes_no_session(db_session, asking, monkeypatch):
+    issued, subject = asking
+    person = db_session.get(AuthSession, issued.session_id).user_id
+    monkeypatch.setattr(config, "DEFAULT_WORKSPACE_ID", None)  # no workspace to record the row in
+
+    with pytest.raises(session_audit.SessionAuditFailed):
+        _confirm(db_session, issued, subject, NOW)
+
+    db_session.expire_all()
+    rows = db_session.query(AuthSession).filter(AuthSession.user_id == person).all()
+    assert [(row.id, row.revoked_at) for row in rows] == [(issued.session_id, None)]
+    assert rows[0].auth_time == STARTED - timedelta(hours=2)
 
 
 @pytest.mark.parametrize(("auth_time", "reason"), [
@@ -134,13 +187,17 @@ def test_a_step_up_callback_carried_to_another_session_or_used_twice_changes_not
 
     assert _refusal(carried) == sign_in_flow.EXPIRED
     assert _auth_time(install.db, me.session_id) == me.old and _step_ups(install) == []
-    assert install.client.get(callback, follow_redirects=False).status_code == 303  # its own browser: confirmed
-    refreshed = _auth_time(install.db, me.session_id)
-    assert refreshed > me.old
+    confirmed = install.client.get(callback, follow_redirects=False)
+    assert confirmed.status_code == 303  # its own browser: confirmed, with a new session
+    _token, new = _new_session(install.db, confirmed)
+    assert new.auth_time > me.old
+    held = _count(install.db, "SELECT COUNT(*) FROM auth_sessions WHERE user_id = :u", u=me.user_id)
 
     assert _refusal(install.client.get(callback, follow_redirects=False)) == sign_in_flow.EXPIRED
-    assert _auth_time(install.db, me.session_id) == refreshed
-    assert _step_ups(install) == [(me.user_id, {"confirmed": True})]
+    assert _count(install.db, "SELECT COUNT(*) FROM auth_sessions WHERE user_id = :u", u=me.user_id) == held
+    _token, still = _new_session(install.db, confirmed)
+    assert sessions.session_state(still, datetime.now(timezone.utc)) == sessions.LIVE  # the reuse ended nothing
+    assert _step_ups(install) == [(me.user_id, _confirmed(new.id))]
 
 
 @pytest.mark.parametrize("auth_time", [int(time.time()) + 3600, "yesterday", True],

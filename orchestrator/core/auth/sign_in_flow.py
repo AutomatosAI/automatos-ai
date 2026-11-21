@@ -11,9 +11,10 @@ provider directly. ``finish_sign_in`` runs, in this order:
    hold for the verified token's claims (``core.auth.access_rule``). A refusal is audited
    (``access_rule``) and answered ``sign_in_not_allowed``, before any person is found, created or
    linked, so a refused person leaves no row.
-3. **A step-up** (US-406, a sign-in started with ``step_up=1``) ends here: the asking session's
-   ``auth_time`` is refreshed or the step-up refused (``core.auth.step_up_sign_in``), and no person
-   is created or linked and no session issued. Before any first-sign-in step.
+3. **A step-up** (US-406, a sign-in started with ``step_up=1``) ends here: the asking session ends
+   and a new one is issued with the fresh ``auth_time``, keeping that session's person and absolute
+   expiry, or the step-up is refused and no session changes (``core.auth.step_up_sign_in``). No
+   person is created or linked. Before any first-sign-in step.
 4. **The person**, found by ``(issuer, subject)`` or created (``people.link_person``), with
    ``email_verified`` exactly as the verified ID token states it (absent is false).
 5. **A deactivated person** is refused here, before anything is granted.
@@ -149,8 +150,8 @@ class Browser:
 class SignInDone:
     """The new session and the path on this install the person goes to.
 
-    ``session`` is None after a step-up: the browser's own session was refreshed, none was issued.
-    It is None after a phone's sign-in too (US-603): ``phone_confirmation`` is then the token that
+    After a step-up ``session`` is the new session that replaced the browser's own (US-406). It is
+    None after a phone's sign-in (US-603): ``phone_confirmation`` is then the token that
     binds what awaits the person's Continue to this browser, for its cookie; no code exists yet.
     """
 
@@ -379,20 +380,20 @@ def _issue(db: Session, identity: VerifiedIdentity, user_id: int, browser: Brows
 
 
 def _step_up(db: Session, finished: Finished, browser: Browser) -> SignInDone:
-    """US-406: the asking session refreshed, and no session issued; else ``SignInRefusal``."""
+    """US-406: a new session in place of the one that asked (which ends); else ``SignInRefusal``."""
     failure: Optional[str] = None
     try:
-        step_up_sign_in.confirm_step_up(db, finished, ip_address=browser.ip_address,
-                                        user_agent=browser.user_agent)
+        issued = step_up_sign_in.confirm_step_up(db, finished, ip_address=browser.ip_address,
+                                                 user_agent=browser.user_agent)
     except step_up_sign_in.StepUpRefused as refused:
         failure = STEP_UP_NO_AUTH_TIME if str(refused) == session_audit.STEP_UP_NO_AUTH_TIME else STEP_UP_REFUSED
-    except (session_audit.SessionAuditFailed, SQLAlchemyError) as error:
+    except (session_audit.SessionAuditFailed, sessions.SignInFailed, SQLAlchemyError) as error:
         db.rollback()
         logger.error("A step-up could not be recorded (%s)", type(error).__name__)
         failure = FAILED
     if failure is not None:
         raise SignInRefusal(failure)
-    return SignInDone(session=None, return_to=finished.return_to)
+    return SignInDone(session=issued, return_to=finished.return_to)
 
 
 def _phone_waits(db: Session, finished: Finished, user_id: int, browser: Browser) -> SignInDone:
