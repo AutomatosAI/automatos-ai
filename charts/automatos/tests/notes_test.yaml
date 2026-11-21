@@ -74,6 +74,19 @@ tests:
           pattern: localhost:8000 \(fixed at build time\)
       - notMatchRegexRaw:
           pattern: there is no login
+  - it: names the addresses to register at the identity provider, and the secret the API waits for (PRD-277 US-701)
+    set:
+      edition:
+        authEdition: enterprise
+        enterprise:
+          publicUrl: https://automatos.example.com/home
+    asserts:
+      - matchRegexRaw:
+          pattern: "sign-in callback:  https://automatos\\.example\\.com/api/v1/auth/oidc/callback\n"
+      - matchRegexRaw:
+          pattern: "after sign-out:    https://automatos\\.example\\.com/sign-in\n"
+      - matchRegexRaw:
+          pattern: The API reads OIDC_CLIENT_SECRET from the Secret automatos-secrets
   - it: says there is no login when remote access is off
     asserts:
       - matchRegexRaw:

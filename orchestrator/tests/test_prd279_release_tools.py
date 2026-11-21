@@ -234,6 +234,10 @@ def test_each_editions_render_values_hold_only_what_it_needs_and_nothing_secret_
     enterprise = yaml.safe_load((tmp_path / "render" / "enterprise.yaml").read_text(encoding="utf-8"))
     assert local == {}, "the default edition renders with existingSecret alone"
     assert enterprise["edition"]["authEdition"] == "enterprise"
+    # PRD-277 US-701: each value the chart requires in this edition, and nothing else.
+    assert enterprise["edition"]["enterprise"] == {
+        "publicUrl": "https://automatos.example.com", "clientIpHeader": "X-Real-IP",
+        "oidc": {"issuer": "https://id.example.com/realms/automatos", "clientId": "automatos"}}
     assert "secret" not in json.dumps(enterprise).lower()
 
 

@@ -42,7 +42,7 @@ spec:
           args: ["migrate"]
           env:
             {{- include "automatos.apiEnv" . | nindent 12 }}
-          {{- $caMount := include "automatos.databaseCaMount" . | trim }}
+          {{- $caMount := list (include "automatos.databaseCaMount" . | trim) (include "automatos.oidcCaMount" . | trim) | compact | join "\n" }}
           {{- if or $caMount .Values.migrations.readOnlyRootFilesystem }}
           volumeMounts:
             {{- with $caMount }}
@@ -66,7 +66,7 @@ spec:
               type: RuntimeDefault
           resources:
             {{- toYaml .Values.migrations.resources | nindent 12 }}
-      {{- $caVolume := include "automatos.databaseCaVolume" . | trim }}
+      {{- $caVolume := list (include "automatos.databaseCaVolume" . | trim) (include "automatos.oidcCaVolume" . | trim) | compact | join "\n" }}
       {{- if or $caVolume .Values.migrations.readOnlyRootFilesystem }}
       volumes:
         {{- with $caVolume }}

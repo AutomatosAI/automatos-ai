@@ -389,6 +389,7 @@ before any of the release's ordinary resources exist.
 - name: LOCAL_OPERATOR_EMAIL
   value: {{ .Values.edition.localOperatorEmail | quote }}
 {{- end }}
+{{- include "automatos.enterpriseApiEnv" . }}
 - name: WORKSPACE_VOLUME_PATH
   value: /workspaces
 {{- if .Values.sessionMode.enabled }}
@@ -417,6 +418,10 @@ before any of the release's ordinary resources exist.
 {{- /* The worker's own Secret must hold the token (PRD-280 US-202), so the API's must too. */}}
 {{- $required = append $required "WORKER_INTERNAL_TOKEN" }}
 {{- $optional = without $optional "WORKER_INTERNAL_TOKEN" }}
+{{- end }}
+{{- if include "automatos.enterprise" . }}
+{{- /* The identity provider's client secret (PRD-277 US-701): from the Secret, never a value. */}}
+{{- $required = append $required "OIDC_CLIENT_SECRET" }}
 {{- end }}
 {{- range $key := $required }}
 - name: {{ $key }}

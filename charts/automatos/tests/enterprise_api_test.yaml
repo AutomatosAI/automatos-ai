@@ -1,0 +1,202 @@
+suite: The enterprise edition's API settings (PRD-277 US-701)
+# Made-up values of the right shape: example.com is reserved for examples.
+templates:
+  - templates/api-deployment.yaml
+  - templates/migrate-job.yaml
+release:
+  name: demo
+  namespace: automatos
+set:
+  existingSecret: automatos-secrets
+  edition:
+    authEdition: enterprise
+    enterprise:
+      publicUrl: https://automatos.example.com
+      clientIpHeader: X-Real-IP
+      oidc:
+        issuer: https://id.example.com/realms/automatos
+        clientId: automatos
+tests:
+  - it: renders the edition, its workspace, its public address, the client address header and the provider
+    template: templates/api-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: AUTH_EDITION, value: enterprise}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DEFAULT_WORKSPACE_ID, value: "00000000-0000-0000-0000-0000000000c1"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: FRONTEND_URL, value: "https://automatos.example.com"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: CLIENT_IP_HEADER, value: X-Real-IP}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_ISSUER, value: "https://id.example.com/realms/automatos"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_CLIENT_ID, value: automatos}
+  - it: reads the client secret from the existing Secret, as a required key
+    template: templates/api-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OIDC_CLIENT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: automatos-secrets
+                key: OIDC_CLIENT_SECRET
+  - it: gives the migration Job the same settings, the secret and the default workspace it makes
+    template: templates/migrate-job.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DEFAULT_WORKSPACE_ID, value: "00000000-0000-0000-0000-0000000000c1"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_ISSUER, value: "https://id.example.com/realms/automatos"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OIDC_CLIENT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: automatos-secrets
+                key: OIDC_CLIENT_SECRET
+  - it: leaves the local edition's settings out
+    template: templates/api-deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: LOCAL_OPERATOR_EMAIL, value: local@automatos.local}
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: PLATFORM_KEY_WORKSPACE_ID, value: "00000000-0000-0000-0000-0000000000c1"}
+  - it: leaves every optional setting to the API's default when it is empty, and mounts no CA
+    template: templates/api-deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_SCOPES}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_DISPLAY_NAME}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_REQUIRED_CLAIMS}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_ENDPOINT_HOSTS}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_DEFAULT_ROLE}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_BOOTSTRAP_ADMINS}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_CA_BUNDLE_FILE}
+          any: true
+      - notContains:
+          path: spec.template.spec.volumes
+          content: {name: oidc-ca}
+          any: true
+  - it: renders each optional setting it is given
+    template: templates/api-deployment.yaml
+    set:
+      edition:
+        enterprise:
+          bootstrapAdmins: "email:admin@example.com"
+          defaultRole: viewer
+          oidc:
+            displayName: Example Identity
+            scopes: openid profile email groups
+            requiredClaims: "groups=automatos"
+            endpointHosts: "login.example.com, keys.example.com"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_DISPLAY_NAME, value: Example Identity}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_SCOPES, value: openid profile email groups}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_REQUIRED_CLAIMS, value: "groups=automatos"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_ENDPOINT_HOSTS, value: "login.example.com, keys.example.com"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_DEFAULT_ROLE, value: viewer}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_BOOTSTRAP_ADMINS, value: "email:admin@example.com"}
+  - it: mounts the provider's CA read-only in the API and names the file
+    template: templates/api-deployment.yaml
+    set:
+      edition:
+        enterprise:
+          oidc:
+            caConfigMap: identity-ca
+            caKey: bundle.pem
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_CA_BUNDLE_FILE, value: /etc/automatos/oidc-ca/bundle.pem}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: oidc-ca, mountPath: /etc/automatos/oidc-ca, readOnly: true}
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: oidc-ca
+            configMap:
+              name: identity-ca
+  - it: mounts the database's CA and the provider's side by side in the Job
+    template: templates/migrate-job.yaml
+    set:
+      database:
+        sslmode: verify-full
+        caConfigMap: database-ca
+      edition:
+        enterprise:
+          oidc:
+            caConfigMap: identity-ca
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: database-ca, mountPath: /etc/automatos/database-ca, readOnly: true}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: oidc-ca, mountPath: /etc/automatos/oidc-ca, readOnly: true}
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: oidc-ca, configMap: {name: identity-ca}}
+  - it: never reads the client secret, or any enterprise setting, in the local edition
+    template: templates/api-deployment.yaml
+    set:
+      edition:
+        authEdition: local
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_CLIENT_SECRET}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OIDC_ISSUER}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: FRONTEND_URL}
+          any: true

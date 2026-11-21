@@ -99,6 +99,9 @@ spec:
             {{- with include "automatos.databaseCaMount" . | trim }}
             {{- . | nindent 12 }}
             {{- end }}
+            {{- with include "automatos.oidcCaMount" . | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
             {{- if .Values.api.readOnlyRootFilesystem }}
             # A read-only root (PRD-280 US-104): a scratch volume for each path the API
             # writes outside its volumes (docs/PRDS/PRD-280-US-103-WRITE-PATHS.md). Keep
@@ -136,6 +139,9 @@ spec:
             claimName: {{ include "automatos.apiDataClaim" . }}
         {{- end }}
         {{- with include "automatos.databaseCaVolume" . | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        {{- with include "automatos.oidcCaVolume" . | trim }}
         {{- . | nindent 8 }}
         {{- end }}
         {{- if .Values.api.readOnlyRootFilesystem }}

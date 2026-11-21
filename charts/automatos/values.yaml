@@ -21,6 +21,8 @@ fullnameOverride: ""
 #   AWS_SECRET_ACCESS_KEY      with S3_ENDPOINT_URL in config)
 #   OTEL_EXPORTER_OTLP_HEADERS optional; headers for the OTLP endpoint (otel below),
 #                              e.g. Authorization=Basic%20<base64>, values URL-encoded
+#   OIDC_CLIENT_SECRET         the enterprise edition only, and required there: the
+#                              application's client secret at the identity provider
 existingSecret: ""
 
 edition:
@@ -29,16 +31,65 @@ edition:
   # enterprise: people sign in with your organisation's identity provider (OIDC), and the
   # chart runs the enterprise web image (frontend.enterpriseImage).
   authEdition: local
+  # The local edition's one workspace; in enterprise, the default workspace the migration Job
+  # makes (with no owner), which sign-ins are recorded in and the first admins own. A UUID.
   defaultWorkspaceId: "00000000-0000-0000-0000-0000000000c1"
   localOperatorEmail: local@automatos.local
+  # The enterprise edition (PRD-277 US-701), read only when authEdition is enterprise. Rendering
+  # fails when a required one is missing or is a value the API refuses at start. The client
+  # secret is never a value: put OIDC_CLIENT_SECRET in the Secret existingSecret names.
+  enterprise:
+    # Required. The install's public address, https://<host>, which the web app and the API
+    # share (FRONTEND_URL): the sign-in callback and the cookie are on it. The ingress's host.
+    publicUrl: ""
+    # Required. The header your ingress controller or proxy sets to the caller's address
+    # (CLIENT_IP_HEADER), e.g. X-Real-IP for ingress-nginx. Sign-in limits requests by that
+    # address and writes it to the audit log. Set it only when every request comes through a
+    # proxy that overwrites it: the API trusts it from every caller.
+    clientIpHeader: ""
+    # People who become install admins at their first sign-in, or at any sign-in while the
+    # install has no active install admin (ENTERPRISE_BOOTSTRAP_ADMINS): sub:<subject> and
+    # email:<address> entries, separated by commas. The API checks the entries at start.
+    bootstrapAdmins: ""
+    # The role in the default workspace for anyone who passes the access rule
+    # (ENTERPRISE_DEFAULT_ROLE): none, viewer, editor or admin. Empty: the API's default, none.
+    # A role other than none needs oidc.requiredClaims.
+    defaultRole: ""
+    oidc:
+      # Required. The identity provider's issuer address, https only (OIDC_ISSUER).
+      issuer: ""
+      # Required. The application's client id at the identity provider (OIDC_CLIENT_ID).
+      clientId: ""
+      # The text on the sign-in button (OIDC_DISPLAY_NAME): 1 to 64 characters, no control
+      # character and no < or >. Empty: the API's default, "your organisation".
+      displayName: ""
+      # What sign-in asks for (OIDC_SCOPES), separated by spaces; must include openid. Empty:
+      # the API's default, "openid profile email".
+      scopes: ""
+      # The access rule (OIDC_REQUIRED_CLAIMS): claim=value rules separated by ';', which a
+      # token must match before anyone is let in. Required for an issuer many organisations
+      # share and with a default role; the API checks the rules and both cases at start.
+      requiredClaims: ""
+      # Host names, separated by commas, besides the issuer's own, on which the provider's
+      # metadata may put its token endpoint and keys (OIDC_ENDPOINT_HOSTS). No scheme, port,
+      # wildcard or address.
+      endpointHosts: ""
+      # A ConfigMap in the release's namespace holding the certificate authority of a provider
+      # with a private certificate, under caKey. Mounted read-only at /etc/automatos/oidc-ca in
+      # the API and the migration Job; OIDC_CA_BUNDLE_FILE names the file. Empty: none.
+      caConfigMap: ""
+      caKey: ca.crt
 
 # Extra non-secret settings for the API and the migration Job: any name config.py
 # reads. The chart already sets the edition, the worker URL and the workspace path, and
 # rendering fails on AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY here (they go in the
 # Secret), on DOCUMENT_UPLOAD_DIR and DOCUMENT_STORAGE_DIR while api.data is on (and,
 # while it is off under api.readOnlyRootFilesystem, on either outside the API's scratch
-# volumes), on HOME under api.readOnlyRootFilesystem (the chart sets it), and on
-# DATABASE_SSLMODE and DATABASE_SSLROOTCERT (set `database` below).
+# volumes), on HOME under api.readOnlyRootFilesystem (the chart sets it), on
+# DATABASE_SSLMODE and DATABASE_SSLROOTCERT (set `database` below), on OIDC_CLIENT_SECRET
+# (it goes in the Secret), and in the enterprise edition on each setting
+# edition.enterprise sets and on SESSION_COOKIE_NAME and SESSION_CSRF_HEADER, which the
+# enterprise web image fixes when it is built.
 # Quote LOCAL_REMOTE_ACCESS: YAML reads a bare `off` as false, which the API refuses.
 config:
   ENVIRONMENT: production

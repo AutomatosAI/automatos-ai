@@ -29,6 +29,17 @@ Local edition, open mode: there is no pairing. Anyone who can reach the API or t
 Local edition: there is no login. Anyone who can reach the web app is the admin.
 {{- end }}
 {{- end }}
+{{- if include "automatos.enterprise" . }}
+{{- $public := regexFind `(?i)^https://[^/?#]*` (toString ((.Values.edition.enterprise | default dict).publicUrl | default "") | trim) }}
+
+Enterprise edition: people sign in with your identity provider. Register these addresses,
+on the origin of edition.enterprise.publicUrl, for the application there:
+  sign-in callback:  {{ $public }}/api/v1/auth/oidc/callback
+  after sign-out:    {{ $public }}/sign-in
+The API reads OIDC_CLIENT_SECRET from the Secret {{ .Values.existingSecret }}; it does not
+start until it is there. The people listed in edition.enterprise.bootstrapAdmins become
+install admins at their first sign-in.
+{{- end }}
 {{- if include "automatos.workerApart" . }}
 
 The worker runs in the namespace {{ .Values.worker.namespace }}. The chart created none of

@@ -616,9 +616,9 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As an operator, I want to switch the edition on from the chart's values.
 
 **Acceptance Criteria:**
-- [ ] `edition.authEdition=enterprise` renders the OIDC settings and reads `OIDC_CLIENT_SECRET` from the existing Secret.
-- [ ] Rendering fails with a clear message when a required value is missing.
-- [ ] helm-unittest covers both.
+- [ ] `edition.authEdition=enterprise` renders the OIDC settings and reads `OIDC_CLIENT_SECRET` from the existing Secret. *Built (chart 0.11.0): `edition.enterprise.*` sets `FRONTEND_URL`, `CLIENT_IP_HEADER`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, and when given `OIDC_DISPLAY_NAME`, `OIDC_SCOPES`, `OIDC_REQUIRED_CLAIMS`, `OIDC_ENDPOINT_HOSTS`, `ENTERPRISE_DEFAULT_ROLE`, `ENTERPRISE_BOOTSTRAP_ADMINS` and `OIDC_CA_BUNDLE_FILE` (a ConfigMap mounted read-only), with `DEFAULT_WORKSPACE_ID` from `edition.defaultWorkspaceId`, in the API and the migration Job; `OIDC_CLIENT_SECRET` is a required key of `existingSecret`, and `config.OIDC_CLIENT_SECRET` stops the render in every edition. The other settings in §5.10 have working defaults and go in `config`; the session cookie's name and the CSRF header's may not, because the enterprise web image fixes them. The chart README's "The enterprise edition" lists each. Left unticked until CI runs the suite.*
+- [ ] Rendering fails with a clear message when a required value is missing. *Built: each required value missing stops the render with a message naming the value and the setting, never its content, and so do the values the API would refuse at start where the chart can judge them (an issuer or public address that is not https with a host, a header that is not one name, a role it does not know or one with no access rule, a sign-in button text, scopes without `openid`, an endpoint host that is not a host name, a default workspace that is not a UUID). What only the API can judge, it still judges at start: the access rule's and the first admins' syntax, an issuer many organisations share, and whether the CA file holds a certificate. Left unticked until CI runs the suite.*
+- [ ] helm-unittest covers both. *Written: `charts/automatos/tests/enterprise_api_test.yaml` and `enterprise_refusals_test.yaml`, and the install notes in `notes_test.yaml`. Left unticked until CI runs them.*
 
 #### US-702: A setup guide for each provider · M
 **Description:** As a customer's administrator, I want exact steps for my IdP, so that I register the application correctly the first time.

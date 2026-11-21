@@ -4,12 +4,13 @@ Installs Automatos AI on Kubernetes: the API, a database migration Job, the web
 app and the workspace worker. PostgreSQL (with the `pgvector` extension) and
 Redis are **external**: use managed services, or anything you run yourself.
 
-> **Local edition only, for now.** The published web-app image is the local
-> edition: one workspace, one operator, **no login**. Anyone who can reach the web
-> app is the admin, so put it behind a VPN or an authenticating ingress. The web
-> app also has its API address fixed at build time (`http://localhost:8000`), so
-> today you reach it with `kubectl port-forward` (below). Both change in later
-> releases.
+> **Two editions.** The default, `local`, is one workspace, one operator and **no
+> login**: anyone who can reach the web app is the admin, so put it behind a VPN or
+> an authenticating ingress. Its web app has its API address fixed at build time
+> (`http://localhost:8000`), so you reach it with `kubectl port-forward` (below).
+> `enterprise` signs people in with your organisation's identity provider and needs
+> the ingress, so that the web app and the API answer on one host: see
+> [The enterprise edition](#the-enterprise-edition).
 
 ## What it deploys
 
@@ -47,6 +48,7 @@ Redis are **external**: use managed services, or anything you run yourself.
    | `WORKER_INTERNAL_TOKEN` | Optional. Shared secret between the API and the worker. Required, in this Secret and the worker's, when the worker has a Secret of its own (`worker.existingSecret`). |
    | `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` | Optional. For the worker's Code Canvas agent. |
    | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | Optional. Object storage credentials, for S3 or for MinIO with `S3_ENDPOINT_URL` in `config`. |
+   | `OIDC_CLIENT_SECRET` | The enterprise edition only, and required there: the application's client secret at your identity provider. |
 
 2. Install:
 
@@ -100,8 +102,10 @@ See [`values.yaml`](values.yaml). The ones you're most likely to change:
 | Value | Default | |
 |---|---|---|
 | `existingSecret` | *(required)* | The Secret above. |
-| `edition.defaultWorkspaceId` | `00000000-…-0000000000c1` | The local workspace's id. |
-| `config` | optional services off | Extra non-secret settings for the API and the Job: a name `orchestrator/config.py` reads, e.g. `S3_ENDPOINT_URL`, `QDRANT_URL`. Rendering fails on `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (they go in the Secret), on `DOCUMENT_UPLOAD_DIR` and `DOCUMENT_STORAGE_DIR` while `api.data` is on (and, while it is off under a read-only root, on either outside the API's scratch volumes), on `HOME` under the API's read-only root (the chart sets it), and on `DATABASE_SSLMODE` and `DATABASE_SSLROOTCERT` (set `database.*`). Quote `LOCAL_REMOTE_ACCESS`: YAML reads a bare `off` as `false`, which the API refuses. |
+| `edition.authEdition` | `local` | Which edition the API and the web app run: `local`, or `enterprise` (below). |
+| `edition.defaultWorkspaceId` | `00000000-…-0000000000c1` | The local workspace's id; in enterprise, the default workspace's (a UUID). |
+| `edition.enterprise.*` | empty | The enterprise edition's sign-in: [The enterprise edition](#the-enterprise-edition). |
+| `config` | optional services off | Extra non-secret settings for the API and the Job: a name `orchestrator/config.py` reads, e.g. `S3_ENDPOINT_URL`, `QDRANT_URL`. Rendering fails on `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (they go in the Secret), on `DOCUMENT_UPLOAD_DIR` and `DOCUMENT_STORAGE_DIR` while `api.data` is on (and, while it is off under a read-only root, on either outside the API's scratch volumes), on `HOME` under the API's read-only root (the chart sets it), on `DATABASE_SSLMODE` and `DATABASE_SSLROOTCERT` (set `database.*`), on `OIDC_CLIENT_SECRET` (it goes in the Secret), and in the enterprise edition on each setting `edition.enterprise` sets and on `SESSION_COOKIE_NAME` and `SESSION_CSRF_HEADER`. Quote `LOCAL_REMOTE_ACCESS`: YAML reads a bare `off` as `false`, which the API refuses. |
 | `database.sslmode`, `database.caConfigMap`, `database.caKey` | empty, empty, `ca.crt` | TLS on every connection to PostgreSQL, from the API, the migration Job and the worker. `sslmode` sets `DATABASE_SSLMODE`; `verify-full` checks the server's certificate and its host name. `caConfigMap` names a ConfigMap you create in the release's namespace holding the CA that signed the server's certificate (for a managed database, the provider's bundle), under the key `caKey`: the chart mounts it read-only at `/etc/automatos/database-ca` in all three and sets `DATABASE_SSLROOTCERT` to the file. It needs `sslmode` `verify-ca` or `verify-full`. When you change the ConfigMap, the kubelet updates the mounted file after its sync delay (a minute or so); each new connection then trusts the new file, while a connection already open keeps its session until it closes, and a file with no certificate in it stops a pod at its next start. Keep the old and the new CA in one bundle until the server presents its new certificate, and restart the pods to be certain. All empty: nothing is set or mounted, and each connection behaves as before. Example: `kubectl -n automatos create configmap database-ca --from-file=ca.crt=<bundle>.pem`, then `--set database.sslmode=verify-full --set database.caConfigMap=database-ca`. |
 | `api.image.tag`, `frontend.image.tag`, `frontend.enterpriseImage.tag`, `worker.image.tag` | the chart's `appVersion` (`edge`) | Pin a `sha-…` or version tag for repeatable installs (below). |
 | `api.image.digest`, `frontend.image.digest`, `frontend.enterpriseImage.digest`, `worker.image.digest` | empty | `sha256:<64 hex>`: the pod runs `repository@digest`, that exact build, whatever the tag. |
@@ -139,6 +143,60 @@ Every container's root file system is read-only, so what runs stays what was rel
 Each component's `readOnlyRootFilesystem` value turns it off for that component alone. A path of your own in `config` (a temporary folder, a log file) has to be under one of these, or the API cannot write it.
 
 CI installs the chart into a kind cluster on every change to the chart (Markdown aside) or to an image's start-up (`.github/workflows/chart.yml`, `deploy/kind/strict.sh`), with the values in `deploy/kind/strict-values.yaml`, whose header lists what they turn on and what they do not exercise. The worker runs there in a namespace of its own, with a Secret of its own and the agent-files volume as two claims on one folder, as "The worker in a namespace of its own" below describes; the release's namespace and the worker's both enforce "restricted", and every pod must become ready. The worker must run as uid 1000 and write its volume, and the API must read what it wrote through its own claim. Every pod the release makes, the migration Job's included, must also be admitted by a second namespace that enforces "restricted", as a dry run, so a refusal names the pod and its violations. Every container and init container of those pods must set `readOnlyRootFilesystem: true` in its spec, and in the API, the web app and the worker, which keep running, a write to the root must fail.
+
+## The enterprise edition
+
+`edition.authEdition=enterprise` signs people in with your organisation's identity
+provider over OpenID Connect (PRD-277). The chart then runs the enterprise web image
+(`frontend.enterpriseImage`) and gives the API and the migration Job the settings below.
+Rendering fails, naming the value and never what it holds, when a required one is missing
+or is one the API would refuse at start.
+
+| Value | API setting | |
+|---|---|---|
+| `edition.enterprise.publicUrl` | `FRONTEND_URL` | Required. The install's public address, `https://<host>`, shared by the web app and the API. The sign-in callback and the session cookie are on its origin. |
+| `edition.enterprise.clientIpHeader` | `CLIENT_IP_HEADER` | Required. The header your ingress controller sets to the caller's address (`X-Real-IP` for ingress-nginx). Sign-in limits requests by it and the audit log records it. The API trusts it from every caller, so every request must come through a proxy that overwrites it. |
+| `edition.enterprise.oidc.issuer` | `OIDC_ISSUER` | Required. The provider's issuer address, `https` only. |
+| `edition.enterprise.oidc.clientId` | `OIDC_CLIENT_ID` | Required. The application's client id at the provider. |
+| `edition.enterprise.oidc.displayName` | `OIDC_DISPLAY_NAME` | The sign-in button's text, 1 to 64 characters, no `<` or `>`. Empty: "your organisation". |
+| `edition.enterprise.oidc.scopes` | `OIDC_SCOPES` | Separated by spaces, `openid` among them. Empty: `openid profile email`. |
+| `edition.enterprise.oidc.requiredClaims` | `OIDC_REQUIRED_CLAIMS` | The access rule: `claim=value` rules separated by `;`. The API requires one for an issuer many organisations share, and checks the rules' syntax at start. |
+| `edition.enterprise.oidc.endpointHosts` | `OIDC_ENDPOINT_HOSTS` | Host names, besides the issuer's, where the provider's metadata may put its token endpoint and keys. |
+| `edition.enterprise.oidc.caConfigMap`, `caKey` | `OIDC_CA_BUNDLE_FILE` | A ConfigMap you create in the release's namespace holding the CA of a provider with a private certificate, under `caKey` (`ca.crt`). Mounted read-only at `/etc/automatos/oidc-ca` in the API and the Job. |
+| `edition.enterprise.defaultRole` | `ENTERPRISE_DEFAULT_ROLE` | `none` (the default), `viewer`, `editor` or `admin`: the role in the default workspace for anyone the access rule lets in. Any role but `none` needs `requiredClaims`. |
+| `edition.enterprise.bootstrapAdmins` | `ENTERPRISE_BOOTSTRAP_ADMINS` | `sub:<subject>` and `email:<address>` entries, separated by commas: install admins at their first sign-in. The API checks the entries at start. |
+| `edition.defaultWorkspaceId` | `DEFAULT_WORKSPACE_ID` | The default workspace the Job makes, with no owner, that sign-ins are recorded in. |
+
+The client secret goes in the Secret as `OIDC_CLIENT_SECRET`, never in values. The
+session clocks (`SESSION_IDLE_MINUTES`, `SESSION_ABSOLUTE_HOURS`), the claim names
+(`OIDC_CLAIM_EMAIL`, `OIDC_CLAIM_NAME`, `OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES`) and
+the pending sign-in limits (`OIDC_PENDING_SIGN_INS_MAX`, `OIDC_PENDING_SIGN_INS_PER_ADDRESS`)
+have working defaults and go in `config` when you change them; the API checks them at start.
+The session cookie's name and the CSRF header's are fixed in the enterprise web image, so
+`config` may not change them.
+
+At the provider, register the sign-in callback `<publicUrl origin>/api/v1/auth/oidc/callback`
+and the address after sign-out `<publicUrl origin>/sign-in`; the install notes print both.
+Turn the ingress on (`ingress.enabled`, `ingress.host` the host of `publicUrl`, and `ingress.tls`):
+the enterprise web app calls the API on its own origin, and the session cookie is a
+`__Host-` cookie, sent over https only.
+
+Example values:
+
+```yaml
+edition:
+  authEdition: enterprise
+  enterprise:
+    publicUrl: https://automatos.example.com
+    clientIpHeader: X-Real-IP
+    bootstrapAdmins: email:admin@example.com
+    oidc:
+      issuer: https://id.example.com/realms/automatos
+      clientId: automatos
+ingress:
+  enabled: true
+  host: automatos.example.com
+```
 
 ## The worker in a namespace of its own
 
