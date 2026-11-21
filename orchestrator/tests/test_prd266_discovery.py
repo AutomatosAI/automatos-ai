@@ -217,6 +217,9 @@ def enterprise(monkeypatch):
 
 
 START_URL = FRONTEND + discovery.OIDC_START_PATH
+# PRD-277 US-603: the start and exchange addresses, the app link key and the one PKCE method.
+OIDC_BLOCK = {"start_url": START_URL, "exchange_url": FRONTEND + "/api/v1/mobile/sign-in/exchange",
+              "app_link": "go", "code_challenge_method": "S256"}
 
 
 @pytest.mark.parametrize("remote_access", ["off", "open", "paired"])
@@ -226,7 +229,7 @@ def test_enterprise_offers_sign_in_then_pairing(client, enterprise, monkeypatch,
     body = _document(client)
 
     assert set(body) == SECTIONS and body["schema"] == SCHEMA and body["edition"] == "enterprise"
-    assert body["auth"] == {"modes": ["oidc", "device"], "clerk": None, "oidc": {"start_url": START_URL}}
+    assert body["auth"] == {"modes": ["oidc", "device"], "clerk": None, "oidc": OIDC_BLOCK}
     assert body["pairing"] == {"enabled": True}
     assert body["push"] == {"expo": False}
 
@@ -237,7 +240,7 @@ def test_enterprise_with_pairing_off_offers_sign_in_only(client, enterprise, mon
 
     body = _document(client)
 
-    assert body["auth"] == {"modes": ["oidc"], "clerk": None, "oidc": {"start_url": START_URL}}
+    assert body["auth"] == {"modes": ["oidc"], "clerk": None, "oidc": OIDC_BLOCK}
     assert body["pairing"] == {"enabled": False}
 
 
@@ -249,7 +252,7 @@ def test_enterprise_names_only_its_configured_address_whatever_the_request_says(
     body = _document(client, headers={"host": "attacker.example", "x-forwarded-proto": "http"})
 
     assert (body["api_url"], body["web_url"]) == (FRONTEND, FRONTEND)
-    assert body["auth"]["oidc"] == {"start_url": START_URL} and START_URL.startswith("https://")
+    assert body["auth"]["oidc"] == OIDC_BLOCK and START_URL.startswith("https://")
     for other in ("attacker.example", "testserver", "http://", public_api_host):
         assert other not in json.dumps(body)
 
@@ -261,7 +264,7 @@ def test_enterprise_publishes_nothing_about_the_identity_provider(client, enterp
     response = client.get(DISCOVERY)
 
     assert response.status_code == 200, response.text
-    assert set(response.json()["auth"]["oidc"]) == {"start_url"}
+    assert set(response.json()["auth"]["oidc"]) == {"start_url", "exchange_url", "app_link", "code_challenge_method"}
     assert "idp.prd277.test" not in response.text and "prd277-client-id" not in response.text
     leaked = sorted(name for name, value in planted_secrets.items() if value in response.text)
     assert leaked == []
@@ -271,6 +274,7 @@ def test_the_start_address_is_a_route_the_app_serves():
     manifest = json.loads((ORCH / "reports" / "route-manifest.json").read_text(encoding="utf-8"))
 
     assert {"method": "GET", "path": discovery.OIDC_START_PATH} in manifest["routes"]
+    assert {"method": "POST", "path": discovery.OIDC_EXCHANGE_PATH} in manifest["routes"]
 
 
 @pytest.mark.parametrize("edition", ["saas", "local", "enterprise"])

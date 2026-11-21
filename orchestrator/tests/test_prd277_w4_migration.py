@@ -1,7 +1,8 @@
 """PRD-277 Wave 4 (US-402): prd277_w4_oidc_sign_ins_20261120, the first part's one migration.
 
 * The revision chains onto ``prd277_w3_sessions_20261120``, and Wave 4 part 2's
-  ``prd277_w4b_step_up_20261120`` (one more column on this table) chains onto it and is the head.
+  ``prd277_w4b_step_up_20261120`` (one more column on this table) chains onto it; Wave 6 part 2's
+  ``prd277_w6b_phone_sign_in_20261121`` (four more) chains onto that and is the head.
 * Its upgrade creates ``oidc_pending_sign_ins``, its unique state-hash index, its expiry index and
   its per-address index, each only when missing, writing no row and touching no other table; its downgrade drops exactly
   the table.
@@ -46,6 +47,9 @@ MIGRATION = VERSIONS / f"{REVISION}.py"
 # Wave 4 part 2 (US-406) adds one column to the table this revision builds.
 PART_2 = "prd277_w4b_step_up_20261120"
 PART_2_COLUMNS = ("step_up_session_id",)
+# Wave 6 part 2 (US-603) adds four more: what a phone's start asked for.
+PHONE_SIGN_IN = "prd277_w6b_phone_sign_in_20261121"
+PHONE_COLUMNS = ("phone_app_link", "phone_code_challenge", "phone_install_id", "phone_platform")
 TABLE = "oidc_pending_sign_ins"
 COLUMNS = ("id", "state_hash", "nonce_hash", "binding_hash", "client_hash", "code_verifier", "return_to", "created_at",
            "expires_at")
@@ -100,13 +104,14 @@ def test_the_revision_chains_onto_wave_3_and_part_2_chains_onto_it():
     assert (constants["revision"], constants["down_revision"]) == (REVISION, PARENT)
     revisions = _revisions()
     assert [rev for rev, down in revisions.items() if PARENT in _parents(down)] == [REVISION]
-    # PRD-277 Wave 4 part 2 chained prd277_w4b_step_up_20261120 onto this revision, so the one head
-    # is part 2's (tests/test_prd277_w4b_migration.py pins it).
+    # PRD-277 Wave 4 part 2 chained prd277_w4b_step_up_20261120 onto this revision, and Wave 6 part 2
+    # chained prd277_w6b_phone_sign_in_20261121 onto that, so the one head is Wave 6 part 2's
+    # (tests/test_prd277_w6b_phone_sign_in_migration.py pins it).
     assert [rev for rev, down in revisions.items() if REVISION in _parents(down)] == [PART_2]
     heads = set(revisions) - {parent for down in revisions.values() for parent in _parents(down)}
-    assert heads == {PART_2}
+    assert heads == {PHONE_SIGN_IN}
     single_head = (ORCH / "tests" / "test_prd209_alembic_single_head.py").read_text(encoding="utf-8")
-    assert REVISION in single_head and f'EXPECTED_HEAD = "{PART_2}"' in single_head
+    assert REVISION in single_head and f'EXPECTED_HEAD = "{PHONE_SIGN_IN}"' in single_head
     chain = (ORCH / "tests" / "test_prd236_w1_routes.py").read_text(encoding="utf-8")
     assert f'(versions / "{REVISION}.py")' in chain and f'down_revision = "{PARENT}"' in chain
 
@@ -133,7 +138,7 @@ def _ddl_lines() -> list:
 
 def test_the_model_and_the_ddl_declare_the_same_names_and_sizes():
     table = OidcPendingSignIn.__table__
-    assert tuple(table.columns.keys()) == COLUMNS + PART_2_COLUMNS
+    assert tuple(table.columns.keys()) == COLUMNS + PART_2_COLUMNS + PHONE_COLUMNS
     assert Base.metadata.tables[TABLE] is table
     lines = _ddl_lines()
     assert [line.split()[0] for line in lines] == list(COLUMNS)
@@ -190,6 +195,13 @@ def _run(conn, step: str = "upgrade", migration: Path = MIGRATION) -> None:
         getattr(_load(migration), step)()
 
 
+def _run_phone_columns(conn) -> None:
+    """The US-603 revision's statements on this table (its others alter ``mobile_devices``)."""
+    for statement in _load(VERSIONS / f"{PHONE_SIGN_IN}.py")._UPGRADE:
+        if f"ALTER TABLE {TABLE} " in statement:
+            conn.execute(sa.text(statement))
+
+
 _SNAPSHOT = (
     "SELECT table_name, column_name, data_type, character_maximum_length, is_nullable, column_default "
     "FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = :t",
@@ -233,6 +245,7 @@ def test_the_migration_builds_what_create_all_builds(pg):
     pg.execute(sa.text(f"DROP TABLE {TABLE}"))
     _run(pg)
     _run(pg, migration=VERSIONS / f"{PART_2}.py")  # the model carries part 2's column too
+    _run_phone_columns(pg)  # and Wave 6 part 2's four
     assert _schema(pg) == by_model
 
 

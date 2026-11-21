@@ -1,7 +1,7 @@
 """PRD-277 Wave 4 part 2 (US-406): prd277_w4b_step_up_20261120, the part's one migration.
 
-* The revision chains onto ``prd277_w4_oidc_sign_ins_20261120`` and is the one head; both head pins
-  name it.
+* The revision chains onto ``prd277_w4_oidc_sign_ins_20261120``; Wave 6 part 2's
+  ``prd277_w6b_phone_sign_in_20261121`` chains onto it and is the one head both head pins name.
 * Its upgrade adds ``oidc_pending_sign_ins.step_up_session_id`` (a nullable UUID) only when missing,
   writing no row, adding no key and touching no other table; its downgrade drops exactly that column.
 * The model declares the same column: nullable, a UUID, no foreign key.
@@ -36,6 +36,8 @@ REVISION, PARENT = "prd277_w4b_step_up_20261120", "prd277_w4_oidc_sign_ins_20261
 MIGRATION = VERSIONS / f"{REVISION}.py"
 TABLE, COLUMN = "oidc_pending_sign_ins", "step_up_session_id"
 ROW_WRITES = re.compile(r"\b(DELETE FROM|TRUNCATE|UPDATE \w+ SET|INSERT INTO)\b")
+# Wave 6 part 2 (US-603) chains onto this revision and adds four more columns to the table.
+PHONE_SIGN_IN = "prd277_w6b_phone_sign_in_20261121"
 
 
 def _constants(path: Path = MIGRATION) -> dict:
@@ -81,15 +83,18 @@ def _revisions() -> dict:
     return revisions
 
 
-def test_the_revision_chains_onto_part_1_and_is_the_one_head():
+def test_the_revision_chains_onto_part_1_and_wave_6_part_2_chains_onto_it():
     constants = _constants()
     assert (constants["revision"], constants["down_revision"]) == (REVISION, PARENT)
     revisions = _revisions()
     assert [rev for rev, down in revisions.items() if PARENT in _parents(down)] == [REVISION]
+    # PRD-277 Wave 6 part 2 chained prd277_w6b_phone_sign_in_20261121 onto this revision, so the one
+    # head is Wave 6 part 2's (tests/test_prd277_w6b_phone_sign_in_migration.py pins it).
+    assert [rev for rev, down in revisions.items() if REVISION in _parents(down)] == [PHONE_SIGN_IN]
     heads = set(revisions) - {parent for down in revisions.values() for parent in _parents(down)}
-    assert heads == {REVISION}
+    assert heads == {PHONE_SIGN_IN}
     single_head = (ORCH / "tests" / "test_prd209_alembic_single_head.py").read_text(encoding="utf-8")
-    assert f'EXPECTED_HEAD = "{REVISION}"' in single_head
+    assert REVISION in single_head and f'EXPECTED_HEAD = "{PHONE_SIGN_IN}"' in single_head
     chain = (ORCH / "tests" / "test_prd236_w1_routes.py").read_text(encoding="utf-8")
     assert f'(versions / "{REVISION}.py")' in chain and f'down_revision = "{PARENT}"' in chain
 
@@ -177,6 +182,9 @@ def test_over_part_1_it_builds_what_create_all_builds_and_old_rows_read_null(pg)
         "return_to, expires_at) VALUES (:id, :s, :s, :s, :s, :s, '/', :e)"),
         {"id": uuid.uuid4(), "s": uuid.uuid4().hex * 2, "e": datetime.now(timezone.utc) + timedelta(minutes=10)})
     _run(pg)
+    for statement in _load(VERSIONS / f"{PHONE_SIGN_IN}.py")._UPGRADE:  # the model has its four columns
+        if f"ALTER TABLE {TABLE} " in statement:
+            pg.execute(sa.text(statement))
     assert _schema(pg) == by_model
     assert pg.execute(sa.text(f"SELECT {COLUMN} FROM {TABLE}")).scalar_one() is None
 

@@ -2,7 +2,9 @@
 
 * **The setting** (``ENTERPRISE_DEVICE_PAIRING``, §5.10): on when unset; in enterprise ``device_pairing`` follows
   it, a malformed value reading as off; ``local`` and ``saas`` never move whatever it says. Start-up refuses a
-  malformed value naming the setting and never the value. With it off a device token is 401 before any lookup.
+  malformed value naming the setting and never the value. With it off only a device whose person signed in on
+  the phone (``oidc``, PRD-277 US-603) is taken; where no kind is taken (saas) a device token is 401 before any
+  lookup.
 * **Who makes a code** (``pairing_code_owner``): in enterprise a person signed in on the session lane, a member of
   the workspace, for themselves; a device, a key, the all-workspaces view and a non-member are 403, and the
   console (``scripts/mint_pairing_code.py``) refuses. ``local`` keeps its workspace-admin gate. In enterprise a
@@ -181,9 +183,18 @@ def test_the_check_ignores_the_setting_where_the_edition_does_not_read_it(editio
     edition_start_up.check_device_pairing_setting(editions.CAPABILITIES[edition], {SETTING: "maybe"})
 
 
-@pytest.mark.asyncio
-async def test_with_pairing_off_a_device_token_is_refused_before_any_lookup(monkeypatch):
+def test_with_pairing_off_only_a_device_signed_in_on_the_phone_is_taken(monkeypatch):
+    """PRD-277 US-603: pairing off stops paired devices, never one whose person signed in with OIDC."""
     _enterprise(monkeypatch, "false")
+    assert device.token_kinds() == ("oidc",)
+    _enterprise(monkeypatch, "true")
+    assert device.token_kinds() == ("paired", "oidc")
+
+
+@pytest.mark.asyncio
+async def test_where_no_device_is_taken_a_device_token_is_refused_before_any_lookup(monkeypatch):
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
+    assert device.token_kinds() == ()
     monkeypatch.setattr(device, "SessionLocal", lambda: pytest.fail("no lookup may run"))
     with pytest.raises(HTTPException) as refused:
         await device.resolve_device_context(SimpleNamespace(headers={}), "amd_" + "x" * 43)
@@ -429,7 +440,7 @@ def test_the_lock_is_waited_for_briefly_taken_before_the_marker_is_read_and_held
     _enterprise(monkeypatch)
     monkeypatch.setattr(edition_change, "stored_edition",
                         lambda db: events.append(("read",)) or "enterprise:pairing_on")
-    monkeypatch.setattr(edition_change, "revoke_every_paired_device", lambda db, now: pytest.fail("no revoke"))
+    monkeypatch.setattr(edition_change, "revoke_every_device_of", lambda db, kinds, now: pytest.fail("no revoke"))
     assert edition_change.revoke_if_edition_changed(_Ordered(events), None) == 0
     assert [event[0] for event in events] == ["execute", "execute", "read", "commit"]
     assert "lock_timeout" in events[0][1] and events[0][2] == {"limit": edition_change.LOCK_WAIT_LIMIT}

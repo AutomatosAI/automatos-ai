@@ -196,11 +196,15 @@ def _ticket(db, device_id: str, workspace_id: str, push_type: str) -> str:
 
 
 def _schema(db) -> tuple:
-    """The two tables' columns (name, type, nullable, default) and the push-type CHECK's definition."""
+    """The two tables' columns (name, type, nullable, default) and the push-type CHECK's definition.
+
+    By name, not position: a column a later revision appends (PRD-277 US-603's) sits after
+    ``push_categories`` in a ``create_all`` table, and after it once this revision adds it back.
+    """
     columns = db.execute(text(
         "SELECT table_name, column_name, data_type, is_nullable, column_default "
         "FROM information_schema.columns WHERE table_name IN ('mobile_push_tickets', 'mobile_devices') "
-        "ORDER BY table_name, ordinal_position")).all()
+        "ORDER BY table_name, column_name")).all()
     check = db.execute(text(
         "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = :name"),
         {"name": TICKET_CHECK}).scalar()

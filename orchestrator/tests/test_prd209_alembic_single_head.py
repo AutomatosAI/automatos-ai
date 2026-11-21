@@ -199,7 +199,10 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # prd277_w3_sessions_20261120 — oidc_pending_sign_ins, a new table: sign-ins started, not finished.
 # 2026-11-20 (PRD-277 Wave 4 part 2, US-406): prd277_w4b_step_up_20261120 chains onto
 # prd277_w4_oidc_sign_ins_20261120 — oidc_pending_sign_ins.step_up_session_id, a new nullable column.
-EXPECTED_HEAD = "prd277_w4b_step_up_20261120"
+# 2026-11-21 (PRD-277 Wave 6 part 2, US-603): prd277_w6b_phone_sign_in_20261121 chains onto
+# prd277_w4b_step_up_20261120 — ck_mobile_devices_kind allows 'oidc', two nullable columns on
+# mobile_devices and four on oidc_pending_sign_ins: signing in on the phone.
+EXPECTED_HEAD = "prd277_w6b_phone_sign_in_20261121"
 
 
 def _literal(node: ast.AST):

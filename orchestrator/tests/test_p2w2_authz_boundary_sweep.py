@@ -73,6 +73,11 @@ PUBLIC_BY_DESIGN = {
     # 404 unless AUTH_EDITION=local and LOCAL_REMOTE_ACCESS=paired; rate-limited per IP
     # before the code is read (api/mobile_devices.py).
     ("POST", "/api/v1/mobile/pair"),
+    # PRD-277 US-603: a phone that signed in at the install's own OIDC start address has no token
+    # yet, so the one-time code its app link received, with its PKCE verifier, is its only
+    # credential. 404 unless the edition signs in with OIDC; rate-limited per IP with /pair's
+    # bucket before the code is read (api/mobile_devices.py).
+    ("POST", "/api/v1/mobile/sign-in/exchange"),
 }
 
 # (d) Own non-hybrid auth. Structurally enforced below: none of these may

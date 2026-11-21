@@ -46,7 +46,7 @@ ORCH = Path(__file__).resolve().parents[1]
 VERSIONS = ORCH / "alembic" / "versions"
 REVISION, PARENT = "prd277_w2_identities_20261120", "merge_heads_20261117"
 WAVE_3 = "prd277_w3_sessions_20261120"
-HEAD = "prd277_w4b_step_up_20261120"  # Wave 4 part 2's revision, on part 1's
+HEAD = "prd277_w6b_phone_sign_in_20261121"  # Wave 6 part 2's revision, on Wave 4 part 2's
 MIGRATION = VERSIONS / f"{REVISION}.py"
 TABLE = "user_identities"
 COLUMNS = ("id", "user_id", "issuer", "subject", "created_at", "updated_at")
@@ -102,8 +102,9 @@ def test_the_revision_chains_onto_the_merge_and_wave_3_chains_onto_it():
     revisions = _revisions()
     assert [rev for rev, down in revisions.items() if PARENT in _parents(down)] == [REVISION]
     # PRD-277 Wave 3 chained prd277_w3_sessions_20261120 onto this revision, and Wave 4 chained
-    # prd277_w4_oidc_sign_ins_20261120 onto Wave 3's and prd277_w4b_step_up_20261120 onto that, so the
-    # one head is Wave 4 part 2's and the head pins name it (tests/test_prd277_w4b_migration.py pins it).
+    # prd277_w4_oidc_sign_ins_20261120 onto Wave 3's and prd277_w4b_step_up_20261120 onto that, and
+    # Wave 6 part 2 prd277_w6b_phone_sign_in_20261121 onto that, so the one head is Wave 6 part 2's and
+    # the head pins name it (tests/test_prd277_w6b_phone_sign_in_migration.py pins it).
     assert [rev for rev, down in revisions.items() if REVISION in _parents(down)] == [WAVE_3]
     heads = set(revisions) - {parent for down in revisions.values() for parent in _parents(down)}
     assert heads == {HEAD}

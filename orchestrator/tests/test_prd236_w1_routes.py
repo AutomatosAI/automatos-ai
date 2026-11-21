@@ -458,7 +458,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # first revision — oidc_pending_sign_ins.step_up_session_id, a new nullable column; the guard follows it.
     step_up = (versions / "prd277_w4b_step_up_20261120.py").read_text()
     assert 'down_revision = "prd277_w4_oidc_sign_ins_20261120"' in step_up
-    assert 'EXPECTED_HEAD = "prd277_w4b_step_up_20261120"' in guard
+    # 2026-11-21 (PRD-277 Wave 6 part 2, US-603): prd277_w6b_phone_sign_in_20261121 chains onto Wave 4
+    # part 2's revision — the 'oidc' device kind and the columns a phone's sign-in keeps; the guard follows it.
+    phone = (versions / "prd277_w6b_phone_sign_in_20261121.py").read_text()
+    assert 'down_revision = "prd277_w4b_step_up_20261120"' in phone
+    assert 'EXPECTED_HEAD = "prd277_w6b_phone_sign_in_20261121"' in guard
 
 
 def test_orm_row_is_keyed_by_route():
