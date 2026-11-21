@@ -9,11 +9,14 @@ published and signed each image. Three commands:
   Only those lines change, comments included, and the result is read back as YAML and
   must equal the original with exactly those values set. The repository's own chart is
   never touched: it keeps ``appVersion: "edge"``. ``helm package --version
-  --app-version`` then stamps the copy with the release's version.
-* ``check-rendered`` reads ``helm template`` of the packaged chart with only
-  ``existingSecret`` set, and fails if any image is named by a tag, if an image the
-  release published is missing or another one appears, or if the chart's labels do not
-  carry the release's version.
+  --app-version`` then stamps the copy with the release's version. It also writes, for
+  each published edition, the images that edition's render must run (``--images``) and
+  the values file its render is given (``--render-values``, one ``<edition>.yaml`` each).
+* ``check-rendered`` reads ``helm template`` of the packaged chart once per published
+  edition (``<edition>.yaml`` in ``--rendered``), each with ``existingSecret`` and that
+  edition's values file only, and fails if an edition's render is missing, if any image
+  is named by a tag, if an image that edition should run is missing or another one
+  appears, or if the chart's labels do not carry the release's version.
 * ``digest`` prints the digest a pushed chart's tag resolves to, so it is signed and
   checked by digest, never by tag.
 * ``remove`` takes back a chart version whose signature was not made or did not check
@@ -24,12 +27,11 @@ published and signed each image. Three commands:
   package's only one, GitHub deletes the package instead. If GitHub refuses, it says
   exactly what a maintainer must delete by hand.
 
-The web app has one published image per edition (``WEB_EDITIONS``): today only
-``local``. The chart has one web image slot, ``frontend.image``, and it is filled with
-the image of the edition the chart's values default to (``edition.authEdition``). A
-second edition needs a slot of its own, which the chart's templates would choose by
-``edition.authEdition``; until they can, ``prepare`` refuses a second edition rather
-than publish a chart that runs the wrong web image for it.
+The web app has one published image per edition (``WEB_EDITIONS``), each in a slot of
+its own that the chart's templates pick by ``edition.authEdition`` (PRD-277 US-505):
+``frontend.image`` for ``local``, ``frontend.enterpriseImage`` for ``enterprise``. Every
+slot is pinned, so the packaged chart names one web image digest per published edition,
+whichever edition an install picks.
 """
 from __future__ import annotations
 
@@ -48,11 +50,21 @@ from typing import Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 import yaml
 
-# The chart's values key for each published image the chart runs, other than the web app.
-SLOTS: Mapping[str, str] = {"api": "api", "worker": "workspace-worker"}
-# The web app's slot, and the published web image of each edition (PRD-277 US-505 adds one).
-WEB_SLOT = "frontend"
-WEB_EDITIONS: Mapping[str, str] = {"local": "frontend"}
+KeyPath = Tuple[str, ...]
+
+# The chart's values path for each published image every edition runs, other than the web app.
+SLOTS: Mapping[KeyPath, str] = {("api", "image"): "api", ("worker", "image"): "workspace-worker"}
+# Each published edition's web image, and the values path of its slot (PRD-277 US-505).
+WEB_EDITIONS: Mapping[str, Tuple[KeyPath, str]] = {
+    "local": (("frontend", "image"), "frontend"),
+    "enterprise": (("frontend", "enterpriseImage"), "enterprise-frontend"),
+}
+# What each edition's render is given besides existingSecret: the least it renders with.
+# Made-up values of the right shape (example.com is reserved for examples), never an install's.
+RENDER_VALUES: Mapping[str, dict] = {
+    "local": {},
+    "enterprise": {"edition": {"authEdition": "enterprise"}},
+}
 CHART_NAME = "automatos"
 PACKAGE = "charts/automatos"
 GITHUB_API = "https://api.github.com"
@@ -61,8 +73,6 @@ DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 REPOSITORY = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]+)?(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)+$")
 _KEY_LINE = re.compile(r"^(?P<indent> *)(?P<key>[A-Za-z0-9_-]+):(?P<rest>[^\n]*)(?P<newline>\n?)$")
 _COMMENT = re.compile(r"\s+#.*$")
-
-KeyPath = Tuple[str, ...]
 
 
 class ChartError(ValueError):
@@ -86,32 +96,39 @@ def read_digests(directory: Path, names: Sequence[str]) -> Dict[str, str]:
     return digests
 
 
-def web_image(default_edition: str, editions: Mapping[str, str] = WEB_EDITIONS) -> str:
-    """The published web image the chart's one web slot runs."""
-    if default_edition not in editions:
-        raise ChartError(f"the chart defaults to the {default_edition!r} edition, which has no published web image")
-    others = sorted(set(editions) - {default_edition})
-    if others:
-        raise ChartError(f"the chart has one web image slot, for {default_edition!r}; the editions {others} need a "
-                         "slot each, which the chart's templates must pick by edition.authEdition")
-    return editions[default_edition]
+def published_names() -> List[str]:
+    """Every image the chart runs in some edition, as the merge job names its digest file."""
+    return sorted({*SLOTS.values(), *(name for _, name in WEB_EDITIONS.values())})
 
 
-def plan(default_edition: str) -> Dict[str, str]:
-    """``{chart values key: published image name}`` for every image the chart runs."""
-    return {**SLOTS, WEB_SLOT: web_image(default_edition)}
+def plan(editions: Mapping[str, Tuple[KeyPath, str]] = WEB_EDITIONS) -> Dict[KeyPath, str]:
+    """``{chart values path of an image: published image name}`` for every slot the chart has."""
+    return {**SLOTS, **{slot: name for slot, name in editions.values()}}
 
 
-def settings(slots: Mapping[str, str], digests: Mapping[str, str], prefix: str) -> Dict[KeyPath, str]:
+def edition_images(edition: str, editions: Mapping[str, Tuple[KeyPath, str]] = WEB_EDITIONS) -> List[str]:
+    """The published images one edition's install runs: every shared one and its own web image."""
+    if edition not in editions:
+        raise ChartError(f"the {edition!r} edition has no published web image")
+    return sorted({*SLOTS.values(), editions[edition][1]})
+
+
+def settings(slots: Mapping[KeyPath, str], digests: Mapping[str, str], prefix: str) -> Dict[KeyPath, str]:
     """The values to write: each slot's repository and digest."""
     written = {}
-    for key, name in slots.items():
+    for slot, name in slots.items():
         repository = f"{prefix}{name}"
         if not REPOSITORY.match(repository):
             raise ChartError(f"{repository!r} is not a lower-case registry repository")
-        written[(key, "image", "repository")] = repository
-        written[(key, "image", "digest")] = digests[name]
+        written[(*slot, "repository")] = repository
+        written[(*slot, "digest")] = digests[name]
     return written
+
+
+def references(digests: Mapping[str, str], prefix: str) -> Dict[str, List[str]]:
+    """``{edition: the image references its render must run}``, for every published edition."""
+    return {edition: [f"{prefix}{name}@{digests[name]}" for name in edition_images(edition)]
+            for edition in sorted(WEB_EDITIONS)}
 
 
 # --------------------------------------------------------------------------- values.yaml
@@ -165,19 +182,30 @@ def set_values(text: str, written: Mapping[KeyPath, str]) -> str:
     return result
 
 
-def prepare(chart: Path, out: Path, digests: Mapping[str, str], prefix: str, version: str) -> List[str]:
-    """Copy the chart to ``out``, pin its images, and return the references it now names."""
+def prepare(chart: Path, out: Path, digests: Mapping[str, str], prefix: str, version: str) -> Dict[str, List[str]]:
+    """Copy the chart to ``out``, pin every image slot, and return each edition's references."""
     values_text = (chart / "values.yaml").read_text(encoding="utf-8")
     default_edition = str(yaml.safe_load(values_text)["edition"]["authEdition"])
-    written = settings(plan(default_edition), digests, prefix)
-    pinned = set_values(values_text, written)
+    if default_edition not in WEB_EDITIONS:
+        raise ChartError(f"the chart defaults to the {default_edition!r} edition, which has no published web image")
+    pinned = set_values(values_text, settings(plan(), digests, prefix))
     header = (f"# Automatos {version}. Every image below is named by the digest this release published\n"
               "# and signed; a digest wins over a tag.\n\n")
     target = out / CHART_NAME
     shutil.copytree(chart, target)
     (target / "values.yaml").write_text(header + pinned, encoding="utf-8")
-    slots = {path[0] for path in written}
-    return sorted(f"{written[(slot, 'image', 'repository')]}@{written[(slot, 'image', 'digest')]}" for slot in slots)
+    return references(digests, prefix)
+
+
+def write_render_values(directory: Path) -> List[Path]:
+    """One ``<edition>.yaml`` per published edition: the values its render is given."""
+    directory.mkdir(parents=True, exist_ok=True)
+    written = []
+    for edition in sorted(WEB_EDITIONS):
+        path = directory / f"{edition}.yaml"
+        path.write_text(yaml.safe_dump(RENDER_VALUES[edition], sort_keys=True), encoding="utf-8")
+        written.append(path)
+    return written
 
 
 # --------------------------------------------------------------------------- the render
@@ -205,7 +233,7 @@ def check_rendered(documents: Sequence[object], expected: Sequence[str], version
     images = {value for key, value in found if key == "image" and isinstance(value, str)}
     problems = [f"named by a tag, not a digest: {image}" for image in sorted(images) if tagged(image)]
     problems += [f"published but not run by the chart: {image}" for image in sorted(set(expected) - images)]
-    problems += [f"run by the chart but not published by this release: {image}"
+    problems += [f"run by the chart but not one of the images this render should run: {image}"
                  for image in sorted(images - set(expected)) if not tagged(image)]
     want = {"helm.sh/chart": f"{CHART_NAME}-{version}".replace("+", "_"), "app.kubernetes.io/version": version}
     for label, value in want.items():
@@ -214,6 +242,16 @@ def check_rendered(documents: Sequence[object], expected: Sequence[str], version
             problems.append(f"label {label} is {sorted(seen)}, not {value!r}")
     if not images:
         problems.append("the render names no image at all")
+    return problems
+
+
+def check_renders(renders: Mapping[str, Sequence[object]], expected: Mapping[str, Sequence[str]],
+                  version: str) -> List[str]:
+    """Every problem with the renders of every published edition, each named by its edition."""
+    problems = [f"{edition}: not rendered" for edition in sorted(set(expected) - set(renders))]
+    problems += [f"{edition}: rendered, but not a published edition" for edition in sorted(set(renders) - set(expected))]
+    for edition in sorted(set(expected) & set(renders)):
+        problems += [f"{edition}: {problem}" for problem in check_rendered(renders[edition], expected[edition], version)]
     return problems
 
 
@@ -273,23 +311,30 @@ def _append(path: Optional[str], text: str) -> None:
 
 
 def cmd_prepare(args: argparse.Namespace) -> int:
-    names = sorted({*SLOTS.values(), *WEB_EDITIONS.values()})
-    digests = read_digests(Path(args.digests), names)
-    references = prepare(Path(args.chart), Path(args.out), digests, args.prefix, args.version)
-    Path(args.images).write_text(json.dumps(references, indent=2) + "\n", encoding="utf-8")
-    _append(args.summary, f"### Chart {args.version}: its default images\n\n"
-            + "".join(f"- `{reference}`\n" for reference in references))
-    print("\n".join(references))
+    digests = read_digests(Path(args.digests), published_names())
+    by_edition = prepare(Path(args.chart), Path(args.out), digests, args.prefix, args.version)
+    Path(args.images).write_text(json.dumps(by_edition, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_render_values(Path(args.render_values))
+    lines = [f"- {edition}: `{reference}`\n" for edition, refs in by_edition.items() for reference in refs]
+    _append(args.summary, f"### Chart {args.version}: its default images, by edition\n\n" + "".join(lines))
+    print("".join(lines), end="")
     return 0
 
 
+def _renders(directory: Path) -> Dict[str, List[object]]:
+    """``{edition: its rendered documents}`` from ``<edition>.yaml`` files in ``directory``."""
+    return {path.stem: [doc for doc in yaml.safe_load_all(path.read_text(encoding="utf-8")) if doc]
+            for path in sorted(directory.glob("*.yaml"))}
+
+
 def cmd_check_rendered(args: argparse.Namespace) -> int:
-    documents = [doc for doc in yaml.safe_load_all(Path(args.rendered).read_text(encoding="utf-8")) if doc]
+    renders = _renders(Path(args.rendered))
     expected = json.loads(Path(args.images).read_text(encoding="utf-8"))
-    problems = check_rendered(documents, expected, args.version)
+    problems = check_renders(renders, expected, args.version)
     for problem in problems:
         print(f"::error title=Release chart::{problem}")
-    print(f"{len(documents)} manifests, {len(problems)} problems")
+    counts = ", ".join(f"{edition} {len(documents)}" for edition, documents in renders.items())
+    print(f"manifests by edition: {counts or 'none'}; {len(problems)} problems")
     return 1 if problems else 0
 
 
@@ -319,10 +364,10 @@ def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = root.add_subparsers(dest="command", required=True)
     one = commands.add_parser("prepare", help="copy the chart and pin its images by digest")
-    for flag in ("--chart", "--out", "--digests", "--prefix", "--version", "--images"):
+    for flag in ("--chart", "--out", "--digests", "--prefix", "--version", "--images", "--render-values"):
         one.add_argument(flag, required=True)
     one.add_argument("--summary")
-    two = commands.add_parser("check-rendered", help="fail on any image named by a tag")
+    two = commands.add_parser("check-rendered", help="fail on any image named by a tag, in any edition's render")
     for flag in ("--rendered", "--images", "--version"):
         two.add_argument(flag, required=True)
     three = commands.add_parser("digest", help="the digest a pushed chart's tag resolves to")

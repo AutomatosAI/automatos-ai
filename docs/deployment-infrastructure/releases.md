@@ -111,10 +111,15 @@ checked.
 5. **The chart** (`release-chart` job, after the version tags). `scripts/ci/release_chart.py`
    copies `charts/automatos`, writes each image's repository and signed digest into the
    copy's `values.yaml` (only those lines change), and `helm package` stamps it with
-   the version. The chart in the repository keeps `appVersion: "edge"`.
-6. **The chart names no tag.** The packaged chart is rendered with only
-   `existingSecret` set, and the job fails if any image is named by a tag, if a
-   published image is missing, or if its labels do not carry the version.
+   the version. The web app has one slot per published edition (`frontend.image` for
+   local, `frontend.enterpriseImage` for enterprise), and each is pinned. The chart in
+   the repository keeps `appVersion: "edge"`.
+6. **The chart names no tag, in any edition.** The packaged chart is rendered once per
+   published edition, each with `existingSecret` and the least that edition renders
+   with (made-up values, written by `release_chart.py prepare`), and the job fails if
+   an edition was not rendered, if any image is named by a tag, if an image that
+   edition runs is missing or another one appears, or if the labels do not carry the
+   version.
 7. **The chart is published, signed and checked.** It is pushed to
    `oci://ghcr.io/automatosai/charts/automatos` under the version, signed by digest,
    and its signature checked with the same command as the images.

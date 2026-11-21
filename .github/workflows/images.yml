@@ -1216,17 +1216,25 @@ jobs:
           python -m pip install --disable-pip-version-check --quiet "pyyaml==6.0.3"
           python scripts/ci/release_chart.py prepare --chart charts/automatos --out "${RUNNER_TEMP}/chart" \
             --digests "${RUNNER_TEMP}/release-digests" --prefix "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/automatos-" \
-            --version "$VERSION" --images "${RUNNER_TEMP}/images.json" --summary "$GITHUB_STEP_SUMMARY"
+            --version "$VERSION" --images "${RUNNER_TEMP}/images.json" \
+            --render-values "${RUNNER_TEMP}/render-values" --summary "$GITHUB_STEP_SUMMARY"
           helm package "${RUNNER_TEMP}/chart/automatos" --version "$VERSION" --app-version "$VERSION" \
             --destination "${RUNNER_TEMP}/dist"
 
-      # US-201: the default install of the packaged chart runs exactly the published
-      # images. The web app has one published edition today (local, the chart's default);
-      # release_chart.py refuses a second until the chart has a slot for it.
+      # US-201: an install of the packaged chart runs exactly the published images, in
+      # every published edition. One render per edition (local, the chart's default, and
+      # enterprise, PRD-277 US-505), each with existingSecret and the values file
+      # release_chart.py wrote for that edition (the least it renders with, made-up
+      # values); check-rendered fails when an edition was not rendered, or its render
+      # names an image by a tag or runs any image but that edition's published ones.
       - name: Render the packaged chart; fail on any image named by a tag
         run: |
-          helm template automatos "$PACKAGE" --set existingSecret=ci > "${RUNNER_TEMP}/rendered.yaml"
-          python scripts/ci/release_chart.py check-rendered --rendered "${RUNNER_TEMP}/rendered.yaml" \
+          mkdir -p "${RUNNER_TEMP}/rendered"
+          for values in "${RUNNER_TEMP}/render-values"/*.yaml; do
+            helm template automatos "$PACKAGE" --set existingSecret=ci --values "$values" \
+              > "${RUNNER_TEMP}/rendered/$(basename "$values")"
+          done
+          python scripts/ci/release_chart.py check-rendered --rendered "${RUNNER_TEMP}/rendered" \
             --images "${RUNNER_TEMP}/images.json" --version "$VERSION"
 
       - name: Log in to GHCR

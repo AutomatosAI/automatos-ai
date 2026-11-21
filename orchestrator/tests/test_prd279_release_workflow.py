@@ -168,9 +168,14 @@ def test_the_chart_job_packages_renders_refuses_pushes_signs_and_checks_in_that_
     package = _step("release-chart", order[0])["run"]
     assert 'helm package "${RUNNER_TEMP}/chart/automatos" --version "$VERSION" --app-version "$VERSION"' in package
     assert "release_chart.py prepare --chart charts/automatos" in package
+    assert '--render-values "${RUNNER_TEMP}/render-values"' in package
     render = _step("release-chart", order[1])["run"]
-    assert 'helm template automatos "$PACKAGE" --set existingSecret=ci >' in render
-    assert "release_chart.py check-rendered" in render
+    # Once per published edition (US-201 line 3): existingSecret and the edition's values file only.
+    assert 'for values in "${RUNNER_TEMP}/render-values"/*.yaml; do' in render
+    assert 'helm template automatos "$PACKAGE" --set existingSecret=ci --values "$values" \\' in render
+    assert '> "${RUNNER_TEMP}/rendered/$(basename "$values")"' in render
+    assert 'release_chart.py check-rendered --rendered "${RUNNER_TEMP}/rendered"' in render
+    assert "${{" not in render
 
 
 def test_a_version_that_exists_is_never_pushed_again():

@@ -4,7 +4,11 @@ The migration Job ran before the pods started. Check the API:
   kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "automatos.fullname" . }}-api
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "automatos.fullname" . }}-api 8000:8000
   curl http://localhost:8000/health/ready
-{{- if .Values.frontend.enabled }}
+{{- if and .Values.frontend.enabled (include "automatos.enterprise" .) }}
+
+The enterprise web app calls the API on its own address, so it works only where both
+answer on one host: the chart's ingress (ingress.enabled) routes the API's paths there.
+{{- else if .Values.frontend.enabled }}
 
 The published web app calls the API at http://localhost:8000 (fixed at build time),
 so forward both and open http://localhost:3000:

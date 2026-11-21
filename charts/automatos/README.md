@@ -17,7 +17,7 @@ Redis are **external**: use managed services, or anything you run yourself.
 |---|---|
 | Job `<release>-migrate` | A `pre-install`/`pre-upgrade` hook running `docker-entrypoint.sh migrate`: waits for PostgreSQL, builds an empty database, migrates, seeds, and (local edition) creates the workspace and operator. A failure fails the install or upgrade. |
 | Deployment `<release>-api` | The API. It starts uvicorn with `AUTOMATOS_SKIP_MIGRATIONS=true`, so the image's entrypoint runs no boot step and the Job is the only thing that changes the schema. **One replica**: the in-process schedulers use a per-container lock, so a second replica would run every scheduled job twice. |
-| Deployment `<release>-frontend` | The web app. |
+| Deployment `<release>-frontend` | The web app: the edition's own image, `frontend.image` (local) or `frontend.enterpriseImage` (enterprise), as `edition.authEdition` names. |
 | Deployment `<release>-worker` | The workspace worker (Code Canvas runtime). One pod, `Recreate` strategy. It runs as uid 1000 with no capability, and nothing in the container can gain privileges (`allowPrivilegeEscalation: false`). It re-owns nothing: the storage must hand its volume over writable by the pod's group (`fsGroup: 1000`), and it stops with a message that says so when it cannot write the volume. |
 | ServiceAccounts `<fullname>-api`, `<fullname>-frontend`, `<fullname>-worker`, `<fullname>-migrate` | One account for each component, so a cloud role you tie to one reaches that component only (`<fullname>` is the prefix the chart puts on every resource's name: the release name, with `-automatos` added unless the release name already contains it (release `demo`: `demo-automatos`)). The migration Job's account is a hook that runs just before the Job. Helm deletes it once the hooks succeed; after a failed Job it can be left behind until the next install or upgrade replaces it. None of them mounts a token for the cluster's own API: nothing in Automatos calls it. |
 | PVC `<release>-workspaces` | Agent files: the worker reads and writes, the API reads. Kept on `helm uninstall`. Pods on several nodes need `ReadWriteMany` storage. Not created when either side names a claim of its own (`workspaces.api.existingClaim`, `workspaces.worker.existingClaim`). |
@@ -70,7 +70,9 @@ database.
 
 Each release (a `vMAJOR.MINOR.PATCH` tag) publishes this chart to GHCR as an OCI
 artifact, with its `version` and `appVersion` set to the release's version and every
-image named by the digest that release published and signed. No checkout is needed:
+image named by the digest that release published and signed, the web image of each
+published edition included (`frontend.image` for local, `frontend.enterpriseImage` for
+enterprise). No checkout is needed:
 
 ```bash
 helm install automatos oci://ghcr.io/automatosai/charts/automatos --version 0.7.0 \
@@ -101,9 +103,11 @@ See [`values.yaml`](values.yaml). The ones you're most likely to change:
 | `edition.defaultWorkspaceId` | `00000000-…-0000000000c1` | The local workspace's id. |
 | `config` | optional services off | Extra non-secret settings for the API and the Job: a name `orchestrator/config.py` reads, e.g. `S3_ENDPOINT_URL`, `QDRANT_URL`. Rendering fails on `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (they go in the Secret), on `DOCUMENT_UPLOAD_DIR` and `DOCUMENT_STORAGE_DIR` while `api.data` is on (and, while it is off under a read-only root, on either outside the API's scratch volumes), on `HOME` under the API's read-only root (the chart sets it), and on `DATABASE_SSLMODE` and `DATABASE_SSLROOTCERT` (set `database.*`). Quote `LOCAL_REMOTE_ACCESS`: YAML reads a bare `off` as `false`, which the API refuses. |
 | `database.sslmode`, `database.caConfigMap`, `database.caKey` | empty, empty, `ca.crt` | TLS on every connection to PostgreSQL, from the API, the migration Job and the worker. `sslmode` sets `DATABASE_SSLMODE`; `verify-full` checks the server's certificate and its host name. `caConfigMap` names a ConfigMap you create in the release's namespace holding the CA that signed the server's certificate (for a managed database, the provider's bundle), under the key `caKey`: the chart mounts it read-only at `/etc/automatos/database-ca` in all three and sets `DATABASE_SSLROOTCERT` to the file. It needs `sslmode` `verify-ca` or `verify-full`. When you change the ConfigMap, the kubelet updates the mounted file after its sync delay (a minute or so); each new connection then trusts the new file, while a connection already open keeps its session until it closes, and a file with no certificate in it stops a pod at its next start. Keep the old and the new CA in one bundle until the server presents its new certificate, and restart the pods to be certain. All empty: nothing is set or mounted, and each connection behaves as before. Example: `kubectl -n automatos create configmap database-ca --from-file=ca.crt=<bundle>.pem`, then `--set database.sslmode=verify-full --set database.caConfigMap=database-ca`. |
-| `api.image.tag`, `frontend.image.tag`, `worker.image.tag` | the chart's `appVersion` (`edge`) | Pin a `sha-…` or version tag for repeatable installs (below). |
-| `api.image.digest`, `frontend.image.digest`, `worker.image.digest` | empty | `sha256:<64 hex>`: the pod runs `repository@digest`, that exact build, whatever the tag. |
-| `api.image.pullPolicy`, `frontend.image.pullPolicy`, `worker.image.pullPolicy` | empty: the chart chooses | `Always` for a tag that moves (`edge`, or a `MAJOR.MINOR` release line), `IfNotPresent` for a digest or a fixed tag. A value you set is used as given. |
+| `api.image.tag`, `frontend.image.tag`, `frontend.enterpriseImage.tag`, `worker.image.tag` | the chart's `appVersion` (`edge`) | Pin a `sha-…` or version tag for repeatable installs (below). |
+| `api.image.digest`, `frontend.image.digest`, `frontend.enterpriseImage.digest`, `worker.image.digest` | empty | `sha256:<64 hex>`: the pod runs `repository@digest`, that exact build, whatever the tag. |
+| `api.image.pullPolicy`, `frontend.image.pullPolicy`, `frontend.enterpriseImage.pullPolicy`, `worker.image.pullPolicy` | empty: the chart chooses | `Always` for a tag that moves (`edge`, or a `MAJOR.MINOR` release line), `IfNotPresent` for a digest or a fixed tag. A value you set is used as given. |
+| `frontend.enterpriseImage.repository` | `ghcr.io/automatosai/automatos-enterprise-frontend` | The enterprise edition's web image, which the chart runs in place of `frontend.image` when `edition.authEdition` is `enterprise`. Each web image is built for one edition. |
+| `frontend.mediaOrigins` | empty | Enterprise only: the origins the browser may load media from (your object storage's public host), which the web server adds to its content security policy when it starts (`MEDIA_ORIGINS`). Up to 16, separated by commas or spaces, each `https://<host>[:port]` or `https://*.<domain>.<suffix>[:port]`. Name the narrowest host that works: a wildcard is checked for shape only. Rendering fails on a value the server would refuse, and on any value in another edition. |
 | `workspaces.storageClass`, `workspaces.accessModes` | cluster default, `ReadWriteMany` | |
 | `workspaces.api.existingClaim`, `workspaces.worker.existingClaim` | empty | A claim that already exists for that side of the agent-files volume; the chart then creates none. In one namespace, a claim named for either side serves both. With `worker.namespace`, both are required (below). |
 | `worker.namespace` | empty: the release's namespace | The worker's Deployment, Service and account go there, and the API's `WORKER_INTERNAL_URL` becomes `http://<fullname>-worker.<namespace>.svc:8081`. The release's own namespace counts as empty. See "The worker in a namespace of its own" below. |
@@ -201,7 +205,8 @@ the chart pulls it `Always`: with `IfNotPresent` each node would keep whichever
 install, pin one build instead, and the chart pulls it `IfNotPresent`:
 
 - **A fixed tag:** `--set api.image.tag=sha-1a2b3c4` (and the same for `frontend`
-  and `worker`). A `sha-<7>` tag is never re-pushed.
+  and `worker`, and for the enterprise edition `frontend.enterpriseImage`). A `sha-<7>`
+  tag is never re-pushed.
 - **A digest:** `--set api.image.digest=sha256:<64 hex>`. The pod runs
   `repository@digest`; `crane digest` or `docker buildx imagetools inspect` prints
   a tag's digest.

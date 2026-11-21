@@ -59,6 +59,21 @@ tests:
           pattern: the ConfigMap database-ca \(the database's CA\)
       - matchRegexRaw:
           pattern: the account worker-account
+  - it: says the published web app calls localhost:8000 in the local edition
+    asserts:
+      - matchRegexRaw:
+          pattern: The published web app calls the API at http://localhost:8000
+  - it: says the enterprise web app needs the API on its own host, and nothing of localhost:8000 (PRD-277 US-505)
+    set:
+      edition:
+        authEdition: enterprise
+    asserts:
+      - matchRegexRaw:
+          pattern: The enterprise web app calls the API on its own address
+      - notMatchRegexRaw:
+          pattern: localhost:8000 \(fixed at build time\)
+      - notMatchRegexRaw:
+          pattern: there is no login
   - it: says there is no login when remote access is off
     asserts:
       - matchRegexRaw:
