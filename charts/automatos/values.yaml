@@ -80,6 +80,10 @@ edition:
       themeRevocations: false
       cloudSync: false
       cloudItems: false
+    # Whether people may pair their phones (PRD-277 US-601; ENTERPRISE_DEVICE_PAIRING): true or
+    # false, on by default. Each person pairs their own phone from Settings, signed in as
+    # themselves, and the phone acts as them with their current role. Set it here, never in config.
+    devicePairing: true
     oidc:
       # Required. The identity provider's issuer address, https only (OIDC_ISSUER).
       issuer: ""

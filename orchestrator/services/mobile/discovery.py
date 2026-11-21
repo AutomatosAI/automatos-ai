@@ -3,16 +3,19 @@
 ``GET /.well-known/automatos.json`` (``api/well_known.py``) answers ``build_discovery``, so one
 app binary can talk to hosted Studio and to a self-hosted install alike:
 
-* ``schema`` is ``automatos-discovery/v1``. When ``auth.modes`` later gains ``"oidc"``
-  (PRD-257, §4.11) the schema stays v1: the app treats a mode it does not know as "not
-  supported by this app version". This build never emits ``"oidc"``.
+* ``schema`` is ``automatos-discovery/v1``. ``auth.modes`` may hold ``"oidc"`` (enterprise only)
+  and the schema stays v1: the app picks the first mode it supports and treats a mode it does
+  not know as "not supported by this app version".
 * ``edition`` is the edition's name (``editions.current_name``). saas signs in with Clerk: ``auth.modes ["clerk"]`` and
   ``clerk {publishable_key, frontend_api}``, the frontend API decoded from the publishable key
   (``clerk_frontend_api``; no setting of its own). local signs in with a paired device:
   ``auth.modes ["device"]``, ``clerk`` null, and ``pairing.enabled`` only while the install
   takes paired devices (``LOCAL_REMOTE_ACCESS=paired``, ``services.mobile.remote_access``).
-  Any other way of signing in (``oidc``, the enterprise edition, until PRD-277 US-602 fills
-  it in) raises ``DiscoveryUnavailable``: never a Clerk block it would not honour.
+  enterprise (PRD-277 US-602) lists ``["oidc", "device"]``, or ``["oidc"]`` while
+  ``ENTERPRISE_DEVICE_PAIRING`` is off, with ``pairing.enabled`` to match, ``clerk`` null and
+  ``oidc {start_url}``: Automatos's own start address and nothing about the identity provider.
+  The ``local`` and ``saas`` documents carry no ``oidc`` key. Any other way of signing in raises
+  ``DiscoveryUnavailable``: never a Clerk block it would not honour.
 * ``api_url`` and ``web_url`` are ``services.mobile.urls``'s, the helpers the pair link uses
   (K15): a local install never advertises the hosted API.
 * ``push.expo`` says whether this server sends notifications through Expo's push service
@@ -55,7 +58,10 @@ DISCOVERY_SCHEMA = "automatos-discovery/v1"
 SERVER_NAME = "Automatos"
 AUTH_MODE_CLERK = "clerk"
 AUTH_MODE_DEVICE = "device"
-# PRD-277: phones cannot sign in through an organisation's identity provider in this build.
+AUTH_MODE_OIDC = "oidc"
+# PRD-277 §5.7: where a phone starts signing in, on this API (api/auth_oidc.py's /start).
+OIDC_START_PATH = "/api/v1/auth/oidc/start"
+# A sign-in kind this build has no discovery block for.
 SIGN_IN_NOT_BUILT = "this build cannot tell phones how to sign in to this edition"
 # A Clerk publishable key is one of these prefixes, then base64 of "<frontend API host>$".
 CLERK_KEY_PREFIXES = ("pk_test_", "pk_live_")
@@ -166,7 +172,19 @@ def _clerk_block() -> Dict[str, str]:
     return {"publishable_key": key, "frontend_api": frontend_api}
 
 
-def _auth_and_pairing() -> Tuple[Dict[str, Any], Dict[str, bool]]:
+def _oidc_auth_and_pairing(api_address: str) -> Tuple[Dict[str, Any], Dict[str, bool]]:
+    """Enterprise (PRD-277 US-602, §5.7): sign-in first, then pairing while ``device_pairing`` is on.
+
+    ``oidc`` holds only Automatos's own start address on this API (D-8: the phone talks to
+    Automatos, never to the identity provider), so nothing about the provider is published.
+    """
+    pairs = editions.current().device_pairing
+    modes = [AUTH_MODE_OIDC, AUTH_MODE_DEVICE] if pairs else [AUTH_MODE_OIDC]
+    auth = {"modes": modes, "clerk": None, "oidc": {"start_url": api_address.rstrip("/") + OIDC_START_PATH}}
+    return auth, {"enabled": pairs}
+
+
+def _auth_and_pairing(api_address: str) -> Tuple[Dict[str, Any], Dict[str, bool]]:
     """The ``auth`` and ``pairing`` blocks for this edition's ``sign_in`` and remote-access mode."""
     sign_in = editions.current().sign_in
     if sign_in == editions.SIGN_IN_NONE:
@@ -174,6 +192,8 @@ def _auth_and_pairing() -> Tuple[Dict[str, Any], Dict[str, bool]]:
         return auth, {"enabled": config.LOCAL_REMOTE_ACCESS == MODE_PAIRED}
     if sign_in == editions.SIGN_IN_CLERK:
         return {"modes": [AUTH_MODE_CLERK], "clerk": _clerk_block()}, {"enabled": False}
+    if sign_in == editions.SIGN_IN_OIDC:
+        return _oidc_auth_and_pairing(api_address)
     raise DiscoveryUnavailable(SIGN_IN_NOT_BUILT)
 
 
@@ -193,7 +213,7 @@ def build_discovery(request_base_url: str) -> Dict[str, Any]:
         addresses = {"api_url": api_url(request_base_url), "web_url": web_url()}
     except MobileUrlError as misconfigured:
         raise DiscoveryUnavailable(str(misconfigured)) from misconfigured
-    auth, pairing = _auth_and_pairing()
+    auth, pairing = _auth_and_pairing(addresses["api_url"])
     return {
         "schema": DISCOVERY_SCHEMA,
         "name": SERVER_NAME,

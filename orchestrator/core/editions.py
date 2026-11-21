@@ -32,6 +32,11 @@ plain true form (``SWITCH_ON``), off for anything else, so a malformed value nev
 (``core/edition_start_up.py`` refuses one at start). ``with_hosted_service_settings`` is that one
 rule.
 
+**Device pairing** (PRD-277 US-601, D-7). In an edition whose row has ``device_pairing_by_setting``
+(``enterprise``), ``current`` keeps ``device_pairing`` on only while ``ENTERPRISE_DEVICE_PAIRING``
+(``DEVICE_PAIRING_SETTING``) is a plain on form; ``config.py`` makes it on when unset (§5.10), and a
+malformed value reads as off. ``local`` and ``saas`` ignore it (``with_device_pairing_setting``).
+
 Importing this module reads no setting and imports no config, so ``config.py`` can
 use it while it is being built.
 """
@@ -81,7 +86,10 @@ class EditionCapabilities:
     profile_editable: a person's name and email are edited in Automatos.
     step_up: how a sensitive action is confirmed (``STEP_UP_*``).
     device_pairing: a phone or browser may pair with a one-time code and hold an
-        ``amd_`` token (``LOCAL_REMOTE_ACCESS`` still decides whether it must).
+        ``amd_`` token (``LOCAL_REMOTE_ACCESS`` still decides whether it must, where the
+        edition has an anonymous operator).
+    device_pairing_by_setting: ``device_pairing`` is on only while the operator's
+        ``DEVICE_PAIRING_SETTING`` says so (PRD-277 D-7).
     session_mode: the operator's own CLI sessions may run as agents
         (``CLI_RUNTIME_ENABLED`` still switches it on).
     hosts_automatos_cloud: this install is Automatos Cloud: it serves the public
@@ -137,6 +145,7 @@ class EditionCapabilities:
     profile_editable: bool
     step_up: str
     device_pairing: bool
+    device_pairing_by_setting: bool
     session_mode: bool
     hosts_automatos_cloud: bool
     calls_theme_revocations: bool
@@ -163,6 +172,7 @@ _LOCAL = EditionCapabilities(
     profile_editable=True,
     step_up=STEP_UP_SKIP,
     device_pairing=True,
+    device_pairing_by_setting=False,
     session_mode=True,
     hosts_automatos_cloud=False,
     calls_theme_revocations=True,
@@ -189,6 +199,7 @@ _SAAS = EditionCapabilities(
     profile_editable=False,
     step_up=STEP_UP_CLERK_FRESHNESS,
     device_pairing=False,
+    device_pairing_by_setting=False,
     session_mode=False,
     hosts_automatos_cloud=True,
     calls_theme_revocations=False,
@@ -208,8 +219,8 @@ _SAAS = EditionCapabilities(
 )
 
 # PRD-277 §5.1 and its decisions. Each hosted service is off here, and the operator switches each
-# one on with its own setting (D-12, US-704: hosted_services_by_setting). device_pairing is on, and
-# LOCAL_REMOTE_ACCESS still decides whether codes are minted (D-7). issues_sessions is on: a
+# one on with its own setting (D-12, US-704: hosted_services_by_setting). device_pairing is on while
+# ENTERPRISE_DEVICE_PAIRING says so (D-7, US-601: device_pairing_by_setting). issues_sessions is on: a
 # browser holds a session Automatos issues, in a cookie scripts cannot read (D-3, §5.3).
 _ENTERPRISE = EditionCapabilities(
     sign_in=SIGN_IN_OIDC,
@@ -219,6 +230,7 @@ _ENTERPRISE = EditionCapabilities(
     profile_editable=False,
     step_up=STEP_UP_REAUTH,
     device_pairing=True,
+    device_pairing_by_setting=True,
     session_mode=False,
     hosts_automatos_cloud=False,
     calls_theme_revocations=False,
@@ -255,6 +267,8 @@ HOSTED_SERVICE_SETTINGS: Mapping[str, str] = MappingProxyType({
 # off forms. A setting's value is trimmed and lower-cased first; unset is off.
 SWITCH_ON: FrozenSet[str] = frozenset({"1", "true", "yes", "on"})
 SWITCH_OFF: FrozenSet[str] = frozenset({"", "0", "false", "no", "off"})
+# PRD-277 US-601: whether phones may pair, where the row says ``device_pairing_by_setting``.
+DEVICE_PAIRING_SETTING = "ENTERPRISE_DEVICE_PAIRING"
 
 
 def _switch_text(value: Any) -> str:
@@ -287,6 +301,18 @@ def with_hosted_service_settings(
     return replace(capabilities, **switched)
 
 
+def with_device_pairing_setting(capabilities: EditionCapabilities, value: Any) -> EditionCapabilities:
+    """``capabilities``, with ``device_pairing`` off unless ``value`` is a plain on form, where the row says so.
+
+    The one place ``ENTERPRISE_DEVICE_PAIRING`` and an edition combine. Where
+    ``device_pairing_by_setting`` is off (``local``, ``saas``) the row is returned as it is. A
+    setting never turns on pairing a row holds off.
+    """
+    if not capabilities.device_pairing_by_setting:
+        return capabilities
+    return replace(capabilities, device_pairing=capabilities.device_pairing and is_switched_on(value))
+
+
 def capabilities_for(edition: str) -> EditionCapabilities:
     """The capabilities of ``edition``; ``UnknownEdition`` for one with no row.
 
@@ -311,23 +337,35 @@ def current_name() -> str:
     return name if name in CAPABILITIES else EDITION_SAAS
 
 
-def current() -> EditionCapabilities:
-    """The running edition's capabilities, with the hosted services' settings where its row takes them.
+def started_as_another(earlier: str) -> bool:
+    """Whether ``earlier``, the edition the install last started as, is not the running one.
 
-    Reads the edition, and those settings, on every call rather than once at import, so a test that
-    patches ``config.AUTH_EDITION`` or a setting sees the matching capabilities (``current_name``).
+    The one comparison of edition names outside this module's capabilities: PRD-277 US-601
+    revokes every paired device when it is true (``services/mobile/edition_change.py``).
+    """
+    return earlier != current_name()
+
+
+def current() -> EditionCapabilities:
+    """The running edition's capabilities, with the operator's settings where its row takes them.
+
+    Reads the edition, and those settings (the hosted services', and device pairing's), on every
+    call rather than once at import, so a test that patches ``config.AUTH_EDITION`` or a setting
+    sees the matching capabilities (``current_name``).
     """
     row = CAPABILITIES[current_name()]
-    if not row.hosted_services_by_setting:
+    if not (row.hosted_services_by_setting or row.device_pairing_by_setting):
         return row
     from config import config
 
     settings = {name: getattr(config, name, None) for name in HOSTED_SERVICE_SETTINGS.values()}
-    return with_hosted_service_settings(row, settings)
+    hosted = with_hosted_service_settings(row, settings)
+    return with_device_pairing_setting(hosted, getattr(config, DEVICE_PAIRING_SETTING, None))
 
 
 __all__ = [
     "CAPABILITIES",
+    "DEVICE_PAIRING_SETTING",
     "EDITION_ENTERPRISE",
     "EDITION_LOCAL",
     "EDITION_SAAS",
@@ -351,5 +389,7 @@ __all__ = [
     "current_name",
     "is_switch_form",
     "is_switched_on",
+    "started_as_another",
+    "with_device_pairing_setting",
     "with_hosted_service_settings",
 ]

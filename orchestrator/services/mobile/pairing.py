@@ -18,7 +18,8 @@ SHA-256 is kept and the token itself is returned exactly once.
   (``uq_mobile_devices_workspace_user_install``) and its device id never changes.
 * Minting a code first deletes the caller's own pending codes that have expired, so a dead
   code's row (and its hash) does not linger.
-* Pairing is a local-edition feature: on saas these refuse (``PairingUnavailable``), so a
+* Pairing exists where ``device_pairing`` is on (local; enterprise while
+  ``ENTERPRISE_DEVICE_PAIRING`` is): on saas these refuse (``PairingUnavailable``), so a
   paired row never exists there (§8), whatever calls them.
 * These functions flush and never commit: the router commits once and maps a database error
   to 409/503 by its type. Nothing here logs, so a code, a token or a hash never reaches a log.
@@ -96,7 +97,7 @@ def _unexpired(expires_at: Optional[datetime], now: datetime) -> bool:
 
 def _require_device_pairing() -> None:
     if not editions.current().device_pairing:
-        raise PairingUnavailable("pairing is a local-edition feature; saas phones sign in with Clerk")
+        raise PairingUnavailable("devices do not pair on this install")
 
 
 def _drop_expired_codes(db: Session, workspace_id: UUID, user_pk: int, now: datetime) -> None:

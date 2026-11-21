@@ -296,8 +296,11 @@ async def _boot_phase_1_core():
     from core.seeds.leader_stage import run_leader_seeds, seed_local_first_run_on_boot
     from integrations.vertical_products import seed_vertical_products_on_boot
 
-    # DDL — safe for all workers (idempotent, fast no-op when tables exist)
-    create_tables()
+    from services.mobile.edition_change import confirm_edition
+    try:  # DDL — safe for all workers (idempotent, fast no-op when tables exist)
+        create_tables()
+    finally:  # PRD-277 US-601: every worker, before it serves; no device of another edition stays live
+        confirm_edition()
 
     with boot_leader_lock(engine) as is_leader:
         if not is_leader:

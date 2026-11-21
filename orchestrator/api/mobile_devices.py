@@ -1,15 +1,19 @@
 """PRD-266 §4.3 — the Automatos Go device routes (``/api/v1/mobile``).
 
-* ``POST /pairing-codes`` — a workspace owner or admin (``require_workspace_admin``; the
-  local operator passes as super_admin) mints a one-time code that pairs a phone or a
-  browser to themselves: ``{code, expires_at, qr_payload}``. Local edition only: 404 in saas,
-  where phones sign in with Clerk.
+* ``POST /pairing-codes`` — mints a one-time code that pairs a phone or a browser to the
+  caller: ``{code, expires_at, qr_payload}``. In local, a workspace owner or admin
+  (``require_workspace_admin``; the operator passes as super_admin). In enterprise (PRD-277
+  US-601), any person signed in on the session lane, for themselves, in a workspace they are a
+  member of (``pairing_code_owner``): never a device, a key or an all-workspaces view. 404 where
+  devices never pair (saas, where phones sign in with Clerk; enterprise with
+  ``ENTERPRISE_DEVICE_PAIRING`` off).
 * ``POST /pair`` — **PUBLIC.** AGENTS.md exception 1, approved by Gerard on 20 Oct 2026
   (PRD-266 §4.10, tracking issue #1253), as PRD-264 D16 did for ``/verify``: the phone has
-  no account yet, so the one-time code is its only credential. It answers 404 unless
-  ``AUTH_EDITION=local`` and ``LOCAL_REMOTE_ACCESS=paired``. A wrong, expired or used code is
+  no account yet, so the one-time code is its only credential. It answers 404 unless devices
+  pair here and, on an install with an operator (local), ``LOCAL_REMOTE_ACCESS=paired``. A wrong, expired or used code is
   ``401 {"code": "invalid_pairing_code"}`` and nothing more, and never spends the pending
-  code. The token is in the answer exactly once.
+  code. The token is in the answer exactly once. Without an operator (enterprise) only a
+  phone pairs: ``platform`` ``web`` is 403 before the code is read.
 * ``POST /devices`` — a device-lane caller (``Bearer amd_…``) updates its own row; a Clerk
   caller upserts a ``clerk`` row by (workspace, person, ``install_id``) with no token hash
   (§8). ``{device_id, push_key}``: the key is in clear only on the first registration
@@ -44,6 +48,10 @@ header its proxy writes. Redis unreachable lets the
 attempt through and logs an ERROR naming this limiter. ``POST /devices`` is limited the same
 way, with ``mobile_devices_ip`` (the W2 review: each registration can add a push target).
 
+In enterprise a code made, a phone paired and a device revoked are each one ``audit_logs`` row
+in the same commit (``services.mobile.device_audit``). Both pairing routes first ask that no
+device paired under another edition is still live (``edition_change.ensure_confirmed``).
+
 Every answer that carries a code or a token is ``Cache-Control: no-store``. Nothing here logs
 a code, a token or a hash: a database error is logged by its type only, because its text
 carries the statement's bound parameters. The routes and the limiter are plain ``def``
@@ -69,9 +77,11 @@ from config import config
 from core import editions
 from core.auth.bearer_registry import bearer_token
 from core.auth.dependencies import RequestContext
+from core.auth import hybrid
 from core.auth.device import DEVICE_AUTH_TYPE
 from core.auth.hybrid import get_request_context_hybrid
-from core.auth.principal import resolve_user_pk
+from core.auth.principal import claimed_user_pk, resolve_user_pk
+from core.auth.session_lane import SESSION_AUTH_TYPE
 from core.auth.workspace_admin import may_see_own_workspace_health, require_workspace_admin
 from core.database.database import get_db
 from core.models.mobile_devices import (
@@ -81,10 +91,11 @@ from core.models.mobile_devices import (
     MOBILE_DEVICE_PLATFORMS,
     NAME_LENGTH,
     TIMEZONE_LENGTH,
+    MobileDevice,
 )
 from core.security.ip_bucket import ip_rate_bucket
 from core.security.rate_limiter import DEFAULT_LIMITS
-from services.mobile import devices, pairing
+from services.mobile import device_audit, devices, edition_change, pairing
 from services.mobile.urls import MobileUrlError
 from services.push.payload import OPTIONAL_PUSH_TYPES
 
@@ -112,6 +123,11 @@ NO_STORE_HEADERS = {"Cache-Control": "no-store"}
 NOT_FOUND = "Not Found"
 NO_WORKSPACE = "Choose a workspace first."
 NO_PERSON = "A device is paired to a person, and this caller is not one."
+PAIR_FROM_THE_BROWSER = "Pair a phone from Automatos in your browser, signed in as yourself."
+PAIR_IN_YOUR_WORKSPACE = "Pair a phone from a workspace you are a member of."
+# Only where an install has an operator does a browser pair; elsewhere a browser signs in.
+WEB_PLATFORM = "web"
+PHONES_ONLY = "Only a phone pairs with this install: sign in to Automatos in your browser."
 RATE_LIMITED_DETAIL = "Too many pairing attempts from this address. Try again later."
 DEVICES_RATE_LIMITED_DETAIL = "Too many device registrations from this address. Try again later."
 CONCURRENT_CHANGE = "This device changed at the same moment. Try again."
@@ -214,16 +230,52 @@ class UpdateDeviceRequest(BaseModel):
 
 
 def _require_device_pairing() -> None:
-    """404 where devices never pair (``device_pairing`` off): saas phones sign in with Clerk."""
+    """404 where devices never pair (``device_pairing`` off): saas phones sign in with Clerk.
+
+    Then 503 while this process cannot confirm no device of another edition is live.
+    """
     if not editions.current().device_pairing:
         raise HTTPException(status_code=404, detail=NOT_FOUND)
+    edition_change.ensure_confirmed()
 
 
 def _require_paired_mode() -> None:
-    """404 unless this local install takes paired devices (``LOCAL_REMOTE_ACCESS=paired``)."""
+    """404 unless this install takes paired devices.
+
+    On an install with an operator (local) that is ``LOCAL_REMOTE_ACCESS=paired``; elsewhere
+    (enterprise) ``device_pairing`` alone, which ``ENTERPRISE_DEVICE_PAIRING`` decides.
+    """
     _require_device_pairing()
-    if config.LOCAL_REMOTE_ACCESS != PAIRED_MODE:
+    if editions.current().anonymous_operator and config.LOCAL_REMOTE_ACCESS != PAIRED_MODE:
         raise HTTPException(status_code=404, detail=NOT_FOUND)
+
+
+def pairing_code_owner(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> RequestContext:
+    """Who may make a pairing code, which pairs a device to its maker.
+
+    Where one install holds many people (``multi_person``: enterprise), a person signed in on the
+    session lane, in a workspace whose member they are by the device lane's own rule
+    (``hybrid._user_pk_is_workspace_member``), so a code is never made that its device could not
+    use; any workspace role. A device, a key or an install admin's all-workspaces view is 403.
+    Elsewhere (local) a workspace owner or admin, the operator included, as before.
+    """
+    if not editions.current().multi_person:
+        return require_workspace_admin(ctx, db)
+    person = claimed_user_pk(ctx) if ctx.auth_type == SESSION_AUTH_TYPE else None
+    if person is None:
+        raise HTTPException(status_code=403, detail=PAIR_FROM_THE_BROWSER)
+    if ctx.admin_all_workspaces or ctx.workspace_id is None \
+            or not hybrid._user_pk_is_workspace_member(db, ctx.workspace_id, person):
+        raise HTTPException(status_code=403, detail=PAIR_IN_YOUR_WORKSPACE)
+    return ctx
+
+
+def _browser(request: Request) -> Dict[str, Optional[str]]:
+    """The caller's address and browser, for an audit row."""
+    return {"ip_address": get_client_ip(request), "user_agent": request.headers.get("user-agent")}
 
 
 @dataclass(frozen=True)
@@ -338,15 +390,23 @@ def _found(value: Optional[T]) -> T:
 def create_pairing_code(
     request: Request,
     response: Response,
-    ctx: RequestContext = Depends(require_workspace_admin),
+    ctx: RequestContext = Depends(pairing_code_owner),
     db: Session = Depends(get_db),
 ) -> Dict[str, str]:
     """Mint a one-time code that pairs a phone or a browser to the caller. Shown once; ten minutes."""
     user_pk = _person(db, ctx)
     base_url = str(request.base_url)
+
+    def issue() -> pairing.PairingCode:
+        made = pairing.create_pairing_code(db, ctx.workspace_id, user_pk, request_base_url=base_url)
+        if device_audit.records_devices():
+            device_audit.stage(db, action=device_audit.PAIRING_CODE_CREATED, workspace_id=ctx.workspace_id,
+                               actor=user_pk, details={"expires_at": made.expires_at.isoformat()},
+                               **_browser(request))
+        return made
+
     try:
-        issued = _write(db, lambda: pairing.create_pairing_code(
-            db, ctx.workspace_id, user_pk, request_base_url=base_url))
+        issued = _write(db, issue)
     except MobileUrlError as misconfigured:
         logger.error("pairing code refused: %s", misconfigured)
         raise HTTPException(status_code=500, detail=NOT_SET_UP.format(reason=misconfigured)) from misconfigured
@@ -355,10 +415,22 @@ def create_pairing_code(
 
 
 @router.post("/pair", dependencies=[Depends(_require_paired_mode), Depends(limit_pair_attempts_per_ip)])
-def pair(body: PairRequest, response: Response, db: Session = Depends(get_db)) -> Dict[str, str]:
+def pair(body: PairRequest, request: Request, response: Response, db: Session = Depends(get_db)) -> Dict[str, str]:
     """Exchange a one-time code for a device token, returned exactly once (PUBLIC: module docstring)."""
-    paired = _write(db, lambda: pairing.pair_device(
-        db, body.code, body.name, body.platform, body.app_version, body.install_id))
+
+    if body.platform == WEB_PLATFORM and not editions.current().anonymous_operator:
+        raise HTTPException(status_code=403, detail=PHONES_ONLY)  # before the code is read: it stays usable
+
+    def claim() -> Optional[pairing.PairedDevice]:
+        claimed = pairing.pair_device(db, body.code, body.name, body.platform, body.app_version, body.install_id)
+        if claimed is not None and device_audit.records_devices():
+            person = db.get(MobileDevice, claimed.device_id).user_id
+            device_audit.stage(db, action=device_audit.DEVICE_PAIRED, workspace_id=claimed.workspace_id,
+                               actor=person, resource_id=claimed.device_id,
+                               details={"platform": body.platform}, **_browser(request))
+        return claimed
+
+    paired = _write(db, claim)
     if paired is None:
         raise HTTPException(status_code=401, detail={"code": INVALID_PAIRING_CODE})
     response.headers.update(NO_STORE_HEADERS)
@@ -413,12 +485,23 @@ def update_device(
 @router.delete("/devices/{device_id}")
 def revoke_device(
     device_id: UUID,
+    request: Request,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Revoke a device (its person, or a workspace owner/admin); its next call is 401 device_revoked."""
     caller = _caller(db, ctx, workspace_view=True)
-    return _found(_write(db, lambda: devices.revoke_device(db, caller, device_id))).to_dict()
+
+    def revoke() -> Optional[MobileDevice]:
+        revoked = devices.revoke_device(db, caller, device_id)
+        if revoked is not None and device_audit.records_devices():
+            device_audit.stage(db, action=device_audit.DEVICE_REVOKED, workspace_id=caller.workspace_id,
+                               actor=caller.user_pk, resource_id=revoked.id,
+                               details={"reason": device_audit.REVOKED_BY_PERSON, "person": revoked.user_id},
+                               **_browser(request))
+        return revoked
+
+    return _found(_write(db, revoke)).to_dict()
 
 
 @router.post("/devices/{device_id}/rotate")

@@ -50,6 +50,8 @@ from an id that does not exist.
   nothing.
 * ``revoke_persons_devices``: every device of one person, in every workspace, when that person
   is deactivated (PRD-277 US-303); each revoked as ``revoke_device`` revokes one.
+* ``revoke_every_paired_device``: every paired device of the install, when it starts as another
+  edition (PRD-277 US-601, ``services.mobile.edition_change``).
 * ``rotate_token``: the device lane on its own device, presenting its CURRENT token. The
   new token is returned once; the old one stays valid for
   ``MOBILE_TOKEN_ROTATION_OVERLAP_SECONDS``. A token already rotated out may not rotate
@@ -415,6 +417,23 @@ def revoke_persons_devices(db: Session, user_id: int, revoked_by: Optional[int],
         _assign(device, _revoked(device, revoked_by, moment))
     db.flush()
     return len(rows)
+
+
+def revoke_every_paired_device(db: Session, now: datetime) -> List[MobileDevice]:
+    """Cut off every paired device of the install, pending codes included (PRD-277 US-601).
+
+    When the install starts as another edition (``services.mobile.edition_change``). Each is revoked
+    as ``revoke_device`` revokes one, by nobody (``revoked_by`` empty), its token hash kept so its
+    next call is told ``device_revoked``. Returns the rows revoked; flushes, never commits.
+    """
+    rows = db.query(MobileDevice).filter(
+        MobileDevice.kind == MobileDeviceKind.PAIRED.value,
+        MobileDevice.status != MobileDeviceStatus.REVOKED.value,
+    ).with_for_update().all()
+    for device in rows:
+        _assign(device, _revoked(device, None, now))
+    db.flush()
+    return rows
 
 
 def rotate_token(db: Session, caller: DeviceCaller, device_id: UUID,

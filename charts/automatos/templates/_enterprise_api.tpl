@@ -14,7 +14,7 @@ many organisations share, whether the CA file holds a certificate) it judges at 
 
 {{/* The settings the chart sets in the enterprise edition, which `config` must not set too. */}}
 {{- define "automatos.enterpriseSettings" -}}
-DEFAULT_WORKSPACE_ID FRONTEND_URL CLIENT_IP_HEADER CLIENT_IP_PROXY_COUNT ENTERPRISE_BOOTSTRAP_ADMINS ENTERPRISE_DEFAULT_ROLE OIDC_ISSUER OIDC_CLIENT_ID OIDC_DISPLAY_NAME OIDC_SCOPES OIDC_REQUIRED_CLAIMS OIDC_ENDPOINT_HOSTS OIDC_CA_BUNDLE_FILE ENTERPRISE_CALLS_THEME_REVOCATIONS ENTERPRISE_CALLS_CLOUD_SYNC ENTERPRISE_CALLS_CLOUD_ITEMS
+DEFAULT_WORKSPACE_ID FRONTEND_URL CLIENT_IP_HEADER CLIENT_IP_PROXY_COUNT ENTERPRISE_BOOTSTRAP_ADMINS ENTERPRISE_DEFAULT_ROLE OIDC_ISSUER OIDC_CLIENT_ID OIDC_DISPLAY_NAME OIDC_SCOPES OIDC_REQUIRED_CLAIMS OIDC_ENDPOINT_HOSTS OIDC_CA_BUNDLE_FILE ENTERPRISE_CALLS_THEME_REVOCATIONS ENTERPRISE_CALLS_CLOUD_SYNC ENTERPRISE_CALLS_CLOUD_ITEMS ENTERPRISE_DEVICE_PAIRING
 {{- end }}
 
 {{/*
@@ -165,6 +165,9 @@ edition.enterprise.clientIpProxyCount (CLIENT_IP_PROXY_COUNT) as trimmed text: e
 {{- include "automatos.validateEnterpriseRole" . }}
 {{- include "automatos.validateEnterpriseOidcText" . }}
 {{- include "automatos.validateHostedServices" . }}
+{{- if not (or (kindIs "invalid" $enterprise.devicePairing) (kindIs "bool" $enterprise.devicePairing)) }}
+{{- fail "edition.enterprise.devicePairing must be true or false (ENTERPRISE_DEVICE_PAIRING), written without quotes: the API refuses to start otherwise" }}
+{{- end }}
 {{- end }}
 
 {{/*
@@ -290,6 +293,8 @@ value left empty is not rendered, so the API's own default holds.
 - name: {{ index $pair 1 }}
   value: {{ eq (toString (index $hosted (index $pair 0))) "true" | ternary "true" "false" | quote }}
 {{- end }}
+- name: ENTERPRISE_DEVICE_PAIRING
+  value: {{ kindIs "invalid" $enterprise.devicePairing | ternary "true" (toString $enterprise.devicePairing) | quote }}
 {{- end }}
 {{- end }}
 

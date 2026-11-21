@@ -621,6 +621,8 @@ class Config:
     ENTERPRISE_CALLS_THEME_REVOCATIONS: str = (os.getenv("ENTERPRISE_CALLS_THEME_REVOCATIONS") or "false").strip().lower()
     ENTERPRISE_CALLS_CLOUD_SYNC: str = (os.getenv("ENTERPRISE_CALLS_CLOUD_SYNC") or "false").strip().lower()
     ENTERPRISE_CALLS_CLOUD_ITEMS: str = (os.getenv("ENTERPRISE_CALLS_CLOUD_ITEMS") or "false").strip().lower()
+    # PRD-277 US-601, §5.10: whether phones pair in enterprise (on when unset; read as these three are).
+    ENTERPRISE_DEVICE_PAIRING: str = (os.getenv("ENTERPRISE_DEVICE_PAIRING") or "true").strip().lower()
     # PRD-277 §5.3, D-15: sessions (core/auth/sessions.py): two clocks, a __Host- cookie and the CSRF header; a bad clock stops enterprise only.
     SESSION_IDLE_MINUTES: int = _whole_number_setting("SESSION_IDLE_MINUTES", SESSION_IDLE_MINUTES_DEFAULT)
     SESSION_ABSOLUTE_HOURS: int = _whole_number_setting("SESSION_ABSOLUTE_HOURS", SESSION_ABSOLUTE_HOURS_DEFAULT)
@@ -2873,8 +2875,9 @@ class Config:
         Raises ``RuntimeError`` (aborting boot) on a contradiction.
         """
         # PRD-266 §4.3: imported here, at boot, so config.py never imports the app.
-        from core.edition_start_up import (HOSTED_SERVICE_SETTING_NAMES, OIDC_SIGN_IN_SETTINGS, OIDC_START_UP_SETTINGS,
-                                           SESSION_SETTINGS, check_session_settings, check_start_up)
+        from core.edition_start_up import (DEVICE_PAIRING_SETTING_NAMES, HOSTED_SERVICE_SETTING_NAMES,
+                                           OIDC_SIGN_IN_SETTINGS, OIDC_START_UP_SETTINGS, SESSION_SETTINGS,
+                                           check_session_settings, check_start_up)
         from core.editions import SIGN_IN_CLERK, capabilities_for
         from services.mobile import remote_access
         capabilities = capabilities_for(self.AUTH_EDITION)
@@ -2916,7 +2919,7 @@ class Config:
         addresses = {"API_PUBLISH_ADDRESS": self.API_PUBLISH_ADDRESS, "WEB_PUBLISH_ADDRESS": self.WEB_PUBLISH_ADDRESS}
         remote_access.enforce_boot_decision(capabilities.anonymous_operator, self.LOCAL_REMOTE_ACCESS, addresses)
         check_session_settings(capabilities, {name: getattr(self, name) for name in SESSION_SETTINGS})
-        start_up = OIDC_START_UP_SETTINGS + OIDC_SIGN_IN_SETTINGS + HOSTED_SERVICE_SETTING_NAMES
+        start_up = OIDC_START_UP_SETTINGS + OIDC_SIGN_IN_SETTINGS + HOSTED_SERVICE_SETTING_NAMES + DEVICE_PAIRING_SETTING_NAMES
         check_start_up(capabilities, {**{name: getattr(self, name) for name in start_up},
                                       "FRONTEND_URL": self._FRONTEND_URL_FROM_ENV})
 

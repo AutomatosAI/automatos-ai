@@ -41,6 +41,8 @@
    brought from Automatos Cloud is withdrawn only through that list), and when
    ``ENTERPRISE_CALLS_CLOUD_ITEMS`` is on without ``ENTERPRISE_CALLS_CLOUD_SYNC`` (items arrive only
    in a Sync). No setting turns another on (``check_hosted_service_settings``).
+5. where device pairing is a setting (``device_pairing_by_setting``, PRD-277 US-601), when
+   ``ENTERPRISE_DEVICE_PAIRING`` is not a plain on or off form (``check_device_pairing_setting``).
 
 Each refusal names the setting, never its value. ``config.py`` reads these settings so that no
 value can stop another edition from starting. A correctly configured install starts.
@@ -156,6 +158,11 @@ CLOUD_SYNC_SETTING = editions.HOSTED_SERVICE_SETTINGS["calls_cloud_sync"]
 CLOUD_ITEMS_SETTING = editions.HOSTED_SERVICE_SETTINGS["calls_cloud_items"]
 HOSTED_SWITCH_PROBLEM = (
     "must be true or false (or 1/0, yes/no, on/off): true lets this install call that Automatos service"
+)
+# PRD-277 US-601: whether phones pair (``editions.DEVICE_PAIRING_SETTING``).
+DEVICE_PAIRING_SETTING_NAMES: Tuple[str, ...] = (editions.DEVICE_PAIRING_SETTING,)
+DEVICE_PAIRING_PROBLEM = (
+    "must be true or false (or 1/0, yes/no, on/off): true lets the people of this install pair their phones"
 )
 CLOUD_SYNC_NEEDS_REVOCATIONS = (
     f"needs {THEME_REVOCATIONS_SETTING}: a theme brought from Automatos Cloud is withdrawn only through "
@@ -309,16 +316,31 @@ def _rule_and_admin_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str,
 def check_start_up(capabilities: editions.EditionCapabilities, settings: Mapping[str, Optional[str]]) -> None:
     """Raise ``EditionNotReady`` when an OIDC edition, or one whose hosted services are settings, may not start.
 
-    ``settings`` maps each name in ``OIDC_START_UP_SETTINGS``, ``OIDC_SIGN_IN_SETTINGS`` and
-    ``HOSTED_SERVICE_SETTING_NAMES`` to its value (``None`` when unset). Where sign-in is OIDC, the
-    missing settings are checked first, then the sign-in settings, then the access rule, the first
-    admins and the default workspace; then, where the hosted services are settings, those
-    (``check_hosted_service_settings``). Every other edition passes untouched, and a correctly
+    ``settings`` maps each name in ``OIDC_START_UP_SETTINGS``, ``OIDC_SIGN_IN_SETTINGS``,
+    ``HOSTED_SERVICE_SETTING_NAMES`` and ``DEVICE_PAIRING_SETTING_NAMES`` to its value (``None`` when
+    unset). Where sign-in is OIDC, the missing settings are checked first, then the sign-in settings,
+    then the access rule, the first admins and the default workspace; then, where the hosted services
+    are settings, those (``check_hosted_service_settings``); then device pairing's
+    (``check_device_pairing_setting``). Every other edition passes untouched, and a correctly
     configured install passes.
     """
     if capabilities.sign_in == editions.SIGN_IN_OIDC:
         _check_oidc_sign_in(settings)
     check_hosted_service_settings(capabilities, settings)
+    check_device_pairing_setting(capabilities, settings)
+
+
+def check_device_pairing_setting(capabilities: editions.EditionCapabilities, settings: Mapping[str, Any]) -> None:
+    """Raise ``EditionNotReady`` naming ``ENTERPRISE_DEVICE_PAIRING``, never its value, when it is not a switch form.
+
+    Only where the edition reads it (``device_pairing_by_setting``): a malformed value reads as off at
+    run time, and is refused here rather than left to look like a choice.
+    """
+    if not capabilities.device_pairing_by_setting:
+        return
+    name = editions.DEVICE_PAIRING_SETTING
+    if not editions.is_switch_form(settings.get(name)):
+        raise EditionNotReady(BAD_SESSION_SETTING.format(name=name, problem=DEVICE_PAIRING_PROBLEM))
 
 
 def _check_oidc_sign_in(settings: Mapping[str, Optional[str]]) -> None:
@@ -401,6 +423,8 @@ __all__ = [
     "BAD_SESSION_SETTING",
     "CLOUD_ITEMS_NEED_SYNC",
     "CLOUD_SYNC_NEEDS_REVOCATIONS",
+    "DEVICE_PAIRING_PROBLEM",
+    "DEVICE_PAIRING_SETTING_NAMES",
     "HOSTED_SERVICE_SETTING_NAMES",
     "HOSTED_SWITCH_PROBLEM",
     "DEFAULT_ROLE_NEEDS_RULE_PROBLEM",
@@ -418,6 +442,7 @@ __all__ = [
     "SESSION_IDLE_MINUTES_MIN",
     "SESSION_SETTINGS",
     "EditionNotReady",
+    "check_device_pairing_setting",
     "check_hosted_service_settings",
     "check_session_settings",
     "check_start_up",
