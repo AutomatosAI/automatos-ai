@@ -56,7 +56,7 @@ way, with ``mobile_devices_ip`` (the W2 review: each registration can add a push
 
 In enterprise a code made, a phone paired and a device revoked are each one ``audit_logs`` row
 in the same commit (``services.mobile.device_audit``); revoking a device already revoked writes
-none. There ``POST /pairing-codes`` is also limited per person (``mobile_pairing_codes_person``,
+none. There ``POST /pairing-codes`` is also limited per person (``mobile_codes_person``,
 counted the same way), and a person holds one pending code and makes none past the device cap
 (``services.mobile.pairing``). Both pairing routes first ask that no
 device paired under another edition is still live (``edition_change.ensure_confirmed``).
@@ -123,7 +123,7 @@ RATE_LIMITER_LABEL = "mobile pairing rate limiter"
 DEVICES_RATE_LIMIT_OPERATION = "mobile_devices_ip"
 DEVICES_RATE_BUCKET_PREFIX = "mobile_devices:ip"
 DEVICES_RATE_LIMITER_LABEL = "mobile device registration rate limiter"
-CODES_RATE_LIMIT_OPERATION = "mobile_pairing_codes_person"
+CODES_RATE_LIMIT_OPERATION = "mobile_codes_person"
 CODES_RATE_BUCKET_PREFIX = "mobile_pairing_codes:person"
 CODES_RATE_LIMITER_LABEL = "mobile pairing code rate limiter"
 CODES_RATE_LIMITED_DETAIL = "Too many pairing codes made. Try again in a few minutes."
@@ -345,7 +345,7 @@ def _check_ip_limit(request: Request, ip_limit: _IpLimit) -> None:
 
 
 def limit_codes_per_person(user_pk: int) -> None:
-    """429 once this person has made ``mobile_pairing_codes_person`` codes in its window.
+    """429 once this person has made ``mobile_codes_person`` codes in its window.
 
     Only where codes are a person's own (``pairing.codes_are_a_persons_own``: enterprise).
     """
@@ -443,7 +443,7 @@ def create_pairing_code(
 ) -> Dict[str, str]:
     """Mint a one-time code that pairs a phone or a browser to the caller. Shown once; ten minutes.
 
-    In enterprise a person makes ``mobile_pairing_codes_person`` codes a window (429 beyond), holds
+    In enterprise a person makes ``mobile_codes_person`` codes a window (429 beyond), holds
     one at a time, and none while they hold the most active devices (409 ``device_limit_reached``).
     """
     user_pk = _person(db, ctx)

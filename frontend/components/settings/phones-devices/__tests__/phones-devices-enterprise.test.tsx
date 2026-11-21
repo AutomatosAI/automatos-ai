@@ -126,7 +126,10 @@ describe('Settings → Phones & devices in enterprise (PRD-277 US-601)', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     await renderEnterpriseTab()
 
-    fireEvent.click(await screen.findByRole('switch', { name: SWITCH_LABEL }))
+    // The switch is disabled until the install's answer has been read.
+    const toggle = await screen.findByRole('switch', { name: SWITCH_LABEL })
+    await waitFor(() => expect(toggle).toBeEnabled())
+    fireEvent.click(toggle)
 
     await waitFor(() => expect(signIn.startUrl).toHaveBeenCalledWith('/settings?tab=phones-devices', START))
     await waitFor(() => expect(window.location.hash).toBe('#signing-in-again'))
