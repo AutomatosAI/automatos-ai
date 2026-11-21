@@ -13,8 +13,9 @@ name: chart
 # "restricted" pod security level, and fails unless every pod is ready, every pod the
 # release makes passes "restricted", the worker's included (PRD-280 US-201), the worker
 # runs as uid 1000 in a namespace of its own with a Secret of its own (US-202) and writes
-# its volume, the API reads those files through its own claim, and every container's root
-# file system is read-only (deploy/kind/strict.sh). Then the enterprise edition (PRD-277),
+# its volume, the API reads those files through its own claim, every container's root
+# file system is read-only, and the memory store (PRD-280 US-601) runs as uid 1000 and
+# requires the key the API sends (deploy/kind/strict.sh). Then the enterprise edition (PRD-277),
 # rendered with the lane's values and deploy/kind/strict-enterprise-values.yaml: every pod
 # of it must pass "restricted" with a read-only root, and its web pod, the enterprise web
 # image built in this run, must start under "restricted", become ready, send a page to sign
@@ -122,6 +123,7 @@ jobs:
               --set worker.namespace=automatos-worker --set worker.existingSecret=ci-worker \
               --set workspaces.api.existingClaim=ci-workspaces-api \
               --set workspaces.worker.existingClaim=ci-workspaces-worker \
+              --set qdrant.enabled=true \
               | kubeconform -strict -summary -kubernetes-version "$version"
             echo "Kubernetes ${version}, the enterprise edition with the install lane's values"
             helm template ci charts/automatos --kube-version "$version" \

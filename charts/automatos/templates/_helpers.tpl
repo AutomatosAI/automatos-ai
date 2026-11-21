@@ -34,7 +34,22 @@ serviceAccount in values.yaml: (include "automatos.serviceAccountComponents" . |
 Only those that are on, in the order serviceaccount.yaml renders them.
 */}}
 {{- define "automatos.serviceAccountComponents" -}}
-api{{ if .Values.frontend.enabled }} frontend{{ end }}{{ if .Values.worker.enabled }} worker{{ end }} migrate
+api{{ if .Values.frontend.enabled }} frontend{{ end }}{{ if .Values.worker.enabled }} worker{{ end }}{{ if include "automatos.qdrantEnabled" . }} qdrant{{ end }} migrate
+{{- end }}
+
+{{/*
+The memory store (PRD-280 US-601): "true" when qdrant.enabled. Values with no qdrant key at all
+(an upgrade with --reuse-values from a chart before it) count as off.
+*/}}
+{{- define "automatos.qdrantEnabled" -}}
+{{- if (.Values.qdrant | default dict).enabled -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/* The address the API reaches the memory store at: its Service, in the release's namespace. */}}
+{{- define "automatos.qdrantUrl" -}}
+{{- printf "http://%s-qdrant:6333" (include "automatos.fullname" .) -}}
 {{- end }}
 
 {{/*
@@ -50,8 +65,8 @@ account served every pod; a value meant for it would otherwise be dropped withou
 {{- fail "serviceAccount.annotations: since chart 0.7.0 each component has its own account. Put the annotations on the account that needs them, e.g. serviceAccount.api.annotations, and remove serviceAccount.annotations" }}
 {{- end }}
 {{- range $key, $_ := $accounts }}
-{{- if not (has $key (list "create" "name" "annotations" "api" "frontend" "worker" "migrate")) }}
-{{- fail (printf "serviceAccount.%s: unknown key. The accounts are serviceAccount.api, serviceAccount.frontend (the web app), serviceAccount.worker and serviceAccount.migrate" $key) }}
+{{- if not (has $key (list "create" "name" "annotations" "api" "frontend" "worker" "qdrant" "migrate")) }}
+{{- fail (printf "serviceAccount.%s: unknown key. The accounts are serviceAccount.api, serviceAccount.frontend (the web app), serviceAccount.worker, serviceAccount.qdrant (the memory store) and serviceAccount.migrate" $key) }}
 {{- end }}
 {{- end }}
 {{- if $accounts.create }}
@@ -296,6 +311,15 @@ root, would fail at the first upload.
 {{- if hasKey $config "OIDC_CLIENT_SECRET" }}
 {{- fail "config.OIDC_CLIENT_SECRET: a secret is never a chart value. Put it in the Secret existingSecret names, under the key OIDC_CLIENT_SECRET, and remove it from config" }}
 {{- end }}
+{{- if include "automatos.qdrantEnabled" . }}
+{{- /* The memory store the chart installs (PRD-280 US-601) sets both; an empty QDRANT_URL is the default's. */}}
+{{- if (get $config "QDRANT_URL" | default "" | toString | trim) }}
+{{- fail "config.QDRANT_URL is set and qdrant.enabled is true: the chart points the API at the memory store it installs. Remove QDRANT_URL from config, or set qdrant.enabled=false to keep a store of your own" }}
+{{- end }}
+{{- if hasKey $config "QDRANT_API_KEY" }}
+{{- fail "config.QDRANT_API_KEY: a secret is never a chart value. With qdrant.enabled the API and the memory store read it from the Secret existingSecret names, under the key QDRANT_API_KEY; remove it from config" }}
+{{- end }}
+{{- end }}
 {{- if .Values.api.data.enabled }}
 {{- range $key := list "DOCUMENT_UPLOAD_DIR" "DOCUMENT_STORAGE_DIR" }}
 {{- if hasKey $config $key }}
@@ -420,13 +444,24 @@ before any of the release's ordinary resources exist.
 - name: WORKER_INTERNAL_URL
   value: {{ include "automatos.workerUrl" . | quote }}
 {{- end }}
+{{- $qdrant := include "automatos.qdrantEnabled" . }}
+{{- if $qdrant }}
+- name: QDRANT_URL
+  value: {{ include "automatos.qdrantUrl" . | quote }}
+{{- end }}
 {{- include "automatos.databaseTlsEnv" . }}
 {{- range $name, $value := .Values.config }}
+{{- if not (and $qdrant (eq $name "QDRANT_URL")) }}
 - name: {{ $name }}
   value: {{ $value | toString | quote }}
 {{- end }}
+{{- end }}
 {{- $required := list "DATABASE_URL" "REDIS_URL" "API_KEY" "CREDENTIAL_ENCRYPTION_KEY" }}
 {{- $optional := list "WORKER_INTERNAL_TOKEN" "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" }}
+{{- if $qdrant }}
+{{- /* The memory store's key (PRD-280 US-601): with it in the Secret, the store requires it and the API sends it. */}}
+{{- $optional = append $optional "QDRANT_API_KEY" }}
+{{- end }}
 {{- if and .Values.worker.enabled .Values.worker.existingSecret }}
 {{- /* The worker's own Secret must hold the token (PRD-280 US-202), so the API's must too. */}}
 {{- $required = append $required "WORKER_INTERNAL_TOKEN" }}

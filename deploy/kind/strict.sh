@@ -10,7 +10,9 @@
 #                                      lists what is on and what is not exercised)
 #   deploy/kind/strict.sh check        every pod the release makes against "restricted";
 #                                      every container's root file system read-only; the
-#                                      worker as uid 1000, sharing its files with the API
+#                                      worker as uid 1000, sharing its files with the API;
+#                                      the memory store as uid 1000 on a read-only root,
+#                                      requiring the key the API sends
 #   deploy/kind/strict.sh enterprise   the enterprise edition rendered with the lane's values
 #                                      and strict-enterprise-values.yaml: every pod of it
 #                                      against "restricted" and its read-only roots, as `check`
@@ -52,7 +54,7 @@ POD_SPECS="$ROOT/scripts/ci/chart_pod_specs.py"
 KIND_NODE="${CLUSTER:-automatos-ci}-control-plane"
 SHARED_FOLDER=/var/lib/automatos-ci/workspaces
 # The pods the probe namespace must see, and admit.
-EXPECTED_PODS=("$RELEASE-api" "$RELEASE-frontend" "$RELEASE-worker" "$RELEASE-migrate")
+EXPECTED_PODS=("$RELEASE-api" "$RELEASE-frontend" "$RELEASE-worker" "$RELEASE-migrate" "$RELEASE-qdrant")
 # Each running component's namespace.
 declare -A COMPONENT_NS=([api]="$NS" [frontend]="$NS" [worker]="$WORKER_NS")
 # The running containers whose root file system must refuse a write, each with a file of the image
@@ -69,6 +71,20 @@ SCRATCH_TMP=(api worker)
 # the file it writes on its volume, which the API must then read on its own claim.
 WORKER_UID=1000
 WORKSPACE_PROBE=/workspaces/.strict-probe
+# The memory store's one pod (PRD-280 US-601) and the user the chart runs it as. No file of its
+# image is uid 1000's, so a refused write could not tell a read-only root from a permission:
+# `check` reads the root's mount options instead. Run in the API's pod, QDRANT_ASK prints the
+# store's answer to GET /collections without the API's key, then with it.
+QDRANT_POD="$RELEASE-qdrant-0"
+QDRANT_UID=1000
+QDRANT_ASK='import os, urllib.error, urllib.request
+def ask(headers):
+    request = urllib.request.Request(os.environ["QDRANT_URL"] + "/collections", headers=headers)
+    try:
+        return urllib.request.urlopen(request, timeout=10).status
+    except urllib.error.HTTPError as error:
+        return error.code
+print(ask({}), ask({"api-key": os.environ["QDRANT_API_KEY"]}))'
 # The enterprise edition (PRD-277): its values over the lane's, the web pod started from its
 # render, and the media origin those values give the web server (frontend.mediaOrigins).
 ENTERPRISE_VALUES="$ROOT/deploy/kind/strict-enterprise-values.yaml"
@@ -122,7 +138,8 @@ prepare_namespaces() {  # PG-PASSWORD REDIS-PASSWORD
     label_namespace "$WORKER_NS" restricted
     apply_secret "$NS" automatos-secrets "DATABASE_URL=$database" "REDIS_URL=$redis" \
         "API_KEY=$(openssl rand -hex 24)" "CREDENTIAL_ENCRYPTION_KEY=$fernet" \
-        "WORKER_INTERNAL_TOKEN=$token" "OTEL_EXPORTER_OTLP_HEADERS=x-automatos-ci=1"
+        "WORKER_INTERNAL_TOKEN=$token" "OTEL_EXPORTER_OTLP_HEADERS=x-automatos-ci=1" \
+        "QDRANT_API_KEY=$(openssl rand -hex 24)"
     apply_secret "$WORKER_NS" automatos-worker-secrets "DATABASE_URL=$database" "REDIS_URL=$redis" \
         "WORKER_INTERNAL_TOKEN=$token" "OTEL_EXPORTER_OTLP_HEADERS=x-automatos-ci=1"
 }
@@ -272,6 +289,32 @@ check_worker_start() {
     return "$failures"
 }
 
+# PRD-280 US-601: the memory store runs as uid 1000 on a read-only root, and the API reaches it
+# at the address the chart gave it, with the key from the Secret; without the key it is refused.
+check_qdrant() {
+    log "The memory store runs as uid $QDRANT_UID on a read-only root, and requires the key the API sends"
+    local failures=0 uid root answer
+    uid="$(kubectl -n "$NS" exec "$QDRANT_POD" -- id -u 2>&1)" || uid="(exec failed: $uid)"
+    if [ "$uid" = "$QDRANT_UID" ]; then
+        echo "  ✓ qdrant: runs as uid $uid"
+    else
+        echo "  ✗ qdrant: runs as uid $uid, not $QDRANT_UID"; failures=$((failures + 1))
+    fi
+    root="$(kubectl -n "$NS" exec "$QDRANT_POD" -- cat /proc/mounts 2>/dev/null | awk '$2 == "/" { print $4 }')" || true
+    if [[ ",$root," == *,ro,* ]]; then
+        echo "  ✓ qdrant: its root file system is mounted read-only ($root)"
+    else
+        echo "  ✗ qdrant: its root file system is mounted '$root', not read-only"; failures=$((failures + 1))
+    fi
+    answer="$(in_component api python -c "$QDRANT_ASK" 2>&1)" || answer="(exec failed: $answer)"
+    if [ "$answer" = "401 200" ]; then
+        echo "  ✓ api: reaches the store with its key (200); without the key the store refuses (401)"
+    else
+        echo "  ✗ api: asked the store without and with its key: '$answer', not '401 200'"; failures=$((failures + 1))
+    fi
+    return "$failures"
+}
+
 cmd_check() {
     local failures=0 objects
     # Read first, so a failure to read the release stops here with helm's or kubectl's error.
@@ -280,6 +323,7 @@ cmd_check() {
     check_read_only_spec "$objects" || failures=$((failures + $?))
     check_read_only_root || failures=$((failures + $?))
     check_worker_start || failures=$((failures + $?))
+    check_qdrant || failures=$((failures + $?))
     [ "$failures" -eq 0 ] || { log "$failures check(s) failed"; return 1; }
     log "Every check passed"
 }
@@ -354,7 +398,7 @@ diagnose_namespace() {  # NAMESPACE COMPONENT...
     kubectl -n "$namespace" describe pods || true
     kubectl -n "$namespace" get pvc || true
     for component in "$@"; do
-        for target in "job/$RELEASE-$component" "deploy/$RELEASE-$component"; do
+        for target in "job/$RELEASE-$component" "deploy/$RELEASE-$component" "statefulset/$RELEASE-$component"; do
             kubectl -n "$namespace" get "$target" >/dev/null 2>&1 || continue
             log "Logs: $namespace/$target"
             kubectl -n "$namespace" logs "$target" --all-containers --tail=80 || true
@@ -368,7 +412,7 @@ cmd_diagnostics() {
     log "Diagnostics"
     kubectl get pods -A -o wide || true
     kubectl get pv || true
-    diagnose_namespace "$NS" migrate api frontend
+    diagnose_namespace "$NS" migrate api frontend qdrant
     diagnose_namespace "$WORKER_NS" worker
     if kubectl -n "$PROBE_NS" get pod "$ENTERPRISE_WEB" >/dev/null 2>&1; then
         log "The enterprise web pod in $PROBE_NS"
@@ -383,5 +427,5 @@ case "${1:-}" in
     check) cmd_check ;;
     enterprise) cmd_enterprise ;;
     diagnostics) cmd_diagnostics ;;
-    *) sed -n '2,41p' "$0"; exit 2 ;;
+    *) sed -n '2,43p' "$0"; exit 2 ;;
 esac

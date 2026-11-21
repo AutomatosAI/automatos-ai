@@ -1,0 +1,47 @@
+suite: A memory store the chart installs and one written by hand stop the API's render (PRD-280 US-601)
+# The API's template alone, so a failed render can only be reported against it (helm-unittest
+# reports a failed render against the first template, in reverse alphabetical order, that fails).
+# The migration Job shares the API's environment (automatos.apiEnv) and its checks.
+templates:
+  - templates/api-deployment.yaml
+release:
+  name: demo
+  namespace: automatos
+set:
+  existingSecret: automatos-secrets
+  qdrant:
+    enabled: true
+tests:
+  - it: renders with the default config, whose QDRANT_URL is empty
+    asserts:
+      - hasDocuments: {count: 1}
+  - it: renders with a QDRANT_URL that is only spaces, as empty
+    set:
+      config:
+        QDRANT_URL: "  "
+    asserts:
+      - hasDocuments: {count: 1}
+  - it: stops on a hand-written QDRANT_URL beside qdrant.enabled, naming both ways out
+    set:
+      config:
+        QDRANT_URL: http://qdrant.elsewhere:6333
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.QDRANT_URL is set and qdrant.enabled is true: the chart points the API at the memory store it installs. Remove QDRANT_URL from config, or set qdrant.enabled=false"
+  - it: stops on QDRANT_API_KEY in config beside qdrant.enabled, saying where it goes
+    set:
+      config:
+        QDRANT_API_KEY: not-a-real-key
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.QDRANT_API_KEY: a secret is never a chart value. With qdrant.enabled the API and the memory store read it from the Secret existingSecret names, under the key QDRANT_API_KEY; remove it from config"
+  - it: keeps a hand-written QDRANT_URL as before while qdrant.enabled is off
+    set:
+      qdrant:
+        enabled: false
+      config:
+        QDRANT_URL: http://qdrant.elsewhere:6333
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: QDRANT_URL, value: "http://qdrant.elsewhere:6333"}

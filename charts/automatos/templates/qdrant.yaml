@@ -1,0 +1,147 @@
+{{- /*
+The memory store (PRD-280 US-601): one Qdrant, as the compose file runs it, with its own disk.
+
+The image is the one Qdrant publishes, which its own documentation runs as uid 1000 with a
+read-only root as long as /qdrant/storage and /qdrant/snapshots are volumes
+(docs/PRDS/PRD-280-US-103-WRITE-PATHS.md, section 5). The disk is the claim the StatefulSet
+makes from its template: Helm does not own it, and the StatefulSet keeps it when it is deleted
+(Retain), so `helm uninstall` leaves it, and an install of the same release under the same
+name mounts it again.
+
+The claim template carries the selector labels only: a StatefulSet's claim templates cannot
+change after it is created, so a label that moves with the chart's version would stop every
+upgrade.
+*/ -}}
+{{- if include "automatos.qdrantEnabled" . }}
+{{- $values := .Values.qdrant }}
+{{- $image := $values.image }}
+{{- $_ := required "qdrant.image.digest is required: the memory store runs one exact build, repository@sha256:<64 hex>" $image.digest }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "automatos.fullname" . }}-qdrant
+  labels:
+    {{- include "automatos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: qdrant
+spec:
+  replicas: 1
+  serviceName: {{ include "automatos.fullname" . }}-qdrant
+  # Kubernetes' default, written out: deleting the StatefulSet, or scaling it down, keeps the claim.
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      {{- include "automatos.selectorLabels" (dict "ctx" $ "component" "qdrant") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "automatos.selectorLabels" (dict "ctx" $ "component" "qdrant") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "automatos.serviceAccountName" (dict "ctx" $ "component" "qdrant") }}
+      # A single store calls nothing in the cluster's own API.
+      automountServiceAccountToken: false
+      # The image starts as root unless told otherwise; Qdrant documents uid 1000. The storage
+      # hands the disk over to the pod's group, as it must for the API's and the worker's.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: qdrant
+          image: {{ include "automatos.image" (dict "ctx" $ "image" $image) }}
+          imagePullPolicy: {{ include "automatos.imagePullPolicy" (dict "ctx" $ "image" $image) }}
+          env:
+            # Qdrant sends usage statistics to its makers unless this is set; the store calls out to nothing.
+            - name: QDRANT__TELEMETRY_DISABLED
+              value: "true"
+            # The file the image's entrypoint reads after a crash, on a scratch volume, not the root.
+            - name: QDRANT_INIT_FILE_PATH
+              value: /qdrant/init/.qdrant-initialized
+            # With QDRANT_API_KEY in the Secret, every request but the health checks must carry it.
+            - name: QDRANT__SERVICE__API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "automatos.secretName" . }}
+                  key: QDRANT_API_KEY
+                  optional: true
+          ports:
+            - name: http
+              containerPort: 6333
+          # The health endpoints answer without the key. Loading a large store can take minutes.
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: storage
+              mountPath: /qdrant/storage
+            # Scratch: a snapshot is made here, then copied to object storage by the API's job.
+            - name: snapshots
+              mountPath: /qdrant/snapshots
+            - name: init
+              mountPath: /qdrant/init
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            {{- toYaml $values.resources | nindent 12 }}
+      volumes:
+        - name: snapshots
+          emptyDir: {}
+        - name: init
+          emptyDir: {}
+      {{- with include "automatos.placement" $values | trim }}
+      {{- . | nindent 6 }}
+      {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: storage
+        labels:
+          {{- include "automatos.selectorLabels" (dict "ctx" $ "component" "qdrant") | nindent 10 }}
+      spec:
+        accessModes:
+          {{- toYaml $values.storage.accessModes | nindent 10 }}
+        {{- with $values.storage.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $values.storage.size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "automatos.fullname" . }}-qdrant
+  labels:
+    {{- include "automatos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: qdrant
+spec:
+  selector:
+    {{- include "automatos.selectorLabels" (dict "ctx" $ "component" "qdrant") | nindent 4 }}
+  # The REST port the API uses. The store's gRPC port, 6334, is not offered.
+  ports:
+    - name: http
+      port: 6333
+      targetPort: http
+{{- end }}
