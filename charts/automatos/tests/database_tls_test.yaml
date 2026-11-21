@@ -1,0 +1,185 @@
+suite: TLS to PostgreSQL (PRD-278 W3)
+templates:
+  - templates/api-deployment.yaml
+  - templates/migrate-job.yaml
+  - templates/worker.yaml
+set:
+  existingSecret: automatos-secrets
+tests:
+  # ── left empty, the default: nothing set, nothing mounted ───────────────────
+  - it: sets neither TLS setting on the API by default
+    template: templates/api-deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DATABASE_SSLMODE}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DATABASE_SSLROOTCERT}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: database-ca}
+          any: true
+      - notContains:
+          path: spec.template.spec.volumes
+          content: {name: database-ca}
+          any: true
+  - it: leaves the migration Job with no CA volume by default, only its scratch /tmp (PRD-280 US-104)
+    template: templates/migrate-job.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DATABASE_SSLMODE}
+          any: true
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts
+          value:
+            - name: tmp
+              mountPath: /tmp
+      - equal:
+          path: spec.template.spec.volumes
+          value:
+            - name: tmp
+              emptyDir: {}
+  - it: leaves the migration Job with no volume at all on a writable root
+    template: templates/migrate-job.yaml
+    set:
+      migrations:
+        readOnlyRootFilesystem: false
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].volumeMounts
+      - notExists:
+          path: spec.template.spec.volumes
+  - it: sets neither TLS setting on the worker by default
+    template: templates/worker.yaml
+    documentIndex: 0
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DATABASE_SSLMODE}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DATABASE_SSLROOTCERT}
+          any: true
+      # The workspaces, and the scratch volumes of a read-only root (PRD-280 US-104).
+      - equal:
+          path: spec.template.spec.volumes
+          value:
+            - name: workspaces
+              persistentVolumeClaim:
+                claimName: RELEASE-NAME-automatos-workspaces
+            - name: tmp
+              emptyDir: {}
+            - name: home
+              emptyDir: {}
+
+  # ── verify-full with a CA from a ConfigMap ──────────────────────────────────
+  - it: mounts the CA read-only in the API and names the file
+    template: templates/api-deployment.yaml
+    set:
+      database: {sslmode: verify-full, caConfigMap: database-ca}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DATABASE_SSLMODE, value: verify-full}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DATABASE_SSLROOTCERT, value: /etc/automatos/database-ca/ca.crt}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: database-ca, mountPath: /etc/automatos/database-ca, readOnly: true}
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: database-ca, configMap: {name: database-ca}}
+  - it: mounts the CA read-only in the migration Job, which migrates over the same connection
+    template: templates/migrate-job.yaml
+    set:
+      database: {sslmode: verify-full, caConfigMap: database-ca, caKey: db-ca-bundle.pem}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DATABASE_SSLMODE, value: verify-full}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DATABASE_SSLROOTCERT, value: /etc/automatos/database-ca/db-ca-bundle.pem}
+      # The CA, then the scratch /tmp of a read-only root (PRD-280 US-104).
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts
+          value:
+            - name: database-ca
+              mountPath: /etc/automatos/database-ca
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      - equal:
+          path: spec.template.spec.volumes
+          value:
+            - name: database-ca
+              configMap:
+                name: database-ca
+            - name: tmp
+              emptyDir: {}
+  - it: mounts the CA read-only in the worker and gives it both settings
+    template: templates/worker.yaml
+    documentIndex: 0
+    set:
+      database: {sslmode: verify-full, caConfigMap: database-ca}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DATABASE_SSLMODE, value: verify-full}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DATABASE_SSLROOTCERT, value: /etc/automatos/database-ca/ca.crt}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: database-ca, mountPath: /etc/automatos/database-ca, readOnly: true}
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: database-ca, configMap: {name: database-ca}}
+  - it: sets the mode alone, with nothing mounted, when no CA is named
+    template: templates/api-deployment.yaml
+    set:
+      database: {sslmode: require}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DATABASE_SSLMODE, value: require}
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DATABASE_SSLROOTCERT}
+          any: true
+      - notContains:
+          path: spec.template.spec.volumes
+          content: {name: database-ca}
+          any: true
+
+  # ── values the app would refuse stop the render ─────────────────────────────
+  # A failed render is reported against the first template it fails in, and that is the
+  # worker's for all three: it takes the same settings as the API and the Job.
+  - it: stops on a CA without a mode that checks the certificate
+    template: templates/worker.yaml
+    set:
+      database: {sslmode: require, caConfigMap: database-ca}
+    asserts:
+      - failedTemplate:
+          errorPattern: "database.caConfigMap needs database.sslmode verify-ca or verify-full"
+  - it: stops on a mode libpq doesn't know
+    template: templates/worker.yaml
+    set:
+      database: {sslmode: verify}
+    asserts:
+      - failedTemplate:
+          errorPattern: "database.sslmode must be disable, allow, prefer, require, verify-ca or verify-full"
+  - it: stops on the settings in config, which the worker would not get
+    template: templates/worker.yaml
+    set:
+      config:
+        DATABASE_SSLMODE: verify-full
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.DATABASE_SSLMODE: set database.sslmode and database.caConfigMap instead"

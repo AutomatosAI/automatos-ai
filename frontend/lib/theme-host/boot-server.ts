@@ -39,6 +39,8 @@
  * (import-map.ts), and the import map is scriptSafeJson of the whole object (A0 D16).
  */
 import { isSaaS } from '@/lib/auth-edition'
+import { isEnterprise } from '@/lib/edition-name'
+import { sessionCookieFrom, sessionCookieHeader, sessionKey } from '@/lib/enterprise/server-session'
 
 import { baseThemeBoot } from './boot'
 import { parseInstalledBoot } from './boot-sanitize'
@@ -68,8 +70,13 @@ const NO_THEME_STATUSES: readonly number[] = [401, 403, 404]
 const LOG_PREFIX = '[theme-boot]'
 const JSON_TYPE = 'application/json'
 
-/** The credential a boot is fetched with: a Bearer header (SaaS) or none (local); not ok: ask nothing. */
-export type BootCredential = { readonly ok: true; readonly authorization: string | null } | { readonly ok: false }
+/**
+ * The credential a boot is fetched with: a Bearer header (SaaS), none (local), or the session
+ * cookie alone (enterprise, PRD-277 US-503: `cookie`); not ok: ask nothing.
+ */
+export type BootCredential =
+  | { readonly ok: true; readonly authorization: string | null; readonly cookie?: string }
+  | { readonly ok: false }
 
 /** Who the boot is for. The credential is read only on a cache miss. */
 export interface BootCaller {
@@ -102,11 +109,29 @@ export interface InstalledBootDeps {
 const PROCESS_BOOT_CACHE: InstalledBootCache = new Map()
 
 /**
+ * Enterprise (PRD-277 US-503): the request's session cookie, passed on alone; null without one.
+ * The cache key is the cookie's SHA-256, never the cookie, so one session's boot is never another's.
+ */
+export async function enterpriseBootCaller(cookieHeader?: string | null): Promise<BootCaller | null> {
+  try {
+    const header = cookieHeader === undefined ? (await (await import('next/headers')).headers()).get('cookie') : cookieHeader
+    const session = sessionCookieFrom(header)
+    if (session === null) return null
+    const cookie = sessionCookieHeader(session)
+    return { user: `session:${await sessionKey(session)}`, credential: async () => ({ ok: true, authorization: null, cookie }) }
+  } catch (error) {
+    console.error(LOG_PREFIX, 'could not read the session cookie', error)
+    return null
+  }
+}
+
+/**
  * SaaS: the Clerk session (null when signed out or unreadable). Local: the local operator, no
  * token. Clerk's server module is imported only here, in SaaS, so the local edition and any
  * render outside a request (where auth() refuses to run) never load it with the layout.
  */
 export async function sessionBootCaller(): Promise<BootCaller | null> {
+  if (isEnterprise) return enterpriseBootCaller()
   if (!isSaaS) return { user: LOCAL_OPERATOR, credential: async () => ({ ok: true, authorization: null }) }
   try {
     const { auth } = await import('@clerk/nextjs/server')
@@ -186,9 +211,12 @@ export async function fetchInstalledBoot(
   installId: string,
   authorization: string | null,
   deps: Pick<InstalledBootDeps, 'fetchBoot' | 'timeoutMs'>,
+  cookie?: string,
 ): Promise<ThemeBoot | null> {
-  const headers: Record<string, string> =
-    authorization === null ? { Accept: JSON_TYPE } : { Accept: JSON_TYPE, Authorization: authorization }
+  const headers: Record<string, string> = {
+    ...(authorization === null ? { Accept: JSON_TYPE } : { Accept: JSON_TYPE, Authorization: authorization }),
+    ...(cookie === undefined ? {} : { Cookie: cookie }),
+  }
   const url = `${BACKEND_URL}${THEME_BOOT_PATH}${encodeURIComponent(installId)}`
   return withDeadline(async (signal) => {
     const response = await deps.fetchBoot(url, { headers, cache: 'no-store', redirect: 'manual', signal })
@@ -258,7 +286,7 @@ export function createInstalledBootResolver(overrides: Partial<InstalledBootDeps
     if (cached !== null) return cached
     const credential = await caller.credential()
     if (!credential.ok) return baseThemeBoot(style)
-    const boot = await fetchInstalledBoot(installId, credential.authorization, deps)
+    const boot = await fetchInstalledBoot(installId, credential.authorization, deps, credential.cookie)
     if (boot === null) {
       deps.cache.delete(key)
       return baseThemeBoot(style)

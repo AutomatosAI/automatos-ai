@@ -109,6 +109,23 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     # PRD-266 W1 Connect -- the Automatos Go backend: device discovery, pairing,
     # remote access (/api/v1/mobile/*).
     RouterSpec("api.mobile_devices"),
+    # PRD-277 US-303 -- signing out, and an install admin ending sessions or deactivating a
+    # person (/api/v1/auth/*). Every route 404s unless the edition issues sessions (enterprise).
+    RouterSpec("api.auth_sessions"),
+    # PRD-277 US-402 -- signing in with the organisation's identity provider
+    # (/api/v1/auth/oidc/start, /callback). Both 404 unless the edition signs in with OIDC.
+    RouterSpec("api.auth_oidc"),
+    # PRD-277 US-603 -- the page a phone's sign-in waits on (/api/v1/auth/oidc/phone/waiting,
+    # /continue, /cancel): its confirmation cookie is the only credential. 404 unless the edition
+    # signs in with OIDC.
+    RouterSpec("api.phone_sign_in"),
+    # PRD-277 US-501/US-502 -- the web app's who-am-I (/api/v1/auth/me, its credential the session
+    # itself) and the sign-in page's provider name (/api/v1/auth/sign-in-page, public). Both 404
+    # unless the edition issues sessions (enterprise).
+    RouterSpec("api.auth_web"),
+    # PRD-277 US-504 -- the Team page's people waiting for a workspace
+    # (/api/workspaces/{workspace_id}/team/waiting): an install admin lists them and places one.
+    RouterSpec("api.team_waiting"),
     # PRD-266 W2 Push -- the operator's Expo answer (/api/v1/mobile/push-consent, local only)
     # and the workspace's question redaction (/api/v1/mobile/push-settings).
     RouterSpec("api.mobile_push"),
@@ -148,6 +165,9 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     # (GET /api/marketplace/cloud-sync/items, .../items/{kind}/{key}/disclosure, .../updates): local edition only
     # (404 hosted), any member, the caller's workspace's copies only.
     RouterSpec("api.marketplace_cloud_items"),
+    # PRD-277 US-704 -- which of Automatos's hosted services this install calls
+    # (GET /api/hosted-services): any signed-in caller; the enterprise web app reads it.
+    RouterSpec("api.hosted_services"),
 )
 
 

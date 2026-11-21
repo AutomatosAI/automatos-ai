@@ -1,4 +1,9 @@
 {{- if .Values.frontend.enabled }}
+{{- /* Each web image is built for one edition (PRD-277 US-505): frontend.enterpriseImage in enterprise. */}}
+{{- $image := .Values.frontend.image }}
+{{- if include "automatos.enterprise" . }}
+{{- $image = .Values.frontend.enterpriseImage }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,12 +28,14 @@ spec:
         runAsUser: 1001
       containers:
         - name: frontend
-          image: {{ include "automatos.image" (dict "ctx" $ "image" .Values.frontend.image) }}
-          imagePullPolicy: {{ include "automatos.imagePullPolicy" (dict "ctx" $ "image" .Values.frontend.image) }}
+          image: {{ include "automatos.image" (dict "ctx" $ "image" $image) }}
+          imagePullPolicy: {{ include "automatos.imagePullPolicy" (dict "ctx" $ "image" $image) }}
           env:
-            # Server-side route handlers (the chat proxy) reach the API in-cluster.
+            # Server-side route handlers (the chat proxy) reach the API in-cluster. The
+            # enterprise web server refuses to start without it.
             - name: BACKEND_INTERNAL_URL
               value: {{ printf "http://%s-api:8000" (include "automatos.fullname" .) | quote }}
+            {{- include "automatos.frontendEnterpriseEnv" . | nindent 12 }}
             {{- include "automatos.otelEnv" (dict "ctx" . "service" "automatos-web") | nindent 12 }}
           ports:
             - name: http
@@ -45,14 +52,22 @@ spec:
               port: http
             periodSeconds: 20
             timeoutSeconds: 5
+          # A read-only root (PRD-280 US-104) needs no scratch volume here: the server writes
+          # no file (docs/PRDS/PRD-280-US-103-WRITE-PATHS.md).
           securityContext:
             allowPrivilegeEscalation: false
+            {{- if .Values.frontend.readOnlyRootFilesystem }}
+            readOnlyRootFilesystem: true
+            {{- end }}
             capabilities:
               drop: ["ALL"]
             seccompProfile:
               type: RuntimeDefault
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
+      {{- with include "automatos.placement" .Values.frontend | trim }}
+      {{- . | nindent 6 }}
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service

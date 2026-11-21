@@ -2,6 +2,7 @@
 /**
  * API Configuration for Enhanced Automatos AI Platform
  */
+import { currentWebSocketUrl } from './websocket-url'
 
 // Environment configuration
 export const API_CONFIG = {
@@ -95,21 +96,13 @@ function generateRequestId(): string {
   return Math.random().toString(36).substring(2) + Date.now().toString(36)
 }
 
-// WebSocket configuration for real-time updates
-// Derive WebSocket URL from API URL if WS_URL not explicitly set
-const getWebSocketUrl = () => {
-  if (process.env.NEXT_PUBLIC_WS_URL) {
-    return process.env.NEXT_PUBLIC_WS_URL
-  }
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
-  if (apiUrl) {
-    return apiUrl.replace(/^https?/, 'ws') + '/ws'
-  }
-  return ''
-}
-
+// WebSocket configuration for real-time updates. PRD-279 US-401: the address is worked out by
+// lib/websocket-url.ts when URL is read (not when this module loads, where on the server there is
+// no page): NEXT_PUBLIC_WS_URL, else the absolute API address, else (enterprise) the page's own host.
 export const WEBSOCKET_CONFIG = {
-  URL: getWebSocketUrl(),
+  get URL(): string {
+    return currentWebSocketUrl()
+  },
   RECONNECT_INTERVAL: 5000, // 5 seconds
   MAX_RECONNECT_ATTEMPTS: 5,
   PING_INTERVAL: 30000, // 30 seconds

@@ -22,6 +22,8 @@ from core.models import (
     SystemHealthResponse
 )
 import logging
+# Aliased: this module's handlers name their SystemConfiguration rows `config`.
+from config import config as app_config
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.auth.workspace_permission import require_workspace_permission
@@ -384,7 +386,7 @@ def get_system_health(ctx: RequestContext = Depends(get_request_context_hybrid),
             components=components,
             system_metrics=host_metrics(cpu_percent),
             uptime="N/A",  # TODO: Track actual uptime
-            version="1.0.0",  # TODO: Get from actual version
+            version=app_config.AUTOMATOS_VERSION,  # PRD-279 US-303: the web app shows it beside the edition
             timestamp=datetime.now(),
             capabilities=capabilities,
         )

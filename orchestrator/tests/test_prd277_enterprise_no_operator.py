@@ -1,7 +1,7 @@
 """PRD-277 US-103: in enterprise there is no operator, and a request with no credential is 401.
 
-Start-up refuses the edition until Wave 4 (``test_prd277_enterprise_start_up.py``). These tests
-patch the edition past that refusal to prove the code paths are already safe:
+These tests set the edition directly, without its start-up checks
+(``test_prd277_enterprise_start_up.py``), to prove the code paths are safe:
 
 * the real request-context dependency (``hybrid.get_request_context_hybrid``, with the bearer
   registry in front of it) answers 401 to a request with no credential, in every
@@ -14,8 +14,9 @@ patch the edition past that refusal to prove the code paths are already safe:
 * a server key is bound to its own workspace and its own scope, and nothing more: the shared
   dependency refuses it and it holds no workspace permission;
 * the platform API key is kept as it is (PRD-277 D-14): an admin-level key, never the operator;
-* step-up refuses every context, a fresh Clerk one included, until US-406 builds sign-in again;
-* discovery refuses rather than offer phones a Clerk sign-in;
+* step-up refuses every context that is not a session (a device, a key, a fresh Clerk one
+  included): only a session's person can sign in again (US-406);
+* discovery never offers phones a Clerk sign-in (US-602: it offers OIDC, then pairing);
 * Auto describes an organisation's install, with the hosted tabs less Billing and Widget SDK.
 
 DB-free: the database seams are stubbed.
@@ -340,7 +341,9 @@ def test_step_up_refuses_every_context(enterprise, ctx):
         step_up.check_step_up(ctx, 10, time.time())
 
     assert refused.value.status_code == 403
-    assert refused.value.detail == {"code": step_up.STEP_UP_UNAVAILABLE_CODE, "message": step_up.STEP_UP_NOT_BUILT}
+    # PRD-277 US-406: no person who can sign in again here, so never sent to sign in again.
+    assert refused.value.detail["code"] == step_up.STEP_UP_UNAVAILABLE_CODE
+    assert not isinstance(refused.value, step_up.StepUpRequired)
 
 
 def test_step_up_never_reads_clerks_freshness(enterprise, monkeypatch):
@@ -356,11 +359,14 @@ def test_step_up_never_reads_clerks_freshness(enterprise, monkeypatch):
 # --------------------------------------------------------------------------- discovery
 
 
-def test_discovery_refuses_rather_than_offer_clerk(enterprise):
-    with pytest.raises(discovery.DiscoveryUnavailable) as refused:
-        discovery._auth_and_pairing()
+def test_discovery_never_offers_clerk(enterprise, monkeypatch):
+    # US-602 replaced US-103's refusal: enterprise now says how to sign in, and it is never Clerk.
+    monkeypatch.setattr(enterprise.config, "CLERK_PUBLISHABLE_KEY", "pk_live_" + "prd277-stand-in")
 
-    assert str(refused.value) == discovery.SIGN_IN_NOT_BUILT
+    auth, _pairing = discovery._auth_and_pairing("https://automatos.example.org")
+
+    assert discovery.AUTH_MODE_CLERK not in auth["modes"] and auth["clerk"] is None
+    assert auth["modes"][0] == discovery.AUTH_MODE_OIDC
 
 
 # --------------------------------------------------------------------------- what Auto is told

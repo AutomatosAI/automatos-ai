@@ -58,8 +58,9 @@ import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
  * Billing (PRD-265 US-011) is hosted-only — the local edition never meters — so it is not in
  * this list. The open tab is read from and written to `?tab=` (./use-settings-tab.ts).
  *
- * Automatos Cloud (PRD-270 US-270-05b) is local-only too, and only for owners and admins while the
- * Sync is on (./automatos-cloud-panel.tsx).
+ * Automatos Cloud (PRD-270 US-270-05b) shows only where this install syncs with Automatos Cloud (the local
+ * edition, or an enterprise install whose operator switched it on, PRD-277 US-704), and only for owners and
+ * admins while the Sync is on (./automatos-cloud-panel.tsx `useHasAutomatosCloudTab`).
  */
 export const LOCAL_EDITION_SETTINGS_TABS: ReadonlySet<string> = new Set([
   'profile',
@@ -97,7 +98,7 @@ export function SettingsPanel() {
     { value: 'voice', label: 'Voice', icon: Mic },
     { value: 'socials', label: 'Socials', icon: Share2 },
     { value: 'appearance', label: 'Appearance', icon: Palette },
-    ...(isLocal ? [{ value: 'automatos-cloud', label: 'Automatos Cloud', icon: Cloud }] : []),
+    { value: 'automatos-cloud', label: 'Automatos Cloud', icon: Cloud },  // useHasAutomatosCloudTab decides
     { value: 'widget-sdk', label: 'Widget SDK', icon: Puzzle },
   ]
   const tabs = (isLocal ? allTabs.filter((tab) => LOCAL_EDITION_SETTINGS_TABS.has(tab.value)) : allTabs)

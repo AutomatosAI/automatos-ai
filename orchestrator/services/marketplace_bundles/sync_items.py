@@ -4,8 +4,10 @@ W1's ``POST /api/marketplace/cloud-sync`` runs W1's theme pass (``pull.sync_cata
 once, then W1's auto-update (``updates.apply_cloud_updates``). The catalogue is fetched once: W1's result
 carries it parsed (``SyncOutcome.catalog``), and the passes read its item entries (``items_feed.Entries``).
 
-They run only when W1's pass succeeded, in the local edition with ``AUTOMATOS_CLOUD_URL`` set
-(``pull.sync_enabled``), and under W1's one-Sync-at-a-time rule: they take W1's in-process lock again
+They run only when W1's pass succeeded, where this install brings items from Automatos Cloud and syncs with
+``AUTOMATOS_CLOUD_URL`` set (``items_enabled``: ``items_gate.brings_items`` and ``pull.sync_enabled``; the
+local edition, or an enterprise install whose operator switched both on, PRD-277 US-704; the bundle and package
+fetches ask ``items_gate`` themselves too), and under W1's one-Sync-at-a-time rule: they take W1's in-process lock again
 (``pull._SYNC_LOCK``, never blocking) and hold it while they run, so a Sync pressed meanwhile gets W1's "already
 running" and runs no pass, and no theme pass overlaps them. ``sync_catalog`` releases that lock when it returns
 (K4 leaves it so), so there is a moment between W1's pass and these when another Sync can take it first: then
@@ -45,6 +47,7 @@ from sqlalchemy.orm import Session
 
 from core.models.marketplace_cloud import CLOUD_ITEM_TYPES, MARKETPLACE_CLOUD_SYNC_ROW_ID, MarketplaceCloudSync
 from services.marketplace_bundles.import_items import AGENT, ITEM_TYPES, import_items
+from services.marketplace_bundles.items_gate import brings_items
 from services.marketplace_bundles.items_feed import (
     CatalogEntry, Entries, changed_entries, fetch_bundles, rechecked_entries,
 )
@@ -91,6 +94,12 @@ class Passes(NamedTuple):
         }
 
 
+def items_enabled() -> bool:
+    """True where this install brings items from Automatos Cloud (``items_gate.brings_items``: the local edition,
+    or an enterprise install that switched it on, PRD-277 US-704) and the Sync is on here (``pull.sync_enabled``)."""
+    return brings_items() and pull.sync_enabled()
+
+
 def run_item_passes(
     db: Session, sync_result: SyncOutcome, client_factory: Optional[ClientFactory], run_async: RunAsync,
 ) -> Dict[str, Any]:
@@ -101,7 +110,7 @@ def run_item_passes(
     catalogue and the Sync is on here, or while another Sync holds W1's lock. ``run_async`` runs one coroutine
     off the event loop (``asyncio.run`` in the plain-def route's worker thread).
     """
-    if not (sync_result.ok and sync_result.catalog is not None and pull.sync_enabled()):
+    if not (sync_result.ok and sync_result.catalog is not None and items_enabled()):
         return Passes().view(sync_result.counts)
     if not pull._SYNC_LOCK.acquire(blocking=False):  # W1's one-Sync lock: sync_catalog held it for the theme pass
         logger.warning("Sync with Automatos Cloud: another Sync took the lock first, so its passes bring the items")
@@ -225,6 +234,6 @@ def _add_counts(db: Session, total: SyncCounts) -> None:
 
 
 __all__ = [
-    "COUNTS_NOT_SAVED", "ITEMS_NOT_READ", "PLUGINS_FAILED", "Passes", "counted", "item_counts", "merged", "record_error",
-    "refused_by_type", "run_item_passes",
+    "COUNTS_NOT_SAVED", "ITEMS_NOT_READ", "PLUGINS_FAILED", "Passes", "counted", "item_counts", "items_enabled",
+    "merged", "record_error", "refused_by_type", "run_item_passes",
 ]

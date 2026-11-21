@@ -35,6 +35,35 @@ DEFAULT_PUBLISH_ADDRESS = "127.0.0.1"
 # only joins the waitlist and never calls this API with a session token.
 CLERK_DEFAULT_AUTHORIZED_PARTIES = "https://ui.automatos.app,http://localhost:3000"
 
+# PRD-277 §5.3, D-15: the session clocks' defaults (2 hours idle, 12 hours absolute).
+SESSION_IDLE_MINUTES_DEFAULT = 120
+SESSION_ABSOLUTE_HOURS_DEFAULT = 12
+
+# PRD-279 US-303: what an API built without a version reports (a checkout's own build, the
+# test suite). images.yml builds every API image with AUTOMATOS_VERSION set.
+UNVERSIONED_BUILD = "dev"
+
+
+def _build_version(raw):
+    """The version the API image was built as (its AUTOMATOS_VERSION build argument); UNVERSIONED_BUILD when none."""
+    return (raw or "").strip() or UNVERSIONED_BUILD
+
+
+def _whole_number_setting(name: str, default: int):
+    """``name`` as an int; ``default`` when unset; the text as it was when it is not a number.
+
+    Never raises, so a value an edition never reads cannot stop it from starting. Where the value
+    is read (an edition that issues sessions), start-up refuses anything but a whole number
+    (``core.edition_start_up.check_session_settings``).
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return raw
+
 # Load .env file
 env_path = Path(__file__).parent.parent / '.env'
 load_dotenv(env_path)
@@ -54,23 +83,12 @@ class Config:
     POSTGRES_HOST: str = os.getenv("POSTGRES_HOST")
     POSTGRES_PORT: str = os.getenv("POSTGRES_PORT")
     DATABASE_URL: str = os.getenv("DATABASE_URL")  # If set, overrides individual params
+    # PRD-278 W3: TLS on every connection to this database (core/database/tls.py). libpq's
+    # sslmode, and the CA file verify-ca or verify-full checks against. Unset: as before.
+    DATABASE_SSLMODE: str = os.getenv("DATABASE_SSLMODE")
+    DATABASE_SSLROOTCERT: str = os.getenv("DATABASE_SSLROOTCERT")
     SQL_DEBUG: bool = os.getenv("SQL_DEBUG", "false").lower() == "true"
 
-    # PRD-70 FIX-05: Enforce SSL for database connections in production.
-    # Skipped for local dev (localhost / docker-compose internal hostnames).
-    @staticmethod
-    def get_database_url() -> str:
-        """Return DATABASE_URL with sslmode=require enforced for non-local hosts."""
-        url = Config.DATABASE_URL
-        if not url:
-            return url
-        _local_hosts = ("localhost", "127.0.0.1", "postgres", "db")
-        if any(h in url for h in _local_hosts):
-            return url
-        if "sslmode" not in url:
-            url += "?sslmode=require" if "?" not in url else "&sslmode=require"
-        return url
-    
     # =============================================================================
     # REDIS - Caching/PubSub (optional)
     # =============================================================================
@@ -213,6 +231,9 @@ class Config:
     # ONE flag the frontend mount-gate and the backend local-session posture both read.
     _AUTH_EDITION_RAW = (os.getenv("AUTH_EDITION", "saas") or "saas").strip().lower()
     AUTH_EDITION: str = _AUTH_EDITION_RAW if _AUTH_EDITION_RAW in ("local", "saas", "enterprise") else "saas"
+    # PRD-279 US-303: the version this API reports (/, /health, /api/system/health, OpenAPI):
+    # the tag's version on a release, the commit id on any other images.yml build.
+    AUTOMATOS_VERSION: str = _build_version(os.getenv("AUTOMATOS_VERSION"))
 
     # The `local` edition *implies* the no-login posture: REQUIRE_AUTH is forced
     # false so operators set ONE flag, not three that can silently contradict
@@ -570,18 +591,46 @@ class Config:
     CLERK_PUBLISHABLE_KEY: str = os.getenv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY")
     CLERK_JWKS_URL: str = os.getenv("CLERK_JWKS_URL")
     CLERK_AUDIENCE: str = os.getenv("CLERK_AUDIENCE", "")
-    # The `azp` check (core/auth/clerk_azp.py): the browser origins whose Clerk
-    # session tokens the API accepts, comma-separated. FRONTEND_URL's origin is
-    # always added. A token whose azp names any other origin gets a 401.
+    # The `azp` check (core/auth/clerk_azp.py): the browser origins whose Clerk session tokens the API
+    # accepts, comma-separated. FRONTEND_URL's origin is always added. Any other origin's azp gets a 401.
     CLERK_AUTHORIZED_PARTIES: str = os.getenv("CLERK_AUTHORIZED_PARTIES", CLERK_DEFAULT_AUTHORIZED_PARTIES)
-    # A token with no azp at all (Clerk omits it when the minting request had no
-    # Origin: native apps, tokens minted through the Backend API). false = log a
-    # warning and accept it; true = 401.
+    # A token with no azp at all (Clerk omits it with no Origin: native apps, Backend API tokens). false = warn and accept; true = 401.
     CLERK_AZP_REQUIRED: bool = os.getenv("CLERK_AZP_REQUIRED", "false").strip().lower() in ("1", "true", "yes", "on")
-    # PRD-277 §5.10: the organisation's identity provider (enterprise; core/edition_start_up.py).
-    OIDC_ISSUER: str = (os.getenv("OIDC_ISSUER") or "").strip()
+    OIDC_ISSUER: str = (os.getenv("OIDC_ISSUER") or "").strip()  # PRD-277 §5.10 (enterprise), to the next comment: read so no value stops a start; core/edition_start_up.py checks them where sign-in is OIDC
     OIDC_CLIENT_ID: str = (os.getenv("OIDC_CLIENT_ID") or "").strip()
     OIDC_CLIENT_SECRET: str = (os.getenv("OIDC_CLIENT_SECRET") or "").strip()
+    OIDC_SCOPES: str = " ".join((os.getenv("OIDC_SCOPES") or "openid profile email").split())
+    OIDC_CLAIM_EMAIL: str = (os.getenv("OIDC_CLAIM_EMAIL") or "email").strip()
+    OIDC_CLAIM_NAME: str = (os.getenv("OIDC_CLAIM_NAME") or "name").strip()
+    # The claim that, with the issuer, identifies the person (user_identities). Changing it on an install people
+    # already use changes who everyone is: each person's next sign-in matches no existing identity link.
+    OIDC_CLAIM_SUBJECT: str = (os.getenv("OIDC_CLAIM_SUBJECT") or "sub").strip()
+    # PRD-277 US-502: the sign-in button's name for the provider ("Sign in with <name>"); plain text, 1-64 characters.
+    OIDC_DISPLAY_NAME: str = (os.getenv("OIDC_DISPLAY_NAME") or "your organisation").strip()
+    # "true" only when the provider puts ONLY addresses it has verified in the claim OIDC_CLAIM_EMAIL names (not `email`).
+    # Off by default: a person who can edit that claim at the provider could take another person's address.
+    OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES: str = (
+        os.getenv("OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES") or "false").strip().lower()
+    OIDC_CA_BUNDLE_FILE: str = (os.getenv("OIDC_CA_BUNDLE_FILE") or "").strip()
+    ENTERPRISE_DEFAULT_ROLE: str = (os.getenv("ENTERPRISE_DEFAULT_ROLE") or "none").strip().lower()
+    OIDC_ENDPOINT_HOSTS: str = (os.getenv("OIDC_ENDPOINT_HOSTS") or "").strip()  # hosts besides the issuer's the metadata may name
+    OIDC_PENDING_SIGN_INS_MAX: int = _whole_number_setting("OIDC_PENDING_SIGN_INS_MAX", 10_000)  # unfinished sign-ins held at once
+    OIDC_PENDING_SIGN_INS_PER_ADDRESS: int = _whole_number_setting("OIDC_PENDING_SIGN_INS_PER_ADDRESS", 100)  # ...by one client address
+    OIDC_REQUIRED_CLAIMS: str = (os.getenv("OIDC_REQUIRED_CLAIMS") or "").strip()  # US-403: claim=value rules (core/auth/access_rule.py)
+    ENTERPRISE_BOOTSTRAP_ADMINS: str = (os.getenv("ENTERPRISE_BOOTSTRAP_ADMINS") or "").strip()  # US-405: sub:/email: entries
+    # PRD-277 US-704, D-12: in enterprise each of Automatos's hosted services is called only while its switch is on
+    # (core/editions.py reads them; local and saas ignore them). Off by default; a value that is not a plain true or
+    # false form reads as off and stops an enterprise start (core/edition_start_up.py).
+    ENTERPRISE_CALLS_THEME_REVOCATIONS: str = (os.getenv("ENTERPRISE_CALLS_THEME_REVOCATIONS") or "false").strip().lower()
+    ENTERPRISE_CALLS_CLOUD_SYNC: str = (os.getenv("ENTERPRISE_CALLS_CLOUD_SYNC") or "false").strip().lower()
+    ENTERPRISE_CALLS_CLOUD_ITEMS: str = (os.getenv("ENTERPRISE_CALLS_CLOUD_ITEMS") or "false").strip().lower()
+    # PRD-277 US-601, §5.10: whether phones pair in enterprise (on when unset; read as these three are).
+    ENTERPRISE_DEVICE_PAIRING: str = (os.getenv("ENTERPRISE_DEVICE_PAIRING") or "true").strip().lower()
+    # PRD-277 §5.3, D-15: sessions (core/auth/sessions.py): two clocks, a __Host- cookie and the CSRF header; a bad clock stops enterprise only.
+    SESSION_IDLE_MINUTES: int = _whole_number_setting("SESSION_IDLE_MINUTES", SESSION_IDLE_MINUTES_DEFAULT)
+    SESSION_ABSOLUTE_HOURS: int = _whole_number_setting("SESSION_ABSOLUTE_HOURS", SESSION_ABSOLUTE_HOURS_DEFAULT)
+    SESSION_COOKIE_NAME: str = (os.getenv("SESSION_COOKIE_NAME") or "__Host-automatos_session").strip()
+    SESSION_CSRF_HEADER: str = (os.getenv("SESSION_CSRF_HEADER") or "X-Automatos-CSRF").strip()
     DEFAULT_WORKSPACE_ID: str = os.getenv("DEFAULT_WORKSPACE_ID")
     WORKSPACE_ID: str = os.getenv("WORKSPACE_ID")
     CREDENTIAL_ENCRYPTION_KEY: str = os.getenv("CREDENTIAL_ENCRYPTION_KEY")
@@ -686,6 +735,9 @@ class Config:
     # overwrites it: no direct, TCP-proxy or private-network callers (on Railway, *.railway.internal
     # skips the edge and a caller there can send its own). Check that a forged one is replaced first.
     CLIENT_IP_HEADER: str = os.getenv("CLIENT_IP_HEADER", "")
+    # How many of your own proxies append to CLIENT_IP_HEADER (1 to 8; 1 for one load balancer): the address is that
+    # many values from its end. Unset: its first value. Text, checked in core/client_ip_settings.py.
+    CLIENT_IP_PROXY_COUNT: str = (os.getenv("CLIENT_IP_PROXY_COUNT") or "").strip()
     # PRD-274 W1: requests a minute any server key may make on the routes named for it
     # (services/key_limits.py); a key's own rate_limit_requests can only lower it.
     SERVER_KEY_REQUESTS_PER_MINUTE: int = int(os.getenv("SERVER_KEY_REQUESTS_PER_MINUTE", "600"))
@@ -2819,12 +2871,16 @@ class Config:
           to (W6 seeds it). It requires NO Clerk env.
         - PRD-266 §4.3: a ``local`` install published beyond loopback needs
           ``LOCAL_REMOTE_ACCESS`` paired or open (``services.mobile.remote_access``).
+        - PRD-277 Wave 3: where the edition issues sessions, their clocks, cookie and header
+          settings must hold (``core.edition_start_up.check_session_settings``).
         - PRD-277 US-103, last: OIDC sign-in (``enterprise``, ``core.edition_start_up``).
 
         Raises ``RuntimeError`` (aborting boot) on a contradiction.
         """
         # PRD-266 §4.3: imported here, at boot, so config.py never imports the app.
-        from core.edition_start_up import check_start_up
+        from core.edition_start_up import (DEVICE_PAIRING_SETTING_NAMES, HOSTED_SERVICE_SETTING_NAMES,
+                                           OIDC_SIGN_IN_SETTINGS, OIDC_START_UP_SETTINGS, SESSION_SETTINGS,
+                                           check_session_settings, check_start_up)
         from core.editions import SIGN_IN_CLERK, capabilities_for
         from services.mobile import remote_access
         capabilities = capabilities_for(self.AUTH_EDITION)
@@ -2865,8 +2921,9 @@ class Config:
 
         addresses = {"API_PUBLISH_ADDRESS": self.API_PUBLISH_ADDRESS, "WEB_PUBLISH_ADDRESS": self.WEB_PUBLISH_ADDRESS}
         remote_access.enforce_boot_decision(capabilities.anonymous_operator, self.LOCAL_REMOTE_ACCESS, addresses)
-        check_start_up(capabilities, {"OIDC_ISSUER": self.OIDC_ISSUER, "OIDC_CLIENT_ID": self.OIDC_CLIENT_ID,
-                                      "OIDC_CLIENT_SECRET": self.OIDC_CLIENT_SECRET,
+        check_session_settings(capabilities, {name: getattr(self, name) for name in SESSION_SETTINGS})
+        start_up = OIDC_START_UP_SETTINGS + OIDC_SIGN_IN_SETTINGS + HOSTED_SERVICE_SETTING_NAMES + DEVICE_PAIRING_SETTING_NAMES
+        check_start_up(capabilities, {**{name: getattr(self, name) for name in start_up},
                                       "FRONTEND_URL": self._FRONTEND_URL_FROM_ENV})
 
     def validate(self) -> bool:

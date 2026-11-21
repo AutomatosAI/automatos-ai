@@ -1,0 +1,39 @@
+suite: A hosted-services value the API would refuse stops the web app's render too (PRD-277 D-12)
+# The web app's template alone, so a failed render can only be reported against it (helm-unittest
+# reports a failed render against the first template, in reverse alphabetical order, that fails).
+# The enterprise web container takes Cloud sync from edition.enterprise.hostedServices.cloudSync,
+# the API's own value, so it refuses what the API's template refuses (enterprise_refusals_test.yaml).
+templates:
+  - templates/frontend.yaml
+release:
+  name: demo
+  namespace: automatos
+set:
+  existingSecret: automatos-secrets
+  edition:
+    authEdition: enterprise
+tests:
+  - it: renders with the revocation list and Cloud sync switched on
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: true, cloudSync: true}}}
+    asserts:
+      - hasDocuments:
+          count: 2
+  - it: stops on Cloud sync written as quoted text, naming it and its setting
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: true, cloudSync: "true"}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.hostedServices.cloudSync must be true or false \\(ENTERPRISE_CALLS_CLOUD_SYNC\\)"
+  - it: stops on Cloud sync switched on without the revocation list
+    set:
+      edition: {enterprise: {hostedServices: {cloudSync: true}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.hostedServices.cloudSync needs themeRevocations"
+  - it: stops on hostedServices that is not a map
+    set:
+      edition: {enterprise: {hostedServices: "all"}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.hostedServices must be a map of themeRevocations, cloudSync and cloudItems"
