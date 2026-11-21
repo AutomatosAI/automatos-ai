@@ -26,6 +26,7 @@ Each one answers one question the code asks. None of them means "is this edition
 | `step_up` | How is a sensitive action confirmed? | `skip` | `clerk_freshness` | `reauth` (D-13) |
 | `device_pairing` | Can a phone or browser pair with a one-time code and hold an `amd_` token? | yes (by `LOCAL_REMOTE_ACCESS`) | no | yes, by setting (D-7) |
 | `issues_sessions` | Does Automatos issue and resolve its own sign-in sessions: the `ams_` bearer lane, the session cookie and its cross-site check, the `/api/v1/auth` sign-out and session routes, and the session settings checked at start-up? No call site in the table below reads it: it gates only code Wave 3 added. | no | no | yes (D-3, §5.3; Wave 3) |
+| `agent_http_own_hosts_only` | May an agent's `http_request` tool call only the install's own hosts (its internal API and web hosts and the loopback names), never Automatos's public API and web hosts? New with D-12 (#1605), so no earlier comparison made it (row 58a). | no | no | yes (D-12: the platform's API is the install's) |
 | `session_mode` | Can the operator's own CLI sessions run as agents (PRD-234)? | yes (by `CLI_RUNTIME_ENABLED`) | no | no (PRD-253 O1) |
 | `hosts_automatos_cloud` | Is this install Automatos Cloud itself: the public Marketplace, the catalogue, bundles, the theme revocation feed, the moderation inbox, the isolated theme review? | no | yes | no |
 | `calls_theme_revocations` | May this install pull Automatos's theme revocation list (the pull, its schedule, its sync status and Check now)? US-704 replaced `calls_automatos_cloud` with this and the next two. Each stops requests only: what a pull stored still applies when it is off (row 96). | yes | no (it is the host) | only while `ENTERPRISE_CALLS_THEME_REVOCATIONS` is on (D-12, US-704); off by default |
@@ -142,6 +143,7 @@ A migration is history. Rewriting it to read a capability changes what an old re
 | 56 | `modules/voice/arming.py:54` | C | Name of a newly created Retell agent | `live_agent_named_apart` | "Auto Live (local)" | "Auto Live" | "Auto Live" (G-7) |
 | 57 | `modules/voice/mint.py:98` | H | Auto Live allowed by the plan | `billing` | always | by plan | always |
 | 58 | `modules/voice/mint.py:111` | H | Auto Live refused for plan or exhausted credits | `billing` | never | by plan and credits | never |
+| 58a | `modules/tools/execution/http_hosts.py:27` (read by `exec_shell.py` `_get_allowed_http_domains` and `tool_registry.py:202`) | H | The `http_request` tool's allowed hosts and the description the model reads | `agent_http_own_hosts_only` | the install's hosts and `api.automatos.app`, `ui.automatos.app` | the same | the install's hosts only (D-12, #1605) |
 
 ### `scripts/`
 
