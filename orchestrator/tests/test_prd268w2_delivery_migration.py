@@ -40,6 +40,8 @@ BASE_HEAD = "prd268_w1_proactive"
 PUSH_TYPES = ("needs_answer", "review", "auto_message", "suggestion")
 TICKET_CHECK = "ck_mobile_push_tickets_push_type"
 CATEGORIES_LINE = "push_categories JSONB NOT NULL DEFAULT '[]'"
+# What prd277_w6b_phone_sign_in_20261121 adds to mobile_devices after it, in its order.
+APPENDED_BY_LATER_REVISIONS = ("sign_in_challenge", "sign_in_install_id", "sign_in_app_link", "sign_in_confirm_hash")
 TABLES = ("mobile_push_tickets", "mobile_devices")
 
 
@@ -119,7 +121,10 @@ def test_push_categories_is_declared_the_same_way_on_both_sides():
 
     table = MobileDevice.__table__
     column = table.c.push_categories
-    assert list(table.columns)[-1] is column  # the revision appends it: last on both sides
+    # The revision appends it. Only the columns a later revision appends (PRD-277 US-603's, in
+    # that revision's order) may follow it, so the two sides still agree on the order.
+    names = [declared.name for declared in table.columns]
+    assert tuple(names[names.index("push_categories") + 1:]) == APPENDED_BY_LATER_REVISIONS
     assert column.type.compile(dialect=postgresql.dialect()) == "JSONB"
     assert column.nullable is False
     assert column.server_default.arg.text == "'[]'"

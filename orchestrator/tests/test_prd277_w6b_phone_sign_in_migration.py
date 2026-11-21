@@ -103,7 +103,7 @@ def test_the_upgrade_widens_two_checks_adds_eight_columns_and_writes_no_row():
         assert added_back.startswith(f"ALTER TABLE mobile_devices ADD CONSTRAINT {name} CHECK (")
         assert added_back.endswith(") NOT VALID;")
         assert upgrade[dropped + 2] == f"ALTER TABLE mobile_devices VALIDATE CONSTRAINT {name};"
-    added = {match[1]: (match[0], int(match[2])) for match in
+    added = {match[2]: (match[1], int(match[3])) for match in
              (re.match(r"ALTER TABLE (\w+) ADD COLUMN IF NOT EXISTS (\w+) VARCHAR\((\d+)\);$", s) for s in upgrade)
              if match}
     assert added == {**{name: ("mobile_devices", size) for name, size in DEVICE_COLUMNS.items()},
