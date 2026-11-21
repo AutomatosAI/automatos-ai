@@ -42,3 +42,12 @@ def test_the_chart_adds_no_capability_to_the_worker():
     assert 'drop: ["ALL"]' in template
     for capability in NEEDED:
         assert capability not in template, capability
+
+
+def test_the_chart_s_readme_lists_no_capability_for_the_worker():
+    """What the README says the chart deploys and how its pods run; its upgrade notes may still
+    say what 0.9.0 added."""
+    readme = (ROOT / "charts" / "automatos" / "README.md").read_text()
+    current = readme[:readme.index("## Upgrading to")]
+    for capability in [*NEEDED, "DAC_READ_SEARCH"]:
+        assert capability not in current, capability
