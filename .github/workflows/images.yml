@@ -96,8 +96,8 @@ name: images
 #     nothing.
 #   - The merge job publishes each image only under `release-staging-<run>-<attempt>`
 #     (no version, and no `sha-<short>`: the tagged commit's main push published that),
-#     signs the digest and checks the signature against this workflow at the tag,
-#     identity and issuer pinned exactly (scripts/ci/release_signing.py).
+#     signs the digest its create step pushed once the index holds just this run's scanned
+#     builds (release_digests.py), and checks it against this workflow at the tag (release_signing.py).
 #   - The release-images job, once every merge leg has, tags every image `X.Y.Z`, and
 #     `X.Y` unless the tag has a suffix (a candidate, `v0.8.0-rc.1`), by digest, in one
 #     step (scripts/ci/release_tags.py). smoke-images never runs on a tag, so `edge`
@@ -1060,16 +1060,16 @@ jobs:
           done <<< "$ANNOTATIONS"
           sources=()
           for digest in *; do sources+=("${IMAGE}@sha256:${digest}"); done
-          docker buildx imagetools create "${tag_args[@]}" "${annotation_args[@]}" "${sources[@]}"
+          docker buildx imagetools create --metadata-file "${RUNNER_TEMP}/index-metadata.json" "${tag_args[@]}" "${annotation_args[@]}" "${sources[@]}"
 
-      - name: Resolve the index digest
+      - name: The index digest, from the create step
         id: index
+        env:
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # A tag the previous step actually pushed.
-          tag=$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
-          digest=$(docker buildx imagetools inspect "$tag" --format '{{json .Manifest}}' | jq -r .digest)
-          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
-          echo "Published ${IMAGE}@${digest}" >> "$GITHUB_STEP_SUMMARY"
+          python3 scripts/ci/release_digests.py index --metadata "${RUNNER_TEMP}/index-metadata.json" \
+            --built "${RUNNER_TEMP}/digests" --image "$IMAGE" --outputs "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
@@ -1320,14 +1320,14 @@ jobs:
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           helm registry login ghcr.io --username "$REGISTRY_USER" --password-stdin <<< "$REGISTRY_TOKEN"
-          helm push "$PACKAGE" "$CHART_REGISTRY"
+          helm push "$PACKAGE" "$CHART_REGISTRY" > "${RUNNER_TEMP}/helm-push.log"
 
-      - name: Resolve the chart's digest
+      - name: The chart's digest, from the push
         id: chart
         env:
           REGISTRY_USER: ${{ github.actor }}
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python scripts/ci/release_chart.py digest --ref "${CHART}:${VERSION}" --outputs "$GITHUB_OUTPUT"
+        run: python scripts/ci/release_digests.py chart --push-log "${RUNNER_TEMP}/helm-push.log" --chart "$CHART" --version "$VERSION" --package "$PACKAGE" --outputs "$GITHUB_OUTPUT"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3

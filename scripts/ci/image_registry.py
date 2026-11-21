@@ -15,6 +15,8 @@ API with the standard library only, because the arm64 runner image has no
 * ``platform_digest(index, arch)`` picks one architecture's manifest out of the
   index BuildKit pushes. With ``provenance`` and ``sbom`` on, a per-arch push is an
   index of two manifests: the image, and an ``unknown/unknown`` attestation.
+* ``manifest_bytes(session, reference)`` is a manifest's bytes as the registry served
+  them, for a caller that checks they hash to the digest it asked for.
 * ``resolve(ref)`` is the digest a tag points at: for a published tag, the
   multi-arch index (smoke-images, PRD-262 US-003, checks that a pulled image's
   ``RepoDigests`` holds it, and promote-edge that ``edge`` lands on it).
@@ -161,11 +163,16 @@ def connect(ref: str) -> Tuple[Session, str]:
     return Session(base, repo, _token(challenge, repo)), reference
 
 
-def manifest(session: Session, reference: str) -> dict:
-    """The index or manifest ``reference`` (tag or digest) names, as JSON."""
+def manifest_bytes(session: Session, reference: str) -> bytes:
+    """The bytes of the index or manifest ``reference`` (tag or digest) names, as served."""
     url = f"{session.base}/v2/{session.repo}/manifests/{reference}"
     with _open(_request(url, MANIFEST_TYPES, session.token)) as response:
-        return json.load(response)
+        return response.read()
+
+
+def manifest(session: Session, reference: str) -> dict:
+    """The index or manifest ``reference`` (tag or digest) names, as JSON."""
+    return json.loads(manifest_bytes(session, reference))
 
 
 def resolve(ref: str) -> str:
