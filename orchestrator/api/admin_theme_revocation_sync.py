@@ -18,8 +18,11 @@ pull succeeded in the last 7 days (or ever). Both handlers check ``_require_admi
 a non-admin gets the plain 403 in either edition; then ``calls_theme_revocations``: the hosted
 edition serves the feed and pulls nothing, and an enterprise install pulls it only while its
 operator switched it on (PRD-277 US-704), so both answer 404 otherwise, with the hosted sentence
-on the hosted edition. No step-up: Check now runs the same pull the schedule runs, and copies
-only what Automatos's list says. Plain ``def`` handlers over the synchronous session (AGENTS.md).
+on the hosted edition. No step-up, in an enterprise install as in the local edition: Check now
+runs sooner the same pull the schedule runs on its own every ``THEME_REVOCATIONS_PULL_MINUTES``
+while the service is switched on, takes nothing from the caller, and copies only what Automatos's
+list says; the admin check already limits it to install admins. Plain ``def`` handlers over the
+synchronous session (AGENTS.md).
 """
 
 from __future__ import annotations

@@ -5,8 +5,9 @@ once, then W1's auto-update (``updates.apply_cloud_updates``). The catalogue is 
 carries it parsed (``SyncOutcome.catalog``), and the passes read its item entries (``items_feed.Entries``).
 
 They run only when W1's pass succeeded, where this install brings items from Automatos Cloud and syncs with
-``AUTOMATOS_CLOUD_URL`` set (``items_enabled``: ``calls_cloud_items`` and ``pull.sync_enabled``; the local
-edition, or an enterprise install whose operator switched both on, PRD-277 US-704), and under W1's one-Sync-at-a-time rule: they take W1's in-process lock again
+``AUTOMATOS_CLOUD_URL`` set (``items_enabled``: ``items_gate.brings_items`` and ``pull.sync_enabled``; the
+local edition, or an enterprise install whose operator switched both on, PRD-277 US-704; the bundle and package
+fetches ask ``items_gate`` themselves too), and under W1's one-Sync-at-a-time rule: they take W1's in-process lock again
 (``pull._SYNC_LOCK``, never blocking) and hold it while they run, so a Sync pressed meanwhile gets W1's "already
 running" and runs no pass, and no theme pass overlaps them. ``sync_catalog`` releases that lock when it returns
 (K4 leaves it so), so there is a moment between W1's pass and these when another Sync can take it first: then
@@ -44,9 +45,9 @@ from typing import Any, Callable, Dict, Iterable, Mapping, NamedTuple, Optional,
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from core import editions
 from core.models.marketplace_cloud import CLOUD_ITEM_TYPES, MARKETPLACE_CLOUD_SYNC_ROW_ID, MarketplaceCloudSync
 from services.marketplace_bundles.import_items import AGENT, ITEM_TYPES, import_items
+from services.marketplace_bundles.items_gate import brings_items
 from services.marketplace_bundles.items_feed import (
     CatalogEntry, Entries, changed_entries, fetch_bundles, rechecked_entries,
 )
@@ -94,9 +95,9 @@ class Passes(NamedTuple):
 
 
 def items_enabled() -> bool:
-    """True where this install brings items from Automatos Cloud (``calls_cloud_items``: the local edition, or an
-    enterprise install that switched it on, PRD-277 US-704) and the Sync is on here (``pull.sync_enabled``)."""
-    return editions.current().calls_cloud_items and pull.sync_enabled()
+    """True where this install brings items from Automatos Cloud (``items_gate.brings_items``: the local edition,
+    or an enterprise install that switched it on, PRD-277 US-704) and the Sync is on here (``pull.sync_enabled``)."""
+    return brings_items() and pull.sync_enabled()
 
 
 def run_item_passes(

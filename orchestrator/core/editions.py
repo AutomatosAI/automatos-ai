@@ -89,13 +89,16 @@ class EditionCapabilities:
         the moderation inbox and runs the isolated theme review.
     calls_theme_revocations: this install pulls Automatos's theme revocation list
         (``THEME_REVOCATIONS_URL`` still names it): the scheduled pull, the admin's sync
-        status and Check now, and the signing keys the list revoked.
+        status and Check now. What a pull stored (its revocations and revoked signing keys)
+        still applies while it is off: each of these three stops requests, never reads.
     calls_cloud_sync: this install syncs Marketplace themes from Automatos Cloud
         (``AUTOMATOS_CLOUD_URL`` still names it): the Cloud Sync routes and the catalogue
         pull, a Cloud theme's package on install and update, and its screenshots.
-    calls_cloud_items: this install brings agents, Playbooks, packages and plugins from
-        Automatos Cloud: the Sync's bundle and plugin downloads, and the "Items brought from
-        Cloud" routes. Items arrive only in a Sync, so it needs ``calls_cloud_sync``.
+    calls_cloud_items: this install requests agents, Playbooks, packages and plugins from
+        Automatos Cloud: the Sync's item and plugin passes and their bundle and package
+        downloads. The "Items brought from Cloud" routes read what the install holds and
+        follow ``hosts_automatos_cloud``. Items arrive only in a Sync, so it needs
+        ``calls_cloud_sync``.
     hosted_services_by_setting: each of the three above is off in the row and is the
         operator's own setting (``HOSTED_SERVICE_SETTINGS``, D-12).
     push_needs_consent: notifications leave through Expo's push service only once

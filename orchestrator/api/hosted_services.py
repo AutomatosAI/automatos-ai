@@ -9,8 +9,9 @@ Route (registered through ``RouterSpec('api.hosted_services')`` in ``router_mani
                                 ``calls_theme_revocations``, ``calls_cloud_sync``, ``calls_cloud_items``)
 ==============================  ===================================================================
 
-The enterprise web app reads it to show the pages that use each service, or to say the service is off,
-because there each one is the operator's own setting. The local and hosted web apps know the answers
+The enterprise web app reads it to show what offers or describes each service (the Sync button, Settings ›
+Automatos Cloud and what a Sync brings, the revocation sync), or to say the service is off, because there
+each one is the operator's own setting. What the install already holds is shown whatever it answers. The local and hosted web apps know the answers
 when they are built (``frontend/lib/hosted-services.ts``) and never ask. Any signed-in caller: it names
 the install's settings, no workspace's data. It reads no setting itself and calls nothing. A plain
 ``def`` (AGENTS.md).
