@@ -50,8 +50,9 @@ async def _fetch_rows(query: str, workspace_id: str, limit: int) -> List[Any]:
     ``RAGService._expand_to_parent_context``)."""
     import asyncpg
     from config import config as app_config
+    from core.database.tls import database_tls
 
-    conn = await asyncpg.connect(app_config.DATABASE_URL)
+    conn = await asyncpg.connect(app_config.DATABASE_URL, **database_tls().asyncpg_kwargs())
     try:
         return await conn.fetch(_BM25_SQL, query, workspace_id, limit)
     finally:

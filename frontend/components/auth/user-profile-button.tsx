@@ -5,7 +5,10 @@ import { useEffect, useState } from 'react'
 import { UserButton } from '@clerk/nextjs'
 import { useUser } from '@/lib/auth-hooks'
 import { isSaaS } from '@/lib/auth-edition'
+import { isEnterprise } from '@/lib/edition-name'
 import { apiClient, type ProfileResponse } from '@/lib/api-client'
+import { initialsFor } from '@/lib/initials'
+import { ProfileMenu } from './profile-menu'
 
 /**
  * PRD-37: User Profile Button Component
@@ -17,15 +20,6 @@ import { apiClient, type ProfileResponse } from '@/lib/api-client'
  * shows the operator (avatar or initials + name from GET /api/profile) and
  * links to /settings/profile, where the name Auto greets them by is set.
  */
-
-/** "Ada Lovelace" → "AL"; one word → its first two letters; else the email's first letter. */
-export function initialsFor(name: string | null | undefined, email: string | null | undefined): string {
-    const parts = (name ?? '').trim().split(/\s+/).filter(Boolean)
-    if (parts.length >= 2) return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
-    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
-    const fromEmail = (email ?? '').trim().charAt(0)
-    return fromEmail ? fromEmail.toUpperCase() : '?'
-}
 
 const LOCAL_OPERATOR_FALLBACK_LABEL = 'Operator'
 
@@ -85,6 +79,12 @@ export function UserProfileButton({
     afterSignUpUrl = '/chat',
 }: UserProfileButtonProps) {
     const { isSignedIn, isLoaded } = useUser()
+
+    // PRD-277 US-502: enterprise has accounts but no Clerk — the same menu the SaaS header shows,
+    // fed by lib/auth-hooks (the API's who-am-I); its Sign out ends the session at the API.
+    if (isEnterprise) {
+        return <ProfileMenu />
+    }
 
     // Local edition: no Clerk, no account — the slot is the operator's profile.
     // (UserButton is a Clerk COMPONENT and would throw without ClerkProvider.)

@@ -3,7 +3,7 @@
  * API Client — one transport (Clerk auth + workspace header + error handling)
  * over the backend API. Real failures surface honestly: PRD-168 S3 removed the
  * mock fallback/data system; dev uses the real PRD-153 local stack.
- * Base URL: NEXT_PUBLIC_API_URL.
+ * Base URL: NEXT_PUBLIC_API_URL; relative in enterprise (lib/api-base-url.ts).
  */
 
 import type {
@@ -35,8 +35,11 @@ import type {
   SocialPostedResponse,
   SocialVoiceExample,
 } from './socials-results-types'
+import { apiBaseUrl } from './api-base-url'
 import { reportUnauthorized } from './api-unauthorized'
 import { cloudInstallGate } from './marketplace/cloud-install-gate'
+// PRD-277 US-302: the enterprise session's cookie and cross-site header, added here and nowhere else.
+import { sessionHeadersForAnyMethod, withSession } from './enterprise/session-transport'
 
 interface ApiResponse<T = any> {
   data: T
@@ -1441,19 +1444,8 @@ class ApiClient {
     // CRITICAL: Point directly to production backend since Next.js proxy is disabled
     // Frontend runs locally on Mac, backend on remote server
 
-    // Try multiple ways to get the API URL (build-time and runtime)
-    this.baseUrl =
-      (typeof window !== 'undefined' && (window as any).__NEXT_PUBLIC_API_URL__) || // Runtime injection
-      process.env.NEXT_PUBLIC_API_URL || // Build-time env var
-      (typeof window !== 'undefined' && (window as any).NEXT_PUBLIC_API_URL) || // Runtime fallback
-      ''
-
-    // Warn if baseUrl is not set (will cause 404s)
-    if (!this.baseUrl && typeof window !== 'undefined') {
-      console.error('❌ NEXT_PUBLIC_API_URL is not set! API calls will fail.')
-      console.error('Set NEXT_PUBLIC_API_URL in Railway frontend service variables')
-      console.error('Current env:', process.env.NEXT_PUBLIC_API_URL || 'NOT SET')
-    }
+    // Try multiple ways to get the API URL (build-time and runtime); relative in enterprise (PRD-277 US-505)
+    this.baseUrl = apiBaseUrl()
 
     // Default headers - NO API KEY, will use Clerk JWT
     this.defaultHeaders = {
@@ -1485,7 +1477,7 @@ class ApiClient {
 
   /** Auth headers (Clerk JWT + workspace) for use with raw fetch. */
   async getAuthHeaders(): Promise<Record<string, string>> {
-    const headers: Record<string, string> = {}
+    const headers: Record<string, string> = { ...sessionHeadersForAnyMethod() }
     if (typeof window !== 'undefined') {
       const workspaceId = _adminWorkspaceOverride || localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
       if (workspaceId) headers['X-Workspace-ID'] = workspaceId
@@ -1567,10 +1559,10 @@ class ApiClient {
     }
 
     try {
-      const response = await fetch(url, {
+      const response = await fetch(url, withSession({
         ...config,
         redirect: 'follow' // Follow redirects automatically
-      })
+      }))
 
       if (!response.ok) throw await httpErrorOf(response)
 
@@ -1595,10 +1587,10 @@ class ApiClient {
    */
   async requestBlob(endpoint: string, options: RequestInit = {}): Promise<Blob> {
     const token = await this.clerkTokenOrNull()
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+    const response = await fetch(`${this.baseUrl}${endpoint}`, withSession({
       ...options,
       headers: this.requestHeaders(options, options.body, token),
-    })
+    }))
     if (!response.ok) throw await httpErrorOf(response)
     return response.blob()
   }
@@ -2291,11 +2283,11 @@ class ApiClient {
     const url = `${BACKEND_URL}/api/knowledge/graph/import`
     console.log('[GraphImport] Uploading to:', url, 'file:', file.name, file.size, 'bytes')
 
-    const response = await fetch(url, {
+    const response = await fetch(url, withSession({
       method: 'POST',
       headers,
       body: formData,
-    })
+    }))
 
     console.log('[GraphImport] Response:', response.status, response.statusText)
 
@@ -2324,7 +2316,7 @@ class ApiClient {
       } catch (_) {}
     }
 
-    const response = await fetch(url, { method: 'POST', headers })
+    const response = await fetch(url, withSession({ method: 'POST', headers }))
     if (!response.ok) {
       const errorText = await response.text()
       throw new Error(errorText || `HTTP ${response.status}`)
@@ -2376,11 +2368,11 @@ class ApiClient {
     const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || ''
     const url = `${BACKEND_URL}/api/attachments`
 
-    const response = await fetch(url, {
+    const response = await fetch(url, withSession({
       method: 'POST',
       headers,
       body: formData,
-    })
+    }))
 
     if (!response.ok) {
       const errorText = await response.text()
@@ -3093,11 +3085,11 @@ class ApiClient {
     // Use raw fetch for multipart upload — don't set Content-Type header
     const headers = await this.getAuthHeaders()
     const url = `${this.baseUrl}/api/admin/plugins/upload`
-    const response = await fetch(url, {
+    const response = await fetch(url, withSession({
       method: 'POST',
       headers,
       body: formData
-    })
+    }))
     if (!response.ok) {
       let detail = response.statusText
       try {

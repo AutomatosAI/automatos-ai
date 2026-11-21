@@ -32,6 +32,8 @@ import { useCallback } from 'react'
 import { useReverification } from '@clerk/nextjs'
 
 import { isSaaS } from '@/lib/auth-edition'
+import { isEnterprise } from '@/lib/edition-name'
+import { useEnterpriseStepUp } from '@/lib/enterprise/step-up'
 
 export const STEP_UP_REQUIRED_CODE = 'step_up_required'
 export const STEP_UP_UNAVAILABLE_CODE = 'step_up_unavailable'
@@ -191,9 +193,10 @@ function useLocalStepUp<Args extends unknown[], Result>(
 /**
  * `const putSettings = useStepUp(apiClient.putThemeSettings.bind(apiClient))`, then
  * `await putSettings(changes)`. SaaS: Clerk asks the person to confirm it's them and the action
- * runs once more; local: the action itself.
+ * runs once more; enterprise (PRD-277): the browser signs in again at the organisation's identity
+ * provider (lib/enterprise/step-up.ts); local: the action itself.
  */
 export const useStepUp: <Args extends unknown[], Result>(
   action: StepUpAction<Args, Result>,
   options?: StepUpOptions,
-) => StepUpAction<Args, Result> = isSaaS ? useClerkStepUp : useLocalStepUp
+) => StepUpAction<Args, Result> = isSaaS ? useClerkStepUp : isEnterprise ? useEnterpriseStepUp : useLocalStepUp

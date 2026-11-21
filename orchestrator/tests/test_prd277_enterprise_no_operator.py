@@ -1,7 +1,7 @@
 """PRD-277 US-103: in enterprise there is no operator, and a request with no credential is 401.
 
-Start-up refuses the edition until Wave 4 (``test_prd277_enterprise_start_up.py``). These tests
-patch the edition past that refusal to prove the code paths are already safe:
+These tests set the edition directly, without its start-up checks
+(``test_prd277_enterprise_start_up.py``), to prove the code paths are safe:
 
 * the real request-context dependency (``hybrid.get_request_context_hybrid``, with the bearer
   registry in front of it) answers 401 to a request with no credential, in every
@@ -14,7 +14,8 @@ patch the edition past that refusal to prove the code paths are already safe:
 * a server key is bound to its own workspace and its own scope, and nothing more: the shared
   dependency refuses it and it holds no workspace permission;
 * the platform API key is kept as it is (PRD-277 D-14): an admin-level key, never the operator;
-* step-up refuses every context, a fresh Clerk one included, until US-406 builds sign-in again;
+* step-up refuses every context that is not a session (a device, a key, a fresh Clerk one
+  included): only a session's person can sign in again (US-406);
 * discovery refuses rather than offer phones a Clerk sign-in;
 * Auto describes an organisation's install, with the hosted tabs less Billing and Widget SDK.
 
@@ -340,7 +341,9 @@ def test_step_up_refuses_every_context(enterprise, ctx):
         step_up.check_step_up(ctx, 10, time.time())
 
     assert refused.value.status_code == 403
-    assert refused.value.detail == {"code": step_up.STEP_UP_UNAVAILABLE_CODE, "message": step_up.STEP_UP_NOT_BUILT}
+    # PRD-277 US-406: no person who can sign in again here, so never sent to sign in again.
+    assert refused.value.detail["code"] == step_up.STEP_UP_UNAVAILABLE_CODE
+    assert not isinstance(refused.value, step_up.StepUpRequired)
 
 
 def test_step_up_never_reads_clerks_freshness(enterprise, monkeypatch):

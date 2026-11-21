@@ -20,12 +20,22 @@ time so this module, which hybrid imports, never imports the services package at
 time.
 
 * ``amd_`` — a paired phone or browser (PRD-266): ``core.auth.device.resolve_device_context``.
+* ``ams_`` — a signed-in person's session (PRD-277 Wave 3):
+  ``core.auth.session_lane.resolve_session_bearer``. Registered only where the edition issues
+  sessions (``issues_sessions``, ``LANE_REGISTERED_WHEN``): in ``local`` and ``saas`` no lane
+  claims an ``ams_`` bearer, so it reaches the wrapped function exactly as before and is refused
+  there like any other bearer it cannot verify.
 * PRD-257's runner and workload-identity tokens add their own entry here later, never another
   branch in ``hybrid.py``.
 
 A resolver is ``async (request, token) -> RequestContext``; it answers the request itself
 (an ``HTTPException`` for a refused bearer) and never falls through to the Clerk lane, so a
 registered token is never shown to Clerk.
+
+**The session cookie** (PRD-277 §5.3). Where the edition issues sessions, a request with no
+``Authorization`` header and no API key that carries the session cookie is the session lane's
+(``resolve_session_cookie``), which first refuses a cross-site request that changes something
+(US-302). Nowhere else is the cookie read.
 
 ``functools.wraps`` keeps FastAPI's view of the wrapped function: ``inspect.signature``
 follows ``__wrapped__`` to ``(request: Request)``, so every
@@ -44,6 +54,9 @@ from config import config
 from core import editions
 from core.auth.dependencies import RequestContext
 from core.auth.device import resolve_device_context
+from core.auth.session_cookie import cookie_token
+from core.auth.session_lane import resolve_session_bearer, resolve_session_cookie
+from core.auth.sessions import SESSION_TOKEN_PREFIX
 
 BEARER_SCHEME = "bearer "
 API_KEY_SCHEME = "apikey "
@@ -60,6 +73,12 @@ ContextDependency = Callable[[Request], Awaitable[RequestContext]]
 
 BEARER_RESOLVERS: Mapping[str, BearerResolver] = MappingProxyType({
     DEVICE_TOKEN_PREFIX: resolve_device_context,
+    SESSION_TOKEN_PREFIX: resolve_session_bearer,
+})
+# A prefix named here is registered only in an edition whose capabilities satisfy it; every other
+# prefix in BEARER_RESOLVERS is registered in every edition (its resolver gates itself).
+LANE_REGISTERED_WHEN: Mapping[str, Callable[[editions.EditionCapabilities], bool]] = MappingProxyType({
+    SESSION_TOKEN_PREFIX: lambda capabilities: capabilities.issues_sessions,
 })
 
 
@@ -100,14 +119,33 @@ def _pairing_required() -> HTTPException:
     )
 
 
+def _registered_here(prefix: str, capabilities: editions.EditionCapabilities) -> bool:
+    condition = LANE_REGISTERED_WHEN.get(prefix)
+    return condition is None or condition(capabilities)
+
+
 def resolver_for(token: Optional[str]) -> Optional[BearerResolver]:
-    """The resolver registered for this token's prefix, or ``None`` (not a registered lane)."""
+    """The resolver registered for this token's prefix in this edition, or ``None`` (no lane)."""
     if not isinstance(token, str) or not token:
         return None
+    capabilities = editions.current()
     for prefix, resolver in BEARER_RESOLVERS.items():
-        if token.startswith(prefix):
+        if token.startswith(prefix) and _registered_here(prefix, capabilities):
             return resolver
     return None
+
+
+def session_cookie_token(request: Request) -> Optional[str]:
+    """The session cookie's token when it is the request's only credential, else ``None``.
+
+    Read only where the edition issues sessions, and only when the request has no
+    ``Authorization`` header (of any scheme) and no API key.
+    """
+    if not editions.current().issues_sessions:
+        return None
+    if request.headers.get("authorization") or request.headers.get("Authorization") or api_key(request):
+        return None
+    return cookie_token(request)
 
 
 def resolve_registered_bearers(wrapped: ContextDependency) -> ContextDependency:
@@ -119,6 +157,9 @@ def resolve_registered_bearers(wrapped: ContextDependency) -> ContextDependency:
         resolver = resolver_for(token)
         if resolver is not None:
             return await resolver(request, token)
+        cookie = session_cookie_token(request)
+        if cookie is not None:
+            return await resolve_session_cookie(request, cookie)
         if not token and not api_key(request) and anonymous_lane_closed():
             raise _pairing_required()
         return await wrapped(request)
@@ -130,9 +171,12 @@ __all__ = [
     "BEARER_RESOLVERS",
     "DEVICE_PAIRING_REQUIRED",
     "DEVICE_TOKEN_PREFIX",
+    "LANE_REGISTERED_WHEN",
+    "SESSION_TOKEN_PREFIX",
     "anonymous_lane_closed",
     "api_key",
     "bearer_token",
     "resolve_registered_bearers",
     "resolver_for",
+    "session_cookie_token",
 ]
