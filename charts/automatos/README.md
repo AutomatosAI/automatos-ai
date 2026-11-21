@@ -188,8 +188,10 @@ Device pairing is on by default. `devicePairing` is `true` or `false`, written w
 rendering stops on any other value and on `ENTERPRISE_DEVICE_PAIRING` in `config`. With it off,
 no phone pairs, every paired phone's token is refused, and the discovery document offers phones
 sign-in only. The first time the install starts as an edition other than the one it last started
-as, the API revokes every paired phone, so a phone paired under the local edition never carries
-into the enterprise edition.
+as, or with pairing switched off after it was on, the API revokes every paired phone, so a phone
+paired under the local edition never carries into the enterprise edition; switching pairing back
+on brings none back. Change the edition or this setting with the pods of the earlier
+configuration stopped.
 
 The client secret goes in the Secret as `OIDC_CLIENT_SECRET`, never in values. The
 session clocks (`SESSION_IDLE_MINUTES`, `SESSION_ABSOLUTE_HOURS`), the claim names
@@ -263,7 +265,7 @@ Rendering stops with a message on a combination that cannot work:
 
 ## Upgrading to 0.11.0
 
-- **The local edition gets one change: one extra ingress path.** With `ingress.enabled`, exactly `/.well-known/automatos.json`, the discovery document a phone reads, now goes to the API (`pathType: Exact`), between `/ws` and the web app's `/`. Before, the web app answered it. In the enterprise edition it answers an error until phone sign-in for that edition is built (PRD-277 Wave 6, US-602). The rest of `/.well-known/` stays the web app's, and `/exports/`, `/health`, `/metrics` and `/docs` are not routed. With the ingress off (the default) nothing changes but the chart's version label (`charts/automatos/tests/default_render_test.yaml` pins the default render).
+- **The local edition gets one change: one extra ingress path.** With `ingress.enabled`, exactly `/.well-known/automatos.json`, the discovery document a phone reads, now goes to the API (`pathType: Exact`), between `/ws` and the web app's `/`. Before, the web app answered it. In the enterprise edition it offers phones sign-in and, while device pairing is on, pairing, every address in it the install's public address (PRD-277 US-602). The rest of `/.well-known/` stays the web app's, and `/exports/`, `/health`, `/metrics` and `/docs` are not routed. With the ingress off (the default) nothing changes but the chart's version label (`charts/automatos/tests/default_render_test.yaml` pins the default render).
 - **The enterprise edition can be installed** (`edition.authEdition=enterprise`, PRD-277). It needs, before `helm install`:
   - `OIDC_CLIENT_SECRET` in the Secret `existingSecret` names: the API does not start without it;
   - `edition.enterprise.publicUrl`, `clientIpHeader`, `oidc.issuer` and `oidc.clientId`: rendering stops, naming the value, while one is missing or is one the API would refuse;
