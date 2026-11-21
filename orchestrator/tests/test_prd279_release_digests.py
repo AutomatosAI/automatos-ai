@@ -7,6 +7,7 @@
   digest, holds exactly those builds' entries;
 * ``chart``: the chart digest comes from ``helm push``'s output, and the manifest it
   names must hold the packaged chart byte for byte;
+* ``buildx``: the job's own buildx must be v0.32.0 or later, the first with the file;
 * every read is by digest, bytes that do not hash to it are refused, and anything
   malformed fails with the same ``::error`` line and exit code as any other problem.
 
@@ -118,6 +119,47 @@ def _run_index(tmp_path, fake, metadata: str, built, matrix: str = ""):
 
 def _all(members, arches=ARCHES):
     return [entry for arch in arches for entry in members[arch]]
+
+
+# --------------------------------------------------------------------------- buildx
+
+# What `docker buildx version` prints, as buildx v0.39.0 builds it: commands/version.go:15 is
+# `fmt.Println(version.Package, version.Version, version.Revision)`, and the release build's
+# Dockerfile (lines 71-83) links Package=github.com/docker/buildx, Version=`git describe --match
+# 'v[0-9]*' --dirty='.m' --always --tags` and Revision=`git rev-parse HEAD` (both `dev` in a git
+# worktree); unlinked, version/version.go:8 leaves Version "v0.0.0+unknown".
+REVISION = "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567"
+
+
+@pytest.mark.parametrize("output, version", [
+    (f"github.com/docker/buildx v0.39.0 {REVISION}\n", (0, 39, 0)),
+    (f"github.com/docker/buildx v0.32.0 {REVISION}\n", (0, 32, 0)),
+    (f"github.com/docker/buildx v0.39.0-12-g0a1b2c3 {REVISION}\n", (0, 39, 0)),
+    (f"github.com/docker/buildx v0.40.0.m {REVISION}.m\n", (0, 40, 0)),
+    (f"github.com/docker/buildx v1.0.0-rc1 {REVISION}\n", (1, 0, 0)),
+])
+def test_a_buildx_with_the_metadata_file_passes(monkeypatch, capsys, output, version):
+    assert digests.buildx_version(output) == version
+    monkeypatch.setattr(sys, "stdin", io.StringIO(output))
+    assert digests.main(["buildx"]) == 0
+    assert "has imagetools create --metadata-file" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("output, message", [
+    (f"github.com/docker/buildx v0.31.1 {REVISION}\n", "buildx v0.31.1 is older than v0.32.0"),
+    (f"github.com/docker/buildx v0.31.0-40-g0a1b2c3 {REVISION}\n", "buildx v0.31.0 is older than v0.32.0"),
+    ("github.com/docker/buildx v0.0.0+unknown \n", "buildx v0.0.0 is older than v0.32.0"),
+    ("github.com/docker/buildx dev dev\n", "could not read a buildx version"),
+    ("docker: 'buildx' is not a docker command.\n", "could not read a buildx version"),
+    ("github.com/docker/buildx 0.39.0 x\n", "could not read a buildx version"),
+    ("", "could not read a buildx version"),
+])
+def test_an_older_or_unreadable_buildx_stops_the_job_with_one_error(monkeypatch, capsys, output, message):
+    monkeypatch.setattr(sys, "stdin", io.StringIO(output))
+    assert digests.main(["buildx"]) == 1
+    out = capsys.readouterr().out
+    assert out.count("::error title=Release digest::") == 1 and message in out
+    assert digests.METADATA_FILE_BUILDX == (0, 32, 0)
 
 
 # --------------------------------------------------------------------------- the images

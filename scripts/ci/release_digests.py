@@ -4,12 +4,17 @@
 The digest a job signs, checks, tags with the version and writes into the chart is read
 from the output of the step that pushed it, never from a tag by name. Before it is used,
 what it names is read back by that digest, its bytes must hash to it, and it must hold
-exactly what this run built. Two commands, each writing ``digest=…`` to ``--outputs``:
+exactly what this run built. Two commands, each writing ``digest=…`` to ``--outputs``,
+and a third that runs first:
 
+* ``buildx`` (the merge job, before it creates the index) reads ``docker buildx
+  version`` on standard input and stops unless it is ``METADATA_FILE_BUILDX`` or later,
+  the first release with ``imagetools create --metadata-file``. The job uses the
+  runner's own buildx; it downloads none.
 * ``index`` (the merge job, every publishing run): the digest of the index that
   ``docker buildx imagetools create --metadata-file`` reports it pushed: the file's
-  ``containerimage.descriptor``, the descriptor of the bytes it pushed (buildx v0.32.0
-  and later; the merge job pins its buildx). The file's ``image.name`` is not relied on.
+  ``containerimage.descriptor``, the descriptor of the bytes it pushed. The file's
+  ``image.name`` is not relied on.
   This run's builds are the digests the build jobs pushed and scanned (``--built``: one
   empty file per digest, named by its hex, as they export them). BuildKit pushes each as
   an index of one linux image and its attestation, and ``imagetools create`` lists those
@@ -36,9 +41,14 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+# docker/buildx PR #3638 added `imagetools create --metadata-file`; v0.32.0 is its first release.
+METADATA_FILE_BUILDX = (0, 32, 0)
+# `docker buildx version` prints "<package> <version> <revision>"; a release's version is its
+# tag (v0.39.0), a development build's `git describe` (v0.39.0-12-g1a2b3c4, `.m` when dirty).
+_BUILDX_VERSION = re.compile(r"v(\d+)\.(\d+)\.(\d+)(?:[-+.][0-9A-Za-z.+-]*)?")
 CHART_LAYER = "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
 CHART_CONFIG = "application/vnd.cncf.helm.config.v1+json"
 INDEX_TYPES = ("application/vnd.oci.image.index.v1+json",
@@ -83,6 +93,28 @@ def _objects(manifest: dict, digest: str) -> List[dict]:
 
 def _entries(manifest: dict, digest: str) -> List[str]:
     return [_digest(entry.get("digest"), f"an entry of {digest}") for entry in _objects(manifest, digest)]
+
+
+# --------------------------------------------------------------------------- buildx
+
+
+def buildx_version(output: str) -> Tuple[int, int, int]:
+    """The release ``docker buildx version``'s first line names, as (major, minor, patch)."""
+    lines = output.strip().splitlines()
+    fields = lines[0].split() if lines else []
+    match = _BUILDX_VERSION.fullmatch(fields[1]) if len(fields) >= 2 else None
+    if not match:
+        raise DigestError(f"could not read a buildx version from {output.strip()[:120]!r}")
+    return int(match[1]), int(match[2]), int(match[3])
+
+
+def check_buildx(output: str) -> str:
+    """A line naming the buildx in use, once it has ``imagetools create --metadata-file``."""
+    version = buildx_version(output)
+    named, needed = ".".join(map(str, version)), ".".join(map(str, METADATA_FILE_BUILDX))
+    if version < METADATA_FILE_BUILDX:
+        raise DigestError(f"buildx v{named} is older than v{needed}, the first with imagetools create --metadata-file")
+    return f"buildx v{named} has imagetools create --metadata-file (v{needed} or later)"
 
 
 # --------------------------------------------------------------------------- the images
@@ -205,6 +237,11 @@ def _finish(problems: List[str], digest: str, args: argparse.Namespace, line: st
     return 0
 
 
+def cmd_buildx(_args: argparse.Namespace, _fetch: Fetch) -> int:
+    print(check_buildx(sys.stdin.read()))
+    return 0
+
+
 def cmd_index(args: argparse.Namespace, fetch: Fetch) -> int:
     index = created_index(json.loads(Path(args.metadata).read_text(encoding="utf-8")))
     arches = expected_arches(json.loads(args.matrix), args.image)
@@ -226,6 +263,7 @@ def cmd_chart(args: argparse.Namespace, fetch: Fetch) -> int:
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = root.add_subparsers(dest="command", required=True)
+    commands.add_parser("buildx", help="stop unless docker buildx version, on stdin, has --metadata-file")
     index = commands.add_parser("index", help="the index digest from imagetools create's metadata file")
     chart = commands.add_parser("chart", help="the chart digest from helm push's output")
     for command, flags in ((index, ("--metadata", "--built", "--image", "--matrix")),
@@ -239,7 +277,7 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[List[str]] = None, fetch: Optional[Fetch] = None) -> int:
     args = parser().parse_args(argv)
-    command = {"index": cmd_index, "chart": cmd_chart}[args.command]
+    command = {"buildx": cmd_buildx, "index": cmd_index, "chart": cmd_chart}[args.command]
     try:
         return command(args, fetch or _registry_fetch)
     except (DigestError, OSError, ValueError, LookupError, http.client.HTTPException) as error:

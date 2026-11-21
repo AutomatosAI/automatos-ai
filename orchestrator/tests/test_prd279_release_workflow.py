@@ -273,12 +273,14 @@ def test_the_signed_chart_digest_is_the_one_helm_push_printed_never_its_tags():
     assert not any("release_chart.py digest" in step.get("run", "") for step in _steps("release-chart"))
 
 
-def test_the_merge_jobs_buildx_is_pinned_to_one_with_the_metadata_file():
-    """`imagetools create --metadata-file` is in buildx v0.32.0 and later."""
+def test_the_merge_job_checks_its_own_buildx_has_the_metadata_file_before_creating_the_index():
+    """The runner's buildx, never a downloaded one; release_digests.py stops below v0.32.0."""
     setup = next(step for step in _steps("merge") if "docker/setup-buildx-action@" in step.get("uses", ""))
-    version = setup["with"]["version"]
-    assert re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", version)
-    assert tuple(int(part) for part in version[1:].split(".")) >= (0, 32, 0)
+    assert "with" not in setup, "no version input: the action would download a buildx"
+    run = _step("merge", "Create the multi-arch index")["run"]
+    check = 'docker buildx version | python3 "${GITHUB_WORKSPACE}/scripts/ci/release_digests.py" buildx'
+    assert run.splitlines()[0] == check
+    assert run.index(check) < run.index("docker buildx imagetools create")
 
 
 def test_no_release_job_reads_a_digest_back_by_name_or_hides_a_failure():
