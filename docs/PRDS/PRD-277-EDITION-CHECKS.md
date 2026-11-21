@@ -108,7 +108,7 @@ A migration is history. Rewriting it to read a capability changes what an old re
 | # | Where | Kind | What it switches | Capability | `local` | `saas` | `enterprise` |
 |---|---|---|---|---|---|---|---|
 | 32 | `core/auth/bearer_registry.py:92` | P | Whether remote access has closed the anonymous lane (row 82) | `anonymous_operator` | see 82 | see 82 | see 82 |
-| 33 | `core/auth/device.py:220` | H | An `amd_` bearer is refused with 401 | `device_pairing` | resolved | 401 | resolved when pairing is on, as the person who paired (FR-22). Built (US-601): role `user`, their membership read per request; 503 until the edition check has run |
+| 33 | `core/auth/device.py:220` | H | An `amd_` bearer is refused with 401 | `device_pairing` | resolved | 401 | resolved when pairing is on, as the person who paired (FR-22). Built (US-601): role `user`, their membership read per request; 503 until the edition check has run. US-603: `token_kinds` decides which rows are taken (`paired` by `device_pairing`, `oidc` by `sign_in` being OIDC), so in enterprise a phone signed in on the phone resolves with pairing on or off |
 | 34 | `core/auth/hybrid.py:985` | C | The anonymous session is bound to the operator row and made super admin | `anonymous_operator` | super admin | plain user | never reached: no anonymous lane (FR-3) |
 | 35 | `core/auth/step_up.py:161` | C | `check_step_up` (line 177) passes every request | `step_up` | `skip` | `clerk_freshness` | `reauth` (US-406) |
 | 36 | `core/llm/byok_endpoint.py:37` | C | `_saas()` (now `_guarded()`, and its callers take `guarded` instead of an edition), used at lines 55, 84 and 96: a key's own endpoint must be `https`, public and pinned, and is required even when `AZURE_OPENAI_ENDPOINT` is set | `guards_user_endpoints` | not guarded | guarded | guarded (G-3) |
@@ -175,7 +175,7 @@ A migration is history. Rewriting it to read a capability changes what an old re
 | 76 | `services/credits/summary.py:58` | P | A product workspace's billing summary (row 72) | `billing` | see 72 | see 72 | see 72 |
 | 77 | `services/credits/summary.py:80` | P | A workspace's billing summary (row 72) | `billing` | see 72 | see 72 | see 72 |
 | 78 | `services/marketplace_cloud/pull.py:133` | H | Cloud sync enabled (the Sync, and a Cloud theme's package download, `package._download`) | `calls_cloud_sync` | when `AUTOMATOS_CLOUD_URL` is set | never | only while switched on, with the URL set (D-12, US-704) |
-| 79 | `services/mobile/discovery.py:166` | H | Discovery's `auth.modes` and `pairing` blocks | `sign_in` | `["device"]`, pairing by mode | `["clerk"]` | `["oidc", "device"]`, or `["oidc"]` with pairing off; `oidc {start_url}` (FR-23; built, US-602) |
+| 79 | `services/mobile/discovery.py:166` | H | Discovery's `auth.modes` and `pairing` blocks | `sign_in` | `["device"]`, pairing by mode | `["clerk"]` | `["oidc", "device"]`, or `["oidc"]` with pairing off; `oidc {start_url}` (FR-23; built, US-602), then `{start_url, exchange_url, app_link, code_challenge_method}` (built, US-603) |
 | 80 | `services/mobile/discovery.py:192` | R | `edition` in the discovery document | (name) | `local` | `saas` | `enterprise` |
 | 80a | `services/mobile/pairing.py:97` | H | Creating or redeeming a pairing code is refused (`_require_local_edition`) | `device_pairing` | allowed | refused | allowed when pairing is on (D-7; built, US-601) |
 | 81 | `services/mobile/remote_access.py:83` | F | `LOCAL_REMOTE_ACCESS` boot decision (refuse, warn, start) | `anonymous_operator` | applies | skipped | skipped (no anonymous lane to protect) |
@@ -183,7 +183,7 @@ A migration is history. Rewriting it to read a capability changes what an old re
 | 83 | `services/mobile/urls.py:50` | H | With no `PUBLIC_API_HOST`, phones are told the request's own base URL instead of the hosted API | `hosts_automatos_cloud` | request's URL | `PUBLIC_API_HOST`, whatever it holds | request's URL (never point phones at the hosted API) |
 | 84 | `services/onboarding_state.py:579` | H | Stage after the payoff | `billing` | `completed` | `powerup` | `completed` |
 | 85 | `services/push/consent.py:78` | H | `expo_push_allowed` | `push_needs_consent` | once agreed | always | once agreed (G-1) |
-| 86 | `services/push/fanout.py:174` | H | Which device kind receives a push | `device_pairing` | `paired` | `clerk` | `paired` now (D-7); `oidc` too after US-603 |
+| 86 | `services/push/fanout.py:174` | H | Which device kind receives a push | `device_pairing` | `paired` | `clerk` | `paired` while pairing is on (D-7) and `oidc` (built, US-603): the device lane's `token_kinds`, `clerk` where it takes none |
 | 87 | `services/push/recipients.py:92` | H | The operator row holds the owner role for push recipients | `anonymous_operator` | yes | no | no |
 | 88 | `services/readiness/probes.py:105` | H | Push readiness: always ready, or ready once agreed | `push_needs_consent` | once agreed | always | once agreed (G-1) |
 | 89 | `services/readiness/service.py:171` | H | Readiness detail adds the host and latency reached | `operator_is_user` | shown | hidden | hidden (G-2) |
