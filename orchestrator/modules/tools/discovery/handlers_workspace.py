@@ -522,10 +522,9 @@ async def update_system_setting(db: Session, workspace_id: UUID, params: Dict[st
         from core.models.system_settings import SystemSetting
         from services.mobile.edition_change import RESERVED_SETTING_CATEGORIES
 
-        setting = (
+        setting = None if category in RESERVED_SETTING_CATEGORIES else (
             db.query(SystemSetting)
-            .filter(SystemSetting.category == category, SystemSetting.key == key,
-                    SystemSetting.category.notin_(RESERVED_SETTING_CATEGORIES))
+            .filter(SystemSetting.category == category, SystemSetting.key == key)
             .first()
         )
         if not setting:

@@ -6,7 +6,7 @@
 * **Who makes a code** (``pairing_code_owner``): in enterprise a person signed in on the session lane, a member of
   the workspace, for themselves; a device, a key, the all-workspaces view and a non-member are 403, and the
   console (``scripts/mint_pairing_code.py``) refuses. ``local`` keeps its workspace-admin gate. In enterprise a
-  person makes ``mobile_pairing_codes_person`` codes a window (10 in 10 minutes), in a bucket of their own;
+  person makes ``mobile_codes_person`` codes a window (10 in 10 minutes), in a bucket of their own;
   ``local`` has no such limit.
 * **The push decision** (``PUT /api/v1/mobile/push-consent``): in enterprise an install admin signed in on the
   session lane, after a fresh sign-in, with one ``push:consent_changed`` row; a workspace admin who is not an
