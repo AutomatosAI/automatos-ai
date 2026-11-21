@@ -18,6 +18,11 @@ set:
       oidc:
         issuer: https://id.example.com/realms/automatos
         clientId: automatos
+  # PRD-278 D-6: the edition renders only on a database connection that checks the server
+  # (database_tls_test.yaml has its refusals).
+  database:
+    sslmode: verify-full
+    caConfigMap: database-ca
 tests:
   - it: renders with every required value set
     asserts:

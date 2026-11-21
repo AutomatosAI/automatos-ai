@@ -45,7 +45,7 @@ ENV_KEYS = (
     "AUTH_EDITION", "REQUIRE_AUTH", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "FRONTEND_URL",
     "CLI_RUNTIME_ENABLED", "DEFAULT_WORKSPACE_ID", "CLERK_JWKS_URL", "CLERK_SECRET_KEY",
     "LOCAL_REMOTE_ACCESS", "API_PUBLISH_ADDRESS", "WEB_PUBLISH_ADDRESS", "CLIENT_IP_HEADER",
-    "OIDC_REQUIRED_CLAIMS", "ENTERPRISE_BOOTSTRAP_ADMINS",
+    "OIDC_REQUIRED_CLAIMS", "ENTERPRISE_BOOTSTRAP_ADMINS", "DATABASE_SSLMODE",
 )
 # Distinct values, so a test can prove that none of them ever reaches a message. A value that
 # stands in for a secret is built from parts, so no literal looks like a credential.
@@ -58,6 +58,8 @@ OIDC_ENV = {
     "CLIENT_IP_HEADER": "X-Real-IP",
     # Wave 4 part 2: the workspace sign-ins are recorded in and the first admins own.
     "DEFAULT_WORKSPACE_ID": "00000000-0000-0000-0000-0000000277ac",
+    # PRD-278 D-6: this edition starts only on a database connection that checks the server.
+    "DATABASE_SSLMODE": "verify-full",
 }
 STAND_IN_CLERK_SECRET = "prd277" + "-" + "stand-in"
 LOCAL_WS = "00000000-0000-0000-0000-0000000277aa"

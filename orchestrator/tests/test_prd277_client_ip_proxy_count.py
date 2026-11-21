@@ -41,7 +41,7 @@ ENV_KEYS = (
     "AUTH_EDITION", "REQUIRE_AUTH", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "FRONTEND_URL",
     "CLI_RUNTIME_ENABLED", "DEFAULT_WORKSPACE_ID", "CLERK_JWKS_URL", "CLERK_SECRET_KEY",
     "LOCAL_REMOTE_ACCESS", "API_PUBLISH_ADDRESS", "WEB_PUBLISH_ADDRESS", "CLIENT_IP_HEADER",
-    "CLIENT_IP_PROXY_COUNT", "OIDC_REQUIRED_CLAIMS", "ENTERPRISE_BOOTSTRAP_ADMINS",
+    "CLIENT_IP_PROXY_COUNT", "OIDC_REQUIRED_CLAIMS", "ENTERPRISE_BOOTSTRAP_ADMINS", "DATABASE_SSLMODE",
 )
 OIDC_ENV = {
     "OIDC_ISSUER": "https://idp.example.test/realms/prd277-proxy-count",
@@ -53,8 +53,10 @@ EDITION_ENV = {
     "local": {"AUTH_EDITION": "local", "DEFAULT_WORKSPACE_ID": "00000000-0000-0000-0000-0000000277f1"},
     "saas": {"AUTH_EDITION": "saas", "CLERK_JWKS_URL": "https://clerk.example.test/.well-known/jwks.json",
              "CLERK_SECRET_KEY": "prd277" + "-" + "proxy-count-stand-in"},
+    # PRD-278 D-6: DATABASE_SSLMODE, as this edition starts only on a connection that checks the server.
     "enterprise": {"AUTH_EDITION": "enterprise", "CLIENT_IP_HEADER": "X-Real-IP",
-                   "DEFAULT_WORKSPACE_ID": "00000000-0000-0000-0000-0000000277f3", **OIDC_ENV},
+                   "DEFAULT_WORKSPACE_ID": "00000000-0000-0000-0000-0000000277f3", "DATABASE_SSLMODE": "verify-full",
+                   **OIDC_ENV},
 }
 FORWARDED_FOR = "X-Forwarded-For"
 ORIGINAL_FORWARDED_FOR = "X-Original-Forwarded-For"

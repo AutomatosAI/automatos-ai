@@ -140,6 +140,10 @@ class EditionCapabilities:
         (``FRONTEND_URL``, which start-up requires to be ``https``): every address a phone is handed
         (discovery's ``api_url`` and sign-in start, the pairing link) is built from it, never from
         the request (``services/mobile/urls.py``, PRD-277 US-602).
+    requires_verified_database_tls: the API starts only when its connection to the application's
+        database checks the server's certificate and host name (``DATABASE_SSLMODE=verify-full``,
+        PRD-278 D-6; ``core/edition_start_up.py``). Where it is off, the two settings are the
+        operator's choice and, both unset, every connection is made as before.
     """
 
     sign_in: str
@@ -167,6 +171,7 @@ class EditionCapabilities:
     issues_sessions: bool
     agent_http_own_hosts_only: bool
     api_on_public_address: bool
+    requires_verified_database_tls: bool
 
 
 _LOCAL = EditionCapabilities(
@@ -195,6 +200,7 @@ _LOCAL = EditionCapabilities(
     issues_sessions=False,
     agent_http_own_hosts_only=False,
     api_on_public_address=False,
+    requires_verified_database_tls=False,
 )
 
 _SAAS = EditionCapabilities(
@@ -223,6 +229,7 @@ _SAAS = EditionCapabilities(
     issues_sessions=False,
     agent_http_own_hosts_only=False,
     api_on_public_address=False,
+    requires_verified_database_tls=False,
 )
 
 # PRD-277 §5.1 and its decisions. Each hosted service is off here, and the operator switches each
@@ -255,6 +262,7 @@ _ENTERPRISE = EditionCapabilities(
     issues_sessions=True,
     agent_http_own_hosts_only=True,
     api_on_public_address=True,
+    requires_verified_database_tls=True,
 )
 
 CAPABILITIES: Mapping[str, EditionCapabilities] = MappingProxyType({

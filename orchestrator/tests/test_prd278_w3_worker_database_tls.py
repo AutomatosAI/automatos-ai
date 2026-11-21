@@ -6,8 +6,8 @@ same two settings as the platform's, read in its own config module.
 ``task_executions_db.record_task_status``, which passes them to ``psycopg2.connect`` as
 libpq's ``sslmode`` and ``sslrootcert`` keywords, over the same keys in the address. libpq
 then checks the server's certificate against that CA, and its host name for verify-full.
-Neither set: no keyword, as before. A CA file that is missing or holds no certificate
-stops the worker at start. No database: psycopg2.connect is recorded; the CA files are
+Neither set: no keyword, as before. verify-ca or verify-full without a CA file, and a CA
+file that is missing or holds no certificate, stop the worker at start. No database: psycopg2.connect is recorded; the CA files are
 made at run time (``tests/helpers_prd278_w3_ca.py``).
 """
 from __future__ import annotations
@@ -89,6 +89,12 @@ def test_neither_setting_gives_no_keyword(tls_env):
     assert worker_config.database_tls_params() == {}
 
 
+@pytest.mark.parametrize("mode", ["disable", "allow", "prefer", "require"])
+def test_a_mode_that_checks_no_certificate_needs_no_ca(tls_env, mode):
+    tls_env(sslmode=mode)
+    assert worker_config.database_tls_params() == {"sslmode": mode}
+
+
 def test_verify_full_with_a_ca_path_gives_both_keywords(tls_env, ca_file):
     tls_env(sslmode="VERIFY-FULL ", sslrootcert=ca_file)
     assert worker_config.database_tls_params() == {"sslmode": "verify-full", "sslrootcert": ca_file}
@@ -120,6 +126,9 @@ def test_the_settings_win_over_an_sslmode_in_the_address():
     ("verify", None, "DATABASE_SSLMODE must be one of"),
     (None, CA_IN_POD, "DATABASE_SSLROOTCERT is used only with"),
     ("require", CA_IN_POD, "DATABASE_SSLROOTCERT is used only with"),
+    ("verify-full", None, "DATABASE_SSLMODE verify-ca and verify-full need DATABASE_SSLROOTCERT"),
+    ("verify-ca", None, "DATABASE_SSLMODE verify-ca and verify-full need DATABASE_SSLROOTCERT"),
+    (" VERIFY-FULL ", "   ", "DATABASE_SSLMODE verify-ca and verify-full need DATABASE_SSLROOTCERT"),
 ])
 def test_values_that_cannot_work_stop_the_worker_at_start(tls_env, monkeypatch, tmp_path, sslmode, sslrootcert, message):
     tls_env(sslmode=sslmode, sslrootcert=sslrootcert)

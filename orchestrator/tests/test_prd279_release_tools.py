@@ -252,6 +252,9 @@ def test_each_editions_render_values_hold_only_what_it_needs_and_nothing_secret_
     assert enterprise["edition"]["enterprise"] == {
         "publicUrl": "https://automatos.example.com", "clientIpHeader": "X-Real-IP",
         "oidc": {"issuer": "https://id.example.com/realms/automatos", "clientId": "automatos"}}
+    # PRD-278 D-6: the edition renders only on a database connection that checks the server.
+    assert enterprise["database"] == {"sslmode": "verify-full", "caConfigMap": "database-ca"}
+    assert set(enterprise) == {"edition", "database"}
     assert "secret" not in json.dumps(enterprise).lower()
 
 

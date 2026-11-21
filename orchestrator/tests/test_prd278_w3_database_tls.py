@@ -8,9 +8,9 @@ database is secured, and each driver gets it in the form it takes.
 * with ``verify-full`` and a CA file, libpq gets ``sslmode`` and ``sslrootcert`` (psycopg2,
   and SQLAlchemy through ``connect_args``), and asyncpg gets an ``ssl.SSLContext`` that
   requires the certificate, trusts that CA and checks the host name;
-* a mode libpq doesn't know, a CA file without a mode that checks it, or a CA file that is
-  missing or holds no certificate, stops start-up with a message that names the setting
-  and never the file's path;
+* a mode libpq doesn't know, a CA file without a mode that checks it, verify-ca or
+  verify-full without a CA file, or a CA file that is missing or holds no certificate, stops
+  start-up with a message that names the settings and never the file's path;
 * a CA file replaced at the same path is loaded again for the next asyncpg connection.
 
 The CA files are made at run time (``tests/helpers_prd278_w3_ca.py``).
@@ -213,16 +213,16 @@ def test_the_asyncpg_context_trusts_only_the_named_ca(settings, monkeypatch, ca_
     assert made == [(ssl.Purpose.SERVER_AUTH, {"cafile": ca_file})], "built once, from that file only"
 
 
-@pytest.mark.parametrize("mode", ["disable", "allow", "prefer", "require", "verify-ca", "verify-full"])
-def test_a_mode_without_a_ca_reaches_asyncpg_as_text(settings, mode):
-    """asyncpg reads the mode text the way libpq does (its own root.crt for verify-*)."""
+@pytest.mark.parametrize("mode", ["disable", "allow", "prefer", "require"])
+def test_a_mode_that_checks_no_certificate_reaches_asyncpg_as_text(settings, mode):
+    """asyncpg reads the mode text the way libpq does. A checking mode needs a CA file (below)."""
     settings(sslmode=mode)
     assert tls.database_tls().asyncpg_kwargs() == {"ssl": mode}
     assert tls.database_tls().libpq_params() == {"sslmode": mode}
 
 
 def test_only_verify_full_verifies_the_server():
-    """The predicate a later edition check can require (PRD-278 D-6)."""
+    """The predicate the enterprise edition's start-up requires (PRD-278 D-6), and no wider."""
     verified = {mode for mode in tls.SSLMODES if tls.DatabaseTLS(sslmode=mode).verifies_server}
     checked = {mode for mode in tls.SSLMODES if tls.DatabaseTLS(sslmode=mode).checks_certificate}
     assert verified == {"verify-full"}
@@ -245,6 +245,18 @@ def test_a_ca_without_a_checking_mode_is_refused_without_quoting_its_path(settin
     with pytest.raises(tls.DatabaseTLSConfigError, match="DATABASE_SSLROOTCERT is used only with") as refused:
         tls.database_tls()
     assert CA_IN_POD not in str(refused.value)
+
+
+@pytest.mark.parametrize("rootcert", [None, "", "   "])
+@pytest.mark.parametrize("mode", ["verify-ca", "verify-full", " VERIFY-FULL "])
+def test_a_checking_mode_without_a_ca_is_refused_naming_both_settings(settings, mode, rootcert):
+    """Refused at start, not after a wait: libpq would look for a root.crt the image does not hold."""
+    settings(sslmode=mode, sslrootcert=rootcert)
+    with pytest.raises(tls.DatabaseTLSConfigError) as refused:
+        tls.database_tls()
+    message = str(refused.value)
+    assert message.startswith("DATABASE_SSLMODE verify-ca and verify-full need DATABASE_SSLROOTCERT")
+    assert "a file" in message and CA_IN_POD not in message
 
 
 def _no_certificate(tmp_path) -> str:

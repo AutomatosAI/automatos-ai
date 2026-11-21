@@ -2873,13 +2873,16 @@ class Config:
           ``LOCAL_REMOTE_ACCESS`` paired or open (``services.mobile.remote_access``).
         - PRD-277 Wave 3: where the edition issues sessions, their clocks, cookie and header
           settings must hold (``core.edition_start_up.check_session_settings``).
-        - PRD-277 US-103, last: OIDC sign-in (``enterprise``, ``core.edition_start_up``).
+        - PRD-277 US-103: OIDC sign-in (``enterprise``, ``core.edition_start_up``).
+        - PRD-278 D-6, last: where the edition requires it, a database connection that checks the
+          server (``core.edition_start_up.check_database_tls``).
 
         Raises ``RuntimeError`` (aborting boot) on a contradiction.
         """
         # PRD-266 §4.3: imported here, at boot, so config.py never imports the app.
-        from core.edition_start_up import (DEVICE_PAIRING_SETTING_NAMES, HOSTED_SERVICE_SETTING_NAMES,
-                                           OIDC_SIGN_IN_SETTINGS, OIDC_START_UP_SETTINGS, SESSION_SETTINGS,
+        from core.edition_start_up import (DATABASE_TLS_START_UP_SETTINGS, DEVICE_PAIRING_SETTING_NAMES,
+                                           HOSTED_SERVICE_SETTING_NAMES, OIDC_SIGN_IN_SETTINGS,
+                                           OIDC_START_UP_SETTINGS, SESSION_SETTINGS, check_database_tls,
                                            check_session_settings, check_start_up)
         from core.editions import SIGN_IN_CLERK, capabilities_for
         from services.mobile import remote_access
@@ -2925,6 +2928,7 @@ class Config:
         start_up = OIDC_START_UP_SETTINGS + OIDC_SIGN_IN_SETTINGS + HOSTED_SERVICE_SETTING_NAMES + DEVICE_PAIRING_SETTING_NAMES
         check_start_up(capabilities, {**{name: getattr(self, name) for name in start_up},
                                       "FRONTEND_URL": self._FRONTEND_URL_FROM_ENV})
+        check_database_tls(capabilities, {name: getattr(self, name) for name in DATABASE_TLS_START_UP_SETTINGS})
 
     def validate(self) -> bool:
         """

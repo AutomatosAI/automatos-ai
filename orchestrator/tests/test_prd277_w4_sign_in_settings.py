@@ -47,6 +47,7 @@ ENV_KEYS = (
     "AUTH_EDITION", "REQUIRE_AUTH", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "FRONTEND_URL",
     "CLI_RUNTIME_ENABLED", "DEFAULT_WORKSPACE_ID", "CLERK_JWKS_URL", "CLERK_SECRET_KEY",
     "LOCAL_REMOTE_ACCESS", "API_PUBLISH_ADDRESS", "WEB_PUBLISH_ADDRESS", "CLIENT_IP_HEADER", *NEW_SETTINGS,
+    "DATABASE_SSLMODE",
 )
 OIDC_ENV = {
     "OIDC_ISSUER": "https://idp.example.test/realms/prd277-w4",
@@ -58,8 +59,10 @@ EDITION_ENV = {
     "local": {"AUTH_EDITION": "local", "DEFAULT_WORKSPACE_ID": "00000000-0000-0000-0000-0000000277d1"},
     "saas": {"AUTH_EDITION": "saas", "CLERK_JWKS_URL": "https://clerk.example.test/.well-known/jwks.json",
              "CLERK_SECRET_KEY": "prd277" + "-" + "w4-stand-in"},
+    # PRD-278 D-6: DATABASE_SSLMODE, as this edition starts only on a connection that checks the server.
     "enterprise": {"AUTH_EDITION": "enterprise", "CLIENT_IP_HEADER": "X-Real-IP",
-                   "DEFAULT_WORKSPACE_ID": "00000000-0000-0000-0000-0000000277d3", **OIDC_ENV},
+                   "DEFAULT_WORKSPACE_ID": "00000000-0000-0000-0000-0000000277d3", "DATABASE_SSLMODE": "verify-full",
+                   **OIDC_ENV},
 }
 # Each a value that must stop enterprise, and must not stop local or saas.
 BAD = [

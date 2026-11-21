@@ -233,7 +233,7 @@ Each wave is one pull request or a short series. CI is the only gate: nothing he
 - [x] `DATABASE_SSLMODE` and `DATABASE_SSLROOTCERT` exist in `config.py` and `config-surface.json`.
 - [x] One function returns what SQLAlchemy with `psycopg2`, a raw `psycopg2` connection and `asyncpg` each need.
 - [x] With neither setting, the main engine behaves as today, and a test pins that.
-- [ ] If D-6 is accepted: in the `enterprise` edition, start-up fails unless `DATABASE_SSLMODE` is `verify-full`.
+- [x] If D-6 is accepted: in the `enterprise` edition, start-up fails unless `DATABASE_SSLMODE` is `verify-full` (`core/edition_start_up.py`, through the `requires_verified_database_tls` capability), and the chart does not render it otherwise. In every edition, `verify-ca` or `verify-full` without a CA file is refused at start (the API, the worker, the entrypoint and the chart).
 - [x] `Config.get_database_url()` is deleted.
 
 #### US-302: Every connection path · L

@@ -52,6 +52,7 @@ TRUTH_TABLE = {
         "issues_sessions": False,
         "agent_http_own_hosts_only": False,
         "api_on_public_address": False,
+        "requires_verified_database_tls": False,
     },
     "saas": {
         "sign_in": "clerk",
@@ -79,6 +80,7 @@ TRUTH_TABLE = {
         "issues_sessions": False,
         "agent_http_own_hosts_only": False,
         "api_on_public_address": False,
+        "requires_verified_database_tls": False,
     },
     "enterprise": {
         "sign_in": "oidc",                              # §5.1
@@ -106,6 +108,7 @@ TRUTH_TABLE = {
         "issues_sessions": True,                        # D-3, §5.3 (Wave 3)
         "agent_http_own_hosts_only": True,              # D-12 (#1605): the platform's API is the install's
         "api_on_public_address": True,                  # US-602: one public origin, FRONTEND_URL
+        "requires_verified_database_tls": True,         # PRD-278 D-6: DATABASE_SSLMODE=verify-full
     },
 }
 
@@ -123,9 +126,10 @@ SAAS_TRUE = (
 )
 # Capabilities no comparison ever made: new with enterprise, so off in local and saas (PRD-277
 # Wave 3 sessions, US-704's settings, D-12's agent host list, US-601's pairing setting, US-602's one
-# public address). Each is False on both, so neither edition's behaviour moves.
+# public address, PRD-278 D-6's verified database connection). Each is False on both, so neither
+# edition's behaviour moves.
 ENTERPRISE_ONLY = ("issues_sessions", "hosted_services_by_setting", "agent_http_own_hosts_only",
-                   "device_pairing_by_setting", "api_on_public_address")
+                   "device_pairing_by_setting", "api_on_public_address", "requires_verified_database_tls")
 
 
 @pytest.mark.parametrize("edition", ["local", "saas", "enterprise"])

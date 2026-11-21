@@ -19,6 +19,13 @@ edition:
       issuer: https://id.ci.invalid/realms/automatos
       clientId: automatos-ci
 
+# PRD-278 D-6: the enterprise edition renders only with verify-full and a CA ConfigMap.
+# The ConfigMap is not made: the pods are dry-run, and the API, the Job and the worker of
+# this render are not started, so nothing reads the file.
+database:
+  sslmode: verify-full
+  caConfigMap: database-ca
+
 frontend:
   enterpriseImage:
     repository: automatos-enterprise-frontend

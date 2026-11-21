@@ -59,6 +59,14 @@ cookie-authenticated change must carry is a valid header name. The refusal names
 never its value. ``config.py`` reads the clocks so that no value stops another edition: a value
 that is not a number reaches this check as the text it was, and is refused here.
 
+``check_database_tls`` (PRD-278 D-6) is called last. Where the edition requires a verified
+connection to its database (``requires_verified_database_tls``) it refuses to start unless
+``DATABASE_SSLMODE`` is ``REQUIRED_DATABASE_SSLMODE`` (``verify-full``: the server's certificate is
+checked against the CA file ``DATABASE_SSLROOTCERT`` names, and its host name against the address).
+The value is read as ``core.database.tls`` reads it, trimmed and in lower case, and is never quoted.
+``core.database.tls`` refuses ``verify-full`` without a CA file in every edition, so together the two
+rules mean this edition's API connects only after checking the server.
+
 Every other edition passes untouched: nothing here reads a setting it does not use.
 
 Imports no config and reads no setting itself: ``config.py`` hands the values in. The three rule
@@ -187,6 +195,17 @@ CLOUD_SYNC_NEEDS_REVOCATIONS = (
 CLOUD_ITEMS_NEED_SYNC = (
     f"needs {CLOUD_SYNC_SETTING}: agents, Playbooks, packages and plugins arrive from Automatos Cloud only "
     "in a Sync. Switch both on, or leave Cloud items off"
+)
+
+
+# PRD-278 D-6: the setting ``check_database_tls`` reads, and the one mode it accepts. The same as
+# core.database.tls.SERVER_VERIFYING_MODE; this module imports no database code, so a test pins the two.
+DATABASE_TLS_START_UP_SETTINGS: Tuple[str, ...] = ("DATABASE_SSLMODE",)
+REQUIRED_DATABASE_SSLMODE = "verify-full"
+DATABASE_TLS_PROBLEM = (
+    f"must be {REQUIRED_DATABASE_SSLMODE}, with DATABASE_SSLROOTCERT naming the CA file that signed the "
+    "database server's certificate: this edition connects to its database only after checking the "
+    "server's certificate and host name (PRD-278 D-6)"
 )
 
 
@@ -421,6 +440,20 @@ def check_hosted_service_settings(capabilities: editions.EditionCapabilities, se
         raise EditionNotReady(BAD_SESSION_SETTING.format(name=name, problem=problem))
 
 
+def check_database_tls(capabilities: editions.EditionCapabilities, settings: Mapping[str, Any]) -> None:
+    """Raise ``EditionNotReady`` naming ``DATABASE_SSLMODE``, never its value, unless it is ``verify-full``.
+
+    Only where the edition requires a verified database connection (``requires_verified_database_tls``,
+    PRD-278 D-6). ``settings`` maps each name in ``DATABASE_TLS_START_UP_SETTINGS`` to its value. Every
+    other edition returns at once, reading nothing.
+    """
+    if not capabilities.requires_verified_database_tls:
+        return
+    name = DATABASE_TLS_START_UP_SETTINGS[0]
+    if str(settings.get(name) or "").strip().lower() != REQUIRED_DATABASE_SSLMODE:
+        raise EditionNotReady(BAD_SESSION_SETTING.format(name=name, problem=DATABASE_TLS_PROBLEM))
+
+
 def _whole_number_at_least_one(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
@@ -462,6 +495,8 @@ __all__ = [
     "BAD_SESSION_SETTING",
     "CLOUD_ITEMS_NEED_SYNC",
     "CLOUD_SYNC_NEEDS_REVOCATIONS",
+    "DATABASE_TLS_PROBLEM",
+    "DATABASE_TLS_START_UP_SETTINGS",
     "DEVICE_PAIRING_PROBLEM",
     "DEVICE_PAIRING_SETTING_NAMES",
     "HOSTED_SERVICE_SETTING_NAMES",
@@ -479,10 +514,12 @@ __all__ = [
     "SUBJECT_CLAIM_PROFILE_PROBLEM",
     "OIDC_SIGN_IN_SETTINGS",
     "OIDC_START_UP_SETTINGS",
+    "REQUIRED_DATABASE_SSLMODE",
     "SESSION_COOKIE_PREFIX",
     "SESSION_IDLE_MINUTES_MIN",
     "SESSION_SETTINGS",
     "EditionNotReady",
+    "check_database_tls",
     "check_device_pairing_setting",
     "check_hosted_service_settings",
     "check_session_settings",

@@ -136,16 +136,24 @@ config:
 # TLS on the connection to PostgreSQL from the API, the migration Job and the worker
 # (PRD-278). All empty, the default: nothing is set or mounted, and each connection
 # behaves as it does today. Set these here, not in `config` (rendering fails there):
-# the worker doesn't read `config`.
+# the worker doesn't read `config`. The enterprise edition renders only with
+# sslmode verify-full and a caConfigMap (PRD-278 D-6); its API refuses to start otherwise.
+#
+# The API holds two session-level advisory locks on this database: the scheduler's lock,
+# on a connection of its own for as long as the process leads, and the start-up lock its
+# boot seeding takes. A connection pooler in transaction mode hands each transaction a
+# different server connection, so it cannot keep either lock: connect the API to
+# PostgreSQL directly, or through a pooler in session mode.
 database:
   # DATABASE_SSLMODE: disable, allow, prefer, require, verify-ca or verify-full.
   # verify-full checks the server's certificate against the CA below and its host name
-  # against the address in DATABASE_URL.
+  # against the address in DATABASE_URL. verify-ca and verify-full need caConfigMap.
   sslmode: ""
   # A ConfigMap in the release's namespace holding the CA certificate(s) that signed the
-  # server's certificate: for a managed database, the provider's bundle. Mounted read-only
-  # at /etc/automatos/database-ca in the API, the Job and the worker, and
-  # DATABASE_SSLROOTCERT names the file. Needs sslmode verify-ca or verify-full.
+  # server's certificate: for a managed database, the provider's bundle, as a PEM file
+  # (the API, the Job and the worker read a file; libpq's `system` store is not used).
+  # Mounted read-only at /etc/automatos/database-ca in the API, the Job and the worker,
+  # and DATABASE_SSLROOTCERT names the file. Needs sslmode verify-ca or verify-full.
   # Changing the ConfigMap: the kubelet updates the mounted file in place, after its sync
   # delay (a minute or so). Each new connection then trusts the new file; a connection
   # already open keeps the session it has until it closes. A file that holds no

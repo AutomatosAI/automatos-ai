@@ -323,7 +323,9 @@ root, would fail at the first upload.
 {{/*
 TLS to PostgreSQL (PRD-278 W3), for the API, the migration Job and the worker: the same
 two settings the app reads, and the CA file mounted from `database.caConfigMap`. Nothing
-when `database` is left empty. Stops rendering on values the app would refuse at start.
+when `database` is left empty, outside the enterprise edition. Stops rendering on values
+the app would refuse at start: an unknown mode, a CA without a mode that checks it, a mode
+that checks with no CA, and, in the enterprise edition, any mode but verify-full (D-6).
 */}}
 {{- define "automatos.databaseCaDir" -}}
 /etc/automatos/database-ca
@@ -341,8 +343,15 @@ when `database` is left empty. Stops rendering on values the app would refuse at
 {{- fail (printf "database.sslmode must be disable, allow, prefer, require, verify-ca or verify-full, got %q" .) }}
 {{- end }}
 {{- end }}
-{{- if and .Values.database.caConfigMap (not (has .Values.database.sslmode (list "verify-ca" "verify-full"))) }}
+{{- $checking := has .Values.database.sslmode (list "verify-ca" "verify-full") }}
+{{- if and .Values.database.caConfigMap (not $checking) }}
 {{- fail "database.caConfigMap needs database.sslmode verify-ca or verify-full: the CA file is used only to check the server's certificate" }}
+{{- end }}
+{{- if and $checking (not .Values.database.caConfigMap) }}
+{{- fail "database.sslmode verify-ca and verify-full need database.caConfigMap: a ConfigMap holding the CA file that signed the database server's certificate" }}
+{{- end }}
+{{- if and (include "automatos.enterprise" .) (ne (.Values.database.sslmode | default "") "verify-full") }}
+{{- fail "database.sslmode must be verify-full in the enterprise edition, with database.caConfigMap: the API connects to its database only after checking the server's certificate and host name (PRD-278 D-6)" }}
 {{- end }}
 {{- end }}
 

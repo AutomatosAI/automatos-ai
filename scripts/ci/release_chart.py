@@ -63,10 +63,11 @@ WEB_EDITIONS: Mapping[str, Tuple[KeyPath, str]] = {
 # Made-up values of the right shape (example.com is reserved for examples), never an install's.
 RENDER_VALUES: Mapping[str, dict] = {
     "local": {},
-    # PRD-277 US-701: the values this edition cannot render without.
+    # PRD-277 US-701 and PRD-278 D-6: the values this edition cannot render without.
     "enterprise": {"edition": {"authEdition": "enterprise", "enterprise": {
         "publicUrl": "https://automatos.example.com", "clientIpHeader": "X-Real-IP",
-        "oidc": {"issuer": "https://id.example.com/realms/automatos", "clientId": "automatos"}}}},
+        "oidc": {"issuer": "https://id.example.com/realms/automatos", "clientId": "automatos"}}},
+        "database": {"sslmode": "verify-full", "caConfigMap": "database-ca"}},
 }
 CHART_NAME = "automatos"
 PACKAGE = "charts/automatos"

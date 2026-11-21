@@ -71,9 +71,10 @@ require_database_settings() {
 # PRD-278 W3: DATABASE_SSLMODE and DATABASE_SSLROOTCERT, the settings the app's own
 # connections read, reach pg_isready and psql as libpq's PGSSLMODE and PGSSLROOTCERT.
 # read_database_tls reads them once, the way the app does: trimmed, the mode lowercased,
-# blank as unset. A mode libpq doesn't know, or a CA file without verify-ca or
-# verify-full, stops the script before it waits for the database, with a line that names
-# the setting and never the address or the file's path.
+# blank as unset. A mode libpq doesn't know, a CA file without verify-ca or verify-full,
+# or verify-ca or verify-full without a CA file, stops the script before it waits for the
+# database, with a line that names the settings and never the address or the file's path.
+# The CA must be a file: the Python steps after this one check that it holds a certificate.
 DB_TLS_SSLMODE=""
 DB_TLS_SSLROOTCERT=""
 
@@ -99,6 +100,13 @@ read_database_tls() {
             verify-ca|verify-full) ;;
             *)
                 echo "❌ DATABASE_SSLROOTCERT is used only with DATABASE_SSLMODE verify-ca or verify-full"
+                exit 1
+                ;;
+        esac
+    else
+        case "$DB_TLS_SSLMODE" in
+            verify-ca|verify-full)
+                echo "❌ DATABASE_SSLMODE verify-ca and verify-full need DATABASE_SSLROOTCERT: the path of a file holding the CA certificate(s) that signed the database server's certificate"
                 exit 1
                 ;;
         esac

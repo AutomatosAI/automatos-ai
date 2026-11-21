@@ -9,7 +9,8 @@ user's own PostgreSQL. With neither setting, neither variable is set and the add
 passed as given. With the mode set, the address's own ``sslmode`` and ``sslrootcert`` are
 dropped from what the tools get, since libpq prefers the connection string to the
 environment. The settings are read the way config.py's reader reads them (trimmed, the mode
-lowercased); a value the app would refuse stops the script before it waits for the database.
+lowercased); a value the app would refuse, verify-ca or verify-full without a CA file among
+them, stops the script before it waits for the database.
 
 The script runs under bash with every command it calls replaced by a stub that records
 the two variables it was given, and the addresses pg_isready and psql were given.
@@ -103,11 +104,12 @@ def test_the_mode_is_read_the_way_the_app_reads_it(tmp_path):
 
 def test_the_settings_win_over_an_sslmode_and_sslrootcert_in_the_address(tmp_path):
     query = "?application_name=boot&sslmode=disable&sslrootcert=" + "/tmp/other.crt"
-    proc, calls, addresses = _execute(tmp_path, {"DATABASE_URL": _address(query), "DATABASE_SSLMODE": "verify-full"})
+    proc, calls, addresses = _execute(tmp_path, {"DATABASE_URL": _address(query), "DATABASE_SSLMODE": "verify-full",
+                                                 "DATABASE_SSLROOTCERT": CA_IN_POD})
     assert calls, proc.stdout + proc.stderr
     assert addresses and set(addresses) == {f"pg_isready {_address('?application_name=boot')}",
                                             f"psql {_address('?application_name=boot')}"}
-    assert _by_tool(calls)["pg_isready"] == {"PGSSLMODE=verify-full PGSSLROOTCERT=unset"}
+    assert _by_tool(calls)["pg_isready"] == {f"PGSSLMODE=verify-full PGSSLROOTCERT={CA_IN_POD}"}
 
 
 @pytest.mark.parametrize("query", ["?sslmode=disable", "?sslrootcert=/tmp/other.crt&sslmode=disable"])
@@ -127,6 +129,10 @@ def test_neither_setting_passes_the_address_as_given(tmp_path):
     ({"DATABASE_SSLMODE": "verify"}, "DATABASE_SSLMODE must be one of"),
     ({"DATABASE_SSLMODE": "require", "DATABASE_SSLROOTCERT": CA_IN_POD}, "DATABASE_SSLROOTCERT is used only with"),
     ({"DATABASE_SSLROOTCERT": CA_IN_POD}, "DATABASE_SSLROOTCERT is used only with"),
+    ({"DATABASE_SSLMODE": "verify-full"}, "DATABASE_SSLMODE verify-ca and verify-full need DATABASE_SSLROOTCERT"),
+    ({"DATABASE_SSLMODE": "verify-ca"}, "DATABASE_SSLMODE verify-ca and verify-full need DATABASE_SSLROOTCERT"),
+    ({"DATABASE_SSLMODE": " VERIFY-FULL ", "DATABASE_SSLROOTCERT": "   "},
+     "DATABASE_SSLMODE verify-ca and verify-full need DATABASE_SSLROOTCERT"),
 ])
 def test_a_value_the_app_would_refuse_stops_the_entrypoint_before_it_waits(tmp_path, env, message):
     proc, calls, _ = _execute(tmp_path, env)

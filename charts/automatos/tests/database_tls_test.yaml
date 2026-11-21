@@ -183,3 +183,127 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "config.DATABASE_SSLMODE: set database.sslmode and database.caConfigMap instead"
+  - it: stops on verify-full with no CA, naming both values
+    template: templates/worker.yaml
+    set:
+      database: {sslmode: verify-full}
+    asserts:
+      - failedTemplate:
+          errorPattern: "database.sslmode verify-ca and verify-full need database.caConfigMap: a ConfigMap holding the CA file"
+  - it: stops on verify-ca with no CA
+    template: templates/worker.yaml
+    set:
+      database: {sslmode: verify-ca}
+    asserts:
+      - failedTemplate:
+          errorPattern: "database.sslmode verify-ca and verify-full need database.caConfigMap"
+  - it: stops on a checking mode with no CA in the Job too, with the worker off
+    template: templates/migrate-job.yaml
+    set:
+      worker: {enabled: false}
+      database: {sslmode: verify-full}
+    asserts:
+      - failedTemplate:
+          errorPattern: "database.sslmode verify-ca and verify-full need database.caConfigMap"
+
+  # ── the hosted edition: the defaults render exactly as before ──────────────
+  - it: sets neither TLS setting on the hosted edition's API by default
+    template: templates/api-deployment.yaml
+    set:
+      edition: {authEdition: saas}
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DATABASE_SSLMODE}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DATABASE_SSLROOTCERT}
+          any: true
+      - notContains:
+          path: spec.template.spec.volumes
+          content: {name: database-ca}
+          any: true
+
+  # ── the enterprise edition: verify-full with a CA, or no render (PRD-278 D-6) ──
+  # The enterprise values the API needs are set in each, so the database rule is the one that
+  # fails. Reported against the worker's template, the first to fail (see above).
+  - it: stops an enterprise render with neither value set
+    template: templates/worker.yaml
+    set:
+      edition: {authEdition: enterprise, enterprise: {publicUrl: "https://automatos.example.com", clientIpHeader: X-Real-IP, oidc: {issuer: "https://id.example.com/realms/automatos", clientId: automatos}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "database.sslmode must be verify-full in the enterprise edition, with database.caConfigMap"
+  - it: stops an enterprise render on require
+    template: templates/worker.yaml
+    set:
+      edition: {authEdition: enterprise, enterprise: {publicUrl: "https://automatos.example.com", clientIpHeader: X-Real-IP, oidc: {issuer: "https://id.example.com/realms/automatos", clientId: automatos}}}
+      database: {sslmode: require}
+    asserts:
+      - failedTemplate:
+          errorPattern: "database.sslmode must be verify-full in the enterprise edition"
+  - it: stops an enterprise render on verify-ca, which checks no host name, even with a CA
+    template: templates/worker.yaml
+    set:
+      edition: {authEdition: enterprise, enterprise: {publicUrl: "https://automatos.example.com", clientIpHeader: X-Real-IP, oidc: {issuer: "https://id.example.com/realms/automatos", clientId: automatos}}}
+      database: {sslmode: verify-ca, caConfigMap: database-ca}
+    asserts:
+      - failedTemplate:
+          errorPattern: "database.sslmode must be verify-full in the enterprise edition"
+  - it: stops an enterprise render on verify-full with no CA
+    template: templates/worker.yaml
+    set:
+      edition: {authEdition: enterprise, enterprise: {publicUrl: "https://automatos.example.com", clientIpHeader: X-Real-IP, oidc: {issuer: "https://id.example.com/realms/automatos", clientId: automatos}}}
+      database: {sslmode: verify-full}
+    asserts:
+      - failedTemplate:
+          errorPattern: "database.sslmode verify-ca and verify-full need database.caConfigMap"
+  - it: stops an enterprise render in the API's and the Job's templates when the worker is off
+    template: templates/migrate-job.yaml
+    set:
+      edition: {authEdition: enterprise, enterprise: {publicUrl: "https://automatos.example.com", clientIpHeader: X-Real-IP, oidc: {issuer: "https://id.example.com/realms/automatos", clientId: automatos}}}
+      worker: {enabled: false}
+    asserts:
+      - failedTemplate:
+          errorPattern: "database.sslmode must be verify-full in the enterprise edition"
+  - it: renders the enterprise API with verify-full and the CA
+    template: templates/api-deployment.yaml
+    set:
+      edition: {authEdition: enterprise, enterprise: {publicUrl: "https://automatos.example.com", clientIpHeader: X-Real-IP, oidc: {issuer: "https://id.example.com/realms/automatos", clientId: automatos}}}
+      database: {sslmode: verify-full, caConfigMap: database-ca}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DATABASE_SSLMODE, value: verify-full}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DATABASE_SSLROOTCERT, value: /etc/automatos/database-ca/ca.crt}
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: database-ca, configMap: {name: database-ca}}
+  - it: gives the enterprise migration Job and worker the same verify-full and CA
+    template: templates/worker.yaml
+    documentIndex: 0
+    set:
+      edition: {authEdition: enterprise, enterprise: {publicUrl: "https://automatos.example.com", clientIpHeader: X-Real-IP, oidc: {issuer: "https://id.example.com/realms/automatos", clientId: automatos}}}
+      database: {sslmode: verify-full, caConfigMap: database-ca}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DATABASE_SSLMODE, value: verify-full}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DATABASE_SSLROOTCERT, value: /etc/automatos/database-ca/ca.crt}
+  - it: gives the enterprise migration Job verify-full and the CA
+    template: templates/migrate-job.yaml
+    set:
+      edition: {authEdition: enterprise, enterprise: {publicUrl: "https://automatos.example.com", clientIpHeader: X-Real-IP, oidc: {issuer: "https://id.example.com/realms/automatos", clientId: automatos}}}
+      database: {sslmode: verify-full, caConfigMap: database-ca}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DATABASE_SSLMODE, value: verify-full}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: database-ca, mountPath: /etc/automatos/database-ca, readOnly: true}
