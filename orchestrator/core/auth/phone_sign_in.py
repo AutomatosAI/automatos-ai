@@ -7,7 +7,8 @@ first sign-in, first admin and audit. It starts with ``START_PARAMS`` on the sta
 provider. They are kept in the sign-in's own row (``oidc_pending``) and the callback reads them from
 there, never from its own query. Towards the provider a phone's start differs in one way: it asks the
 person to sign in again, as a step-up does (``oidc_sign_in.auth_time_values``), so no sign-in the
-provider already holds in this browser answers for them unseen.
+provider already holds in this browser answers for them unseen; and the callback holds the provider
+to it, by the step-up's sign-in time rule, before anything awaits the person (``sign_in_flow``).
 
 **What it can and cannot prove.** Nothing at the install can tell the real Automatos Go app from any
 other program that sends the same start: the app holds no secret of its own. PKCE binds a code to

@@ -118,9 +118,10 @@ class Callback:
 class Finished:
     """A verified identity, and the path the person goes to next.
 
-    For a step-up (US-406): ``step_up_session_id`` is the session that asked, and ``started_at`` when
-    the step-up started, which the identity's ``auth_time`` must not be older than. A method that
-    offers no step-up leaves both None, and its callbacks are ordinary sign-ins.
+    ``started_at`` is when the sign-in started. For a step-up (US-406), ``step_up_session_id`` is the
+    session that asked; for a step-up and for a phone's sign-in (US-603) the identity's ``auth_time``
+    must not be older than ``started_at``. A method that offers no step-up leaves
+    ``step_up_session_id`` None, and its callbacks are ordinary sign-ins.
     """
 
     identity: VerifiedIdentity

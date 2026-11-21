@@ -20,7 +20,8 @@ address of the provider's own sign-in page, with:
   which ``finish`` hands back with when the step-up started.
 
 These only ask. Freshness is judged from the returned token's ``auth_time`` alone
-(``core.auth.step_up_sign_in``): a provider that sends none, or an old one, is refused all the same.
+(``core.auth.step_up_sign_in``), for a step-up and for a phone's sign-in alike: a provider that
+sends none, or an old one, is refused all the same.
 
 The browser binding is a secret of its own, never in an address: the route puts it in a
 ``__Host-`` cookie only this browser holds, so a callback carried to another browser (login
@@ -303,8 +304,8 @@ class OidcSignIn:
         and for a phone's start (``phone``, US-603) it also asks the provider to make the person
         sign in again (``max_age=0``, and ``prompt=login`` where taken), so a sign-in the provider
         already holds in this browser never answers for them unseen. ``phone`` is kept with the
-        sign-in. The callback does not check a phone's ``auth_time``: a step-up's does, because it
-        confirms a session; a phone's sign-in is confirmed by the person on the install's page."""
+        sign-in. The callback checks the ``auth_time`` the provider returns for both, by one rule
+        (``step_up_sign_in.sign_in_time_refusal``); a browser's ordinary sign-in is not checked."""
         metadata = oidc_provider.current_metadata()
         redirect_uri = callback_address()
         started = oidc_pending.begin(db, safe_return_path(return_to), client_address,
