@@ -236,7 +236,7 @@ Each wave is one pull request or a short series. CI is the only gate.
 - [x] Started as that user, the entrypoint repairs nothing. It checks the volume is writable and otherwise stops with a message that says what the storage must provide.
   - *`test_prd262_worker_boot.py`: started as uid 1000 or 1001 on a writable volume (a folder another user owns included), no `find`, `chown`, `usermod` or `setpriv` probe runs and it starts as itself; on a missing or read-only volume it exits 1 before starting, naming each folder it cannot write, the pod's `fsGroup` and the root start. test.yml's parity job runs both on the built image (a volume uid 1000 owns starts; one root owns stops, and stays root's), in CI.*
 - [ ] The chart sets the worker non-root, with the pod's group setting on its volume, and adds no capability.
-  - *Rendered: `worker_frontend_test.yaml`, `pod_security_test.yaml`, `default_render_test.yaml`, and `test_f452…::test_the_chart_s_worker_starts_as_uid_1000_and_gains_no_privilege_or_capability`. Admission under "restricted" with no exception for the worker, and its start as uid 1000 writing its volume, wait on chart.yml's install lane (`deploy/kind/strict.sh check`), in CI.*
+  - *Rendered: `worker_frontend_test.yaml`, `pod_security_test.yaml`, `default_render_test.yaml`, and `test_f452…::test_the_chart_s_worker_starts_as_uid_1000_and_gains_no_privilege_or_capability`; the pod also sets `fsGroupChangePolicy: OnRootMismatch`. The install lane (`deploy/kind/strict.sh check`, in CI) proves admission under "restricted" with no exception for the worker, its start as uid 1000, and that the two claims share files. It does not prove the pod's group setting: its hostPath volumes ignore `fsGroup`, and the folder is prepared for gid 1000 before either pod starts. That storage honouring `fsGroup` makes a root-owned volume writable for the worker is shown by the first real install on such storage.*
 - [ ] The compose file states the user it starts the worker as, and the local development path works as today.
   - *Compose sets `user: "0:0"` and keeps its four capabilities (`test_1309_worker_capabilities.py`); the root start is the path compose used before, unchanged in `entrypoint.sh` and covered by `test_prd262_worker_boot.py`'s root cases. A `make dev` run is not part of CI.*
 - [x] The chart's README no longer lists capabilities for the worker.
@@ -255,7 +255,7 @@ Each wave is one pull request or a short series. CI is the only gate.
 - [x] The worker's internal token is a required key of that secret, not an optional one.
   - *Required when `worker.existingSecret` is set, in the worker's Secret and in `existingSecret` too, so both sides hold it. With the chart's one Secret, as before, it stays optional, so the default render is unchanged (`worker_namespace_test.yaml`, `default_render_test.yaml`).*
 - [x] Each side of the agent-files volume can be given a claim that already exists.
-  - *`workspaces.api.existingClaim`, `workspaces.worker.existingClaim` (`worker_namespace_test.yaml`). In one namespace a claim named for either side serves both; with the worker apart, both and `worker.existingSecret` are required, and an invalid namespace name is refused (`worker_namespace_refusals_test.yaml`). That two claims on one file system share files waits on the install lane, which binds two claims to one node folder and has the API read a file the worker wrote, in CI.*
+  - *`workspaces.api.existingClaim`, `workspaces.worker.existingClaim` (`worker_namespace_test.yaml`). In one namespace a claim named for either side serves both; with the worker apart, both and `worker.existingSecret` are required, and an invalid namespace name, or one starting `kube-`, is refused (`worker_namespace_refusals_test.yaml`); the install notes then list what must already exist in the worker's namespace (`notes_test.yaml`). That two claims on one file system share files waits on the install lane, which binds two claims to one node folder and has the API read a file the worker wrote, in CI.*
 - [x] With none of the three set, the rendered chart is the same as before this story. A test pins it.
   - *`default_render_test.yaml` pins every object the default render makes (kind, apiVersion, metadata and spec, and each template's object count). The differences from chart 0.9.0 are deliberate and listed in its header: the chart's version label, and US-201's worker pod settings and dropped capabilities.*
 
@@ -263,8 +263,8 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As an operator, I want to choose the nodes each component runs on, so that the worker has nodes to itself.
 
 **Acceptance Criteria:**
-- [x] The worker, the web app, the migration job and the memory store take a node selector, tolerations, affinity and spread, as the API does.
-  - *`nodeSelector`, `tolerations`, `affinity` and `topologySpreadConstraints` for `api` (spread is new), `frontend`, `worker` and `migrations`, through one helper (`automatos.placement`). The memory store is not in the chart until Wave 6 (US-601), so it takes them then; nothing is built for it here. The install lane sets each on the worker and a node selector on the rest, in CI.*
+- [ ] The worker, the web app, the migration job and the memory store take a node selector, tolerations, affinity and spread, as the API does.
+  - *Built for the API (spread is new), the web app, the worker and the migration Job: `nodeSelector`, `tolerations`, `affinity` and `topologySpreadConstraints`, through one helper (`automatos.placement`). Not done for the memory store, which the chart does not have yet: it gets its placement when Wave 6 adds it, a requirement now written into US-601. The install lane sets each value on the worker and a node selector on the rest, in CI.*
 - [x] Unit tests cover each.
   - *`placement_test.yaml`: each of the four components with all four values, a component's values reaching no other, and one value alone; `default_render_test.yaml`: none rendered while empty.*
 
@@ -360,6 +360,7 @@ Each wave is one pull request or a short series. CI is the only gate.
 - [ ] The API's `QDRANT_URL` is set by the chart, and the chart refuses to render with both `qdrant.enabled` and a hand-written `QDRANT_URL`.
 - [ ] The disk is kept when the chart is uninstalled.
 - [ ] With the value off, nothing is rendered and `QDRANT_URL` is as today.
+- [ ] The memory store takes `qdrant.nodeSelector`, `qdrant.tolerations`, `qdrant.affinity` and `qdrant.topologySpreadConstraints`, through the chart's placement helper (`automatos.placement`, US-203), with unit tests. US-203 built them for every other component; this is the memory store's share of it.
 
 ### Wave 7: What the chart guarantees
 
@@ -408,7 +409,7 @@ Each has a recommendation, which stands unless he changes it.
 - **PRD-278.** A read-only root assumes nothing that must survive lives on the API's disk. Where PRD-278 has not landed, the API's data volume covers it.
 - **PRD-277.** A token bound to a session follows the pattern that PRD sets for sessions and device tokens: random, stored hashed, checked through the bearer registry.
 - **Tests that pin today's shape and must be changed on purpose:** the chart's `worker_frontend_test.yaml`, `api_test.yaml` and `migrate_job_test.yaml`; `test_prd262_smoke_worker_health.py`; `test_prd262_worker_starlette.py`.
-- **The hosted service** runs the worker outside this chart, on storage that mounts as root **[T]** (`entrypoint.sh:66`). The image still starts as root there when told to, and its root path is unchanged. But since US-201 the image starts as uid 1000 unless told otherwise, so the hosted service must now tell it: Railway starts a non-root image as its `USER` and documents `RAILWAY_RUN_UID=0` to start it as root (docs.railway.com/volumes#permissions). Without it the worker stops at start with the "cannot write /workspaces" message. `infrastructure/railway-manifest.json` names the key for `agent-workspace-worker`; its value is set on the service before this ships.
+- **The hosted service** runs the worker outside this chart, on storage that mounts as root **[T]** (`entrypoint.sh:66`). The image still starts as root there when told to, and its root path is unchanged. But since US-201 the image starts as uid 1000 unless told otherwise, so the hosted service must now tell it: Railway starts a non-root image as its `USER` and documents `RAILWAY_RUN_UID=0` to start it as root (docs.railway.com/volumes#permissions). `infrastructure/railway-manifest.json` records the required value for `agent-workspace-worker` (`required_env_values`), and a test checks it. **Order:** set it on the service before an image from this release deploys; setting it earlier changes nothing, as the older image already starts as root. Without it the worker prints `[entrypoint] uid 1000 cannot write /workspaces…` and exits 1 before it starts, touching no file, and each restart stops the same way. `docs/deployment-infrastructure/production-deployment-cicd.md` and the chart's upgrade notes say the same.
 
 ## 10. Success metrics
 
