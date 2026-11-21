@@ -8,7 +8,7 @@ tests:
     asserts:
       - hasDocuments:
           count: 0
-  - it: routes /api, /ws, the discovery document and /exports/ to the API and everything else to the web app
+  - it: routes /api, /ws and the discovery document to the API and everything else to the web app
     release:
       name: demo
     set:
@@ -29,9 +29,9 @@ tests:
           path: spec.rules[0].http.paths[1].path
           value: /ws
       - equal:
-          path: spec.rules[0].http.paths[4].backend.service.name
+          path: spec.rules[0].http.paths[3].backend.service.name
           value: demo-automatos-frontend
-  # PRD-277 US-505: exactly these two more paths, in every edition.
+  # PRD-277 US-505: exactly one more path, in every edition.
   - it: routes exactly the discovery document to the API, never the rest of /.well-known/
     release:
       name: demo
@@ -52,16 +52,6 @@ tests:
       - equal:
           path: spec.rules[0].http.paths[3]
           value:
-            path: /exports/
-            pathType: Prefix
-            backend:
-              service:
-                name: demo-automatos-api
-                port:
-                  name: http
-      - equal:
-          path: spec.rules[0].http.paths[4]
-          value:
             path: /
             pathType: Prefix
             backend:
@@ -71,7 +61,7 @@ tests:
                   name: http
       - lengthEqual:
           path: spec.rules[0].http.paths
-          count: 5
+          count: 4
   - it: routes the same paths in the enterprise edition
     release:
       name: demo
@@ -84,17 +74,22 @@ tests:
       - equal:
           path: spec.rules[0].http.paths[2].path
           value: /.well-known/automatos.json
-      - equal:
-          path: spec.rules[0].http.paths[3].path
-          value: /exports/
       - lengthEqual:
           path: spec.rules[0].http.paths
-          count: 5
-  - it: exposes neither /health, /metrics, /docs nor the /.well-known/ prefix
+          count: 4
+  - it: routes neither /exports/, /health, /metrics, /docs nor the /.well-known/ prefix
     set:
       ingress:
         enabled: true
     asserts:
+      - notContains:
+          path: spec.rules[0].http.paths
+          content: {path: /exports/}
+          any: true
+      - notContains:
+          path: spec.rules[0].http.paths
+          content: {path: /exports}
+          any: true
       - notContains:
           path: spec.rules[0].http.paths
           content: {path: /health}
@@ -124,4 +119,4 @@ tests:
     asserts:
       - lengthEqual:
           path: spec.rules[0].http.paths
-          count: 4
+          count: 3

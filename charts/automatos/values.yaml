@@ -364,9 +364,9 @@ otel:
   # The pod and namespace names are always added.
   resourceAttributes: ""
 
-# Path routing on one host: /api, /ws, exactly /.well-known/automatos.json (the
-# discovery document a phone reads) and /exports/ to the API, everything else to the
-# web app (its own /.well-known/ files among it). /health, /metrics and /docs are not
+# Path routing on one host: /api, /ws and exactly /.well-known/automatos.json (the
+# discovery document a phone reads) to the API, everything else to the web app (its
+# own /.well-known/ files among it). /exports/, /health, /metrics and /docs are not
 # routed. The enterprise edition needs it: its web app calls the API on its own
 # origin. The local web image has http://localhost:8000 fixed at build time.
 ingress:
