@@ -7,7 +7,7 @@ OpenAI embedding models provider (extends OpenAI client).
 
 import logging
 import time
-from typing import List
+from typing import List, Optional
 
 from config import config
 from .embedding_bounds import client_kwargs as bounded_client_kwargs, single_text_timeout, timeout_note
@@ -81,14 +81,16 @@ class OpenAIEmbeddingProvider(BaseEmbeddingProvider):
             raise
     
     def get_dimension(self) -> int:
-        """Return embedding dimension based on model"""
-        # Map OpenAI models to their dimensions
-        if "3-large" in self.config.model:
-            return 3072
-        elif "3-small" in self.config.model:
-            return 1536
-        elif "ada-002" in self.config.model:
-            return 1536
-        else:
-            # Return configured dimension or default
-            return self.config.dimension
+        """Return embedding dimension based on model, else the configured one"""
+        return openai_model_dimension(self.config.model) or self.config.dimension
+
+
+def openai_model_dimension(model: Optional[str]) -> Optional[int]:
+    """The dimensions an OpenAI embedding model produces, when known (None otherwise).
+    The start-up size check reads it too (PRD-278 US-502)."""
+    name = model or ""
+    if "3-large" in name:
+        return 3072
+    if "3-small" in name or "ada-002" in name:
+        return 1536
+    return None

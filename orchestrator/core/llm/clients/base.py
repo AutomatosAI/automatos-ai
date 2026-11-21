@@ -65,6 +65,7 @@ class EmbeddingProvider(Enum):
     HUGGINGFACE_LOCAL = "huggingface_local"
     HUGGINGFACE_API = "huggingface_api"
     OPENROUTER = "openrouter"  # OpenRouter aggregator (20+ embedding models)
+    BEDROCK = "bedrock"  # bedrock-runtime, with the Bedrock chat client's credentials (PRD-278 US-501)
     DISABLED = "disabled"  # Deterministic fallback
 
 
@@ -344,5 +345,41 @@ class DeterministicEmbeddingProvider(BaseEmbeddingProvider):
             "No embedding provider configured/reachable; refusing to return random vectors."
         )
     
+    def get_dimension(self) -> int:
+        return self.dimension
+
+
+class UnusableEmbeddingProvider(BaseEmbeddingProvider):
+    """A provider is set but cannot be used (PRD-278 US-503).
+
+    It is not the stand-in: the stand-in is for an install with no provider at all. This one
+    names the provider that was set and why it cannot be used, and every embedding call raises
+    ``EmbeddingUnavailableError`` with that reason, so nothing is written to an index from it.
+    It reports itself degraded (``is_degraded``) like the stand-in, so readiness and the memory
+    surfaces say that memory and knowledge search are off. The reason is a fixed sentence or an
+    exception's class, never a credential; the detail is in the server log.
+    """
+
+    is_degraded = True
+
+    def __init__(self, provider: str, reason: str, dimension: int):
+        self.dimension = dimension
+        self.wanted = provider
+        self.reason = reason
+        self.config = EmbeddingConfig(provider=EmbeddingProvider.DISABLED, model=f"unusable:{provider}",
+                                      dimension=dimension)
+        self.client = None
+        logger.warning("The embedding provider '%s' is set but cannot be used: %s. Nothing is embedded "
+                       "until it is fixed.", provider, reason)
+
+    def _initialize_client(self):
+        pass  # No client: it could not be built
+
+    async def generate_embedding(self, text: str) -> List[float]:
+        """Raise: the provider that was set cannot be used."""
+        raise EmbeddingUnavailableError(
+            f"The embedding provider '{self.wanted}' is set but cannot be used: {self.reason}."
+        )
+
     def get_dimension(self) -> int:
         return self.dimension

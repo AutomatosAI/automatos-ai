@@ -68,15 +68,19 @@ class _StaticToken:
 
 
 def runtime_client(api_key: Optional[str], secret_key: Optional[str], region: Optional[str],
-                   use_role: bool = False) -> Any:
+                   use_role: bool = False, extra: Optional[Any] = None) -> Any:
     """A ``bedrock-runtime`` client for these credentials (see the module docstring).
 
     ``use_role``: the key resolver answered with the install's own role (PRD-278), the only
     case in which, with ``AWS_USE_WORKLOAD_IDENTITY`` on, the default chain is used.
+    ``extra``: a botocore ``Config`` merged over this one's (the embedding provider's time
+    limits and retries, PRD-278 US-501); None keeps the chat client's own.
     """
     import botocore.session
 
     config = Config(region_name=region or DEFAULT_REGION, retries={"max_attempts": 3, "mode": "adaptive"})
+    if extra is not None:
+        config = config.merge(extra)
     if api_key and not _ACCESS_KEY_ID.match(api_key):
         session = botocore.session.Session()
         session.register_component("token_provider", _StaticToken(api_key))
