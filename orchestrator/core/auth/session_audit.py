@@ -41,7 +41,7 @@ from typing import Any, Callable, Dict, Optional, Tuple, TypeVar, Union
 from uuid import UUID
 
 from config import config
-from core.auth.user_link import REFUSED_EMAIL_CONFLICT
+from core.auth.user_link import REFUSED_EMAIL_CONFLICT, REFUSED_SUBJECT_CLAIM_CHANGED
 from core.models.auth_sessions import IP_ADDRESS_MAX, USER_AGENT_MAX
 from core.workspaces.audit import AuditLog, AuditService
 
@@ -63,7 +63,7 @@ PERSON_DEACTIVATED = "user:deactivated"
 SESSION_ACTIONS = (SIGN_IN, SIGN_IN_REFUSED, SIGN_OUT, SESSION_REVOKED, STEP_UP, IDENTITY_LINKED, BOOTSTRAP_ADMIN)
 
 # Why a sign-in was refused (§5.12): the access rule, an email on another person, a deactivated
-# person, an ID token that did not verify.
+# person, an ID token that did not verify, a person linked under ``sub`` before OIDC_CLAIM_SUBJECT changed.
 REFUSED_ACCESS_RULE = "access_rule"
 REFUSED_DEACTIVATED = "deactivated"
 REFUSED_INVALID_TOKEN = "invalid_token"
@@ -74,7 +74,7 @@ REFUSED_SEVERAL_WORKSPACES = "several_workspaces"
 REFUSED_DEVICE_LIMIT = "device_limit_reached"
 PHONE_REFUSAL_REASONS = (REFUSED_NO_WORKSPACE, REFUSED_SEVERAL_WORKSPACES, REFUSED_DEVICE_LIMIT)
 REFUSAL_REASONS = (REFUSED_ACCESS_RULE, REFUSED_EMAIL_CONFLICT, REFUSED_DEACTIVATED, REFUSED_INVALID_TOKEN,
-                   *PHONE_REFUSAL_REASONS)
+                   REFUSED_SUBJECT_CLAIM_CHANGED, *PHONE_REFUSAL_REASONS)
 
 # Why a step-up was refused (``auth:step_up`` with ``confirmed`` false, US-406): someone other than the
 # session's person signed in, the token carried no ``auth_time``, one older than the step-up or one
@@ -292,6 +292,7 @@ __all__ = [
     "REFUSED_DEACTIVATED",
     "REFUSED_DEVICE_LIMIT",
     "REFUSED_EMAIL_CONFLICT",
+    "REFUSED_SUBJECT_CLAIM_CHANGED",
     "REFUSED_INVALID_TOKEN",
     "REFUSED_NO_WORKSPACE",
     "REFUSED_SEVERAL_WORKSPACES",

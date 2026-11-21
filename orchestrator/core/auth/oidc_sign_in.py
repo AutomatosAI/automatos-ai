@@ -50,6 +50,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Mapping, Optional, Tuple
 from urllib.parse import urlencode
@@ -80,6 +81,10 @@ logger = logging.getLogger(__name__)
 METHOD_NAME = "oidc"
 CALLBACK_PATH = "/api/v1/auth/oidc/callback"
 CODE_MAX_LENGTH = 4096
+# The claim OIDC Core §2 requires of every ID token, and OIDC_CLAIM_SUBJECT's default.
+STANDARD_SUBJECT_CLAIM = "sub"
+# A subject holding one of these (C0 controls, DEL) is no subject.
+_CONTROL_CHARACTER = re.compile(r"[\x00-\x1f\x7f]")
 # A token without ``auth_time`` is recorded as signed in at the epoch, so a check of how recently
 # the person proved who they are (step-up, US-406) can never pass on it.
 NO_AUTH_TIME = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -180,13 +185,26 @@ def _email_verified(claims: Mapping[str, Any]) -> bool:
 def _subject(claims: Mapping[str, Any]) -> str:
     """The person's id at the provider: the claim ``OIDC_CLAIM_SUBJECT`` names (``sub`` unless set).
 
-    A token without it, or with anything but a non-empty string there, is refused as a token
-    without ``sub`` is (``oidc_tokens``, which still requires ``sub`` of every ID token).
+    A token without it, or with anything there but a string that is not blank and holds no control
+    character (below 0x20, or 0x7f), is refused as a token without ``sub`` is (``oidc_tokens``,
+    which still requires ``sub`` of every ID token).
     """
     subject = claims.get(config.OIDC_CLAIM_SUBJECT)
-    if not isinstance(subject, str) or not subject:
-        raise InvalidSignIn("the ID token was refused: it names no subject in OIDC_CLAIM_SUBJECT's claim")
+    if not isinstance(subject, str) or not subject.strip() or _CONTROL_CHARACTER.search(subject):
+        raise InvalidSignIn("the ID token was refused: it names no usable subject in OIDC_CLAIM_SUBJECT's claim")
     return subject
+
+
+def _standard_sub(claims: Mapping[str, Any]) -> Optional[str]:
+    """The token's ``sub`` when the subject is read from another claim, else None (``VerifiedIdentity``).
+
+    Also None for a ``sub`` no identity link could hold (too long, or holding a NUL): nobody can
+    have been linked under it.
+    """
+    if config.OIDC_CLAIM_SUBJECT == STANDARD_SUBJECT_CLAIM:
+        return None
+    sub = claims.get(STANDARD_SUBJECT_CLAIM)
+    return sub if isinstance(sub, str) and sub and _fits(sub, SUBJECT_MAX) else None
 
 
 def verified_identity(claims: Mapping[str, Any], now: Optional[float] = None) -> VerifiedIdentity:
@@ -211,7 +229,7 @@ def verified_identity(claims: Mapping[str, Any], now: Optional[float] = None) ->
         name=_profile_value(claims.get(config.OIDC_CLAIM_NAME), strip=True),
         auth_time=_auth_time(claims.get("auth_time"), moment),
         idp_session_id=sid if isinstance(sid, str) and sid and len(sid) <= IDP_SESSION_ID_MAX else None,
-        claims=claims,
+        claims=claims, standard_sub=_standard_sub(claims),
     )
 
 

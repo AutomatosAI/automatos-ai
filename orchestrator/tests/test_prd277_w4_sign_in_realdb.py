@@ -17,7 +17,10 @@ address) and the in-process provider (US-407), each test in a transaction rolled
   The email is the person's only when the token marks it verified with ``true``.
 * **The subject claim**: the person is the issuer and the claim ``OIDC_CLAIM_SUBJECT`` names. Set to
   another claim, two tokens with different ``sub`` and the same value there are one person; a token
-  with no non-empty string there, or with no ``sub``, is refused and audited as a bad token.
+  with no non-empty string there, or with no ``sub``, is refused and audited as a bad token. A person
+  linked under ``sub`` before the setting named another claim is refused at their next sign-in
+  (``subject_claim_changed``, logged at error naming no value), and no second person is made, even with
+  an unverified address; a person new under the new claim still gets in; at ``sub`` that check never runs.
 * **Every refusal** in US-402's list (wrong signature, ``alg: none``, wrong issuer, wrong
   audience, expired, missing or wrong nonce, reused state, replayed code, another host) ends
   without a session, at ``/sign-in?error=…``; one that is a refusal of the person is audited with
@@ -58,7 +61,7 @@ os.environ.setdefault("POSTGRES_DB", "test")
 
 from api import auth_oidc as routes  # noqa: E402
 from config import config  # noqa: E402
-from core.auth import hybrid, oidc_pending, oidc_provider, session_lane, sign_in_flow  # noqa: E402
+from core.auth import hybrid, oidc_pending, oidc_provider, people, session_lane, sign_in_flow  # noqa: E402
 from core.auth.oidc_sign_in import CALLBACK_PATH, CODE_MAX_LENGTH, OidcSignIn  # noqa: E402
 from core.auth.pairing import hash_secret  # noqa: E402
 from core.auth.sign_in_methods import (  # noqa: E402
@@ -359,6 +362,52 @@ def test_a_token_without_the_subject_claim_or_without_sub_is_refused_as_a_bad_to
     assert _all_sessions(install.db) == 0 and _identity_user(install.db, "has-a-sub") is None
     assert [(action, details) for action, _uid, details in _audits(install.db, install.workspace_id)] == [
         ("auth:sign_in_refused", {"reason": "invalid_token"})]
+
+
+def _count_users(db) -> int:
+    return db.execute(text("SELECT COUNT(*) FROM users")).scalar_one()
+
+
+def test_a_person_linked_under_sub_is_refused_once_the_subject_claim_changes(install, monkeypatch, caplog):
+    install.idp.sign_in_as(Person(subject="linked-under-sub", email=f"was-{uuid.uuid4().hex[:8]}@example.test",
+                                  email_verified=False, extra={"oid": "oid-of-the-linked"}))
+    _sign_in(install)
+    user_id, users = _identity_user(install.db, "linked-under-sub"), _count_users(install.db)
+    monkeypatch.setattr(config, "OIDC_CLAIM_SUBJECT", "oid")
+
+    with caplog.at_level(logging.ERROR):
+        assert _refusal(_sign_in(install)) == sign_in_flow.REFUSED
+
+    assert _count_users(install.db) == users and _identity_user(install.db, "oid-of-the-linked") is None
+    assert _sessions_of(install.db, user_id) == 1
+    refused = [details for action, _uid, details in _audits(install.db, install.workspace_id)
+               if action == "auth:sign_in_refused"]
+    assert refused == [{"reason": "subject_claim_changed"}]
+    errors = [record.getMessage() for record in caplog.records if record.levelno >= logging.ERROR]
+    assert any("OIDC_CLAIM_SUBJECT" in line for line in errors)
+    assert not any(value in line for line in errors for value in ("linked-under-sub", "oid-of-the-linked"))
+
+
+def test_a_person_new_under_another_subject_claim_still_gets_in(install, monkeypatch):
+    install.idp.sign_in_as(Person(subject="linked-under-sub-too", extra={"oid": "oid-of-someone-else"}))
+    _sign_in(install)
+    monkeypatch.setattr(config, "OIDC_CLAIM_SUBJECT", "oid")
+    install.idp.sign_in_as(Person(subject="never-linked", extra={"oid": "oid-of-a-newcomer"}))
+
+    assert _sign_in(install).headers["location"] == "/projects?tab=1"
+
+    assert _sessions_of(install.db, _identity_user(install.db, "oid-of-a-newcomer")) == 1
+
+
+def test_at_sub_the_earlier_link_check_never_runs(install, monkeypatch):
+    checked = []
+    monkeypatch.setattr(people, "refuse_if_linked_before", lambda *args, **kwargs: checked.append(kwargs))
+    install.idp.sign_in_as(Person(subject="always-sub", extra={"oid": "an-oid-nobody-reads"}))
+
+    _sign_in(install)
+    _sign_in(install)
+
+    assert checked == [] and _sessions_of(install.db, _identity_user(install.db, "always-sub")) == 2
 
 
 def test_a_reused_state_is_expired_and_the_code_is_exchanged_once(install):

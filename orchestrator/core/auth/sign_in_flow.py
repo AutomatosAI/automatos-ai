@@ -276,14 +276,15 @@ def _finished(db: Session, callback: Callback, browser: Browser, method: str):
 
 
 def _linked(db: Session, identity: VerifiedIdentity, browser: Browser) -> LinkedPerson:
-    """The person the identity signs in as; an email held by another person is refused."""
+    """The person the identity signs in as; an email held by another person is refused, and so is a
+    first sign-in of a person linked under the token's ``sub`` before (``identity.standard_sub``)."""
     reason: Optional[str] = None
     try:
         return people.link_person(db, issuer=identity.issuer, subject=identity.subject,
                                   email_verified=identity.email_verified, email=identity.email,
-                                  name=identity.name)
-    except IdentityLinkRefused:
-        reason = session_audit.REFUSED_EMAIL_CONFLICT
+                                  name=identity.name, linked_before_as=identity.standard_sub)
+    except IdentityLinkRefused as refused:
+        reason = refused.reason
     except (ValueError, TypeError):
         reason = session_audit.REFUSED_INVALID_TOKEN
     logger.warning("Sign-in refused: the identity could not be linked (%s)", reason)

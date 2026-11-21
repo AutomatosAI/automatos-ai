@@ -554,11 +554,15 @@ def test_a_new_sign_in_replaces_the_persons_pending_ones_and_clears_anybodys_exp
                          pairing_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1))
     install.db.add(stale)
     install.db.commit()
+    # Keep the id and let go of the object: once the sign-in below deletes the row, reading the
+    # object again would ask the database for a row that is no longer there.
+    stale_id = stale.id
+    install.db.expunge(stale)
 
     _awaits(third.sign_in())
 
     assert [row.sign_in_install_id for row in _pending(install.db, person)] == [third.install_id]
-    assert install.db.get(MobileDevice, stale.id) is None
+    assert install.db.query(MobileDevice.id).filter(MobileDevice.id == stale_id).first() is None
     assert second.press_continue().status_code == 404
 
 
