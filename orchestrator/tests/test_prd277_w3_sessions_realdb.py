@@ -400,9 +400,10 @@ def test_ending_every_session_of_a_person_writes_one_row(db_session, install):
     ]
 
 
-def _device(db, install) -> MobileDevice:
+def _device(db, install, person=None) -> MobileDevice:
     token, digest = mint_token("amd_", 32)
-    row = MobileDevice(workspace_id=install.workspace_id, user_id=install.person, kind="paired", status="active",
+    row = MobileDevice(workspace_id=install.workspace_id, user_id=person or install.person, kind="paired",
+                       status="active",
                        install_id=f"prd277-w3-{uuid.uuid4().hex[:12]}", platform="ios", token_hash=digest,
                        paired_at=_now(), events=[])
     db.add(row)
@@ -427,6 +428,27 @@ def test_deactivating_ends_the_person_their_sessions_and_devices_in_one_commit(d
     assert _audits(db_session, install.workspace_id)[before:] == [
         ("user:deactivated", admin, "user", str(install.person), {"sessions": 2, "devices": 1}, "203.0.113.9", None),
     ]
+
+
+def test_an_admin_ending_another_persons_access_revokes_their_devices_in_the_same_commit(db_session, install):
+    """PRD-277 US-601: a paired phone is the person's access too; each device gets its own row."""
+    admin = _seed_person(db_session, role="admin")
+    _issue(db_session, install.person)
+    phone = _device(db_session, install)
+    before = len(_audits(db_session, install.workspace_id))
+
+    done = people.end_access_of(db_session, install.person, _requester(install, admin))
+
+    assert (done.sessions_ended, done.devices) == (1, ((phone.id, install.workspace_id),))
+    db_session.expire_all()
+    assert db_session.get(MobileDevice, phone.id).status == "revoked"
+    assert sorted(_audits(db_session, install.workspace_id)[before:]) == [
+        ("auth:session_revoked", admin, "user", str(install.person), {"sessions": 1, "devices": 1},
+         "203.0.113.9", None),
+        ("device:revoked", admin, "mobile_device", str(phone.id),
+         {"reason": "sessions_ended", "person": install.person}, "203.0.113.9", None),
+    ]
+    assert not people.end_access_of(db_session, install.person, _requester(install, admin))  # nothing left
 
 
 def test_a_removal_lands_even_when_its_row_cannot_be_written(db_session, install, monkeypatch, caplog):
@@ -519,6 +541,41 @@ def test_an_admin_ends_one_session_then_every_session_and_lists_them(client, db_
     assert {entry["state"] for entry in listed} == {"revoked"}
     assert not any(one.token in str(entry) or "token" in "".join(entry) for entry in listed)
     assert _row(db_session, two.session_id).revoked_reason == "admin"
+
+
+def _phone_status(db, phone) -> str:
+    db.expire_all()
+    return db.get(MobileDevice, phone.id).status
+
+
+def test_an_admin_ending_every_session_of_another_person_also_ends_their_phones(client, db_session, install, admin):
+    _issue(db_session, install.person)
+    phone = _device(db_session, install)
+    db_session.commit()
+
+    answer = client.post(f"/api/v1/auth/people/{install.person}/sessions/revoke", headers=admin.headers)
+
+    assert answer.json() == {"revoked": 1} and _phone_status(db_session, phone) == "revoked"
+
+
+def test_an_admin_ending_their_own_sessions_keeps_their_phones(client, db_session, install, admin):
+    phone = _device(db_session, install, person=admin.pk)
+    db_session.commit()
+
+    answer = client.post(f"/api/v1/auth/people/{admin.pk}/sessions/revoke", headers=admin.headers)
+
+    assert answer.json() == {"revoked": 1} and _phone_status(db_session, phone) == "active"
+    assert not [row for row in _audits(db_session, install.workspace_id) if row[0] == "device:revoked"]
+
+
+def test_an_admin_ending_one_session_keeps_the_persons_phones(client, db_session, install, admin):
+    one = _issue(db_session, install.person)
+    phone = _device(db_session, install)
+    db_session.commit()
+
+    answer = client.post(f"/api/v1/auth/sessions/{one.session_id}/revoke", headers=admin.headers)
+
+    assert answer.json() == {"revoked": True} and _phone_status(db_session, phone) == "active"
 
 
 def test_an_admin_deactivates_a_person_but_not_themselves_or_a_higher_role(client, db_session, install, admin):

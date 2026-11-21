@@ -216,7 +216,7 @@ def enterprise(monkeypatch):
     return config
 
 
-START_URL = "http://testserver" + discovery.OIDC_START_PATH
+START_URL = FRONTEND + discovery.OIDC_START_PATH
 
 
 @pytest.mark.parametrize("remote_access", ["off", "open", "paired"])
@@ -241,13 +241,17 @@ def test_enterprise_with_pairing_off_offers_sign_in_only(client, enterprise, mon
     assert body["pairing"] == {"enabled": False}
 
 
-def test_enterprise_names_its_own_host_in_the_start_address(client, enterprise, monkeypatch):
-    monkeypatch.setattr(config, "PUBLIC_API_HOST", "automatos.example.org")
+@pytest.mark.parametrize("public_api_host", [HOSTED_PUBLIC_API_HOST, "api.elsewhere.example"])
+def test_enterprise_names_only_its_configured_address_whatever_the_request_says(client, enterprise, monkeypatch,
+                                                                                public_api_host):
+    monkeypatch.setattr(config, "PUBLIC_API_HOST", public_api_host)
 
-    body = _document(client)
+    body = _document(client, headers={"host": "attacker.example", "x-forwarded-proto": "http"})
 
-    assert body["auth"]["oidc"] == {"start_url": "https://automatos.example.org" + discovery.OIDC_START_PATH}
-    assert HOSTED_PUBLIC_API_HOST not in json.dumps(body)
+    assert (body["api_url"], body["web_url"]) == (FRONTEND, FRONTEND)
+    assert body["auth"]["oidc"] == {"start_url": START_URL} and START_URL.startswith("https://")
+    for other in ("attacker.example", "testserver", "http://", public_api_host):
+        assert other not in json.dumps(body)
 
 
 def test_enterprise_publishes_nothing_about_the_identity_provider(client, enterprise, planted_secrets, monkeypatch):

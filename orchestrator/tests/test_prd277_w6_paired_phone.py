@@ -5,13 +5,17 @@
   malformed value naming the setting and never the value. With it off a device token is 401 before any lookup.
 * **Who makes a code** (``pairing_code_owner``): in enterprise a person signed in on the session lane, a member of
   the workspace, for themselves; a device, a key, the all-workspaces view and a non-member are 403, and the
-  console (``scripts/mint_pairing_code.py``) refuses. ``local`` keeps its workspace-admin gate.
+  console (``scripts/mint_pairing_code.py``) refuses. ``local`` keeps its workspace-admin gate. In enterprise a
+  person makes ``mobile_pairing_codes_person`` codes a window (10 in 10 minutes), in a bucket of their own;
+  ``local`` has no such limit.
 * **The push decision** (``PUT /api/v1/mobile/push-consent``): in enterprise an install admin signed in on the
   session lane, after a fresh sign-in, with one ``push:consent_changed`` row; a workspace admin who is not an
   install admin, and a device, are 403. ``local`` is as before: the operator, no step-up, no row.
   ``PUSH_CONSENT_STEP_UP_ROUTES`` is this route's share of the app-wide step-up pin in ``test_prd261_c1_wire.py``.
-* **The edition check** (``services.mobile.edition_change``): the lock is taken before the marker is read, so two
-  pods starting at once revoke once; a check that cannot run refuses device tokens (503) until it does; every
+* **The edition check** (``services.mobile.edition_change``): what the install starts as names the edition and,
+  in enterprise, whether it pairs; the lock is waited for at most ``LOCK_WAIT_LIMIT`` and taken before the
+  marker is read, so two pods starting at once revoke once; a check that cannot run, for any error or a lock not
+  had in time, never raises, refuses device tokens (503) until it does, and the next request retries it; every
   worker runs it in ``_boot_phase_1_core`` after the tables, before it serves.
 """
 from __future__ import annotations
@@ -260,6 +264,48 @@ def test_with_pairing_off_the_code_route_is_absent_in_enterprise(monkeypatch):
     assert TestClient(app).post("/api/v1/mobile/pairing-codes").status_code == 404
 
 
+def test_a_person_makes_ten_codes_in_ten_minutes():
+    from core.security.rate_limiter import DEFAULT_LIMITS
+
+    assert DEFAULT_LIMITS[devices_api.CODES_RATE_LIMIT_OPERATION] == (10, 600)
+
+
+class _Spent:
+    """A limiter that has seen this many checks per bucket, refusing past ``limit``."""
+
+    def __init__(self):
+        self.buckets = []
+
+    def check(self, bucket, limit, window, *, label):
+        self.buckets.append(bucket)
+        return self.buckets.count(bucket) <= limit, limit, 0, window
+
+
+def test_in_enterprise_codes_are_limited_per_person(monkeypatch):
+    _enterprise(monkeypatch)
+    spent = _Spent()
+    monkeypatch.setattr(devices_api, "_rate_store", spent)
+    limit, window = (2, 600)
+    monkeypatch.setitem(devices_api.DEFAULT_LIMITS, devices_api.CODES_RATE_LIMIT_OPERATION, (limit, window))
+
+    for _ in range(limit):
+        devices_api.limit_codes_per_person(PERSON)
+    devices_api.limit_codes_per_person(PERSON + 1)  # another person has a bucket of their own
+    with pytest.raises(HTTPException) as refused:
+        devices_api.limit_codes_per_person(PERSON)
+
+    assert (refused.value.status_code, refused.value.detail) == (429, devices_api.CODES_RATE_LIMITED_DETAIL)
+    assert refused.value.headers == {"Retry-After": str(window)}
+    assert set(spent.buckets) == {f"{devices_api.CODES_RATE_BUCKET_PREFIX}:{PERSON}",
+                                  f"{devices_api.CODES_RATE_BUCKET_PREFIX}:{PERSON + 1}"}
+
+
+def test_in_local_making_codes_is_limited_as_before(monkeypatch):
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
+    monkeypatch.setattr(devices_api, "_rate_store", SimpleNamespace(check=lambda *a, **k: pytest.fail("no limit")))
+    devices_api.limit_codes_per_person(PERSON)
+
+
 # --------------------------------------------------------------------------- the push decision
 
 
@@ -378,25 +424,79 @@ class _Ordered:
         self.events.append(("commit",))
 
 
-def test_the_lock_is_taken_before_the_marker_is_read_and_held_to_the_commit(monkeypatch):
+def test_the_lock_is_waited_for_briefly_taken_before_the_marker_is_read_and_held_to_the_commit(monkeypatch):
     events = []
     _enterprise(monkeypatch)
-    monkeypatch.setattr(edition_change, "stored_edition", lambda db: events.append(("read",)) or "enterprise")
+    monkeypatch.setattr(edition_change, "stored_edition",
+                        lambda db: events.append(("read",)) or "enterprise:pairing_on")
     monkeypatch.setattr(edition_change, "revoke_every_paired_device", lambda db, now: pytest.fail("no revoke"))
     assert edition_change.revoke_if_edition_changed(_Ordered(events), None) == 0
-    assert [event[0] for event in events] == ["execute", "read", "commit"]
-    assert "pg_advisory_xact_lock" in events[0][1] and events[0][2] == {"key": edition_change.LOCK_KEY}
+    assert [event[0] for event in events] == ["execute", "execute", "read", "commit"]
+    assert "lock_timeout" in events[0][1] and events[0][2] == {"limit": edition_change.LOCK_WAIT_LIMIT}
+    assert "pg_advisory_xact_lock" in events[1][1] and events[1][2] == {"key": edition_change.LOCK_KEY}
 
 
 class _Failing:
+    """A session whose every statement fails with ``error`` (by default the database being down)."""
+
+    def __init__(self, error=None):
+        self.error = error or OperationalError("SELECT 1", {}, Exception("down"))
+        self.closed = False
+
     def execute(self, *_args, **_kwargs):
-        raise OperationalError("SELECT 1", {}, Exception("down"))
+        raise self.error
 
     def rollback(self):
         return None
 
     def close(self):
+        self.closed = True
+
+
+class _LockNotHad(_Failing):
+    """The lock wait limit is set; the advisory lock is not had in time (Postgres: lock_timeout)."""
+
+    def execute(self, statement, params=None):
+        if "pg_advisory_xact_lock" in str(statement):
+            raise OperationalError(str(statement), params, Exception("canceling statement due to lock timeout"))
         return None
+
+
+def _no_session():
+    raise RuntimeError("no session at all")
+
+
+@pytest.mark.parametrize("session", [
+    lambda: _Failing(RuntimeError("not a database error")),
+    lambda: _Failing(ValueError("a bad value")),
+    _no_session,
+], ids=["any error in the check", "another error", "the session cannot be made"])
+def test_a_check_never_stops_a_start_whatever_fails(monkeypatch, caplog, session):
+    _enterprise(monkeypatch)
+    monkeypatch.setattr(edition_change, "_status", edition_change.NOT_RUN)
+    monkeypatch.setattr(edition_change, "SessionLocal", session)
+
+    assert edition_change.confirm_edition() is False
+    assert edition_change.needs_confirming() is True
+    assert any(record.exc_info for record in caplog.records if record.name == edition_change.__name__)
+
+
+def test_a_lock_not_had_in_time_leaves_the_check_failed_and_the_next_request_retries(monkeypatch):
+    _enterprise(monkeypatch)
+    monkeypatch.setattr(edition_change, "_status", edition_change.NOT_RUN)
+    waiting = _LockNotHad()
+    monkeypatch.setattr(edition_change, "SessionLocal", lambda: waiting)
+
+    assert edition_change.confirm_edition() is False and edition_change.needs_confirming() is True
+    assert waiting.closed is True
+    with pytest.raises(HTTPException) as refused:
+        edition_change.ensure_confirmed()
+    assert refused.value.status_code == 503
+
+    monkeypatch.setattr(edition_change, "SessionLocal", lambda: _Failing())
+    monkeypatch.setattr(edition_change, "revoke_if_edition_changed", lambda db, now: 0)
+    edition_change.ensure_confirmed()
+    assert edition_change.needs_confirming() is False
 
 
 @pytest.mark.asyncio
@@ -414,13 +514,43 @@ async def test_a_check_that_cannot_run_refuses_device_tokens_until_it_does(monke
         devices_api._require_device_pairing()
 
 
-@pytest.mark.parametrize("earlier, running, changed", [
-    ("local", "local", False), ("enterprise", "enterprise", False), ("saas", "saas", False),
-    ("local", "enterprise", True), ("enterprise", "local", True), ("saas", "enterprise", True),
+@pytest.mark.parametrize("edition, pairing, started_as", [
+    ("local", "true", "local"), ("local", "false", "local"),
+    ("saas", "true", "saas"), ("saas", "false", "saas"),
+    ("enterprise", "true", "enterprise:pairing_on"), ("enterprise", "false", "enterprise:pairing_off"),
+    ("enterprise", "nope", "enterprise:pairing_off"),
 ])
-def test_the_one_edition_comparison_lives_with_the_flag(monkeypatch, earlier, running, changed):
+def test_what_the_install_starts_as_names_pairing_only_where_a_setting_decides_it(monkeypatch, edition, pairing,
+                                                                                   started_as):
+    monkeypatch.setattr(config, "AUTH_EDITION", edition)
+    monkeypatch.setattr(config, SETTING, pairing)
+    assert editions.started_as() == started_as
+
+
+@pytest.mark.parametrize("earlier, running, pairing, changed", [
+    ("local", "local", "true", False), ("saas", "saas", "true", False),
+    ("enterprise:pairing_on", "enterprise", "true", False),
+    ("enterprise:pairing_off", "enterprise", "false", False),
+    ("enterprise:pairing_on", "enterprise", "false", True),   # switched off
+    ("enterprise:pairing_off", "enterprise", "true", True),   # switched on: nothing is live to revoke
+    ("enterprise", "enterprise", "true", True),               # a marker that names no pairing state
+    ("local", "enterprise", "true", True), ("enterprise:pairing_on", "local", "true", True),
+    ("saas", "enterprise", "true", True),
+])
+def test_the_one_edition_comparison_lives_with_the_flag(monkeypatch, earlier, running, pairing, changed):
     monkeypatch.setattr(config, "AUTH_EDITION", running)
+    monkeypatch.setattr(config, SETTING, pairing)
     assert editions.started_as_another(earlier) is changed
+
+
+@pytest.mark.parametrize("earlier, reason", [
+    ("local", device_audit.REVOKED_EDITION_CHANGED),
+    ("saas", device_audit.REVOKED_EDITION_CHANGED),
+    ("enterprise:pairing_on", device_audit.REVOKED_PAIRING_SWITCHED_OFF),
+])
+def test_each_cause_has_its_own_reason(monkeypatch, earlier, reason):
+    _enterprise(monkeypatch, pairing="false")
+    assert edition_change._reason(earlier) == reason
 
 
 def test_a_check_that_has_run_asks_nothing_more(monkeypatch):

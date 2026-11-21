@@ -7,12 +7,16 @@
   and leaving the device's workspace each refuse the device at its next request: ``device.py``'s own
   checks, here in enterprise.
 * **Pairing:** a signed-in person makes a code, which pairs a phone to them (the row's ``user_id``); the code,
-  the pairing and a revoke are each one ``audit_logs`` row in enterprise, none in ``local``; in enterprise
-  only a phone pairs (a browser signs in), with no ``LOCAL_REMOTE_ACCESS`` needed.
-* **The edition change:** the first start as another edition revokes every paired device, pending codes
-  included, and only paired ones, with one ``device:revoked`` row each; a token issued before the change is
-  then ``401 device_revoked``; both directions; the same edition, a second run and an unmarked ``local``
-  install revoke nothing.
+  the pairing and a revoke are each one ``audit_logs`` row in enterprise (a second revoke of the same device
+  none), none in ``local``; in enterprise no ``LOCAL_REMOTE_ACCESS`` is needed. The pair link names the
+  install's configured address whatever the request's host. A person holds one pending code (a new one
+  replaces it) and makes none while they hold the most active devices. A code exchanged with an install id
+  another person already paired leaves that person's row as it was.
+* **The edition change:** the first start as another edition, or with pairing switched off, revokes every
+  paired device, pending codes included, and only paired ones, with one ``device:revoked`` row each and the
+  reason for its cause; a token issued before is then ``401 device_revoked``; both directions; switching
+  pairing back on brings none back; the same start, a second run and an unmarked ``local`` install revoke
+  nothing.
 
 Each test runs in a transaction rolled back at the end; ``commit`` releases a savepoint.
 """
@@ -22,6 +26,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -48,7 +53,7 @@ from core.auth.session_lane import SESSION_AUTH_TYPE  # noqa: E402
 from core.auth.workspace_admin import may_see_own_workspace_health  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 from core.models.mobile_devices import MobileDevice  # noqa: E402
-from services.mobile import device_audit, edition_change  # noqa: E402
+from services.mobile import device_audit, devices, edition_change  # noqa: E402
 
 INSTALL = "https://automatos.example.test"
 PAIRING_CODES = "/api/v1/mobile/pairing-codes"
@@ -99,8 +104,8 @@ def _member(db, workspace_id, user_pk, role="member") -> None:
                {"ws": str(workspace_id), "uid": user_pk, "role": role})
 
 
-def _set_edition(monkeypatch, edition) -> None:
-    for name, value in {"AUTH_EDITION": edition, "ENTERPRISE_DEVICE_PAIRING": "true",
+def _set_edition(monkeypatch, edition, pairing="true") -> None:
+    for name, value in {"AUTH_EDITION": edition, "ENTERPRISE_DEVICE_PAIRING": pairing,
                         "LOCAL_REMOTE_ACCESS": "paired"}.items():
         monkeypatch.setattr(config, name, value)
 
@@ -130,9 +135,9 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _device(db, install, *, kind="paired", status="active"):
+def _device(db, install, *, kind="paired", status="active", person=None):
     token, digest = mint_token("amd_", 32)
-    row = MobileDevice(workspace_id=install.workspace_id, user_id=install.person, kind=kind, status=status,
+    row = MobileDevice(workspace_id=install.workspace_id, user_id=person or install.person, kind=kind, status=status,
                        install_id=f"prd277-w6-{uuid.uuid4().hex[:12]}", platform="ios",
                        token_hash=digest if kind == "paired" else None,  # a signed-in phone holds no token
                        paired_at=_now(), events=[])
@@ -291,14 +296,77 @@ def test_in_enterprise_pairing_needs_no_remote_access_setting(db_session, instal
     assert _pair_with(client, client.post(PAIRING_CODES).json()["code"]).status_code == 200
 
 
-def test_in_enterprise_a_browser_does_not_pair_and_the_code_stays_usable(db_session, install):
+def test_in_enterprise_the_pair_link_names_the_configured_address_whatever_the_request_says(db_session, install,
+                                                                                            monkeypatch):
+    monkeypatch.setattr(config, "PUBLIC_API_HOST", "api.elsewhere.example")
     client = _client(db_session, _session_ctx(install))
-    code = client.post(PAIRING_CODES).json()["code"]
 
-    refused = client.post(PAIR, json={"code": code, "platform": "web", "install_id": f"prd277w6{uuid.uuid4().hex[:12]}"})
+    minted = client.post(PAIRING_CODES, headers={"host": "attacker.example", "x-forwarded-proto": "http"})
 
-    assert (refused.status_code, refused.json()) == (403, {"detail": mobile_devices.PHONES_ONLY})
-    assert _pair_with(client, code).status_code == 200
+    link = urlsplit(minted.json()["qr_payload"])
+    assert f"{link.scheme}://{link.netloc}" == INSTALL and parse_qs(link.query)["api"] == [INSTALL]
+    assert "attacker.example" not in minted.text and "http://" not in minted.text
+
+
+def _pending(db, install, person=None) -> list:
+    db.expire_all()
+    return db.query(MobileDevice).filter(MobileDevice.workspace_id == install.workspace_id,
+                                         MobileDevice.user_id == (person or install.person),
+                                         MobileDevice.status == "pending").all()
+
+
+def test_in_enterprise_a_new_code_replaces_the_persons_pending_one(db_session, install):
+    client = _client(db_session, _session_ctx(install))
+    first = client.post(PAIRING_CODES).json()["code"]
+    _device(db_session, install, status="pending")  # an older one, whatever its time
+
+    second = client.post(PAIRING_CODES).json()["code"]
+
+    assert len(_pending(db_session, install)) == 1
+    assert _pair_with(client, first).status_code == 401
+    assert _pair_with(client, second).status_code == 200
+
+
+def test_in_enterprise_no_code_is_made_while_the_person_holds_the_most_devices(db_session, install):
+    for _ in range(devices.MAX_ACTIVE_DEVICES_PER_PERSON):
+        _device(db_session, install)
+    client = _client(db_session, _session_ctx(install))
+
+    refused = client.post(PAIRING_CODES)
+
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == {"code": devices.DEVICE_LIMIT_REACHED, "message": devices.DEVICE_LIMIT_MESSAGE}
+    assert _pending(db_session, install) == []
+
+
+def test_a_device_revoked_twice_is_recorded_once(db_session, install):
+    client = _client(db_session, _session_ctx(install))
+    phone = _device(db_session, install)
+
+    for _ in range(2):
+        assert client.delete(f"/api/v1/mobile/devices/{phone.id}").status_code == 200
+
+    assert [action for action, *_rest in _audits(db_session, install.workspace_id)] == [device_audit.DEVICE_REVOKED]
+
+
+@pytest.mark.asyncio
+async def test_a_code_exchanged_with_another_persons_install_id_leaves_their_row_alone(db_session, install):
+    other = _seed_person(db_session)
+    _member(db_session, install.workspace_id, other.pk)
+    theirs = _device(db_session, install, person=other.pk)
+    before = db_session.get(MobileDevice, theirs.id)
+    kept = (before.user_id, before.status, before.token_hash, before.install_id)
+    client = _client(db_session, _session_ctx(install))
+
+    paired = client.post(PAIR, json={"code": client.post(PAIRING_CODES).json()["code"], "platform": "ios",
+                                     "install_id": kept[3]})
+
+    assert paired.status_code == 200 and paired.json()["device_id"] != str(theirs.id)
+    db_session.expire_all()
+    after = db_session.get(MobileDevice, theirs.id)
+    assert (after.user_id, after.status, after.token_hash, after.install_id) == kept
+    assert claimed_user_pk(await _resolve(theirs.token)) == other.pk
+    assert claimed_user_pk(await _resolve(paired.json()["token"])) == install.person
 
 
 def test_local_pairs_as_before_and_records_nothing(db_session, install, monkeypatch):
@@ -335,24 +403,61 @@ async def test_a_device_paired_under_one_edition_does_not_survive_the_other(db_s
     refused = await _refused(phone.token)
     assert (refused.status_code, refused.detail) == (401, {"code": device.DEVICE_REVOKED})
     assert (_status_of(db_session, pending.id), _status_of(db_session, signed_in.id)) == ("revoked", "active")
-    assert edition_change.stored_edition(db_session) == after
-    rows = _audits(db_session, install.workspace_id)
-    assert {(a, uid, r) for a, uid, _t, r, _d in rows} == {
-        (device_audit.DEVICE_REVOKED, None, str(phone.id)), (device_audit.DEVICE_REVOKED, None, str(pending.id))}
-    assert {tuple(sorted(d.items())) for *_rest, d in rows} == {tuple(sorted({
-        "reason": device_audit.REVOKED_EDITION_CHANGED, "person": install.person,
-        "from_edition": before, "to_edition": after}.items()))}
+    assert edition_change.stored_edition(db_session) == STARTED_AS[after]
+    _assert_revoked_rows(db_session, install, {phone.id, pending.id}, reason=device_audit.REVOKED_EDITION_CHANGED,
+                         before=STARTED_AS[before], after=STARTED_AS[after])
     assert _check(db_session, after) == 0
 
 
-@pytest.mark.parametrize("edition", ["local", "saas", "enterprise"])
-def test_an_install_that_keeps_its_edition_revokes_nothing(db_session, install, monkeypatch, edition):
-    _set_edition(monkeypatch, edition)
-    edition_change._store_edition(db_session, edition)
+# What each start is recorded as (editions.started_as), with ENTERPRISE_DEVICE_PAIRING on.
+STARTED_AS = {"local": "local", "saas": "saas", "enterprise": "enterprise:pairing_on"}
+PAIRING_OFF = "enterprise:pairing_off"
+
+
+def _assert_revoked_rows(db, install, device_ids, *, reason, before, after) -> None:
+    """One ``device:revoked`` row per device, by the install, naming the cause and both starts."""
+    rows = _audits(db, install.workspace_id)
+    assert {(a, uid, r) for a, uid, _t, r, _d in rows} == {(device_audit.DEVICE_REVOKED, None, str(i))
+                                                            for i in device_ids}
+    assert {tuple(sorted(d.items())) for *_rest, d in rows} == {tuple(sorted({
+        "reason": reason, "person": install.person, "from_edition": before, "to_edition": after}.items()))}
+
+
+@pytest.mark.parametrize("edition, pairing", [
+    ("local", "true"), ("saas", "true"), ("enterprise", "true"), ("enterprise", "false"), ("local", "false"),
+])
+def test_an_install_that_starts_as_it_did_revokes_nothing(db_session, install, monkeypatch, edition, pairing):
+    _set_edition(monkeypatch, edition, pairing)
+    edition_change._store_edition(db_session, editions.started_as())
     phone = _device(db_session, install)
 
     assert _check(db_session, edition) == 0
     assert _status_of(db_session, phone.id) == "active" and _audits(db_session, install.workspace_id) == []
+
+
+@pytest.mark.asyncio
+async def test_switching_pairing_off_ends_every_phone_and_switching_it_on_brings_none_back(db_session, install,
+                                                                                         monkeypatch):
+    _set_edition(monkeypatch, "enterprise")
+    _check(db_session, "enterprise")  # the install has started with pairing on
+    phone = _device(db_session, install)
+    pending = _device(db_session, install, status="pending")
+    assert claimed_user_pk(await _resolve(phone.token)) == install.person
+
+    _set_edition(monkeypatch, "enterprise", pairing="false")
+    assert _check(db_session, "enterprise") >= 2 and edition_change.stored_edition(db_session) == PAIRING_OFF
+    _assert_revoked_rows(db_session, install, {phone.id, pending.id},
+                         reason=device_audit.REVOKED_PAIRING_SWITCHED_OFF,
+                         before=STARTED_AS["enterprise"], after=PAIRING_OFF)
+    rows = len(_audits(db_session, install.workspace_id))
+
+    _set_edition(monkeypatch, "enterprise")
+    _check(db_session, "enterprise")  # install-wide; nothing of ours is live to revoke
+    assert edition_change.stored_edition(db_session) == STARTED_AS["enterprise"]
+    assert len(_audits(db_session, install.workspace_id)) == rows
+    refused = await _refused(phone.token)
+    assert (refused.status_code, refused.detail) == (401, {"code": device.DEVICE_REVOKED})
+    assert _status_of(db_session, pending.id) == "revoked"
 
 
 def test_an_unmarked_install_is_taken_to_have_been_local(db_session, install, monkeypatch):
