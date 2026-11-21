@@ -210,7 +210,7 @@ def test_helm_and_cosign_are_pinned_exactly():
 def test_every_action_the_release_adds_is_one_this_repository_already_pins():
     def uses(job: dict) -> set:
         return {step["uses"] for step in job.get("steps", []) if "uses" in step}
-    added = ("release-images", "release-chart")
+    added = ("release-images", "release-chart", "release-notes")
     others = set().union(*(uses(job) for name, job in JOBS.items() if name not in added))
     for name in added:
         assert uses(JOBS[name]) <= others, name
@@ -221,7 +221,7 @@ def test_no_new_step_interpolates_an_expression_into_its_shell():
     new = [step for step in _steps("merge") if step.get("if") == ON_A_TAG]
     new += [next(step for step in _steps("changes") if step.get("id") == "release")]
     new += [_step("changes", "Release preflight (v* tags only)")]
-    new += _steps("release-images") + _steps("release-chart")
+    new += _steps("release-images") + _steps("release-chart") + _steps("release-notes")
     for step in new:
         assert not _INTERPOLATION.search(step.get("run", "")), step["name"]
 

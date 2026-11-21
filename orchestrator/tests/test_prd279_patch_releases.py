@@ -118,7 +118,7 @@ def test_the_tag_path_runs_on_any_v_tag_whatever_branch_it_was_cut_on():
     assert triggers["push"]["tags"] == ["v*"]
     assert triggers["push"]["branches"] == ["main"], "a merge into a release branch publishes nothing"
     assert triggers["pull_request"]["branches"] == ["main", "release/**"], "a cherry-pick is built and scanned"
-    for job in ("release-images", "release-chart"):
+    for job in ("release-images", "release-chart", "release-notes"):
         assert workflow["jobs"][job]["if"] == "startsWith(github.ref, 'refs/tags/v')", job
 
 

@@ -105,6 +105,10 @@ name: images
 #     image named by a tag, pushes it to ghcr.io/<owner>/charts/automatos (never over an
 #     existing version), signs it and checks the signature; a chart it could not prove
 #     is deleted again.
+#   - The release-notes job, after both, creates the version's release page with the
+#     notes of PRD-279 §5.4 (scripts/ci/release_page.py): what changed, the database,
+#     upgrading, what to install and checking it. A candidate's page is a pre-release.
+#     It is the only job with `contents: write`, and it holds nothing else.
 #
 # - The enterprise web image (PRD-277 US-505): enterprise-frontend, published as
 #   ghcr.io/<owner>/automatos-enterprise-frontend beside the local one. Its own name, so
@@ -1179,6 +1183,9 @@ jobs:
       packages: write
       # cosign keyless signing exchanges the job's OIDC token for a certificate.
       id-token: write
+    # The release page names the chart by this digest (PRD-279 US-301).
+    outputs:
+      digest: ${{ steps.chart.outputs.digest }}
     env:
       VERSION: ${{ needs.changes.outputs.version }}
       HELM_VERSION: v4.3.0
@@ -1329,6 +1336,50 @@ jobs:
         run: |
           python scripts/ci/release_chart.py remove --owner "$GITHUB_REPOSITORY_OWNER" \
             --owner-type "$OWNER_TYPE" --tag "$VERSION"
+
+  # PRD-279 US-301, on a `v*` tag only, once every image is signed, checked and tagged with
+  # the version and the chart is published, signed and checked: the release page, with the
+  # notes of §5.4 (scripts/ci/release_page.py; the Markdown is release_notes.py's, the
+  # history release_history.py's). It is the one job that may write the repository's
+  # contents, which creating a release needs, and it holds nothing else: no packages, no
+  # OIDC token, so it cannot sign. Commit text reaches it only as git's output, read by
+  # the script as data and shown inside code spans; nothing from a tag, a commit or a file
+  # reaches the shell. A release page that exists is never changed: the job fails instead.
+  # The full history is fetched, so the previous release's tag and files can be read.
+  release-notes:
+    name: create the release page (v* tags only)
+    needs: [changes, release-images, release-chart]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.changes.outputs.version }}
+      CHART_DIGEST: ${{ needs.release-chart.outputs.digest }}
+    steps:
+      - name: Checkout (every tag and the history between releases)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Download the signed digests
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/release-digests
+          pattern: release-digest-*
+          merge-multiple: true
+
+      # The images the merge job publishes (a test holds the lists equal).
+      - name: Write the notes and create the release page
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/ci/release_page.py --repo "$GITHUB_REPOSITORY" --version "$VERSION" --sha "$GITHUB_SHA" \
+            --digests "${RUNNER_TEMP}/release-digests" --chart-digest "$CHART_DIGEST" \
+            --image api --image frontend --image enterprise-frontend --image workspace-worker \
+            --notes "${RUNNER_TEMP}/release-notes.md" --summary "$GITHUB_STEP_SUMMARY" --publish
 
   # PRD-262 US-053: the media assets image, ghcr.io/<owner>/automatos-media-assets.
   # media-render's build is to copy the Kokoro model and voices and the music tracks

@@ -1,0 +1,16 @@
+# The earliest version an install upgrades from to this one in one step (PRD-279 US-301).
+#
+# images.yml's release-notes job reads this file at the tagged commit and prints its value
+# under "Upgrading" on the release page (scripts/ci/release_page.py). The job fails, and no
+# release page is created, if the file is missing or malformed.
+#
+# Format: lines starting with # are comments and blank lines are ignored. Exactly one other
+# line holds the value, either
+#   MAJOR.MINOR.PATCH   a full release (no -rc suffix) that has a v tag, below the version
+#                       being released, from which an upgrade to it works in one step, or
+#   none                no earlier release upgrades to this one in one step.
+#
+# Change it on purpose, in the pull request that makes an older release unable to upgrade in
+# one step (a migration that needs an intermediate release, a removed setting): move it up to
+# the oldest release that still upgrades. Until the first release, it is none.
+none

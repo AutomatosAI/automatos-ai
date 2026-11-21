@@ -61,6 +61,9 @@ The tag path has never run before the first candidate. Check, on its run:
 - the command under [Checking a signature](#checking-a-signature) passes for an image
   and for the chart;
 - pushing the same chart version again is refused (re-run the chart job once).
+- the release page `Automatos 0.7.0-rc.1` exists, is marked as a pre-release, says it is
+  the first release in "What changed" and "Database", and its commands match the step
+  summaries; re-running the `release-notes` job fails and leaves the page as it is.
 - If the chart job's "Refuse a version that is already published" step stops the first
   candidate because the registry does not answer "not found" for a chart that has never
   been pushed, that is the step to adjust: its log shows the answer it got.
@@ -127,6 +130,43 @@ checked.
 7. **The chart is published, signed and checked.** It is pushed to
    `oci://ghcr.io/automatosai/charts/automatos` under the version, signed by digest,
    and its signature checked with the same command as the images.
+8. **The release page** (`release-notes` job, after the chart). `scripts/ci/release_page.py`
+   creates the version's page under the repository's Releases, named `Automatos <version>`,
+   with five sections (PRD-279 §5.4), described under [The release page](#the-release-page).
+   A candidate's page is marked as a pre-release. This is the only job that may write the
+   repository's contents, which creating a release needs, and it may do nothing else: it
+   cannot sign or publish an image. If the page for the tag exists, it is left as it is and
+   the job fails.
+
+## The release page
+
+Its five sections, each worked out by the job, none written by hand:
+
+- **What changed:** every pull request merged since the previous release, grouped by the
+  type in its title (`feat`, `fix`, `docs`, …), each with a link to it. The previous
+  release is the highest full release below this version among the tags the tagged commit
+  reaches: for a candidate, the full release before it, never an earlier candidate; for a
+  patch cut on `release/MAJOR.MINOR`, the release before it on that branch. A title is shown
+  as written, as plain text: it cannot add a heading, a link or markup to the page.
+- **Database:** whether the release changes the database, from the Alembic revision files
+  at the two tags (read as text). It lists the migrations added, in the order they run, and
+  any migration a shipped release had that was since removed or edited, which also counts
+  as a change. A release that changes the database can only be undone by restoring a
+  backup, because migrations go forward only.
+- **Upgrading:** the earliest version that upgrades to this one in one step, read from
+  [`scripts/ci/release_upgrade_from.txt`](../../scripts/ci/release_upgrade_from.txt). Its
+  format is written in the file: one line, `MAJOR.MINOR.PATCH` of a tagged full release below
+  the one being cut, or `none`. The job fails, and creates no page, if the file is missing or
+  malformed or names a version that has no tag. It says `none` until the first release; set
+  it to the first release's version in the pull request after it, and move it up on purpose
+  whenever a change stops older installs upgrading in one step.
+- **What to install:** the chart's address, version and digest, the `helm install` command,
+  and each image's digest.
+- **Checking it:** the `cosign verify` command for the chart and each image, by digest,
+  exactly as the workflow ran it, and a link to [Checking a release](checking-a-release.md).
+
+The page is marked the repository's latest release only when no full release has a higher
+version, so a patch to an older line does not take that place.
 
 The staging tags stay on the images after the run. They are not versions, and nothing
 installs from them.
@@ -150,6 +190,11 @@ installs from them.
   error names the chart version a maintainer must delete by hand under the
   organisation's packages. Deleting package versions from a workflow is in public
   preview on GitHub.
+- **The release page:** the images and the chart are published by then. If GitHub did not
+  answer, "Re-run failed jobs". If the upgrade file at the tag is missing or wrong, the job
+  cannot make the page for that tag: fix the file and cut the next version. Once the notes
+  are written, the job's summary holds them, even when GitHub refuses the page. A page that
+  exists is never changed by the job.
 
 ## A version is never replaced
 
