@@ -18,7 +18,7 @@ How to register Automatos with Keycloak for the enterprise edition. Read [Enterp
 
 ## 2. Register the application
 
-Create a confidential OpenID Connect client in the realm people sign in to. The CI realm's client is the worked example. Its settings, as Keycloak's realm JSON names them:
+Create a confidential OpenID Connect client in the realm people sign in to. The CI realm's client is the worked example. Its settings, as Keycloak's realm JSON names them, with the install's address in place of the CI's test address. The client's name is free: CI uses `automatos-ci`, and this page uses `automatos`.
 
 ```json
 {
@@ -119,6 +119,9 @@ edition:
       requiredClaims: automatos:team=ops
       caConfigMap: <configmap-name>   # only with a private certificate authority
       caKey: ca.crt
+database:
+  sslmode: verify-full
+  caConfigMap: <database-ca-configmap>   # the CA that signed the database server's certificate
 ingress:
   enabled: true
   host: automatos.example.com
@@ -137,13 +140,18 @@ OIDC_CLIENT_SECRET=<from the Kubernetes Secret>
 OIDC_DISPLAY_NAME=Keycloak
 OIDC_REQUIRED_CLAIMS=automatos:team=ops
 OIDC_CA_BUNDLE_FILE=/etc/automatos/oidc-ca/ca.crt
+DEFAULT_WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1
+DATABASE_SSLMODE=verify-full
+DATABASE_SSLROOTCERT=/etc/automatos/database-ca/ca.crt
 ```
+
+The chart sets the last three itself: `DEFAULT_WORKSPACE_ID` from `edition.defaultWorkspaceId`, and `DATABASE_SSLMODE` and `DATABASE_SSLROOTCERT` from `database.*`. Set them yourself only for an install made without the chart. The enterprise edition connects to its database only with `verify-full` ([chart README, Settings](../../charts/automatos/README.md#settings)).
 
 The chart sets `OIDC_CA_BUNDLE_FILE` from `caConfigMap` and `caKey`. The access rule is optional for a realm that serves one organisation. It is required when `ENTERPRISE_DEFAULT_ROLE` is not `none`.
 
 ## 7. What this provider cannot do
 
-Nothing Automatos needs was found missing. One difference to expect: Keycloak may ask the person to confirm sign-out, because Automatos sends no `id_token_hint` (see [Sign-out](#8-sign-out)).
+Nothing the sign-in needs was found missing. Keycloak may ask the person to confirm sign-out when the request carries no `id_token_hint` (see [Sign-out](#8-sign-out)).
 
 ## 8. Sign-out
 

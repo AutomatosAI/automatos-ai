@@ -77,10 +77,10 @@ https://login.microsoftonline.com/<tenant-id>/v2.0
 | `roles` | "The set of roles that were assigned to the user" (app roles). | Access rule: `roles=<app-role-value>`. |
 | `groups` | Optional. Added with **Token configuration** > **Add groups claim**. Above 200 groups in a JWT, Microsoft leaves the claim out and adds an overage claim instead. | Access rule: `groups=<value Entra sends for the group>`. |
 
-Because Entra sends no `email_verified`, Automatos keeps no email address for Entra users. So:
+Entra sends no `email_verified`, and an address is stored only when `email_verified` is `true`. So, for Entra users:
 
 - `email:` entries in `ENTERPRISE_BOOTSTRAP_ADMINS` never match. Use `sub:<object-id>`, the person's `oid` value.
-- Automatos never matches or refuses a person by email address with Entra ID.
+- No address is stored, and no sign-in is matched or refused by email address.
 
 To add a groups claim: in the app registration, go to **Token configuration** > **Add groups claim**, and choose which groups. Microsoft recommends "Groups assigned to the application" for large organisations, because of the group limit.
 
@@ -123,6 +123,9 @@ edition:
       requiredClaims: tid=<tenant-id>
 config:
   OIDC_CLAIM_SUBJECT: oid
+database:
+  sslmode: verify-full
+  caConfigMap: <database-ca-configmap>   # the CA that signed the database server's certificate
 ingress:
   enabled: true
   host: automatos.example.com
@@ -141,13 +144,18 @@ OIDC_CLIENT_SECRET=<from the Kubernetes Secret>
 OIDC_DISPLAY_NAME=Microsoft
 OIDC_REQUIRED_CLAIMS=tid=<tenant-id>
 OIDC_CLAIM_SUBJECT=oid
+DEFAULT_WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1
+DATABASE_SSLMODE=verify-full
+DATABASE_SSLROOTCERT=/etc/automatos/database-ca/ca.crt
 ```
+
+The chart sets the last three itself: `DEFAULT_WORKSPACE_ID` from `edition.defaultWorkspaceId`, and `DATABASE_SSLMODE` and `DATABASE_SSLROOTCERT` from `database.*`. Set them yourself only for an install made without the chart. The enterprise edition connects to its database only with `verify-full` ([chart README, Settings](../../charts/automatos/README.md#settings)).
 
 To admit only people with an app role, add it to the rule: `tid=<tenant-id>;roles=<app-role-value>`.
 
 ## 7. What this provider cannot do
 
-- **No verified email.** Entra lists no `email_verified` claim, so Automatos keeps no address for its users, and `email:` first-admin entries do not match. Use `sub:` entries.
+- **No verified email.** Entra lists no `email_verified` claim. An address is stored only when it is verified, so `email:` first-admin entries do not match Entra users. Use `sub:` entries.
 - **Large group lists are left out.** Above 200 groups, the `groups` claim is not in the token. A rule on `groups` refuses such a person with `sign_in_not_allowed`. A rule on `roles` is not affected.
 - **`sub` changes with the app registration.** Use `oid`, which is the same for every app in the tenant.
 - **`auth_time` is off by default.** Without the optional claim, every step-up is refused with `step_up_no_auth_time`, and every phone sign-in with `sign_in_refused`.
@@ -156,7 +164,7 @@ To admit only people with an app role, add it to the rule: `tid=<tenant-id>;role
 
 - Entra's metadata lists an `end_session_endpoint`, `https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/logout`, on the issuer's host. Automatos sends the browser there with `client_id` and `post_logout_redirect_uri=https://automatos.example.com/sign-in`.
 - Microsoft says `post_logout_redirect_uri` "must match one of the redirect URIs registered for your application". So `https://automatos.example.com/sign-in` must be a registered Web redirect URI.
-- Automatos sends no `logout_hint`. Microsoft documents `logout_hint` as the way to sign out "without prompting the user to select an account", so Entra may ask the person to choose an account.
+- Entra may ask the person to choose an account unless the request carries `logout_hint`, which Microsoft documents as the way to sign out "without prompting the user to select an account". The request carries `client_id` and `post_logout_redirect_uri`.
 - Microsoft says the platform "ends the user session for this application. However, the user may still be signed in to other applications".
 
 ## 9. Check it works

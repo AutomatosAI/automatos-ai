@@ -98,6 +98,9 @@ edition:
       displayName: Amazon Cognito
       requiredClaims: cognito:groups=<group-name>
       endpointHosts: <prefix>.auth.<region>.amazoncognito.com
+database:
+  sslmode: verify-full
+  caConfigMap: <database-ca-configmap>   # the CA that signed the database server's certificate
 ingress:
   enabled: true
   host: automatos.example.com
@@ -116,7 +119,12 @@ OIDC_CLIENT_SECRET=<from the Kubernetes Secret>
 OIDC_DISPLAY_NAME=Amazon Cognito
 OIDC_REQUIRED_CLAIMS=cognito:groups=<group-name>
 OIDC_ENDPOINT_HOSTS=<prefix>.auth.<region>.amazoncognito.com
+DEFAULT_WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1
+DATABASE_SSLMODE=verify-full
+DATABASE_SSLROOTCERT=/etc/automatos/database-ca/ca.crt
 ```
+
+The chart sets the last three itself: `DEFAULT_WORKSPACE_ID` from `edition.defaultWorkspaceId`, and `DATABASE_SSLMODE` and `DATABASE_SSLROOTCERT` from `database.*`. Set them yourself only for an install made without the chart. The enterprise edition connects to its database only with `verify-full` ([chart README, Settings](../../charts/automatos/README.md#settings)).
 
 The access rule is optional for a pool that serves one organisation. It is required when `ENTERPRISE_DEFAULT_ROLE` is not `none`.
 
@@ -130,8 +138,9 @@ The access rule is optional for a pool that serves one organisation. It is requi
 ## 8. Sign-out
 
 - Cognito's `/logout` endpoint is on the user pool's domain. Amazon says it takes `client_id` with `logout_uri`, which must be one of the **Allowed sign-out URLs**, or `redirect_uri`: "Amazon Cognito requires either a logout_uri or a redirect_uri parameter".
-- Automatos sends `client_id` and `post_logout_redirect_uri`, and only when the metadata lists an `end_session_endpoint`. The pages read do not say whether Cognito's metadata lists one.
-- When the metadata lists none, sign-out ends the Automatos session only, and the person keeps Cognito's managed login session. Amazon says that session cookie lasts one hour.
+- The browser is sent to the provider only when its metadata lists an `end_session_endpoint`. The pages read do not say whether Cognito's metadata lists one.
+- If the pool's metadata lists an `end_session_endpoint`, Cognito may refuse the request, which carries `client_id` and `post_logout_redirect_uri` where Cognito's logout endpoint asks for `logout_uri` or `redirect_uri`. The Automatos session has ended either way.
+- When the metadata lists none, sign-out ends the Automatos session, and Cognito's managed login session continues. Amazon says that session cookie lasts one hour.
 - Amazon also says: "The logout endpoint doesn't sign users out of OIDC or social identity providers".
 - The conformance run (US-703) records what happens.
 

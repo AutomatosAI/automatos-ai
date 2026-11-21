@@ -66,7 +66,7 @@ A filter that matches only the groups the access rule names keeps the list short
 
 Nothing to set. Okta lists `auth_time` among the "base claims (always present)".
 
-For a step-up and a phone's sign-in, Automatos sends `max_age=0` and `prompt=login`. Okta documents both. For `prompt=login` Okta says: "Always prompt the user for authentication, regardless of whether they have an Okta session."
+For a step-up and a phone's sign-in, Automatos sends `max_age=0`, and `prompt=login` when Okta's metadata lists `login` among its prompt values or lists none. Okta documents both parameters. For `prompt=login` Okta says: "Always prompt the user for authentication, regardless of whether they have an Okta session."
 
 ## 6. The matching install settings
 
@@ -86,6 +86,9 @@ edition:
       displayName: Okta
       scopes: openid profile email groups
       requiredClaims: groups=<group-name>
+database:
+  sslmode: verify-full
+  caConfigMap: <database-ca-configmap>   # the CA that signed the database server's certificate
 ingress:
   enabled: true
   host: automatos.example.com
@@ -104,7 +107,12 @@ OIDC_CLIENT_SECRET=<from the Kubernetes Secret>
 OIDC_DISPLAY_NAME=Okta
 OIDC_SCOPES=openid profile email groups
 OIDC_REQUIRED_CLAIMS=groups=<group-name>
+DEFAULT_WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1
+DATABASE_SSLMODE=verify-full
+DATABASE_SSLROOTCERT=/etc/automatos/database-ca/ca.crt
 ```
+
+The chart sets the last three itself: `DEFAULT_WORKSPACE_ID` from `edition.defaultWorkspaceId`, and `DATABASE_SSLMODE` and `DATABASE_SSLROOTCERT` from `database.*`. Set them yourself only for an install made without the chart. The enterprise edition connects to its database only with `verify-full` ([chart README, Settings](../../charts/automatos/README.md#settings)).
 
 The access rule is optional for an Okta org, which serves one organisation. It is required when `ENTERPRISE_DEFAULT_ROLE` is not `none`. Without a groups claim, drop `groups` from the scopes and the rule, and control access with the app's **Assignments**.
 
@@ -112,7 +120,7 @@ The access rule is optional for an Okta org, which serves one organisation. It i
 
 - **More than 100 matching groups fails the sign-in at Okta.** Keep the groups filter narrow.
 - **No custom scopes on the org server.** Custom claims still work there.
-- **Sign-out at Okta needs the ID token.** Okta's logout reference lists `id_token_hint` as required. Automatos keeps no ID token, so it sends `client_id` and `post_logout_redirect_uri` only (see [Sign-out](#8-sign-out)).
+- Okta's logout reference lists `id_token_hint` as required. The sign-out request carries `client_id` and `post_logout_redirect_uri` (see [Sign-out](#8-sign-out)).
 
 ## 8. Sign-out
 

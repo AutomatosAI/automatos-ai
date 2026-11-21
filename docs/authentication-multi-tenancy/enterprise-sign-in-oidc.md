@@ -62,9 +62,11 @@ Automatos's backend is the OIDC client. It is a confidential client: it holds a 
 6. Automatos exchanges the code at the provider's `token_endpoint`, with the PKCE verifier and the client secret.
 7. Automatos verifies the ID token, applies the access rule, finds or makes the person, and issues a session.
 
-Automatos uses the ID token only. It does not call the userinfo endpoint and keeps no provider access or refresh token.
+Automatos reads who the person is from the ID token alone. The provider's userinfo endpoint is not called.
 
 ### What the provider's metadata must offer
+
+The metadata and the keys are each held for 300 seconds, then read again. A failed read of the metadata is held for 5 seconds, so sign-ins in that time are answered `identity_provider_unavailable` at once [orchestrator/core/auth/oidc_provider.py:31-66]().
 
 The API reads the metadata at start and refuses metadata it cannot use [orchestrator/core/auth/oidc_provider.py:235-255]():
 
@@ -112,7 +114,7 @@ Every ID token must pass these checks [orchestrator/core/auth/oidc_tokens.py:1-4
 |---|---|
 | Size | At most 16 KiB. |
 | Algorithm | `RS256`, `PS256` or `ES256`, and the header names a `kid`. |
-| Signature | Verified against the provider's `jwks_uri`. An unknown `kid` makes Automatos read the keys again once. |
+| Signature | Verified against the provider's `jwks_uri`. An unknown `kid` makes Automatos read the keys again, at most once every 60 seconds. |
 | `iss` | Equals `OIDC_ISSUER`. |
 | `aud` | Contains `OIDC_CLIENT_ID`. |
 | `azp` | Required when `aud` holds more than one value. When present, it equals `OIDC_CLIENT_ID`. |
@@ -143,7 +145,7 @@ A person is found by the pair (issuer, subject), never by email address [orchest
 - `OIDC_CLAIM_SUBJECT` names the subject claim. It defaults to `sub`.
 - Choose it before the first sign-in. Changing it later makes everyone's next sign-in a first sign-in. A person already linked under `sub` is then refused, audited `subject_claim_changed`.
 - The claim must be unique to one person, never change, never be reused, and not be editable by the person.
-- The API refuses to start when `OIDC_CLAIM_SUBJECT` names a claim that cannot be that: a protocol claim, `email_verified`, `acr`, `amr`, `ver`, `tid`, `hd`, `groups`, `roles`, `picture`, `locale`, `preferred_username`, `upn`, `email`, or the claim `OIDC_CLAIM_EMAIL` or `OIDC_CLAIM_NAME` names [orchestrator/core/auth/access_rule.py:82-91]().
+- At start-up, the API refuses an `OIDC_CLAIM_SUBJECT` that names a claim that cannot be that: a protocol claim, `email_verified`, `acr`, `amr`, `ver`, `tid`, `hd`, `groups`, `roles`, `picture`, `locale`, `preferred_username`, `upn`, `email`, or the claim `OIDC_CLAIM_EMAIL` or `OIDC_CLAIM_NAME` names. The comparison ignores case, so `Email` is refused as `email` is [orchestrator/core/edition_start_up.py:301-315](), [orchestrator/core/auth/access_rule.py:82-91]().
 
 ### The email address
 
@@ -215,7 +217,7 @@ A sign-in issues an Automatos session [orchestrator/core/auth/sessions.py:1-35](
 - Two clocks end a session:
   - `SESSION_IDLE_MINUTES`, 120 by default, at least 5, and no longer than the absolute clock. Use moves it forward; the session's row is written at most every 5 minutes.
   - `SESSION_ABSOLUTE_HOURS`, 12 by default. It never moves.
-- Automatos does not renew a session from the provider. It keeps no refresh token. When a session ends, the person signs in again, and the provider decides whether to ask for a password.
+- A session lasts until one of its clocks ends it. The person then signs in again, and the provider decides whether to ask for a password.
 - A new session is issued at every sign-in.
 - A change made with the session cookie needs the same `Origin` and the header `X-Automatos-CSRF`. Otherwise it is answered `403 cross_site_request_refused`.
 - An ended session is answered `401 session_ended`, with the reason `unknown`, `revoked` or `expired`.
@@ -229,7 +231,7 @@ A sign-in issues an Automatos session [orchestrator/core/auth/sessions.py:1-35](
 Admin actions need a recent sign-in [orchestrator/core/auth/step_up.py:85-90](), [orchestrator/core/auth/step_up_sign_in.py:1-45]().
 
 1. The session's `auth_time` is older than `STEP_UP_MAX_AGE_MINUTES` (10 by default). The API answers `403 step_up_required` and names `/api/v1/auth/oidc/start?step_up=1`.
-2. The browser opens that address. It is accepted only when the browser's `Sec-Fetch-Site` is `same-origin` or `none`.
+2. The browser opens that address. It is accepted when the browser's `Sec-Fetch-Site` is `same-origin` or `none`, or when the request sends no `Sec-Fetch-Site` [orchestrator/api/auth_oidc.py:204-215](). `same-site` and `cross-site` are refused with `step_up_refused`.
 3. Automatos asks the provider for a fresh sign-in: `max_age=0`, plus `prompt=login` where the provider takes it (below).
 4. The callback reads `auth_time` from the new ID token. It confirms the step-up only when that time is no earlier than the step-up's start, less 60 seconds, and not in the future.
 5. A confirmed step-up issues a new session. The new session keeps the old one's absolute expiry.
@@ -243,7 +245,7 @@ The audit reasons are `no_auth_time`, `stale_auth_time`, `future_auth_time`, `an
 
 ### Why `auth_time` is needed
 
-`max_age=0` and `prompt=login` only ask the provider to make the person sign in again. Automatos cannot see whether it did. The ID token's `auth_time` is the only proof of when the person last signed in. So the step-up decision is read from `auth_time` alone.
+`max_age=0` and `prompt=login` ask the provider to make the person sign in again. Whether the provider made the person sign in again is read from `auth_time` alone: the ID token's record of when the person last signed in.
 
 An ordinary sign-in whose ID token has no `auth_time` still works. Its session records 1 January 1970 [orchestrator/core/auth/oidc_sign_in.py:91](). Every admin action then needs a step-up, and every step-up is refused with `step_up_no_auth_time`. So set up the provider to send `auth_time` before the install is used.
 
@@ -266,7 +268,7 @@ An ordinary sign-in whose ID token has no `auth_time` still works. Its session r
 - It answers `204` when there is nowhere else to go.
 - It answers `200` with `{"redirect_to": "<address>"}` when the provider's metadata lists an `end_session_endpoint` on the issuer's host or a host in `OIDC_ENDPOINT_HOSTS`. The browser then goes there.
 - That address carries exactly two parameters: `client_id` and `post_logout_redirect_uri=<install origin>/sign-in`.
-- No `id_token_hint` is sent, because Automatos keeps no ID token.
+- The request carries no `id_token_hint`.
 
 What happens at the provider depends on the provider. Each guide's **Sign-out** section says what its documentation describes. The Automatos session has ended in every case.
 
@@ -278,7 +280,7 @@ Automatos Go signs in through the same start address. Nothing extra is registere
 
 1. The app opens `/api/v1/auth/oidc/start` with `app_link=go`, `code_challenge`, `code_challenge_method=S256`, `install_id` and `platform` (`ios` or `android`). A malformed start is answered `400 invalid_phone_start`.
 2. Automatos asks the provider for a fresh sign-in (`max_age=0`, and `prompt=login` where taken).
-3. The callback requires `auth_time` no earlier than the phone's start. Otherwise the app link is answered `error=sign_in_refused`, audited `no_auth_time`, `stale_auth_time` or `future_auth_time`.
+3. The callback requires `auth_time` no earlier than the phone's start. Otherwise the app link is answered `error=sign_in_refused`, audited `no_auth_time`, `stale_auth_time` or `future_auth_time`. Any refusal before the person is known goes to the app link the same way, as `error=<code>` with the code from [the sign-in page's list](#on-the-sign-in-page). A callback whose sign-in is unknown or already used goes to the browser's `/sign-in` page instead.
 4. The browser shows the confirm page `/sign-in/phone`. The person presses Continue within 5 minutes.
 5. The app link `automatos://go/signed-in?code=…` opens the app.
 6. The app exchanges the code at `POST /api/v1/mobile/sign-in/exchange`. A bad code is answered `401 invalid_sign_in_code`.
@@ -287,7 +289,7 @@ The confirm page shows `no_workspace`, `several_workspaces` or `device_limit_rea
 
 `ENTERPRISE_DEVICE_PAIRING` (`true` by default) switches phone pairing on or off. `ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS` (90 by default, 1 to 3650) is how long a phone's token lives after its last pairing or sign-in. An expired token is answered `401 device_token_expired`. The app finds the install through `/.well-known/automatos.json`.
 
-A provider that never sends a fresh `auth_time` refuses every phone sign-in. Such a phone pairs with a code from Settings instead.
+Each phone sign-in needs a fresh `auth_time` from the provider. Without one, the phone pairs with a code from Settings instead.
 
 ---
 
@@ -295,7 +297,7 @@ A provider that never sends a fresh `auth_time` refuses every phone sign-in. Suc
 
 Every sign-in setting, with where it is set in the chart. The chart sets the `edition.enterprise` ones; `config:` may not set them. See [charts/automatos/values.yaml](../../charts/automatos/values.yaml) and [orchestrator/config.py:601-638]().
 
-| Environment name | Chart value | Default | Notes |
+| Environment name | Chart value | Chart default | Notes |
 |---|---|---|---|
 | `AUTH_EDITION` | `edition.authEdition` | `local` | `enterprise`. |
 | `FRONTEND_URL` | `edition.enterprise.publicUrl` | none, required | `https://<host>`. Gives the redirect origin. |
@@ -314,6 +316,8 @@ Every sign-in setting, with where it is set in the chart. The chart sets the `ed
 | `ENTERPRISE_DEFAULT_ROLE` | `edition.enterprise.defaultRole` | `none` | Needs an access rule when not `none`. |
 | `ENTERPRISE_DEVICE_PAIRING` | `edition.enterprise.devicePairing` | `true` | |
 | `ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS` | `edition.enterprise.deviceTokenMaxAgeDays` | `90` | 1 to 3650. |
+| `DATABASE_SSLMODE` (also required) | `database.sslmode` | empty | Must be `verify-full` in the enterprise edition. |
+| `DATABASE_SSLROOTCERT` (also required) | `database.caConfigMap` and `database.caKey` | empty | The CA that signed the database server's certificate, mounted at `/etc/automatos/database-ca`. |
 | `OIDC_CLAIM_SUBJECT` | `config:` | `sub` | Choose before the first sign-in. |
 | `OIDC_CLAIM_EMAIL` | `config:` | `email` | |
 | `OIDC_CLAIM_NAME` | `config:` | `name` | |
@@ -325,6 +329,10 @@ Every sign-in setting, with where it is set in the chart. The chart sets the `ed
 | `OIDC_PENDING_SIGN_INS_PER_ADDRESS` | `config:` | `100` | Unfinished sign-ins from one client address. |
 
 The session cookie's name (`SESSION_COOKIE_NAME`) and the CSRF header's (`SESSION_CSRF_HEADER`) are fixed in the enterprise web image. `config:` may not change them.
+
+The database settings are documented in the [chart README's Settings table](../../charts/automatos/README.md#settings): the chart stops rendering unless `database.sslmode` is `verify-full` with `database.caConfigMap`.
+
+The Secret `existingSecret` names holds more than `OIDC_CLIENT_SECRET`: `DATABASE_URL`, `REDIS_URL`, `API_KEY`, `CREDENTIAL_ENCRYPTION_KEY` and others. See the [chart README's Install section](../../charts/automatos/README.md#install) for the list.
 
 ---
 
@@ -352,7 +360,7 @@ The callback sends the browser to `/sign-in?error=<code>` [orchestrator/core/aut
 | `403 workspace_required` | The person is in no workspace. |
 | `403 step_up_required` | The action needs a recent sign-in. |
 | `403 cross_site_request_refused` | A cookie-authenticated change came without the same origin or the CSRF header. |
-| `429` | More than 300 starts, or 300 callbacks, from one address in 10 minutes. |
+| `429` | More than 300 starts, or 300 callbacks, from one address in 10 minutes. These are the default limits [orchestrator/core/security/rate_limiter.py:70-71](). |
 | `400 invalid_phone_start` | A phone's start had a missing or malformed parameter. |
 | `401 invalid_sign_in_code` | A phone's code was refused. Any code found is spent. |
 | `401 device_token_expired` | A phone's token is older than `ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS`. |
@@ -363,6 +371,7 @@ The API refuses to start, with a message naming the setting, when:
 
 - `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` or `FRONTEND_URL` is unset: `AUTH_EDITION=enterprise cannot start: <names> <is|are> unset.`
 - any other setting is malformed: `AUTH_EDITION=enterprise cannot start: <name> <problem>.`
+- `DATABASE_SSLMODE` is not `verify-full`. The message names `DATABASE_SSLMODE`, never its value [orchestrator/core/edition_start_up.py:486-499]().
 
 The chart stops rendering on most of the same mistakes, before anything is deployed.
 
@@ -390,7 +399,7 @@ From PRD-277 §5.9 and each provider's documentation, read on 21 November 2026. 
 | Provider | Issuer | Groups in the ID token | `auth_time` | Endpoint hosts to list | Sign-out at the provider |
 |---|---|---|---|---|---|
 | Microsoft Entra ID | `https://login.microsoftonline.com/<tenant-id>/v2.0` | Optional; left out above 200. App roles in `roles`. | Add the `auth_time` optional claim. | none | `end_session_endpoint` on the issuer's host. `post_logout_redirect_uri` must be a registered redirect URI. |
-| Google Workspace | `https://accounts.google.com` | None | Enable **Session age claims** for the project; the app must be published and verified. | `oauth2.googleapis.com,www.googleapis.com` | No `end_session_endpoint`: Automatos only. |
+| Google Workspace | `https://accounts.google.com` | None | Enable **Session age claims** for the project; the app must be published and verified. | `oauth2.googleapis.com,www.googleapis.com` | Google publishes no `end_session_endpoint`; the Google session continues. |
 | Okta | `https://<okta-domain>` or `https://<okta-domain>/oauth2/<server-id>` | Through a groups claim; more than 100 matches fails the request. | Always present. | none | Okta's logout reference lists `id_token_hint` as required; Automatos sends `client_id` and `post_logout_redirect_uri`. |
 | Keycloak | `https://<host>/realms/<realm>` | Through a protocol mapper. | In the metadata's claims; CI checks a step-up. | none | Accepts `client_id` and `post_logout_redirect_uri` (CI checks it). |
 | Amazon Cognito | `https://cognito-idp.<region>.amazonaws.com/<pool-id>`, or the `issuer-cognito-idp` form | `cognito:groups` | Listed among the claims; a step-up needs managed login. | The user pool domain | Cognito's `/logout` takes `logout_uri`, not `post_logout_redirect_uri`. |

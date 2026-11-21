@@ -71,7 +71,7 @@ Google says: "To receive additional claims your app needs to be published, verif
 
 Google's audience page says the publishing status "is not applicable to Internal or Personal projects". The pages read do not say whether an Internal app can turn on session age claims. Check the **Settings** page of your project.
 
-For a step-up and a phone's sign-in, Automatos sends `max_age=0`. It does not send `prompt=login`: Google lists only `none`, `consent` and `select_account` as `prompt` values. Google's documentation lists no `max_age` parameter.
+For a step-up and a phone's sign-in, the request carries `max_age=0` and no `prompt=login`: Google lists only `none`, `consent` and `select_account` as `prompt` values. Google's documentation lists no `max_age` parameter.
 
 ## 6. The matching install settings
 
@@ -91,6 +91,9 @@ edition:
       displayName: Google
       requiredClaims: hd=example.com
       endpointHosts: oauth2.googleapis.com,www.googleapis.com
+database:
+  sslmode: verify-full
+  caConfigMap: <database-ca-configmap>   # the CA that signed the database server's certificate
 ingress:
   enabled: true
   host: automatos.example.com
@@ -109,20 +112,25 @@ OIDC_CLIENT_SECRET=<from the Kubernetes Secret>
 OIDC_DISPLAY_NAME=Google
 OIDC_REQUIRED_CLAIMS=hd=example.com
 OIDC_ENDPOINT_HOSTS=oauth2.googleapis.com,www.googleapis.com
+DEFAULT_WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1
+DATABASE_SSLMODE=verify-full
+DATABASE_SSLROOTCERT=/etc/automatos/database-ca/ca.crt
 ```
+
+The chart sets the last three itself: `DEFAULT_WORKSPACE_ID` from `edition.defaultWorkspaceId`, and `DATABASE_SSLMODE` and `DATABASE_SSLROOTCERT` from `database.*`. Set them yourself only for an install made without the chart. The enterprise edition connects to its database only with `verify-full` ([chart README, Settings](../../charts/automatos/README.md#settings)).
 
 `hd=example.com` is required: Automatos refuses to start with Google's issuer and no access rule.
 
 ## 7. What this provider cannot do
 
 - **No groups.** Google sends no groups, so access by group is not available with Google. Access is by domain (`hd`), and by the app's **Audience** at Google.
-- **No end-session endpoint.** Signing out of Automatos does not sign the person out of Google.
+- **No end-session endpoint.** Google publishes none, so sign-out ends the Automatos session; the Google session continues.
 - **No documented way to ask for the password again.** Google lists no `prompt=login` and no `max_age`. A step-up confirms only when Google returns an `auth_time` no earlier than the step-up's start. When Google returns an earlier sign-in time, the step-up is refused with `step_up_refused`. A phone's sign-in follows the same rule, and is refused with `sign_in_refused`; such a phone pairs with a code from Settings.
 - **`auth_time` needs a published, verified project** with session age claims on. Without it, every step-up is refused with `step_up_no_auth_time`.
 
 ## 8. Sign-out
 
-Google's metadata document lists no `end_session_endpoint`. `POST /api/v1/auth/sign-out` ends the Automatos session and answers `204`. The person stays signed in to their Google account.
+Google publishes no end-session endpoint, so sign-out ends the Automatos session; the Google session continues. Google's metadata document lists no `end_session_endpoint`, and `POST /api/v1/auth/sign-out` answers `204`.
 
 ## 9. Check it works
 

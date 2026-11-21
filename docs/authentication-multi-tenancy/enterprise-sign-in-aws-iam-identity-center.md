@@ -4,7 +4,7 @@ AWS IAM Identity Center is **not supported** as the enterprise edition's OIDC pr
 
 ## Evidence
 
-- **Written from:** AWS's documentation, read on 21 November 2026.
+- **Written from:** AWS's documentation, read on 21 November 2026, and this repository's code.
 - **The alternative below is documented by AWS and not yet run here.** No IAM Identity Center or Cognito federation has been run against an install.
 - AWS's pages used:
   - [AWS IAM Identity Center FAQs](https://aws.amazon.com/iam/identity-center/faqs/)
@@ -42,5 +42,5 @@ The install's settings are the Cognito ones: `oidc.issuer` is the user pool's is
 
 Not confirmed on the pages read:
 
-- which `email_verified` value Cognito puts in the ID token of a user who signed in through a SAML provider. Without `true`, Automatos keeps no address and `email:` first-admin entries do not match; use `sub:` entries;
+- which `email_verified` value Cognito puts in the ID token of a user who signed in through a SAML provider. An address is stored only when it is `true`; otherwise use `sub:` first-admin entries;
 - whether IAM Identity Center group membership can reach `cognito:groups`.
