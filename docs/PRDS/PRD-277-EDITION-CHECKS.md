@@ -143,7 +143,7 @@ A migration is history. Rewriting it to read a capability changes what an old re
 | 56 | `modules/voice/arming.py:54` | C | Name of a newly created Retell agent | `live_agent_named_apart` | "Auto Live (local)" | "Auto Live" | "Auto Live" (G-7) |
 | 57 | `modules/voice/mint.py:98` | H | Auto Live allowed by the plan | `billing` | always | by plan | always |
 | 58 | `modules/voice/mint.py:111` | H | Auto Live refused for plan or exhausted credits | `billing` | never | by plan and credits | never |
-| 58a | `modules/tools/execution/http_hosts.py:27` (read by `exec_shell.py` `_get_allowed_http_domains` and `tool_registry.py:202`) | H | The `http_request` tool's allowed hosts and the description the model reads | `agent_http_own_hosts_only` | the install's hosts and `api.automatos.app`, `ui.automatos.app` | the same | the install's hosts only (D-12, #1605) |
+| 58a | `modules/tools/execution/http_hosts.py:25` (read by `exec_shell.py` `_get_allowed_http_domains` and `tool_registry.py:202`) | H | The `http_request` tool's allowed hosts and the description the model reads | `agent_http_own_hosts_only` | the install's hosts and `api.automatos.app`, `ui.automatos.app` | the same | the install's hosts only (D-12, #1605) |
 
 ### `scripts/`
 

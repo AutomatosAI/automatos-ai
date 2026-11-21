@@ -24,9 +24,9 @@
 #    it in no directive: the origin came from the running server, not from the build, and the
 #    server put it in img-src and media-src only.
 # 5. (PRD-277 D-12) Started with a malformed ENTERPRISE_CALLS_CLOUD_SYNC, it stops the same way.
-#    Started with it on, the sign-in page's img-src names Automatos Cloud's files path while the
-#    static file's build-time policy does not, and neither names any other Automatos, Clerk or
-#    Cloudflare host.
+#    Started without it, the sign-in page's img-src does not name Automatos Cloud's files path.
+#    Started with it on, it does, in img-src only, while the static file's build-time policy
+#    does not. None of the three names any other Automatos, Clerk or Cloudflare host.
 #
 # Not proved here: that the web app reaches an API (nothing listens at the address given, and
 # the container has no network) or that anyone can sign in (no identity provider). chart.yml's
@@ -171,31 +171,37 @@ other_directives_naming() {
 # PRD-277 D-12: the policy of PATH names no Automatos origin and no sign-in or challenge host,
 # except Automatos Cloud's files path in img-src, which it must name (WANT=yes) or must not (WANT=no).
 expect_own_hosts() {
-  local path=$1 want=$2 answer policy rest
+  local path=$1 want=$2 answer policy img others
   answer=$(answer_of "$path")
   policy=${answer#* }
-  if grep -qF -- " ${CLOUD_IMAGES}" <<< "$(directive img-src "$policy")"; then
+  img=$(directive img-src "$policy")
+  if grep -qF -- " ${CLOUD_IMAGES}" <<< "$img"; then
     [ "$want" = yes ] || fail "GET ${path}: img-src names ${CLOUD_IMAGES}, which only Cloud sync allows"
   else
     [ "$want" = no ] || fail "GET ${path}: img-src does not name ${CLOUD_IMAGES} with Cloud sync on"
   fi
-  rest=${policy//" ${CLOUD_IMAGES}"/}
-  if grep -qiE 'automatos\.app|clerk|cloudflare' <<< "$rest"; then
-    fail "GET ${path}: the policy names an Automatos, sign-in or challenge host: ${rest}"
+  # The files path is taken out of img-src alone: in any other directive it is a finding too.
+  others=$(tr ';' '\n' <<< "$policy" | sed 's/^ *//' | grep -v '^img-src ' || true)
+  if grep -qiE 'automatos\.app|clerk|cloudflare' <<< "${others} ${img//" ${CLOUD_IMAGES}"/}"; then
+    fail "GET ${path}: the policy names an Automatos, sign-in or challenge host beyond that path in img-src: ${policy}"
   fi
 }
 
 check_running_policy() {
+  local before=$bad
+  start -e "BACKEND_INTERNAL_URL=${BACKEND}" -e "MEDIA_ORIGINS=${MEDIA_ORIGIN}"
+  wait_until_ready || return
+  expect_policy /sign-in 200 yes
+  expect_own_hosts /sign-in no
   start -e "BACKEND_INTERNAL_URL=${BACKEND}" -e "MEDIA_ORIGINS=${MEDIA_ORIGIN}" -e "ENTERPRISE_CALLS_CLOUD_SYNC=true"
   wait_until_ready || return
-  local before=$bad
   expect_policy / 307 yes
   expect_policy /sign-in 200 yes
   expect_policy "$READY_PATH" 200 no
   expect_own_hosts /sign-in yes
   expect_own_hosts "$READY_PATH" no
   if [ "$bad" = "$before" ]; then
-    echo "proved: the policy of a page names the media origin given at start-up in img-src and media-src only, and the build-time policy names it nowhere; with Cloud sync switched on at start-up a page's img-src names Automatos Cloud's files path, the build-time policy does not, and neither names another Automatos, sign-in or challenge host"
+    echo "proved: the policy of a page names the media origin given at start-up in img-src and media-src only, and the build-time policy names it nowhere; a page's img-src names Automatos Cloud's files path only when Cloud sync was switched on at start-up, the build-time policy never does, and none names another Automatos, sign-in or challenge host"
   fi
 }
 
