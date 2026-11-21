@@ -22,10 +22,14 @@ fixtures and no history of its own:
   ``orchestrator/alembic/versions/*.py`` file's module-level ``revision`` and
   ``down_revision`` (by ``ast``, never by importing code from an old tag). Added revisions,
   in the order they apply; removed ones; and rewritten ones (the same id with other source),
-  which an earlier release shipped and which must never read as "no change".
+  which an earlier release shipped and which must never read as "no change". A file that sets
+  either name in any form this cannot read as a literal (an expression, a name, an f-string,
+  a conditional or tuple assignment, an import) stops the page, never drops the migration;
+  a file that sets neither is not a migration and is skipped.
 * **The upgrade file** (``read_upgrade_from``): ``release_upgrade_from.txt`` beside this
   script, whose one line that is not a comment is the earliest version this release upgrades
-  from in one step (``MAJOR.MINOR.PATCH``), or ``none``. A missing or malformed file fails.
+  from in one step (``MAJOR.MINOR.PATCH``), or ``none``, which only the first release may
+  say. A missing or malformed file fails.
 """
 from __future__ import annotations
 
@@ -140,10 +144,11 @@ def parse_log(raw: str) -> List[Change]:
     """``git log -z --first-parent --format=%H%n%P%n%s%n%b`` output, newest first, as changes."""
     changes = []
     for record in raw.split("\0"):
-        lines = record.strip("\n").split("\n")
-        if len(lines) < 3 or not lines[0].strip():
+        # A commit with an empty message has an empty subject line: it is listed, never dropped.
+        lines = record.lstrip("\n").split("\n") + ["", ""]
+        if not lines[0].strip():
             continue
-        changes.append(change_of(lines[0].strip(), lines[1].split(), lines[2], "\n".join(lines[3:])))
+        changes.append(change_of(lines[0].strip(), lines[1].split(), lines[2], "\n".join(lines[3:]).strip("\n")))
     return changes
 
 
@@ -167,41 +172,84 @@ class Revision:
 
 
 REVISION_NAMES = ("revision", "down_revision")
+_UNREADABLE = object()
+_DEFINITIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 
 
-def _assigned(node: ast.stmt) -> List[Tuple[str, ast.expr]]:
-    """``[(name, value)]`` a module-level ``name = value`` or ``name: type = value`` sets."""
-    if isinstance(node, ast.Assign):
-        return [(target.id, node.value) for target in node.targets if isinstance(target, ast.Name)]
+def _bound(node: ast.stmt) -> List[str]:
+    """Every name a module-level statement binds, at any depth but inside a function or class."""
+    if isinstance(node, (ast.Import, ast.ImportFrom)):
+        return [(alias.asname or alias.name).split(".")[0] for alias in node.names]
+    if isinstance(node, _DEFINITIONS):
+        return [node.name]
+    names: List[str] = []
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
+            names.append(child.id)
+        elif isinstance(child, ast.stmt):
+            names += _bound(child)
+        elif not isinstance(child, ast.expr_context):
+            names += [sub.id for sub in ast.walk(child) if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Store)]
+    return names
+
+
+def _plain(node: ast.stmt) -> Optional[Tuple[str, ast.expr]]:
+    """``(name, value)`` for ``name = value`` or ``name: type = value``: the one form this reads."""
+    if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+        return node.targets[0].id, node.value
     if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
-        return [(node.target.id, node.value)]
-    return []
+        return node.target.id, node.value
+    return None
 
 
 def _literal(value: ast.expr) -> object:
     try:
         return ast.literal_eval(value)
-    except (ValueError, TypeError):
-        return None
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return _UNREADABLE
 
 
-def _module_values(tree: ast.Module) -> Dict[str, object]:
-    """The literal values of the module-level ``revision`` and ``down_revision``."""
-    return {name: _literal(value) for node in tree.body for name, value in _assigned(node) if name in REVISION_NAMES}
+def _module_values(path: str, tree: ast.Module) -> Dict[str, object]:
+    """The module-level ``revision`` and ``down_revision``; HistoryError for any form not read as a literal."""
+    values: Dict[str, object] = {}
+    for node in tree.body:
+        named = sorted(set(_bound(node)) & set(REVISION_NAMES))
+        plain = _plain(node) if named else None
+        if named and (plain is None or plain[0] not in REVISION_NAMES):
+            raise HistoryError(f"{path} sets {' and '.join(named)} in a form this check cannot read: "
+                               f"write it as a plain `name = 'value'` at the top level of the file")
+        if plain:
+            values[plain[0]] = _literal(plain[1])
+    return values
+
+
+def _parents(path: str, down: object) -> Tuple[str, ...]:
+    """``down_revision`` as the revisions it names: a string, a tuple or list of strings, or None."""
+    if down is None:
+        return ()
+    if isinstance(down, str) and down:
+        return (down,)
+    if isinstance(down, (tuple, list)) and all(isinstance(parent, str) and parent for parent in down):
+        return tuple(down)
+    raise HistoryError(f"{path}: down_revision is not a revision id, a tuple or list of them, or None, as written")
 
 
 def parse_revision(path: str, source: str) -> Optional[Revision]:
-    """The revision a versions file declares; None for a file that declares none."""
+    """The revision a versions file declares; None for a file that sets neither name; HistoryError otherwise."""
     try:
         tree = ast.parse(source, filename=path)
     except SyntaxError as error:
         raise HistoryError(f"{path} is not Python ({error.msg}), so its revision cannot be read") from error
-    values = _module_values(tree)
-    revision, down = values.get("revision"), values.get("down_revision")
-    if not isinstance(revision, str) or not revision:
+    values = _module_values(path, tree)
+    if not values:
         return None
-    parents = (down,) if isinstance(down, str) else tuple(down) if isinstance(down, (tuple, list)) else ()
-    return Revision(revision, tuple(parent for parent in parents if isinstance(parent, str)), path, source)
+    missing = [name for name in REVISION_NAMES if name not in values]
+    if missing:
+        raise HistoryError(f"{path} sets {', '.join(sorted(values))} but not {', '.join(missing)}")
+    revision = values["revision"]
+    if not isinstance(revision, str) or not revision.strip():
+        raise HistoryError(f"{path}: revision is not a non-empty string literal, as written")
+    return Revision(revision, _parents(path, values["down_revision"]), path, source)
 
 
 def revisions(files: Mapping[str, str]) -> Dict[str, Revision]:
@@ -286,8 +334,13 @@ def read_upgrade_from(text: str) -> Optional[str]:
     return release.version
 
 
-def check_upgrade_from(value: Optional[str], version: str, all_tags: Iterable[str]) -> None:
-    """HistoryError unless ``value`` is a full release, tagged, and below ``version``."""
+def check_upgrade_from(value: Optional[str], version: str, all_tags: Iterable[str], previous: Optional[str]) -> None:
+    """HistoryError unless ``value`` is a tagged full release below ``version``, or ``none`` for the first release."""
+    if value is None and previous is not None:
+        raise HistoryError(
+            f"the upgrade file says {UPGRADE_NONE}, but {previous} is an earlier release. {UPGRADE_NONE} is only for "
+            f"the first release; set the file to the earliest version an install upgrades to {version} from in one "
+            f"step (MAJOR.MINOR.PATCH, a tagged full release), which the release page prints under Upgrading")
     if value is None:
         return
     if release_version.parse_version(value).core >= release_version.parse_version(version).core:

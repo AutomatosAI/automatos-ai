@@ -38,6 +38,11 @@ VERSIONS = "orchestrator/alembic/versions"
 WORKFLOW = yaml.safe_load((ROOT / ".github" / "workflows" / "images.yml").read_text(encoding="utf-8"))
 JOBS = WORKFLOW["jobs"]
 ON_A_TAG = "startsWith(github.ref, 'refs/tags/v')"
+# The Arabic letter mark, the soft hyphen, the combining grapheme joiner, the Mongolian vowel
+# separator, the interlinear annotation characters, two tag characters, two variation selectors,
+# a zero-width space, the line separator, a direction override and isolate, and the byte order mark.
+INVISIBLE_SAMPLE = (0x061C, 0x00AD, 0x034F, 0x180E, 0xFFF9, 0xFFFA, 0xFFFB, 0xE0001, 0xE0041, 0xFE0F, 0xE0100,
+                    0x200B, 0x2028, 0x202E, 0x2066, 0xFEFF)
 
 
 def _load(name: str):
@@ -145,10 +150,12 @@ HOSTILE = [
     "[a link](https://example.com/steal) ![an image](https://example.com/x.png) https://example.com",
     "@everyone and @AutomatosAI/maintainers, see #1 and GH-2",
     "close the span ` then **bold** and <b>html</b> `` twice",
-    "a line\nthen\r\nmore and‮more\x00",
+    "a line\nthen\r\nmore" + chr(0x2028) + "and" + chr(0x202E) + "more\x00",
     "| a | table | row |",
     "x" * 1000,
     "",
+    # Invisible and direction-changing characters, by code point (this file holds none of them).
+    "before" + "".join(chr(point) for point in INVISIBLE_SAMPLE) + "after",
 ]
 
 
@@ -156,7 +163,7 @@ HOSTILE = [
 def test_text_from_a_commit_is_one_code_span_that_cannot_break_out(text):
     shown = notes_md.literal(text)
     assert shown.startswith("`") and shown.endswith("`") and shown.count("`") == 2
-    assert "\n" not in shown and "\r" not in shown and " " not in shown and "‮" not in shown
+    assert "\n" not in shown and "\r" not in shown and not set(shown) & {chr(point) for point in INVISIBLE_SAMPLE}
     assert len(shown) <= notes_md.TEXT_LIMIT + 2
 
 
@@ -253,7 +260,7 @@ def test_revisions_are_read_as_text_never_run():
              f"{VERSIONS}/typed.py": "revision: str = 'r2'\ndown_revision: str = 'r1'\n"}
     assert {rev: r.parents for rev, r in history.revisions(files).items()} == {"r1": (), "r2": ("r1",)}
     with pytest.raises(history.HistoryError, match="both declare 'r1'"):
-        history.revisions({**files, f"{VERSIONS}/again.py": "revision = 'r1'\n"})
+        history.revisions({**files, f"{VERSIONS}/again.py": "revision = 'r1'\ndown_revision = None\n"})
     with pytest.raises(history.HistoryError, match="is not Python"):
         history.revisions({f"{VERSIONS}/bad.py": "revision = ("})
 
@@ -286,8 +293,15 @@ def test_a_malformed_upgrade_file_is_refused(text):
 @pytest.mark.parametrize("value,match", [("0.12.0", "not below"), ("0.13.0", "not below"), ("0.10.0", "no tag v0.10.0")])
 def test_the_upgrade_file_names_an_earlier_tagged_release(value, match):
     with pytest.raises(history.HistoryError, match=match):
-        history.check_upgrade_from(value, "0.12.0", ["v0.11.0", "v0.12.0-rc.1"])
-    history.check_upgrade_from("0.11.0", "0.12.0", ["v0.11.0"])
+        history.check_upgrade_from(value, "0.12.0", ["v0.11.0", "v0.12.0-rc.1"], "v0.11.0")
+    history.check_upgrade_from("0.11.0", "0.12.0", ["v0.11.0"], "v0.11.0")
+
+
+@pytest.mark.parametrize("version,previous", [("0.12.0", "v0.11.0"), ("0.11.3", "v0.11.2"), ("0.12.0-rc.1", "v0.11.0")])
+def test_none_is_refused_once_there_is_an_earlier_release(version, previous):
+    with pytest.raises(history.HistoryError, match=f"the upgrade file says none, but {previous} is an earlier release"):
+        history.check_upgrade_from(None, version, [previous], previous)
+    history.check_upgrade_from(None, "0.11.0", [], None)  # the first release
 
 
 def test_the_repositorys_upgrade_file_is_well_formed():
@@ -297,12 +311,12 @@ def test_the_repositorys_upgrade_file_is_well_formed():
     assert value is None or re.fullmatch(r"\d+\.\d+\.\d+", value)
 
 
-@pytest.mark.parametrize("value,line", [
-    ("0.11.0", "An install of 0.11.0 or any later release upgrades to 0.12.0 in one step."),
-    (None, "No earlier release upgrades to 0.12.0 in one step: install it new."),
+@pytest.mark.parametrize("value,previous,line", [
+    ("0.11.0", "v0.11.0", "An install of 0.11.0 or any later release upgrades to 0.12.0 in one step."),
+    (None, None, "This is the first release, so there is nothing to upgrade from: install it new."),
 ])
-def test_the_page_prints_the_upgrade_files_value(value, line):
-    text = "\n".join(notes_md.upgrade_section(_notes(upgrade_from=value)))
+def test_the_page_prints_the_upgrade_files_value(value, previous, line):
+    text = "\n".join(notes_md.upgrade_section(_notes(upgrade_from=value, previous=previous)))
     assert line in text and "scripts/ci/release_upgrade_from.txt" in text
 
 
@@ -338,7 +352,7 @@ def test_checking_it_is_the_workflows_own_check_for_each_artifact():
 
 @pytest.mark.parametrize("field,value", [("repository", "Automatos AI/x"), ("sha", "HEAD"), ("chart_digest", "latest"),
                                          ("images", (("api", "sha256:short"),)), ("previous", "v0.13.0"),
-                                         ("version", "0.12")])
+                                         ("version", "0.12"), ("sha", SHA + "\n"), ("upgrade_from", None)])
 def test_a_value_shown_outside_a_code_span_must_be_of_its_form(field, value):
     with pytest.raises((notes_md.NotesError, ValueError)):
         notes_md.render(_notes(**{field: value}))
@@ -347,8 +361,8 @@ def test_a_value_shown_outside_a_code_span_must_be_of_its_form(field, value):
 @pytest.mark.parametrize("version,prerelease,latest", [("0.12.0", False, "true"), ("0.12.0-rc.1", True, "false")])
 def test_a_release_candidate_is_a_pre_release_and_never_the_latest(version, prerelease, latest):
     request = page.release_request(_notes(version=version), "body", latest=True)
-    assert request == {"tag_name": f"v{version}", "name": f"Automatos {version}", "body": "body", "draft": False,
-                       "prerelease": prerelease, "make_latest": latest}
+    assert request == {"tag_name": f"v{version}", "target_commitish": SHA, "name": f"Automatos {version}",
+                       "body": "body", "draft": False, "prerelease": prerelease, "make_latest": latest}
 
 
 class FakeGitHub:
@@ -385,26 +399,33 @@ class FakeGit:
     TAGS = ["v0.11.0", "v0.12.0-rc.1", "v0.12.0"]
     TREES = {"refs/tags/v0.11.0": BASE, SHA: BASE + (("r3", "r2"),)}
 
-    def __init__(self, tags=None):
+    def __init__(self, tags=None, shallow: bool = False, trees=None):
         self.tags, self.calls = tags if tags is not None else self.TAGS, []
+        self.shallow, self.trees = shallow, trees if trees is not None else self.TREES
 
     def __call__(self, args):
         args = list(args)
         self.calls.append(args)
+        if args == ["rev-parse", "--is-shallow-repository"]:
+            return "true\n" if self.shallow else "false\n"
         if args[:2] == ["tag", "--list"]:
             return "\n".join(self.tags) + "\n"
         if args[0] == "ls-tree":
-            pairs = self.TREES[args[2]]
-            return "".join(f"100644 blob {'0' * 40}\t{VERSIONS}/{rev}.py\0" for rev, _ in pairs) + \
+            files = self.trees[args[2]]
+            return "".join(f"100644 blob {'0' * 40}\t{VERSIONS}/{rev}.py\0" for rev in self._sources(files)) + \
                 f"040000 tree {'0' * 40}\t{VERSIONS}/__pycache__\0"
         if args[0] == "show":
             ref, path = args[1].split(":", 1)
-            down = dict(self.TREES[ref])[Path(path).stem]
-            return _source(Path(path).stem, down)
+            return self._sources(self.trees[ref])[Path(path).stem]
         if args[0] == "log":
             assert args[-1] == f"refs/tags/v0.11.0..{SHA}"
             return LOG
         raise AssertionError(args)
+
+    @staticmethod
+    def _sources(tree) -> dict:
+        """``{stem: source}``: a tree is ``((revision, down), …)`` pairs or ``{stem: source}`` as written."""
+        return dict(tree) if isinstance(tree, dict) else {rev: _source(rev, down) for rev, down in tree}
 
 
 def _argv(tmp_path: Path, upgrade: str = "0.11.0\n", version: str = "0.12.0") -> list:
@@ -412,8 +433,9 @@ def _argv(tmp_path: Path, upgrade: str = "0.11.0\n", version: str = "0.12.0") ->
     digests.mkdir(exist_ok=True)
     for name in NAMES:
         (digests / name).write_text(DIGEST + "\n", encoding="utf-8")
-    argv = ["--repo", REPO, "--version", version, "--sha", SHA, "--digests", str(digests), "--chart-digest", CHART,
-            "--notes", str(tmp_path / "notes.md"), "--publish"] + [arg for name in NAMES for arg in ("--image", name)]
+    argv = ["publish", "--repo", REPO, "--version", version, "--sha", SHA, "--digests", str(digests),
+            "--chart-digest", CHART, "--notes", str(tmp_path / "notes.md")] + [
+                arg for name in NAMES for arg in ("--image", name)]
     if upgrade is not None:
         (tmp_path / "upgrade.txt").write_text(upgrade, encoding="utf-8")
     return argv + ["--upgrade-file", str(tmp_path / "upgrade.txt")]
@@ -470,9 +492,9 @@ def test_the_job_reads_the_full_history_and_puts_nothing_into_its_shell():
     run = next(step for step in steps if "run" in step)
     assert "${{" not in run["run"]
     assert run["env"] == {"GH_TOKEN": "${{ github.token }}"}
-    assert run["run"].startswith('python3 scripts/ci/release_page.py --repo "$GITHUB_REPOSITORY" --version "$VERSION"')
+    assert run["run"].startswith(
+        'python3 scripts/ci/release_page.py publish --repo "$GITHUB_REPOSITORY" --version "$VERSION"')
     assert '--sha "$GITHUB_SHA"' in run["run"] and '--chart-digest "$CHART_DIGEST"' in run["run"]
-    assert run["run"].rstrip().endswith("--publish")
     named = re.findall(r"--image (\S+)", run["run"])
     assert named == [entry["name"] for entry in JOBS["merge"]["strategy"]["matrix"]["image"]]
 

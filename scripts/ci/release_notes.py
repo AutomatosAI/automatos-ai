@@ -15,11 +15,12 @@
 
 **Text from a commit is data.** A commit's subject and body, a pull request's title, a scope
 and a revision id or file name come from anyone who could open a pull request, so each is
-shown only through ``literal``: one line, control characters dropped, cut to a length,
-backticks turned to ``'``, inside a single code span. Inside a code span GitHub renders no
-HTML, heading, emphasis, link, image, mention or ``#123`` reference, and with no backtick
-left the text cannot close the span, so it cannot leave its list item or table cell. Every
-link on the page is one this function builds to this repository on github.com.
+shown only through ``literal``: one line, control and invisible characters dropped
+(``INVISIBLE``), cut to a length, backticks turned to ``'``, inside a single code span.
+Inside a code span GitHub renders no HTML, heading, emphasis, link, image, mention or
+``#123`` reference, and with no backtick left the text cannot close the span, so it cannot
+leave its list item or table cell. A commit with no subject is listed as one, by its commit.
+Every link on the page is one this function builds to this repository on github.com.
 """
 from __future__ import annotations
 
@@ -51,8 +52,23 @@ UPGRADE_FILE = "scripts/ci/release_upgrade_from.txt"
 REPOSITORY = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
-# Control characters, line and paragraph separators, and the invisible and direction marks.
-CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f​-‏ -‮⁠-⁩﻿]+")
+IMAGE_NAME = re.compile(r"^[a-z0-9-]{1,64}$")
+# What a title may not carry onto the page, by code point (written as numbers, so this file holds
+# none of them): control characters; the soft hyphen; the combining grapheme joiner; the Arabic
+# letter mark; the Hangul and Khmer fillers; the Mongolian variation selectors and vowel
+# separator; the zero-width characters and direction marks; the line and paragraph separators
+# and the direction embeddings and overrides; the word joiner, invisible operators, direction
+# isolates and deprecated format characters; the variation selectors; the byte order mark; the
+# interlinear annotation characters; the musical format characters; the tag characters; and the
+# supplementary variation selectors.
+INVISIBLE: Tuple[Tuple[int, int], ...] = (
+    (0x0000, 0x001F), (0x007F, 0x009F), (0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C),
+    (0x115F, 0x1160), (0x17B4, 0x17B5), (0x180B, 0x180F), (0x200B, 0x200F), (0x2028, 0x202E),
+    (0x2060, 0x206F), (0x3164, 0x3164), (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0),
+    (0xFFF9, 0xFFFB), (0x1D173, 0x1D17A), (0xE0000, 0xE007F), (0xE0100, 0xE01EF),
+)
+CONTROL = re.compile("[" + "".join(f"{re.escape(chr(low))}-{re.escape(chr(high))}" for low, high in INVISIBLE) + "]+")
+NO_SUBJECT = "(a commit with no subject)"
 TEXT_LIMIT = 200
 MAX_CHANGES = 250
 MAX_REVISIONS = 100
@@ -90,9 +106,6 @@ class Notes:
         return self.repository.split("/", 1)[0].lower()
 
 
-IMAGE_NAME = re.compile(r"^[a-z0-9-]{1,64}$")
-
-
 def _forms(notes: Notes) -> List[Tuple[str, str, re.Pattern]]:
     """``(what, value, form)`` for every value the page prints outside a code span."""
     forms = [("repository", notes.repository, REPOSITORY), ("commit", notes.sha, COMMIT),
@@ -103,11 +116,13 @@ def _forms(notes: Notes) -> List[Tuple[str, str, re.Pattern]]:
 
 
 def checked(notes: Notes) -> Notes:
-    """``notes``, or NotesError when any value the page prints outside a code span is not of its form."""
+    """``notes``, or NotesError when a value printed outside a code span is not of its form."""
     release_version.parse_version(notes.version)
     problems = [what for what, value, form in _forms(notes) if not form.fullmatch(value)]
     if notes.previous is not None and history.previous_release(notes.version, [notes.previous]) != notes.previous:
         problems.append(f"previous release {notes.previous!r}")
+    if notes.previous is not None and notes.upgrade_from is None:
+        problems.append(f"upgrade version (none, though {notes.previous} is an earlier release)")
     if problems:
         raise NotesError("not of the expected form: " + ", ".join(problems))
     return notes
@@ -135,7 +150,8 @@ def change_line(change: history.Change, notes: Notes) -> str:
     where = (_link(notes, f"pull/{change.number}", f"#{change.number}") if change.number
              else _link(notes, f"commit/{change.commit}", change.commit[:12]) if COMMIT.fullmatch(change.commit) else "")
     breaking = "**Breaking:** " if change.breaking else ""
-    return f"- {breaking}{literal(text)}" + (f" ({where})" if where else "")
+    shown = literal(text) if CONTROL.sub("", text).strip() else NO_SUBJECT
+    return f"- {breaking}{shown}" + (f" ({where})" if where else "")
 
 
 # --------------------------------------------------------------------------- the sections
@@ -213,12 +229,10 @@ def database_section(notes: Notes) -> List[str]:
 
 
 def upgrade_section(notes: Notes) -> List[str]:
-    """Upgrading: the earliest version this one upgrades from in one step."""
+    """Upgrading: the earliest version this one upgrades from in one step (``none`` only for the first)."""
     lines = ["## Upgrading", ""]
-    if notes.upgrade_from is None and notes.previous is None:
+    if notes.upgrade_from is None:
         lines.append("This is the first release, so there is nothing to upgrade from: install it new.")
-    elif notes.upgrade_from is None:
-        lines.append(f"No earlier release upgrades to {notes.version} in one step: install it new.")
     else:
         lines.append(f"An install of {notes.upgrade_from} or any later release upgrades to {notes.version} in one "
                      f"step. From an earlier version, first upgrade to a release that it can be upgraded from.")

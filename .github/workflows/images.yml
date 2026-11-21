@@ -88,7 +88,9 @@ name: images
 #   - The changes job reads the version off the tag (scripts/ci/release_version.py),
 #     then refuses the run before anything builds (scripts/ci/release_preflight.py) if
 #     any published image already has `<image>:<version>`, or if the tagged commit is
-#     in neither the default branch nor `release/MAJOR.MINOR`.
+#     in neither the default branch nor `release/MAJOR.MINOR`. Beside it, the release page
+#     check refuses, before anything builds, whatever the release page would be refused
+#     for later (scripts/ci/release_page.py check).
 #   - The scan policy runs in `fail` mode whatever POLICY_MODE says, so a failing image
 #     fails its build job, and the merge job, which needs every build, publishes
 #     nothing.
@@ -233,7 +235,8 @@ jobs:
     # job, so they skip with it.
     if: inputs.media_assets != true
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    # 15, not 5: on a `v*` tag this job also clones the full history (the release page check).
+    timeout-minutes: 15
     permissions:
       actions: read
       contents: read
@@ -282,6 +285,34 @@ jobs:
           python3 scripts/ci/release_preflight.py --version "$VERSION" --sha "$GITHUB_SHA" \
             --repo "$GITHUB_REPOSITORY" --default-branch "$DEFAULT_BRANCH" \
             --prefix "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/automatos-" \
+            --image api --image frontend --image enterprise-frontend --image workspace-worker \
+            --summary "$GITHUB_STEP_SUMMARY"
+
+      # PRD-279 US-301, on a `v*` tag only, before any image builds: everything the release
+      # page will say that needs no digest, refused here rather than after the images and
+      # the chart are public (scripts/ci/release_page.py check): the upgrade file, the
+      # previous release, the history, both sets of migrations, the notes rendered with
+      # placeholder digests, and no page yet for the tag. The release-notes job makes the
+      # same checks again before it creates the page. It needs every tag and the full
+      # history, so the tagged commit is checked out again, whole, beside the picker's
+      # sparse checkout, with no credentials kept. This job's token may read contents and
+      # nothing more, so it cannot create a release.
+      - name: Checkout (the history the release page is written from; v* tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          path: release-history
+
+      - name: Release page check (v* tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: release-history
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          python3 scripts/ci/release_page.py check --repo "$GITHUB_REPOSITORY" --version "$VERSION" --sha "$GITHUB_SHA" \
             --image api --image frontend --image enterprise-frontend --image workspace-worker \
             --summary "$GITHUB_STEP_SUMMARY"
 
@@ -1345,7 +1376,9 @@ jobs:
   # OIDC token, so it cannot sign. Commit text reaches it only as git's output, read by
   # the script as data and shown inside code spans; nothing from a tag, a commit or a file
   # reaches the shell. A release page that exists is never changed: the job fails instead.
-  # The full history is fetched, so the previous release's tag and files can be read.
+  # The full history is fetched, so the previous release's tag and files can be read. The
+  # changes job has already made every one of these checks that needs no digest, before
+  # any image was built; this job makes them again (`release_page.py publish`).
   release-notes:
     name: create the release page (v* tags only)
     needs: [changes, release-images, release-chart]
@@ -1376,10 +1409,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 scripts/ci/release_page.py --repo "$GITHUB_REPOSITORY" --version "$VERSION" --sha "$GITHUB_SHA" \
+          python3 scripts/ci/release_page.py publish --repo "$GITHUB_REPOSITORY" --version "$VERSION" --sha "$GITHUB_SHA" \
             --digests "${RUNNER_TEMP}/release-digests" --chart-digest "$CHART_DIGEST" \
             --image api --image frontend --image enterprise-frontend --image workspace-worker \
-            --notes "${RUNNER_TEMP}/release-notes.md" --summary "$GITHUB_STEP_SUMMARY" --publish
+            --notes "${RUNNER_TEMP}/release-notes.md" --summary "$GITHUB_STEP_SUMMARY"
 
   # PRD-262 US-053: the media assets image, ghcr.io/<owner>/automatos-media-assets.
   # media-render's build is to copy the Kokoro model and voices and the music tracks

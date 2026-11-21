@@ -220,7 +220,7 @@ def test_no_new_step_interpolates_an_expression_into_its_shell():
     """The tag name and every other value reach the shell through env:, quoted."""
     new = [step for step in _steps("merge") if step.get("if") == ON_A_TAG]
     new += [next(step for step in _steps("changes") if step.get("id") == "release")]
-    new += [_step("changes", "Release preflight (v* tags only)")]
+    new += [_step("changes", "Release preflight (v* tags only)"), _step("changes", "Release page check (v* tags only)")]
     new += _steps("release-images") + _steps("release-chart") + _steps("release-notes")
     for step in new:
         assert not _INTERPOLATION.search(step.get("run", "")), step["name"]
