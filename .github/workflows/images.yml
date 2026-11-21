@@ -151,6 +151,9 @@ on:
   pull_request:
     branches:
       - main
+      # PRD-279 US-304: a fix cherry-picked to an older release's patch branch is built and
+      # scanned as on main. A merge there publishes nothing: only its patch tag does.
+      - "release/**"
     # Exactly the changes job's SHARED_INPUTS plus every image's `inputs`
     # (orchestrator/tests/test_prd262_image_matrix.py holds them equal).
     paths:

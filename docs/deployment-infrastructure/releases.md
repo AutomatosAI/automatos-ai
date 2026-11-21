@@ -4,8 +4,8 @@ A release is a version you can name: the images and one Helm chart, built from o
 commit and published under one version number. It is cut by pushing a tag
 `vMAJOR.MINOR.PATCH` to this repository. This page covers what the tag does, the
 repository setting that limits who can push one, and the check a release runs on its
-own signatures. It is the record for [PRD-279](../PRDS/PRD-279-VERSIONED-RELEASES.md)
-Waves 1 and 2. The release notes and release page are Wave 3.
+own signatures, and the release page each version gets. It is the record for
+[PRD-279](../PRDS/PRD-279-VERSIONED-RELEASES.md) Waves 1 to 3.
 
 ## What a release is
 
@@ -29,7 +29,10 @@ you trust an image or the chart, check its signature with the command under
 ## Cutting one
 
 Releases are cut from main, or for a patch to an older release from
-`release/MAJOR.MINOR` (PRD-279 §5.5). Push a release candidate first:
+`release/MAJOR.MINOR` (PRD-279 §5.5; the branch, the cherry-pick and the patch tag are on
+[Patching an older release](patching-a-release.md)). A tag's version is never below the
+chart's `version` at the tagged commit (0.11.0 today), so the examples below stand for
+whatever version is next. Push a release candidate first:
 
 ```bash
 git tag -a v0.7.0-rc.1 -m "v0.7.0-rc.1" <commit on main>

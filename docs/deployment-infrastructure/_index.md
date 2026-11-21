@@ -44,6 +44,8 @@ For implementation and operational details, follow the child pages below.
 - For Railway topology and production operations, see [Production Deployment](#20.6).
 - For Helm and Kind-based deployment, see [Kubernetes & Helm Chart](#20.7).
 - For version tags, the published chart and checking a release's signatures, see [Releases](releases.md).
+- To check a release yourself before you install it (the commands, the contents list and the build record, and what a passing check proves), see [Checking a release](checking-a-release.md).
+- To fix a release that main has moved past, see [Patching an older release](patching-a-release.md).
 
 Sources: [docker-compose.yml:25-28]()
 
