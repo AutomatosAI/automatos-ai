@@ -33,6 +33,11 @@ const PUBLIC_ROUTES_SOURCE = path.resolve(__dirname, '..', '..', '..', 'lib', 'p
 // A transpiled module may carry this marker; it is no export (lib/theme-sdk/__tests__/shim.test.ts skips it too).
 const ES_MODULE_FLAG = '__esModule'
 
+/** The CLI's request (PRD-277 US-505: the handler takes it, for the enterprise answer; these cases ignore it). */
+function hostFileRequest(): Request {
+  return new Request('http://localhost:3000/automatos-host.json')
+}
+
 /** Each matcher pattern as the anchored expression the middleware runs on (the universal-links reading). */
 function matcherPatterns(): RegExp[] {
   return config.matcher.map((pattern) => new RegExp(`^${pattern}$`))
@@ -45,7 +50,7 @@ afterEach(() => {
 describe('PRD-261 B-03j — the host file answers exactly {schema, apiUrl}, never cached', () => {
   it('answers 200 JSON with schema 1 and the API URL, and Cache-Control: no-store', async () => {
     vi.stubEnv(API_URL_ENV, 'http://localhost:8000')
-    const response = route.GET()
+    const response = route.GET(hostFileRequest())
 
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toBe('application/json')
@@ -55,9 +60,9 @@ describe('PRD-261 B-03j — the host file answers exactly {schema, apiUrl}, neve
 
   it('reads the variable when called, not when the module loads (a built image has it inlined)', async () => {
     vi.stubEnv(API_URL_ENV, 'https://api.example.test')
-    expect(await route.GET().json()).toStrictEqual({ schema: 1, apiUrl: 'https://api.example.test' })
+    expect(await route.GET(hostFileRequest()).json()).toStrictEqual({ schema: 1, apiUrl: 'https://api.example.test' })
     vi.stubEnv(API_URL_ENV, 'http://127.0.0.1:18000')
-    expect(await route.GET().json()).toStrictEqual({ schema: 1, apiUrl: 'http://127.0.0.1:18000' })
+    expect(await route.GET(hostFileRequest()).json()).toStrictEqual({ schema: 1, apiUrl: 'http://127.0.0.1:18000' })
   })
 
   it.each([
@@ -65,7 +70,7 @@ describe('PRD-261 B-03j — the host file answers exactly {schema, apiUrl}, neve
     ['empty', ''],
   ])('is a 500 with a plain sentence naming the variable when it is %s', async (_state, value) => {
     vi.stubEnv(API_URL_ENV, value)
-    const response = route.GET()
+    const response = route.GET(hostFileRequest())
 
     expect(response.status).toBe(500)
     expect(response.headers.get('content-type')).toBe('text/plain; charset=utf-8')

@@ -40,6 +40,18 @@ function getAuthHeaders(request: NextRequest): Record<string, string> {
   return headers
 }
 
+/**
+ * Where GET reaches the API. PRD-277 US-505: in enterprise the browser-facing address is relative
+ * (none is built in), so GET uses the server-side BACKEND_INTERNAL_URL, as POST does, which the
+ * enterprise server requires at start-up (lib/enterprise/start-up.ts). Every other edition: as before.
+ */
+const LOCAL_BACKEND_URL = 'http://localhost:8000'
+
+function getBackendUrlForGet(): string {
+  if (isEnterprise) return process.env.BACKEND_INTERNAL_URL || LOCAL_BACKEND_URL
+  return process.env.NEXT_PUBLIC_API_URL || LOCAL_BACKEND_URL
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
@@ -120,7 +132,7 @@ export async function GET(request: NextRequest) {
     })
   }
 
-  const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+  const backendUrl = getBackendUrlForGet()
   const streamUrl = `${backendUrl}/api/workflows/executions/${executionId}/stream/aisdk`
 
   try {

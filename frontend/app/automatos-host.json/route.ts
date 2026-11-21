@@ -7,6 +7,12 @@
 // every other NEXT_PUBLIC_API_URL reader here. Only `next dev` and the tests see a per-call value.
 // middleware.ts's matcher skips a path with an extension, so no middleware, Clerk's in SaaS, runs for it in
 // either edition (__tests__/route.test.ts holds the matcher to that).
+// PRD-277 US-505: the enterprise build has no API address (the API answers on the web app's own host, §5.3),
+// so there the answer is the origin the request came in on, from its Host and X-Forwarded-Proto
+// (share-card.ts requestOrigin, which takes a plain host name only).
+import { isEnterprise } from '@/lib/edition-name'
+import { requestOrigin } from '@/lib/marketplace/share-card'
+
 export const dynamic = 'force-dynamic'
 
 const HOST_FILE_SCHEMA = 1
@@ -14,11 +20,19 @@ const NO_STORE = 'no-store'
 const UNSET =
   'This web app has no NEXT_PUBLIC_API_URL set, so it cannot say where its API is. ' +
   'Set it to the API URL and rebuild, or give the CLI the API URL itself.'
+const NO_HOST =
+  'This web app could not read its own address from the request, so it cannot say where its API is. ' +
+  'Give the CLI the API URL itself: it is this web app\'s own address.'
 
-export function GET(): Response {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL
+/** The API's address: the build's NEXT_PUBLIC_API_URL, or in enterprise this request's own origin. */
+function apiUrlFor(request: Request): string | null | undefined {
+  return isEnterprise ? requestOrigin(request.headers) : process.env.NEXT_PUBLIC_API_URL
+}
+
+export function GET(request: Request): Response {
+  const apiUrl = apiUrlFor(request)
   if (!apiUrl) {
-    return new Response(UNSET, {
+    return new Response(isEnterprise ? NO_HOST : UNSET, {
       status: 500,
       headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': NO_STORE },
     })

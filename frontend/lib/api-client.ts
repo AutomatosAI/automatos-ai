@@ -3,7 +3,7 @@
  * API Client — one transport (Clerk auth + workspace header + error handling)
  * over the backend API. Real failures surface honestly: PRD-168 S3 removed the
  * mock fallback/data system; dev uses the real PRD-153 local stack.
- * Base URL: NEXT_PUBLIC_API_URL.
+ * Base URL: NEXT_PUBLIC_API_URL; relative in enterprise (lib/api-base-url.ts).
  */
 
 import type {
@@ -35,6 +35,7 @@ import type {
   SocialPostedResponse,
   SocialVoiceExample,
 } from './socials-results-types'
+import { apiBaseUrl } from './api-base-url'
 import { reportUnauthorized } from './api-unauthorized'
 import { cloudInstallGate } from './marketplace/cloud-install-gate'
 // PRD-277 US-302: the enterprise session's cookie and cross-site header, added here and nowhere else.
@@ -1443,19 +1444,8 @@ class ApiClient {
     // CRITICAL: Point directly to production backend since Next.js proxy is disabled
     // Frontend runs locally on Mac, backend on remote server
 
-    // Try multiple ways to get the API URL (build-time and runtime)
-    this.baseUrl =
-      (typeof window !== 'undefined' && (window as any).__NEXT_PUBLIC_API_URL__) || // Runtime injection
-      process.env.NEXT_PUBLIC_API_URL || // Build-time env var
-      (typeof window !== 'undefined' && (window as any).NEXT_PUBLIC_API_URL) || // Runtime fallback
-      ''
-
-    // Warn if baseUrl is not set (will cause 404s)
-    if (!this.baseUrl && typeof window !== 'undefined') {
-      console.error('❌ NEXT_PUBLIC_API_URL is not set! API calls will fail.')
-      console.error('Set NEXT_PUBLIC_API_URL in Railway frontend service variables')
-      console.error('Current env:', process.env.NEXT_PUBLIC_API_URL || 'NOT SET')
-    }
+    // Try multiple ways to get the API URL (build-time and runtime); relative in enterprise (PRD-277 US-505)
+    this.baseUrl = apiBaseUrl()
 
     // Default headers - NO API KEY, will use Clerk JWT
     this.defaultHeaders = {
