@@ -222,4 +222,23 @@ Chart unit tests run without a cluster through `helm unittest charts/automatos`;
 
 Sources: `charts/automatos/README.md:99-110`
 
+## Automatos's hosted services in the enterprise edition
+
+An enterprise install (PRD-277 US-704, D-12) calls none of Automatos's hosted services until its operator switches one on. Each service is one chart value under `edition.enterprise.hostedServices`, rendered to one API setting; each is `false` unless set `true`, and the chart and the API both refuse any other value. One never switches on another. The local edition calls each service as it always has, and the hosted edition is the host, so it calls none; neither reads these settings.
+
+| Value | API setting | Host it calls | What it sends | What it brings back | When |
+|---|---|---|---|---|---|
+| `themeRevocations` | `ENTERPRISE_CALLS_THEME_REVOCATIONS` | `THEME_REVOCATIONS_URL` (default `https://api.automatos.app/api/themes/revocations`) | One `GET` with `Accept: application/json`, `Accept-Encoding: identity` and `User-Agent: Automatos-ThemeRevocations/1`. No credential, cookie, install id or workspace data. | Automatos's theme revocation list: the revoked Marketplace theme versions (a digest, or a theme id and version range, with a level and a reason) and the revoked signing key ids. The install stores them and refuses or warns on a theme they cover. | Every `THEME_REVOCATIONS_PULL_MINUTES` (60), first a minute after start, and when an admin presses Check now. |
+| `cloudSync` | `ENTERPRISE_CALLS_CLOUD_SYNC` | `AUTOMATOS_CLOUD_URL` (default `https://api.automatos.app`) | `GET /api/marketplace/catalog`, and `GET /api/marketplace/catalog/files/<digest>/package.autotheme` for a Cloud theme being installed or updated, each with `Accept`, `Accept-Encoding: identity` and the `User-Agent` `Automatos/<version> (local)`. No credential, cookie, install id or workspace data. The web app's browsers load a Cloud theme's screenshots from `/api/marketplace/catalog/files/<digest>/<path>` on that host. | The catalogue (the Marketplace themes and items it lists, with their versions and digests) and each theme package, which the install checks against its digest and signature before storing it. | When an owner or admin presses Sync with Automatos Cloud, and when a Cloud theme is installed or updated. |
+| `cloudItems` | `ENTERPRISE_CALLS_CLOUD_ITEMS` | `AUTOMATOS_CLOUD_URL` | During a Sync, `GET` of each changed item's bundle and each listed plugin's package, at addresses the install derives from the setting and the catalogue's revision or slug and version, with the same headers. | The agents, Playbooks, packages and plugins the catalogue lists. Each is reviewed in the web app (what it will use) before anyone adds it. | Only inside a Sync, so only with `cloudSync` on. |
+
+What each service needs, which the chart checks when it renders and the API checks at start:
+
+- **`cloudSync` needs `themeRevocations`.** A theme brought from Automatos Cloud is withdrawn only through Automatos's revocation list, so an install that syncs themes must pull it.
+- **`cloudItems` needs `cloudSync`.** Items arrive only in a Sync.
+
+While a service is off, nothing is sent for it: no request is made and no scheduled pull is registered. Its routes answer 404 (`/api/admin/themes/revocations/sync*` for the revocation list, `/api/marketplace/cloud-sync` and its `/status` for Cloud sync, `/api/marketplace/cloud-sync/items*` and `/updates` for Cloud items) with a sentence saying the operator hasn't switched it on, and the web app says so or leaves out the pieces that need it. The web app reads which services are on from `GET /api/hosted-services`. Revocations an admin sets on the install itself apply whatever the setting.
+
+Sources: `orchestrator/core/editions.py`, `orchestrator/core/edition_start_up.py`, `charts/automatos/templates/_enterprise_api.tpl`, `charts/automatos/README.md`
+
 ---

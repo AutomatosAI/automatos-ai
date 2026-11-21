@@ -103,7 +103,7 @@ Today the edition flag answers many different questions at once: is there a sign
 | Step-up for sensitive actions | Skipped | Clerk's freshness claim | Sign in again at the IdP |
 | Device pairing | By setting | No | By setting (D-7) |
 | Session mode | Yes | No | No |
-| Calls to Automatos's hosted services (theme revocations, Cloud sync, marketplace) | On by default | It is the host | **Off unless switched on** (D-12) |
+| Calls to Automatos's hosted services (theme revocations, Cloud sync, Cloud items) | On by default | It is the host | **Off unless switched on**, each by its own setting (D-12, US-704: `ENTERPRISE_CALLS_THEME_REVOCATIONS`, `ENTERPRISE_CALLS_CLOUD_SYNC`, `ENTERPRISE_CALLS_CLOUD_ITEMS`) |
 
 Wave 1 builds the full table from the 91 call sites. The table above shows the intent, not the final list.
 
@@ -111,7 +111,7 @@ Wave 1 builds the full table from the 91 call sites. The table above shows the i
 - startup refuses to run unless the issuer, client id, client secret and the install's public address are set;
 - `REQUIRE_AUTH` is forced on and cannot be turned off;
 - the anonymous operator does not exist;
-- until US-704 builds the per-service settings, every call to Automatos's hosted services is off.
+- every call to Automatos's hosted services is off until the operator switches that service on with its own setting (US-704). *Built: the three settings are off by default, and start-up refuses a value that is not true or false, Cloud sync without theme revocations and Cloud items without Cloud sync.*
 
 ### 5.2 Signing in from a browser
 
@@ -642,10 +642,10 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As an operator, I want to choose which of Automatos's hosted services my install calls, so that nothing leaves the install unless I switched it on (D-12).
 
 **Acceptance Criteria:**
-- [ ] One named setting for each hosted service the code calls: theme revocations (the revocation pull, its schedule, its sync status and manual pull), Cloud sync (the Cloud Sync routes and the sync pull) and Cloud items (the "Items brought from Cloud" routes). The list is the `calls_automatos_cloud` rows of `PRD-277-EDITION-CHECKS.md`; a service added later gets its own setting.
-- [ ] Each setting is off by default in enterprise, and the code reads it through a capability, never the edition's name.
-- [ ] `local` and `saas` behave as before: `local` calls each service as today, and `saas` remains the host.
-- [ ] Tests prove each service is not called in enterprise with its setting off, is called with it on, and that `local` and `saas` are unchanged.
+- [ ] One named setting for each hosted service the code calls: theme revocations (the revocation pull, its schedule, its sync status and manual pull), Cloud sync (the Cloud Sync routes and the sync pull) and Cloud items (the "Items brought from Cloud" routes). The list is the `calls_automatos_cloud` rows of `PRD-277-EDITION-CHECKS.md`; a service added later gets its own setting. *Built: `ENTERPRISE_CALLS_THEME_REVOCATIONS`, `ENTERPRISE_CALLS_CLOUD_SYNC` and `ENTERPRISE_CALLS_CLOUD_ITEMS` (`config.py`, in `reports/config-surface.json`), one capability each (`calls_theme_revocations`, `calls_cloud_sync`, `calls_cloud_items`) replacing `calls_automatos_cloud` everywhere. Theme revocations also guards the pull itself (`revocation_pull.pull_feed`) and the feed's revoked keys; Cloud sync also guards a Cloud theme's package download and the Cloud screenshot address; Cloud items also guards the Sync's item and plugin passes and the web install gate. Cloud sync needs theme revocations and Cloud items needs Cloud sync, refused at start (`core/edition_start_up.py`) and at chart render; no setting turns another on. The web app reads which are on from `GET /api/hosted-services`. The chart sets each from `edition.enterprise.hostedServices` and refuses them in `config`. Left unticked until CI runs the tests.*
+- [ ] Each setting is off by default in enterprise, and the code reads it through a capability, never the edition's name. *Built: `editions.current()` gives each capability its setting's value only where the row says `hosted_services_by_setting` (enterprise), through `with_hosted_service_settings`, on only for `1`, `true`, `yes` or `on` (config's own switch forms), so a malformed value reads as off, and start-up refuses it. Every call site reads the capability (`test_prd277_us704_hosted_services.py`, `test_prd277_edition_capabilities.py`). Left unticked until CI runs the tests.*
+- [ ] `local` and `saas` behave as before: `local` calls each service as today, and `saas` remains the host. *Built: their rows hold the three answers and no setting can move them; saas keeps its 404 sentences, and the local and hosted web builds answer from the build and ask nothing. Left unticked until CI runs the tests.*
+- [ ] Tests prove each service is not called in enterprise with its setting off, is called with it on, and that `local` and `saas` are unchanged. *Built: `test_prd277_us704_hosted_services.py` (with the HTTP transports and every client seam set to fail if touched: no request, no scheduled job, the routes' 404 before anything runs; with it on, the request reaches a mock Automatos host); the chart's `enterprise_api_test.yaml` and `enterprise_refusals_test.yaml`; the web app's `hosted-services.test.ts`, `use-hosted-services.test.tsx`, `cloud-install-gate-enterprise.test.ts`, `enterprise-hosted-services.test.tsx` and `revocations-panel-enterprise.test.tsx`. Left unticked until CI runs them.*
 
 ## 7. Functional requirements
 
@@ -676,7 +676,7 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 - **FR-25:** `local` and `saas` must behave as before. Their existing tests must pass without being weakened.
 - **FR-26:** No source file may name an identity provider.
 - **FR-27:** Sign-in must be written against one identity interface, with one hook after verification, and registration must close at startup.
-- **FR-28:** In enterprise the system must call each of Automatos's hosted services only when the operator has switched that service on with its own setting, each off by default, and `local` and `saas` must call them as before.
+- **FR-28:** In enterprise the system must call each of Automatos's hosted services only when the operator has switched that service on with its own setting, each off by default, and `local` and `saas` must call them as before. *Built in US-704.*
 
 ## 8. Decisions for Gerard
 

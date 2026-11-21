@@ -167,6 +167,16 @@ or is one the API would refuse at start.
 | `edition.enterprise.defaultRole` | `ENTERPRISE_DEFAULT_ROLE` | `none` (the default), `viewer`, `editor` or `admin`: the role in the default workspace for anyone the access rule lets in. Any role but `none` needs `requiredClaims`. |
 | `edition.enterprise.bootstrapAdmins` | `ENTERPRISE_BOOTSTRAP_ADMINS` | `sub:<subject>` and `email:<address>` entries, separated by commas: install admins at their first sign-in. The API checks the entries at start. |
 | `edition.defaultWorkspaceId` | `DEFAULT_WORKSPACE_ID` | The default workspace the Job makes, with no owner, that sign-ins are recorded in. |
+| `edition.enterprise.hostedServices.themeRevocations` | `ENTERPRISE_CALLS_THEME_REVOCATIONS` | `false` (the default) or `true`: pull Automatos's theme revocation list from `THEME_REVOCATIONS_URL` (PRD-277 US-704). |
+| `edition.enterprise.hostedServices.cloudSync` | `ENTERPRISE_CALLS_CLOUD_SYNC` | `false` (the default) or `true`: Sync with Automatos Cloud, its catalogue and the themes it lists, from `AUTOMATOS_CLOUD_URL`. Needs `themeRevocations`. |
+| `edition.enterprise.hostedServices.cloudItems` | `ENTERPRISE_CALLS_CLOUD_ITEMS` | `false` (the default) or `true`: the agents, Playbooks, packages and plugins a Sync brings from Automatos Cloud. Needs `cloudSync`. |
+
+The hosted services are off by default: an enterprise install calls none of Automatos's hosted
+services until you switch one on. Each is `true` or `false`, written without quotes; rendering
+stops on any other value, on a name under `hostedServices` the chart does not know, on a service
+switched on without the one it needs, and on any of the three settings in `config`. One never
+switches on another. What each one sends and brings back is in
+[the deployment docs](../../docs/deployment-infrastructure/kubernetes-helm-chart.md#automatoss-hosted-services-in-the-enterprise-edition).
 
 The client secret goes in the Secret as `OIDC_CLIENT_SECRET`, never in values. The
 session clocks (`SESSION_IDLE_MINUTES`, `SESSION_ABSOLUTE_HOURS`), the claim names
@@ -247,10 +257,11 @@ Rendering stops with a message on a combination that cannot work:
   - behind proxies that append to the client address header, `edition.enterprise.clientIpProxyCount`: how many of your own proxies append to it (1 behind one AWS application load balancer with `clientIpHeader: X-Forwarded-For`). Rendering stops while `clientIpHeader` is `X-Forwarded-For` or `X-Original-Forwarded-For` and the count is empty, while the count is not a plain whole number from 1 to 8, while a count is set with no `clientIpHeader`, while `clientIpHeader` is `Forwarded`, and while `config` sets `FORWARDED_ALLOW_IPS`;
   - the application registered at your identity provider with the two addresses the install notes print;
   - the ingress on, on the host of `publicUrl`, with TLS, so the web app and the API answer on one origin;
-  - for a provider with a private certificate, a ConfigMap with its CA (`edition.enterprise.oidc.caConfigMap`).
+  - for a provider with a private certificate, a ConfigMap with its CA (`edition.enterprise.oidc.caConfigMap`);
+  - to call any of Automatos's hosted services, each switched on under `edition.enterprise.hostedServices` (`themeRevocations`, `cloudSync`, `cloudItems`; all off by default, so nothing is called until you do).
   The chart then runs the enterprise web image (`frontend.enterpriseImage`), gives it `BACKEND_INTERNAL_URL` and `MEDIA_ORIGINS` (`frontend.mediaOrigins`), and gives the API and the migration Job the settings in [The enterprise edition](#the-enterprise-edition).
 - **`edition.authEdition` must be exactly `local`, `enterprise` or `saas`**, in lower case with no spaces; rendering stops on any other spelling. 0.10.0 documented `local` alone and rendered any value.
-- **`config` refuses `OIDC_CLIENT_SECRET` in every edition**: a secret is never a chart value. In the enterprise edition it also refuses each setting the chart sets and `SESSION_COOKIE_NAME` and `SESSION_CSRF_HEADER`.
+- **`config` refuses `OIDC_CLIENT_SECRET` in every edition**: a secret is never a chart value. In the enterprise edition it also refuses each setting the chart sets (the three `ENTERPRISE_CALLS_*` hosted service settings among them) and `SESSION_COOKIE_NAME` and `SESSION_CSRF_HEADER`.
 - **A released chart names one web image per published edition**, each by digest: `frontend.image` (local) and `frontend.enterpriseImage` (enterprise).
 
 ## Upgrading to 0.10.0
