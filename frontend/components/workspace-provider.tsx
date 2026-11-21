@@ -5,6 +5,7 @@ import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useAuth, useOrganization } from '@/lib/auth-hooks'
 import { usePathname } from 'next/navigation'
 import type { WorkspaceSocialsState, WorkspaceVoiceLiveState } from '@/lib/api-client'
+import { enterpriseWorkspaceHeaders, withSession } from '@/lib/enterprise/session-transport'
 
 const ACCEPT_INVITATION_ROUTE = /^\/accept-invitation(\/|$|\?)/
 
@@ -188,14 +189,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             setIsLoading(true)
             const token = await getToken()
 
+            // PRD-277 US-501: enterprise names the workspace its session provider stored and
+            // sends the session cookie (withSession); every other edition sends what it sent before.
             const response = await fetch(
                 `${process.env.NEXT_PUBLIC_API_URL}/api/workspaces/current`,
-                {
+                withSession({
                     headers: {
                         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                        ...enterpriseWorkspaceHeaders(),
                         'Content-Type': 'application/json',
                     },
-                }
+                })
             )
 
             if (await followPendingInvitation(response)) return

@@ -67,6 +67,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from config import config
+from core.auth.clerk_person import clerk_id_query
 from core.jobs.registry import CATCH_UP_LATEST, job_handler
 from core.models.core import User
 from core.models.mobile_devices import MobileDevice, MobileDeviceStatus
@@ -362,7 +363,7 @@ def _said(read: Mapping[str, Any]) -> bool:
 
 def recorded_person(db: Session, user_id: int) -> Optional[str]:
     """The person as ``resolve_recorded_person`` reads them: their Clerk id, else their email."""
-    row = db.query(User.clerk_user_id, User.email).filter(User.id == user_id).first()
+    row = clerk_id_query(db, user_id, User.email).first()
     if row is None:
         return None
     return (row.clerk_user_id or "").strip() or (row.email or "").strip() or None

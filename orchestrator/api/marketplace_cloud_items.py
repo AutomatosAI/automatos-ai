@@ -14,12 +14,14 @@ disclosure``                                                (``disclosure.disclo
                                                             (``updates.updates``)
 ==========================================================  ==================================================
 
-Gates, in order (each handler's first two dependencies): the edition first, because the hosted edition is
-Automatos Cloud and holds no item brought from it, so every route answers 404 there to every caller, signed in
-or not; then ``get_request_context_hybrid``: any member of the workspace, since these read catalogue content any
-member may install and only the caller's own workspace's copies (``/updates`` filters by ``ctx.workspace_id``).
-All three are GETs over local rows only, with no network call. Plain ``def`` handlers over the synchronous
-session (AGENTS.md).
+Gates, in order (each handler's first two dependencies): ``hosts_automatos_cloud`` first, because the hosted
+edition is Automatos Cloud and holds no item brought from it, so every route answers 404 there to every caller,
+signed in or not; then ``get_request_context_hybrid``: any member of the workspace, since these read catalogue
+content any member may install and only the caller's own workspace's copies (``/updates`` filters by
+``ctx.workspace_id``). All three are GETs over local rows only, with no network call, so an enterprise install
+answers them whatever ``ENTERPRISE_CALLS_CLOUD_ITEMS`` holds (PRD-277 US-704): that setting stops the Sync's
+item and plugin passes, the only requests for items, and an item brought while it was on is still listed and
+still reviewed before anyone adds it. Plain ``def`` handlers over the synchronous session (AGENTS.md).
 """
 
 from __future__ import annotations
@@ -45,8 +47,8 @@ NOT_A_CLOUD_ITEM = "That isn't an item this install brought from Automatos Cloud
 
 
 def require_local_edition() -> None:
-    """404 in the hosted edition, before the caller is looked at: only a local install holds Cloud items."""
-    if not editions.current().calls_automatos_cloud:
+    """404 in the hosted edition, before the caller is looked at: every other install may hold Cloud items."""
+    if editions.current().hosts_automatos_cloud:
         raise HTTPException(status_code=NOT_FOUND, detail=HOSTED_NO_CLOUD_ITEMS)
 
 

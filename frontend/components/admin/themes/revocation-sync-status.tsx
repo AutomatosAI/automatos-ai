@@ -6,7 +6,9 @@
  * and Check now (`POST /api/admin/themes/revocations/sync/pull`).
  *
  * Local edition only: the hosted edition serves the feed and pulls nothing (both sync routes are
- * 404 there), so the panel neither shows this nor asks for it. `stale` is the server's own rule
+ * 404 there), so the panel neither shows this nor asks for it. An enterprise install shows it while its
+ * operator has switched the pull on (PRD-277 US-704); while off it shows one plain line instead
+ * (`switchedOff`) and asks nothing. `stale` is the server's own rule
  * (`revocation_pull.is_stale`: no successful pull in 7 days, or none yet), the same one that lets an
  * admin lift a feed row here; the warning shows only while sync is on.
  */
@@ -17,7 +19,7 @@ import type { ThemeRevocationSyncStatus } from '@/lib/api-client'
 import { formatRelative } from '@/lib/format-relative'
 import { themeErrorMessage } from '@/lib/theme-host/api'
 
-import { CHECK_NOW, SYNC_OFF, SYNC_STALE, SYNC_TITLE } from './review-words'
+import { CHECK_NOW, SYNC_NOT_SWITCHED_ON, SYNC_OFF, SYNC_STALE, SYNC_TITLE } from './review-words'
 import { usePullRevocations } from './use-theme-revocations'
 
 function Fact({ label, value, testId }: { label: string; value: string; testId: string }) {
@@ -81,12 +83,23 @@ function SyncBody({ sync }: { sync: UseQueryResult<ThemeRevocationSyncStatus> })
   )
 }
 
-export function RevocationSyncStatus({ hosted, sync }: { hosted: boolean; sync: UseQueryResult<ThemeRevocationSyncStatus> }) {
+interface RevocationSyncStatusProps {
+  hosted: boolean
+  /** An enterprise install whose operator hasn't switched the pull on (PRD-277 US-704): one plain line. */
+  switchedOff?: boolean
+  sync: UseQueryResult<ThemeRevocationSyncStatus>
+}
+
+export function RevocationSyncStatus({ hosted, switchedOff = false, sync }: RevocationSyncStatusProps) {
   if (hosted) return null
   return (
     <section aria-label={SYNC_TITLE} className="space-y-2 rounded-lg border border-border/50 p-3" data-testid="revocation-sync">
       <p className="text-sm font-medium">{SYNC_TITLE}</p>
-      <SyncBody sync={sync} />
+      {switchedOff ? (
+        <p className="text-xs text-muted-foreground" data-testid="revocation-sync-not-switched-on">{SYNC_NOT_SWITCHED_ON}</p>
+      ) : (
+        <SyncBody sync={sync} />
+      )}
     </section>
   )
 }

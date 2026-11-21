@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core import editions
+from core.auth.clerk_person import clerk_person_query
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid, invalidate_local_operator_cache
 from core.auth.workspace_permission import require_workspace_permission
@@ -109,7 +110,7 @@ def _resolve_user_row(db: Session, ctx: RequestContext) -> Optional[User]:
     clerk_uid = user.clerk_user_id or (user.id if isinstance(user.id, str) else None)
     row = None
     if clerk_uid:
-        row = db.query(User).filter(User.clerk_user_id == clerk_uid).first()
+        row = clerk_person_query(db, User, clerk_uid).first()
     if row is None and user.email:
         row = db.query(User).filter(User.email == user.email).first()
     return row

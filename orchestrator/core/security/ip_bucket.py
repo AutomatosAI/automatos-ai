@@ -6,11 +6,13 @@ that count honest and keep Redis keys clean:
 * An IPv6 subscriber is usually handed a whole /64, so per-address buckets would let
   them rotate addresses inside it; the bucket is the /64 instead. An IPv4-mapped IPv6
   address counts as its IPv4 address.
-* A client-IP value that is not an IP address (a junk ``X-Forwarded-For``) shares one
-  ``<prefix>:unparsable`` bucket, so a caller can never write an arbitrary key.
+* A client-IP value that is not an IP address shares one ``<prefix>:unparsable`` bucket,
+  so a caller can never write an arbitrary key.
 
-The address itself comes from ``api.credentials.get_client_ip``; this module only turns
-it into a bucket name, so it never trusts or reads a header.
+The address itself comes from ``api.credentials.get_client_ip``, which reads it from
+``core/security/client_ip.py`` and its two settings (``CLIENT_IP_HEADER``, and
+``CLIENT_IP_PROXY_COUNT`` for proxies that append); this module only turns it into a bucket
+name, so it never trusts or reads a header.
 """
 from __future__ import annotations
 

@@ -9,6 +9,7 @@ from uuid import UUID
 
 from core.security.ssh_host_keys import apply_trust_on_first_use_policy
 from modules.tools.execution.agent_request import marks_an_agent_request
+from modules.tools.execution.http_hosts import allowed_http_hosts
 
 logger = logging.getLogger(__name__)
 
@@ -33,15 +34,8 @@ async def execute_shell(
 
 
 def _get_allowed_http_domains():
-    from config import config
-    return {
-        config.INTERNAL_API_HOSTNAME,
-        config.INTERNAL_FRONTEND_HOSTNAME,
-        "api.automatos.app",
-        "ui.automatos.app",
-        "localhost",
-        "127.0.0.1",
-    }
+    """The hosts ``http_request`` may call: the install's own, and Automatos's public two outside ``enterprise`` (PRD-277 D-12)."""
+    return set(allowed_http_hosts())
 
 
 @marks_an_agent_request  # PRD-264 EUAI-07: the platform's email routes know an agent asked

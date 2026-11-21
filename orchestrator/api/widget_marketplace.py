@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, desc, func as sqlfunc, or_, text
 from sqlalchemy.orm import Session
 
+from core.auth.clerk_person import clerk_person_row
 from core.auth.dependencies import RequestContext
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.hybrid import get_request_context_hybrid
@@ -36,14 +37,11 @@ router = APIRouter(prefix="/api/widget-marketplace", tags=["Widget Marketplace"]
 # ===================================================================
 
 def _get_user_db_id(db: Session, ctx: RequestContext):
-    """Resolve clerk_user_id -> users.id UUID."""
+    """Resolve the caller's Clerk user ID -> users.id (``core.auth.clerk_person``)."""
     clerk_id = getattr(ctx.user, "clerk_user_id", None) or ctx.user.id
     if not clerk_id:
         return None
-    row = db.execute(
-        text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
-        {"cid": clerk_id},
-    ).fetchone()
+    row = clerk_person_row(db, clerk_id)
     return row[0] if row else None
 
 
