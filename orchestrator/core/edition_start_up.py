@@ -12,7 +12,8 @@
 2. when a sign-in setting (``OIDC_SIGN_IN_SETTINGS``, PRD-277 Wave 4) cannot be used: the issuer
    and ``FRONTEND_URL`` must be ``https`` addresses with a host; ``OIDC_SCOPES`` must be scope
    tokens including ``openid``; ``OIDC_CLAIM_EMAIL``, ``OIDC_CLAIM_NAME`` and
-   ``OIDC_CLAIM_SUBJECT`` must name a claim, the last not one of ``access_rule.PROTOCOL_CLAIMS``;
+   ``OIDC_CLAIM_SUBJECT`` must name a claim, the last not one of ``access_rule.PROTOCOL_CLAIMS``
+   and not the claim ``OIDC_CLAIM_EMAIL`` or ``OIDC_CLAIM_NAME`` names, nor ``email`` (FR-7);
    ``OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES``, when set, must be ``true`` or ``false``;
    ``OIDC_CA_BUNDLE_FILE``, when set, must be a file this process can read; and
    ``ENTERPRISE_DEFAULT_ROLE`` must be ``none`` or a workspace role below owner, and a role needs
@@ -114,6 +115,11 @@ CLAIM_NAME_SETTINGS: Tuple[str, ...] = ("OIDC_CLAIM_EMAIL", "OIDC_CLAIM_NAME", S
 SUBJECT_CLAIM_PROBLEM = (
     "must name the claim that identifies the person, not one that describes the token itself, which is the same "
     "for everyone or new at every sign-in"
+)
+# FR-7: the subject is never the claim an address or a display name is read from, nor the standard address claim.
+SUBJECT_CLAIM_PROFILE_PROBLEM = (
+    "must differ from OIDC_CLAIM_EMAIL, OIDC_CLAIM_NAME and the standard address claim: a person is never "
+    "identified by an address or a displayed label (FR-7)"
 )
 # PRD-277 US-502: the provider's name on the sign-in button. Plain text the page shows as it is:
 # 1 to 64 characters, no control character (C0, DEL or C1) and no angle bracket.
@@ -242,10 +248,27 @@ def _sign_in_setting_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str
 def _claim_name_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str, str]]:
     """Each claim setting names a claim; the subject's names one that can identify a person."""
     for name in CLAIM_NAME_SETTINGS:
-        if not str(settings.get(name) or "").strip():
+        if not _trimmed(settings, name):
             yield name, "must name a claim"
-    if str(settings.get(SUBJECT_CLAIM_SETTING) or "").strip() in access_rule.PROTOCOL_CLAIMS:
-        yield SUBJECT_CLAIM_SETTING, SUBJECT_CLAIM_PROBLEM
+    problem = _subject_claim_problem(settings)
+    if problem:
+        yield SUBJECT_CLAIM_SETTING, problem
+
+
+def _trimmed(settings: Mapping[str, Any], name: str) -> str:
+    return str(settings.get(name) or "").strip()
+
+
+def _subject_claim_problem(settings: Mapping[str, Any]) -> Optional[str]:
+    """Why ``OIDC_CLAIM_SUBJECT`` cannot identify a person, or None (an empty one is refused before)."""
+    subject = _trimmed(settings, SUBJECT_CLAIM_SETTING)
+    if not subject:
+        return None
+    if subject in access_rule.PROTOCOL_CLAIMS:
+        return SUBJECT_CLAIM_PROBLEM
+    profile_claims = (_trimmed(settings, "OIDC_CLAIM_EMAIL"), _trimmed(settings, "OIDC_CLAIM_NAME"),
+                      STANDARD_EMAIL_CLAIM)
+    return SUBJECT_CLAIM_PROFILE_PROBLEM if subject in profile_claims else None
 
 
 def _bundle_and_role_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str, str]]:
@@ -453,6 +476,7 @@ __all__ = [
     "DEFAULT_ROLES",
     "SHARED_ISSUER_PROBLEM",
     "SUBJECT_CLAIM_PROBLEM",
+    "SUBJECT_CLAIM_PROFILE_PROBLEM",
     "OIDC_SIGN_IN_SETTINGS",
     "OIDC_START_UP_SETTINGS",
     "SESSION_COOKIE_PREFIX",

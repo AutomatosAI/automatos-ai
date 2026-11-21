@@ -21,8 +21,7 @@ running it twice changes nothing. No row is written or changed.
 
 Locks: each ``ALTER TABLE`` takes an ACCESS EXCLUSIVE lock, held until the upgrade's one transaction
 commits (``alembic/env.py`` runs every pending revision in one). ``VALIDATE CONSTRAINT`` reads ``mobile_devices`` once (one
-row per phone); a column with no default rewrites nothing. No ``lock_timeout`` is set: no revision
-here sets one (``prd268_w2_delivery`` says the same).
+row per phone); a column with no default rewrites nothing. This revision sets no ``lock_timeout``.
 
 The downgrade drops the eight columns and puts the narrower checks back as ``NOT VALID``: they hold for
 every row written after it, and an ``oidc`` row already there is kept as it is (the code of the

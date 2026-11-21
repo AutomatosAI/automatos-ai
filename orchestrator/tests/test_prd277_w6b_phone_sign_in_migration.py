@@ -4,8 +4,8 @@
 * Its upgrade widens ``ck_mobile_devices_kind`` to allow ``oidc`` and lets an ``oidc`` row hold a code and token
   hash (``ck_mobile_devices_clerk_holds_no_token``), each dropped only if it exists, added back ``NOT VALID`` and
   then validated; it adds four nullable columns to ``mobile_devices`` and four to ``oidc_pending_sign_ins``,
-  each only when missing. It writes no row, touches no other table and sets no ``lock_timeout`` (no revision
-  does). The model declares the same names and sizes.
+  each only when missing. It writes no row, touches no other table and sets no ``lock_timeout``. The model
+  declares the same names and sizes.
 * On Postgres, inside a transaction rolled back at the end: over the tables ``create_all`` built, the upgrade
   run twice changes nothing and leaves both checks validated; the downgrade drops the eight columns, keeps an
   ``oidc`` row already there and refuses a new one; the upgrade from there gives back exactly what

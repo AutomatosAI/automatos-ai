@@ -302,7 +302,7 @@ These are requirements, each with a test.
 
 - **The ID token** is accepted only if its signature verifies against the IdP's published keys, with an allow-list of algorithms (RS256, PS256, ES256). `none` and the shared-secret algorithms are refused.
 - **Issuer** must equal `OIDC_ISSUER` exactly, and the metadata document must name the same issuer.
-- **Subject:** `sub` must be a non-empty string, as OIDC Core §2 requires of every ID token, and so must the claim `OIDC_CLAIM_SUBJECT` names when that is another (§5.4).
+- **Subject:** `sub` must be a non-empty string, as OIDC Core §2 requires of every ID token, and so must the claim `OIDC_CLAIM_SUBJECT` names when that is another (§5.4). A person is never identified by an address or a display name (FR-7): start-up refuses `OIDC_CLAIM_SUBJECT` set to the claim `OIDC_CLAIM_EMAIL` or `OIDC_CLAIM_NAME` names, or to `email`.
 - **Audience** must contain the client id. With several audiences, `azp` must equal the client id.
 - **Times:** `exp`, `iat` and `nbf` are checked with at most 60 seconds of leeway.
 - **`nonce`** must match the one made at `/start`. **`state`** must match and is single use.
