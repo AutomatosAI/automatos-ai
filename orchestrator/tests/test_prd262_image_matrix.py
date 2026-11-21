@@ -6,7 +6,8 @@ lists:
 
 * the PR paths include the frontend's ``public/`` files, build config and ``.npmrc``,
   and the budgets, and are exactly the images' inputs plus the shared ones;
-* a frontend-only PR builds only the frontend, on both arches;
+* a frontend-only PR builds only the two web images, on both arches, and the enterprise one
+  (PRD-277 US-505) leaves the local one as it was;
 * PR and branch builds push to the job's ``registry:2`` (buildx on the host
   network), main pushes to GHCR, and only publishing runs write the GHA cache,
   ``mode=min`` for the API (the picker writes the cache settings);
@@ -72,19 +73,77 @@ def test_the_pull_request_paths_are_exactly_the_image_inputs():
     assert set(TRIGGERS["pull_request"]["paths"]) == inputs
 
 
-def test_a_frontend_only_pr_builds_only_the_frontend_on_both_arches():
+WEB_IMAGES = ["frontend", "enterprise-frontend"]
+
+
+def test_a_frontend_only_pr_builds_only_the_two_web_images_on_both_arches():
+    """Both web images read the same files (PRD-277 US-505), so a frontend change builds both."""
     entries = _pick(["frontend/public/auto/new-pose.png", "frontend/app/page.tsx"])
-    assert [(entry["name"], entry["arch"]) for entry in entries] == [("frontend", "amd64"), ("frontend", "arm64")]
+    assert [(entry["name"], entry["arch"]) for entry in entries] == [
+        ("frontend", "amd64"), ("frontend", "arm64"),
+        ("enterprise-frontend", "amd64"), ("enterprise-frontend", "arm64"),
+    ]
     assert {entry["runner"] for entry in entries} == {"ubuntu-24.04", "ubuntu-24.04-arm"}
     for entry in entries:
+        name = entry["name"]
         assert entry["publish"] is False
-        assert entry["image"] == "localhost:5000/automatos-frontend"
+        assert entry["image"] == f"localhost:5000/automatos-{name}"
         assert entry["registry"] == LOCAL
-        assert entry["edge"] == "ghcr.io/automatosai/automatos-frontend:edge"
+        assert entry["edge"] == f"ghcr.io/automatosai/automatos-{name}:edge"
+    local = [entry for entry in entries if entry["name"] == "frontend"]
+    for entry in local:
         assert "NEXT_PUBLIC_AUTH_EDITION=local\nNEXT_PUBLIC_API_URL=http://localhost:8000" in entry["build_args"]
 
 
-EVERY_IMAGE = ["api", "frontend", "workspace-worker", "agent-opt-worker", "media-render", "voice-tts"]
+def test_the_enterprise_web_image_is_built_for_its_edition_with_no_address():
+    """PRD-277 US-505: the enterprise edition, the API and WebSocket addresses empty (its build
+    refuses any other value), from the local image's context, target and cache settings."""
+    images = {image["name"]: image for image in IMAGES}
+    enterprise, local = images["enterprise-frontend"], images["frontend"]
+    assert enterprise["build_args"] == [
+        "NEXT_PUBLIC_AUTH_EDITION=enterprise", "NEXT_PUBLIC_API_URL=", "NEXT_PUBLIC_WS_URL=",
+    ]
+    for key in ("context", "target", "cache_mode", "no_cache_filters", "arches", "publish"):
+        assert enterprise[key] == local[key], key
+    assert enterprise["inputs"] == [*local["inputs"], "frontend/scripts/check-enterprise-image.sh"]
+
+
+def test_the_local_web_image_is_built_as_before():
+    """PRD-277 US-505: publishing the enterprise image beside it changes nothing of the local one."""
+    local = next(image for image in IMAGES if image["name"] == "frontend")
+    assert local == {
+        "name": "frontend", "context": "frontend", "target": "production",
+        "build_args": ["NEXT_PUBLIC_AUTH_EDITION=local", "NEXT_PUBLIC_API_URL=http://localhost:8000",
+                       "NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws",
+                       "NEXT_PUBLIC_MEDIA_ORIGINS=http://localhost:9000"],
+        "cache_mode": "max", "no_cache_filters": ["production"],
+        "arches": ["amd64", "arm64"], "publish": True,
+        "inputs": ["frontend/Dockerfile", "frontend/.dockerignore",
+                   "frontend/package.json", "frontend/package-lock.json",
+                   "frontend/next.config.js", "frontend/csp-sources.js",
+                   "frontend/csp-policy.mjs", "frontend/enterprise-build.js",
+                   "frontend/.npmrc", "frontend/public/**",
+                   "frontend/scripts/check-standalone-image.sh"],
+    }
+    entry = next(entry for entry in _pick([], publish=True, every=True)
+                 if (entry["name"], entry["arch"]) == ("frontend", "amd64"))
+    assert entry["image"] == "ghcr.io/automatosai/automatos-frontend"
+    assert entry["edge"] == "ghcr.io/automatosai/automatos-frontend:edge"
+    assert "scope=frontend-amd64" in entry["cache_from"]
+
+
+def test_no_published_image_downloads_another_images_digests():
+    """The merge job downloads ``digests-<name>-*`` into one index, so a name that starts with
+    another's name and a dash would join its index: why the enterprise image is not
+    ``frontend-enterprise``."""
+    names = [image["name"] for image in IMAGES if image["publish"]]
+    for name in names:
+        for other in names:
+            assert other == name or not other.startswith(f"{name}-"), (name, other)
+
+
+EVERY_IMAGE = ["api", "frontend", "enterprise-frontend", "workspace-worker", "agent-opt-worker",
+               "media-render", "voice-tts"]
 
 
 @pytest.mark.parametrize("path,names", [
@@ -110,7 +169,7 @@ def test_a_push_publishes_every_published_image_to_ghcr():
     entries = _pick([], publish=True, every=True)
     assert len(entries) == sum(len(image["arches"]) for image in IMAGES)
     published = {image["name"] for image in IMAGES if image["publish"]}
-    assert published == {"api", "frontend", "workspace-worker"}
+    assert published == {"api", "frontend", "enterprise-frontend", "workspace-worker"}
     for entry in entries:
         if entry["name"] in published:
             assert entry["publish"] is True and entry["registry"] == ""
@@ -194,7 +253,7 @@ def test_only_publishing_runs_write_the_cache_and_the_api_writes_min():
     modes = {image["name"]: image["cache_mode"] for image in IMAGES}
     assert modes["api"] == "min" and modes["frontend"] == "max"
     gha = {image["name"] for image in IMAGES if image.get("cache", "gha") == "gha"}
-    assert gha == {"api", "frontend", "workspace-worker", "agent-opt-worker", "voice-tts"}
+    assert gha == {"api", "frontend", "enterprise-frontend", "workspace-worker", "agent-opt-worker", "voice-tts"}
     for publish in (False, True):
         for entry in _pick([], publish=publish, every=True):
             if entry["name"] not in gha:

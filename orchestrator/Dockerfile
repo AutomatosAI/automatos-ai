@@ -407,6 +407,14 @@ ENTRYPOINT ["docker-entrypoint.sh"]
 # envs/api.defaults sets 1 for compose. Set it on a service to change it there.
 ENV WEB_CONCURRENCY=4
 
+# The version the API reports (PRD-279 US-303; config.AUTOMATOS_VERSION): images.yml passes
+# the tag's version on a release and the full commit id on every other build. No default:
+# a build that passes none (compose, `make build`, Railway) sets it empty, and the API then
+# reports config.UNVERSIONED_BUILD. Declared here, after the last filesystem layer, so a value
+# that changes on every commit rebuilds no layer and only the image's config changes.
+ARG AUTOMATOS_VERSION
+ENV AUTOMATOS_VERSION=${AUTOMATOS_VERSION}
+
 # Production command — uvicorn, and no alembic: the entrypoint migrates, once,
 # before it starts, and a failed migration exits before uvicorn runs (PRD-262
 # US-029). Shell form, so the shell expands Railway's PORT. `exec` (F416):

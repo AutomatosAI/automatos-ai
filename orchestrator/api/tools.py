@@ -16,9 +16,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from anyio import from_thread
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, text
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from core.auth import person as people
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
@@ -71,6 +72,11 @@ def _fire_shopify_autosync(workspace_id: str) -> None:
     _asyncio.create_task(_run())
 
 
+# The caller's active member row, by the users.id their Clerk ID names (core.auth.person).
+_MEMBER_ROLE_SQL = ("SELECT wm.role FROM workspace_members wm WHERE wm.workspace_id = :ws_id "
+                    "AND wm.user_id = {person} AND wm.is_active = true LIMIT 1")
+
+
 def _assert_workspace_admin(ctx: RequestContext, db: Session = None) -> None:
     """Raise 403 unless the user has admin or owner role.
 
@@ -82,15 +88,9 @@ def _assert_workspace_admin(ctx: RequestContext, db: Session = None) -> None:
     if db and ctx.workspace_id and ctx.user:
         clerk_id = getattr(ctx.user, 'clerk_user_id', None)
         if clerk_id:
-            row = db.execute(
-                text(
-                    "SELECT wm.role FROM workspace_members wm "
-                    "JOIN users u ON u.id = wm.user_id "
-                    "WHERE wm.workspace_id = :ws_id AND u.clerk_user_id = :cid AND wm.is_active = true "
-                    "LIMIT 1"
-                ),
-                {"ws_id": str(ctx.workspace_id), "cid": clerk_id},
-            ).first()
+            row = db.execute(*people.person_statement(
+                _MEMBER_ROLE_SQL, people.by_clerk_id(clerk_id), ws_id=str(ctx.workspace_id),
+            )).first()
             if row and row[0] in ('admin', 'owner'):
                 return
 

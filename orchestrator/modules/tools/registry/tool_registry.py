@@ -196,6 +196,10 @@ class ToolRegistry:
         
         # Initialize with core platform tools
         self._register_core_tools()
+        # PRD-277 D-12: in enterprise, http_request names only the install's own hosts (same place in the list).
+        from modules.tools.execution.http_hosts import fitted_to_edition
+
+        self.tools["http_request"] = fitted_to_edition(self.tools["http_request"])
         from .app_and_document_tools import app_and_document_specs
 
         for spec in app_and_document_specs():

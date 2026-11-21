@@ -15,10 +15,16 @@ export const NOT_SYNCED_YET = 'Not synced yet'
 export const CLOUD_TITLE = 'Automatos Cloud'
 export const CLOUD_LEDE =
   'Where this install syncs Marketplace themes, agents, Playbooks, packages and plugins from. A Sync runs only when someone presses it. It lists only theme versions an Automatos key signed; agents, Playbooks, packages and plugins are Reviewed on Automatos Cloud, and each shows what it will use before it is added.'
+/** The lede on an enterprise install whose operator syncs themes but hasn't switched Cloud items on (PRD-277 US-704). */
+export const CLOUD_LEDE_THEMES_ONLY =
+  "Where this install syncs Marketplace themes from. A Sync runs only when someone presses it. It lists only theme versions an Automatos key signed. It doesn't bring agents, Playbooks, packages or plugins: this install's operator hasn't switched that on. Those already here still show what they will use before they are added."
 export const SYNC_NOW = 'Sync now'
 export const READING_STATUS = 'Reading Sync with Automatos Cloud…'
 export const SYNC_OFF = 'Sync with Automatos Cloud is off on this install: AUTOMATOS_CLOUD_URL is empty.'
 export const TURN_OFF = 'To turn it off, set AUTOMATOS_CLOUD_URL= (empty) in envs/api.local and restart.'
+/** How an enterprise install's operator turns it off (PRD-277 US-704): the setting, not the URL. */
+export const TURN_OFF_ENTERPRISE =
+  "To turn it off, this install's operator sets ENTERPRISE_CALLS_CLOUD_SYNC and ENTERPRISE_CALLS_CLOUD_ITEMS to false (the chart's edition.enterprise.hostedServices) and restarts the API."
 
 /** The last successful Sync's counts, for Settings: "2 new, 1 updated, 5 unchanged, 0 refused". */
 export function countsLine(counts: CloudSyncCounts): string {

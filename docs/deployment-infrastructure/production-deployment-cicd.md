@@ -248,8 +248,17 @@ The `railway-manifest.json` defines the production deployment topology on Railwa
 - **Service Definitions**: Each service specifies its repository, `root_dir`, `builder` (e.g., `DOCKERFILE`), `port`, `restart_policy`, and a list of environment variables (`env_keys`) it expects [infrastructure/railway-manifest.json:68-180]().
 - **Domain Mapping**: Custom domains are mapped to specific services, such as `api.automatos.app` to `automatos-ai-api` and `ui.automatos.app` to `automotas-ai-frontend` [infrastructure/railway-manifest.json:8-10]().
 - **Dockerfile Usage**: Railway builds services using their respective Dockerfiles, targeting the `production` stage [infrastructure/railway-manifest.json:75, 188](). This is verified by `orchestrator/tests/test_dockerfile_prod_parity.py` to ensure that Dockerfile `ARG` defaults align with production values [orchestrator/tests/test_dockerfile_prod_parity.py:81-102]().
+- **Values a service requires**: `required_env_values` records the non-secret value a service must have set, beside `env_keys`, which names only the keys.
 
-Sources: [infrastructure/railway-manifest.json:1-879](), [orchestrator/tests/test_dockerfile_prod_parity.py:81-102]()
+#### The workspace worker's start user (`RAILWAY_RUN_UID=0`)
+
+Since PRD-280 US-201 the worker image starts as uid 1000 by default (its Dockerfile's `USER 1000:1000`). Railway mounts the `agent-workspace-worker` volume at `/workspaces` owned by root and starts a non-root image as its `USER`, so the service must be told to start the image as root: `RAILWAY_RUN_UID=0` (Railway: docs.railway.com/volumes#permissions). Started as root, the entrypoint re-owns the volume and drops to uid 1000, as it always has.
+
+- **Order:** set `RAILWAY_RUN_UID=0` on the service **before** an image from this release deploys. Setting it earlier changes nothing: the older image already starts as root.
+- **If it is missing:** the worker prints `[entrypoint] uid 1000 cannot write /workspaces. Started as a user other than root, the worker changes no owner…` and exits 1 before it starts. It touches no file: the check only tests whether the folder is writable. Railway's restart policy (`ON_FAILURE`, 10 retries) restarts it, and each start stops the same way until the value is set.
+- The manifest records it (`required_env_values` on `agent-workspace-worker`), and `orchestrator/tests/test_f452_worker_cannot_regain_privileges.py` checks that it is there.
+
+Sources: [infrastructure/railway-manifest.json:1-879](), [orchestrator/tests/test_dockerfile_prod_parity.py:81-102](), [services/workspace-worker/entrypoint.sh]()
 
 ---
 

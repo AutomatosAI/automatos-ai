@@ -368,8 +368,11 @@ def test_no_route_or_setting_can_set_the_lifetime():
     assert set(inspect.signature(mobile_devices.create_pairing_code).parameters) == {
         "request", "response", "ctx", "db"}
     surface = json.loads((ORCH / "reports" / "config-surface.json").read_text(encoding="utf-8"))["settings"]
-    assert not [name for name in surface if "PAIRING" in name or "REVIEW_CODE" in name]
-    assert not [name for name in dir(config) if "PAIRING" in name or "REVIEW_CODE" in name]
+    # PRD-277 US-601: the enterprise edition's switch for pairing. It is on or off (anything else is
+    # refused at start-up, test_prd277_w6_paired_phone.py) and sets no lifetime.
+    switches = {"ENTERPRISE_DEVICE_PAIRING"}
+    assert not [name for name in surface if ("PAIRING" in name or "REVIEW_CODE" in name) and name not in switches]
+    assert not [name for name in dir(config) if ("PAIRING" in name or "REVIEW_CODE" in name) and name not in switches]
 
 
 def test_the_docstring_and_the_docs_name_the_review_flags():

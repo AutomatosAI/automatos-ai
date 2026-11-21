@@ -49,7 +49,7 @@ import 'prismjs/components/prism-markdown'
 import 'prismjs/components/prism-docker'
 import { MarkdownView } from '@/components/shared/markdown-view'
 import { apiClient } from '@/lib/api-client'
-import { apiFileUrl, NOT_AN_API_FILE } from '@/lib/api-file-url'
+import { apiFileCredentials, apiFileUrl, NOT_AN_API_FILE } from '@/lib/api-file-url'
 
 /**
  * Fetch a URL with Automatos Bearer auth. Relative URLs are prefixed with
@@ -61,7 +61,7 @@ export async function authenticatedArrayBufferFetch(url: string): Promise<ArrayB
   const apiUrl = isAbsolute ? null : apiFileUrl(apiClient.getBaseUrl(), url)  // F352: the token goes to the API only
   if (!isAbsolute && !apiUrl) throw new Error(NOT_AN_API_FILE)
   const headers = apiUrl ? await apiClient.getAuthHeaders() : {}
-  const resp = await fetch(apiUrl ?? url, { headers, credentials: isAbsolute ? 'include' : 'omit' })
+  const resp = await fetch(apiUrl ?? url, { headers, credentials: apiFileCredentials(isAbsolute) })
   if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`)
   return resp.arrayBuffer()
 }

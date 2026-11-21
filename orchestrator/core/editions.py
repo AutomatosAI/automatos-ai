@@ -8,8 +8,8 @@ falling through a ``== "local"`` check.
 
 ``enterprise`` (PRD-277 US-103) is a self-hosted install whose people sign in through the
 organisation's own identity provider. Its row is decided (PRD-277 §5.1, D-7, D-12, D-13
-and the owner's answers G-1 to G-8 in ``PRD-277-EDITION-CHECKS.md``). Until OIDC sign-in
-is built (Wave 4), start-up refuses that edition (``core/edition_start_up.py``).
+and the owner's answers G-1 to G-8 in ``PRD-277-EDITION-CHECKS.md``). Start-up refuses it
+only when it is half-configured, naming what is missing (``core/edition_start_up.py``).
 
 ``docs/PRDS/PRD-277-EDITION-CHECKS.md`` lists every call site that compares the
 edition and the one capability it maps to. Outside ``config.py``, this module, the
@@ -23,14 +23,28 @@ never given another edition's answers. ``current`` follows the flag's own rule
 (PRD-277 §5.1, ``config.py``): the name is trimmed and lower-cased, and a value with
 no row is ``saas``, so a value a test patches in decides what the old comparisons did.
 
+**Automatos's hosted services** (PRD-277 US-704, D-12). Each one the code calls has its own
+capability: ``calls_theme_revocations``, ``calls_cloud_sync`` and ``calls_cloud_items``. In
+``local`` and ``saas`` the row decides them, and no setting can change them. In an edition whose
+row has ``hosted_services_by_setting`` (``enterprise``), the row holds each one off, and
+``current`` gives each one its setting's value (``HOSTED_SERVICE_SETTINGS``): on only for a
+plain true form (``SWITCH_ON``), off for anything else, so a malformed value never reads as on
+(``core/edition_start_up.py`` refuses one at start). ``with_hosted_service_settings`` is that one
+rule.
+
+**Device pairing** (PRD-277 US-601, D-7). In an edition whose row has ``device_pairing_by_setting``
+(``enterprise``), ``current`` keeps ``device_pairing`` on only while ``ENTERPRISE_DEVICE_PAIRING``
+(``DEVICE_PAIRING_SETTING``) is a plain on form; ``config.py`` makes it on when unset (§5.10), and a
+malformed value reads as off. ``local`` and ``saas`` ignore it (``with_device_pairing_setting``).
+
 Importing this module reads no setting and imports no config, so ``config.py`` can
 use it while it is being built.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
-from typing import Mapping, Tuple
+from typing import Any, FrozenSet, Mapping, Tuple
 
 EDITION_LOCAL = "local"
 EDITION_SAAS = "saas"
@@ -72,14 +86,29 @@ class EditionCapabilities:
     profile_editable: a person's name and email are edited in Automatos.
     step_up: how a sensitive action is confirmed (``STEP_UP_*``).
     device_pairing: a phone or browser may pair with a one-time code and hold an
-        ``amd_`` token (``LOCAL_REMOTE_ACCESS`` still decides whether it must).
+        ``amd_`` token (``LOCAL_REMOTE_ACCESS`` still decides whether it must, where the
+        edition has an anonymous operator).
+    device_pairing_by_setting: ``device_pairing`` is on only while the operator's
+        ``DEVICE_PAIRING_SETTING`` says so (PRD-277 D-7).
     session_mode: the operator's own CLI sessions may run as agents
         (``CLI_RUNTIME_ENABLED`` still switches it on).
     hosts_automatos_cloud: this install is Automatos Cloud: it serves the public
         Marketplace, the catalogue, bundles and the theme revocation feed, posts to
         the moderation inbox and runs the isolated theme review.
-    calls_automatos_cloud: this install may call Automatos's hosted services
-        (theme revocations, Cloud sync, Cloud items).
+    calls_theme_revocations: this install pulls Automatos's theme revocation list
+        (``THEME_REVOCATIONS_URL`` still names it): the scheduled pull, the admin's sync
+        status and Check now. What a pull stored (its revocations and revoked signing keys)
+        still applies while it is off: each of these three stops requests, never reads.
+    calls_cloud_sync: this install syncs Marketplace themes from Automatos Cloud
+        (``AUTOMATOS_CLOUD_URL`` still names it): the Cloud Sync routes and the catalogue
+        pull, a Cloud theme's package on install and update, and its screenshots.
+    calls_cloud_items: this install requests agents, Playbooks, packages and plugins from
+        Automatos Cloud: the Sync's item and plugin passes and their bundle and package
+        downloads. The "Items brought from Cloud" routes read what the install holds and
+        follow ``hosts_automatos_cloud``. Items arrive only in a Sync, so it needs
+        ``calls_cloud_sync``.
+    hosted_services_by_setting: each of the three above is off in the row and is the
+        operator's own setting (``HOSTED_SERVICE_SETTINGS``, D-12).
     push_needs_consent: notifications leave through Expo's push service only once
         the operator has agreed.
     operator_is_user: the person using the app runs the server, so host detail,
@@ -98,6 +127,26 @@ class EditionCapabilities:
         dashboard.
     last_workspace_purge_deletes_person: purging the last workspace a person owns or
         belongs to also deletes that person's account.
+    issues_sessions: Automatos issues and resolves its own sign-in sessions (PRD-277 Wave 3):
+        an ``ams_`` token, carried by a browser in a ``__Host-`` cookie, that the bearer
+        registry resolves; a request the cookie authenticates that changes something must
+        come from the install's own origin. Where it is off, an ``ams_`` token belongs to no
+        lane and no cookie is read.
+    agent_http_own_hosts_only: an agent's ``http_request`` tool may call only the install's own
+        hosts (its internal API and web hosts, and the loopback names), never Automatos's public
+        API and web hosts: the platform's API is the install's own (D-12). Where it is off, those
+        two hosts are on the tool's list as well (``modules/tools/execution/http_hosts.py``).
+    api_on_public_address: the API is reached on the install's one public address, the web app's
+        (``FRONTEND_URL``, which start-up requires to be ``https``): every address a phone is handed
+        (discovery's ``api_url`` and sign-in start, the pairing link) is built from it, never from
+        the request (``services/mobile/urls.py``, PRD-277 US-602).
+    requires_verified_database_tls: the API starts only when its connection to the application's
+        database checks the server's certificate and host name (``DATABASE_SSLMODE=verify-full``,
+        PRD-278 D-6; ``core/edition_start_up.py``). Where it is off, the two settings are the
+        operator's choice and, both unset, every connection is made as before.
+    device_tokens_age_out: a device token is refused, and its device revoked, once its phone's last
+        pairing or sign-in on the phone is ``DEVICE_TOKEN_MAX_AGE_SETTING`` days old (PRD-277 US-601).
+        Where it is off, a device token has no maximum age and the setting is never read.
     """
 
     sign_in: str
@@ -107,9 +156,13 @@ class EditionCapabilities:
     profile_editable: bool
     step_up: str
     device_pairing: bool
+    device_pairing_by_setting: bool
     session_mode: bool
     hosts_automatos_cloud: bool
-    calls_automatos_cloud: bool
+    calls_theme_revocations: bool
+    calls_cloud_sync: bool
+    calls_cloud_items: bool
+    hosted_services_by_setting: bool
     push_needs_consent: bool
     operator_is_user: bool
     guards_user_endpoints: bool
@@ -118,6 +171,11 @@ class EditionCapabilities:
     install_description: str
     live_agent_named_apart: bool
     last_workspace_purge_deletes_person: bool
+    issues_sessions: bool
+    agent_http_own_hosts_only: bool
+    api_on_public_address: bool
+    requires_verified_database_tls: bool
+    device_tokens_age_out: bool
 
 
 _LOCAL = EditionCapabilities(
@@ -128,9 +186,13 @@ _LOCAL = EditionCapabilities(
     profile_editable=True,
     step_up=STEP_UP_SKIP,
     device_pairing=True,
+    device_pairing_by_setting=False,
     session_mode=True,
     hosts_automatos_cloud=False,
-    calls_automatos_cloud=True,
+    calls_theme_revocations=True,
+    calls_cloud_sync=True,
+    calls_cloud_items=True,
+    hosted_services_by_setting=False,
     push_needs_consent=True,
     operator_is_user=True,
     guards_user_endpoints=False,
@@ -139,6 +201,11 @@ _LOCAL = EditionCapabilities(
     install_description=INSTALL_OWN_COMPUTER,
     live_agent_named_apart=True,
     last_workspace_purge_deletes_person=False,
+    issues_sessions=False,
+    agent_http_own_hosts_only=False,
+    api_on_public_address=False,
+    requires_verified_database_tls=False,
+    device_tokens_age_out=False,
 )
 
 _SAAS = EditionCapabilities(
@@ -149,9 +216,13 @@ _SAAS = EditionCapabilities(
     profile_editable=False,
     step_up=STEP_UP_CLERK_FRESHNESS,
     device_pairing=False,
+    device_pairing_by_setting=False,
     session_mode=False,
     hosts_automatos_cloud=True,
-    calls_automatos_cloud=False,
+    calls_theme_revocations=False,
+    calls_cloud_sync=False,
+    calls_cloud_items=False,
+    hosted_services_by_setting=False,
     push_needs_consent=False,
     operator_is_user=False,
     guards_user_endpoints=True,
@@ -160,11 +231,17 @@ _SAAS = EditionCapabilities(
     install_description=INSTALL_HOSTED,
     live_agent_named_apart=False,
     last_workspace_purge_deletes_person=True,
+    issues_sessions=False,
+    agent_http_own_hosts_only=False,
+    api_on_public_address=False,
+    requires_verified_database_tls=False,
+    device_tokens_age_out=False,
 )
 
-# PRD-277 §5.1 and its decisions. calls_automatos_cloud is off: an operator switches each
-# hosted service on (D-12), and no such switch exists yet. device_pairing is on, and
-# LOCAL_REMOTE_ACCESS still decides whether codes are minted (D-7).
+# PRD-277 §5.1 and its decisions. Each hosted service is off here, and the operator switches each
+# one on with its own setting (D-12, US-704: hosted_services_by_setting). device_pairing is on while
+# ENTERPRISE_DEVICE_PAIRING says so (D-7, US-601: device_pairing_by_setting). issues_sessions is on: a
+# browser holds a session Automatos issues, in a cookie scripts cannot read (D-3, §5.3).
 _ENTERPRISE = EditionCapabilities(
     sign_in=SIGN_IN_OIDC,
     anonymous_operator=False,
@@ -173,9 +250,13 @@ _ENTERPRISE = EditionCapabilities(
     profile_editable=False,
     step_up=STEP_UP_REAUTH,
     device_pairing=True,
+    device_pairing_by_setting=True,
     session_mode=False,
     hosts_automatos_cloud=False,
-    calls_automatos_cloud=False,
+    calls_theme_revocations=False,
+    calls_cloud_sync=False,
+    calls_cloud_items=False,
+    hosted_services_by_setting=True,
     push_needs_consent=True,
     operator_is_user=False,
     guards_user_endpoints=True,
@@ -184,6 +265,11 @@ _ENTERPRISE = EditionCapabilities(
     install_description=INSTALL_ORGANISATION,
     live_agent_named_apart=False,
     last_workspace_purge_deletes_person=False,
+    issues_sessions=True,
+    agent_http_own_hosts_only=True,
+    api_on_public_address=True,
+    requires_verified_database_tls=True,
+    device_tokens_age_out=True,
 )
 
 CAPABILITIES: Mapping[str, EditionCapabilities] = MappingProxyType({
@@ -192,6 +278,68 @@ CAPABILITIES: Mapping[str, EditionCapabilities] = MappingProxyType({
     EDITION_ENTERPRISE: _ENTERPRISE,
 })
 KNOWN_EDITIONS: Tuple[str, ...] = tuple(CAPABILITIES)
+
+# PRD-277 US-704: each hosted service's capability, and the setting that decides it where the
+# row says ``hosted_services_by_setting``. Each setting names what it lets leave the install.
+HOSTED_SERVICE_SETTINGS: Mapping[str, str] = MappingProxyType({
+    "calls_theme_revocations": "ENTERPRISE_CALLS_THEME_REVOCATIONS",
+    "calls_cloud_sync": "ENTERPRISE_CALLS_CLOUD_SYNC",
+    "calls_cloud_items": "ENTERPRISE_CALLS_CLOUD_ITEMS",
+})
+# The forms config.py's other switches read as on ("1", "true", "yes", "on"), and their plain
+# off forms. A setting's value is trimmed and lower-cased first; unset is off.
+SWITCH_ON: FrozenSet[str] = frozenset({"1", "true", "yes", "on"})
+SWITCH_OFF: FrozenSet[str] = frozenset({"", "0", "false", "no", "off"})
+# PRD-277 US-601: whether phones may pair, where the row says ``device_pairing_by_setting``.
+DEVICE_PAIRING_SETTING = "ENTERPRISE_DEVICE_PAIRING"
+# PRD-277 US-601: the most days a device token lives, where the row says ``device_tokens_age_out``.
+DEVICE_TOKEN_MAX_AGE_SETTING = "ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS"
+# What the install started as (``started_as``), where the pairing setting is part of it.
+STARTED_AS_SEPARATOR = ":"
+STARTED_PAIRING_ON = "pairing_on"
+STARTED_PAIRING_OFF = "pairing_off"
+
+
+def _switch_text(value: Any) -> str:
+    return str("" if value is None else value).strip().lower()
+
+
+def is_switched_on(value: Any) -> bool:
+    """True only for a plain on form (``SWITCH_ON``); off for anything else, a malformed value included."""
+    return _switch_text(value) in SWITCH_ON
+
+
+def is_switch_form(value: Any) -> bool:
+    """True for a plain on or off form: what start-up accepts for a hosted service's setting."""
+    return _switch_text(value) in SWITCH_ON | SWITCH_OFF
+
+
+def with_hosted_service_settings(
+    capabilities: EditionCapabilities, settings: Mapping[str, Any],
+) -> EditionCapabilities:
+    """``capabilities``, with each hosted service its setting's value where the row says so.
+
+    The one place a setting and an edition combine. Where ``hosted_services_by_setting`` is off
+    (``local``, ``saas``) the row is returned as it is, whatever ``settings`` hold. Elsewhere each
+    capability in ``HOSTED_SERVICE_SETTINGS`` is on only when its setting is a plain on form.
+    ``settings`` maps each setting's name to its value; a missing one is off.
+    """
+    if not capabilities.hosted_services_by_setting:
+        return capabilities
+    switched = {field: is_switched_on(settings.get(name)) for field, name in HOSTED_SERVICE_SETTINGS.items()}
+    return replace(capabilities, **switched)
+
+
+def with_device_pairing_setting(capabilities: EditionCapabilities, value: Any) -> EditionCapabilities:
+    """``capabilities``, with ``device_pairing`` off unless ``value`` is a plain on form, where the row says so.
+
+    The one place ``ENTERPRISE_DEVICE_PAIRING`` and an edition combine. Where
+    ``device_pairing_by_setting`` is off (``local``, ``saas``) the row is returned as it is. A
+    setting never turns on pairing a row holds off.
+    """
+    if not capabilities.device_pairing_by_setting:
+        return capabilities
+    return replace(capabilities, device_pairing=capabilities.device_pairing and is_switched_on(value))
 
 
 def capabilities_for(edition: str) -> EditionCapabilities:
@@ -218,20 +366,59 @@ def current_name() -> str:
     return name if name in CAPABILITIES else EDITION_SAAS
 
 
-def current() -> EditionCapabilities:
-    """The running edition's capabilities.
+def started_as() -> str:
+    """What the install is starting as: the edition's name and, where a setting decides pairing, whether it pairs.
 
-    Reads the edition on every call rather than once at import, so a test that
-    patches ``config.AUTH_EDITION`` sees the matching capabilities (``current_name``).
+    ``local`` and ``saas`` are their names. ``enterprise`` is ``enterprise:pairing_on`` or
+    ``enterprise:pairing_off`` (``ENTERPRISE_DEVICE_PAIRING``). PRD-277 US-601 records it at every
+    start (``services/mobile/edition_change.py``).
     """
-    return CAPABILITIES[current_name()]
+    name = current_name()
+    if not CAPABILITIES[name].device_pairing_by_setting:
+        return name
+    pairing = STARTED_PAIRING_ON if current().device_pairing else STARTED_PAIRING_OFF
+    return f"{name}{STARTED_AS_SEPARATOR}{pairing}"
+
+
+def started_as_another(earlier: str) -> bool:
+    """Whether ``earlier``, what the install last started as (``started_as``), is not what it starts as now.
+
+    The one comparison of edition names outside this module's capabilities: PRD-277 US-601
+    revokes every paired device when it is true (``services/mobile/edition_change.py``).
+    """
+    return earlier != started_as()
+
+
+def started_as_another_edition(earlier: str) -> bool:
+    """Whether ``earlier`` names another edition, not only another pairing state of this one."""
+    return earlier.split(STARTED_AS_SEPARATOR, 1)[0] != current_name()
+
+
+def current() -> EditionCapabilities:
+    """The running edition's capabilities, with the operator's settings where its row takes them.
+
+    Reads the edition, and those settings (the hosted services', and device pairing's), on every
+    call rather than once at import, so a test that patches ``config.AUTH_EDITION`` or a setting
+    sees the matching capabilities (``current_name``).
+    """
+    row = CAPABILITIES[current_name()]
+    if not (row.hosted_services_by_setting or row.device_pairing_by_setting):
+        return row
+    from config import config
+
+    settings = {name: getattr(config, name, None) for name in HOSTED_SERVICE_SETTINGS.values()}
+    hosted = with_hosted_service_settings(row, settings)
+    return with_device_pairing_setting(hosted, getattr(config, DEVICE_PAIRING_SETTING, None))
 
 
 __all__ = [
     "CAPABILITIES",
+    "DEVICE_PAIRING_SETTING",
+    "DEVICE_TOKEN_MAX_AGE_SETTING",
     "EDITION_ENTERPRISE",
     "EDITION_LOCAL",
     "EDITION_SAAS",
+    "HOSTED_SERVICE_SETTINGS",
     "INSTALL_HOSTED",
     "INSTALL_ORGANISATION",
     "INSTALL_OWN_COMPUTER",
@@ -239,12 +426,24 @@ __all__ = [
     "SIGN_IN_CLERK",
     "SIGN_IN_NONE",
     "SIGN_IN_OIDC",
+    "STARTED_AS_SEPARATOR",
+    "STARTED_PAIRING_OFF",
+    "STARTED_PAIRING_ON",
     "STEP_UP_CLERK_FRESHNESS",
     "STEP_UP_REAUTH",
     "STEP_UP_SKIP",
+    "SWITCH_OFF",
+    "SWITCH_ON",
     "EditionCapabilities",
     "UnknownEdition",
     "capabilities_for",
     "current",
     "current_name",
+    "is_switch_form",
+    "is_switched_on",
+    "started_as",
+    "started_as_another",
+    "started_as_another_edition",
+    "with_device_pairing_setting",
+    "with_hosted_service_settings",
 ]

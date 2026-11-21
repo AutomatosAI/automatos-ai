@@ -24,6 +24,12 @@ that is root's group (0) is never taken, nor any uid or gid the image already gi
 account (www-data's 33, nobody's 65534, the shadow group's 42), and the folder's owner
 and group come from one ``stat -c '%u %g'``.
 
+PRD-280 US-201: the image starts as uid 1000. Started as any user but root, the entrypoint
+repairs nothing (no walk, no chown, no other uid); it checks it can write its volume and the
+deliverables folder, and otherwise stops with a message that says what the storage must
+provide. Started as root, as compose does, everything above holds as before. The parity job
+runs both starts in the real image, and checks the image's default user.
+
 The entrypoint itself runs here under bash with stand-in stat, find, chown, setpriv, id,
 getent, groupmod and usermod, so its control flow is proved in the required suite. The smoke's
 20 s bar and /metrics 200 are in test_prd262_smoke_worker_health.py.
@@ -118,9 +124,12 @@ _STANDINS = {
     "setpriv": '#!/bin/sh\ncase "$*" in *" test -w "*) echo "setpriv $*" >> "$CALL_LOG"\n'
                '  exit "${FOLDER_UNWRITABLE:-0}";; esac\necho "setpriv $*"\n',
     "groupmod": _LOGGED,
-    # usermod -u UID worker: id -u worker answers UID from then on, 1000 before.
+    # usermod -u UID worker: id -u worker answers UID from then on, 1000 before. `id -u` and
+    # `id -g` with no user name answer the entrypoint's own uid and gid: SELF_UID, root's 0
+    # unless a case starts it as another user (PRD-280 US-201).
     "usermod": _LOGGED + 'echo "$2" > "$WORKER_UID_FILE"\n',
-    "id": '#!/bin/sh\ncat "$WORKER_UID_FILE" 2>/dev/null || echo 1000\n',
+    "id": '#!/bin/sh\nif [ "$#" -ge 2 ]; then cat "$WORKER_UID_FILE" 2>/dev/null || echo 1000\n'
+          'else echo "${SELF_UID:-0}"; fi\n',
     # getent passwd|group ID: "name:x:ID:" for an account in IMAGE_ACCOUNTS, else exit 2, as
     # getent does for an id no account has; GETENT_EXIT, when set, is a getent that fails.
     "getent": '#!/bin/sh\n[ -z "$GETENT_EXIT" ] || exit "$GETENT_EXIT"\nfor account in $IMAGE_ACCOUNTS; do\n'
@@ -129,12 +138,15 @@ _STANDINS = {
 
 
 def _boot(tmp_path: Path, uid: str, find_exit: int, folder: tuple[str, str, bool] | None = None,
-          getent_exit: str = "") -> tuple[subprocess.CompletedProcess, list[str], Path]:
+          getent_exit: str = "", self_uid: str = "0",
+          overrides: dict[str, str] | None = None) -> tuple[subprocess.CompletedProcess, list[str], Path]:
     """Run entrypoint.sh with the stand-ins first on PATH; (result, stand-in calls, volume).
 
     ``folder`` is the deliverables folder compose names, as (uid, gid, writable by uid 1000);
     without it LOCAL_WORKSPACE_ROOT is unset, as on Railway. ``getent_exit`` makes every
-    getent fail with that status.
+    getent fail with that status. ``self_uid`` is the uid the entrypoint is started as:
+    root, as compose starts it, unless a case says otherwise. ``overrides`` replaces
+    environment values last (a volume path that does not exist, say).
     """
     bin_dir, volume, log = tmp_path / "bin", tmp_path / "volume", tmp_path / "calls.log"
     bin_dir.mkdir()
@@ -146,12 +158,13 @@ def _boot(tmp_path: Path, uid: str, find_exit: int, folder: tuple[str, str, bool
     env = {"PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin", "CALL_LOG": str(log),
            "FAKE_UID": uid, "FIND_EXIT": str(find_exit), "WORKSPACE_VOLUME_PATH": str(volume),
            "WORKER_UID_FILE": str(tmp_path / "worker-uid"), "IMAGE_ACCOUNTS": IMAGE_ACCOUNTS,
-           "GETENT_EXIT": getent_exit}
+           "GETENT_EXIT": getent_exit, "SELF_UID": self_uid}
     if folder:
         local = volume / DEFAULT_ID
         local.mkdir()
         env.update(LOCAL_WORKSPACE_ROOT=str(local), FOLDER_UID=folder[0], FOLDER_GID=folder[1],
                    FOLDER_UNWRITABLE="0" if folder[2] else "1")
+    env.update(overrides or {})
     proc = subprocess.run(["bash", str(ENTRYPOINT), "--flag"], env=env, stdin=subprocess.DEVNULL,
                           capture_output=True, text=True, timeout=30)
     return proc, log.read_text(encoding="utf-8").splitlines(), volume
@@ -285,6 +298,79 @@ def test_the_folder_s_owner_and_group_come_from_one_stat_and_no_id_is_duplicated
     assert commands and not [line for line in commands if re.search(r"\s-o\b", line)]
 
 
+# PRD-280 US-201: started as a user other than root (the image's default, uid 1000, and the
+# chart's), the entrypoint repairs nothing.
+
+SELF_START = "setpriv --no-new-privs env HOME=/home/worker python -m main"
+CANNOT_WRITE = "[entrypoint] uid {uid} cannot write {dirs}. Started as a user other than root, the worker changes no owner"
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+@pytest.mark.parametrize("self_uid", ["1000", "1001"])
+def test_started_as_another_user_on_a_writable_volume_it_repairs_nothing_and_starts(tmp_path, self_uid):
+    """The volume is the worker's (uid 1000 started on it) yet reported as root's: no walk, no chown."""
+    proc, calls, _ = _boot(tmp_path, uid="0", find_exit=1, self_uid=self_uid)
+    assert proc.returncode == 0, proc.stderr
+    assert calls == [], "no find, no chown, no usermod, no setpriv probe"
+    assert proc.stdout.splitlines() == [f"{SELF_START} --flag"]
+    assert proc.stderr == ""
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_started_as_another_user_it_never_takes_the_folder_owner_s_uid(tmp_path):
+    """A deliverables folder another user owns, still writable: no usermod, no groupmod."""
+    proc, calls, _ = _boot(tmp_path, uid="1000", find_exit=0, folder=("1001", "1002", False), self_uid="1000")
+    assert proc.returncode == 0, proc.stderr
+    assert calls == []
+    assert proc.stdout.splitlines() == [f"{SELF_START} --flag"]
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_started_as_another_user_on_a_volume_it_cannot_write_it_stops_and_says_what_the_storage_must_provide(tmp_path):
+    """A path no one can write, even the root a CI container may run this test as: one that does not exist."""
+    missing = tmp_path / "no-volume"
+    proc, calls, _ = _boot(tmp_path, uid="0", find_exit=0, self_uid="1000",
+                           overrides={"WORKSPACE_VOLUME_PATH": str(missing)})
+    assert proc.returncode == 1
+    assert calls == [] and proc.stdout == "", "nothing repaired, and the worker never started"
+    [message] = proc.stderr.splitlines()
+    assert message.startswith(CANNOT_WRITE.format(uid="1000", dirs=missing))
+    for needed in ("writable by uid 1000 or by its group", "the pod's fsGroup", "start the container as root (user 0)"):
+        assert needed in message, needed
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_started_as_another_user_it_names_every_folder_it_cannot_write(tmp_path):
+    volume, folder = tmp_path / "no-volume", tmp_path / "no-folder"
+    proc, calls, _ = _boot(tmp_path, uid="0", find_exit=0, self_uid="1000",
+                           overrides={"WORKSPACE_VOLUME_PATH": str(volume), "LOCAL_WORKSPACE_ROOT": str(folder)})
+    assert proc.returncode == 1 and calls == []
+    assert proc.stderr.startswith(CANNOT_WRITE.format(uid="1000", dirs=f"{volume}, {folder}"))
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+@pytest.mark.skipif(not hasattr(os, "geteuid") or os.geteuid() == 0, reason="root writes a mode-555 folder")
+def test_started_as_another_user_on_a_read_only_folder_it_stops(tmp_path):
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o555)
+    try:
+        proc, calls, _ = _boot(tmp_path, uid="0", find_exit=0, self_uid="1000",
+                               overrides={"WORKSPACE_VOLUME_PATH": str(locked)})
+    finally:
+        locked.chmod(0o755)
+    assert proc.returncode == 1 and calls == []
+    assert proc.stderr.startswith(CANNOT_WRITE.format(uid="1000", dirs=locked))
+
+
+def test_the_two_starts_end_in_the_two_drops():
+    """Root's start drops with setpriv --reuid (last line); any other user's runs as itself, both with no_new_privs."""
+    lines = [line.strip() for line in ENTRYPOINT.read_text().splitlines()]
+    assert f'exec {SELF_START} "$@"' in lines
+    assert lines[-1] == f'exec {DROP} "$@"'
+    assert lines.index('if [ "$(id -u)" != "0" ]; then') < lines.index(OWNERSHIP_FIND), "the check comes before any repair"
+
+
 def test_compose_names_the_folder_it_mounts_and_the_hosted_edition_names_none():
     """The worker's LOCAL_WORKSPACE_ROOT is the target of its deliverables bind mount."""
     worker = yaml.safe_load((ROOT / "docker-compose.yml").read_text())["services"]["workspace-worker"]
@@ -353,6 +439,16 @@ def test_the_parity_job_runs_the_ownership_block_in_throwaway_containers():
         'check "files with a setuid or setgid bit" "${setid:-none}" none',
         'no_new_privs=$(sed -n "s/^NoNewPrivs:[[:space:]]*//p" /proc/$$/status)',
         'check "the worker\'s no_new_privs" "$(grep -o \'no_new_privs=[0-9]*\' <<< "$out")" "no_new_privs=1"',
+        # PRD-280 US-201: the image's default user, the root starts said out loud, and the
+        # start as uid 1000 on a volume it can write and on one root owns.
+        "default_user=$(docker run --rm --entrypoint id parity-wk -u)",
+        'if [ "$default_user" != 1000 ]; then',
+        "docker run --rm -i --user 0 -v parity-wk-readonly:/srv/readonly:ro --entrypoint bash parity-wk -s",
+        "setpriv --reuid=1000 --regid=1000 --clear-groups env WORKSPACE_VOLUME_PATH=",
+        'check "the worker started as uid 1000"',
+        'check "re-owning started as uid 1000" "$(grep -c \'Fixing ownership\' <<< "$out")" 0',
+        'check "entrypoint exit started as uid 1000 on a volume root owns" "$code" 1',
+        'check "that volume\'s folder after" "$(owner /tmp/volume6/ws)" root',
     ):
         assert needle in script, needle
     assert script.rstrip().endswith('exit "$bad"\nSH')
