@@ -124,6 +124,10 @@ class EditionCapabilities:
         registry resolves; a request the cookie authenticates that changes something must
         come from the install's own origin. Where it is off, an ``ams_`` token belongs to no
         lane and no cookie is read.
+    agent_http_own_hosts_only: an agent's ``http_request`` tool may call only the install's own
+        hosts (its internal API and web hosts, and the loopback names), never Automatos's public
+        API and web hosts: the platform's API is the install's own (D-12). Where it is off, those
+        two hosts are on the tool's list as well (``modules/tools/execution/http_hosts.py``).
     """
 
     sign_in: str
@@ -148,6 +152,7 @@ class EditionCapabilities:
     live_agent_named_apart: bool
     last_workspace_purge_deletes_person: bool
     issues_sessions: bool
+    agent_http_own_hosts_only: bool
 
 
 _LOCAL = EditionCapabilities(
@@ -173,6 +178,7 @@ _LOCAL = EditionCapabilities(
     live_agent_named_apart=True,
     last_workspace_purge_deletes_person=False,
     issues_sessions=False,
+    agent_http_own_hosts_only=False,
 )
 
 _SAAS = EditionCapabilities(
@@ -198,6 +204,7 @@ _SAAS = EditionCapabilities(
     live_agent_named_apart=False,
     last_workspace_purge_deletes_person=True,
     issues_sessions=False,
+    agent_http_own_hosts_only=False,
 )
 
 # PRD-277 §5.1 and its decisions. Each hosted service is off here, and the operator switches each
@@ -227,6 +234,7 @@ _ENTERPRISE = EditionCapabilities(
     live_agent_named_apart=False,
     last_workspace_purge_deletes_person=False,
     issues_sessions=True,
+    agent_http_own_hosts_only=True,
 )
 
 CAPABILITIES: Mapping[str, EditionCapabilities] = MappingProxyType({

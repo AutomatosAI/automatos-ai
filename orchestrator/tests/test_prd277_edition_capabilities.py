@@ -49,6 +49,7 @@ TRUTH_TABLE = {
         "live_agent_named_apart": True,
         "last_workspace_purge_deletes_person": False,
         "issues_sessions": False,
+        "agent_http_own_hosts_only": False,
     },
     "saas": {
         "sign_in": "clerk",
@@ -73,6 +74,7 @@ TRUTH_TABLE = {
         "live_agent_named_apart": False,
         "last_workspace_purge_deletes_person": True,
         "issues_sessions": False,
+        "agent_http_own_hosts_only": False,
     },
     "enterprise": {
         "sign_in": "oidc",                              # §5.1
@@ -97,6 +99,7 @@ TRUTH_TABLE = {
         "live_agent_named_apart": False,                # G-7
         "last_workspace_purge_deletes_person": False,   # G-8: never
         "issues_sessions": True,                        # D-3, §5.3 (Wave 3)
+        "agent_http_own_hosts_only": True,              # D-12 (#1605): the platform's API is the install's
     },
 }
 
@@ -113,8 +116,9 @@ SAAS_TRUE = (
     "last_workspace_purge_deletes_person",
 )
 # Capabilities no comparison ever made: new with enterprise, so off in local and saas (PRD-277
-# Wave 3 sessions, US-704's settings). Each is False on both, so neither edition's behaviour moves.
-ENTERPRISE_ONLY = ("issues_sessions", "hosted_services_by_setting")
+# Wave 3 sessions, US-704's settings, D-12's agent host list). Each is False on both, so neither
+# edition's behaviour moves.
+ENTERPRISE_ONLY = ("issues_sessions", "hosted_services_by_setting", "agent_http_own_hosts_only")
 
 
 @pytest.mark.parametrize("edition", ["local", "saas", "enterprise"])
