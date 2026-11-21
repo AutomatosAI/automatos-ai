@@ -303,9 +303,10 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As a maintainer, I want to know how the coding agent's SDK can be sent through a relay that holds the credentials, so that the design rests on its documentation and not on a guess.
 
 **Acceptance Criteria:**
-- [ ] A page quotes the SDK's documentation on using a gateway: the settings, the request format, and what the gateway must add.
-- [ ] It says whether one relay can serve every provider the install might use, or only some.
-- [ ] If it cannot be done, the page says so and section 5.7 is sent back to Gerard.
+- [x] A page quotes the SDK's documentation on using a gateway: the settings, the request format, and what the gateway must add. ([PRD-280-US-401-RELAY.md](PRD-280-US-401-RELAY.md), section 3)
+- [x] It says whether one relay can serve every provider the install might use, or only some. ([PRD-280-US-401-RELAY.md](PRD-280-US-401-RELAY.md), section 5)
+- [x] If it cannot be done, the page says so and section 5.7 is sent back to Gerard. ([PRD-280-US-401-RELAY.md](PRD-280-US-401-RELAY.md), section 1)
+  - *It can be done, with changes. The page's section 6 lists what section 5.7 and US-402 to US-404 would change, and section 7 the decisions; both are Gerard's to accept before Wave 4 is built.*
 
 #### US-402: The relay · L
 **Description:** As an operator of an install with no model key, I want the worker's agent to reach a model through the API, so that the coding canvas works and the worker still has no cloud permissions.
