@@ -1,0 +1,32 @@
+# The enterprise edition (PRD-277 US-505, US-701), layered over strict-values.yaml:
+#
+#   -f deploy/kind/strict-values.yaml -f deploy/kind/strict-enterprise-values.yaml
+#
+# chart.yml's kubeconform step checks this render against the oldest and the newest
+# Kubernetes the chart supports, and the install lane's `deploy/kind/strict.sh enterprise`
+# dry-runs every pod of it under "restricted" and starts its web pod, the enterprise web
+# image built in the same run, in a namespace that enforces "restricted".
+#
+# Made-up values of the right shape: .invalid names never resolve. No identity provider is
+# run or faked, so nothing here signs anyone in, and the enterprise API is rendered but not
+# started (it shares the lane's database with the local release).
+edition:
+  authEdition: enterprise
+  enterprise:
+    publicUrl: https://automatos.ci.invalid
+    clientIpHeader: X-Real-IP
+    oidc:
+      issuer: https://id.ci.invalid/realms/automatos
+      clientId: automatos-ci
+
+frontend:
+  enterpriseImage:
+    repository: automatos-enterprise-frontend
+    tag: ci
+    pullPolicy: Never
+  # strict.sh checks that the running web server puts it in a page's content security policy.
+  mediaOrigins: https://media.ci.invalid
+
+# Session mode is the local edition's alone: the chart refuses it in any other.
+sessionMode:
+  enabled: false

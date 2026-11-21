@@ -11,8 +11,18 @@
 #   deploy/kind/strict.sh check        every pod the release makes against "restricted";
 #                                      every container's root file system read-only; the
 #                                      worker as uid 1000, sharing its files with the API
+#   deploy/kind/strict.sh enterprise   the enterprise edition rendered with the lane's values
+#                                      and strict-enterprise-values.yaml: every pod of it
+#                                      against "restricted" and its read-only roots, as `check`
+#                                      does; then its web pod, the enterprise web image built in
+#                                      this run, started in the probe namespace: it must become
+#                                      ready, send a page to sign in, and answer the sign-in page
+#                                      with the media origin it was given in its policy
 #   deploy/kind/strict.sh diagnostics  pods, events and logs (and each container's last
 #                                      crash), after a failure
+#
+# `enterprise` proves no sign-in: no identity provider runs (none is faked), and the
+# enterprise API is rendered and dry-run, not started.
 #
 # The chart's namespace holds the chart's pods but the worker's; the worker has a namespace
 # of its own (PRD-280 US-202), with its own Secret. Both enforce, warn and audit at
@@ -59,6 +69,15 @@ SCRATCH_TMP=(api worker)
 # the file it writes on its volume, which the API must then read on its own claim.
 WORKER_UID=1000
 WORKSPACE_PROBE=/workspaces/.strict-probe
+# The enterprise edition (PRD-277): its values over the lane's, the web pod started from its
+# render, and the media origin those values give the web server (frontend.mediaOrigins).
+ENTERPRISE_VALUES="$ROOT/deploy/kind/strict-enterprise-values.yaml"
+ENTERPRISE_WEB="$RELEASE-frontend"
+ENTERPRISE_MEDIA_ORIGIN=https://media.ci.invalid
+ENTERPRISE_READY_TIMEOUT=180s
+# "<status> <Content-Security-Policy>" of one path, asked from inside the web pod with the
+# image's own node, redirects not followed (as frontend/scripts/check-enterprise-image.sh asks).
+ANSWER_JS='fetch(`http://127.0.0.1:${process.env.PORT || 3000}${process.argv[1]}`, { redirect: "manual" }).then((r) => console.log(`${r.status} ${r.headers.get("content-security-policy") || ""}`), () => console.log("0"))'
 
 log() { printf '\n==> %s\n' "$*"; }
 
@@ -265,6 +284,69 @@ cmd_check() {
     log "Every check passed"
 }
 
+# The enterprise edition's objects, rendered (hooks included) with the lane's values and the
+# enterprise values over them, as kubectl's JSON. Nothing is installed.
+enterprise_objects() {
+    helm template "$RELEASE" "$ROOT/charts/automatos" -n "$NS" \
+        -f "$ROOT/deploy/kind/strict-values.yaml" -f "$ENTERPRISE_VALUES" \
+        | kubectl create --dry-run=client -o json -f -
+}
+
+# Creates the enterprise web pod for real in the probe namespace, from its render's spec, and
+# waits for its readiness probe (the chart's own) to pass: OBJECTS-JSON.
+start_enterprise_web() {
+    log "The enterprise web image built in this run, started in $PROBE_NS as the chart renders it"
+    local pod
+    pod="$(python3 "$POD_SPECS" <<<"$1" | awk -F '\t' -v name="$ENTERPRISE_WEB" '$1 == name { print $2 }')"
+    [ -n "$pod" ] || { echo "  ✗ the enterprise render has no $ENTERPRISE_WEB"; return 1; }
+    kubectl -n "$PROBE_NS" delete pod "$ENTERPRISE_WEB" --ignore-not-found --wait >/dev/null
+    if ! printf '%s' "$pod" | kubectl -n "$PROBE_NS" create -f - >/dev/null; then
+        echo "  ✗ $ENTERPRISE_WEB: refused (above)"; return 1
+    fi
+    if ! kubectl -n "$PROBE_NS" wait --for=condition=Ready "pod/$ENTERPRISE_WEB" --timeout="$ENTERPRISE_READY_TIMEOUT" >/dev/null; then
+        echo "  ✗ $ENTERPRISE_WEB: not ready after $ENTERPRISE_READY_TIMEOUT"
+        kubectl -n "$PROBE_NS" logs "pod/$ENTERPRISE_WEB" --tail=80 || true
+        return 1
+    fi
+    echo "  ✓ $ENTERPRISE_WEB: admitted under restricted, started, and ready (the chart's readiness probe on /)"
+}
+
+# The running enterprise web server: a page with no session goes to sign in, and the sign-in
+# page's policy names the media origin the pod was started with.
+check_enterprise_web_answers() {
+    local failures=0 page sign_in
+    page="$(kubectl -n "$PROBE_NS" exec "$ENTERPRISE_WEB" -- node -e "$ANSWER_JS" / 2>&1)" || page="0"
+    sign_in="$(kubectl -n "$PROBE_NS" exec "$ENTERPRISE_WEB" -- node -e "$ANSWER_JS" /sign-in 2>&1)" || sign_in="0"
+    if [ "${page%% *}" = 307 ]; then
+        echo "  ✓ $ENTERPRISE_WEB: / with no session is sent to sign in (307)"
+    else
+        echo "  ✗ $ENTERPRISE_WEB: / answered ${page%% *}, not 307"; failures=$((failures + 1))
+    fi
+    if [ "${sign_in%% *}" != 200 ]; then
+        echo "  ✗ $ENTERPRISE_WEB: /sign-in answered ${sign_in%% *}, not 200"; failures=$((failures + 1))
+    elif grep -qF "$ENTERPRISE_MEDIA_ORIGIN" <<<"$sign_in"; then
+        echo "  ✓ $ENTERPRISE_WEB: /sign-in answers 200, its policy naming $ENTERPRISE_MEDIA_ORIGIN (MEDIA_ORIGINS)"
+    else
+        echo "  ✗ $ENTERPRISE_WEB: /sign-in's policy does not name $ENTERPRISE_MEDIA_ORIGIN"; failures=$((failures + 1))
+    fi
+    return "$failures"
+}
+
+cmd_enterprise() {
+    local failures=0 objects
+    log "The enterprise edition, rendered with the lane's values and $(basename "$ENTERPRISE_VALUES")"
+    objects="$(enterprise_objects)" || { log "Could not render the enterprise edition (error above)"; return 1; }
+    check_restricted "$objects" || failures=$((failures + $?))
+    check_read_only_spec "$objects" || failures=$((failures + $?))
+    if start_enterprise_web "$objects"; then
+        check_enterprise_web_answers || failures=$((failures + $?))
+    else
+        failures=$((failures + 1))
+    fi
+    [ "$failures" -eq 0 ] || { log "$failures enterprise check(s) failed"; return 1; }
+    log "Every enterprise check passed (no sign-in: no identity provider runs here)"
+}
+
 diagnose_namespace() {  # NAMESPACE COMPONENT...
     local namespace="$1" component target
     shift
@@ -288,12 +370,18 @@ cmd_diagnostics() {
     kubectl get pv || true
     diagnose_namespace "$NS" migrate api frontend
     diagnose_namespace "$WORKER_NS" worker
+    if kubectl -n "$PROBE_NS" get pod "$ENTERPRISE_WEB" >/dev/null 2>&1; then
+        log "The enterprise web pod in $PROBE_NS"
+        kubectl -n "$PROBE_NS" describe pod "$ENTERPRISE_WEB" || true
+        kubectl -n "$PROBE_NS" logs "pod/$ENTERPRISE_WEB" --tail=80 || true
+    fi
 }
 
 case "${1:-}" in
     prepare) cmd_prepare ;;
     install) cmd_install ;;
     check) cmd_check ;;
+    enterprise) cmd_enterprise ;;
     diagnostics) cmd_diagnostics ;;
-    *) sed -n '2,30p' "$0"; exit 2 ;;
+    *) sed -n '2,41p' "$0"; exit 2 ;;
 esac

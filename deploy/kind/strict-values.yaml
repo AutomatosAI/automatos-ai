@@ -22,7 +22,10 @@
 #   PostgreSQL has no TLS, so database.sslmode is `disable`. With ENVIRONMENT=production
 #   the API would otherwise ask for `require`, which that server refuses;
 # - api.data.enabled=false (the data volume is on here);
-# - an edition other than `local` (the published web app is the local edition);
+# - an install of an edition other than `local`. The enterprise edition is rendered with
+#   these values and strict-enterprise-values.yaml over them, its pods dry-run under
+#   "restricted" and its web pod started (`strict.sh enterprise`); its API and its
+#   migration Job are not run, and nothing signs in (no identity provider runs here);
 # - the optional Secret keys AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
 #   ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN (no object storage or model to reach);
 # - serviceAccount.create=false;
