@@ -66,13 +66,19 @@ the value, never what it holds.
 
 {{/*
 The web container's environment in the enterprise edition (PRD-277 US-505, PRD-279 US-402):
-the media origins its server reads when it starts. BACKEND_INTERNAL_URL, which every edition
-gets, is in frontend.yaml.
+the media origins its server reads when it starts, and (PRD-277 D-12) whether Cloud sync is on,
+from the API's own value, edition.enterprise.hostedServices.cloudSync, so the content security
+policy allows Automatos Cloud's screenshots only then. BACKEND_INTERNAL_URL, which every edition
+gets, is in frontend.yaml. The web container takes no free-form settings.
 */}}
 {{- define "automatos.frontendEnterpriseEnv" -}}
 {{- include "automatos.validateMediaOrigins" . -}}
 {{- if include "automatos.enterprise" . }}
+{{- $_ := include "automatos.validateHostedServices" . }}
+{{- $hosted := (.Values.edition.enterprise | default dict).hostedServices | default dict }}
 - name: MEDIA_ORIGINS
   value: {{ toString (.Values.frontend.mediaOrigins | default "") | quote }}
+- name: ENTERPRISE_CALLS_CLOUD_SYNC
+  value: {{ eq (toString (index $hosted "cloudSync")) "true" | ternary "true" "false" | quote }}
 {{- end }}
 {{- end }}

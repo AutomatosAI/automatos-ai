@@ -44,7 +44,7 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].imagePullPolicy
           value: Always
-  - it: gives the enterprise web server the API's Service and no media origin by default
+  - it: gives the enterprise web server the API's Service, no media origin and Cloud sync off by default
     documentIndex: 0
     set:
       edition:
@@ -55,6 +55,48 @@ tests:
           value:
             - {name: BACKEND_INTERNAL_URL, value: "http://demo-automatos-api:8000"}
             - {name: MEDIA_ORIGINS, value: ""}
+            - {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}
+  # PRD-277 D-12: the web server's Cloud sync is the API's own value, so the operator sets it once.
+  - it: switches Cloud sync on for the web server from edition.enterprise.hostedServices.cloudSync
+    documentIndex: 0
+    set:
+      edition:
+        authEdition: enterprise
+        enterprise: {hostedServices: {themeRevocations: true, cloudSync: true}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "true"}
+  - it: keeps Cloud sync off for the web server when only the revocation list is on
+    documentIndex: 0
+    set:
+      edition:
+        authEdition: enterprise
+        enterprise: {hostedServices: {themeRevocations: true}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}
+  - it: keeps Cloud sync off for the web server when hostedServices is left out
+    documentIndex: 0
+    set:
+      edition:
+        authEdition: enterprise
+        enterprise: {hostedServices: null}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}
+  - it: gives the local web server no Cloud sync value, whatever hostedServices holds
+    documentIndex: 0
+    set:
+      edition:
+        enterprise: {hostedServices: {themeRevocations: true, cloudSync: true}}
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env
+          value:
+            - {name: BACKEND_INTERNAL_URL, value: "http://demo-automatos-api:8000"}
   - it: passes the media origins as they were given
     documentIndex: 0
     set:

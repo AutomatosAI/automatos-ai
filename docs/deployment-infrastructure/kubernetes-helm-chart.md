@@ -234,6 +234,8 @@ An enterprise install (PRD-277 US-704, D-12) calls none of Automatos's hosted se
 
 Every request is made from the API, so the host sees the address the install calls from, as it would for any request; the screenshot loads come from each person's browser, so the host sees that browser's address.
 
+Screenshots load in the browser from Automatos Cloud only while `cloudSync` is on. The chart gives the web container the same value (`ENTERPRISE_CALLS_CLOUD_SYNC`), and the web app's content security policy allows Automatos Cloud's files path (`https://api.automatos.app/api/marketplace/catalog/files/`) only then. Otherwise the enterprise policy names no Automatos host and no host of the hosted edition's sign-in provider. The web server refuses to start on a value other than the API's switch forms.
+
 What each service needs, which the chart checks when it renders and the API checks at start:
 
 - **`cloudSync` needs `themeRevocations`.** A theme brought from Automatos Cloud is withdrawn only through Automatos's revocation list, so an install that syncs themes must pull it.
@@ -247,6 +249,6 @@ A setting that is off stops requests. It never stops the install reading what it
 
 The web app reads which services are on from `GET /api/hosted-services`. To consider before switching one on: what the table says it sends, that the host learns the install's address and product version, and, for `cloudItems`, that each item still needs a person to add it.
 
-Sources: `orchestrator/core/editions.py`, `orchestrator/core/edition_start_up.py`, `charts/automatos/templates/_enterprise_api.tpl`, `charts/automatos/README.md`
+Sources: `orchestrator/core/editions.py`, `orchestrator/core/edition_start_up.py`, `charts/automatos/templates/_enterprise_api.tpl`, `charts/automatos/templates/_enterprise.tpl`, `frontend/csp-policy.mjs`, `charts/automatos/README.md`
 
 ---

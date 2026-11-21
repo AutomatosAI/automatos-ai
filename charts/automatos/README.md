@@ -177,6 +177,9 @@ stops on any other value, on a name under `hostedServices` the chart does not kn
 switched on without the one it needs, and on any of the three settings in `config`. One never
 switches on another. Switching one off stops its requests only: what the install already pulled
 or brought (revoked themes and signing keys, Cloud themes and items) stays and still applies.
+The chart gives `cloudSync` to the enterprise web container too, as `ENTERPRISE_CALLS_CLOUD_SYNC`:
+browsers load Cloud screenshots from Automatos Cloud only while it is on, and the web app's content
+security policy allows that one source only then (PRD-277 D-12).
 What each one sends and brings back, and what an install gives up with it off, is in
 [the deployment docs](../../docs/deployment-infrastructure/kubernetes-helm-chart.md#automatoss-hosted-services-in-the-enterprise-edition).
 
@@ -261,7 +264,7 @@ Rendering stops with a message on a combination that cannot work:
   - the ingress on, on the host of `publicUrl`, with TLS, so the web app and the API answer on one origin;
   - for a provider with a private certificate, a ConfigMap with its CA (`edition.enterprise.oidc.caConfigMap`);
   - to call any of Automatos's hosted services, each switched on under `edition.enterprise.hostedServices` (`themeRevocations`, `cloudSync`, `cloudItems`; all off by default, so nothing is called until you do).
-  The chart then runs the enterprise web image (`frontend.enterpriseImage`), gives it `BACKEND_INTERNAL_URL` and `MEDIA_ORIGINS` (`frontend.mediaOrigins`), and gives the API and the migration Job the settings in [The enterprise edition](#the-enterprise-edition).
+  The chart then runs the enterprise web image (`frontend.enterpriseImage`), gives it `BACKEND_INTERNAL_URL`, `MEDIA_ORIGINS` (`frontend.mediaOrigins`) and `ENTERPRISE_CALLS_CLOUD_SYNC` (`edition.enterprise.hostedServices.cloudSync`), and gives the API and the migration Job the settings in [The enterprise edition](#the-enterprise-edition).
 - **`edition.authEdition` must be exactly `local`, `enterprise` or `saas`**, in lower case with no spaces; rendering stops on any other spelling. 0.10.0 documented `local` alone and rendered any value.
 - **`config` refuses `OIDC_CLIENT_SECRET` in every edition**: a secret is never a chart value. In the enterprise edition it also refuses each setting the chart sets (the three `ENTERPRISE_CALLS_*` hosted service settings among them) and `SESSION_COOKIE_NAME` and `SESSION_CSRF_HEADER`.
 - **A released chart names one web image per published edition**, each by digest: `frontend.image` (local) and `frontend.enterpriseImage` (enterprise).

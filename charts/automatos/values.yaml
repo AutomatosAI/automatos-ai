@@ -236,8 +236,10 @@ frontend:
     pullPolicy: ""
   # The enterprise edition's (PRD-277 US-505), run when edition.authEdition is enterprise. It
   # calls the API on the page's own address, so the web app and the API must answer on one
-  # host (ingress below). The chart gives it BACKEND_INTERNAL_URL, the API's Service, and
-  # MEDIA_ORIGINS from mediaOrigins; it stops at start-up without the one or with a bad other.
+  # host (ingress below). The chart gives it BACKEND_INTERNAL_URL, the API's Service,
+  # MEDIA_ORIGINS from mediaOrigins, and ENTERPRISE_CALLS_CLOUD_SYNC from
+  # edition.enterprise.hostedServices.cloudSync; it stops at start-up without the first or with a
+  # bad other.
   enterpriseImage:
     repository: ghcr.io/automatosai/automatos-enterprise-frontend
     tag: ""
