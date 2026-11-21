@@ -38,6 +38,9 @@ cross-site request forgery) is not a sign-in there, even by someone who has seen
    of §5.11, the nonce this sign-in's). A refusal is ``InvalidSignIn``.
 4. The identity is read from the verified claims (``verified_identity``).
 
+For a phone's sign-in (US-603) a refusal at 2 to 4 is ``PhoneSignInFailed``, carrying the refusal
+and what the phone's start asked for, so its answer goes to the app; at 1 nothing is known of it.
+
 ``InvalidSignIn``'s text names the rule broken and nothing else: it is for the log. What the
 provider said in ``error`` or ``error_description`` is never read into a log line.
 """
@@ -54,11 +57,13 @@ from uuid import UUID
 from config import config
 from core import editions
 from core.auth import oidc_exchange, oidc_http, oidc_pending, oidc_provider, oidc_tokens
+from core.auth.phone_sign_in import PhoneStart
 from core.auth.session_cookie import install_origin
 from core.auth.sign_in_methods import (
     Callback,
     Finished,
     InvalidSignIn,
+    PhoneSignInFailed,
     SignInExpired,
     Started,
     VerifiedIdentity,
@@ -256,15 +261,16 @@ class OidcSignIn:
     """Signing in with the organisation's OIDC provider: authorization code, PKCE S256, state, nonce."""
 
     def start(self, db: Any, return_to: str, client_address: str,
-              step_up_session_id: Optional[UUID] = None) -> Started:
+              step_up_session_id: Optional[UUID] = None, phone: Optional[PhoneStart] = None) -> Started:
         """Begin a sign-in that returns to ``return_to`` (a path on this install, else ``/``), counted
         against ``client_address``'s pending sign-ins (``oidc_pending.begin``). The address asks
         for ``auth_time`` (``auth_time_values``); for a step-up (``step_up_session_id``, US-406)
-        it also asks the provider to make the person sign in again."""
+        it also asks the provider to make the person sign in again. ``phone`` (US-603) is kept with
+        the sign-in; towards the provider a phone's sign-in is exactly a browser's."""
         metadata = oidc_provider.current_metadata()
         redirect_uri = callback_address()
         started = oidc_pending.begin(db, safe_return_path(return_to), client_address,
-                                     step_up_session_id=step_up_session_id)
+                                     step_up_session_id=step_up_session_id, phone=phone)
         values = {
             "response_type": oidc_provider.CODE_FLOW, "client_id": config.OIDC_CLIENT_ID,
             "redirect_uri": redirect_uri, "scope": config.OIDC_SCOPES, "state": started.state,
@@ -280,9 +286,14 @@ class OidcSignIn:
         claimed = oidc_pending.claim(db, _one(callback.params, "state"), callback.browser_binding)
         if claimed is None:
             raise SignInExpired("the callback names no live sign-in of this browser")
-        code = _code_of(callback.params)
-        claims = _claims_of(_id_token_for(code, claimed), claimed)
-        return Finished(identity=verified_identity(claims), return_to=claimed.return_to,
+        try:
+            claims = _claims_of(_id_token_for(_code_of(callback.params), claimed), claimed)
+            identity = verified_identity(claims)
+        except (InvalidSignIn, oidc_http.ProviderUnreachable) as failure:
+            if claimed.phone is None:
+                raise
+            raise PhoneSignInFailed(failure, claimed.phone) from None
+        return Finished(identity=identity, return_to=claimed.return_to, phone=claimed.phone,
                         step_up_session_id=claimed.step_up_session_id, started_at=claimed.started_at)
 
 

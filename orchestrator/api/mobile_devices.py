@@ -14,6 +14,12 @@
   ``401 {"code": "invalid_pairing_code"}`` and nothing more, and never spends the pending
   code. The token is in the answer exactly once. (The web app offers browser pairing in local
   only; in enterprise a browser signs in.)
+* ``POST /sign-in/exchange`` — **PUBLIC**, as ``/pair`` is (PRD-277 US-603): a phone that signed in
+  at the install's own OIDC start address exchanges the one-time code the callback sent its app link,
+  with its PKCE verifier, for a device token of kind ``oidc`` (``services.mobile.sign_in_codes``),
+  returned once. 404 unless the install takes such devices (enterprise, pairing on or off); limited
+  per IP with ``/pair``'s own bucket. Any code found is spent; every refusal is
+  ``401 {"code": "invalid_sign_in_code"}``.
 * ``POST /devices`` — a device-lane caller (``Bearer amd_…``) updates its own row; a Clerk
   caller upserts a ``clerk`` row by (workspace, person, ``install_id``) with no token hash
   (§8). ``{device_id, push_key}``: the key is in clear only on the first registration
@@ -81,7 +87,7 @@ from core import editions
 from core.auth.bearer_registry import bearer_token
 from core.auth.dependencies import RequestContext
 from core.auth import hybrid
-from core.auth.device import DEVICE_AUTH_TYPE
+from core.auth.device import DEVICE_AUTH_TYPE, token_kinds
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.principal import claimed_user_pk, resolve_user_pk
 from core.auth.session_lane import SESSION_AUTH_TYPE
@@ -90,15 +96,16 @@ from core.database.database import get_db
 from core.models.mobile_devices import (
     APP_VERSION_LENGTH,
     EXPO_PUSH_TOKEN_LENGTH,
-    INSTALL_ID_LENGTH,
+    INSTALL_ID_PATTERN,
     MOBILE_DEVICE_PLATFORMS,
     NAME_LENGTH,
     TIMEZONE_LENGTH,
     MobileDevice,
+    MobileDeviceKind,
 )
 from core.security.ip_bucket import ip_rate_bucket
 from core.security.rate_limiter import DEFAULT_LIMITS
-from services.mobile import device_audit, devices, edition_change, pairing
+from services.mobile import device_audit, devices, edition_change, pairing, sign_in_codes
 from services.mobile.urls import MobileUrlError
 from services.push.payload import OPTIONAL_PUSH_TYPES
 
@@ -121,10 +128,9 @@ CODES_RATE_BUCKET_PREFIX = "mobile_pairing_codes:person"
 CODES_RATE_LIMITER_LABEL = "mobile pairing code rate limiter"
 CODES_RATE_LIMITED_DETAIL = "Too many pairing codes made. Try again in a few minutes."
 INVALID_PAIRING_CODE = "invalid_pairing_code"
+INVALID_SIGN_IN_CODE = "invalid_sign_in_code"
 # Room for the spaces a person may type; the kernel normalises what is hashed.
 PAIRING_CODE_MAX_LENGTH = 32
-INSTALL_ID_MIN_LENGTH = 8
-INSTALL_ID_PATTERN = rf"^[A-Za-z0-9_-]{{{INSTALL_ID_MIN_LENGTH},{INSTALL_ID_LENGTH}}}$"
 NO_STORE_HEADERS = {"Cache-Control": "no-store"}
 # What FastAPI answers for a route that is not there, so a closed route looks absent.
 NOT_FOUND = "Not Found"
@@ -200,6 +206,24 @@ class PairRequest(BaseModel):
         return (value or "").strip() or None
 
 
+class SignInExchangeRequest(BaseModel):
+    """``POST /sign-in/exchange``: a phone's one-time sign-in code, its PKCE verifier, and how it is named.
+
+    The code and the verifier carry no length rule here: any wrong one is the exchange's one refusal
+    (``sign_in_codes.exchange_code``), never a validation error that would echo what was sent.
+    """
+
+    code: str
+    code_verifier: str
+    name: Optional[str] = Field(default=None, max_length=NAME_LENGTH)
+    app_version: Optional[str] = Field(default=None, max_length=APP_VERSION_LENGTH)
+
+    @field_validator("name", "app_version")
+    @classmethod
+    def _blank_is_none(cls, value: Optional[str]) -> Optional[str]:
+        return (value or "").strip() or None
+
+
 class RegisterDeviceRequest(BaseModel):
     """``POST /devices``: this phone as it is now. An optional field left out keeps its value."""
 
@@ -252,6 +276,14 @@ def _require_paired_mode() -> None:
     _require_device_pairing()
     if editions.current().anonymous_operator and config.LOCAL_REMOTE_ACCESS != PAIRED_MODE:
         raise HTTPException(status_code=404, detail=NOT_FOUND)
+
+
+def _require_phone_sign_in() -> None:
+    """404 unless this install takes devices signed in on the phone (``token_kinds``: enterprise,
+    whatever the pairing setting); then 503 while no device of another edition is known gone."""
+    if MobileDeviceKind.OIDC.value not in token_kinds():
+        raise HTTPException(status_code=404, detail=NOT_FOUND)
+    edition_change.ensure_confirmed()
 
 
 def pairing_code_owner(
@@ -457,6 +489,39 @@ def pair(body: PairRequest, request: Request, response: Response, db: Session = 
         "workspace_id": str(paired.workspace_id),
         "token": paired.token,
         "rotate_after": paired.rotate_after.isoformat(),
+    }
+
+
+@router.post("/sign-in/exchange",
+             dependencies=[Depends(_require_phone_sign_in), Depends(limit_pair_attempts_per_ip)])
+def exchange_sign_in_code(body: SignInExchangeRequest, request: Request, response: Response,
+                          db: Session = Depends(get_db)) -> Dict[str, str]:
+    """Exchange a phone's one-time sign-in code and its PKCE verifier for a device token, returned once.
+
+    PUBLIC, as ``/pair`` is (PRD-277 US-603): the code and the verifier are the phone's only
+    credential. Any code found is spent, so a wrong verifier ends it. An unknown, used, expired or
+    wrong-verifier code is ``401 {"code": "invalid_sign_in_code"}`` and nothing more.
+    """
+    described = (body.name, body.app_version)
+
+    def claim() -> Optional[sign_in_codes.Exchanged]:
+        exchanged = sign_in_codes.exchange_code(db, body.code, body.code_verifier, described)
+        if exchanged is not None and device_audit.records_devices():
+            device_audit.stage(db, action=device_audit.DEVICE_PAIRED, workspace_id=exchanged.device.workspace_id,
+                               actor=exchanged.user_pk, resource_id=exchanged.device.device_id,
+                               details={"platform": exchanged.platform, "kind": MobileDeviceKind.OIDC.value},
+                               **_browser(request))
+        return exchanged
+
+    done = _write(db, claim)
+    if done is None:
+        raise HTTPException(status_code=401, detail={"code": INVALID_SIGN_IN_CODE}, headers=dict(NO_STORE_HEADERS))
+    response.headers.update(NO_STORE_HEADERS)
+    return {
+        "device_id": str(done.device.device_id),
+        "workspace_id": str(done.device.workspace_id),
+        "token": done.device.token,
+        "rotate_after": done.device.rotate_after.isoformat(),
     }
 
 

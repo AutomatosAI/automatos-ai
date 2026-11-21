@@ -13,12 +13,14 @@ app binary can talk to hosted Studio and to a self-hosted install alike:
   takes paired devices (``LOCAL_REMOTE_ACCESS=paired``, ``services.mobile.remote_access``).
   enterprise (PRD-277 US-602) lists ``["oidc", "device"]``, or ``["oidc"]`` while
   ``ENTERPRISE_DEVICE_PAIRING`` is off, with ``pairing.enabled`` to match, ``clerk`` null and
-  ``oidc {start_url}``: Automatos's own start address and nothing about the identity provider.
+  ``oidc {start_url, exchange_url, app_link, code_challenge_method}``: Automatos's own start and
+  code-exchange addresses, the app link key a phone names and ``S256`` (US-603), and nothing about
+  the identity provider.
   The ``local`` and ``saas`` documents carry no ``oidc`` key. Any other way of signing in raises
   ``DiscoveryUnavailable``: never a Clerk block it would not honour.
 * ``api_url`` and ``web_url`` are ``services.mobile.urls``'s, the helpers the pair link uses
   (K15): a local install never advertises the hosted API. In enterprise both, and so
-  ``oidc.start_url``, are the install's configured public address (``FRONTEND_URL``), whatever
+  ``oidc.start_url`` and ``oidc.exchange_url``, are the install's configured public address (``FRONTEND_URL``), whatever
   the request's host or scheme.
 * ``push.expo`` says whether this server sends notifications through Expo's push service
   (``services.push.consent.expo_push_allowed``, W2 K13): always on SaaS; on a local install
@@ -48,6 +50,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from config import config
 from core import editions
+from core.auth.phone_sign_in import CHALLENGE_METHOD
 from core.monitoring import turn_clock
 from modules.voice.speech import is_configured as voice_tts_configured
 from services.calibration.switch import calibration_enabled
@@ -63,6 +66,10 @@ AUTH_MODE_DEVICE = "device"
 AUTH_MODE_OIDC = "oidc"
 # PRD-277 §5.7: where a phone starts signing in, on this API (api/auth_oidc.py's /start).
 OIDC_START_PATH = "/api/v1/auth/oidc/start"
+# US-603: where the phone exchanges its one-time code (api/mobile_devices.py's /sign-in/exchange).
+OIDC_EXCHANGE_PATH = "/api/v1/mobile/sign-in/exchange"
+# The one app link Automatos Go names at the start (core.auth.phone_sign_in.APP_LINKS).
+GO_APP_LINK = "go"
 # A sign-in kind this build has no discovery block for.
 SIGN_IN_NOT_BUILT = "this build cannot tell phones how to sign in to this edition"
 # A Clerk publishable key is one of these prefixes, then base64 of "<frontend API host>$".
@@ -177,13 +184,16 @@ def _clerk_block() -> Dict[str, str]:
 def _oidc_auth_and_pairing(api_address: str) -> Tuple[Dict[str, Any], Dict[str, bool]]:
     """Enterprise (PRD-277 US-602, §5.7): sign-in first, then pairing while ``device_pairing`` is on.
 
-    ``oidc`` holds only Automatos's own start address on this API (D-8: the phone talks to
-    Automatos, never to the identity provider), so nothing about the provider is published.
+    ``oidc`` holds only Automatos's own addresses on this API (D-8: the phone talks to Automatos,
+    never to the identity provider), so nothing about the provider is published: where a phone
+    starts and exchanges its code, the app link it names, and the one PKCE method (US-603).
     """
     pairs = editions.current().device_pairing
     modes = [AUTH_MODE_OIDC, AUTH_MODE_DEVICE] if pairs else [AUTH_MODE_OIDC]
-    auth = {"modes": modes, "clerk": None, "oidc": {"start_url": api_address.rstrip("/") + OIDC_START_PATH}}
-    return auth, {"enabled": pairs}
+    api = api_address.rstrip("/")
+    oidc = {"start_url": api + OIDC_START_PATH, "exchange_url": api + OIDC_EXCHANGE_PATH,
+            "app_link": GO_APP_LINK, "code_challenge_method": CHALLENGE_METHOD}
+    return {"modes": modes, "clerk": None, "oidc": oidc}, {"enabled": pairs}
 
 
 def _auth_and_pairing(api_address: str) -> Tuple[Dict[str, Any], Dict[str, bool]]:

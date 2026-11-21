@@ -21,9 +21,14 @@
 * ``step_up_session_id`` (US-406) is the live session that asked for a step-up
   (``/start?step_up=1``), NULL on every other sign-in. Its callback refreshes that session's
   ``auth_time`` and issues no session. No foreign key: the callback looks the session up itself.
+* ``phone_app_link``, ``phone_code_challenge``, ``phone_install_id`` and ``phone_platform`` (US-603)
+  are set together, only on a sign-in a phone started (``core.auth.phone_sign_in``): the key of the
+  app link its answer goes to, the app's own PKCE S256 challenge, and the device that asked. NULL on
+  every other sign-in. Checked at ``/start``; the callback reads them from here, never from its query.
 
 No person or workspace is named: nobody is known until the callback. The Alembic revisions
-``prd277_w4_oidc_sign_ins_20261120`` and ``prd277_w4b_step_up_20261120`` declare the same names.
+``prd277_w4_oidc_sign_ins_20261120``, ``prd277_w4b_step_up_20261120`` and
+``prd277_w6b_phone_sign_in_20261121`` declare the same names.
 """
 from __future__ import annotations
 
@@ -33,8 +38,11 @@ from sqlalchemy import Column, DateTime, Index, String, func
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
 from core.database.base import Base
+from core.models.mobile_devices import CODE_CHALLENGE_LENGTH, ENUM_LENGTH, INSTALL_ID_LENGTH
 
 SHA256_HEX_LENGTH = 64
+# The longest key of core.auth.phone_sign_in.APP_LINKS.
+APP_LINK_KEY_MAX = 16
 # RFC 7636 §4.1: a verifier is 43 to 128 characters.
 CODE_VERIFIER_MAX = 128
 RETURN_TO_MAX = 1024
@@ -59,6 +67,10 @@ class OidcPendingSignIn(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     step_up_session_id = Column(PGUUID(as_uuid=True), nullable=True)
+    phone_app_link = Column(String(APP_LINK_KEY_MAX), nullable=True)
+    phone_code_challenge = Column(String(CODE_CHALLENGE_LENGTH), nullable=True)
+    phone_install_id = Column(String(INSTALL_ID_LENGTH), nullable=True)
+    phone_platform = Column(String(ENUM_LENGTH), nullable=True)
 
     __table_args__ = (
         # The callback's one lookup: a state names at most one started sign-in.
@@ -72,6 +84,7 @@ class OidcPendingSignIn(Base):
 
 
 __all__ = [
+    "APP_LINK_KEY_MAX",
     "CLIENT_INDEX",
     "CODE_VERIFIER_MAX",
     "EXPIRES_INDEX",

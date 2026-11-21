@@ -1,5 +1,5 @@
 {
-  "route_count": 1063,
+  "route_count": 1064,
   "routes": [
     {
       "method": "GET",
@@ -3372,6 +3372,10 @@
     {
       "method": "PUT",
       "path": "/api/v1/mobile/push-settings"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/mobile/sign-in/exchange"
     },
     {
       "method": "POST",

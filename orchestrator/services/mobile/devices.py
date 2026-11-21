@@ -50,9 +50,10 @@ from an id that does not exist.
   nothing.
 * ``revoke_persons_devices``: every device of one person, in every workspace, when that person
   is deactivated (PRD-277 US-303); each revoked as ``revoke_device`` revokes one.
-* ``revoke_every_paired_device``: every paired device of the install, when it starts as another
-  edition (PRD-277 US-601, ``services.mobile.edition_change``).
-* ``rotate_token``: the device lane on its own device, presenting its CURRENT token. The
+* ``revoke_every_device_of``: every device of the given kinds on the install, when it starts as
+  another edition or with pairing off (PRD-277 US-601, ``services.mobile.edition_change``).
+* ``rotate_token``: the device lane on its own device (paired, or signed in on the phone: the
+  kinds that hold a token, ``TOKEN_KINDS``), presenting its CURRENT token. The
   new token is returned once; the old one stays valid for
   ``MOBILE_TOKEN_ROTATION_OVERLAP_SECONDS``. A token already rotated out may not rotate
   again (``token_superseded``): a leaked old token could otherwise trade the last minutes of
@@ -66,7 +67,7 @@ from __future__ import annotations
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Query, Session
@@ -75,7 +76,7 @@ from config import config
 from core.auth.bearer_registry import DEVICE_TOKEN_PREFIX
 from core.auth.pairing import mint_token, secrets_match
 from core.models.core import User
-from core.models.mobile_devices import MobileDevice, MobileDeviceKind, MobileDeviceStatus
+from core.models.mobile_devices import TOKEN_KINDS, MobileDevice, MobileDeviceKind, MobileDeviceStatus
 from services.mobile.events import ENROLLED, PUSH_TOKEN_MOVED, REVOKED, ROTATED, with_event
 from services.mobile.pairing import DEVICE_TOKEN_BYTES
 
@@ -445,15 +446,16 @@ def assert_room_for_a_device(db: Session, workspace_id: UUID, user_pk: int) -> N
     _check_room(db, DeviceCaller(workspace_id=workspace_id, user_pk=user_pk, device_id=None))
 
 
-def revoke_every_paired_device(db: Session, now: datetime) -> List[MobileDevice]:
-    """Cut off every paired device of the install, pending codes included (PRD-277 US-601).
+def revoke_every_device_of(db: Session, kinds: Tuple[str, ...], now: datetime) -> List[MobileDevice]:
+    """Cut off every device of ``kinds`` on the install, pending codes included (PRD-277 US-601, US-603).
 
-    When the install starts as another edition (``services.mobile.edition_change``). Each is revoked
-    as ``revoke_device`` revokes one, by nobody (``revoked_by`` empty), its token hash kept so its
-    next call is told ``device_revoked``. Returns the rows revoked; flushes, never commits.
+    When the install starts as another edition, or with pairing off (``services.mobile.edition_change``
+    says which kinds). Each is revoked as ``revoke_device`` revokes one, by nobody (``revoked_by``
+    empty), its token hash kept so its next call is told ``device_revoked``. Returns the rows
+    revoked; flushes, never commits.
     """
     rows = db.query(MobileDevice).filter(
-        MobileDevice.kind == MobileDeviceKind.PAIRED.value,
+        MobileDevice.kind.in_(kinds),
         MobileDevice.status != MobileDeviceStatus.REVOKED.value,
     ).with_for_update().all()
     for device in rows:
@@ -472,7 +474,7 @@ def rotate_token(db: Session, caller: DeviceCaller, device_id: UUID,
     if caller.device_id != device_id:
         return None
     device = _owned(db, caller, device_id)
-    if device is None or device.kind != MobileDeviceKind.PAIRED.value:
+    if device is None or device.kind not in TOKEN_KINDS:
         return None
     if not secrets_match(device.token_hash, presented):
         raise DeviceConflict(TOKEN_SUPERSEDED)

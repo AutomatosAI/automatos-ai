@@ -38,6 +38,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from core.auth.phone_sign_in import PhoneStart
 from core.models.oidc_pending_sign_ins import RETURN_TO_MAX
 
 DEFAULT_RETURN_PATH = "/"
@@ -49,6 +50,19 @@ class SignInExpired(Exception):
 
 class InvalidSignIn(Exception):
     """What the provider sent back does not prove who the person is. Its text is for the log only."""
+
+
+class PhoneSignInFailed(Exception):
+    """US-603: a phone's sign-in that failed after its start was found, so its answer goes to the app.
+
+    ``failure`` is the ``InvalidSignIn`` or ``oidc_http.ProviderUnreachable`` the method would have
+    raised; ``phone`` is what the phone's start asked for. Its text is for the log only.
+    """
+
+    def __init__(self, failure: Exception, phone: PhoneStart) -> None:
+        super().__init__(str(failure))
+        self.failure = failure
+        self.phone = phone
 
 
 class SignInRefusedByHook(Exception):
@@ -106,6 +120,8 @@ class Finished:
     return_to: str
     step_up_session_id: Optional[UUID] = None
     started_at: Optional[datetime] = None
+    # US-603: what a phone's start asked for. The sign-in then ends with a code for the app, no session.
+    phone: Optional[PhoneStart] = None
 
 
 @dataclass(frozen=True)
@@ -127,6 +143,9 @@ class IdentityMethod(Protocol):
         A method that offers step-up (US-406) also takes ``step_up_session_id``, the live session
         asking for it: it then makes the person prove who they are again, whatever session the
         provider holds, and its ``finish`` hands the id back. Sign-in passes it only for a step-up.
+        A method that offers phone sign-in (US-603) also takes ``phone``, keeps it with the sign-in,
+        and its ``finish`` hands it back (``Finished.phone``), or raises ``PhoneSignInFailed`` for a
+        failure once it is known; sign-in passes it only for a phone's start.
         """
 
     def finish(self, db: Session, callback: Callback) -> Finished:
@@ -222,6 +241,7 @@ __all__ = [
     "HookPeople",
     "IdentityMethod",
     "InvalidSignIn",
+    "PhoneSignInFailed",
     "RegistrationClosed",
     "SignInExpired",
     "SignInHook",

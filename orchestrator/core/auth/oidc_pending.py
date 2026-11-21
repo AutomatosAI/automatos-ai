@@ -38,6 +38,8 @@ holding digests and an expiry, ended by the one call that uses it.
   row is deleted all the same). The digests find the row; the state and the binding are then
   confirmed in constant time (``secrets_match``). It returns when the sign-in started, and the
   session a step-up was asked for (US-406), which ``begin`` kept on the row.
+* A phone's sign-in (US-603, ``core.auth.phone_sign_in``) keeps what its start asked for on the row
+  (``begin``'s ``phone``), and ``claim`` hands it back, so the callback never reads it from a query.
 
 Nothing here logs a value. A database error is rolled back and raised as ``PendingSignInFailed``
 outside the handler, so the driver's text, which carries the statement's values, is neither its
@@ -60,6 +62,7 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core.auth.pairing import hash_secret, secrets_match
+from core.auth.phone_sign_in import PhoneStart
 from core.models.oidc_pending_sign_ins import RETURN_TO_MAX, OidcPendingSignIn
 from core.security.ip_bucket import ip_rate_bucket
 
@@ -96,7 +99,7 @@ _EVICT_OLDEST = text(
 _CLAIM = text(
     "DELETE FROM oidc_pending_sign_ins WHERE state_hash = :state_hash AND binding_hash = :binding_hash "
     "RETURNING state_hash, binding_hash, nonce_hash, code_verifier, return_to, expires_at, created_at, "
-    "step_up_session_id"
+    "step_up_session_id, phone_app_link, phone_code_challenge, phone_install_id, phone_platform"
 )
 
 
@@ -125,6 +128,22 @@ class ClaimedSignIn:
     # When the sign-in started, and (US-406) the session that asked for a step-up, else None.
     started_at: Optional[datetime] = None
     step_up_session_id: Optional[UUID] = None
+    # US-603: what a phone's start asked for; None for a browser's sign-in.
+    phone: Optional[PhoneStart] = None
+
+
+def _phone_columns(phone: Optional[PhoneStart]) -> dict:
+    if phone is None:
+        return {}
+    return {"phone_app_link": phone.app_link, "phone_code_challenge": phone.code_challenge,
+            "phone_install_id": phone.install_id, "phone_platform": phone.platform}
+
+
+def _phone_of(row: Any) -> Optional[PhoneStart]:
+    if row.phone_app_link is None:
+        return None
+    return PhoneStart(app_link=row.phone_app_link, code_challenge=row.phone_code_challenge,
+                      install_id=row.phone_install_id, platform=row.phone_platform)
 
 
 def _now() -> datetime:
@@ -196,10 +215,11 @@ def _log_room_made(own: int, oldest: int) -> None:
 
 
 def begin(db: Session, return_to: str, client_address: str, now: Optional[datetime] = None,
-          step_up_session_id: Optional[UUID] = None) -> StartedSignIn:
+          step_up_session_id: Optional[UUID] = None, phone: Optional[PhoneStart] = None) -> StartedSignIn:
     """Start one sign-in for ``client_address``: room made, its row written, all in one committed
     transaction; its values returned once. ``step_up_session_id`` (US-406) is the session a step-up
-    was asked for, kept on the row for the callback."""
+    was asked for, and ``phone`` (US-603) what a phone's start asked for, each kept on the row for
+    the callback."""
     if not isinstance(return_to, str) or not return_to or len(return_to) > RETURN_TO_MAX:
         raise ValueError(f"return_to must be a path of at most {RETURN_TO_MAX} characters")
     moment, client = now or _now(), client_hash(client_address)
@@ -212,7 +232,7 @@ def begin(db: Session, return_to: str, client_address: str, now: Optional[dateti
         db.add(OidcPendingSignIn(id=uuid4(), state_hash=hash_secret(state), nonce_hash=hash_secret(nonce),
                                  binding_hash=hash_secret(binding), client_hash=client, code_verifier=verifier,
                                  return_to=return_to, created_at=moment, expires_at=expires_at,
-                                 step_up_session_id=step_up_session_id))
+                                 step_up_session_id=step_up_session_id, **_phone_columns(phone)))
         db.flush()
         return made
 
@@ -241,7 +261,8 @@ def claim(db: Session, state: Any, binding: Any, now: Optional[datetime] = None)
     if (now or _now()) >= _as_utc(row.expires_at):
         return None
     return ClaimedSignIn(nonce_hash=row.nonce_hash, code_verifier=row.code_verifier, return_to=row.return_to,
-                         started_at=_as_utc(row.created_at), step_up_session_id=row.step_up_session_id)
+                         started_at=_as_utc(row.created_at), step_up_session_id=row.step_up_session_id,
+                         phone=_phone_of(row))
 
 
 __all__ = [

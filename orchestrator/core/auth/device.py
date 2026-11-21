@@ -3,10 +3,13 @@
 Reached only through the bearer-prefix registry (``core/auth/bearer_registry.py``), which
 runs it BEFORE the Clerk lane, so a device token is never shown to Clerk.
 
-* Only where devices pair (``core.editions`` ``device_pairing``: the local edition, and enterprise
-  while ``ENTERPRISE_DEVICE_PAIRING`` is on). Elsewhere an ``amd_`` bearer is 401 and nothing is
-  looked up: on saas a paired row never exists (§8). Before any lookup, the process must have
-  checked that no device paired under another edition is still live
+* Which devices' tokens are taken is ``token_kinds``, the one place it is decided: ``paired`` only
+  where devices pair (``core.editions`` ``device_pairing``: the local edition, and enterprise while
+  ``ENTERPRISE_DEVICE_PAIRING`` is on), and ``oidc`` (a person signed in on the phone, PRD-277
+  US-603) wherever people sign in with OIDC (enterprise), whatever the pairing setting. Where it
+  takes none (saas) an ``amd_`` bearer is 401 and nothing is looked up: there a paired row never
+  exists (§8); a row of a kind not taken is a plain 401. Before any lookup, the process must have
+  checked that no device of another edition is still live
   (``services.mobile.edition_change.ensure_confirmed``: 503 while it cannot).
 * The row is found by the SHA-256 of the token (``token_hash``) and confirmed in constant
   time (``core.auth.pairing.secrets_match``), or by ``prev_token_hash`` while the rotation
@@ -91,10 +94,19 @@ def _unauthorized(reason: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=INVALID_TOKEN)
 
 
+def token_kinds() -> Tuple[str, ...]:
+    """The kinds of device whose token this install takes: ``paired`` where devices pair, ``oidc``
+    where people sign in with OIDC (PRD-277 US-603), whatever the pairing setting."""
+    edition = editions.current()
+    taken = ((MobileDeviceKind.PAIRED.value, edition.device_pairing),
+             (MobileDeviceKind.OIDC.value, edition.sign_in == editions.SIGN_IN_OIDC))
+    return tuple(kind for kind, takes in taken if takes)
+
+
 def _find_device(db: Session, token: str, now: datetime) -> Optional[MobileDevice]:
-    """The paired row this token opens: its current token, or its previous one inside the overlap."""
+    """The row of a kind taken here this token opens: its current token, or its previous one inside the overlap."""
     digest = hash_secret(token)
-    paired = db.query(MobileDevice).filter(MobileDevice.kind == MobileDeviceKind.PAIRED.value)
+    paired = db.query(MobileDevice).filter(MobileDevice.kind.in_(token_kinds()))
     current = paired.filter(MobileDevice.token_hash == digest).first()
     if current is not None and secrets_match(current.token_hash, token):
         return current
@@ -229,10 +241,10 @@ def _resolve_in_own_session(request: Request, token: str) -> RequestContext:
 async def resolve_device_context(request: Request, token: str) -> RequestContext:
     """The registry's resolver for ``amd_`` bearers: the caller's ``RequestContext``, or 401/403.
 
-    Only where devices pair (``device_pairing``; saas: 401, nothing looked up). The lookup runs
-    off the event loop; the log context is set here, on the request's own context.
+    Only where a kind of device is taken (``token_kinds``; saas: 401, nothing looked up). The lookup
+    runs off the event loop; the log context is set here, on the request's own context.
     """
-    if not editions.current().device_pairing:
+    if not token_kinds():
         raise _unauthorized("device tokens are not taken on this install")
     from services.mobile import edition_change  # at call time: it imports the registry that imports us
 
@@ -243,4 +255,4 @@ async def resolve_device_context(request: Request, token: str) -> RequestContext
     return context
 
 
-__all__ = ["DEVICE_AUTH_TYPE", "DEVICE_REVOKED", "LAST_SEEN_WRITE_INTERVAL", "resolve_device_context"]
+__all__ = ["DEVICE_AUTH_TYPE", "DEVICE_REVOKED", "LAST_SEEN_WRITE_INTERVAL", "resolve_device_context", "token_kinds"]

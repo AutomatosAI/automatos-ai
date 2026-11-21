@@ -31,7 +31,14 @@ provider directly. ``finish_sign_in`` runs, in this order:
    sign-in with its ``auth:identity_linked`` row (naming the default role it granted), a repeat one
    plainly, each with any ``auth:bootstrap_admin`` row. A failed row rolls the person back and
    nobody gets in.
-9. **The session** (``sessions.issue_session``), committed with its ``auth:sign_in`` row.
+9. **The session** (``sessions.issue_session``), committed with its ``auth:sign_in`` row. A sign-in a
+   phone started (US-603, ``core.auth.phone_sign_in``) ends here instead with a one-time code for
+   the app (``services.mobile.sign_in_codes.issue_code``), committed, and no session: ``SignInDone``
+   carries the app link with the code (``app_answer``). Every step before is the browser's.
+
+A phone's refusal after its start was found carries what the start asked for (``SignInRefusal.phone``),
+so the route sends its code to the app link instead of the sign-in page; besides the codes below, a
+phone may be told ``phone_sign_in.PHONE_REFUSALS`` (no workspace, several, or too many devices).
 
 Every refusal is a ``SignInRefusal`` whose ``code`` is all the person is shown:
 
@@ -74,11 +81,13 @@ from core.auth import access_rule, first_admin, people, session_audit, sessions,
 from core.auth.oidc_http import ProviderUnreachable
 from core.auth.oidc_pending import PendingSignInFailed
 from core.auth.oidc_sign_in import METHOD_NAME, OidcSignIn
+from core.auth.phone_sign_in import PhoneStart, app_answer
 from core.auth.sign_in_methods import (
     Callback,
     Finished,
     HookPeople,
     InvalidSignIn,
+    PhoneSignInFailed,
     SignedIn,
     SignInExpired,
     SignInRefusedByHook,
@@ -89,6 +98,7 @@ from core.auth.sign_in_methods import (
 from core.auth.user_link import IdentityLinkRefused, LinkedPerson
 from core.edition_start_up import DEFAULT_ROLES, NO_DEFAULT_ROLE
 from core.seeds.seed_default_workspace import ensure_default_workspace
+from services.mobile import sign_in_codes
 
 logger = logging.getLogger(__name__)
 
@@ -109,11 +119,16 @@ _WORKSPACE_EXISTS = text("SELECT 1 FROM workspaces WHERE id = CAST(:ws AS uuid)"
 
 
 class SignInRefusal(Exception):
-    """A sign-in that ends without a session; ``code`` (one of ``REFUSAL_CODES``) is what the person sees."""
+    """A sign-in that ends without a session; ``code`` (one of ``REFUSAL_CODES``) is what the person sees.
 
-    def __init__(self, code: str) -> None:
+    ``phone`` (US-603) is what a phone's start asked for, when the refusal is a phone's: its code then
+    goes to that app link.
+    """
+
+    def __init__(self, code: str, phone: Optional[PhoneStart] = None) -> None:
         super().__init__(code)
         self.code = code
+        self.phone = phone
 
 
 @dataclass(frozen=True)
@@ -129,10 +144,13 @@ class SignInDone:
     """The new session and the path on this install the person goes to.
 
     ``session`` is None after a step-up: the browser's own session was refreshed, none was issued.
+    It is None after a phone's sign-in too (US-603): ``app_answer`` is then the app link carrying
+    the one-time code, where the browser goes instead.
     """
 
     session: Optional[sessions.IssuedSession] = field(repr=False)
     return_to: str
+    app_answer: Optional[str] = field(default=None, repr=False)
 
 
 def _rules_hold(identity: VerifiedIdentity) -> bool:
@@ -181,27 +199,28 @@ def ensure_audit_workspace(db: Session) -> None:
 
 
 def _started(db: Session, method: str, return_to: str, client_address: str,
-             step_up_session_id: Optional[UUID]) -> Started:
-    chosen = REGISTRY.method(method)
-    if step_up_session_id is None:
-        return chosen.start(db, return_to, client_address)
-    return chosen.start(db, return_to, client_address, step_up_session_id=step_up_session_id)
+             step_up_session_id: Optional[UUID], phone: Optional[PhoneStart]) -> Started:
+    """The method's start, handed ``step_up_session_id`` and ``phone`` only when they are set."""
+    asked = (("step_up_session_id", step_up_session_id), ("phone", phone))
+    return REGISTRY.method(method).start(db, return_to, client_address,
+                                         **{name: value for name, value in asked if value is not None})
 
 
 def start_sign_in(db: Session, return_to: str, client_address: str, method: str = METHOD_NAME,
-                  step_up_session_id: Optional[UUID] = None) -> Started:
+                  step_up_session_id: Optional[UUID] = None, phone: Optional[PhoneStart] = None) -> Started:
     """Where to send the browser at ``client_address`` to sign in; ``SignInRefusal`` when the provider
     cannot be used or the sign-in cannot be stored. ``step_up_session_id`` starts a step-up for that
-    session instead (``start_step_up``)."""
+    session instead (``start_step_up``); ``phone`` starts a phone's sign-in (US-603), and a refusal
+    of it carries it."""
     failure: Optional[str] = None
     try:
-        return _started(db, method, return_to, client_address, step_up_session_id)
+        return _started(db, method, return_to, client_address, step_up_session_id, phone)
     except ProviderUnreachable:
         failure = UNAVAILABLE
     except PendingSignInFailed:
         failure = FAILED
     logger.warning("A sign-in could not start: %s", failure)
-    raise SignInRefusal(failure)
+    raise SignInRefusal(failure, phone=phone)
 
 
 def start_step_up(db: Session, session_token: Optional[str], return_to: str, client_address: str) -> Started:
@@ -224,23 +243,30 @@ def _refuse(db: Session, reason: str, browser: Browser, user_id: Optional[int] =
     return SignInRefusal(code)
 
 
+# What each refusal of an identity method's finish means, and what the log says of it (None: its text).
+_FINISH_FAILURES = (
+    (SignInExpired, EXPIRED, None),
+    (InvalidSignIn, REFUSED, None),
+    (ProviderUnreachable, UNAVAILABLE, "the identity provider could not be used"),
+    (PendingSignInFailed, FAILED, "the sign-in's state could not be read"),
+)
+
+
 def _finished(db: Session, callback: Callback, browser: Browser, method: str):
-    """The identity method's verified answer, or the refusal its exception means."""
-    failure: Optional[str] = None
+    """The identity method's verified answer, or the refusal its exception means (a phone's carries it)."""
+    phone: Optional[PhoneStart] = None
     try:
         return REGISTRY.method(method).finish(db, callback)
-    except SignInExpired as expired:
-        failure, why = EXPIRED, str(expired)
-    except InvalidSignIn as invalid:
-        failure, why = REFUSED, str(invalid)
-    except ProviderUnreachable:
-        failure, why = UNAVAILABLE, "the identity provider could not be used"
-    except PendingSignInFailed:
-        failure, why = FAILED, "the sign-in's state could not be read"
-    logger.warning("Sign-in refused (%s): %s", failure, why)
+    except PhoneSignInFailed as failed:
+        error, phone = failed.failure, failed.phone
+    except (SignInExpired, InvalidSignIn, ProviderUnreachable, PendingSignInFailed) as caught:
+        error = caught
+    failure, why = next((code, why) for kind, code, why in _FINISH_FAILURES if isinstance(error, kind))
+    logger.warning("Sign-in refused (%s): %s", failure, why or str(error))
     if failure == REFUSED:
-        raise _refuse(db, session_audit.REFUSED_INVALID_TOKEN, browser)
-    raise SignInRefusal(failure)
+        refusal = _refuse(db, session_audit.REFUSED_INVALID_TOKEN, browser)
+        raise SignInRefusal(refusal.code, phone=phone)
+    raise SignInRefusal(failure, phone=phone)
 
 
 def _linked(db: Session, identity: VerifiedIdentity, browser: Browser) -> LinkedPerson:
@@ -362,10 +388,31 @@ def _step_up(db: Session, finished: Finished, browser: Browser) -> SignInDone:
     return SignInDone(session=None, return_to=finished.return_to)
 
 
-def finish_sign_in(db: Session, callback: Callback, browser: Browser, method: str = METHOD_NAME) -> SignInDone:
-    """The callback, to a session: every step in this module's docstring, or ``SignInRefusal``."""
-    ensure_audit_workspace(db)
-    finished = _finished(db, callback, browser, method)
+def _phone_answer(db: Session, finished: Finished, user_id: int) -> SignInDone:
+    """US-603: the person's one-time code for the app their phone's start named, committed; no session.
+
+    ``SignInRefusal`` with the phone's own code (``phone_sign_in.PHONE_REFUSALS``) when the person
+    can hold no device here, or ``sign_in_failed`` when the code cannot be stored.
+    """
+    failure: Optional[str] = None
+    try:
+        code = sign_in_codes.issue_code(db, user_id, finished.phone)
+        db.commit()
+    except sign_in_codes.NoSignInCode as refused:
+        failure = refused.code
+    except SQLAlchemyError as error:
+        logger.error("A phone's sign-in code could not be stored (%s)", type(error).__name__)
+        failure = FAILED
+    if failure is None:
+        return SignInDone(session=None, return_to=finished.return_to,
+                          app_answer=app_answer(finished.phone, code=code))
+    db.rollback()
+    logger.warning("users.id=%s: no sign-in code for the phone (%s)", user_id, failure)
+    raise SignInRefusal(failure)
+
+
+def _signed_in(db: Session, finished: Finished, browser: Browser) -> SignInDone:
+    """From a verified identity to a session, or a phone's code: steps 2 to 9 of this module's docstring."""
     identity = finished.identity
     apply_access_rule(db, identity, browser)
     if finished.step_up_session_id is not None:
@@ -379,8 +426,23 @@ def finish_sign_in(db: Session, callback: Callback, browser: Browser, method: st
     memberships = _run_hooks(db, SignedIn(user_id=linked.user_id, created=linked.created, identity=identity),
                              browser)
     _commit_person(db, linked, default_role, memberships, browser)
+    if finished.phone is not None:
+        return _phone_answer(db, finished, linked.user_id)
     issued = _issue(db, identity, linked.user_id, browser)
     return SignInDone(session=issued, return_to=finished.return_to)
+
+
+def finish_sign_in(db: Session, callback: Callback, browser: Browser, method: str = METHOD_NAME) -> SignInDone:
+    """The callback, to a session (or a phone's code): every step in this module's docstring, or
+    ``SignInRefusal``, which carries the phone's start when the sign-in was a phone's."""
+    ensure_audit_workspace(db)
+    finished = _finished(db, callback, browser, method)
+    try:
+        return _signed_in(db, finished, browser)
+    except SignInRefusal as refusal:
+        if finished.phone is None:
+            raise
+        raise SignInRefusal(refusal.code, phone=finished.phone) from None
 
 
 __all__ = [

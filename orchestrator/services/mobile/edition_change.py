@@ -6,7 +6,9 @@ than it last started as, every paired device is revoked, once, before a device t
 What it starts as is ``editions.started_as``: ``local``, ``saas``, or in enterprise
 ``enterprise:pairing_on`` / ``enterprise:pairing_off`` (``ENTERPRISE_DEVICE_PAIRING``). Every change
 follows the one rule: switching pairing off revokes every paired device as an edition change does,
-and switching it back on brings none back.
+and switching it back on brings none back. A device whose person signed in on the phone (kind
+``oidc``, US-603) needs no pairing: an edition change revokes it with the paired ones, switching
+pairing off or on leaves it as it is (``KINDS_REVOKED``).
 
 * **The marker.** What the install last started as is one ``system_settings`` row in the install's
   own category (``MARKER_CATEGORY``, which the settings API neither lists nor changes; key
@@ -44,9 +46,10 @@ from sqlalchemy.orm import Session
 
 from core import editions
 from core.database.database import SessionLocal
+from core.models.mobile_devices import TOKEN_KINDS, MobileDeviceKind
 from core.models.system_settings import SystemSetting
 from services.mobile import device_audit
-from services.mobile.devices import revoke_every_paired_device
+from services.mobile.devices import revoke_every_device_of
 
 logger = logging.getLogger(__name__)
 
@@ -99,8 +102,17 @@ def _reason(earlier: str) -> str:
     return device_audit.REVOKED_PAIRING_SWITCHED_OFF
 
 
+# Which devices each cause revokes (PRD-277 US-603): another edition, every device holding a token;
+# only the pairing setting, only paired ones (a person who signed in on the phone needs no pairing).
+KINDS_REVOKED = {
+    device_audit.REVOKED_EDITION_CHANGED: TOKEN_KINDS,
+    device_audit.REVOKED_PAIRING_SWITCHED_OFF: (MobileDeviceKind.PAIRED.value,),
+}
+
+
 def revoke_if_edition_changed(db: Session, now: datetime) -> int:
-    """Revoke every paired device when the install starts as other than it last started as; commits.
+    """Revoke the devices its cause names (``KINDS_REVOKED``) when the install starts as other than it
+    last started as; commits.
 
     What it starts as is ``editions.started_as``: the edition and, in enterprise, whether it pairs.
     Returns how many were revoked. Waits at most ``LOCK_WAIT_LIMIT`` for the advisory lock, then
@@ -112,8 +124,8 @@ def revoke_if_edition_changed(db: Session, now: datetime) -> int:
     earlier = stored or EARLIER_WHEN_UNMARKED
     running = editions.started_as()
     changed = editions.started_as_another(earlier)
-    revoked = revoke_every_paired_device(db, now) if changed else []
     reason = _reason(earlier)
+    revoked = revoke_every_device_of(db, KINDS_REVOKED[reason], now) if changed else []
     for device in revoked:
         device_audit.stage(db, action=device_audit.DEVICE_REVOKED, workspace_id=device.workspace_id, actor=None,
                            resource_id=device.id,
@@ -123,7 +135,7 @@ def revoke_if_edition_changed(db: Session, now: datetime) -> int:
         _store_edition(db, running)
     db.commit()
     if revoked:
-        logger.warning("Install started as %s after %s: %d paired devices revoked", running, earlier, len(revoked))
+        logger.warning("Install started as %s after %s: %d devices revoked", running, earlier, len(revoked))
     return len(revoked)
 
 

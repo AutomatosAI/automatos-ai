@@ -26,6 +26,15 @@ shared limiter's store cannot be reached, these two routes count in this process
   callback with more than ``CALLBACK_PARAMS_MAX`` parameters is read as carrying none, so it is
   refused.
 
+A phone (US-603, ``core.auth.phone_sign_in``) starts at the same address with
+``app_link``, ``code_challenge``, ``code_challenge_method=S256``, ``install_id`` and ``platform``:
+all or none, each once, else 400 ``{"code": "invalid_phone_start"}`` before anything is stored or
+the provider is asked (with ``step_up`` too). They are kept with the sign-in, which is the
+browser's in every other step. Its callback sets NO session cookie (the system browser may share
+its cookies with the person's own browser): it answers 303 to the app link with the one-time code
+(``phone_sign_in.app_answer``), and a refusal once its start is found goes to the app link with
+``error=<code>`` too. A refusal before that (an unknown or used state) is the browser's.
+
 Every answer carries ``Cache-Control: no-store`` and ``Referrer-Policy: no-referrer`` (the
 callback's address holds the one-time code, which must never be sent on as a referrer), and a refusal is 303 to ``/sign-in?error=<code>``, the code one of ``sign_in_flow.REFUSAL_CODES``,
 never the provider's own error text. The callback clears the binding cookie whatever happens.
@@ -34,7 +43,7 @@ Registered through ``RouterSpec("api.auth_oidc")`` in ``router_manifest.py``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -47,6 +56,7 @@ from core import editions
 from core.auth import session_cookie, sign_in_flow
 from core.auth.bearer_registry import session_cookie_token
 from core.auth.oidc_pending import SIGN_IN_TTL_SECONDS
+from core.auth.phone_sign_in import START_PARAMS, InvalidPhoneStart, PhoneStart, app_answer, phone_start_from
 from core.auth.sign_in_methods import DEFAULT_RETURN_PATH, Callback
 from core.database.database import get_db
 from core.security.ip_bucket import ip_rate_bucket
@@ -58,6 +68,7 @@ SIGN_IN_COOKIE = "__Host-automatos_sign_in"
 SIGN_IN_PAGE = "/sign-in"
 NO_STORE_HEADERS = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
 RATE_LIMITED_DETAIL = "Too many sign-in attempts from this address. Try again later."
+INVALID_PHONE_START = "invalid_phone_start"
 # A callback carries a handful of parameters; more than this is not one.
 CALLBACK_PARAMS_MAX = 32
 # Fetch Metadata: where the browser says a request came from. A step-up starts only from these.
@@ -117,7 +128,10 @@ def _redirect(to: str) -> RedirectResponse:
     return RedirectResponse(to, status_code=status.HTTP_303_SEE_OTHER, headers=dict(NO_STORE_HEADERS))
 
 
-def _refused(code: str) -> RedirectResponse:
+def _refused(code: str, phone: Optional[PhoneStart] = None) -> RedirectResponse:
+    """303 to the sign-in page with ``code``; a phone's refusal goes to its app link instead."""
+    if phone is not None:
+        return _redirect(app_answer(phone, error=code))
     return _redirect(f"{SIGN_IN_PAGE}?{urlencode({'error': code})}")
 
 
@@ -158,12 +172,31 @@ def _step_up_sent_from_here(request: Request) -> bool:
     return sent_from is None or sent_from.strip().lower() in STEP_UP_FETCH_SITES
 
 
-def _started(request: Request, db: Session, return_to: str, step_up: bool):
+def _phone_start(request: Request, step_up: bool) -> Optional[PhoneStart]:
+    """What a phone's start asks for (US-603), or ``None`` for a browser's.
+
+    400 when any phone parameter is named and they are not all there, once each and well formed
+    (more than ``CALLBACK_PARAMS_MAX`` parameters included), or are sent with ``step_up``.
+    """
+    named = any(name in request.query_params for name in START_PARAMS)
+    try:
+        phone = phone_start_from(_params(request))
+    except InvalidPhoneStart:
+        phone = None
+    if named and (phone is None or step_up):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"code": INVALID_PHONE_START},
+                            headers=dict(NO_STORE_HEADERS))
+    return phone
+
+
+def _started(request: Request, db: Session, return_to: str, step_up: bool, phone: Optional[PhoneStart]):
     if step_up:
         if not _step_up_sent_from_here(request):
             raise sign_in_flow.SignInRefusal(sign_in_flow.STEP_UP_REFUSED)
         return sign_in_flow.start_step_up(db, session_cookie_token(request), return_to, get_client_ip(request))
-    return sign_in_flow.start_sign_in(db, return_to, get_client_ip(request))
+    if phone is None:
+        return sign_in_flow.start_sign_in(db, return_to, get_client_ip(request))
+    return sign_in_flow.start_sign_in(db, return_to, get_client_ip(request), phone=phone)
 
 
 @router.get("/start", dependencies=[Depends(limit_starts_per_ip)])
@@ -172,11 +205,13 @@ def start(request: Request, return_to: str = Query(DEFAULT_RETURN_PATH), step_up
     """303 to the provider's sign-in page, with this browser's sign-in bound to it by cookie.
 
     ``step_up=1`` (US-406) signs the person in again for the session this browser's cookie holds.
+    A phone's start (US-603) names its app link, PKCE challenge and device; malformed is 400.
     """
+    phone = _phone_start(request, step_up)
     try:
-        started = _started(request, db, return_to, step_up)
+        started = _started(request, db, return_to, step_up, phone)
     except sign_in_flow.SignInRefusal as refusal:
-        return _refused(refusal.code)
+        return _refused(refusal.code, refusal.phone)
     response = _redirect(started.redirect_to)
     response.set_cookie(key=SIGN_IN_COOKIE, value=started.browser_binding, max_age=SIGN_IN_TTL_SECONDS,
                         path=session_cookie.COOKIE_PATH, secure=True, httponly=True,
@@ -186,15 +221,20 @@ def start(request: Request, return_to: str = Query(DEFAULT_RETURN_PATH), step_up
 
 @router.get("/callback", dependencies=[Depends(limit_callbacks_per_ip)])
 def callback(request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
-    """303 to where the person was going, signed in; or to the sign-in page with the refusal's code."""
+    """303 to where the person was going, signed in; or to the sign-in page with the refusal's code.
+
+    A phone's sign-in (US-603) goes to its app link with the one-time code, or the refusal's code,
+    and never gets a session cookie.
+    """
     sent = Callback(params=_params(request), browser_binding=request.cookies.get(SIGN_IN_COOKIE))
     try:
         done = sign_in_flow.finish_sign_in(db, sent, _browser(request))
     except sign_in_flow.SignInRefusal as refusal:
-        response = _refused(refusal.code)
+        response = _refused(refusal.code, refusal.phone)
     else:
-        response = _redirect(done.return_to)
-        if done.session is not None:  # None after a step-up: the browser keeps its own, refreshed session
+        response = _redirect(done.app_answer or done.return_to)
+        # None after a step-up (the browser keeps its own, refreshed session) and after a phone's sign-in.
+        if done.session is not None:
             session_cookie.set_session_cookie(response, done.session.token, done.session.absolute_expires_at)
     _clear_binding(response)
     return response

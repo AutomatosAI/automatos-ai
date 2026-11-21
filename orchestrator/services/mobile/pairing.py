@@ -215,16 +215,26 @@ def _same_phone(db: Session, pending: MobileDevice, install_id: str) -> Optional
     )
 
 
-def _paired_fields(device: MobileDevice, *, token_hash: str, install_id: str, name: Optional[str],
-                   platform: str, app_version: Optional[str], now: datetime) -> Dict[str, Any]:
-    """Every column pairing writes, as a new mapping: active, the new token only, no code or push key."""
+@dataclass(frozen=True)
+class Enrolment:
+    """The phone a claimed code becomes: its kind, its install id and how it describes itself."""
+
+    kind: str
+    install_id: str
+    name: Optional[str]
+    platform: str
+    app_version: Optional[str]
+
+
+def _paired_fields(device: MobileDevice, enrolment: Enrolment, *, token_hash: str, now: datetime) -> Dict[str, Any]:
+    """Every column enrolling writes, as a new mapping: active, the new token only, no code or push key."""
     return {
-        "kind": MobileDeviceKind.PAIRED.value,
+        "kind": enrolment.kind,
         "status": MobileDeviceStatus.ACTIVE.value,
-        "install_id": install_id,
-        "name": name or device.name,
-        "platform": platform,
-        "app_version": app_version or device.app_version,
+        "install_id": enrolment.install_id,
+        "name": enrolment.name or device.name,
+        "platform": enrolment.platform,
+        "app_version": enrolment.app_version or device.app_version,
         "token_hash": token_hash,
         "token_rotated_at": None,
         "prev_token_hash": None,
@@ -233,6 +243,8 @@ def _paired_fields(device: MobileDevice, *, token_hash: str, install_id: str, na
         "push_disabled_reason": None,
         "pairing_code_hash": None,
         "pairing_expires_at": None,
+        "sign_in_challenge": None,
+        "sign_in_install_id": None,
         "paired_at": now,
         "last_seen_at": now,
         "revoked_at": None,
@@ -255,10 +267,21 @@ def pair_device(
     pending = _claimable(db, code, now)
     if pending is None:
         return None
-    device = _same_phone(db, pending, install_id) or pending
+    enrolment = Enrolment(kind=MobileDeviceKind.PAIRED.value, install_id=install_id, name=name,
+                          platform=platform, app_version=app_version)
+    return enrol(db, pending, enrolment, now)
+
+
+def enrol(db: Session, pending: MobileDevice, enrolment: Enrolment, now: datetime) -> PairedDevice:
+    """Make the claimed ``pending`` row a device, holding a new token (returned once).
+
+    A phone already known to the pending row's workspace and person (``enrolment.install_id``) keeps
+    its row, which takes the new token and ``enrolment.kind``, and the pending row is deleted (module
+    docstring). Signing in on the phone (PRD-277 US-603) enrols a code the same way.
+    """
+    device = _same_phone(db, pending, enrolment.install_id) or pending
     token, token_hash = mint_token(DEVICE_TOKEN_PREFIX, DEVICE_TOKEN_BYTES)
-    fields = _paired_fields(device, token_hash=token_hash, install_id=install_id, name=name,
-                            platform=platform, app_version=app_version, now=now)
+    fields = _paired_fields(device, enrolment, token_hash=token_hash, now=now)
     if device is not pending:
         db.delete(pending)
     for column, value in fields.items():
