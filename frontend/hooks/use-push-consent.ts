@@ -15,18 +15,33 @@
  * (useAskOnceBeforePairing). Both read one cached answer: once the question is answered, the
  * switch shows it and the question is never asked again. A read that fails (403, 503) asks
  * nothing: the server never shows "could not read" as "not answered", and neither does Studio.
+ *
+ * PRD-277 US-601: an enterprise install reads and answers it too, and there it is an install
+ * admin's decision: anyone else's read is 403, so the switch stays hidden and "Pair a phone" mints
+ * without asking. The PUT needs a fresh sign-in there, so a step-up refusal sends the browser to
+ * sign in again (lib/enterprise/step-up.ts); local answers at once, as before.
  */
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { apiClient, type ApiHttpError } from '@/lib/api-client'
 import { isLocal } from '@/lib/auth-edition'
+import { isEnterprise } from '@/lib/edition-name'
+import { useEnterpriseStepUp } from '@/lib/enterprise/step-up'
 
 export const PUSH_CONSENT_PATH = '/api/v1/mobile/push-consent'
 export const PUSH_CONSENT_QUERY_KEY = ['mobile-push-consent'] as const
 const FORBIDDEN = 403
 /** A failed read is tried once more, as the app's QueryClient does (components/providers.tsx). */
 const READ_RETRIES = 1
+/** The editions whose push needs this answer: SaaS always pushes through the platform's project. */
+const ASKS_FOR_CONSENT = isLocal || isEnterprise
+
+type Put = (agreed: boolean) => Promise<PushConsent>
+const putConsent: Put = (agreed) => apiClient.put<PushConsent>(PUSH_CONSENT_PATH, { agreed })
+const answeredAtOnce = (action: Put): Put => action
+/** Enterprise: a step-up refusal sends the browser to sign in again. A build-time choice, so hooks hold. */
+const useConsentStepUp: (action: Put) => Put = isEnterprise ? useEnterpriseStepUp : answeredAtOnce
 
 /** The operator's answer as GET and PUT /push-consent return it. */
 export interface PushConsent {
@@ -56,12 +71,12 @@ export function isConsentForbidden(error: unknown): boolean {
   return (error as ApiHttpError | null)?.status === FORBIDDEN
 }
 
-/** The operator's answer; read on a local install only. A 403 is final: it is not tried again. */
+/** The operator's answer; read on a local or enterprise install only. A 403 is final: it is not tried again. */
 export function usePushConsent() {
   return useQuery({
     queryKey: PUSH_CONSENT_QUERY_KEY,
     queryFn: () => apiClient.get<PushConsent>(PUSH_CONSENT_PATH),
-    enabled: isLocal,
+    enabled: ASKS_FOR_CONSENT,
     retry: (failures, error) => !isConsentForbidden(error) && failures < READ_RETRIES,
   })
 }
@@ -69,9 +84,10 @@ export function usePushConsent() {
 /** Record the answer; the cached answer becomes the one the server stored. */
 export function useAnswerPushConsent() {
   const queryClient = useQueryClient()
+  const answer = useConsentStepUp(putConsent)
   return useMutation({
-    mutationFn: (agreed: boolean) => apiClient.put<PushConsent>(PUSH_CONSENT_PATH, { agreed }),
-    onSuccess: (answer) => queryClient.setQueryData(PUSH_CONSENT_QUERY_KEY, answer),
+    mutationFn: answer,
+    onSuccess: (stored) => queryClient.setQueryData(PUSH_CONSENT_QUERY_KEY, stored),
   })
 }
 

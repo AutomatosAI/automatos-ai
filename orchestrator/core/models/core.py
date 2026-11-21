@@ -26,6 +26,7 @@ from uuid import uuid4
 from core.playbook_steps import steps_in_order
 from core.models.blog_post_review import BlogPostReviewColumns
 from core.models.end_users import END_USER_ID_MAX
+from core.models.user_identities import UserSystemRoleColumns
 
 # Define PriorityLevel locally to avoid circular imports
 class PriorityLevel(str, Enum):
@@ -1119,7 +1120,7 @@ class Task(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
-class User(Base):
+class User(UserSystemRoleColumns, Base):  # PRD-277 US-203: users.system_role
     """User model with Clerk authentication (PRD-37: SaaS Foundation)"""
     __tablename__ = 'users'
     

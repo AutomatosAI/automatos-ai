@@ -3,9 +3,10 @@
 Agents compile, clone and run Node in the worker (executor.py ALLOWED_COMMANDS), so a
 cut that saves bytes must leave each of those working. images.yml runs this inside the
 worker image it built, on each architecture, with the image's own Python, as root
-(the paths it checks are root's), before anything else in the container runs npm:
+(the paths it checks are root's; the image itself starts as uid 1000, PRD-280 US-201),
+before anything else in the container runs npm:
 
-    docker run --rm -i --entrypoint python IMAGE - < scripts/ci/image_worker_toolchain.py
+    docker run --rm -i --user 0 --entrypoint python IMAGE - < scripts/ci/image_worker_toolchain.py
 
 Each check names the row of the 19 Oct size breakdown it proves, or the finding:
 

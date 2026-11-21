@@ -32,6 +32,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient, type ApiHttpError } from '@/lib/api-client'
 import { onUnauthorized } from '@/lib/api-unauthorized'
 import { isLocal } from '@/lib/auth-edition'
+import { isEnterprise } from '@/lib/edition-name'
 import {
   DEVICE_PAIRING_REQUIRED,
   DEVICE_REVOKED,
@@ -51,6 +52,7 @@ export const PAIRING_CODES_PATH = '/api/v1/mobile/pairing-codes'
 export const MOBILE_DEVICES_QUERY_KEY = ['mobile-devices'] as const
 const DISCOVERY_QUERY_KEY = ['mobile-discovery'] as const
 const LOCAL_EDITION = 'local'
+const ENTERPRISE_EDITION = 'enterprise'
 const INVALID_PAIRING_CODE = 'invalid_pairing_code'
 /** PATCH push on for a phone that registered no Expo token (services/mobile/devices.py). */
 const PUSH_TOKEN_MISSING = 'push_token_missing'
@@ -93,7 +95,7 @@ export interface PairingCode {
   readonly qr_payload: string
 }
 
-/** What Settings reads from discovery: paired mode, and the web address another browser opens. */
+/** What Settings reads from discovery: whether to offer pairing, and the web address another browser opens (local only). */
 export interface PairingMode {
   readonly paired: boolean
   readonly webUrl: string | null
@@ -193,11 +195,24 @@ export function useBrowserPairing(): BrowserPairing {
   return { needsPairing: isLocal && pairingOn === true && token === null, keepPairing }
 }
 
-/** Settings: is this install in paired mode? SaaS never reads discovery and is never paired. */
+/**
+ * Does the discovery document say this enterprise install lets people pair their phones
+ * (PRD-277 US-601: ENTERPRISE_DEVICE_PAIRING)? Phones only: an enterprise browser signs in.
+ */
+export function pairsPhones(discovery: DiscoveryDocument | null | undefined): boolean {
+  return discovery?.edition === ENTERPRISE_EDITION && discovery.pairing?.enabled === true
+}
+
+/**
+ * Settings: may the signed-in person pair a phone here? Local: paired mode, and another browser
+ * may pair too (`webUrl`). Enterprise: while the install lets people pair, for themselves, phones
+ * only (`webUrl` null). SaaS never reads discovery and is never paired.
+ */
 export function usePairingMode(): PairingMode {
-  const { data } = useQuery({ queryKey: DISCOVERY_QUERY_KEY, queryFn: readDiscovery, enabled: isLocal })
-  const paired = isLocal && takesPairedDevices(data)
-  return { paired, webUrl: paired ? data?.web_url ?? null : null }
+  const { data } = useQuery({ queryKey: DISCOVERY_QUERY_KEY, queryFn: readDiscovery, enabled: isLocal || isEnterprise })
+  const browsersPair = isLocal && takesPairedDevices(data)
+  const paired = browsersPair || (isEnterprise && pairsPhones(data))
+  return { paired, webUrl: browsersPair ? data?.web_url ?? null : null }
 }
 
 /** The devices the caller may see, read again every `refreshMs` when given (a live pairing code). */
