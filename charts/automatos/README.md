@@ -217,6 +217,19 @@ Rendering stops with a message on a combination that cannot work:
 - `worker.namespace` set (and not the release's) without `worker.existingSecret`;
 - `worker.namespace` set (and not the release's) without `workspaces.api.existingClaim` or without `workspaces.worker.existingClaim`.
 
+## Upgrading to 0.11.0
+
+- **The local edition gets one change: one extra ingress path.** With `ingress.enabled`, exactly `/.well-known/automatos.json`, the discovery document a phone reads, now goes to the API (`pathType: Exact`), between `/ws` and the web app's `/`. Before, the web app answered it. The rest of `/.well-known/` stays the web app's, and `/exports/`, `/health`, `/metrics` and `/docs` are not routed. With the ingress off (the default) nothing changes but the chart's version label (`charts/automatos/tests/default_render_test.yaml` pins the default render).
+- **The enterprise edition can be installed** (`edition.authEdition=enterprise`, PRD-277). It needs, before `helm install`:
+  - `OIDC_CLIENT_SECRET` in the Secret `existingSecret` names: the API does not start without it;
+  - `edition.enterprise.publicUrl`, `clientIpHeader`, `oidc.issuer` and `oidc.clientId`: rendering stops, naming the value, while one is missing or is one the API would refuse;
+  - the application registered at your identity provider with the two addresses the install notes print;
+  - the ingress on, on the host of `publicUrl`, with TLS, so the web app and the API answer on one origin;
+  - for a provider with a private certificate, a ConfigMap with its CA (`edition.enterprise.oidc.caConfigMap`).
+  The chart then runs the enterprise web image (`frontend.enterpriseImage`), gives it `BACKEND_INTERNAL_URL` and `MEDIA_ORIGINS` (`frontend.mediaOrigins`), and gives the API and the migration Job the settings in [The enterprise edition](#the-enterprise-edition).
+- **`config` refuses `OIDC_CLIENT_SECRET` in every edition**: a secret is never a chart value. In the enterprise edition it also refuses each setting the chart sets and `SESSION_COOKIE_NAME` and `SESSION_CSRF_HEADER`.
+- **A released chart names one web image per published edition**, each by digest: `frontend.image` (local) and `frontend.enterpriseImage` (enterprise).
+
 ## Upgrading to 0.10.0
 
 - **The worker runs as uid 1000 from its start, never as root** (PRD-280 US-201). Its pod sets `runAsNonRoot`, `runAsUser: 1000`, `runAsGroup: 1000`, `fsGroup: 1000` and `fsGroupChangePolicy: OnRootMismatch`, and its container adds no capability back (0.9.0 added `CHOWN`, `DAC_OVERRIDE`, `SETGID` and `SETUID`). It passes the "restricted" pod security level.

@@ -6,7 +6,8 @@ suite: With no new value set, the chart renders what chart 0.9.0 rendered, but f
 # workspaces.worker.existingClaim, or the placement values (US-203) is set.
 #
 # The differences from chart 0.9.0, each deliberate, and the complete list:
-# 1. helm.sh/chart is automatos-0.10.0 on every object (the chart's version);
+# 1. helm.sh/chart is automatos-0.11.0 on every object (the chart's version; from 0.10.0,
+#    this label is the only difference in the default render: the ingress is off);
 # 2. US-201: the worker's pod has a securityContext, which 0.9.0 did not set: runAsNonRoot
 #    true, runAsUser 1000, runAsGroup 1000, fsGroup 1000 and fsGroupChangePolicy
 #    OnRootMismatch (the kubelet re-groups the volume only when its top folder does not match);
@@ -62,7 +63,7 @@ tests:
           value:
             name: demo-automatos-api
             labels:
-              helm.sh/chart: automatos-0.10.0
+              helm.sh/chart: automatos-0.11.0
               app.kubernetes.io/name: automatos
               app.kubernetes.io/instance: demo
               app.kubernetes.io/version: "edge"
@@ -74,7 +75,7 @@ tests:
           value:
             name: demo-automatos-frontend
             labels:
-              helm.sh/chart: automatos-0.10.0
+              helm.sh/chart: automatos-0.11.0
               app.kubernetes.io/name: automatos
               app.kubernetes.io/instance: demo
               app.kubernetes.io/version: "edge"
@@ -86,7 +87,7 @@ tests:
           value:
             name: demo-automatos-worker
             labels:
-              helm.sh/chart: automatos-0.10.0
+              helm.sh/chart: automatos-0.11.0
               app.kubernetes.io/name: automatos
               app.kubernetes.io/instance: demo
               app.kubernetes.io/version: "edge"
@@ -98,7 +99,7 @@ tests:
           value:
             name: demo-automatos-migrate
             labels:
-              helm.sh/chart: automatos-0.10.0
+              helm.sh/chart: automatos-0.11.0
               app.kubernetes.io/name: automatos
               app.kubernetes.io/instance: demo
               app.kubernetes.io/version: "edge"
@@ -122,7 +123,7 @@ tests:
           value:
             name: demo-automatos-workspaces
             labels:
-              helm.sh/chart: automatos-0.10.0
+              helm.sh/chart: automatos-0.11.0
               app.kubernetes.io/name: automatos
               app.kubernetes.io/instance: demo
               app.kubernetes.io/version: "edge"
@@ -145,7 +146,7 @@ tests:
           value:
             name: demo-automatos-api-data
             labels:
-              helm.sh/chart: automatos-0.10.0
+              helm.sh/chart: automatos-0.11.0
               app.kubernetes.io/name: automatos
               app.kubernetes.io/instance: demo
               app.kubernetes.io/version: "edge"
@@ -171,7 +172,7 @@ tests:
           value:
             name: demo-automatos-api
             labels:
-              helm.sh/chart: automatos-0.10.0
+              helm.sh/chart: automatos-0.11.0
               app.kubernetes.io/name: automatos
               app.kubernetes.io/instance: demo
               app.kubernetes.io/version: "edge"
@@ -197,7 +198,7 @@ tests:
           value:
             name: demo-automatos-frontend
             labels:
-              helm.sh/chart: automatos-0.10.0
+              helm.sh/chart: automatos-0.11.0
               app.kubernetes.io/name: automatos
               app.kubernetes.io/instance: demo
               app.kubernetes.io/version: "edge"
@@ -223,7 +224,7 @@ tests:
           value:
             name: demo-automatos-worker
             labels:
-              helm.sh/chart: automatos-0.10.0
+              helm.sh/chart: automatos-0.11.0
               app.kubernetes.io/name: automatos
               app.kubernetes.io/instance: demo
               app.kubernetes.io/version: "edge"
@@ -251,7 +252,7 @@ tests:
           value:
             name: demo-automatos-api
             labels:
-              helm.sh/chart: automatos-0.10.0
+              helm.sh/chart: automatos-0.11.0
               app.kubernetes.io/name: automatos
               app.kubernetes.io/instance: demo
               app.kubernetes.io/version: "edge"
@@ -347,7 +348,7 @@ tests:
           value:
             name: demo-automatos-migrate
             labels:
-              helm.sh/chart: automatos-0.10.0
+              helm.sh/chart: automatos-0.11.0
               app.kubernetes.io/name: automatos
               app.kubernetes.io/instance: demo
               app.kubernetes.io/version: "edge"
@@ -424,7 +425,7 @@ tests:
           value:
             name: demo-automatos-frontend
             labels:
-              helm.sh/chart: automatos-0.10.0
+              helm.sh/chart: automatos-0.11.0
               app.kubernetes.io/name: automatos
               app.kubernetes.io/instance: demo
               app.kubernetes.io/version: "edge"
@@ -480,7 +481,7 @@ tests:
           value:
             name: demo-automatos-worker
             labels:
-              helm.sh/chart: automatos-0.10.0
+              helm.sh/chart: automatos-0.11.0
               app.kubernetes.io/name: automatos
               app.kubernetes.io/instance: demo
               app.kubernetes.io/version: "edge"
