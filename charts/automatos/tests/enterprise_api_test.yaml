@@ -48,7 +48,40 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content: {name: CLIENT_IP_PROXY_COUNT, value: "2"}
-  - it: leaves the proxy count out when it is empty, so the header's first value is the address
+  # What YAML hands the template for each way of writing 1, and what it renders.
+  - it: renders an unquoted 1 as "1"
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {clientIpHeader: X-Forwarded-For, clientIpProxyCount: 1}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: CLIENT_IP_PROXY_COUNT, value: "1"}
+  - it: renders a quoted "1" as "1"
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {clientIpHeader: X-Forwarded-For, clientIpProxyCount: "1"}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: CLIENT_IP_PROXY_COUNT, value: "1"}
+  - it: renders an unquoted 1.0 as "1", since YAML reads it as the number one
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {clientIpHeader: X-Forwarded-For, clientIpProxyCount: 1.0}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: CLIENT_IP_PROXY_COUNT, value: "1"}
+  - it: renders an unquoted 010 as "8", since YAML reads a leading zero as octal
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {clientIpHeader: X-Forwarded-For, clientIpProxyCount: 010}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: CLIENT_IP_PROXY_COUNT, value: "8"}
+  - it: leaves the proxy count out when it is empty, so the address is the first value of the header's last line
     asserts:
       - notContains:
           path: spec.template.spec.containers[0].env

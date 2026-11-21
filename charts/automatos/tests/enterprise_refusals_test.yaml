@@ -112,43 +112,79 @@ tests:
       edition: {enterprise: {clientIpHeader: X-Forwarded-For}}
     asserts:
       - failedTemplate:
-          errorPattern: "edition.enterprise.clientIpProxyCount must be set \\(CLIENT_IP_PROXY_COUNT\\): edition.enterprise.clientIpHeader names the header proxies append to"
+          errorPattern: "edition.enterprise.clientIpProxyCount must be set \\(CLIENT_IP_PROXY_COUNT\\): edition.enterprise.clientIpHeader names a header proxies append to"
   - it: stops on X-Forwarded-For in another case, with spaces, without the count
     set:
       edition: {enterprise: {clientIpHeader: "  x-forwarded-FOR "}}
     asserts:
       - failedTemplate:
           errorPattern: "edition.enterprise.clientIpProxyCount must be set"
+  - it: stops on X-Original-Forwarded-For without the proxy count
+    set:
+      edition: {enterprise: {clientIpHeader: X-Original-Forwarded-For}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.clientIpProxyCount must be set \\(CLIENT_IP_PROXY_COUNT\\)"
+  - it: takes X-Original-Forwarded-For with a count
+    set:
+      edition: {enterprise: {clientIpHeader: X-Original-Forwarded-For, clientIpProxyCount: 1}}
+    asserts:
+      - hasDocuments:
+          count: 1
+  - it: stops on the Forwarded header, whose values are not addresses, with or without a count
+    set:
+      edition: {enterprise: {clientIpHeader: Forwarded}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.clientIpHeader must name a header that holds one IP address, or IP addresses separated by commas, as X-Real-IP and X-Forwarded-For do \\(CLIENT_IP_HEADER\\)"
+  - it: stops on the Forwarded header in another case, with a count
+    set:
+      edition: {enterprise: {clientIpHeader: " FORWARDED ", clientIpProxyCount: 1}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.clientIpHeader must name a header that holds one IP address"
   - it: stops on a proxy count of 0, read as a count and never as unset
     set:
       edition: {enterprise: {clientIpHeader: X-Forwarded-For, clientIpProxyCount: 0}}
     asserts:
       - failedTemplate:
-          errorPattern: "edition.enterprise.clientIpProxyCount must be a whole number from 1 to 8 \\(CLIENT_IP_PROXY_COUNT\\)"
+          errorPattern: "edition.enterprise.clientIpProxyCount must be a plain whole number from 1 to 8 \\(CLIENT_IP_PROXY_COUNT\\)"
   - it: stops on a proxy count over 8
     set:
       edition: {enterprise: {clientIpHeader: X-Forwarded-For, clientIpProxyCount: 9}}
     asserts:
       - failedTemplate:
-          errorPattern: "edition.enterprise.clientIpProxyCount must be a whole number from 1 to 8"
+          errorPattern: "edition.enterprise.clientIpProxyCount must be a plain whole number from 1 to 8"
   - it: stops on a proxy count that is not a whole number
     set:
       edition: {enterprise: {clientIpHeader: X-Forwarded-For, clientIpProxyCount: 1.5}}
     asserts:
       - failedTemplate:
-          errorPattern: "edition.enterprise.clientIpProxyCount must be a whole number from 1 to 8"
+          errorPattern: "edition.enterprise.clientIpProxyCount must be a plain whole number from 1 to 8"
   - it: stops on a negative proxy count
     set:
       edition: {enterprise: {clientIpHeader: X-Forwarded-For, clientIpProxyCount: -1}}
     asserts:
       - failedTemplate:
-          errorPattern: "edition.enterprise.clientIpProxyCount must be a whole number from 1 to 8"
+          errorPattern: "edition.enterprise.clientIpProxyCount must be a plain whole number from 1 to 8"
   - it: stops on a proxy count in words
     set:
       edition: {enterprise: {clientIpHeader: X-Real-IP, clientIpProxyCount: two}}
     asserts:
       - failedTemplate:
-          errorPattern: "edition.enterprise.clientIpProxyCount must be a whole number from 1 to 8"
+          errorPattern: "edition.enterprise.clientIpProxyCount must be a plain whole number from 1 to 8"
+  - it: stops on a quoted proxy count with a leading zero, which the template can see
+    set:
+      edition: {enterprise: {clientIpHeader: X-Forwarded-For, clientIpProxyCount: "01"}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.clientIpProxyCount must be a plain whole number from 1 to 8"
+  - it: stops on a quoted proxy count with a point
+    set:
+      edition: {enterprise: {clientIpHeader: X-Forwarded-For, clientIpProxyCount: "1.0"}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.clientIpProxyCount must be a plain whole number from 1 to 8"
   - it: stops on a proxy count without a client address header, naming the count first
     set:
       edition: {enterprise: {clientIpHeader: "", clientIpProxyCount: 1}}
@@ -180,6 +216,13 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "config.CLIENT_IP_PROXY_COUNT: in the enterprise edition the chart sets it from edition.enterprise"
+  - it: stops on the server's forwarded-header list in config
+    set:
+      config:
+        FORWARDED_ALLOW_IPS: "*"
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.FORWARDED_ALLOW_IPS: in the enterprise edition the API reads the caller's address from edition.enterprise.clientIpHeader and clientIpProxyCount"
   - it: stops on a default role the API does not know
     set:
       edition: {enterprise: {defaultRole: owner, oidc: {requiredClaims: "groups=automatos"}}}
