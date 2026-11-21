@@ -5,8 +5,9 @@ Where the edition says ``device_tokens_age_out`` (enterprise), a device's token 
 it: the phone's last pairing with a code, or its last sign-in on the phone. Both are an enrolment
 (``services.mobile.pairing.enrol``), which stamps ``paired_at``; enrolling again restarts the count. A
 rotation does not: a rotation is the device trading its own token for a new one, and proves nothing
-about its person. A row with no ``paired_at`` counts from when it was created, and a ``paired_at`` later
-than now counts as now. Both kinds that hold a token (``paired``, ``oidc``) age alike. ``local`` and
+about its person. A row with no ``paired_at`` counts from when it was created. A ``paired_at`` later
+than now is read as now, so it never makes a device past its age: such a device ages out one
+maximum age after that time. Both kinds that hold a token (``paired``, ``oidc``) age alike. ``local`` and
 ``saas`` never call into the rule and never read the setting.
 
 **One rule, three readers.** A device is past its maximum age when the moment its age starts
