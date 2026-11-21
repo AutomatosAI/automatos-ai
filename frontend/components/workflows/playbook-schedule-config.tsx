@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { InlineHelp } from '@/components/ui/help-tooltip'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { apiAddressShown } from '@/lib/api-address-shown'
 import type { PlaybookFormValues } from './create-playbook-modal'
 
 const SCHEDULE_TYPES = [
@@ -93,7 +94,7 @@ export function PlaybookScheduleConfig({ webhookId }: PlaybookScheduleConfigProp
   const [copied, setCopied] = React.useState(false)
   const [cronQuick, setCronQuick] = React.useState('')
 
-  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+  const apiBaseUrl = apiAddressShown()
 
   const updateSchedule = (field: keyof PlaybookFormValues['schedule_config'], value: unknown) => {
     methods.setValue('schedule_config', { ...scheduleConfig, [field]: value })

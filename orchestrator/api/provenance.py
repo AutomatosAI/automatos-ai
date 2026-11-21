@@ -63,10 +63,9 @@ _rate_store = RateLimitStore()
 def rate_bucket_for(request: Request) -> str:
     """The rate-limit bucket for this caller: one IPv4 address or one IPv6 /64.
 
-    The address comes from ``get_client_ip`` (the first X-Forwarded-For hop, as main.py's
-    global limiter reads it). That trusts the edge to replace a client-sent header, so
-    the first hop is the connecting address; on Railway this is unverified until a
-    probe is run (docs/compliance/DETECTION.md, an owner decision). It is parsed as an
+    The address comes from ``get_client_ip``, as main.py's global limiter reads it:
+    ``core/security/client_ip.py`` and its two settings (``CLIENT_IP_HEADER``, and
+    ``CLIENT_IP_PROXY_COUNT`` for proxies that append). It is parsed as an
     IP so the Redis key and the fail-open log line only ever hold an address: anything else shares
     ``UNPARSABLE_IP_BUCKET``. An IPv4-mapped IPv6 address counts as its IPv4 address. The rule
     is ``core.security.ip_bucket``'s, shared with POST /api/v1/mobile/pair (PRD-266 K13).

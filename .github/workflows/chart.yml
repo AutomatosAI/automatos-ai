@@ -1,13 +1,34 @@
 name: chart
 
-# Checks charts/automatos without a cluster: helm lint, the rendered manifests
-# against the Kubernetes schemas (kubeconform), and the helm-unittest suites in
+# Two jobs.
+#
+# `chart` checks charts/automatos without a cluster: helm lint, the rendered manifests
+# against the Kubernetes schemas (kubeconform) of the oldest and the newest
+# Kubernetes the chart supports (PRD-279 US-203), and the helm-unittest suites in
 # charts/automatos/tests. Seconds, not minutes.
 #
-# The end-to-end test on a real cluster (deploy/kind/e2e.sh) needs Docker and
-# several GB of images, so it runs locally, not here.
+# `install` (PRD-280 US-100) installs the chart on a kind cluster, with the components
+# deploy/kind/strict-values.yaml turns on (its header lists what is on and what is not
+# exercised) and the images built in this run, into a namespace that enforces the
+# "restricted" pod security level, and fails unless every pod is ready, every pod the
+# release makes passes "restricted", the worker's included (PRD-280 US-201), the worker
+# runs as uid 1000 in a namespace of its own with a Secret of its own (US-202) and writes
+# its volume, the API reads those files through its own claim, and every container's root
+# file system is read-only (deploy/kind/strict.sh). Then the enterprise edition (PRD-277),
+# rendered with the lane's values and deploy/kind/strict-enterprise-values.yaml: every pod
+# of it must pass "restricted" with a read-only root, and its web pod, the enterprise web
+# image built in this run, must start under "restricted", become ready, send a page to sign
+# in and answer the sign-in page with the media origin it was given. No identity provider
+# runs, so nothing signs in, and the enterprise API is not started. It runs only
+# when the chart, this lane, or an image's start-up changes (the paths below): it is the
+# chart's slowest lane. A change to Markdown files under charts/ alone runs neither job:
+# nothing either job checks reads them.
 #
-# Third-party actions are pinned to a commit; the comment names the release.
+# The longer local end-to-end test (deploy/kind/e2e.sh: upgrades, request checks, traces)
+# still runs on a person's machine.
+#
+# Third-party actions are pinned to a commit; the comment names the release. Tools are
+# pinned by version and checked against their published SHA-256.
 
 on:
   push:
@@ -15,12 +36,34 @@ on:
       - main
     paths:
       - "charts/**"
+      - "!charts/**/*.md"
       - ".github/workflows/chart.yml"
+      - "deploy/kind/**"
+      - "deploy/otel/**"
+      - "scripts/ci/chart_pod_specs.py"
+      - "orchestrator/Dockerfile"
+      - "orchestrator/docker-entrypoint.sh"
+      - "orchestrator/docker-secrets-guard.sh"
+      - "frontend/Dockerfile"
+      - "frontend/next.config.js"
+      - "services/workspace-worker/Dockerfile"
+      - "services/workspace-worker/entrypoint.sh"
   # Any base branch, so a PR stacked on another PR is checked too.
   pull_request:
     paths:
       - "charts/**"
+      - "!charts/**/*.md"
       - ".github/workflows/chart.yml"
+      - "deploy/kind/**"
+      - "deploy/otel/**"
+      - "scripts/ci/chart_pod_specs.py"
+      - "orchestrator/Dockerfile"
+      - "orchestrator/docker-entrypoint.sh"
+      - "orchestrator/docker-secrets-guard.sh"
+      - "frontend/Dockerfile"
+      - "frontend/next.config.js"
+      - "services/workspace-worker/Dockerfile"
+      - "services/workspace-worker/entrypoint.sh"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -34,8 +77,11 @@ env:
   HELM_UNITTEST_VERSION: v1.1.2
   KUBECONFORM_VERSION: v0.8.0
   KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
-  # The oldest Kubernetes minor the chart is validated against.
-  KUBERNETES_VERSION: 1.31.0
+  # The oldest and the newest Kubernetes the chart supports: every render is checked
+  # against both. charts/automatos/README.md states the same two minors
+  # (orchestrator/tests/test_prd279_chart_kubernetes.py fails when they differ).
+  KUBERNETES_OLDEST: 1.31.0
+  KUBERNETES_NEWEST: 1.37.0
 
 jobs:
   chart:
@@ -65,12 +111,153 @@ jobs:
       - name: helm lint
         run: helm lint charts/automatos --set existingSecret=ci
 
-      - name: kubeconform (every optional part switched on)
+      - name: kubeconform (every optional part switched on, oldest and newest Kubernetes)
         run: |
-          helm template ci charts/automatos \
-            --set existingSecret=ci --set ingress.enabled=true \
-            --set otel.enabled=true --set otel.endpoint=http://otel-collector:4318 \
-            | kubeconform -strict -summary -kubernetes-version "${KUBERNETES_VERSION}"
+          set -o pipefail
+          for version in "$KUBERNETES_OLDEST" "$KUBERNETES_NEWEST"; do
+            echo "Kubernetes ${version}"
+            helm template ci charts/automatos --kube-version "$version" \
+              --set existingSecret=ci --set ingress.enabled=true \
+              --set otel.enabled=true --set otel.endpoint=http://otel-collector:4318 \
+              --set worker.namespace=automatos-worker --set worker.existingSecret=ci-worker \
+              --set workspaces.api.existingClaim=ci-workspaces-api \
+              --set workspaces.worker.existingClaim=ci-workspaces-worker \
+              | kubeconform -strict -summary -kubernetes-version "$version"
+            echo "Kubernetes ${version}, the enterprise edition with the install lane's values"
+            helm template ci charts/automatos --kube-version "$version" \
+              -f deploy/kind/strict-values.yaml -f deploy/kind/strict-enterprise-values.yaml \
+              | kubeconform -strict -summary -kubernetes-version "$version"
+          done
 
       - name: helm-unittest
         run: helm unittest charts/automatos
+
+  install:
+    name: install under a strict namespace (kind, the images built here)
+    runs-on: ubuntu-24.04
+    # About twice the expected run (15 to 25 minutes on a warm image cache).
+    timeout-minutes: 45
+    env:
+      KIND_VERSION: v0.33.0
+      KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
+      # The node image this kind release names for that Kubernetes version, by digest.
+      KIND_NODE_IMAGE: kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0
+      KUBECTL_VERSION: v1.35.8
+      KUBECTL_SHA256: 874d5e72dbb819f43cff16bcd1e4f8bac5b7f2361fe1e55049b0a6c676fb0cbf
+      CLUSTER: automatos-ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install kind and kubectl
+        run: |
+          curl -sSfL -o kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  kind" | sha256sum -c -
+          curl -sSfL -o kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          echo "${KUBECTL_SHA256}  kubectl" | sha256sum -c -
+          sudo install -m 0755 kind kubectl /usr/local/bin/
+          rm kind kubectl
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # The four builds repeat smoke-images.yml's pull-request builds (images.yml's
+      # IMAGES: context, target, build args) and read its amd64 GHA cache without writing
+      # it. `load` puts each image in the runner's Docker under the name the lane's values
+      # give it (deploy/kind/strict-values.yaml); nothing is pushed.
+      - name: Build api
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: orchestrator
+          target: production
+          platforms: linux/amd64
+          tags: automatos-api:ci
+          load: true
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=api-amd64
+
+      - name: Build frontend
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: frontend
+          target: production
+          platforms: linux/amd64
+          build-args: |
+            NEXT_PUBLIC_AUTH_EDITION=local
+            NEXT_PUBLIC_API_URL=http://localhost:8000
+            NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+            NEXT_PUBLIC_MEDIA_ORIGINS=http://localhost:9000
+          tags: automatos-frontend:ci
+          load: true
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=frontend-amd64
+
+      # PRD-277 US-505: images.yml's enterprise-frontend entry, for `strict.sh enterprise`.
+      - name: Build enterprise-frontend
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: frontend
+          target: production
+          platforms: linux/amd64
+          build-args: |
+            NEXT_PUBLIC_AUTH_EDITION=enterprise
+            NEXT_PUBLIC_API_URL=
+            NEXT_PUBLIC_WS_URL=
+          tags: automatos-enterprise-frontend:ci
+          load: true
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=enterprise-frontend-amd64
+
+      - name: Build workspace-worker
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: services/workspace-worker
+          platforms: linux/amd64
+          build-args: |
+            INSTALL_BROWSER=false
+          tags: automatos-workspace-worker:ci
+          load: true
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=workspace-worker-amd64
+
+      # The images are in the runner's Docker now; the builder's copy only takes disk.
+      - name: Free the build cache
+        run: docker buildx prune --all --force
+
+      - name: Create the kind cluster and load the images
+        run: |
+          kind create cluster --name "$CLUSTER" --image "$KIND_NODE_IMAGE" \
+            --config deploy/kind/cluster.yaml --wait 180s
+          archive="$(mktemp)"
+          for image in automatos-api:ci automatos-frontend:ci automatos-enterprise-frontend:ci automatos-workspace-worker:ci; do
+            docker save "$image" -o "$archive"
+            kind load image-archive "$archive" --name "$CLUSTER"
+          done
+          rm -f "$archive"
+
+      - name: Datastores, the two namespaces, their Secrets and the agent-files claims
+        run: deploy/kind/strict.sh prepare
+
+      - name: helm install (every pod must become ready)
+        run: deploy/kind/strict.sh install
+
+      - name: Pod security, read-only roots and the worker's start
+        run: deploy/kind/strict.sh check
+
+      - name: The enterprise edition's pods under restricted, and its web image started
+        run: deploy/kind/strict.sh enterprise
+
+      - name: Diagnostics
+        if: failure()
+        run: deploy/kind/strict.sh diagnostics

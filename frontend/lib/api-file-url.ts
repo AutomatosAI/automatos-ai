@@ -8,6 +8,8 @@
  * as `${base}${path}`, ".evil.example/x" or "@evil.example/x" would change the host and
  * send the token there.
  */
+import { isEnterprise } from '@/lib/edition-name'
+
 const FALLBACK_ORIGIN = 'http://localhost'
 
 function pageOrigin(): string {
@@ -25,6 +27,15 @@ export function apiFileUrl(base: string, path: string): string | null {
   } catch {
     return null
   }
+}
+
+/**
+ * The credentials a file read sends (FilePreview). An absolute (presigned) address sends them as
+ * before. A file on the API sends none in saas and local, where the bearer token says who is asking;
+ * in enterprise the session cookie says it (PRD-277 US-502), so it goes with them.
+ */
+export function apiFileCredentials(isAbsolute: boolean, enterprise: boolean = isEnterprise): RequestCredentials {
+  return isAbsolute || enterprise ? 'include' : 'omit'
 }
 
 /** A path the API does not serve: what a guarded fetch reports instead of sending the token. */

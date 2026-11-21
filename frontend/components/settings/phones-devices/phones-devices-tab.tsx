@@ -10,11 +10,17 @@
  *
  * US-019a: a local install also shows the operator's Expo answer as a switch, and Pair a phone
  * asks it once, before the first code, while it was never answered (hooks/use-push-consent.ts).
+ *
+ * PRD-277 US-601: an enterprise install shows Pair a phone while discovery says it lets people
+ * pair, to the signed-in person, for themselves (the code pairs to its maker), with no Pair a
+ * browser (an enterprise browser signs in). The Expo switch shows to an install admin only: the
+ * route refuses everyone else.
  */
 import { useCountdown } from '@/hooks/use-countdown'
 import { useMintPairingCode, useMobileDevices, usePairingMode } from '@/hooks/use-mobile-devices'
 import { useAskOnceBeforePairing } from '@/hooks/use-push-consent'
 import { isLocal } from '@/lib/auth-edition'
+import { isEnterprise } from '@/lib/edition-name'
 
 import { DeviceList } from './device-list'
 import { PairBrowserNote, PairPhonePanel } from './pair-phone-panel'
@@ -49,7 +55,7 @@ export function PhonesDevicesTab() {
         <p className="text-sm text-muted-foreground">{TAB_LEDE}</p>
       </div>
       <DeviceList devices={devices.data} loading={devices.isLoading} failed={devices.isError} />
-      {isLocal && <PushConsentSwitch />}
+      {(isLocal || isEnterprise) && <PushConsentSwitch />}
       {paired && (
         <PairPhonePanel
           pairing={mint.data}
@@ -63,7 +69,7 @@ export function PhonesDevicesTab() {
           )}
         </PairPhonePanel>
       )}
-      {paired && <PairBrowserNote webUrl={webUrl} />}
+      {paired && isLocal && <PairBrowserNote webUrl={webUrl} />}
     </div>
   )
 }

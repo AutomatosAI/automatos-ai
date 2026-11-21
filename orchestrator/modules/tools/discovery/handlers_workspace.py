@@ -5,9 +5,9 @@ import logging
 from typing import Any, Dict, List, Optional, Set
 from uuid import UUID
 
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from core.auth.clerk_person import clerk_person_row
 from core.composio.pending_connections import CONNECTED, NOT_CONNECTED, PENDING
 from modules.tools.discovery.memory_off import NOT_SAVED, memory_is_off, memory_off_answer, off_when_nothing_is_found
 from modules.tools.discovery.memory_owner import owned_by_the_driver
@@ -46,10 +46,7 @@ def _resolve_owner_subject(db: Session, raw_user_id: Any) -> Optional[str]:
     if s.isdigit():
         return f"user:{int(s)}"
     try:
-        row = db.execute(
-            text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
-            {"cid": s},
-        ).fetchone()
+        row = clerk_person_row(db, s)
     except Exception:
         logger.warning("[PlatformExecutor] owner-subject resolution failed", exc_info=True)
         return None
@@ -483,8 +480,9 @@ async def list_system_settings(db: Session, workspace_id: UUID, params: Dict[str
     returns them raw to admin sessions; the tool deliberately does not)."""
     try:
         from core.models.system_settings import SystemSetting
+        from services.mobile.edition_change import RESERVED_SETTING_CATEGORIES
 
-        query = db.query(SystemSetting)
+        query = db.query(SystemSetting).filter(SystemSetting.category.notin_(RESERVED_SETTING_CATEGORIES))
         category = params.get("category")
         if category:
             query = query.filter(SystemSetting.category == category)
@@ -522,8 +520,9 @@ async def update_system_setting(db: Session, workspace_id: UUID, params: Dict[st
         from datetime import datetime
 
         from core.models.system_settings import SystemSetting
+        from services.mobile.edition_change import RESERVED_SETTING_CATEGORIES
 
-        setting = (
+        setting = None if category in RESERVED_SETTING_CATEGORIES else (
             db.query(SystemSetting)
             .filter(SystemSetting.category == category, SystemSetting.key == key)
             .first()

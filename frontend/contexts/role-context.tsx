@@ -3,6 +3,8 @@
 import { createContext, useContext, ReactNode } from 'react'
 import { useSession } from '@/lib/auth-hooks'
 import { isSaaS } from '@/lib/auth-edition'
+import { isEnterprise } from '@/lib/edition-name'
+import { systemRoleOf, useEnterpriseSession } from '@/lib/enterprise/session-context'
 
 /**
  * System Role Context
@@ -70,7 +72,12 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     // Local edition: there is exactly one operator and it is their machine — the
     // anonymous local session is the instance's super admin (backend mirrors
     // this in hybrid.py's anonymous lane; no platform exists above the operator).
-    const systemRole = (!isSaaS ? 'super_admin' : (effectiveRole || 'user')) as SystemRole
+    const editionRole = (!isSaaS ? 'super_admin' : (effectiveRole || 'user')) as SystemRole
+
+    // PRD-277 US-501: enterprise has many people, and each one's install role is the API's
+    // (GET /api/v1/auth/me `system_role`), never Clerk's or the browser's; `user` until it answers.
+    const enterprise = useEnterpriseSession()
+    const systemRole = isEnterprise ? systemRoleOf(enterprise) : editionRole
 
     return (
         <RoleContext.Provider value={{
@@ -78,7 +85,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
             // super_admin ⊇ admin — mirrors the backend hierarchy
             // (modules/policy/roles.py role_satisfies).
             isAdmin: systemRole === 'admin' || systemRole === 'super_admin',
-            isLoading: !isLoaded
+            isLoading: isEnterprise ? enterprise?.status !== 'signed-in' : !isLoaded
         }}>
             {children}
         </RoleContext.Provider>

@@ -19,7 +19,7 @@ on its own, in K15's order, and nothing is stored until every check has passed:
    change under one version);
 3. its package, from the DERIVED URL (the configured origin and ``catalog_paths.plugin_package_path`` of the
    bundle's slug and version, never a URL a catalogue or a bundle carries) through W1's ``fetch.fetch_bytes``,
-   capped at ``PLUGIN_MAX_UPLOAD_SIZE_MB``;
+   capped at ``PLUGIN_MAX_UPLOAD_SIZE_MB``, and only where ``items_gate.brings_items`` (PRD-277 US-704);
 4. the upload's own zip rules (``plugin_upload_service.py``, its constants named the same): at most
    ``MAX_FILE_COUNT`` files, each at most ``MAX_FILE_UNCOMPRESSED_SIZE``, at most the smaller of
    ``MAX_TOTAL_UNCOMPRESSED_SIZE`` and the S3 cap in all, compressed at most ``MAX_COMPRESSION_RATIO`` times;
@@ -85,6 +85,7 @@ from core.services.plugin_upload_service import _auto_categorise
 from core.services.skill_materializer import SkillMaterializer
 from services.marketplace_bundles.catalog_paths import plugin_package_path
 from services.marketplace_bundles.items_feed import CatalogEntry, FetchedBundle, changed_entries, fetch_bundles
+from services.marketplace_bundles.items_gate import ITEMS_NOT_SWITCHED_ON, brings_items
 from services.marketplace_bundles.plugin_files import (
     MB, PluginFilesRefused, StoredPlugin, checked_files, is_safe_path, plugin_files_max_bytes, plugin_prefix,
 )
@@ -390,7 +391,10 @@ def target_of(mapping: Any, row: Any, version: str) -> Target:
 
 
 def _package(seams: Seams, slug: str, version: str) -> bytes:
-    """The plugin's package from the derived URL, capped at ``PLUGIN_MAX_UPLOAD_SIZE_MB``."""
+    """The plugin's package from the derived URL, capped at ``PLUGIN_MAX_UPLOAD_SIZE_MB``; nothing is requested
+    where this install doesn't bring items from Automatos Cloud (``items_gate``, PRD-277 US-704)."""
+    if not brings_items():
+        raise PluginRefused(ITEMS_NOT_SWITCHED_ON)
     url = f"{seams.origin}{plugin_package_path(slug, version)}"
     try:
         return fetch_bytes(url, plugin_files_max_bytes(), ACCEPT_PACKAGE, seams.client_factory)

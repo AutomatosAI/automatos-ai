@@ -195,7 +195,7 @@ Configuration and data persistence are centralized to guarantee multi-tenant ten
 ### Centralized Configuration (`Config` class)
 - Configuration is centralized exclusively in `orchestrator/config.py` using a type-safe `Config` class that wraps environment variables `[orchestrator/config.py:1-46]()`.
 - Exposes connection strings (`DATABASE_URL`, `POSTGRES_*`), Redis parameters (`REDIS_URL`, `REDIS_HOST`), memory tuning variables, and LLM thresholds `[orchestrator/config.py:48-138]()`.
-- Enforces strict production rules, such as forcing `sslmode=require` for external PostgreSQL connections `[orchestrator/config.py:59-72]()`.
+- TLS to PostgreSQL comes from `DATABASE_SSLMODE` and `DATABASE_SSLROOTCERT`, applied to every connection to the application's database by `orchestrator/core/database/tls.py`; with neither set, the main engine adds `sslmode=require` in production when its address names none `[orchestrator/core/database/tls.py]()`.
 - System settings coverage is tracked via `orchestrator/reports/config-surface.json` containing over 688 defined settings keys `[orchestrator/reports/config-surface.json:1-197]()`.
 
 ### Persistent Data Stores

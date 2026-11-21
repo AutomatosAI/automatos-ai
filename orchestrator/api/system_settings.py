@@ -27,6 +27,7 @@ from core.models.system_settings import (
     SettingCategory
 )
 from pydantic import BaseModel
+from services.mobile.edition_change import RESERVED_SETTING_CATEGORIES
 
 class BulkUpdateItem(BaseModel):
     """Single item in bulk update request"""
@@ -46,6 +47,26 @@ def _require_admin(ctx: RequestContext) -> None:
     if ctx.user and getattr(ctx.user, "system_role", "user") in ("admin", "super_admin"):
         return
     raise HTTPException(status_code=403, detail="Admin access required")
+
+
+# Categories only the install itself writes (PRD-277 US-601: what it last started as). This API never
+# lists, reads, changes, deletes or resets one; a row in one is answered as a setting that does not exist.
+RESERVED_CATEGORIES = RESERVED_SETTING_CATEGORIES
+SETTING_NOT_FOUND = "Setting not found"
+RESERVED_CATEGORY_MESSAGE = "Settings in this category are written by the install itself."
+
+
+def _settings(db: Session):
+    """The settings this API shows and changes: every category but the reserved ones."""
+    return db.query(SystemSetting).filter(SystemSetting.category.notin_(RESERVED_CATEGORIES))
+
+
+def _setting(db: Session, setting_id: int) -> SystemSetting:
+    """One setting this API may act on, by id; 404 when there is none (or it is the install's own)."""
+    setting = _settings(db).filter(SystemSetting.id == setting_id).first()
+    if not setting:
+        raise HTTPException(status_code=404, detail=SETTING_NOT_FOUND)
+    return setting
 
 
 # The Auto restamp on a change of the platform default (core/llm/auto_model_sync):
@@ -81,10 +102,10 @@ def list_system_settings(
     """List all system settings, optionally filtered by category"""
     _require_admin(ctx)
     try:
-        query = db.query(SystemSetting)
+        query = _settings(db)
         if category:
             query = query.filter(SystemSetting.category == category)
-        
+
         settings = query.order_by(SystemSetting.category, SystemSetting.key).all()
         return settings
     except Exception as e:
@@ -97,7 +118,8 @@ def list_setting_categories(db: Session = Depends(get_db), ctx: RequestContext =
     """List all available setting categories"""
     _require_admin(ctx)
     try:
-        categories = db.query(SystemSetting.category).distinct().all()
+        categories = db.query(SystemSetting.category).filter(
+            SystemSetting.category.notin_(RESERVED_CATEGORIES)).distinct().all()
         return [cat[0] for cat in categories]
     except Exception as e:
         logger.error(f"Failed to list categories: {e}")
@@ -109,8 +131,8 @@ def get_settings_by_category(db: Session = Depends(get_db), ctx: RequestContext 
     """Get all settings grouped by category"""
     _require_admin(ctx)
     try:
-        settings = db.query(SystemSetting).order_by(SystemSetting.category, SystemSetting.key).all()
-        
+        settings = _settings(db).order_by(SystemSetting.category, SystemSetting.key).all()
+
         # Group by category
         categories = {}
         for setting in settings:
@@ -137,20 +159,20 @@ def get_settings_stats(db: Session = Depends(get_db), ctx: RequestContext = Depe
     """Get system settings statistics"""
     _require_admin(ctx)
     try:
-        total_settings = db.query(SystemSetting).count()
-        
+        total_settings = _settings(db).count()
+
         # Count by category
         categories = {}
         category_counts = db.query(
-            SystemSetting.category, 
+            SystemSetting.category,
             func.count(SystemSetting.id)
-        ).group_by(SystemSetting.category).all()
-        
+        ).filter(SystemSetting.category.notin_(RESERVED_CATEGORIES)).group_by(SystemSetting.category).all()
+
         for category, count in category_counts:
             categories[category] = count
-        
-        sensitive_settings = db.query(SystemSetting).filter(SystemSetting.is_sensitive == True).count()
-        required_settings = db.query(SystemSetting).filter(SystemSetting.is_required == True).count()
+
+        sensitive_settings = _settings(db).filter(SystemSetting.is_sensitive == True).count()
+        required_settings = _settings(db).filter(SystemSetting.is_required == True).count()
         
         return SystemSettingsStats(
             total_settings=total_settings,
@@ -172,11 +194,7 @@ def get_system_setting(
     """Get a specific system setting"""
     _require_admin(ctx)
     try:
-        setting = db.query(SystemSetting).filter(SystemSetting.id == setting_id).first()
-        if not setting:
-            raise HTTPException(status_code=404, detail="Setting not found")
-        
-        return setting
+        return _setting(db, setting_id)
     except HTTPException:
         raise
     except Exception as e:
@@ -196,10 +214,7 @@ def update_system_setting(
     _require_admin(ctx)
 
     try:
-        setting = db.query(SystemSetting).filter(SystemSetting.id == setting_id).first()
-        if not setting:
-            raise HTTPException(status_code=404, detail="Setting not found")
-        
+        setting = _setting(db, setting_id)
         old_value = setting.value
         setting.value = update_data.value
         if update_data.description is not None:
@@ -230,6 +245,8 @@ def create_system_setting(
     _require_admin(ctx)
 
     try:
+        if setting_data.category in RESERVED_CATEGORIES:
+            raise HTTPException(status_code=400, detail=RESERVED_CATEGORY_MESSAGE)
         # Check if setting already exists
         existing = db.query(SystemSetting).filter(
             SystemSetting.category == setting_data.category,
@@ -266,10 +283,7 @@ def delete_system_setting(
     _require_admin(ctx)
 
     try:
-        setting = db.query(SystemSetting).filter(SystemSetting.id == setting_id).first()
-        if not setting:
-            raise HTTPException(status_code=404, detail="Setting not found")
-        
+        setting = _setting(db, setting_id)
         # Don't allow deletion of required settings
         if setting.is_required:
             raise HTTPException(
@@ -310,7 +324,7 @@ def bulk_update_settings(
         moves_auto_default = False
 
         for update in updates:
-            setting = db.query(SystemSetting).filter(SystemSetting.id == update.id).first()
+            setting = _settings(db).filter(SystemSetting.id == update.id).first()
             if setting:
                 old_value = setting.value
                 new_value = update.value
@@ -362,7 +376,7 @@ def reset_settings_to_defaults(
     _require_admin(ctx)
 
     try:
-        query = db.query(SystemSetting)
+        query = _settings(db)
         if category:
             query = query.filter(SystemSetting.category == category)
         settings = query.filter(SystemSetting.default_value.isnot(None)).all()

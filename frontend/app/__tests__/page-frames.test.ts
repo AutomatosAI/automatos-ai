@@ -35,6 +35,7 @@ const NO_HEADER: Record<string, string> = {
   '/auth/signin/[[...rest]]': 'Clerk flow',
   '/auth/signup/[[...rest]]': 'Clerk flow',
   '/sign-in/[[...rest]]': 'Clerk flow',
+  '/sign-in/phone': "auth flow: where a phone's sign-in waits for Continue (enterprise)",
   '/sign-up/[[...rest]]': 'Clerk flow',
 }
 

@@ -66,7 +66,10 @@ NEW, UPDATED, UNCHANGED, REFUSED = "new", "updated", "unchanged", "refused"
 WRITTEN = frozenset({NEW, UPDATED})
 UNIQUE_VIOLATION = "23505"  # Postgres's SQLSTATE for a row a unique index refuses
 
-SYNC_OFF = "Sync with Automatos Cloud runs only on a local install with AUTOMATOS_CLOUD_URL set."
+SYNC_OFF = (
+    "Sync with Automatos Cloud runs only on an install that syncs with it (a local install, or an organisation's "
+    "whose operator switched it on) with AUTOMATOS_CLOUD_URL set."
+)
 KEYS_UNREADABLE = "This install's signing keys couldn't be read, so nothing was synced."
 NOT_SAVED = "The synced listings couldn't be saved."
 ALREADY_RUNNING = "A Sync with Automatos Cloud is already running. Try again when it has finished."
@@ -124,8 +127,10 @@ class Held(NamedTuple):
 
 
 def sync_enabled() -> bool:
-    """True in the local edition with ``AUTOMATOS_CLOUD_URL`` set (the hosted edition serves the catalogue)."""
-    return editions.current().calls_automatos_cloud and bool(configured_url())
+    """True where this install syncs with Automatos Cloud (``calls_cloud_sync``: the local edition, or an
+    enterprise install that switched it on) and ``AUTOMATOS_CLOUD_URL`` is set; the hosted edition serves the
+    catalogue."""
+    return editions.current().calls_cloud_sync and bool(configured_url())
 
 
 # --------------------------------------------------------------------------- applying

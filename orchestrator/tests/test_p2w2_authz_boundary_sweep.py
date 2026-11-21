@@ -73,6 +73,11 @@ PUBLIC_BY_DESIGN = {
     # 404 unless AUTH_EDITION=local and LOCAL_REMOTE_ACCESS=paired; rate-limited per IP
     # before the code is read (api/mobile_devices.py).
     ("POST", "/api/v1/mobile/pair"),
+    # PRD-277 US-603: a phone that signed in at the install's own OIDC start address has no token
+    # yet, so the one-time code its app link received, with its PKCE verifier, is its only
+    # credential. 404 unless the edition signs in with OIDC; rate-limited per IP in its own
+    # bucket (phone_sign_in_exchange_ip) before the code is read (api/mobile_devices.py).
+    ("POST", "/api/v1/mobile/sign-in/exchange"),
 }
 
 # (d) Own non-hybrid auth. Structurally enforced below: none of these may
@@ -98,6 +103,19 @@ OWN_AUTH_ROUTES = {
     # credential is the product's own key (Authorization: Bearer, checked against the product's stored hash in
     # constant time; 401 otherwise), NOT the shared hybrid dependency: no person or workspace calls it.
     ("POST", "/api/products/{product_id}/workspaces"),
+    # PRD-277 US-303 (api/auth_sessions.py): sign-out's credential is the caller's own session
+    # (Authorization: Bearer ams_… or the session cookie, which must pass the cross-site check),
+    # found by its token's hash and confirmed in constant time; NOT the shared hybrid dependency,
+    # so a person in no workspace can still sign out. It ends that one session and nothing else.
+    # 404 unless the edition issues sessions.
+    ("POST", "/api/v1/auth/sign-out"),
+    # PRD-277 US-603 (api/phone_sign_in.py): Continue and Cancel on the page a phone's sign-in waits
+    # on. Their credential is the confirmation cookie (__Host-, HttpOnly, SameSite=Lax), found by its
+    # token's hash and confirmed in constant time, after the US-302 cross-site check
+    # (session_cookie.assert_cookie_request_allowed); NOT the shared hybrid dependency: nobody has a
+    # session or a workspace yet. 404 unless the edition signs in with OIDC.
+    ("POST", "/api/v1/auth/oidc/phone/continue"),
+    ("POST", "/api/v1/auth/oidc/phone/cancel"),
     # PRD-274 W5c: the same key closes and restores one of the product's own workspaces (404 for any other).
     ("DELETE", "/api/products/{product_id}/workspaces/{workspace_id}"),
     ("POST", "/api/products/{product_id}/workspaces/{workspace_id}/restore"),
@@ -182,6 +200,15 @@ ADMIN_GATED_IN_HANDLER = {
     # Skills git import is admin-only until a safe user-facing flow exists
     # (PRD-70 FIX-01).
     ("POST", "/api/v1/skills/sources/git"),
+    # PRD-277 US-303 (api/auth_sessions.py): an install admin on the session lane (_require_admin:
+    # caller_is_admin on a session context, nothing else), after step-up, ends sessions or
+    # deactivates a person whose install role theirs satisfies. 404 unless sessions are issued.
+    ("POST", "/api/v1/auth/sessions/{session_id}/revoke"),
+    ("POST", "/api/v1/auth/people/{user_id}/sessions/revoke"),
+    ("POST", "/api/v1/auth/people/{user_id}/deactivate"),
+    # PRD-277 US-405: the same install admin, after step-up, gives a person an install-wide role
+    # their own satisfies, and never leaves the install without an active install admin.
+    ("POST", "/api/v1/auth/people/{user_id}/system-role"),
     # PRD-196 S7 DONE: api/gdpr.py's hand-rolled workspace-admin gate was
     # consolidated onto the canonical ``require_workspace_admin`` DEPENDENCY, so
     # /api/v1/gdpr/erase + /erase-subject now classify as workspace-admin (not
@@ -259,6 +286,10 @@ OWN_GATE_IN_HANDLER = {
     ("DELETE", "/api/v1/mobile/devices/{device_id}"),
     # rotate: the device lane on its own device, presenting its current token (else 404/409).
     ("POST", "/api/v1/mobile/devices/{device_id}/rotate"),
+    # PRD-277 US-601: a pairing code pairs a device to its maker (``pairing_code_owner``). In local
+    # it calls ``require_workspace_admin`` (the operator passes); in enterprise any person on the
+    # session lane, in a workspace they are a member of, for themselves; a device or key is 403.
+    ("POST", "/api/v1/mobile/pairing-codes"),
     # digest now (api/mobile_push.py _digest_asker): today's brief for the CALLER only, into
     # their own Auto thread. 404 without a workspace, 403 when no person stands behind the
     # caller or the person isn't a current member (services.mobile.digest.belongs, the

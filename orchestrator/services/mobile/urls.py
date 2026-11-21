@@ -4,7 +4,8 @@
 * ``api_url`` is ``https://<PUBLIC_API_HOST>`` in saas, and on a local install only once
   the operator has named their own host. While ``PUBLIC_API_HOST`` is still the hosted
   default (``HOSTED_PUBLIC_API_HOST`` in ``config.py``) a local install answers with the request's
-  own base URL: a self-hosted server never advertises the hosted API.
+  own base URL: a self-hosted server never advertises the hosted API. Where the web app and the
+  API share the install's one public address (PRD-277 US-602, enterprise) it is ``web_url``.
 * Both must be http(s) URLs with a host, so the pair link built on them
   (``services.mobile.pairing``) is never a custom scheme; anything else is a
   misconfiguration and raises ``MobileUrlError`` naming its source.
@@ -45,8 +46,12 @@ def api_url(request_base_url: str) -> str:
     """The API's address as a phone should call it (K15).
 
     ``request_base_url`` is the base URL the caller reached this API on; it is used only
-    on a local install that has not set ``PUBLIC_API_HOST``.
+    on a local install that has not set ``PUBLIC_API_HOST``. Where the API is reached on the
+    install's one public address (``api_on_public_address``: enterprise) it is that address,
+    ``web_url``, and nothing the request says.
     """
+    if editions.current().api_on_public_address:
+        return web_url()
     host = config.PUBLIC_API_HOST
     if not editions.current().hosts_automatos_cloud and host == HOSTED_PUBLIC_API_HOST:
         return _web_address(request_base_url, "the request's base URL")
