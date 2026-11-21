@@ -12,7 +12,8 @@
  *
  * PRD-277 / PRD-279 moved the directive list here from next.config.js unchanged, with the
  * constants it names (they were in csp-sources.js, which re-exports them): for the same inputs the
- * policy is the same string it was.
+ * policy is the same string it was. The enterprise edition builds its own list
+ * (enterpriseContentSecurityPolicy, PRD-277 D-12), at build time and in the middleware alike.
  */
 
 /**
@@ -104,6 +105,43 @@ export function contentSecurityPolicy({ clerkFrontendApi = '', apiOrigin = '', s
       'https://challenges.cloudflare.com',
       stripe.frame,
     ),
+    "worker-src 'self' blob:",
+    "object-src blob:",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join('; ')
+}
+
+/**
+ * PRD-277 D-12 (#1605): the enterprise edition's policy, naming only the sources that edition uses.
+ * It mounts no Clerk, so it names none of Clerk's hosts, nor Cloudflare's challenge, which Clerk's
+ * bot protection loads. Its API is the page's own origin ('self'), so it names no Automatos origin
+ * in connect-src. It has no billing, so it names no Stripe host. A Cloud listing's screenshots load
+ * from Automatos Cloud's files route (the path cloudImageSources names, not the origin) only while
+ * `cloudImages` is true, that is, while the install's operator has switched Cloud sync on. The other
+ * sources are the shared policy's: jsDelivr (the code editor loads from it), Composio's app logos,
+ * Google-hosted profile pictures, and the WebSocket schemes.
+ *
+ * @param {object} inputs
+ * @param {string} [inputs.mediaSources] the media origins, space-separated, or ''
+ * @param {boolean} [inputs.cloudImages] whether Cloud sync is switched on
+ * @returns {string}
+ */
+export function enterpriseContentSecurityPolicy({ mediaSources = '', cloudImages = false } = {}) {
+  return [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net",
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+    directive(
+      "img-src 'self' data: blob: https://*.googleusercontent.com https://logos.composio.dev",
+      cloudImages ? cloudImageSources('') : '',
+      mediaSources,
+    ),
+    `media-src 'self' blob: ${mediaSources}`.trim(),
+    "font-src 'self' data: https://cdn.jsdelivr.net",
+    "connect-src 'self' https://cdn.jsdelivr.net wss: ws:",
+    "frame-src 'self' blob:",
     "worker-src 'self' blob:",
     "object-src blob:",
     "base-uri 'self'",

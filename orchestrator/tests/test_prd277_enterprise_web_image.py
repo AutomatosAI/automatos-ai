@@ -71,7 +71,7 @@ def test_the_script_starts_the_image_with_no_network_and_says_what_it_proved():
     assert SCRIPT.startswith("#!/usr/bin/env bash\n")
     assert "set -euo pipefail" in SCRIPT
     assert '--network none "$@" "$IMAGE"' in SCRIPT
-    # One for each refusal (expect_refused, run twice), one for the standalone checks, one for the policy.
+    # One for each refusal (expect_refused, run three times), one for the standalone checks, one for the policy.
     assert SCRIPT.count('echo "proved: ') == 3
     assert 'exit "$bad"' == SCRIPT.rstrip().splitlines()[-1]
     assert "Not proved here:" in SCRIPT
@@ -82,6 +82,8 @@ def test_it_runs_both_refusals_then_the_standalone_checks_then_the_policy():
         'expect_refused BACKEND_INTERNAL_URL "" -e "MEDIA_ORIGINS=${MEDIA_ORIGIN}"',
         'expect_refused MEDIA_ORIGINS "$BAD_MEDIA_ORIGIN" -e "BACKEND_INTERNAL_URL=${BACKEND}" '
         '-e "MEDIA_ORIGINS=${BAD_MEDIA_ORIGIN}"',
+        'expect_refused ENTERPRISE_CALLS_CLOUD_SYNC "$BAD_CLOUD_SYNC" -e "BACKEND_INTERNAL_URL=${BACKEND}" '
+        '-e "ENTERPRISE_CALLS_CLOUD_SYNC=${BAD_CLOUD_SYNC}"',
         'bash "${HERE}/check-standalone-image.sh" "$IMAGE" /sign-in',
         "check_running_policy\n",
     ]
@@ -102,6 +104,10 @@ def test_each_refusal_the_server_gives_starts_with_its_settings_name():
     assert "`${BACKEND_INTERNAL_URL_SETTING} must be" in start_up
     assert "export const MEDIA_ORIGINS_SETTING = 'MEDIA_ORIGINS'" in media
     assert "`${MEDIA_ORIGINS_SETTING} must list" in media
+    cloud_sync = (ENTERPRISE / "cloud-sync-setting.ts").read_text(encoding="utf-8")
+    assert "export const CLOUD_SYNC_SETTING = 'ENTERPRISE_CALLS_CLOUD_SYNC'" in cloud_sync
+    assert "`${CLOUD_SYNC_SETTING} must be true or false" in cloud_sync
+    assert _value("BAD_CLOUD_SYNC") not in cloud_sync, "the refusal text never holds the bad value"
 
 
 def test_the_values_are_made_up_and_of_the_right_shape():

@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const path = require('path')
 const { mediaOrigins, clerkFrontendApiOrigin, stripeCspFor } = require('./csp-sources')
-const { contentSecurityPolicy } = require('./csp-policy.mjs')
+const { contentSecurityPolicy, enterpriseContentSecurityPolicy } = require('./csp-policy.mjs')
 const {
   isEnterpriseBuild,
   refuseBuildTimeAddresses,
@@ -78,9 +78,12 @@ const SECURITY_HEADERS_RULE = {
     // PRD-270 K15: img-src names the catalogue files route on Automatos Cloud and on the API origin (cloudImageSources,
     // csp-policy.mjs): a Cloud listing's screenshots load from there.
     // The directives are built in csp-policy.mjs, which the enterprise middleware builds them with too.
+    // PRD-277 D-12: the enterprise edition's own list, with no media origin and Cloud sync off here.
     {
       key: 'Content-Security-Policy',
-      value: contentSecurityPolicy({ clerkFrontendApi, apiOrigin, stripe: stripeCsp, mediaSources }),
+      value: enterprise
+        ? enterpriseContentSecurityPolicy()
+        : contentSecurityPolicy({ clerkFrontendApi, apiOrigin, stripe: stripeCsp, mediaSources }),
     },
   ],
 }

@@ -10,10 +10,14 @@
  *     http://localhost:8000, which inside the web app's container is the web app itself, so it is
  *     required: an origin and nothing else, `http` or `https`, a host and an optional port. No
  *     trailing slash and no path, since the routes append `/api/…` to it as it is.
+ *   - ENTERPRISE_CALLS_CLOUD_SYNC (PRD-277 D-12): whether the policy allows Automatos Cloud's
+ *     screenshots (cloud-sync-setting.ts). Unset or blank is off; anything but the API's switch
+ *     forms is refused.
  *
  * The answer names the setting, never its value. instrumentation.ts runs this through
  * start-up-node.ts once, when the Node server starts, in the enterprise build only.
  */
+import { parseCloudSync } from './cloud-sync-setting'
 import { HOST_NAME, isValidPort, parseMediaOrigins } from './media-origins'
 
 export const BACKEND_INTERNAL_URL_SETTING = 'BACKEND_INTERNAL_URL'
@@ -25,10 +29,11 @@ export const BACKEND_INTERNAL_URL_REFUSED =
 /** http or https, a host name (a cluster service name has one label), an optional port; nothing after it. */
 const SERVER_ORIGIN = new RegExp(`^https?://${HOST_NAME}(?::(\\d{1,5}))?$`, 'i')
 
-/** What start-up reads: the two settings, as the environment holds them. */
+/** What start-up reads: the three settings, as the environment holds them. */
 export interface StartUpSettings {
   readonly MEDIA_ORIGINS?: string
   readonly BACKEND_INTERNAL_URL?: string
+  readonly ENTERPRISE_CALLS_CLOUD_SYNC?: string
 }
 
 function isServerOrigin(raw: string | undefined): boolean {
@@ -41,5 +46,7 @@ export function enterpriseStartUpProblem(settings: StartUpSettings): string | nu
   const media = parseMediaOrigins(settings.MEDIA_ORIGINS)
   if (!media.ok) return media.error
   if (!isServerOrigin(settings.BACKEND_INTERNAL_URL)) return BACKEND_INTERNAL_URL_REFUSED
+  const cloudSync = parseCloudSync(settings.ENTERPRISE_CALLS_CLOUD_SYNC)
+  if (!cloudSync.ok) return cloudSync.error
   return null
 }

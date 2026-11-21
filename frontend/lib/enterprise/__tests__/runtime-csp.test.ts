@@ -78,16 +78,20 @@ const LOCAL_POLICY = [
   ...TAIL,
 ].join('; ')
 
-/** The enterprise build: no key, no API address, no billing, no media origin. */
+/**
+ * The enterprise build (PRD-277 D-12, #1605): no Clerk, Cloudflare, Automatos or payment host, no
+ * media origin, and Cloud sync off (enterprise-own-hosts-csp.test.ts pins it with Cloud sync on).
+ */
+const ENTERPRISE_IMG = "img-src 'self' data: blob: https://*.googleusercontent.com https://logos.composio.dev"
 const ENTERPRISE_POLICY = [
   "default-src 'self'",
-  SCRIPT_NO_BILLING,
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net",
   "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
-  IMG_BASE,
+  ENTERPRISE_IMG,
   "media-src 'self' blob:",
   "font-src 'self' data: https://cdn.jsdelivr.net",
-  "connect-src 'self'  https://*.automatos.app https://*.clerk.accounts.dev https://*.protect.clerk.com:* https://api.clerk.com https://cdn.jsdelivr.net wss: ws:",
-  FRAME_NO_BILLING,
+  "connect-src 'self' https://cdn.jsdelivr.net wss: ws:",
+  "frame-src 'self' blob:",
   ...TAIL,
 ].join('; ')
 
@@ -127,7 +131,7 @@ describe('the middleware sets the policy with the running server’s media origi
     expect(redirected.status).toBe(307)
     for (const answer of [through, redirected]) {
       const policy = directives(answer.headers.get(CSP_HEADER) ?? '')
-      expect(policy.get('img-src')).toBe(`${IMG_BASE} ${MEDIA}`)
+      expect(policy.get('img-src')).toBe(`${ENTERPRISE_IMG} ${MEDIA}`)
       expect(policy.get('media-src')).toBe(`media-src 'self' blob: ${MEDIA}`)
     }
   })
