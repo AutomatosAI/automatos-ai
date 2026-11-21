@@ -306,11 +306,86 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content: {name: ENTERPRISE_CALLS_CLOUD_ITEMS, value: "true"}
-  - it: renders the hosted services off with no hostedServices map at all
+  - it: renders the hosted services off with no hostedServices map at all, in the API
     template: templates/api-deployment.yaml
     set:
       edition: {enterprise: {hostedServices: null}}
     asserts:
       - contains:
           path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_THEME_REVOCATIONS, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
           content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_ITEMS, value: "false"}
+  - it: renders the hosted services off with no hostedServices map at all, in the migration Job
+    template: templates/migrate-job.yaml
+    set:
+      edition: {enterprise: {hostedServices: null}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_THEME_REVOCATIONS, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_ITEMS, value: "false"}
+  # A null value drops that key from the merged values, so each of these is also the key left out.
+  - it: renders themeRevocations off when it is null or left out, in the API
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: null}}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_THEME_REVOCATIONS, value: "false"}
+  - it: renders themeRevocations off when it is null or left out, in the migration Job
+    template: templates/migrate-job.yaml
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: null}}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_THEME_REVOCATIONS, value: "false"}
+  - it: renders cloudSync off when it is null or left out, in the API
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: true, cloudSync: null}}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_THEME_REVOCATIONS, value: "true"}
+  - it: renders cloudSync off when it is null or left out, in the migration Job
+    template: templates/migrate-job.yaml
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: true, cloudSync: null}}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}
+  - it: renders cloudItems off when it is null or left out, in the API
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: true, cloudSync: true, cloudItems: null}}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_ITEMS, value: "false"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "true"}
+  - it: renders cloudItems off when it is null or left out, in the migration Job
+    template: templates/migrate-job.yaml
+    set:
+      edition: {enterprise: {hostedServices: {themeRevocations: true, cloudSync: true, cloudItems: null}}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_ITEMS, value: "false"}

@@ -3,6 +3,7 @@
  *
  * - the local build calls every one, the hosted build none, and neither asks;
  * - the enterprise build knows none of them and asks (`editionHostedServices` is null);
+ * - every build but the hosted one may hold Cloud items (`holdsCloudItems`), whatever the settings say;
  * - an answer turns a service on only with `true`: anything else, a missing field or a malformed answer is off;
  * - `readHostedServices` reads `GET /api/hosted-services` through the client it is handed.
  */
@@ -34,6 +35,17 @@ describe('what the build knows', () => {
 
   it('the enterprise build knows none and asks', async () => {
     expect((await load('enterprise')).editionHostedServices()).toBeNull()
+  })
+})
+
+describe('what the install may hold', () => {
+  // A setting stops requests, never what is held: Cloud items are shown and reviewed everywhere but the host.
+  it.each([
+    ['local', true],
+    ['enterprise', true],
+    ['saas', false],
+  ] as const)('the %s build holds Cloud items: %s', async (edition, holds) => {
+    expect((await load(edition)).holdsCloudItems()).toBe(holds)
   })
 })
 

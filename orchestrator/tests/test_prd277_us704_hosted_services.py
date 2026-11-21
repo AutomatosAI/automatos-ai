@@ -3,10 +3,12 @@
 Three settings, one per hosted service the code calls (``core/editions.py`` ``HOSTED_SERVICE_SETTINGS``):
 ``ENTERPRISE_CALLS_THEME_REVOCATIONS`` (the revocation pull, its schedule, its sync status and Check now),
 ``ENTERPRISE_CALLS_CLOUD_SYNC`` (the Cloud Sync routes, the Sync and its package downloads, the Cloud file
-addresses) and ``ENTERPRISE_CALLS_CLOUD_ITEMS`` (the Sync's item passes and the "Items brought from Cloud"
-routes). No database, and nothing leaves the process: Automatos's hosts are ``httpx.MockTransport``s, and while
-a service is off every client seam and the real HTTP transports raise and record, so a test fails if any is
-touched at all. Proven:
+addresses) and ``ENTERPRISE_CALLS_CLOUD_ITEMS`` (the Sync's item and plugin passes, and the bundle and package
+requests they make). A setting stops requests; it never stops the install reading what it already holds.
+Nothing leaves the process: Automatos's hosts are ``httpx.MockTransport``s, and while a service is off every
+client seam and the real HTTP transports raise and record. Code under test catches errors in places, so every
+"off" test asserts that record is empty, not only that no error surfaced. One test holds an in-memory SQLite
+install; the rest use no database. Proven:
 
 * in enterprise each capability is its own setting: off by default, on only for a plain true form, off for a
   malformed value, and one setting never turns on another; in ``local`` and ``saas`` the row decides and no
@@ -15,12 +17,15 @@ touched at all. Proven:
   without Cloud sync, naming the setting and never its value; ``config.py`` reads each setting, ``false`` unless
   set, and names it in the config surface;
 * off, theme revocations: the shared scheduler registers no pull job, ``pull_feed`` sends nothing and records
-  nothing, both admin routes answer 404 with their plain sentence before anything runs, and the feed revokes no
-  key; on: the job is registered, the pull reaches the feed, and the routes answer;
+  nothing, and both admin routes answer 404 with their plain sentence before anything runs; on: the job is
+  registered, the pull reaches the feed, and the routes answer. A key a pull revoked while it was on still reads
+  as revoked through ``signature_state`` once it is off; an install that never pulled holds no revoked key; the
+  hosted edition reads no row;
 * off, Cloud sync: ``sync_catalog`` and a package download send nothing, no Cloud file address is given, and
   both routes answer 404 before the caller is looked at; on: the Sync and the download reach Automatos Cloud;
-* off, Cloud items: the Sync runs no item pass, and the three routes answer 404 before the caller is looked at;
-  on: the passes run and the routes answer;
+* off, Cloud items: the Sync runs no item pass, a bundle fetch and a plugin package fetch each refuse before any
+  request, and the three read routes still answer for what the install holds, before and after the setting is
+  switched off; on: the passes run, and a plugin package is fetched;
 * ``GET /api/hosted-services`` answers each capability, for any signed-in caller;
 * ``local`` calls each service as before, and ``saas`` stays the host: 404 with its own sentences, no pull.
 """
@@ -30,12 +35,16 @@ import inspect
 import itertools
 import json
 import os
+import re
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
 import pytest
+import sqlalchemy as sa
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 os.environ.setdefault("POSTGRES_USER", "test")
 os.environ.setdefault("POSTGRES_PASSWORD", "test")
@@ -59,9 +68,12 @@ from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 from core.edition_start_up import EditionNotReady, check_hosted_service_settings, check_start_up  # noqa: E402
-from services.marketplace_bundles import sync_items  # noqa: E402
+from services.marketplace_bundles import items_feed, items_gate, plugin_import, sync_items  # noqa: E402
 from services.marketplace_cloud import fetch, package, pull, urls  # noqa: E402
-from services.themes import revocation_pull, revocation_sync_state  # noqa: E402
+from services.themes import revocation_pull, revocation_sync_state, signature_state  # noqa: E402
+from tests.test_prd261_revocation_pull import KEY_A  # noqa: E402
+from tests.test_prd261_revocation_pull import TABLES as THEME_TABLES  # noqa: E402
+from tests.test_prd261_revocation_pull import _feed as _revocation_feed  # noqa: E402
 from tests.test_prd277_enterprise_start_up import (  # noqa: E402,F401  (the reload fixture travels with _enterprise)
     _assert_no_value_in,
     _enterprise,
@@ -350,9 +362,40 @@ def test_on_a_pull_reaches_the_feed(monkeypatch):
     assert revocation_pull.pull_enabled() is True
 
 
-def test_off_the_feed_revokes_no_key_and_reads_nothing(monkeypatch):
+@pytest.fixture
+def held():
+    """An in-memory install with the theme tables, and a mock feed that revokes ``KEY_A``."""
+    engine = sa.create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    THEME_TABLES[0].metadata.create_all(engine, tables=THEME_TABLES)
+    session = sessionmaker(bind=engine)()
+    seen, factory = _host(_revocation_feed([], keys=[KEY_A]))
+    try:
+        yield SimpleNamespace(db=session, seen=seen, factory=factory)
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_a_key_revoked_while_on_stays_revoked_once_switched_off(monkeypatch, held, no_requests):
+    _switch(monkeypatch, "enterprise", revocations="true")
+    assert revocation_pull.pull_feed(held.db, held.factory).ok
+    assert signature_state.current_key_set(held.db).revoked == {KEY_A}
+    _switch(monkeypatch, "enterprise")  # the operator switches theme revocations off
+    assert signature_state.current_key_set(held.db).revoked == {KEY_A}
+    assert revocation_pull.pull_feed(held.db, held.factory).error == revocation_pull.PULL_NOT_SWITCHED_ON
+    assert len(held.seen) == 1 and no_requests.touched == []  # the one pull made while it was on
+
+
+def test_an_install_that_never_pulled_holds_no_revoked_key(monkeypatch, held, no_requests):
     _switch(monkeypatch, "enterprise")
+    assert signature_state.current_key_set(held.db).revoked == frozenset()
+    assert held.seen == [] and no_requests.touched == []
+
+
+def test_the_hosted_edition_reads_no_revoked_key_row(monkeypatch, no_requests):
+    _switch(monkeypatch, "saas", revocations="true")
     assert revocation_sync_state.revoked_key_ids(_Untouchable()) == frozenset()
+    assert no_requests.touched == []
 
 
 def test_off_the_revocation_routes_answer_404_and_run_nothing(monkeypatch, no_requests):
@@ -411,9 +454,10 @@ def test_on_a_package_is_downloaded(monkeypatch):
     assert [str(request.url) for request in seen] == [urls.package_url(CLOUD, DIGEST)]
 
 
-def test_off_no_cloud_file_address_is_given(monkeypatch):
+def test_off_no_cloud_file_address_is_given(monkeypatch, no_requests):
     _switch(monkeypatch, "enterprise", revocations="true", items="true")
     assert urls.cloud_file_url(DIGEST, "assets/previews/a.png") is None
+    assert no_requests.touched == []
     _switch(monkeypatch, "enterprise", revocations="true", sync="true")
     assert urls.cloud_file_url(DIGEST, "assets/previews/a.png") == (
         f"{CLOUD}/api/marketplace/catalog/files/{DIGEST}/assets/previews/a.png")
@@ -472,23 +516,58 @@ def test_on_the_item_passes_run(monkeypatch):
     assert ran == [1] and sync_items.items_enabled() is True
 
 
-def test_off_the_item_routes_answer_404_before_the_caller_is_looked_at(monkeypatch, no_requests):
-    _switch(monkeypatch, "enterprise", revocations="true", sync="true")
-    for name in ("cloud_items", "disclosure", "updates"):
-        monkeypatch.setattr(items_api, name, _never)
-    ran = []
-    off = {"detail": items_api.CLOUD_ITEMS_NOT_SWITCHED_ON}
-    assert _answers(_client(items_api.router, ran), ITEM_ROUTES) == [(404, off)] * 3
-    assert ran == [] and no_requests.touched == []
+def _entry():
+    return items_feed.CatalogEntry(type="agent", external_id="ab" * 16, version="1.0.0", revision="cd" * 32, name="A")
 
 
-def test_on_the_item_routes_answer(monkeypatch):
+def _seams(factory):
+    return plugin_import.Seams(origin=CLOUD, client_factory=factory, run_async=_never, s3=None)
+
+
+@pytest.mark.parametrize("values", [{"revocations": "true", "sync": "true"}, {"revocations": "true", "items": "true"}])
+def test_off_no_bundle_and_no_plugin_package_is_requested(monkeypatch, no_requests, values):
+    _switch(monkeypatch, "enterprise", **values)
+    fetched = items_feed.fetch_bundles([_entry()], no_requests.factory)
+    assert fetched.bundles == () and [r.reason for r in fetched.refused] == [items_gate.ITEMS_NOT_SWITCHED_ON]
+    with pytest.raises(items_feed.EntryRefused, match=re.escape(items_gate.ITEMS_NOT_SWITCHED_ON)):
+        items_feed.fetch_bundle(_entry(), no_requests.factory)
+    with pytest.raises(plugin_import.PluginRefused, match=re.escape(items_gate.ITEMS_NOT_SWITCHED_ON)):
+        plugin_import._package(_seams(no_requests.factory), "a-plugin", "1.0.0")
+    assert items_gate.brings_items() is False and no_requests.touched == []
+
+
+def test_on_a_plugin_package_is_requested(monkeypatch):
     _switch(monkeypatch, "enterprise", revocations="true", sync="true", items="true")
-    monkeypatch.setattr(items_api, "cloud_items", lambda db: {"held": []})
-    monkeypatch.setattr(items_api, "disclosure", lambda db, kind, key: {"kind": kind})
+    seen, factory = _host(b"zip-bytes")
+    assert plugin_import._package(_seams(factory), "a-plugin", "1.0.0") == b"zip-bytes"
+    assert [request.method for request in seen] == ["GET"] and items_gate.brings_items() is True
+
+
+def _held_items(monkeypatch):
+    """The three reads answer from what the install holds (they read rows only: local_reads, disclosure, updates)."""
+    monkeypatch.setattr(items_api, "cloud_items", lambda db: {"agents": [{"id": 7}]})
+    monkeypatch.setattr(items_api, "disclosure", lambda db, kind, key: {"kind": kind, "uses": ["an app"]})
     monkeypatch.setattr(items_api, "updates", lambda db, ws: {"updates": []})
-    answers = _answers(_client(items_api.router, []), ITEM_ROUTES)
-    assert answers == [(200, {"held": []}), (200, {"kind": "agent"}), (200, {"updates": []})]
+    return [(200, {"agents": [{"id": 7}]}), (200, {"kind": "agent", "uses": ["an app"]}), (200, {"updates": []})]
+
+
+def test_items_brought_while_on_are_still_listed_and_reviewed_once_switched_off(monkeypatch, no_requests):
+    _switch(monkeypatch, "enterprise", revocations="true", sync="true", items="true")
+    held_answers = _held_items(monkeypatch)
+    assert _answers(_client(items_api.router, []), ITEM_ROUTES) == held_answers
+    _switch(monkeypatch, "enterprise", revocations="true", sync="true")  # the operator switches Cloud items off
+    assert _answers(_client(items_api.router, []), ITEM_ROUTES) == held_answers
+    monkeypatch.setattr(sync_items, "_passes", _never)
+    sync_items.run_item_passes(_Untouchable(), _synced(), no_requests.factory, _never)
+    assert no_requests.touched == []
+
+
+@pytest.mark.parametrize("values", [{}, {"revocations": "true"}, {"revocations": "true", "sync": "true"}])
+def test_in_enterprise_the_item_reads_answer_whatever_the_settings_hold(monkeypatch, no_requests, values):
+    _switch(monkeypatch, "enterprise", **values)
+    held_answers = _held_items(monkeypatch)
+    assert _answers(_client(items_api.router, []), ITEM_ROUTES) == held_answers
+    assert no_requests.touched == []
 
 
 # --------------------------------------------------------------------------- what the web app reads

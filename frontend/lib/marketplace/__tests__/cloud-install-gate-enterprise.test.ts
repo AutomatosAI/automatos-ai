@@ -1,12 +1,13 @@
 /**
- * PRD-277 US-704 (D-12) — the install gate on an enterprise build, where Cloud items are the operator's
- * own setting (GET /api/hosted-services, lib/hosted-services.ts).
+ * PRD-277 US-704 (D-12) — the install gate on an enterprise build. ENTERPRISE_CALLS_CLOUD_ITEMS stops the Sync
+ * from requesting items; it never stops the review of an item the install already holds, so the gate behaves
+ * as on the local edition, always (lib/hosted-services.ts `holdsCloudItems`):
  *
  * - any request that isn't one of K19's four install calls returns at once and reads nothing;
- * - with Cloud items off, an install passes after reading only the settings, never the Cloud items;
- * - with Cloud items on, a Cloud item's install waits for its review as on the local edition (refused here,
- *   with no layer mounted), and a local item's install passes;
- * - when the settings can't be read, the install is refused ("Couldn't check …"), as for the Cloud items;
+ * - a Cloud item's install waits for its review (refused here, with no layer mounted), after reading only the
+ *   Cloud items: GET /api/hosted-services is never asked, so an unreadable answer there can refuse nothing;
+ * - a local item's install passes;
+ * - when the Cloud items can't be read, the install is refused ("Couldn't check …"), as on the local edition;
  * - lib/hosted-services.ts, which the gate imports, imports nothing from lib/api-client.ts.
  */
 import { readFileSync } from 'fs'
@@ -39,13 +40,14 @@ const ITEMS = {
 let get: ReturnType<typeof vi.fn>
 const client = (): CloudGateClient => ({ get } as unknown as CloudGateClient)
 
-function answering(cloudItems: boolean | 'unreadable') {
+/** The install answers its Cloud items (or can't); the settings read always fails, and must never be asked. */
+function answering(items: 'held' | 'unreadable') {
   get = vi.fn(async (endpoint: string) => {
-    if (endpoint === HOSTED_SERVICES_ENDPOINT) {
-      if (cloudItems === 'unreadable') throw new Error('offline')
-      return { themeRevocations: true, cloudSync: true, cloudItems }
+    if (endpoint === HOSTED_SERVICES_ENDPOINT) throw new Error('the gate must not ask for the settings')
+    if (endpoint === ITEMS_PATH) {
+      if (items === 'unreadable') throw new Error('offline')
+      return ITEMS
     }
-    if (endpoint === ITEMS_PATH) return ITEMS
     throw new Error(`unexpected request ${endpoint}`)
   })
 }
@@ -55,7 +57,7 @@ const reads = () => get.mock.calls.map(([endpoint]) => endpoint)
 beforeEach(async () => {
   vi.resetModules()
   gate = await import('../cloud-install-gate')
-  answering(false)
+  answering('held')
 })
 
 describe('the install gate on an enterprise build', () => {
@@ -65,31 +67,25 @@ describe('the install gate on an enterprise build', () => {
     expect(get).not.toHaveBeenCalled()
   })
 
-  it('with Cloud items off, lets an install go after reading only the settings', async () => {
-    await expect(cloudInstallGate(CLOUD_AGENT_INSTALL, POST, client())).resolves.toBeUndefined()
-    expect(reads()).toEqual([HOSTED_SERVICES_ENDPOINT])
-  })
-
-  it('with Cloud items on, a Cloud item waits for its review (refused with no layer mounted)', async () => {
-    answering(true)
+  it('makes a Cloud item wait for its review whatever the settings say (refused with no layer mounted)', async () => {
     const waiting = cloudInstallGate(CLOUD_AGENT_INSTALL, POST, client())
 
     await expect(waiting).rejects.toBeInstanceOf(gate.CloudInstallRefused)
     await expect(waiting).rejects.toThrow(gate.CLOUD_INSTALL_ELSEWHERE)
-    expect(reads()).toEqual([HOSTED_SERVICES_ENDPOINT, ITEMS_PATH])
+    expect(reads()).toEqual([ITEMS_PATH])
   })
 
-  it('with Cloud items on, a local item passes', async () => {
-    answering(true)
+  it('lets a local item pass, having read only the Cloud items', async () => {
     await expect(cloudInstallGate(LOCAL_AGENT_INSTALL, POST, client())).resolves.toBeUndefined()
+    expect(reads()).toEqual([ITEMS_PATH])
   })
 
-  it('refuses the install when the settings cannot be read', async () => {
+  it('refuses the install when the Cloud items cannot be read', async () => {
     answering('unreadable')
     const waiting = cloudInstallGate(CLOUD_AGENT_INSTALL, POST, client())
 
     await expect(waiting).rejects.toThrow(gate.CLOUD_INSTALL_UNCHECKED)
-    expect(reads()).toEqual([HOSTED_SERVICES_ENDPOINT])
+    expect(reads()).toEqual([ITEMS_PATH])
   })
 })
 
@@ -98,5 +94,10 @@ describe('its imports', () => {
     const source = readFileSync(path.resolve(__dirname, '..', '..', 'hosted-services.ts'), 'utf8')
     expect(source).not.toMatch(/from ['"][^'"]*api-client['"]/)
     expect(source).not.toMatch(/from ['"]@\/hooks\//)
+  })
+
+  it('the gate no longer reads the hosted-service settings', () => {
+    const source = readFileSync(path.resolve(__dirname, '..', 'cloud-install-gate.ts'), 'utf8')
+    expect(source).not.toMatch(/readHostedServices|editionHostedServices/)
   })
 })

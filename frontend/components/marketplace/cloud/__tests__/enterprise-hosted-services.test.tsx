@@ -1,12 +1,13 @@
 /**
- * PRD-277 US-704 (D-12) — the Marketplace's Automatos Cloud pieces on an enterprise build, where each hosted
- * service is the operator's own setting (GET /api/hosted-services, hooks/use-hosted-services.ts).
+ * PRD-277 US-704 (D-12) — the Automatos Cloud pieces on an enterprise build. A setting decides only what offers
+ * or describes a request to Automatos; what the install already holds is shown whatever the settings say.
  *
- * - with Cloud sync and Cloud items off, Sync with Automatos Cloud, the Cloud badges and the Cloud items
- *   layer render nothing, and the only request is the one that reads the settings;
- * - while that answer loads, or when it can't be read, nothing renders and nothing else is asked;
- * - with both on, the button shows (its status read) and a Cloud item carries its badges;
- * - Cloud items on with Cloud sync off shows the badges and no button: each setting decides its own piece.
+ * - Sync with Automatos Cloud follows Cloud sync (GET /api/hosted-services, hooks/use-hosted-services.ts): off,
+ *   unreadable or loading shows no button and reads no Sync status; on shows it;
+ * - a held Cloud item's badges and the Cloud items layer (the review before an install, the update notices)
+ *   show as on the local edition, with every setting off, and when the settings can't be read;
+ * - Settings › Automatos Cloud, shown while Cloud sync is on, says a Sync brings themes only while Cloud items
+ *   are off, and names the operator's settings as the way to turn it off.
  *
  * The build is enterprise through lib/edition-name.ts, the one place that reads it; lib/auth-edition.ts
  * follows it, so `isLocal` and `isSaaS` are both false.
@@ -29,12 +30,14 @@ vi.mock('@clerk/nextjs', () => ({
   useReverification: (fetcher: (...args: unknown[]) => Promise<unknown>) => fetcher,
 }))
 
+import { AutomatosCloudPanel } from '@/components/settings/automatos-cloud-panel'
 import { isLocal, isSaaS } from '@/lib/auth-edition'
 import { HOSTED_SERVICES_ENDPOINT } from '@/lib/hosted-services'
+import { CLOUD_UPDATES_ENDPOINT } from '@/lib/marketplace/cloud-items'
 
 import { CloudItemBadges } from '../cloud-item-badges'
 import { CloudItemsLayer } from '../cloud-items-layer'
-import { SYNC_WITH_CLOUD } from '../copy'
+import { CLOUD_LEDE, CLOUD_LEDE_THEMES_ONLY, SYNC_WITH_CLOUD, TURN_OFF, TURN_OFF_ENTERPRISE } from '../copy'
 import { CLOUD_BADGE } from '../item-copy'
 import { SyncButton } from '../sync-button'
 
@@ -59,6 +62,7 @@ const ITEMS = {
   packages: [],
   plugins: [],
 }
+const ALL_OFF = { themeRevocations: false, cloudSync: false, cloudItems: false }
 
 const UNREADABLE = 'unreadable'
 
@@ -74,13 +78,7 @@ function answering(services: Record<string, boolean> | typeof UNREADABLE) {
   })
 }
 
-function renderAll(ui: ReactElement = (
-  <>
-    <SyncButton />
-    <CloudItemBadges kind="agent" id={7} />
-    <CloudItemsLayer />
-  </>
-)) {
+function renderAll(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
 }
@@ -98,44 +96,11 @@ describe('an enterprise build', () => {
     expect(isSaaS).toBe(false)
   })
 
-  it('with Cloud sync and Cloud items off shows nothing and asks only for the settings', async () => {
-    answering({ themeRevocations: true, cloudSync: false, cloudItems: false })
-    renderAll()
-
-    await waitFor(() => expect(paths()).toEqual([HOSTED_SERVICES_ENDPOINT]))
-    await tick()
-    expect(screen.queryByRole('button', { name: SYNC_WITH_CLOUD })).not.toBeInTheDocument()
-    expect(screen.queryByText(CLOUD_BADGE)).not.toBeInTheDocument()
-    expect(paths()).toEqual([HOSTED_SERVICES_ENDPOINT])
-  })
-
-  it('shows nothing and asks nothing else while the settings load or when they cannot be read', async () => {
-    answering(UNREADABLE)
-    renderAll()
-
-    await waitFor(() => expect(paths()).toEqual([HOSTED_SERVICES_ENDPOINT]))
-    await tick()
-    expect(screen.queryByRole('button', { name: SYNC_WITH_CLOUD })).not.toBeInTheDocument()
-    expect(screen.queryByText(CLOUD_BADGE)).not.toBeInTheDocument()
-    expect(paths()).toEqual([HOSTED_SERVICES_ENDPOINT])
-  })
-
-  it('with both on shows the button and the badges', async () => {
-    answering({ themeRevocations: true, cloudSync: true, cloudItems: true })
-    renderAll(
-      <>
-        <SyncButton />
-        <CloudItemBadges kind="agent" id={7} />
-      </>,
-    )
-
-    expect(await screen.findByRole('button', { name: SYNC_WITH_CLOUD })).toBeEnabled()
-    expect(await screen.findByText(CLOUD_BADGE)).toBeInTheDocument()
-    expect(paths()).toEqual(expect.arrayContaining([HOSTED_SERVICES_ENDPOINT, STATUS_PATH, ITEMS_PATH]))
-  })
-
-  it('Cloud items on with Cloud sync off shows the badges and no button', async () => {
-    answering({ themeRevocations: true, cloudSync: false, cloudItems: true })
+  it.each([
+    ['every setting off', ALL_OFF],
+    ['the settings unreadable', UNREADABLE],
+  ] as const)('with %s shows a held Cloud item and no Sync button', async (_label, services) => {
+    answering(services)
     renderAll(
       <>
         <SyncButton />
@@ -144,7 +109,42 @@ describe('an enterprise build', () => {
     )
 
     expect(await screen.findByText(CLOUD_BADGE)).toBeInTheDocument()
+    await waitFor(() => expect(paths()).toContain(HOSTED_SERVICES_ENDPOINT))
+    await tick()
     expect(screen.queryByRole('button', { name: SYNC_WITH_CLOUD })).not.toBeInTheDocument()
     expect(paths()).not.toContain(STATUS_PATH)
+  })
+
+  it('mounts the Cloud items layer with every setting off: its update notices are read', async () => {
+    answering(ALL_OFF)
+    renderAll(<CloudItemsLayer />)
+
+    await waitFor(() => expect(paths()).toContain(CLOUD_UPDATES_ENDPOINT))
+  })
+
+  it('with Cloud sync on shows the button and reads its status', async () => {
+    answering({ themeRevocations: true, cloudSync: true, cloudItems: false })
+    renderAll(<SyncButton />)
+
+    expect(await screen.findByRole('button', { name: SYNC_WITH_CLOUD })).toBeEnabled()
+    expect(paths()).toEqual(expect.arrayContaining([HOSTED_SERVICES_ENDPOINT, STATUS_PATH]))
+  })
+
+  it('Settings › Automatos Cloud says a Sync brings themes only while Cloud items are off', async () => {
+    answering({ themeRevocations: true, cloudSync: true, cloudItems: false })
+    renderAll(<AutomatosCloudPanel />)
+
+    expect(await screen.findByText(CLOUD_LEDE_THEMES_ONLY)).toBeInTheDocument()
+    expect(screen.queryByText(CLOUD_LEDE)).not.toBeInTheDocument()
+    expect(await screen.findByText(TURN_OFF_ENTERPRISE)).toBeInTheDocument()
+    expect(screen.queryByText(TURN_OFF)).not.toBeInTheDocument()
+  })
+
+  it('Settings › Automatos Cloud says a Sync brings items too while Cloud items are on', async () => {
+    answering({ themeRevocations: true, cloudSync: true, cloudItems: true })
+    renderAll(<AutomatosCloudPanel />)
+
+    expect(await screen.findByText(CLOUD_LEDE)).toBeInTheDocument()
+    expect(screen.queryByText(CLOUD_LEDE_THEMES_ONLY)).not.toBeInTheDocument()
   })
 })
