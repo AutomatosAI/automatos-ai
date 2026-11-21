@@ -11,6 +11,7 @@ import { isLocal } from '@/lib/auth-edition'
 import { LocalProfileForm } from './local-profile-form'
 import { isEnterprise } from '@/lib/edition-name'
 import { EnterpriseProfile } from './enterprise-profile'
+import { InstallVersion } from './install-version'
 
 /**
  * Profile page — one route, two editions (PRD-233 S6).
@@ -198,6 +199,7 @@ function ClerkProfilePage() {
                             </Button>
                         }
                     />
+                    <InstallVersion />
                 </div>
 
                 {/* Success/Error Message */}

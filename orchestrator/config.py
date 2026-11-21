@@ -39,6 +39,15 @@ CLERK_DEFAULT_AUTHORIZED_PARTIES = "https://ui.automatos.app,http://localhost:30
 SESSION_IDLE_MINUTES_DEFAULT = 120
 SESSION_ABSOLUTE_HOURS_DEFAULT = 12
 
+# PRD-279 US-303: what an API built without a version reports (a checkout's own build, the
+# test suite). images.yml builds every API image with AUTOMATOS_VERSION set.
+UNVERSIONED_BUILD = "dev"
+
+
+def _build_version(raw):
+    """The version the API image was built as (its AUTOMATOS_VERSION build argument); UNVERSIONED_BUILD when none."""
+    return (raw or "").strip() or UNVERSIONED_BUILD
+
 
 def _whole_number_setting(name: str, default: int):
     """``name`` as an int; ``default`` when unset; the text as it was when it is not a number.
@@ -222,6 +231,9 @@ class Config:
     # ONE flag the frontend mount-gate and the backend local-session posture both read.
     _AUTH_EDITION_RAW = (os.getenv("AUTH_EDITION", "saas") or "saas").strip().lower()
     AUTH_EDITION: str = _AUTH_EDITION_RAW if _AUTH_EDITION_RAW in ("local", "saas", "enterprise") else "saas"
+    # PRD-279 US-303: the version this API reports (/, /health, /api/system/health, OpenAPI):
+    # the tag's version on a release, the commit id on any other images.yml build.
+    AUTOMATOS_VERSION: str = _build_version(os.getenv("AUTOMATOS_VERSION"))
 
     # The `local` edition *implies* the no-login posture: REQUIRE_AUTH is forced
     # false so operators set ONE flag, not three that can silently contradict

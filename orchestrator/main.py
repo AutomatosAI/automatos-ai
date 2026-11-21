@@ -822,7 +822,7 @@ app = FastAPI(
     
     **🌟 Ready to build the future of AI? Start exploring the endpoints below!**
     """,
-    version="1.0.0",
+    version=config.AUTOMATOS_VERSION,  # PRD-279 US-303: the version the image was built as
     contact={
         "name": "Automatos AI Development Team",
         "url": "https://github.com/AutomatosAI/automatos-ai",
@@ -1349,7 +1349,7 @@ def health_check():
     body = {
         "status": health_probe.overall_status(components),
         "service": "automatos-ai-api",
-        "version": "1.0.0",
+        "version": config.AUTOMATOS_VERSION,
         "timestamp": datetime.utcnow().isoformat(),
         "components": components,
         "db_pool": pool_watch.pool_numbers(),
@@ -1475,7 +1475,7 @@ async def root():
     """
     return {
         "service": "Automatos AI API Server",
-        "version": "1.0.0",
+        "version": config.AUTOMATOS_VERSION,
         "status": "operational",
         "description": "World's Most Advanced Multi-Agent AI Orchestration Platform",
         

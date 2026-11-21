@@ -14,6 +14,7 @@ import { PageHeader } from '@/components/shared/page-header'
 import { initialsFor } from '@/lib/initials'
 import { PROFILE_MANAGED_NOTE } from '@/lib/enterprise/messages'
 import { useEnterpriseSession } from '@/lib/enterprise/session-context'
+import { InstallVersion } from './install-version'
 
 const READONLY_CLASS =
   'w-full px-4 py-2 bg-secondary/30 border border-border rounded-lg text-muted-foreground cursor-not-allowed'
@@ -52,6 +53,7 @@ export function EnterpriseProfile() {
               </Button>
             }
           />
+          <InstallVersion />
         </div>
 
         <section className="glass-card rounded-2xl border border-border p-8 mb-6 space-y-6">

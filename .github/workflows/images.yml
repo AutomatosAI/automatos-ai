@@ -120,7 +120,8 @@ name: images
 # Build args match docker-compose.yml, i.e. the local edition: no bundled
 # Chromium, and the frontend built for AUTH_EDITION=local against
 # http://localhost:8000 (NEXT_PUBLIC_* are inlined at build time, for now).
-# The API takes none: Railway's build installs the same lock (PRD-262 US-027).
+# The API takes no variant arg: Railway's build installs the same lock (PRD-262 US-027).
+# Its one build arg is AUTOMATOS_VERSION, the version it reports (PRD-279 US-303).
 # The API reads AUTH_EDITION at runtime; only the frontend fixes its edition
 # at build time, and a hosted-edition frontend can't be published generically
 # because its Clerk key is per deployment. Railway builds its own images and
@@ -315,11 +316,15 @@ jobs:
           # and never published, for the same reason (GPL-3.0 espeak-ng and
           # phonemizer), but keeps the GHA cache: `min`, so the 310 MB model is
           # cached once, in the image's own layer, not again in its fetch stage.
+          # version_arg (the API only, PRD-279 US-303): the build arg image_matrix.py
+          # sets to BUILD_VERSION, which the API reports; its Dockerfile reads it after
+          # the last layer, so it rebuilds nothing and leaves the tree tags as they were.
           IMAGES: |
             [
               {"name": "api", "context": "orchestrator", "target": "production",
                "build_args": [],
                "source_date_epoch": 1792368000,
+               "version_arg": "AUTOMATOS_VERSION",
                "cache_mode": "min", "no_cache_filters": ["base"],
                "arches": ["amd64", "arm64"], "publish": true,
                "inputs": ["orchestrator/Dockerfile", "orchestrator/.dockerignore",
@@ -380,6 +385,9 @@ jobs:
              "scripts/ci/image_*.py"]
           RUNNERS: '{"amd64": "ubuntu-24.04", "arm64": "ubuntu-24.04-arm"}'
           LOCAL_REGISTRY: registry:2@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373 # 2.8.3
+          # PRD-279 US-303: what the API image reports. The tag's version on a `v*` tag
+          # (the step above has checked its form), the full commit id on every other run.
+          BUILD_VERSION: ${{ steps.release.outputs.version || github.sha }}
         run: |
           set -euo pipefail
           weekly=()
@@ -390,7 +398,8 @@ jobs:
           pick() {
             python3 scripts/ci/image_matrix.py --images "$IMAGES" --shared-inputs "$SHARED_INPUTS" \
               --runners "$RUNNERS" --owner "$GITHUB_REPOSITORY_OWNER" --publish "$PUBLISH" \
-              --no-cache "$NO_CACHE" --local-registry "$LOCAL_REGISTRY" "${weekly[@]}" "$@" | tee -a "$GITHUB_OUTPUT"
+              --no-cache "$NO_CACHE" --local-registry "$LOCAL_REGISTRY" --version "$BUILD_VERSION" \
+              "${weekly[@]}" "$@" | tee -a "$GITHUB_OUTPUT"
           }
           if [ "$EVENT" != "pull_request" ]; then pick --every < /dev/null; exit 0; fi
           if ! files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)'); then
