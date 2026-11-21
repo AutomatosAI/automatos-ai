@@ -463,3 +463,30 @@ tests:
     asserts:
       - hasDocuments:
           count: 1
+
+  # ── device pairing (PRD-277 US-601) ──────────────────────────────────────────
+  - it: stops on device pairing's setting in config
+    set:
+      config:
+        ENTERPRISE_DEVICE_PAIRING: "true"
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.ENTERPRISE_DEVICE_PAIRING: in the enterprise edition the chart sets it from edition.enterprise"
+  - it: stops on device pairing written as quoted text, naming it and its setting
+    set:
+      edition: {enterprise: {devicePairing: "false"}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.devicePairing must be true or false \\(ENTERPRISE_DEVICE_PAIRING\\)"
+  - it: stops on device pairing written as a word other than true or false
+    set:
+      edition: {enterprise: {devicePairing: "on"}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.devicePairing must be true or false \\(ENTERPRISE_DEVICE_PAIRING\\)"
+  - it: renders with device pairing switched off
+    set:
+      edition: {enterprise: {devicePairing: false}}
+    asserts:
+      - hasDocuments:
+          count: 1

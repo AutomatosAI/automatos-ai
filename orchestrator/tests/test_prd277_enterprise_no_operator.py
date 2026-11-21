@@ -16,7 +16,7 @@ These tests set the edition directly, without its start-up checks
 * the platform API key is kept as it is (PRD-277 D-14): an admin-level key, never the operator;
 * step-up refuses every context that is not a session (a device, a key, a fresh Clerk one
   included): only a session's person can sign in again (US-406);
-* discovery refuses rather than offer phones a Clerk sign-in;
+* discovery never offers phones a Clerk sign-in (US-602: it offers OIDC, then pairing);
 * Auto describes an organisation's install, with the hosted tabs less Billing and Widget SDK.
 
 DB-free: the database seams are stubbed.
@@ -359,11 +359,14 @@ def test_step_up_never_reads_clerks_freshness(enterprise, monkeypatch):
 # --------------------------------------------------------------------------- discovery
 
 
-def test_discovery_refuses_rather_than_offer_clerk(enterprise):
-    with pytest.raises(discovery.DiscoveryUnavailable) as refused:
-        discovery._auth_and_pairing()
+def test_discovery_never_offers_clerk(enterprise, monkeypatch):
+    # US-602 replaced US-103's refusal: enterprise now says how to sign in, and it is never Clerk.
+    monkeypatch.setattr(enterprise.config, "CLERK_PUBLISHABLE_KEY", "pk_live_" + "prd277-stand-in")
 
-    assert str(refused.value) == discovery.SIGN_IN_NOT_BUILT
+    auth, _pairing = discovery._auth_and_pairing("https://automatos.example.org")
+
+    assert discovery.AUTH_MODE_CLERK not in auth["modes"] and auth["clerk"] is None
+    assert auth["modes"][0] == discovery.AUTH_MODE_OIDC
 
 
 # --------------------------------------------------------------------------- what Auto is told

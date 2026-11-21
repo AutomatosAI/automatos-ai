@@ -34,6 +34,7 @@ TRUTH_TABLE = {
         "profile_editable": True,
         "step_up": "skip",
         "device_pairing": True,
+        "device_pairing_by_setting": False,
         "session_mode": True,
         "hosts_automatos_cloud": False,
         "calls_theme_revocations": True,
@@ -59,6 +60,7 @@ TRUTH_TABLE = {
         "profile_editable": False,
         "step_up": "clerk_freshness",
         "device_pairing": False,
+        "device_pairing_by_setting": False,
         "session_mode": False,
         "hosts_automatos_cloud": True,
         "calls_theme_revocations": False,
@@ -83,7 +85,8 @@ TRUTH_TABLE = {
         "billing": False,                               # §5.1, FR-24
         "profile_editable": False,                      # §5.1: the IdP owns it
         "step_up": "reauth",                            # D-13
-        "device_pairing": True,                         # D-7; LOCAL_REMOTE_ACCESS still decides
+        "device_pairing": True,                         # D-7: on while ENTERPRISE_DEVICE_PAIRING is
+        "device_pairing_by_setting": True,              # US-601, §5.10: the setting decides it
         "session_mode": False,                          # §5.1
         "hosts_automatos_cloud": False,                 # §5.1
         "calls_theme_revocations": False,               # D-12, US-704: off until the operator switches it on
@@ -116,9 +119,10 @@ SAAS_TRUE = (
     "last_workspace_purge_deletes_person",
 )
 # Capabilities no comparison ever made: new with enterprise, so off in local and saas (PRD-277
-# Wave 3 sessions, US-704's settings, D-12's agent host list). Each is False on both, so neither
-# edition's behaviour moves.
-ENTERPRISE_ONLY = ("issues_sessions", "hosted_services_by_setting", "agent_http_own_hosts_only")
+# Wave 3 sessions, US-704's settings, D-12's agent host list, US-601's pairing setting). Each is
+# False on both, so neither edition's behaviour moves.
+ENTERPRISE_ONLY = ("issues_sessions", "hosted_services_by_setting", "agent_http_own_hosts_only",
+                   "device_pairing_by_setting")
 
 
 @pytest.mark.parametrize("edition", ["local", "saas", "enterprise"])

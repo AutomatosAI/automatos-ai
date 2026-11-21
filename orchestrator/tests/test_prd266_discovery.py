@@ -5,7 +5,10 @@
   it (``pk_test_`` / ``pk_live_`` + base64 of ``"<host>$"``); a key that is not Clerk's is a
   500 naming the setting, never the value. ``pairing.enabled`` is false.
 * local: ``auth.modes ["device"]``, ``clerk`` null, ``pairing.enabled`` only in paired mode.
-  No ``"oidc"`` mode in either edition (§4.11).
+  No ``"oidc"`` mode in either edition (§4.11), and both documents are pinned byte for byte.
+* enterprise (PRD-277 US-602): ``auth.modes ["oidc", "device"]``, or ``["oidc"]`` while
+  ``ENTERPRISE_DEVICE_PAIRING`` is off, ``pairing.enabled`` to match, and ``auth.oidc`` holding
+  only the start address on this API, a route the app serves; ``"oidc"`` appears only here.
 * ``push.expo`` (W2 US-010c, K13): true on saas; on a local install the operator's stored
   answer, none here (``test_prd266_push_consent.py`` stores one).
 * K15: a local install still on the hosted ``PUBLIC_API_HOST`` answers with the request's own
@@ -171,6 +174,111 @@ def test_no_oidc_mode_is_ever_emitted(client, saas, monkeypatch, edition, mode):
     body = _document(client)
 
     assert "oidc" not in body["auth"]["modes"] and "oidc" not in json.dumps(body)
+
+
+def _exact_bytes(document: dict) -> bytes:
+    """The body FastAPI writes for ``document``, key order and spacing included."""
+    return json.dumps(document, ensure_ascii=False, allow_nan=False, indent=None, separators=(",", ":")).encode()
+
+
+def test_the_saas_document_is_pinned_byte_for_byte(client, saas):
+    expected = {
+        "schema": SCHEMA, "name": "Automatos", "edition": "saas", "api_url": f"https://{HOSTED_PUBLIC_API_HOST}",
+        "web_url": FRONTEND,
+        "auth": {"modes": ["clerk"], "clerk": {"publishable_key": PUBLISHABLE_KEY, "frontend_api": CLERK_HOST}},
+        "pairing": {"enabled": False}, "push": {"expo": True}, "capabilities": discovery.offered_capabilities(),
+    }
+
+    assert client.get(DISCOVERY).content == _exact_bytes(expected)
+
+
+@pytest.mark.parametrize("mode, enabled", [("off", False), ("paired", True)])
+def test_the_local_document_is_pinned_byte_for_byte(client, local, monkeypatch, mode, enabled):
+    monkeypatch.setattr(config, "LOCAL_REMOTE_ACCESS", mode)
+    expected = {
+        "schema": SCHEMA, "name": "Automatos", "edition": "local", "api_url": "http://testserver",
+        "web_url": "http://localhost:3000", "auth": {"modes": ["device"], "clerk": None},
+        "pairing": {"enabled": enabled}, "push": {"expo": False}, "capabilities": discovery.offered_capabilities(),
+    }
+
+    assert client.get(DISCOVERY).content == _exact_bytes(expected)
+
+
+@pytest.fixture
+def enterprise(monkeypatch):
+    monkeypatch.setattr(config, "AUTH_EDITION", "enterprise")
+    monkeypatch.setattr(config, "CLERK_PUBLISHABLE_KEY", PUBLISHABLE_KEY)  # left over: never advertised
+    monkeypatch.setattr(config, "FRONTEND_URL", FRONTEND)
+    monkeypatch.setattr(config, "PUBLIC_API_HOST", HOSTED_PUBLIC_API_HOST)
+    monkeypatch.setattr(config, "LOCAL_REMOTE_ACCESS", "off")
+    monkeypatch.setattr(config, "ENTERPRISE_DEVICE_PAIRING", "true")
+    monkeypatch.setattr(consent, "get_system_setting", lambda category, key, default=None: default)
+    return config
+
+
+START_URL = "http://testserver" + discovery.OIDC_START_PATH
+
+
+@pytest.mark.parametrize("remote_access", ["off", "open", "paired"])
+def test_enterprise_offers_sign_in_then_pairing(client, enterprise, monkeypatch, remote_access):
+    monkeypatch.setattr(config, "LOCAL_REMOTE_ACCESS", remote_access)  # local's switch decides nothing here
+
+    body = _document(client)
+
+    assert set(body) == SECTIONS and body["schema"] == SCHEMA and body["edition"] == "enterprise"
+    assert body["auth"] == {"modes": ["oidc", "device"], "clerk": None, "oidc": {"start_url": START_URL}}
+    assert body["pairing"] == {"enabled": True}
+    assert body["push"] == {"expo": False}
+
+
+@pytest.mark.parametrize("switch", ["false", "off", "0", "no", "malformed"])
+def test_enterprise_with_pairing_off_offers_sign_in_only(client, enterprise, monkeypatch, switch):
+    monkeypatch.setattr(config, "ENTERPRISE_DEVICE_PAIRING", switch)
+
+    body = _document(client)
+
+    assert body["auth"] == {"modes": ["oidc"], "clerk": None, "oidc": {"start_url": START_URL}}
+    assert body["pairing"] == {"enabled": False}
+
+
+def test_enterprise_names_its_own_host_in_the_start_address(client, enterprise, monkeypatch):
+    monkeypatch.setattr(config, "PUBLIC_API_HOST", "automatos.example.org")
+
+    body = _document(client)
+
+    assert body["auth"]["oidc"] == {"start_url": "https://automatos.example.org" + discovery.OIDC_START_PATH}
+    assert HOSTED_PUBLIC_API_HOST not in json.dumps(body)
+
+
+def test_enterprise_publishes_nothing_about_the_identity_provider(client, enterprise, planted_secrets, monkeypatch):
+    monkeypatch.setattr(config, "OIDC_ISSUER", "https://idp.prd277.test/realm")
+    monkeypatch.setattr(config, "OIDC_CLIENT_ID", "prd277-client-id")
+
+    response = client.get(DISCOVERY)
+
+    assert response.status_code == 200, response.text
+    assert set(response.json()["auth"]["oidc"]) == {"start_url"}
+    assert "idp.prd277.test" not in response.text and "prd277-client-id" not in response.text
+    leaked = sorted(name for name, value in planted_secrets.items() if value in response.text)
+    assert leaked == []
+
+
+def test_the_start_address_is_a_route_the_app_serves():
+    manifest = json.loads((ORCH / "reports" / "route-manifest.json").read_text(encoding="utf-8"))
+
+    assert {"method": "GET", "path": discovery.OIDC_START_PATH} in manifest["routes"]
+
+
+@pytest.mark.parametrize("edition", ["saas", "local", "enterprise"])
+def test_oidc_is_emitted_only_in_enterprise(client, saas, monkeypatch, edition):
+    monkeypatch.setattr(config, "AUTH_EDITION", edition)
+    monkeypatch.setattr(config, "ENTERPRISE_DEVICE_PAIRING", "true")
+    monkeypatch.setattr(consent, "get_system_setting", lambda category, key, default=None: default)
+
+    body = _document(client)
+
+    assert ("oidc" in body["auth"]["modes"]) is (edition == "enterprise")
+    assert ("oidc" in body["auth"]) is (edition == "enterprise")
 
 
 # --------------------------------------------------------------------------- the Clerk frontend API

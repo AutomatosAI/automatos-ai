@@ -389,3 +389,43 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content: {name: ENTERPRISE_CALLS_CLOUD_ITEMS, value: "false"}
+  # PRD-277 US-601: whether people pair their phones, on by default (§5.10).
+  - it: renders device pairing on by default, in the API
+    template: templates/api-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_DEVICE_PAIRING, value: "true"}
+  - it: renders device pairing on by default, in the migration Job
+    template: templates/migrate-job.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_DEVICE_PAIRING, value: "true"}
+  - it: renders device pairing off when switched off
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {devicePairing: false}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_DEVICE_PAIRING, value: "false"}
+  # A null value drops the key from the merged values: the same as leaving it out.
+  - it: renders device pairing on when it is null or left out
+    template: templates/api-deployment.yaml
+    set:
+      edition: {enterprise: {devicePairing: null}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_DEVICE_PAIRING, value: "true"}
+  - it: never renders device pairing in the local edition
+    template: templates/api-deployment.yaml
+    set:
+      edition:
+        authEdition: local
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_DEVICE_PAIRING}
+          any: true

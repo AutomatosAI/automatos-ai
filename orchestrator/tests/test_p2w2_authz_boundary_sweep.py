@@ -274,6 +274,10 @@ OWN_GATE_IN_HANDLER = {
     ("DELETE", "/api/v1/mobile/devices/{device_id}"),
     # rotate: the device lane on its own device, presenting its current token (else 404/409).
     ("POST", "/api/v1/mobile/devices/{device_id}/rotate"),
+    # PRD-277 US-601: a pairing code pairs a device to its maker (``pairing_code_owner``). In local
+    # it calls ``require_workspace_admin`` (the operator passes); in enterprise any person on the
+    # session lane, in a workspace they are a member of, for themselves; a device or key is 403.
+    ("POST", "/api/v1/mobile/pairing-codes"),
     # digest now (api/mobile_push.py _digest_asker): today's brief for the CALLER only, into
     # their own Auto thread. 404 without a workspace, 403 when no person stands behind the
     # caller or the person isn't a current member (services.mobile.digest.belongs, the
