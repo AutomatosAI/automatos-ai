@@ -1,0 +1,360 @@
+"""PRD-279 Waves 1 and 2: the scripts a `v*` tag runs.
+
+* ``scripts/ci/release_version.py`` (US-101): the version a tag names, whether it is a
+  release candidate, and the refusal of a tag that is not a version or goes backwards.
+* ``scripts/ci/release_signing.py`` (US-103, US-202): the ``cosign verify`` a release
+  runs pins its signer exactly, so a signature from a pull request build, a branch,
+  another tag, another workflow or a fork does not pass it.
+* ``scripts/ci/release_chart.py`` (US-201): the packaged chart's values name every
+  image by digest, one web image per published edition in that edition's slot, and
+  change nothing else; each edition's render is checked against that edition's images,
+  and a rendered chart that names an image by a tag, or an edition left unrendered, fails.
+
+Pure file reads and temporary files: no Docker, no helm, no cosign, no network.
+"""
+from __future__ import annotations
+
+import importlib.util
+import json
+import shutil
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+import yaml
+
+ROOT = Path(__file__).resolve().parents[2]
+CHART = ROOT / "charts" / "automatos"
+REPO = "AutomatosAI/automatos-ai"
+SHA = "0d9f0ac594c3783e62a30e6c5ce75164028850db"
+TAG = "refs/tags/v0.8.0-rc.1"
+DIGESTS = {"api": "sha256:" + "a" * 64, "frontend": "sha256:" + "b" * 64, "workspace-worker": "sha256:" + "c" * 64,
+           "enterprise-frontend": "sha256:" + "d" * 64}
+# Each published edition's images: the shared ones and its own web image (PRD-277 US-505).
+EDITION_IMAGES = {"local": ["api", "frontend", "workspace-worker"],
+                  "enterprise": ["api", "enterprise-frontend", "workspace-worker"]}
+PREFIX = "ghcr.io/automatosai/automatos-"
+
+
+def _load(name: str):
+    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / "ci" / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+version = _load("release_version")
+signing = _load("release_signing")
+chart = _load("release_chart")
+
+
+# --------------------------------------------------------------------------- the version (US-101)
+
+
+@pytest.mark.parametrize("ref,expected,candidate,line", [
+    ("refs/tags/v0.7.0", "0.7.0", False, "0.7"),
+    ("refs/tags/v0.8.0-rc.1", "0.8.0-rc.1", True, "0.8"),
+    ("refs/tags/v1.12.3-beta.2", "1.12.3-beta.2", True, "1.12"),
+])
+def test_a_version_tag_names_its_version_and_whether_it_is_a_candidate(ref, expected, candidate, line):
+    release = version.parse_ref(ref)
+    assert (release.version, release.candidate, release.major_minor) == (expected, candidate, line)
+    assert version.outputs(release) == [f"version={expected}", f"candidate={str(candidate).lower()}",
+                                        f"major_minor={line}"]
+
+
+@pytest.mark.parametrize("ref", [
+    "refs/tags/v0.7", "refs/tags/v0.7.0+build.1", "refs/tags/v01.7.0", "refs/tags/v0.7.0-",
+    "refs/tags/vnext", "refs/tags/0.7.0", "refs/heads/v0.7.0", "refs/pull/12/merge", "refs/tags/v0.7.0 ",
+])
+def test_anything_else_is_refused(ref):
+    with pytest.raises(version.ReleaseError):
+        version.parse_ref(ref)
+
+
+def test_a_version_below_the_charts_is_refused_and_the_same_or_above_passes():
+    with pytest.raises(version.ReleaseError, match="below the chart's version 0.6.0: a release never goes backwards"):
+        version.check_not_backwards(version.parse_version("0.5.9"), (0, 6, 0))
+    with pytest.raises(version.ReleaseError, match="never goes backwards"):
+        version.check_not_backwards(version.parse_version("0.6.0-rc.1"), (0, 7, 0))
+    for allowed in ("0.6.0", "0.7.0-rc.1", "1.0.0"):
+        version.check_not_backwards(version.parse_version(allowed), (0, 6, 0))
+
+
+def test_the_charts_version_is_read_from_its_chart_yaml():
+    core = version.chart_version((CHART / "Chart.yaml").read_text(encoding="utf-8"))
+    assert len(core) == 3 and all(isinstance(part, int) for part in core)
+    assert version.chart_version("apiVersion: v2\nname: x\nversion: \"1.2.3\"\nappVersion: edge\n") == (1, 2, 3)
+
+
+def test_the_cli_writes_the_outputs_and_fails_on_a_bad_tag(tmp_path, capsys):
+    outputs = tmp_path / "outputs"
+    args = ["--chart-yaml", str(CHART / "Chart.yaml"), "--outputs", str(outputs)]
+    assert version.main(["--ref", "refs/tags/v99.0.0-rc.1", *args]) == 0
+    assert outputs.read_text(encoding="utf-8").splitlines() == [
+        "version=99.0.0-rc.1", "candidate=true", "major_minor=99.0"]
+    assert version.main(["--ref", "refs/tags/v0.0.1", *args]) == 1
+    assert "::error title=Release version::" in capsys.readouterr().out
+
+
+def test_the_chart_in_the_repository_keeps_edge():
+    """US-201: only the packaged copy carries the version; the repository's chart follows main."""
+    assert yaml.safe_load((CHART / "Chart.yaml").read_text(encoding="utf-8"))["appVersion"] == "edge"
+
+
+# --------------------------------------------------------------------------- the signature check (US-103)
+
+
+def _release_check(reference: str = "ghcr.io/automatosai/automatos-api@sha256:" + "d" * 64) -> list:
+    return signing.verify_args(reference, signing.release_signer(REPO, TAG, SHA))
+
+
+def _certificate(**changes) -> "signing.Signer":
+    claims = {"repository": REPO, "workflow": ".github/workflows/images.yml", "ref": TAG, "sha": SHA,
+              "workflow_name": "images", **changes}
+    return signing.Signer(**claims)
+
+
+def test_the_check_pins_identity_and_issuer_exactly():
+    args = _release_check()
+    assert args[:2] == ["cosign", "verify"] and args[-1].endswith("@sha256:" + "d" * 64)
+    pinned = dict(zip(args[2:-1:2], args[3:-1:2]))
+    assert pinned["--certificate-identity"] == (
+        "https://github.com/AutomatosAI/automatos-ai/.github/workflows/images.yml@refs/tags/v0.8.0-rc.1")
+    assert pinned["--certificate-oidc-issuer"] == "https://token.actions.githubusercontent.com"
+    assert pinned["--certificate-github-workflow-repository"] == REPO
+    assert pinned["--certificate-github-workflow-ref"] == TAG
+    assert pinned["--certificate-github-workflow-sha"] == SHA
+    assert not [arg for arg in args if arg.endswith("-regexp")], "never a pattern"
+
+
+def test_the_release_run_passes_its_own_check():
+    assert signing.accepts(_release_check(), _certificate())
+
+
+@pytest.mark.parametrize("who,changes", [
+    ("a pull request build", {"ref": "refs/pull/1577/merge"}),
+    ("main", {"ref": "refs/heads/main"}),
+    ("another branch", {"ref": "refs/heads/feat/prd279-w1-releases"}),
+    ("another tag", {"ref": "refs/tags/v0.8.0-rc.2"}),
+    ("another workflow", {"workflow": ".github/workflows/smoke-images.yml", "workflow_name": "smoke-images"}),
+    ("another workflow under the same name", {"workflow": ".github/workflows/other.yml"}),
+    ("a fork", {"repository": "someone/automatos-ai"}),
+    ("another commit", {"sha": "1" * 40}),
+    ("another issuer", {"issuer": "https://accounts.example.com"}),
+])
+def test_a_signature_from_anywhere_else_does_not_pass_the_release_check(who, changes):
+    assert not signing.accepts(_release_check(), _certificate(**changes)), who
+
+
+def test_a_check_by_pattern_or_with_a_claim_left_out_is_refused():
+    loose = [arg.replace("--certificate-identity", "--certificate-identity-regexp") for arg in _release_check()]
+    with pytest.raises(ValueError, match="pins the identity exactly"):
+        signing.accepts(loose, _certificate())
+    with pytest.raises(ValueError, match="unpinned"):
+        signing.accepts(_release_check()[:4] + _release_check()[-1:], _certificate())
+
+
+def test_the_check_runs_on_a_digest_never_a_tag():
+    with pytest.raises(ValueError, match="verify a digest"):
+        _release_check("ghcr.io/automatosai/automatos-api:0.8.0-rc.1")
+
+
+def test_verify_runs_cosign_and_a_failed_check_fails(capsys):
+    ran = []
+    args = SimpleNamespace(image="ghcr.io/automatosai/automatos-api@sha256:" + "d" * 64,
+                           repository=REPO, ref=TAG, sha=SHA)
+    assert signing.verify(args, run=lambda command, check: ran.append(command) or SimpleNamespace(returncode=0)) == 0
+    assert ran == [_release_check()]
+    assert signing.verify(args, run=lambda command, check: SimpleNamespace(returncode=1)) == 1
+    assert "is not signed by https://github.com/AutomatosAI/automatos-ai/.github/workflows/images.yml@" in (
+        capsys.readouterr().out)
+
+
+# --------------------------------------------------------------------------- the packaged chart (US-201)
+
+
+SLOT_IMAGES = ((("api", "image"), "api"), (("frontend", "image"), "frontend"),
+               (("frontend", "enterpriseImage"), "enterprise-frontend"), (("worker", "image"), "workspace-worker"))
+
+
+def _refs(names) -> list:
+    return [f"{PREFIX}{name}@{DIGESTS[name]}" for name in names]
+
+
+def _prepared(tmp_path: Path) -> tuple[dict, str, dict]:
+    references = chart.prepare(CHART, tmp_path, DIGESTS, PREFIX, "0.8.0-rc.1")
+    text = (tmp_path / "automatos" / "values.yaml").read_text(encoding="utf-8")
+    return yaml.safe_load(text), text, references
+
+
+def test_the_packaged_values_name_every_image_by_its_digest_one_web_image_per_edition(tmp_path):
+    values, _, references = _prepared(tmp_path)
+    for (key, slot), name in SLOT_IMAGES:
+        assert values[key][slot]["repository"] == f"{PREFIX}{name}"
+        assert values[key][slot]["digest"] == DIGESTS[name]
+    assert references == {edition: _refs(names) for edition, names in EDITION_IMAGES.items()}
+
+
+def test_nothing_else_in_the_values_changes_and_the_comments_stay(tmp_path):
+    values, text, _ = _prepared(tmp_path)
+    original_text = (CHART / "values.yaml").read_text(encoding="utf-8")
+    original = yaml.safe_load(original_text)
+    for (key, slot), _name in SLOT_IMAGES:
+        values[key][slot] = {**values[key][slot], "digest": "", "repository": original[key][slot]["repository"]}
+    assert values == original
+    comments = [line for line in original_text.splitlines() if line.lstrip().startswith("#")]
+    assert [line for line in text.splitlines() if line.lstrip().startswith("#")][2:] == comments
+    assert 'digest: "sha256:' + "a" * 64 + '"         # sha256:<64 hex>; wins over the tag' in text
+    assert (CHART / "values.yaml").read_text(encoding="utf-8") == original_text, "the repository's chart is untouched"
+
+
+def test_each_edition_has_a_web_slot_of_its_own_and_one_without_an_image_is_refused(tmp_path):
+    """The second edition no longer refused (PRD-279 US-201 line 2): its image has its own slot."""
+    assert chart.plan() == {slot: name for slot, name in SLOT_IMAGES}
+    assert chart.published_names() == sorted(DIGESTS)
+    for edition, names in EDITION_IMAGES.items():
+        assert chart.edition_images(edition) == sorted(names)
+    with pytest.raises(chart.ChartError, match="no published web image"):
+        chart.edition_images("saas")
+    saas = tmp_path / "saas-chart"
+    shutil.copytree(CHART, saas)
+    values = (saas / "values.yaml").read_text(encoding="utf-8")
+    (saas / "values.yaml").write_text(values.replace("  authEdition: local\n", "  authEdition: saas\n"), encoding="utf-8")
+    with pytest.raises(chart.ChartError, match="defaults to the 'saas' edition, which has no published web image"):
+        chart.prepare(saas, tmp_path / "out", DIGESTS, PREFIX, "0.8.0-rc.1")
+
+
+def test_a_release_with_one_digest_in_two_web_slots_publishes_nothing(tmp_path):
+    """The enterprise slot filled with the local image would run the local web app in enterprise."""
+    same = {**DIGESTS, "enterprise-frontend": DIGESTS["frontend"]}
+    expected = r"one digest in frontend\.enterpriseImage \(enterprise\) and frontend\.image \(local\)"
+    with pytest.raises(chart.ChartError, match=expected):
+        chart.check_distinct_web_digests(same)
+    with pytest.raises(chart.ChartError, match=expected):
+        chart.prepare(CHART, tmp_path, same, PREFIX, "0.8.0-rc.1")
+    assert not (tmp_path / "automatos").exists(), "nothing is copied for a refused release"
+    chart.check_distinct_web_digests(DIGESTS)
+    # The shared images may hold any digest: only the web slots are each one edition's build.
+    chart.check_distinct_web_digests({**DIGESTS, "workspace-worker": DIGESTS["api"]})
+
+
+def test_each_editions_render_values_hold_only_what_it_needs_and_nothing_secret_shaped(tmp_path):
+    written = chart.write_render_values(tmp_path / "render")
+    assert [path.name for path in written] == ["enterprise.yaml", "local.yaml"]
+    local = yaml.safe_load((tmp_path / "render" / "local.yaml").read_text(encoding="utf-8"))
+    enterprise = yaml.safe_load((tmp_path / "render" / "enterprise.yaml").read_text(encoding="utf-8"))
+    assert local == {}, "the default edition renders with existingSecret alone"
+    assert enterprise["edition"]["authEdition"] == "enterprise"
+    # PRD-277 US-701: each value the chart requires in this edition, and nothing else.
+    assert enterprise["edition"]["enterprise"] == {
+        "publicUrl": "https://automatos.example.com", "clientIpHeader": "X-Real-IP",
+        "oidc": {"issuer": "https://id.example.com/realms/automatos", "clientId": "automatos"}}
+    assert "secret" not in json.dumps(enterprise).lower()
+
+
+def test_a_missing_or_malformed_digest_publishes_nothing(tmp_path):
+    (tmp_path / "api").write_text(DIGESTS["api"] + "\n", encoding="utf-8")
+    (tmp_path / "frontend").write_text("sha256:short\n", encoding="utf-8")
+    with pytest.raises(chart.ChartError, match="frontend: no sha256 digest.*workspace-worker: no sha256 digest"):
+        chart.read_digests(tmp_path, ["api", "frontend", "workspace-worker"])
+
+
+def test_a_value_the_chart_does_not_hold_once_is_refused():
+    with pytest.raises(chart.ChartError, match="exactly once: api.image.nothing"):
+        chart.set_values((CHART / "values.yaml").read_text(encoding="utf-8"), {("api", "image", "nothing"): "x"})
+    with pytest.raises(chart.ChartError, match="a mapping, not a value"):
+        chart.set_values((CHART / "values.yaml").read_text(encoding="utf-8"), {("api", "image"): "x"})
+
+
+def _rendered(images: list, version_label: str = "0.8.0-rc.1") -> list:
+    labels = {"helm.sh/chart": f"automatos-{version_label}", "app.kubernetes.io/version": version_label}
+    return [{"kind": "Deployment", "metadata": {"labels": labels},
+             "spec": {"template": {"spec": {"containers": [{"name": "c", "image": image}]}}}} for image in images]
+
+
+def test_a_render_that_runs_exactly_the_published_digests_passes():
+    expected = _refs(EDITION_IMAGES["local"])
+    assert chart.check_rendered(_rendered(expected), expected, "0.8.0-rc.1") == []
+
+
+@pytest.mark.parametrize("image", [
+    "ghcr.io/automatosai/automatos-api:0.8.0-rc.1",
+    "ghcr.io/automatosai/automatos-api:edge",
+    "ghcr.io/automatosai/automatos-api",
+    "ghcr.io/automatosai/automatos-api:0.8@sha256:" + "a" * 64,
+])
+def test_a_render_with_an_image_named_by_a_tag_fails(image):
+    expected = _refs(EDITION_IMAGES["local"])
+    problems = chart.check_rendered(_rendered([*expected[1:], image]), expected, "0.8.0-rc.1")
+    assert f"named by a tag, not a digest: {image}" in problems
+    assert f"published but not run by the chart: {expected[0]}" in problems
+
+
+def test_a_render_with_another_image_or_the_wrong_version_fails():
+    expected = _refs(EDITION_IMAGES["local"])
+    stranger = "ghcr.io/someone/else@sha256:" + "e" * 64
+    assert chart.check_rendered(_rendered([*expected, stranger]), expected, "0.8.0-rc.1") == [
+        f"run by the chart but not one of the images this render should run: {stranger}"]
+    problems = chart.check_rendered(_rendered(expected, "edge"), expected, "0.8.0-rc.1")
+    assert any(problem.startswith("label helm.sh/chart is") for problem in problems)
+    assert chart.check_rendered([], expected, "0.8.0-rc.1")[-1] == "the render names no image at all"
+
+
+def _expected_by_edition() -> dict:
+    return {edition: _refs(names) for edition, names in EDITION_IMAGES.items()}
+
+
+def test_every_editions_render_is_checked_against_its_own_images():
+    expected = _expected_by_edition()
+    renders = {edition: _rendered(refs) for edition, refs in expected.items()}
+    assert chart.check_renders(renders, expected, "0.8.0-rc.1") == []
+
+
+def test_an_edition_running_the_other_editions_web_image_fails():
+    expected = _expected_by_edition()
+    local_web, enterprise_web = _refs(["frontend"])[0], _refs(["enterprise-frontend"])[0]
+    swapped = [ref for ref in expected["enterprise"] if ref != enterprise_web] + [local_web]
+    problems = chart.check_renders({"local": _rendered(expected["local"]), "enterprise": _rendered(swapped)},
+                                   expected, "0.8.0-rc.1")
+    assert problems == [f"enterprise: published but not run by the chart: {enterprise_web}",
+                        f"enterprise: run by the chart but not one of the images this render should run: {local_web}"]
+
+
+def test_an_edition_left_unrendered_or_one_never_published_fails():
+    expected = _expected_by_edition()
+    renders = {"local": _rendered(expected["local"]), "saas": _rendered(expected["local"])}
+    assert chart.check_renders(renders, expected, "0.8.0-rc.1") == [
+        "enterprise: not rendered", "saas: rendered, but not a published edition"]
+
+
+def test_the_cli_prepares_the_chart_and_lists_each_editions_images_and_render_values(tmp_path):
+    digests = tmp_path / "digests"
+    digests.mkdir()
+    for name, digest in DIGESTS.items():
+        (digests / name).write_text(digest + "\n", encoding="utf-8")
+    images = tmp_path / "images.json"
+    assert chart.main(["prepare", "--chart", str(CHART), "--out", str(tmp_path / "out"), "--digests", str(digests),
+                       "--prefix", PREFIX, "--version", "0.8.0-rc.1", "--images", str(images),
+                       "--render-values", str(tmp_path / "render")]) == 0
+    assert json.loads(images.read_text(encoding="utf-8")) == _expected_by_edition()
+    assert sorted(path.name for path in (tmp_path / "render").iterdir()) == ["enterprise.yaml", "local.yaml"]
+    assert (tmp_path / "out" / "automatos" / "templates" / "_helpers.tpl").is_file()
+
+
+def test_the_cli_checks_one_render_file_per_edition(tmp_path, capsys):
+    images = tmp_path / "images.json"
+    images.write_text(json.dumps(_expected_by_edition()), encoding="utf-8")
+    rendered = tmp_path / "rendered"
+    rendered.mkdir()
+    (rendered / "local.yaml").write_text(yaml.safe_dump_all(_rendered(_expected_by_edition()["local"])),
+                                         encoding="utf-8")
+    args = ["check-rendered", "--rendered", str(rendered), "--images", str(images), "--version", "0.8.0-rc.1"]
+    assert chart.main(args) == 1
+    assert "::error title=Release chart::enterprise: not rendered" in capsys.readouterr().out
+    (rendered / "enterprise.yaml").write_text(yaml.safe_dump_all(_rendered(_expected_by_edition()["enterprise"])),
+                                              encoding="utf-8")
+    assert chart.main(args) == 0
+    assert "manifests by edition: enterprise 3, local 3; 0 problems" in capsys.readouterr().out

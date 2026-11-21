@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, text
 
-from core.database.database import end_open_transaction, get_db
+from core.database.database import database_tls, end_open_transaction, get_db
 from core.models import Document, DocumentUploadResponse, DocumentResponse
 from modules.rag import DocumentManager, DocumentStatus, DocumentType
 import logging
@@ -79,13 +79,13 @@ else:
             'port': config.POSTGRES_PORT or '5432'
         }
 
-db_config = {
+db_config = database_tls().with_libpq_params({
     "database": postgres_creds.get('database', 'orchestrator_db'),
     "user": postgres_creds.get('user', 'postgres'),
     "password": postgres_creds.get('password', ''),
     "host": postgres_creds.get('host', 'localhost'),
     "port": int(postgres_creds.get('port', 5432))
-}
+})
 
 # Document manager factory - creates instance per request with workspace context
 # The type a document is listed under, by extension. F086: night 3's café sheet

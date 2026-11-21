@@ -104,11 +104,13 @@ Three values, each defaulting to today's behaviour:
 
 | Value | Default | With it set |
 |---|---|---|
-| `worker.namespace` | The release's namespace | The worker's deployment, service, account, secret reference and volume claim are created there. The API's `WORKER_INTERNAL_URL` follows. |
+| `worker.namespace` | The release's namespace | The worker's deployment, service and account are created there, and its pod reads its secret and mounts its volume claim there; both must already exist (the chart refuses the value without `worker.existingSecret` and both claims). The API's `WORKER_INTERNAL_URL` follows. |
 | `worker.existingSecret` | The chart's `existingSecret` | The worker reads its own secret, which holds only what the worker needs. |
 | Placement for every component | None | Node selector, tolerations, affinity and spread, for the worker, the web app, the migration job and the memory store as the API has today. |
 
-**The agent-files volume across two namespaces.** A claim belongs to one namespace. So each side can be given a claim that already exists: one for the API, which mounts it read-only, and one for the worker. The operator binds both to the same file system. With one namespace the chart creates one claim, as today.
+**The agent-files volume across two namespaces.** A claim belongs to one namespace. So each side can be given a claim that already exists: one for the API, which mounts it read-only, and one for the worker. The operator binds both to the same file system. With one namespace the chart creates one claim, as today, unless either side names one; a claim named for either side then serves both.
+
+**The token with two secrets.** With `worker.existingSecret` set, `WORKER_INTERNAL_TOKEN` is a required key of the worker's secret and of the chart's `existingSecret`, so both sides hold it. With the chart's one secret it stays optional, as today.
 
 ### 5.5 The worker without the database
 
@@ -183,9 +185,12 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Acceptance Criteria:**
 - [ ] A CI lane, run only when the chart or an image's start-up changes, installs the chart into a namespace that enforces the "restricted" level.
 - [ ] It enables every optional component the chart has at the time. Each later wave adds what it builds: the worker's namespace, the network rules, the memory store.
+  - *Wave 1 (`deploy/kind/strict-values.yaml`):* on: the API with its data volume, the migration Job, the web app, the worker, the read-only roots, OpenTelemetry to a real collector with its headers from the Secret, session mode, the ingress objects (class, host, TLS, annotations; no controller), every account renamed and annotated, `WORKER_INTERNAL_TOKEN`, `ENVIRONMENT=production` and `database.sslmode` (`disable`). Not exercised: the database CA mount (the dev PostgreSQL has no TLS), `api.data.enabled=false`, an edition other than `local`, the Secret keys `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN`, `serviceAccount.create=false`, and more than one API replica.
+  - *Wave 2 adds:* the worker started as uid 1000 in a namespace of its own (`automatos-worker`, "restricted"), with a Secret of its own, and the agent-files volume as two claims the lane makes, one in each namespace, bound to one folder on the node (`deploy/kind/strict-workspaces.yaml`); placement values on every component. `check` also requires the worker to run as uid 1000, write its volume, and the API to read that file through its own claim. Not exercised: the agent-files claim the chart makes (the e2e values and the unit tests use it), and placement that keeps a pod off a node (one node).
 - [ ] Every pod becomes ready, and the lane fails if the namespace refuses one.
-- [ ] The lane uses images built in the same run, not published ones.
+- [x] The lane uses images built in the same run, not published ones.
 - [ ] Until Wave 2 lands, the worker is the one pod the lane lets run at the "baseline" level, and the lane says so in its output.
+  - *Ended by Wave 2: the exception and its message are gone from `deploy/kind/strict.sh`. Every namespace the lane makes for the chart enforces "restricted", and the worker's pod is probed like the others; that it is admitted waits on the lane, in CI.*
 
 #### US-101: A service account for each component · M
 **Description:** As an operator, I want each component to have its own account, so that a cloud role I give the API is not also given to the worker.
@@ -208,15 +213,15 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As a maintainer, I want every path each component writes to listed, so that a read-only root file system breaks nothing.
 
 **Acceptance Criteria:**
-- [ ] A table lists, for the API, the web app, the worker, the migration job and the memory store: each path written, by what, and whether it must survive a restart.
-- [ ] Each row is marked as scratch or as needing a home.
-- [ ] A row that needs a home and has none is listed for Gerard, not guessed.
+- [x] A table lists, for the API, the web app, the worker, the migration job and the memory store: each path written, by what, and whether it must survive a restart. ([PRD-280-US-103-WRITE-PATHS.md](PRD-280-US-103-WRITE-PATHS.md))
+- [x] Each row is marked as scratch or as needing a home.
+- [x] A row that needs a home and has none is listed for Gerard, not guessed.
 
 #### US-104: A read-only root file system · M
 **Description:** As an operator, I want no container able to change its own image at run time, so that what runs stays what was released.
 
 **Acceptance Criteria:**
-- [ ] Every container has a read-only root file system, with a scratch volume for each scratch row in US-103's table.
+- [x] Every container has a read-only root file system, with a scratch volume for each scratch row in US-103's table.
 - [ ] Each component starts and passes its health check in CI's install test (US-100).
 - [ ] No scratch volume holds anything US-103 marked as needing a home.
 
@@ -226,29 +231,42 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As an operator, I want the worker never to run as root, so that the one component that runs agent code has the least it can have.
 
 **Acceptance Criteria:**
-- [ ] The worker's image runs as user 1000 by default.
-- [ ] Started as that user, the entrypoint repairs nothing. It checks the volume is writable and otherwise stops with a message that says what the storage must provide.
+- [x] The worker's image runs as user 1000 by default.
+  - *`USER 1000:1000` after the production stage's last `RUN` (`test_f452_worker_cannot_regain_privileges.py::test_the_image_runs_as_uid_1000_by_default`). The built image's default user is checked by test.yml's prod-image-parity job (`docker run … id -u` must be 1000), in CI.*
+- [x] Started as that user, the entrypoint repairs nothing. It checks the volume is writable and otherwise stops with a message that says what the storage must provide.
+  - *`test_prd262_worker_boot.py`: started as uid 1000 or 1001 on a writable volume (a folder another user owns included), no `find`, `chown`, `usermod` or `setpriv` probe runs and it starts as itself; on a missing or read-only volume it exits 1 before starting, naming each folder it cannot write, the pod's `fsGroup` and the root start. test.yml's parity job runs both on the built image (a volume uid 1000 owns starts; one root owns stops, and stays root's), in CI.*
 - [ ] The chart sets the worker non-root, with the pod's group setting on its volume, and adds no capability.
+  - *Rendered: `worker_frontend_test.yaml`, `pod_security_test.yaml`, `default_render_test.yaml`, and `test_f452…::test_the_chart_s_worker_starts_as_uid_1000_and_gains_no_privilege_or_capability`; the pod also sets `fsGroupChangePolicy: OnRootMismatch`. The install lane (`deploy/kind/strict.sh check`, in CI) proves admission under "restricted" with no exception for the worker, its start as uid 1000, and that the two claims share files. It does not prove the pod's group setting: its hostPath volumes ignore `fsGroup`, and the folder is prepared for gid 1000 before either pod starts. That storage honouring `fsGroup` makes a root-owned volume writable for the worker is shown by the first real install on such storage.*
 - [ ] The compose file states the user it starts the worker as, and the local development path works as today.
-- [ ] The chart's README no longer lists capabilities for the worker.
+  - *Compose sets `user: "0:0"` and keeps its four capabilities (`test_1309_worker_capabilities.py`); the root start is the path compose used before, unchanged in `entrypoint.sh` and covered by `test_prd262_worker_boot.py`'s root cases. A `make dev` run is not part of CI.*
+- [x] The chart's README no longer lists capabilities for the worker.
+  - *`test_1309_worker_capabilities.py::test_the_chart_s_readme_lists_no_capability_for_the_worker` (everything above the upgrade notes, which say what 0.9.0 added).*
 - [ ] The worker's own tests pass, with new cases for both start modes.
+  - *The new cases are in `test_prd262_worker_boot.py` (both modes, and that each ends in its own drop) and in test.yml's parity job. Whether they pass is CI's to say.*
 
 #### US-202: The worker in its own namespace · M
 **Description:** As an operator, I want to put the worker in a namespace of its own, so that I can give it its own security level and its own rules.
 
 **Acceptance Criteria:**
-- [ ] `worker.namespace` moves the worker's deployment, service and account, and the API's `WORKER_INTERNAL_URL` names the new address.
-- [ ] `worker.existingSecret` names the worker's own secret, and the worker reads no other.
-- [ ] The worker's internal token is a required key of that secret, not an optional one.
-- [ ] Each side of the agent-files volume can be given a claim that already exists.
-- [ ] With none of the three set, the rendered chart is the same as before this story. A test pins it.
+- [x] `worker.namespace` moves the worker's deployment, service and account, and the API's `WORKER_INTERNAL_URL` names the new address.
+  - *`worker_namespace_test.yaml`: the Deployment, the Service and the worker's account in `worker.namespace`, every other account in the release's; `WORKER_INTERNAL_URL` is `http://<fullname>-worker.<namespace>.svc:8081` for the API and the migration Job; the release's own namespace named counts as unset. The chart creates no namespace (D-5). The install lane runs it in its own "restricted" namespace, in CI.*
+- [x] `worker.existingSecret` names the worker's own secret, and the worker reads no other.
+  - *`worker_namespace_test.yaml` pins the worker's whole environment: every `secretKeyRef`, the OpenTelemetry headers' included, names `worker.existingSecret`.*
+- [x] The worker's internal token is a required key of that secret, not an optional one.
+  - *Required when `worker.existingSecret` is set, in the worker's Secret and in `existingSecret` too, so both sides hold it. With the chart's one Secret, as before, it stays optional, so the default render is unchanged (`worker_namespace_test.yaml`, `default_render_test.yaml`).*
+- [x] Each side of the agent-files volume can be given a claim that already exists.
+  - *`workspaces.api.existingClaim`, `workspaces.worker.existingClaim` (`worker_namespace_test.yaml`). In one namespace a claim named for either side serves both; with the worker apart, both and `worker.existingSecret` are required, and an invalid namespace name, or one starting `kube-`, is refused (`worker_namespace_refusals_test.yaml`); the install notes then list what must already exist in the worker's namespace (`notes_test.yaml`). That two claims on one file system share files waits on the install lane, which binds two claims to one node folder and has the API read a file the worker wrote, in CI.*
+- [x] With none of the three set, the rendered chart is the same as before this story. A test pins it.
+  - *`default_render_test.yaml` pins every object the default render makes (kind, apiVersion, metadata and spec, and each template's object count). The differences from chart 0.9.0 are deliberate and listed in its header: the chart's version label, and US-201's worker pod settings and dropped capabilities.*
 
 #### US-203: Placement for every component · S
 **Description:** As an operator, I want to choose the nodes each component runs on, so that the worker has nodes to itself.
 
 **Acceptance Criteria:**
 - [ ] The worker, the web app, the migration job and the memory store take a node selector, tolerations, affinity and spread, as the API does.
-- [ ] Unit tests cover each.
+  - *Built for the API (spread is new), the web app, the worker and the migration Job: `nodeSelector`, `tolerations`, `affinity` and `topologySpreadConstraints`, through one helper (`automatos.placement`). Not done for the memory store, which the chart does not have yet: it gets its placement when Wave 6 adds it, a requirement now written into US-601. The install lane sets each value on the worker and a node selector on the rest, in CI.*
+- [x] Unit tests cover each.
+  - *`placement_test.yaml`: each of the four components with all four values, a component's values reaching no other, and one value alone; `default_render_test.yaml`: none rendered while empty.*
 
 ### Wave 3: The worker without the database
 
@@ -342,6 +360,7 @@ Each wave is one pull request or a short series. CI is the only gate.
 - [ ] The API's `QDRANT_URL` is set by the chart, and the chart refuses to render with both `qdrant.enabled` and a hand-written `QDRANT_URL`.
 - [ ] The disk is kept when the chart is uninstalled.
 - [ ] With the value off, nothing is rendered and `QDRANT_URL` is as today.
+- [ ] The memory store takes `qdrant.nodeSelector`, `qdrant.tolerations`, `qdrant.affinity` and `qdrant.topologySpreadConstraints`, through the chart's placement helper (`automatos.placement`, US-203), with unit tests. US-203 built them for every other component; this is the memory store's share of it.
 
 ### Wave 7: What the chart guarantees
 
@@ -390,7 +409,7 @@ Each has a recommendation, which stands unless he changes it.
 - **PRD-278.** A read-only root assumes nothing that must survive lives on the API's disk. Where PRD-278 has not landed, the API's data volume covers it.
 - **PRD-277.** A token bound to a session follows the pattern that PRD sets for sessions and device tokens: random, stored hashed, checked through the bearer registry.
 - **Tests that pin today's shape and must be changed on purpose:** the chart's `worker_frontend_test.yaml`, `api_test.yaml` and `migrate_job_test.yaml`; `test_prd262_smoke_worker_health.py`; `test_prd262_worker_starlette.py`.
-- **The hosted service** runs the worker outside this chart, on storage that mounts as root **[T]** (`entrypoint.sh:66`). The image still starts as root there when told to. That path is unchanged.
+- **The hosted service** runs the worker outside this chart, on storage that mounts as root **[T]** (`entrypoint.sh:66`). The image still starts as root there when told to, and its root path is unchanged. But since US-201 the image starts as uid 1000 unless told otherwise, so the hosted service must now tell it: Railway starts a non-root image as its `USER` and documents `RAILWAY_RUN_UID=0` to start it as root (docs.railway.com/volumes#permissions). `infrastructure/railway-manifest.json` records the required value for `agent-workspace-worker` (`required_env_values`), and a test checks it. **Order:** set it on the service before an image from this release deploys; setting it earlier changes nothing, as the older image already starts as root. Without it the worker prints `[entrypoint] uid 1000 cannot write /workspaces…` and exits 1 before it starts, touching no file, and each restart stops the same way. `docs/deployment-infrastructure/production-deployment-cicd.md` and the chart's upgrade notes say the same.
 
 ## 10. Success metrics
 

@@ -27,6 +27,14 @@ import {
 } from '@clerk/nextjs'
 import { isSaaS } from '@/lib/auth-edition'
 import { readDeviceToken } from '@/lib/device-token'
+import { isEnterprise } from '@/lib/edition-name'
+import {
+    useEnterpriseAuth,
+    useEnterpriseClerk,
+    useEnterpriseOrganization,
+    useEnterpriseSessionHook,
+    useEnterpriseUser,
+} from '@/lib/enterprise/auth-hooks'
 
 // The local session: signed-in-shaped (the backend treats the anonymous local
 // session as workspace owner — PRD-195 auth-lane contract), org-less and
@@ -69,8 +77,19 @@ const LOCAL_CLERK = {
     openOrganizationProfile: () => {},
 } as unknown as ReturnType<typeof clerkUseClerk>
 
-export const useAuth = isSaaS ? clerkUseAuth : () => LOCAL_AUTH
-export const useUser = isSaaS ? clerkUseUser : () => LOCAL_USER
-export const useSession = isSaaS ? clerkUseSession : () => LOCAL_SESSION
-export const useOrganization = isSaaS ? clerkUseOrganization : () => LOCAL_ORGANIZATION
-export const useClerk = isSaaS ? clerkUseClerk : () => LOCAL_CLERK
+// PRD-277 US-501: the enterprise edition's hooks, the same shapes filled from the API's who-am-I
+// (lib/enterprise/auth-hooks.ts). Its role comes from the API, never from Clerk.
+const useEnterpriseAuthAsClerk = () => useEnterpriseAuth() as unknown as ReturnType<typeof clerkUseAuth>
+const useEnterpriseUserAsClerk = () => useEnterpriseUser() as unknown as ReturnType<typeof clerkUseUser>
+const useEnterpriseSessionAsClerk = () => useEnterpriseSessionHook() as unknown as ReturnType<typeof clerkUseSession>
+const useEnterpriseOrganizationAsClerk = () =>
+    useEnterpriseOrganization() as unknown as ReturnType<typeof clerkUseOrganization>
+const useEnterpriseClerkAsClerk = () => useEnterpriseClerk() as unknown as ReturnType<typeof clerkUseClerk>
+
+export const useAuth = isSaaS ? clerkUseAuth : isEnterprise ? useEnterpriseAuthAsClerk : () => LOCAL_AUTH
+export const useUser = isSaaS ? clerkUseUser : isEnterprise ? useEnterpriseUserAsClerk : () => LOCAL_USER
+export const useSession = isSaaS ? clerkUseSession : isEnterprise ? useEnterpriseSessionAsClerk : () => LOCAL_SESSION
+export const useOrganization = isSaaS
+    ? clerkUseOrganization
+    : isEnterprise ? useEnterpriseOrganizationAsClerk : () => LOCAL_ORGANIZATION
+export const useClerk = isSaaS ? clerkUseClerk : isEnterprise ? useEnterpriseClerkAsClerk : () => LOCAL_CLERK

@@ -230,36 +230,36 @@ Each wave is one pull request or a short series. CI is the only gate: nothing he
 **Description:** As a developer, I want one function to say how a database connection is secured, so that no path can differ.
 
 **Acceptance Criteria:**
-- [ ] `DATABASE_SSLMODE` and `DATABASE_SSLROOTCERT` exist in `config.py` and `config-surface.json`.
-- [ ] One function returns what SQLAlchemy with `psycopg2`, a raw `psycopg2` connection and `asyncpg` each need.
-- [ ] With neither setting, the main engine behaves as today, and a test pins that.
+- [x] `DATABASE_SSLMODE` and `DATABASE_SSLROOTCERT` exist in `config.py` and `config-surface.json`.
+- [x] One function returns what SQLAlchemy with `psycopg2`, a raw `psycopg2` connection and `asyncpg` each need.
+- [x] With neither setting, the main engine behaves as today, and a test pins that.
 - [ ] If D-6 is accepted: in the `enterprise` edition, start-up fails unless `DATABASE_SSLMODE` is `verify-full`.
-- [ ] `Config.get_database_url()` is deleted.
+- [x] `Config.get_database_url()` is deleted.
 
 #### US-302: Every connection path · L
 **Description:** As a security reviewer, I want the same TLS on every connection core opens to its own database, so that the answer does not depend on which query ran.
 
 **Acceptance Criteria:**
-- [ ] The main engine, the scheduler's lock connection, both `asyncpg` connections, the documents routes' own connections and the ingestion manager's all use US-301's function.
-- [ ] Alembic's `env.py` uses it, so the migration job connects the same way.
-- [ ] The start-up scripts that open their own connection use it.
-- [ ] A test fails if a file in the orchestrator opens a connection to the application's database another way. Connections to a user's own data source are not covered.
+- [x] The main engine, the scheduler's lock connection, both `asyncpg` connections, the documents routes' own connections and the ingestion manager's all use US-301's function.
+- [x] Alembic's `env.py` uses it, so the migration job connects the same way.
+- [x] The start-up scripts that open their own connection use it.
+- [x] A test fails if a file in the orchestrator opens a connection to the application's database another way. Connections to a user's own data source are not covered.
 - [ ] The pull request lists every path it changed, with file and line.
 
 #### US-303: The worker · S
 **Description:** As an operator, I want the workspace worker's database connection secured the same way, for as long as it has one.
 
 **Acceptance Criteria:**
-- [ ] The worker reads the same two settings and applies them to its one connection.
-- [ ] A test covers `verify-full` with a CA path.
+- [x] The worker reads the same two settings and applies them to its one connection.
+- [x] A test covers `verify-full` with a CA path.
 
 #### US-304: A CA bundle in the chart · S
 **Description:** As an operator, I want to hand the chart my database's CA, so that the certificate check has something to check against.
 
 **Acceptance Criteria:**
-- [ ] A value names a ConfigMap holding a CA file. The chart mounts it read-only in the API, the migration job and the worker, and sets `DATABASE_SSLROOTCERT`.
-- [ ] Without the value, nothing is mounted and nothing changes.
-- [ ] The chart's unit tests cover both.
+- [x] A value names a ConfigMap holding a CA file. The chart mounts it read-only in the API, the migration job and the worker, and sets `DATABASE_SSLROOTCERT`.
+- [x] Without the value, nothing is mounted and nothing changes.
+- [x] The chart's unit tests cover both.
 
 ### Wave 4: Uploads in object storage
 

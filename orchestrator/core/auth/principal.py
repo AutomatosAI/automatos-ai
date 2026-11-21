@@ -11,8 +11,8 @@ fetch" (``GET /api/documents/variables``) are the same bug.
 
 This is the ONE resolver. Lanes that already carry the PK (an int ``id``, or
 the ``raw_claims["user_id"]`` of the local operator or of a paired device)
-resolve without a query; the Clerk lane looks the row up by ``clerk_user_id``
-and then by email.
+resolve without a query; the Clerk lane looks the row up by its Clerk user ID
+(``core.auth.clerk_person``, PRD-277 US-202) and then by email.
 """
 
 from __future__ import annotations
@@ -21,16 +21,20 @@ from typing import Any, Optional
 
 from sqlalchemy import text
 
+from core.auth.clerk_person import PRINCIPAL_PARAM, clerk_person_row
+
 
 # The only lanes that stash the integer PK on ``raw_claims``: the local
-# operator context in ``core/auth/hybrid.py`` (``"source": "local_operator"``)
-# and the paired-device lane in ``core/auth/device.py`` (PRD-266,
-# ``"source": "mobile_device"``). The Clerk lane's ``raw_claims`` is the RAW JWT
+# operator context in ``core/auth/hybrid.py`` (``"source": "local_operator"``),
+# the paired-device lane in ``core/auth/device.py`` (PRD-266,
+# ``"source": "mobile_device"``) and the session lane (PRD-277, ``"auth_session"``). The Clerk lane's ``raw_claims`` is the RAW JWT
 # payload; a claim that merely happens to be called ``user_id`` there must
 # never be trusted as our PK.
 LOCAL_OPERATOR_CLAIM_SOURCE = "local_operator"
 MOBILE_DEVICE_CLAIM_SOURCE = "mobile_device"
-_PK_CLAIM_SOURCES = frozenset({LOCAL_OPERATOR_CLAIM_SOURCE, MOBILE_DEVICE_CLAIM_SOURCE})
+# PRD-277 Wave 3: the session lane (``core/auth/session_lane.py``), a signed-in person by ``users.id``.
+AUTH_SESSION_CLAIM_SOURCE = "auth_session"
+_PK_CLAIM_SOURCES = frozenset({LOCAL_OPERATOR_CLAIM_SOURCE, MOBILE_DEVICE_CLAIM_SOURCE, AUTH_SESSION_CLAIM_SOURCE})
 # The lane whose raw_claims is that verified JWT's payload: whatever it says, it is
 # never one of the two lanes above (PRD-266 US-004b security review).
 CLERK_AUTH_TYPE = "clerk"
@@ -53,11 +57,10 @@ def claimed_user_pk(ctx: Any) -> Optional[int]:
     return claimed if isinstance(claimed, int) and not isinstance(claimed, bool) else None
 
 
-def _lookup(db: Any, column: str, value: str) -> Optional[int]:
-    row = db.execute(
-        text(f"SELECT id FROM users WHERE {column} = :value LIMIT 1"),  # noqa: S608 — column is a literal below
-        {"value": value},
-    ).fetchone()
+_PK_BY_EMAIL = text("SELECT id FROM users WHERE email = :value LIMIT 1")
+
+
+def _pk_of(row: Any) -> Optional[int]:
     return int(row[0]) if row else None
 
 
@@ -83,14 +86,14 @@ def resolve_user_pk(db: Any, ctx: Any) -> Optional[int]:
 
     clerk_uid = getattr(user, "clerk_user_id", None) or (uid if isinstance(uid, str) else None)
     if clerk_uid:
-        found = _lookup(db, "clerk_user_id", clerk_uid)
+        found = _pk_of(clerk_person_row(db, clerk_uid, param=PRINCIPAL_PARAM))
         if found is not None:
             return found
 
     email = getattr(user, "email", None)
     if email:
-        return _lookup(db, "email", email)
+        return _pk_of(db.execute(_PK_BY_EMAIL, {"value": email}).fetchone())
     return None
 
 
-__all__ = ["LOCAL_OPERATOR_CLAIM_SOURCE", "MOBILE_DEVICE_CLAIM_SOURCE", "claimed_user_pk", "resolve_user_pk"]
+__all__ = ["AUTH_SESSION_CLAIM_SOURCE", "LOCAL_OPERATOR_CLAIM_SOURCE", "MOBILE_DEVICE_CLAIM_SOURCE", "claimed_user_pk", "resolve_user_pk"]

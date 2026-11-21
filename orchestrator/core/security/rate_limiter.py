@@ -60,6 +60,11 @@ DEFAULT_LIMITS: dict[str, tuple[int, int]] = {
     # the event loop by api/readiness.py through RateLimitStore. GET /api/readiness answers the last
     # check while it is younger than this window.
     "readiness_check": config.rate_limit_for("readiness_check", 3, 60),     # 3 checks per workspace per minute
+    # PRD-277 US-402: the public GET /api/v1/auth/oidc/start and /callback, one bucket each per client
+    # IP (an IPv6 /64), counted off the event loop by api/auth_oidc.py the mobile_pair_ip way. Room for
+    # an office behind one address signing in at nine; a script cannot fill the sign-in table.
+    "oidc_start_ip":    config.rate_limit_for("oidc_start_ip", 300, 600),    # 300 sign-ins started per IP per 10 minutes
+    "oidc_callback_ip": config.rate_limit_for("oidc_callback_ip", 300, 600), # 300 callbacks per IP per 10 minutes
 }
 
 

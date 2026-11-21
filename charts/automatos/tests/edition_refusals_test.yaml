@@ -1,0 +1,106 @@
+suite: An edition spelled other than the chart documents, and the client secret in config, stop the API's render
+# The API's template alone. A suite that also renders templates/frontend.yaml, which refuses a
+# mis-spelled edition too, has the failure reported against frontend.yaml (helm-unittest reports
+# a failed render against the first template, in reverse alphabetical order, that fails), and
+# an assertion on the API's template then sees no failed document. The web app's template has
+# its own suite, edition_refusals_web_test.yaml. The API reads AUTH_EDITION trimmed and in lower
+# case and takes an unknown one as saas, so a near miss would start an edition the chart did not
+# render for. The message never prints the value.
+templates:
+  - templates/api-deployment.yaml
+release:
+  name: demo
+  namespace: automatos
+set:
+  existingSecret: automatos-secrets
+tests:
+  - it: renders saas, spelled exactly (enterprise is enterprise_api_test.yaml's)
+    template: templates/api-deployment.yaml
+    set:
+      edition:
+        authEdition: saas
+    asserts:
+      - hasDocuments:
+          count: 1
+  - it: renders the default edition, local
+    template: templates/api-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: AUTH_EDITION, value: local}
+
+  - it: stops on an upper-case Enterprise, naming the key and the accepted spellings
+    template: templates/api-deployment.yaml
+    set:
+      edition:
+        authEdition: Enterprise
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.authEdition must be exactly local, enterprise or saas, in lower case with no spaces"
+  - it: stops on enterprise with a trailing space
+    template: templates/api-deployment.yaml
+    set:
+      edition:
+        authEdition: "enterprise "
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.authEdition must be exactly local, enterprise or saas"
+  - it: stops on local with a leading space
+    template: templates/api-deployment.yaml
+    set:
+      edition:
+        authEdition: " local"
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.authEdition must be exactly local, enterprise or saas"
+  - it: stops on LOCAL
+    template: templates/api-deployment.yaml
+    set:
+      edition:
+        authEdition: LOCAL
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.authEdition must be exactly local, enterprise or saas"
+  - it: stops on SaaS
+    template: templates/api-deployment.yaml
+    set:
+      edition:
+        authEdition: SaaS
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.authEdition must be exactly local, enterprise or saas"
+  - it: stops on an edition the chart does not know
+    template: templates/api-deployment.yaml
+    set:
+      edition:
+        authEdition: hosted
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.authEdition must be exactly local, enterprise or saas"
+  - it: stops on an empty edition
+    template: templates/api-deployment.yaml
+    set:
+      edition:
+        authEdition: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.authEdition must be exactly local, enterprise or saas"
+  # ── the client secret in config, in every edition ───────────────────────────
+  - it: stops on the client secret in config in the local edition
+    template: templates/api-deployment.yaml
+    set:
+      config:
+        OIDC_CLIENT_SECRET: not-a-real-value
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.OIDC_CLIENT_SECRET: a secret is never a chart value. Put it in the Secret existingSecret names, under the key OIDC_CLIENT_SECRET, and remove it from config"
+  - it: stops on the client secret in config in the saas edition
+    template: templates/api-deployment.yaml
+    set:
+      edition:
+        authEdition: saas
+      config:
+        OIDC_CLIENT_SECRET: not-a-real-value
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.OIDC_CLIENT_SECRET: a secret is never a chart value"

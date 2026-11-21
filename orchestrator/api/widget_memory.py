@@ -28,9 +28,9 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from core.auth.clerk_person import clerk_person_row
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.scopes import MEMORY_READ, MEMORY_WRITE
@@ -244,8 +244,9 @@ def _internal_user_id(db: Session, ctx: RequestContext) -> Optional[int]:
 
     ``ctx.user.id`` on the Clerk path is the Clerk STRING — never usable as
     ``users.id`` (the #513 lesson). An already-integer id (local edition)
-    passes through; otherwise resolve via ``users.clerk_user_id``. None when
-    unresolvable — the resume payload then simply carries no threads.
+    passes through; otherwise the row its Clerk user ID names
+    (``core.auth.clerk_person``). None when unresolvable — the resume payload
+    then simply carries no threads.
     """
     user = getattr(ctx, "user", None)
     if user is None:
@@ -257,10 +258,7 @@ def _internal_user_id(db: Session, ctx: RequestContext) -> Optional[int]:
     if not clerk:
         return None
     try:
-        row = db.execute(
-            text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
-            {"cid": clerk},
-        ).fetchone()
+        row = clerk_person_row(db, clerk)
     except Exception:
         logger.warning("[widget_memory] internal user resolution failed", exc_info=True)
         return None

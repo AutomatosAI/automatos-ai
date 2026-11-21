@@ -38,6 +38,15 @@ spec:
                 name: {{ $fullname }}-api
                 port:
                   name: http
+          {{- /* PRD-277 US-505: the discovery document alone, never the web app's other
+          /.well-known/ files. A route is added here when something calls it. */}}
+          - path: /.well-known/automatos.json
+            pathType: Exact
+            backend:
+              service:
+                name: {{ $fullname }}-api
+                port:
+                  name: http
           {{- if .Values.frontend.enabled }}
           - path: /
             pathType: Prefix
