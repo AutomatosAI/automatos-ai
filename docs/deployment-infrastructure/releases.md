@@ -191,6 +191,10 @@ The same for `automatos-frontend`, `automatos-enterprise-frontend`, `automatos-w
 `ghcr.io/automatosai/charts/automatos`. A tag's digest:
 `docker buildx imagetools inspect ghcr.io/automatosai/automatos-api:0.7.0`.
 
+[Checking a release](checking-a-release.md) gives the full command for an image and for
+the chart, says how to read each image's contents list and build record, and says what a
+passing check does and does not prove. Each release page links to it.
+
 The workflow's own check ([`scripts/ci/release_signing.py`](../../scripts/ci/release_signing.py))
 pins more than that, each claim exactly and never by pattern: the identity, the issuer,
 the repository, the ref, the commit and the workflow's name. A signature made by a pull
