@@ -4,8 +4,9 @@ same two settings as the platform's, read in its own config module.
 ``worker_config.database_tls_params()`` reads ``DATABASE_SSLMODE`` and
 ``DATABASE_SSLROOTCERT``; the worker reads them once at start and hands them to
 ``task_executions_db.record_task_status``, which passes them to ``psycopg2.connect`` as
-libpq's ``sslmode`` and ``sslrootcert`` keywords, over the same keys in the address. libpq
-then checks the server's certificate against that CA, and its host name for verify-full.
+libpq's ``sslmode`` and ``sslrootcert`` keywords, over the same keys in the address.
+psycopg2 parses the address with libpq first, which turns its ``requiressl`` and ``ssl`` into
+``sslmode``, so the keywords replace those too. libpq then checks the server's certificate against that CA, and its host name for verify-full.
 Neither set: no keyword, as before. verify-ca or verify-full without a CA file, and a CA
 file that is missing or holds no certificate, stop the worker at start. No database: psycopg2.connect is recorded; the CA files are
 made at run time (``tests/helpers_prd278_w3_ca.py``).
@@ -120,6 +121,36 @@ def test_the_settings_win_over_an_sslmode_in_the_address():
                                           sslmode="verify-full", sslrootcert=CA_IN_POD)
     parsed = psycopg2.extensions.parse_dsn(merged)
     assert parsed["sslmode"] == "verify-full" and parsed["sslrootcert"] == CA_IN_POD
+
+
+@pytest.mark.parametrize("query", ["?sslmode=disable&requiressl=0", "?sslmode=disable&ssl=true",
+                                   "?requiressl=0", "?sslmode=disable&requiress%6C=0"])
+def test_libpq_ends_on_the_settings_mode_whatever_the_address_says(tls_env, monkeypatch, ca_file, query):
+    """psycopg2's final connection string, recorded where psycopg2.connect hands it to libpq and
+    read back with libpq's own parser: the setting's mode, not the address's."""
+    import psycopg2.extensions
+
+    seen = []
+
+    def record(dsn, *args, **kwargs):
+        seen.append(dsn)
+        raise db.psycopg2.OperationalError("recorded; no connection is made")
+
+    monkeypatch.setattr(db.psycopg2, "_connect", record)
+    tls_env(sslmode="verify-full", sslrootcert=ca_file)
+    assert db.record_task_status(_address() + query, TASK_ID, "running", WORKER_ID,
+                                 tls=worker_config.database_tls_params()) is False
+    used = psycopg2.extensions.parse_dsn(seen[0])
+    assert (used["sslmode"], used["sslrootcert"]) == ("verify-full", ca_file)
+
+
+def test_with_neither_setting_the_address_reaches_psycopg2_as_given(tls_env, monkeypatch):
+    recorder = _Recorder()
+    monkeypatch.setattr(db.psycopg2, "connect", recorder.connect)
+    address = _address() + "?sslmode=disable&requiressl=1&ssl=true"
+    assert db.record_task_status(address, TASK_ID, "running", WORKER_ID,
+                                 tls=worker_config.database_tls_params()) is True
+    assert recorder.calls == [(db.libpq_dsn(address), {"connect_timeout": db.CONNECT_TIMEOUT_SECONDS})]
 
 
 @pytest.mark.parametrize(("sslmode", "sslrootcert", "message"), [

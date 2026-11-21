@@ -181,6 +181,104 @@ def test_psycopg2_receives_the_settings_over_the_addresses_own_sslmode(settings,
     assert seen[0]["host"] == "db.example.invalid"
 
 
+# ── the address's own keys that libpq reads as sslmode ──────────────────────
+# libpq turns requiressl (1: require, else prefer) and, in a URI, ssl=true (require) into sslmode,
+# applying keys in the order written. psycopg2's final connection string is recorded at
+# psycopg2._connect and read back with libpq's own parser (parse_dsn), which applies them the same
+# way, so each assertion is on the mode libpq would use.
+ALIASED_QUERIES = ["?sslmode=disable&requiressl=0", "?sslmode=disable&ssl=true",
+                   "?requiressl=1&sslmode=disable&requiressl=0", "?sslmode=disable&requiress%6C=0",
+                   "?application_name=api&sslmode=disable&requiressl=0"]
+
+
+@pytest.fixture
+def libpq_strings(monkeypatch):
+    """psycopg2's final connection strings, recorded where psycopg2.connect hands them to libpq."""
+    import psycopg2
+
+    seen = []
+
+    def record(dsn, *args, **kwargs):
+        seen.append(dsn)
+        raise psycopg2.OperationalError("recorded; no connection is made")
+
+    monkeypatch.setattr(psycopg2, "_connect", record)
+    return seen
+
+
+def _libpq_reads(dsn: str) -> dict:
+    from psycopg2.extensions import parse_dsn
+
+    return parse_dsn(dsn)
+
+
+@pytest.mark.parametrize("query", ALIASED_QUERIES)
+def test_libpq_ends_on_the_settings_mode_through_an_engine(settings, libpq_strings, ca_file, query):
+    from sqlalchemy.pool import NullPool
+
+    settings(sslmode="verify-full", sslrootcert=ca_file)
+    engine = tls.create_app_engine(_address(query), poolclass=NullPool)
+    with pytest.raises(Exception):
+        engine.connect()
+    assert libpq_strings, "psycopg2 built no connection string"
+    used = _libpq_reads(libpq_strings[0])
+    assert (used["sslmode"], used["sslrootcert"]) == ("verify-full", ca_file)
+    assert "requiressl" not in libpq_strings[0] and "ssl=" not in libpq_strings[0]
+
+
+@pytest.mark.parametrize("query", ["?sslmode=disable&requiressl=0", "?sslmode=disable&ssl=true"])
+def test_libpq_ends_on_the_settings_mode_through_the_seed_loaders_dsn(settings, monkeypatch, libpq_strings,
+                                                                      ca_file, query):
+    """psycopg2.connect(url, **keywords) parses the address with libpq first, then the keywords replace it."""
+    import psycopg2
+    from core.database import load_seed_data
+
+    monkeypatch.setattr("core.database.database.get_database_url", lambda: _address(query))
+    settings(sslmode="verify-full", sslrootcert=ca_file)
+    with pytest.raises(psycopg2.OperationalError):
+        load_seed_data._connect()
+    used = _libpq_reads(libpq_strings[0])
+    assert (used["sslmode"], used["sslrootcert"]) == ("verify-full", ca_file)
+
+
+def test_a_keyword_dict_loses_libpqs_other_sslmode_keys_and_the_callers_dict_is_kept(settings, ca_file):
+    settings(sslmode="verify-full", sslrootcert=ca_file)
+    given = {"host": "db", "sslmode": "disable", "requiressl": "0", "ssl": "true"}
+    merged = tls.database_tls().with_libpq_params(given)
+    assert merged == {"host": "db", "sslmode": "verify-full", "sslrootcert": ca_file}
+    assert given == {"host": "db", "sslmode": "disable", "requiressl": "0", "ssl": "true"}
+
+
+def test_an_address_without_those_keys_is_returned_as_given():
+    address = _address("?sslmode=disable&application_name=api")
+    assert tls.without_sslmode_aliases(address) is address
+
+
+def test_only_those_keys_leave_the_address():
+    kept = tls.without_sslmode_aliases(_address("?requiressl=0&application_name=api&ssl=true&sslmode=disable"))
+    assert dict(kept.query) == {"application_name": "api", "sslmode": "disable"}
+    assert (kept.host, kept.port, kept.database, kept.username) == ("db.example.invalid", 5432, "app", "app")
+
+
+def test_with_neither_setting_the_address_and_the_dict_reach_the_builder_as_given(settings, monkeypatch):
+    recorder = _EngineRecorder()
+    monkeypatch.setattr(tls, "create_engine", recorder)
+    address = _address("?sslmode=disable&requiressl=1&ssl=true")
+    tls.create_app_engine(address, connect_args={"requiressl": "1"})
+    assert recorder.calls == [(address, {"connect_args": {"requiressl": "1"}})]
+    given = {"host": "db", "requiressl": "1", "ssl": "true"}
+    assert tls.database_tls().with_libpq_params(given) == given
+
+
+def test_with_neither_setting_libpq_receives_the_addresses_own_keys(settings, libpq_strings):
+    from sqlalchemy.pool import NullPool
+
+    engine = tls.create_app_engine(_address("?sslmode=disable&requiressl=1"), poolclass=NullPool)
+    with pytest.raises(Exception):
+        engine.connect()
+    assert "sslmode=disable" in libpq_strings[0] and "requiressl=1" in libpq_strings[0]
+
+
 def test_verify_full_with_a_ca_gives_asyncpg_a_context_that_checks_the_certificate_and_host(settings, ca_file):
     settings(sslmode="verify-full", sslrootcert=ca_file)
     context = tls.database_tls().asyncpg_kwargs()["ssl"]

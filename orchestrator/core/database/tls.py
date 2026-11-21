@@ -14,6 +14,11 @@ Two settings, read through ``config``:
 * **libpq**, which ``psycopg2.connect`` and SQLAlchemy's psycopg2 dialect both use: the
   keywords ``sslmode`` and ``sslrootcert`` (``libpq_params``; SQLAlchemy gets them in
   ``connect_args``, which win over the same keys in the address). libpq does the check.
+  libpq also turns ``requiressl`` and ``ssl`` into ``sslmode`` (``SSLMODE_ALIASES``), so with
+  the mode set those two keys are dropped from an engine's address and from a keyword dict
+  (``without_sslmode_aliases``, ``with_libpq_params``). An address handed to
+  ``psycopg2.connect`` as its DSN needs nothing: psycopg2 parses it with libpq, which folds
+  both into ``sslmode``, before the keywords replace it.
 * **asyncpg** (``asyncpg_kwargs``): the ``ssl`` argument, which wins over an ``sslmode`` in
   the address. asyncpg takes no ``sslrootcert`` keyword, so with a CA file it is given an
   ``ssl.SSLContext`` that trusts only that file, requires the certificate, and checks the
@@ -49,7 +54,7 @@ from typing import Any, Dict, Mapping, Optional, Tuple, Union
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import URL, Engine, make_url
 
 from config import config
 
@@ -68,6 +73,11 @@ _CA_REQUIRED = (
     "DATABASE_SSLMODE verify-ca and verify-full need DATABASE_SSLROOTCERT: the path of a file holding "
     "the CA certificate(s) that signed the database server's certificate"
 )
+
+# The address keys libpq turns into sslmode: requiressl (1 is require, anything else prefer) and,
+# in a URI, ssl=true (require). libpq applies keys in the order written, so with the mode set
+# neither reaches it beside the setting's sslmode.
+SSLMODE_ALIASES = frozenset({"requiressl", "ssl"})
 
 AsyncpgSSL = Union[str, ssl.SSLContext]
 
@@ -114,8 +124,15 @@ class DatabaseTLS:
         return params
 
     def with_libpq_params(self, params: Mapping[str, Any]) -> Dict[str, Any]:
-        """A copy of a psycopg2 keyword dict with these settings over it."""
-        return {**params, **self.libpq_params()}
+        """A copy of a psycopg2 keyword dict with these settings over it.
+
+        With the mode set, ``SSLMODE_ALIASES`` are left out of the copy, so libpq sees the
+        setting's ``sslmode`` and nothing it would read as another. Unset: a plain copy.
+        """
+        if not self.configured:
+            return {**params}
+        kept = {key: value for key, value in params.items() if key not in SSLMODE_ALIASES}
+        return {**kept, **self.libpq_params()}
 
     def asyncpg_kwargs(self) -> Dict[str, AsyncpgSSL]:
         """The keywords for ``asyncpg.connect``: none, or ``ssl`` (see the module docstring)."""
@@ -218,9 +235,26 @@ def main_engine_url(url: str, environment: Optional[str], tls: DatabaseTLS) -> s
     return urlunparse(parsed._replace(query=urlencode(params, doseq=True)))
 
 
-def create_app_engine(url: str, *, connect_args: Optional[Mapping[str, Any]] = None, **kwargs: Any) -> Engine:
+def without_sslmode_aliases(url: Union[str, URL]) -> Union[str, URL]:
+    """``url`` with its query keys in ``SSLMODE_ALIASES`` dropped, read as SQLAlchemy reads them.
+
+    SQLAlchemy hands an address's query keys to psycopg2 as keywords, beside ``connect_args``, in
+    the order written. An address with neither key is returned as given; one with either comes
+    back as a ``URL`` with every other part unchanged.
+    """
+    parsed = make_url(url)
+    if not SSLMODE_ALIASES & set(parsed.query):
+        return url
+    return parsed.difference_update_query(SSLMODE_ALIASES)
+
+
+def create_app_engine(url: Union[str, URL], *, connect_args: Optional[Mapping[str, Any]] = None,
+                      **kwargs: Any) -> Engine:
     """A SQLAlchemy engine on the application's own database, secured by ``database_tls()``.
 
-    The settings' libpq keywords go in ``connect_args``, over any the caller passes.
+    The settings' libpq keywords go in ``connect_args``, over any the caller passes. With the
+    mode set, the address's ``SSLMODE_ALIASES`` are dropped first; unset, it is used as given.
     """
-    return create_engine(url, connect_args=database_tls().with_libpq_params(connect_args or {}), **kwargs)
+    tls = database_tls()
+    address = without_sslmode_aliases(url) if tls.configured else url
+    return create_engine(address, connect_args=tls.with_libpq_params(connect_args or {}), **kwargs)
