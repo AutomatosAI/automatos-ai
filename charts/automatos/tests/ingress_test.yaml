@@ -8,7 +8,7 @@ tests:
     asserts:
       - hasDocuments:
           count: 0
-  - it: routes /api and /ws to the API and everything else to the web app
+  - it: routes /api, /ws, the discovery document and /exports/ to the API and everything else to the web app
     release:
       name: demo
     set:
@@ -29,5 +29,99 @@ tests:
           path: spec.rules[0].http.paths[1].path
           value: /ws
       - equal:
-          path: spec.rules[0].http.paths[2].backend.service.name
+          path: spec.rules[0].http.paths[4].backend.service.name
           value: demo-automatos-frontend
+  # PRD-277 US-505: exactly these two more paths, in every edition.
+  - it: routes exactly the discovery document to the API, never the rest of /.well-known/
+    release:
+      name: demo
+    set:
+      ingress:
+        enabled: true
+    asserts:
+      - equal:
+          path: spec.rules[0].http.paths[2]
+          value:
+            path: /.well-known/automatos.json
+            pathType: Exact
+            backend:
+              service:
+                name: demo-automatos-api
+                port:
+                  name: http
+      - equal:
+          path: spec.rules[0].http.paths[3]
+          value:
+            path: /exports/
+            pathType: Prefix
+            backend:
+              service:
+                name: demo-automatos-api
+                port:
+                  name: http
+      - equal:
+          path: spec.rules[0].http.paths[4]
+          value:
+            path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: demo-automatos-frontend
+                port:
+                  name: http
+      - lengthEqual:
+          path: spec.rules[0].http.paths
+          count: 5
+  - it: routes the same paths in the enterprise edition
+    release:
+      name: demo
+    set:
+      edition:
+        authEdition: enterprise
+      ingress:
+        enabled: true
+    asserts:
+      - equal:
+          path: spec.rules[0].http.paths[2].path
+          value: /.well-known/automatos.json
+      - equal:
+          path: spec.rules[0].http.paths[3].path
+          value: /exports/
+      - lengthEqual:
+          path: spec.rules[0].http.paths
+          count: 5
+  - it: exposes neither /health, /metrics, /docs nor the /.well-known/ prefix
+    set:
+      ingress:
+        enabled: true
+    asserts:
+      - notContains:
+          path: spec.rules[0].http.paths
+          content: {path: /health}
+          any: true
+      - notContains:
+          path: spec.rules[0].http.paths
+          content: {path: /metrics}
+          any: true
+      - notContains:
+          path: spec.rules[0].http.paths
+          content: {path: /docs}
+          any: true
+      - notContains:
+          path: spec.rules[0].http.paths
+          content: {path: /.well-known/}
+          any: true
+      - notContains:
+          path: spec.rules[0].http.paths
+          content: {path: /.well-known}
+          any: true
+  - it: routes the API's paths alone when the web app is off
+    set:
+      frontend:
+        enabled: false
+      ingress:
+        enabled: true
+    asserts:
+      - lengthEqual:
+          path: spec.rules[0].http.paths
+          count: 4
