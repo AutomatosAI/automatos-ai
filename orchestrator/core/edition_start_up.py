@@ -12,8 +12,9 @@
 2. when a sign-in setting (``OIDC_SIGN_IN_SETTINGS``, PRD-277 Wave 4) cannot be used: the issuer
    and ``FRONTEND_URL`` must be ``https`` addresses with a host; ``OIDC_SCOPES`` must be scope
    tokens including ``openid``; ``OIDC_CLAIM_EMAIL``, ``OIDC_CLAIM_NAME`` and
-   ``OIDC_CLAIM_SUBJECT`` must name a claim, the last not one of ``access_rule.PROTOCOL_CLAIMS``
-   and not the claim ``OIDC_CLAIM_EMAIL`` or ``OIDC_CLAIM_NAME`` names, nor ``email`` (FR-7);
+   ``OIDC_CLAIM_SUBJECT`` must name a claim, the last (compared without regard to case) not one of
+   ``access_rule.PROTOCOL_CLAIMS`` or ``access_rule.NOT_ONE_PERSONS_ID_CLAIMS``, and not the claim
+   ``OIDC_CLAIM_EMAIL`` or ``OIDC_CLAIM_NAME`` names, nor ``email`` (FR-7);
    ``OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES``, when set, must be ``true`` or ``false``;
    ``OIDC_CA_BUNDLE_FILE``, when set, must be a file this process can read; and
    ``ENTERPRISE_DEFAULT_ROLE`` must be ``none`` or a workspace role below owner, and a role needs
@@ -115,6 +116,11 @@ CLAIM_NAME_SETTINGS: Tuple[str, ...] = ("OIDC_CLAIM_EMAIL", "OIDC_CLAIM_NAME", S
 SUBJECT_CLAIM_PROBLEM = (
     "must name the claim that identifies the person, not one that describes the token itself, which is the same "
     "for everyone or new at every sign-in"
+)
+# A claim many people share, or one that changes and is reused (``access_rule.NOT_ONE_PERSONS_ID_CLAIMS``).
+SUBJECT_CLAIM_SHARED_PROBLEM = (
+    "must name a claim unique to one person, fixed for good and not reused: a claim many people share, or one "
+    "that changes, does not identify a person"
 )
 # FR-7: the subject is never the claim an address or a display name is read from, nor the standard address claim.
 SUBJECT_CLAIM_PROFILE_PROBLEM = (
@@ -259,15 +265,24 @@ def _trimmed(settings: Mapping[str, Any], name: str) -> str:
     return str(settings.get(name) or "").strip()
 
 
+def _folded(names: Tuple[str, ...]) -> Tuple[str, ...]:
+    return tuple(name.casefold() for name in names)
+
+
 def _subject_claim_problem(settings: Mapping[str, Any]) -> Optional[str]:
-    """Why ``OIDC_CLAIM_SUBJECT`` cannot identify a person, or None (an empty one is refused before)."""
-    subject = _trimmed(settings, SUBJECT_CLAIM_SETTING)
+    """Why ``OIDC_CLAIM_SUBJECT`` cannot identify a person, or None (an empty one is refused before).
+
+    Every comparison ignores case, so ``Email`` is refused as ``email`` is.
+    """
+    subject = _trimmed(settings, SUBJECT_CLAIM_SETTING).casefold()
     if not subject:
         return None
-    if subject in access_rule.PROTOCOL_CLAIMS:
+    if subject in _folded(access_rule.PROTOCOL_CLAIMS):
         return SUBJECT_CLAIM_PROBLEM
-    profile_claims = (_trimmed(settings, "OIDC_CLAIM_EMAIL"), _trimmed(settings, "OIDC_CLAIM_NAME"),
-                      STANDARD_EMAIL_CLAIM)
+    if subject in _folded(access_rule.NOT_ONE_PERSONS_ID_CLAIMS):
+        return SUBJECT_CLAIM_SHARED_PROBLEM
+    profile_claims = _folded((_trimmed(settings, "OIDC_CLAIM_EMAIL"), _trimmed(settings, "OIDC_CLAIM_NAME"),
+                              STANDARD_EMAIL_CLAIM))
     return SUBJECT_CLAIM_PROFILE_PROBLEM if subject in profile_claims else None
 
 
@@ -477,6 +492,7 @@ __all__ = [
     "SHARED_ISSUER_PROBLEM",
     "SUBJECT_CLAIM_PROBLEM",
     "SUBJECT_CLAIM_PROFILE_PROBLEM",
+    "SUBJECT_CLAIM_SHARED_PROBLEM",
     "OIDC_SIGN_IN_SETTINGS",
     "OIDC_START_UP_SETTINGS",
     "SESSION_COOKIE_PREFIX",

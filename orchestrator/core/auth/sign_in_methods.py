@@ -79,7 +79,13 @@ class AlreadyRegistered(ValueError):
 
 @dataclass(frozen=True)
 class VerifiedIdentity:
-    """Who the person is, as the identity method verified it. ``claims`` is read-only."""
+    """Who the person is, as the identity method verified it. ``claims`` is read-only.
+
+    ``subject`` is the person's id, the one value they are found and linked by. ``standard_sub`` is
+    never an id: it is the token's ``sub``, carried only when the subject is read from another claim
+    (``OIDC_CLAIM_SUBJECT``), so a first sign-in can be refused for a person already linked under
+    ``sub`` (``user_link.link_identity``'s ``linked_before_as``). None otherwise.
+    """
 
     issuer: str
     subject: str
@@ -89,6 +95,7 @@ class VerifiedIdentity:
     auth_time: datetime
     idp_session_id: Optional[str]
     claims: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}), repr=False)
+    standard_sub: Optional[str] = None
 
 
 @dataclass(frozen=True)

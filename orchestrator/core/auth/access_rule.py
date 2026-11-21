@@ -82,6 +82,13 @@ SHARED_ISSUERS: Tuple[str, ...] = (
 PROTOCOL_CLAIMS: Tuple[str, ...] = (
     "iss", "aud", "azp", "exp", "iat", "nbf", "nonce", "auth_time", "at_hash", "c_hash", "sid", "jti",
 )
+# Claims that say something about a person but never which one (PRD-277 §5.10): the same value for many
+# people, or a value that changes and is reused. A rule may name one; ``OIDC_CLAIM_SUBJECT`` may not
+# (``core.edition_start_up``), because the subject is the one value a person is found by.
+NOT_ONE_PERSONS_ID_CLAIMS: Tuple[str, ...] = (
+    "email_verified", "acr", "amr", "ver", "tid", "hd", "groups", "roles", "picture", "locale",
+    "preferred_username", "upn",
+)
 
 
 class MalformedRule(ValueError):
@@ -147,6 +154,7 @@ def is_shared_issuer(issuer: Any) -> bool:
 
 __all__ = [
     "NAME_MAX",
+    "NOT_ONE_PERSONS_ID_CLAIMS",
     "PROTOCOL_CLAIMS",
     "RULES_MAX",
     "SHARED_ISSUERS",

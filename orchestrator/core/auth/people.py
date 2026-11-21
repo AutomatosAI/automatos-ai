@@ -68,7 +68,8 @@ from core.auth.system_role import (
     set_system_role,
     stored_system_role,
 )
-from core.auth.user_link import PENDING_EMAIL_DOMAIN, LinkedPerson, link_identity, user_id_for_invitee
+from core.auth.user_link import (PENDING_EMAIL_DOMAIN, LinkedPerson, link_identity, refuse_if_linked_before,
+                                  user_id_for_invitee)
 from core.workspaces.audit import AuditService
 from core.workspaces.models import WorkspaceMember
 from modules.policy.roles import ADMIN, SUPER_ADMIN, USER, WorkspaceRole
@@ -344,13 +345,17 @@ def set_install_role(db: Session, user_id: int, role: str, requester: Requester)
 
 
 def link_person(db: Session, *, issuer: str, subject: str, email_verified: bool,
-                email: Optional[str] = None, name: Optional[str] = None) -> LinkedPerson:
+                email: Optional[str] = None, name: Optional[str] = None,
+                linked_before_as: Optional[str] = None) -> LinkedPerson:
     """The person ``(issuer, subject)`` signs in as, found or created; not committed.
 
     ``email_verified`` is the provider's own statement, from the verified ID token; ``link_identity``
     keeps an email only when it is True, and refuses (``IdentityLinkRefused``) an email another
-    person holds. A repeat sign-in changes no row (PRD-277 §12, entry 8).
+    person holds, and a first sign-in of a person already linked as ``linked_before_as``. A repeat
+    sign-in changes no row (PRD-277 §12, entry 8).
     """
+    if linked_before_as is not None:
+        refuse_if_linked_before(db, issuer=issuer, subject=subject, linked_before_as=linked_before_as)
     return link_identity(db, issuer=issuer, subject=subject, email_verified=email_verified,
                          email=email, name=name)
 

@@ -199,8 +199,13 @@ session clocks (`SESSION_IDLE_MINUTES`, `SESSION_ABSOLUTE_HOURS`), the claim nam
 `OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES`) and
 the pending sign-in limits (`OIDC_PENDING_SIGN_INS_MAX`, `OIDC_PENDING_SIGN_INS_PER_ADDRESS`)
 have working defaults and go in `config` when you change them; the API checks them at start.
-Choose `OIDC_CLAIM_SUBJECT` before the first sign-in: it names the claim that identifies each
-person, so changing it later makes everyone's next sign-in a new person's (PRD-277 §5.10).
+Choose `OIDC_CLAIM_SUBJECT` before the first sign-in. It names the claim that identifies each
+person: one unique to that person, that never changes, is never reused and that the person cannot
+edit. The API refuses to start with a claim it knows cannot be that, but cannot check one it does
+not know. Changing it later makes everyone's next sign-in a first sign-in: a person already linked
+under `sub` is refused (audited `subject_claim_changed`), and anyone else is made a new person
+unless the email rule refuses them. A change from another claim to `sub`, or between two other
+claims, is not detected (PRD-277 §5.10).
 The session cookie's name and the CSRF header's are fixed in the enterprise web image, so
 `config` may not change them. Nor may it set `FORWARDED_ALLOW_IPS`: the API reads the
 caller's address from `clientIpHeader` and `clientIpProxyCount`, and leaves the server's own

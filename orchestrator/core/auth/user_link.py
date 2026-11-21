@@ -53,6 +53,8 @@ IDENTITY_LINK_REFUSED_MESSAGE = (
 )
 # The refusal's reason, for the sign-in audit row (PRD-277 §5.12, auth:sign_in_refused).
 REFUSED_EMAIL_CONFLICT = "email_conflict"
+# The person is already linked under the token's ``sub``, and the subject is now read from another claim.
+REFUSED_SUBJECT_CLAIM_CHANGED = "subject_claim_changed"
 
 # The email and username a person gets when the identity provider sent no email: one per
 # (issuer, subject), so two first sign-ins for the same pair meet on the same unique value.
@@ -251,6 +253,25 @@ def _linked_or_refused(db, issuer: str, subject: str, detail: str) -> LinkedPers
     if linked is not None:
         return LinkedPerson(user_id=linked, created=False)
     raise _identity_refused(REFUSED_EMAIL_CONFLICT, detail)
+
+
+def refuse_if_linked_before(db, *, issuer: str, subject: str, linked_before_as: str) -> None:
+    """``IdentityLinkRefused`` (``REFUSED_SUBJECT_CLAIM_CHANGED``) for a first sign-in of a person
+    already linked as ``(issuer, linked_before_as)``; nothing when ``(issuer, subject)`` is linked.
+
+    ``linked_before_as`` is the token's ``sub``, given only when the subject is read from another
+    claim (``OIDC_CLAIM_SUBJECT``): a person linked under it signed in before that setting changed,
+    so this sign-in must not make them a second person. Logged at error, naming the setting and no
+    value. Only a change away from ``sub`` is seen: a change back to ``sub``, or between two other
+    claims, is not. Not called at all when the subject is ``sub``, so that runs no query for it.
+    """
+    if user_id_for_identity(db, issuer, subject) is not None:
+        return
+    if user_id_for_identity(db, issuer, linked_before_as) is None:
+        return
+    logger.error("Identity link refused (%s): this person is linked under the token's sub, and "
+                 "OIDC_CLAIM_SUBJECT now names another claim", REFUSED_SUBJECT_CLAIM_CHANGED)
+    raise IdentityLinkRefused(REFUSED_SUBJECT_CLAIM_CHANGED)
 
 
 def user_id_for_identity(db, issuer: str, subject: str) -> Optional[int]:

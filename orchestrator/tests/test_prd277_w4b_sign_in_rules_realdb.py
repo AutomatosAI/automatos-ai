@@ -412,6 +412,25 @@ def test_another_person_signing_in_is_refused_and_never_switches_the_session(ins
     assert _step_ups(install) == [(me.user_id, {"confirmed": False, "reason": "another_person"})] * 2
 
 
+def test_a_step_up_under_another_subject_claim_finds_the_same_person(install, monkeypatch):
+    monkeypatch.setattr(config, "OIDC_CLAIM_SUBJECT", "oid")
+    install.idp.sign_in_as(Person(subject="sub-at-sign-in", extra={"oid": "oid-that-steps-up"}))
+    token = _sign_in(install).cookies[config.SESSION_COOKIE_NAME]
+    session_id = install.db.execute(text("SELECT id FROM auth_sessions WHERE token_hash = :h"),
+                                    {"h": hash_secret(token)}).scalar_one()
+    install.db.execute(text("UPDATE auth_sessions SET auth_time = :t WHERE id = :id"),
+                       {"t": datetime.now(timezone.utc) - timedelta(hours=2), "id": session_id})
+    install.db.commit()
+    started = _start(install, step_up_too=True)
+    install.idp.sign_in_as(Person(subject="another-sub", extra={"oid": "oid-that-steps-up"}))
+
+    answer = install.client.get(install.idp.approve(started.headers["location"]), follow_redirects=False)
+
+    assert answer.status_code == 303 and answer.headers["location"] == "/settings"
+    assert _auth_time(install.db, session_id) > datetime.now(timezone.utc) - timedelta(minutes=2)
+    assert _step_ups(install) == [(_identity_user(install.db, "oid-that-steps-up"), {"confirmed": True})]
+
+
 @pytest.mark.parametrize(("behaviour", "reason", "code"), [
     ({"remove_claims": ("auth_time",)}, "no_auth_time", sign_in_flow.STEP_UP_NO_AUTH_TIME),
     ({"claims": {"auth_time": int(time.time()) - 3600}}, "stale_auth_time", sign_in_flow.STEP_UP_REFUSED),

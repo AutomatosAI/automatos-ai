@@ -11,7 +11,8 @@ under each value:
 * in ``enterprise`` each is refused at start-up, naming the setting and never the value: an issuer
   or a public address that is not https, scopes without ``openid`` or with a character a scope may
   not hold, an empty claim name, a subject claim that describes the token or is the claim an
-  address or a display name is read from, or ``email`` (FR-7), a CA file that cannot be read, a default role that is not
+  address or a display name is read from, or ``email`` (FR-7), or that cannot be one person's id
+  (``access_rule.NOT_ONE_PERSONS_ID_CLAIMS``), in any case, a CA file that cannot be read, a default role that is not
   ``none``, viewer, editor or admin, a role without ``DEFAULT_WORKSPACE_ID`` or without an access
   rule, an email-claim setting that is not ``true`` or ``false``, no
   ``CLIENT_IP_HEADER`` (the address sign-in limits and audits by would be the caller's to write),
@@ -36,6 +37,7 @@ os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
 os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
+from core.auth import access_rule  # noqa: E402
 from core.edition_start_up import OIDC_SIGN_IN_SETTINGS, EditionNotReady  # noqa: E402
 
 ORCH = Path(__file__).resolve().parents[1]
@@ -195,28 +197,50 @@ def test_good_values_start_enterprise(role, tmp_path):
     _fresh_config(**env).validate_auth_edition()  # must not raise
 
 
-# The subject claim set to the claim an address or a display name is read from, or to ``email`` (FR-7).
+# The subject claim set to the claim an address or a display name is read from, or to ``email`` (FR-7),
+# in any case: each with every value the check compares it against.
 SUBJECT_IS_A_PROFILE_CLAIM = [
     {"OIDC_CLAIM_EMAIL": "mail", "OIDC_CLAIM_SUBJECT": " mail "},
-    {"OIDC_CLAIM_NAME": "preferred_username", "OIDC_CLAIM_SUBJECT": "preferred_username"},
-    {"OIDC_CLAIM_EMAIL": "upn", "OIDC_CLAIM_SUBJECT": "email"},
+    {"OIDC_CLAIM_NAME": "preferred_name", "OIDC_CLAIM_SUBJECT": "preferred_name"},
+    {"OIDC_CLAIM_EMAIL": "upn_mail", "OIDC_CLAIM_SUBJECT": "email"},
+    {"OIDC_CLAIM_EMAIL": "upn_mail", "OIDC_CLAIM_SUBJECT": "Email"},
+    {"OIDC_CLAIM_EMAIL": "mail", "OIDC_CLAIM_SUBJECT": "Mail"},
 ]
-SUBJECT_CASES = ["same-as-email-claim", "same-as-name-claim", "the-standard-email-claim"]
+SUBJECT_CASES = ["same-as-email-claim", "same-as-name-claim", "the-standard-email-claim", "Email", "Mail"]
+# Claims that cannot be one person's id: the token's own, and those many people share or that change.
+NOT_AN_ID = (*access_rule.NOT_ONE_PERSONS_ID_CLAIMS, "UPN", "Groups", "aud", "AUD", "nonce", "iss", "sid", "jti",
+             "exp")
+EVERY_SUBJECT_REFUSAL = SUBJECT_IS_A_PROFILE_CLAIM + [{"OIDC_CLAIM_SUBJECT": name} for name in NOT_AN_ID]
+
+
+def _subject_refusal(claims) -> str:
+    with pytest.raises(EditionNotReady) as refused:
+        _fresh_config(**{**EDITION_ENV["enterprise"], **claims}).validate_auth_edition()
+    message = str(refused.value)
+    assert message.startswith("AUTH_EDITION=enterprise cannot start: OIDC_CLAIM_SUBJECT ")
+    return message
 
 
 @pytest.mark.parametrize("claims", SUBJECT_IS_A_PROFILE_CLAIM, ids=SUBJECT_CASES)
 def test_a_subject_claim_that_is_an_address_or_a_name_is_refused_in_enterprise(claims):
-    with pytest.raises(EditionNotReady) as refused:
-        _fresh_config(**{**EDITION_ENV["enterprise"], **claims}).validate_auth_edition()
+    message = _subject_refusal(claims)
 
-    message = str(refused.value)
-    assert message.startswith("AUTH_EDITION=enterprise cannot start: OIDC_CLAIM_SUBJECT ") and "FR-7" in message
-    assert claims["OIDC_CLAIM_SUBJECT"].strip() not in message.split("OIDC_CLAIM_SUBJECT", 1)[1]
+    assert "FR-7" in message
+    compared = (claims["OIDC_CLAIM_SUBJECT"].strip(), claims.get("OIDC_CLAIM_EMAIL", "email"),
+                claims.get("OIDC_CLAIM_NAME", "name"))
+    assert [value for value in compared if value in message] == []
+
+
+@pytest.mark.parametrize("name", NOT_AN_ID)
+def test_a_subject_claim_that_cannot_be_one_persons_id_is_refused_in_enterprise(name):
+    message = _subject_refusal({"OIDC_CLAIM_SUBJECT": name})
+
+    assert name not in message
 
 
 @pytest.mark.parametrize("edition", ["local", "saas"])
-@pytest.mark.parametrize("claims", SUBJECT_IS_A_PROFILE_CLAIM, ids=SUBJECT_CASES)
-def test_a_subject_claim_that_is_an_address_or_a_name_never_stops_local_or_saas(edition, claims):
+@pytest.mark.parametrize("claims", EVERY_SUBJECT_REFUSAL)
+def test_no_subject_claim_ever_stops_local_or_saas(edition, claims):
     _fresh_config(**EDITION_ENV[edition], **claims).validate_auth_edition()  # must not raise
 
 

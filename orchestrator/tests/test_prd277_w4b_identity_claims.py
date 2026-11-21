@@ -9,7 +9,9 @@
   exception of another kind.
 * **The subject** is the claim ``OIDC_CLAIM_SUBJECT`` names (``sub`` unless set). Set to another claim,
   ``sub`` no longer says who the person is, and the first-admin list's ``sub:`` entries match the
-  claim's value. A token without a non-empty string there is ``InvalidSignIn``, whose text holds no value.
+  claim's value. A token without a string there that is not blank and holds no control character is
+  ``InvalidSignIn``, whose text holds no value. The token's own ``sub`` is carried beside it
+  (``standard_sub``) only when the subject is read from another claim, and only when a link could hold it.
 
 DB-free: the claims are handed in, as ``oidc_tokens.verify_id_token`` hands them over.
 """
@@ -31,6 +33,7 @@ from core.auth import bootstrap_admins  # noqa: E402
 from core.auth.oidc_sign_in import NO_AUTH_TIME, verified_identity  # noqa: E402
 from core.auth.oidc_tokens import TIME_LEEWAY_SECONDS  # noqa: E402
 from core.auth.sign_in_methods import InvalidSignIn  # noqa: E402
+from core.models.user_identities import SUBJECT_MAX  # noqa: E402
 
 NOW = 1_795_000_000.0
 BASE = {"iss": "https://idp.example.test/realms/prd277-w4b", "sub": "subject-1"}
@@ -129,10 +132,24 @@ def test_a_first_admin_sub_entry_names_the_subject_claims_value(settings):
                                          identity.claims) is None
 
 
-@pytest.mark.parametrize("value", [None, "", 42, True, ["object-1"], {"id": "object-1"}])
+@pytest.mark.parametrize("value", [None, "", " ", "\t", "object-1\n", "obj\x00ect-1", "object\x7f-1", 42, True,
+                                   ["object-1"], {"id": "object-1"}])
 def test_a_token_without_a_usable_subject_claim_refuses_the_sign_in(settings, value):
     settings.setattr(config, "OIDC_CLAIM_SUBJECT", "oid")
     claims = {**BASE, **({} if value is None else {"oid": value})}
     with pytest.raises(InvalidSignIn) as refused:
         verified_identity(claims, now=NOW)
     assert "subject" in str(refused.value) and "object-1" not in str(refused.value)
+
+
+def test_the_standard_sub_is_carried_only_when_the_subject_is_another_claim(settings):
+    assert verified_identity({**BASE, "oid": "object-1"}, now=NOW).standard_sub is None
+    settings.setattr(config, "OIDC_CLAIM_SUBJECT", "oid")
+    identity = verified_identity({**BASE, "oid": "object-1"}, now=NOW)
+    assert (identity.subject, identity.standard_sub) == ("object-1", "subject-1")
+
+
+def test_a_sub_no_link_could_hold_is_not_carried(settings):
+    settings.setattr(config, "OIDC_CLAIM_SUBJECT", "oid")
+    identity = verified_identity({**BASE, "sub": "s" * (SUBJECT_MAX + 1), "oid": "object-1"}, now=NOW)
+    assert (identity.subject, identity.standard_sub) == ("object-1", None)
