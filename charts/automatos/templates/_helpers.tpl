@@ -216,6 +216,30 @@ file system, since a claim the chart made would be a disk of its own.
 {{- end }}
 {{- end }}
 
+{{/*
+Where a component's pods may run (PRD-280 US-203): its nodeSelector, tolerations, affinity
+and topologySpreadConstraints, each rendered as given, at the pod spec's indent; nothing for
+an empty one. Called with the component's values: (include "automatos.placement" .Values.worker).
+*/}}
+{{- define "automatos.placement" -}}
+{{- with .nodeSelector }}
+nodeSelector:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .tolerations }}
+tolerations:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .affinity }}
+affinity:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .topologySpreadConstraints }}
+topologySpreadConstraints:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}
+
 {{- define "automatos.apiDataClaim" -}}
 {{- printf "%s-api-data" (include "automatos.fullname" .) }}
 {{- end }}

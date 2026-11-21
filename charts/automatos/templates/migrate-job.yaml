@@ -77,3 +77,6 @@ spec:
           emptyDir: {}
         {{- end }}
       {{- end }}
+      {{- with include "automatos.placement" .Values.migrations | trim }}
+      {{- . | nindent 6 }}
+      {{- end }}

@@ -150,15 +150,6 @@ spec:
           emptyDir: {}
         {{- end }}
         {{- end }}
-      {{- with .Values.api.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.api.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.api.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
+      {{- with include "automatos.placement" .Values.api | trim }}
+      {{- . | nindent 6 }}
       {{- end }}

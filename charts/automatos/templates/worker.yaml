@@ -141,6 +141,9 @@ spec:
         - name: home
           emptyDir: {}
         {{- end }}
+      {{- with include "automatos.placement" .Values.worker | trim }}
+      {{- . | nindent 6 }}
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service

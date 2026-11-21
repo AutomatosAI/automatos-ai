@@ -14,6 +14,8 @@
 # (worker.existingSecret, WORKER_INTERNAL_TOKEN then required in both Secrets), and the
 # agent-files volume as two claims the operator made, one in each namespace, on one folder
 # (workspaces.api.existingClaim, workspaces.worker.existingClaim; strict-workspaces.yaml).
+# Placement (US-203): a nodeSelector on the API, the migration Job, the web app and the
+# worker, and on the worker all four values; the single node meets each.
 #
 # Not exercised here (the chart's unit tests render each):
 # - the database CA mount (database.caConfigMap, verify-ca/verify-full): the dev
@@ -26,6 +28,7 @@
 # - serviceAccount.create=false;
 # - the agent-files claim the chart makes (the operator's two claims are used instead; the
 #   chart's own claim is in e2e.sh's values and the unit tests);
+# - placement that keeps a pod off a node, or spreads pods over several (one node);
 # - more than one API replica (kind's storage is ReadWriteOnce, and values.yaml keeps
 #   one replica for the schedulers).
 existingSecret: automatos-secrets
@@ -53,11 +56,13 @@ api:
   resources:
     requests: {cpu: 100m, memory: 512Mi}
     limits: {memory: 2Gi}
+  nodeSelector: {kubernetes.io/os: linux}
 
 migrations:
   resources:
     requests: {cpu: 100m, memory: 512Mi}
     limits: {memory: 2Gi}
+  nodeSelector: {kubernetes.io/os: linux}
 
 frontend:
   enabled: true
@@ -67,6 +72,7 @@ frontend:
     pullPolicy: Never
   resources:
     requests: {cpu: 50m, memory: 128Mi}
+  nodeSelector: {kubernetes.io/os: linux}
 
 worker:
   enabled: true
@@ -79,6 +85,23 @@ worker:
     pullPolicy: Never
   resources:
     requests: {cpu: 50m, memory: 256Mi}
+  # All four placement values (PRD-280 US-203), each one the single kind node satisfies, so
+  # the pod must still be scheduled with them: the API server checks their shape on create.
+  nodeSelector: {kubernetes.io/os: linux}
+  tolerations:
+    - {key: automatos.dev/worker-only, operator: Exists, effect: NoSchedule}
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - {key: kubernetes.io/os, operator: In, values: [linux]}
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels: {app.kubernetes.io/component: worker}
 
 serviceAccount:
   create: true

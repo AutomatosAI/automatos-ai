@@ -58,6 +58,9 @@ spec:
               type: RuntimeDefault
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
+      {{- with include "automatos.placement" .Values.frontend | trim }}
+      {{- . | nindent 6 }}
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service
