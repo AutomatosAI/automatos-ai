@@ -66,6 +66,20 @@ edition:
     # (ENTERPRISE_DEFAULT_ROLE): none, viewer, editor or admin. Empty: the API's default, none.
     # A role other than none needs oidc.requiredClaims.
     defaultRole: ""
+    # Each of Automatos's hosted services this install may call (PRD-277 US-704): true or false,
+    # off by default, so the install calls none of them until you switch one on.
+    #   themeRevocations  pull Automatos's theme revocation list from THEME_REVOCATIONS_URL
+    #                     (ENTERPRISE_CALLS_THEME_REVOCATIONS)
+    #   cloudSync         Sync with Automatos Cloud: its catalogue and the themes it lists, from
+    #                     AUTOMATOS_CLOUD_URL (ENTERPRISE_CALLS_CLOUD_SYNC); needs themeRevocations
+    #   cloudItems        the agents, Playbooks, packages and plugins a Sync brings
+    #                     (ENTERPRISE_CALLS_CLOUD_ITEMS); needs cloudSync
+    # Rendering stops on any other value, and on a service switched on without the one it needs.
+    # Set each here, never in config.
+    hostedServices:
+      themeRevocations: false
+      cloudSync: false
+      cloudItems: false
     oidc:
       # Required. The identity provider's issuer address, https only (OIDC_ISSUER).
       issuer: ""

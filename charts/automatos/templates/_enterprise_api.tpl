@@ -14,7 +14,55 @@ many organisations share, whether the CA file holds a certificate) it judges at 
 
 {{/* The settings the chart sets in the enterprise edition, which `config` must not set too. */}}
 {{- define "automatos.enterpriseSettings" -}}
-DEFAULT_WORKSPACE_ID FRONTEND_URL CLIENT_IP_HEADER CLIENT_IP_PROXY_COUNT ENTERPRISE_BOOTSTRAP_ADMINS ENTERPRISE_DEFAULT_ROLE OIDC_ISSUER OIDC_CLIENT_ID OIDC_DISPLAY_NAME OIDC_SCOPES OIDC_REQUIRED_CLAIMS OIDC_ENDPOINT_HOSTS OIDC_CA_BUNDLE_FILE
+DEFAULT_WORKSPACE_ID FRONTEND_URL CLIENT_IP_HEADER CLIENT_IP_PROXY_COUNT ENTERPRISE_BOOTSTRAP_ADMINS ENTERPRISE_DEFAULT_ROLE OIDC_ISSUER OIDC_CLIENT_ID OIDC_DISPLAY_NAME OIDC_SCOPES OIDC_REQUIRED_CLAIMS OIDC_ENDPOINT_HOSTS OIDC_CA_BUNDLE_FILE ENTERPRISE_CALLS_THEME_REVOCATIONS ENTERPRISE_CALLS_CLOUD_SYNC ENTERPRISE_CALLS_CLOUD_ITEMS
+{{- end }}
+
+{{/*
+Each of Automatos's hosted services an enterprise install may call (PRD-277 US-704): its value under
+edition.enterprise.hostedServices and the API setting it renders to, in that order. One per line.
+*/}}
+{{- define "automatos.hostedServices" -}}
+themeRevocations ENTERPRISE_CALLS_THEME_REVOCATIONS
+cloudSync ENTERPRISE_CALLS_CLOUD_SYNC
+cloudItems ENTERPRISE_CALLS_CLOUD_ITEMS
+{{- end }}
+
+{{/*
+edition.enterprise.hostedServices, as the API checks its settings at start (core/edition_start_up.py):
+a map holding only the services above, each true or false (unset is false), and none switched on
+without the one it needs: cloudSync needs themeRevocations (a theme brought from Automatos Cloud is
+withdrawn only through that list), and cloudItems needs cloudSync (items arrive only in a Sync).
+*/}}
+{{- define "automatos.validateHostedServices" -}}
+{{- $hosted := (.Values.edition.enterprise | default dict).hostedServices | default dict -}}
+{{- if not (kindIs "map" $hosted) }}
+{{- fail "edition.enterprise.hostedServices must be a map of themeRevocations, cloudSync and cloudItems, each true or false" }}
+{{- end }}
+{{- $known := list }}
+{{- range $line := include "automatos.hostedServices" . | splitList "\n" }}
+{{- $pair := splitList " " $line }}
+{{- $known = append $known (index $pair 0) }}
+{{- $value := index $hosted (index $pair 0) }}
+{{- if not (or (kindIs "invalid" $value) (kindIs "bool" $value)) }}
+{{- fail (printf "edition.enterprise.hostedServices.%s must be true or false (%s), written without quotes: the API refuses to start otherwise" (index $pair 0) (index $pair 1)) }}
+{{- end }}
+{{- end }}
+{{- range $key := keys $hosted | sortAlpha }}
+{{- if not (has $key $known) }}
+{{- fail (printf "edition.enterprise.hostedServices.%s names no hosted service: the services are themeRevocations, cloudSync and cloudItems" $key) }}
+{{- end }}
+{{- end }}
+{{- $on := dict }}
+{{- range $name := $known }}
+{{- $value := index $hosted $name }}
+{{- $_ := set $on $name (and (kindIs "bool" $value) $value) }}
+{{- end }}
+{{- if and $on.cloudSync (not $on.themeRevocations) }}
+{{- fail "edition.enterprise.hostedServices.cloudSync needs themeRevocations (ENTERPRISE_CALLS_CLOUD_SYNC, ENTERPRISE_CALLS_THEME_REVOCATIONS): a theme brought from Automatos Cloud is withdrawn only through Automatos's theme revocation list, so the API refuses to start. Switch both on, or leave cloudSync off" }}
+{{- end }}
+{{- if and $on.cloudItems (not $on.cloudSync) }}
+{{- fail "edition.enterprise.hostedServices.cloudItems needs cloudSync (ENTERPRISE_CALLS_CLOUD_ITEMS, ENTERPRISE_CALLS_CLOUD_SYNC): agents, Playbooks, packages and plugins arrive from Automatos Cloud only in a Sync, so the API refuses to start. Switch both on, or leave cloudItems off" }}
+{{- end }}
 {{- end }}
 
 {{/*
@@ -116,6 +164,7 @@ edition.enterprise.clientIpProxyCount (CLIENT_IP_PROXY_COUNT) as trimmed text: e
 {{- end }}
 {{- include "automatos.validateEnterpriseRole" . }}
 {{- include "automatos.validateEnterpriseOidcText" . }}
+{{- include "automatos.validateHostedServices" . }}
 {{- end }}
 
 {{/*
@@ -234,6 +283,12 @@ value left empty is not rendered, so the API's own default holds.
 {{- if $oidc.caConfigMap }}
 - name: OIDC_CA_BUNDLE_FILE
   value: {{ printf "%s/%s" (include "automatos.oidcCaDir" .) ($oidc.caKey | default "ca.crt") | quote }}
+{{- end }}
+{{- $hosted := $enterprise.hostedServices | default dict }}
+{{- range $line := include "automatos.hostedServices" . | splitList "\n" }}
+{{- $pair := splitList " " $line }}
+- name: {{ index $pair 1 }}
+  value: {{ eq (toString (index $hosted (index $pair 0))) "true" | ternary "true" "false" | quote }}
 {{- end }}
 {{- end }}
 {{- end }}
