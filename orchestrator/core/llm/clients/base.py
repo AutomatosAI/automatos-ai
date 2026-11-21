@@ -11,6 +11,7 @@ import contextvars
 import functools
 import logging
 import re
+from concurrent.futures import Executor
 from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -142,9 +143,13 @@ def takes_one_sampling_param(model: Optional[str]) -> bool:
 _T = TypeVar("_T")
 
 
-async def run_blocking(fn: Callable[..., _T], *args: Any) -> _T:
-    """Run a provider's blocking SDK call on the default executor, in a copy of
-    the caller's context.
+def start_blocking(fn: Callable[..., _T], *args: Any, executor: Optional[Executor] = None) -> "asyncio.Future[_T]":
+    """Start a provider's blocking SDK call on ``executor`` (the default one when
+    None), in a copy of the caller's context, and return its future.
+
+    The one place a provider hops to a thread. ``run_blocking`` awaits it; a
+    caller that needs the future itself, to time a call from the moment a thread
+    takes it, calls this with its own executor.
 
     F196, reopened after the refresh-6 build: loop.run_in_executor does not
     carry context variables into its thread. The request, built in the thread,
@@ -153,7 +158,13 @@ async def run_blocking(fn: Callable[..., _T], *args: Any) -> _T:
     (req/ws/agent) was empty on the same lines.
     """
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, functools.partial(contextvars.copy_context().run, fn, *args))
+    return loop.run_in_executor(executor, functools.partial(contextvars.copy_context().run, fn, *args))
+
+
+async def run_blocking(fn: Callable[..., _T], *args: Any) -> _T:
+    """Run a provider's blocking SDK call on the default executor, in a copy of
+    the caller's context (``start_blocking``)."""
+    return await start_blocking(fn, *args)
 
 
 def live_stream(provider: Any, on_delta: Any) -> Optional[Callable[..., Awaitable[Any]]]:

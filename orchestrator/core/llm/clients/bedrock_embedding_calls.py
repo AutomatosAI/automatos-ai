@@ -24,15 +24,13 @@
 from __future__ import annotations
 
 import asyncio
-import contextvars
-import functools
 import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional, TypeVar
 
-from .base import EmbeddingUnavailableError
+from .base import EmbeddingUnavailableError, start_blocking
 from .bedrock_client import model_not_served
 
 logger = logging.getLogger(__name__)
@@ -147,7 +145,7 @@ async def in_pool(fn: Callable[..., _T], *args: Any, timeout: float) -> _T:
         loop.call_soon_threadsafe(started.set)
         return fn(*args)
 
-    future = loop.run_in_executor(_CALL_POOL, functools.partial(contextvars.copy_context().run, run))
+    future = start_blocking(run, executor=_CALL_POOL)
     try:
         await started.wait()
     except asyncio.CancelledError:
