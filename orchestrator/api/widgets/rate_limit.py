@@ -50,7 +50,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Optional
+from typing import Callable, Optional
 from uuid import UUID, uuid4
 
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -113,6 +113,17 @@ def _default_redis():
 # Redis-backed sliding-window store (shared across workers)
 # ---------------------------------------------------------------------------
 
+def _unavailable(key_id: str, limit: int, window: int, quiet: bool, label: str,
+                 when_unavailable: Optional[Callable[[], tuple[bool, int, int, int]]]) -> tuple[bool, int, int, int]:
+    """Redis could not be used: the caller's own answer when it gave one, else fail open, loudly."""
+    if when_unavailable is not None:
+        logger.error("%s: Redis unreachable; counting %s in this process instead", label, key_id)
+        return when_unavailable()
+    if not quiet:
+        _count_redis_failure(key_id, label)
+    return (True, limit, max(0, limit - 1), window)
+
+
 class RateLimitStore:
     """Sliding-window rate-limit counter in a Redis sorted set.
 
@@ -135,13 +146,16 @@ class RateLimitStore:
         *,
         quiet: bool = False,
         label: str = DEFAULT_LIMITER_LABEL,
+        when_unavailable: Optional[Callable[[], tuple[bool, int, int, int]]] = None,
     ) -> tuple[bool, int, int, int]:
         """Evaluate whether *key_id* may proceed under *limit* req/window.
 
         Returns ``(allowed, limit, remaining, reset_seconds)``. Redis
         unreachable ⇒ **fail OPEN** (allowed, loud counter + ERROR log naming
         ``label``, the limiter the caller runs). A ``quiet`` check (a count that
-        gates nothing) skips the fail-open accounting.
+        gates nothing) skips the fail-open accounting. A caller that must stay
+        bounded passes ``when_unavailable``: with Redis unreachable its answer is
+        returned instead, and logged as such. Without it, nothing changes.
         """
         window = window or config.WIDGET_RATE_LIMIT_WINDOW_SECONDS
 
@@ -150,9 +164,7 @@ class RateLimitStore:
         except Exception:
             redis = None
         if redis is None:
-            if not quiet:
-                _count_redis_failure(key_id, label)
-            return (True, limit, max(0, limit - 1), window)
+            return _unavailable(key_id, limit, window, quiet, label, when_unavailable)
 
         key = f"{_KEY_PREFIX}:{key_id}"
         now = time.time()
@@ -166,9 +178,7 @@ class RateLimitStore:
             pipe.expire(key, window + 10)
             results = pipe.execute()
         except Exception:
-            if not quiet:
-                _count_redis_failure(key_id, label)
-            return (True, limit, max(0, limit - 1), window)
+            return _unavailable(key_id, limit, window, quiet, label, when_unavailable)
 
         count = int(results[1])
         oldest = results[2]

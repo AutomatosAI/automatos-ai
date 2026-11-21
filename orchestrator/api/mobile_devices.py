@@ -37,9 +37,10 @@ window, counted in the shared Redis sliding window (``RateLimitStore``, the
 ``api/provenance.py`` pattern) BEFORE the body's code is read; over it is 429 with
 ``Retry-After``. There is no instance-wide bucket: 8 characters from a 32-symbol alphabet
 alive for 600 s cannot be guessed at any rate the API serves, and a shared bucket would let
-one caller block pairing for everyone. The address is ``get_client_ip``'s (the first
-``X-Forwarded-For`` hop), so the bucket is only as honest as the proxy in front: an install
-published for phones sits behind one that replaces that header. Redis unreachable lets the
+one caller block pairing for everyone. The address is ``get_client_ip``'s, which reads it from
+``core/security/client_ip.py`` and its two settings (``CLIENT_IP_HEADER``, and
+``CLIENT_IP_PROXY_COUNT`` for proxies that append), so an install published for phones names the
+header its proxy writes. Redis unreachable lets the
 attempt through and logs an ERROR naming this limiter. ``POST /devices`` is limited the same
 way, with ``mobile_devices_ip`` (the W2 review: each registration can add a push target).
 

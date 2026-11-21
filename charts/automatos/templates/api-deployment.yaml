@@ -59,6 +59,11 @@ spec:
             - name: DOCUMENT_STORAGE_DIR
               value: /app/data/documents
             {{- end }}
+            {{- if .Values.api.readOnlyRootFilesystem }}
+            # The home folder is a scratch volume (below); HOME names it, whatever the user.
+            - name: HOME
+              value: /home/automatos
+            {{- end }}
             # Last, so a `config` entry of the same name cannot turn it off.
             - name: AUTOMATOS_SKIP_MIGRATIONS
               value: "true"
@@ -91,8 +96,33 @@ spec:
             - name: data
               mountPath: /app/data
             {{- end }}
+            {{- with include "automatos.databaseCaMount" . | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- with include "automatos.oidcCaMount" . | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- if .Values.api.readOnlyRootFilesystem }}
+            # A read-only root (PRD-280 US-104): a scratch volume for each path the API
+            # writes outside its volumes (docs/PRDS/PRD-280-US-103-WRITE-PATHS.md). Keep
+            # automatos.apiScratchDirs, which config's document paths are checked against, in step.
+            - name: tmp
+              mountPath: /tmp
+            - name: home
+              mountPath: /home/automatos
+            - name: logs
+              mountPath: /app/logs
+            {{- if not .Values.api.data.enabled }}
+            # DOCUMENT_STORAGE_DIR's default, `documents`, under the working directory /app.
+            - name: documents
+              mountPath: /app/documents
+            {{- end }}
+            {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
+            {{- if .Values.api.readOnlyRootFilesystem }}
+            readOnlyRootFilesystem: true
+            {{- end }}
             capabilities:
               drop: ["ALL"]
             seccompProfile:
@@ -108,15 +138,24 @@ spec:
           persistentVolumeClaim:
             claimName: {{ include "automatos.apiDataClaim" . }}
         {{- end }}
-      {{- with .Values.api.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.api.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.api.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
+        {{- with include "automatos.databaseCaVolume" . | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        {{- with include "automatos.oidcCaVolume" . | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.api.readOnlyRootFilesystem }}
+        - name: tmp
+          emptyDir: {}
+        - name: home
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}
+        {{- if not .Values.api.data.enabled }}
+        - name: documents
+          emptyDir: {}
+        {{- end }}
+        {{- end }}
+      {{- with include "automatos.placement" .Values.api | trim }}
+      {{- . | nindent 6 }}
       {{- end }}

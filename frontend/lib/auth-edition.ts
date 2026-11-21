@@ -13,7 +13,11 @@
  *
  * An unknown value falls back to `saas` so a typo never silently un-guards the
  * app. Nothing else in the frontend should read `process.env.NEXT_PUBLIC_AUTH_EDITION`
- * directly — import `isSaaS` / `isLocal` / `authEdition` from here.
+ * directly — import `isSaaS` / `isLocal` / `isEnterprise` / `authEdition` from here.
+ * PRD-277 US-501: the read itself lives in lib/edition-name.ts, which also says why.
+ *
+ *   enterprise → people sign in with the organisation's identity provider (PRD-277): no
+ *                Clerk mount; the API's session cookie carries who they are.
  *
  * PRD-233 S7 — this file is also the ONLY place that says which surfaces exist
  * in the hosted edition but not locally (`SAAS_ONLY_ROUTES` below). Nav sources
@@ -21,12 +25,10 @@
  * `filterNavForEdition`; in `saas` every helper is the identity, so the running
  * product renders exactly as before.
  */
-export type AuthEdition = 'local' | 'saas'
+import { isEnterprise, resolveEdition, type AuthEdition } from './edition-name'
 
-function resolveEdition(): AuthEdition {
-  const raw = (process.env.NEXT_PUBLIC_AUTH_EDITION || '').trim().toLowerCase()
-  return raw === 'local' ? 'local' : 'saas'
-}
+export { isEnterprise, resolveEdition }
+export type { AuthEdition }
 
 export const authEdition: AuthEdition = resolveEdition()
 export const isSaaS: boolean = authEdition === 'saas'
@@ -65,6 +67,13 @@ export const SAAS_ONLY_ROUTES: readonly string[] = [
   '/dev/reset-onboarding',
 ]
 
+/**
+ * PRD-277 US-502, US-504 — the hosted surfaces enterprise has too: its own sign-in page (one
+ * button, the organisation's identity provider) and the Team page (members, people waiting for
+ * a workspace; no invitations). Everything else in SAAS_ONLY_ROUTES stays hidden there.
+ */
+export const ENTERPRISE_ROUTES: readonly string[] = ['/team', '/sign-in']
+
 function routePath(href: string): string {
   const cut = href.search(/[?#]/)
   return cut === -1 ? href : href.slice(0, cut)
@@ -76,11 +85,13 @@ function isUnderPrefix(path: string, prefix: string): boolean {
 
 /**
  * Does `href` exist in this edition? Always true in `saas`; false in `local`
- * for anything under SAAS_ONLY_ROUTES.
+ * for anything under SAAS_ONLY_ROUTES; in `enterprise`, false for those except
+ * ENTERPRISE_ROUTES.
  */
 export function isRouteAvailableInEdition(href: string): boolean {
   if (isSaaS) return true
   const path = routePath(href)
+  if (isEnterprise && ENTERPRISE_ROUTES.some((prefix) => isUnderPrefix(path, prefix))) return true
   return !SAAS_ONLY_ROUTES.some((prefix) => isUnderPrefix(path, prefix))
 }
 

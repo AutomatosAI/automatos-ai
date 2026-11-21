@@ -102,13 +102,13 @@ class ToolResultFormatter:
     def _get_db_engine():
         """Return a cached SQLAlchemy engine (created once, reused)."""
         if ToolResultFormatter._db_engine is None:
-            from sqlalchemy import create_engine
             from config import config as app_config
+            from core.database.tls import create_app_engine
             db_url = app_config.DATABASE_URL
             if not db_url:
                 logger.warning("[FullContent] No DATABASE_URL — cannot fetch document content")
                 return None
-            ToolResultFormatter._db_engine = create_engine(db_url)
+            ToolResultFormatter._db_engine = create_app_engine(db_url)
         return ToolResultFormatter._db_engine
 
     @staticmethod
