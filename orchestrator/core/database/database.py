@@ -9,13 +9,13 @@ top of this module is gone — importing ``config`` loads ``.env`` exactly once,
 so the duplicate call only fought back over already-set values.
 """
 
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from contextlib import contextmanager
 import logging
 
 from config import config
 from core.database.base import Base
+from core.database.tls import create_app_engine, database_tls, main_engine_url
 
 logger = logging.getLogger(__name__)
 
@@ -66,21 +66,12 @@ def get_database_url() -> str:
         
         return f"postgresql://{user}:{password}@{host}:{port}/{database}"
 
-DATABASE_URL = get_database_url()
-
-# Enforce SSL in production
-_environment = (config.ENVIRONMENT or "development").lower()
-_connect_args = {}
-if _environment == "production":
-    from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
-    _parsed = urlparse(DATABASE_URL)
-    _params = parse_qs(_parsed.query)
-    if "sslmode" not in _params:
-        _params["sslmode"] = ["require"]
-        DATABASE_URL = urlunparse(_parsed._replace(query=urlencode(_params, doseq=True)))
+# PRD-278 W3: DATABASE_SSLMODE and DATABASE_SSLROOTCERT, when set, reach the engine through
+# connect_args. Unset, production keeps sslmode=require when the address names none.
+DATABASE_URL = main_engine_url(get_database_url(), config.ENVIRONMENT, database_tls())
 
 # Create PostgreSQL engine with connection pooling
-engine = create_engine(
+engine = create_app_engine(
     DATABASE_URL,
     pool_size=10,
     max_overflow=20,

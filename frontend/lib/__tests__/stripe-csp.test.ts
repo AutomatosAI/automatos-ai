@@ -70,6 +70,11 @@ describe("Stripe's sources follow the build's edition", () => {
     expect(stripeCspFor(' LOCAL ')).toEqual({ script: '', frame: '', connect: '', img: '' })
   })
 
+  it('PRD-277: the enterprise edition, which has no billing either, names no Stripe host', () => {
+    expect(stripeCspFor('enterprise')).toEqual({ script: '', frame: '', connect: '', img: '' })
+    expect(stripeCspFor(' Enterprise ')).toEqual({ script: '', frame: '', connect: '', img: '' })
+  })
+
   it('the hosted edition (or an unset edition, which is hosted) gets the full set', () => {
     expect(stripeCspFor('saas')).toBe(STRIPE_CSP)
     expect(stripeCspFor(undefined)).toBe(STRIPE_CSP)

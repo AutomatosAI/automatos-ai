@@ -41,7 +41,7 @@ setup_logging(service="workspace-worker")
 logger = logging.getLogger("workspace-worker")
 
 from task_executions_db import record_task_status
-from worker_config import database_url, workspace_root
+from worker_config import database_tls_params, database_url, workspace_root
 
 # Redis key patterns (must match queued.py)
 QUEUE_NAMES = [
@@ -88,6 +88,9 @@ class WorkspaceWorker:
         self._running_in_workspace: Dict[str, Set[str]] = {}
         self._semaphore = asyncio.Semaphore(self.concurrency)
         self._worker_id = f"worker-{os.getpid()}-{int(time.time())}"
+        # PRD-278 W3: read and checked once, so a bad DATABASE_SSLMODE stops the worker at
+        # start rather than failing each task's status write.
+        self._database_tls = database_tls_params()
 
     async def start(self) -> None:
         """Start the worker — runs until SIGTERM/SIGINT."""
@@ -410,7 +413,8 @@ class WorkspaceWorker:
         if not url:
             logger.warning("DATABASE_URL not set — skipping DB update for task %s", task_id[:8])
             return
-        await asyncio.to_thread(record_task_status, url, task_id, status, self._worker_id, error)
+        await asyncio.to_thread(record_task_status, url, task_id, status, self._worker_id, error,
+                                tls=self._database_tls)
 
     async def _write_result(self, task_id: str, workspace_id: str, result: Dict[str, Any]) -> None:
         """Write task result to Redis (for API polling)."""

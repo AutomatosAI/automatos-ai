@@ -20,7 +20,8 @@ a phone with the public demo install without asking for a fresh one. It writes o
 code or its hash). ``--ttl-hours`` without ``--review`` is refused: every other code lasts
 ten minutes, and nothing but this script can make one last longer.
 
-Refuses (exit 2) on the saas edition, where phones sign in with Clerk, without
+Refuses (exit 2) on the saas edition, where phones sign in with Clerk, on an enterprise
+install, which has no operator (each person pairs their own phone from Settings), without
 ``DEFAULT_WORKSPACE_ID``, and on a local install that is not in paired mode, saying how to
 turn it on: ``POST /api/v1/mobile/pair`` answers only in paired mode, so a code minted
 there could never be used. Exit 1 when the operator's row is missing or the database
@@ -68,8 +69,9 @@ REVIEW_CODE_RESOURCE = "pairing_code"
 REVIEW_CODE_SOURCE = "console"
 
 SAAS_REFUSAL = (
-    "Pairing codes are a local-edition feature (AUTH_EDITION=local). On the hosted edition "
-    "phones sign in with their Automatos account instead."
+    "This console mints pairing codes for the local edition's operator (AUTH_EDITION=local). On the "
+    "hosted edition phones sign in with their Automatos account; on an enterprise install each person "
+    "pairs their own phone from Settings, Phones & devices, signed in as themselves."
 )
 NO_WORKSPACE_REFUSAL = "DEFAULT_WORKSPACE_ID is unset or not a UUID: there is no local workspace to pair with."
 NOT_PAIRED_REFUSAL = (
@@ -154,8 +156,13 @@ def _workspace_id() -> Optional[UUID]:
 
 
 def refusal() -> Optional[str]:
-    """Why this install may not mint a code now, or ``None`` when it may."""
-    if not editions.current().device_pairing:
+    """Why this install may not mint a code now, or ``None`` when it may.
+
+    Only where devices pair AND there is an operator to mint for (local): in enterprise a code is
+    made by a signed-in person, for themselves (PRD-277 US-601), never from this console.
+    """
+    capabilities = editions.current()
+    if not (capabilities.device_pairing and capabilities.anonymous_operator):
         return SAAS_REFUSAL
     if _workspace_id() is None:
         return NO_WORKSPACE_REFUSAL

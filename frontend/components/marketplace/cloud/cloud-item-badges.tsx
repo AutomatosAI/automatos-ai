@@ -9,11 +9,13 @@
  * cards (grid and featured) and the agent and Playbook detail header. It renders them only for a row
  * the Cloud items read lists (hooks/use-cloud-items.ts), by the key its install takes; nothing for any
  * other row, nothing while the list loads or if it fails. On the hosted edition it renders nothing and
- * mounts no query, so a card there needs no QueryClientProvider and asks nothing.
+ * mounts no query, so a card there needs no QueryClientProvider and asks nothing. An enterprise install
+ * shows them as the local edition does, whatever ENTERPRISE_CALLS_CLOUD_ITEMS holds (lib/hosted-services.ts
+ * `holdsCloudItems`, PRD-277 US-704): an item brought earlier still says where it came from.
  */
 import { Badge } from '@/components/ui/badge'
 import { useCloudItems } from '@/hooks/use-cloud-items'
-import { isLocal } from '@/lib/auth-edition'
+import { holdsCloudItems } from '@/lib/hosted-services'
 import { isCloudItem } from '@/lib/marketplace/cloud-item-rows'
 import type { CloudItemKey, CloudItemKind } from '@/lib/marketplace/cloud-item-rows'
 import { cn } from '@/lib/utils'
@@ -43,5 +45,5 @@ function HeldCloudItemBadges({ kind, id, className }: CloudItemBadgesProps) {
 }
 
 export function CloudItemBadges(props: CloudItemBadgesProps) {
-  return isLocal ? <HeldCloudItemBadges {...props} /> : null
+  return holdsCloudItems() ? <HeldCloudItemBadges {...props} /> : null
 }

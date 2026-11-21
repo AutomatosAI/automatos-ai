@@ -24,10 +24,17 @@ Each one answers one question the code asks. None of them means "is this edition
 | `billing` | Does Automatos bill the workspace: billing routes, credits, plans, plan limits, quotas, the trial and the power-up? When it does not, the install's owner pays the AI providers directly. | no | yes | no (FR-24) |
 | `profile_editable` | Is a person's name and email edited in Automatos? | yes | no (Clerk) | no (the IdP) |
 | `step_up` | How is a sensitive action confirmed? | `skip` | `clerk_freshness` | `reauth` (D-13) |
-| `device_pairing` | Can a phone or browser pair with a one-time code and hold an `amd_` token? | yes (by `LOCAL_REMOTE_ACCESS`) | no | yes, by setting (D-7) |
+| `device_pairing` | Can a phone or browser pair with a one-time code and hold an `amd_` token? | yes (by `LOCAL_REMOTE_ACCESS`) | no | yes, by setting (D-7): `ENTERPRISE_DEVICE_PAIRING`, on when unset (built, US-601); the web app offers no browser pairing |
+| `issues_sessions` | Does Automatos issue and resolve its own sign-in sessions: the `ams_` bearer lane, the session cookie and its cross-site check, the `/api/v1/auth` sign-out and session routes, and the session settings checked at start-up? No call site in the table below reads it: it gates only code Wave 3 added. | no | no | yes (D-3, §5.3; Wave 3) |
+| `agent_http_own_hosts_only` | May an agent's `http_request` tool call only the install's own hosts (its internal API and web hosts and the loopback names), never Automatos's public API and web hosts? New with D-12 (#1605), so no earlier comparison made it (row 58a). | no | no | yes (D-12: the platform's API is the install's) |
+| `api_on_public_address` | Is the API reached on the install's one public address, the web app's (`FRONTEND_URL`), so every address a phone is handed (discovery's `api_url` and `auth.oidc.start_url`, the pairing link) is built from it and never from the request? New with US-602, so no earlier comparison made it (`services/mobile/urls.py`). | no | no | yes (built, US-602) |
+| `requires_verified_database_tls` | Does the API start only when its connection to the application's database checks the server's certificate and host name (`DATABASE_SSLMODE=verify-full`, with the CA file `DATABASE_SSLROOTCERT` names)? New with PRD-278 D-6, so no earlier comparison made it (`core/edition_start_up.py`). | no | no | yes (PRD-278 D-6) |
 | `session_mode` | Can the operator's own CLI sessions run as agents (PRD-234)? | yes (by `CLI_RUNTIME_ENABLED`) | no | no (PRD-253 O1) |
 | `hosts_automatos_cloud` | Is this install Automatos Cloud itself: the public Marketplace, the catalogue, bundles, the theme revocation feed, the moderation inbox, the isolated theme review? | no | yes | no |
-| `calls_automatos_cloud` | May this install call Automatos's hosted services: theme revocations, Cloud sync, Cloud items? | yes, on by default | no (it is the host) | no: only what the operator switches on (D-12). US-704 builds those per-service switches; until then every one is off |
+| `calls_theme_revocations` | May this install pull Automatos's theme revocation list (the pull, its schedule, its sync status and Check now)? US-704 replaced `calls_automatos_cloud` with this and the next two. Each stops requests only: what a pull stored still applies when it is off (row 96). | yes | no (it is the host) | only while `ENTERPRISE_CALLS_THEME_REVOCATIONS` is on (D-12, US-704); off by default |
+| `calls_cloud_sync` | May this install Sync with Automatos Cloud (the Sync routes and the catalogue pull, a Cloud theme's package download, the Cloud screenshot address)? | yes | no (it is the host) | only while `ENTERPRISE_CALLS_CLOUD_SYNC` is on; off by default; needs theme revocations (start-up refuses it alone) |
+| `calls_cloud_items` | May this install request agents, Playbooks, packages and plugins from Automatos Cloud (the Sync's item and plugin passes, and each bundle and package request: `services/marketplace_bundles/items_gate.py`)? The "Items brought from Cloud" routes and the web install gate read what the install holds, so they follow `hosts_automatos_cloud` instead (rows 20, W34, W36, W37). | yes | no (it is the host) | only while `ENTERPRISE_CALLS_CLOUD_ITEMS` is on; off by default; needs Cloud sync (start-up refuses it alone) |
+| `hosted_services_by_setting` | Are the three above each the operator's own setting, rather than the row's? No call site reads it: `editions.current()` does (`with_hosted_service_settings`), and start-up checks the settings where it is on. | no | no | yes (US-704) |
 | `push_needs_consent` | Must the operator agree before notifications leave through Expo's push service? | yes | no | yes (G-1) |
 | `operator_is_user` | Is the person using the app the person who runs the server, so that host detail, `docker compose` fix commands and the operator's own folders are theirs? | yes | no | no (G-2) |
 | `guards_user_endpoints` | Must an AI endpoint a workspace saves be public `https`, called through the pinned client? | no | yes | yes (G-3; PRD-282 adds named private hosts) |
@@ -71,18 +78,19 @@ A migration is history. Rewriting it to read a capability changes what an old re
 | # | Where | Kind | What it switches | Capability | `local` | `saas` | `enterprise` |
 |---|---|---|---|---|---|---|---|
 | 12 | `api/admin_credits.py:65` | C | Admin credit adjustments answer 404 | `billing` | 404 | served | 404 |
-| 13 | `api/admin_theme_revocation_sync.py:56` | H | Revocation sync status and manual pull answer 404 | `calls_automatos_cloud` | served | 404 | served only if the operator switched revocations on |
+| 13 | `api/admin_theme_revocation_sync.py:63` | H | Revocation sync status and manual pull answer 404 | `calls_theme_revocations` | served | 404 | served only while revocations are switched on; else 404, "its operator hasn't switched it on" (US-704) |
 | 14 | `api/billing.py:46` | C | Every billing route answers 404 | `billing` | 404 | served | 404 |
 | 15 | `api/billing_webhooks.py:69` | C | Stripe webhook answers 404 | `billing` | 404 | served | 404 |
 | 16 | `api/llm_analytics.py:887` | H | OpenRouter balance read from the key the calls actually use (the platform key), not only a workspace's own key | `billing` (off: the owner pays the provider) | platform key | workspace key only | platform key |
 | 17 | `api/marketplace_catalog.py:101` | H | Cloud catalogue routes answer 404 | `hosts_automatos_cloud` | 404 | served | 404 |
 | 18 | `api/marketplace_catalog.py:107` | H | Cloud catalogue file route answers 404 | `hosts_automatos_cloud` | 404 | served | 404 |
 | 19 | `api/marketplace_catalog_items.py:97` | H | Cloud bundle and plugin package routes answer 404 | `hosts_automatos_cloud` | 404 | served | 404 |
-| 20 | `api/marketplace_cloud_items.py:49` | H | "Items brought from Cloud" routes answer 404 | `calls_automatos_cloud` | served | 404 | served only if Cloud sync is switched on |
-| 21 | `api/marketplace_cloud_sync.py:57` | H | Cloud Sync routes answer 404 | `calls_automatos_cloud` | served | 404 | served only if Cloud sync is switched on |
+| 20 | `api/marketplace_cloud_items.py:51` | H | "Items brought from Cloud" routes answer 404 | `hosts_automatos_cloud` | served | 404 | served whatever `ENTERPRISE_CALLS_CLOUD_ITEMS` holds: they read only what the install holds, so an item brought earlier is still listed and reviewed (US-704) |
+| 21 | `api/marketplace_cloud_sync.py:73` | H | Cloud Sync routes answer 404 | `calls_cloud_sync` | served | 404 | served only while Cloud sync is switched on; else 404 before the caller is looked at (US-704) |
+| 21a | `api/marketplace_cloud_sync.py:81` | H | Who may run a Sync: past `workspace:manage`, an install admin, then a fresh step-up | `operator_is_user` (and the edition's `step_up`) | the operator, no install-admin check; step-up `skip` | 404 (row 21) | an install admin (`caller_is_admin`) who signed in again within `STEP_UP_MAX_AGE_MINUTES`; the status read stays `workspace:manage` (US-704) |
 | 22 | `api/marketplace_themes_submit.py:145` | C | A submitter with no `users` row is refused | `anonymous_operator` | allowed | 403 | 403 |
-| 23 | `api/mobile_devices.py:216` | H | Minting a pairing code answers 404; the same guard also gates `POST /pair` through `_require_paired_mode` | `device_pairing` | served | 404 | served when pairing is on (D-7; Wave 6) |
-| 24 | `api/mobile_push.py:105` | H | Push-consent read and write answer 404 | `push_needs_consent` | served | 404 | served (G-1) |
+| 23 | `api/mobile_devices.py:216` | H | Minting a pairing code answers 404; the same guard also gates `POST /pair` through `_require_paired_mode` | `device_pairing` | served | 404 | served when pairing is on (D-7). Built (US-601): the code to a person signed in on the session lane, for themselves, in their workspace, one pending code each, ten codes a person per ten minutes, none past the active-device cap; `/pair` needs no `LOCAL_REMOTE_ACCESS` |
+| 24 | `api/mobile_push.py:105` | H | Push-consent read and write answer 404 | `push_needs_consent` | served | 404 | served (G-1). Built (US-601): to an install admin signed in on the session lane; the answer needs a fresh sign-in and is audited |
 | 25 | `api/profile.py:119` | C | `editable` in the profile answer; the same check chooses the email note | `profile_editable` | true | false | false |
 | 26 | `api/profile.py:121` | R | `edition` in the profile answer | (name) | `local` | `saas` | `enterprise` |
 | 27 | `api/profile.py:158` | C | Profile update refused ("managed by your identity provider") | `profile_editable` | allowed | 403 | 403 |
@@ -101,7 +109,7 @@ A migration is history. Rewriting it to read a capability changes what an old re
 | # | Where | Kind | What it switches | Capability | `local` | `saas` | `enterprise` |
 |---|---|---|---|---|---|---|---|
 | 32 | `core/auth/bearer_registry.py:92` | P | Whether remote access has closed the anonymous lane (row 82) | `anonymous_operator` | see 82 | see 82 | see 82 |
-| 33 | `core/auth/device.py:220` | H | An `amd_` bearer is refused with 401 | `device_pairing` | resolved | 401 | resolved when pairing is on, as the person who paired (FR-22; Wave 6) |
+| 33 | `core/auth/device.py:220` | H | An `amd_` bearer is refused with 401 | `device_pairing` | resolved | 401 | resolved when pairing is on, as the person who paired (FR-22). Built (US-601): role `user`, their membership read per request; 503 until the edition check has run. US-603: `token_kinds` decides which rows are taken (`paired` by `device_pairing`, `oidc` by `sign_in` being OIDC), so in enterprise a phone signed in on the phone resolves with pairing on or off |
 | 34 | `core/auth/hybrid.py:985` | C | The anonymous session is bound to the operator row and made super admin | `anonymous_operator` | super admin | plain user | never reached: no anonymous lane (FR-3) |
 | 35 | `core/auth/step_up.py:161` | C | `check_step_up` (line 177) passes every request | `step_up` | `skip` | `clerk_freshness` | `reauth` (US-406) |
 | 36 | `core/llm/byok_endpoint.py:37` | C | `_saas()` (now `_guarded()`, and its callers take `guarded` instead of an edition), used at lines 55, 84 and 96: a key's own endpoint must be `https`, public and pinned, and is required even when `AZURE_OPENAI_ENDPOINT` is set | `guards_user_endpoints` | not guarded | guarded | guarded (G-3) |
@@ -137,12 +145,13 @@ A migration is history. Rewriting it to read a capability changes what an old re
 | 56 | `modules/voice/arming.py:54` | C | Name of a newly created Retell agent | `live_agent_named_apart` | "Auto Live (local)" | "Auto Live" | "Auto Live" (G-7) |
 | 57 | `modules/voice/mint.py:98` | H | Auto Live allowed by the plan | `billing` | always | by plan | always |
 | 58 | `modules/voice/mint.py:111` | H | Auto Live refused for plan or exhausted credits | `billing` | never | by plan and credits | never |
+| 58a | `modules/tools/execution/http_hosts.py:25` (read by `exec_shell.py` `_get_allowed_http_domains` and `tool_registry.py:202`) | H | The `http_request` tool's allowed hosts and the description the model reads | `agent_http_own_hosts_only` | the install's hosts and `api.automatos.app`, `ui.automatos.app` | the same | the install's hosts only (D-12, #1605) |
 
 ### `scripts/`
 
 | # | Where | Kind | What it switches | Capability | `local` | `saas` | `enterprise` |
 |---|---|---|---|---|---|---|---|
-| 59 | `scripts/mint_pairing_code.py:157` | H | The command-line pairing code is refused | `device_pairing` | minted | refused | minted when pairing is on (Wave 6). Its refusal text still says "local-edition"; Wave 6 corrects it |
+| 59 | `scripts/mint_pairing_code.py:157` | H | The command-line pairing code is refused | `device_pairing` | minted | refused | refused (US-601): a code pairs a phone to the person who made it, signed in, so no console makes one. Its refusal text now names `AUTH_EDITION=local` and says why |
 
 ### `services/` (inside `orchestrator/`)
 
@@ -166,28 +175,30 @@ A migration is history. Rewriting it to read a capability changes what an old re
 | 75 | `services/credits/meter.py:112` | P | A call's debit (row 72) | `billing` | see 72 | see 72 | see 72 |
 | 76 | `services/credits/summary.py:58` | P | A product workspace's billing summary (row 72) | `billing` | see 72 | see 72 | see 72 |
 | 77 | `services/credits/summary.py:80` | P | A workspace's billing summary (row 72) | `billing` | see 72 | see 72 | see 72 |
-| 78 | `services/marketplace_cloud/pull.py:128` | H | Cloud sync enabled | `calls_automatos_cloud` | when `AUTOMATOS_CLOUD_URL` is set | never | only when switched on (D-12) |
-| 79 | `services/mobile/discovery.py:166` | H | Discovery's `auth.modes` and `pairing` blocks | `sign_in` | `["device"]`, pairing by mode | `["clerk"]` | `["oidc"]`, pairing by setting (FR-23; Wave 6) |
+| 78 | `services/marketplace_cloud/pull.py:133` | H | Cloud sync enabled (the Sync, and a Cloud theme's package download, `package._download`) | `calls_cloud_sync` | when `AUTOMATOS_CLOUD_URL` is set | never | only while switched on, with the URL set (D-12, US-704) |
+| 79 | `services/mobile/discovery.py:166` | H | Discovery's `auth.modes` and `pairing` blocks | `sign_in` | `["device"]`, pairing by mode | `["clerk"]` | `["oidc", "device"]`, or `["oidc"]` with pairing off; `oidc {start_url}` (FR-23; built, US-602), then `{start_url, exchange_url, app_link, code_challenge_method}` (built, US-603) |
 | 80 | `services/mobile/discovery.py:192` | R | `edition` in the discovery document | (name) | `local` | `saas` | `enterprise` |
-| 80a | `services/mobile/pairing.py:97` | H | Creating or redeeming a pairing code is refused (`_require_local_edition`) | `device_pairing` | allowed | refused | allowed when pairing is on (D-7; Wave 6) |
+| 80a | `services/mobile/pairing.py:97` | H | Creating or redeeming a pairing code is refused (`_require_local_edition`) | `device_pairing` | allowed | refused | allowed when pairing is on (D-7; built, US-601) |
 | 81 | `services/mobile/remote_access.py:83` | F | `LOCAL_REMOTE_ACCESS` boot decision (refuse, warn, start) | `anonymous_operator` | applies | skipped | skipped (no anonymous lane to protect) |
 | 82 | `services/mobile/remote_access.py:119` | F | Remote access closes the anonymous lane | `anonymous_operator` | closed when `paired` | not closed here: an anonymous request is never the operator, and `REQUIRE_AUTH` decides whether it is served | not closed here: `REQUIRE_AUTH` is forced on, so it is refused |
 | 83 | `services/mobile/urls.py:50` | H | With no `PUBLIC_API_HOST`, phones are told the request's own base URL instead of the hosted API | `hosts_automatos_cloud` | request's URL | `PUBLIC_API_HOST`, whatever it holds | request's URL (never point phones at the hosted API) |
 | 84 | `services/onboarding_state.py:579` | H | Stage after the payoff | `billing` | `completed` | `powerup` | `completed` |
 | 85 | `services/push/consent.py:78` | H | `expo_push_allowed` | `push_needs_consent` | once agreed | always | once agreed (G-1) |
-| 86 | `services/push/fanout.py:174` | H | Which device kind receives a push | `device_pairing` | `paired` | `clerk` | `paired` now (D-7); `oidc` too after US-603 |
+| 86 | `services/push/fanout.py:174` | H | Which device kind receives a push | `device_pairing` | `paired` | `clerk` | `paired` while pairing is on (D-7) and `oidc` (built, US-603): the device lane's `token_kinds`, `clerk` where it takes none |
 | 87 | `services/push/recipients.py:92` | H | The operator row holds the owner role for push recipients | `anonymous_operator` | yes | no | no |
 | 88 | `services/readiness/probes.py:105` | H | Push readiness: always ready, or ready once agreed | `push_needs_consent` | once agreed | always | once agreed (G-1) |
 | 89 | `services/readiness/service.py:171` | H | Readiness detail adds the host and latency reached | `operator_is_user` | shown | hidden | hidden (G-2) |
 | 90 | `services/socials_plan_research.py:133` | C | Background Socials research allowed without credits | `billing` | always | by credits | always |
-| 91 | `services/theme_revocation_scheduler.py:79` | H | The revocation pull is scheduled | `calls_automatos_cloud` | when a feed URL is set | never | only when switched on (D-12) |
+| 91 | `services/theme_revocation_scheduler.py:85` | H | The revocation pull is scheduled | `calls_theme_revocations` | when a feed URL is set | never | only while switched on, with a feed URL set; else no job is registered (D-12, US-704) |
 | 92 | `services/themes/membership.py:72` | C | The anonymous operator is a member of every workspace | `anonymous_operator` | yes | no | no |
 | 93 | `services/themes/records.py:132` | H | Private theme uploads default under `auto` | `multi_person` | on | on only in a one-person workspace | on only in a one-person workspace |
 | 94 | `services/themes/review.py:185` | H | Approving a Marketplace theme needs a passing isolated-review note | `hosts_automatos_cloud` | not needed | needed | not needed (the admin's approval is the review) |
-| 95 | `services/themes/revocation_pull.py:118` | H | The revocation pull is enabled | `calls_automatos_cloud` | when a feed URL is set | never | only when switched on (D-12) |
-| 96 | `services/themes/revocation_sync_state.py:77` | H | Revoked key ids read from the stored pull | `calls_automatos_cloud` | stored ids | none | stored ids when pulled |
+| 95 | `services/themes/revocation_pull.py:123` | H | The revocation pull is enabled | `calls_theme_revocations` | when a feed URL is set | never | only while switched on, with a feed URL set (D-12, US-704) |
+| 96 | `services/themes/revocation_sync_state.py:81` | H | Revoked key ids read from the stored pull | `hosts_automatos_cloud` | stored ids | none | stored ids, whether or not revocations are switched on now: a key a pull revoked stays revoked once they are off (US-704) |
 | 97 | `services/workspace_move/export.py:125` | R | `edition` in a workspace export's manifest | (name) | `local` | `saas` | `enterprise` |
 | 98 | `services/workspace_purge.py:232` | C | Purging an owner's last workspace also deletes their account | `last_workspace_purge_deletes_person` | never | yes | never (G-8) |
+| 99 | `api/phone_sign_in.py:46` | H | The phone sign-in's confirmation routes (`/api/v1/auth/oidc/phone/waiting`, `continue`, `cancel`), through `auth_oidc._signs_in_with_oidc` | `sign_in` | 404 | 404 | served (built, US-603) |
+| 100 | `api/mobile_devices.py` (`_require_phone_sign_in`) | H | `POST /api/v1/mobile/sign-in/exchange` | `sign_in` | 404 | 404 | served (built, US-603) |
 
 ### Shell
 
@@ -244,19 +255,21 @@ The frontend has its own seam, `frontend/lib/auth-edition.ts`, fixed at build ti
 | W31 | `components/admin/themes/review-queue.tsx:65` | Review queue in hosted mode (isolated-review note) | `hosts_automatos_cloud` | local | hosted | local (row 94) |
 | W32 | `components/marketplace/public/marketplace-page.tsx:63` | Public Marketplace or the member Marketplace | `hosts_automatos_cloud` | member | public | member |
 | W33 | `lib/marketplace/share-card-read.ts:151` | Share card metadata | `hosts_automatos_cloud` | local metadata | read | local metadata |
-| W34 | `components/marketplace/cloud/cloud-item-badges.tsx:46`; `cloud-items-layer.tsx:105`; `sync-button.tsx:73` | Cloud item badges, layer and Sync button | `calls_automatos_cloud` | shown | hidden | shown when Cloud sync is switched on |
-| W35 | `components/settings/SettingsPanel.tsx:100`; `components/settings/automatos-cloud-panel.tsx:43` | Automatos Cloud tab and its panel | `calls_automatos_cloud` | shown | hidden | shown when switched on |
-| W36 | `hooks/use-cloud-items.ts:51, 66, 79` | Cloud item queries enabled | `calls_automatos_cloud` | on | off | on when switched on |
-| W37 | `lib/marketplace/cloud-install-gate.ts:142` | Install gate for Cloud items | `calls_automatos_cloud` | checked | none | checked when switched on |
-| W38 | `hooks/use-mobile-devices.ts:123` | Compares the discovery document's `edition` with `local` | `device_pairing` | pairing read | none | pairing by setting (Wave 6) |
-| W39 | `hooks/use-mobile-devices.ts:185, 187, 188, 193, 198, 199` | This browser's device token and pairing prompt | `device_pairing` | on | off | by setting (Wave 6) |
-| W40 | `components/settings/phones-devices/pair-phone-qr.tsx:59`; `phones-devices-tab.tsx:28` | Pairing QR and "browsers paired to it" copy | `device_pairing` | shown | hidden | by setting (Wave 6) |
-| W41 | `components/settings/phones-devices/phones-devices-tab.tsx:52`; `hooks/use-push-consent.ts:64` | Push consent switch and query | `push_needs_consent` | shown | hidden | shown (G-1) |
+| W34 | `components/marketplace/cloud/cloud-item-badges.tsx:48`; `cloud-items-layer.tsx:107`; `sync-button.tsx:74` | Cloud item badges and layer; Sync button | `holdsCloudItems()` (lib/hosted-services.ts); `useHostedService('cloudSync')` (US-704) | shown | hidden | badges and layer always, as `local`; the button while Cloud sync is on |
+| W35 | `components/settings/SettingsPanel.tsx:100`; `components/settings/automatos-cloud-panel.tsx:50, 130` | Automatos Cloud tab and its panel; the panel's lede | `useHostedService('cloudSync')`, through `useHasAutomatosCloudTab`, the tab's one gate; the lede `useHostedService('cloudItems')` (US-704) | shown | hidden | shown while Cloud sync is on; the lede says a Sync brings themes only while Cloud items are off |
+| W36 | `hooks/use-cloud-items.ts:53, 68, 81` | Cloud item queries enabled | `holdsCloudItems()` (US-704) | on | off | on, as `local` |
+| W37 | `lib/marketplace/cloud-install-gate.ts:145` | Install gate for Cloud items | `holdsCloudItems()` (US-704) | checked | none | checked, as `local`: an item brought earlier is still reviewed |
+| W37a | `components/admin/themes/revocations-panel.tsx:131` | The revocation sync section and whether a feed row can be lifted | `useHostedService('themeRevocations')`, through `pullsRevocations` (US-704) | shown | hidden | shown while revocations are on; one plain "not switched on" line, no status asked and feed rows liftable while off |
+| W38 | `hooks/use-mobile-devices.ts:123` | Compares the discovery document's `edition` with `local` | `device_pairing` | pairing read | none | pairing read: `pairsPhones` (built, US-601) |
+| W39 | `hooks/use-mobile-devices.ts:185, 187, 188, 193, 198, 199` | This browser's device token and pairing prompt | `device_pairing` | on | off | off: the web app does not offer browser pairing in enterprise (US-601) |
+| W40 | `components/settings/phones-devices/pair-phone-qr.tsx:59`; `phones-devices-tab.tsx:28` | Pairing QR and "browsers paired to it" copy | `device_pairing` | shown | hidden | QR shown while pairing is on; no browser copy (built, US-601) |
+| W41 | `components/settings/phones-devices/phones-devices-tab.tsx:52`; `hooks/use-push-consent.ts:64` | Push consent switch and query | `push_needs_consent` | shown | hidden | shown to an install admin; the answer through step-up (G-1; built, US-601) |
 | W42 | `components/settings/ChannelsSettingsTab.tsx:164, 172` | A channel that can poll starts on polling; webhook-only channels warn that inbound needs a public URL | per channel | polling, warned | webhook | polling, warned (G-11, Wave 5) |
 | W43 | `components/local/first-run-nudge.tsx:77` | "Add a model key" nudge over the seeded demo | `seeds_first_run_content` (row 45) | shown | hidden | hidden: no demo to nudge over (G-4) |
 | W44 | `lib/theme-sdk/context.ts:125` | `useEdition()` gives themes the edition name, typed `'local' \| 'saas'` | (name) | `local` | `saas` | `enterprise`: a change to the theme SDK contract |
 | W45 | `lib/otel/node.ts:99` | `automatos.edition` trace attribute | (name) | `local` | `saas` | `enterprise` |
 | W46 | `Dockerfile:81, 94` | Build argument, default `saas` | (the flag) | `local` | `saas` | an enterprise image (US-505) |
+| W47 | `app/sign-in/phone/page.tsx:13` | The page a phone's sign-in waits on (Continue, Cancel) | `sign_in` | not found | not found | shown (built, US-603) |
 
 Two response types also name only two editions and widen with the value: `lib/api-client.ts:434` (profile `edition: 'local' | 'saas'`) and `hooks/use-provider-registry.ts:49`.
 

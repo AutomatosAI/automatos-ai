@@ -1,6 +1,7 @@
 """PRD-264 EUAI-07: a request an agent's ``http_request`` tool makes says so, in a header it can't drop.
 
-The tool may call the platform's own API (``exec_shell._get_allowed_http_domains``), and so the
+The tool may call the platform's own API (``exec_shell._get_allowed_http_domains``; in ``enterprise``
+the install's own API only, ``http_hosts.allowed_http_hosts``), and so the
 email routes a person's own Send uses (``api/widget_email.py``). Those routes run as a person's
 direct send: their body carries no AI line. A request this tool makes always carries
 :data:`AGENT_REQUEST_HEADER`, set by the server after the model's own headers (any copy of it the

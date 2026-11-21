@@ -16,8 +16,14 @@ tests:
           content:
             name: DOCUMENT_UPLOAD_DIR
             value: /app/data/uploads
-      - notExists:
+      - notContains:
           path: spec.template.spec.containers[0].volumeMounts
+          content: {name: data}
+          any: true
+      - notContains:
+          path: spec.template.spec.volumes
+          content: {name: data}
+          any: true
   - it: gets the object storage credentials from the Secret, like the API
     asserts:
       - contains:
@@ -80,12 +86,13 @@ tests:
       - equal:
           path: metadata.annotations["helm.sh/hook-weight"]
           value: "0"
-  - it: has the runtime's default system-call filter (PRD-280 US-102)
+  - it: has the runtime's default system-call filter (PRD-280 US-102) and a read-only root (US-104)
     asserts:
       - equal:
           path: spec.template.spec.containers[0].securityContext
           value:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
             seccompProfile:

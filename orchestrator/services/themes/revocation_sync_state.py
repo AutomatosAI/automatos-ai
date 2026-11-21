@@ -7,9 +7,12 @@ asks which keys the feed revoked reads them here: the signature check on load
 signature view (``signed_upload``) and the admin review's report and signature paste (``review``);
 and the admin's sync status (``revocation_pull.sync_status``).
 
-* **Local edition only.** The row is the local edition's own: the hosted edition publishes the
+* **Everywhere but the feed's host** (``hosts_automatos_cloud``). The hosted edition publishes the
   feed and never pulls it (its revoked keys are its keys file's), so there no key reads as revoked
-  by the feed and the row is never read.
+  by the feed and the row is never read. Every other install reads what it stored, whether or not
+  it pulls the list now: reading a stored row sends nothing, and a key revoked by a pull made while
+  an enterprise install had theme revocations switched on stays revoked after the operator switches
+  them off (PRD-277 US-704). Such an install only stops hearing of new ones.
 * **Validated.** Only key ids (strings) count. A stored value that isn't a list reads as no key;
   a list holding entries that aren't strings keeps its strings. Either is logged as an error once
   per malformed value, not on every read (the files route asks on every file), and again only
@@ -70,11 +73,12 @@ def _log_once(stored: Any, message: str, *args: Any) -> None:
 
 
 def revoked_key_ids(db: Any) -> FrozenSet[str]:
-    """The key ids the hosted feed lists as revoked, as the local edition's pull stored them; none in SaaS.
+    """The key ids the hosted feed lists as revoked, as this install's pulls stored them; none on the hosted edition.
 
-    Malformed stored data is logged once (module docstring); its string entries still count.
+    Read whether or not the install pulls the list now (module docstring). Malformed stored data is logged once;
+    its string entries still count.
     """
-    if not editions.current().calls_automatos_cloud:
+    if editions.current().hosts_automatos_cloud:
         return NO_KEYS
     row = db.get(ThemeRevocationSync, THEME_REVOCATION_SYNC_ROW_ID)
     stored = None if row is None else row.revoked_key_ids

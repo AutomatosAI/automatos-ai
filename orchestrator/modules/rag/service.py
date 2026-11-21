@@ -50,6 +50,7 @@ from core.observability.substrate_metrics import (
 from modules.rag.owner_leg import owners_documents_searched
 from modules.rag.owner_passages import owners_passages_kept
 from modules.rag.whole_documents import short_documents_whole
+from modules.rag.chunk_hydration import expansion_plans, fetch_chunk_texts
 
 
 @dataclass
@@ -1290,31 +1291,9 @@ class RAGService:
 
         window = expand_window or self.config.expansion_window
 
-        # Plan each candidate's window once, collecting the union of
-        # (document_id, chunk_index) keys to hydrate. The full chunk text lives
-        # in document_chunks.content; candidate['content'] is only the 500-char
-        # S3 preview. One batched query replaces the old query-per-candidate N+1.
-        plans = []  # (candidate, doc_id|None, [chunk_index, ...]|None)
-        needed = set()
-        for candidate in candidates:
-            raw_doc_id = candidate.get("document_id")
-            chunk_metadata = candidate.get("metadata", {})
-            chunk_index = chunk_metadata.get("chunk_index") if isinstance(chunk_metadata, dict) else None
-
-            # Cast document_id to int (S3 Vectors stores as string)
-            try:
-                doc_id = int(raw_doc_id) if raw_doc_id else None
-            except (ValueError, TypeError):
-                doc_id = None
-
-            if doc_id is None or chunk_index is None:
-                plans.append((candidate, None, None))
-                continue
-
-            idx_window = list(range(max(0, chunk_index - window), chunk_index + window + 1))
-            for ci in idx_window:
-                needed.add((doc_id, ci))
-            plans.append((candidate, doc_id, idx_window))
+        # Each candidate's window planned once, and the full chunk text for every key in
+        # one batched query (chunk_hydration), not one query per candidate.
+        plans, needed = expansion_plans(candidates, window)
 
         if not needed:
             for candidate, _, _ in plans:
@@ -1322,35 +1301,7 @@ class RAGService:
             return candidates
 
         try:
-            import asyncpg
-            from config import config as app_config
-            conn = await asyncpg.connect(app_config.DATABASE_URL)
-
-            try:
-                pairs = list(needed)
-                doc_ids = [p[0] for p in pairs]
-                chunk_idxs = [p[1] for p in pairs]
-                # ONE round-trip: join the requested (doc_id, chunk_index) keys
-                # against document_chunks via unnest of two parallel arrays.
-                # PRD-172 F005: additionally join documents and pin
-                # documents.workspace_id so a chunk is hydrated ONLY when its
-                # parent document belongs to this workspace. When workspace_id
-                # is unavailable ($3 IS NULL) the predicate is a no-op (only
-                # reachable for a non-multi-tenant / self._workspace_id-less
-                # caller), preserving prior behaviour without widening a
-                # tenant's scope.
-                rows = await conn.fetch("""
-                    SELECT dc.document_id, dc.chunk_index, dc.content
-                    FROM document_chunks dc
-                    JOIN unnest($1::int[], $2::int[]) AS k(document_id, chunk_index)
-                      ON dc.document_id = k.document_id
-                     AND dc.chunk_index = k.chunk_index
-                    JOIN documents d ON d.id = dc.document_id
-                    WHERE ($3::uuid IS NULL OR d.workspace_id = $3::uuid)
-                """, doc_ids, chunk_idxs, str(effective_workspace_id) if effective_workspace_id else None)
-            finally:
-                await conn.close()
-
+            rows = await fetch_chunk_texts(needed, effective_workspace_id)
             hydrated = {(r["document_id"], r["chunk_index"]): r["content"] for r in rows}
             for candidate, doc_id, idx_window in plans:
                 if doc_id is None or idx_window is None:

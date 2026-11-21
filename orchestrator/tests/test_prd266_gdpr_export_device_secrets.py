@@ -3,7 +3,8 @@
 ``services.gdpr_service.export_workspace`` (behind ``GET /api/v1/gdpr/export`` and the verticals
 export) reads every workspace table with ``SELECT *``. ``EXPORT_REDACTED_COLUMNS`` drops, from
 ``mobile_devices``, W1's ``SECRET_COLUMNS`` (the pairing code hash, the token hash, the previous
-token hash and the push key) and the Expo push token. Proven here on Postgres:
+token hash and the push key; since PRD-277 US-603 also the hash of a phone sign-in's confirmation
+token, which only a pending row holds) and the Expo push token. Proven here on Postgres:
 
 * a paired phone holding all five is exported with its id, name and platform and none of them;
 * another table's rows (the phone's push ticket) are exported unchanged;
@@ -22,6 +23,8 @@ from core.models.mobile_devices import SECRET_COLUMNS
 from services import gdpr_service
 
 FIVE_SECRETS = ("pairing_code_hash", "token_hash", "prev_token_hash", "push_key", "expo_push_token")
+# PRD-277 US-603: a pending phone sign-in's confirmation hash; never on a paired phone's row.
+REDACTED = (*FIVE_SECRETS, "sign_in_confirm_hash")
 PHONE_NAME = "Ana's iPhone"
 
 
@@ -77,7 +80,7 @@ def _seed_ticket(db, device_id: str, workspace_id: str) -> str:
 def test_the_map_drops_w1s_secret_columns_and_the_expo_token():
     redacted = gdpr_service.EXPORT_REDACTED_COLUMNS["mobile_devices"]
     assert redacted[:len(SECRET_COLUMNS)] == SECRET_COLUMNS
-    assert set(redacted) == set(FIVE_SECRETS)
+    assert set(redacted) == set(REDACTED)
 
 
 def test_a_paired_phone_is_exported_without_its_secrets(db_session, seed_workspace, export_sql_only):
@@ -89,7 +92,7 @@ def test_a_paired_phone_is_exported_without_its_secrets(db_session, seed_workspa
 
     assert str(row["id"]) == device_id
     assert (row["name"], row["platform"], row["kind"]) == (PHONE_NAME, "ios", "paired")
-    assert not set(FIVE_SECRETS) & set(row)
+    assert not set(REDACTED) & set(row)
     assert not set(secrets.values()) & {value for value in row.values() if isinstance(value, str)}
 
 

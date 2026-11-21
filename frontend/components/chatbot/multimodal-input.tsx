@@ -7,6 +7,7 @@
  */
 import { useState, useRef, useEffect, type ChangeEvent, type RefObject } from 'react'
 import { Textarea } from '@/components/ui/textarea'
+import { useKeptChatDraft } from '@/lib/enterprise/kept-chat-draft'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 import type { Agent } from './agent-selector'
 import type { VisibilityType, AppUsage } from '@/types'
@@ -90,6 +91,8 @@ export function MultimodalInput({
   // PRD-127: ephemeral attachments
   const attachments = useComposerAttachments()
   const [input, setInput] = useState('')
+  // PRD-277 US-502: enterprise keeps the unsent text across a sign-in (does nothing elsewhere).
+  useKeptChatDraft(input, setInput)
   const [activeAgent, setActiveAgent] = useState<Agent | null>(null)
 
   // Safe input with default

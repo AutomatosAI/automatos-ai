@@ -60,7 +60,8 @@ ORGANISATION_EDITION = (
 # only: the local edition never bills, so there it still has no such tab (#88).
 # PRD-270 US-270-05b added Automatos Cloud (where Marketplace themes sync from, the last Sync,
 # Sync now), in the local edition only and only while the Sync is on: AUTOMATOS_CLOUD_URL=
-# (empty) hides it, so Auto names it only then.
+# (empty) hides it, so Auto names it only then. PRD-277 US-704: an organisation's install has it too, while its
+# operator has switched the Sync on (ENTERPRISE_CALLS_CLOUD_SYNC) with the URL set.
 # Model keys holds the person's own model-provider keys (BYOK), in both editions; "API Keys" used to
 # name it. API keys holds the workspace's own keys, for the widget (public) and a product's backend
 # (server): hosted only, like the Widget SDK it came out of, so it is a hosted tab here.
@@ -96,9 +97,11 @@ def hosted_settings_tabs() -> tuple[str, ...]:
     return (*SETTINGS_TABS, *HOSTED_SETTINGS_TABS)
 
 
-def organisation_settings_tabs() -> tuple[str, ...]:
-    """An organisation's install: the hosted tabs, less Billing and the Widget SDK."""
-    return tuple(tab for tab in hosted_settings_tabs() if tab not in ORGANISATION_LEFT_OUT_TABS)
+def organisation_settings_tabs(cloud_sync_on: bool = False) -> tuple[str, ...]:
+    """An organisation's install: the hosted tabs, less Billing and the Widget SDK, then Automatos Cloud while
+    its operator has switched the Sync on (PRD-277 US-704)."""
+    kept = tuple(tab for tab in hosted_settings_tabs() if tab not in ORGANISATION_LEFT_OUT_TABS)
+    return (*kept, *((CLOUD_SYNC_TAB,) if cloud_sync_on else ()))
 
 
 def _install_facts(install: str, cloud_sync_on: bool) -> tuple[str, tuple[str, ...], str]:
@@ -108,7 +111,7 @@ def _install_facts(install: str, cloud_sync_on: bool) -> tuple[str, tuple[str, .
     if install == editions.INSTALL_OWN_COMPUTER:
         return LOCAL_EDITION, local_settings_tabs(cloud_sync_on), NO_SUCH_TAB
     if install == editions.INSTALL_ORGANISATION:
-        return ORGANISATION_EDITION, organisation_settings_tabs(), NO_SUCH_TAB
+        return ORGANISATION_EDITION, organisation_settings_tabs(cloud_sync_on), NO_SUCH_TAB
     return HOSTED_EDITION, hosted_settings_tabs(), HOSTED_NO_SUCH_TAB
 
 
@@ -117,8 +120,9 @@ def edition_facts() -> str:
     from config import config
     from core import editions
 
-    cloud_sync_on = bool(str(config.AUTOMATOS_CLOUD_URL or "").strip())
-    edition, tabs, no_such = _install_facts(editions.current().install_description, cloud_sync_on)
+    capabilities = editions.current()
+    cloud_sync_on = capabilities.calls_cloud_sync and bool(str(config.AUTOMATOS_CLOUD_URL or "").strip())
+    edition, tabs, no_such = _install_facts(capabilities.install_description, cloud_sync_on)
     return f"{edition} Settings has these tabs: {', '.join(tabs)}. {no_such}"
 
 
