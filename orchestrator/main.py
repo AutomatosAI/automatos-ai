@@ -1460,20 +1460,8 @@ async def api_endpoint_health():
             "message": "Failed to retrieve API health statistics"
         }
 
-# Root endpoint
-@app.get("/", 
-         summary="🏠 API Overview & Navigation",
-         description="Get comprehensive API information, endpoints overview, and quick navigation links",
-         tags=["🏠 Getting Started"],
-         response_description="API overview with navigation information")
-async def root():
-    """
-    ## 🚀 Welcome to Automatos AI API
-    
-    This endpoint provides a comprehensive overview of all available API endpoints,
-    documentation links, and system information to help developers get started quickly.
-    """
-    return {
+# Root endpoint: what GET / returns, all but its timestamp.
+_ROOT_OVERVIEW = {
         "service": "Automatos AI API Server",
         "version": config.AUTOMATOS_VERSION,
         "status": "operational",
@@ -1553,9 +1541,21 @@ async def root():
             "caching": "Intelligent result caching",
             "rate_limiting": "Configurable per endpoint"
         },
-        
-        "🕐 timestamp": datetime.utcnow().isoformat()
     }
+
+@app.get("/",
+         summary="🏠 API Overview & Navigation",
+         description="Get comprehensive API information, endpoints overview, and quick navigation links",
+         tags=["🏠 Getting Started"],
+         response_description="API overview with navigation information")
+async def root():
+    """
+    ## 🚀 Welcome to Automatos AI API
+
+    This endpoint provides a comprehensive overview of all available API endpoints,
+    documentation links, and system information to help developers get started quickly.
+    """
+    return {**_ROOT_OVERVIEW, "🕐 timestamp": datetime.utcnow().isoformat()}
 
 # Global exception handler
 @app.exception_handler(Exception)
