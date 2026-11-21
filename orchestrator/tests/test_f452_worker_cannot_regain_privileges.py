@@ -111,6 +111,29 @@ def test_the_production_stage_strips_setuid_and_setgid_after_its_last_install():
     assert not [mode for mode in modes if mode & SETID_BITS], "a COPY after the strip sets a setuid or setgid bit"
 
 
+def test_the_image_runs_as_uid_1000_by_default():
+    """PRD-280 US-201: the production stage's one USER line is uid and gid 1000, after its last
+    RUN, so the built image starts as the worker unless it is told to start as root."""
+    stage = _production_stage()
+    users = [line for line in stage if line.startswith("USER ")]
+    assert users == ["USER 1000:1000"], users
+    runs = [i for i, line in enumerate(stage) if line.startswith("RUN ")]
+    assert max(runs) < stage.index("USER 1000:1000")
+
+
+def test_the_hosted_worker_is_started_as_root_on_its_root_owned_volume():
+    """Railway mounts a volume owned by root and starts a non-root image as its USER, so the
+    hosted worker, now uid 1000 by default, is told to start as root (RAILWAY_RUN_UID=0) and
+    re-owns its volume as before. The manifest names the setting; its value is set on the
+    service (docs.railway.com/volumes#permissions)."""
+    manifest = yaml.safe_load((ROOT / "infrastructure" / "railway-manifest.json").read_text())
+    worker = manifest["services"]["agent-workspace-worker"]
+    assert worker["volumes"][0]["mount"] == "/workspaces"
+    assert "RAILWAY_RUN_UID" in worker["env_keys"]
+    assert worker["env_keys"] == sorted(worker["env_keys"])
+    assert "RAILWAY_RUN_UID=0" in ENTRYPOINT
+
+
 # --------------------------------------------------------------------------- the chart
 
 

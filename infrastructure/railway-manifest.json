@@ -267,6 +267,7 @@
         "LOG_LEVEL",
         "LOG_RELAY_ENABLED",
         "QDRANT_URL",
+        "RAILWAY_RUN_UID",
         "REDIS_URL",
         "SERVICE_NAME",
         "WORKER_CONCURRENCY",
