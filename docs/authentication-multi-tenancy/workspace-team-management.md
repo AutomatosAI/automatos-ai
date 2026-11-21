@@ -172,9 +172,9 @@ Sources: [frontend/components/workspace-provider.tsx:140-167]()[frontend/compone
 
 ## Team Management & Role-Based Permissions
 
-The available implementation exposes membership checks in hybrid auth and workspace-role resolution in the current-workspace endpoint. `_user_is_workspace_member()` checks for an active `workspace_members` row joined to a user with the supplied Clerk ID. `_user_pk_is_workspace_member()` performs the active-membership check directly by internal user primary key. [orchestrator/core/auth/hybrid.py:134-168]()
+The available implementation exposes membership checks in hybrid auth and workspace-role resolution in the current-workspace endpoint. Every membership and role read is keyed on the person's own `users.id` through one resolver, `core/auth/person.py`; a Clerk caller's `users.id` is read inside the same statement (PRD-277 US-202). `_user_pk_is_workspace_member()` performs the active-membership check directly by internal user primary key. [orchestrator/core/auth/hybrid.py:137-153](), [orchestrator/core/auth/person.py:100-148]()
 
-`_user_has_workspace_access()` checks whether the Clerk user owns the requested workspace or has an active membership row. This is the access check documented in the source as protection against workspace-ID spoofing. [orchestrator/core/auth/hybrid.py:171-190]()
+`_user_has_workspace_access()` checks whether the Clerk user owns the requested workspace or has an active membership row, through `may_open_workspace`. This is the access check documented in the source as protection against workspace-ID spoofing. [orchestrator/core/auth/hybrid.py:156-166]()
 
 For the current-workspace response, anonymous users and users whose `system_role` is `super_admin` receive the workspace role `"owner"`. Other callers use `resolve_workspace_role(db, ctx)`, falling back to `"viewer"` if no workspace role is resolved. [orchestrator/api/workspaces.py:101-114]()
 
@@ -216,9 +216,9 @@ Sources: [orchestrator/core/auth/hybrid.py:97-112]()
 | `_get_workspace_id_from_request` | Resolves a workspace UUID from request state, headers, query parameters, or environment configuration. [orchestrator/core/auth/hybrid.py:55-94]() |
 | `_workspace_exists` | Checks for a workspace row that is not soft-deleted. [orchestrator/core/auth/hybrid.py:97-112]() |
 | `_assert_workspace_usable` | Rejects non-admin requests for paused workspaces. [orchestrator/core/auth/hybrid.py:115-132]() |
-| `_user_is_workspace_member` | Checks active membership by Clerk user ID. [orchestrator/core/auth/hybrid.py:134-150]() |
-| `_user_pk_is_workspace_member` | Checks active membership by internal user primary key. [orchestrator/core/auth/hybrid.py:152-168]() |
-| `_user_has_workspace_access` | Checks workspace ownership or active membership for a Clerk user. [orchestrator/core/auth/hybrid.py:171-190]() |
+| `_user_pk_is_workspace_member` | Checks active membership by internal user primary key. [orchestrator/core/auth/hybrid.py:137-153]() |
+| `_user_has_workspace_access` | Checks workspace ownership or active membership for a Clerk user, through `may_open_workspace`. [orchestrator/core/auth/hybrid.py:156-166]() |
+| `by_clerk_id`, `by_user_pk`, `member_row`, `owns_workspace`, `may_open_workspace`, `default_workspace` | The person resolver: membership, ownership and default-workspace reads keyed on `users.id`, for a person named by `users.id` or by Clerk user ID. [orchestrator/core/auth/person.py:95-148]() |
 | `insert_personal_workspace`, `seed_new_workspace` | Personal-workspace and new-workspace helpers imported by hybrid auth; their implementations are not included in the provided excerpt. [orchestrator/core/auth/hybrid.py:19-23]() |
 | `get_current_workspace` | Returns current workspace metadata and related settings, snapshots, and provider state. [orchestrator/api/workspaces.py:70-154]() |
 | `WorkspaceProvider` | Frontend React context provider for workspace state. [frontend/components/workspace-provider.tsx:169-190]() |

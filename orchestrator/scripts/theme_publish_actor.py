@@ -33,12 +33,14 @@ from sqlalchemy import text  # noqa: E402
 from sqlalchemy.exc import SQLAlchemyError  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
+from core.auth.clerk_person import clerk_id_row  # noqa: E402
+
 EXIT_OK, EXIT_FAILED, EXIT_REFUSED = 0, 1, 2
 SERVICE_USERNAME = "theme-publisher"
 SERVICE_EMAIL = "theme-publisher@automatos.invalid"
 SERVICE_NAME = "Theme publisher (Design Kit publish job)"
 
-_FIND = text("SELECT id, clerk_user_id FROM users WHERE LOWER(email) = LOWER(:email) ORDER BY id LIMIT 1")
+_FIND = text("SELECT id FROM users WHERE LOWER(email) = LOWER(:email) ORDER BY id LIMIT 1")
 _INSERT = text(
     "INSERT INTO users (username, email, name, is_active) "
     "VALUES (:username, :email, :name, true) ON CONFLICT DO NOTHING"
@@ -79,7 +81,8 @@ def ensure_publish_actor(db: Session) -> tuple:
         if created is None:
             raise LookupError(NOT_CREATED)
         return int(created[0]), True
-    if row[1]:
+    linked = clerk_id_row(db, row[0])
+    if linked is not None and linked[0]:
         raise ActorLinked(LINKED.format(email=SERVICE_EMAIL, user_pk=row[0]))
     return int(row[0]), False
 

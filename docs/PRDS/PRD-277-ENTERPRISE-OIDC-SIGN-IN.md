@@ -43,7 +43,7 @@ This PRD adds a third edition, `enterprise`. People sign in through the customer
 | Edition checks | 91 places outside tests compare the edition, almost all as `== "local"`. A third value would take the `saas` branch in every one: billing on, Clerk expected. | grep at `abcc3f813` **[T]** | Replace with named capabilities (Wave 1). This is the largest hidden risk. |
 | Where a request gets its identity | `get_request_context_hybrid`. Registered token prefixes are resolved first; today only `amd_` (a paired device). Every other bearer token goes to Clerk. Then the platform API key, then the anonymous lane. | `core/auth/bearer_registry.py:60-62, 112-125`; `core/auth/hybrid.py:799-826` **[T]** | Reuse the registry. Its own header says new token kinds add an entry there, "never another branch in `hybrid.py`". |
 | Who a person is | `users.clerk_user_id` (unique, nullable). `users` has no role column. | `core/models/core.py:1122-1131` **[T]** | Add a neutral identity link. Do not reuse the Clerk column. |
-| Linking a sign-in to a person | `ensure_user_row` finds the row by Clerk id or inserts it. If another row already has the email it answers 409 and changes nothing. It never attaches an identity to an existing row by email. | `core/auth/user_link.py:64-101` **[T]** | Keep the rule: never link by email. |
+| Linking a sign-in to a person | `ensure_user_row` finds the row by Clerk id or inserts it. If another row already has the email it answers 409 and changes nothing. It never attaches an identity to an existing row by email. | `core/auth/user_link.py:95-132` **[T]** | Keep the rule: never link by email. |
 | Reading someone's role | By joining `users.clerk_user_id`. The device lane is the exception: it reads by `users.id`. About 25 API files also query by Clerk id. | `core/auth/workspace_permission.py:99-129` **[T]**; sweep **[T]** | Route every read through one resolver keyed on `users.id` (Wave 2). The device lane proves a non-Clerk person works end to end. |
 | Install-wide role | `super_admin`, `admin` or `user`, read only from Clerk token claims. | `core/auth/clerk.py:131-143` **[T]** | Needs a home that is not a Clerk claim. |
 | Workspace roles | `owner`, `admin`, `editor`, `viewer` in `workspace_members`, with one permission matrix. One person can be in many workspaces. | `modules/policy/roles.py:105-150`; `core/workspaces/models.py:6-19` **[T]** | Reuse unchanged. |
@@ -319,17 +319,18 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As the platform, I want to record which issuer and subject a person signs in with, so that a person is recognised without a Clerk id.
 
 **Acceptance Criteria:**
-- [ ] A migration adds `user_identities` (`user_id`, `issuer`, `subject`, timestamps), unique on (`issuer`, `subject`). It chains onto the single head, is idempotent, and survives a database built by `create_all`. The two head-pin tests move.
-- [ ] A link service finds or creates the link. It never matches on email.
-- [ ] When the token's email is already on another person's row, the service raises a refusal that carries a clear message and changes no row.
-- [ ] Tests cover: first link, repeat sign-in, email held by another row, and two first requests racing.
+- [x] A migration adds `user_identities` (`user_id`, `issuer`, `subject`, timestamps), unique on (`issuer`, `subject`). It chains onto the single head, is idempotent, and survives a database built by `create_all`. The two head-pin tests move. `prd277_w2_identities_20261120`, which also carries US-203's column; the model is `core/models/user_identities.py`.
+- [x] A link service finds or creates the link. It never matches on email. `link_identity` in `core/auth/user_link.py`.
+- [x] When the token's email is already on another person's row, the service raises a refusal that carries a clear message and changes no row. `IdentityLinkRefused`, whose message names no issuer, subject or email.
+- [x] The link service uses an email only when the provider verified it. `link_identity` takes a required `email_verified` with no default. Only a verified email becomes the person's address and is checked against other people's addresses; an unverified one gets the per-identity placeholder, is no conflict, and is kept nowhere, so it never holds an address from its real owner.
+- [x] Tests cover: first link, repeat sign-in, email held by another row, and two first requests racing. `orchestrator/tests/test_prd277_w2_identity_link_realdb.py`, with exact comparison of issuer and subject; the migration in `test_prd277_w2_migration.py`.
 
 #### US-202: One way to ask who this person is · L · security review + Dave
 **Description:** As a developer, I want every membership and role read to go through one resolver keyed on `users.id`, so that it works for any way of signing in.
 
 **Acceptance Criteria:**
-- [ ] `workspace_permission.py`, `workspace_admin.py` and the workspace lookups in `hybrid.py` read by `users.id`.
-- [ ] No SQL outside `core/auth/clerk*.py` and `core/auth/user_link.py` mentions `clerk_user_id`. A test fails if one does. The API files that query by Clerk id are changed to the resolver and listed in the PR.
+- [x] `workspace_permission.py`, `workspace_admin.py` and the workspace lookups in `hybrid.py` read by `users.id`. The reads are `core/auth/person.py`; a Clerk caller's `users.id` is read inside the same statement (`core/auth/clerk_person.py`), so each check makes the round trips it made before.
+- [ ] No SQL outside `core/auth/clerk*.py` and `core/auth/user_link.py` mentions `clerk_user_id`. A test fails if one does. The API files that query by Clerk id are changed to the resolver and listed in the PR. The test is `orchestrator/tests/test_prd277_us202_no_clerk_id_sql.py`. One statement is still on its allow-list, keyed on the statement itself so a second use in the same function fails: in `_stream_tool_loop` in `consumers/chatbot/service.py`, the read of the driving user's Clerk user ID from their `users.id` (the way back, not a lookup by Clerk user ID). That function is far over the 50-line limit, so moving the read to `clerk_id_row` in `core/auth/clerk_person.py` means splitting the function first.
 - [ ] In `saas`, every existing auth, permission and boundary-sweep test passes unchanged.
 - [ ] Dave and the security reviewer sign off before merge.
 
@@ -337,9 +338,9 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As an install admin, I want my admin role stored by the install, so that it does not depend on a Clerk token.
 
 **Acceptance Criteria:**
-- [ ] A migration adds nullable `users.system_role`.
-- [ ] It is read only when the edition's sign-in capability is OIDC. In `saas` the role still comes from Clerk claims, and a test proves the column is ignored there.
-- [ ] Changing it is audited.
+- [x] A migration adds nullable `users.system_role`. `prd277_w2_identities_20261120`, with a CHECK to `super_admin`, `admin` and `user`; no such column or equivalent existed.
+- [x] It is read only when the edition's sign-in capability is OIDC. In `saas` the role still comes from Clerk claims, and a test proves the column is ignored there. `core/auth/system_role.py`; `orchestrator/tests/test_prd277_w2_system_role_realdb.py`.
+- [x] Changing it is audited. `set_system_role` writes one `audit_logs` row (`user:system_role_changed`) through `AuditService.log`, in the same commit as the change.
 
 ### Wave 3: Sessions
 
@@ -423,6 +424,8 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 - [ ] With `ENTERPRISE_DEFAULT_ROLE` set to a role, the person gets that role in the default workspace at first sign-in only.
 - [ ] A later sign-in changes no membership. A test proves a role an admin changed survives the next sign-in.
 - [ ] Sign-in succeeds when the ID token carries only a subject and an email.
+- [ ] The caller passes the provider's own statement that the email is verified, taken from the verified ID token, as `email_verified`; the link service (US-201) enforces it: an email the token does not mark verified is no email.
+- [ ] The refusal a person sees never differs by whether an address is already known to the install.
 
 #### US-405: The first admin · S
 **Description:** As the operator, I want to name the first admins in settings, so that nobody edits the database to get in.
@@ -678,3 +681,6 @@ All answered by Gerard on 19 Nov 2026. The options he was given are kept, so eac
 3. **[?] Does anything in the 25 API files that query by Clerk id run in `local` today?** If so, US-202 fixes a latent bug there; if not, those routes are `saas`-only and need a capability.
 4. **[?] Apple's rule on third-party sign-in** has an exemption for apps that sign in with an existing enterprise account. Confirm against the current text in the app PRD (US-604).
 5. **[?] Where pre-sign-in state is kept** for its 10 minutes: Redis with `SET NX EX`, as webhook dedup does, or a table. Decided in US-402's PR.
+6. **[?] Emails that differ only by case must belong to one person**, on the OIDC path and on the Clerk path. The check before an insert compares emails case-insensitively; for it to hold when two sign-ins arrive at the same moment, `users` needs a unique index on `LOWER(email)`. Adding it needs the owner's decision and a check of existing data for rows it would refuse.
+7. **[?] Which workspace an install-wide role change is audited under.** A change to `users.system_role` belongs to no workspace, and `audit_logs.workspace_id` is required. Today the caller of `set_system_role` passes it. US-405 settles it.
+8. **[?] Whether a person's placeholder address becomes their real address** once a later sign-in carries it verified. Today a repeat sign-in never rewrites a stored address. Open: Wave 4 decides it.
