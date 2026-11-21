@@ -133,6 +133,8 @@ on:
       - "frontend/package-lock.json"
       - "frontend/next.config.js"
       - "frontend/csp-sources.js"
+      - "frontend/csp-policy.mjs"
+      - "frontend/enterprise-build.js"
       - "frontend/.npmrc"
       - "frontend/public/**"
       - "frontend/scripts/check-standalone-image.sh"
@@ -260,6 +262,7 @@ jobs:
                "inputs": ["frontend/Dockerfile", "frontend/.dockerignore",
                           "frontend/package.json", "frontend/package-lock.json",
                           "frontend/next.config.js", "frontend/csp-sources.js",
+                          "frontend/csp-policy.mjs", "frontend/enterprise-build.js",
                           "frontend/.npmrc", "frontend/public/**",
                           "frontend/scripts/check-standalone-image.sh"]},
               {"name": "workspace-worker", "context": "services/workspace-worker", "target": "",

@@ -1,13 +1,14 @@
 /** @type {import('next').NextConfig} */
 const path = require('path')
-const {
-  mediaOrigins,
-  clerkFrontendApiOrigin,
-  CLERK_PROTECT_SOURCE,
-  CLERK_PROTECT_CONNECT_SOURCE,
-  stripeCspFor,
-  cloudImageSources,
-} = require('./csp-sources')
+const { mediaOrigins, clerkFrontendApiOrigin, stripeCspFor } = require('./csp-sources')
+const { contentSecurityPolicy } = require('./csp-policy.mjs')
+const { isEnterpriseBuild, refuseBuildTimeAddresses, enterpriseHeaderRules } = require('./enterprise-build')
+
+// PRD-277 US-505, PRD-279 US-402: one enterprise image for any install's address (enterprise-build.js).
+// The build refuses an API or WebSocket address of its own; the media origins and the Clerk key's host
+// are not read for it (the middleware gives the policy its media origins when the server runs).
+const enterprise = isEnterpriseBuild(process.env.NEXT_PUBLIC_AUTH_EDITION)
+if (enterprise) refuseBuildTimeAddresses(process.env)
 
 // PRD-209 (local edition): the API's origin must be an allowed connect-src.
 const apiOrigin = (() => {
@@ -19,7 +20,7 @@ const apiOrigin = (() => {
 })()
 
 // F237: presigned media (Socials thumbnails, a post's files) loads from object storage's public origin.
-const mediaSources = mediaOrigins(process.env.NEXT_PUBLIC_MEDIA_ORIGINS).join(' ')
+const mediaSources = enterprise ? '' : mediaOrigins(process.env.NEXT_PUBLIC_MEDIA_ORIGINS).join(' ')
 
 // PRD-265 W2: Stripe's sources, for the hosted edition's payment forms only (none for local).
 const stripeCsp = stripeCspFor(process.env.NEXT_PUBLIC_AUTH_EDITION)
@@ -27,10 +28,8 @@ const stripeCsp = stripeCspFor(process.env.NEXT_PUBLIC_AUTH_EDITION)
 // Clerk production readiness: a pk_live_ key loads clerk-js from the instance's own Frontend API
 // (clerk.automatos.app), not *.clerk.accounts.dev, so the sign-in page would not render without it.
 // Derived from the publishable key the build ships with; '' for the local edition (no key).
-const clerkFrontendApi = clerkFrontendApiOrigin(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)
-
-/** One CSP directive: the given parts, empty ones dropped, space-separated. */
-const directive = (...parts) => parts.filter(Boolean).join(' ')
+// The enterprise edition mounts no Clerk, so its policy names no Frontend API host.
+const clerkFrontendApi = enterprise ? '' : clerkFrontendApiOrigin(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)
 
 // SECURITY: HTTP response headers for all routes (OWASP A05:2021 - Security Misconfiguration)
 const SECURITY_HEADERS_RULE = {
@@ -68,56 +67,11 @@ const SECURITY_HEADERS_RULE = {
     // PRD-265 W2: Stripe's sources (stripeCsp, csp-sources.js; none in the local edition) for the payment forms inside
     // Settings → Billing: Stripe.js, its card fields' frames, the 3-D Secure frame and Link.
     // PRD-270 K15: img-src names the catalogue files route on Automatos Cloud and on the API origin (cloudImageSources,
-    // csp-sources.js): a Cloud listing's screenshots load from there.
+    // csp-policy.mjs): a Cloud listing's screenshots load from there.
+    // The directives are built in csp-policy.mjs, which the enterprise middleware builds them with too.
     {
       key: 'Content-Security-Policy',
-      value: [
-        "default-src 'self'",
-        directive(
-          "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev",
-          clerkFrontendApi,
-          CLERK_PROTECT_SOURCE,
-          'https://challenges.cloudflare.com https://cdn.jsdelivr.net',
-          stripeCsp.script,
-        ),
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
-        directive(
-          "img-src 'self' data: blob: https://*.clerk.accounts.dev https://img.clerk.com https://*.googleusercontent.com https://logos.composio.dev",
-          cloudImageSources(apiOrigin),
-          stripeCsp.img,
-          mediaSources,
-        ),
-        `media-src 'self' blob: ${mediaSources}`.trim(),
-        "font-src 'self' data: https://cdn.jsdelivr.net",
-        // The API origin is derived from NEXT_PUBLIC_API_URL so the local edition
-        // (http://localhost:8000) is allowed too — without it the browser refuses
-        // every API call ("Failed to fetch") before it leaves the page. In SaaS the
-        // value is https://api.automatos.app, already covered by the wildcard.
-        directive(
-          `connect-src 'self' ${apiOrigin} https://*.automatos.app https://*.clerk.accounts.dev`,
-          clerkFrontendApi,
-          CLERK_PROTECT_CONNECT_SOURCE,
-          'https://api.clerk.com https://cdn.jsdelivr.net',
-          stripeCsp.connect,
-          'wss: ws:',
-        ),
-        // F352 (night 10b): a PDF preview (Deliverables side panel, Explorer, chat file card)
-        // is fetched with the Bearer header and shown as a blob: URL in an <iframe>
-        // (useAuthenticatedBlobUrl). 'self' never matches blob:, so frame-src names it. The
-        // blob document inherits this policy, and the browser's PDF viewer is a plugin, so
-        // object-src allows blob: too. Only this page's own script can mint a blob: URL.
-        directive(
-          "frame-src 'self' blob: https://*.clerk.accounts.dev",
-          CLERK_PROTECT_SOURCE,
-          'https://challenges.cloudflare.com',
-          stripeCsp.frame,
-        ),
-        "worker-src 'self' blob:",
-        "object-src blob:",
-        "base-uri 'self'",
-        "form-action 'self'",
-        "frame-ancestors 'none'",
-      ].join('; '),
+      value: contentSecurityPolicy({ clerkFrontendApi, apiOrigin, stripe: stripeCsp, mediaSources }),
     },
   ],
 }
@@ -230,8 +184,9 @@ const nextConfig = {
 
   // SECURITY_HEADERS_RULE for every route. PRD-261 A-19f1: Auto's clips left public/ with builtin
   // Play (they ship in Play's package, served by the theme files route), and their cache rule with them.
+  // PRD-279 US-402: in enterprise the middleware sets the policy on the paths it runs for (enterprise-build.js).
   async headers() {
-    return [SECURITY_HEADERS_RULE]
+    return enterprise ? enterpriseHeaderRules(SECURITY_HEADERS_RULE) : [SECURITY_HEADERS_RULE]
   },
 }
 
