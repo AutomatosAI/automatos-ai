@@ -1424,7 +1424,9 @@ jobs:
       # the exact pnpm pin; nothing NodeSource brought (one package per check).
       - name: Worker — Node 24 from the official image, pnpm pinned, no NodeSource leftovers
         run: |
-          in_image() { docker run --rm --entrypoint sh parity-wk -c "$1"; }
+          # As root: the leftovers it looks for include root's own /root/.npm, which uid
+          # 1000, the image's default user (PRD-280 US-201), cannot see into.
+          in_image() { docker run --rm --user 0 --entrypoint sh parity-wk -c "$1"; }
           version=$(in_image 'node -v')
           echo "node $version"
           case "$version" in v24.*) ;; *) echo "::error::the worker image runs Node $version, not 24"; exit 1 ;; esac
@@ -1501,12 +1503,21 @@ jobs:
       # alone it takes (the security review's fixes). F452: the stand-in also prints the
       # NoNewPrivs that setpriv --no-new-privs set, and no file in the image keeps a setuid
       # or setgid bit (the Dockerfile strips them; images.yml checks the GHCR build too).
+      # PRD-280 US-201: the image starts as uid 1000, so these root starts say --user 0, as
+      # compose's `user` does. Started as uid 1000 the entrypoint repairs nothing: on a volume
+      # uid 1000 can write it starts the worker, on one root owns it stops with a message and
+      # re-owns nothing.
       - name: Worker — the entrypoint re-owns the volume without following links, and logs what it cannot
         run: |
+          default_user=$(docker run --rm --entrypoint id parity-wk -u)
+          if [ "$default_user" != 1000 ]; then
+            echo "::error::the worker image starts as uid '$default_user', not 1000 (PRD-280 US-201)"; exit 1
+          fi
+          echo "the worker image starts as uid $default_user"
           docker volume create parity-wk-readonly > /dev/null
-          docker run --rm -v parity-wk-readonly:/srv/readonly --entrypoint sh parity-wk \
+          docker run --rm --user 0 -v parity-wk-readonly:/srv/readonly --entrypoint sh parity-wk \
             -c 'mkdir -p /srv/readonly/ws && touch /srv/readonly/ws/file'
-          docker run --rm -i -v parity-wk-readonly:/srv/readonly:ro --entrypoint bash parity-wk -s <<'SH'
+          docker run --rm -i --user 0 -v parity-wk-readonly:/srv/readonly:ro --entrypoint bash parity-wk -s <<'SH'
           set -uo pipefail
           bad=0
           check() { if [ "$2" = "$3" ]; then echo "$1: $2"; else echo "::error::$1: '$2', expected '$3'"; bad=1; fi; }
@@ -1558,6 +1569,25 @@ jobs:
           check "entrypoint exit with a folder www-data owns" "$code" 0
           check "the worker with a folder www-data owns" "$(grep -o 'started as uid [0-9]*' <<< "$out")" "started as uid 1000"
           check "the log line for that folder" "$(grep -c "cannot take that uid (www-data's in the worker's image)" <<< "$out")" 1
+
+          # PRD-280 US-201: started as uid 1000, as the image and the chart start it. Before
+          # the cases below, which change the worker's uid in this container.
+          mkdir -p /tmp/volume5 /tmp/volume6/ws
+          chown 1000:1000 /tmp/volume5
+          as_uid_1000() { setpriv --reuid=1000 --regid=1000 --clear-groups env WORKSPACE_VOLUME_PATH="$1" PATH="/tmp/stand-in:$PATH" entrypoint.sh 2>&1; }
+          out=$(as_uid_1000 /tmp/volume5); code=$?
+          echo "$out"
+          check "entrypoint exit started as uid 1000" "$code" 0
+          check "the worker started as uid 1000" "$(grep -o 'started as uid [0-9]* gid [0-9]*' <<< "$out")" "started as uid 1000 gid 1000"
+          check "its HOME started as uid 1000" "$(grep -o 'HOME=[^ ]*' <<< "$out")" "HOME=/home/worker"
+          check "its no_new_privs started as uid 1000" "$(grep -o 'no_new_privs=[0-9]*' <<< "$out")" "no_new_privs=1"
+          check "re-owning started as uid 1000" "$(grep -c 'Fixing ownership' <<< "$out")" 0
+          out=$(as_uid_1000 /tmp/volume6); code=$?
+          echo "$out"
+          check "entrypoint exit started as uid 1000 on a volume root owns" "$code" 1
+          check "the message for that volume" "$(grep -c '^\[entrypoint\] uid 1000 cannot write /tmp/volume6\. Started as a user other than root' <<< "$out")" 1
+          check "the worker on that volume" "$(grep -c 'worker started as' <<< "$out")" 0
+          check "that volume's folder after" "$(owner /tmp/volume6/ws)" root
 
           # PRD-262 US-040: a deliverables folder uid 1000 cannot write, as on a Linux host whose
           # user is uid 1001. The worker runs as the folder's owner, and the walk leaves the folder

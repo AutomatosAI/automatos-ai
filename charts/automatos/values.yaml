@@ -14,25 +14,114 @@ fullnameOverride: ""
 #   API_KEY                    the platform API key
 #   CREDENTIAL_ENCRYPTION_KEY  a Fernet key; every pod must share it, or credentials
 #                              saved by one pod can't be read by another
-#   WORKER_INTERNAL_TOKEN      optional; shared secret between the API and the worker
+#   WORKER_INTERNAL_TOKEN      optional; shared secret between the API and the worker.
+#                              Required when the worker has a Secret of its own
+#                              (worker.existingSecret), which holds the same token
 #   AWS_ACCESS_KEY_ID          optional; object storage credentials (S3, or MinIO
 #   AWS_SECRET_ACCESS_KEY      with S3_ENDPOINT_URL in config)
 #   OTEL_EXPORTER_OTLP_HEADERS optional; headers for the OTLP endpoint (otel below),
 #                              e.g. Authorization=Basic%20<base64>, values URL-encoded
+#   OIDC_CLIENT_SECRET         the enterprise edition only, and required there: the
+#                              application's client secret at the identity provider
+#   QDRANT_API_KEY             required while qdrant.enabled is true, and not read
+#                              otherwise: the memory store requires it on every
+#                              request, and the API sends it. Not empty
 existingSecret: ""
 
 edition:
   # local: one workspace, one operator, NO LOGIN — anyone who can reach the web app
-  # is the admin. Put it behind a VPN or an authenticating ingress. The published
-  # frontend image is the local edition, so keep this at local for now.
+  # is the admin. Put it behind a VPN or an authenticating ingress.
+  # enterprise: people sign in with your organisation's identity provider (OIDC), and the
+  # chart runs the enterprise web image (frontend.enterpriseImage).
+  # saas: the hosted edition.
+  # Exactly one of local, enterprise or saas, in lower case: rendering stops on any other spelling.
   authEdition: local
+  # The local edition's one workspace; in enterprise, the default workspace the migration Job
+  # makes (with no owner), which sign-ins are recorded in and the first admins own. A UUID.
   defaultWorkspaceId: "00000000-0000-0000-0000-0000000000c1"
   localOperatorEmail: local@automatos.local
+  # The enterprise edition (PRD-277 US-701), read only when authEdition is enterprise. Rendering
+  # fails when a required one is missing or is a value the API refuses at start. The client
+  # secret is never a value: put OIDC_CLIENT_SECRET in the Secret existingSecret names.
+  enterprise:
+    # Required. The install's public address, https://<host>, which the web app and the API
+    # share (FRONTEND_URL): the sign-in callback and the cookie are on it. The ingress's host.
+    publicUrl: ""
+    # Required. The header your ingress controller or proxy sets to the caller's address
+    # (CLIENT_IP_HEADER), e.g. X-Real-IP for ingress-nginx. Sign-in limits requests by that
+    # address and writes it to the audit log. Name the header your proxy sets on every
+    # request, overwriting any value the caller sent, or the one your proxies append to
+    # (X-Forwarded-For behind an AWS application load balancer) with clientIpProxyCount.
+    clientIpHeader: ""
+    # How many of your own proxies append the caller's address to clientIpHeader
+    # (CLIENT_IP_PROXY_COUNT): a plain whole number, 1 to 8, written without a leading zero
+    # (YAML reads 010 as 8). 1 for one load balancer in its default append mode, 2 for a
+    # content network in front of one. The API reads the value that many from the header's
+    # end. Required when clientIpHeader is X-Forwarded-For or X-Original-Forwarded-For, or
+    # any other header your proxies append to. Empty: the address is the first value of the
+    # header's last line. Rendering stops on 0 or any other value outside 1 to 8.
+    clientIpProxyCount: ""
+    # People who become install admins at their first sign-in, or at any sign-in while the
+    # install has no active install admin (ENTERPRISE_BOOTSTRAP_ADMINS): sub:<subject> and
+    # email:<address> entries, separated by commas. The API checks the entries at start.
+    bootstrapAdmins: ""
+    # The role in the default workspace for anyone who passes the access rule
+    # (ENTERPRISE_DEFAULT_ROLE): none, viewer, editor or admin. Empty: the API's default, none.
+    # A role other than none needs oidc.requiredClaims.
+    defaultRole: ""
+    # Each of Automatos's hosted services this install may call (PRD-277 US-704): true or false,
+    # off by default, so the install calls none of them until you switch one on.
+    #   themeRevocations  pull Automatos's theme revocation list from THEME_REVOCATIONS_URL
+    #                     (ENTERPRISE_CALLS_THEME_REVOCATIONS)
+    #   cloudSync         Sync with Automatos Cloud: its catalogue and the themes it lists, from
+    #                     AUTOMATOS_CLOUD_URL (ENTERPRISE_CALLS_CLOUD_SYNC); needs themeRevocations
+    #   cloudItems        the agents, Playbooks, packages and plugins a Sync brings
+    #                     (ENTERPRISE_CALLS_CLOUD_ITEMS); needs cloudSync
+    # Rendering stops on any other value, and on a service switched on without the one it needs.
+    # Set each here, never in config.
+    hostedServices:
+      themeRevocations: false
+      cloudSync: false
+      cloudItems: false
+    # Whether people may pair their phones (PRD-277 US-601; ENTERPRISE_DEVICE_PAIRING): true or
+    # false, on by default. Each person pairs their own phone from Settings, signed in as
+    # themselves, and the phone acts as them with their current role. Set it here, never in config.
+    devicePairing: true
+    oidc:
+      # Required. The identity provider's issuer address, https only (OIDC_ISSUER).
+      issuer: ""
+      # Required. The application's client id at the identity provider (OIDC_CLIENT_ID).
+      clientId: ""
+      # The text on the sign-in button (OIDC_DISPLAY_NAME): 1 to 64 characters, no control
+      # character and no < or >. Empty: the API's default, "your organisation".
+      displayName: ""
+      # What sign-in asks for (OIDC_SCOPES), separated by spaces; must include openid. Empty:
+      # the API's default, "openid profile email".
+      scopes: ""
+      # The access rule (OIDC_REQUIRED_CLAIMS): claim=value rules separated by ';', which a
+      # token must match before anyone is let in. Required for an issuer many organisations
+      # share and with a default role; the API checks the rules and both cases at start.
+      requiredClaims: ""
+      # Host names, separated by commas, besides the issuer's own, on which the provider's
+      # metadata may put its token endpoint and keys (OIDC_ENDPOINT_HOSTS). No scheme, port,
+      # wildcard or address.
+      endpointHosts: ""
+      # A ConfigMap in the release's namespace holding the certificate authority of a provider
+      # with a private certificate, under caKey. Mounted read-only at /etc/automatos/oidc-ca in
+      # the API and the migration Job; OIDC_CA_BUNDLE_FILE names the file. Empty: none.
+      caConfigMap: ""
+      caKey: ca.crt
 
 # Extra non-secret settings for the API and the migration Job: any name config.py
 # reads. The chart already sets the edition, the worker URL and the workspace path, and
 # rendering fails on AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY here (they go in the
-# Secret), and on DOCUMENT_UPLOAD_DIR and DOCUMENT_STORAGE_DIR while api.data is on.
+# Secret), on DOCUMENT_UPLOAD_DIR and DOCUMENT_STORAGE_DIR while api.data is on (and,
+# while it is off under api.readOnlyRootFilesystem, on either outside the API's scratch
+# volumes), on HOME under api.readOnlyRootFilesystem (the chart sets it), on
+# DATABASE_SSLMODE and DATABASE_SSLROOTCERT (set `database` below), on OIDC_CLIENT_SECRET
+# (it goes in the Secret), and in the enterprise edition on each setting
+# edition.enterprise sets and on SESSION_COOKIE_NAME and SESSION_CSRF_HEADER, which the
+# enterprise web image fixes when it is built.
 # Quote LOCAL_REMOTE_ACCESS: YAML reads a bare `off` as false, which the API refuses.
 config:
   ENVIRONMENT: production
@@ -42,10 +131,39 @@ config:
   # Optional services are OFF unless you point at one. Unset, config.py
   # defaults them to localhost addresses that don't exist in a pod, and the
   # API logs connection errors (the same choice envs/api.defaults makes).
-  QDRANT_URL: ""            # durable memory (Qdrant)
+  QDRANT_URL: ""            # durable memory (Qdrant): your own, or qdrant.enabled below
   AGENT_OPT_WORKER_URL: ""  # the agent-optimisation worker
   LOKI_URL: ""              # log search
   PROMETHEUS_URL: ""        # metrics queries
+
+# TLS on the connection to PostgreSQL from the API, the migration Job and the worker
+# (PRD-278). All empty, the default: nothing is set or mounted, and each connection
+# behaves as it does today. Set these here, not in `config` (rendering fails there):
+# the worker doesn't read `config`. The enterprise edition renders only with
+# sslmode verify-full and a caConfigMap (PRD-278 D-6); its API refuses to start otherwise.
+#
+# The API holds two session-level advisory locks on this database: the scheduler's lock,
+# on a connection of its own for as long as the process leads, and the start-up lock its
+# boot seeding takes. A connection pooler in transaction mode hands each transaction a
+# different server connection, so it cannot keep either lock: connect the API to
+# PostgreSQL directly, or through a pooler in session mode.
+database:
+  # DATABASE_SSLMODE: disable, allow, prefer, require, verify-ca or verify-full.
+  # verify-full checks the server's certificate against the CA below and its host name
+  # against the address in DATABASE_URL. verify-ca and verify-full need caConfigMap.
+  sslmode: ""
+  # A ConfigMap in the release's namespace holding the CA certificate(s) that signed the
+  # server's certificate: for a managed database, the provider's bundle, as a PEM file
+  # (the API, the Job and the worker read a file; libpq's `system` store is not used).
+  # Mounted read-only at /etc/automatos/database-ca in the API, the Job and the worker,
+  # and DATABASE_SSLROOTCERT names the file. Needs sslmode verify-ca or verify-full.
+  # Changing the ConfigMap: the kubelet updates the mounted file in place, after its sync
+  # delay (a minute or so). Each new connection then trusts the new file; a connection
+  # already open keeps the session it has until it closes. A file that holds no
+  # certificate stops a pod at its next start. Put the old and the new CA in one bundle
+  # until the server presents its new certificate. Restart the pods to be certain.
+  caConfigMap: ""
+  caKey: ca.crt         # the ConfigMap's key that holds the CA file
 
 # Each component's image. `tag` defaults to the chart's appVersion (edge, which moves
 # with main). `digest` (sha256:...) pins one exact build and wins over the tag: the pod
@@ -65,6 +183,13 @@ api:
   # uvicorn worker processes per pod. Prefer more pods over more workers once the
   # schedulers can run on several replicas.
   uvicornWorkers: 1
+  # A read-only root file system (PRD-280 US-104), so the running container cannot change
+  # its own image. The chart mounts an emptyDir, emptied when the pod is replaced, at each
+  # path the API writes outside its volumes: /tmp, the home folder /home/automatos, /app/logs
+  # and, with `data` off, /app/documents. docs/PRDS/PRD-280-US-103-WRITE-PATHS.md lists what
+  # writes each. A path of your own in `config` (a temporary folder, a log file) must be
+  # under one of these or on a volume. false: the root stays writable and none is mounted.
+  readOnlyRootFilesystem: true
   # The API's own files at /app/data: uploads, brand files and generated documents.
   # With this off they're on the container's disk and lost on every restart. Kept on
   # `helm uninstall`. With ReadWriteOnce or ReadWriteOncePod every rollout stops the old
@@ -83,9 +208,13 @@ api:
       memory: 1Gi
     limits:
       memory: 2Gi
+  # Where the pods may run, each as the pod spec's field of that name; empty: anywhere, the
+  # scheduler's choice. The web app, the worker, the migration Job and the memory store take
+  # the same four (PRD-280 US-203, US-601).
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  topologySpreadConstraints: []
 
 # The schema lifecycle runs once per install and upgrade, in a Job, before the
 # API pods start: `docker-entrypoint.sh migrate` waits for PostgreSQL, builds an
@@ -95,27 +224,66 @@ api:
 migrations:
   backoffLimit: 1
   activeDeadlineSeconds: 900
+  # A read-only root file system (PRD-280 US-104), with an emptyDir at /tmp, the one path
+  # the Job writes. false: the root stays writable and nothing is mounted.
+  readOnlyRootFilesystem: true
   resources:
     requests:
       cpu: 250m
       memory: 1Gi
     limits:
       memory: 2Gi
+  # Where the Job's pod may run (PRD-280 US-203), as api.nodeSelector and the rest.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
 
 frontend:
   enabled: true
+  # The web app is built for one edition, so each edition has an image of its own, and the
+  # chart runs the one edition.authEdition names. `image` is the local edition's, which has
+  # its API address fixed at build time to http://localhost:8000.
   image:
     repository: ghcr.io/automatosai/automatos-frontend
     tag: ""
     digest: ""
     pullPolicy: ""
+  # The enterprise edition's (PRD-277 US-505), run when edition.authEdition is enterprise. It
+  # calls the API on the page's own address, so the web app and the API must answer on one
+  # host (ingress below). The chart gives it BACKEND_INTERNAL_URL, the API's Service,
+  # MEDIA_ORIGINS from mediaOrigins, and ENTERPRISE_CALLS_CLOUD_SYNC from
+  # edition.enterprise.hostedServices.cloudSync; it stops at start-up without the first or with a
+  # bad other.
+  enterpriseImage:
+    repository: ghcr.io/automatosai/automatos-enterprise-frontend
+    tag: ""
+    digest: ""
+    pullPolicy: ""
+  # Enterprise only: the origins the browser may load media from (presigned files on your object
+  # storage's public host), added to the content security policy's img-src and media-src when
+  # the server starts. Up to 16, separated by commas or spaces, each https://<host>[:port] or
+  # https://*.<domain>.<suffix>[:port] (or http://localhost or http://127.0.0.1 for local
+  # development). Name the narrowest host that works, your storage's own public host, rather
+  # than a wildcard.
+  # Empty: no media origin. Rendering fails on a value the server would refuse, and on any value
+  # in another edition, whose web image fixes its media origins when it is built.
+  mediaOrigins: ""
   replicas: 1
+  # A read-only root file system (PRD-280 US-104). The web app's server writes no file, so
+  # nothing is mounted. false: the root stays writable.
+  readOnlyRootFilesystem: true
   resources:
     requests:
       cpu: 100m
       memory: 256Mi
     limits:
       memory: 512Mi
+  # Where the web app's pods may run (PRD-280 US-203), as api.nodeSelector and the rest.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
 
 worker:
   enabled: true
@@ -126,12 +294,39 @@ worker:
     pullPolicy: ""
   concurrency: 3
   defaultQuotaGb: 5
+  # A read-only root file system (PRD-280 US-104), with an emptyDir at /tmp and at the home
+  # folder /home/worker: the coding agent's and the build tools' caches and scratch files.
+  # Commands the worker runs for an agent keep their files on the workspaces volume.
+  # false: the root stays writable and neither is mounted.
+  readOnlyRootFilesystem: true
+  # The worker in a namespace of its own (PRD-280 US-202), so it can have its own pod
+  # security level and its own rules. Empty, or the release's namespace: the worker is in the
+  # release's namespace, as before. Set, the worker's Deployment, Service and account are
+  # created there, and the API's WORKER_INTERNAL_URL names
+  # http://<fullname>-worker.<namespace>.svc:8081. The chart does not create the namespace or
+  # label it: create it first, with the pod security labels you want. It also needs, there:
+  #   - worker.existingSecret (required): a Secret, since one cannot be read across namespaces;
+  #   - workspaces.api.existingClaim and workspaces.worker.existingClaim (both required);
+  #   - with database.caConfigMap, a ConfigMap of that name;
+  #   - with serviceAccount.create=false, the account serviceAccount.worker.name names.
+  namespace: ""
+  # The worker's own Secret, in the worker's namespace; empty: the chart's existingSecret. It
+  # reads only this one: DATABASE_URL, REDIS_URL and WORKER_INTERNAL_TOKEN, required (the same
+  # token as in existingSecret, which then must hold it too), and optionally
+  # ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN and OTEL_EXPORTER_OTLP_HEADERS.
+  existingSecret: ""
   resources:
     requests:
       cpu: 250m
       memory: 512Mi
     limits:
       memory: 2Gi
+  # Where the worker's pod may run (PRD-280 US-203), as api.nodeSelector and the rest: for
+  # nodes of its own, a nodeSelector for their label and a toleration for their taint.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
 
 # Session mode (PRD-234): agents that run as the operator's own Claude Code, Codex or
 # Copilot sessions, through the CLI host on the operator's machine
@@ -152,19 +347,68 @@ sessionMode:
 
 # Agent files, shared by the worker (read-write) and the API (read-only). Pods on
 # different nodes need ReadWriteMany storage (Azure Files, EFS, NFS); a single-node
-# cluster can use ReadWriteOnce.
+# cluster can use ReadWriteOnce. The storage must honour the pod's fsGroup (1000), or the
+# worker, uid 1000, cannot write here and stops at start saying so.
 workspaces:
   size: 10Gi
   storageClass: ""
   accessModes:
     - ReadWriteMany
+  # A claim that already exists, for each side (PRD-280 US-202); size, storageClass and
+  # accessModes then do nothing, and the chart creates no claim. In one namespace, a claim
+  # named for either side serves both. With worker.namespace, both are required: the API's
+  # in the release's namespace, the worker's in the worker's, and you bind the two to one
+  # file system (two PersistentVolumes on one NFS export or file share, say), as a claim
+  # belongs to one namespace. The API mounts its side read-only.
+  api:
+    existingClaim: ""
+  worker:
+    existingClaim: ""
+
+# The memory store (PRD-280 US-601): Qdrant, for agent memory, in the release's namespace. Off:
+# nothing is rendered, and the API uses config.QDRANT_URL, as before. On: one StatefulSet with a
+# disk of its own, a Service on port 6333, its own account, and the API's QDRANT_URL set to
+# http://<fullname>-qdrant:6333 (rendering stops on a QDRANT_URL in config). On, the Secret
+# must hold QDRANT_API_KEY, not empty: the store does not start without it. The disk, the claim
+# storage-<fullname>-qdrant-0, is kept on `helm uninstall`; delete it yourself to remove it.
+qdrant:
+  enabled: false
+  # Qdrant's published image, by the digest docker-compose.yml pins
+  # (orchestrator/tests/test_prd280_qdrant_image_pin.py holds the two equal). Required.
+  image:
+    repository: docker.io/qdrant/qdrant
+    digest: sha256:9bfc89f9914fc14876a88c05270685921a55b8877b254a98bcc1cc2f0a424cd2
+    pullPolicy: ""
+  # size, storageClass and accessModes can't change once the claim exists. The storage must
+  # honour the pod's fsGroup (1000), as for the API's data volume.
+  storage:
+    size: 10Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  # The scratch volume a snapshot is made in. sizeLimit (e.g. 20Gi) is unset: a snapshot can be
+  # as large as the data, and a pod over its limit is evicted.
+  snapshots:
+    sizeLimit: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+  # Where the store's pod may run (PRD-280 US-203), as api.nodeSelector and the rest.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
 
 # One ServiceAccount for each component (PRD-280), so a cloud role tied to one account
 # reaches that component only. The chart creates <fullname>-api, -frontend (the web app),
-# -worker and -migrate, <fullname> being the prefix of every resource's name (release
-# `demo`: demo-automatos-api). The migration Job's account is created by a hook just
-# before the Job and deleted once the hooks succeed; after a failed Job it can be left
-# behind until the next install or upgrade replaces it. No pod mounts a token for the
+# -worker, -migrate and, with qdrant.enabled, -qdrant (the memory store), <fullname> being
+# the prefix of every resource's name (release `demo`: demo-automatos-api). The migration
+# Job's account is created by a hook just before the Job and deleted once the hooks succeed;
+# after a failed Job it can be left behind until the next install or upgrade replaces it.
+# No pod mounts a token for the
 # cluster's own API: nothing in Automatos calls it. Tokens a cloud's own webhook projects
 # (EKS IRSA) are separate and still work.
 #   create: false  the chart creates no account; each pod runs under the account its `name`
@@ -187,6 +431,9 @@ serviceAccount:
   migrate:
     name: ""
     annotations: {}
+  qdrant:
+    name: ""
+    annotations: {}
 
 # OpenTelemetry (PRD-256): traces from the API, the worker and the web app's
 # server side, and the API's GenAI metrics, over OTLP/HTTP. OFF by default. Point
@@ -201,9 +448,11 @@ otel:
   # The pod and namespace names are always added.
   resourceAttributes: ""
 
-# Path routing on one host: /api and /ws to the API, everything else to the web
-# app. Needs a frontend that reads its API address at runtime; the published
-# image still has http://localhost:8000 fixed at build time.
+# Path routing on one host: /api, /ws and exactly /.well-known/automatos.json (the
+# discovery document a phone reads) to the API, everything else to the web app (its
+# own /.well-known/ files among it). /exports/, /health, /metrics and /docs are not
+# routed. The enterprise edition needs it: its web app calls the API on its own
+# origin. The local web image has http://localhost:8000 fixed at build time.
 ingress:
   enabled: false
   className: ""

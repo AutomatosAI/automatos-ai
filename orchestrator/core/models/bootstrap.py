@@ -34,6 +34,7 @@ class BootstrapStage(str, Enum):
     TRUST_GATE = "trust_gate"
     SKILL_SOURCES = "skill_sources"
     TOOL_SYNC = "tool_sync"
+    OIDC_PROVIDER = "oidc_provider"  # enterprise only: the identity provider's metadata and keys (PRD-277 US-401)
     SEMANTIC_EMBEDDINGS = "semantic_embeddings"
     DASHBOARD_INIT = "dashboard_init"
     SCHEDULER_INIT = "scheduler_init"

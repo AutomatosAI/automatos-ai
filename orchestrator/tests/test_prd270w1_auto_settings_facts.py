@@ -70,8 +70,13 @@ def test_the_local_tab_list_is_the_local_tabs_and_the_shared_ones():
     assert local_settings_tabs(False) == (*LOCAL_LEADING_TABS, *SETTINGS_TABS)
 
 
-def test_the_page_shows_the_tab_only_on_a_local_install_while_its_gate_says_so():
+def test_the_page_shows_the_tab_only_where_the_install_syncs_while_its_gate_says_so():
+    """PRD-277 US-704: the tab's one gate is ``useHasAutomatosCloudTab``, which asks only where this install
+    syncs (the local edition, or an enterprise install that switched it on), never by the page's edition test."""
     page = SETTINGS_PANEL.read_text(encoding="utf-8")
-    assert "...(isLocal ? [{ value: 'automatos-cloud', label: 'Automatos Cloud'" in page
+    panel = (SETTINGS_PANEL.parent / "automatos-cloud-panel.tsx").read_text(encoding="utf-8")
+    assert "{ value: 'automatos-cloud', label: 'Automatos Cloud', icon: Cloud }," in page
     assert ".filter((tab) => tab.value !== 'automatos-cloud' || hasCloudTab)" in page
     assert "const hasCloudTab = useHasAutomatosCloudTab()" in page
+    assert "const asks = useHostedService('cloudSync') === true && canManageThemes(workspace?.role)" in panel
+    assert "return asks && status.data?.enabled === true" in panel

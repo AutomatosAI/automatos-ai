@@ -41,11 +41,13 @@ class SchedulerLock:
         self._holding = False  # this session took the lock; an open connection alone proves nothing
 
     def _connect(self) -> Any:
-        from sqlalchemy import create_engine
         from sqlalchemy.pool import NullPool
 
+        from core.database.tls import create_app_engine
+
         if self._engine is None:
-            self._engine = create_engine(self._url, poolclass=NullPool, connect_args=KEEPALIVE)
+            # Secured like every other connection to the app's database (PRD-278 W3).
+            self._engine = create_app_engine(self._url, poolclass=NullPool, connect_args=KEEPALIVE)
         return self._engine.connect().execution_options(isolation_level="AUTOCOMMIT")
 
     def try_acquire(self) -> bool:

@@ -3,8 +3,10 @@
 Registers one interval job on the UnifiedScheduler that runs
 ``services.themes.revocation_pull.pull_feed`` every ``THEME_REVOCATIONS_PULL_MINUTES`` (60 by
 default), the first run ``FIRST_RUN_DELAY_SECONDS`` after start, one run at a time
-(``max_instances=1``). It is never registered in the hosted edition (which serves the feed) or
-with an empty ``THEME_REVOCATIONS_URL`` (QB-25, still open: the plan's default is on).
+(``max_instances=1``). It is never registered where this install doesn't pull the list
+(``calls_theme_revocations``: the hosted edition, which serves the feed, and an enterprise install
+whose operator hasn't switched it on, PRD-277 US-704) or with an empty ``THEME_REVOCATIONS_URL``
+(QB-25, still open: the plan's default is on).
 
 The job is the module-level ``run_scheduled_pull``, so a job store can store it by reference
 (a scheduler or service instance refuses to be serialized). It runs the synchronous pull in a
@@ -73,12 +75,18 @@ async def run_scheduled_pull() -> None:
 
 
 class ThemeRevocationScheduler:
-    """Registers the revocation-feed pull on the shared APScheduler (local edition only)."""
+    """Registers the revocation-feed pull on the shared APScheduler (where ``calls_theme_revocations`` is on)."""
 
     def start(self, scheduler: Any) -> bool:
-        """Register the pull job; False (nothing registered) in the hosted edition or with no feed URL."""
-        if not editions.current().calls_automatos_cloud:
-            logger.info("[ThemeRevocations] Hosted edition: it serves the revocation feed, no pull scheduled")
+        """Register the pull job; False (nothing registered) where this install doesn't pull the list
+        (``calls_theme_revocations`` off: the hosted edition, or an enterprise install that hasn't switched
+        it on) or with no feed URL."""
+        capabilities = editions.current()
+        if not capabilities.calls_theme_revocations:
+            if capabilities.hosts_automatos_cloud:
+                logger.info("[ThemeRevocations] Hosted edition: it serves the revocation feed, no pull scheduled")
+            else:
+                logger.info("[ThemeRevocations] Not switched on for this install: no pull scheduled")
             return False
         if not feed_url():
             logger.info("[ThemeRevocations] THEME_REVOCATIONS_URL is empty: no pull scheduled")

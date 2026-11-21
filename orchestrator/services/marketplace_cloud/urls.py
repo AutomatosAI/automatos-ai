@@ -11,8 +11,8 @@ no path, query or fragment (a lone trailing ``/`` is allowed and dropped). ``ori
 one rule; ``fetch.checked_origin`` says it in plain sentences, and ``cloud_file_url`` answers None
 while the setting isn't such an origin.
 
-A leaf: ``config`` and the standard library only (``listings`` imports it, and ``catalog`` imports
-``listings``).
+A leaf: ``config``, ``core.editions`` (which imports nothing at load) and the standard library only
+(``listings`` imports it, and ``catalog`` imports ``listings``).
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from typing import Optional
 from urllib.parse import urlsplit
 
 from config import config
+from core import editions
 
 URL_SETTING = "AUTOMATOS_CLOUD_URL"
 CATALOG_ROUTE = "/api/marketplace/catalog"
@@ -107,7 +108,11 @@ def package_url(origin: str, digest: str) -> str:
 
 
 def cloud_file_url(digest: str, path: str) -> Optional[str]:
-    """Where the browser loads ``path`` of the Cloud version ``digest``, or None while the setting is off."""
+    """Where the browser loads ``path`` of the Cloud version ``digest``; None while the setting is off, and
+    where this install doesn't sync with Automatos Cloud (``calls_cloud_sync``, PRD-277 US-704), so no page
+    is sent to Automatos Cloud's address then."""
+    if not editions.current().calls_cloud_sync:
+        return None
     origin = configured_origin()
     return None if origin is None else f"{origin}{catalog_file_path(digest, path)}"
 

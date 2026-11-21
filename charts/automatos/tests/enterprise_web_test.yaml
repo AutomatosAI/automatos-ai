@@ -1,0 +1,145 @@
+suite: The web image of each edition, and what the enterprise one is given (PRD-277 US-505, PRD-279 US-402)
+templates:
+  - templates/frontend.yaml
+release:
+  name: demo
+  namespace: automatos
+set:
+  existingSecret: automatos-secrets
+chart:
+  appVersion: edge
+tests:
+  # ── local, the default: the local image, exactly as before ──────────────────
+  - it: runs the local web image by default and gives it the API's address alone
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/automatosai/automatos-frontend:edge
+      - equal:
+          path: spec.template.spec.containers[0].env
+          value:
+            - {name: BACKEND_INTERNAL_URL, value: "http://demo-automatos-api:8000"}
+  - it: never runs the enterprise image's pin in the local edition
+    documentIndex: 0
+    set:
+      frontend:
+        enterpriseImage:
+          digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/automatosai/automatos-frontend:edge
+
+  # ── enterprise: its own image, the API's Service and the media origins ──────
+  - it: runs the enterprise web image in the enterprise edition, pulling its edge Always
+    documentIndex: 0
+    set:
+      edition:
+        authEdition: enterprise
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/automatosai/automatos-enterprise-frontend:edge
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: Always
+  - it: gives the enterprise web server the API's Service, no media origin and Cloud sync off by default
+    documentIndex: 0
+    set:
+      edition:
+        authEdition: enterprise
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env
+          value:
+            - {name: BACKEND_INTERNAL_URL, value: "http://demo-automatos-api:8000"}
+            - {name: MEDIA_ORIGINS, value: ""}
+            - {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}
+  # PRD-277 D-12: the web server's Cloud sync is the API's own value, so the operator sets it once.
+  - it: switches Cloud sync on for the web server from edition.enterprise.hostedServices.cloudSync
+    documentIndex: 0
+    set:
+      edition:
+        authEdition: enterprise
+        enterprise: {hostedServices: {themeRevocations: true, cloudSync: true}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "true"}
+  - it: keeps Cloud sync off for the web server when only the revocation list is on
+    documentIndex: 0
+    set:
+      edition:
+        authEdition: enterprise
+        enterprise: {hostedServices: {themeRevocations: true}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}
+  - it: keeps Cloud sync off for the web server when hostedServices is left out
+    documentIndex: 0
+    set:
+      edition:
+        authEdition: enterprise
+        enterprise: {hostedServices: null}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: ENTERPRISE_CALLS_CLOUD_SYNC, value: "false"}
+  - it: gives the local web server no Cloud sync value, whatever hostedServices holds
+    documentIndex: 0
+    set:
+      edition:
+        enterprise: {hostedServices: {themeRevocations: true, cloudSync: true}}
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env
+          value:
+            - {name: BACKEND_INTERNAL_URL, value: "http://demo-automatos-api:8000"}
+  - it: passes the media origins as they were given
+    documentIndex: 0
+    set:
+      edition:
+        authEdition: enterprise
+      frontend:
+        mediaOrigins: "https://media.example.com, https://cdn.example.com/"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MEDIA_ORIGINS
+            value: "https://media.example.com, https://cdn.example.com/"
+  - it: runs the enterprise image by digest when one is pinned, and the local pin does nothing there
+    documentIndex: 0
+    set:
+      edition:
+        authEdition: enterprise
+      frontend:
+        image:
+          digest: "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+        enterpriseImage:
+          digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/automatosai/automatos-enterprise-frontend@sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: IfNotPresent
+  - it: keeps the web app's port, probes and read-only root in the enterprise edition
+    documentIndex: 0
+    set:
+      edition:
+        authEdition: enterprise
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].ports
+          value:
+            - {name: http, containerPort: 3000}
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet
+          value: {path: /, port: http}
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true

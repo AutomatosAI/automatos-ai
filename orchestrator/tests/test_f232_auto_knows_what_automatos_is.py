@@ -72,13 +72,16 @@ def test_the_hosted_edition_says_people_sign_in_and_the_plan_sets_the_helpers(ed
 
 
 def test_the_settings_tabs_are_the_pages_own():
-    from modules.context.sections.product_facts import HOSTED_SETTINGS_TABS, LOCAL_SETTINGS_TABS, SETTINGS_TABS
+    from modules.context.sections.product_facts import (
+        CLOUD_SYNC_TAB, HOSTED_SETTINGS_TABS, LOCAL_SETTINGS_TABS, SETTINGS_TABS,
+    )
 
     page = SETTINGS_PANEL.read_text(encoding="utf-8")
     labels = set(re.findall(r"label: '([^']+)'", page))
     local_only = set(re.findall(r"isLocal \? \[\{ value: '[^']+', label: '([^']+)'", page))
     assert labels - {"System Settings"} == {*LOCAL_SETTINGS_TABS, *SETTINGS_TABS, *HOSTED_SETTINGS_TABS}
-    assert local_only == set(LOCAL_SETTINGS_TABS)
+    # PRD-277 US-704: Automatos Cloud is gated by its own hook (where the install syncs), not by isLocal.
+    assert local_only == set(LOCAL_SETTINGS_TABS) - {CLOUD_SYNC_TAB}
     assert not [label for label in labels if re.search(r"plan|team", label, re.I)]
     # Billing is the hosted edition's only (PRD-265 W2): the local edition's tab set leaves it out.
     local_set = re.search(r"LOCAL_EDITION_SETTINGS_TABS[^=]*= new Set\(\[(.*?)\]\)", page, re.S).group(1)

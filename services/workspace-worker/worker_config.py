@@ -15,6 +15,7 @@ with the orchestrator's ``config.py`` that ``main.py`` transiently places on
 from __future__ import annotations
 
 import os
+import ssl
 from pathlib import Path
 from typing import Dict
 
@@ -134,3 +135,56 @@ DATABASE_URL_ENV = "DATABASE_URL"
 def database_url() -> str:
     """``DATABASE_URL``; empty when unset or blank."""
     return os.environ.get(DATABASE_URL_ENV, "").strip()
+
+
+# PRD-278 W3: TLS on that connection, from the same two settings the platform reads
+# (orchestrator/core/database/tls.py): libpq's sslmode, and the CA file a verify-ca or
+# verify-full check uses, which must be a file (a PEM bundle) and is required with either.
+# Both unset: no keyword is added, and the write connects as before.
+DATABASE_SSLMODE_ENV = "DATABASE_SSLMODE"
+DATABASE_SSLROOTCERT_ENV = "DATABASE_SSLROOTCERT"
+DATABASE_SSLMODES = ("disable", "allow", "prefer", "require", "verify-ca", "verify-full")
+DATABASE_CERTIFICATE_CHECKING_MODES = ("verify-ca", "verify-full")
+_UNUSABLE_CA = f"{DATABASE_SSLROOTCERT_ENV} must name a readable file holding at least one PEM certificate"
+_CA_REQUIRED = (
+    f"{DATABASE_SSLMODE_ENV} verify-ca and verify-full need {DATABASE_SSLROOTCERT_ENV}: the path of a file "
+    "holding the CA certificate(s) that signed the database server's certificate"
+)
+
+
+def _require_usable_ca(cafile: str) -> None:
+    """Raise ValueError, naming the setting only, unless ``cafile`` loads at least one certificate."""
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    try:
+        context.load_verify_locations(cafile=cafile)
+    except OSError:  # ssl.SSLError included: missing, unreadable, or no certificate in it
+        raise ValueError(_UNUSABLE_CA) from None
+    if not context.cert_store_stats().get("x509"):
+        raise ValueError(_UNUSABLE_CA)
+
+
+def database_tls_params() -> Dict[str, str]:
+    """psycopg2's ``sslmode`` and ``sslrootcert`` keywords from the two settings, checked.
+
+    Empty when neither is set. Raises ValueError, naming the setting and never the CA
+    file's path, for a mode libpq doesn't know, a CA file without a mode that checks it, a
+    mode that checks the certificate with no CA file, or a CA file that is missing,
+    unreadable or holds no certificate.
+    """
+    mode = os.environ.get(DATABASE_SSLMODE_ENV, "").strip().lower()
+    rootcert = os.environ.get(DATABASE_SSLROOTCERT_ENV, "").strip()
+    if mode and mode not in DATABASE_SSLMODES:
+        raise ValueError(f"{DATABASE_SSLMODE_ENV} must be one of {', '.join(DATABASE_SSLMODES)}; got {mode!r}")
+    if rootcert and mode not in DATABASE_CERTIFICATE_CHECKING_MODES:
+        raise ValueError(
+            f"{DATABASE_SSLROOTCERT_ENV} is used only with {DATABASE_SSLMODE_ENV} verify-ca or verify-full"
+        )
+    if mode in DATABASE_CERTIFICATE_CHECKING_MODES and not rootcert:
+        raise ValueError(_CA_REQUIRED)
+    params: Dict[str, str] = {}
+    if mode:
+        params["sslmode"] = mode
+    if rootcert:
+        _require_usable_ca(rootcert)
+        params["sslrootcert"] = rootcert
+    return params
