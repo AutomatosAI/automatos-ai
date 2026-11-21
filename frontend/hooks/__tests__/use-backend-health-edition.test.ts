@@ -3,10 +3,11 @@
  * PRD-277 US-505 — what the connection indicator asks, by edition.
  *
  *   - local and saas: GET /health through apiClient, exactly as before (path and options).
- *   - enterprise: `/health` is not exposed on the install's host, so the indicator asks the public,
- *     routed discovery path `/.well-known/automatos.json` with a plain fetch, never `/health` and
- *     never apiClient. Any HTTP answer is reachable (null, no body); a network failure, a timeout,
- *     or a gateway's 502, 503 or 504 is not.
+ *   - enterprise: `/health` is not exposed on the install's host, so the indicator asks the public
+ *     sign-in page route `/api/v1/auth/sign-in-page` (api/auth_web.py) with a
+ *     plain fetch, never `/health`, never the discovery document and never apiClient. Any HTTP
+ *     answer is reachable (null, no body); a network failure, a timeout, or a gateway's 502, 503 or
+ *     504 is not.
  *
  * Each edition loads the hook as its build loads it (NEXT_PUBLIC_AUTH_EDITION read when
  * lib/edition-name.ts loads).
@@ -34,12 +35,13 @@ afterEach(() => {
 })
 
 describe('fetchApiReachable', () => {
-  it('asks the discovery path, public, with no credentials and no cache', async () => {
+  it('asks the sign-in page route, public, with no credentials and no cache', async () => {
     const fetchMock = answering(200)
     await expect(fetchApiReachable(TIMEOUT_MS)).resolves.toBeNull()
     const [url, init] = fetchMock.mock.calls[0]
-    expect(url).toBe('/.well-known/automatos.json')
+    expect(url).toBe('/api/v1/auth/sign-in-page')
     expect(url).toBe(API_REACHABLE_PATH)
+    expect(url).not.toBe('/.well-known/automatos.json')
     expect(init?.credentials).toBe('omit')
     expect(init?.cache).toBe('no-store')
     expect(init?.signal).toBeInstanceOf(AbortSignal)
@@ -84,7 +86,7 @@ describe('fetchBackendHealth, as each edition builds it', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('asks the discovery path in enterprise, never /health and never apiClient, and has no body', async () => {
+  it('asks the sign-in page route in enterprise, never /health and never apiClient, and has no body', async () => {
     const { answer, request, fetchMock } = await healthIn('enterprise')
     expect(request).not.toHaveBeenCalled()
     expect(fetchMock).toHaveBeenCalledTimes(1)

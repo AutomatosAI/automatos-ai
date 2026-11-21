@@ -102,7 +102,7 @@ See [`values.yaml`](values.yaml). The ones you're most likely to change:
 | Value | Default | |
 |---|---|---|
 | `existingSecret` | *(required)* | The Secret above. |
-| `edition.authEdition` | `local` | Which edition the API and the web app run: `local`, or `enterprise` (below). |
+| `edition.authEdition` | `local` | Which edition the API and the web app run: `local`, `enterprise` (below) or `saas` (the hosted edition), spelled exactly so. Rendering stops on any other spelling. |
 | `edition.defaultWorkspaceId` | `00000000-…-0000000000c1` | The local workspace's id; in enterprise, the default workspace's (a UUID). |
 | `edition.enterprise.*` | empty | The enterprise edition's sign-in: [The enterprise edition](#the-enterprise-edition). |
 | `config` | optional services off | Extra non-secret settings for the API and the Job: a name `orchestrator/config.py` reads, e.g. `S3_ENDPOINT_URL`, `QDRANT_URL`. Rendering fails on `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (they go in the Secret), on `DOCUMENT_UPLOAD_DIR` and `DOCUMENT_STORAGE_DIR` while `api.data` is on (and, while it is off under a read-only root, on either outside the API's scratch volumes), on `HOME` under the API's read-only root (the chart sets it), on `DATABASE_SSLMODE` and `DATABASE_SSLROOTCERT` (set `database.*`), on `OIDC_CLIENT_SECRET` (it goes in the Secret), and in the enterprise edition on each setting `edition.enterprise` sets and on `SESSION_COOKIE_NAME` and `SESSION_CSRF_HEADER`. Quote `LOCAL_REMOTE_ACCESS`: YAML reads a bare `off` as `false`, which the API refuses. |
@@ -111,7 +111,7 @@ See [`values.yaml`](values.yaml). The ones you're most likely to change:
 | `api.image.digest`, `frontend.image.digest`, `frontend.enterpriseImage.digest`, `worker.image.digest` | empty | `sha256:<64 hex>`: the pod runs `repository@digest`, that exact build, whatever the tag. |
 | `api.image.pullPolicy`, `frontend.image.pullPolicy`, `frontend.enterpriseImage.pullPolicy`, `worker.image.pullPolicy` | empty: the chart chooses | `Always` for a tag that moves (`edge`, or a `MAJOR.MINOR` release line), `IfNotPresent` for a digest or a fixed tag. A value you set is used as given. |
 | `frontend.enterpriseImage.repository` | `ghcr.io/automatosai/automatos-enterprise-frontend` | The enterprise edition's web image, which the chart runs in place of `frontend.image` when `edition.authEdition` is `enterprise`. Each web image is built for one edition. |
-| `frontend.mediaOrigins` | empty | Enterprise only: the origins the browser may load media from (your object storage's public host), which the web server adds to its content security policy when it starts (`MEDIA_ORIGINS`). Up to 16, separated by commas or spaces, each `https://<host>[:port]` or `https://*.<domain>.<suffix>[:port]`. Name the narrowest host that works: a wildcard is checked for shape only. Rendering fails on a value the server would refuse, and on any value in another edition. |
+| `frontend.mediaOrigins` | empty | Enterprise only: the origins the browser may load media from (your object storage's public host), which the web server adds to its content security policy when it starts (`MEDIA_ORIGINS`). Up to 16, separated by commas or spaces, each `https://<host>[:port]` or `https://*.<domain>.<suffix>[:port]`. Name the narrowest host that works, your storage's own public host, rather than a wildcard. Rendering fails on a value the server would refuse, and on any value in another edition. |
 | `workspaces.storageClass`, `workspaces.accessModes` | cluster default, `ReadWriteMany` | |
 | `workspaces.api.existingClaim`, `workspaces.worker.existingClaim` | empty | A claim that already exists for that side of the agent-files volume; the chart then creates none. In one namespace, a claim named for either side serves both. With `worker.namespace`, both are required (below). |
 | `worker.namespace` | empty: the release's namespace | The worker's Deployment, Service and account go there, and the API's `WORKER_INTERNAL_URL` becomes `http://<fullname>-worker.<namespace>.svc:8081`. The release's own namespace counts as empty. See "The worker in a namespace of its own" below. |
@@ -155,7 +155,7 @@ or is one the API would refuse at start.
 | Value | API setting | |
 |---|---|---|
 | `edition.enterprise.publicUrl` | `FRONTEND_URL` | Required. The install's public address, `https://<host>`, shared by the web app and the API. The sign-in callback and the session cookie are on its origin. |
-| `edition.enterprise.clientIpHeader` | `CLIENT_IP_HEADER` | Required. The header your ingress controller sets to the caller's address (`X-Real-IP` for ingress-nginx). Sign-in limits requests by it and the audit log records it. The API trusts it from every caller, so every request must come through a proxy that overwrites it. |
+| `edition.enterprise.clientIpHeader` | `CLIENT_IP_HEADER` | Required. The header your ingress controller sets to the caller's address (`X-Real-IP` for ingress-nginx). Sign-in limits requests by it and the audit log records it. Name the header your proxy sets on every request, overwriting any value the caller sent. |
 | `edition.enterprise.oidc.issuer` | `OIDC_ISSUER` | Required. The provider's issuer address, `https` only. |
 | `edition.enterprise.oidc.clientId` | `OIDC_CLIENT_ID` | Required. The application's client id at the provider. |
 | `edition.enterprise.oidc.displayName` | `OIDC_DISPLAY_NAME` | The sign-in button's text, 1 to 64 characters, no `<` or `>`. Empty: "your organisation". |
@@ -219,7 +219,7 @@ Rendering stops with a message on a combination that cannot work:
 
 ## Upgrading to 0.11.0
 
-- **The local edition gets one change: one extra ingress path.** With `ingress.enabled`, exactly `/.well-known/automatos.json`, the discovery document a phone reads, now goes to the API (`pathType: Exact`), between `/ws` and the web app's `/`. Before, the web app answered it. The rest of `/.well-known/` stays the web app's, and `/exports/`, `/health`, `/metrics` and `/docs` are not routed. With the ingress off (the default) nothing changes but the chart's version label (`charts/automatos/tests/default_render_test.yaml` pins the default render).
+- **The local edition gets one change: one extra ingress path.** With `ingress.enabled`, exactly `/.well-known/automatos.json`, the discovery document a phone reads, now goes to the API (`pathType: Exact`), between `/ws` and the web app's `/`. Before, the web app answered it. In the enterprise edition it answers an error until phone sign-in for that edition is built (PRD-277 Wave 6, US-602). The rest of `/.well-known/` stays the web app's, and `/exports/`, `/health`, `/metrics` and `/docs` are not routed. With the ingress off (the default) nothing changes but the chart's version label (`charts/automatos/tests/default_render_test.yaml` pins the default render).
 - **The enterprise edition can be installed** (`edition.authEdition=enterprise`, PRD-277). It needs, before `helm install`:
   - `OIDC_CLIENT_SECRET` in the Secret `existingSecret` names: the API does not start without it;
   - `edition.enterprise.publicUrl`, `clientIpHeader`, `oidc.issuer` and `oidc.clientId`: rendering stops, naming the value, while one is missing or is one the API would refuse;
@@ -227,6 +227,7 @@ Rendering stops with a message on a combination that cannot work:
   - the ingress on, on the host of `publicUrl`, with TLS, so the web app and the API answer on one origin;
   - for a provider with a private certificate, a ConfigMap with its CA (`edition.enterprise.oidc.caConfigMap`).
   The chart then runs the enterprise web image (`frontend.enterpriseImage`), gives it `BACKEND_INTERNAL_URL` and `MEDIA_ORIGINS` (`frontend.mediaOrigins`), and gives the API and the migration Job the settings in [The enterprise edition](#the-enterprise-edition).
+- **`edition.authEdition` must be exactly `local`, `enterprise` or `saas`**, in lower case with no spaces; rendering stops on any other spelling. 0.10.0 documented `local` alone and rendered any value.
 - **`config` refuses `OIDC_CLIENT_SECRET` in every edition**: a secret is never a chart value. In the enterprise edition it also refuses each setting the chart sets and `SESSION_COOKIE_NAME` and `SESSION_CSRF_HEADER`.
 - **A released chart names one web image per published edition**, each by digest: `frontend.image` (local) and `frontend.enterpriseImage` (enterprise).
 
@@ -292,7 +293,7 @@ install, pin one build instead, and the chart pulls it `IfNotPresent`:
   them with `helm lint` and a kubeconform schema check against the oldest and the
   newest supported Kubernetes (`.github/workflows/chart.yml`).
 - **An install under a strict namespace, in CI:** `chart.yml`'s `install` job builds
-  the three images, installs the chart into a kind cluster with the values in
+  the four images, installs the chart into a kind cluster with the values in
   `deploy/kind/strict-values.yaml` (its header lists what is on and what is not
   exercised), and checks the pod security level and the read-only roots (above), with
   `deploy/kind/strict.sh`.

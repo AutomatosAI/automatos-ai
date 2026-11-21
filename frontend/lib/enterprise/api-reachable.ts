@@ -4,10 +4,13 @@
  *
  * On one host the API's own liveness routes (`/health`, `/health/ready`) are not exposed outside
  * the cluster, by design, so a browser asking `/health` reaches the web app instead and would read
- * every install's API as down. The indicator asks the discovery document instead:
- * `/.well-known/automatos.json` is routed to the API on that host, is public (it needs no sign-in,
- * so asking it never opens the session-ended dialog), reads config only, and is small. Chosen over
- * `/api/system/health`, which is routed too but needs a signed-in caller and does more work.
+ * every install's API as down. The indicator asks the sign-in page's route instead:
+ * `/api/v1/auth/sign-in-page` (api/auth_web.py) is under `/api`, so it reaches the API on every
+ * install with no extra route, is public (it needs no sign-in, so asking it never opens the
+ * session-ended dialog), reads one setting, does no database work, and answers 200. It is not one
+ * of the two sign-in steps limited per address. Chosen over the discovery document, which answers
+ * an error in this edition until phone sign-in for it is built (US-602), and over
+ * `/api/system/health`, which needs a signed-in caller and does more work.
  *
  * The question is only whether the API answers, so any HTTP answer counts as reachable, a 404 or a
  * 500 included; only a network failure, a timeout, or a gateway's answer that the API behind it is
@@ -16,8 +19,8 @@
  * shown in the local edition only), so the answer is `null`, never a made-up /health body.
  */
 
-/** The public, routed path the indicator asks in this edition. */
-export const API_REACHABLE_PATH = '/.well-known/automatos.json'
+/** The public path the indicator asks in this edition (lib/enterprise/auth-api.ts's SIGN_IN_PAGE_PATH). */
+export const API_REACHABLE_PATH = '/api/v1/auth/sign-in-page'
 
 /** A gateway's answers that the API behind it is not there. */
 const GATEWAY_FAILURES: ReadonlySet<number> = new Set([502, 503, 504])

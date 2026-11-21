@@ -128,6 +128,21 @@ def settings(slots: Mapping[KeyPath, str], digests: Mapping[str, str], prefix: s
     return written
 
 
+def check_distinct_web_digests(digests: Mapping[str, str],
+                               editions: Mapping[str, Tuple[KeyPath, str]] = WEB_EDITIONS) -> None:
+    """Refuse a release whose web image slots share a digest: each web image is built for one
+    edition, so one build in two slots (the local image in the enterprise slot) runs the wrong
+    edition's web app."""
+    by_digest: Dict[str, List[str]] = {}
+    for edition in sorted(editions):
+        slot, name = editions[edition]
+        by_digest.setdefault(digests[name], []).append(f"{'.'.join(slot)} ({edition})")
+    shared = [slots for slots in by_digest.values() if len(slots) > 1]
+    if shared:
+        raise ChartError("; ".join(f"one digest in {' and '.join(slots)}: each web image is built for one edition"
+                                   for slots in shared))
+
+
 def references(digests: Mapping[str, str], prefix: str) -> Dict[str, List[str]]:
     """``{edition: the image references its render must run}``, for every published edition."""
     return {edition: [f"{prefix}{name}@{digests[name]}" for name in edition_images(edition)]
@@ -191,6 +206,7 @@ def prepare(chart: Path, out: Path, digests: Mapping[str, str], prefix: str, ver
     default_edition = str(yaml.safe_load(values_text)["edition"]["authEdition"])
     if default_edition not in WEB_EDITIONS:
         raise ChartError(f"the chart defaults to the {default_edition!r} edition, which has no published web image")
+    check_distinct_web_digests(digests)
     pinned = set_values(values_text, settings(plan(), digests, prefix))
     header = (f"# Automatos {version}. Every image below is named by the digest this release published\n"
               "# and signed; a digest wins over a tag.\n\n")

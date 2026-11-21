@@ -102,7 +102,7 @@ export function apiHost(baseUrl: string, pageUrl: string): string | undefined {
 /**
  * GET /health. A frozen backend never answers: the ask gives up, and fails like any other.
  * PRD-277 US-505: in enterprise `/health` is not exposed on the install's host, so the ask is
- * whether the API answers its routed, public discovery path (lib/enterprise/api-reachable.ts),
+ * whether the API answers its public sign-in page route (lib/enterprise/api-reachable.ts),
  * and the answer has no body (null).
  */
 export function fetchBackendHealth<T = unknown>(enterprise: boolean = isEnterprise): Promise<T | null> {

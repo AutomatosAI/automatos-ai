@@ -19,9 +19,10 @@
 #    or nothing, and the image carries nothing the trimmed build leaves out.
 # 4. Started again with those settings, the middleware's answer to a page (`/`, sent to sign in)
 #    and the sign-in page itself carry a content security policy whose img-src and media-src
-#    name the origin MEDIA_ORIGINS gave when the container started, while a static file, which
-#    keeps the policy fixed at build time, carries one that does not: the origin came from the
-#    running server, not from the build.
+#    name the origin MEDIA_ORIGINS gave when the container started, and no other directive names
+#    it, while a static file, which keeps the policy fixed at build time, carries one that names
+#    it in no directive: the origin came from the running server, not from the build, and the
+#    server put it in img-src and media-src only.
 #
 # Not proved here: that the web app reaches an API (nothing listens at the address given, and
 # the container has no network) or that anyone can sign in (no identity provider). chart.yml's
@@ -132,9 +133,9 @@ directive() {
 }
 
 # The policy of PATH, answered with STATUS, must name (WANT=yes) or must not name (WANT=no)
-# the media origin in img-src and media-src.
+# the media origin in img-src and media-src; either way, no other directive may name it.
 expect_policy() {
-  local path=$1 status=$2 want=$3 answer got policy name
+  local path=$1 status=$2 want=$3 answer got policy name others
   answer=$(answer_of "$path")
   got=${answer%% *}
   policy=${answer#* }
@@ -148,6 +149,15 @@ expect_policy() {
       [ "$want" = no ] || fail "GET ${path}: ${name} does not name ${MEDIA_ORIGIN}: $(directive "$name" "$policy")"
     fi
   done
+  others=$(other_directives_naming "$MEDIA_ORIGIN" "$policy")
+  [ -z "$others" ] || fail "GET ${path}: ${MEDIA_ORIGIN} is also in ${others}: only img-src and media-src may name it"
+}
+
+# The names of the directives of POLICY, other than img-src and media-src, that name ORIGIN:
+# ORIGIN POLICY. Empty when none does.
+other_directives_naming() {
+  tr ';' '\n' <<< "$2" | sed 's/^ *//' | grep -v -e '^img-src ' -e '^media-src ' \
+    | grep -F -- "$1" | cut -d' ' -f1 | tr '\n' ' ' || true
 }
 
 check_running_policy() {
@@ -158,7 +168,7 @@ check_running_policy() {
   expect_policy /sign-in 200 yes
   expect_policy "$READY_PATH" 200 no
   if [ "$bad" = "$before" ]; then
-    echo "proved: the policy of a page names the media origin given at start-up, and the build-time policy does not"
+    echo "proved: the policy of a page names the media origin given at start-up in img-src and media-src only, and the build-time policy names it nowhere"
   fi
 }
 

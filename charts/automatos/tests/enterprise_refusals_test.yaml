@@ -172,6 +172,70 @@ tests:
       - hasDocuments:
           count: 1
 
+  # ── a user name or password in an address ───────────────────────────────────
+  - it: stops on a public address with a user name and password, naming the key
+    set:
+      edition: {enterprise: {publicUrl: "https://someone:not-a-password@automatos.example.com"}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.publicUrl must not hold a user name or password \\(an @ before the host\\)"
+  - it: stops on an issuer with a user name, naming the key
+    set:
+      edition: {enterprise: {oidc: {issuer: "https://someone@id.example.com/realms/automatos"}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.issuer must not hold a user name or password"
+  - it: takes an @ after the host, in the path
+    set:
+      edition: {enterprise: {oidc: {issuer: "https://id.example.com/realms/team@example"}}}
+    asserts:
+      - hasDocuments:
+          count: 1
+
+  # ── the provider's CA ───────────────────────────────────────────────────────
+  - it: takes a ConfigMap name with dots and a plain key
+    set:
+      edition: {enterprise: {oidc: {caConfigMap: identity-ca.v2, caKey: bundle.pem}}}
+    asserts:
+      - hasDocuments:
+          count: 1
+  - it: stops on a ConfigMap name Kubernetes would refuse
+    set:
+      edition: {enterprise: {oidc: {caConfigMap: Identity_CA}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.caConfigMap must be a ConfigMap's name"
+  - it: stops on a ConfigMap name with a line break in it
+    set:
+      edition: {enterprise: {oidc: {caConfigMap: "identity-ca\nkind: Secret"}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.caConfigMap must be a ConfigMap's name"
+  - it: stops on a key that climbs out of the mount
+    set:
+      edition: {enterprise: {oidc: {caConfigMap: identity-ca, caKey: ../ca.crt}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.caKey must be a plain file name"
+  - it: stops on a key that is ..
+    set:
+      edition: {enterprise: {oidc: {caConfigMap: identity-ca, caKey: ".."}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.caKey must be a plain file name"
+  - it: stops on a key with a path separator
+    set:
+      edition: {enterprise: {oidc: {caConfigMap: identity-ca, caKey: certs/ca.crt}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.caKey must be a plain file name"
+  - it: stops on a key with a line break in it
+    set:
+      edition: {enterprise: {oidc: {caConfigMap: identity-ca, caKey: "ca.crt\nother"}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.caKey must be a plain file name"
+
   # ── config may not set what the chart sets, or a secret ─────────────────────
   - it: stops on the client secret in config, a secret never being a value
     set:

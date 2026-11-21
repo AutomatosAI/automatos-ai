@@ -227,6 +227,20 @@ def test_each_edition_has_a_web_slot_of_its_own_and_one_without_an_image_is_refu
         chart.prepare(saas, tmp_path / "out", DIGESTS, PREFIX, "0.8.0-rc.1")
 
 
+def test_a_release_with_one_digest_in_two_web_slots_publishes_nothing(tmp_path):
+    """The enterprise slot filled with the local image would run the local web app in enterprise."""
+    same = {**DIGESTS, "enterprise-frontend": DIGESTS["frontend"]}
+    expected = r"one digest in frontend\.enterpriseImage \(enterprise\) and frontend\.image \(local\)"
+    with pytest.raises(chart.ChartError, match=expected):
+        chart.check_distinct_web_digests(same)
+    with pytest.raises(chart.ChartError, match=expected):
+        chart.prepare(CHART, tmp_path, same, PREFIX, "0.8.0-rc.1")
+    assert not (tmp_path / "automatos").exists(), "nothing is copied for a refused release"
+    chart.check_distinct_web_digests(DIGESTS)
+    # The shared images may hold any digest: only the web slots are each one edition's build.
+    chart.check_distinct_web_digests({**DIGESTS, "workspace-worker": DIGESTS["api"]})
+
+
 def test_each_editions_render_values_hold_only_what_it_needs_and_nothing_secret_shaped(tmp_path):
     written = chart.write_render_values(tmp_path / "render")
     assert [path.name for path in written] == ["enterprise.yaml", "local.yaml"]

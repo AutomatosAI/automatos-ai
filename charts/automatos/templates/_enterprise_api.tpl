@@ -45,9 +45,7 @@ true
 {{/* Stops the render on a `config` entry the enterprise edition sets elsewhere. */}}
 {{- define "automatos.validateEnterpriseConfig" -}}
 {{- $config := .Values.config | default dict -}}
-{{- if hasKey $config "OIDC_CLIENT_SECRET" }}
-{{- fail "config.OIDC_CLIENT_SECRET: a secret is never a chart value. Put it in the Secret existingSecret names, under the key OIDC_CLIENT_SECRET, and remove it from config" }}
-{{- end }}
+{{- /* config.OIDC_CLIENT_SECRET is refused in every edition, by automatos.validateApi. */}}
 {{- range $key := include "automatos.enterpriseSettings" $ | splitList " " }}
 {{- if hasKey $config $key }}
 {{- fail (printf "config.%s: in the enterprise edition the chart sets it from edition.enterprise (DEFAULT_WORKSPACE_ID from edition.defaultWorkspaceId). Set it there, and remove it from config" $key) }}
@@ -85,6 +83,12 @@ true
 {{- define "automatos.validateEnterpriseValues" -}}
 {{- $enterprise := .Values.edition.enterprise | default dict -}}
 {{- $oidc := $enterprise.oidc | default dict -}}
+{{- range $address := list (list "edition.enterprise.oidc.issuer" $oidc.issuer) (list "edition.enterprise.publicUrl" $enterprise.publicUrl) }}
+{{- if contains "@" (regexFind `^[^/?#]*//[^/?#]*` (index $address 1 | toString | trim)) }}
+{{- fail (printf "%s must not hold a user name or password (an @ before the host): give the address alone" (index $address 0)) }}
+{{- end }}
+{{- end }}
+{{- include "automatos.validateOidcCa" . }}
 {{- if not (include "automatos.httpsAddress" $oidc.issuer) }}
 {{- fail "edition.enterprise.oidc.issuer must be an https address with a host (OIDC_ISSUER): the API refuses to start otherwise" }}
 {{- end }}
@@ -96,6 +100,26 @@ true
 {{- end }}
 {{- include "automatos.validateEnterpriseRole" . }}
 {{- include "automatos.validateEnterpriseOidcText" . }}
+{{- end }}
+
+{{/*
+The provider's CA: a ConfigMap name Kubernetes accepts (a DNS subdomain: lower-case letters,
+digits, - and ., at most 253), and a key that is a plain file name, with no path separator and
+no "..", since it names the file under the mount.
+*/}}
+{{- define "automatos.validateOidcCa" -}}
+{{- $oidc := (.Values.edition.enterprise | default dict).oidc | default dict -}}
+{{- with $oidc.caConfigMap }}
+{{- $name := toString . }}
+{{- $label := `[a-z0-9]([-a-z0-9]*[a-z0-9])?` }}
+{{- if or (gt (len $name) 253) (not (regexMatch (printf `^%s(\.%s)*$` $label $label) $name)) }}
+{{- fail "edition.enterprise.oidc.caConfigMap must be a ConfigMap's name: lower-case letters, digits, - and ., at most 253 characters, starting and ending with a letter or digit" }}
+{{- end }}
+{{- $key := toString ($oidc.caKey | default "ca.crt") }}
+{{- if or (gt (len $key) 253) (not (regexMatch `^[-._a-zA-Z0-9]+$` $key)) (contains ".." $key) }}
+{{- fail "edition.enterprise.oidc.caKey must be a plain file name, the ConfigMap's key: letters, digits, -, _ and ., with no path separator and no \"..\"" }}
+{{- end }}
+{{- end }}
 {{- end }}
 
 {{/* The default role: one the API knows, and with an access rule beside it. */}}
@@ -180,7 +204,7 @@ value left empty is not rendered, so the API's own default holds.
 {{- with ((.Values.edition.enterprise | default dict).oidc | default dict).caConfigMap }}
 - name: oidc-ca
   configMap:
-    name: {{ . }}
+    name: {{ . | toString | quote }}
 {{- end }}
 {{- end }}
 {{- end }}

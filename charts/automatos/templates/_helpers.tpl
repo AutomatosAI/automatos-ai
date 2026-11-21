@@ -286,11 +286,15 @@ document path of the operator's own outside the API's scratch volumes, under a r
 root, would fail at the first upload.
 */}}
 {{- define "automatos.validateApi" -}}
+{{- include "automatos.validateEdition" . -}}
 {{- $config := .Values.config | default dict -}}
 {{- range $key := list "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" }}
 {{- if hasKey $config $key }}
 {{- fail (printf "config.%s: move it to the Secret named by existingSecret, under the same key, so it isn't plain text in the pod spec" $key) }}
 {{- end }}
+{{- end }}
+{{- if hasKey $config "OIDC_CLIENT_SECRET" }}
+{{- fail "config.OIDC_CLIENT_SECRET: a secret is never a chart value. Put it in the Secret existingSecret names, under the key OIDC_CLIENT_SECRET, and remove it from config" }}
 {{- end }}
 {{- if .Values.api.data.enabled }}
 {{- range $key := list "DOCUMENT_UPLOAD_DIR" "DOCUMENT_STORAGE_DIR" }}

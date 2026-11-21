@@ -2,8 +2,20 @@
 The enterprise edition (PRD-277): its web image and the settings the chart gives it.
 */}}
 
-{{/* "true" when edition.authEdition is enterprise. */}}
+{{/*
+The editions the chart documents (values.yaml), spelled exactly. The API trims and lower-cases
+the value and reads an unknown one as saas, so a near miss would start an edition the chart did
+not render for: the render stops instead, without printing the value.
+*/}}
+{{- define "automatos.validateEdition" -}}
+{{- if not (has .Values.edition.authEdition (list "local" "enterprise" "saas")) }}
+{{- fail "edition.authEdition must be exactly local, enterprise or saas, in lower case with no spaces: the chart chooses the web image and the sign-in settings by it, and the API reads it as its edition" }}
+{{- end }}
+{{- end }}
+
+{{/* "true" when edition.authEdition is enterprise; stops the render on an unknown spelling. */}}
 {{- define "automatos.enterprise" -}}
+{{- include "automatos.validateEdition" . -}}
 {{- if eq (toString .Values.edition.authEdition) "enterprise" -}}
 true
 {{- end -}}

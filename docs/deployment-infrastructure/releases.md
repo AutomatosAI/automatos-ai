@@ -112,7 +112,8 @@ checked.
    copies `charts/automatos`, writes each image's repository and signed digest into the
    copy's `values.yaml` (only those lines change), and `helm package` stamps it with
    the version. The web app has one slot per published edition (`frontend.image` for
-   local, `frontend.enterpriseImage` for enterprise), and each is pinned. The chart in
+   local, `frontend.enterpriseImage` for enterprise), and each is pinned; a release whose
+   two web slots would hold the same digest publishes nothing. The chart in
    the repository keeps `appVersion: "edge"`.
 6. **The chart names no tag, in any edition.** The packaged chart is rendered once per
    published edition, each with `existingSecret` and the least that edition renders

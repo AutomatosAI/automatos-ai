@@ -30,6 +30,8 @@ edition:
   # is the admin. Put it behind a VPN or an authenticating ingress.
   # enterprise: people sign in with your organisation's identity provider (OIDC), and the
   # chart runs the enterprise web image (frontend.enterpriseImage).
+  # saas: the hosted edition.
+  # Exactly one of local, enterprise or saas, in lower case: rendering stops on any other spelling.
   authEdition: local
   # The local edition's one workspace; in enterprise, the default workspace the migration Job
   # makes (with no owner), which sign-ins are recorded in and the first admins own. A UUID.
@@ -44,8 +46,8 @@ edition:
     publicUrl: ""
     # Required. The header your ingress controller or proxy sets to the caller's address
     # (CLIENT_IP_HEADER), e.g. X-Real-IP for ingress-nginx. Sign-in limits requests by that
-    # address and writes it to the audit log. Set it only when every request comes through a
-    # proxy that overwrites it: the API trusts it from every caller.
+    # address and writes it to the audit log. Name the header your proxy sets on every
+    # request, overwriting any value the caller sent.
     clientIpHeader: ""
     # People who become install admins at their first sign-in, or at any sign-in while the
     # install has no active install admin (ENTERPRISE_BOOTSTRAP_ADMINS): sub:<subject> and
@@ -222,7 +224,8 @@ frontend:
   # storage's public host), added to the content security policy's img-src and media-src when
   # the server starts. Up to 16, separated by commas or spaces, each https://<host>[:port] or
   # https://*.<domain>.<suffix>[:port] (or http://localhost or http://127.0.0.1 for local
-  # development). Name the narrowest host that works: a wildcard is checked for shape only.
+  # development). Name the narrowest host that works, your storage's own public host, rather
+  # than a wildcard.
   # Empty: no media origin. Rendering fails on a value the server would refuse, and on any value
   # in another edition, whose web image fixes its media origins when it is built.
   mediaOrigins: ""
