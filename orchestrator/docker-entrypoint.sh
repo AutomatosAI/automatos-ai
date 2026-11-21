@@ -74,7 +74,6 @@ require_database_settings() {
     fi
     read_database_tls
     read_database_password
-    require_plain_query_names
 }
 
 # PRD-278 W3: DATABASE_SSLMODE and DATABASE_SSLROOTCERT, the settings the app's own
@@ -125,12 +124,24 @@ read_database_tls() {
 # The DATABASE_URL form's password, read the way libpq reads a URI (fe-connect.c,
 # conninfo_uri_parse_options and conninfo_uri_parse_params): the user part ends at the
 # first @ before any /, and the password follows its first :. A password query key, read
-# after it, wins over it. Both are percent-decoded once. When the password libpq would use
-# is set, the tools get the address without either (DB_URL_ADDRESS) and that password,
-# decoded (DB_URL_PASSWORD). An address with no password, or an empty one, is passed as
-# given. A password libpq could not decode (a % without two hex digits after it, or %00)
-# stops the script before it waits for the database, naming the setting, never the
-# address. None of these variables is exported.
+# after it, wins over it, an empty one included. Both are percent-decoded once. When the
+# password libpq would use is set, the tools get the address without either
+# (DB_URL_ADDRESS) and that password, decoded (DB_URL_PASSWORD). When it is empty, they
+# get the address without the user part's password and with its query as given. An
+# address with no password is passed as given. None of these variables is exported.
+#
+# Each of these stops the script before it waits for the database, with a line that
+# names the setting, never the address or the password:
+#   - a control character anywhere in DATABASE_URL, a line break or a tab among them;
+#   - a DATABASE_URL that is not a URL (libpq's keyword form) and names a password: the
+#     app reads DATABASE_URL only as a URL (SQLAlchemy's make_url wants scheme://);
+#   - a query parameter name written with a percent-escape: libpq decodes a name before
+#     it matches it, so the password key, and with DATABASE_SSLMODE set the TLS keys that
+#     libpq_url drops, are read here by their plain names only. libpq matches names
+#     case-sensitively and refuses one it does not know, so another letter case fails
+#     to connect rather than counting;
+#   - a password libpq could not decode: a % without two hex digits after it, %00, or a
+#     raw @ left in the address after the user part (a raw @ or / in the password).
 DB_URL_ADDRESS=""
 DB_URL_PASSWORD=""
 KEPT_QUERY=""
@@ -140,6 +151,15 @@ PERCENT='%'
 BACKSLASH='\'
 HEX_DIGIT='[0123456789ABCDEFabcdef]'
 PASSWORD_KEY='password='
+URL_CONTROL_CHARACTER="DATABASE_URL holds a control character, such as a line break or a tab: remove it"
+URL_KEYWORD_FORM="DATABASE_URL names a password but is not a URL: write it as postgresql://user:password@host:port/database"
+URL_ENCODED_QUERY_NAME="A query parameter name in DATABASE_URL is percent-encoded: write each name plainly, so the entrypoint finds the address's password and TLS keys by name"
+URL_UNDECODABLE_PASSWORD="DATABASE_URL holds a password libpq cannot decode: write each reserved character, @ and / among them, as % and two hex digits, and no %00"
+
+refuse_database_url() {
+    echo "❌ $1"
+    exit 1
+}
 
 # True when every % in $1 starts two hex digits and none is %00, as libpq requires
 # (conninfo_uri_decode).
@@ -157,24 +177,20 @@ percent_decode() {
     printf '%b' "${value//"$PERCENT"/"${BACKSLASH}x"}x"
 }
 
-refuse_undecodable_password() {
-    echo "❌ DATABASE_URL holds a password libpq cannot decode: write each reserved character as % and two hex digits, and no %00"
-    exit 1
-}
-
 # Sets KEPT_QUERY (the query $1 without its password keys, joined by &), QUERY_PASSWORD
-# (the last one's value) and QUERY_HAS_PASSWORD. Returns 1 when a password value is not
-# validly encoded.
+# (the last one's value) and QUERY_HAS_PASSWORD. Stops the script on a percent-encoded
+# name or a password value libpq could not decode.
 split_query_password() {
     local param params=() kept=()
     KEPT_QUERY="" QUERY_PASSWORD="" QUERY_HAS_PASSWORD=""
     [ -z "$1" ] || IFS='&' read -r -a params <<<"$1"
     for param in "${params[@]}"; do
+        case "${param%%=*}" in *"$PERCENT"*) refuse_database_url "$URL_ENCODED_QUERY_NAME" ;; esac
         case "$param" in
             "$PASSWORD_KEY"*)
                 QUERY_PASSWORD="${param#"$PASSWORD_KEY"}"
                 QUERY_HAS_PASSWORD=1
-                is_percent_encoded "$QUERY_PASSWORD" || return 1
+                is_percent_encoded "$QUERY_PASSWORD" || refuse_database_url "$URL_UNDECODABLE_PASSWORD"
                 ;;
             *) kept+=("$param") ;;
         esac
@@ -185,9 +201,14 @@ split_query_password() {
 read_database_password() {
     DB_URL_ADDRESS="${DATABASE_URL:-}" DB_URL_PASSWORD=""
     [ -z "${POSTGRES_HOST:-}" ] || return 0
-    case "$DB_URL_ADDRESS" in *://*) ;; *) return 0 ;; esac
+    case "$DB_URL_ADDRESS" in *[[:cntrl:]]*) refuse_database_url "$URL_CONTROL_CHARACTER" ;; esac
+    case "$DB_URL_ADDRESS" in
+        *://*) ;;
+        *password*) refuse_database_url "$URL_KEYWORD_FORM" ;;
+        *) return 0 ;;
+    esac
     local scheme="${DB_URL_ADDRESS%%://*}://" rest="${DB_URL_ADDRESS#*://}"
-    local userinfo="" user="" password="" query=""
+    local userinfo="" user="" user_password="" password="" query=""
     case "${rest%%/*}" in
         *@*)
             userinfo="${rest%%@*}"
@@ -195,36 +216,20 @@ read_database_password() {
             user="${userinfo%%:*}@"
             ;;
     esac
-    case "$userinfo" in *:*) password="${userinfo#*:}" ;; esac
-    is_percent_encoded "$password" || refuse_undecodable_password
+    case "$userinfo" in *:*) user_password="${userinfo#*:}" ;; esac
+    case "${rest%%\?*}" in *@*) refuse_database_url "$URL_UNDECODABLE_PASSWORD" ;; esac
+    is_percent_encoded "$user_password" || refuse_database_url "$URL_UNDECODABLE_PASSWORD"
     case "$rest" in *\?*) query="${rest#*\?}" ;; esac
-    split_query_password "$query" || refuse_undecodable_password
+    split_query_password "$query"
+    password="$user_password"
     [ -z "$QUERY_HAS_PASSWORD" ] || password="$QUERY_PASSWORD"
-    [ -n "$password" ] || return 0
+    if [ -z "$password" ]; then
+        [ -z "$user_password" ] || DB_URL_ADDRESS="${scheme}${user}${rest}"
+        return 0
+    fi
     DB_URL_ADDRESS="${scheme}${user}${rest%%\?*}${KEPT_QUERY:+?$KEPT_QUERY}"
     DB_URL_PASSWORD="$(percent_decode "$password")"
     DB_URL_PASSWORD="${DB_URL_PASSWORD%x}"
-}
-
-# With DATABASE_SSLMODE set, libpq_url drops the address's own TLS keys by their plain
-# names. libpq (fe-connect.c, conninfo_uri_parse_params) percent-decodes a query key
-# before it matches it, so with the mode set a key holding a % stops the script here,
-# naming the setting, never the address. libpq matches keys case-sensitively and refuses
-# a key it does not know, so another letter case fails to connect rather than winning.
-# Neither setting set: nothing is checked and the address is passed as given.
-require_plain_query_names() {
-    [ -n "$DB_TLS_SSLMODE" ] && [ -z "${POSTGRES_HOST:-}" ] || return 0
-    case "$DB_URL_ADDRESS" in *\?*) ;; *) return 0 ;; esac
-    local param params
-    IFS='&' read -r -a params <<<"${DB_URL_ADDRESS#*\?}"
-    for param in "${params[@]}"; do
-        case "${param%%=*}" in
-            *%*)
-                echo "❌ DATABASE_SSLMODE is set, and a query parameter name in DATABASE_URL is percent-encoded: write each name plainly, so the setting replaces the address's own TLS keys"
-                exit 1
-                ;;
-        esac
-    done
 }
 
 # libpq tools accept postgresql:// or postgres:// only. Drop a SQLAlchemy driver

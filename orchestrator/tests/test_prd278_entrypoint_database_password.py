@@ -7,8 +7,13 @@ colon of the user part, or in a ``password`` query key, which wins. The tools ge
 address without it, and the password, percent-decoded once, in PGPASSWORD for their one
 command. The POSTGRES_* form does what it did: psql gets POSTGRES_PASSWORD in PGPASSWORD,
 and pg_isready none. Nothing is exported for the whole script, so the command it finally
-execs has no PGPASSWORD. An address with no password, or an empty one, reaches the tools
-as given. A password libpq could not decode stops the script before anything runs.
+execs has no PGPASSWORD. An address with no password reaches the tools as given; one whose
+winning password is an empty query key loses only the user part's password.
+
+These stop the script before anything runs, with a line that names DATABASE_URL and never the
+address or the password: a control character anywhere in it; libpq's keyword form (no ``://``)
+naming a password, a form the app cannot read; a percent-encoded query parameter name, with or
+without DATABASE_SSLMODE; a password libpq could not decode, a raw ``@`` or ``/`` in it included.
 
 The script runs under bash with every command it calls replaced by a stub. The stubs record
 their arguments and PGPASSWORD, separated by NUL bytes so that any character survives, and
@@ -140,7 +145,8 @@ def test_every_place_libpq_reads_a_password_from_leaves_the_address(tmp_path, da
     _assert_no_argument_holds(calls, _NEEDLE)
 
 
-@pytest.mark.parametrize("decoded", ["ends in a newline\n", "back\\slash and %41 kept", "café ☕",
+@pytest.mark.parametrize("decoded", ["ends in a newline\n", "back\\slash and %41 kept",
+                                     "literal \\c, \\0101 and \\n", "café ☕",
                                      "plus+stays"])
 def test_the_password_is_percent_decoded_once(tmp_path, decoded):
     encoded = quote(decoded, safe="+")
@@ -148,6 +154,41 @@ def test_the_password_is_percent_decoded_once(tmp_path, decoded):
     tools = _tools(calls)
     assert {call.password for call in tools} == {decoded}
     _assert_no_argument_holds(calls, encoded, decoded)
+
+
+def test_raw_backslash_sequences_in_the_password_arrive_as_written(tmp_path):
+    """libpq decodes only %XX: an unencoded backslash is the character itself."""
+    raw = "literal\\c\\0101\\n" + _NEEDLE
+    calls = _migrate(tmp_path, {"DATABASE_URL": _address("app:" + raw)})
+    assert {call.password for call in _tools(calls)} == {raw}
+    _assert_no_argument_holds(calls, _NEEDLE)
+
+
+@pytest.mark.parametrize(("database_url", "address"), [
+    ("postgresql://" + _HOST + ":5432/app?password=" + quote(_DECODED, safe=""), "postgresql://" + _HOST + ":5432/app"),
+    ("postgresql://app:" + _ENCODED + "@[::1]:5432/app", "postgresql://app@[::1]:5432/app"),
+], ids=["query-key-without-a-user-part", "ipv6-host"])
+def test_other_address_shapes_lose_their_password_too(tmp_path, database_url, address):
+    calls = _migrate(tmp_path, {"DATABASE_URL": database_url})
+    tools = _tools(calls)
+    assert _addresses(tools) == {address}
+    assert {call.password for call in tools} == {_DECODED}
+    _assert_no_argument_holds(calls, _NEEDLE)
+
+
+def test_an_empty_password_key_over_a_user_part_password_leaves_the_query_as_given(tmp_path):
+    """libpq reads the empty key last, so it connects with no password: the user part's goes."""
+    calls = _migrate(tmp_path, {"DATABASE_URL": _address("app:" + _ENCODED, "?application_name=boot&password=")})
+    tools = _tools(calls)
+    assert _addresses(tools) == {_address("app", "?application_name=boot&password=")}
+    assert {call.password for call in tools} == {None}
+    _assert_no_argument_holds(calls, _NEEDLE)
+
+
+def test_the_keyword_form_without_a_password_reaches_the_tools_as_given(tmp_path):
+    keywords = "host=" + _HOST + " dbname=app user=app"
+    tools = _tools(_migrate(tmp_path, {"DATABASE_URL": keywords}))
+    assert {arg for call in tools for arg in call.args if arg.startswith("host=")} == {keywords}
 
 
 def test_the_tls_settings_still_replace_the_addresses_own_keys(tmp_path):
@@ -179,18 +220,43 @@ def test_a_pgpassword_the_script_was_given_reaches_the_tools_unless_the_address_
     assert {call.password for call in tools} == {_DECODED}
 
 
-@pytest.mark.parametrize(("userinfo", "query"), [
-    ("app:bad%zz" + _NEEDLE, ""), ("app:" + _NEEDLE + "%4", ""), ("app:" + _NEEDLE + "%00", ""),
-    ("app", "?password=" + _NEEDLE + "%G1"),
-], ids=["not-hex", "one-digit", "nul", "query-key"])
-def test_a_password_libpq_cannot_decode_stops_the_entrypoint_before_anything_runs(tmp_path, userinfo, query):
-    proc, calls, _ = _execute(tmp_path, ["migrate"], {"DATABASE_URL": _address(userinfo, query)})
+def _assert_refused(tmp_path: Path, database_url: str, message: str) -> None:
+    proc, calls, _ = _execute(tmp_path, ["migrate"], {"DATABASE_URL": database_url})
     output = proc.stdout + proc.stderr
     assert proc.returncode == 1, output
     assert calls == [], "nothing is run: no pg_isready, no psql, no Python step"
-    refusal = [line for line in output.splitlines() if "DATABASE_URL holds a password libpq cannot decode" in line]
-    assert len(refusal) == 1, output
+    assert len([line for line in output.splitlines() if message in line]) == 1, output
     assert _NEEDLE not in output and _HOST not in output
+
+
+@pytest.mark.parametrize(("userinfo", "query"), [
+    ("app:bad%zz" + _NEEDLE, ""), ("app:" + _NEEDLE + "%4", ""), ("app:" + _NEEDLE + "%00", ""),
+    ("app", "?password=" + _NEEDLE + "%G1"), ("app:p@" + _NEEDLE, ""), ("app:pa/" + _NEEDLE, ""),
+], ids=["not-hex", "one-digit", "nul", "query-key", "raw-at", "raw-slash"])
+def test_a_password_libpq_cannot_decode_stops_the_entrypoint_before_anything_runs(tmp_path, userinfo, query):
+    _assert_refused(tmp_path, _address(userinfo, query), "DATABASE_URL holds a password libpq cannot decode")
+
+
+@pytest.mark.parametrize("query", ["?passw%6Frd=" + _NEEDLE, "?application_name=boot&%70assword=" + _NEEDLE,
+                                   "?ss%6Cmode=disable&password=" + _NEEDLE])
+def test_a_percent_encoded_query_name_stops_the_entrypoint_without_any_tls_setting(tmp_path, query):
+    _assert_refused(tmp_path, _address("app", query), "query parameter name in DATABASE_URL is percent-encoded")
+
+
+@pytest.mark.parametrize("database_url", [
+    "host=" + _HOST + " dbname=app user=app password=" + _NEEDLE,
+    "host=" + _HOST + " password = " + _NEEDLE,
+], ids=["keyword-form", "keyword-form-spaced"])
+def test_the_keyword_form_naming_a_password_stops_the_entrypoint(tmp_path, database_url):
+    _assert_refused(tmp_path, database_url, "DATABASE_URL names a password but is not a URL")
+
+
+@pytest.mark.parametrize("database_url", [
+    _address("app:" + _NEEDLE, "\n"), _address("app:" + _NEEDLE, "?application_name=a\nb"),
+    _address("app:" + _NEEDLE + "\t"), _address("app:" + _NEEDLE, "\r"),
+], ids=["trailing-line-break", "line-break-in-query", "tab-in-password", "carriage-return"])
+def test_a_control_character_in_the_address_stops_the_entrypoint(tmp_path, database_url):
+    _assert_refused(tmp_path, database_url, "DATABASE_URL holds a control character")
 
 
 def test_the_python_steps_are_not_given_pgpassword(tmp_path):

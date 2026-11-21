@@ -9,7 +9,8 @@ user's own PostgreSQL. With neither setting, neither variable is set and the add
 passed as given. With the mode set, the address's own ``sslmode`` and ``sslrootcert``, and
 ``requiressl`` and ``ssl``, which libpq turns into ``sslmode``, are dropped from what the tools
 get, since libpq prefers the connection string to the environment; a query key written with
-a percent-escape, which libpq decodes before matching, stops the script instead. The settings are read the way config.py's reader reads them (trimmed, the mode
+a percent-escape, which libpq decodes before matching, stops the script instead, with or
+without a mode. The settings are read the way config.py's reader reads them (trimmed, the mode
 lowercased); a value the app would refuse, verify-ca or verify-full without a CA file among
 them, stops the script before it waits for the database.
 
@@ -149,11 +150,22 @@ def test_the_keys_libpq_turns_into_sslmode_are_dropped_too(tmp_path):
     assert {line.split(" ", 1)[1] for line in addresses} == {_address("?application_name=boot")}
 
 
-def test_with_neither_setting_an_encoded_or_translated_key_reaches_the_tools_as_given(tmp_path):
-    query = "?ss%6Cmode=disable&requiressl=0&ssl=true"
+def test_with_neither_setting_a_translated_key_reaches_the_tools_as_given(tmp_path):
+    query = "?sslmode=disable&requiressl=0&ssl=true"
     proc, calls, addresses = _execute(tmp_path, {"DATABASE_URL": _address(query)})
     assert calls, proc.stdout + proc.stderr
     assert {line.split(" ", 1)[1] for line in addresses} == {_address(query)}
+
+
+def test_with_neither_setting_a_percent_encoded_query_name_stops_the_entrypoint_too(tmp_path):
+    """The entrypoint reads the address's password key by its plain name, with or without a mode."""
+    query = "?ss%6Cmode=disable&requiressl=0"
+    proc, calls, _ = _execute(tmp_path, {"DATABASE_URL": _address(query)})
+    output = proc.stdout + proc.stderr
+    assert proc.returncode == 1, output
+    assert calls == [], "nothing is run: no pg_isready, no psql, no Python step"
+    assert len([line for line in output.splitlines() if "query parameter name in DATABASE_URL" in line]) == 1
+    assert "db.example.invalid" not in output and query not in output
 
 
 def test_neither_setting_passes_the_address_as_given(tmp_path):
