@@ -61,6 +61,31 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "worker.namespace must be a namespace name \\(lower-case letters, digits and '-', at most 63, starting and ending with a letter or digit\\), got \"Automatos_Worker\""
+  - it: stops on a system namespace (kube-system)
+    set:
+      worker:
+        namespace: kube-system
+    asserts:
+      - failedTemplate:
+          errorPattern: "worker.namespace is \"kube-system\": a name starting kube- is reserved for Kubernetes' own system namespaces"
+  - it: stops on any namespace starting kube-
+    set:
+      worker:
+        namespace: kube-workers
+    asserts:
+      - failedTemplate:
+          errorPattern: "worker.namespace is \"kube-workers\": a name starting kube- is reserved"
+  - it: accepts a name that only contains kube
+    set:
+      worker:
+        namespace: automatos-kube-worker
+    asserts:
+      - hasDocuments:
+          count: 2
+      - equal:
+          path: metadata.namespace
+          value: automatos-kube-worker
+        documentIndex: 0
   - it: stops on the chart's Secret missing even when the worker has its own
     set:
       existingSecret: ""

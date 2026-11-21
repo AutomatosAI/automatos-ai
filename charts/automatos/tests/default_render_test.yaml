@@ -5,11 +5,15 @@ suite: With no new value set, the chart renders what chart 0.9.0 rendered, but f
 # worker.namespace, worker.existingSecret, workspaces.api.existingClaim,
 # workspaces.worker.existingClaim, or the placement values (US-203) is set.
 #
-# The differences from chart 0.9.0, each deliberate:
-# - helm.sh/chart is automatos-0.10.0 on every object (the chart's version);
-# - US-201: the worker's pod sets runAsNonRoot, runAsUser 1000, runAsGroup 1000 and fsGroup
-#   1000, and its container no longer adds CHOWN, DAC_OVERRIDE, SETUID and SETGID.
-# Nothing else differs. US-203's placement values render nothing while empty.
+# The differences from chart 0.9.0, each deliberate, and the complete list:
+# 1. helm.sh/chart is automatos-0.10.0 on every object (the chart's version);
+# 2. US-201: the worker's pod has a securityContext, which 0.9.0 did not set: runAsNonRoot
+#    true, runAsUser 1000, runAsGroup 1000, fsGroup 1000 and fsGroupChangePolicy
+#    OnRootMismatch (the kubelet re-groups the volume only when its top folder does not match);
+# 3. US-201: the worker's container no longer adds CHOWN, DAC_OVERRIDE, SETUID and SETGID
+#    (its capabilities are drop: [ALL] alone).
+# Nothing else differs: WORKER_INTERNAL_TOKEN stays optional with the one Secret, and US-203's
+# placement values render nothing while empty.
 templates:
   - templates/api-data-pvc.yaml
   - templates/api-deployment.yaml
@@ -502,7 +506,7 @@ tests:
                 serviceAccountName: demo-automatos-worker
                 automountServiceAccountToken: false
                 # US-201 (deliberate): chart 0.9.0 set no pod securityContext here.
-                securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000}
+                securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, fsGroupChangePolicy: OnRootMismatch}
                 containers:
                   - name: worker
                     image: ghcr.io/automatosai/automatos-workspace-worker:edge

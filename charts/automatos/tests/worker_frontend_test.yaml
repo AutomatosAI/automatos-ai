@@ -38,6 +38,7 @@ tests:
             runAsUser: 1000
             runAsGroup: 1000
             fsGroup: 1000
+            fsGroupChangePolicy: OnRootMismatch
       - notExists:
           path: spec.template.spec.containers[0].securityContext.runAsUser
       - notExists:

@@ -123,15 +123,15 @@ def test_the_image_runs_as_uid_1000_by_default():
 
 def test_the_hosted_worker_is_started_as_root_on_its_root_owned_volume():
     """Railway mounts a volume owned by root and starts a non-root image as its USER, so the
-    hosted worker, now uid 1000 by default, is told to start as root (RAILWAY_RUN_UID=0) and
-    re-owns its volume as before. The manifest names the setting; its value is set on the
-    service (docs.railway.com/volumes#permissions)."""
+    hosted worker, now uid 1000 by default, must be told to start as root (RAILWAY_RUN_UID=0)
+    and re-owns its volume as before (docs.railway.com/volumes#permissions). The manifest
+    records the value the service requires, beside the key."""
     manifest = yaml.safe_load((ROOT / "infrastructure" / "railway-manifest.json").read_text())
     worker = manifest["services"]["agent-workspace-worker"]
-    assert worker["volumes"][0]["mount"] == "/workspaces"
-    assert "RAILWAY_RUN_UID" in worker["env_keys"]
+    assert [volume["mount"] for volume in worker["volumes"]] == ["/workspaces"]
+    assert worker["required_env_values"] == {"RAILWAY_RUN_UID": "0"}
+    assert set(worker["required_env_values"]) <= set(worker["env_keys"])
     assert worker["env_keys"] == sorted(worker["env_keys"])
-    assert "RAILWAY_RUN_UID=0" in ENTRYPOINT
 
 
 # --------------------------------------------------------------------------- the chart
@@ -150,7 +150,10 @@ def _worker_security_contexts() -> list[dict]:
 
 def test_the_chart_s_worker_starts_as_uid_1000_and_gains_no_privilege_or_capability():
     pod, container = _worker_security_contexts()
-    assert pod == {"runAsNonRoot": True, "runAsUser": 1000, "runAsGroup": 1000, "fsGroup": 1000}
+    assert pod == {
+        "runAsNonRoot": True, "runAsUser": 1000, "runAsGroup": 1000,
+        "fsGroup": 1000, "fsGroupChangePolicy": "OnRootMismatch",
+    }
     assert container == {
         "allowPrivilegeEscalation": False,
         "readOnlyRootFilesystem": True,

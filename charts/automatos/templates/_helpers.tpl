@@ -203,6 +203,9 @@ file system, since a claim the chart made would be a disk of its own.
 {{- if not (regexMatch `^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$` (toString .)) }}
 {{- fail (printf "worker.namespace must be a namespace name (lower-case letters, digits and '-', at most 63, starting and ending with a letter or digit), got %q" (toString .)) }}
 {{- end }}
+{{- if hasPrefix "kube-" (toString .) }}
+{{- fail (printf "worker.namespace is %q: a name starting kube- is reserved for Kubernetes' own system namespaces. Create a namespace of your own for the worker and name it here" (toString .)) }}
+{{- end }}
 {{- end }}
 {{- if include "automatos.workerApart" . }}
 {{- if not .Values.worker.existingSecret }}

@@ -116,3 +116,6 @@ tests:
       - equal:
           path: spec.template.spec.securityContext.runAsUser
           value: 1000
+      - equal:
+          path: spec.template.spec.securityContext.fsGroupChangePolicy
+          value: OnRootMismatch

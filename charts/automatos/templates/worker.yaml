@@ -41,11 +41,14 @@ spec:
       # storage hands the volume over to the pod's group (fsGroup), as it must for the API's
       # volume, and the entrypoint re-owns nothing: it checks it can write the volume, and
       # stops with a message that says what the storage must provide when it cannot.
+      # OnRootMismatch: the kubelet changes the volume's group and permissions only when its
+      # top folder does not already match, so a start does not walk every agent file.
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: worker
           image: {{ include "automatos.image" (dict "ctx" $ "image" .Values.worker.image) }}

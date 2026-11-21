@@ -10,6 +10,14 @@
 # Each volume names the claim it is for (claimRef), and each claim the volume (volumeName), so
 # neither can bind to anything else; the empty storageClassName keeps the default class's
 # provisioner away.
+#
+# What this proves, and what it does not. With these volumes the lane proves that the worker
+# is admitted under "restricted", runs as uid 1000, writes its volume, and that the two claims
+# share files (the API reads what the worker wrote). It does NOT exercise the pod's group
+# setting (fsGroup, fsGroupChangePolicy): a hostPath volume ignores both, and the folder is
+# prepared for gid 1000 before either pod starts. That storage honouring fsGroup hands a
+# root-owned volume over writable to group 1000 is shown by the first real install on such
+# storage, not here.
 apiVersion: v1
 kind: PersistentVolume
 metadata:

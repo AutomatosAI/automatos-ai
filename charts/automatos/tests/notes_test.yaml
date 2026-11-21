@@ -4,6 +4,61 @@ templates:
 set:
   existingSecret: automatos-secrets
 tests:
+  - it: says nothing of the worker's namespace while the worker is in the release's (PRD-280 US-202)
+    asserts:
+      - notMatchRegexRaw:
+          pattern: The worker runs in the namespace
+  - it: names what must already exist in the worker's own namespace (PRD-280 US-202)
+    release:
+      name: demo
+      namespace: automatos
+    set:
+      worker:
+        namespace: automatos-worker
+        existingSecret: automatos-worker-secrets
+      workspaces:
+        api:
+          existingClaim: agent-files-api
+        worker:
+          existingClaim: agent-files-worker
+    asserts:
+      - matchRegexRaw:
+          pattern: The worker runs in the namespace automatos-worker
+      - matchRegexRaw:
+          pattern: the Secret automatos-worker-secrets \(DATABASE_URL, REDIS_URL, WORKER_INTERNAL_TOKEN\)
+      - matchRegexRaw:
+          pattern: the claim agent-files-worker, on the same file system as agent-files-api in automatos
+      - notMatchRegexRaw:
+          pattern: the ConfigMap
+      - notMatchRegexRaw:
+          pattern: the account
+      - matchRegexRaw:
+          pattern: kubectl -n automatos-worker rollout status deploy/demo-automatos-worker
+  - it: adds the CA ConfigMap and the named account when they are the operator's (PRD-280 US-202)
+    release:
+      name: demo
+      namespace: automatos
+    set:
+      database:
+        sslmode: verify-full
+        caConfigMap: database-ca
+      serviceAccount:
+        create: false
+        worker:
+          name: worker-account
+      worker:
+        namespace: automatos-worker
+        existingSecret: automatos-worker-secrets
+      workspaces:
+        api:
+          existingClaim: agent-files-api
+        worker:
+          existingClaim: agent-files-worker
+    asserts:
+      - matchRegexRaw:
+          pattern: the ConfigMap database-ca \(the database's CA\)
+      - matchRegexRaw:
+          pattern: the account worker-account
   - it: says there is no login when remote access is off
     asserts:
       - matchRegexRaw:
