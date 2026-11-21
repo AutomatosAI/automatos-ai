@@ -8,20 +8,22 @@
  *     files and generated images routes, the theme boot, the Marketplace share card) reaches the
  *     API inside the cluster. The browser never sees it. Without it those fall back to
  *     http://localhost:8000, which inside the web app's container is the web app itself, so it is
- *     required: an http or https address.
+ *     required: an origin and nothing else, `http` or `https`, a host and an optional port. No
+ *     trailing slash and no path, since the routes append `/api/…` to it as it is.
  *
  * The answer names the setting, never its value. instrumentation.ts runs this through
  * start-up-node.ts once, when the Node server starts, in the enterprise build only.
  */
-import { parseMediaOrigins } from './media-origins'
+import { HOST_NAME, isValidPort, parseMediaOrigins } from './media-origins'
 
 export const BACKEND_INTERNAL_URL_SETTING = 'BACKEND_INTERNAL_URL'
 
 export const BACKEND_INTERNAL_URL_REFUSED =
-  `${BACKEND_INTERNAL_URL_SETTING} must be the API's http or https address inside the cluster ` +
-  "(the web app's server routes call the API there)."
+  `${BACKEND_INTERNAL_URL_SETTING} must be the API's origin inside the cluster, http(s)://<host>[:port] ` +
+  "with no path and no trailing slash (the web app's server routes call the API there)."
 
-const SERVER_PROTOCOLS: ReadonlySet<string> = new Set(['http:', 'https:'])
+/** http or https, a host name (a cluster service name has one label), an optional port; nothing after it. */
+const SERVER_ORIGIN = new RegExp(`^https?://${HOST_NAME}(?::(\\d{1,5}))?$`, 'i')
 
 /** What start-up reads: the two settings, as the environment holds them. */
 export interface StartUpSettings {
@@ -29,19 +31,15 @@ export interface StartUpSettings {
   readonly BACKEND_INTERNAL_URL?: string
 }
 
-function isServerAddress(raw: string | undefined): boolean {
-  try {
-    const url = new URL(String(raw ?? '').trim())
-    return SERVER_PROTOCOLS.has(url.protocol) && url.hostname !== '' && url.username === '' && url.password === ''
-  } catch {
-    return false
-  }
+function isServerOrigin(raw: string | undefined): boolean {
+  const match = SERVER_ORIGIN.exec(String(raw ?? ''))
+  return match !== null && isValidPort(match[1])
 }
 
 /** Why the enterprise web server must not start with `settings`, or null when it may. */
 export function enterpriseStartUpProblem(settings: StartUpSettings): string | null {
   const media = parseMediaOrigins(settings.MEDIA_ORIGINS)
   if (!media.ok) return media.error
-  if (!isServerAddress(settings.BACKEND_INTERNAL_URL)) return BACKEND_INTERNAL_URL_REFUSED
+  if (!isServerOrigin(settings.BACKEND_INTERNAL_URL)) return BACKEND_INTERNAL_URL_REFUSED
   return null
 }

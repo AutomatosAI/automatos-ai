@@ -153,6 +153,28 @@ describe('the middleware sets the policy with the running server’s media origi
     expect(String(logged.mock.calls[0][0])).not.toContain('media.example.test')
   })
 
+  it('parses once per distinct value, and logs a bad value once per process however often it is served', async () => {
+    vi.resetModules()
+    const parse = vi.fn()
+    vi.doMock('@/lib/enterprise/media-origins', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/lib/enterprise/media-origins')>()
+      parse.mockImplementation(actual.parseMediaOrigins)
+      return { ...actual, parseMediaOrigins: parse }
+    })
+    const fresh = await import('@/lib/enterprise/content-security-policy')
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    for (let n = 0; n < 3; n += 1) fresh.runningPolicy(MEDIA)
+    expect(parse).toHaveBeenCalledTimes(1)
+    expect(fresh.runningPolicy(OTHER_MEDIA)).toContain(OTHER_MEDIA)
+    expect(parse).toHaveBeenCalledTimes(2)
+    for (const bad of ['https://a.example.test/x', 'data:', 'https://a.example.test/x']) {
+      for (let n = 0; n < 3; n += 1) expect(fresh.runningPolicy(bad)).toBe(ENTERPRISE_POLICY)
+    }
+    expect(logged).toHaveBeenCalledTimes(1)
+    vi.doUnmock('@/lib/enterprise/media-origins')
+  })
+
   it('with no media origin is exactly the enterprise build’s policy, and adds only img-src and media-src', () => {
     expect(runningPolicy('')).toBe(ENTERPRISE_POLICY)
     const base = directives(enterprisePolicy([]))
@@ -196,6 +218,28 @@ describe('the enterprise build', () => {
     const value = 'https://address.example.test'
     expect(() => loadConfig({ ...ENTERPRISE_BUILD, [name]: value })).toThrow(name)
     expect(() => loadConfig({ ...ENTERPRISE_BUILD, [name]: value })).not.toThrow(value)
+  })
+
+  it.each(['NEXT_PUBLIC_API_URL', 'NEXT_PUBLIC_WS_URL'] as const)('refuses %s of spaces alone, untrimmed', (name) => {
+    expect(() => loadConfig({ ...ENTERPRISE_BUILD, [name]: '  ' })).toThrow(name)
+  })
+
+  it('makes an unset address the empty string before Next inlines it, never the text undefined', () => {
+    loadConfig(ENTERPRISE_BUILD)
+    vi.stubEnv('NEXT_PUBLIC_API_URL', undefined)
+    vi.stubEnv('NEXT_PUBLIC_WS_URL', undefined)
+    delete load.cache[CONFIG]
+    load(CONFIG)
+    expect(process.env.NEXT_PUBLIC_API_URL).toBe('')
+    expect(process.env.NEXT_PUBLIC_WS_URL).toBe('')
+  })
+
+  it('leaves an unset address unset outside enterprise', () => {
+    loadConfig({})
+    vi.stubEnv('NEXT_PUBLIC_API_URL', undefined)
+    delete load.cache[CONFIG]
+    load(CONFIG)
+    expect(process.env.NEXT_PUBLIC_API_URL).toBeUndefined()
   })
 
   it('gives each path the policy from exactly one place: the build or the middleware', async () => {

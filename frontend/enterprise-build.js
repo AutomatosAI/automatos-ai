@@ -16,7 +16,10 @@
  *    security header on every path, and the build-time policy only on the paths the middleware never
  *    runs for (middleware.ts `config.matcher`): `_next` and a path with an extension outside `/api`
  *    and `/trpc`. A response never gets the policy from both, which a browser would enforce as the
- *    stricter of the two, and every document gets it from one.
+ *    stricter of the two, and every document gets it from one. The seven `redirects()` in
+ *    next.config.js carry no policy in this edition: Next answers them before the middleware runs
+ *    (its middleware page's execution order: `headers`, then `redirects`, then middleware), and a
+ *    redirect renders no document for a policy to govern.
  *
  * CommonJS, like csp-sources.js: next.config.js requires it, and so does its test.
  */
@@ -40,14 +43,34 @@ function isEnterpriseBuild(edition) {
   return String(edition || '').trim().toLowerCase() === ENTERPRISE_EDITION
 }
 
-/** Throws, naming each variable, when an enterprise build is given an address of its own. */
+/**
+ * Throws, naming each variable, when an enterprise build is given an address of its own. Any
+ * value but the empty string is refused, untrimmed: a value of spaces alone would be inlined as a
+ * truthy string and read as an address.
+ */
 function refuseBuildTimeAddresses(env) {
-  const given = BUILD_TIME_ADDRESSES.filter((name) => String(env[name] || '').trim() !== '')
+  const given = BUILD_TIME_ADDRESSES.filter((name) => env[name] !== undefined && env[name] !== '')
   if (given.length === 0) return
   throw new Error(
     `The enterprise web app calls its API and WebSocket on the page's own address, so ${given.join(' and ')} ` +
       'must be left empty when it is built (PRD-277 US-505).',
   )
+}
+
+/**
+ * Sets each unset address variable to the empty string, in the environment of the process that
+ * loads next.config.js, so every build of this edition inlines `""` and never the text
+ * `undefined` (a reader such as `${process.env.NEXT_PUBLIC_API_URL}/api/…` then stays relative,
+ * as it is in the image, whose Dockerfile sets both to ''). Early enough: Next inlines every
+ * `NEXT_PUBLIC_*` key `process.env` holds with a non-null value when it builds its bundler
+ * configuration (lib/static-env.ts `getNextPublicEnvironmentVariables`), which is after it has
+ * loaded this config, in each process that compiles. The one write to `env` in this file, and the
+ * point of it.
+ */
+function blankUnsetAddresses(env) {
+  for (const name of BUILD_TIME_ADDRESSES) {
+    if (env[name] === undefined) env[name] = ''
+  }
 }
 
 /** `rule`'s headers on every path without the policy, and the policy alone on the paths the middleware skips. */
@@ -62,5 +85,6 @@ module.exports = {
   PATHS_WITHOUT_MIDDLEWARE,
   isEnterpriseBuild,
   refuseBuildTimeAddresses,
+  blankUnsetAddresses,
   enterpriseHeaderRules,
 }

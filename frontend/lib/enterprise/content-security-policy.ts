@@ -12,10 +12,11 @@
  * put on the paths the middleware never runs for (enterprise-build.js), so it is never looser
  * than the build-time policy, only wider by the origins the operator named.
  *
- * MEDIA_ORIGINS is read on each response, as the Edge runtime gives the server's environment.
- * start-up.ts stops the server before it serves anything when the value is bad; should one get
- * here anyway, the policy names no media origin at all (the strictest answer) and says so in the
- * server log, without the value.
+ * MEDIA_ORIGINS is read on each response, as the Edge runtime gives the server's environment, but
+ * parsed once per distinct value: the policy for the last value seen is kept, and built again
+ * only when the value differs. start-up.ts stops the server before it serves anything when the
+ * value is bad; should one get here anyway, the policy names no media origin at all (the
+ * strictest answer) and the server log says so once per process, without the value.
  */
 import { contentSecurityPolicy } from '@/csp-policy.mjs'
 
@@ -28,12 +29,23 @@ export function enterprisePolicy(mediaOrigins: readonly string[]): string {
   return contentSecurityPolicy({ mediaSources: mediaOrigins.join(' ') })
 }
 
-/** The policy for the running server: its MEDIA_ORIGINS, or none when that is not a list of origins. */
-export function runningPolicy(raw: string | undefined = process.env.MEDIA_ORIGINS): string {
+/** The last value seen and its policy (a cache: the only state here), and whether a bad value has been logged. */
+let lastPolicy: { readonly raw: string; readonly policy: string } | null = null
+let refusalLogged = false
+
+function policyFor(raw: string): string {
   const parsed = parseMediaOrigins(raw)
   if (parsed.ok) return enterprisePolicy(parsed.origins)
-  console.error(`[content-security-policy] ${parsed.error} The policy names no media origin.`)
+  if (!refusalLogged) console.error(`[content-security-policy] ${parsed.error} The policy names no media origin.`)
+  refusalLogged = true
   return enterprisePolicy([])
+}
+
+/** The policy for the running server: its MEDIA_ORIGINS, or none when that is not a list of origins. */
+export function runningPolicy(raw: string | undefined = process.env.MEDIA_ORIGINS): string {
+  const value = raw ?? ''
+  if (lastPolicy === null || lastPolicy.raw !== value) lastPolicy = { raw: value, policy: policyFor(value) }
+  return lastPolicy.policy
 }
 
 /** `response`, carrying the running server's policy (the header is set on the response the middleware returns). */

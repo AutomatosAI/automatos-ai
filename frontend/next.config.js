@@ -2,13 +2,22 @@
 const path = require('path')
 const { mediaOrigins, clerkFrontendApiOrigin, stripeCspFor } = require('./csp-sources')
 const { contentSecurityPolicy } = require('./csp-policy.mjs')
-const { isEnterpriseBuild, refuseBuildTimeAddresses, enterpriseHeaderRules } = require('./enterprise-build')
+const {
+  isEnterpriseBuild,
+  refuseBuildTimeAddresses,
+  blankUnsetAddresses,
+  enterpriseHeaderRules,
+} = require('./enterprise-build')
 
 // PRD-277 US-505, PRD-279 US-402: one enterprise image for any install's address (enterprise-build.js).
-// The build refuses an API or WebSocket address of its own; the media origins and the Clerk key's host
-// are not read for it (the middleware gives the policy its media origins when the server runs).
+// The build refuses an API or WebSocket address of its own, and inlines an unset one as ''; the media
+// origins and the Clerk key's host are not read for it (the middleware gives the policy its media
+// origins when the server runs).
 const enterprise = isEnterpriseBuild(process.env.NEXT_PUBLIC_AUTH_EDITION)
-if (enterprise) refuseBuildTimeAddresses(process.env)
+if (enterprise) {
+  refuseBuildTimeAddresses(process.env)
+  blankUnsetAddresses(process.env)
+}
 
 // PRD-209 (local edition): the API's origin must be an allowed connect-src.
 const apiOrigin = (() => {

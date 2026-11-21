@@ -7,8 +7,9 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { MAX_MEDIA_ORIGINS, MAX_MEDIA_ORIGINS_LENGTH } from '@/lib/enterprise/media-origins'
 import { enterpriseStartUpProblem } from '@/lib/enterprise/start-up'
-import { START_UP_REFUSED_EXIT_CODE, stopUnlessEnterpriseReady } from '@/lib/enterprise/start-up-node'
+import { BUILD_PHASE, START_UP_REFUSED_EXIT_CODE, stopUnlessEnterpriseReady } from '@/lib/enterprise/start-up-node'
 
 const READY = { MEDIA_ORIGINS: 'https://media.example.test', BACKEND_INTERNAL_URL: 'http://api.internal.test:8000' }
 
@@ -24,6 +25,16 @@ describe('enterpriseStartUpProblem', () => {
     expect(enterpriseStartUpProblem(READY)).toBeNull()
     expect(enterpriseStartUpProblem({ ...READY, MEDIA_ORIGINS: undefined })).toBeNull()
     expect(enterpriseStartUpProblem({ ...READY, BACKEND_INTERNAL_URL: 'https://api.internal.test' })).toBeNull()
+    expect(enterpriseStartUpProblem({ ...READY, BACKEND_INTERNAL_URL: 'http://automatos-api:8000' })).toBeNull()
+  })
+
+  it('bounds MEDIA_ORIGINS: too many origins, or too long, is refused', () => {
+    const many = Array.from({ length: MAX_MEDIA_ORIGINS + 1 }, (_, n) => `https://m${n}.example.test`).join(',')
+    expect(enterpriseStartUpProblem({ ...READY, MEDIA_ORIGINS: many })).toContain('MEDIA_ORIGINS')
+    const long = `https://${'a'.repeat(60)}.${'b'.repeat(60)}.example.test`.padEnd(MAX_MEDIA_ORIGINS_LENGTH + 1, ' ')
+    expect(enterpriseStartUpProblem({ ...READY, MEDIA_ORIGINS: long })).toContain('MEDIA_ORIGINS')
+    const most = Array.from({ length: MAX_MEDIA_ORIGINS }, (_, n) => `https://m${n}.example.test`).join(',')
+    expect(enterpriseStartUpProblem({ ...READY, MEDIA_ORIGINS: most })).toBeNull()
   })
 
   it('refuses a media origin the policy may not name, naming the setting only', () => {
@@ -38,6 +49,13 @@ describe('enterpriseStartUpProblem', () => {
     ['not an address', 'api-internal'],
     ['another scheme', 'ftp://api.internal.test'],
     ['an address with a user name', 'http://user:pw@api.internal.test'],
+    ['a trailing slash', 'http://api.internal.test:8000/'],
+    ['a path', 'http://api.internal.test:8000/api'],
+    ['a query', 'http://api.internal.test?x=1'],
+    ['a port out of range', 'http://api.internal.test:70000'],
+    ['port zero', 'http://api.internal.test:0'],
+    ['a trailing dot', 'http://api.internal.test.'],
+    ['surrounding spaces', ' http://api.internal.test '],
   ])('refuses BACKEND_INTERNAL_URL %s, naming the setting only', (_why, value) => {
     const problem = enterpriseStartUpProblem({ ...READY, BACKEND_INTERNAL_URL: value })
     expect(problem).toContain('BACKEND_INTERNAL_URL')
@@ -50,6 +68,21 @@ describe('stopUnlessEnterpriseReady', () => {
     const exit = vi.fn()
     stopUnlessEnterpriseReady(READY, exit)
     expect(exit).not.toHaveBeenCalled()
+  })
+
+  it('does nothing during `next build`, even with bad settings', () => {
+    const exit = vi.fn()
+    stopUnlessEnterpriseReady({ NEXT_PHASE: BUILD_PHASE, MEDIA_ORIGINS: "'unsafe-inline'" }, exit)
+    expect(exit).not.toHaveBeenCalled()
+  })
+
+  it('stops the running server on a bad value, whatever other phase Next names', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    for (const phase of [undefined, 'phase-production-server', 'phase-development-server']) {
+      const exit = vi.fn()
+      stopUnlessEnterpriseReady({ ...READY, NEXT_PHASE: phase, BACKEND_INTERNAL_URL: undefined }, exit)
+      expect(exit, String(phase)).toHaveBeenCalledWith(START_UP_REFUSED_EXIT_CODE)
+    }
   })
 
   it('logs one line naming the setting, never its value, and stops the server', () => {
@@ -87,5 +120,28 @@ describe('register() runs the check in the enterprise Node server only', () => {
     ['saas', 'nodejs'],
   ])('not in %s on %s', async (edition, runtime) => {
     expect(await registerAs(edition, runtime)).not.toHaveBeenCalled()
+  })
+})
+
+describe('register() with the real check: a build never stops, a running server does', () => {
+  async function registerIn(phase: string): Promise<ReturnType<typeof vi.spyOn>> {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
+    vi.stubEnv('NEXT_PUBLIC_AUTH_EDITION', 'enterprise')
+    vi.stubEnv('NEXT_RUNTIME', 'nodejs')
+    vi.stubEnv('OTEL_ENABLED', '')
+    vi.stubEnv('NEXT_PHASE', phase)
+    vi.stubEnv('BACKEND_INTERNAL_URL', '')
+    const { register } = await import('../../../instrumentation')
+    await register()
+    return exit
+  }
+
+  it('does not exit in `next build` (phase-production-build), with no BACKEND_INTERNAL_URL', async () => {
+    expect(await registerIn(BUILD_PHASE)).not.toHaveBeenCalled()
+  })
+
+  it('exits on the running server (phase-production-server) with no BACKEND_INTERNAL_URL', async () => {
+    expect(await registerIn('phase-production-server')).toHaveBeenCalledWith(START_UP_REFUSED_EXIT_CODE)
   })
 })

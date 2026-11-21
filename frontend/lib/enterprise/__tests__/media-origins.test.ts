@@ -8,7 +8,13 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { MEDIA_ORIGINS_SETTING, isMediaOrigin, parseMediaOrigins } from '@/lib/enterprise/media-origins'
+import {
+  MAX_MEDIA_ORIGINS,
+  MAX_MEDIA_ORIGINS_LENGTH,
+  MEDIA_ORIGINS_SETTING,
+  isMediaOrigin,
+  parseMediaOrigins,
+} from '@/lib/enterprise/media-origins'
 
 describe('isMediaOrigin', () => {
   it.each([
@@ -43,6 +49,7 @@ describe('isMediaOrigin', () => {
     ['a port out of range', 'https://media.example.test:70000'],
     ['an empty label', 'https://media..example.test'],
     ['a label starting with a hyphen', 'https://-media.example.test'],
+    ['a trailing dot', 'https://media.example.test.'],
   ])('refuses %s', (_why, origin) => {
     expect(isMediaOrigin(origin)).toBe(false)
   })
@@ -59,6 +66,18 @@ describe('parseMediaOrigins', () => {
       ok: true,
       origins: ['https://media.example.test', 'https://*.amazonaws.com', 'http://localhost:9000'],
     })
+  })
+
+  it('takes at most MAX_MEDIA_ORIGINS origins in at most MAX_MEDIA_ORIGINS_LENGTH characters', () => {
+    const list = (count: number) => Array.from({ length: count }, (_, n) => `https://m${n}.example.test`).join(' ')
+    expect(parseMediaOrigins(list(MAX_MEDIA_ORIGINS)).ok).toBe(true)
+    expect(parseMediaOrigins(list(MAX_MEDIA_ORIGINS + 1)).ok).toBe(false)
+    expect(parseMediaOrigins('https://media.example.test'.padEnd(MAX_MEDIA_ORIGINS_LENGTH, ' ')).ok).toBe(true)
+    expect(parseMediaOrigins('https://media.example.test'.padEnd(MAX_MEDIA_ORIGINS_LENGTH + 1, ' ')).ok).toBe(false)
+  })
+
+  it('checks the wildcard for shape only: a two-label public suffix passes (the setting says to name the narrowest host)', () => {
+    expect(isMediaOrigin('https://*.co.uk')).toBe(true)
   })
 
   it('refuses the whole value for one bad origin, naming the setting and never the value', () => {
