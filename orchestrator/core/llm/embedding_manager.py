@@ -148,6 +148,16 @@ def _api_key_for(provider_type: str) -> Optional[str]:
     return getattr(_config, env_var, None) if env_var else None
 
 
+def _provider_classes() -> dict:
+    """The provider each built client serves, read when a provider is created."""
+    return {
+        EmbeddingProvider.OPENAI: OpenAIEmbeddingProvider,
+        EmbeddingProvider.OPENROUTER: OpenRouterEmbeddingProvider,
+        EmbeddingProvider.HUGGINGFACE_LOCAL: HuggingFaceLocalEmbeddingProvider,
+        EmbeddingProvider.BEDROCK: BedrockEmbeddingProvider,
+    }
+
+
 class EmbeddingManager:
     """
     Centralized manager for all embedding operations.
@@ -217,17 +227,13 @@ class EmbeddingManager:
 
     def _create_provider(self, config: EmbeddingConfig) -> BaseEmbeddingProvider:
         """Create embedding provider from config"""
-        if config.provider == EmbeddingProvider.OPENAI:
-            return OpenAIEmbeddingProvider(config)
-        elif config.provider == EmbeddingProvider.OPENROUTER:
-            return OpenRouterEmbeddingProvider(config)
-        elif config.provider == EmbeddingProvider.HUGGINGFACE_LOCAL:
-            return HuggingFaceLocalEmbeddingProvider(config)
-        elif config.provider == EmbeddingProvider.BEDROCK:
-            return BedrockEmbeddingProvider(config)
-        elif config.provider == EmbeddingProvider.DISABLED:
+        if config.provider == EmbeddingProvider.DISABLED:
             return DeterministicEmbeddingProvider(config.dimension)
-        return UnusableEmbeddingProvider(config.provider.value, "no embedding client is built for it", config.dimension)
+        provider_class = _provider_classes().get(config.provider)
+        if provider_class is None:
+            return UnusableEmbeddingProvider(config.provider.value, "no embedding client is built for it",
+                                             config.dimension)
+        return provider_class(config)
     
     def _ensure_provider(self):
         """Lazy-load provider on first use (when database is ready)"""
