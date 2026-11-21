@@ -18,7 +18,6 @@ import logging
 import mimetypes
 import os
 import re
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
@@ -32,6 +31,7 @@ from docx import Document as DocxDocument
 import psycopg2
 from botocore.exceptions import ClientError
 
+from core.database.tls import database_tls
 from core.storage import FAST_FAIL, ensure_bucket, get_s3_client
 from modules.rag.chunking.text_splitters import PythonCodeTextSplitter, RecursiveCharacterTextSplitter  # PRD-262 US-026
 from modules.rag.ingestion.section_chunks import sections_first  # F311 (night 9)
@@ -494,7 +494,7 @@ class DocumentManager:
         use_s3_vectors: bool = False,
         s3_bucket: Optional[str] = None
     ):
-        self.db_config = db_config
+        self.db_config = database_tls().with_libpq_params(db_config)
         self.processor = DocumentProcessor()
         self.workspace_id = workspace_id
         self.use_s3_vectors = use_s3_vectors

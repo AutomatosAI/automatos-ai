@@ -25,6 +25,23 @@ Local edition, open mode: there is no pairing. Anyone who can reach the API or t
 Local edition: there is no login. Anyone who can reach the web app is the admin.
 {{- end }}
 {{- end }}
+{{- if include "automatos.workerApart" . }}
+
+The worker runs in the namespace {{ .Values.worker.namespace }}. The chart created none of
+these there, so each must already exist, or the worker's pod does not start:
+  - the Secret {{ .Values.worker.existingSecret }} (DATABASE_URL, REDIS_URL, WORKER_INTERNAL_TOKEN)
+  - the claim {{ include "automatos.workerWorkspacesClaim" . }}, on the same file system as {{ include "automatos.workspacesClaim" . }} in {{ .Release.Namespace }}
+{{- with .Values.database.caConfigMap }}
+  - the ConfigMap {{ . }} (the database's CA)
+{{- end }}
+{{- if not .Values.serviceAccount.create }}
+{{- with (index .Values.serviceAccount "worker" | default dict).name }}
+  - the account {{ . }}
+{{- end }}
+{{- end }}
+Check it:
+  kubectl -n {{ .Values.worker.namespace }} rollout status deploy/{{ include "automatos.fullname" . }}-worker
+{{- end }}
 {{- if .Values.sessionMode.enabled }}
 
 Session mode is on. Pair the CLI host on your machine with this API's address
