@@ -3,6 +3,8 @@
 import { useCallback, useMemo } from 'react'
 import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
+import { isEnterprise } from '@/lib/edition-name'
+import { fetchApiReachable } from '@/lib/enterprise/api-reachable'
 
 /**
  * PRD-260 T-004 — is the backend answering? Play's connection pill asks
@@ -97,13 +99,19 @@ export function apiHost(baseUrl: string, pageUrl: string): string | undefined {
   }
 }
 
-/** GET /health. A frozen backend never answers: the ask gives up, and fails like any other. */
-export function fetchBackendHealth<T = unknown>(): Promise<T> {
+/**
+ * GET /health. A frozen backend never answers: the ask gives up, and fails like any other.
+ * PRD-277 US-505: in enterprise `/health` is not exposed on the install's host, so the ask is
+ * whether the API answers its routed, public discovery path (lib/enterprise/api-reachable.ts),
+ * and the answer has no body (null).
+ */
+export function fetchBackendHealth<T = unknown>(enterprise: boolean = isEnterprise): Promise<T | null> {
+  if (enterprise) return fetchApiReachable(BACKEND_HEALTH_TIMEOUT_MS)
   return apiClient.request<T>('/health', { signal: AbortSignal.timeout(BACKEND_HEALTH_TIMEOUT_MS) })
 }
 
-/** The one GET /health query, as react-query reports it; `T` is the answer's shape the caller reads. */
-export function useBackendHealthQuery<T = unknown>({ poll = false }: BackendHealthOptions = {}): UseQueryResult<T> {
+/** The one GET /health query, as react-query reports it; `T` is the answer's shape the caller reads (null in enterprise). */
+export function useBackendHealthQuery<T = unknown>({ poll = false }: BackendHealthOptions = {}): UseQueryResult<T | null> {
   return useQuery({
     queryKey: BACKEND_HEALTH_QUERY_KEY,
     queryFn: () => fetchBackendHealth<T>(),
