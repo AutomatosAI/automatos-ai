@@ -14,7 +14,7 @@ many organisations share, whether the CA file holds a certificate) it judges at 
 
 {{/* The settings the chart sets in the enterprise edition, which `config` must not set too. */}}
 {{- define "automatos.enterpriseSettings" -}}
-DEFAULT_WORKSPACE_ID FRONTEND_URL CLIENT_IP_HEADER ENTERPRISE_BOOTSTRAP_ADMINS ENTERPRISE_DEFAULT_ROLE OIDC_ISSUER OIDC_CLIENT_ID OIDC_DISPLAY_NAME OIDC_SCOPES OIDC_REQUIRED_CLAIMS OIDC_ENDPOINT_HOSTS OIDC_CA_BUNDLE_FILE
+DEFAULT_WORKSPACE_ID FRONTEND_URL CLIENT_IP_HEADER CLIENT_IP_PROXY_COUNT ENTERPRISE_BOOTSTRAP_ADMINS ENTERPRISE_DEFAULT_ROLE OIDC_ISSUER OIDC_CLIENT_ID OIDC_DISPLAY_NAME OIDC_SCOPES OIDC_REQUIRED_CLAIMS OIDC_ENDPOINT_HOSTS OIDC_CA_BUNDLE_FILE
 {{- end }}
 
 {{/*
@@ -40,6 +40,15 @@ true
 {{- if regexMatch `^[0-9a-f]{32}$` $hex -}}
 true
 {{- end -}}
+{{- end }}
+
+{{/*
+edition.enterprise.clientIpProxyCount (CLIENT_IP_PROXY_COUNT) as trimmed text: empty when unset or
+"". A 0 stays "0", so it is refused, never read as unset.
+*/}}
+{{- define "automatos.clientIpProxyCount" -}}
+{{- $raw := (.Values.edition.enterprise | default dict).clientIpProxyCount -}}
+{{- if not (kindIs "invalid" $raw) }}{{ toString $raw | trim }}{{ end -}}
 {{- end }}
 
 {{/* Stops the render on a `config` entry the enterprise edition sets elsewhere. */}}
@@ -71,6 +80,9 @@ true
 {{- if not (toString ($enterprise.publicUrl | default "") | trim) }}
 {{- fail "edition.enterprise.publicUrl is required in the enterprise edition: the install's public address, https://<host>, which the web app and the API share (FRONTEND_URL)" }}
 {{- end }}
+{{- if and (include "automatos.clientIpProxyCount" .) (not (toString ($enterprise.clientIpHeader | default "") | trim)) }}
+{{- fail "edition.enterprise.clientIpProxyCount needs edition.enterprise.clientIpHeader (CLIENT_IP_PROXY_COUNT, CLIENT_IP_HEADER): name the header your own proxies append the caller's address to" }}
+{{- end }}
 {{- if not (toString ($enterprise.clientIpHeader | default "") | trim) }}
 {{- fail "edition.enterprise.clientIpHeader is required in the enterprise edition: the header your ingress controller or proxy sets to the caller's address, which sign-in limits requests by and writes to the audit log (CLIENT_IP_HEADER)" }}
 {{- end }}
@@ -95,6 +107,7 @@ true
 {{- if not (include "automatos.httpsAddress" $enterprise.publicUrl) }}
 {{- fail "edition.enterprise.publicUrl must be an https address with a host (FRONTEND_URL): the API refuses to start otherwise" }}
 {{- end }}
+{{- include "automatos.validateClientIpProxyCount" . }}
 {{- if not (regexMatch "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$" (toString $enterprise.clientIpHeader | trim)) }}
 {{- fail "edition.enterprise.clientIpHeader must be one header name, letters, digits and - (CLIENT_IP_HEADER): the API refuses to start otherwise" }}
 {{- end }}
@@ -119,6 +132,22 @@ no "..", since it names the file under the mount.
 {{- if or (gt (len $key) 253) (not (regexMatch `^[-._a-zA-Z0-9]+$` $key)) (contains ".." $key) }}
 {{- fail "edition.enterprise.oidc.caKey must be a plain file name, the ConfigMap's key: letters, digits, -, _ and ., with no path separator and no \"..\"" }}
 {{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+How many of the install's own proxies append to the client address header, as the API checks it
+(core/client_ip_settings.py): a whole number from 1 to 8 when set, and set when the header is
+X-Forwarded-For, the header proxies append to.
+*/}}
+{{- define "automatos.validateClientIpProxyCount" -}}
+{{- $header := toString ((.Values.edition.enterprise | default dict).clientIpHeader | default "") | trim | lower -}}
+{{- $count := include "automatos.clientIpProxyCount" . -}}
+{{- if and $count (or (not (regexMatch `^[0-9]{1,3}$` $count)) (lt (atoi $count) 1) (gt (atoi $count) 8)) }}
+{{- fail "edition.enterprise.clientIpProxyCount must be a whole number from 1 to 8 (CLIENT_IP_PROXY_COUNT): how many of your own proxies append the caller's address to edition.enterprise.clientIpHeader. The API refuses to start otherwise" }}
+{{- end }}
+{{- if and (not $count) (eq $header "x-forwarded-for") }}
+{{- fail "edition.enterprise.clientIpProxyCount must be set (CLIENT_IP_PROXY_COUNT): edition.enterprise.clientIpHeader names the header proxies append to, so say how many of your own proxies append to it (1 for one load balancer, 2 for a content network in front of one)" }}
 {{- end }}
 {{- end }}
 
@@ -181,6 +210,10 @@ value left empty is not rendered, so the API's own default holds.
   value: {{ $enterprise.publicUrl | toString | trim | quote }}
 - name: CLIENT_IP_HEADER
   value: {{ $enterprise.clientIpHeader | toString | trim | quote }}
+{{- with include "automatos.clientIpProxyCount" . }}
+- name: CLIENT_IP_PROXY_COUNT
+  value: {{ . | quote }}
+{{- end }}
 - name: OIDC_ISSUER
   value: {{ $oidc.issuer | toString | trim | quote }}
 - name: OIDC_CLIENT_ID

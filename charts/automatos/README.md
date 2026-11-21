@@ -155,7 +155,8 @@ or is one the API would refuse at start.
 | Value | API setting | |
 |---|---|---|
 | `edition.enterprise.publicUrl` | `FRONTEND_URL` | Required. The install's public address, `https://<host>`, shared by the web app and the API. The sign-in callback and the session cookie are on its origin. |
-| `edition.enterprise.clientIpHeader` | `CLIENT_IP_HEADER` | Required. The header your ingress controller sets to the caller's address (`X-Real-IP` for ingress-nginx). Sign-in limits requests by it and the audit log records it. Name the header your proxy sets on every request, overwriting any value the caller sent. |
+| `edition.enterprise.clientIpHeader` | `CLIENT_IP_HEADER` | Required. The header your ingress controller sets to the caller's address (`X-Real-IP` for ingress-nginx). Sign-in limits requests by it and the audit log records it. Name the header your proxy sets on every request, overwriting any value the caller sent, or the header your proxies append to, with `clientIpProxyCount`. |
+| `edition.enterprise.clientIpProxyCount` | `CLIENT_IP_PROXY_COUNT` | How many of your own proxies append the caller's address to `clientIpHeader`, from 1 to 8: 1 for one load balancer, 2 for a content network in front of one. Count every proxy of yours that appends to the header, an ingress controller set to append among them. The API reads the value that many from the header's end. Required when `clientIpHeader` is `X-Forwarded-For` (behind an AWS application load balancer, which appends to it: set 1). Empty: the header's first value. |
 | `edition.enterprise.oidc.issuer` | `OIDC_ISSUER` | Required. The provider's issuer address, `https` only. |
 | `edition.enterprise.oidc.clientId` | `OIDC_CLIENT_ID` | Required. The application's client id at the provider. |
 | `edition.enterprise.oidc.displayName` | `OIDC_DISPLAY_NAME` | The sign-in button's text, 1 to 64 characters, no `<` or `>`. Empty: "your organisation". |
@@ -198,6 +199,16 @@ ingress:
   host: automatos.example.com
 ```
 
+Behind an AWS application load balancer, which appends the connecting address to
+`X-Forwarded-For`, name that header and say how many of your own proxies append to it:
+
+```yaml
+edition:
+  enterprise:
+    clientIpHeader: X-Forwarded-For
+    clientIpProxyCount: 1   # 2 with a content network in front of the load balancer
+```
+
 ## The worker in a namespace of its own
 
 `worker.namespace` puts the worker in a namespace other than the release's, so it can have its own pod security level, network rules and quotas. A Secret, a ServiceAccount and a PersistentVolumeClaim belong to one namespace, and the chart never creates a namespace, so you provide, before `helm install`:
@@ -223,6 +234,7 @@ Rendering stops with a message on a combination that cannot work:
 - **The enterprise edition can be installed** (`edition.authEdition=enterprise`, PRD-277). It needs, before `helm install`:
   - `OIDC_CLIENT_SECRET` in the Secret `existingSecret` names: the API does not start without it;
   - `edition.enterprise.publicUrl`, `clientIpHeader`, `oidc.issuer` and `oidc.clientId`: rendering stops, naming the value, while one is missing or is one the API would refuse;
+  - behind proxies that append to the client address header, `edition.enterprise.clientIpProxyCount`: how many of your own proxies append to it (1 behind one AWS application load balancer with `clientIpHeader: X-Forwarded-For`). Rendering stops while `clientIpHeader` is `X-Forwarded-For` and the count is empty, while the count is not a whole number from 1 to 8, and while a count is set with no `clientIpHeader`;
   - the application registered at your identity provider with the two addresses the install notes print;
   - the ingress on, on the host of `publicUrl`, with TLS, so the web app and the API answer on one origin;
   - for a provider with a private certificate, a ConfigMap with its CA (`edition.enterprise.oidc.caConfigMap`).

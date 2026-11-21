@@ -47,8 +47,14 @@ edition:
     # Required. The header your ingress controller or proxy sets to the caller's address
     # (CLIENT_IP_HEADER), e.g. X-Real-IP for ingress-nginx. Sign-in limits requests by that
     # address and writes it to the audit log. Name the header your proxy sets on every
-    # request, overwriting any value the caller sent.
+    # request, overwriting any value the caller sent, or the one your proxies append to
+    # (X-Forwarded-For behind an AWS application load balancer) with clientIpProxyCount.
     clientIpHeader: ""
+    # How many of your own proxies append the caller's address to clientIpHeader
+    # (CLIENT_IP_PROXY_COUNT), from 1 to 8: 1 for one load balancer, 2 for a content network
+    # in front of one. The API reads the value that many from the header's end. Required when
+    # clientIpHeader is X-Forwarded-For. Empty: the header's first value is the address.
+    clientIpProxyCount: ""
     # People who become install admins at their first sign-in, or at any sign-in while the
     # install has no active install admin (ENTERPRISE_BOOTSTRAP_ADMINS): sub:<subject> and
     # email:<address> entries, separated by commas. The API checks the entries at start.
