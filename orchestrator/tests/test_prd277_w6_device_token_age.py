@@ -4,8 +4,9 @@
   whole number from 1 to 3650 and refuses anything else, naming the setting and never the value. There is
   no "off". ``local`` and ``saas`` never read it: no value stops them.
 * **The age** counts from the phone's last pairing or sign-in on the phone (``paired_at``), never from a
-  rotation, from the row's creation where no pairing time was recorded, and from now for a pairing time
-  later than now. A device is past it from the moment the age reaches the maximum.
+  rotation, from the row's creation where no pairing time was recorded. A pairing time later than now is read
+  as now, and the device ages out one maximum age after that time. A device is past its age from the
+  moment the age reaches the maximum.
 * **One rule, three readers**: push fan-out leaves a device past its age out in enterprise and builds
   exactly today's filters elsewhere; the device list shows such a device as ``expired`` in enterprise only.
 
@@ -173,12 +174,15 @@ def test_the_maximum_age_follows_the_setting(monkeypatch):
     assert token_age.is_past_max_age(_row(paired_at=NOW - timedelta(days=2)), NOW) is True
 
 
-def test_a_pairing_time_later_than_now_counts_as_now(monkeypatch):
+def test_a_pairing_time_later_than_now_is_read_as_now_and_ages_from_that_time(monkeypatch):
     monkeypatch.setattr(config, SETTING, 1)
     row = _row(paired_at=NOW + timedelta(days=30))
     assert token_age.issued_at(row, NOW) == NOW
     assert token_age.is_past_max_age(row, NOW) is False
-    assert token_age.is_past_max_age(row, NOW + timedelta(days=1)) is True
+    # Read as now at every moment before it, so the device is never past its age early...
+    assert token_age.is_past_max_age(row, NOW + timedelta(days=30)) is False
+    # ...and one maximum age after that pairing time, it is.
+    assert token_age.is_past_max_age(row, NOW + timedelta(days=31)) is True
 
 
 # --------------------------------------------------------------------------- push fan-out and the device list
