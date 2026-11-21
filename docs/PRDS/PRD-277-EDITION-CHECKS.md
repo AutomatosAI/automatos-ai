@@ -196,6 +196,8 @@ A migration is history. Rewriting it to read a capability changes what an old re
 | 96 | `services/themes/revocation_sync_state.py:81` | H | Revoked key ids read from the stored pull | `hosts_automatos_cloud` | stored ids | none | stored ids, whether or not revocations are switched on now: a key a pull revoked stays revoked once they are off (US-704) |
 | 97 | `services/workspace_move/export.py:125` | R | `edition` in a workspace export's manifest | (name) | `local` | `saas` | `enterprise` |
 | 98 | `services/workspace_purge.py:232` | C | Purging an owner's last workspace also deletes their account | `last_workspace_purge_deletes_person` | never | yes | never (G-8) |
+| 99 | `api/phone_sign_in.py:46` | H | The phone sign-in's confirmation routes (`/api/v1/auth/oidc/phone/waiting`, `continue`, `cancel`), through `auth_oidc._signs_in_with_oidc` | `sign_in` | 404 | 404 | served (built, US-603) |
+| 100 | `api/mobile_devices.py` (`_require_phone_sign_in`) | H | `POST /api/v1/mobile/sign-in/exchange` | `sign_in` | 404 | 404 | served (built, US-603) |
 
 ### Shell
 
@@ -266,6 +268,7 @@ The frontend has its own seam, `frontend/lib/auth-edition.ts`, fixed at build ti
 | W44 | `lib/theme-sdk/context.ts:125` | `useEdition()` gives themes the edition name, typed `'local' \| 'saas'` | (name) | `local` | `saas` | `enterprise`: a change to the theme SDK contract |
 | W45 | `lib/otel/node.ts:99` | `automatos.edition` trace attribute | (name) | `local` | `saas` | `enterprise` |
 | W46 | `Dockerfile:81, 94` | Build argument, default `saas` | (the flag) | `local` | `saas` | an enterprise image (US-505) |
+| W47 | `app/sign-in/phone/page.tsx:13` | The page a phone's sign-in waits on (Continue, Cancel) | `sign_in` | not found | not found | shown (built, US-603) |
 
 Two response types also name only two editions and widen with the value: `lib/api-client.ts:434` (profile `edition: 'local' | 'saas'`) and `hooks/use-provider-registry.ts:49`.
 
