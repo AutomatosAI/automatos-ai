@@ -545,10 +545,15 @@ services:
         org.opencontainers.image.revision: ${AUTOMATOS_REVISION:-unknown}
     container_name: automatos_workspace_worker
     restart: unless-stopped
+    # PRD-280 US-201: the image starts as uid 1000; compose starts it as root on purpose. The
+    # entrypoint then takes your deliverables folder's owner when uid 1000 cannot write it (a
+    # Linux host whose user is another uid) and re-owns the volume, before it drops to the
+    # worker. The chart starts it as uid 1000, and it repairs nothing there.
+    user: "0:0"
     # F452 (#1309): the worker runs agent code. Its entrypoint starts as root only to re-own
     # the workspace volume (CHOWN; DAC_OVERRIDE to walk folders it doesn't own) and drop to
     # uid 1000 (SETUID, SETGID) with setpriv --no-new-privs; nothing after needs a capability.
-    # The chart's worker securityContext keeps the same four.
+    # The chart adds none: it never starts the worker as root.
     cap_drop:
       - ALL
     cap_add:

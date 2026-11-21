@@ -184,7 +184,7 @@ When the backend container boots, its entrypoint executes a sequential readiness
 4. **Seed Loading**: Populates baseline data, default agents, and workspace records idempotently
 5. **Server Launch**: Starts the FastAPI application via `uvicorn`
 
-The `workspace-worker` container uses `services/workspace-worker/entrypoint.sh` to handle ownership of mounted volumes before dropping privileges to the non-root `worker` user via `setpriv` [services/workspace-worker/entrypoint.sh:54-93](). If `uid 1000` cannot write to `LOCAL_WORKSPACE_ROOT`, the entrypoint assigns the folder owner's UID/GID to the worker process so host deliverables remain fully accessible without permission denied errors [services/workspace-worker/entrypoint.sh:4-52]().
+The `workspace-worker` container uses `services/workspace-worker/entrypoint.sh` to handle ownership of mounted volumes before dropping privileges to the non-root `worker` user via `setpriv` [services/workspace-worker/entrypoint.sh:54-93](). It does this only when the container starts as root, which compose asks for with `user: "0:0"` on the `workspace-worker` service [docker-compose.yml](). The image's own default user is uid 1000 (PRD-280 US-201): started that way, as the Helm chart starts it, the entrypoint changes no owner, checks that it can write its folders, and stops with a message if it cannot. If `uid 1000` cannot write to `LOCAL_WORKSPACE_ROOT`, the entrypoint assigns the folder owner's UID/GID to the worker process so host deliverables remain fully accessible without permission denied errors [services/workspace-worker/entrypoint.sh:4-52]().
 
 Title: "Backend Initialization Lifecycle Sequence"
 ```mermaid

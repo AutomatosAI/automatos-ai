@@ -16,8 +16,14 @@ tests:
           content:
             name: DOCUMENT_UPLOAD_DIR
             value: /app/data/uploads
-      - notExists:
+      - notContains:
           path: spec.template.spec.containers[0].volumeMounts
+          content: {name: data}
+          any: true
+      - notContains:
+          path: spec.template.spec.volumes
+          content: {name: data}
+          any: true
   - it: gets the object storage credentials from the Secret, like the API
     asserts:
       - contains:
@@ -66,19 +72,57 @@ tests:
           content:
             name: LOCAL_OPERATOR_EMAIL
             value: local@automatos.local
-  - it: does not use the chart's ServiceAccount, which doesn't exist yet at pre-install
+  - it: runs under its own account, with no cluster token, after the hook that creates the account (PRD-280 US-101)
+    release:
+      name: demo
     asserts:
-      - notExists:
+      - equal:
           path: spec.template.spec.serviceAccountName
-  - it: uses a pre-existing ServiceAccount when one is named
+          value: demo-automatos-migrate
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+      # The account's hook weighs -10 (serviceaccount_test.yaml), so it runs first.
+      - equal:
+          path: metadata.annotations["helm.sh/hook-weight"]
+          value: "0"
+  - it: has the runtime's default system-call filter (PRD-280 US-102) and a read-only root (US-104)
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext
+          value:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+  - it: uses a pre-existing account when one is named
+    set:
+      serviceAccount:
+        create: false
+        migrate:
+          name: automatos-migrate-identity
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: automatos-migrate-identity
+  - it: runs under the namespace's default account when none is created or named
+    set:
+      serviceAccount:
+        create: false
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: default
+  - it: stops on the one account for every pod that charts before 0.7.0 took, saying what to set
     set:
       serviceAccount:
         create: false
         name: automatos-identity
     asserts:
-      - equal:
-          path: spec.template.spec.serviceAccountName
-          value: automatos-identity
+      - failedTemplate:
+          errorPattern: "serviceAccount.name: since chart 0.7.0 each component has its own account. Set serviceAccount.api.name"
   - it: omits the local-edition settings in the hosted edition
     set:
       edition:

@@ -13,7 +13,10 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
+# The seed loader runs this seeder at boot, on the app's own database: the engine is built
+# with DATABASE_SSLMODE and DATABASE_SSLROOTCERT (PRD-278 W3).
+from core.database.tls import create_app_engine as create_engine
 from core.database.database import get_database_url
 
 # Professional starter agents with REAL tools and detailed descriptions

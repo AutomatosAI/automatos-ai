@@ -5,7 +5,8 @@ migrates, seeds and (local edition) creates the workspace and operator, then
 exits. A failed seed fails the Job, and a failed Job fails the install/upgrade.
 
 As a hook it runs before the release's ordinary resources exist, so it takes its
-settings inline (automatos.apiEnv) and does not use the chart's ServiceAccount.
+settings inline (automatos.apiEnv), and its own account is a hook too, of a lower
+weight, so it exists before the Job (serviceaccount.yaml).
 */ -}}
 apiVersion: batch/v1
 kind: Job
@@ -28,10 +29,8 @@ spec:
         {{- include "automatos.selectorLabels" (dict "ctx" $ "component" "migrate") | nindent 8 }}
     spec:
       restartPolicy: Never
+      serviceAccountName: {{ include "automatos.serviceAccountName" (dict "ctx" $ "component" "migrate") }}
       automountServiceAccountToken: false
-      {{- if and (not .Values.serviceAccount.create) .Values.serviceAccount.name }}
-      serviceAccountName: {{ .Values.serviceAccount.name }}
-      {{- end }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -43,9 +42,41 @@ spec:
           args: ["migrate"]
           env:
             {{- include "automatos.apiEnv" . | nindent 12 }}
+          {{- $caMount := include "automatos.databaseCaMount" . | trim }}
+          {{- if or $caMount .Values.migrations.readOnlyRootFilesystem }}
+          volumeMounts:
+            {{- with $caMount }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- if .Values.migrations.readOnlyRootFilesystem }}
+            # A read-only root (PRD-280 US-104): /tmp is the one path the Job writes, for a
+            # here-document too large for a pipe (docs/PRDS/PRD-280-US-103-WRITE-PATHS.md).
+            - name: tmp
+              mountPath: /tmp
+            {{- end }}
+          {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
+            {{- if .Values.migrations.readOnlyRootFilesystem }}
+            readOnlyRootFilesystem: true
+            {{- end }}
             capabilities:
               drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           resources:
             {{- toYaml .Values.migrations.resources | nindent 12 }}
+      {{- $caVolume := include "automatos.databaseCaVolume" . | trim }}
+      {{- if or $caVolume .Values.migrations.readOnlyRootFilesystem }}
+      volumes:
+        {{- with $caVolume }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.migrations.readOnlyRootFilesystem }}
+        - name: tmp
+          emptyDir: {}
+        {{- end }}
+      {{- end }}
+      {{- with include "automatos.placement" .Values.migrations | trim }}
+      {{- . | nindent 6 }}
+      {{- end }}

@@ -1,0 +1,121 @@
+suite: Every container's security settings (PRD-280 US-102, and the read-only root of US-104)
+set:
+  existingSecret: automatos-secrets
+  # Every optional component on.
+  frontend:
+    enabled: true
+  worker:
+    enabled: true
+  api:
+    data:
+      enabled: true
+  ingress:
+    enabled: true
+  sessionMode:
+    enabled: true
+  otel:
+    enabled: true
+    endpoint: http://otel-collector:4318
+# Each pod has exactly one container and no init container, so checking containers[0]
+# checks every container: a second one, or an init container, fails here until it is
+# added to these checks.
+tests:
+  - it: gives the API's container the default system-call filter, no privilege escalation and no capability
+    template: templates/api-deployment.yaml
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 1
+      - notExists:
+          path: spec.template.spec.initContainers
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.seccompProfile.type
+          value: RuntimeDefault
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          value: ["ALL"]
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.capabilities.add
+  - it: gives the web app's container the default system-call filter, no privilege escalation and no capability
+    template: templates/frontend.yaml
+    documentIndex: 0
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 1
+      - notExists:
+          path: spec.template.spec.initContainers
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.seccompProfile.type
+          value: RuntimeDefault
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          value: ["ALL"]
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.capabilities.add
+  - it: gives the migration Job's container the default system-call filter, no privilege escalation and no capability
+    template: templates/migrate-job.yaml
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 1
+      - notExists:
+          path: spec.template.spec.initContainers
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.seccompProfile.type
+          value: RuntimeDefault
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          value: ["ALL"]
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.capabilities.add
+  - it: gives the worker's container the same, with no capability, and its pod a non-root user (PRD-280 US-201)
+    template: templates/worker.yaml
+    documentIndex: 0
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 1
+      - notExists:
+          path: spec.template.spec.initContainers
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.seccompProfile.type
+          value: RuntimeDefault
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          value: ["ALL"]
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.capabilities.add
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 1000
+      - equal:
+          path: spec.template.spec.securityContext.fsGroupChangePolicy
+          value: OnRootMismatch

@@ -1,3 +1,8 @@
+{{- /*
+The agent-files claim, unless a side names one that already exists (workspaces.api.existingClaim,
+workspaces.worker.existingClaim; PRD-280 US-202). The worker in its own namespace needs both.
+*/ -}}
+{{- if include "automatos.workspacesClaimCreated" . }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -16,3 +21,4 @@ spec:
   resources:
     requests:
       storage: {{ .Values.workspaces.size }}
+{{- end }}

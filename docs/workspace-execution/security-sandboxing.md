@@ -70,7 +70,9 @@ Sources: [docs/workspace-execution/security-sandboxing.md:29-30]()
 
 ### Mounted workspace ownership boundary
 
-The entrypoint checks whether the worker can write to `LOCAL_WORKSPACE_ROOT`. If it cannot, it reads the folder owner’s UID and GID and may remap the `worker` account to that owner, subject to checks that prevent taking root’s UID/GID or IDs already assigned to other image accounts. It does not change ownership of the user’s deliverables folder. [services/workspace-worker/entrypoint.sh:13-19](), [services/workspace-worker/entrypoint.sh:21-52](), [services/workspace-worker/entrypoint.sh:54-64]()
+Everything in this section happens only when the container starts as root: compose asks for that with `user: "0:0"` on the `workspace-worker` service, and the hosted service with `RAILWAY_RUN_UID=0`. The image's default user is uid 1000 (PRD-280 US-201), and the Helm chart starts it so: then the entrypoint remaps no account and re-owns nothing; it checks that it can write `WORKSPACE_VOLUME_PATH` (and `LOCAL_WORKSPACE_ROOT` when set) and stops with a message if it cannot. [services/workspace-worker/entrypoint.sh]()
+
+Started as root, the entrypoint checks whether the worker can write to `LOCAL_WORKSPACE_ROOT`. If it cannot, it reads the folder owner’s UID and GID and may remap the `worker` account to that owner, subject to checks that prevent taking root’s UID/GID or IDs already assigned to other image accounts. It does not change ownership of the user’s deliverables folder. [services/workspace-worker/entrypoint.sh:13-19](), [services/workspace-worker/entrypoint.sh:21-52](), [services/workspace-worker/entrypoint.sh:54-64]()
 
 For the broader volume ownership repair, the entrypoint prunes `*/projects` and `LOCAL_WORKSPACE_ROOT` from the `find` walk, skips files already owned by `worker`, and uses `chown -h` so a symlink itself is changed rather than its target. A failed walk is logged rather than silently ignored. [services/workspace-worker/entrypoint.sh:66-79]()
 

@@ -90,11 +90,13 @@ def _connect():
 
     ``get_database_url()`` tries the credential system, then DATABASE_URL, then the
     POSTGRES_* parts. Railway and Kubernetes provide only DATABASE_URL; reading only
-    POSTGRES_* (and falling back to localhost) meant nothing was seeded there.
+    POSTGRES_* (and falling back to localhost) meant nothing was seeded there. It is
+    secured like every other connection to that database (PRD-278 W3).
     """
     from core.database.database import get_database_url
+    from core.database.tls import database_tls
 
-    return psycopg2.connect(get_database_url())
+    return psycopg2.connect(get_database_url(), **database_tls().libpq_params())
 
 
 def _credential_row(cred: dict) -> tuple:

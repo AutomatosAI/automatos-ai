@@ -164,18 +164,21 @@ async def test_the_worker_writes_in_a_thread_not_on_its_event_loop(monkeypatch, 
     worker_main = load_worker_main(monkeypatch, tmp_path)
     calls = []
 
-    def record(url, task_id, status, worker_id, error=None):
-        calls.append((threading.get_ident(), url, task_id, status, worker_id, error))
+    def record(url, task_id, status, worker_id, error=None, tls=None):
+        calls.append((threading.get_ident(), url, task_id, status, worker_id, error, tls))
         return True
 
     monkeypatch.setattr(worker_main, "record_task_status", record)
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg2://u:p@db/x")
+    monkeypatch.delenv("DATABASE_SSLMODE", raising=False)
+    monkeypatch.delenv("DATABASE_SSLROOTCERT", raising=False)
     worker = worker_main.WorkspaceWorker()
     await worker._update_db_execution(TASK_ID, "failed", error="boom")
-    ((thread, url, task_id, status, worker_id, error),) = calls
+    ((thread, url, task_id, status, worker_id, error, tls),) = calls
     assert thread != threading.get_ident(), "the UPDATE ran on the event loop's thread"
     assert (url, task_id, status, worker_id, error) == (
         "postgresql+psycopg2://u:p@db/x", TASK_ID, "failed", worker._worker_id, "boom")
+    assert tls == {}, "with neither TLS setting the write adds no libpq keyword (PRD-278 W3)"
 
 
 @pytest.mark.asyncio

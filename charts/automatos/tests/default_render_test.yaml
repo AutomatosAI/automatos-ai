@@ -1,0 +1,546 @@
+suite: With no new value set, the chart renders what chart 0.9.0 rendered, but for US-201 (PRD-280 US-202, FR-12)
+# Every object the chart renders with its defaults (and the one required value, existingSecret),
+# pinned whole: its kind, its metadata and its spec (a ServiceAccount's token setting), and how
+# many objects each template renders. Any field added, removed or changed fails here. None of
+# worker.namespace, worker.existingSecret, workspaces.api.existingClaim,
+# workspaces.worker.existingClaim, or the placement values (US-203) is set.
+#
+# The differences from chart 0.9.0, each deliberate, and the complete list:
+# 1. helm.sh/chart is automatos-0.10.0 on every object (the chart's version);
+# 2. US-201: the worker's pod has a securityContext, which 0.9.0 did not set: runAsNonRoot
+#    true, runAsUser 1000, runAsGroup 1000, fsGroup 1000 and fsGroupChangePolicy
+#    OnRootMismatch (the kubelet re-groups the volume only when its top folder does not match);
+# 3. US-201: the worker's container no longer adds CHOWN, DAC_OVERRIDE, SETUID and SETGID
+#    (its capabilities are drop: [ALL] alone).
+# Nothing else differs: WORKER_INTERNAL_TOKEN stays optional with the one Secret, and US-203's
+# placement values render nothing while empty.
+templates:
+  - templates/api-data-pvc.yaml
+  - templates/api-deployment.yaml
+  - templates/api-service.yaml
+  - templates/frontend.yaml
+  - templates/ingress-session-mode.yaml
+  - templates/ingress.yaml
+  - templates/migrate-job.yaml
+  - templates/serviceaccount.yaml
+  - templates/worker.yaml
+  - templates/workspaces-pvc.yaml
+release:
+  name: demo
+  namespace: automatos
+set:
+  existingSecret: automatos-secrets
+tests:
+  # ── how many objects each template renders ────────────────────────────────────
+  - it: renders no Ingress
+    template: templates/ingress.yaml
+    asserts:
+      - hasDocuments: {count: 0}
+  - it: renders no session-mode Ingress
+    template: templates/ingress-session-mode.yaml
+    asserts:
+      - hasDocuments: {count: 0}
+  - it: renders the web app's Deployment and Service, and nothing else
+    template: templates/frontend.yaml
+    asserts:
+      - hasDocuments: {count: 2}
+  - it: renders the worker's Deployment and Service, and nothing else
+    template: templates/worker.yaml
+    asserts:
+      - hasDocuments: {count: 2}
+
+  # ── the accounts ───────────────────────────────────────────────────────────────
+  - it: renders the four accounts as before
+    template: templates/serviceaccount.yaml
+    asserts:
+      - hasDocuments: {count: 4}
+      - isKind: {of: ServiceAccount}
+      - isAPIVersion: {of: v1}
+      - equal: {path: automountServiceAccountToken, value: false}
+      - equal:
+          path: metadata
+          value:
+            name: demo-automatos-api
+            labels:
+              helm.sh/chart: automatos-0.10.0
+              app.kubernetes.io/name: automatos
+              app.kubernetes.io/instance: demo
+              app.kubernetes.io/version: "edge"
+              app.kubernetes.io/managed-by: Helm
+              app.kubernetes.io/component: api
+        documentIndex: 0
+      - equal:
+          path: metadata
+          value:
+            name: demo-automatos-frontend
+            labels:
+              helm.sh/chart: automatos-0.10.0
+              app.kubernetes.io/name: automatos
+              app.kubernetes.io/instance: demo
+              app.kubernetes.io/version: "edge"
+              app.kubernetes.io/managed-by: Helm
+              app.kubernetes.io/component: frontend
+        documentIndex: 1
+      - equal:
+          path: metadata
+          value:
+            name: demo-automatos-worker
+            labels:
+              helm.sh/chart: automatos-0.10.0
+              app.kubernetes.io/name: automatos
+              app.kubernetes.io/instance: demo
+              app.kubernetes.io/version: "edge"
+              app.kubernetes.io/managed-by: Helm
+              app.kubernetes.io/component: worker
+        documentIndex: 2
+      - equal:
+          path: metadata
+          value:
+            name: demo-automatos-migrate
+            labels:
+              helm.sh/chart: automatos-0.10.0
+              app.kubernetes.io/name: automatos
+              app.kubernetes.io/instance: demo
+              app.kubernetes.io/version: "edge"
+              app.kubernetes.io/managed-by: Helm
+              app.kubernetes.io/component: migrate
+            annotations:
+              helm.sh/hook: pre-install,pre-upgrade
+              helm.sh/hook-weight: "-10"
+              helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+        documentIndex: 3
+
+  # ── the claims ─────────────────────────────────────────────────────────────────
+  - it: renders the agent-files claim as before
+    template: templates/workspaces-pvc.yaml
+    asserts:
+      - hasDocuments: {count: 1}
+      - isKind: {of: PersistentVolumeClaim}
+      - isAPIVersion: {of: v1}
+      - equal:
+          path: metadata
+          value:
+            name: demo-automatos-workspaces
+            labels:
+              helm.sh/chart: automatos-0.10.0
+              app.kubernetes.io/name: automatos
+              app.kubernetes.io/instance: demo
+              app.kubernetes.io/version: "edge"
+              app.kubernetes.io/managed-by: Helm
+            annotations:
+              helm.sh/resource-policy: keep
+      - equal:
+          path: spec
+          value:
+            accessModes: [ReadWriteMany]
+            resources: {requests: {storage: 10Gi}}
+  - it: renders the API's data claim as before
+    template: templates/api-data-pvc.yaml
+    asserts:
+      - hasDocuments: {count: 1}
+      - isKind: {of: PersistentVolumeClaim}
+      - isAPIVersion: {of: v1}
+      - equal:
+          path: metadata
+          value:
+            name: demo-automatos-api-data
+            labels:
+              helm.sh/chart: automatos-0.10.0
+              app.kubernetes.io/name: automatos
+              app.kubernetes.io/instance: demo
+              app.kubernetes.io/version: "edge"
+              app.kubernetes.io/managed-by: Helm
+              app.kubernetes.io/component: api
+            annotations:
+              helm.sh/resource-policy: keep
+      - equal:
+          path: spec
+          value:
+            accessModes: [ReadWriteOnce]
+            resources: {requests: {storage: 10Gi}}
+
+  # ── the Services ───────────────────────────────────────────────────────────────
+  - it: renders the API's Service as before
+    template: templates/api-service.yaml
+    asserts:
+      - hasDocuments: {count: 1}
+      - isKind: {of: Service}
+      - isAPIVersion: {of: v1}
+      - equal:
+          path: metadata
+          value:
+            name: demo-automatos-api
+            labels:
+              helm.sh/chart: automatos-0.10.0
+              app.kubernetes.io/name: automatos
+              app.kubernetes.io/instance: demo
+              app.kubernetes.io/version: "edge"
+              app.kubernetes.io/managed-by: Helm
+              app.kubernetes.io/component: api
+      - equal:
+          path: spec
+          value:
+            selector:
+              app.kubernetes.io/name: automatos
+              app.kubernetes.io/instance: demo
+              app.kubernetes.io/component: api
+            ports:
+              - {name: http, port: 8000, targetPort: http}
+  - it: renders the web app's Service as before
+    template: templates/frontend.yaml
+    documentIndex: 1
+    asserts:
+      - isKind: {of: Service}
+      - isAPIVersion: {of: v1}
+      - equal:
+          path: metadata
+          value:
+            name: demo-automatos-frontend
+            labels:
+              helm.sh/chart: automatos-0.10.0
+              app.kubernetes.io/name: automatos
+              app.kubernetes.io/instance: demo
+              app.kubernetes.io/version: "edge"
+              app.kubernetes.io/managed-by: Helm
+              app.kubernetes.io/component: frontend
+      - equal:
+          path: spec
+          value:
+            selector:
+              app.kubernetes.io/name: automatos
+              app.kubernetes.io/instance: demo
+              app.kubernetes.io/component: frontend
+            ports:
+              - {name: http, port: 3000, targetPort: http}
+  - it: renders the worker's Service as before, in the release's namespace
+    template: templates/worker.yaml
+    documentIndex: 1
+    asserts:
+      - isKind: {of: Service}
+      - isAPIVersion: {of: v1}
+      - equal:
+          path: metadata
+          value:
+            name: demo-automatos-worker
+            labels:
+              helm.sh/chart: automatos-0.10.0
+              app.kubernetes.io/name: automatos
+              app.kubernetes.io/instance: demo
+              app.kubernetes.io/version: "edge"
+              app.kubernetes.io/managed-by: Helm
+              app.kubernetes.io/component: worker
+      - equal:
+          path: spec
+          value:
+            selector:
+              app.kubernetes.io/name: automatos
+              app.kubernetes.io/instance: demo
+              app.kubernetes.io/component: worker
+            ports:
+              - {name: http, port: 8081, targetPort: http}
+
+  # ── the API ────────────────────────────────────────────────────────────────────
+  - it: renders the API's Deployment as before
+    template: templates/api-deployment.yaml
+    asserts:
+      - hasDocuments: {count: 1}
+      - isKind: {of: Deployment}
+      - isAPIVersion: {of: apps/v1}
+      - equal:
+          path: metadata
+          value:
+            name: demo-automatos-api
+            labels:
+              helm.sh/chart: automatos-0.10.0
+              app.kubernetes.io/name: automatos
+              app.kubernetes.io/instance: demo
+              app.kubernetes.io/version: "edge"
+              app.kubernetes.io/managed-by: Helm
+              app.kubernetes.io/component: api
+      - equal:
+          path: spec
+          value:
+            replicas: 1
+            strategy:
+              type: RollingUpdate
+              rollingUpdate: {maxSurge: 0, maxUnavailable: 1}
+            selector:
+              matchLabels:
+                app.kubernetes.io/name: automatos
+                app.kubernetes.io/instance: demo
+                app.kubernetes.io/component: api
+            template:
+              metadata:
+                labels:
+                  app.kubernetes.io/name: automatos
+                  app.kubernetes.io/instance: demo
+                  app.kubernetes.io/component: api
+              spec:
+                serviceAccountName: demo-automatos-api
+                automountServiceAccountToken: false
+                securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000}
+                containers:
+                  - name: api
+                    image: ghcr.io/automatosai/automatos-api:edge
+                    imagePullPolicy: Always
+                    args: [uvicorn, "main:app", --host, "0.0.0.0", --port, "8000", --workers, "1"]
+                    env:
+                      - {name: AUTH_EDITION, value: local}
+                      - {name: DEFAULT_WORKSPACE_ID, value: "00000000-0000-0000-0000-0000000000c1"}
+                      - {name: PLATFORM_KEY_WORKSPACE_ID, value: "00000000-0000-0000-0000-0000000000c1"}
+                      - {name: LOCAL_OPERATOR_EMAIL, value: local@automatos.local}
+                      - {name: WORKSPACE_VOLUME_PATH, value: /workspaces}
+                      - {name: WORKER_INTERNAL_URL, value: "http://demo-automatos-worker:8081"}
+                      - {name: AGENT_OPT_WORKER_URL, value: ""}
+                      - {name: ENVIRONMENT, value: production}
+                      - {name: LOG_LEVEL, value: INFO}
+                      - {name: LOG_RELAY_ENABLED, value: "false"}
+                      - {name: LOKI_URL, value: ""}
+                      - {name: PROMETHEUS_URL, value: ""}
+                      - {name: QDRANT_URL, value: ""}
+                      - {name: DATABASE_URL, valueFrom: {secretKeyRef: {name: automatos-secrets, key: DATABASE_URL}}}
+                      - {name: REDIS_URL, valueFrom: {secretKeyRef: {name: automatos-secrets, key: REDIS_URL}}}
+                      - {name: API_KEY, valueFrom: {secretKeyRef: {name: automatos-secrets, key: API_KEY}}}
+                      - {name: CREDENTIAL_ENCRYPTION_KEY, valueFrom: {secretKeyRef: {name: automatos-secrets, key: CREDENTIAL_ENCRYPTION_KEY}}}
+                      - {name: WORKER_INTERNAL_TOKEN, valueFrom: {secretKeyRef: {name: automatos-secrets, key: WORKER_INTERNAL_TOKEN, optional: true}}}
+                      - {name: AWS_ACCESS_KEY_ID, valueFrom: {secretKeyRef: {name: automatos-secrets, key: AWS_ACCESS_KEY_ID, optional: true}}}
+                      - {name: AWS_SECRET_ACCESS_KEY, valueFrom: {secretKeyRef: {name: automatos-secrets, key: AWS_SECRET_ACCESS_KEY, optional: true}}}
+                      - {name: DOCUMENT_UPLOAD_DIR, value: /app/data/uploads}
+                      - {name: DOCUMENT_STORAGE_DIR, value: /app/data/documents}
+                      - {name: HOME, value: /home/automatos}
+                      - {name: AUTOMATOS_SKIP_MIGRATIONS, value: "true"}
+                    ports:
+                      - {name: http, containerPort: 8000}
+                    startupProbe: {httpGet: {path: /health, port: http}, periodSeconds: 5, failureThreshold: 60}
+                    readinessProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 10, timeoutSeconds: 5}
+                    livenessProbe: {httpGet: {path: /health, port: http}, periodSeconds: 20, timeoutSeconds: 5}
+                    volumeMounts:
+                      - {name: workspaces, mountPath: /workspaces, readOnly: true}
+                      - {name: data, mountPath: /app/data}
+                      - {name: tmp, mountPath: /tmp}
+                      - {name: home, mountPath: /home/automatos}
+                      - {name: logs, mountPath: /app/logs}
+                    securityContext:
+                      allowPrivilegeEscalation: false
+                      readOnlyRootFilesystem: true
+                      capabilities: {drop: [ALL]}
+                      seccompProfile: {type: RuntimeDefault}
+                    resources:
+                      requests: {cpu: 250m, memory: 1Gi}
+                      limits: {memory: 2Gi}
+                volumes:
+                  - {name: workspaces, persistentVolumeClaim: {claimName: demo-automatos-workspaces}}
+                  - {name: data, persistentVolumeClaim: {claimName: demo-automatos-api-data}}
+                  - {name: tmp, emptyDir: {}}
+                  - {name: home, emptyDir: {}}
+                  - {name: logs, emptyDir: {}}
+
+  # ── the migration Job ──────────────────────────────────────────────────────────
+  - it: renders the migration Job as before
+    template: templates/migrate-job.yaml
+    asserts:
+      - hasDocuments: {count: 1}
+      - isKind: {of: Job}
+      - isAPIVersion: {of: batch/v1}
+      - equal:
+          path: metadata
+          value:
+            name: demo-automatos-migrate
+            labels:
+              helm.sh/chart: automatos-0.10.0
+              app.kubernetes.io/name: automatos
+              app.kubernetes.io/instance: demo
+              app.kubernetes.io/version: "edge"
+              app.kubernetes.io/managed-by: Helm
+              app.kubernetes.io/component: migrate
+            annotations:
+              helm.sh/hook: pre-install,pre-upgrade
+              helm.sh/hook-weight: "0"
+              helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+      - equal:
+          path: spec
+          value:
+            backoffLimit: 1
+            activeDeadlineSeconds: 900
+            template:
+              metadata:
+                labels:
+                  app.kubernetes.io/name: automatos
+                  app.kubernetes.io/instance: demo
+                  app.kubernetes.io/component: migrate
+              spec:
+                restartPolicy: Never
+                serviceAccountName: demo-automatos-migrate
+                automountServiceAccountToken: false
+                securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000}
+                containers:
+                  - name: migrate
+                    image: ghcr.io/automatosai/automatos-api:edge
+                    imagePullPolicy: Always
+                    args: [migrate]
+                    env:
+                      - {name: AUTH_EDITION, value: local}
+                      - {name: DEFAULT_WORKSPACE_ID, value: "00000000-0000-0000-0000-0000000000c1"}
+                      - {name: PLATFORM_KEY_WORKSPACE_ID, value: "00000000-0000-0000-0000-0000000000c1"}
+                      - {name: LOCAL_OPERATOR_EMAIL, value: local@automatos.local}
+                      - {name: WORKSPACE_VOLUME_PATH, value: /workspaces}
+                      - {name: WORKER_INTERNAL_URL, value: "http://demo-automatos-worker:8081"}
+                      - {name: AGENT_OPT_WORKER_URL, value: ""}
+                      - {name: ENVIRONMENT, value: production}
+                      - {name: LOG_LEVEL, value: INFO}
+                      - {name: LOG_RELAY_ENABLED, value: "false"}
+                      - {name: LOKI_URL, value: ""}
+                      - {name: PROMETHEUS_URL, value: ""}
+                      - {name: QDRANT_URL, value: ""}
+                      - {name: DATABASE_URL, valueFrom: {secretKeyRef: {name: automatos-secrets, key: DATABASE_URL}}}
+                      - {name: REDIS_URL, valueFrom: {secretKeyRef: {name: automatos-secrets, key: REDIS_URL}}}
+                      - {name: API_KEY, valueFrom: {secretKeyRef: {name: automatos-secrets, key: API_KEY}}}
+                      - {name: CREDENTIAL_ENCRYPTION_KEY, valueFrom: {secretKeyRef: {name: automatos-secrets, key: CREDENTIAL_ENCRYPTION_KEY}}}
+                      - {name: WORKER_INTERNAL_TOKEN, valueFrom: {secretKeyRef: {name: automatos-secrets, key: WORKER_INTERNAL_TOKEN, optional: true}}}
+                      - {name: AWS_ACCESS_KEY_ID, valueFrom: {secretKeyRef: {name: automatos-secrets, key: AWS_ACCESS_KEY_ID, optional: true}}}
+                      - {name: AWS_SECRET_ACCESS_KEY, valueFrom: {secretKeyRef: {name: automatos-secrets, key: AWS_SECRET_ACCESS_KEY, optional: true}}}
+                    volumeMounts:
+                      - {name: tmp, mountPath: /tmp}
+                    securityContext:
+                      allowPrivilegeEscalation: false
+                      readOnlyRootFilesystem: true
+                      capabilities: {drop: [ALL]}
+                      seccompProfile: {type: RuntimeDefault}
+                    resources:
+                      requests: {cpu: 250m, memory: 1Gi}
+                      limits: {memory: 2Gi}
+                volumes:
+                  - {name: tmp, emptyDir: {}}
+
+  # ── the web app ────────────────────────────────────────────────────────────────
+  - it: renders the web app's Deployment as before
+    template: templates/frontend.yaml
+    documentIndex: 0
+    asserts:
+      - isKind: {of: Deployment}
+      - isAPIVersion: {of: apps/v1}
+      - equal:
+          path: metadata
+          value:
+            name: demo-automatos-frontend
+            labels:
+              helm.sh/chart: automatos-0.10.0
+              app.kubernetes.io/name: automatos
+              app.kubernetes.io/instance: demo
+              app.kubernetes.io/version: "edge"
+              app.kubernetes.io/managed-by: Helm
+              app.kubernetes.io/component: frontend
+      - equal:
+          path: spec
+          value:
+            replicas: 1
+            selector:
+              matchLabels:
+                app.kubernetes.io/name: automatos
+                app.kubernetes.io/instance: demo
+                app.kubernetes.io/component: frontend
+            template:
+              metadata:
+                labels:
+                  app.kubernetes.io/name: automatos
+                  app.kubernetes.io/instance: demo
+                  app.kubernetes.io/component: frontend
+              spec:
+                serviceAccountName: demo-automatos-frontend
+                automountServiceAccountToken: false
+                securityContext: {runAsNonRoot: true, runAsUser: 1001}
+                containers:
+                  - name: frontend
+                    image: ghcr.io/automatosai/automatos-frontend:edge
+                    imagePullPolicy: Always
+                    env:
+                      - {name: BACKEND_INTERNAL_URL, value: "http://demo-automatos-api:8000"}
+                    ports:
+                      - {name: http, containerPort: 3000}
+                    readinessProbe: {httpGet: {path: /, port: http}, periodSeconds: 10, timeoutSeconds: 5}
+                    livenessProbe: {httpGet: {path: /, port: http}, periodSeconds: 20, timeoutSeconds: 5}
+                    securityContext:
+                      allowPrivilegeEscalation: false
+                      readOnlyRootFilesystem: true
+                      capabilities: {drop: [ALL]}
+                      seccompProfile: {type: RuntimeDefault}
+                    resources:
+                      requests: {cpu: 100m, memory: 256Mi}
+                      limits: {memory: 512Mi}
+
+  # ── the worker ─────────────────────────────────────────────────────────────────
+  - it: renders the worker's Deployment as before, but for US-201's non-root start and no added capability
+    template: templates/worker.yaml
+    documentIndex: 0
+    asserts:
+      - isKind: {of: Deployment}
+      - isAPIVersion: {of: apps/v1}
+      - equal:
+          path: metadata
+          value:
+            name: demo-automatos-worker
+            labels:
+              helm.sh/chart: automatos-0.10.0
+              app.kubernetes.io/name: automatos
+              app.kubernetes.io/instance: demo
+              app.kubernetes.io/version: "edge"
+              app.kubernetes.io/managed-by: Helm
+              app.kubernetes.io/component: worker
+      - equal:
+          path: spec
+          value:
+            replicas: 1
+            strategy: {type: Recreate}
+            selector:
+              matchLabels:
+                app.kubernetes.io/name: automatos
+                app.kubernetes.io/instance: demo
+                app.kubernetes.io/component: worker
+            template:
+              metadata:
+                labels:
+                  app.kubernetes.io/name: automatos
+                  app.kubernetes.io/instance: demo
+                  app.kubernetes.io/component: worker
+              spec:
+                serviceAccountName: demo-automatos-worker
+                automountServiceAccountToken: false
+                # US-201 (deliberate): chart 0.9.0 set no pod securityContext here.
+                securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, fsGroupChangePolicy: OnRootMismatch}
+                containers:
+                  - name: worker
+                    image: ghcr.io/automatosai/automatos-workspace-worker:edge
+                    imagePullPolicy: Always
+                    env:
+                      - {name: WORKSPACE_VOLUME_PATH, value: /workspaces}
+                      - {name: WORKSPACE_DEFAULT_QUOTA_GB, value: "5"}
+                      - {name: WORKER_CONCURRENCY, value: "3"}
+                      - {name: WORKER_HEALTH_PORT, value: "8081"}
+                      - {name: SERVICE_NAME, value: workspace-worker}
+                      - {name: LOG_RELAY_ENABLED, value: "false"}
+                      - {name: DATABASE_URL, valueFrom: {secretKeyRef: {name: automatos-secrets, key: DATABASE_URL}}}
+                      - {name: REDIS_URL, valueFrom: {secretKeyRef: {name: automatos-secrets, key: REDIS_URL}}}
+                      - {name: WORKER_INTERNAL_TOKEN, valueFrom: {secretKeyRef: {name: automatos-secrets, key: WORKER_INTERNAL_TOKEN, optional: true}}}
+                      - {name: ANTHROPIC_API_KEY, valueFrom: {secretKeyRef: {name: automatos-secrets, key: ANTHROPIC_API_KEY, optional: true}}}
+                      - {name: CLAUDE_CODE_OAUTH_TOKEN, valueFrom: {secretKeyRef: {name: automatos-secrets, key: CLAUDE_CODE_OAUTH_TOKEN, optional: true}}}
+                    ports:
+                      - {name: http, containerPort: 8081}
+                    readinessProbe: {httpGet: {path: /health, port: http}, periodSeconds: 10, timeoutSeconds: 5}
+                    livenessProbe: {httpGet: {path: /health, port: http}, periodSeconds: 30, timeoutSeconds: 5}
+                    volumeMounts:
+                      - {name: workspaces, mountPath: /workspaces}
+                      - {name: tmp, mountPath: /tmp}
+                      - {name: home, mountPath: /home/worker}
+                    # US-201 (deliberate): chart 0.9.0 added CHOWN, DAC_OVERRIDE, SETUID and SETGID.
+                    securityContext:
+                      allowPrivilegeEscalation: false
+                      readOnlyRootFilesystem: true
+                      capabilities: {drop: [ALL]}
+                      seccompProfile: {type: RuntimeDefault}
+                    resources:
+                      requests: {cpu: 250m, memory: 512Mi}
+                      limits: {memory: 2Gi}
+                volumes:
+                  - {name: workspaces, persistentVolumeClaim: {claimName: demo-automatos-workspaces}}
+                  - {name: tmp, emptyDir: {}}
+                  - {name: home, emptyDir: {}}

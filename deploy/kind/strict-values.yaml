@@ -1,0 +1,147 @@
+# Values for chart.yml's install lane (deploy/kind/strict.sh, PRD-280 US-100), with the
+# images the lane built in the same run and loaded into the kind cluster, so none is
+# pulled. The datastores and the collector run in their own namespace
+# (automatos-datastores), so the chart's namespace holds only the chart's pods. Each later
+# wave of PRD-280 adds what it builds here.
+#
+# On here: the API with its data volume, the migration Job, the web app, the worker, the
+# read-only roots (the chart's default), OpenTelemetry to a real collector (with
+# OTEL_EXPORTER_OTLP_HEADERS from each Secret), session mode, the ingress objects (with a
+# class, a host, TLS and annotations; no controller is installed), every account renamed
+# and annotated, ENVIRONMENT=production (the chart's default) and database.sslmode.
+# PRD-280 Wave 2: the worker started as uid 1000 (the image's user and the chart's), in a
+# namespace of its own (worker.namespace, automatos-worker) with a Secret of its own
+# (worker.existingSecret, WORKER_INTERNAL_TOKEN then required in both Secrets), and the
+# agent-files volume as two claims the operator made, one in each namespace, on one folder
+# (workspaces.api.existingClaim, workspaces.worker.existingClaim; strict-workspaces.yaml).
+# Placement (US-203): a nodeSelector on the API, the migration Job, the web app and the
+# worker, and on the worker all four values; the single node meets each.
+#
+# Not exercised here (the chart's unit tests render each):
+# - the database CA mount (database.caConfigMap, verify-ca/verify-full): the dev
+#   PostgreSQL has no TLS, so database.sslmode is `disable`. With ENVIRONMENT=production
+#   the API would otherwise ask for `require`, which that server refuses;
+# - api.data.enabled=false (the data volume is on here);
+# - an edition other than `local` (the published web app is the local edition);
+# - the optional Secret keys AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+#   ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN (no object storage or model to reach);
+# - serviceAccount.create=false;
+# - the agent-files claim the chart makes (the operator's two claims are used instead; the
+#   chart's own claim is in e2e.sh's values and the unit tests);
+# - placement that keeps a pod off a node, or spreads pods over several (one node);
+# - more than one API replica (kind's storage is ReadWriteOnce, and values.yaml keeps
+#   one replica for the schedulers).
+existingSecret: automatos-secrets
+
+config:
+  ENVIRONMENT: production
+  LOG_LEVEL: INFO
+  LOG_RELAY_ENABLED: "false"
+  QDRANT_URL: ""
+  AGENT_OPT_WORKER_URL: ""
+  LOKI_URL: ""
+  PROMETHEUS_URL: ""
+
+database:
+  sslmode: disable
+
+api:
+  image:
+    repository: automatos-api
+    tag: ci
+    pullPolicy: Never
+  data:
+    enabled: true
+    size: 1Gi
+  resources:
+    requests: {cpu: 100m, memory: 512Mi}
+    limits: {memory: 2Gi}
+  nodeSelector: {kubernetes.io/os: linux}
+
+migrations:
+  resources:
+    requests: {cpu: 100m, memory: 512Mi}
+    limits: {memory: 2Gi}
+  nodeSelector: {kubernetes.io/os: linux}
+
+frontend:
+  enabled: true
+  image:
+    repository: automatos-frontend
+    tag: ci
+    pullPolicy: Never
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+  nodeSelector: {kubernetes.io/os: linux}
+
+worker:
+  enabled: true
+  # Made and labelled by strict.sh, with automatos-worker-secrets in it, as an operator would.
+  namespace: automatos-worker
+  existingSecret: automatos-worker-secrets
+  image:
+    repository: automatos-workspace-worker
+    tag: ci
+    pullPolicy: Never
+  resources:
+    requests: {cpu: 50m, memory: 256Mi}
+  # All four placement values (PRD-280 US-203), each one the single kind node satisfies, so
+  # the pod must still be scheduled with them: the API server checks their shape on create.
+  nodeSelector: {kubernetes.io/os: linux}
+  tolerations:
+    - {key: automatos.dev/worker-only, operator: Exists, effect: NoSchedule}
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - {key: kubernetes.io/os, operator: In, values: [linux]}
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels: {app.kubernetes.io/component: worker}
+
+serviceAccount:
+  create: true
+  api:
+    name: automatos-ci-api
+    annotations: {ci.automatos.dev/account: api}
+  frontend:
+    name: automatos-ci-frontend
+    annotations: {ci.automatos.dev/account: frontend}
+  worker:
+    name: automatos-ci-worker
+    annotations: {ci.automatos.dev/account: worker}
+  migrate:
+    name: automatos-ci-migrate
+    annotations: {ci.automatos.dev/account: migrate}
+
+otel:
+  enabled: true
+  endpoint: http://otel-collector.automatos-datastores:4318
+  resourceAttributes: k8s.cluster.name=automatos-ci
+
+sessionMode:
+  enabled: true
+
+# The Ingress objects only: the lane installs no controller, and nothing is sent through
+# them. The class and the TLS Secret they name do not exist; the API server accepts that.
+ingress:
+  enabled: true
+  className: nginx
+  host: automatos.ci.invalid
+  annotations: {ci.automatos.dev/ingress: "true"}
+  tls:
+    - hosts: [automatos.ci.invalid]
+      secretName: automatos-ci-tls
+
+# The worker apart needs a claim on each side (PRD-280 US-202): strict.sh makes both, bound
+# to one folder on the single kind node (strict-workspaces.yaml), so size, storageClass and
+# accessModes do nothing here.
+workspaces:
+  api:
+    existingClaim: automatos-workspaces-api
+  worker:
+    existingClaim: automatos-workspaces-worker

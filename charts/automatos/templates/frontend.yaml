@@ -16,7 +16,7 @@ spec:
       labels:
         {{- include "automatos.selectorLabels" (dict "ctx" $ "component" "frontend") | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "automatos.serviceAccountName" . }}
+      serviceAccountName: {{ include "automatos.serviceAccountName" (dict "ctx" $ "component" "frontend") }}
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
@@ -45,12 +45,22 @@ spec:
               port: http
             periodSeconds: 20
             timeoutSeconds: 5
+          # A read-only root (PRD-280 US-104) needs no scratch volume here: the server writes
+          # no file (docs/PRDS/PRD-280-US-103-WRITE-PATHS.md).
           securityContext:
             allowPrivilegeEscalation: false
+            {{- if .Values.frontend.readOnlyRootFilesystem }}
+            readOnlyRootFilesystem: true
+            {{- end }}
             capabilities:
               drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
+      {{- with include "automatos.placement" .Values.frontend | trim }}
+      {{- . | nindent 6 }}
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service
