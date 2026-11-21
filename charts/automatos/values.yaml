@@ -14,7 +14,9 @@ fullnameOverride: ""
 #   API_KEY                    the platform API key
 #   CREDENTIAL_ENCRYPTION_KEY  a Fernet key; every pod must share it, or credentials
 #                              saved by one pod can't be read by another
-#   WORKER_INTERNAL_TOKEN      optional; shared secret between the API and the worker
+#   WORKER_INTERNAL_TOKEN      optional; shared secret between the API and the worker.
+#                              Required when the worker has a Secret of its own
+#                              (worker.existingSecret), which holds the same token
 #   AWS_ACCESS_KEY_ID          optional; object storage credentials (S3, or MinIO
 #   AWS_SECRET_ACCESS_KEY      with S3_ENDPOINT_URL in config)
 #   OTEL_EXPORTER_OTLP_HEADERS optional; headers for the OTLP endpoint (otel below),
@@ -168,6 +170,22 @@ worker:
   # Commands the worker runs for an agent keep their files on the workspaces volume.
   # false: the root stays writable and neither is mounted.
   readOnlyRootFilesystem: true
+  # The worker in a namespace of its own (PRD-280 US-202), so it can have its own pod
+  # security level and its own rules. Empty, or the release's namespace: the worker is in the
+  # release's namespace, as before. Set, the worker's Deployment, Service and account are
+  # created there, and the API's WORKER_INTERNAL_URL names
+  # http://<fullname>-worker.<namespace>.svc:8081. The chart does not create the namespace or
+  # label it: create it first, with the pod security labels you want. It also needs, there:
+  #   - worker.existingSecret (required): a Secret, since one cannot be read across namespaces;
+  #   - workspaces.api.existingClaim and workspaces.worker.existingClaim (both required);
+  #   - with database.caConfigMap, a ConfigMap of that name;
+  #   - with serviceAccount.create=false, the account serviceAccount.worker.name names.
+  namespace: ""
+  # The worker's own Secret, in the worker's namespace; empty: the chart's existingSecret. It
+  # reads only this one: DATABASE_URL, REDIS_URL and WORKER_INTERNAL_TOKEN, required (the same
+  # token as in existingSecret, which then must hold it too), and optionally
+  # ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN and OTEL_EXPORTER_OTLP_HEADERS.
+  existingSecret: ""
   resources:
     requests:
       cpu: 250m
@@ -194,12 +212,23 @@ sessionMode:
 
 # Agent files, shared by the worker (read-write) and the API (read-only). Pods on
 # different nodes need ReadWriteMany storage (Azure Files, EFS, NFS); a single-node
-# cluster can use ReadWriteOnce.
+# cluster can use ReadWriteOnce. The storage must honour the pod's fsGroup (1000), or the
+# worker, uid 1000, cannot write here and stops at start saying so.
 workspaces:
   size: 10Gi
   storageClass: ""
   accessModes:
     - ReadWriteMany
+  # A claim that already exists, for each side (PRD-280 US-202); size, storageClass and
+  # accessModes then do nothing, and the chart creates no claim. In one namespace, a claim
+  # named for either side serves both. With worker.namespace, both are required: the API's
+  # in the release's namespace, the worker's in the worker's, and you bind the two to one
+  # file system (two PersistentVolumes on one NFS export or file share, say), as a claim
+  # belongs to one namespace. The API mounts its side read-only.
+  api:
+    existingClaim: ""
+  worker:
+    existingClaim: ""
 
 # One ServiceAccount for each component (PRD-280), so a cloud role tied to one account
 # reaches that component only. The chart creates <fullname>-api, -frontend (the web app),

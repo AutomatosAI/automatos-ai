@@ -1,0 +1,69 @@
+suite: A worker namespace that cannot work stops the render (PRD-280 US-202)
+# The worker's template alone, so a failed render can only be reported against it (helm-unittest
+# reports a failed render against the first template, in reverse alphabetical order, that fails).
+templates:
+  - templates/worker.yaml
+release:
+  name: demo
+  namespace: automatos
+set:
+  existingSecret: automatos-secrets
+  worker:
+    namespace: automatos-worker
+    existingSecret: automatos-worker-secrets
+  workspaces:
+    api:
+      existingClaim: agent-files-api
+    worker:
+      existingClaim: agent-files-worker
+tests:
+  - it: renders with a Secret and both claims named
+    asserts:
+      - hasDocuments:
+          count: 2
+  - it: stops on a worker apart with no Secret of its own, saying what it must hold
+    set:
+      worker:
+        existingSecret: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "worker.namespace is \"automatos-worker\", so the worker needs a Secret of its own in that namespace: a Secret cannot be read from another one. Create it there with DATABASE_URL, REDIS_URL and WORKER_INTERNAL_TOKEN"
+  - it: stops on a worker apart with no claim for the API's side
+    set:
+      workspaces:
+        api:
+          existingClaim: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "worker.namespace is \"automatos-worker\", so workspaces.api.existingClaim must name a claim that already exists: a claim belongs to one namespace"
+  - it: stops on a worker apart with no claim for its own side
+    set:
+      workspaces:
+        worker:
+          existingClaim: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "worker.namespace is \"automatos-worker\", so workspaces.worker.existingClaim must name a claim that already exists"
+  - it: stops on a worker apart with no claim at all, the API's side named first
+    set:
+      workspaces:
+        api:
+          existingClaim: ""
+        worker:
+          existingClaim: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "workspaces.api.existingClaim must name a claim that already exists"
+  - it: stops on a namespace name Kubernetes refuses
+    set:
+      worker:
+        namespace: Automatos_Worker
+    asserts:
+      - failedTemplate:
+          errorPattern: "worker.namespace must be a namespace name \\(lower-case letters, digits and '-', at most 63, starting and ending with a letter or digit\\), got \"Automatos_Worker\""
+  - it: stops on the chart's Secret missing even when the worker has its own
+    set:
+      existingSecret: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "existingSecret is required"

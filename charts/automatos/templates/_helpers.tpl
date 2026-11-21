@@ -129,8 +129,91 @@ IfNotPresent
 {{- required "existingSecret is required: the Secret holding DATABASE_URL, REDIS_URL, API_KEY and CREDENTIAL_ENCRYPTION_KEY (see values.yaml)" .Values.existingSecret }}
 {{- end }}
 
+{{/*
+The worker in a namespace of its own (PRD-280 US-202). "true" when the worker is on and
+worker.namespace names a namespace other than the release's. The chart never creates that
+namespace or labels it: the operator does (PRD-280 D-5).
+*/}}
+{{- define "automatos.workerApart" -}}
+{{- if and .Values.worker.enabled .Values.worker.namespace (ne (toString .Values.worker.namespace) .Release.Namespace) -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/* The worker's Secret: worker.existingSecret, or the chart's existingSecret. */}}
+{{- define "automatos.workerSecretName" -}}
+{{- default (include "automatos.secretName" .) .Values.worker.existingSecret -}}
+{{- end }}
+
+{{/* The address the API reaches the worker at: its Service, by namespace when it has its own. */}}
+{{- define "automatos.workerUrl" -}}
+{{- if include "automatos.workerApart" . -}}
+{{- printf "http://%s-worker.%s.svc:8081" (include "automatos.fullname" .) .Values.worker.namespace -}}
+{{- else -}}
+{{- printf "http://%s-worker:8081" (include "automatos.fullname" .) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The agent-files volume's claims, one for each side: (dict "ctx" $ "side" "api") or "worker".
+A side's workspaces.<side>.existingClaim when set. In one namespace, the other side's claim
+when only that one is named, so one claim serves both; otherwise the chart's own claim.
+*/}}
+{{- define "automatos.workspacesExistingClaim" -}}
+{{- (index (.ctx.Values.workspaces | default dict) .side | default dict).existingClaim | default "" -}}
+{{- end }}
+
+{{- define "automatos.workspacesSideClaim" -}}
+{{- $own := include "automatos.workspacesExistingClaim" . -}}
+{{- $other := include "automatos.workspacesExistingClaim" (dict "ctx" .ctx "side" (ternary "worker" "api" (eq .side "api"))) -}}
+{{- if $own -}}
+{{- $own -}}
+{{- else if and $other (not (include "automatos.workerApart" .ctx)) -}}
+{{- $other -}}
+{{- else -}}
+{{- printf "%s-workspaces" (include "automatos.fullname" .ctx) -}}
+{{- end -}}
+{{- end }}
+
+{{/* The API's side of the agent-files volume. */}}
 {{- define "automatos.workspacesClaim" -}}
-{{- printf "%s-workspaces" (include "automatos.fullname" .) }}
+{{- include "automatos.workspacesSideClaim" (dict "ctx" . "side" "api") -}}
+{{- end }}
+
+{{/* The worker's side of the agent-files volume. */}}
+{{- define "automatos.workerWorkspacesClaim" -}}
+{{- include "automatos.workspacesSideClaim" (dict "ctx" . "side" "worker") -}}
+{{- end }}
+
+{{/* "true" when the chart creates the agent-files claim: neither side names one of its own. */}}
+{{- define "automatos.workspacesClaimCreated" -}}
+{{- if not (or (include "automatos.workspacesExistingClaim" (dict "ctx" . "side" "api")) (include "automatos.workspacesExistingClaim" (dict "ctx" . "side" "worker"))) -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+Stops the render on a worker namespace that cannot work. A Secret, a ServiceAccount and a
+PersistentVolumeClaim belong to one namespace: the worker apart needs a Secret named for it
+there, and each side of the agent-files volume a claim the operator made and bound to one
+file system, since a claim the chart made would be a disk of its own.
+*/}}
+{{- define "automatos.validateWorker" -}}
+{{- with .Values.worker.namespace }}
+{{- if not (regexMatch `^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$` (toString .)) }}
+{{- fail (printf "worker.namespace must be a namespace name (lower-case letters, digits and '-', at most 63, starting and ending with a letter or digit), got %q" (toString .)) }}
+{{- end }}
+{{- end }}
+{{- if include "automatos.workerApart" . }}
+{{- if not .Values.worker.existingSecret }}
+{{- fail (printf "worker.namespace is %q, so the worker needs a Secret of its own in that namespace: a Secret cannot be read from another one. Create it there with DATABASE_URL, REDIS_URL and WORKER_INTERNAL_TOKEN (the same token as the Secret existingSecret names), and any of ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN and OTEL_EXPORTER_OTLP_HEADERS the worker uses, then name it in worker.existingSecret" .Values.worker.namespace) }}
+{{- end }}
+{{- range $side := list "api" "worker" }}
+{{- if not (include "automatos.workspacesExistingClaim" (dict "ctx" $ "side" $side)) }}
+{{- fail (printf "worker.namespace is %q, so workspaces.%s.existingClaim must name a claim that already exists: a claim belongs to one namespace, so the chart cannot make one the API (in %q, read-only) and the worker (in %q) both mount. Create workspaces.api.existingClaim in the release's namespace and workspaces.worker.existingClaim in the worker's, bound to one file system" $.Values.worker.namespace $side $.Release.Namespace $.Values.worker.namespace) }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- end }}
 
 {{- define "automatos.apiDataClaim" -}}
@@ -294,21 +377,28 @@ before any of the release's ordinary resources exist.
 {{- end }}
 {{- if .Values.worker.enabled }}
 - name: WORKER_INTERNAL_URL
-  value: {{ printf "http://%s-worker:8081" (include "automatos.fullname" .) | quote }}
+  value: {{ include "automatos.workerUrl" . | quote }}
 {{- end }}
 {{- include "automatos.databaseTlsEnv" . }}
 {{- range $name, $value := .Values.config }}
 - name: {{ $name }}
   value: {{ $value | toString | quote }}
 {{- end }}
-{{- range $key := list "DATABASE_URL" "REDIS_URL" "API_KEY" "CREDENTIAL_ENCRYPTION_KEY" }}
+{{- $required := list "DATABASE_URL" "REDIS_URL" "API_KEY" "CREDENTIAL_ENCRYPTION_KEY" }}
+{{- $optional := list "WORKER_INTERNAL_TOKEN" "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" }}
+{{- if and .Values.worker.enabled .Values.worker.existingSecret }}
+{{- /* The worker's own Secret must hold the token (PRD-280 US-202), so the API's must too. */}}
+{{- $required = append $required "WORKER_INTERNAL_TOKEN" }}
+{{- $optional = without $optional "WORKER_INTERNAL_TOKEN" }}
+{{- end }}
+{{- range $key := $required }}
 - name: {{ $key }}
   valueFrom:
     secretKeyRef:
       name: {{ $secret }}
       key: {{ $key }}
 {{- end }}
-{{- range $key := list "WORKER_INTERNAL_TOKEN" "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" }}
+{{- range $key := $optional }}
 - name: {{ $key }}
   valueFrom:
     secretKeyRef:
@@ -319,7 +409,8 @@ before any of the release's ordinary resources exist.
 {{- end }}
 
 {{/*
-OpenTelemetry (PRD-256) for one component: (dict "ctx" $ "service" "automatos-api").
+OpenTelemetry (PRD-256) for one component: (dict "ctx" $ "service" "automatos-api"), and
+"secret" for a component that reads a Secret of its own (the worker, PRD-280 US-202).
 Nothing when otel.enabled is false.
 */}}
 {{- define "automatos.otelEnv" -}}
@@ -337,7 +428,7 @@ Nothing when otel.enabled is false.
 - name: OTEL_EXPORTER_OTLP_HEADERS
   valueFrom:
     secretKeyRef:
-      name: {{ include "automatos.secretName" $ctx }}
+      name: {{ $.secret | default (include "automatos.secretName" $ctx) }}
       key: OTEL_EXPORTER_OTLP_HEADERS
       optional: true
 - name: OTEL_POD_NAME

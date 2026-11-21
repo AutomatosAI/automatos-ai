@@ -6,10 +6,14 @@
 #
 # On here: the API with its data volume, the migration Job, the web app, the worker, the
 # read-only roots (the chart's default), OpenTelemetry to a real collector (with
-# OTEL_EXPORTER_OTLP_HEADERS from the Secret), session mode, the ingress objects (with a
+# OTEL_EXPORTER_OTLP_HEADERS from each Secret), session mode, the ingress objects (with a
 # class, a host, TLS and annotations; no controller is installed), every account renamed
-# and annotated, the optional Secret key WORKER_INTERNAL_TOKEN, ENVIRONMENT=production
-# (the chart's default) and database.sslmode.
+# and annotated, ENVIRONMENT=production (the chart's default) and database.sslmode.
+# PRD-280 Wave 2: the worker started as uid 1000 (the image's user and the chart's), in a
+# namespace of its own (worker.namespace, automatos-worker) with a Secret of its own
+# (worker.existingSecret, WORKER_INTERNAL_TOKEN then required in both Secrets), and the
+# agent-files volume as two claims the operator made, one in each namespace, on one folder
+# (workspaces.api.existingClaim, workspaces.worker.existingClaim; strict-workspaces.yaml).
 #
 # Not exercised here (the chart's unit tests render each):
 # - the database CA mount (database.caConfigMap, verify-ca/verify-full): the dev
@@ -20,6 +24,8 @@
 # - the optional Secret keys AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
 #   ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN (no object storage or model to reach);
 # - serviceAccount.create=false;
+# - the agent-files claim the chart makes (the operator's two claims are used instead; the
+#   chart's own claim is in e2e.sh's values and the unit tests);
 # - more than one API replica (kind's storage is ReadWriteOnce, and values.yaml keeps
 #   one replica for the schedulers).
 existingSecret: automatos-secrets
@@ -64,6 +70,9 @@ frontend:
 
 worker:
   enabled: true
+  # Made and labelled by strict.sh, with automatos-worker-secrets in it, as an operator would.
+  namespace: automatos-worker
+  existingSecret: automatos-worker-secrets
   image:
     repository: automatos-workspace-worker
     tag: ci
@@ -105,8 +114,11 @@ ingress:
     - hosts: [automatos.ci.invalid]
       secretName: automatos-ci-tls
 
-# kind's local-path storage is ReadWriteOnce; a single node shares it fine.
+# The worker apart needs a claim on each side (PRD-280 US-202): strict.sh makes both, bound
+# to one folder on the single kind node (strict-workspaces.yaml), so size, storageClass and
+# accessModes do nothing here.
 workspaces:
-  size: 1Gi
-  accessModes:
-    - ReadWriteOnce
+  api:
+    existingClaim: automatos-workspaces-api
+  worker:
+    existingClaim: automatos-workspaces-worker

@@ -1,9 +1,24 @@
 {{- if .Values.worker.enabled }}
-{{- $secret := include "automatos.secretName" . }}
+{{- include "automatos.validateWorker" . }}
+{{- /*
+The worker's own Secret (worker.existingSecret, PRD-280 US-202) holds only what it needs, and
+the token it shares with the API is a key it must hold. With the chart's one Secret, as
+before, that key stays optional.
+*/}}
+{{- $secret := include "automatos.workerSecretName" . }}
+{{- $required := list "DATABASE_URL" "REDIS_URL" }}
+{{- $optional := list "WORKER_INTERNAL_TOKEN" "ANTHROPIC_API_KEY" "CLAUDE_CODE_OAUTH_TOKEN" }}
+{{- if .Values.worker.existingSecret }}
+{{- $required = append $required "WORKER_INTERNAL_TOKEN" }}
+{{- $optional = without $optional "WORKER_INTERNAL_TOKEN" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "automatos.fullname" . }}-worker
+  {{- if include "automatos.workerApart" . }}
+  namespace: {{ .Values.worker.namespace }}
+  {{- end }}
   labels:
     {{- include "automatos.labels" . | nindent 4 }}
     app.kubernetes.io/component: worker
@@ -48,14 +63,14 @@ spec:
               value: workspace-worker
             - name: LOG_RELAY_ENABLED
               value: "false"
-            {{- range $key := list "DATABASE_URL" "REDIS_URL" }}
+            {{- range $key := $required }}
             - name: {{ $key }}
               valueFrom:
                 secretKeyRef:
                   name: {{ $secret }}
                   key: {{ $key }}
             {{- end }}
-            {{- range $key := list "WORKER_INTERNAL_TOKEN" "ANTHROPIC_API_KEY" "CLAUDE_CODE_OAUTH_TOKEN" }}
+            {{- range $key := $optional }}
             - name: {{ $key }}
               valueFrom:
                 secretKeyRef:
@@ -63,7 +78,7 @@ spec:
                   key: {{ $key }}
                   optional: true
             {{- end }}
-            {{- include "automatos.otelEnv" (dict "ctx" $ "service" "automatos-workspace-worker") | nindent 12 }}
+            {{- include "automatos.otelEnv" (dict "ctx" $ "service" "automatos-workspace-worker" "secret" $secret) | nindent 12 }}
             {{- with include "automatos.databaseTlsEnv" . | trim }}
             {{- . | nindent 12 }}
             {{- end }}
@@ -116,7 +131,7 @@ spec:
       volumes:
         - name: workspaces
           persistentVolumeClaim:
-            claimName: {{ include "automatos.workspacesClaim" . }}
+            claimName: {{ include "automatos.workerWorkspacesClaim" . }}
         {{- with include "automatos.databaseCaVolume" . | trim }}
         {{- . | nindent 8 }}
         {{- end }}
@@ -131,6 +146,9 @@ apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "automatos.fullname" . }}-worker
+  {{- if include "automatos.workerApart" . }}
+  namespace: {{ .Values.worker.namespace }}
+  {{- end }}
   labels:
     {{- include "automatos.labels" . | nindent 4 }}
     app.kubernetes.io/component: worker

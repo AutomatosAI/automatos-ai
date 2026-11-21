@@ -11,8 +11,9 @@ name: chart
 # exercised) and the three images built in this run, into a namespace that enforces the
 # "restricted" pod security level, and fails unless every pod is ready, every pod the
 # release makes passes "restricted", the worker's included (PRD-280 US-201), the worker
-# runs as uid 1000 and writes its volume, and every container's root file system is
-# read-only (deploy/kind/strict.sh). It runs only
+# runs as uid 1000 in a namespace of its own with a Secret of its own (US-202) and writes
+# its volume, the API reads those files through its own claim, and every container's root
+# file system is read-only (deploy/kind/strict.sh). It runs only
 # when the chart, this lane, or an image's start-up changes (the paths below): it is the
 # chart's slowest lane. A change to Markdown files under charts/ alone runs neither job:
 # nothing either job checks reads them.
@@ -106,6 +107,9 @@ jobs:
           helm template ci charts/automatos \
             --set existingSecret=ci --set ingress.enabled=true \
             --set otel.enabled=true --set otel.endpoint=http://otel-collector:4318 \
+            --set worker.namespace=automatos-worker --set worker.existingSecret=ci-worker \
+            --set workspaces.api.existingClaim=ci-workspaces-api \
+            --set workspaces.worker.existingClaim=ci-workspaces-worker \
             | kubeconform -strict -summary -kubernetes-version "${KUBERNETES_VERSION}"
 
       - name: helm-unittest
@@ -208,13 +212,13 @@ jobs:
           done
           rm -f "$archive"
 
-      - name: Datastores, the namespace and its Secret
+      - name: Datastores, the two namespaces, their Secrets and the agent-files claims
         run: deploy/kind/strict.sh prepare
 
       - name: helm install (every pod must become ready)
         run: deploy/kind/strict.sh install
 
-      - name: Pod security and read-only roots
+      - name: Pod security, read-only roots and the worker's start
         run: deploy/kind/strict.sh check
 
       - name: Diagnostics

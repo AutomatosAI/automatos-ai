@@ -20,7 +20,7 @@ Redis are **external**: use managed services, or anything you run yourself.
 | Deployment `<release>-frontend` | The web app. |
 | Deployment `<release>-worker` | The workspace worker (Code Canvas runtime). One pod, `Recreate` strategy. It runs as uid 1000 with no capability, and nothing in the container can gain privileges (`allowPrivilegeEscalation: false`). It re-owns nothing: the storage must hand its volume over writable by the pod's group (`fsGroup: 1000`), and it stops with a message that says so when it cannot write the volume. |
 | ServiceAccounts `<fullname>-api`, `<fullname>-frontend`, `<fullname>-worker`, `<fullname>-migrate` | One account for each component, so a cloud role you tie to one reaches that component only (`<fullname>` is the prefix the chart puts on every resource's name: the release name, with `-automatos` added unless the release name already contains it (release `demo`: `demo-automatos`)). The migration Job's account is a hook that runs just before the Job. Helm deletes it once the hooks succeed; after a failed Job it can be left behind until the next install or upgrade replaces it. None of them mounts a token for the cluster's own API: nothing in Automatos calls it. |
-| PVC `<release>-workspaces` | Agent files: the worker reads and writes, the API reads. Kept on `helm uninstall`. Pods on several nodes need `ReadWriteMany` storage. |
+| PVC `<release>-workspaces` | Agent files: the worker reads and writes, the API reads. Kept on `helm uninstall`. Pods on several nodes need `ReadWriteMany` storage. Not created when either side names a claim of its own (`workspaces.api.existingClaim`, `workspaces.worker.existingClaim`). |
 | PVC `<release>-api-data` | The API's files at `/app/data`: uploads, brand files and generated documents. Kept on `helm uninstall`. With `ReadWriteOnce`, the default, every rollout stops the old API pod first, so the API is down until the new pod is ready. |
 | Ingress (off by default) | `/api` and `/ws` to the API, everything else to the web app. Useful once the web app reads its API address at runtime. |
 
@@ -44,7 +44,7 @@ Redis are **external**: use managed services, or anything you run yourself.
    | `REDIS_URL` | |
    | `API_KEY` | The platform API key. |
    | `CREDENTIAL_ENCRYPTION_KEY` | A Fernet key. **Keep it and back it up**: credentials saved in the app are encrypted with it, and every pod must share it. |
-   | `WORKER_INTERNAL_TOKEN` | Optional. Shared secret between the API and the worker. |
+   | `WORKER_INTERNAL_TOKEN` | Optional. Shared secret between the API and the worker. Required, in this Secret and the worker's, when the worker has a Secret of its own (`worker.existingSecret`). |
    | `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` | Optional. For the worker's Code Canvas agent. |
    | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | Optional. Object storage credentials, for S3 or for MinIO with `S3_ENDPOINT_URL` in `config`. |
 
@@ -80,6 +80,9 @@ See [`values.yaml`](values.yaml). The ones you're most likely to change:
 | `api.image.digest`, `frontend.image.digest`, `worker.image.digest` | empty | `sha256:<64 hex>`: the pod runs `repository@digest`, that exact build, whatever the tag. |
 | `api.image.pullPolicy`, `frontend.image.pullPolicy`, `worker.image.pullPolicy` | empty: the chart chooses | `Always` for a tag that moves (`edge`, or a `MAJOR.MINOR` release line), `IfNotPresent` for a digest or a fixed tag. A value you set is used as given. |
 | `workspaces.storageClass`, `workspaces.accessModes` | cluster default, `ReadWriteMany` | |
+| `workspaces.api.existingClaim`, `workspaces.worker.existingClaim` | empty | A claim that already exists for that side of the agent-files volume; the chart then creates none. In one namespace, a claim named for either side serves both. With `worker.namespace`, both are required (below). |
+| `worker.namespace` | empty: the release's namespace | The worker's Deployment, Service and account go there, and the API's `WORKER_INTERNAL_URL` becomes `http://<fullname>-worker.<namespace>.svc:8081`. The release's own namespace counts as empty. See "The worker in a namespace of its own" below. |
+| `worker.existingSecret` | empty: `existingSecret` | The worker's own Secret, in the worker's namespace. The worker reads no other: `DATABASE_URL`, `REDIS_URL` and `WORKER_INTERNAL_TOKEN` (required), `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` and `OTEL_EXPORTER_OTLP_HEADERS` (optional). Set, `WORKER_INTERNAL_TOKEN` becomes required in `existingSecret` too, the same value. |
 | `api.data.enabled`, `api.data.size`, `api.data.storageClass`, `api.data.accessModes` | on, `10Gi`, cluster default, `ReadWriteOnce` | The API's files. Off, they're lost on every restart. `accessModes` can't change once the claim exists; more than one API replica needs a mode other than `ReadWriteOnce` or `ReadWriteOncePod`. The storage must honour the pod's `fsGroup`, or the API can't write here: some NFS-style drivers don't. |
 | `serviceAccount.create` | `true` | The chart creates one account for each component (above). `false`: it creates none, and each pod runs under the account `serviceAccount.<component>.name` names, or the namespace's `default`; several components may name the same one. |
 | `serviceAccount.api`, `.frontend`, `.worker`, `.migrate` (`.name`, `.annotations`) | `<fullname>-<component>`, none | `name` renames that account; `annotations` go on it alone, e.g. `eks.amazonaws.com/role-arn` or `iam.gke.io/gcp-service-account` on the API's. With `serviceAccount.create=true` each account needs a name of its own. Tying a role to an account is yours to do; a token a cloud's webhook projects for that role (EKS IRSA) is separate from the cluster token the chart turns off. |
@@ -105,13 +108,36 @@ Every container's root file system is read-only, so what runs stays what was rel
 
 Each component's `readOnlyRootFilesystem` value turns it off for that component alone. A path of your own in `config` (a temporary folder, a log file) has to be under one of these, or the API cannot write it.
 
-CI installs the chart into a kind cluster on every change to the chart (Markdown aside) or to an image's start-up (`.github/workflows/chart.yml`, `deploy/kind/strict.sh`), with the values in `deploy/kind/strict-values.yaml`, whose header lists what they turn on and what they do not exercise. The release's namespace enforces "restricted", and every pod must become ready. Every pod the release makes, the migration Job's included, must also be admitted by a second namespace that enforces "restricted", as a dry run, so a refusal names the pod and its violations. Every container and init container of those pods must set `readOnlyRootFilesystem: true` in its spec, and in the API, the web app and the worker, which keep running, a write to the root must fail.
+CI installs the chart into a kind cluster on every change to the chart (Markdown aside) or to an image's start-up (`.github/workflows/chart.yml`, `deploy/kind/strict.sh`), with the values in `deploy/kind/strict-values.yaml`, whose header lists what they turn on and what they do not exercise. The worker runs there in a namespace of its own, with a Secret of its own and the agent-files volume as two claims on one folder, as "The worker in a namespace of its own" below describes; the release's namespace and the worker's both enforce "restricted", and every pod must become ready. The worker must run as uid 1000 and write its volume, and the API must read what it wrote through its own claim. Every pod the release makes, the migration Job's included, must also be admitted by a second namespace that enforces "restricted", as a dry run, so a refusal names the pod and its violations. Every container and init container of those pods must set `readOnlyRootFilesystem: true` in its spec, and in the API, the web app and the worker, which keep running, a write to the root must fail.
+
+## The worker in a namespace of its own
+
+`worker.namespace` puts the worker in a namespace other than the release's, so it can have its own pod security level, network rules and quotas. A Secret, a ServiceAccount and a PersistentVolumeClaim belong to one namespace, and the chart never creates a namespace, so you provide, before `helm install`:
+
+1. **The namespace**, with the pod security labels you want (`restricted` passes).
+2. **The worker's Secret** in it, named in `worker.existingSecret`: `DATABASE_URL`, `REDIS_URL` and `WORKER_INTERNAL_TOKEN` (the same token as in `existingSecret`, which must now hold it too), and any of `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` and `OTEL_EXPORTER_OTLP_HEADERS` the worker uses.
+3. **Two claims on one file system**: `workspaces.api.existingClaim` in the release's namespace, `workspaces.worker.existingClaim` in the worker's. A claim the chart made would be a disk of its own, so the chart makes none here: bind both to the same storage, for example two PersistentVolumes on one NFS export or file share, each with a `claimRef` to its claim. The storage must give uid 1000 or group 1000 write access (the worker writes, the API reads).
+4. With `database.caConfigMap`: a ConfigMap of that name in the worker's namespace too.
+5. With `serviceAccount.create=false`: the account `serviceAccount.worker.name` names, in the worker's namespace.
+
+With `serviceAccount.create=true` the chart creates the worker's account in the worker's namespace. The API reaches the worker across the namespaces on port 8081: a network policy you add must allow it.
+
+Rendering stops with a message on a combination that cannot work:
+
+- `worker.namespace` that is not a valid namespace name;
+- `worker.namespace` set (and not the release's) without `worker.existingSecret`;
+- `worker.namespace` set (and not the release's) without `workspaces.api.existingClaim` or without `workspaces.worker.existingClaim`.
 
 ## Upgrading to 0.10.0
 
 - **The worker runs as uid 1000 from its start, never as root** (PRD-280 US-201). Its pod sets `runAsNonRoot`, `runAsUser: 1000`, `runAsGroup: 1000` and `fsGroup: 1000`, and its container adds no capability back (0.9.0 added `CHOWN`, `DAC_OVERRIDE`, `SETGID` and `SETUID`). It passes the "restricted" pod security level.
 - **The worker re-owns nothing.** Before, it started as root and re-owned whatever on its volume was not uid 1000's. Now the storage must hand the volume over writable by the pod's group, as it already must for the API's data volume. With storage that honours `fsGroup` (most block-storage and CSI drivers) nothing changes: the kubelet gives the volume to group 1000, and what the 0.9.0 worker wrote is uid 1000's already. With storage that does not (some NFS-style drivers), the worker stops at start with `[entrypoint] uid 1000 cannot write /workspaces…`: give the volume's files to uid 1000 or group 1000 on the storage side, or use a storage class that honours `fsGroup`.
 - **The chart needs a worker image from this release or later.** The image now starts as uid 1000, and its entrypoint knows it. An older worker image, started as uid 1000 by this chart, stops at its drop to the worker (`setpriv` cannot set groups without root). Upgrade the image with the chart: leave `worker.image.tag` and `worker.image.digest` empty, or pin a build from this release.
+- **The worker can have a namespace of its own** (PRD-280 US-202), so it can have its own pod security level and rules: set `worker.namespace`. Nothing changes unless you set it: with `worker.namespace`, `worker.existingSecret`, `workspaces.api.existingClaim` and `workspaces.worker.existingClaim` all empty, the chart renders what 0.9.0 did, but for the worker's start above and the chart's version label (`charts/automatos/tests/default_render_test.yaml` pins it). See "The worker in a namespace of its own" below for what you provide.
+- **The worker can read a Secret of its own** (`worker.existingSecret`), in any namespace. It then reads no key from `existingSecret`, and `WORKER_INTERNAL_TOKEN` becomes a required key of both Secrets, the same value in each, so the two sides always share it: a pod whose Secret lacks it does not start (`CreateContainerConfigError`).
+- **Each side of the agent-files volume can be given a claim that already exists** (`workspaces.api.existingClaim`, `workspaces.worker.existingClaim`). The chart then creates no `<fullname>-workspaces` claim; one it created before is kept (`helm.sh/resource-policy: keep`) and is yours to delete once nothing mounts it.
+
+## Upgrading to 0.9.0
 
 - **Every container's root file system becomes read-only** (`readOnlyRootFilesystem: true`), with the scratch volumes in the table above. Anything a pod wrote on its own disk outside them now fails with "read-only file system". To keep a component as it was, set its value to `false` (`--set api.readOnlyRootFilesystem=false`, and the same for `frontend`, `worker` and `migrations`).
 - **The API's home folder, `/tmp` and `/app/logs` start empty on every new pod,** as the container's own disk already did. The API's pods now set `HOME=/home/automatos`.

@@ -57,7 +57,7 @@ Sources: `charts/automatos/README.md:3-5`, `charts/automatos/README.md:14-24`, `
 
 ### Configuration and component mapping
 
-The chart’s documented settings include `existingSecret`, edition configuration, component image tags and digests, workspace storage, ingress, OpenTelemetry, and optional session mode. The README points operators to `values.yaml` for the chart’s settings. The worker template consumes worker-specific image, quota, concurrency, resource, and shared-secret values. [charts/automatos/README.md:66-81](), [charts/automatos/templates/worker.yaml:1-2](), [charts/automatos/templates/worker.yaml:29-60](), [charts/automatos/templates/worker.yaml:105-110]()
+The chart’s documented settings include `existingSecret`, edition configuration, component image tags and digests, workspace storage, ingress, OpenTelemetry, and optional session mode. The README points operators to `values.yaml` for the chart’s settings. The worker template consumes worker-specific image, quota, concurrency, resource, and shared-secret values. Since chart 0.10.0 (PRD-280 US-202) the worker can run in a namespace of its own (`worker.namespace`), reading a Secret of its own (`worker.existingSecret`), with each side of the agent-files volume on a claim the operator made (`workspaces.api.existingClaim`, `workspaces.worker.existingClaim`); the chart refuses a separate namespace without that Secret and both claims, and never creates the namespace. [charts/automatos/README.md]() [charts/automatos/README.md:66-81](), [charts/automatos/templates/worker.yaml:1-2](), [charts/automatos/templates/worker.yaml:29-60](), [charts/automatos/templates/worker.yaml:105-110]()
 
 **Diagram: Helm configuration names mapped to rendered worker resources**
 

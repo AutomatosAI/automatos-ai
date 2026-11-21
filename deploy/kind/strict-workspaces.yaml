@@ -1,0 +1,71 @@
+# The agent-files volume for chart.yml's install lane (deploy/kind/strict.sh prepare), with
+# the worker in a namespace of its own (PRD-280 US-202). A claim belongs to one namespace, so
+# the operator makes one in each and binds both to one file system; the chart is given their
+# names (workspaces.api.existingClaim, workspaces.worker.existingClaim in strict-values.yaml)
+# and makes no claim. Here the file system is one folder on the single kind node, which
+# strict.sh makes first, owned by group 1000 (the pods' group) with the setgid bit: a
+# hostPath volume ignores the pod's fsGroup. On a real cluster it is an NFS export or a file
+# share, with ReadWriteMany.
+#
+# Each volume names the claim it is for (claimRef), and each claim the volume (volumeName), so
+# neither can bind to anything else; the empty storageClassName keeps the default class's
+# provisioner away.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: automatos-ci-workspaces-api
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  hostPath:
+    path: /var/lib/automatos-ci/workspaces
+    type: Directory
+  claimRef:
+    namespace: automatos
+    name: automatos-workspaces-api
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: automatos-ci-workspaces-worker
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  hostPath:
+    path: /var/lib/automatos-ci/workspaces
+    type: Directory
+  claimRef:
+    namespace: automatos-worker
+    name: automatos-workspaces-worker
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: automatos-workspaces-api
+  namespace: automatos
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: ""
+  volumeName: automatos-ci-workspaces-api
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: automatos-workspaces-worker
+  namespace: automatos-worker
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: ""
+  volumeName: automatos-ci-workspaces-worker
+  resources:
+    requests:
+      storage: 1Gi
