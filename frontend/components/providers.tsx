@@ -20,7 +20,9 @@ import { ThemeHostProvider } from './theme-host/theme-host-provider'
 import { ThemeLookRuntime } from './theme-host/theme-look-runtime'
 import { BriefOnOpen } from './proactive/brief-on-open'
 import { isSaaS } from '@/lib/auth-edition'
+import { isEnterprise } from '@/lib/edition-name'
 import { ResumeAfterSignIn } from './auth/resume-after-sign-in'
+import { EnterpriseSessionProvider } from './enterprise/enterprise-session-provider'
 
 // PRD-244 W0: the `?theme=studio-preview` URL flag is gone — Studio is a
 // picker entry like any other theme (D1a); the default stays `system` until
@@ -31,7 +33,12 @@ import { ResumeAfterSignIn } from './auth/resume-after-sign-in'
 // WorkspaceProvider, children) is identical. In `saas` the boundary is Clerk +
 // ClerkApiClientProvider (the real token getter); in `local` it is LocalAuthProvider
 // (a no-op token getter over the same seam), and NO Clerk symbol executes.
+// PRD-277 US-501: in `enterprise` it is EnterpriseSessionProvider (the API's session cookie, who
+// the person is from the API), and again NO Clerk symbol executes.
 function AuthBoundary({ children }: { children: React.ReactNode }) {
+  if (isEnterprise) {
+    return <EnterpriseSessionProvider>{children}</EnterpriseSessionProvider>
+  }
   if (!isSaaS) {
     return <LocalAuthProvider>{children}</LocalAuthProvider>
   }

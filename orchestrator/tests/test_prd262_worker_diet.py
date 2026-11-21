@@ -420,6 +420,8 @@ def test_images_runs_the_toolchain_check_in_the_worker_it_built():
     assert step["env"] == {"IMAGE": "${{ matrix.image }}", "DIGEST": "${{ steps.build.outputs.digest }}"}
     assert 'docker pull --quiet "${IMAGE}@${DIGEST}"' in step["run"]
     assert f'--entrypoint python "${{IMAGE}}@${{DIGEST}}" - < {TOOLCHAIN_SCRIPT}' in step["run"]
+    # As root, which the image no longer starts as (PRD-280 US-201): the checks read root's paths.
+    assert f'docker run --rm -i --user 0 --entrypoint python "${{IMAGE}}@${{DIGEST}}" - < {TOOLCHAIN_SCRIPT}' in step["run"]
     scan_at = next(i for i, other in enumerate(BUILD_STEPS) if other.get("name") == "Vulnerability scan")
     assert BUILD_STEPS.index(step) > scan_at, "after the reports and the scan, so they run first"
 

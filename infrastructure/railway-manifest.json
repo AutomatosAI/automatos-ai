@@ -234,6 +234,7 @@
       ]
     },
     "agent-workspace-worker": {
+      "_note": "PRD-280 US-201: the worker image starts as uid 1000 by default, and Railway mounts this service's volume owned by root, so RAILWAY_RUN_UID=0 (required_env_values) starts it as root; its entrypoint then re-owns the volume and drops to uid 1000, as before. Set it on the service BEFORE an image from that release deploys; set earlier, it changes nothing (the older image already starts as root). Without it the worker prints '[entrypoint] uid 1000 cannot write /workspaces...' and exits 1 before starting, touching no file. See docs/deployment-infrastructure/production-deployment-cicd.md.",
       "group": "core",
       "source": {
         "repo": "AutomatosAI/automatos-ai",
@@ -267,6 +268,7 @@
         "LOG_LEVEL",
         "LOG_RELAY_ENABLED",
         "QDRANT_URL",
+        "RAILWAY_RUN_UID",
         "REDIS_URL",
         "SERVICE_NAME",
         "WORKER_CONCURRENCY",
@@ -274,7 +276,10 @@
         "WORKER_INTERNAL_TOKEN",
         "WORKSPACE_DEFAULT_QUOTA_GB",
         "WORKSPACE_VOLUME_PATH"
-      ]
+      ],
+      "required_env_values": {
+        "RAILWAY_RUN_UID": "0"
+      }
     },
     "media-render": {
       "_note": "PRD-251 D3 (S1.1c): the Socials renderer. Owner sizing 2026-09-23: 4 vCPU / 8 GB, ONE replica (its render lanes are in-process: two renders at once overall, one per workspace).",

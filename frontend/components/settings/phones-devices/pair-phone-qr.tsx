@@ -9,12 +9,13 @@
  * The error correction level is M exactly: the encoder may not raise it. A quiet zone of four light
  * modules surrounds the symbol. The modules are dark on a light ground in both themes, because a
  * symbol in the theme's colours would invert in dark mode and many scanners read only dark on
- * light. Pairing exists only on a local install, so on SaaS this draws nothing. The panel draws it
+ * light. Pairing exists only on a local or enterprise install (PRD-277 US-601), so on SaaS this draws nothing. The panel draws it
  * only while the code is live, with the code, its countdown and the link beside it as text.
  */
 import { useMemo } from 'react'
 
 import { isLocal } from '@/lib/auth-edition'
+import { isEnterprise } from '@/lib/edition-name'
 import { QrCode } from '@/lib/vendor/qrcodegen/qrcodegen'
 import { QrSegment } from '@/lib/vendor/qrcodegen/qrsegment'
 
@@ -56,7 +57,7 @@ export function qrModulePath(qr: QrCode): string {
 }
 
 export function PairPhoneQr({ payload }: { payload: string }) {
-  const qr = useMemo(() => (isLocal ? encodePairingQr(payload) : null), [payload])
+  const qr = useMemo(() => (isLocal || isEnterprise ? encodePairingQr(payload) : null), [payload])
   if (!qr) return null
   const side = qr.size + 2 * QUIET_ZONE_MODULES
   return (

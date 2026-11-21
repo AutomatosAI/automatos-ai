@@ -21,12 +21,21 @@ from starlette.concurrency import run_in_threadpool
 
 from core.auth.bearer_registry import bearer_token
 from core.auth.clerk import get_clerk_auth
+from core.auth.clerk_person import clerk_person_row
 from core.auth.dependencies import RequestContext, clerk_user
 from core.auth.hybrid import _get_workspace_id_from_request, get_request_context_hybrid
 from core.auth.workspace_admin import require_workspace_admin
 from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
+
+
+def _is_the_owner(db, owner_pk: Optional[int], clerk_user_id: Optional[str]) -> bool:
+    """True when the person this Clerk user ID names is the workspace's owner, by ``users.id``."""
+    if owner_pk is None or not clerk_user_id:
+        return False
+    person = clerk_person_row(db, clerk_user_id)
+    return person is not None and person[0] == owner_pk
 
 
 def closed_workspace_owner_context(request: Request, db) -> Optional[RequestContext]:
@@ -38,8 +47,7 @@ def closed_workspace_owner_context(request: Request, db) -> Optional[RequestCont
     if not bearer or not workspace_id:
         return None
     row = db.execute(
-        text("SELECT w.deleted_at IS NOT NULL AS closed, u.clerk_user_id AS owner FROM workspaces w "
-             "LEFT JOIN users u ON u.id = w.owner_id WHERE w.id = :id"),
+        text("SELECT w.deleted_at IS NOT NULL AS closed, w.owner_id AS owner FROM workspaces w WHERE w.id = :id"),
         {"id": str(workspace_id)},
     ).fetchone()
     if row is None or not row.closed:
@@ -50,7 +58,7 @@ def closed_workspace_owner_context(request: Request, db) -> Optional[RequestCont
     if not claims:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
     info = clerk.extract_user_info(claims)
-    if not row.owner or info.get("clerk_user_id") != row.owner:
+    if not _is_the_owner(db, row.owner, info.get("clerk_user_id")):
         return None
     logger.info("The owner of closed workspace %s reached it to finish its erasure", workspace_id)
     return RequestContext(workspace_id=workspace_id, user=clerk_user(info, claims), auth_type="clerk")
