@@ -56,10 +56,19 @@ DEFAULT_LIMITS: dict[str, tuple[int, int]] = {
     # PRD-266 W2 review: POST /api/v1/mobile/devices, one bucket per client IP (an IPv6 /64), the same
     # way as mobile_pair_ip. Each registration can add a push target: a script cannot add thousands.
     "mobile_devices_ip": config.rate_limit_for("mobile_devices_ip", 30, 600),  # 30 registrations per IP per 10 minutes
+    # PRD-277 US-601: POST /api/v1/mobile/pairing-codes where codes are a person's own (enterprise), one
+    # bucket per person, the mobile_pair_ip way. A person pairing a phone needs one or two codes; a loop
+    # gets ten codes, each replacing the last.
+    "mobile_codes_person": config.rate_limit_for("mobile_codes_person", 10, 600),  # 10 per person per 10 minutes
     # PRD-268 US-C18: POST /api/readiness/check ("Check again"), one bucket per workspace, counted off
     # the event loop by api/readiness.py through RateLimitStore. GET /api/readiness answers the last
     # check while it is younger than this window.
     "readiness_check": config.rate_limit_for("readiness_check", 3, 60),     # 3 checks per workspace per minute
+    # PRD-277 US-402: the public GET /api/v1/auth/oidc/start and /callback, one bucket each per client
+    # IP (an IPv6 /64), counted off the event loop by api/auth_oidc.py the mobile_pair_ip way. Room for
+    # an office behind one address signing in at nine; a script cannot fill the sign-in table.
+    "oidc_start_ip":    config.rate_limit_for("oidc_start_ip", 300, 600),    # 300 sign-ins started per IP per 10 minutes
+    "oidc_callback_ip": config.rate_limit_for("oidc_callback_ip", 300, 600), # 300 callbacks per IP per 10 minutes
 }
 
 

@@ -18,7 +18,8 @@ import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/shared'
 import { useWorkspace } from '@/hooks/use-workspace'
 import { apiClient, type ProfileResponse, type ProfileUpdateRequest } from '@/lib/api-client'
-import { initialsFor } from '@/components/auth/user-profile-button'
+import { initialsFor } from '@/lib/initials'
+import { InstallVersion } from './install-version'
 
 /**
  * PRD-233 S6 — the local operator's profile.
@@ -188,6 +189,7 @@ export function LocalProfileForm() {
                             </Button>
                         }
                     />
+                    <InstallVersion />
                 </div>
 
                 {saveStatus !== 'idle' && (

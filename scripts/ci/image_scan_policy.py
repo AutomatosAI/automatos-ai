@@ -7,7 +7,11 @@ Two commands:
   fixable Critical (severity Critical, ``fix.state`` ``fixed``), or when it is on CISA's
   Known Exploited Vulnerabilities list, whatever its severity, and no unexpired
   allowlist entry matches it. In ``report`` mode the blocking rows are warnings and the
-  step passes; in ``fail`` mode they fail it.
+  step passes; in ``fail`` mode they fail it. On a ``v*`` tag (``--ref``) the check runs
+  in ``fail`` mode whatever ``--mode`` says (PRD-279 US-102, D-4): a release is never
+  cut from an image the policy would fail. An image scanned report only
+  (``--report-only true``, images.yml's ``scan_report_only``, which is never published)
+  stays report only: that switch only ever lowers the mode.
 * ``allowlist`` (the daily scan-allowlist workflow) fails once an entry has expired,
   and warns a week before.
 
@@ -46,6 +50,8 @@ from typing import List, Optional, Sequence, Tuple
 import yaml
 
 MODES = ("report", "fail")
+# The refs images.yml publishes a version from (its `v*` tag trigger).
+RELEASE_REF_PREFIX = "refs/tags/v"
 MAX_DAYS = 90
 WARN_DAYS = 7
 FIXED = "fixed"
@@ -331,6 +337,20 @@ def _refuse(error: ValueError, title: str) -> int:
     return 1
 
 
+def effective_mode(mode: str, ref: str = "", report_only: bool = False) -> str:
+    """The mode a check runs in: ``fail`` on a version tag, unless the image is report only.
+
+    ``mode`` is POLICY_MODE, the branches' setting. A ``v*`` tag raises it to ``fail``
+    (PRD-279 US-102). ``report_only`` (an image never published, scanned for the first
+    time) lowers it to ``report`` on any ref, as before.
+    """
+    if report_only:
+        return "report"
+    if ref.startswith(RELEASE_REF_PREFIX):
+        return "fail"
+    return mode
+
+
 def _today(value: Optional[str]) -> date:
     return date.fromisoformat(value) if value else datetime.now(timezone.utc).date()
 
@@ -342,6 +362,7 @@ def check(args: argparse.Namespace) -> int:
     """Judge one image's scan; exit 1 only in fail mode with a blocking row, or on bad input."""
     today = _today(args.today)
     label = f"{args.name} ({args.arch})"
+    mode = effective_mode(args.mode, args.ref, args.report_only == "true")
     try:
         entries = load_allowlist(Path(args.allowlist), today)
         report = json.loads(Path(args.report).read_text(encoding="utf-8"))
@@ -349,12 +370,12 @@ def check(args: argparse.Namespace) -> int:
     except (AllowlistError, ReportError, json.JSONDecodeError) as error:
         return _refuse(error, "Scan policy")
     verdict = evaluate(found, entries, today)
-    annotate(verdict, args.mode, label)
+    annotate(verdict, mode, label)
     grype = str((report.get("descriptor") or {}).get("version") or "(version not reported)")
-    _append(args.summary, summary_markdown(found, verdict, args.mode, label, grype))
+    _append(args.summary, summary_markdown(found, verdict, mode, label, grype))
     print(f"{label}: {len(found)} matches, {len(verdict.blocking)} blocking, "
-          f"{len(verdict.allowlisted)} allowlisted ({args.mode} mode)")
-    return 1 if verdict.blocking and args.mode == "fail" else 0
+          f"{len(verdict.allowlisted)} allowlisted ({mode} mode)")
+    return 1 if verdict.blocking and mode == "fail" else 0
 
 
 def allowlist(args: argparse.Namespace) -> int:
@@ -386,6 +407,9 @@ def parser() -> argparse.ArgumentParser:
     for flag in ("--report", "--allowlist", "--name", "--arch"):
         one.add_argument(flag, required=True)
     one.add_argument("--mode", required=True, choices=MODES)
+    one.add_argument("--ref", default="", help="the run's ref ($GITHUB_REF): a v* tag runs in fail mode")
+    one.add_argument("--report-only", default="false", choices=("true", "false"),
+                     help="an image judged report only on any ref (images.yml's scan_report_only)")
     every = commands.add_parser("allowlist", help="fail once an allowlist entry has expired")
     every.add_argument("--allowlist", required=True)
     for command in (one, every):

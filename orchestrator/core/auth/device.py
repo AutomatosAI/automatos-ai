@@ -3,8 +3,11 @@
 Reached only through the bearer-prefix registry (``core/auth/bearer_registry.py``), which
 runs it BEFORE the Clerk lane, so a device token is never shown to Clerk.
 
-* Only where devices pair (``core.editions`` ``device_pairing``: the local edition). On
-  saas an ``amd_`` bearer is 401 and nothing is looked up: a paired row never exists there (§8).
+* Only where devices pair (``core.editions`` ``device_pairing``: the local edition, and enterprise
+  while ``ENTERPRISE_DEVICE_PAIRING`` is on). Elsewhere an ``amd_`` bearer is 401 and nothing is
+  looked up: on saas a paired row never exists (§8). Before any lookup, the process must have
+  checked that no device paired under another edition is still live
+  (``services.mobile.edition_change.ensure_confirmed``: 503 while it cannot).
 * The row is found by the SHA-256 of the token (``token_hash``) and confirmed in constant
   time (``core.auth.pairing.secrets_match``), or by ``prev_token_hash`` while the rotation
   overlap lasts (strictly before ``prev_token_valid_until``). A revoked row is
@@ -21,7 +24,10 @@ runs it BEFORE the Clerk lane, so a device token is never shown to Clerk.
   user_id}`` so ``core.auth.principal.resolve_user_pk`` reads the integer PK without a query.
   Only an edition with an operator (``anonymous_operator``: local) has one: elsewhere
   (enterprise, PRD-277 FR-22) a person whose email is ``LOCAL_OPERATOR_EMAIL`` is a plain
-  ``user`` like anyone else, and must still be a member of the device's workspace.
+  ``user`` like anyone else, and must still be a member of the device's workspace. In
+  enterprise a device is never its person's install-wide role either: it is ``user``, and its
+  workspace role is read from the person's membership at each request
+  (``core.auth.workspace_permission``), so a device can never pass an install admin's check.
 * ``last_seen_at`` is written at most once every ``LAST_SEEN_WRITE_INTERVAL``, never on
   every request; a failed write is logged and never costs the caller the request.
 * The lookup runs in the threadpool on its own session, always closed. Nothing here logs a
@@ -227,7 +233,11 @@ async def resolve_device_context(request: Request, token: str) -> RequestContext
     off the event loop; the log context is set here, on the request's own context.
     """
     if not editions.current().device_pairing:
-        raise _unauthorized("device tokens are a local-edition credential")
+        raise _unauthorized("device tokens are not taken on this install")
+    from services.mobile import edition_change  # at call time: it imports the registry that imports us
+
+    if edition_change.needs_confirming():
+        await run_in_threadpool(edition_change.ensure_confirmed)
     context = await run_in_threadpool(_resolve_in_own_session, request, token)
     _hybrid()._enrich_log_context(context)
     return context

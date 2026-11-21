@@ -9,6 +9,7 @@ import { CREDITS_EXHAUSTED_CODE as TRIAL_EXHAUSTED_CODE } from '@/lib/credits'
 import { completeRunningToolCalls, upsertTaskCard, upsertToolCall } from '@/lib/chat/tool-calls'
 import { errorFromDataPayload, parseErrorFrame } from '@/lib/chat/errors'
 import { withoutNarration } from '@/lib/chat/narration'
+import { reportedSessionRefusal } from '@/lib/enterprise/chat-refusal'
 import { toast } from 'sonner'
 
 /** PRD-237 S7: the client-side placeholder shown while the server finishes a turn. */
@@ -239,6 +240,7 @@ export function useChat({
           // it so the exhausted banner appears immediately (before the snapshot
           // refreshes). The gate can trip pre-stream (this non-ok body).
           if (errorText.includes(TRIAL_EXHAUSTED_CODE)) setErrorCode(TRIAL_EXHAUSTED_CODE)
+          if (reportedSessionRefusal(response.status, errorText)) return // PRD-277 US-502: the dialog, not a toast
           toast.error(`Chat request failed (${response.status})${errorText ? `: ${errorText}` : ''}`)
           return
         }

@@ -12,6 +12,9 @@ import { useAuth } from '@/lib/auth-hooks'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { PageHeader, SearchInput } from '@/components/shared'
+import { isEnterprise } from '@/lib/edition-name'
+import { EnterpriseMemberActions } from './enterprise-member-actions'
+import { EnterpriseWaitingSection } from './enterprise-waiting-section'
 
 /**
  * The Team page: header with member count, refresh and invite; the search box; pending
@@ -32,6 +35,9 @@ export function TeamManagement() {
     } = useTeamMembers()
     const [isInviteOpen, setIsInviteOpen] = useState(false)
     const [searchTerm, setSearchTerm] = useState('')
+    // PRD-277 US-504: enterprise has no invitations (people sign in with the organisation's identity
+    // provider); an install admin (the API's role) places people waiting and ends a person's access,
+    // in components only enterprise renders, so no other edition runs their hooks.
 
     const filteredMembers = members.filter(m =>
         m.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -72,13 +78,15 @@ export function TeamManagement() {
                             Refresh
                         </Button>
 
-                        <Button
-                            onClick={() => setIsInviteOpen(true)}
-                            className="bg-brand-primary hover:bg-brand-primary/90"
-                        >
-                            <UserPlus className="w-4 h-4 mr-2" />
-                            Invite Member
-                        </Button>
+                        {!isEnterprise && (
+                            <Button
+                                onClick={() => setIsInviteOpen(true)}
+                                className="bg-brand-primary hover:bg-brand-primary/90"
+                            >
+                                <UserPlus className="w-4 h-4 mr-2" />
+                                Invite Member
+                            </Button>
+                        )}
                     </>
                 }
             />
@@ -91,9 +99,11 @@ export function TeamManagement() {
             />
 
             {/* Pending invitations */}
-            {pendingInvites.length > 0 && (
+            {!isEnterprise && pendingInvites.length > 0 && (
                 <PendingInvitations pendingInvites={pendingInvites} onRevoke={handleRevokeInvite} />
             )}
+
+            {isEnterprise && <EnterpriseWaitingSection workspaceId={workspaceId} onPlaced={fetchMembers} />}
 
             {/* Members List */}
             <MembersTable
@@ -101,14 +111,17 @@ export function TeamManagement() {
                 loading={loading}
                 onRoleChange={handleRoleChange}
                 onRemove={handleRemoveMember}
+                renderActions={isEnterprise ? (member) => <EnterpriseMemberActions member={member} onChanged={fetchMembers} /> : undefined}
             />
 
-            <InviteModal
-                isOpen={isInviteOpen}
-                onClose={() => setIsInviteOpen(false)}
-                onInvite={() => fetchMembers()}
-                workspaceId={workspaceId || ""}
-            />
+            {!isEnterprise && (
+                <InviteModal
+                    isOpen={isInviteOpen}
+                    onClose={() => setIsInviteOpen(false)}
+                    onInvite={() => fetchMembers()}
+                    workspaceId={workspaceId || ""}
+                />
+            )}
         </div>
     )
 }

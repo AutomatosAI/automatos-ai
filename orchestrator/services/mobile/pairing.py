@@ -17,8 +17,13 @@ SHA-256 is kept and the token itself is returned exactly once.
   is deleted. One phone is always one row
   (``uq_mobile_devices_workspace_user_install``) and its device id never changes.
 * Minting a code first deletes the caller's own pending codes that have expired, so a dead
-  code's row (and its hash) does not linger.
-* Pairing is a local-edition feature: on saas these refuse (``PairingUnavailable``), so a
+  code's row (and its hash) does not linger. Where codes are a person's own (no operator:
+  enterprise, PRD-277 US-601) a person holds one pending code per workspace, so a new code
+  replaces theirs, expired or not, and none is made while they hold
+  ``MAX_ACTIVE_DEVICES_PER_PERSON`` active devices there (``DeviceConflict``, 409). Counted, not
+  locked, as registration is.
+* Pairing exists where ``device_pairing`` is on (local; enterprise while
+  ``ENTERPRISE_DEVICE_PAIRING`` is): on saas these refuse (``PairingUnavailable``), so a
   paired row never exists there (§8), whatever calls them.
 * These functions flush and never commit: the router commits once and maps a database error
   to 409/503 by its type. Nothing here logs, so a code, a token or a hash never reaches a log.
@@ -31,7 +36,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlencode
 from uuid import UUID
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
 
 from config import config
 from core import editions
@@ -96,18 +101,42 @@ def _unexpired(expires_at: Optional[datetime], now: datetime) -> bool:
 
 def _require_device_pairing() -> None:
     if not editions.current().device_pairing:
-        raise PairingUnavailable("pairing is a local-edition feature; saas phones sign in with Clerk")
+        raise PairingUnavailable("devices do not pair on this install")
 
 
-def _drop_expired_codes(db: Session, workspace_id: UUID, user_pk: int, now: datetime) -> None:
-    """Delete this person's pending codes in this workspace whose time is up (they never pair)."""
-    db.query(MobileDevice).filter(
+def _pending_codes(db: Session, workspace_id: UUID, user_pk: int) -> Query:
+    """This person's pending codes in this workspace."""
+    return db.query(MobileDevice).filter(
         MobileDevice.workspace_id == workspace_id,
         MobileDevice.user_id == user_pk,
         MobileDevice.kind == MobileDeviceKind.PAIRED.value,
         MobileDevice.status == MobileDeviceStatus.PENDING.value,
-        MobileDevice.pairing_expires_at <= now,
-    ).delete(synchronize_session=False)
+    )
+
+
+def codes_are_a_persons_own() -> bool:
+    """Where the install has no operator (enterprise), a code is one person's own: they hold one at a time."""
+    return not editions.current().anonymous_operator
+
+
+def _make_room_for_a_code(db: Session, workspace_id: UUID, user_pk: int, now: datetime) -> None:
+    """Clear the way for this person's new code.
+
+    Where an operator makes codes (local): drop their codes whose time is up (they never pair), and
+    keep the live ones (the console's App Review code among them). Where codes are a person's own
+    (enterprise): ``DeviceConflict(device_limit_reached)`` while they hold
+    ``MAX_ACTIVE_DEVICES_PER_PERSON`` active devices here, then the new code replaces every pending
+    code of theirs, expired or not.
+    """
+    if not codes_are_a_persons_own():
+        _pending_codes(db, workspace_id, user_pk).filter(
+            MobileDevice.pairing_expires_at <= now,
+        ).delete(synchronize_session=False)
+        return
+    from services.mobile.devices import assert_room_for_a_device  # devices imports this module
+
+    assert_room_for_a_device(db, workspace_id, user_pk)
+    _pending_codes(db, workspace_id, user_pk).delete(synchronize_session=False)
 
 
 def pair_link(api: str, code: str) -> str:
@@ -122,7 +151,8 @@ def create_pairing_code(
     """Add a PENDING paired row for this workspace and person and return its code once.
 
     ``request_base_url`` is the base URL the caller reached the API on; the pair link names
-    it only when the install has no ``PUBLIC_API_HOST`` of its own (K15). The link is built
+    it only when a local install has no ``PUBLIC_API_HOST`` of its own (K15); in enterprise the
+    link names the install's configured public address (``urls.api_url``). The link is built
     before the row, so a misconfigured address (``MobileUrlError``) leaves nothing behind.
     ``name`` (the console's ``--name``) labels the device until it pairs with a name of its own.
     ``ttl_seconds`` overrides ``PAIRING_CODE_TTL_SECONDS`` for the console's App Review code
@@ -135,7 +165,7 @@ def create_pairing_code(
     now = _now()
     lifetime = PAIRING_CODE_TTL_SECONDS if ttl_seconds is None else ttl_seconds
     expires_at = now + timedelta(seconds=lifetime)
-    _drop_expired_codes(db, _as_uuid(workspace_id), user_pk, now)
+    _make_room_for_a_code(db, _as_uuid(workspace_id), user_pk, now)
     db.add(MobileDevice(
         workspace_id=_as_uuid(workspace_id),
         user_id=user_pk,
