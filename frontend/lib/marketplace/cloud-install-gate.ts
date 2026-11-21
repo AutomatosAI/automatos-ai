@@ -1,8 +1,8 @@
 /**
  * PRD-270 W2 US-270-14d (§5.6, §5.8, K19) — the install gate: on the local edition, an Add or Enable of an
- * Automatos Cloud item waits for its disclosure, and nothing is added unless Add is clicked. On an enterprise
- * install the same holds while its operator has switched Cloud items on (PRD-277 US-704): the gate reads
- * `GET /api/hosted-services` for each install call, and refuses the install when that can't be read.
+ * Automatos Cloud item waits for its disclosure, and nothing is added unless Add is clicked. An enterprise
+ * install is gated the same way, always (lib/hosted-services.ts `holdsCloudItems`, PRD-277 US-704): whatever
+ * ENTERPRISE_CALLS_CLOUD_ITEMS holds, an item brought from Automatos Cloud is reviewed before it is added.
  *
  * apiClient.request() calls `cloudInstallGate(endpoint, options, this)` once, before anything else it
  * awaits; it is the one choke point every install of an agent, Playbook, package or plugin passes, from
@@ -25,8 +25,7 @@
  *
  * It imports nothing from lib/api-client.ts (which imports it): request() hands itself in as `client`.
  */
-import { editionHostedServices, readHostedServices } from '@/lib/hosted-services'
-import type { HostedServices } from '@/lib/hosted-services'
+import { holdsCloudItems } from '@/lib/hosted-services'
 
 import { installCallOf, installKey, UNREADABLE_INSTALL } from './cloud-install-call'
 import type { CloudInstallCall } from './cloud-install-call'
@@ -135,29 +134,17 @@ async function reviewed(call: CloudInstallCall, client: CloudGateClient): Promis
   if (!(await shown.open(call))) throw new CloudInstallDeclined()
 }
 
-/** An enterprise install's review: only while its operator has switched Cloud items on (PRD-277 US-704). */
-async function reviewedWhereSwitchedOn(call: CloudInstallCall, client: CloudGateClient): Promise<void> {
-  let services: HostedServices
-  try {
-    services = await readHostedServices(client)
-  } catch {
-    throw new CloudInstallRefused(CLOUD_INSTALL_UNCHECKED)
-  }
-  if (services.cloudItems) await reviewed(call, client)
-}
-
 /**
  * Called once by apiClient.request() before it sends anything. Returns at once (nothing to await) for any
  * request that isn't one of K19's four install calls, and for every request on the hosted edition; for an
- * install call where this install brings Cloud items (the local edition, or an enterprise install whose
- * operator switched them on: lib/hosted-services.ts), resolves when the request may go and throws a
+ * install call where this install may hold Cloud items (the local and enterprise editions:
+ * lib/hosted-services.ts `holdsCloudItems`), resolves when the request may go and throws a
  * `CloudInstallRefused` when it may not.
  */
 export function cloudInstallGate(endpoint: string, options: RequestInit, client: CloudGateClient): Promise<void> | undefined {
-  const built = editionHostedServices()
-  if (built !== null && !built.cloudItems) return undefined
+  if (!holdsCloudItems()) return undefined
   const call = installCallOf(endpoint, options)
   if (call === null) return undefined
   if (call === UNREADABLE_INSTALL) return Promise.reject(new CloudInstallRefused(CLOUD_INSTALL_UNCHECKED))
-  return built === null ? reviewedWhereSwitchedOn(call, client) : reviewed(call, client)
+  return reviewed(call, client)
 }

@@ -2,10 +2,10 @@
  * PRD-270 W2 US-270-14b (K19) — which Marketplace rows came from Automatos Cloud, for the badges
  * (components/marketplace/cloud/cloud-item-badges.tsx).
  *
- * React Query over lib/marketplace/cloud-items.ts. Only where this install brings Cloud items (the local
- * edition, or an enterprise install whose operator switched them on: hooks/use-hosted-services.ts): on the
- * hosted edition, and while they are off, the query is never enabled, so nothing is asked (the route answers
- * 404 there). The list is the install's, not a
+ * React Query over lib/marketplace/cloud-items.ts. Only where this install may hold Cloud items (the local and
+ * enterprise editions, whatever ENTERPRISE_CALLS_CLOUD_ITEMS holds: lib/hosted-services.ts `holdsCloudItems`,
+ * PRD-277 US-704; these read what the install holds and request nothing from Automatos): on the hosted
+ * edition the query is never enabled, so nothing is asked (the route answers 404 there). The list is the install's, not a
  * workspace's, so one cache serves every card; a Sync with Automatos Cloud reads it again
  * (hooks/use-cloud-sync.ts invalidates `cloudItemsKeys.all`).
  *
@@ -27,7 +27,7 @@
 import { useQuery } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 
-import { useHostedService } from '@/hooks/use-hosted-services'
+import { holdsCloudItems } from '@/lib/hosted-services'
 import type { CloudItemKey, CloudItemKind, CloudItems } from '@/lib/marketplace/cloud-item-rows'
 import {
   cloudDisclosureOf, cloudUpdatesOf, getCloudDisclosure, getCloudItems, getCloudUpdates,
@@ -48,10 +48,9 @@ export const cloudItemsKeys = {
 
 /** The Cloud agents, Playbooks, packages and plugins this install holds; never asked on the hosted edition. */
 export function useCloudItems() {
-  const bringsItems = useHostedService('cloudItems') === true
   return useQuery<CloudItems>({
     queryKey: cloudItemsKeys.items(),
-    enabled: bringsItems,
+    enabled: holdsCloudItems(),
     queryFn: getCloudItems,
     staleTime: CLOUD_ITEMS_STALE_MS,
   })
@@ -64,10 +63,9 @@ export function fetchCloudItems(queryClient: QueryClient): Promise<CloudItems> {
 
 /** What one Cloud item will use (`GET /items/{kind}/{key}/disclosure`); never asked on the hosted edition. */
 export function useCloudDisclosure(kind: CloudItemKind, key: CloudItemKey) {
-  const bringsItems = useHostedService('cloudItems') === true
   return useQuery<CloudDisclosure>({
     queryKey: cloudItemsKeys.disclosure(kind, key),
-    enabled: bringsItems,
+    enabled: holdsCloudItems(),
     queryFn: async () => cloudDisclosureOf(await getCloudDisclosure(kind, key), kind),
     cacheTime: 0,
     retry: false,
@@ -78,10 +76,9 @@ export function useCloudDisclosure(kind: CloudItemKind, key: CloudItemKey) {
 
 /** The update notices of `workspaceId` (`GET /updates`); never asked on the hosted edition or with no workspace. */
 export function useCloudUpdates(workspaceId: string | null) {
-  const bringsItems = useHostedService('cloudItems') === true
   return useQuery<CloudUpdates>({
     queryKey: cloudItemsKeys.updates(workspaceId),
-    enabled: bringsItems && !!workspaceId,
+    enabled: holdsCloudItems() && !!workspaceId,
     queryFn: async () => cloudUpdatesOf(await getCloudUpdates()),
   })
 }

@@ -2,8 +2,9 @@
 
 /**
  * PRD-270 W2 US-270-14d, US-270-14e (§5.6, K17, K19) — the Marketplace's Automatos Cloud items layer, mounted
- * once in MarketplaceHomepage, where this install brings Cloud items (the local edition, or an enterprise install
- * whose operator switched them on: hooks/use-hosted-services.ts; nothing on the hosted edition).
+ * once in MarketplaceHomepage, wherever this install may hold Cloud items (the local and enterprise editions:
+ * lib/hosted-services.ts `holdsCloudItems`, whatever ENTERPRISE_CALLS_CLOUD_ITEMS holds, so an item brought
+ * earlier is still reviewed, PRD-277 US-704; nothing on the hosted edition).
  *
  * On mount it registers the install gate's opener (lib/marketplace/cloud-install-gate.ts) and unregisters it
  * on unmount. When an Add or Enable of a Cloud item reaches apiClient, the gate asks the layer, which shows
@@ -25,7 +26,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
 import { fetchCloudItems } from '@/hooks/use-cloud-items'
-import { useHostedService } from '@/hooks/use-hosted-services'
+import { holdsCloudItems } from '@/lib/hosted-services'
 import type { CloudInstallCall } from '@/lib/marketplace/cloud-install-call'
 import {
   CLOUD_INSTALL_BUSY, CloudInstallRefused, registerCloudInstallOpener,
@@ -103,5 +104,5 @@ function LocalCloudItemsLayer() {
 }
 
 export function CloudItemsLayer() {
-  return useHostedService('cloudItems') === true ? <LocalCloudItemsLayer /> : null
+  return holdsCloudItems() ? <LocalCloudItemsLayer /> : null
 }
