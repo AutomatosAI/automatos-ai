@@ -175,7 +175,9 @@ The hosted services are off by default: an enterprise install calls none of Auto
 services until you switch one on. Each is `true` or `false`, written without quotes; rendering
 stops on any other value, on a name under `hostedServices` the chart does not know, on a service
 switched on without the one it needs, and on any of the three settings in `config`. One never
-switches on another. What each one sends and brings back is in
+switches on another. Switching one off stops its requests only: what the install already pulled
+or brought (revoked themes and signing keys, Cloud themes and items) stays and still applies.
+What each one sends and brings back, and what an install gives up with it off, is in
 [the deployment docs](../../docs/deployment-infrastructure/kubernetes-helm-chart.md#automatoss-hosted-services-in-the-enterprise-edition).
 
 The client secret goes in the Secret as `OIDC_CLIENT_SECRET`, never in values. The
