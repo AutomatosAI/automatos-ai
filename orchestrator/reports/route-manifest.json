@@ -1,5 +1,5 @@
 {
-  "route_count": 1062,
+  "route_count": 1063,
   "routes": [
     {
       "method": "GET",
@@ -1496,6 +1496,10 @@
     {
       "method": "PATCH",
       "path": "/api/heartbeat/{heartbeat_id}/toggle"
+    },
+    {
+      "method": "GET",
+      "path": "/api/hosted-services"
     },
     {
       "method": "GET",

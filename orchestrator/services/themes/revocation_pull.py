@@ -25,7 +25,9 @@ Automatos revokes falls back to its base here on the next load.
   ``last_success_at``, ``feed_generated_at`` and the revoked keys stay as they were.
 
 ``pull_feed`` runs from the scheduler (``services/theme_revocation_scheduler.py``) and from an
-admin's Check now (``api/admin_theme_revocation_sync.py``), one pull at a time per process.
+admin's Check now (``api/admin_theme_revocation_sync.py``), one pull at a time per process, and
+only where this install pulls the list (``calls_theme_revocations``: the local edition, or an
+enterprise install whose operator switched it on, PRD-277 US-704); elsewhere it sends nothing.
 Synchronous; it commits.
 """
 
@@ -83,6 +85,7 @@ STALE_AFTER = timedelta(days=7)
 LAST_ERROR_MAX = 500
 
 PULL_OFF = "Revocation sync is off: THEME_REVOCATIONS_URL is empty."
+PULL_NOT_SWITCHED_ON = "Revocation sync is off: this install doesn't pull Automatos's theme revocation list."
 URL_NOT_HTTPS = "THEME_REVOCATIONS_URL must be an https:// URL (http:// only to this machine)."
 URL_CREDENTIALS = "THEME_REVOCATIONS_URL must not carry a user name or password."
 UNREACHABLE = "The revocation feed couldn't be reached ({error})."
@@ -115,8 +118,9 @@ def feed_url() -> str:
 
 
 def pull_enabled() -> bool:
-    """True in the local edition with a feed URL set (the hosted edition serves the feed)."""
-    return editions.current().calls_automatos_cloud and bool(feed_url())
+    """True where this install pulls the revocation list (``calls_theme_revocations``: the local edition, or an
+    enterprise install that switched it on) and a feed URL is set; the hosted edition serves the feed."""
+    return editions.current().calls_theme_revocations and bool(feed_url())
 
 
 def _is_loopback(host: str) -> bool:
@@ -277,7 +281,13 @@ def _failed(db: Session, attempted_at: datetime, message: str) -> PullOutcome:
 
 
 def pull_feed(db: Session, client_factory: Optional[ClientFactory] = None) -> PullOutcome:
-    """Fetch, check and apply the feed in one transaction; any failure changes no revocation."""
+    """Fetch, check and apply the feed in one transaction; any failure changes no revocation.
+
+    Where this install doesn't pull the list (``calls_theme_revocations`` off) it sends nothing,
+    records nothing and answers ``PULL_NOT_SWITCHED_ON``.
+    """
+    if not editions.current().calls_theme_revocations:
+        return PullOutcome(ok=False, error=PULL_NOT_SWITCHED_ON)
     with _PULL_LOCK:
         attempted_at = datetime.now(timezone.utc)
         try:
@@ -331,7 +341,7 @@ def sync_status(db: Session, now: Optional[datetime] = None) -> Dict[str, Any]:
 
 
 __all__ = [
-    "DEFAULT_FEED_URL", "PULL_DEADLINE_SECONDS", "PULL_OFF", "PULL_TIMEOUT_SECONDS", "REQUEST_HEADERS", "STALE_AFTER",
+    "DEFAULT_FEED_URL", "PULL_DEADLINE_SECONDS", "PULL_NOT_SWITCHED_ON", "PULL_OFF", "PULL_TIMEOUT_SECONDS", "REQUEST_HEADERS", "STALE_AFTER",
     "URL_SETTING", "ClientFactory", "PullFailed", "PullOutcome", "apply_feed", "checked_url", "feed_url",
     "fetch_feed", "is_stale", "pull_enabled", "pull_feed", "stored_revoked_keys", "sync_row", "sync_status",
 ]

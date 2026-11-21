@@ -14,9 +14,10 @@ disclosure``                                                (``disclosure.disclo
                                                             (``updates.updates``)
 ==========================================================  ==================================================
 
-Gates, in order (each handler's first two dependencies): the edition first, because the hosted edition is
-Automatos Cloud and holds no item brought from it, so every route answers 404 there to every caller, signed in
-or not; then ``get_request_context_hybrid``: any member of the workspace, since these read catalogue content any
+Gates, in order (each handler's first two dependencies): ``calls_cloud_items`` first, because the hosted edition
+is Automatos Cloud and holds no item brought from it, and an enterprise install brings items only while its
+operator switched it on (PRD-277 US-704), so every route answers 404 otherwise to every caller, signed in or not
+(with the hosted sentence on the hosted edition); then ``get_request_context_hybrid``: any member of the workspace, since these read catalogue content any
 member may install and only the caller's own workspace's copies (``/updates`` filters by ``ctx.workspace_id``).
 All three are GETs over local rows only, with no network call. Plain ``def`` handlers over the synchronous
 session (AGENTS.md).
@@ -42,12 +43,17 @@ router = APIRouter(prefix="/api/marketplace/cloud-sync", tags=["Marketplace"])
 NOT_FOUND = 404
 HOSTED_NO_CLOUD_ITEMS = "The hosted edition is Automatos Cloud: it holds no items brought from Automatos Cloud to show."
 NOT_A_CLOUD_ITEM = "That isn't an item this install brought from Automatos Cloud."
+CLOUD_ITEMS_NOT_SWITCHED_ON = (
+    "This install doesn't bring items from Automatos Cloud: its operator hasn't switched it on."
+)
 
 
 def require_local_edition() -> None:
-    """404 in the hosted edition, before the caller is looked at: only a local install holds Cloud items."""
-    if not editions.current().calls_automatos_cloud:
-        raise HTTPException(status_code=NOT_FOUND, detail=HOSTED_NO_CLOUD_ITEMS)
+    """404 before the caller is looked at, unless this install brings items from Automatos Cloud."""
+    capabilities = editions.current()
+    if not capabilities.calls_cloud_items:
+        detail = HOSTED_NO_CLOUD_ITEMS if capabilities.hosts_automatos_cloud else CLOUD_ITEMS_NOT_SWITCHED_ON
+        raise HTTPException(status_code=NOT_FOUND, detail=detail)
 
 
 @router.get("/items")

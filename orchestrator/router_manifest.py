@@ -161,6 +161,9 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     # (GET /api/marketplace/cloud-sync/items, .../items/{kind}/{key}/disclosure, .../updates): local edition only
     # (404 hosted), any member, the caller's workspace's copies only.
     RouterSpec("api.marketplace_cloud_items"),
+    # PRD-277 US-704 -- which of Automatos's hosted services this install calls
+    # (GET /api/hosted-services): any signed-in caller; the enterprise web app reads it.
+    RouterSpec("api.hosted_services"),
 )
 
 

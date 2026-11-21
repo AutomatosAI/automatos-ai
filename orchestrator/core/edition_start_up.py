@@ -35,6 +35,12 @@
    ``sub:`` and ``email:`` entries (``core.auth.bootstrap_admins``); and ``DEFAULT_WORKSPACE_ID``
    must be the id of the install's default workspace, which sign-ins are recorded in and the
    first admins own.
+4. where the edition's hosted services are settings (``hosted_services_by_setting``, PRD-277
+   US-704), when one of ``HOSTED_SERVICE_SETTING_NAMES`` is not a plain on or off form, when
+   ``ENTERPRISE_CALLS_CLOUD_SYNC`` is on without ``ENTERPRISE_CALLS_THEME_REVOCATIONS`` (a theme
+   brought from Automatos Cloud is withdrawn only through that list), and when
+   ``ENTERPRISE_CALLS_CLOUD_ITEMS`` is on without ``ENTERPRISE_CALLS_CLOUD_SYNC`` (items arrive only
+   in a Sync). No setting turns another on (``check_hosted_service_settings``).
 
 Each refusal names the setting, never its value. ``config.py`` reads these settings so that no
 value can stop another edition from starting. A correctly configured install starts.
@@ -142,6 +148,24 @@ NO_DEFAULT_ROLE = "none"
 DEFAULT_ROLES: Tuple[str, ...] = (NO_DEFAULT_ROLE, "viewer", "editor", "admin")
 # RFC 6749 §3.3: scope-token = 1*( %x21 / %x23-5B / %x5D-7E ).
 _SCOPE_TOKEN = re.compile(r"^[\x21\x23-\x5B\x5D-\x7E]+$")
+
+# PRD-277 US-704: the hosted services' settings (``editions.HOSTED_SERVICE_SETTINGS``), and what each needs.
+HOSTED_SERVICE_SETTING_NAMES: Tuple[str, ...] = tuple(editions.HOSTED_SERVICE_SETTINGS.values())
+THEME_REVOCATIONS_SETTING = editions.HOSTED_SERVICE_SETTINGS["calls_theme_revocations"]
+CLOUD_SYNC_SETTING = editions.HOSTED_SERVICE_SETTINGS["calls_cloud_sync"]
+CLOUD_ITEMS_SETTING = editions.HOSTED_SERVICE_SETTINGS["calls_cloud_items"]
+HOSTED_SWITCH_PROBLEM = (
+    "must be true or false (or 1/0, yes/no, on/off): true lets this install call that Automatos service"
+)
+CLOUD_SYNC_NEEDS_REVOCATIONS = (
+    f"needs {THEME_REVOCATIONS_SETTING}: a theme brought from Automatos Cloud is withdrawn only through "
+    "Automatos's theme revocation list, so an install that syncs themes must pull it. Switch both on, or "
+    "leave Cloud sync off"
+)
+CLOUD_ITEMS_NEED_SYNC = (
+    f"needs {CLOUD_SYNC_SETTING}: agents, Playbooks, packages and plugins arrive from Automatos Cloud only "
+    "in a Sync. Switch both on, or leave Cloud items off"
+)
 
 
 class EditionNotReady(RuntimeError):
@@ -283,19 +307,54 @@ def _rule_and_admin_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str,
 
 
 def check_start_up(capabilities: editions.EditionCapabilities, settings: Mapping[str, Optional[str]]) -> None:
-    """Raise ``EditionNotReady`` when an OIDC edition may not start; return for every other one.
+    """Raise ``EditionNotReady`` when an OIDC edition, or one whose hosted services are settings, may not start.
 
-    ``settings`` maps each name in ``OIDC_START_UP_SETTINGS`` and ``OIDC_SIGN_IN_SETTINGS`` to its
-    value (``None`` when unset). The missing settings are checked first, then the sign-in settings,
-    then the access rule, the first admins and the default workspace. A correctly configured
-    install passes.
+    ``settings`` maps each name in ``OIDC_START_UP_SETTINGS``, ``OIDC_SIGN_IN_SETTINGS`` and
+    ``HOSTED_SERVICE_SETTING_NAMES`` to its value (``None`` when unset). Where sign-in is OIDC, the
+    missing settings are checked first, then the sign-in settings, then the access rule, the first
+    admins and the default workspace; then, where the hosted services are settings, those
+    (``check_hosted_service_settings``). Every other edition passes untouched, and a correctly
+    configured install passes.
     """
-    if capabilities.sign_in != editions.SIGN_IN_OIDC:
-        return
+    if capabilities.sign_in == editions.SIGN_IN_OIDC:
+        _check_oidc_sign_in(settings)
+    check_hosted_service_settings(capabilities, settings)
+
+
+def _check_oidc_sign_in(settings: Mapping[str, Optional[str]]) -> None:
+    """The OIDC checks of ``check_start_up``, in its order; the first refusal is raised."""
     missing = missing_settings(settings)
     if missing:
         raise EditionNotReady(_missing_message(missing))
     first = next(_sign_in_setting_problems(settings), None) or next(_rule_and_admin_problems(settings), None)
+    if first is not None:
+        name, problem = first
+        raise EditionNotReady(BAD_SESSION_SETTING.format(name=name, problem=problem))
+
+
+def _hosted_service_problems(settings: Mapping[str, Any]) -> Iterator[Tuple[str, str]]:
+    """Each ``(name, problem)`` among ``HOSTED_SERVICE_SETTING_NAMES``: the forms, then what each needs."""
+    for name in HOSTED_SERVICE_SETTING_NAMES:
+        if not editions.is_switch_form(settings.get(name)):
+            yield name, HOSTED_SWITCH_PROBLEM
+    on = frozenset(name for name in HOSTED_SERVICE_SETTING_NAMES if editions.is_switched_on(settings.get(name)))
+    if CLOUD_SYNC_SETTING in on and THEME_REVOCATIONS_SETTING not in on:
+        yield CLOUD_SYNC_SETTING, CLOUD_SYNC_NEEDS_REVOCATIONS
+    if CLOUD_ITEMS_SETTING in on and CLOUD_SYNC_SETTING not in on:
+        yield CLOUD_ITEMS_SETTING, CLOUD_ITEMS_NEED_SYNC
+
+
+def check_hosted_service_settings(capabilities: editions.EditionCapabilities, settings: Mapping[str, Any]) -> None:
+    """Raise ``EditionNotReady`` for the first bad hosted service setting where the edition reads them.
+
+    PRD-277 US-704. Each setting must be a plain on or off form (``editions.SWITCH_ON``,
+    ``editions.SWITCH_OFF``): any other value reads as off, and is refused here rather than left to
+    look like a choice. Cloud sync needs theme revocations, and Cloud items need Cloud sync; no
+    setting turns another on. Every other edition returns at once, reading nothing.
+    """
+    if not capabilities.hosted_services_by_setting:
+        return
+    first = next(_hosted_service_problems(settings), None)
     if first is not None:
         name, problem = first
         raise EditionNotReady(BAD_SESSION_SETTING.format(name=name, problem=problem))
@@ -340,6 +399,10 @@ def check_session_settings(capabilities: editions.EditionCapabilities, settings:
 
 __all__ = [
     "BAD_SESSION_SETTING",
+    "CLOUD_ITEMS_NEED_SYNC",
+    "CLOUD_SYNC_NEEDS_REVOCATIONS",
+    "HOSTED_SERVICE_SETTING_NAMES",
+    "HOSTED_SWITCH_PROBLEM",
     "DEFAULT_ROLE_NEEDS_RULE_PROBLEM",
     "DEFAULT_WORKSPACE_PROBLEM",
     "DISPLAY_NAME_MAX",
@@ -355,6 +418,7 @@ __all__ = [
     "SESSION_IDLE_MINUTES_MIN",
     "SESSION_SETTINGS",
     "EditionNotReady",
+    "check_hosted_service_settings",
     "check_session_settings",
     "check_start_up",
     "is_display_name",

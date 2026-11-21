@@ -15,9 +15,11 @@ pull to the authZ sweep's ``ADMIN_GATED_IN_HANDLER`` bucket):
 ``rows`` counts the revocations pulled from the feed and held here; ``stale`` is true when no
 pull succeeded in the last 7 days (or ever). Both handlers check ``_require_admin(ctx)`` first
 (``caller_is_admin``: a platform admin; the local edition's anonymous owner is a super admin), so
-a non-admin gets the plain 403 in either edition; then the edition: the hosted edition serves the
-feed and pulls nothing, so both answer 404 there. No step-up: the routes exist only in the local
-edition, where step-up passes. Plain ``def`` handlers over the synchronous session (AGENTS.md).
+a non-admin gets the plain 403 in either edition; then ``calls_theme_revocations``: the hosted
+edition serves the feed and pulls nothing, and an enterprise install pulls it only while its
+operator switched it on (PRD-277 US-704), so both answer 404 otherwise, with the hosted sentence
+on the hosted edition. No step-up: Check now runs the same pull the schedule runs, and copies
+only what Automatos's list says. Plain ``def`` handlers over the synchronous session (AGENTS.md).
 """
 
 from __future__ import annotations
@@ -43,6 +45,9 @@ router = APIRouter(prefix="/api/admin/themes/revocations/sync", tags=["Admin The
 FORBIDDEN, NOT_FOUND, CONFLICT, BAD_GATEWAY = 403, 404, 409, 502
 ADMIN_REQUIRED = "Only an Automatos admin can see or run the theme revocation sync."
 HOSTED_NO_PULL = "The hosted edition serves the revocation feed; it has no sync to show or run."
+PULL_NOT_SWITCHED_ON = (
+    "This install doesn't pull Automatos's theme revocation list: its operator hasn't switched it on."
+)
 
 
 def _require_admin(ctx: RequestContext) -> None:
@@ -53,8 +58,11 @@ def _require_admin(ctx: RequestContext) -> None:
 
 
 def _require_local_edition() -> None:
-    if not editions.current().calls_automatos_cloud:
-        raise HTTPException(status_code=NOT_FOUND, detail=HOSTED_NO_PULL)
+    """404 unless this install pulls the revocation list (``calls_theme_revocations``)."""
+    capabilities = editions.current()
+    if not capabilities.calls_theme_revocations:
+        detail = HOSTED_NO_PULL if capabilities.hosts_automatos_cloud else PULL_NOT_SWITCHED_ON
+        raise HTTPException(status_code=NOT_FOUND, detail=detail)
 
 
 def get_pull_client_factory() -> Optional[ClientFactory]:

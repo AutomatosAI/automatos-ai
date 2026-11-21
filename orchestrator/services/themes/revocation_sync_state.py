@@ -7,9 +7,10 @@ asks which keys the feed revoked reads them here: the signature check on load
 signature view (``signed_upload``) and the admin review's report and signature paste (``review``);
 and the admin's sync status (``revocation_pull.sync_status``).
 
-* **Local edition only.** The row is the local edition's own: the hosted edition publishes the
-  feed and never pulls it (its revoked keys are its keys file's), so there no key reads as revoked
-  by the feed and the row is never read.
+* **Only where the list is pulled** (``calls_theme_revocations``: the local edition, or an
+  enterprise install that switched it on, PRD-277 US-704). The hosted edition publishes the feed
+  and never pulls it (its revoked keys are its keys file's), so there, and in an enterprise install
+  that has not switched it on, no key reads as revoked by the feed and the row is never read.
 * **Validated.** Only key ids (strings) count. A stored value that isn't a list reads as no key;
   a list holding entries that aren't strings keeps its strings. Either is logged as an error once
   per malformed value, not on every read (the files route asks on every file), and again only
@@ -74,7 +75,7 @@ def revoked_key_ids(db: Any) -> FrozenSet[str]:
 
     Malformed stored data is logged once (module docstring); its string entries still count.
     """
-    if not editions.current().calls_automatos_cloud:
+    if not editions.current().calls_theme_revocations:
         return NO_KEYS
     row = db.get(ThemeRevocationSync, THEME_REVOCATION_SYNC_ROW_ID)
     stored = None if row is None else row.revoked_key_ids

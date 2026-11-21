@@ -16,9 +16,10 @@ listed in ``reports/route-manifest.json``):
                                               running
 ===========================================  =====================================================
 
-Gates, in order (the handler's first two dependencies): the edition first, because the hosted edition
-serves the catalogue and syncs nothing, so both routes answer 404 there to every caller, signed in or
-not; then ``require_workspace_permission('workspace:manage')``, the theme install's gate: a workspace
+Gates, in order (the handler's first two dependencies): ``calls_cloud_sync`` first, because the hosted
+edition serves the catalogue and syncs nothing, and an enterprise install syncs only while its operator
+switched it on (PRD-277 US-704), so both routes answer 404 otherwise to every caller, signed in or not
+(with the hosted sentence on the hosted edition); then ``require_workspace_permission('workspace:manage')``, the theme install's gate: a workspace
 owner or admin (the local operator is the owner, §8-Q1), anyone else 403. The POST is the authZ sweep's
 class (a) by that gate. No step-up: the routes exist only in the local edition, where step-up passes.
 Nothing schedules a Sync (§8-Q2): this button is the only way one runs. Plain ``def`` handlers over the
@@ -50,12 +51,15 @@ router = APIRouter(prefix="/api/marketplace/cloud-sync", tags=["Marketplace"])
 MANAGE = require_workspace_permission("workspace:manage")
 NOT_FOUND, CONFLICT, BAD_GATEWAY = 404, 409, 502
 HOSTED_NO_SYNC = "The hosted edition is Automatos Cloud: it serves the catalogue and has no Sync to show or run."
+SYNC_NOT_SWITCHED_ON = "This install doesn't sync with Automatos Cloud: its operator hasn't switched it on."
 
 
 def require_local_edition() -> None:
-    """404 in the hosted edition, before the caller is looked at: only a local install syncs."""
-    if not editions.current().calls_automatos_cloud:
-        raise HTTPException(status_code=NOT_FOUND, detail=HOSTED_NO_SYNC)
+    """404 before the caller is looked at, unless this install syncs with Automatos Cloud."""
+    capabilities = editions.current()
+    if not capabilities.calls_cloud_sync:
+        detail = HOSTED_NO_SYNC if capabilities.hosts_automatos_cloud else SYNC_NOT_SWITCHED_ON
+        raise HTTPException(status_code=NOT_FOUND, detail=detail)
 
 
 def get_cloud_client_factory() -> Optional[ClientFactory]:
