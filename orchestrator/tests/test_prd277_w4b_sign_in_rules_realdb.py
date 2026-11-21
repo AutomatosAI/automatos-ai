@@ -50,7 +50,8 @@ os.environ.setdefault("POSTGRES_DB", "test")
 from api import auth_oidc as routes  # noqa: E402
 from api import auth_sessions  # noqa: E402
 from config import config  # noqa: E402
-from core.auth import first_admin, hybrid, oidc_provider, people, session_lane, sessions, sign_in_flow  # noqa: E402
+from core.auth import first_admin, hybrid, oidc_provider, people, session_cookie, session_lane, sessions  # noqa: E402
+from core.auth import sign_in_flow  # noqa: E402
 from core.auth import step_up, step_up_sign_in  # noqa: E402
 from core.auth.oidc_sign_in import OidcSignIn, SIGNED_OUT_PATH, STEP_UP_MAX_AGE  # noqa: E402
 from core.auth.pairing import hash_secret  # noqa: E402
@@ -423,6 +424,21 @@ def test_after_a_step_up_the_old_token_is_refused_and_the_new_one_works(install)
     assert refused.json()["detail"]["code"] == "session_ended"
     assert refused.json()["detail"]["reason"] == sessions.REVOKED
     assert install.client.post(SIGN_OUT, headers={"authorization": "Bearer " + token}).status_code == 200
+
+
+def test_the_old_token_in_a_cookie_is_401_and_leaves_the_cookie_that_now_holds_the_new_one(install):
+    """A request that left before the step-up finished must not clear the successor's cookie."""
+    session_cookie.install_cookie_session_ended_handler(install.client.app)  # as main.py does
+    me = _signed_in(install, "keeps-its-cookie")
+    _sign_in(install, step_up_too=True)
+    late = TestClient(install.client.app, base_url=INSTALL)
+
+    answer = late.get(f"/api/v1/auth/people/{me.user_id}/sessions",
+                      headers={"cookie": f"{config.SESSION_COOKIE_NAME}={me.token}"})
+
+    assert answer.status_code == 401 and "set-cookie" not in answer.headers
+    assert answer.json()["detail"]["code"] == "session_ended"
+    assert answer.json()["detail"]["reason"] == sessions.REVOKED
 
 
 def test_another_person_signing_in_is_refused_and_never_switches_the_session(install, monkeypatch):

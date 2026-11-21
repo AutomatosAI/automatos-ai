@@ -203,6 +203,19 @@ def test_no_session_is_issued_outside_enterprise(db_session, install, monkeypatc
     assert _audits(db_session, install.workspace_id) == []
 
 
+@pytest.mark.parametrize("edition", ["local", "saas"])
+def test_no_session_is_renewed_outside_enterprise(db_session, install, monkeypatch, edition):
+    asking = _issue(db_session, install.person)
+    monkeypatch.setattr(config, "AUTH_EDITION", edition)
+
+    with pytest.raises(sessions.SessionsNotIssued):
+        sessions.renew_session(db_session, _row(db_session, asking.session_id), auth_time=_now(), sid=None,
+                               ip_address=None, user_agent=None, now=_now())
+
+    assert db_session.query(AuthSession).filter(AuthSession.user_id == install.person).count() == 1
+    assert _row(db_session, asking.session_id).revoked_at is None
+
+
 def test_a_deactivated_person_is_refused_with_one_row_naming_only_the_reason(db_session, install):
     db_session.execute(text("UPDATE users SET is_active = false WHERE id = :id"), {"id": install.person})
     db_session.commit()
@@ -576,6 +589,32 @@ def test_an_admin_ending_one_session_keeps_the_persons_phones(client, db_session
     answer = client.post(f"/api/v1/auth/sessions/{one.session_id}/revoke", headers=admin.headers)
 
     assert answer.json() == {"revoked": True} and _phone_status(db_session, phone) == "active"
+
+
+def test_ending_one_session_a_step_up_replaced_says_so_and_leaves_its_successor(client, db_session, install, admin):
+    """The successor is a different session; "end all sessions" is the route that ends it."""
+    asking = _issue(db_session, install.person)
+    successor = sessions.renew_session(db_session, _row(db_session, asking.session_id), auth_time=_now(), sid=None,
+                                       ip_address=None, user_agent=None, now=_now())
+    db_session.commit()
+
+    answer = client.post(f"/api/v1/auth/sessions/{asking.session_id}/revoke", headers=admin.headers)
+
+    assert answer.status_code == 200 and answer.json() == {"revoked": False, "replaced": True}
+    assert _row(db_session, successor.session_id).revoked_at is None
+    assert _row(db_session, asking.session_id).revoked_reason == sessions.REVOKED_STEP_UP
+    ended_all = client.post(f"/api/v1/auth/people/{install.person}/sessions/revoke", headers=admin.headers)
+    assert ended_all.json() == {"revoked": 1} and _row(db_session, successor.session_id).revoked_at is not None
+
+
+def test_ending_one_session_that_ended_any_other_way_answers_as_before(client, db_session, install, admin):
+    one = _issue(db_session, install.person)
+    sessions.revoke_session(db_session, one.session_id, sessions.REVOKED_SIGN_OUT, _now())
+    db_session.commit()
+
+    answer = client.post(f"/api/v1/auth/sessions/{one.session_id}/revoke", headers=admin.headers)
+
+    assert answer.json() == {"revoked": False}
 
 
 def test_an_admin_deactivates_a_person_but_not_themselves_or_a_higher_role(client, db_session, install, admin):

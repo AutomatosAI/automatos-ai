@@ -14,7 +14,8 @@ provider directly. ``finish_sign_in`` runs, in this order:
 3. **A step-up** (US-406, a sign-in started with ``step_up=1``) ends here: the asking session ends
    and a new one is issued with the fresh ``auth_time``, keeping that session's person and absolute
    expiry, or the step-up is refused and no session changes (``core.auth.step_up_sign_in``). No
-   person is created or linked. Before any first-sign-in step.
+   person is created or linked. Before any first-sign-in step. Anything else the step-up raises
+   (``_STEP_UP_FAILURES``) is rolled back and answered ``sign_in_failed``.
    **A phone's sign-in** (US-603) must prove here, by the step-up's own sign-in time rule
    (``step_up_sign_in.sign_in_time_refusal``), that the provider signed the person in since the
    phone's start: an ``auth_time`` that is missing, later than now or earlier than the start (each
@@ -66,7 +67,8 @@ Every refusal is a ``SignInRefusal`` whose ``code`` is all the person is shown:
   them in. Audited as ``auth:sign_in_refused`` with reason ``access_rule``. It tells the person only
   that this install does not admit their account, which they already know they hold.
 * ``step_up_refused``: a step-up could not start (no live session in this browser, or a request
-  sent from another site) or did not confirm the session's own person with a fresh sign-in.
+  sent from another site) or did not confirm the session's own person with a fresh sign-in, in the
+  browser holding that session (its callback must present that session's cookie).
   Audited as ``auth:step_up`` when it got as far as the callback.
 * ``step_up_no_auth_time``: the provider's ID token said nothing of when the person signed in
   (``auth_time``), so a step-up cannot be confirmed; the provider must be set up to send it.
@@ -108,6 +110,7 @@ from core.auth.sign_in_methods import (
     Started,
     VerifiedIdentity,
 )
+from core.auth.system_role import UnknownPerson
 from core.auth.user_link import IdentityLinkRefused, LinkedPerson, user_id_for_identity
 from core.edition_start_up import DEFAULT_ROLES, NO_DEFAULT_ROLE
 from core.seeds.seed_default_workspace import ensure_default_workspace
@@ -147,10 +150,12 @@ class SignInRefusal(Exception):
 
 @dataclass(frozen=True)
 class Browser:
-    """Where the sign-in came from: the ``audit_logs`` fields of its rows."""
+    """Where the sign-in came from: the ``audit_logs`` fields of its rows, and the session token its
+    cookie presents (a step-up's callback must present the session that asked; never in a repr)."""
 
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
+    session_token: Optional[str] = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -386,15 +391,20 @@ def _issue(db: Session, identity: VerifiedIdentity, user_id: int, browser: Brows
     raise SignInRefusal(failure)
 
 
+# What a step-up can raise besides its refusal: each is a failed sign-in, rolled back, never a 500.
+_STEP_UP_FAILURES = (session_audit.SessionAuditFailed, sessions.SignInFailed, sessions.SessionsNotIssued,
+                     UnknownPerson, TypeError, ValueError, SQLAlchemyError)
+
+
 def _step_up(db: Session, finished: Finished, browser: Browser) -> SignInDone:
     """US-406: a new session in place of the one that asked (which ends); else ``SignInRefusal``."""
     failure: Optional[str] = None
     try:
-        issued = step_up_sign_in.confirm_step_up(db, finished, ip_address=browser.ip_address,
-                                                 user_agent=browser.user_agent)
+        issued = step_up_sign_in.confirm_step_up(db, finished, presented=browser.session_token,
+                                                 ip_address=browser.ip_address, user_agent=browser.user_agent)
     except step_up_sign_in.StepUpRefused as refused:
         failure = STEP_UP_NO_AUTH_TIME if str(refused) == session_audit.STEP_UP_NO_AUTH_TIME else STEP_UP_REFUSED
-    except (session_audit.SessionAuditFailed, sessions.SignInFailed, SQLAlchemyError) as error:
+    except _STEP_UP_FAILURES as error:
         db.rollback()
         logger.error("A step-up could not be recorded (%s)", type(error).__name__)
         failure = FAILED

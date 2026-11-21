@@ -23,8 +23,9 @@ shared limiter's store cannot be reached, these two routes count in this process
 * ``GET /callback`` finishes it (``sign_in_flow.finish_sign_in``): 303 to the stored path, with the
   session cookie set (``session_cookie.set_session_cookie``). After a step-up the cookie holds the
   new session that replaced the browser's own (``step_up_sign_in.confirm_step_up``), which ended. A
-  callback with more than ``CALLBACK_PARAMS_MAX`` parameters is read as carrying none, so it is
-  refused.
+  step-up's callback must present the asking session in the session cookie (``session_cookie_token``):
+  one that presents another session, or none, is refused (``step_up_refused``). A callback with
+  more than ``CALLBACK_PARAMS_MAX`` parameters is read as carrying none, so it is refused.
 
 A phone (US-603, ``core.auth.phone_sign_in``) starts at the same address with
 ``app_link``, ``code_challenge``, ``code_challenge_method=S256``, ``install_id`` and ``platform``:
@@ -181,7 +182,9 @@ def _clear_binding(response: RedirectResponse) -> None:
 
 
 def _browser(request: Request) -> sign_in_flow.Browser:
-    return sign_in_flow.Browser(ip_address=get_client_ip(request), user_agent=request.headers.get("user-agent"))
+    """The request's address and agent, and the session cookie a step-up's callback must present."""
+    return sign_in_flow.Browser(ip_address=get_client_ip(request), user_agent=request.headers.get("user-agent"),
+                                session_token=session_cookie_token(request))
 
 
 def _params(request: Request) -> Dict[str, Tuple[str, ...]]:

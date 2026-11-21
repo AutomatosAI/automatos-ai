@@ -27,8 +27,9 @@ A session is what a person holds after signing in, so they do not sign in on eve
   it is told the session was revoked.
 
 Only where the edition issues sessions (``core.editions`` ``issues_sessions``: enterprise);
-``issue_session`` refuses everywhere else. Nothing here logs a token or a hash. ``issue_session``
-commits (with its audit row, ``core.auth.session_audit``); every other writer flushes or leaves
+``issue_session`` and ``renew_session`` refuse everywhere else. Nothing here logs a token or a
+hash. ``issue_session`` commits (with its audit row, ``core.auth.session_audit``); every other
+writer flushes or leaves
 the transaction to its caller, except ``touch_session``, which is bookkeeping on the session lane's
 own database session.
 """
@@ -205,7 +206,10 @@ def renew_session(db: Session, asking: AuthSession, *, auth_time: datetime, sid:
     It has a new token, the new ``auth_time``, this browser's address and agent, and an idle clock
     started at ``now`` and never past that expiry. The caller commits both with the step-up's audit
     row; when the new row cannot be stored, everything is rolled back and ``SignInFailed`` raised.
+    Where the edition issues no sessions it is ``SessionsNotIssued``, as ``issue_session`` is.
     """
+    if not editions.current().issues_sessions:
+        raise SessionsNotIssued(NOT_ISSUED_MESSAGE)
     _checked_sign_in(auth_time, sid)
     browser = session_audit.browser_fields(ip_address, user_agent)
     absolute = _as_utc(asking.absolute_expires_at)
@@ -240,6 +244,11 @@ def find_session(db: Session, token: Optional[str]) -> Optional[AuthSession]:
         return None
     row = db.query(AuthSession).filter(AuthSession.token_hash == hash_secret(token)).first()
     return row if row is not None and secrets_match(row.token_hash, token) else None
+
+
+def token_opens(row: AuthSession, token: Optional[str]) -> bool:
+    """Whether ``token`` is the one whose hash ``row`` keeps, compared in constant time; False for none."""
+    return isinstance(token, str) and token.startswith(SESSION_TOKEN_PREFIX) and secrets_match(row.token_hash, token)
 
 
 def session_state(row: Optional[AuthSession], now: datetime) -> str:
@@ -312,5 +321,6 @@ __all__ = [
     "revoke_session",
     "revoke_sessions_of",
     "session_state",
+    "token_opens",
     "touch_session",
 ]

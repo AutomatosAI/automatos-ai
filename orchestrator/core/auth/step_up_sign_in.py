@@ -15,6 +15,9 @@ naming ``STEP_UP_START``. The web app sends the browser there:
    after the other), then the session that asked, and refuses, in this order, when:
 
    * that session is no longer live (``session_ended``);
+   * the callback's request does not present that session in its cookie: it presents another
+     session, or none (``session_not_presented``). The browser that asked is the one that holds
+     that session, so a callback without it is refused even while that session is live;
    * the person who signed in again is not that session's person: their ``(issuer, subject)`` is
      linked to someone else, or to nobody (``another_person``). Never an identity switch: the
      session keeps its person and its old ``auth_time``, and no session is issued;
@@ -52,7 +55,7 @@ from sqlalchemy.orm import Session
 from core.auth import people, session_audit, sessions
 from core.auth.oidc_sign_in import NO_AUTH_TIME
 from core.auth.oidc_tokens import TIME_LEEWAY_SECONDS
-from core.auth.sign_in_methods import Finished, VerifiedIdentity
+from core.auth.sign_in_methods import Finished
 from core.auth.user_link import user_id_for_identity
 from core.models.auth_sessions import AuthSession
 
@@ -90,16 +93,19 @@ def _locked_session(db: Session, session_id: UUID) -> Optional[AuthSession]:
     return db.query(AuthSession).filter(AuthSession.id == session_id).with_for_update().first()
 
 
-def _refusal(db: Session, identity: VerifiedIdentity, row: Optional[AuthSession],
-             started_at: Optional[datetime], now: datetime) -> Optional[str]:
+def _refusal(db: Session, finished: Finished, row: Optional[AuthSession], presented: Optional[str],
+             now: datetime) -> Optional[str]:
     """Why this callback does not confirm the session ``row``, or None when it does."""
+    identity = finished.identity
     if sessions.session_state(row, now) != sessions.LIVE:
         return session_audit.STEP_UP_SESSION_ENDED
+    if not sessions.token_opens(row, presented):
+        return session_audit.STEP_UP_NOT_PRESENTED
     if user_id_for_identity(db, identity.issuer, identity.subject) != row.user_id:
         return session_audit.STEP_UP_ANOTHER_PERSON
     if not people.person_is_active(db, row.user_id):
         return session_audit.STEP_UP_DEACTIVATED
-    return sign_in_time_refusal(identity.auth_time, started_at, now)
+    return sign_in_time_refusal(identity.auth_time, finished.started_at, now)
 
 
 def sign_in_time_refusal(auth_time: datetime, started_at: Optional[datetime],
@@ -125,19 +131,23 @@ def _freshness_refusal(auth_time: datetime, started_at: Optional[datetime], now:
     return None
 
 
-def confirm_step_up(db: Session, finished: Finished, *, ip_address: Optional[str], user_agent: Optional[str],
-                    now: Optional[datetime] = None) -> sessions.IssuedSession:
+def confirm_step_up(db: Session, finished: Finished, *, presented: Optional[str], ip_address: Optional[str],
+                    user_agent: Optional[str], now: Optional[datetime] = None) -> sessions.IssuedSession:
     """The asking session ended and a new one issued with this sign-in's ``auth_time``, audited, in
     one commit; else ``StepUpRefused``, and no session changed.
 
-    ``SessionAuditFailed`` when the confirmation's row cannot be written, and ``sessions.SignInFailed``
-    when the new session cannot be stored: nothing changed either way.
+    ``presented`` is the session token the callback's request carries in its cookie: it must be the
+    asking session's own. ``now`` is read once both locks are held, so the session's clocks and the
+    sign-in's time are judged when the session is locked, never before a wait for the locks (a
+    session that expired while this waited is refused as ended). ``SessionAuditFailed`` when the
+    confirmation's row cannot be written, and ``sessions.SignInFailed`` when the new session cannot
+    be stored: nothing changed either way.
     """
-    moment = now or _now()
     session_id = finished.step_up_session_id
     row = _locked_session(db, session_id)
+    moment = now or _now()
     asked_by = row.user_id if row is not None else None
-    reason = _refusal(db, finished.identity, row, finished.started_at, moment)
+    reason = _refusal(db, finished, row, presented, moment)
     if reason is not None:
         db.rollback()
         logger.warning("users.id=%s: step-up refused (%s)", asked_by, reason)

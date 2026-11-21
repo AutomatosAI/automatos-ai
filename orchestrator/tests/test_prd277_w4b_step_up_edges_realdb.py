@@ -11,7 +11,10 @@ transaction rolled back at the end.
   (the token's ``sid``, else the old one); when the audit row cannot be written, no session changes.
 * **Refusals**: a person deactivated while signing in again (``deactivated``); a callback carried to
   another browser with a session of its own, or used twice (``sign_in_expired``, nothing changed);
-  an ``auth_time`` in the future or not a number (``sign_in_refused``, the session untouched).
+  a callback whose cookie presents another session, or none (``session_not_presented``, nothing
+  changed; an ended session with none is ``session_ended`` as before); an ``auth_time`` in the
+  future or not a number (``sign_in_refused``, the session untouched); anything else the step-up
+  raises is ``sign_in_failed``, rolled back. The clock is read once the locks are held.
 * **Fetch metadata**: ``step_up=1`` sent from another site (``Sec-Fetch-Site`` ``cross-site`` or
   ``same-site``) is refused before anything is stored; this site, the address bar, or a browser that
   sends no such header may start one.
@@ -35,10 +38,12 @@ os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
 os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
+from api.auth_oidc import SIGN_IN_COOKIE  # noqa: E402
 from config import config  # noqa: E402
 from core.auth import oidc_provider, people, session_audit, sessions, sign_in_flow, step_up_sign_in  # noqa: E402
 from core.auth.sign_in_methods import Finished, VerifiedIdentity  # noqa: E402
 from core.auth.step_up_sign_in import CLOCK_SKEW, StepUpRefused  # noqa: E402
+from core.auth.system_role import UnknownPerson  # noqa: E402
 from core.models.auth_sessions import AuthSession  # noqa: E402
 from tests.helpers_fake_oidc_provider import INSTALL, Person  # noqa: E402
 from tests.test_prd277_w4b_sign_in_rules_realdb import (  # noqa: E402
@@ -49,6 +54,7 @@ from tests.test_prd277_w4b_sign_in_rules_realdb import (  # noqa: E402
     _count,
     _new_session,
     _refusal,
+    _sets_session_cookie,
     _signed_in,
     _start,
     _step_ups,
@@ -80,11 +86,15 @@ def asking(db_session, seed_workspace, monkeypatch):
     return issued, subject
 
 
-def _confirm(db, issued, subject, auth_time, sid=None) -> sessions.IssuedSession:
+_ASKING = object()  # the callback presents the asking session's own token
+
+
+def _confirm(db, issued, subject, auth_time, sid=None, presented=_ASKING) -> sessions.IssuedSession:
     identity = VerifiedIdentity(issuer=ISSUER, subject=subject, email=None, email_verified=False, name=None,
                                 auth_time=auth_time, idp_session_id=sid)
     finished = Finished(identity=identity, return_to="/", step_up_session_id=issued.session_id, started_at=STARTED)
-    return step_up_sign_in.confirm_step_up(db, finished, ip_address=None, user_agent=None, now=NOW)
+    token = issued.token if presented is _ASKING else presented
+    return step_up_sign_in.confirm_step_up(db, finished, presented=token, ip_address=None, user_agent=None, now=NOW)
 
 
 @pytest.mark.parametrize("auth_time", [STARTED, STARTED - CLOCK_SKEW, NOW, NOW + CLOCK_SKEW],
@@ -157,7 +167,115 @@ def test_an_auth_time_beyond_the_skew_is_refused(db_session, asking, auth_time, 
     assert db_session.get(AuthSession, issued.session_id).auth_time == STARTED - timedelta(hours=2)
 
 
+def _held(db, person) -> list:
+    db.expire_all()
+    return sorted((str(row.id), row.revoked_at, row.auth_time)
+                  for row in db.query(AuthSession).filter(AuthSession.user_id == person).all())
+
+
+@pytest.mark.parametrize("presented", ["another", None, "ams_not-a-session"],
+                         ids=["another-live-session-of-the-same-person", "no-cookie", "an-unknown-token"])
+def test_a_callback_that_does_not_present_the_asking_session_is_refused_and_changes_nothing(
+        db_session, asking, presented):
+    issued, subject = asking
+    person = db_session.get(AuthSession, issued.session_id).user_id
+    another = sessions.issue_session(db_session, user_id=person, auth_time=STARTED - timedelta(hours=2),
+                                     now=STARTED - timedelta(minutes=1))
+    before = _held(db_session, person)
+
+    with pytest.raises(StepUpRefused) as refused:
+        _confirm(db_session, issued, subject, NOW, presented=another.token if presented == "another" else presented)
+
+    assert str(refused.value) == session_audit.STEP_UP_NOT_PRESENTED
+    assert _held(db_session, person) == before
+
+
+def test_an_ended_session_with_no_cookie_is_refused_as_ended(db_session, asking):
+    issued, subject = asking
+    sessions.revoke_session(db_session, issued.session_id, sessions.REVOKED_SIGN_OUT, NOW)
+    db_session.commit()
+
+    with pytest.raises(StepUpRefused) as refused:
+        _confirm(db_session, issued, subject, NOW, presented=None)
+
+    assert str(refused.value) == session_audit.STEP_UP_SESSION_ENDED
+
+
+def test_the_step_ups_clock_is_read_once_its_locks_are_held(db_session, asking, monkeypatch):
+    issued, subject = asking
+    order = []
+    locked = step_up_sign_in._locked_session
+    monkeypatch.setattr(step_up_sign_in, "_locked_session", lambda db, sid: order.append("locked") or locked(db, sid))
+    monkeypatch.setattr(step_up_sign_in, "_now", lambda: order.append("now") or NOW)
+    identity = VerifiedIdentity(issuer=ISSUER, subject=subject, email=None, email_verified=False, name=None,
+                                auth_time=NOW, idp_session_id=None)
+    finished = Finished(identity=identity, return_to="/", step_up_session_id=issued.session_id, started_at=STARTED)
+
+    step_up_sign_in.confirm_step_up(db_session, finished, presented=issued.token, ip_address=None, user_agent=None)
+
+    assert order[:2] == ["locked", "now"]
+
+
 # --------------------------------------------------------------------------- refusals through the routes
+
+
+def _callback_presenting(install, callback, session_token):
+    """The callback sent with this browser's binding cookie and, when given, ``session_token`` as its session."""
+    cookies = [f"{SIGN_IN_COOKIE}={install.client.cookies.get(SIGN_IN_COOKIE)}"]
+    if session_token is not None:
+        cookies.append(f"{config.SESSION_COOKIE_NAME}={session_token}")
+    alone = TestClient(install.client.app, base_url=INSTALL)
+    return alone.get(callback, headers={"cookie": "; ".join(cookies)}, follow_redirects=False)
+
+
+def _raises(error):
+    def fail(*args, **kwargs):
+        raise error
+
+    return fail
+
+
+@pytest.mark.parametrize(("name", "error"), [
+    ("renew_session", UnknownPerson("gone")),
+    ("renew_session", TypeError("auth_time")),
+    ("renew_session", ValueError("sid")),
+    ("renew_session", sessions.SessionsNotIssued("off")),
+    ("renew_session", sessions.SignInFailed("not stored")),
+    ("person_is_active_locked", UnknownPerson("gone")),
+], ids=["renew-unknown-person", "renew-type-error", "renew-value-error", "renew-not-issued",
+        "renew-not-stored", "locked-lookup-unknown-person"])
+def test_whatever_the_step_up_raises_is_a_failed_sign_in_that_changes_nothing(install, monkeypatch, name, error):
+    me = _signed_in(install, "steps-up-into-a-failure")
+    started = _start(install, step_up_too=True)
+    callback = install.idp.approve(started.headers["location"])
+    monkeypatch.setattr(sessions, name, _raises(error))
+
+    answer = install.client.get(callback, follow_redirects=False)
+
+    assert _refusal(answer) == sign_in_flow.FAILED and not _sets_session_cookie(answer)
+    assert _auth_time(install.db, me.session_id) == me.old
+    assert _count(install.db, "SELECT COUNT(*) FROM auth_sessions WHERE user_id = :u AND revoked_at IS NULL",
+                  u=me.user_id) == 1
+    assert _step_ups(install) == []
+
+
+@pytest.mark.parametrize("presents_another", [True, False], ids=["another-session", "no-session"])
+def test_a_step_up_callback_without_the_asking_sessions_cookie_is_refused_and_changes_nothing(
+        install, presents_another):
+    me = _signed_in(install, "presents-the-wrong-session")
+    another = sessions.issue_session(install.db, user_id=me.user_id, auth_time=me.old)
+    started = _start(install, step_up_too=True)
+    callback = install.idp.approve(started.headers["location"])
+    held = _count(install.db, "SELECT COUNT(*) FROM auth_sessions WHERE user_id = :u AND revoked_at IS NULL",
+                  u=me.user_id)
+
+    answer = _callback_presenting(install, callback, another.token if presents_another else None)
+
+    assert _refusal(answer) == sign_in_flow.STEP_UP_REFUSED and not _sets_session_cookie(answer)
+    assert _auth_time(install.db, me.session_id) == me.old
+    assert _count(install.db, "SELECT COUNT(*) FROM auth_sessions WHERE user_id = :u AND revoked_at IS NULL",
+                  u=me.user_id) == held
+    assert _step_ups(install) == [(me.user_id, {"confirmed": False, "reason": "session_not_presented"})]
 
 
 def test_a_person_deactivated_while_signing_in_again_is_refused(install):

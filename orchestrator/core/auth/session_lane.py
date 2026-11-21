@@ -13,7 +13,9 @@ token exactly as they did before this lane existed.
   (``core.auth.sessions.find_session``). Unknown, revoked or expired is
   ``401 {"code": "session_ended", "reason": "unknown" | "revoked" | "expired", "message": …}``,
   which the web app recognises; the reason goes to the log too, never the token. When the token
-  came from the cookie, the answer also clears the cookie (``session_cookie.CookieSessionEnded``).
+  came from the cookie, the answer also clears the cookie (``session_cookie.CookieSessionEnded``),
+  except for a session a confirmed step-up replaced (``SessionReplaced``): the same 401, and the
+  cookie, which now holds its successor, is left as it is.
 * **The person** is the session's ``users`` row, by ``users.id``; a deactivated one is
   ``401 session_ended`` (``revoked``). Their install-wide role is the one the install stores
   (``core.auth.system_role.stored_system_role``), else ``user``.
@@ -100,6 +102,22 @@ def session_ended(reason: str) -> HTTPException:
     )
 
 
+class SessionReplaced(HTTPException):
+    """The same ``401 session_ended`` (``revoked``), for a session a confirmed step-up replaced.
+
+    The browser that stepped up already holds its successor in the cookie, so the cookie lane
+    raises this as it is and never clears the cookie for it (``resolve_session_cookie``).
+    """
+
+
+def _refused(row: Optional[Any], state: str) -> HTTPException:
+    """The refusal for a session that is not live: ``SessionReplaced`` when a step-up ended it."""
+    refused = session_ended(state)
+    if row is None or row.revoked_reason != sessions.REVOKED_STEP_UP:
+        return refused
+    return SessionReplaced(status_code=refused.status_code, detail=refused.detail)
+
+
 def _person(db: Session, user_pk: int) -> Optional[Person]:
     """The session's person, or None when the row is gone or deactivated."""
     row = db.query(User.id, User.email).filter(User.id == user_pk, User.is_active.isnot(False)).first()
@@ -181,7 +199,7 @@ def _resolve_in_own_session(request: Any, token: str) -> RequestContext:
         row = sessions.find_session(db, token)
         state = sessions.session_state(row, now)
         if state != sessions.LIVE:
-            raise session_ended(state)
+            raise _refused(row, state)
         person = _person(db, row.user_id)
         if person is None:
             raise session_ended(sessions.REVOKED)
@@ -213,13 +231,15 @@ async def resolve_session_cookie(request: Request, token: str) -> RequestContext
     """The registry's resolver for the session cookie: the origin check first, then the session.
 
     An ended session is ``session_cookie.CookieSessionEnded``: the same 401, whose answer also
-    clears the cookie. Every other refusal is raised as it is.
+    clears the cookie. A session a confirmed step-up replaced (``SessionReplaced``) is the same 401
+    without clearing it: a request that left before the step-up finished must not clear the
+    successor the browser now holds. Every other refusal is raised as it is.
     """
     session_cookie.assert_cookie_request_allowed(request)
     try:
         return await _resolve(request, token)
     except HTTPException as refused:
-        if not _is_session_ended(refused):
+        if isinstance(refused, SessionReplaced) or not _is_session_ended(refused):
             raise
         ended = session_cookie.CookieSessionEnded(status_code=refused.status_code, detail=refused.detail)
     raise ended
@@ -243,6 +263,7 @@ def session_auth_time(ctx: Any) -> Optional[float]:
 __all__ = [
     "SESSION_AUTH_TYPE",
     "SESSION_ENDED",
+    "SessionReplaced",
     "WORKSPACE_REQUIRED",
     "resolve_session_bearer",
     "resolve_session_cookie",

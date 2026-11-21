@@ -13,6 +13,8 @@ declare still answers 405, as FastAPI answers it in every edition, so the paths 
 * ``GET /people/{user_id}/sessions`` — an install admin lists a person's sessions, newest first:
   their clocks, address, browser and end, never a token or a hash.
 * ``POST /sessions/{session_id}/revoke`` — an install admin ends one session; the person's phones stay.
+  One a confirmed step-up already replaced answers ``{"revoked": false, "replaced": true}``: its
+  successor is a different session, ended by the next route, "end all sessions".
 * ``POST /people/{user_id}/sessions/revoke`` — an install admin ends every session of a person. For
   another person it also revokes every device they hold, in the same transaction, one
   ``device:revoked`` row each (reason ``sessions_ended``; PRD-277 US-601); for the admin themselves,
@@ -195,13 +197,27 @@ def list_sessions(user_id: int, ctx: RequestContext = Depends(get_request_contex
              dependencies=[Depends(require_step_up(config.STEP_UP_MAX_AGE_MINUTES))])
 def revoke_session(session_id: UUID, request: Request, ctx: RequestContext = Depends(get_request_context_hybrid),
                    db: Session = Depends(get_db)) -> Dict[str, bool]:
-    """End one session (US-303); ``revoked`` is false when it had already ended."""
+    """End one session (US-303); ``revoked`` is false when it had already ended.
+
+    A session a confirmed step-up replaced (US-406) had already ended, and its successor, a
+    different session, is still live: the answer is ``{"revoked": false, "replaced": true}``, and
+    this route leaves the successor as it is. Ending everything a person has is the "end all
+    sessions" route, ``POST /people/{user_id}/sessions/revoke``.
+    """
     actor = _require_admin(ctx)
     owner = db.query(AuthSession.user_id).filter(AuthSession.id == session_id).first()
     if owner is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=NO_SUCH_SESSION)
     _assert_may_act_on(db, ctx, owner[0])
-    return {"revoked": people.end_session(db, session_id, _requester(request, ctx, actor))}
+    revoked = people.end_session(db, session_id, _requester(request, ctx, actor))
+    if revoked or _ended_reason(db, session_id) != sessions.REVOKED_STEP_UP:
+        return {"revoked": revoked}
+    return {"revoked": False, "replaced": True}
+
+
+def _ended_reason(db: Session, session_id: UUID) -> Optional[str]:
+    """Why a session ended, as stored (``revoked_reason``), or None."""
+    return db.query(AuthSession.revoked_reason).filter(AuthSession.id == session_id).scalar()
 
 
 @router.post("/people/{user_id}/sessions/revoke",
