@@ -59,7 +59,9 @@ describe('enterpriseStartUpProblem', () => {
   ])('refuses BACKEND_INTERNAL_URL %s, naming the setting only', (_why, value) => {
     const problem = enterpriseStartUpProblem({ ...READY, BACKEND_INTERNAL_URL: value })
     expect(problem).toContain('BACKEND_INTERNAL_URL')
-    if (value) expect(problem).not.toContain(value.trim())
+    // A blank value trims to '', which every string contains: there is nothing of it to leak.
+    const written = (value ?? '').trim()
+    if (written) expect(problem).not.toContain(written)
   })
 })
 
