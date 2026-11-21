@@ -38,6 +38,22 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content: {name: OIDC_CLIENT_ID, value: automatos}
+  - it: renders the proxy count beside the client address header, in the API and the migration Job
+    set:
+      edition: {enterprise: {clientIpHeader: X-Forwarded-For, clientIpProxyCount: 2}}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: CLIENT_IP_HEADER, value: X-Forwarded-For}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: CLIENT_IP_PROXY_COUNT, value: "2"}
+  - it: leaves the proxy count out when it is empty, so the header's first value is the address
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: CLIENT_IP_PROXY_COUNT}
+          any: true
   - it: reads the client secret from the existing Secret, as a required key
     template: templates/api-deployment.yaml
     asserts:
