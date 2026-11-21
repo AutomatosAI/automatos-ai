@@ -251,4 +251,17 @@ The web app reads which services are on from `GET /api/hosted-services`. To cons
 
 Sources: `orchestrator/core/editions.py`, `orchestrator/core/edition_start_up.py`, `charts/automatos/templates/_enterprise_api.tpl`, `charts/automatos/templates/_enterprise.tpl`, `frontend/csp-policy.mjs`, `charts/automatos/README.md`
 
+## Phones in the enterprise edition
+
+People pair their phones with Automatos Go while `edition.enterprise.devicePairing` is on (`ENTERPRISE_DEVICE_PAIRING`, PRD-277 US-601). It is on by default; the chart and the API refuse any value but `true` or `false`, and the chart refuses the setting in `config`.
+
+- **Who pairs.** A person signed in to the web app makes a one-time code in Settings, Phones & devices, for themselves, in a workspace they are a member of. The code lasts ten minutes and pairs one phone once; `POST /api/v1/mobile/pair` keeps its limit of attempts per address. No device, key or console makes a code in this edition.
+- **What a phone is.** The person who paired it, never an operator and never an install admin: at each request it is that person, with their current role in the phone's workspace. A phone cannot confirm a fresh sign-in, so it can take no action that needs one.
+- **When a phone stops working.** At its next request after its person is deactivated, after they leave the phone's workspace, and after the phone is removed in Settings.
+- **Push notifications.** Notifications leave through Expo's push service only after an install admin agrees, after a fresh sign-in; each answer is in the audit log.
+- **Changing edition.** The first time the API starts as an edition other than the one it last started as, it revokes every paired phone before it serves, so a phone paired under the local edition does not carry over. Each phone revoked is in the audit log.
+- **Discovery.** `/.well-known/automatos.json` lists `auth.modes` `["oidc", "device"]` (`["oidc"]` with pairing off) and `auth.oidc.start_url`, the install's own sign-in start address; nothing about the identity provider.
+
+Sources: `orchestrator/core/editions.py`, `orchestrator/api/mobile_devices.py`, `orchestrator/api/mobile_push.py`, `orchestrator/services/mobile/edition_change.py`, `orchestrator/services/mobile/discovery.py`, `charts/automatos/templates/_enterprise_api.tpl`
+
 ---

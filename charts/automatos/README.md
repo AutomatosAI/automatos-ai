@@ -170,6 +170,7 @@ or is one the API would refuse at start.
 | `edition.enterprise.hostedServices.themeRevocations` | `ENTERPRISE_CALLS_THEME_REVOCATIONS` | `false` (the default) or `true`: pull Automatos's theme revocation list from `THEME_REVOCATIONS_URL` (PRD-277 US-704). |
 | `edition.enterprise.hostedServices.cloudSync` | `ENTERPRISE_CALLS_CLOUD_SYNC` | `false` (the default) or `true`: Sync with Automatos Cloud, its catalogue and the themes it lists, from `AUTOMATOS_CLOUD_URL`. Needs `themeRevocations`. |
 | `edition.enterprise.hostedServices.cloudItems` | `ENTERPRISE_CALLS_CLOUD_ITEMS` | `false` (the default) or `true`: the agents, Playbooks, packages and plugins a Sync brings from Automatos Cloud. Needs `cloudSync`. |
+| `edition.enterprise.devicePairing` | `ENTERPRISE_DEVICE_PAIRING` | `true` (the default) or `false`: whether people may pair their phones (PRD-277 US-601). Each person pairs their own phone from Settings, signed in as themselves, and the phone acts as that person with their current role. |
 
 The hosted services are off by default: an enterprise install calls none of Automatos's hosted
 services until you switch one on. Each is `true` or `false`, written without quotes; rendering
@@ -182,6 +183,13 @@ browsers load Cloud screenshots from Automatos Cloud only while it is on, and th
 security policy allows that one source only then (PRD-277 D-12).
 What each one sends and brings back, and what an install gives up with it off, is in
 [the deployment docs](../../docs/deployment-infrastructure/kubernetes-helm-chart.md#automatoss-hosted-services-in-the-enterprise-edition).
+
+Device pairing is on by default. `devicePairing` is `true` or `false`, written without quotes;
+rendering stops on any other value and on `ENTERPRISE_DEVICE_PAIRING` in `config`. With it off,
+no phone pairs, every paired phone's token is refused, and the discovery document offers phones
+sign-in only. The first time the install starts as an edition other than the one it last started
+as, the API revokes every paired phone, so a phone paired under the local edition never carries
+into the enterprise edition.
 
 The client secret goes in the Secret as `OIDC_CLIENT_SECRET`, never in values. The
 session clocks (`SESSION_IDLE_MINUTES`, `SESSION_ABSOLUTE_HOURS`), the claim names
