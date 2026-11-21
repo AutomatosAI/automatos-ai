@@ -2,12 +2,14 @@
 
 * The revision chains onto ``prd277_w4b_step_up_20261120`` and is the one head; both head pins name it.
 * Its upgrade widens ``ck_mobile_devices_kind`` to allow ``oidc`` and lets an ``oidc`` row hold a code and token
-  hash (``ck_mobile_devices_clerk_holds_no_token``), each dropped only if it exists and added back; it adds two
-  nullable columns to ``mobile_devices`` and four to ``oidc_pending_sign_ins``, each only when missing. It
-  writes no row and touches no other table. The model declares the same names and sizes.
+  hash (``ck_mobile_devices_clerk_holds_no_token``), each dropped only if it exists, added back ``NOT VALID`` and
+  then validated; it adds four nullable columns to ``mobile_devices`` and four to ``oidc_pending_sign_ins``,
+  each only when missing. It writes no row, touches no other table and sets no ``lock_timeout`` (no revision
+  does). The model declares the same names and sizes.
 * On Postgres, inside a transaction rolled back at the end: over the tables ``create_all`` built, the upgrade
-  run twice changes nothing; the downgrade drops the six columns, keeps an ``oidc`` row already there and
-  refuses a new one; the upgrade from there gives back exactly what ``create_all`` built.
+  run twice changes nothing and leaves both checks validated; the downgrade drops the eight columns, keeps an
+  ``oidc`` row already there and refuses a new one; the upgrade from there gives back exactly what
+  ``create_all`` built.
 """
 from __future__ import annotations
 
@@ -30,7 +32,8 @@ VERSIONS = ORCH / "alembic" / "versions"
 REVISION, PARENT = "prd277_w6b_phone_sign_in_20261121", "prd277_w4b_step_up_20261120"
 MIGRATION = VERSIONS / f"{REVISION}.py"
 TABLES = ("mobile_devices", "oidc_pending_sign_ins")
-DEVICE_COLUMNS = {"sign_in_challenge": 43, "sign_in_install_id": 128}
+DEVICE_COLUMNS = {"sign_in_challenge": 43, "sign_in_install_id": 128, "sign_in_app_link": 16,
+                  "sign_in_confirm_hash": 64}
 PENDING_COLUMNS = {"phone_app_link": 16, "phone_code_challenge": 43, "phone_install_id": 128, "phone_platform": 16}
 CHECKS = ("ck_mobile_devices_kind", "ck_mobile_devices_clerk_holds_no_token")
 ROW_WRITES = re.compile(r"\b(DELETE FROM|TRUNCATE|UPDATE \w+ SET|INSERT INTO)\b")
@@ -89,24 +92,28 @@ def test_the_revision_chains_onto_wave_4_part_2_and_is_the_one_head():
     assert f'(versions / "{REVISION}.py")' in chain and f'down_revision = "{PARENT}"' in chain
 
 
-def test_the_upgrade_widens_two_checks_adds_six_columns_and_writes_no_row():
+def test_the_upgrade_widens_two_checks_adds_eight_columns_and_writes_no_row():
     upgrade = _statements("upgrade")
     assert not any(ROW_WRITES.search(statement) for statement in upgrade)
     assert all(re.match(rf"ALTER TABLE ({'|'.join(TABLES)}) ", statement) for statement in upgrade)
-    assert "CHECK (kind IN ('paired', 'clerk', 'oidc'))" in " ".join(upgrade)
+    assert "CHECK (kind IN ('paired', 'clerk', 'oidc')) NOT VALID;" in " ".join(upgrade)
     for name in CHECKS:
         dropped = upgrade.index(f"ALTER TABLE mobile_devices DROP CONSTRAINT IF EXISTS {name};")
-        assert upgrade[dropped + 1].startswith(f"ALTER TABLE mobile_devices ADD CONSTRAINT {name} CHECK (")
+        added_back = upgrade[dropped + 1]
+        assert added_back.startswith(f"ALTER TABLE mobile_devices ADD CONSTRAINT {name} CHECK (")
+        assert added_back.endswith(") NOT VALID;")
+        assert upgrade[dropped + 2] == f"ALTER TABLE mobile_devices VALIDATE CONSTRAINT {name};"
     added = {match[1]: (match[0], int(match[2])) for match in
              (re.match(r"ALTER TABLE (\w+) ADD COLUMN IF NOT EXISTS (\w+) VARCHAR\((\d+)\);$", s) for s in upgrade)
              if match}
     assert added == {**{name: ("mobile_devices", size) for name, size in DEVICE_COLUMNS.items()},
                      **{name: ("oidc_pending_sign_ins", size) for name, size in PENDING_COLUMNS.items()}}
-    assert len(upgrade) == 2 * len(CHECKS) + len(added)
+    assert len(upgrade) == 3 * len(CHECKS) + len(added)
     assert not any("NOT NULL" in statement or "DEFAULT" in statement for statement in upgrade)
+    assert not any("lock_timeout" in statement for statement in upgrade)
 
 
-def test_the_downgrade_drops_the_six_columns_and_puts_the_narrow_checks_back_not_valid():
+def test_the_downgrade_drops_the_eight_columns_and_puts_the_narrow_checks_back_not_valid():
     downgrade = _statements("downgrade")
     dropped = {re.match(r"ALTER TABLE \w+ DROP COLUMN IF EXISTS (\w+);$", s)[1] for s in downgrade
                if "DROP COLUMN" in s}
@@ -170,6 +177,9 @@ def test_over_create_all_the_upgrade_changes_nothing_twice(tables):
     _run(tables.db, "upgrade")
     _run(tables.db, "upgrade")
     assert _schema(tables.db) == by_model
+    validated = tables.db.execute(text("SELECT bool_and(convalidated) FROM pg_constraint WHERE conname = ANY(:names)"),
+                                  {"names": list(CHECKS)}).scalar_one()
+    assert validated is True
     _oidc_row(tables.db, tables.workspace_id, tables.user_id)
 
 

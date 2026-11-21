@@ -75,8 +75,8 @@ PUBLIC_BY_DESIGN = {
     ("POST", "/api/v1/mobile/pair"),
     # PRD-277 US-603: a phone that signed in at the install's own OIDC start address has no token
     # yet, so the one-time code its app link received, with its PKCE verifier, is its only
-    # credential. 404 unless the edition signs in with OIDC; rate-limited per IP with /pair's
-    # bucket before the code is read (api/mobile_devices.py).
+    # credential. 404 unless the edition signs in with OIDC; rate-limited per IP in its own
+    # bucket (phone_sign_in_exchange_ip) before the code is read (api/mobile_devices.py).
     ("POST", "/api/v1/mobile/sign-in/exchange"),
 }
 
@@ -109,6 +109,13 @@ OWN_AUTH_ROUTES = {
     # so a person in no workspace can still sign out. It ends that one session and nothing else.
     # 404 unless the edition issues sessions.
     ("POST", "/api/v1/auth/sign-out"),
+    # PRD-277 US-603 (api/phone_sign_in.py): Continue and Cancel on the page a phone's sign-in waits
+    # on. Their credential is the confirmation cookie (__Host-, HttpOnly, SameSite=Lax), found by its
+    # token's hash and confirmed in constant time, after the US-302 cross-site check
+    # (session_cookie.assert_cookie_request_allowed); NOT the shared hybrid dependency: nobody has a
+    # session or a workspace yet. 404 unless the edition signs in with OIDC.
+    ("POST", "/api/v1/auth/oidc/phone/continue"),
+    ("POST", "/api/v1/auth/oidc/phone/cancel"),
     # PRD-274 W5c: the same key closes and restores one of the product's own workspaces (404 for any other).
     ("DELETE", "/api/products/{product_id}/workspaces/{workspace_id}"),
     ("POST", "/api/products/{product_id}/workspaces/{workspace_id}/restore"),

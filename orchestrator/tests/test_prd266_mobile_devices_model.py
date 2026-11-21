@@ -49,7 +49,7 @@ COLUMNS = (
     "token_hash", "token_rotated_at", "prev_token_hash", "prev_token_valid_until",
     "expo_push_token", "push_enabled", "push_disabled_reason", "push_key", "last_seen_at",
     "paired_at", "revoked_at", "revoked_by", "events", "created_at", "updated_at", "push_categories",
-    "sign_in_challenge", "sign_in_install_id",
+    "sign_in_challenge", "sign_in_install_id", "sign_in_app_link", "sign_in_confirm_hash",
 )
 NOT_NULL = {"id", "workspace_id", "user_id", "kind", "status", "push_enabled", "events",
             "created_at", "updated_at", "push_categories"}
@@ -63,7 +63,7 @@ INDEXES = {
     "ix_mobile_devices_workspace_status": ["workspace_id", "status"],
     "ix_mobile_devices_prev_token_hash": ["prev_token_hash"],
 }
-SECRETS = ("pairing_code_hash", "token_hash", "prev_token_hash", "push_key")
+SECRETS = ("pairing_code_hash", "token_hash", "prev_token_hash", "push_key", "sign_in_confirm_hash")
 CODE_HASH = "a" * 64
 TOKEN_HASH = "b" * 64
 PREV_HASH = "c" * 64
@@ -173,7 +173,8 @@ def test_the_checks_hold_kind_status_and_platform_and_keep_tokens_off_clerk_rows
     widened = _statements("upgrade", PHONE_SIGN_IN)
     for name, sqltext in checks.items():
         if name in WIDENED_CHECKS:
-            assert f"ALTER TABLE mobile_devices ADD CONSTRAINT {name} CHECK ({sqltext});" in widened, name
+            added = widened.index(f"ALTER TABLE mobile_devices ADD CONSTRAINT {name} CHECK ({sqltext}) NOT VALID;")
+            assert widened[added + 1] == f"ALTER TABLE mobile_devices VALIDATE CONSTRAINT {name};", name
             continue
         assert f"CONSTRAINT {name} CHECK ({sqltext})" in _ddl_lines()
 
@@ -212,6 +213,7 @@ def test_to_dict_never_carries_a_hash_the_push_key_or_the_push_token():
         install_id="install-1", platform="ios", pairing_code_hash=CODE_HASH, token_hash=TOKEN_HASH,
         prev_token_hash=PREV_HASH, prev_token_valid_until=NOW, push_key=PUSH_KEY,
         expo_push_token=PUSH_TOKEN, push_enabled=True, events=[{"event": "enrolled"}], paired_at=NOW,
+        sign_in_confirm_hash=CODE_HASH,
     )
     shown = device.to_dict()
     for hidden in (*SECRETS, "expo_push_token"):
