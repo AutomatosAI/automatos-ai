@@ -47,9 +47,13 @@ from config import config
 from . import bedrock_client
 from .base import BaseEmbeddingProvider, EmbeddingUnavailableError, LLMConfig, LLMProvider
 from .bedrock_embedding_calls import HEALTH, BedrockEmbeddingUnavailable, cancel_all, in_pool, refusal
-from .embedding_usage import CHARS_PER_TOKEN_ESTIMATE, record_embedding_usage
+from .embedding_usage import record_embedding_usage
 
 logger = logging.getLogger(__name__)
+
+# Tokens left spare under a model's token limit when text is cut by characters: room for the
+# tokens a tokenizer adds of its own, so 8,192 tokens become an 8,000-character cut.
+TOKEN_MARGIN = 192
 
 # The settings tiers the provider's credentials are looked up for (core.llm.manager): its
 # own when it names a Bedrock credential, else Bedrock chat's.
@@ -79,9 +83,11 @@ class BedrockEmbeddingModel:
 
     @property
     def max_chars(self) -> int:
-        """Text past this is cut before the call: the character limit, or the token limit at
-        the platform's ~4 characters a token, whichever is smaller."""
-        return min(self.max_input_chars, self.max_input_tokens * CHARS_PER_TOKEN_ESTIMATE)
+        """Text past this is cut before the call: the token limit counted as characters, less
+        ``TOKEN_MARGIN``, or the character limit if smaller. Safe where one character is about
+        one token (Chinese, Japanese, dense symbols), where a cut at four characters a token
+        would send such text at four times the token limit."""
+        return min(self.max_input_chars, self.max_input_tokens - TOKEN_MARGIN)
 
 
 # Amazon Titan Text Embeddings V2 (docs.aws.amazon.com/bedrock/latest/userguide/

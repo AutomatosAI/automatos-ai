@@ -77,10 +77,11 @@ def bedrock_on_the_role(monkeypatch, tmp_path):
 
 class _Runtime:
     """A bedrock-runtime stand-in: counts calls and how many are in flight, notes each call's
-    thread, sleeps ``delay``; ``fail(n)`` says whether call ``n`` (from 0) raises ``error``."""
+    thread, sleeps ``delay``; ``fail(n)`` says whether call ``n`` (from 0) raises ``error``, or,
+    with ``fail_text``, only the call for that text does."""
 
-    def __init__(self, delay: float = 0.0, error: Exception = None, fail=lambda _n: True):
-        self.delay, self.error, self.fail = delay, error, fail
+    def __init__(self, delay: float = 0.0, error: Exception = None, fail=lambda _n: True, fail_text: str = None):
+        self.delay, self.error, self.fail, self.fail_text = delay, error, fail, fail_text
         self.lock = threading.Lock()
         self.calls = self.in_flight = self.peak = 0
         self.thread_names = set()
@@ -94,7 +95,9 @@ class _Runtime:
             self.thread_names.add(threading.current_thread().name)
         try:
             time.sleep(self.delay)
-            if self.error is not None and self.fail(number):
+            text = json.loads(kwargs["body"])["inputText"]
+            failing = self.fail(number) if self.fail_text is None else text == self.fail_text
+            if self.error is not None and failing:
                 raise self.error
             body = {"embedding": [0.25] * 1024, "inputTextTokenCount": 1}
             return {"body": io.BytesIO(json.dumps(body).encode())}
@@ -168,6 +171,7 @@ def test_calls_are_held_back_after_it_and_the_next_success_clears_it(monkeypatch
     manager = _manager(runtime)
     with pytest.raises(calls.BedrockEmbeddingUnavailable):
         asyncio.run(manager.generate_embedding("first"))
+    assert manager.provider.is_degraded is True, "access denied marks it degraded"
 
     with pytest.raises(calls.BedrockEmbeddingUnavailable, match="AccessDeniedException"):
         asyncio.run(manager.generate_embedding("held"))
@@ -178,6 +182,68 @@ def test_calls_are_held_back_after_it_and_the_next_success_clears_it(monkeypatch
     assert runtime.calls == 2 and manager.provider.is_degraded is False and provider_ready(manager) is True
 
 
+def _validation(message: str) -> ClientError:
+    return ClientError({"Error": {"Code": "ValidationException", "Message": message}}, "InvokeModel")
+
+
+TOO_LONG = _validation("Input is too long for requested model.")
+MODEL_NOT_OFFERED = _validation("The provided model identifier is invalid.")
+
+
+async def _all_calls_made(runtime: _Runtime, wanted: int, within_s: float = 5.0) -> None:
+    """Wait, in the batch's own loop, until ``wanted`` calls have been made, or ``within_s``."""
+    deadline = time.monotonic() + within_s
+    while runtime.calls < wanted and time.monotonic() < deadline:
+        await asyncio.sleep(0.01)
+
+
+def test_a_validation_error_on_one_text_of_a_batch_leaves_the_other_texts_calls_made():
+    texts = ["a text past the model's input limit"] + [f"text {n}" for n in range(1, 8)]
+    runtime = _Runtime(delay=0.05, error=TOO_LONG, fail_text=texts[0])
+    manager = _manager(runtime)
+
+    async def batch():
+        with pytest.raises(calls.BedrockEmbeddingError) as raised:
+            await manager.generate_embeddings_batch(texts, max_concurrent=2)
+        await _all_calls_made(runtime, len(texts))
+        return raised.value
+
+    error = asyncio.run(batch())
+
+    assert not isinstance(error, EmbeddingUnavailableError) and error.code == "ValidationException"
+    assert runtime.calls == len(texts), "the batch's other texts were still sent: none cancelled"
+    assert manager.provider.is_degraded is False and calls.HEALTH.holding() is None
+
+
+def test_a_validation_error_on_one_text_leaves_the_provider_ready_and_starts_no_hold():
+    runtime = _Runtime(error=TOO_LONG, fail_text="a text past the model's input limit")
+    manager = _manager(runtime)
+    with pytest.raises(calls.BedrockEmbeddingError):
+        asyncio.run(manager.generate_embedding("a text past the model's input limit"))
+
+    assert manager.provider.is_degraded is False and calls.HEALTH.holding() is None
+    assert len(asyncio.run(manager.generate_embedding("the next text"))) == 1024 and runtime.calls == 2
+
+
+def test_the_model_identifier_is_invalid_form_still_marks_it_degraded_and_holds():
+    runtime = _Runtime(error=MODEL_NOT_OFFERED)
+    manager = _manager(runtime)
+    with pytest.raises(calls.BedrockEmbeddingUnavailable, match="ValidationException"):
+        asyncio.run(manager.generate_embedding("hello"))
+
+    assert manager.provider.is_degraded is True
+    with pytest.raises(calls.BedrockEmbeddingUnavailable):
+        asyncio.run(manager.generate_embedding("held"))
+    assert runtime.calls == 1, "held back: no request"
+
+
+@pytest.mark.parametrize("message", ["The provided model identifier is invalid.",
+                                     "This model version has reached the end of its life.",
+                                     "This model is marked by provider as Legacy."])
+def test_each_form_the_chat_client_reads_as_a_model_not_served_is_final(message):
+    assert isinstance(calls.refusal(_validation(message), TITAN_TEXT_EMBEDDINGS_V2), calls.BedrockEmbeddingUnavailable)
+
+
 @pytest.mark.parametrize("code", sorted(calls.WILL_NOT_GET_BETTER))
 def test_each_code_that_will_not_get_better_is_final(code):
     error = ClientError({"Error": {"Code": code, "Message": "x"}}, "InvokeModel")
@@ -186,7 +252,7 @@ def test_each_code_that_will_not_get_better_is_final(code):
 
 @pytest.mark.parametrize("code", ["ThrottlingException", "ModelNotReadyException", "ModelTimeoutException",
                                   "ModelErrorException", "ServiceUnavailableException", "InternalServerException",
-                                  "ServiceQuotaExceededException"])
+                                  "ServiceQuotaExceededException", "ValidationException"])
 def test_each_code_that_may_get_better_is_not_final_and_leaves_it_ready(code):
     error = ClientError({"Error": {"Code": code, "Message": "x"}}, "InvokeModel")
     raised = calls.refusal(error, TITAN_TEXT_EMBEDDINGS_V2)

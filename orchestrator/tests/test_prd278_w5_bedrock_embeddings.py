@@ -349,7 +349,8 @@ def test_text_past_the_models_limit_is_cut_before_the_call(monkeypatch):
 
     asyncio.run(provider.generate_embedding("x" * 40_000))
 
-    assert len(sent[0]) == 32_768 == provider.model.max_chars
+    # 8,192 tokens less a margin, counted as characters: safe where a character is a token.
+    assert len(sent[0]) == 8_000 == provider.model.max_chars < provider.model.max_input_tokens
 
 
 @pytest.mark.parametrize("answer", [{}, {"embedding": [0.5] * 10}, {"embedding": ["a"] * 1024}, []])

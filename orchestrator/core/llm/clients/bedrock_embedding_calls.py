@@ -5,12 +5,15 @@
   executor that every other blocking call shares. However many documents ingest at once, and
   while start-up warms an index, at most ``CALLS_IN_FLIGHT`` calls are in flight. A call
   waiting for a thread has not started: its time limit starts with it.
-- **Two kinds of refusal.** An error code that will not get better without a change to the
-  role, the key, the region or the model (``WILL_NOT_GET_BETTER``) raises
-  ``BedrockEmbeddingUnavailable``, an ``EmbeddingUnavailableError``: the batch it is part of
-  stops, and the ingestion fallbacks do not try again. Any other (throttling, a model or
-  service error, a lost connection) raises ``BedrockEmbeddingError``, as a provider's error
-  raised before.
+- **Two kinds of refusal.** A refusal about the deployment, which will not get better without
+  a change to the role, the key, the region or the model, raises ``BedrockEmbeddingUnavailable``,
+  an ``EmbeddingUnavailableError``: the batch it is part of stops, and the ingestion fallbacks do
+  not try again. That is an error code in ``WILL_NOT_GET_BETTER``, or a ``ValidationException``
+  whose text says the model ID is not served (``bedrock_client.model_not_served``, the chat
+  client's own test). Any other ``ValidationException`` is about that one request (a text past
+  the model's input limit, say) and fails that call only, as does every other refusal
+  (throttling, a model or service error, a lost connection): ``BedrockEmbeddingError``, as a
+  provider's error raised before.
 - **Messages carry the code and the model only.** AWS's own message can name a role and an
   account, so it stays on the original exception, kept as the cause.
 - **Readiness.** After a refusal that will not get better, every Bedrock embedding provider in
@@ -30,6 +33,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional, TypeVar
 
 from .base import EmbeddingUnavailableError
+from .bedrock_client import model_not_served
 
 logger = logging.getLogger(__name__)
 
@@ -39,17 +43,19 @@ _T = TypeVar("_T")
 CALLS_IN_FLIGHT = 10
 # After a refusal that will not get better, calls fail at once for this long, then try again.
 REFUSAL_HOLD_S = 30.0
-# InvokeModel's errors that the same request will meet again until an operator changes the
-# role, the key, the region or the model (docs.aws.amazon.com/bedrock/latest/APIReference/
-# API_runtime_InvokeModel.html, and userguide/troubleshooting-api-error-codes.html).
-# ValidationException is here: the request itself is refused, also for a model ID the region
-# does not offer. Throttling, ModelNotReady, ModelTimeout, ModelError, ServiceUnavailable,
-# InternalServer and ServiceQuotaExceeded ("resubmit later") may get better and are not.
+# InvokeModel's errors that every request meets until an operator changes the role, the key,
+# the region or the model (docs.aws.amazon.com/bedrock/latest/APIReference/
+# API_runtime_InvokeModel.html, and userguide/troubleshooting-api-error-codes.html): access,
+# credentials, a resource that does not exist. Throttling, ModelNotReady, ModelTimeout,
+# ModelError, ServiceUnavailable, InternalServer and ServiceQuotaExceeded ("resubmit later")
+# may get better and are not here.
 WILL_NOT_GET_BETTER = frozenset({
-    "AccessDeniedException", "ResourceNotFoundException", "ValidationException",
+    "AccessDeniedException", "ResourceNotFoundException",
     "UnrecognizedClientException", "InvalidClientTokenId", "InvalidSignatureException",
     "IncompleteSignature", "NotAuthorized", "ExpiredTokenException",
 })
+# Refused input: one request's problem, unless its text says the model ID is not served.
+VALIDATION = "ValidationException"
 
 _CALL_POOL = ThreadPoolExecutor(max_workers=CALLS_IN_FLIGHT, thread_name_prefix="bedrock-embedding")
 
@@ -111,11 +117,21 @@ def error_code(exc: BaseException) -> str:
     return str(code) if code else type(exc).__name__
 
 
+def will_not_get_better(code: str, exc: BaseException) -> bool:
+    """True for a refusal about the deployment: a code in ``WILL_NOT_GET_BETTER``, or a
+    ``ValidationException`` saying the model ID is not served (the chat client's test of the
+    text, ``bedrock_client.model_not_served``). Any other refused input is that request's."""
+    if code in WILL_NOT_GET_BETTER:
+        return True
+    return code == VALIDATION and model_not_served(str(exc))
+
+
 def refusal(exc: BaseException, model_id: str) -> RuntimeError:
     """The error to raise for a failed call: ``BedrockEmbeddingUnavailable`` (and the shared
-    health marked) for a code that will not get better, else ``BedrockEmbeddingError``."""
+    health marked) for a refusal that will not get better, else ``BedrockEmbeddingError``,
+    which fails that call only."""
     code = error_code(exc)
-    if code in WILL_NOT_GET_BETTER:
+    if will_not_get_better(code, exc):
         HEALTH.refused(code)
         return BedrockEmbeddingUnavailable(code, model_id)
     return BedrockEmbeddingError(code, model_id)
@@ -148,6 +164,7 @@ async def cancel_all(tasks: list) -> None:
 
 
 __all__ = [
-    "CALLS_IN_FLIGHT", "HEALTH", "REFUSAL_HOLD_S", "WILL_NOT_GET_BETTER", "BedrockEmbeddingError",
+    "CALLS_IN_FLIGHT", "HEALTH", "REFUSAL_HOLD_S", "VALIDATION", "WILL_NOT_GET_BETTER", "BedrockEmbeddingError",
     "BedrockEmbeddingHealth", "BedrockEmbeddingUnavailable", "cancel_all", "error_code", "in_pool", "refusal",
+    "will_not_get_better",
 ]
