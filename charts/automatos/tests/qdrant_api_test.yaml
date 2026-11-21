@@ -1,7 +1,8 @@
 suite: The API reaches the memory store the chart installs (PRD-280 US-601)
 # With qdrant.enabled the chart sets the API's QDRANT_URL, once, in place of config's empty
-# default, and gives the API the store's key from the Secret, optional. The migration Job shares
-# the API's environment. Off, the API's environment is as before: default_render_test.yaml pins it.
+# default, and gives the API the store's key from the Secret, required. The migration Job shares
+# the API's environment but not these two: its migrations and seeds never call the store. Off, the
+# API's environment is as before: default_render_test.yaml pins it.
 templates:
   - templates/api-deployment.yaml
   - templates/migrate-job.yaml
@@ -22,15 +23,17 @@ tests:
       - notContains:
           path: spec.template.spec.containers[0].env
           content: {name: QDRANT_URL, value: ""}
-  - it: points the migration Job at the store's Service too, once
+  - it: gives the migration Job neither the store's address nor its key
     template: templates/migrate-job.yaml
     asserts:
-      - contains:
-          path: spec.template.spec.containers[0].env
-          content: {name: QDRANT_URL, value: "http://demo-automatos-qdrant:6333"}
       - notContains:
           path: spec.template.spec.containers[0].env
-          content: {name: QDRANT_URL, value: ""}
+          content: {name: QDRANT_URL}
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: QDRANT_API_KEY}
+          any: true
   - it: names the store by the chart's fullname
     template: templates/api-deployment.yaml
     set:
@@ -39,22 +42,21 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content: {name: QDRANT_URL, value: "http://memory-qdrant:6333"}
-  - it: gives the API the store's key from the chart's Secret, optional (config may not hold it, qdrant_refusals_test.yaml)
+  - it: gives the API the store's key from the chart's Secret, required (config may not hold it, qdrant_refusals_test.yaml)
     template: templates/api-deployment.yaml
     asserts:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
             name: QDRANT_API_KEY
-            valueFrom: {secretKeyRef: {name: automatos-secrets, key: QDRANT_API_KEY, optional: true}}
-  - it: gives the migration Job the same key reference
-    template: templates/migrate-job.yaml
+            valueFrom: {secretKeyRef: {name: automatos-secrets, key: QDRANT_API_KEY}}
+  - it: makes no reference to the store's key optional
+    template: templates/api-deployment.yaml
     asserts:
-      - contains:
-          path: spec.template.spec.containers[0].env
-          content:
-            name: QDRANT_API_KEY
-            valueFrom: {secretKeyRef: {name: automatos-secrets, key: QDRANT_API_KEY, optional: true}}
+      - exists:
+          path: spec.template.spec.containers[0].env[?(@.name == "QDRANT_API_KEY")].valueFrom.secretKeyRef.key
+      - notExists:
+          path: spec.template.spec.containers[0].env[?(@.name == "QDRANT_API_KEY")].valueFrom.secretKeyRef.optional
   - it: keeps the store's key in the chart's Secret when the worker has one of its own
     template: templates/api-deployment.yaml
     set:
@@ -71,7 +73,7 @@ tests:
           path: spec.template.spec.containers[0].env
           content:
             name: QDRANT_API_KEY
-            valueFrom: {secretKeyRef: {name: automatos-secrets, key: QDRANT_API_KEY, optional: true}}
+            valueFrom: {secretKeyRef: {name: automatos-secrets, key: QDRANT_API_KEY}}
       - contains:
           path: spec.template.spec.containers[0].env
           content: {name: QDRANT_URL, value: "http://demo-automatos-qdrant:6333"}

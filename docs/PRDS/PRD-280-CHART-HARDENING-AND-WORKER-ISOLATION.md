@@ -167,7 +167,7 @@ The web app and the memory store get no rule that lets them open a connection ou
 `qdrant.enabled`, off by default. With it on:
 
 - one copy, as a stateful set with its own disk, from the image the compose file already pins by digest;
-- an API key, read from the secret under a new optional key `QDRANT_API_KEY`;
+- an API key, read from the secret under a new key `QDRANT_API_KEY`, required while `qdrant.enabled` is true and not read otherwise;
 - `QDRANT_URL` set for the API without the operator writing it;
 - the same "restricted" settings as every other pod, its own service account, and no way out.
 
@@ -186,7 +186,7 @@ Each wave is one pull request or a short series. CI is the only gate.
 - [ ] A CI lane, run only when the chart or an image's start-up changes, installs the chart into a namespace that enforces the "restricted" level.
 - [ ] It enables every optional component the chart has at the time. Each later wave adds what it builds: the worker's namespace, the network rules, the memory store.
   - *Wave 1 (`deploy/kind/strict-values.yaml`):* on: the API with its data volume, the migration Job, the web app, the worker, the read-only roots, OpenTelemetry to a real collector with its headers from the Secret, session mode, the ingress objects (class, host, TLS, annotations; no controller), every account renamed and annotated, `WORKER_INTERNAL_TOKEN`, `ENVIRONMENT=production` and `database.sslmode` (`disable`). Not exercised: the database CA mount (the dev PostgreSQL has no TLS), `api.data.enabled=false`, an edition other than `local`, the Secret keys `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN`, `serviceAccount.create=false`, and more than one API replica.
-  - *Wave 6 adds:* the memory store (`qdrant.enabled`), its account renamed and annotated, a node selector, and `QDRANT_API_KEY` in the Secret; `check` requires it to run as uid 1000 on a root mounted read-only, and to refuse the API's request without the key and answer it with the key.
+  - *Wave 6 adds:* the memory store (`qdrant.enabled`), its account renamed and annotated, a node selector, and `QDRANT_API_KEY` in the Secret; `check` requires it to run as uid 1000 on a root mounted read-only, to refuse the API's request without the key and answer it with the key, and, through the API's pod with the key, to create a collection, add a point, take, list and delete a snapshot, and delete the collection.
   - *Wave 2 adds:* the worker started as uid 1000 in a namespace of its own (`automatos-worker`, "restricted"), with a Secret of its own, and the agent-files volume as two claims the lane makes, one in each namespace, bound to one folder on the node (`deploy/kind/strict-workspaces.yaml`); placement values on every component. `check` also requires the worker to run as uid 1000, write its volume, and the API to read that file through its own claim. Not exercised: the agent-files claim the chart makes (the e2e values and the unit tests use it), and placement that keeps a pod off a node (one node).
 - [ ] Every pod becomes ready, and the lane fails if the namespace refuses one.
 - [x] The lane uses images built in the same run, not published ones.
@@ -360,9 +360,10 @@ Each wave is one pull request or a short series. CI is the only gate.
 - [ ] It runs non-root with a read-only root file system and its own service account.
   - *uid 1000, no capability, the default seccomp profile, no cluster token, `<fullname>-qdrant` (`qdrant_test.yaml`, `pod_security_test.yaml`, `read_only_root_test.yaml`, `serviceaccount_test.yaml`). The install lane runs it under "restricted" and checks its user and its read-only root, in CI.*
 - [ ] `QDRANT_API_KEY` is an optional key in the secret, and the store requires it when it is set.
-  - *The store reads it as `QDRANT__SERVICE__API_KEY`, the API as `QDRANT_API_KEY`, both `optional` references to the chart's Secret (`qdrant_test.yaml`, `qdrant_api_test.yaml`); `config.QDRANT_API_KEY` is refused. The install lane sets it and requires the store to refuse a request without it and answer the API's, in CI.*
+  - *Decided stricter: a store installed by the chart always asks for its key. The key is required while `qdrant.enabled` is true and not read otherwise.*
+  - *The store reads it as `QDRANT__SERVICE__API_KEY`, the API as `QDRANT_API_KEY`, both required references to the chart's Secret (`qdrant_test.yaml`, `qdrant_api_test.yaml`); the store's container stops at start on an empty key, then runs the image's own command; the migration Job gets neither the key nor the address, as nothing it runs calls the store; `config.QDRANT_API_KEY` is refused, by the API's and the Job's templates (`qdrant_refusals_test.yaml`, `qdrant_refusals_job_test.yaml`). The install lane sets it, requires the store to refuse a request without it and answer the API's, and, through the API's pod with the key, creates a collection, adds a point, takes, lists and deletes a snapshot and deletes the collection, in CI.*
 - [ ] The API's `QDRANT_URL` is set by the chart, and the chart refuses to render with both `qdrant.enabled` and a hand-written `QDRANT_URL`.
-  - *`http://<fullname>-qdrant:6333`, once, for the API and the migration Job (`qdrant_api_test.yaml`); a non-empty `config.QDRANT_URL` stops the render (`qdrant_refusals_test.yaml`). The default's empty one is not hand-written.*
+  - *`http://<fullname>-qdrant:6333`, once, for the API (`qdrant_api_test.yaml`); a non-empty `config.QDRANT_URL` stops the render (`qdrant_refusals_test.yaml`). The default's empty one is not hand-written.*
 - [ ] The disk is kept when the chart is uninstalled.
   - *The claim comes from the StatefulSet's template, so it is not a release object, and `persistentVolumeClaimRetentionPolicy` is `Retain` for deletion and scale-down (`qdrant_test.yaml`). Removing it is the operator's `kubectl delete pvc` (README). An uninstall is not run in CI.*
 - [ ] With the value off, nothing is rendered and `QDRANT_URL` is as today.

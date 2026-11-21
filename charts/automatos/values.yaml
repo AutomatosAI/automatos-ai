@@ -23,8 +23,9 @@ fullnameOverride: ""
 #                              e.g. Authorization=Basic%20<base64>, values URL-encoded
 #   OIDC_CLIENT_SECRET         the enterprise edition only, and required there: the
 #                              application's client secret at the identity provider
-#   QDRANT_API_KEY             optional, read only with qdrant.enabled: the memory store
-#                              then requires it on every request, and the API sends it
+#   QDRANT_API_KEY             required while qdrant.enabled is true, and not read
+#                              otherwise: the memory store requires it on every
+#                              request, and the API sends it. Not empty
 existingSecret: ""
 
 edition:
@@ -367,8 +368,8 @@ workspaces:
 # The memory store (PRD-280 US-601): Qdrant, for agent memory, in the release's namespace. Off:
 # nothing is rendered, and the API uses config.QDRANT_URL, as before. On: one StatefulSet with a
 # disk of its own, a Service on port 6333, its own account, and the API's QDRANT_URL set to
-# http://<fullname>-qdrant:6333 (rendering stops on a QDRANT_URL in config). QDRANT_API_KEY in
-# the Secret, when there, is required by the store and sent by the API. The disk, the claim
+# http://<fullname>-qdrant:6333 (rendering stops on a QDRANT_URL in config). On, the Secret
+# must hold QDRANT_API_KEY, not empty: the store does not start without it. The disk, the claim
 # storage-<fullname>-qdrant-0, is kept on `helm uninstall`; delete it yourself to remove it.
 qdrant:
   enabled: false
@@ -385,6 +386,10 @@ qdrant:
     storageClass: ""
     accessModes:
       - ReadWriteOnce
+  # The scratch volume a snapshot is made in. sizeLimit (e.g. 20Gi) is unset: a snapshot can be
+  # as large as the data, and a pod over its limit is evicted.
+  snapshots:
+    sizeLimit: ""
   resources:
     requests:
       cpu: 100m

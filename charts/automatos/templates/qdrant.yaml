@@ -53,6 +53,16 @@ spec:
         - name: qdrant
           image: {{ include "automatos.image" (dict "ctx" $ "image" $image) }}
           imagePullPolicy: {{ include "automatos.imagePullPolicy" (dict "ctx" $ "image" $image) }}
+          # The image's own command, ./entrypoint.sh in its working directory /qdrant, run unchanged
+          # once the key is checked: the store starts only with a key that is not empty.
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              if [ -z "$QDRANT__SERVICE__API_KEY" ]; then
+                echo "QDRANT_API_KEY in the Secret {{ include "automatos.secretName" . }} is empty: the memory store starts only with a key" >&2
+                exit 1
+              fi
+              exec ./entrypoint.sh
           env:
             # Qdrant sends usage statistics to its makers unless this is set; the store calls out to nothing.
             - name: QDRANT__TELEMETRY_DISABLED
@@ -60,13 +70,12 @@ spec:
             # The file the image's entrypoint reads after a crash, on a scratch volume, not the root.
             - name: QDRANT_INIT_FILE_PATH
               value: /qdrant/init/.qdrant-initialized
-            # With QDRANT_API_KEY in the Secret, every request but the health checks must carry it.
+            # Required: every request but the health checks must carry it.
             - name: QDRANT__SERVICE__API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "automatos.secretName" . }}
                   key: QDRANT_API_KEY
-                  optional: true
           ports:
             - name: http
               containerPort: 6333
@@ -108,7 +117,12 @@ spec:
             {{- toYaml $values.resources | nindent 12 }}
       volumes:
         - name: snapshots
+          {{- with ($values.snapshots | default dict).sizeLimit }}
+          emptyDir:
+            sizeLimit: {{ . | quote }}
+          {{- else }}
           emptyDir: {}
+          {{- end }}
         - name: init
           emptyDir: {}
       {{- with include "automatos.placement" $values | trim }}

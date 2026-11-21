@@ -445,12 +445,9 @@ before any of the release's ordinary resources exist.
   value: {{ include "automatos.workerUrl" . | quote }}
 {{- end }}
 {{- $qdrant := include "automatos.qdrantEnabled" . }}
-{{- if $qdrant }}
-- name: QDRANT_URL
-  value: {{ include "automatos.qdrantUrl" . | quote }}
-{{- end }}
 {{- include "automatos.databaseTlsEnv" . }}
 {{- range $name, $value := .Values.config }}
+{{- /* With the memory store on, automatos.qdrantApiEnv gives the API its address. */}}
 {{- if not (and $qdrant (eq $name "QDRANT_URL")) }}
 - name: {{ $name }}
   value: {{ $value | toString | quote }}
@@ -458,10 +455,6 @@ before any of the release's ordinary resources exist.
 {{- end }}
 {{- $required := list "DATABASE_URL" "REDIS_URL" "API_KEY" "CREDENTIAL_ENCRYPTION_KEY" }}
 {{- $optional := list "WORKER_INTERNAL_TOKEN" "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" }}
-{{- if $qdrant }}
-{{- /* The memory store's key (PRD-280 US-601): with it in the Secret, the store requires it and the API sends it. */}}
-{{- $optional = append $optional "QDRANT_API_KEY" }}
-{{- end }}
 {{- if and .Values.worker.enabled .Values.worker.existingSecret }}
 {{- /* The worker's own Secret must hold the token (PRD-280 US-202), so the API's must too. */}}
 {{- $required = append $required "WORKER_INTERNAL_TOKEN" }}
@@ -485,6 +478,22 @@ before any of the release's ordinary resources exist.
       name: {{ $secret }}
       key: {{ $key }}
       optional: true
+{{- end }}
+{{- end }}
+
+{{/*
+The memory store's address and key (PRD-280 US-601), for the API pods only: the migration
+Job's migrations and seeds never call the store. The key is required while qdrant.enabled.
+*/}}
+{{- define "automatos.qdrantApiEnv" -}}
+{{- if include "automatos.qdrantEnabled" . }}
+- name: QDRANT_URL
+  value: {{ include "automatos.qdrantUrl" . | quote }}
+- name: QDRANT_API_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "automatos.secretName" . }}
+      key: QDRANT_API_KEY
 {{- end }}
 {{- end }}
 

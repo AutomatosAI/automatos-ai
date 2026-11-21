@@ -1,7 +1,8 @@
 suite: The memory store, Qdrant (PRD-280 US-601)
 # The StatefulSet and its Service. The API's side (QDRANT_URL, QDRANT_API_KEY) is
 # qdrant_api_test.yaml's, the account serviceaccount_test.yaml's, the refusals
-# qdrant_refusals_test.yaml's, and the default render (nothing at all) default_render_test.yaml's.
+# qdrant_refusals_test.yaml's and qdrant_refusals_job_test.yaml's, values with no qdrant key
+# qdrant_absent_test.yaml's, and the default render (nothing at all) default_render_test.yaml's.
 templates:
   - templates/qdrant.yaml
 release:
@@ -81,7 +82,8 @@ tests:
             resources: {requests: {storage: 50Gi}}
 
   # The pod spec whole: non-root, read-only root, no capability, the default seccomp profile, no
-  # cluster token, no call home, the key from the Secret only, and the three volumes it writes.
+  # cluster token, no call home, the key from the Secret only and required (a check stops an empty
+  # one, then the image's own ./entrypoint.sh runs), and the three volumes it writes.
   - it: runs the store as uid 1000 under "restricted", with a read-only root and a scratch volume for each path it writes
     documentIndex: 0
     asserts:
@@ -101,10 +103,18 @@ tests:
                 - name: qdrant
                   image: docker.io/qdrant/qdrant@sha256:9bfc89f9914fc14876a88c05270685921a55b8877b254a98bcc1cc2f0a424cd2
                   imagePullPolicy: IfNotPresent
+                  command: [/bin/bash, -c]
+                  args:
+                    - |
+                      if [ -z "$QDRANT__SERVICE__API_KEY" ]; then
+                        echo "QDRANT_API_KEY in the Secret automatos-secrets is empty: the memory store starts only with a key" >&2
+                        exit 1
+                      fi
+                      exec ./entrypoint.sh
                   env:
                     - {name: QDRANT__TELEMETRY_DISABLED, value: "true"}
                     - {name: QDRANT_INIT_FILE_PATH, value: /qdrant/init/.qdrant-initialized}
-                    - {name: QDRANT__SERVICE__API_KEY, valueFrom: {secretKeyRef: {name: automatos-secrets, key: QDRANT_API_KEY, optional: true}}}
+                    - {name: QDRANT__SERVICE__API_KEY, valueFrom: {secretKeyRef: {name: automatos-secrets, key: QDRANT_API_KEY}}}
                   ports:
                     - {name: http, containerPort: 6333}
                   startupProbe: {httpGet: {path: /livez, port: http}, periodSeconds: 5, failureThreshold: 60}
@@ -126,7 +136,7 @@ tests:
                 - {name: snapshots, emptyDir: {}}
                 - {name: init, emptyDir: {}}
 
-  - it: reads the key from the chart's Secret, not the worker's own
+  - it: reads the key from the chart's Secret, not the worker's own, and names that Secret when it is empty
     documentIndex: 0
     set:
       existingSecret: automatos-api-secrets
@@ -137,7 +147,18 @@ tests:
           path: spec.template.spec.containers[0].env
           content:
             name: QDRANT__SERVICE__API_KEY
-            valueFrom: {secretKeyRef: {name: automatos-api-secrets, key: QDRANT_API_KEY, optional: true}}
+            valueFrom: {secretKeyRef: {name: automatos-api-secrets, key: QDRANT_API_KEY}}
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: QDRANT_API_KEY in the Secret automatos-api-secrets is empty
+  - it: requires the key, as no reference to it is optional
+    documentIndex: 0
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].env[2].valueFrom.secretKeyRef.optional
+      - equal:
+          path: spec.template.spec.containers[0].env[2].name
+          value: QDRANT__SERVICE__API_KEY
   - it: runs under the account serviceAccount.qdrant.name names, with the chart's accounts off
     documentIndex: 0
     set:
@@ -147,6 +168,32 @@ tests:
           name: memory-store
     asserts:
       - equal: {path: spec.template.spec.serviceAccountName, value: memory-store}
+  - it: runs under the namespace's default account with the chart's accounts off and no name for the store
+    documentIndex: 0
+    set:
+      serviceAccount:
+        create: false
+    asserts:
+      - equal: {path: spec.template.spec.serviceAccountName, value: default}
+
+  - it: puts no size limit on the snapshot scratch volume unless qdrant.snapshots.sizeLimit is set
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: snapshots, emptyDir: {}}
+  - it: limits the snapshot scratch volume to qdrant.snapshots.sizeLimit
+    documentIndex: 0
+    set:
+      qdrant:
+        snapshots:
+          sizeLimit: 20Gi
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes
+          value:
+            - {name: snapshots, emptyDir: {sizeLimit: 20Gi}}
+            - {name: init, emptyDir: {}}
 
   - it: runs the digest set, pulled IfNotPresent, or with the pull policy set
     documentIndex: 0
@@ -193,6 +240,10 @@ tests:
               app.kubernetes.io/component: qdrant
             ports:
               - {name: http, port: 6333, targetPort: http}
+  - it: sets no type on its Service, so it is reachable only inside the cluster
+    documentIndex: 1
+    asserts:
+      - notExists: {path: spec.type}
 
   # Placement (PRD-280 US-203), through automatos.placement.
   - it: places the store's pod as its values say

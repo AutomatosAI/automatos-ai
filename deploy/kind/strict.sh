@@ -12,7 +12,8 @@
 #                                      every container's root file system read-only; the
 #                                      worker as uid 1000, sharing its files with the API;
 #                                      the memory store as uid 1000 on a read-only root,
-#                                      requiring the key the API sends
+#                                      requiring the key the API sends, and its writes,
+#                                      snapshots and deletes, through the API's pod
 #   deploy/kind/strict.sh enterprise   the enterprise edition rendered with the lane's values
 #                                      and strict-enterprise-values.yaml: every pod of it
 #                                      against "restricted" and its read-only roots, as `check`
@@ -85,6 +86,33 @@ def ask(headers):
     except urllib.error.HTTPError as error:
         return error.code
 print(ask({}), ask({"api-key": os.environ["QDRANT_API_KEY"]}))'
+# Run in the API's pod with the image's own Python and urllib, QDRANT_WRITES uses each path the
+# store writes, with the API's key: it creates a collection, adds a point, takes a snapshot and
+# lists it, then deletes the snapshot and the collection. One line per step, its status code
+# (never the key); it exits non-zero on the first answer that is not 200.
+QDRANT_WRITES='import json, os, sys, urllib.error, urllib.request
+base = os.environ["QDRANT_URL"] + "/collections/strict-probe"
+headers = {"api-key": os.environ["QDRANT_API_KEY"], "Content-Type": "application/json"}
+def call(step, method, path, body=None):
+    data = None if body is None else json.dumps(body).encode()
+    request = urllib.request.Request(base + path, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            status, result = response.status, json.load(response).get("result")
+    except urllib.error.HTTPError as error:
+        status, result = error.code, None
+    print(step, status)
+    if status != 200:
+        sys.exit(1)
+    return result
+call("create collection", "PUT", "", {"vectors": {"size": 4, "distance": "Cosine"}})
+call("add point", "PUT", "/points?wait=true", {"points": [{"id": 1, "vector": [0.1, 0.2, 0.3, 0.4]}]})
+snapshot = call("take snapshot", "POST", "/snapshots?wait=true")["name"]
+listed = snapshot in [item["name"] for item in call("list snapshots", "GET", "/snapshots")]
+print("snapshot listed", listed)
+call("delete snapshot", "DELETE", "/snapshots/" + snapshot + "?wait=true")
+call("delete collection", "DELETE", "")
+sys.exit(0 if listed else 1)'
 # The enterprise edition (PRD-277): its values over the lane's, the web pod started from its
 # render, and the media origin those values give the web server (frontend.mediaOrigins).
 ENTERPRISE_VALUES="$ROOT/deploy/kind/strict-enterprise-values.yaml"
@@ -315,6 +343,18 @@ check_qdrant() {
     return "$failures"
 }
 
+# PRD-280 US-601: the store's write paths in use: its disk and its snapshot scratch volume.
+check_qdrant_writes() {
+    log "The memory store writes, snapshots and deletes, asked from the API's pod with its key"
+    local answer
+    if answer="$(in_component api python -c "$QDRANT_WRITES" 2>&1)"; then
+        sed 's/^/  ✓ qdrant: /' <<<"$answer"
+        return 0
+    fi
+    sed 's/^/  ✗ qdrant: /' <<<"$answer"
+    return 1
+}
+
 cmd_check() {
     local failures=0 objects
     # Read first, so a failure to read the release stops here with helm's or kubectl's error.
@@ -324,6 +364,7 @@ cmd_check() {
     check_read_only_root || failures=$((failures + $?))
     check_worker_start || failures=$((failures + $?))
     check_qdrant || failures=$((failures + $?))
+    check_qdrant_writes || failures=$((failures + $?))
     [ "$failures" -eq 0 ] || { log "$failures check(s) failed"; return 1; }
     log "Every check passed"
 }
@@ -427,5 +468,5 @@ case "${1:-}" in
     check) cmd_check ;;
     enterprise) cmd_enterprise ;;
     diagnostics) cmd_diagnostics ;;
-    *) sed -n '2,43p' "$0"; exit 2 ;;
+    *) sed -n '2,44p' "$0"; exit 2 ;;
 esac

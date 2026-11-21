@@ -1,7 +1,7 @@
 suite: A memory store the chart installs and one written by hand stop the API's render (PRD-280 US-601)
 # The API's template alone, so a failed render can only be reported against it (helm-unittest
 # reports a failed render against the first template, in reverse alphabetical order, that fails).
-# The migration Job shares the API's environment (automatos.apiEnv) and its checks.
+# The migration Job renders the same checks: qdrant_refusals_job_test.yaml.
 templates:
   - templates/api-deployment.yaml
 release:
@@ -45,3 +45,20 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content: {name: QDRANT_URL, value: "http://qdrant.elsewhere:6333"}
+  # Pins the render as it stood before the store: with qdrant.enabled off, config is rendered as
+  # written, a QDRANT_API_KEY in it included, and the chart adds no reference to the Secret.
+  - it: renders a hand-written QDRANT_API_KEY in config as before while qdrant.enabled is off
+    set:
+      qdrant:
+        enabled: false
+      config:
+        QDRANT_API_KEY: not-a-real-key
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: QDRANT_API_KEY, value: not-a-real-key}
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: QDRANT_API_KEY
+            valueFrom: {secretKeyRef: {name: automatos-secrets, key: QDRANT_API_KEY}}
