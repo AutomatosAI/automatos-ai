@@ -23,6 +23,8 @@ import ast
 import asyncio
 import os
 import ssl
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -257,6 +259,44 @@ def test_a_checking_mode_without_a_ca_is_refused_naming_both_settings(settings, 
     message = str(refused.value)
     assert message.startswith("DATABASE_SSLMODE verify-ca and verify-full need DATABASE_SSLROOTCERT")
     assert "a file" in message and CA_IN_POD not in message
+
+
+# The engine module imported in a fresh interpreter, with psycopg2.connect replaced by a refusal
+# that prints a marker: the import is the API's start, and nothing may connect before it refuses.
+_IMPORT_THE_ENGINE_MODULE = (
+    "import psycopg2\n"
+    "def refuse(*args, **kwargs):\n"
+    "    print('CONNECT_ATTEMPTED', flush=True)\n"
+    "    raise SystemExit(3)\n"
+    "psycopg2.connect = refuse\n"
+    "import core.database.database\n"
+    "print('ENGINE_MODULE_IMPORTED', flush=True)\n"
+)
+
+
+def _import_the_engine_module(**settings):
+    """A fresh interpreter importing core/database/database.py as an enterprise API: (code, output)."""
+    env = {key: value for key, value in os.environ.items() if key not in ("DATABASE_SSLMODE", "DATABASE_SSLROOTCERT")}
+    env.update({"AUTH_EDITION": "enterprise", "DATABASE_URL": _address(), **settings})
+    done = subprocess.run([sys.executable, "-c", _IMPORT_THE_ENGINE_MODULE], cwd=ORCH, env=env,
+                          capture_output=True, text=True, timeout=120)
+    return done.returncode, done.stdout + done.stderr
+
+
+def test_an_enterprise_api_with_verify_full_and_no_ca_stops_at_the_engine_import_before_any_connection():
+    """Refused by core.database.tls when the engine module is imported, not by the edition check."""
+    code, output = _import_the_engine_module(DATABASE_SSLMODE="verify-full")
+    assert code != 0, output
+    assert "DatabaseTLSConfigError" in output and "need DATABASE_SSLROOTCERT" in output
+    assert "CONNECT_ATTEMPTED" not in output and "ENGINE_MODULE_IMPORTED" not in output
+    assert "db.example.invalid" not in output
+
+
+def test_the_same_api_with_a_ca_file_imports_the_engine_module_and_connects_to_nothing(ca_file):
+    """The control: only the missing CA file stopped the import above."""
+    code, output = _import_the_engine_module(DATABASE_SSLMODE="verify-full", DATABASE_SSLROOTCERT=ca_file)
+    assert code == 0, output[-2000:]
+    assert "ENGINE_MODULE_IMPORTED" in output and "CONNECT_ATTEMPTED" not in output
 
 
 def _no_certificate(tmp_path) -> str:

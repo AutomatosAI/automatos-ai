@@ -6,9 +6,10 @@ from ``DATABASE_SSLMODE`` and ``DATABASE_SSLROOTCERT`` on those two commands onl
 Python steps (Alembic, the seed loader, the server) read the two settings through
 config.py, and a process-wide PGSSLMODE would also reach the app's connections to a
 user's own PostgreSQL. With neither setting, neither variable is set and the address is
-passed as given. With the mode set, the address's own ``sslmode`` and ``sslrootcert`` are
-dropped from what the tools get, since libpq prefers the connection string to the
-environment. The settings are read the way config.py's reader reads them (trimmed, the mode
+passed as given. With the mode set, the address's own ``sslmode`` and ``sslrootcert``, and
+``requiressl`` and ``ssl``, which libpq turns into ``sslmode``, are dropped from what the tools
+get, since libpq prefers the connection string to the environment; a query key written with
+a percent-escape, which libpq decodes before matching, stops the script instead. The settings are read the way config.py's reader reads them (trimmed, the mode
 lowercased); a value the app would refuse, verify-ca or verify-full without a CA file among
 them, stops the script before it waits for the database.
 
@@ -117,6 +118,42 @@ def test_the_address_loses_only_its_tls_keys(tmp_path, query):
     proc, calls, addresses = _execute(tmp_path, {"DATABASE_URL": _address(query), "DATABASE_SSLMODE": "require"})
     assert calls, proc.stdout + proc.stderr
     assert {line.split(" ", 1)[1] for line in addresses} == {_address()}
+
+
+@pytest.mark.parametrize("query", ["?ss%6Cmode=disable", "?application_name=boot&%73slrootcert=" + "/tmp/other.crt",
+                                   "?%72equiressl=0"])
+def test_a_percent_encoded_query_name_stops_the_entrypoint_while_a_mode_is_set(tmp_path, query):
+    """libpq decodes a key before it matches it, so the strip below could not drop this one."""
+    env = {"DATABASE_URL": _address(query), "DATABASE_SSLMODE": "verify-full", "DATABASE_SSLROOTCERT": CA_IN_POD}
+    proc, calls, _ = _execute(tmp_path, env)
+    output = proc.stdout + proc.stderr
+    assert proc.returncode == 1, output
+    assert calls == [], "nothing is run: no pg_isready, no psql, no Python step"
+    assert len([line for line in output.splitlines() if "query parameter name in DATABASE_URL" in line]) == 1
+    assert "db.example.invalid" not in output and query not in output
+
+
+def test_a_percent_encoded_value_is_left_alone(tmp_path):
+    query = "?application_name=boot%20lane"
+    proc, calls, addresses = _execute(tmp_path, {"DATABASE_URL": _address(query), "DATABASE_SSLMODE": "require"})
+    assert calls, proc.stdout + proc.stderr
+    assert {line.split(" ", 1)[1] for line in addresses} == {_address(query)}
+
+
+def test_the_keys_libpq_turns_into_sslmode_are_dropped_too(tmp_path):
+    """requiressl and ssl become sslmode in libpq, over PGSSLMODE: with a mode set they go."""
+    query = "?requiressl=0&application_name=boot&ssl=true"
+    proc, calls, addresses = _execute(tmp_path, {"DATABASE_URL": _address(query), "DATABASE_SSLMODE": "verify-full",
+                                                 "DATABASE_SSLROOTCERT": CA_IN_POD})
+    assert calls, proc.stdout + proc.stderr
+    assert {line.split(" ", 1)[1] for line in addresses} == {_address("?application_name=boot")}
+
+
+def test_with_neither_setting_an_encoded_or_translated_key_reaches_the_tools_as_given(tmp_path):
+    query = "?ss%6Cmode=disable&requiressl=0&ssl=true"
+    proc, calls, addresses = _execute(tmp_path, {"DATABASE_URL": _address(query)})
+    assert calls, proc.stdout + proc.stderr
+    assert {line.split(" ", 1)[1] for line in addresses} == {_address(query)}
 
 
 def test_neither_setting_passes_the_address_as_given(tmp_path):

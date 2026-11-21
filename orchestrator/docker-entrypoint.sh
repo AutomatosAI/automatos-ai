@@ -66,6 +66,7 @@ require_database_settings() {
         exit 1
     fi
     read_database_tls
+    require_plain_query_names
 }
 
 # PRD-278 W3: DATABASE_SSLMODE and DATABASE_SSLROOTCERT, the settings the app's own
@@ -113,17 +114,39 @@ read_database_tls() {
     fi
 }
 
+# With DATABASE_SSLMODE set, libpq_url drops the address's own TLS keys by their plain
+# names. libpq (fe-connect.c, conninfo_uri_parse_params) percent-decodes a query key
+# before it matches it, so with the mode set a key holding a % stops the script here,
+# naming the setting, never the address. libpq matches keys case-sensitively and refuses
+# a key it does not know, so another letter case fails to connect rather than winning.
+# Neither setting set: nothing is checked and the address is passed as given.
+require_plain_query_names() {
+    [ -n "$DB_TLS_SSLMODE" ] && [ -z "${POSTGRES_HOST:-}" ] || return 0
+    case "$DATABASE_URL" in *\?*) ;; *) return 0 ;; esac
+    local param params
+    IFS='&' read -r -a params <<<"${DATABASE_URL#*\?}"
+    for param in "${params[@]}"; do
+        case "${param%%=*}" in
+            *%*)
+                echo "❌ DATABASE_SSLMODE is set, and a query parameter name in DATABASE_URL is percent-encoded: write each name plainly, so the setting replaces the address's own TLS keys"
+                exit 1
+                ;;
+        esac
+    done
+}
+
 # libpq tools accept postgresql:// or postgres:// only. Drop a SQLAlchemy driver
 # suffix (postgresql+psycopg2://, postgresql+asyncpg://), which the app accepts
-# but pg_isready and psql reject. With DATABASE_SSLMODE set, the address's own sslmode
-# and sslrootcert are dropped too: libpq prefers the connection string to PGSSLMODE and
-# PGSSLROOTCERT, and the settings win here as they do in the app. Neither set: the
-# address is passed as given.
+# but pg_isready and psql reject. With DATABASE_SSLMODE set, the address's own keys that
+# libpq turns into sslmode or sslrootcert are dropped too: sslmode, sslrootcert, and
+# requiressl and ssl, which libpq translates to sslmode. libpq prefers the connection
+# string to PGSSLMODE and PGSSLROOTCERT, and the settings win here as they do in the app.
+# Neither set: the address is passed as given.
 libpq_url() {
     local url
     url="$(printf '%s' "$DATABASE_URL" | sed -E 's#^(postgres(ql)?)\+[A-Za-z0-9_]+://#\1://#')"
     if [ -n "$DB_TLS_SSLMODE" ]; then
-        url="$(printf '%s' "$url" | sed -E -e ':strip' -e 's/([?&])(sslmode|sslrootcert)=[^&]*(&|$)/\1/' -e 't strip' -e 's/[?&]$//')"
+        url="$(printf '%s' "$url" | sed -E -e ':strip' -e 's/([?&])(sslmode|sslrootcert|requiressl|ssl)=[^&]*(&|$)/\1/' -e 't strip' -e 's/[?&]$//')"
     fi
     printf '%s' "$url"
 }
