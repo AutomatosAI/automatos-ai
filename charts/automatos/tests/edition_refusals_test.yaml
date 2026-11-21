@@ -1,11 +1,13 @@
-suite: An edition spelled other than the chart documents, and the client secret in config, stop the render
-# One template per test, so a failed render can only be reported against it (helm-unittest reports
-# a failed render against the first template, in reverse alphabetical order, that fails). The
-# API reads AUTH_EDITION trimmed and in lower case and takes an unknown one as saas, so a near miss
-# would start an edition the chart did not render for. The message never prints the value.
+suite: An edition spelled other than the chart documents, and the client secret in config, stop the API's render
+# The API's template alone. A suite that also renders templates/frontend.yaml, which refuses a
+# mis-spelled edition too, has the failure reported against frontend.yaml (helm-unittest reports
+# a failed render against the first template, in reverse alphabetical order, that fails), and
+# an assertion on the API's template then sees no failed document. The web app's template has
+# its own suite, edition_refusals_web_test.yaml. The API reads AUTH_EDITION trimmed and in lower
+# case and takes an unknown one as saas, so a near miss would start an edition the chart did not
+# render for. The message never prints the value.
 templates:
   - templates/api-deployment.yaml
-  - templates/frontend.yaml
 release:
   name: demo
   namespace: automatos
@@ -83,15 +85,6 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "edition.authEdition must be exactly local, enterprise or saas"
-  - it: stops the web app's render too, so it never runs the other edition's image
-    template: templates/frontend.yaml
-    set:
-      edition:
-        authEdition: Enterprise
-    asserts:
-      - failedTemplate:
-          errorPattern: "edition.authEdition must be exactly local, enterprise or saas"
-
   # ── the client secret in config, in every edition ───────────────────────────
   - it: stops on the client secret in config in the local edition
     template: templates/api-deployment.yaml
