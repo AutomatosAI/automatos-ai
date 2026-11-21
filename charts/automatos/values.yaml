@@ -84,6 +84,11 @@ edition:
     # false, on by default. Each person pairs their own phone from Settings, signed in as
     # themselves, and the phone acts as them with their current role. Set it here, never in config.
     devicePairing: true
+    # How many days a phone keeps its token after its person last paired it or signed in on it
+    # (PRD-277 US-601; ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS): a whole number from 1 to 3650, 90 by
+    # default. Then the phone is refused and removed, and its person signs in on it or pairs it again.
+    # There is no "off". Set it here, never in config.
+    deviceTokenMaxAgeDays: 90
     oidc:
       # Required. The identity provider's issuer address, https only (OIDC_ISSUER).
       issuer: ""

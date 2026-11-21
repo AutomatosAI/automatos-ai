@@ -99,9 +99,20 @@ def _refusal(db: Session, identity: VerifiedIdentity, row: Optional[AuthSession]
         return session_audit.STEP_UP_ANOTHER_PERSON
     if not people.person_is_active(db, row.user_id):
         return session_audit.STEP_UP_DEACTIVATED
-    if identity.auth_time <= NO_AUTH_TIME:
+    return sign_in_time_refusal(identity.auth_time, started_at, now)
+
+
+def sign_in_time_refusal(auth_time: datetime, started_at: Optional[datetime],
+                         now: Optional[datetime] = None) -> Optional[str]:
+    """Why ``auth_time`` does not prove a sign-in made since ``started_at``, or None when it does.
+
+    The one sign-in time rule: a step-up's, and a phone's sign-in's (PRD-277 US-603,
+    ``core.auth.sign_in_flow``). ``no_auth_time`` when the provider reported none, ``future_auth_time``
+    or ``stale_auth_time`` as ``_freshness_refusal`` says.
+    """
+    if auth_time <= NO_AUTH_TIME:
         return session_audit.STEP_UP_NO_AUTH_TIME
-    return _freshness_refusal(identity.auth_time, started_at, now)
+    return _freshness_refusal(auth_time, started_at, now or _now())
 
 
 def _freshness_refusal(auth_time: datetime, started_at: Optional[datetime], now: datetime) -> Optional[str]:
@@ -142,4 +153,5 @@ def confirm_step_up(db: Session, finished: Finished, *, ip_address: Optional[str
     return issued
 
 
-__all__ = ["CLOCK_SKEW", "STEP_UP_START", "StepUpRefused", "confirm_step_up", "session_asking"]
+__all__ = ["CLOCK_SKEW", "STEP_UP_START", "StepUpRefused", "confirm_step_up", "session_asking",
+           "sign_in_time_refusal"]

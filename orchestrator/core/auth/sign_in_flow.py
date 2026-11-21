@@ -15,6 +15,12 @@ provider directly. ``finish_sign_in`` runs, in this order:
    and a new one is issued with the fresh ``auth_time``, keeping that session's person and absolute
    expiry, or the step-up is refused and no session changes (``core.auth.step_up_sign_in``). No
    person is created or linked. Before any first-sign-in step.
+   **A phone's sign-in** (US-603) must prove here, by the step-up's own sign-in time rule
+   (``step_up_sign_in.sign_in_time_refusal``), that the provider signed the person in since the
+   phone's start: an ``auth_time`` that is missing, later than now or earlier than the start (each
+   beyond the clock skew) is refused, audited ``auth:sign_in_refused`` with that rule's reason
+   (``no_auth_time``, ``future_auth_time``, ``stale_auth_time``) and answered ``sign_in_refused``,
+   before any person is created or linked and before anything awaits the person's Continue.
 4. **The person**, found by ``(issuer, subject)`` or created (``people.link_person``), with
    ``email_verified`` exactly as the verified ID token states it (absent is false).
 5. **A deactivated person** is refused here, before anything is granted.
@@ -52,7 +58,8 @@ Every refusal is a ``SignInRefusal`` whose ``code`` is all the person is shown:
   time, or ended to make room for newer ones (``core.auth.oidc_pending``). Logged, not audited
   (nobody is known, and anyone can send such a request).
 * ``sign_in_refused``: the token did not verify, the provider answered with an error, the email
-  belongs to another person, the person is deactivated, or a hook refused. One code for all, so
+  belongs to another person, the person is deactivated, a hook refused, or a phone's sign-in did not
+  prove by its ``auth_time`` that it was made since the phone's start. One code for all, so
   the answer never tells whether an address is known to the install. Audited as
   ``auth:sign_in_refused`` with its reason; anything pending is rolled back first.
 * ``sign_in_not_allowed``: the person signed in at the provider, but the access rule does not let
@@ -101,7 +108,7 @@ from core.auth.sign_in_methods import (
     Started,
     VerifiedIdentity,
 )
-from core.auth.user_link import IdentityLinkRefused, LinkedPerson
+from core.auth.user_link import IdentityLinkRefused, LinkedPerson, user_id_for_identity
 from core.edition_start_up import DEFAULT_ROLES, NO_DEFAULT_ROLE
 from core.seeds.seed_default_workspace import ensure_default_workspace
 from services.mobile import sign_in_codes, sign_in_confirmation
@@ -421,12 +428,27 @@ def _phone_waits(db: Session, finished: Finished, user_id: int, browser: Browser
     raise SignInRefusal(failure)
 
 
+def _assert_phone_sign_in_fresh(db: Session, finished: Finished, browser: Browser) -> None:
+    """US-603: a phone's sign-in proves, by the step-up's sign-in time rule, that the provider signed the
+    person in since the phone's start; else refused, audited with that rule's reason, naming the person
+    only when one is already linked to the identity. Nothing is created, linked or kept."""
+    identity = finished.identity
+    reason = step_up_sign_in.sign_in_time_refusal(identity.auth_time, finished.started_at)
+    if reason is None:
+        return
+    known = user_id_for_identity(db, identity.issuer, identity.subject)
+    logger.warning("A phone's sign-in refused: its sign-in time does not prove a fresh sign-in (%s)", reason)
+    raise _refuse(db, reason, browser, known)
+
+
 def _signed_in(db: Session, finished: Finished, browser: Browser) -> SignInDone:
     """From a verified identity to a session, or a phone's awaiting record: steps 2 to 9 of this module's docstring."""
     identity = finished.identity
     apply_access_rule(db, identity, browser)
     if finished.step_up_session_id is not None:
         return _step_up(db, finished, browser)
+    if finished.phone is not None:
+        _assert_phone_sign_in_fresh(db, finished, browser)
     linked = _linked(db, identity, browser)
     if not linked.created and not people.person_is_active(db, linked.user_id):
         logger.warning("users.id=%s: sign-in refused, the person is deactivated", linked.user_id)

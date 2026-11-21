@@ -14,7 +14,7 @@ many organisations share, whether the CA file holds a certificate) it judges at 
 
 {{/* The settings the chart sets in the enterprise edition, which `config` must not set too. */}}
 {{- define "automatos.enterpriseSettings" -}}
-DEFAULT_WORKSPACE_ID FRONTEND_URL CLIENT_IP_HEADER CLIENT_IP_PROXY_COUNT ENTERPRISE_BOOTSTRAP_ADMINS ENTERPRISE_DEFAULT_ROLE OIDC_ISSUER OIDC_CLIENT_ID OIDC_DISPLAY_NAME OIDC_SCOPES OIDC_REQUIRED_CLAIMS OIDC_ENDPOINT_HOSTS OIDC_CA_BUNDLE_FILE ENTERPRISE_CALLS_THEME_REVOCATIONS ENTERPRISE_CALLS_CLOUD_SYNC ENTERPRISE_CALLS_CLOUD_ITEMS ENTERPRISE_DEVICE_PAIRING
+DEFAULT_WORKSPACE_ID FRONTEND_URL CLIENT_IP_HEADER CLIENT_IP_PROXY_COUNT ENTERPRISE_BOOTSTRAP_ADMINS ENTERPRISE_DEFAULT_ROLE OIDC_ISSUER OIDC_CLIENT_ID OIDC_DISPLAY_NAME OIDC_SCOPES OIDC_REQUIRED_CLAIMS OIDC_ENDPOINT_HOSTS OIDC_CA_BUNDLE_FILE ENTERPRISE_CALLS_THEME_REVOCATIONS ENTERPRISE_CALLS_CLOUD_SYNC ENTERPRISE_CALLS_CLOUD_ITEMS ENTERPRISE_DEVICE_PAIRING ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS
 {{- end }}
 
 {{/*
@@ -99,6 +99,12 @@ edition.enterprise.clientIpProxyCount (CLIENT_IP_PROXY_COUNT) as trimmed text: e
 {{- if not (kindIs "invalid" $raw) }}{{ toString $raw | trim }}{{ end -}}
 {{- end }}
 
+{{/* edition.enterprise.deviceTokenMaxAgeDays as text, or nothing when it is left out. */}}
+{{- define "automatos.deviceTokenMaxAgeDays" -}}
+{{- $raw := (.Values.edition.enterprise | default dict).deviceTokenMaxAgeDays -}}
+{{- if not (kindIs "invalid" $raw) }}{{ toString $raw | trim }}{{ end -}}
+{{- end }}
+
 {{/* Stops the render on a `config` entry the enterprise edition sets elsewhere. */}}
 {{- define "automatos.validateEnterpriseConfig" -}}
 {{- $config := .Values.config | default dict -}}
@@ -167,6 +173,10 @@ edition.enterprise.clientIpProxyCount (CLIENT_IP_PROXY_COUNT) as trimmed text: e
 {{- include "automatos.validateHostedServices" . }}
 {{- if not (or (kindIs "invalid" $enterprise.devicePairing) (kindIs "bool" $enterprise.devicePairing)) }}
 {{- fail "edition.enterprise.devicePairing must be true or false (ENTERPRISE_DEVICE_PAIRING), written without quotes: the API refuses to start otherwise" }}
+{{- end }}
+{{- $maxAge := include "automatos.deviceTokenMaxAgeDays" . }}
+{{- if and $maxAge (or (not (regexMatch `^[1-9][0-9]{0,3}$` $maxAge)) (gt (atoi $maxAge) 3650)) }}
+{{- fail "edition.enterprise.deviceTokenMaxAgeDays must be a whole number of days from 1 to 3650 (ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS): the API refuses to start otherwise" }}
 {{- end }}
 {{- end }}
 
@@ -295,6 +305,10 @@ value left empty is not rendered, so the API's own default holds.
 {{- end }}
 - name: ENTERPRISE_DEVICE_PAIRING
   value: {{ kindIs "invalid" $enterprise.devicePairing | ternary "true" (toString $enterprise.devicePairing) | quote }}
+{{- with include "automatos.deviceTokenMaxAgeDays" . }}
+- name: ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS
+  value: {{ . | quote }}
+{{- end }}
 {{- end }}
 {{- end }}
 

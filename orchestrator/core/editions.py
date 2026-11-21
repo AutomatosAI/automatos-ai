@@ -144,6 +144,9 @@ class EditionCapabilities:
         database checks the server's certificate and host name (``DATABASE_SSLMODE=verify-full``,
         PRD-278 D-6; ``core/edition_start_up.py``). Where it is off, the two settings are the
         operator's choice and, both unset, every connection is made as before.
+    device_tokens_age_out: a device token is refused, and its device revoked, once its phone's last
+        pairing or sign-in on the phone is ``DEVICE_TOKEN_MAX_AGE_SETTING`` days old (PRD-277 US-601).
+        Where it is off, a device token has no maximum age and the setting is never read.
     """
 
     sign_in: str
@@ -172,6 +175,7 @@ class EditionCapabilities:
     agent_http_own_hosts_only: bool
     api_on_public_address: bool
     requires_verified_database_tls: bool
+    device_tokens_age_out: bool
 
 
 _LOCAL = EditionCapabilities(
@@ -201,6 +205,7 @@ _LOCAL = EditionCapabilities(
     agent_http_own_hosts_only=False,
     api_on_public_address=False,
     requires_verified_database_tls=False,
+    device_tokens_age_out=False,
 )
 
 _SAAS = EditionCapabilities(
@@ -230,6 +235,7 @@ _SAAS = EditionCapabilities(
     agent_http_own_hosts_only=False,
     api_on_public_address=False,
     requires_verified_database_tls=False,
+    device_tokens_age_out=False,
 )
 
 # PRD-277 §5.1 and its decisions. Each hosted service is off here, and the operator switches each
@@ -263,6 +269,7 @@ _ENTERPRISE = EditionCapabilities(
     agent_http_own_hosts_only=True,
     api_on_public_address=True,
     requires_verified_database_tls=True,
+    device_tokens_age_out=True,
 )
 
 CAPABILITIES: Mapping[str, EditionCapabilities] = MappingProxyType({
@@ -285,6 +292,8 @@ SWITCH_ON: FrozenSet[str] = frozenset({"1", "true", "yes", "on"})
 SWITCH_OFF: FrozenSet[str] = frozenset({"", "0", "false", "no", "off"})
 # PRD-277 US-601: whether phones may pair, where the row says ``device_pairing_by_setting``.
 DEVICE_PAIRING_SETTING = "ENTERPRISE_DEVICE_PAIRING"
+# PRD-277 US-601: the most days a device token lives, where the row says ``device_tokens_age_out``.
+DEVICE_TOKEN_MAX_AGE_SETTING = "ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS"
 # What the install started as (``started_as``), where the pairing setting is part of it.
 STARTED_AS_SEPARATOR = ":"
 STARTED_PAIRING_ON = "pairing_on"
@@ -405,6 +414,7 @@ def current() -> EditionCapabilities:
 __all__ = [
     "CAPABILITIES",
     "DEVICE_PAIRING_SETTING",
+    "DEVICE_TOKEN_MAX_AGE_SETTING",
     "EDITION_ENTERPRISE",
     "EDITION_LOCAL",
     "EDITION_SAAS",
