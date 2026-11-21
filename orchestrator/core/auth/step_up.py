@@ -19,8 +19,14 @@ edition     behaviour
             none of them has a person who can sign in again.
 ==========  ==================================================================
 
-``enterprise`` (``reauth``: sign in again at the identity provider, PRD-277 US-406)
-refuses every context until that is built: never a pass, and never Clerk's ``fva``.
+``enterprise`` (``reauth``: sign in again at the identity provider, PRD-277 US-406) goes
+through one seam, ``confirm_by_signing_in_again``, and never reads Clerk's ``fva``. A session
+context passes when the time its person last proved who they are
+(``core.auth.session_lane.session_auth_time``, from ``auth_sessions.auth_time``) is within the
+max age; an older one, or none, is sent to sign in again (``sign_in_again_body``: the code,
+a message and ``/api/v1/auth/oidc/start?step_up=1``, never a ``clerk_error``); every other context
+(a device, a key) is refused. ``core.auth.step_up_sign_in`` refreshes the session's
+``auth_time`` when the person signs in again.
 
 The ``fva`` claim ("factor verification age") is Clerk's session-token claim
 ``[first_factor_minutes, second_factor_minutes]``, ``-1`` for a factor never
@@ -58,6 +64,7 @@ from fastapi.responses import JSONResponse
 from core import editions
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.session_lane import SESSION_AUTH_TYPE, session_auth_time
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +85,9 @@ FACTOR_NOT_VERIFIED = -1
 STEP_UP_CODE = "step_up_required"
 STEP_UP_UNAVAILABLE_CODE = "step_up_unavailable"
 STEP_UP_NOT_BUILT = "This action needs you to sign in again, which this build cannot do yet."
+# Where the web app sends the browser to sign in again (core.auth.step_up_sign_in.STEP_UP_START;
+# that module imports the sign-in flow, so a test pins the two together instead of an import).
+SIGN_IN_AGAIN_START = "/api/v1/auth/oidc/start?step_up=1"
 
 # Marker stamped on every step-up dependency (its max age, in minutes), so the
 # wire story's test can find exactly the routes that carry it on the route table.
@@ -187,9 +197,48 @@ def _refuse_without_person(auth_type: Any) -> HTTPException:
     )
 
 
+def _confirms_by_signing_in_again() -> bool:
+    return editions.current().step_up == editions.STEP_UP_REAUTH
+
+
+def sign_in_again_body(max_age_minutes: int) -> Dict[str, Any]:
+    """The 403 body where people step up by signing in again (PRD-277 §5.5): the code the web app
+    recognises, a plain message, and where to send the browser. No Clerk ``clerk_error``."""
+    return {
+        "code": STEP_UP_CODE,
+        "detail": (
+            "Confirm it's you to continue: sign in again. This action needs a sign-in "
+            f"from the last {max_age_minutes} minutes."
+        ),
+        "step_up": {"start": SIGN_IN_AGAIN_START, "max_age_minutes": max_age_minutes},
+    }
+
+
+def confirm_by_signing_in_again(ctx: Any, max_age_minutes: int, now: float) -> None:
+    """Step-up where people confirm by signing in again at the identity provider (``reauth``, US-406).
+
+    A session context passes when its ``auth_time`` (``session_lane.session_auth_time``: when its
+    person last proved who they are, from ``auth_sessions.auth_time``) is less than
+    ``max_age_minutes`` before ``now``. An older one, and one with no ``auth_time`` (the epoch a
+    token without one records), is ``StepUpRequired`` with ``sign_in_again_body``: the web app
+    sends the person through ``/start?step_up=1``. Every other context (a device, a key, no
+    person) is refused: none has a person who can sign in again here.
+    """
+    auth_type = getattr(ctx, "auth_type", None)
+    if auth_type != SESSION_AUTH_TYPE:
+        raise _refuse_without_person(auth_type)
+    signed_in_at = session_auth_time(ctx)
+    if signed_in_at is not None and now - signed_in_at < max_age_minutes * _SECONDS_PER_MINUTE:
+        return
+    raise StepUpRequired(sign_in_again_body(max_age_minutes))
+
+
 def check_step_up(ctx: Any, max_age_minutes: int, now: float) -> None:
     """Raise unless ``ctx`` satisfies step-up in the current edition."""
     if _skips_step_up():
+        return
+    if _confirms_by_signing_in_again():
+        confirm_by_signing_in_again(ctx, max_age_minutes, now)
         return
     auth_type = getattr(ctx, "auth_type", None)
     if not _reads_clerk_freshness():

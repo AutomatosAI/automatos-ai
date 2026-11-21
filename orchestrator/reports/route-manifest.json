@@ -1,5 +1,5 @@
 {
-  "route_count": 1050,
+  "route_count": 1062,
   "routes": [
     {
       "method": "GET",
@@ -3062,6 +3062,46 @@
       "path": "/api/v1/approval-grants/{grant_id}/view"
     },
     {
+      "method": "GET",
+      "path": "/api/v1/auth/me"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/auth/oidc/callback"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/auth/oidc/start"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/people/{user_id}/deactivate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/auth/people/{user_id}/sessions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/people/{user_id}/sessions/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/people/{user_id}/system-role"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/sessions/{session_id}/revoke"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/auth/sign-in-page"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/sign-out"
+    },
+    {
       "method": "POST",
       "path": "/api/v1/billing/checkout"
     },
@@ -4148,6 +4188,14 @@
     {
       "method": "PATCH",
       "path": "/api/workspaces/{workspace_id}/team/members/{member_id}/role"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/{workspace_id}/team/waiting"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/{workspace_id}/team/waiting/{user_id}"
     },
     {
       "method": "GET",

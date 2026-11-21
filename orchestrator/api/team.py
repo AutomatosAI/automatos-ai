@@ -8,7 +8,7 @@ from core.auth.hybrid import get_request_context_hybrid as get_request_context
 from core.auth.dependencies import RequestContext
 from core.auth.actor import resolve_internal_user_id
 from core.auth.clerk import clerk_in_use, get_clerk_auth
-from core.auth.user_link import user_id_for_invitee
+from core.auth import people
 from core.database.database import get_db
 from core.auth.workspace_permission import require_workspace_permission, workspace_permission_granted
 from core.auth.step_up import require_step_up
@@ -262,6 +262,12 @@ async def invite_member(
         created_at=invitation.created_at.isoformat()
     )
 
+def _membership_refusal(refused: Exception) -> HTTPException:
+    """The Team page's answer to a membership change ``core.auth.people`` refused: 404 for a member
+    not in this workspace, else 400, each with the service's own message."""
+    return HTTPException(404 if isinstance(refused, people.MemberNotFound) else 400, str(refused))
+
+
 @router.patch(
     "/members/{member_id}/role",
     dependencies=[Depends(require_workspace_permission("members:change_role")), Depends(STEP_UP)],
@@ -273,33 +279,12 @@ def update_member_role(
     ctx: RequestContext = Depends(get_request_context),
     db: Session = Depends(get_db)
 ):
-    """Change a member's role."""
-    
-    member = db.query(WorkspaceMember).filter(
-        WorkspaceMember.id == member_id,
-        WorkspaceMember.workspace_id == workspace_id
-    ).first()
-    
-    if not member:
-        raise HTTPException(404, "Member not found")
-    
-    # Can't change owner's role
-    if member.role == WorkspaceRole.OWNER.value:
-        raise HTTPException(400, "The owner's role cannot be changed.")
-    # F152: a workspace has one owner, so nobody else is made owner.
-    if str(request.role).strip().lower() == WorkspaceRole.OWNER.value:
-        raise HTTPException(400, "A workspace has one owner: make them an admin, editor or viewer.")
-
-    # Validate role
-    valid_roles = [r.value for r in WorkspaceRole if r != WorkspaceRole.OWNER]
-    if request.role not in valid_roles:
-        raise HTTPException(400, f"Invalid role: {request.role}")
-    
-    old_role = member.role
-    member.role = request.role
-    db.commit()
-
-    # TODO: Update role in Clerk metadata via API if needed
+    """Change a member's role (through the people service, ``core.auth.people``, which holds the
+    rules: the member must be in this workspace, and its one owner stays its one owner, F152)."""
+    try:
+        old_role = people.change_member_role(db, workspace_id, member_id, request.role)
+    except (people.MemberNotFound, people.MembershipRefused) as refused:
+        raise _membership_refusal(refused) from None
 
     actor_internal_id = _resolve_internal_user_id(db, ctx)
     if not actor_internal_id:
@@ -326,19 +311,13 @@ async def remove_member(
     ctx: RequestContext = Depends(get_request_context),
     db: Session = Depends(get_db)
 ):
-    """Remove a member from the workspace."""
-    
-    member = db.query(WorkspaceMember).filter(
-        WorkspaceMember.id == member_id,
-        WorkspaceMember.workspace_id == workspace_id
-    ).first()
-    
-    if not member:
-        raise HTTPException(404, "Member not found")
-    
-    if member.role == WorkspaceRole.OWNER.value:
-        raise HTTPException(400, "Cannot remove workspace owner")
-    
+    """Remove a member from the workspace (through the people service, ``core.auth.people``, which
+    holds the rules: the member must be in this workspace, and is never its owner)."""
+    try:
+        member = people.member_to_remove(db, workspace_id, member_id)
+    except (people.MemberNotFound, people.MembershipRefused) as refused:
+        raise _membership_refusal(refused) from None
+
     # Remove from Clerk Org
     # We need the Clerk User ID logic here. We assume member.user_id -> User -> clerk_user_id
     user = db.query(User).filter(User.id == member.user_id).first()
@@ -350,8 +329,10 @@ async def remove_member(
             logger.error(f"Failed to remove from Clerk: {e}")
             # Continue to remove locally even if clerk fails (e.g. out of sync)
 
-    member.is_active = False
-    db.commit()
+    try:
+        people.end_membership(db, workspace_id, member_id)
+    except (people.MemberNotFound, people.MembershipRefused) as refused:
+        raise _membership_refusal(refused) from None
 
     actor_internal_id = _resolve_internal_user_id(db, ctx)
     if not actor_internal_id:
@@ -489,38 +470,6 @@ def _acceptable_invitation(db: Session, token: str):
     return invitation, workspace
 
 
-def _join_from_invitation(db: Session, invitation: WorkspaceInvitation, user_id: int) -> bool:
-    """Make ``user_id`` an active member in the invitation's role; True when they already were.
-
-    Idempotent: an existing inactive row is reactivated. Marks the invitation accepted
-    the first time. Not committed: the caller commits.
-    """
-    member = db.query(WorkspaceMember).filter(
-        WorkspaceMember.workspace_id == invitation.workspace_id,
-        WorkspaceMember.user_id == user_id,
-    ).first()
-
-    already_member = bool(member and member.is_active)
-    if member:
-        member.is_active = True
-        member.role = invitation.role
-    else:
-        db.add(WorkspaceMember(
-            workspace_id=invitation.workspace_id,
-            user_id=user_id,
-            role=invitation.role,
-            invited_by=invitation.invited_by,
-            invited_at=invitation.created_at,
-            joined_at=datetime.utcnow(),
-            is_active=True,
-        ))
-
-    if not invitation.accepted_at:
-        invitation.accepted_at = datetime.utcnow()
-        invitation.accepted_by_user_id = user_id
-    return already_member
-
-
 @public_router.post(
     "/accept-invitation", response_model=AcceptInvitationResponse, dependencies=[Depends(require_invitations)],
 )
@@ -547,8 +496,8 @@ def accept_invitation(
     # Resolve or create the User row for this Clerk user: by Clerk ID, else a new
     # row. A row that already has the email (case-insensitive), linked to a Clerk
     # ID or not, is a 409: the token's email never attaches an existing row.
-    user_id = user_id_for_invitee(db, clerk_user_id, user_email or None, name=user_name)
-    already_member = _join_from_invitation(db, invitation, user_id)
+    user_id = people.person_for_invitee(db, clerk_user_id, user_email or None, name=user_name)
+    already_member = people.join_from_invitation(db, invitation, user_id)
 
     db.commit()
 

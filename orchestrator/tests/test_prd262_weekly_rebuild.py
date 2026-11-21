@@ -43,7 +43,11 @@ SHA = "0d9f0ac594c3783e62a30e6c5ce75164028850db"
 OWNER = "AutomatosAI"
 LOCAL = "registry:2@sha256:" + "0" * 64
 PREFIX = "ghcr.io/automatosai/automatos-"
-NOT_ON_SCHEDULE = "enable=${{ github.event_name != 'schedule' }}"
+# Off on the weekly schedule, and (PRD-279 US-101) on a `v*` tag, whose run must not
+# re-push the sha-<7> its commit's main push already published.
+NOT_ON_SCHEDULE = "enable=${{ github.event_name != 'schedule' && !startsWith(github.ref, 'refs/tags/v') }}"
+# A line on for a `v*` tag only, which a schedule run never is (PRD-279's staging tag).
+ONLY_ON_A_VERSION_TAG = "${{ startsWith(github.ref, 'refs/tags/v') }}"
 
 
 def _load(name: str):
@@ -243,6 +247,8 @@ def test_no_other_tag_is_pushed_on_a_schedule_run():
     for tag in _merge_tags():
         kind = tag.split(",", 1)[0]
         if kind in ("type=schedule", "type=semver"):  # semver applies to v* tag pushes only
+            continue
+        if tag.endswith(f",enable={ONLY_ON_A_VERSION_TAG}"):  # PRD-279: a v* tag's staging tag
             continue
         assert NOT_ON_SCHEDULE in tag, f"{tag} would be re-pushed by the weekly rebuild"
 

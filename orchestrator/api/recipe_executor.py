@@ -31,10 +31,10 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from core.database.database import get_db, SessionLocal
+from core.database.tls import create_app_engine as create_engine
 from core.utils.background_tasks import on_the_event_loop
 from core.models import Agent
 from core.models.core import PLAYBOOK_DOCUMENT_STEP, RecipeExecution, WorkflowTemplate as WorkflowRecipe

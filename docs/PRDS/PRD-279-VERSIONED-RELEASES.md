@@ -41,7 +41,7 @@ Most of the machinery exists. The image workflow already reacts to a `v*` tag, a
 | Release record | No release workflow, no change log, no version file. | not found **[T]** | Nothing says what a version contains. |
 | What the API says it is | `"version": "1.0.0"`, written in the code. | `orchestrator/main.py:1342`, `:1468` **[T]** | A running install cannot say what it is. |
 | Web image | One edition is published: `local`, with its API address, WebSocket address and media origins fixed when the image is built. | `images.yml:254-257`; `frontend/Dockerfile:73-101` **[T]** | An image built for one address cannot serve another. |
-| Media origins | Read from `NEXT_PUBLIC_MEDIA_ORIGINS` into the content security policy in `next.config.js`. | `frontend/next.config.js:22` **[T]** | Fixed at build time **[I]**. An install whose files sit on its own storage host needs its own value. |
+| Media origins | Read from `NEXT_PUBLIC_MEDIA_ORIGINS` into the content security policy in `next.config.js`. | `frontend/next.config.js:22` **[T]** | Fixed at build time **[T]**: the policy is a `headers()` rule, which `next build` evaluates (see US-402's first line). An install whose files sit on its own storage host needs its own value. |
 
 ## 3. Goals
 
@@ -122,7 +122,7 @@ The image is built with its version, and the API reports it wherever it reports 
 
 PRD-277 makes the `enterprise` web image call the API by a relative address, which removes the API address from the build. Two per-install settings remain.
 
-- **The WebSocket address** is worked out from the page's own address when none is set and the API address is relative. Today the web app takes it from its own setting, or works it out from an absolute API address, and otherwise has none (`frontend/lib/api-config.ts:99-110` **[T]**).
+- **The WebSocket address** is worked out from the page's own address when none is set and the API address is relative. Before Wave 4 the helper took it from its own setting, or worked it out from an absolute API address, and otherwise had none (`frontend/lib/api-config.ts` `getWebSocketUrl`, now `frontend/lib/websocket-url.ts` **[T]**). Correction: no module imports `lib/api-config.ts`, so that address reached no socket the web app opens; the only WebSocket the web app opens is the canvas terminal's, whose address the API hands it **[T]**. Wave 4 still gives the helper its third case, so any socket that reads it gets the right address.
 - **Media origins** are read when the server starts, not when the image is built. The content security policy is then built from the running server's settings.
 
 The `local` and `saas` images keep their build-time values and behave as today.
@@ -137,27 +137,27 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As a maintainer, I want the version path proven end to end on a release candidate, so that the first real release is not the first time it runs.
 
 **Acceptance Criteria:**
-- [ ] A ruleset lets only maintainers create a `v*` tag. A page records the setting. It is a repository setting: a person sets it, and CI cannot check it.
-- [ ] A release-candidate tag publishes every image with the version tag, and does not move `MAJOR.MINOR` or `edge`.
-- [ ] The workflow run is linked from the pull request that follows it, with what was published.
-- [ ] Anything on the tag path that did not work is fixed in this wave.
+- [ ] A ruleset lets only maintainers create a `v*` tag. A page records the setting. It is a repository setting: a person sets it, and CI cannot check it. *(Page written: `docs/deployment-infrastructure/releases.md`. Needs a repository setting: an admin creates the ruleset.)*
+- [ ] A release-candidate tag publishes every image with the version tag, and does not move `MAJOR.MINOR` or `edge`. *(Built: the merge job publishes each image only under a staging tag, and one job adds `X.Y.Z` (and `X.Y` for a full release only) after every image is signed and its signature checked. No `sha-<7>` on a tag; smoke-images never runs on a tag. Needs a real tag to show.)*
+- [ ] The workflow run is linked from the pull request that follows it, with what was published. *(Needs a real tag.)*
+- [ ] Anything on the tag path that did not work is fixed in this wave. *(Found by reading and fixed: a tag run re-pushed `sha-<7>`, and applied version tags before the signature was made or checked. The rest needs a real tag.)*
 
 #### US-102: A release fails on a failing scan · S
 **Description:** As an operator, I want no release published from an image with a fixable critical finding, so that a version number means the scan passed.
 
 **Acceptance Criteria:**
-- [ ] On a `v*` tag the policy step runs in `fail` mode, whatever `POLICY_MODE` is for branches.
-- [ ] A failing image is neither tagged with the version nor signed.
-- [ ] The allow-list's rules are unchanged: an entry still needs a reason and an expiry.
-- [ ] The scan policy's own tests cover the tag case.
+- [x] On a `v*` tag the policy step runs in `fail` mode, whatever `POLICY_MODE` is for branches.
+- [x] A failing image is neither tagged with the version nor signed. *(The merge job needs every build job, and the version tags come only after every merge leg; `test_prd279_release_workflow.py`.)*
+- [x] The allow-list's rules are unchanged: an entry still needs a reason and an expiry.
+- [x] The scan policy's own tests cover the tag case.
 
 #### US-103: The workflow checks its own signatures · S
 **Description:** As an operator, I want a published image to have a signature that was checked before I ever see it, so that "signed" means something.
 
 **Acceptance Criteria:**
-- [ ] After signing, the workflow verifies each image against this repository's image workflow at the tag that ran.
-- [ ] A failed check fails the run.
-- [ ] A signature made by a pull request build, or from a branch, does not pass the same check. A test of the command's arguments shows it.
+- [ ] After signing, the workflow verifies each image against this repository's image workflow at the tag that ran. *(Built: on the staging digest, before any version tag exists. Needs a real tag to run.)*
+- [ ] A failed check fails the run. *(Built: no image gets the version, and the chart is not published. Needs a real tag to run.)*
+- [x] A signature made by a pull request build, or from a branch, does not pass the same check. A test of the command's arguments shows it.
 
 ### Wave 2: The chart is published
 
@@ -165,26 +165,26 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As an operator, I want a chart that installs exactly the images it was released with, so that the version I name is the version I get.
 
 **Acceptance Criteria:**
-- [ ] On a version tag, the chart is packaged with its version and `appVersion` set to the tag's version.
-- [ ] The packaged chart's default values name every image by digest, with one web image digest for each published edition.
-- [ ] Rendering the packaged chart with only `existingSecret` set, once for each published edition, shows no image named by a tag. The job fails if one is.
-- [ ] The chart in the repository keeps `appVersion: "edge"`, and its tests pass unchanged.
+- [ ] On a version tag, the chart is packaged with its version and `appVersion` set to the tag's version. *(Built. Needs a real tag to run.)*
+- [ ] The packaged chart's default values name every image by digest, with one web image digest for each published edition. *(Built for both published editions: `frontend.image` holds the local web image's digest and `frontend.enterpriseImage` the enterprise one's (PRD-277 US-505), and the templates pick the slot by `edition.authEdition`; the packaging step no longer refuses a second edition (`scripts/ci/release_chart.py`, `tests/test_prd279_release_tools.py`). Needs a real tag to run.)*
+- [ ] Rendering the packaged chart with only `existingSecret` set, once for each published edition, shows no image named by a tag. The job fails if one is. *(Built, once per edition. Correction: an edition other than the chart's default also needs its own values to render, at least `edition.authEdition`, and enterprise its identity provider's settings (PRD-277 US-701). Each edition's render is given `existingSecret` and a values file `release_chart.py prepare` writes for it, of made-up values, and `check-rendered` fails when an edition was not rendered or runs any image but its own. Needs a real tag to run.)*
+- [x] The chart in the repository keeps `appVersion: "edge"`, and its tests pass unchanged.
 
 #### US-202: Publishing and signing the chart · M
 **Description:** As an operator, I want to pull the chart from the registry and check where it came from, so that I do not need a checkout to install.
 
 **Acceptance Criteria:**
-- [ ] The packaged chart is pushed to the registry as an OCI artifact, under the release's version.
-- [ ] It is signed with the workflow's identity, and the signature is checked in the same run.
-- [ ] A version that already exists is never overwritten: a second push of the same version fails. Shown once, on a release candidate, and recorded in the pull request.
-- [ ] The chart's README gives the command to install a named version from the registry.
+- [ ] The packaged chart is pushed to the registry as an OCI artifact, under the release's version. *(Built. Needs a real tag to run.)*
+- [ ] It is signed with the workflow's identity, and the signature is checked in the same run. *(Built. `helm push` tags the chart before it can be signed; a chart not proven is deleted again through GitHub's packages API with the built-in token (public preview), or the job names what a maintainer must delete. Needs a real tag to run.)*
+- [ ] A version that already exists is never overwritten: a second push of the same version fails. Shown once, on a release candidate, and recorded in the pull request. *(GHCR overwrites a tag, so the job reads the registry first and refuses an existing version, or a registry it cannot read. Needs a real tag to show.)*
+- [x] The chart's README gives the command to install a named version from the registry.
 
 #### US-203: The chart checked against each supported Kubernetes version · S
 **Description:** As an operator, I want the chart checked against the Kubernetes versions I might run, so that "supported" is tested.
 
 **Acceptance Criteria:**
-- [ ] The chart workflow renders and checks the chart against the oldest supported version and the newest, not one.
-- [ ] The README states both versions, and a test fails if the README and the workflow disagree.
+- [x] The chart workflow renders and checks the chart against the oldest supported version and the newest, not one.
+- [x] The README states both versions, and a test fails if the README and the workflow disagree.
 
 ### Wave 3: A release says what it is
 
@@ -229,19 +229,19 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As an operator, I want the web app to find its WebSocket endpoint from its own address, so that one image serves any install.
 
 **Acceptance Criteria:**
-- [ ] With no WebSocket address set and no absolute API address, the web app uses the page's own host and scheme.
-- [ ] With either set, behaviour is as today.
-- [ ] The one helper that works the address out (`getWebSocketUrl`) gains the third case, and a test covers all three.
+- [x] With no WebSocket address set and no absolute API address, the web app uses the page's own host and scheme. In the `enterprise` edition: `wss://<host>/ws` on an https page, `ws://<host>/ws` on an http one. `local` and `saas` still answer none, as today (§5.7: they keep their build-time values). The address is worked out when it is read, so on the server, with no page, it is none.
+- [x] With either set, behaviour is as today. In every edition, including the old helper's answer for an https API address (`ws://`, not `wss://`).
+- [x] The one helper that works the address out (`getWebSocketUrl`) gains the third case, and a test covers all three. `frontend/lib/websocket-url.ts`, read by `WEBSOCKET_CONFIG.URL`; `frontend/lib/__tests__/websocket-url.test.ts` runs each case under each edition.
 
 #### US-402: Media origins read at start-up · M
 **Description:** As an operator, I want to give the web app my storage host when it starts, so that images and files stored on my own storage are not blocked.
 
 **Acceptance Criteria:**
-- [ ] The pull request states whether `next.config.js` fixes the content security policy at build time, with evidence.
-- [ ] In the `enterprise` image, the media origins come from a setting read when the server starts.
-- [ ] A response's content security policy contains the origins the running server was given.
-- [ ] The `local` and `saas` images behave as today, and the existing policy tests pass unchanged.
-- [ ] The chart passes the setting to the web app.
+- [x] The pull request states whether `next.config.js` fixes the content security policy at build time, with evidence. It does. The policy is a `next.config.js` `headers()` rule whose value is computed when the config file is loaded, from `NEXT_PUBLIC_MEDIA_ORIGINS`, and that load happens in `next build` (`frontend/Dockerfile:110`). The image then runs `node server.js` from the build's `.next/standalone` output (`frontend/Dockerfile:159-162`, `:183`), whose `server.js` Next writes with the configuration the build resolved; the image workflow lists `next.config.js` and `csp-sources.js` among the frontend image's build inputs, and `csp-sources.js` already said the headers are "baked into the standalone build". Next's content security policy guide shows the run-time way: the middleware sets the header on each response. *Read from the code and Next's documentation, not from a built image: no image was built for this pull request.*
+- [x] In the `enterprise` image, the media origins come from a setting read when the server starts. `MEDIA_ORIGINS` (the web container's environment, not a `NEXT_PUBLIC_*` variable): checked when the Node server starts (`instrumentation.ts` → `lib/enterprise/start-up.ts`; a bad value stops the server with one line naming the setting, never the value) and read by the middleware for each response. Each origin must be `https://host[:port]`, `https://*.<domain>.<suffix>`, or `http://localhost` / `http://127.0.0.1` with a port; nothing else gets in (`lib/enterprise/media-origins.ts`, `lib/enterprise/__tests__/media-origins.test.ts`, `start-up.test.ts`).
+- [x] A response's content security policy contains the origins the running server was given. In enterprise the middleware sets the policy on every answer it gives, through or redirected, built by the same function as the build's policy (`frontend/csp-policy.mjs`); the build keeps its policy only on the paths the middleware never runs for (`_next` and files with an extension), so no answer carries two. With no media origin it is exactly the build's enterprise policy. `lib/enterprise/__tests__/runtime-csp.test.ts`.
+- [ ] The `local` and `saas` images behave as today, and the existing policy tests pass unchanged. *None of the existing policy tests is changed; CI proves they pass. `runtime-csp.test.ts` also checks that the saas config and the local config (the published image's build arguments) give one rule and the same policy string as before, written out in full.*
+- [ ] The chart passes the setting to the web app. *Built: with `edition.authEdition=enterprise` the web container runs the enterprise image and gets `MEDIA_ORIGINS` from `frontend.mediaOrigins` (empty by default) and `BACKEND_INTERNAL_URL`, the API's Service; rendering stops on a value the server would refuse, by the server's rules, and on any value in another edition (`charts/automatos/tests/enterprise_web_test.yaml`, `media_origins_refusals_test.yaml`). Left unticked until CI runs those suites, and until an install lane starts the enterprise image with them.*
 
 ## 7. Functional requirements
 
@@ -250,7 +250,7 @@ Each wave is one pull request or a short series. CI is the only gate.
 - FR-3: On a `v*` tag the scan policy must fail the release for any finding it would fail in `fail` mode.
 - FR-4: Every published image and chart must be signed, and the signature must be checked by the workflow before the release is complete.
 - FR-5: A released chart's default values must name every image by digest.
-- FR-6: A published version must never be overwritten.
+- FR-6: A published version must never be overwritten. *(The registry does not enforce it. Images: a preflight before any build refuses a version any published image has, and the tag step refuses a version on another digest. The chart: the release job refuses an existing version. Both rest on the `v*` tag ruleset too. Needs a real tag to show.)*
 - FR-7: Every release must have notes that say whether it changes the database.
 - FR-8: The API must report the version it was built as.
 - FR-9: A release candidate must not move the `MAJOR.MINOR` tag or `edge`.
@@ -297,6 +297,7 @@ Each has a recommendation, which stands unless he changes it.
 
 ## 12. Open questions
 
-1. **Is `next.config.js` evaluated at build for the standalone server?** US-402 confirms it before choosing how the policy is built at run time.
+1. **[answered, US-402] Is `next.config.js` evaluated at build for the standalone server?** Yes: its `headers()` rules are fixed by `next build` (evidence in US-402's first line). The enterprise policy is therefore set by the middleware on each response.
 2. **Should a release also carry the `media-assets` image?** It is published by a separate job today (`images.yml:962`) **[T]**.
 3. **How long is a `MAJOR.MINOR` line patched?** That is a support promise, not part of this PRD, and the patch page should state it once it is decided.
+4. **[open, not built] A tighter policy for the `enterprise` image.** Its content security policy (US-402) is exactly as strict as the build-time one it replaces: the same directive list, without the Clerk Frontend API host, the API origin, payment sources and the build's media origins. It still names the hosted product's origins (`https://*.automatos.app`, Automatos Cloud's catalogue files route) and third parties' (Clerk's development and protection hosts, Cloudflare's challenge host, the jsDelivr CDN, Google's and Composio's image hosts), and keeps `'unsafe-inline'` and `'unsafe-eval'` in `script-src`. Dropping any of them needs a browser lane that runs this edition's pages first, to prove none breaks.

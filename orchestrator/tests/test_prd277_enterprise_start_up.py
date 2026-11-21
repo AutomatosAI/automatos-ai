@@ -5,10 +5,10 @@
 * ``REQUIRE_AUTH`` is true in enterprise whatever the environment says.
 * Start-up aborts, naming each missing setting and never a value, when the issuer, client id,
   client secret or the install's public address (``FRONTEND_URL``, set in the environment, not
-  its localhost default) is unset or blank.
-* Last, while ``OIDC_SIGN_IN_IN_THIS_BUILD`` is false, start-up aborts with "not available in
-  this build". Flipping that one switch is all that stands between a configured enterprise
-  install and a boot, which is what Wave 4 removes.
+  its localhost default) is unset or blank: every combination of them names exactly the ones
+  missing. Without ``CLIENT_IP_HEADER`` or ``DEFAULT_WORKSPACE_ID`` it names that one.
+* A correctly configured enterprise install starts (PRD-277 Wave 4 deleted the build switch that
+  stopped it: the start-up checks are the only gate).
 * ``local`` and ``saas`` never read the OIDC settings.
 
 * A request made after that reload, through the real request-context dependency, sees
@@ -21,6 +21,7 @@ request-time tests stub the database session.
 from __future__ import annotations
 
 import importlib
+import itertools
 import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -37,13 +38,14 @@ os.environ.setdefault("POSTGRES_DB", "test")
 from core import edition_start_up  # noqa: E402
 # Imported before any reload, so each holds the process's own config singleton (restored after).
 from core.auth import bearer_registry, hybrid  # noqa: E402
-from core.edition_start_up import NOT_AVAILABLE, OIDC_START_UP_SETTINGS, EditionNotReady  # noqa: E402
+from core.edition_start_up import OIDC_START_UP_SETTINGS, EditionNotReady  # noqa: E402
 from core.editions import capabilities_for  # noqa: E402
 
 ENV_KEYS = (
     "AUTH_EDITION", "REQUIRE_AUTH", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "FRONTEND_URL",
     "CLI_RUNTIME_ENABLED", "DEFAULT_WORKSPACE_ID", "CLERK_JWKS_URL", "CLERK_SECRET_KEY",
-    "LOCAL_REMOTE_ACCESS", "API_PUBLISH_ADDRESS", "WEB_PUBLISH_ADDRESS",
+    "LOCAL_REMOTE_ACCESS", "API_PUBLISH_ADDRESS", "WEB_PUBLISH_ADDRESS", "CLIENT_IP_HEADER",
+    "OIDC_REQUIRED_CLAIMS", "ENTERPRISE_BOOTSTRAP_ADMINS",
 )
 # Distinct values, so a test can prove that none of them ever reaches a message. A value that
 # stands in for a secret is built from parts, so no literal looks like a credential.
@@ -52,10 +54,17 @@ OIDC_ENV = {
     "OIDC_CLIENT_ID": "prd277-client-id-marker",
     "OIDC_CLIENT_SECRET": "prd277" + "-" + "client" + "-" + "marker",
     "FRONTEND_URL": "https://automatos.example.test",
+    # Wave 4: where sign-in is OIDC, the address it limits and audits by must come from the proxy.
+    "CLIENT_IP_HEADER": "X-Real-IP",
+    # Wave 4 part 2: the workspace sign-ins are recorded in and the first admins own.
+    "DEFAULT_WORKSPACE_ID": "00000000-0000-0000-0000-0000000277ac",
 }
 STAND_IN_CLERK_SECRET = "prd277" + "-" + "stand-in"
 LOCAL_WS = "00000000-0000-0000-0000-0000000277aa"
 ENTERPRISE_WS = "00000000-0000-0000-0000-0000000277ab"
+# Every combination of the four settings an enterprise install cannot start without.
+MISSING_COMBINATIONS = [combo for size in range(1, len(OIDC_START_UP_SETTINGS) + 1)
+                        for combo in itertools.combinations(OIDC_START_UP_SETTINGS, size)]
 
 
 @pytest.fixture(autouse=True)
@@ -150,7 +159,22 @@ def test_start_up_names_the_missing_setting_and_never_a_value(missing):
 
     assert missing in message and "AUTH_EDITION=enterprise" in message
     assert [name for name in OIDC_START_UP_SETTINGS if name in message] == [missing]
-    assert "not available in this build" not in message
+    _assert_no_value_in(message)
+
+
+@pytest.mark.parametrize("missing", MISSING_COMBINATIONS)
+def test_every_half_configured_combination_names_exactly_what_is_missing(missing):
+    message = _refusal(_enterprise(**{name: None for name in missing}))
+
+    assert [name for name in OIDC_START_UP_SETTINGS if name in message] == list(missing)
+    _assert_no_value_in(message)
+
+
+@pytest.mark.parametrize("missing", ["CLIENT_IP_HEADER", "DEFAULT_WORKSPACE_ID"])
+def test_without_the_proxy_header_or_the_default_workspace_start_up_names_it(missing):
+    message = _refusal(_enterprise(**{missing: None}))
+
+    assert message.startswith(f"AUTH_EDITION=enterprise cannot start: {missing} ")
     _assert_no_value_in(message)
 
 
@@ -163,7 +187,6 @@ def test_every_missing_setting_is_named_at_once():
     message = _refusal(_fresh_config(AUTH_EDITION="enterprise"))
 
     assert all(name in message for name in OIDC_START_UP_SETTINGS)
-    assert "not available in this build" not in message
 
 
 def test_the_public_address_must_be_set_not_defaulted():
@@ -173,23 +196,20 @@ def test_the_public_address_must_be_set_not_defaulted():
     assert "FRONTEND_URL" in _refusal(cfg)
 
 
-# --------------------------------------------------------------------------- not in this build
+# --------------------------------------------------------------------------- a configured install starts
 
 
-def test_a_fully_configured_enterprise_is_not_available_in_this_build():
-    message = _refusal(_enterprise())
-
-    assert message == NOT_AVAILABLE and "not available in this build" in message
-    _assert_no_value_in(message)
+def test_a_correctly_configured_enterprise_starts():
+    _enterprise().validate_auth_edition()  # must not raise
 
 
-def test_the_not_available_abort_is_the_last_check():
-    """With every check before it satisfied, the abort is what stops a boot, and only it."""
-    cfg = _enterprise()
-
-    assert _refusal(cfg) == NOT_AVAILABLE  # every OIDC setting set: nothing earlier refused
-    for missing in OIDC_START_UP_SETTINGS:  # any earlier refusal wins over it
-        assert _refusal(_enterprise(**{missing: None})) != NOT_AVAILABLE
+def test_the_build_switch_is_gone():
+    """PRD-277 Wave 4 deleted ``OIDC_SIGN_IN_IN_THIS_BUILD`` and its "not available" refusal."""
+    assert not hasattr(edition_start_up, "OIDC_SIGN_IN_IN_THIS_BUILD")
+    assert not hasattr(edition_start_up, "NOT_AVAILABLE")
+    source = edition_start_up.__file__
+    with open(source, encoding="utf-8") as module:
+        assert "not available in this build" not in module.read()
 
 
 def test_validate_security_runs_the_edition_check_and_lets_its_abort_stop_the_boot(monkeypatch):
@@ -200,10 +220,11 @@ def test_validate_security_runs_the_edition_check_and_lets_its_abort_stop_the_bo
     """
     cfg = _enterprise()
     calls = []
+    refusal = "AUTH_EDITION=enterprise cannot start: a stand-in refusal."
 
     def edition_check():
         calls.append("validate_auth_edition")
-        raise EditionNotReady(NOT_AVAILABLE)
+        raise EditionNotReady(refusal)
 
     monkeypatch.setattr(cfg, "assert_vector_config_integrity", lambda: None)
     monkeypatch.setattr(cfg, "validate_auth_edition", edition_check)
@@ -211,7 +232,7 @@ def test_validate_security_runs_the_edition_check_and_lets_its_abort_stop_the_bo
     with pytest.raises(EditionNotReady) as refused:
         cfg.validate_security()
 
-    assert calls == ["validate_auth_edition"] and str(refused.value) == NOT_AVAILABLE
+    assert calls == ["validate_auth_edition"] and str(refused.value) == refusal
 
 
 # --------------------------------------------------------------------------- at request time
@@ -258,14 +279,6 @@ def _bare_request():
                            state=SimpleNamespace())
 
 
-def test_the_one_switch_is_all_that_stands_between_a_configured_install_and_a_boot(monkeypatch):
-    assert edition_start_up.OIDC_SIGN_IN_IN_THIS_BUILD is False
-    monkeypatch.setattr(edition_start_up, "OIDC_SIGN_IN_IN_THIS_BUILD", True)
-
-    _enterprise().validate_auth_edition()  # must not raise
-    assert "OIDC_ISSUER" in _refusal(_enterprise(OIDC_ISSUER=None))  # the settings still count
-
-
 def test_session_mode_is_refused_in_enterprise():
     with pytest.raises(RuntimeError) as refused:
         _enterprise(CLI_RUNTIME_ENABLED="true").validate_auth_edition()
@@ -273,12 +286,13 @@ def test_session_mode_is_refused_in_enterprise():
     assert "CLI_RUNTIME_ENABLED" in str(refused.value)
 
 
-def test_enterprise_needs_no_clerk_and_no_default_workspace(monkeypatch):
-    monkeypatch.setattr(edition_start_up, "OIDC_SIGN_IN_IN_THIS_BUILD", True)
+def test_enterprise_needs_no_clerk_but_needs_the_default_workspace():
     cfg = _enterprise()
 
-    assert not cfg.CLERK_JWKS_URL and not cfg.DEFAULT_WORKSPACE_ID
+    assert not cfg.CLERK_JWKS_URL and cfg.DEFAULT_WORKSPACE_ID
     cfg.validate_auth_edition()  # must not raise
+    # Sign-ins are recorded in the default workspace and the first admins own it (US-405).
+    assert "DEFAULT_WORKSPACE_ID" in _refusal(_enterprise(DEFAULT_WORKSPACE_ID="not-a-workspace-id"))
 
 
 # --------------------------------------------------------------------------- local and saas

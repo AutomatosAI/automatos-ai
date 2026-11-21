@@ -1,0 +1,282 @@
+suite: Enterprise values the API would refuse stop the render (PRD-277 US-701)
+# The API's template alone, so a failed render can only be reported against it (helm-unittest
+# reports a failed render against the first template, in reverse alphabetical order, that fails;
+# the migration Job reads the same settings). Each message names the value, never what it holds.
+# Made-up values of the right shape: example.com is reserved for examples.
+templates:
+  - templates/api-deployment.yaml
+release:
+  name: demo
+  namespace: automatos
+set:
+  existingSecret: automatos-secrets
+  edition:
+    authEdition: enterprise
+    enterprise:
+      publicUrl: https://automatos.example.com
+      clientIpHeader: X-Real-IP
+      oidc:
+        issuer: https://id.example.com/realms/automatos
+        clientId: automatos
+tests:
+  - it: renders with every required value set
+    asserts:
+      - hasDocuments:
+          count: 1
+
+  # ── a required value missing ────────────────────────────────────────────────
+  - it: stops without the issuer, naming it
+    set:
+      edition: {enterprise: {oidc: {issuer: ""}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.issuer is required in the enterprise edition: the identity provider's issuer address, https only \\(OIDC_ISSUER\\)"
+  - it: stops without the client id, naming it
+    set:
+      edition: {enterprise: {oidc: {clientId: ""}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.clientId is required in the enterprise edition"
+  - it: stops without the public address, naming it
+    set:
+      edition: {enterprise: {publicUrl: ""}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.publicUrl is required in the enterprise edition"
+  - it: stops without the client address header, naming it
+    set:
+      edition: {enterprise: {clientIpHeader: ""}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.clientIpHeader is required in the enterprise edition"
+  - it: stops on a value of spaces as on an empty one
+    set:
+      edition: {enterprise: {oidc: {clientId: "   "}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.clientId is required"
+  - it: stops on a default workspace that is not a UUID
+    set:
+      edition: {defaultWorkspaceId: not-a-workspace}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.defaultWorkspaceId must be a UUID in the enterprise edition"
+  - it: stops without the Secret, which must hold the client secret
+    set:
+      existingSecret: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "existingSecret is required"
+
+  # ── a value the API refuses at start ────────────────────────────────────────
+  - it: stops on an issuer over http, without printing it
+    set:
+      edition: {enterprise: {oidc: {issuer: "http://id.example.com/realms/automatos"}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.issuer must be an https address with a host \\(OIDC_ISSUER\\): the API refuses to start otherwise"
+  - it: stops on an issuer with no host
+    set:
+      edition: {enterprise: {oidc: {issuer: "https:///realms/automatos"}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.issuer must be an https address with a host"
+  - it: stops on a public address with a port that is not a number
+    set:
+      edition: {enterprise: {publicUrl: "https://automatos.example.com:https"}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.publicUrl must be an https address with a host \\(FRONTEND_URL\\)"
+  - it: stops on a public address with a port out of range
+    set:
+      edition: {enterprise: {publicUrl: "https://automatos.example.com:70000"}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.publicUrl must be an https address with a host"
+  - it: takes an address with a port, a path and an upper-case scheme
+    set:
+      edition: {enterprise: {publicUrl: "HTTPS://automatos.example.com:8443/", oidc: {issuer: "https://[2001:db8::1]:8443/realms/a"}}}
+    asserts:
+      - hasDocuments:
+          count: 1
+  - it: stops on a client address header that is not one header name
+    set:
+      edition: {enterprise: {clientIpHeader: "X-Real-IP, X-Forwarded-For"}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.clientIpHeader must be one header name"
+  - it: stops on a default role the API does not know
+    set:
+      edition: {enterprise: {defaultRole: owner, oidc: {requiredClaims: "groups=automatos"}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.defaultRole must be none, viewer, editor or admin \\(ENTERPRISE_DEFAULT_ROLE\\)"
+  - it: stops on a default role without an access rule
+    set:
+      edition: {enterprise: {defaultRole: editor}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.defaultRole needs edition.enterprise.oidc.requiredClaims"
+  - it: takes a default role of none without a rule, in any case
+    set:
+      edition: {enterprise: {defaultRole: NONE}}
+    asserts:
+      - hasDocuments:
+          count: 1
+  - it: stops on a sign-in button text with a < in it
+    set:
+      edition: {enterprise: {oidc: {displayName: "<b>Example</b>"}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.displayName must be plain text of 1 to 64 characters"
+  - it: stops on a sign-in button text over 64 characters
+    set:
+      edition: {enterprise: {oidc: {displayName: "Example Identity Provider For Every Office Of The Organisation, Everywhere"}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.displayName must be plain text of 1 to 64 characters"
+  - it: stops on scopes without openid
+    set:
+      edition: {enterprise: {oidc: {scopes: profile email}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.scopes must be scope names separated by spaces, openid among them \\(OIDC_SCOPES\\)"
+  - it: stops on a scope with a character a scope cannot hold
+    set:
+      edition: {enterprise: {oidc: {scopes: "openid \"profile\""}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.scopes must be scope names separated by spaces"
+  - it: stops on an endpoint host with a scheme
+    set:
+      edition: {enterprise: {oidc: {endpointHosts: "login.example.com, https://keys.example.com"}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.endpointHosts must be host names separated by commas, with no scheme, port, wildcard or address \\(OIDC_ENDPOINT_HOSTS\\)"
+  - it: stops on an endpoint host that is an address
+    set:
+      edition: {enterprise: {oidc: {endpointHosts: "192.0.2.10"}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.endpointHosts must be host names"
+  - it: stops on a wildcard endpoint host
+    set:
+      edition: {enterprise: {oidc: {endpointHosts: "*.example.com"}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.endpointHosts must be host names"
+  - it: takes endpoint hosts in any case, with a trailing dot
+    set:
+      edition: {enterprise: {oidc: {endpointHosts: "Login.Example.com., keys.example.com"}}}
+    asserts:
+      - hasDocuments:
+          count: 1
+
+  # ── a user name or password in an address ───────────────────────────────────
+  - it: stops on a public address with a user name and password, naming the key
+    set:
+      edition: {enterprise: {publicUrl: "https://someone:not-a-password@automatos.example.com"}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.publicUrl must not hold a user name or password \\(an @ before the host\\)"
+  - it: stops on an issuer with a user name, naming the key
+    set:
+      edition: {enterprise: {oidc: {issuer: "https://someone@id.example.com/realms/automatos"}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.issuer must not hold a user name or password"
+  - it: takes an @ after the host, in the path
+    set:
+      edition: {enterprise: {oidc: {issuer: "https://id.example.com/realms/team@example"}}}
+    asserts:
+      - hasDocuments:
+          count: 1
+
+  # ── the provider's CA ───────────────────────────────────────────────────────
+  - it: takes a ConfigMap name with dots and a plain key
+    set:
+      edition: {enterprise: {oidc: {caConfigMap: identity-ca.v2, caKey: bundle.pem}}}
+    asserts:
+      - hasDocuments:
+          count: 1
+  - it: stops on a ConfigMap name Kubernetes would refuse
+    set:
+      edition: {enterprise: {oidc: {caConfigMap: Identity_CA}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.caConfigMap must be a ConfigMap's name"
+  - it: stops on a ConfigMap name with a line break in it
+    set:
+      edition: {enterprise: {oidc: {caConfigMap: "identity-ca\nkind: Secret"}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.caConfigMap must be a ConfigMap's name"
+  - it: stops on a key that climbs out of the mount
+    set:
+      edition: {enterprise: {oidc: {caConfigMap: identity-ca, caKey: ../ca.crt}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.caKey must be a plain file name"
+  - it: stops on a key that is ..
+    set:
+      edition: {enterprise: {oidc: {caConfigMap: identity-ca, caKey: ".."}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.caKey must be a plain file name"
+  - it: stops on a key with a path separator
+    set:
+      edition: {enterprise: {oidc: {caConfigMap: identity-ca, caKey: certs/ca.crt}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.caKey must be a plain file name"
+  - it: stops on a key with a line break in it
+    set:
+      edition: {enterprise: {oidc: {caConfigMap: identity-ca, caKey: "ca.crt\nother"}}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.oidc.caKey must be a plain file name"
+
+  # ── config may not set what the chart sets, or a secret ─────────────────────
+  - it: stops on the client secret in config, a secret never being a value
+    set:
+      config:
+        OIDC_CLIENT_SECRET: not-a-real-value
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.OIDC_CLIENT_SECRET: a secret is never a chart value. Put it in the Secret existingSecret names, under the key OIDC_CLIENT_SECRET"
+  - it: stops on a setting in config that edition.enterprise sets
+    set:
+      config:
+        OIDC_ISSUER: https://id.example.com/realms/other
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.OIDC_ISSUER: in the enterprise edition the chart sets it from edition.enterprise"
+  - it: stops on the default workspace in config
+    set:
+      config:
+        DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c2"
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.DEFAULT_WORKSPACE_ID: in the enterprise edition the chart sets it"
+  - it: stops on a session cookie name the web image would not send
+    set:
+      config:
+        SESSION_COOKIE_NAME: __Host-other
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.SESSION_COOKIE_NAME: the enterprise web image sends the session cookie __Host-automatos_session and the header X-Automatos-CSRF"
+  - it: takes the session clocks from config
+    set:
+      config:
+        SESSION_IDLE_MINUTES: "60"
+        SESSION_ABSOLUTE_HOURS: "8"
+    asserts:
+      - hasDocuments:
+          count: 1
+  - it: stops on session mode, which only the local edition has
+    set:
+      sessionMode:
+        enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "sessionMode.enabled needs edition.authEdition=local"

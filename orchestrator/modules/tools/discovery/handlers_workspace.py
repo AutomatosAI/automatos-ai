@@ -5,9 +5,9 @@ import logging
 from typing import Any, Dict, List, Optional, Set
 from uuid import UUID
 
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from core.auth.clerk_person import clerk_person_row
 from core.composio.pending_connections import CONNECTED, NOT_CONNECTED, PENDING
 from modules.tools.discovery.memory_off import NOT_SAVED, memory_is_off, memory_off_answer, off_when_nothing_is_found
 from modules.tools.discovery.memory_owner import owned_by_the_driver
@@ -46,10 +46,7 @@ def _resolve_owner_subject(db: Session, raw_user_id: Any) -> Optional[str]:
     if s.isdigit():
         return f"user:{int(s)}"
     try:
-        row = db.execute(
-            text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
-            {"cid": s},
-        ).fetchone()
+        row = clerk_person_row(db, s)
     except Exception:
         logger.warning("[PlatformExecutor] owner-subject resolution failed", exc_info=True)
         return None
