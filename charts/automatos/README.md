@@ -204,8 +204,8 @@ it or signed in on it longer ago than that is removed at its next request.
 Until that request, Settings lists the phone as expired and no push is sent to it.
 
 Signing in on a phone needs the provider to return `auth_time` in the ID token when the phone asks
-for a fresh sign-in, no earlier than the sign-in's start: Entra's optional claim, Google's client
-setting, Cognito's managed login (the PRD's §5.9). Without it every phone sign-in is refused and
+for a fresh sign-in, no earlier than the sign-in's start: Entra's optional claim, Google's
+project setting "Session age claims", Cognito's managed login (the PRD's §5.9). Without it every phone sign-in is refused and
 the app is told `sign_in_refused`; the reason is recorded in the `auth:sign_in_refused` audit row
 and in the API's warning log line. Such a phone pairs with a code from Settings instead.
 
@@ -229,6 +229,9 @@ forwarded-header handling trusting only its own host.
 
 At the provider, register the sign-in callback `<publicUrl origin>/api/v1/auth/oidc/callback`
 and the address after sign-out `<publicUrl origin>/sign-in`; the install notes print both.
+Each provider's registration, claims and matching values are in
+[Enterprise Sign-In with OIDC](../../docs/authentication-multi-tenancy/enterprise-sign-in-oidc.md),
+with a guide for Microsoft Entra ID, Google Workspace, Okta, Keycloak and Amazon Cognito.
 Turn the ingress on (`ingress.enabled`, `ingress.host` the host of `publicUrl`, and `ingress.tls`):
 the enterprise web app calls the API on its own origin, and the session cookie is a
 `__Host-` cookie, sent over https only.
