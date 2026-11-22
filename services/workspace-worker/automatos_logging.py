@@ -40,7 +40,7 @@ from typing import Optional
 import log_settings
 import worker_config
 from json_log_format import JsonLineFormatter
-from worker_log_context import request_log_fields
+from worker_log_context import TextLineFormatter, request_log_fields
 
 
 # ---------------------------------------------------------------------------
@@ -266,15 +266,11 @@ class LogRelayHandler(logging.Handler):
 # Setup Function
 # ---------------------------------------------------------------------------
 
-# PRD-256 O5: " trace=<id>" when a sampled span is current (worker_otel); empty otherwise.
-TEXT_FORMAT = "%(asctime)s [%(name)s] %(levelname)s:%(_trace_context)s %(message)s"
-
-
 def _console_formatter(service: str, log_format: str) -> logging.Formatter:
     """The console's line: the text one, or (PRD-282 US-302) one JSON record with the API's fields."""
     if log_format == log_settings.LOG_FORMAT_JSON:
         return JsonLineFormatter(service, worker_config.automatos_version(), request_log_fields)
-    return logging.Formatter(TEXT_FORMAT, defaults={"_trace_context": ""})
+    return TextLineFormatter()
 
 
 def setup_logging(
@@ -288,7 +284,7 @@ def setup_logging(
 
     Args:
         service: Service name (e.g. "workspace-worker", "mem0-server")
-        level: Log level (default from LOG_LEVEL, or INFO; a level it cannot use stops start-up)
+        level: Log level (default from LOG_LEVEL, or INFO; for a value it cannot use, INFO and a warning)
         relay_url: Override LOG_RELAY_URL
         environment: Override ENVIRONMENT
         enable_relay: Override LOG_RELAY_ENABLED
@@ -296,9 +292,11 @@ def setup_logging(
     Returns:
         Root logger
     """
-    log_format = log_settings.log_format(worker_config.log_format_setting())
+    format_raw, level_raw = worker_config.log_format_setting(), worker_config.log_level_setting()
+    unusable = log_settings.unusable(format_raw, level_raw if level is None else None)
+    log_format = log_settings.log_format(format_raw)
     if level is None:
-        level = log_settings.log_level(worker_config.log_level_setting())
+        level = log_settings.log_level(level_raw)
 
     root = logging.getLogger()
     root.setLevel(level)
@@ -334,4 +332,7 @@ def setup_logging(
             "Log relay enabled → %s", relay_url or LOG_RELAY_URL
         )
 
+    # PRD-282: a LOG_FORMAT or LOG_LEVEL it cannot use is the default, and says so once.
+    for warning in unusable:
+        logging.getLogger(service).warning(warning)
     return root

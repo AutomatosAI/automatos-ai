@@ -14,9 +14,13 @@ sets is seen in the request's own task, where uvicorn writes that line.
 * **The path** never carries the query.
 * **The trace and span ids** are read from the current span once tracing has started
   (``worker_otel``); with tracing off nothing from OpenTelemetry is imported.
+
+A text line (``TextLineFormatter``) carries the request's id as `` req=<id>`` after its level,
+as the API's text line carries ``req=``; a line outside a request is as it was.
 """
 from __future__ import annotations
 
+import logging
 import re
 from contextvars import ContextVar, Token
 from typing import Any, Awaitable, Callable, Dict, List, MutableMapping, Tuple
@@ -35,6 +39,10 @@ http_path_var: ContextVar[str] = ContextVar("worker_http_path", default="")
 
 Message = MutableMapping[str, Any]
 
+# PRD-256 O5's " trace=<id>" when a sampled span is current (worker_otel), and PRD-282's
+# " req=<id>" in a request; each empty otherwise.
+TEXT_FORMAT = "%(asctime)s [%(name)s] %(levelname)s:%(_request_context)s%(_trace_context)s %(message)s"
+
 
 def request_log_fields() -> Dict[str, str]:
     """The current request's fields for a JSON line; empty ones are left out by the formatter."""
@@ -47,6 +55,19 @@ def request_log_fields() -> Dict[str, str]:
     if worker_otel.tracing_started():
         fields["trace_id"], fields["span_id"] = worker_otel.current_trace_ids()
     return fields
+
+
+class TextLineFormatter(logging.Formatter):
+    """The worker's text line, with the current request's id; the record is not changed."""
+
+    def __init__(self) -> None:
+        super().__init__(TEXT_FORMAT)
+
+    def formatMessage(self, record: logging.LogRecord) -> str:
+        request_id = request_id_var.get()
+        values = {"_trace_context": "", **record.__dict__,
+                  "_request_context": f" req={request_id}" if request_id else ""}
+        return TEXT_FORMAT % values
 
 
 def _request_id(scope: Message) -> str:
@@ -84,5 +105,5 @@ class RequestLogContextMiddleware:
 
 
 __all__ = ["MAX_REQUEST_ID_LEN", "REQUEST_ID_HEADER", "REQUEST_ID_UNSAFE", "RequestLogContextMiddleware",
-           "WORKSPACE_PATH", "http_method_var", "http_path_var", "request_id_var", "request_log_fields",
+           "TEXT_FORMAT", "TextLineFormatter", "WORKSPACE_PATH", "http_method_var", "http_path_var", "request_id_var", "request_log_fields",
            "workspace_id_var"]
