@@ -574,9 +574,9 @@ uvicorn at `core/monitoring/server_log_config.json`). A text line carries the re
 `req=…`, and uvicorn's access line ends with it.
 
 What is still text with `LOG_FORMAT=json`: the start script's own lines (its banner and its
-boot steps' messages, before uvicorn starts), the migration tool's output when the start script
-or the migration Job migrates, and anything a process writes before logging is set up, such as a
-crash while it starts.
+boot steps' messages, before uvicorn starts), the migration tool's and the seed loader's output
+when the start script or the migration Job migrates and seeds, and anything a process writes
+before logging is set up, such as a crash while it starts.
 
 ## 4. First boot — what happens and how long it takes
 
