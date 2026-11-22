@@ -38,6 +38,13 @@ from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, Optional
 
 from config import config
+from core.redis.connection import (
+    RedisTarget,
+    new_async_client,
+    new_sync_client,
+    redis_target_from_host_settings,
+    redis_target_from_url_or_host_settings,
+)
 
 from .base import TaskRunner
 from .models import (
@@ -90,53 +97,48 @@ def _cancel_key(task_id: str) -> str:
     return f"{_PREFIX}:task:{task_id}:cancel"
 
 
+def _queue_target() -> RedisTarget:
+    """Where the queue's two clients connect.
+
+    ``REDIS_URL`` when it is set, with the database its path names. Otherwise the
+    host settings with ``REDIS_DB``, as the queue always read them. A malformed
+    ``REDIS_URL`` is logged and the host settings are used, as they were before the
+    queue read ``REDIS_URL`` at all, so a bad address never stops the runner.
+    """
+    db = int(config.REDIS_DB or "0")
+    try:
+        return redis_target_from_url_or_host_settings(db)
+    except ValueError as exc:
+        # Never the address or the error's text: either can hold part of a password.
+        logger.error(
+            "QueuedTaskRunner: REDIS_URL is not a usable Redis address (%s); "
+            "using REDIS_HOST/REDIS_PORT instead",
+            type(exc).__name__,
+        )
+        return redis_target_from_host_settings(db)
+
+
 class QueuedTaskRunner(TaskRunner):
     """Execute agent tasks via Redis queue + worker containers.
 
     The runner itself is thin — it only enqueues tasks and reads results.
     Actual execution happens in worker processes (ARQ workers or custom).
 
-    Configuration (env vars):
-        REDIS_HOST          — Redis host (default: 127.0.0.1)
-        REDIS_PORT          — Redis port (default: 6379)
-        REDIS_PASSWORD      — Redis password (default: None)
-        REDIS_DB            — Redis DB index (default: 0)
-        TASK_QUEUE_PREFIX   — Key prefix (default: taskrunner)
-        TASK_RESULT_TTL     — Seconds to keep completed task data (default: 7200)
+    Configuration (``_queue_target``): the ``REDIS_URL`` setting when it is set;
+    otherwise ``REDIS_HOST`` (127.0.0.1), ``REDIS_PORT`` (6379), ``REDIS_PASSWORD``,
+    ``REDIS_DB`` (0) and ``REDIS_TLS``.
     """
 
     def __init__(self) -> None:
-        import redis as _redis
-        import redis.asyncio as _aioredis
-
-        self._host = config.REDIS_HOST or "127.0.0.1"
-        self._port = int(config.REDIS_PORT or "6379")
-        self._password = config.REDIS_PASSWORD or None
-        self._db = int(config.REDIS_DB or "0")
+        target = _queue_target()
 
         # Sync client for simple operations
-        self._redis = _redis.Redis(
-            host=self._host,
-            port=self._port,
-            password=self._password,
-            db=self._db,
-            decode_responses=True,
-            socket_timeout=5,
-        )
+        self._redis = new_sync_client(target, decode_responses=True, socket_timeout=5)
 
         # Async client for streaming / blocking operations
-        self._aredis = _aioredis.Redis(
-            host=self._host,
-            port=self._port,
-            password=self._password,
-            db=self._db,
-            decode_responses=True,
-        )
+        self._aredis = new_async_client(target, decode_responses=True)
 
-        logger.info(
-            "QueuedTaskRunner initialized (redis=%s:%d, db=%d)",
-            self._host, self._port, self._db,
-        )
+        logger.info("QueuedTaskRunner initialized (redis=%s)", target.describe())
 
     @property
     def backend_name(self) -> str:

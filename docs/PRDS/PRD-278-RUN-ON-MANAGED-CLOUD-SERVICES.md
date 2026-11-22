@@ -34,9 +34,10 @@ Core is close. Its storage client already uses the pod's role when no key is set
 | Storage gate | `is_storage_configured()` is true only with a custom endpoint or a full key pair. Its docstring says the SDK's own chain "does not" count. `_get_client` raises `StorageNotConfigured` otherwise. | `core/storage/s3.py:93-100`, `:143-144` **[T]** | A pod with a role and no key is told storage is not configured. |
 | Who asks the gate | A dozen modules: document generation, thumbnails, brand assets, downloads, socials media, workspace purge and move. Most fall back to local disk or skip the step. | `modules/documents/generation_service.py:294`, `services/document_downloads.py:63`, `modules/documents/thumbnails/store.py:64` and others **[T]** | With a role and no key, each silently takes the local path. |
 | Search index client | Passes the two key settings as they are. When they are unset the SDK's chain is used. | `modules/search/vector_store/backends/s3_vectors_backend.py:77-81` **[T]** | Works from a role today. |
-| Search index creation | At start-up it always tries to create the vector bucket and the index, and ignores only the answer "already exists". Any other answer stops it. It refuses to run against an index of a different size, and never deletes one. | `s3_vectors_backend.py:100-125`, `:149-161` **[T]** | An operator who wants the index encrypted with their own key must create it first. A role that may not create one stops core at start-up, even when both exist. |
+| Search index creation | Not at start-up: on first use, and again on every search, add and delete. Each of them calls `_ensure_setup`, which tries to create the vector bucket and the index and ignores only the answer "already exists". Any other answer fails that call. It refuses to run against an index of a different size, and never deletes one. | `s3_vectors_backend.py:92-128`, `:130-161`; called from `:187`, `:272`, `:335`, `:403` **[T]** | An operator who wants the index encrypted with their own key must create it first. A role that may not create one fails every search, add and delete, even when both exist. |
 | Bedrock chat | `bedrock-runtime`, with three ways to authenticate. With no key it uses the SDK's chain: "environment, profile, instance role". | `core/llm/clients/bedrock_client.py:60-72` **[T]** | The client works from a role. |
 | Bedrock, further up | The provider is registered with an access key as its "env key", and the agent factory passes the key settings through. | `core/llm/providers.py:167-169`, `modules/agents/factory/agent_factory.py:511-513` **[T]** | Whether a Bedrock model is offered at all with no key is not known **[?]**. |
+| Bedrock, provider and region | Agents store Bedrock as `bedrock` or `aws_bedrock`. Activation checks the stored name against the provider enum and sends any name the enum does not hold to OpenRouter. The client takes its region from `base_url`: agent creation sets `AWS_REGION`; activation and the spoken model set none, so the client's default applies; the settings path takes the stored credential's region. | `modules/agents/factory/agent_factory.py:513`, `:936-944`, `:993`; `consumers/chatbot/spoken_model.py:139-144`; `core/llm/manager.py:560-561`; `core/llm/clients/bedrock_client.py:63` **[T]** | US-105 makes both names reach Bedrock on every path, in `AWS_REGION` on the install's role. |
 | SDK services in the image | The image keeps six: `s3`, `s3vectors`, `bedrock-runtime`, `sts`, `sso`, `sso-oidc`. A test requires every client to name one of them. | `orchestrator/tests/test_prd262_botocore_services.py` **[T]** | Embeddings through `bedrock-runtime` need nothing new. |
 | Redis, main client | Built from a host, port, password and database number. `get_redis_client()` parses `REDIS_URL` and keeps only those four. The scheme is never read. | `core/redis/client.py:26-44`, `:180-192` **[T]** | `rediss://` is treated as `redis://`. The connection is plain. A user name in the address is dropped. |
 | Redis, other clients | The async publish and subscribe client and the chat-turns client are built from the same four fields. The task queue builds two more from `REDIS_HOST`, `REDIS_PORT` and `REDIS_PASSWORD`, and ignores `REDIS_URL`. Two clients pass the whole address to `from_url` and do honour `rediss://`. A third does the same and falls back to the host fields. | `core/redis/client.py:62-82`, `services/chat_turns.py:93-110`, `core/task_runner/queued.py:109-135`, `modules/context/adapters/redis_context.py:37-50`, `modules/intake/progress.py:103`, `services/workspace-worker/main.py:101` **[T]** | TLS works only where the whole address is passed through. |
@@ -48,7 +49,7 @@ Core is close. Its storage client already uses the pod's role when no key is set
 | Uploads, the other path | Mission uploads already go to object storage, and the row's `file_path` becomes `s3://bucket/key`. Downloads and reprocessing already understand that form. | `modules/rag/ingestion/manager.py:622-645`, `:715-717`; `api/missions.py:1006`; `services/document_downloads.py:50-63`; `api/documents.py:827-841` **[T]** | The path exists. The main upload route does not use it. |
 | The API's disk in the chart | A 10 GB volume that one pod can mount, by default. The chart refuses a second API replica unless the volume's access mode lets several pods mount it. | `charts/automatos/values.yaml:66-79`, `templates/_helpers.tpl:118` **[T]** | With the default, the API is tied to one node's zone. |
 | Embedding providers | OpenAI, OpenRouter and a local Hugging Face model. Others in the enum are not built. No Bedrock. | `core/llm/embedding_manager.py:169-181`, `core/llm/clients/base.py:60-68` **[T]** | Document text leaves the account to be embedded, or a model is downloaded into the pod. |
-| Embeddings with no key | A missing key or an unset provider gives a deterministic stand-in, quietly. | `embedding_manager.py:114`, `:145` **[T]** | An index can be filled with vectors that mean nothing. `test_p2w0_embeddings_fail_loud.py` covers some of this **[?]**. |
+| Embeddings with no key | A missing key or an unset provider gives a deterministic stand-in. Since PRD-185 S3 it returns no vector: every call raises `EmbeddingUnavailableError`, and it reports itself degraded. A provider that is set but cannot be used (no key, no client built for it, a failed set-up) is given the same stand-in. | `embedding_manager.py:114`, `:145`, `:167`, `:181`; `clients/base.py:314-345` **[T]** | Nothing is written to an index from it. US-503 gives a provider that is set but cannot be used one of its own, which names it and says why on every call. `test_p2w0_embeddings_fail_loud.py` pins that the stand-in raises **[T]**. |
 | Sizes | Three settings default to 2,048: `VECTOR_STORE_DIMENSIONS`, `S3_VECTORS_DIMENSION`, `FIELD_EMBEDDING_DIM`. A longer embedding is cut to fit. Nothing checks that the model can reach the index's size. | `config.py:1604`, `:1757`, `:1808`; `modules/rag/ingestion/manager.py:1411-1420` **[T]** | A model that produces fewer dimensions than the index expects is found out at the first write. |
 
 ## 3. Goals
@@ -57,7 +58,7 @@ Core is close. Its storage client already uses the pod's role when no key is set
 - The connection to the cache is encrypted, and the connection to the database is encrypted and checked, on every code path, from one setting each.
 - An uploaded file's original lives in object storage whenever object storage is configured, so the API can run with no disk of its own.
 - Embeddings can be made on Bedrock.
-- An install whose embedding model cannot fill its index refuses to start, and says why.
+- An install on Bedrock embeddings whose index sizes disagree with its vectors refuses to start, and says why. On another provider, a model too small for an index in use is named in one warning at start.
 - The `local` and `saas` editions keep working. Where their behaviour changes, section 8 says so and asks.
 
 ## 4. Non-goals
@@ -79,8 +80,10 @@ One new setting, `AWS_USE_WORKLOAD_IDENTITY`, off by default.
 - **With it on,** object storage counts as configured, and no key pair is passed to any client.
 - **With it on and a key pair also set,** the install refuses to start. Two sources of credentials is a mistake waiting to be found.
 - **At start-up the API proves it can reach the documents bucket** with one cheap call, and fails with a message that names the bucket and the role's problem. A wrong role is then found at install, not at the first upload.
+- **Today the search index is not checked at start-up.** Core tries to create it on first use and on every search, add and delete. With `S3_VECTORS_CREATE_IF_MISSING` off, this wave adds a real start-up check of the index in a shared vector bucket. A vector bucket named per workspace is known only once a workspace uses it, so its index is still checked on first use.
 - **A Bedrock model is offered with no key.** US-103 finds whatever further up treats a missing key as "provider not set up" and makes the setting answer it.
-- **The search index can be left alone.** A second setting, `S3_VECTORS_CREATE_IF_MISSING`, on by default as today. With it off, a missing index is an error with a clear message, and core never tries to create one. An install whose role may not create an index needs it off, or it cannot start.
+- **The search index can be left alone.** A second setting, `S3_VECTORS_CREATE_IF_MISSING`, on by default as today. With it off, a missing index is an error with a clear message, and core never tries to create one. An install whose role may not create an index needs it off, or none of its searches, adds and deletes can run.
+- **A Bedrock model runs on Bedrock, in the install's region.** US-105: whichever name an agent stores for Bedrock, and whichever path builds its client, the call goes to Bedrock. A call on the install's role goes to `AWS_REGION`. A configuration with its own key keeps the region it names, and one that names no region uses `AWS_REGION`. A workspace's own Bedrock key is found under either name.
 
 ### 5.2 TLS to Redis
 
@@ -91,6 +94,7 @@ One function turns the Redis settings into connection arguments, and every clien
 - When the address is put together from `REDIS_HOST`, `REDIS_PORT` and `REDIS_PASSWORD`, a new `REDIS_TLS` setting chooses the scheme.
 - The task queue stops reading the three parts itself and uses the same function.
 - A test fails if anything in the orchestrator builds a Redis client another way, as the storage module's test already does for its clients.
+- This is stricter than `from_url`, which the shared-context adapter and the intake progress client used: the address's query string is not read, so an address cannot switch certificate checking off, and only `redis://` and `rediss://` are accepted (no `unix://`).
 
 ### 5.3 TLS to the database, checked
 
@@ -116,21 +120,29 @@ Files already on an install's disk are moved by a durable job (PRD-276), which c
 
 A fourth provider, `bedrock`, beside the three that exist, behind the same `EmbeddingManager`.
 
-- It calls `bedrock-runtime` with the same credential handling as the chat client, so it works from a role.
-- The first model is Amazon Titan Text Embeddings V2, which produces up to 1,024 dimensions **[I]**. The model is a setting, so a second can follow.
+- It calls `bedrock-runtime` with the same credential handling as the chat client, so it works from a role. The stored credential is the one the embeddings tier names, else the one Bedrock chat's tier (`orchestrator_llm`) finds, by chat's own lookup; then the operator workspace's key, the environment's key, and the role (the page lists the order).
+- The first model is Amazon Titan Text Embeddings V2 (`amazon.titan-embed-text-v2:0`), which produces 1,024 dimensions by default, or 512 or 256 **[T]** (AWS's Titan Text Embeddings pages). The model is a setting, so a second can follow. Any model ID not in the provider's table is refused at start-up, with the list.
 - **Its size is smaller than core's default.** The three size settings default to 2,048 **[T]**. An install that chooses this model sets all three to 1,024 before its first start, and section 5.6's check says so if it has not. An install that already has an index at another size cannot switch without indexing again, which section 4 leaves out.
-- A model that takes one text at a time is called with a bounded number of calls in flight, inside the existing time limits (`EMBEDDING_BATCH_TIMEOUT_S`).
+- A model that takes one text at a time is called with a bounded number of calls in flight: the caller's `max_concurrent` per batch, and 10 per process across every batch, in a pool of the provider's own so the default thread pool is never filled by them. Each call has the embedding clients' existing limits: `EMBEDDING_CONNECT_TIMEOUT_S` to connect, `EMBEDDING_QUERY_TIMEOUT_S` to read, `EMBEDDING_MAX_RETRIES` retries, and `EMBEDDING_BATCH_TIMEOUT_S` for the call with its retries, from when a thread takes it. A whole batch has no limit of its own, as OpenRouter's per-text calls have none: a document's batch is all its chunks.
+- A refusal that will not get better (access denied, a credential not recognised, expired or badly signed, a resource not found, or a request refused because the model ID is not served, in the words the chat client already matches) stops its batch, is not tried again one text at a time by ingestion, and marks Bedrock embeddings degraded until a call succeeds. Any other request refused as invalid fails that call only, as another provider's refusal of one input does; the other refusals keep today's behaviour too. The error raised carries Bedrock's code and the model ID only.
+- Text is cut before the call at the token limit counted as characters, less a margin (8,000 for Titan V2), so it holds where one character is one token. A text can still be refused; that refusal fails that text, and so its document, only.
+- The ingestion cache is keyed by the provider, the model and the size, so a vector another model made is never served after a switch.
 - No call blocks the event loop.
+- **With `EMBEDDING_PROVIDER=bedrock`, the environment wins.** A seeded install's `embeddings.provider` row says `openrouter`, and the manager reads that row before `EMBEDDING_PROVIDER` **[T]** (`embedding_manager.py:92-102`), so `bedrock` in the environment would otherwise never be seen. With Bedrock, `EMBEDDING_MODEL` and `VECTOR_STORE_DIMENSIONS` also win over the stored `model` and `dimensions`: no supported way exists to change a stored setting while the API is down, and section 5.6's refusal must be fixable then. The code index's column follows the vectors' real length with Bedrock, not the stored `dimensions`. Any other value keeps today's order.
 
 ### 5.6 Sizes that agree
 
-At start-up, when a real embedding provider is set:
+At start-up, each worker compares the provider's vectors with each index that is in use:
 
-- If the model cannot produce at least as many dimensions as the index expects, the install refuses to start and names the two settings.
-- Cutting a longer embedding down to the index's size stays as it is. That is how the current default model is used **[T]**.
-- The same check covers the memory store's size (`FIELD_EMBEDDING_DIM`).
+- `S3_VECTORS_DIMENSION` when S3 Vectors is on; `FIELD_EMBEDDING_DIM` when the memory store answers within 3 seconds (its address has a default, so a set address is no sign it is in use), asked only when its size disagrees.
+- **With Bedrock, the install refuses to start** when an index in use expects another size than the vectors have (`VECTOR_STORE_DIMENSIONS`, or the model's largest size when that is smaller). The message names each such setting and its value, the model's size, the value to set in the environment and which setting wins over which, and points to the page. Bedrock is new, so no running install is stopped by it.
+- **Any other provider never refuses.** A known model smaller than an index in use gives one warning naming the settings and both numbers, and the install starts, as it does today: refusing would stop installs that start and work now, for instance a 1,536-dimension model storing in the database with neither index in use.
+- The size the vectors are cut to is not compared on its own: with Bedrock no store is made at that size (the vectors report their real length, which ingestion and the code index follow).
+- Cutting a longer embedding down to the configured size stays as it is. That is how the current default model is used **[T]**.
+- The model's size comes from a table (Bedrock's, OpenRouter's, OpenAI's), never from a probe text. A model no table holds is not checked, and one log line says so. A stored size that is not a number never stops a start: it is logged once and `VECTOR_STORE_DIMENSIONS` is used.
+- It runs after `_boot_core` and before the server listens, the settings read in a worker thread. With Bedrock it reads only the environment, so every worker and replica sees the same. With another provider it reads the seeded `embeddings` settings; a replica that starts before the boot leader has seeded them reads the environment, and can only warn.
 
-And one rule for a real index: when a provider is set and cannot be used, embedding fails. The deterministic stand-in is for an install with no provider at all, never a fallback for a broken one.
+And one rule for a real index: when a provider is set and cannot be used, embedding fails. The deterministic stand-in is for an install with no provider at all, never a fallback for a broken one. A provider that is set and cannot be used is replaced by one that names it and says why on every call; it still reports itself degraded, so readiness and the memory surfaces say what they say today.
 
 ### 5.7 Settings
 
@@ -141,7 +153,7 @@ And one rule for a real index: when a provider is set and cannot be used, embedd
 | `REDIS_TLS` | off | Used only when the address is built from host, port and password. |
 | `DATABASE_SSLMODE` | unset | Unset keeps today's behaviour. |
 | `DATABASE_SSLROOTCERT` | unset | Path to a CA file. |
-| `EMBEDDING_PROVIDER=bedrock` | | With `EMBEDDING_MODEL` naming the Bedrock model. |
+| `EMBEDDING_PROVIDER=bedrock` | | With `EMBEDDING_MODEL` naming the Bedrock model (unset: Titan Text Embeddings V2). With Bedrock, it, `EMBEDDING_MODEL` and `VECTOR_STORE_DIMENSIONS` win over the stored `embeddings` `provider`, `model` and `dimensions`. Existing settings: Wave 5 adds none. |
 
 Each is read through `config.py` and added to `orchestrator/reports/config-surface.json`.
 
@@ -155,39 +167,49 @@ Each wave is one pull request or a short series. CI is the only gate: nothing he
 **Description:** As an operator, I want to tell core to use the pod's own role, so that I store no cloud key.
 
 **Acceptance Criteria:**
-- [ ] `AWS_USE_WORKLOAD_IDENTITY` exists in `config.py` and in `config-surface.json`.
-- [ ] With it on and no key pair, `is_storage_configured()` is true and a client is built with no key arguments.
-- [ ] With it on and a key pair set, start-up fails with a message naming both.
-- [ ] With it off, every existing shape in `test_is_storage_configured_shapes` behaves as today.
-- [ ] `ruff check` and the backend test lanes pass in CI.
+- [x] `AWS_USE_WORKLOAD_IDENTITY` exists in `config.py` and in `config-surface.json`.
+- [x] With it on and no key pair, `is_storage_configured()` is true and a client is built with no key arguments.
+- [x] With it on and a key pair set, start-up fails with a message naming both.
+- [x] With it off, every existing shape in `test_is_storage_configured_shapes` behaves as today.
+- [ ] `ruff check` and the backend test lanes pass in CI. Open until CI shows it.
 
 #### US-102: Proving the role at start-up · S
 **Description:** As an operator, I want a wrong role found when the install starts, so that the first upload is not how I learn about it.
 
 **Acceptance Criteria:**
-- [ ] With the setting on, start-up makes one cheap call to the documents bucket.
-- [ ] A refusal fails start-up with a message that names the bucket and the kind of failure, and quotes no credential.
-- [ ] The call runs off the event loop and has a short time limit.
-- [ ] With the setting off, no call is made.
+- [x] With the setting on, start-up makes one cheap call to the documents bucket.
+- [x] A refusal fails start-up with a message that names the bucket and the kind of failure, and quotes no credential.
+- [x] The call runs off the event loop and has a short time limit.
+- [x] With the setting off, no call is made.
 
 #### US-103: Bedrock with no key · M
 **Description:** As an operator, I want Bedrock models offered and usable from the pod's role, so that the default model path needs no key either.
 
 **Acceptance Criteria:**
-- [ ] The pull request states what, above the client, treats a missing key as "not set up", with file and line.
-- [ ] With the setting on and no key, a Bedrock model resolves and the client is built on the role branch.
-- [ ] With the setting off, behaviour is unchanged.
-- [ ] `test_1170_bedrock_converse.py` passes, with a new case for the role path.
+- [ ] The pull request states what, above the client, treats a missing key as "not set up", with file and line. Open until the pull request is written.
+- [x] With the setting on and no key, a Bedrock model resolves and the client is built on the role branch.
+- [x] With the setting off, behaviour is unchanged.
+- [ ] `test_1170_bedrock_converse.py` passes, with a new case for the role path. The case is added; open until CI shows it passing.
 
 #### US-104: An index core does not create · S
 **Description:** As an operator who creates the search index myself, with my own key, I want core never to create one, so that a mistake in my setup is an error and not a second, unencrypted index.
 
 **Acceptance Criteria:**
-- [ ] `S3_VECTORS_CREATE_IF_MISSING` exists, on by default.
-- [ ] With it off and no index, start-up fails with a message naming the bucket and index it looked for.
-- [ ] With it off, no create call is ever made. A test asserts it.
-- [ ] With it off and a role that is refused both create calls, core starts against a bucket and an index that exist.
-- [ ] The existing size check is unchanged.
+- [x] `S3_VECTORS_CREATE_IF_MISSING` exists, on by default.
+- [ ] With it off and no index, start-up fails with a message naming the bucket and index it looked for. Delivered for a shared vector bucket. Open for a bucket named per workspace: its index is checked on that workspace's first use, and a missing one fails that call with the same message.
+- [x] With it off, no create call is ever made. A test asserts it.
+- [x] With it off and a role that is refused both create calls, core starts against a bucket and an index that exist.
+- [x] The existing size check is unchanged.
+
+#### US-105: A Bedrock model is called on Bedrock, in the install's region · M
+**Description:** As an operator who runs models on Bedrock in my own account, I want every Bedrock agent called on Bedrock, in the install's region, so that its calls stay in that account and region whichever path makes them.
+
+**Acceptance Criteria:**
+- [x] With `AWS_USE_WORKLOAD_IDENTITY` on, an agent stored as `bedrock` or `aws_bedrock` is called on Bedrock in chat, in agent creation and in the spoken model.
+- [x] On every path, a call on the install's role is in `AWS_REGION`; a configuration with its own key keeps the region it names, and uses `AWS_REGION` when it names none.
+- [x] A Bedrock tier with no key uses the role and is never rerouted to another provider.
+- [x] With the setting off, today's behaviour is unchanged, and a test pins it.
+- [ ] The pull request states what main does today, with file and line. Open until the pull request is written.
 
 ### Wave 2: TLS to Redis
 
@@ -195,21 +217,21 @@ Each wave is one pull request or a short series. CI is the only gate: nothing he
 **Description:** As a developer, I want one function that turns the settings into connection arguments, so that TLS is decided in one place.
 
 **Acceptance Criteria:**
-- [ ] One function returns the arguments for a sync client, an async client and a pool.
-- [ ] `rediss://` gives TLS with certificate checking on. `redis://` gives none.
-- [ ] A user name in the address is kept.
-- [ ] `REDIS_TLS` exists and chooses the scheme when the address is built from its parts.
-- [ ] Unit tests cover each scheme, with and without a user name and a password.
+- [x] One function returns the arguments for a sync client, an async client and a pool.
+- [x] `rediss://` gives TLS with certificate checking on. `redis://` gives none.
+- [x] A user name in the address is kept.
+- [x] `REDIS_TLS` exists and chooses the scheme when the address is built from its parts.
+- [x] Unit tests cover each scheme, with and without a user name and a password.
 
 #### US-202: Every client through it · M
 **Description:** As an operator, I want every Redis connection core opens to honour TLS, so that a managed Redis that requires it works.
 
 **Acceptance Criteria:**
-- [ ] The main pool, the async publish and subscribe client, `chat_turns` and the task queue are all built from US-201's function.
-- [ ] The task queue no longer reads `REDIS_HOST`, `REDIS_PORT` or `REDIS_PASSWORD` itself.
-- [ ] A test fails if any file in the orchestrator outside that module constructs a Redis client or pool directly. A connection made to test a user's own saved Redis credential is not covered.
+- [x] The main pool, the async publish and subscribe client, `chat_turns` and the task queue are all built from US-201's function.
+- [x] The task queue no longer reads `REDIS_HOST`, `REDIS_PORT` or `REDIS_PASSWORD` itself.
+- [x] A test fails if any file in the orchestrator outside that module constructs a Redis client or pool directly. A connection made to test a user's own saved Redis credential is not covered.
 - [ ] `test_redis_client_timeouts.py` passes with its timeouts unchanged.
-- [ ] The chart's documented example address is unchanged for `local`, and a TLS example is added.
+- [x] The chart's documented example address is unchanged for `local`, and a TLS example is added.
 
 ### Wave 3: TLS to the database, checked
 
@@ -300,29 +322,29 @@ Each wave is one pull request or a short series. CI is the only gate: nothing he
 **Description:** As an operator, I want embeddings made on Bedrock, so that document text does not leave my account.
 
 **Acceptance Criteria:**
-- [ ] `EMBEDDING_PROVIDER=bedrock` selects a provider that calls `bedrock-runtime`.
-- [ ] It works from the pod's role and from a key, through the chat client's existing credential handling.
-- [ ] It reports its dimension, and `get_dimension()` returns it.
-- [ ] A page lists, for each supported Bedrock model, the value the three size settings must have.
-- [ ] A batch is embedded with a bounded number of calls in flight, inside the existing time limits.
-- [ ] No call runs on the event loop.
-- [ ] `test_prd262_botocore_services.py` passes unchanged.
+- [x] `EMBEDDING_PROVIDER=bedrock` selects a provider that calls `bedrock-runtime`.
+- [ ] It works from the pod's role and from a key, through the chat client's existing credential handling. The request is built and signed on both, by the chat client's settings-tier read and its `runtime_client`, with the same arguments chat gets (tests stop it before it is sent). That Bedrock answers it needs a real call to the model service, which no test here makes.
+- [x] It reports its dimension, and `get_dimension()` returns it.
+- [x] A page lists, for each supported Bedrock model, the value the three size settings must have (`docs/deployment-infrastructure/bedrock-embeddings.md`).
+- [x] A batch is embedded with a bounded number of calls in flight, inside the existing time limits.
+- [x] No call runs on the event loop.
+- [ ] `test_prd262_botocore_services.py` passes unchanged. It is not changed, and the provider builds its client through `runtime_client`, so no new client call is added; open until CI shows it.
 
 #### US-502: Sizes that agree, or no start · M
 **Description:** As an operator, I want a mismatch between my embedding model and my index found at start-up, so that I do not find it in a failed write.
 
 **Acceptance Criteria:**
-- [ ] With a real provider set, start-up fails when the model's dimension is smaller than `S3_VECTORS_DIMENSION` or `FIELD_EMBEDDING_DIM`, and the message names the settings, both numbers and the value to set.
-- [ ] A model that produces more dimensions than the index still starts, and is cut to fit as today.
-- [ ] The current default configuration starts unchanged. A test pins it.
+- [x] With Bedrock set, start-up fails when an index in use (`S3_VECTORS_DIMENSION` with S3 Vectors on, `FIELD_EMBEDDING_DIM` with the memory store answering) expects another size than its vectors have, and the message names the settings, both numbers, the value to set in the environment and which setting wins. With any other provider set, a known model smaller than an index in use writes one warning with the same facts, and the install starts (section 5.6; open question 5).
+- [x] A model that produces more dimensions than the index still starts, and is cut to fit as today.
+- [x] The current default configuration starts unchanged. A test pins it.
 
 #### US-503: No stand-in vectors in a real index · S
 **Description:** As an operator, I want embedding to fail when my provider is broken, so that my index is never filled with vectors that mean nothing.
 
 **Acceptance Criteria:**
-- [ ] With a provider set and unusable, an embedding call raises. It does not return the deterministic stand-in.
-- [ ] With no provider set at all, the stand-in behaves as today.
-- [ ] The pull request says what `test_p2w0_embeddings_fail_loud.py` already covered and what this adds.
+- [x] With a provider set and unusable, an embedding call raises. It does not return the deterministic stand-in.
+- [x] With no provider set at all, the stand-in behaves as today.
+- [ ] The pull request says what `test_p2w0_embeddings_fail_loud.py` already covered and what this adds. Open until the pull request is written.
 
 ## 7. Functional requirements
 
@@ -336,9 +358,10 @@ Each wave is one pull request or a short series. CI is the only gate: nothing he
 - FR-8: With object storage configured, an upload's original must be stored there and its row must say so.
 - FR-9: With object storage configured, the API must keep nothing on local disk that has to survive a restart.
 - FR-10: `EMBEDDING_PROVIDER=bedrock` must produce embeddings through `bedrock-runtime`.
-- FR-11: An install must refuse to start when its embedding model produces fewer dimensions than an index expects.
+- FR-11: An install on Bedrock embeddings must refuse to start when an index in use expects another size than its vectors have. An install on another provider must start, with one warning, when its model produces fewer dimensions than an index in use expects.
 - FR-12: A provider that is set and unusable must raise, never fall back to stand-in vectors.
 - FR-13: With none of the new settings set, the `local` edition must behave as it does today.
+- FR-14: With `AWS_USE_WORKLOAD_IDENTITY` on, an agent whose provider is Bedrock, under either stored name, must be called on Bedrock on every path, with the workspace's own Bedrock key found under either name. A call on the install's role must go to `AWS_REGION`; a configuration with its own key must keep the region it names, and use `AWS_REGION` when it names none. A Bedrock tier with no key must use the role, never another provider, and a Bedrock agent with no usable key must fail with a clear error rather than run on the role or on another provider.
 
 ## 8. Decisions for Gerard
 
@@ -383,6 +406,8 @@ Each has a recommendation, which stands unless he changes it.
 ## 12. Open questions
 
 1. **What else, above the Bedrock client, needs a key to be present?** US-103 finds out.
-2. **Does every caller reach embeddings through `EmbeddingManager`?** `services/ai_providers.py:241-245` reads the provider setting on its own **[T]**.
+2. **Does every caller reach embeddings through `EmbeddingManager`?** Every embedding call found does **[T]**. `services/ai_providers.py` read the provider setting on its own; since Wave 5 it asks the manager's read (`configured_provider`), so the consent list names AWS Bedrock when Bedrock embeds. The ingestion processor and pipeline accept an `embedding_generator` that no caller passes (`modules/rag/ingestion/processor.py:253`, `pipeline.py:348`).
 3. **How long does moving an install's existing files take,** and does it need a quiet period?
 4. **Which Bedrock embedding models are offered in the regions the first installs will use?**
+5. **Should a size mismatch stop the start for every provider?** US-502 says "with a real provider set". Wave 5 refuses for Bedrock only and warns for the others, because refusing for them would stop installs that start and work today (a 1,536-dimension model with the default sizes, storing in the database with neither index in use). The owner decides whether, and when, the others refuse too.
+6. **The settings card.** With the environment choosing Bedrock, Settings → System Settings → Embeddings still shows the stored provider, model and size, which are not in use. The API's own answers about the provider in use (the consent list, the provider registry's `embeddings` flag, readiness, memory health) are truthful; the card is UI work the owner decides on.

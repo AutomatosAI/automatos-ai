@@ -271,48 +271,57 @@ def _get_available_providers(db: Session, workspace_id) -> set:
 
     Checks: 1) BYOK keys (UserApiKey), 2) the credential store (platform keys),
     3) the operator's env keys where a platform key is allowed in this edition
-    (the local edition's .env). Never the key values — presence only.
+    (the local edition's .env), or the pod's own role for Bedrock with
+    AWS_USE_WORKLOAD_IDENTITY on (PRD-278 US-103). Never the key values — presence only.
     """
-    available: set = set()
+    available = _byok_providers(db, workspace_id)
+    available = available | _stored_platform_providers(available)
+    return available | {
+        provider for provider in registry.platform_key_slugs()
+        if provider not in available
+        and (registry.env_api_key(provider) or registry.runs_on_workload_identity(provider))
+    }
 
-    if workspace_id:
-        try:
-            from core.models.core import UserApiKey
-            byok_providers = (
-                db.query(UserApiKey.provider)
-                .filter(
-                    UserApiKey.workspace_id == workspace_id,
-                    UserApiKey.is_active == True,
-                )
-                .distinct()
-                .all()
-            )
-            available.update(p[0] for p in byok_providers)
-        except Exception:
-            pass  # table may not exist yet
 
+def _byok_providers(db: Session, workspace_id) -> set:
+    """1) Providers with an active BYOK key in the workspace; none without a workspace."""
+    if not workspace_id:
+        return set()
+    try:
+        from core.models.core import UserApiKey
+        rows = (
+            db.query(UserApiKey.provider)
+            .filter(UserApiKey.workspace_id == workspace_id, UserApiKey.is_active == True)
+            .distinct()
+            .all()
+        )
+    except Exception:  # noqa: BLE001 - the table may not exist yet: no BYOK providers, as before
+        return set()
+    return {row[0] for row in rows}
+
+
+def _stored_platform_providers(found: set) -> set:
+    """2) Platform-key providers not in ``found`` with a key in the credential store."""
     try:
         from core.credentials.resolver import get_credential_resolver
         resolver = get_credential_resolver()
-        for provider in registry.platform_key_slugs():
-            if provider in available:
-                continue
-            for variation in [f"{provider}_api", provider]:
-                try:
-                    key = resolver.get_credential_field(variation, "api_key")
-                    if key:
-                        available.add(provider)
-                        break
-                except Exception:
-                    continue
-    except Exception:
-        pass
+    except Exception:  # noqa: BLE001 - no credential store: no stored keys, as before
+        return set()
+    return {
+        provider for provider in registry.platform_key_slugs()
+        if provider not in found and _has_stored_key(resolver, provider)
+    }
 
-    for provider in registry.platform_key_slugs():
-        if provider not in available and registry.env_api_key(provider):
-            available.add(provider)
 
-    return available
+def _has_stored_key(resolver, provider: str) -> bool:
+    """Does the credential store hold an api_key for ``provider`` under either of its names?"""
+    for variation in (f"{provider}_api", provider):
+        try:
+            if resolver.get_credential_field(variation, "api_key"):
+                return True
+        except Exception:  # noqa: BLE001 - a missing credential is the next name's turn, as before
+            continue
+    return False
 
 
 def _get_installed_ids(db: Session, workspace_id) -> set:

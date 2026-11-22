@@ -1,15 +1,18 @@
 """PRD-277 Wave 2 (US-201, US-203): prd277_w2_identities_20261120, the wave's one migration.
 
 * The revision chains onto ``merge_heads_20261117``, and Wave 3's revision chains onto it.
-* Its upgrade creates ``user_identities`` and its two indexes and adds the nullable
-  ``users.system_role`` with its CHECK, each only when missing and the CHECK ``NOT VALID`` (no
-  scan of ``users``), writing no row; its downgrade drops exactly those.
+* Its upgrade bounds its lock waits with ``SET LOCAL lock_timeout``, adds the nullable
+  ``users.system_role`` with its CHECK first (the strongest lock on ``users`` is the first one
+  taken), then creates ``user_identities`` and its two indexes, each only when missing and the
+  CHECK ``NOT VALID`` (no scan of ``users``), writing no row, and puts back the lock_timeout it
+  found; its downgrade drops exactly those.
 * The model (``core.models.user_identities``) and the DDL declare the same names, sizes and CHECK,
   and the stored roles are the policy plane's three install-wide roles.
 * On Postgres, in a new empty schema inside a rolled-back transaction: the upgrade over tables
   ``create_all`` built changes nothing, twice (its CHECK stays validated, so it was not added
   again); the migration builds what ``create_all`` builds, its CHECK added ``NOT VALID``;
-  the downgrade keeps every person; an unknown role and a second link for one pair are refused.
+  the upgrade leaves the transaction's lock_timeout as it found it; the downgrade keeps every
+  person; an unknown role and a second link for one pair are refused.
 """
 from __future__ import annotations
 
@@ -109,11 +112,25 @@ def test_the_revision_chains_onto_the_merge_and_wave_3_chains_onto_it():
     assert f'(versions / "{REVISION}.py")' in chain and f'down_revision = "{PARENT}"' in chain
 
 
-def test_the_upgrade_builds_the_table_indexes_and_column_and_writes_no_row():
+def test_the_upgrade_bounds_its_lock_waits_takes_users_first_and_writes_no_row():
     constants = _constants()
+    module = _load()
     upgrade = _statements("upgrade")
-    assert upgrade == [constants["_TABLE"], *constants["_INDEXES"], constants["_SYSTEM_ROLE"]]
-    assert upgrade[0].strip().startswith(f"CREATE TABLE IF NOT EXISTS {TABLE} (")
+    assert upgrade == [
+        *module._BOUND_LOCK_WAIT, constants["_SYSTEM_ROLE"], constants["_TABLE"], *constants["_INDEXES"],
+        module._RESTORE_LOCK_WAIT,
+    ]
+    saved, lock_timeout = module._BOUND_LOCK_WAIT
+    assert saved == f"SELECT set_config('{module._SAVED_LOCK_TIMEOUT}', current_setting('lock_timeout'), true);"
+    assert lock_timeout == f"SET LOCAL lock_timeout = '{constants['_LOCK_TIMEOUT']}';"
+    assert re.fullmatch(r"[1-9]s", constants["_LOCK_TIMEOUT"]), "a few seconds, no more"
+    assert module._RESTORE_LOCK_WAIT == (
+        f"SELECT set_config('lock_timeout', current_setting('{module._SAVED_LOCK_TIMEOUT}'), true);"
+    )
+    users_first = upgrade.index(constants["_SYSTEM_ROLE"])
+    assert users_first < upgrade.index(constants["_TABLE"]), "users' ACCESS EXCLUSIVE before the key's lock"
+    assert upgrade.index(lock_timeout) < users_first
+    assert upgrade[users_first + 1].strip().startswith(f"CREATE TABLE IF NOT EXISTS {TABLE} (")
     assert constants["_INDEXES"] == (
         f"CREATE UNIQUE INDEX IF NOT EXISTS {IDENTITY_PAIR_INDEX} ON {TABLE} (issuer, subject);",
         f"CREATE INDEX IF NOT EXISTS {IDENTITY_USER_INDEX} ON {TABLE} (user_id);",
@@ -260,6 +277,13 @@ def test_the_migration_builds_what_create_all_builds_with_its_check_not_valid(pg
     with pytest.raises(IntegrityError):
         with pg.begin_nested():
             pg.execute(sa.text("UPDATE users SET system_role = 'owner' WHERE id = :id"), {"id": person})
+
+
+def test_the_upgrade_puts_back_the_lock_timeout_it_found(pg):
+    _create_all(pg)
+    pg.execute(sa.text("SET LOCAL lock_timeout = '7s'"))                 # not the migration's own value
+    _run(pg)
+    assert pg.execute(sa.text("SHOW lock_timeout")).scalar_one() == "7s"
 
 
 def _person(conn, label: str) -> int:
