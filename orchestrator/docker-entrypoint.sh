@@ -78,6 +78,11 @@ require_database_settings() {
 # The CA must be a file: the Python steps after this one check that it holds a certificate.
 DB_TLS_SSLMODE=""
 DB_TLS_SSLROOTCERT=""
+# libpq uses GSSAPI encryption, where Kerberos credentials allow it, in preference to TLS
+# whatever sslmode says, and then checks no certificate. With a mode that requires TLS,
+# PGGSSENCMODE turns it off, so the mode set is the one in force (core/database/tls.py).
+DB_TLS_GSSENCMODE=""
+NO_GSS_ENCRYPTION="disable"
 
 trim() {
     local value="$1"
@@ -112,6 +117,9 @@ read_database_tls() {
                 ;;
         esac
     fi
+    case "$DB_TLS_SSLMODE" in
+        require|verify-ca|verify-full) DB_TLS_GSSENCMODE="$NO_GSS_ENCRYPTION" ;;
+    esac
 }
 
 # With DATABASE_SSLMODE set, libpq_url drops the address's own TLS keys by their plain
@@ -139,14 +147,15 @@ require_plain_query_names() {
 # suffix (postgresql+psycopg2://, postgresql+asyncpg://), which the app accepts
 # but pg_isready and psql reject. With DATABASE_SSLMODE set, the address's own keys that
 # libpq turns into sslmode or sslrootcert are dropped too: sslmode, sslrootcert, and
-# requiressl and ssl, which libpq translates to sslmode. libpq prefers the connection
-# string to PGSSLMODE and PGSSLROOTCERT, and the settings win here as they do in the app.
-# Neither set: the address is passed as given.
+# requiressl and ssl, which libpq translates to sslmode, and gssencmode when PGGSSENCMODE is
+# set. libpq prefers the connection string to PGSSLMODE, PGSSLROOTCERT and PGGSSENCMODE, and
+# the settings win here as they do in the app. Neither set: the address is passed as given.
 libpq_url() {
-    local url
+    local url keys="sslmode|sslrootcert|requiressl|ssl"
     url="$(printf '%s' "$DATABASE_URL" | sed -E 's#^(postgres(ql)?)\+[A-Za-z0-9_]+://#\1://#')"
+    [ -z "$DB_TLS_GSSENCMODE" ] || keys="$keys|gssencmode"
     if [ -n "$DB_TLS_SSLMODE" ]; then
-        url="$(printf '%s' "$url" | sed -E -e ':strip' -e 's/([?&])(sslmode|sslrootcert|requiressl|ssl)=[^&]*(&|$)/\1/' -e 't strip' -e 's/[?&]$//')"
+        url="$(printf '%s' "$url" | sed -E -e ':strip' -e "s/([?&])($keys)=[^&]*(&|\$)/\1/" -e 't strip' -e 's/[?&]$//')"
     fi
     printf '%s' "$url"
 }
@@ -161,6 +170,9 @@ with_database_tls() {
         fi
         if [ -n "$DB_TLS_SSLROOTCERT" ]; then
             export PGSSLROOTCERT="$DB_TLS_SSLROOTCERT"
+        fi
+        if [ -n "$DB_TLS_GSSENCMODE" ]; then
+            export PGGSSENCMODE="$DB_TLS_GSSENCMODE"
         fi
         "$@"
     )

@@ -19,13 +19,23 @@ Two settings, read through ``config``:
   (``without_sslmode_aliases``, ``with_libpq_params``). An address handed to
   ``psycopg2.connect`` as its DSN needs nothing: psycopg2 parses it with libpq, which folds
   both into ``sslmode``, before the keywords replace it.
+  A mode that requires TLS (``TLS_REQUIRING_MODES``) also gives libpq ``gssencmode=disable``
+  (``NO_GSS_ENCRYPTION``): libpq uses GSSAPI encryption, where Kerberos credentials allow it, in
+  preference to TLS whatever ``sslmode`` says, and would then check no certificate. So a mode
+  that requires TLS is the one in force. The keyword replaces a ``gssencmode`` in the address or
+  the caller's dict on every path above, as ``sslmode`` does. ``disable``, ``allow`` and
+  ``prefer`` require no TLS and get no ``gssencmode``: GSSAPI encryption defeats nothing they
+  ask for, and turning it off could leave a connection unencrypted.
 * **asyncpg** (``asyncpg_kwargs``): the ``ssl`` argument, which wins over an ``sslmode`` in
   the address. asyncpg takes no ``sslrootcert`` keyword, so with a CA file it is given an
   ``ssl.SSLContext`` that trusts only that file, requires the certificate, and checks the
   host name for ``verify-full``. A mode that checks no certificate is given as text, which asyncpg
   applies the way libpq does.
+* **asyncpg** never negotiates GSSAPI encryption (it sends only an SSLRequest, and refuses GSSAPI
+  authentication), so it needs no ``gssencmode`` and takes none.
 * **libpq's tools** (``pg_isready``, ``psql``): ``PGSSLMODE`` and ``PGSSLROOTCERT``, which
-  ``docker-entrypoint.sh`` sets from the same two settings on those commands only.
+  ``docker-entrypoint.sh`` sets from the same two settings on those commands only, with
+  ``PGGSSENCMODE=disable`` for a mode that requires TLS.
 
 With neither setting, nothing is added to any connection, so each connects as it did
 before the settings existed. The main engine keeps its own default: in production,
@@ -50,6 +60,7 @@ import ssl
 import stat
 from dataclasses import dataclass
 from functools import lru_cache
+from types import MappingProxyType
 from typing import Any, Dict, Mapping, Optional, Tuple, Union
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
@@ -61,6 +72,10 @@ from config import config
 SSLMODES = ("disable", "allow", "prefer", "require", "verify-ca", "verify-full")
 CERTIFICATE_CHECKING_MODES = frozenset({"verify-ca", "verify-full"})
 SERVER_VERIFYING_MODE = "verify-full"
+# The modes that refuse a connection without TLS. With one of them, libpq is also told not to
+# use GSSAPI encryption, which it would otherwise prefer to TLS whatever sslmode says.
+TLS_REQUIRING_MODES = frozenset({"require", "verify-ca", "verify-full"})
+NO_GSS_ENCRYPTION = MappingProxyType({"gssencmode": "disable"})
 # The main engine's own default, unchanged: in production, encrypted when the address names
 # no sslmode. It applies only while DATABASE_SSLMODE is unset.
 PRODUCTION_ENVIRONMENT = "production"
@@ -114,20 +129,31 @@ class DatabaseTLS:
         """
         return self.sslmode == SERVER_VERIFYING_MODE
 
+    @property
+    def requires_tls(self) -> bool:
+        """True for a mode that refuses a connection without TLS (``TLS_REQUIRING_MODES``)."""
+        return self.sslmode in TLS_REQUIRING_MODES
+
     def libpq_params(self) -> Dict[str, str]:
-        """The keywords for ``psycopg2.connect`` and for SQLAlchemy's ``connect_args``."""
+        """The keywords for ``psycopg2.connect`` and for SQLAlchemy's ``connect_args``.
+
+        A mode that requires TLS also carries ``NO_GSS_ENCRYPTION`` (see the module docstring).
+        """
         params: Dict[str, str] = {}
         if self.sslmode:
             params["sslmode"] = self.sslmode
         if self.sslrootcert:
             params["sslrootcert"] = self.sslrootcert
+        if self.requires_tls:
+            params.update(NO_GSS_ENCRYPTION)
         return params
 
     def with_libpq_params(self, params: Mapping[str, Any]) -> Dict[str, Any]:
         """A copy of a psycopg2 keyword dict with these settings over it.
 
         With the mode set, ``SSLMODE_ALIASES`` are left out of the copy, so libpq sees the
-        setting's ``sslmode`` and nothing it would read as another. Unset: a plain copy.
+        setting's ``sslmode`` and nothing it would read as another, and the settings' keywords
+        (``gssencmode`` among them) replace the dict's own. Unset: a plain copy.
         """
         if not self.configured:
             return {**params}
