@@ -40,7 +40,7 @@ import logging
 import time
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from config import config
 
@@ -243,15 +243,27 @@ class BedrockEmbeddingProvider(BaseEmbeddingProvider):
         """Embed ``texts`` in order, at most ``max_concurrent`` at a time (and ``CALLS_IN_FLIGHT``
         in the process). An empty or whitespace-only text refuses the batch before any call. A
         refusal that will not get better cancels the calls not yet made and raises; any other
-        error raises as the manager's batch raised it, its siblings left to finish."""
+        error raises as the manager's batch raised it, its siblings left to finish.
+
+        The batch remembers its own refusal: a text that gets its turn after it is not sent,
+        whatever a sibling already in flight then answers. The shared hold alone cannot promise
+        that, because the next success clears it."""
         blank = [i for i, text in enumerate(texts) if is_blank(text)]
         if blank:
             raise ValueError(f"Bedrock cannot embed an empty or whitespace-only text (positions {blank[:5]})")
         gate = asyncio.Semaphore(max_concurrent)
+        refused: Optional[EmbeddingUnavailableError] = None
 
         async def one(text: str) -> List[float]:
+            nonlocal refused
             async with gate:
-                return await self.generate_embedding(text)
+                if refused is not None:
+                    raise refused
+                try:
+                    return await self.generate_embedding(text)
+                except EmbeddingUnavailableError as error:
+                    refused = refused or error
+                    raise
 
         tasks = [asyncio.ensure_future(one(text)) for text in texts]
         try:
