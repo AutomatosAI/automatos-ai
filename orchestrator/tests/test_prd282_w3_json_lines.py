@@ -187,7 +187,7 @@ relay = next(h for h in root.handlers if isinstance(h, LogRelayHandler))
 console = next(h for h in root.handlers if not isinstance(h, LogRelayHandler))
 assert isinstance(console.formatter, JsonLineFormatter), console.formatter
 assert type(relay.formatter) is logging.Formatter and '[req=%(request_id)s' in relay.formatter._fmt
-record = logging.LogRecord('prd282.app', logging.INFO, __file__, 1, 'shipped', (), None)
+record = logging.LogRecord('prd282.app', logging.INFO, 'prd282_app.py', 1, 'shipped', (), None)
 for f in relay.filters:
     f.filter(record)
 entry = relay._format_entry(record)

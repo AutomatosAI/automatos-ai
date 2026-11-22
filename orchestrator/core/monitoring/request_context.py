@@ -1,8 +1,9 @@
 """PRD-282 US-301: the request's id, method, path and workspace, held for every line it writes.
 
 ``RequestContextMiddleware`` replaces main.py's ``add_request_id_middleware``, a
-``BaseHTTPMiddleware`` that set the same context variables. main.py registers it last, so
-it is the outermost of the app's own middleware, and it is plain ASGI, for one reason:
+``BaseHTTPMiddleware`` that set the same context variables. main.py registers it last, after
+the metrics middleware too, so it is the outermost of the app's own middleware, and it is
+plain ASGI, for one reason:
 uvicorn writes a request's access line when the response starts, in the request's own task.
 A ``BaseHTTPMiddleware`` runs the rest of the app in a task of its own, so what it sets is
 never seen outside it: not by the middleware around it, not by uvicorn's access line. Set
@@ -45,12 +46,10 @@ def _workspace(headers: Headers) -> str:
 
 
 def _hold(scope: Message, headers: Headers, request_id: str) -> List[Tuple[ContextVar, Token]]:
-    """Set the request's context variables; the tokens put each back."""
+    """Set the request's context variables; the tokens put each back. All four are set every
+    time: a request that names no workspace holds none, whatever the context around it held."""
     values = [(request_id_var, request_id), (http_method_var, scope["method"]),
-              (http_path_var, URL(scope=scope).path)]
-    workspace = _workspace(headers)
-    if workspace:
-        values.append((workspace_id_var, workspace))
+              (http_path_var, URL(scope=scope).path), (workspace_id_var, _workspace(headers))]
     return [(var, var.set(value)) for var, value in values]
 
 

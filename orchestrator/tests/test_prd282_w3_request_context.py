@@ -48,6 +48,16 @@ from core.observability import otel  # noqa: E402
 WS = "00000000-0000-0000-0000-0000000000c2"
 
 
+@pytest.fixture(autouse=True)
+def no_request_in_the_context():
+    """Each test starts with no request in the context, whatever an earlier test in the same
+    process left there, and puts back what it found."""
+    held = [(var, var.set("")) for var in (request_id_var, workspace_id_var, http_method_var, http_path_var)]
+    yield
+    for var, token in reversed(held):
+        var.reset(token)
+
+
 def _context() -> tuple:
     return (request_id_var.get(""), workspace_id_var.get(""), http_method_var.get(""), http_path_var.get(""))
 
@@ -181,6 +191,20 @@ def test_anything_but_an_http_request_passes_through_untouched():
     for kind in ("lifespan", "websocket"):
         asyncio.run(RequestContextMiddleware(app)({"type": kind}, None, send))
     assert calls == [("lifespan", send, ""), ("websocket", send, "")]
+
+
+def test_a_request_that_names_no_workspace_holds_none_whatever_the_context_held():
+    """The context around the request carries a workspace (an earlier request's, a job's). A
+    request that names none must not write its lines under it."""
+    seen: dict = {}
+    token = workspace_id_var.set(WS)
+    try:
+        response = TestClient(_app(seen)).get("/api/things/7")
+        assert response.status_code == 200
+        assert seen["route"][1] == "" and "workspace_id" not in seen["line"]
+        assert workspace_id_var.get("") == WS, "the context around the request is untouched"
+    finally:
+        workspace_id_var.reset(token)
 
 
 def test_main_registers_it_outermost_and_the_old_middleware_is_gone():
