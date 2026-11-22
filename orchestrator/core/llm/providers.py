@@ -170,7 +170,7 @@ _SPECS: Tuple[ProviderSpec, ...] = (
     ProviderSpec(
         slug="bedrock", label="AWS Bedrock", kind=KIND_DIRECT, adapter=ADAPTER_BEDROCK,
         enum_value="aws_bedrock", env_key="AWS_ACCESS_KEY_ID", aliases=("aws_bedrock",),
-        docs_url="https://console.aws.amazon.com/bedrock", workload_identity=True,
+        docs_url="https://console.aws.amazon.com/bedrock", workload_identity=True, embeddings=True,
     ),
     ProviderSpec(
         slug="grok", label="Grok / xAI", kind=KIND_DIRECT, adapter=ADAPTER_GROK,

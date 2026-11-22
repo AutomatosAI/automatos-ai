@@ -490,6 +490,14 @@ def _with_platform_keys(provider: LLMProvider, fields: _CredentialFields) -> _Cr
     return fields
 
 
+def settings_credential_fields(provider: LLMProvider, service_name: str) -> _CredentialFields:
+    """The credentials a settings tier's calls to ``provider`` use: the stored credential's
+    fields, then the operator workspace's key and the env key (``_with_platform_keys``). The
+    Bedrock embedding provider reads its credentials here too, as chat does (PRD-278 US-501)."""
+    cred_data = get_credential_data(provider.value, service_name=service_name)
+    return _with_platform_keys(provider, _credential_fields(provider, cred_data))
+
+
 class LLMManager:
     """Main LLM manager that handles provider selection and configuration"""
     
@@ -601,9 +609,7 @@ class LLMManager:
         temperature = float(get_system_setting(category, "temperature", "0.7"))
         max_tokens = int(get_system_setting(category, "max_tokens", "2000"))
 
-        # Get credential data (pass service_name for settings lookup)
-        cred_data = get_credential_data(provider.value, service_name=service_name)
-        fields = _with_platform_keys(provider, _credential_fields(provider, cred_data))
+        fields = settings_credential_fields(provider, service_name)
         return LLMConfig(
             provider=provider,
             model=model,

@@ -63,6 +63,8 @@ class _Boot:
         monkeypatch.setattr(main, "_bootstrap_composio_catalog", self._catalog)
         monkeypatch.setattr(main, "_boot_phase_2_extensions", self._phase_2)
         monkeypatch.setattr(main, "shutdown_dashboard", self._shutdown_dashboard)
+        # PRD-278 US-502: the embedding size check reads settings; stubbed, as every step is.
+        monkeypatch.setattr("core.llm.embedding_sizes.verify_embedding_sizes", self._sizes)
         monkeypatch.setattr(loop_watchdog, "start_loop_watchdog",
                             lambda: SimpleNamespace(stop=lambda: self.calls.append("watchdog stopped")))
         if dispatch:
@@ -75,6 +77,9 @@ class _Boot:
 
     async def _semantic(self, leader):
         self.calls.append(("semantic", leader))
+
+    async def _sizes(self):
+        """The embedding size check (PRD-278 US-502): no settings read here."""
 
     def _trust_gate(self):
         self.calls.append("trust gate")
