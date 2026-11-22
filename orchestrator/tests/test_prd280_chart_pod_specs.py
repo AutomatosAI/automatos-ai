@@ -88,6 +88,39 @@ def test_every_kind_that_makes_pods_is_read_where_it_keeps_its_template(kind, pa
     assert specs.pod_spec(obj) == POD_SPEC
 
 
+def _stateful_set(name: str) -> dict:
+    spec = {**POD_SPEC, "volumes": [{"name": "init", "emptyDir": {}}]}
+    templates = [{"metadata": {"name": "storage"}, "spec": {"accessModes": ["ReadWriteOnce"]}}]
+    return {"kind": "StatefulSet", "metadata": {"name": name},
+            "spec": {"template": {"spec": spec}, "volumeClaimTemplates": templates}}
+
+
+def test_a_stateful_set_s_claim_templates_become_the_claims_its_first_pod_mounts():
+    """PRD-280 US-601: without them the memory store's mount of its disk names no volume."""
+    ((name, pod),) = list(specs.probe_pods(_stateful_set("demo-automatos-qdrant")))
+
+    assert name == "demo-automatos-qdrant"
+    assert pod["spec"]["volumes"] == [
+        {"name": "init", "emptyDir": {}},
+        {"name": "storage", "persistentVolumeClaim": {"claimName": "storage-demo-automatos-qdrant-0"}},
+    ]
+
+
+def test_a_stateful_set_s_template_is_left_as_it_was():
+    stateful_set = _stateful_set("demo-automatos-qdrant")
+
+    list(specs.probe_pods(stateful_set))
+
+    assert stateful_set["spec"]["template"]["spec"]["volumes"] == [{"name": "init", "emptyDir": {}}]
+
+
+def test_no_other_kind_gains_a_volume():
+    ((_, pod),) = list(specs.probe_pods(_deployment("demo-automatos-api")))
+
+    assert "volumes" not in pod["spec"]
+    assert specs.claim_volumes(_deployment("demo-automatos-api")) == []
+
+
 def test_main_prints_one_tab_separated_line_per_pod(monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(_deployment("demo-automatos-worker"))))
 

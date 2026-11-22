@@ -16,6 +16,8 @@ set:
   otel:
     enabled: true
     endpoint: http://otel-collector:4318
+  qdrant:
+    enabled: true
 # Each pod has exactly one container and no init container, so checking containers[0]
 # checks every container: a second one, or an init container, fails here until it is
 # added to these checks.
@@ -119,3 +121,35 @@ tests:
       - equal:
           path: spec.template.spec.securityContext.fsGroupChangePolicy
           value: OnRootMismatch
+  - it: gives the memory store's container the same, with no capability, and its pod a non-root user (PRD-280 US-601)
+    template: templates/qdrant.yaml
+    documentIndex: 0
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 1
+      - notExists:
+          path: spec.template.spec.initContainers
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.seccompProfile.type
+          value: RuntimeDefault
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          value: ["ALL"]
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.capabilities.add
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 1000
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
