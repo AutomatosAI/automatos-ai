@@ -114,3 +114,56 @@ def test_missing_model_auth_fails_clearly_not_silently(tmp_path, monkeypatch):
         assert on_disk["status"] == css.STATUS_FAILED
 
     asyncio.run(scenario())
+
+
+# The coding agent's environment: the worker's own variables are blanked for the agent, the
+# model credential and what a CLI needs to run are kept.
+_WORKER_SECRETS = {
+    "DATABASE_URL": "postgresql://worker:pw@db:5432/automatos",
+    "REDIS_URL": "redis://:pw@redis:6379/0",
+    "WORKER_INTERNAL_TOKEN": "worker-internal-token",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": "/var/run/secrets/pod-identity/token",
+    "OTEL_EXPORTER_OTLP_HEADERS": "authorization=Bearer otel",
+}
+
+
+def test_the_agent_never_sees_the_workers_own_variables(tmp_path, monkeypatch):
+    for name, value in _WORKER_SECRETS.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-agent")
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+
+    async def scenario():
+        factory = _FactorySpy()
+        mgr = css.CanvasSessionManager(str(tmp_path), sdk_client_factory=factory, init_timeout=2.0)
+        await mgr.start_session("ws-env")
+        env = factory.calls[0]["env"]
+        # Each is laid over the inherited environment as empty, so the CLI and its commands get "".
+        for name in _WORKER_SECRETS:
+            assert env[name] == "", name
+        assert env["ANTHROPIC_API_KEY"] == "sk-ant-agent"
+        assert env["CLAUDE_CONFIG_DIR"].startswith(str(tmp_path))
+        await mgr.stop_session("ws-env")
+
+    asyncio.run(scenario())
+
+
+def test_what_a_cli_needs_to_run_is_left_as_the_worker_has_it():
+    inherited = {
+        "PATH": "/usr/bin", "HOME": "/home/worker", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
+        "TZ": "UTC", "HTTPS_PROXY": "http://proxy:3128", "NODE_EXTRA_CA_CERTS": "/ca.pem",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_TELEMETRY": "1",
+        "CLAUDE_CODE_OAUTH_TOKEN": "tok", "ANTHROPIC_API_KEY": "sk", "DATABASE_URL": "postgresql://x",
+    }
+    blanked = css.agent_environment(inherited)
+    # Kept names are left out of the overlay, so the agent sees the worker's own value.
+    for kept in ("PATH", "HOME", "LANG", "LC_ALL", "TZ", "HTTPS_PROXY", "NODE_EXTRA_CA_CERTS",
+                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_TELEMETRY"):
+        assert kept not in blanked, kept
+    # The credentials are blanked here and added back only by model_auth_env, when configured.
+    assert blanked == {"CLAUDE_CODE_OAUTH_TOKEN": "", "ANTHROPIC_API_KEY": "", "DATABASE_URL": ""}
+
+
+def test_the_blanked_environment_adds_no_value_of_its_own():
+    assert css.agent_environment({}) == {}
+    assert all(value == "" for value in css.agent_environment({"A": "1", "B": "2"}).values())

@@ -54,7 +54,7 @@ from canvas_events import (
     session_status_event,
 )
 from workspace_manager import WorkspaceManager
-from worker_config import model_auth_env
+from worker_config import agent_environment, model_auth_env
 
 logger = logging.getLogger("workspace-worker.canvas")
 
@@ -369,9 +369,11 @@ class CanvasSessionManager:
 
         option_kwargs: Dict[str, Any] = {
             "cwd": str(root),
-            # Transcript + CLI state on the persistent volume -> survives restarts.
+            # The worker's own variables blanked (worker_config.agent_environment), then the
+            # transcript + CLI state on the persistent volume -> survives restarts.
             "env": {
-                "CLAUDE_CONFIG_DIR": str(root / STATE_DIR_NAME / CLAUDE_CONFIG_DIR_NAME)
+                **agent_environment(),
+                "CLAUDE_CONFIG_DIR": str(root / STATE_DIR_NAME / CLAUDE_CONFIG_DIR_NAME),
             },
             "permission_mode": "default",
             "can_use_tool": self._make_tool_gate(workspace_id, root),
