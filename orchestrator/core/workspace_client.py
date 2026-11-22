@@ -21,6 +21,8 @@ import httpx
 from config import config
 from core import editions
 from core.local_projects_mount import worker_workspace_for
+from core.monitoring.automatos_logging import request_id_var
+from core.observability.error_response import safe_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,15 @@ WORKER_START_HINT = (
 # Singleton client — reused across the orchestrator process
 _client: Optional[httpx.AsyncClient] = None
 
+REQUEST_ID_HEADER = "X-Request-ID"
+
+
+async def _send_request_id(request: httpx.Request) -> None:
+    """PRD-282: the API request's id on each call, so the worker's log lines carry it too."""
+    request_id = safe_request_id(request_id_var.get(""))
+    if request_id:
+        request.headers[REQUEST_ID_HEADER] = request_id
+
 
 def _get_client() -> httpx.AsyncClient:
     """Get or create the shared httpx client."""
@@ -53,6 +64,7 @@ def _get_client() -> httpx.AsyncClient:
         _client = httpx.AsyncClient(
             timeout=httpx.Timeout(connect=10.0, read=600.0, write=30.0, pool=10.0),
             headers=headers,
+            event_hooks={"request": [_send_request_id]},
         )
     return _client
 

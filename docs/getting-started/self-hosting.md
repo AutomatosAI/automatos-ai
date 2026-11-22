@@ -557,6 +557,12 @@ own lines are written the same way. A text line carries the request's id as `req
 uvicorn's access line ends with it. Any other value of either setting stops the backend at
 start-up, with a message naming the setting.
 
+The workspace worker reads the same two settings itself and, with `json`, writes the same
+fields under its own service name, `workspace-worker`, with the backend's request id on the
+lines of each call the backend makes to it. Compose passes it `LOG_LEVEL` from `.env`, not
+`LOG_FORMAT`, so under compose it writes text. The Helm chart passes `config.LOG_FORMAT` to the
+backend, the migration Job and the worker (`charts/automatos/README.md`).
+
 ## 4. First boot — what happens and how long it takes
 
 1. **Images.** `make up` pulls the app images CI built, scanned and published
