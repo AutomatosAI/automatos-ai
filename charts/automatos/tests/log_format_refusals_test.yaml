@@ -1,9 +1,9 @@
-suite: A LOG_FORMAT the API would refuse stops the API's render (PRD-282 US-303)
+suite: A LOG_FORMAT or LOG_LEVEL the API cannot use stops the API's render (PRD-282 US-303)
 # The API's template alone: helm-unittest reports a failed render against the first template, in
 # reverse alphabetical order, that fails, and the worker's template refuses the same value (its
 # own suite, log_format_worker_refusals_test.yaml). The migration Job gets the same check through
-# automatos.apiEnv. The API reads LOG_FORMAT trimmed and in any case and refuses to start on any
-# other value; the message never prints the value.
+# automatos.apiEnv. The API reads both trimmed and in any case; at run time it would write the
+# default with a warning, so the render stops instead. The message never prints the value.
 templates:
   - templates/api-deployment.yaml
 release:
@@ -32,4 +32,25 @@ tests:
         LOG_FORMAT: logfmt
     asserts:
       - failedTemplate:
-          errorPattern: "config.LOG_FORMAT must be text or json, or unset for text: the API and the worker refuse to start on any other value"
+          errorPattern: "config.LOG_FORMAT must be text or json, or unset for text"
+  - it: renders a level in any case, with spaces
+    set:
+      config:
+        LOG_LEVEL: " warning "
+    asserts:
+      - hasDocuments:
+          count: 1
+  - it: stops on a level the API does not know, naming the key and the levels
+    set:
+      config:
+        LOG_LEVEL: verbose
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.LOG_LEVEL must be DEBUG, INFO, WARNING, WARN, ERROR, CRITICAL or FATAL, or unset for INFO"
+  - it: stops on NOTSET, which logging would read as every line
+    set:
+      config:
+        LOG_LEVEL: notset
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.LOG_LEVEL must be"

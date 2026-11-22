@@ -1,8 +1,8 @@
-suite: A LOG_FORMAT the worker would refuse stops the worker's render (PRD-282 US-303)
+suite: A LOG_FORMAT the worker cannot use stops the worker's render (PRD-282 US-303)
 # The worker's template alone, so a failed render can only be reported against it (helm-unittest
 # reports a failed render against the first template, in reverse alphabetical order, that fails).
-# The worker reads LOG_FORMAT trimmed and in any case and refuses to start on any other value; the
-# message never prints the value.
+# The worker reads LOG_FORMAT trimmed and in any case; at run time it would write text with a
+# warning, so the render stops instead. The message never prints the value.
 templates:
   - templates/worker.yaml
 release:
@@ -24,4 +24,4 @@ tests:
         LOG_FORMAT: logfmt
     asserts:
       - failedTemplate:
-          errorPattern: "config.LOG_FORMAT must be text or json, or unset for text: the API and the worker refuse to start on any other value"
+          errorPattern: "config.LOG_FORMAT must be text or json, or unset for text"

@@ -578,11 +578,15 @@ boot steps' messages, before uvicorn starts), the migration tool's output when t
 or the migration Job migrates, and anything a process writes before logging is set up, such as a
 crash while it starts.
 
-The workspace worker reads the same two settings itself and, with `json`, writes the same
-fields under its own service name, `workspace-worker`, with the backend's request id on the
-lines of each call the backend makes to it. Compose passes it `LOG_LEVEL` from `.env`, not
-`LOG_FORMAT`, so under compose it writes text. The Helm chart passes `config.LOG_FORMAT` to the
-backend, the migration Job and the worker (`charts/automatos/README.md`).
+The workspace worker reads the same two settings itself, in the same way: an unknown value is
+the default with one warning. With `json` it writes the same fields under its own service name,
+`workspace-worker`, with the backend's request id on the lines of each call the backend makes to
+it; in text, those lines carry `req=…` as the backend's do. Compose passes it `LOG_LEVEL` from
+`.env`, not `LOG_FORMAT`, so under compose it writes text. The Helm chart passes
+`config.LOG_FORMAT` to the backend, the worker and the migration Job's environment, but the
+Job's output stays text; it passes `config.LOG_LEVEL` to the backend and the Job (whose steps
+keep their own level), not the worker, which stays at `INFO`. Rendering the chart stops on a value of either that the
+code would not use (`charts/automatos/README.md`).
 
 ## 4. First boot — what happens and how long it takes
 

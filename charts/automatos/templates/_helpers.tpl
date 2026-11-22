@@ -288,6 +288,7 @@ root, would fail at the first upload.
 {{- define "automatos.validateApi" -}}
 {{- include "automatos.validateEdition" . -}}
 {{- include "automatos.validateLogFormat" . -}}
+{{- include "automatos.validateLogLevel" . -}}
 {{- $config := .Values.config | default dict -}}
 {{- range $key := list "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" }}
 {{- if hasKey $config $key }}

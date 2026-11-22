@@ -126,11 +126,14 @@ edition:
 # Quote LOCAL_REMOTE_ACCESS: YAML reads a bare `off` as false, which the API refuses.
 config:
   ENVIRONMENT: production
-  # DEBUG, INFO, WARNING, ERROR or CRITICAL, in any case: the API refuses to start on any
-  # other value. The worker keeps its image's INFO.
+  # DEBUG, INFO, WARNING, ERROR or CRITICAL (WARN and FATAL too), in any case: rendering
+  # stops on any other value (at run time one would be INFO, with a warning). DEBUG is for a
+  # development install. The worker is not given it and stays at INFO.
   LOG_LEVEL: INFO
-  # PRD-282: json writes one JSON record per line, from the API, the migration Job and the
-  # worker (the worker reads only this from config). Unset: text, as before.
+  # PRD-282: json writes one JSON record per line from the API and the worker (the worker
+  # reads only this from config). The migration Job gets it too, but its output (the start
+  # script's, the migration tool's and the seed loader's) stays text. Rendering stops on
+  # anything but text or json. Unset: text, as before.
   # LOG_FORMAT: json
   # The log relay targets Railway's internal Loki by default.
   LOG_RELAY_ENABLED: "false"
