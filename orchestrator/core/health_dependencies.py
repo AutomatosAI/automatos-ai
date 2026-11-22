@@ -41,9 +41,9 @@ _GAUGE_VALUES = {checks.UP: True, checks.DOWN: False}  # any other state: no ser
 _WATCHES, _TASKS = "dependency_watches", "dependency_watch_tasks"  # where each lives on app.state
 
 
-def record_gauge(name: str, reading: Reading) -> None:
-    """The dependency's /metrics series, from the reading just made."""
-    set_dependency_up(name, _GAUGE_VALUES.get(reading.state))
+def record_gauge(name: str, reading: Optional[Reading]) -> None:
+    """The dependency's /metrics series, from its current reading (None: none, or stale)."""
+    set_dependency_up(name, None if reading is None else _GAUGE_VALUES.get(reading.state))
 
 
 def dependency_watches() -> Tuple[Watch, ...]:

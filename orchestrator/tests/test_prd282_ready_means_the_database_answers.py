@@ -18,7 +18,7 @@ import asyncio
 import json
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -125,11 +125,19 @@ def test_redis_is_not_part_of_readiness():
 # --------------------------------------------------------------------------- the watch
 
 
-def _watch(check):
-    return Watch("test", check, every_s=60, limit_s=LIMIT_S, failed_state="down")
+def _watch(check, **kwargs):
+    return Watch("test", check, every_s=kwargs.pop("every_s", 60), limit_s=LIMIT_S, failed_state="down", **kwargs)
 
 
-def test_a_check_that_hangs_ends_its_wait_at_the_time_limit_and_is_never_started_twice():
+async def _until(condition, within_s=WAIT_S):
+    """Waits for ``condition`` itself, never a fixed sleep; fails after ``within_s``."""
+    deadline = time.monotonic() + within_s
+    while not condition():
+        assert time.monotonic() < deadline, "the awaited condition never came"
+        await asyncio.sleep(0.01)
+
+
+def test_a_hung_check_ends_its_wait_at_the_limit_holds_one_thread_and_its_late_answer_is_used():
     release, calls = threading.Event(), []
 
     def hangs():
@@ -145,16 +153,18 @@ def test_a_check_that_hangs_ends_its_wait_at_the_time_limit_and_is_never_started
         took = time.monotonic() - started
         second = await watch.check_now()  # the first is still on its thread
         release.set()
-        await asyncio.sleep(0.05)
+        await _until(lambda: watch.last.state == "up")  # the late answer, recorded when it came
+        late = watch.last
         third = await watch.check_now()
-        return first, took, second, third
+        return first, took, second, late, third
 
     try:
-        first, took, second, third = asyncio.run(scenario())
+        first, took, second, late, third = asyncio.run(scenario())
     finally:
         release.set()
     assert first.state == "down" and LIMIT_S * 0.9 <= took < LIMIT_S + AT_ONCE_S
-    assert second.state == "down"
+    assert second is first, "no new reading while the hung check runs: it ages"
+    assert late.state == "up" and late.checked_at > first.checked_at
     assert third.state == "up"
     assert len(calls) == 2, "no second thread while the first check hung"
 
@@ -172,11 +182,112 @@ def test_a_check_runs_off_the_event_loop_and_one_that_raises_reads_as_failed(cap
     async def scenario():
         return threading.get_ident(), await _watch(records).check_now(), await _watch(raises).check_now()
 
-    with caplog.at_level("ERROR", logger="core.health_watch"):
+    with caplog.at_level("WARNING", logger="core.health_watch"):
         loop_thread, ran, failed = asyncio.run(scenario())
     assert ran.state == "up" and threads and threads[0] != loop_thread
     assert failed.state == "down"
-    assert any("the test check failed" in record.getMessage() for record in caplog.records)
+    assert [record.exc_info[1].args for record in caplog.records
+            if record.name == "core.health_watch" and record.exc_info] == [("refused",)]
+
+
+def test_a_failure_is_logged_when_the_state_changes_and_when_it_recovers_never_every_tick(caplog):
+    answers = iter([RuntimeError("one"), RuntimeError("two"), RuntimeError("three"), "up", "up"])
+
+    def check():
+        answer = next(answers)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    watch = _watch(check)
+
+    async def scenario():
+        for _ in range(5):
+            await watch.check_now()
+
+    with caplog.at_level("INFO", logger="core.health_watch"):
+        asyncio.run(scenario())
+    lines = [(record.levelname, record.getMessage(), bool(record.exc_info)) for record in caplog.records
+             if record.name == "core.health_watch"]
+    assert lines == [("WARNING", "Health: test is down", True), ("INFO", "Health: test is up", False)]
+
+
+def test_from_the_watch_a_failed_select_raises_and_logs_nothing_and_a_direct_probe_logs_as_before(
+        monkeypatch, caplog):
+    import core.database.database as database
+
+    class Broken:
+        def execute(self, *_args):
+            raise RuntimeError("no database")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(database, "SessionLocal", Broken)
+    monkeypatch.setattr(health_probe.pool_watch, "pool_has_room", lambda: True)
+    with caplog.at_level("ERROR", logger="core.health_probe"):
+        with pytest.raises(RuntimeError):
+            health_probe.database_status(health_probe.FullPoolClock(), raise_errors=True)
+        assert [record for record in caplog.records if record.name == "core.health_probe"] == []
+        assert health_probe.database_status(health_probe.FullPoolClock()) == health_probe.UNHEALTHY
+    assert [record.getMessage() for record in caplog.records
+            if record.name == "core.health_probe"] == ["Health: database check failed"]
+
+
+def test_a_callback_that_raises_once_neither_loses_the_reading_nor_stops_the_watch(caplog):
+    told = []
+
+    def on_reading(name, reading):
+        told.append(reading)
+        if len(told) == 1:
+            raise RuntimeError("gauge down")
+
+    watch = _watch(lambda: "up", every_s=0.01, on_reading=on_reading)
+
+    async def scenario():
+        task = asyncio.create_task(watch.run())
+        await _until(lambda: len(told) >= 3)
+        task.cancel()
+        await asyncio.wait({task})
+        return task
+
+    with caplog.at_level("ERROR", logger="core.health_watch"):
+        task = asyncio.run(scenario())
+    assert watch.last is not None and watch.last.state == "up"
+    assert task.cancelled(), "only the cancel ended it"
+    assert any("the reading stands" in record.getMessage() for record in caplog.records)
+
+
+def test_a_check_that_fails_outside_its_thread_does_not_stop_the_watch(monkeypatch):
+    import core.health_watch as health_watch
+
+    real, starts = health_watch._on_a_thread, []
+
+    def fails_once(name, check):
+        starts.append(name)
+        if len(starts) == 1:
+            raise RuntimeError("no thread")
+        return real(name, check)
+
+    monkeypatch.setattr(health_watch, "_on_a_thread", fails_once)
+    watch = _watch(lambda: "up", every_s=0.01)
+
+    async def scenario():
+        task = asyncio.create_task(watch.run())
+        await _until(lambda: watch.last is not None)
+        task.cancel()
+        await asyncio.wait({task})
+
+    asyncio.run(scenario())
+    assert watch.last.state == "up" and len(starts) >= 2
+
+
+def test_a_stale_healthy_reading_is_no_passed_check():
+    state = _state(health_probe.HEALTHY)
+    watch = state.database_watch
+    watch.last = Reading(health_probe.HEALTHY, datetime.now(timezone.utc) - timedelta(seconds=watch.stale_after_s + 1))
+    assert watch.stale_after_s == 3 * config.HEALTH_READY_CHECK_SECONDS + config.HEALTH_READY_CHECK_TIMEOUT_SECONDS
+    assert health_readiness.answer(state) == (503, {"status": "not_ready", "database": "unchecked"})
 
 
 # --------------------------------------------------------------------------- start-up order, on main's lifespan
@@ -200,7 +311,7 @@ def test_ready_is_never_answered_before_the_first_database_check(monkeypatch):
     """The first check takes longer than the whole (stubbed) boot: READY waits for it."""
     boot = _Boot(monkeypatch)
 
-    def slow_but_healthy():
+    def slow_but_healthy(**_kwargs):
         time.sleep(LIMIT_S)
         return health_probe.HEALTHY
 
@@ -231,7 +342,7 @@ def test_readiness_follows_the_database_back_on_the_watchs_timer(monkeypatch):
             await asyncio.wait_for(asyncio.shield(boot.app.state.background_boot), WAIT_S)
             down = (await boot.ready_probe())[0]
             boot.database = health_probe.DATABASE_BUSY  # back, and busy: ready
-            await asyncio.sleep(0.3)
+            await _until(lambda: boot.app.state.database_watch.last.state == health_probe.DATABASE_BUSY)
             return down, await boot.ready_probe()
 
     down, back = asyncio.run(scenario())
