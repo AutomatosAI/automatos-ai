@@ -728,6 +728,21 @@ run_supervised() {
 }
 
 # =============================================================================
+# The web server's own lines (PRD-282 US-301)
+# =============================================================================
+# With LOG_FORMAT=json (any case, spaces around it), uvicorn's supervising process writes
+# JSON too: uvicorn reads UVICORN_LOG_CONFIG (--log-config). Any other value, or a log
+# configuration of the operator's own, and nothing is set.
+SERVER_JSON_LOG_CONFIG="core/monitoring/server_log_config.json"
+
+select_server_log_config() {
+    log_format=$(printf '%s' "${LOG_FORMAT:-}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')
+    if [ "$log_format" = "json" ] && [ -z "${UVICORN_LOG_CONFIG:-}" ] && [ -f "$PWD/$SERVER_JSON_LOG_CONFIG" ]; then
+        export UVICORN_LOG_CONFIG="$PWD/$SERVER_JSON_LOG_CONFIG"
+    fi
+}
+
+# =============================================================================
 # Main Execution
 # =============================================================================
 # PRD-262 US-037: no command but `migrate` starts on a CHANGE_ME placeholder secret.
@@ -746,6 +761,7 @@ fi
 if is_server_command "$@"; then
     run_boot_steps
     resolve_web_concurrency "$@"
+    select_server_log_config
 fi
 
 if [ "${AUTOMATOS_LIVENESS_WATCHDOG:-}" = "true" ]; then

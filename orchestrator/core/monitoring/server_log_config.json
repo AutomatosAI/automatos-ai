@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "disable_existing_loggers": false,
+  "formatters": {
+    "json": {"()": "core.monitoring.server_log_config.json_formatter"}
+  },
+  "filters": {
+    "level": {"()": "core.monitoring.server_log_config.LevelFilter"}
+  },
+  "handlers": {
+    "default": {"class": "logging.StreamHandler", "formatter": "json", "filters": ["level"],
+                "stream": "ext://sys.stderr"},
+    "access": {"class": "logging.StreamHandler", "formatter": "json", "filters": ["level"],
+               "stream": "ext://sys.stdout"}
+  },
+  "loggers": {
+    "uvicorn": {"handlers": ["default"], "level": "DEBUG", "propagate": false},
+    "uvicorn.error": {"level": "DEBUG"},
+    "uvicorn.access": {"handlers": ["access"], "level": "DEBUG", "propagate": false}
+  }
+}
