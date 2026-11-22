@@ -612,7 +612,7 @@ Readiness, not liveness, is the signal that it is usable:
 | URL | Meaning |
 |---|---|
 | `http://localhost:8000/health` | 200 as soon as the API process answers, with per-component status (database, config, resources). |
-| `http://localhost:8000/health/ready` | 503 `{"status": "starting"}` until the full boot finished, then 200 `{"status": "ready"}` while the database answers. The database is checked in the background every `HEALTH_READY_CHECK_SECONDS` (5 s), each check given `HEALTH_READY_CHECK_TIMEOUT_SECONDS` (3 s); a full connection pool still counts as ready, and a database that does not answer makes it 503 `{"status": "not_ready"}` until it does. Redis plays no part. |
+| `http://localhost:8000/health/ready` | 503 `{"status": "starting"}` until the full boot finished, then 200 `{"status": "ready"}` while the database answers. The database is checked in the background every `HEALTH_READY_CHECK_SECONDS` (5 s), each check given `HEALTH_READY_CHECK_TIMEOUT_SECONDS` (3 s); a full connection pool still counts as ready, and a database that does not answer makes it 503 `{"status": "not_ready"}` until it does. A result older than three check intervals and one time limit (18 s by default) counts as no check at all (503, `"database": "unchecked"`). Redis plays no part. |
 | `http://localhost:8000/health/bootstrap` | The per-stage boot report with timings. |
 | `http://localhost:8000/docs` | The OpenAPI reference. |
 

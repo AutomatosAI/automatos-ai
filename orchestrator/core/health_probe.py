@@ -66,17 +66,21 @@ class FullPoolClock:
 _full_pool = FullPoolClock()
 
 
-def database_status(clock: FullPoolClock = _full_pool) -> str:
+def database_status(clock: FullPoolClock = _full_pool, *, raise_errors: bool = False) -> str:
     """``healthy`` or ``unhealthy`` (a SELECT 1 on a free connection), or, with no
-    connection free, ``busy`` / ``stuck`` without asking the pool for one."""
+    connection free, ``busy`` / ``stuck`` without asking the pool for one.
+
+    ``raise_errors``: a failed SELECT 1 raises instead of logging and answering
+    ``unhealthy``. Readiness's background watch (PRD-282) asks so: it logs a failure
+    once, when the state changes, where GET /health logs every one it meets."""
     if not pool_watch.pool_has_room():
         full_for = clock.saw_full(time.monotonic())
         return DATABASE_STUCK if full_for >= config.HEALTH_POOL_STUCK_SECONDS else DATABASE_BUSY
     clock.saw_room()
-    return _select_one()
+    return _select_one(raise_errors=raise_errors)
 
 
-def _select_one() -> str:
+def _select_one(*, raise_errors: bool = False) -> str:
     from sqlalchemy import text
 
     from core.database import database
@@ -89,6 +93,8 @@ def _select_one() -> str:
         finally:
             db.close()
     except Exception:
+        if raise_errors:
+            raise
         logger.exception("Health: database check failed")
         return UNHEALTHY
 

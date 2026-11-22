@@ -8,7 +8,13 @@ does no database work of its own.
 
 * ``healthy`` and ``busy`` (the pool is full, the database answers) are ready.
 * ``unhealthy`` (no answer, or none within the time limit) and ``stuck`` are not.
+* A reading older than the watch's stale bound (core/health_watch.py: three check
+  intervals plus one time limit, 18 s by default) is no passed check: 503, with the
+  database ``unchecked``. So a check that hangs, or a watch that stops, never leaves
+  the last answer up.
 * Redis is not part of it (PRD-282 D-5): core runs without it.
+* The watch logs the database's state when it changes, with a failure's traceback
+  once, never every tick; a direct GET /health logs as it always did.
 
 Start-up order. The watch starts as the server starts listening (main._start_serving),
 so its first check runs beside the background boot; the READY stage waits for that
@@ -26,12 +32,14 @@ from core import health_probe
 from core.health_watch import Watch
 
 READY_STATES = frozenset({health_probe.HEALTHY, health_probe.DATABASE_BUSY})
-UNCHECKED = "unchecked"  # no database check has finished yet
+UNCHECKED = "unchecked"  # no database check has finished, or the last one is stale
 _WATCH, _TASK = "database_watch", "database_watch_task"  # where each lives on app.state
 
 
 def _database_status() -> str:
-    return health_probe.database_status()  # looked up per call, so a test can replace it
+    # Looked up per call, so a test can replace it. A failure raises, so the watch can log
+    # it once, at the state change, rather than every tick.
+    return health_probe.database_status(raise_errors=True)
 
 
 def database_watch() -> Watch:
@@ -68,8 +76,8 @@ def answer(state: Any) -> Tuple[int, dict]:
     if not getattr(state, "ready", False):
         return health_probe.HTTP_UNAVAILABLE, {"status": "starting", "message": "Boot in progress"}
     watch = getattr(state, _WATCH, None)
-    reading = watch.last if watch is not None else None
-    if reading is None:
+    reading = watch.current() if watch is not None else None
+    if reading is None:  # no check has finished, or the last one is stale
         return health_probe.HTTP_UNAVAILABLE, {"status": "not_ready", "database": UNCHECKED}
     if reading.state in READY_STATES:
         return health_probe.HTTP_OK, {"status": "ready"}
