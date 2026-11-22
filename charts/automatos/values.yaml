@@ -126,7 +126,12 @@ edition:
 # Quote LOCAL_REMOTE_ACCESS: YAML reads a bare `off` as false, which the API refuses.
 config:
   ENVIRONMENT: production
+  # DEBUG, INFO, WARNING, ERROR or CRITICAL, in any case: the API refuses to start on any
+  # other value. The worker keeps its image's INFO.
   LOG_LEVEL: INFO
+  # PRD-282: json writes one JSON record per line, from the API, the migration Job and the
+  # worker (the worker reads only this from config). Unset: text, as before.
+  # LOG_FORMAT: json
   # The log relay targets Railway's internal Loki by default.
   LOG_RELAY_ENABLED: "false"
   # Optional services are OFF unless you point at one. Unset, config.py
@@ -140,7 +145,7 @@ config:
 # TLS on the connection to PostgreSQL from the API, the migration Job and the worker
 # (PRD-278). All empty, the default: nothing is set or mounted, and each connection
 # behaves as it does today. Set these here, not in `config` (rendering fails there):
-# the worker doesn't read `config`. The enterprise edition renders only with
+# the worker reads nothing from `config` but LOG_FORMAT. The enterprise edition renders only with
 # sslmode verify-full and a caConfigMap (PRD-278 D-6); its API refuses to start otherwise.
 #
 # The API holds two session-level advisory locks on this database: the scheduler's lock,

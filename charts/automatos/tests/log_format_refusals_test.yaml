@@ -1,0 +1,35 @@
+suite: A LOG_FORMAT the API would refuse stops the API's render (PRD-282 US-303)
+# The API's template alone: helm-unittest reports a failed render against the first template, in
+# reverse alphabetical order, that fails, and the worker's template refuses the same value (its
+# own suite, log_format_worker_refusals_test.yaml). The migration Job gets the same check through
+# automatos.apiEnv. The API reads LOG_FORMAT trimmed and in any case and refuses to start on any
+# other value; the message never prints the value.
+templates:
+  - templates/api-deployment.yaml
+release:
+  name: demo
+  namespace: automatos
+set:
+  existingSecret: automatos-secrets
+tests:
+  - it: renders json in any case, with spaces
+    set:
+      config:
+        LOG_FORMAT: " Json "
+    asserts:
+      - hasDocuments:
+          count: 1
+  - it: renders text
+    set:
+      config:
+        LOG_FORMAT: text
+    asserts:
+      - hasDocuments:
+          count: 1
+  - it: stops on a format the API does not write, naming the key and the formats
+    set:
+      config:
+        LOG_FORMAT: logfmt
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.LOG_FORMAT must be text or json, or unset for text: the API and the worker refuse to start on any other value"

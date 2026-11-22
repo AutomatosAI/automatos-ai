@@ -269,16 +269,16 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As an operator, I want the worker's logs in the same shape, so that one parser reads everything.
 
 **Acceptance Criteria:**
-- [ ] The worker reads the same two settings in its own config module.
-- [ ] With `json`, its lines carry the same fields, with its own service name.
+- [x] The worker reads the same two settings in its own config module.
+- [x] With `json`, its lines carry the same fields, with its own service name.
 - [ ] `test_prd262_worker_starlette.py` passes.
 
 #### US-303: The chart · S
 **Description:** As an operator, I want to choose the format when I install, so that I need no patch.
 
 **Acceptance Criteria:**
-- [ ] The chart passes `LOG_FORMAT` to the API, the migration job and the worker, beside the `LOG_LEVEL` it already passes.
-- [ ] With `LOG_FORMAT` unset, the rendered chart is unchanged. A test pins it.
+- [x] The chart passes `LOG_FORMAT` to the API, the migration job and the worker, beside the `LOG_LEVEL` it already passes.
+- [x] With `LOG_FORMAT` unset, the rendered chart is unchanged. A test pins it.
 
 ## 7. Functional requirements
 

@@ -1,0 +1,92 @@
+suite: The log format reaches the API, the migration Job and the worker (PRD-282 US-303)
+# config.LOG_FORMAT goes to the API and the Job with the rest of config, beside config.LOG_LEVEL,
+# and the worker gets it too. Unset (the default), none of the three gets LOG_FORMAT, and
+# default_render_test.yaml pins the whole default render.
+templates:
+  - templates/api-deployment.yaml
+  - templates/migrate-job.yaml
+  - templates/worker.yaml
+release:
+  name: demo
+  namespace: automatos
+set:
+  existingSecret: automatos-secrets
+tests:
+  - it: gives the API no LOG_FORMAT while it is unset, and LOG_LEVEL as before
+    template: templates/api-deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: LOG_FORMAT}
+          any: true
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: LOG_LEVEL, value: INFO}
+  - it: gives the migration Job no LOG_FORMAT while it is unset
+    template: templates/migrate-job.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: LOG_FORMAT}
+          any: true
+  - it: gives the worker no LOG_FORMAT while it is unset
+    template: templates/worker.yaml
+    documentIndex: 0
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: LOG_FORMAT}
+          any: true
+
+  - it: passes json to the API, beside LOG_LEVEL
+    template: templates/api-deployment.yaml
+    set:
+      config:
+        LOG_FORMAT: json
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: LOG_FORMAT, value: json}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: LOG_LEVEL, value: INFO}
+  - it: passes json to the migration Job
+    template: templates/migrate-job.yaml
+    set:
+      config:
+        LOG_FORMAT: json
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: LOG_FORMAT, value: json}
+  - it: passes json to the worker, once
+    template: templates/worker.yaml
+    documentIndex: 0
+    set:
+      config:
+        LOG_FORMAT: json
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: LOG_FORMAT, value: json}
+          count: 1
+  - it: passes the value as written, which the API and the worker read trimmed and in any case
+    template: templates/worker.yaml
+    documentIndex: 0
+    set:
+      config:
+        LOG_FORMAT: " JSON "
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: LOG_FORMAT, value: " JSON "}
+  - it: passes an empty value as written, which the API and the worker read as text
+    template: templates/worker.yaml
+    documentIndex: 0
+    set:
+      config:
+        LOG_FORMAT: ""
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: LOG_FORMAT, value: ""}

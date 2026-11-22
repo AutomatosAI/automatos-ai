@@ -1,0 +1,27 @@
+suite: A LOG_FORMAT the worker would refuse stops the worker's render (PRD-282 US-303)
+# The worker's template alone, so a failed render can only be reported against it (helm-unittest
+# reports a failed render against the first template, in reverse alphabetical order, that fails).
+# The worker reads LOG_FORMAT trimmed and in any case and refuses to start on any other value; the
+# message never prints the value.
+templates:
+  - templates/worker.yaml
+release:
+  name: demo
+  namespace: automatos
+set:
+  existingSecret: automatos-secrets
+tests:
+  - it: renders json in any case, with spaces
+    set:
+      config:
+        LOG_FORMAT: " Json "
+    asserts:
+      - hasDocuments:
+          count: 2
+  - it: stops on a format the worker does not write, naming the key and the formats
+    set:
+      config:
+        LOG_FORMAT: logfmt
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.LOG_FORMAT must be text or json, or unset for text: the API and the worker refuse to start on any other value"
