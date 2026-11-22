@@ -32,6 +32,50 @@ tests:
           value:
             name: AUTOMATOS_SKIP_MIGRATIONS
             value: "true"
+  - it: runs under its own account and mounts no cluster token (PRD-280 US-101)
+    release:
+      name: demo
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: demo-automatos-api
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+  - it: runs under the account serviceAccount.api.name renames
+    set:
+      serviceAccount:
+        api:
+          name: automatos-api-identity
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: automatos-api-identity
+  - it: runs under a pre-existing account when the chart creates none, which other components may share
+    set:
+      serviceAccount:
+        create: false
+        api:
+          name: automatos-api-identity
+        worker:
+          name: automatos-api-identity
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: automatos-api-identity
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+  - it: has the runtime's default system-call filter (PRD-280 US-102)
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext
+          value:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
   - it: runs one replica by default (the schedulers use a per-container lock)
     asserts:
       - equal:

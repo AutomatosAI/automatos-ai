@@ -14,21 +14,22 @@ def init_redis_for_tests():
     """Initialize Redis client using centralized credential system"""
     from core.credentials.resolver import get_credential_resolver
     from core.redis.client import init_redis_client
-    
+    from core.redis.connection import RedisTarget
+
     try:
         # Get Redis credentials from database or .env
         resolver = get_credential_resolver()
         redis_params = resolver.get_redis_connection_params(
             credential_name="development_redis"
         )
-        
+
         # Initialize global Redis client
-        init_redis_client(
+        init_redis_client(RedisTarget(
             host=redis_params['host'],
-            port=redis_params['port'],
+            port=int(redis_params['port']),
             password=redis_params.get('password'),
-            db=redis_params.get('database', 0)
-        )
+            db=int(redis_params.get('database', 0))
+        ))
         print(f"✅ Redis initialized for tests: {redis_params['host']}:{redis_params['port']}")
     except Exception as e:
         print(f"⚠️  Redis initialization failed: {e}")

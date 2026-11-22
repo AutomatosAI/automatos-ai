@@ -91,20 +91,31 @@ async def _get_async_redis() -> Optional[Any]:
         if _async_redis is not None:
             return _async_redis
 
-        url = config.REDIS_URL
-        if not url:
+        if not config.REDIS_URL:
             logger.warning(
                 "wizard.progress: REDIS_URL not configured — progress events disabled"
             )
             return None
 
+        # local import to keep module cheap
+        from core.redis.connection import new_async_client, redis_target_from_config
+
         try:
-            import redis.asyncio as aioredis  # local import to keep module cheap
-            client = aioredis.from_url(url, decode_responses=True)
+            target = redis_target_from_config()
+        except ValueError as exc:
+            # Never the address or the error's text: either can hold part of a password.
+            logger.error(
+                "wizard.progress: REDIS_URL is not a usable Redis address (%s) — progress events disabled",
+                type(exc).__name__,
+            )
+            return None
+
+        try:
+            client = new_async_client(target, decode_responses=True)
             # Sanity check the connection once up front
             await client.ping()
             _async_redis = client
-            logger.info("wizard.progress: connected to Redis at %s", _safe_url(url))
+            logger.info("wizard.progress: connected to Redis at %s", target.describe())
             return _async_redis
         except Exception as exc:  # noqa: BLE001
             logger.error(
@@ -112,15 +123,6 @@ async def _get_async_redis() -> Optional[Any]:
                 exc, exc_info=True,
             )
             return None
-
-
-def _safe_url(url: str) -> str:
-    """Strip credentials from a Redis URL for logging."""
-    if "@" in url:
-        scheme, rest = url.split("://", 1)
-        creds, host = rest.split("@", 1)
-        return f"{scheme}://***@{host}"
-    return url
 
 
 # ---------------------------------------------------------------------------
