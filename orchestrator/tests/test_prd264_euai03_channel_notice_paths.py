@@ -495,6 +495,9 @@ def test_a_failed_driver_send_keeps_the_notice_for_the_next_message(state, monke
 def _webhook_bodies(monkeypatch) -> list:
     import httpx
 
+    from tests.helpers_outbound_dns import public_dns
+
+    public_dns(monkeypatch, "hooks.example.com")  # saas checks the address before it sends
     bodies: list = []
     monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: _HttpClient(bodies))
     return bodies

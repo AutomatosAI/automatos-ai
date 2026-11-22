@@ -18,6 +18,7 @@ from typing import Any, Mapping, Optional
 
 import httpx
 
+from core.security.web_access import operator_destination_async, pinned_request_parts
 from modules.policy import ai_disclosure as disclosure
 
 from . import register_driver
@@ -53,15 +54,31 @@ async def post_webhook(url: str, payload: dict[str, Any], *, delivery_id: Option
     (``services/content_reports/moderation.py``), which is not a channel message
     and so never goes through ``channels.sender.send_to_channel`` (PRD-264 EUAI-03).
     A ``delivery_id`` goes out as ``X-Automatos-Delivery``, so the receiver can drop a retry it has seen.
+
+    The URL is whatever a workspace admin saved, and this runs from the server's own
+    network position, so it goes through the outbound guard
+    (``web_access.operator_destination_async``): where several people share the
+    server, an address in a private, loopback, link-local or metadata range, or on
+    ``WEB_ACCESS_DENY``, is refused before any request (``ok=False``, never retried,
+    ``error`` = the guard's reason), and the POST goes to the address that was
+    checked. A redirect is never followed: a hop could land in a blocked range.
     """
     started = time.monotonic()
+    target = await operator_destination_async(url)
+    if not target.ok:
+        logger.warning("[webhook] destination refused by the outbound guard (reason in the result)")
+        return SendResult(ok=False, latency_ms=int((time.monotonic() - started) * 1000),
+                          error=target.reason, retryable=False)
     headers = {"Content-Type": "application/json", **({DELIVERY_HEADER: delivery_id} if delivery_id else {})}
+    request = pinned_request_parts(url, target, headers)
     try:
+        # httpx follows no redirect by default: never turn it on here.
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
             resp = await client.post(
-                url,
+                request["url"],
                 json=payload,
-                headers=headers,
+                headers=request["headers"],
+                extensions=request["extensions"],
             )
     except Exception as exc:  # noqa: BLE001
         return SendResult(

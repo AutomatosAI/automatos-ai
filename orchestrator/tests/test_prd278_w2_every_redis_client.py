@@ -320,7 +320,6 @@ def test_a_malformed_redis_url_disables_intake_progress_and_is_logged_without_th
 #: Files that may open a Redis connection without core.redis.connection, and why.
 EXEMPT = {
     "core/credentials/tester.py": "tests a user's own saved Redis credential: the user's Redis, not the platform's",
-    "core/credentials/service.py": "tests a user's own saved Redis credential: the user's Redis, not the platform's",
 }
 SKIP_DIRS = frozenset({"tests", "__pycache__", "node_modules", ".venv", "venv"})
 CONNECTION_MODULE = "core/redis/"

@@ -304,7 +304,11 @@ class TestWebhookDriver:
 
     def test_send_5xx_is_retryable(self, driver, monkeypatch):
         from channels.drivers import webhook as wh
-        fake = _FakeClient({"https://hooks": _FakeResp(503)})
+        from tests.helpers_outbound_dns import PUBLIC_IP, public_dns
+
+        public_dns(monkeypatch, "hooks.example.com")  # saas checks the address before it sends
+        # The host as given (local) or the address the guard checked (saas, enterprise).
+        fake = _FakeClient({"https://hooks": _FakeResp(503), f"https://{PUBLIC_IP}/": _FakeResp(503)})
         _patch_httpx(monkeypatch, wh, fake)
 
         result = _run(driver.send(
