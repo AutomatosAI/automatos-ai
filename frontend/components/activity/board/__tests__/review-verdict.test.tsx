@@ -92,6 +92,15 @@ describe('Approve', () => {
     expect(verdict.approve.mutate).toHaveBeenCalledWith({ taskId: '5', note: 'Send it Monday.' }, expect.anything())
   })
 
+  it('Ticket PR fields: approving sends back the pull request the ticket showed', () => {
+    const pullRequest = { url: 'https://github.com/automatos-ai/automatos-ai/pull/1559', repository: 'automatos-ai/automatos-ai',
+      number: 1559, branch: 'feat/x', commits: [], tested: null, at: '2026-11-18T09:30:00+00:00', merges_on_approve: true }
+    render(<ReviewVerdict task={ticket({ pull_request: pullRequest })} onDecided={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /Approve and mark done/ }))
+    expect(verdict.approve.mutate).toHaveBeenCalledWith(
+      { taskId: '5', note: undefined, pullRequest: { url: pullRequest.url, at: pullRequest.at } }, expect.anything())
+  })
+
   it('says why when the approval fails', () => {
     verdict.approve.mutate.mockImplementation((_vars, opts) => opts.onError(new Error('Approval action failed: planner unavailable')))
     render(<ReviewVerdict task={ticket()} onDecided={vi.fn()} />)

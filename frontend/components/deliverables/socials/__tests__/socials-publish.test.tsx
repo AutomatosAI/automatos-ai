@@ -2,10 +2,11 @@
  * PRD-251 Wave 3, US-308 (S3.3f) — the publish controls and receipts in the post
  * view, against a mocked apiClient.
  *
- * - An approved post schedules with the browser's timezone, and publishes now
- *   after a confirmation naming its channels.
- * - A scheduled post shows its slot in its own timezone, reschedules and
- *   unschedules.
+ * - An approved post schedules with the browser's timezone, and publishes now on one
+ *   click of "Publish now to LinkedIn, X", which names its channels: no second step
+ *   (one Publish now, 17 Nov 2026).
+ * - A scheduled post shows its slot in its own timezone, reschedules, unschedules and
+ *   publishes now.
  * - A partially published post shows each channel's permalink and error, and Retry
  *   calls the retry route; a missed post offers Reschedule and Publish now.
  * - A 409 says the post changed and reloads it, as approve does.
@@ -49,8 +50,11 @@ import { SocialsPostView } from '@/components/deliverables/socials/studio/social
 import { SOCIAL_POST_CHANGED_MESSAGE } from '@/hooks/use-socials-api'
 import type { SocialPost, SocialPostTarget } from '@/lib/api-client'
 import { slotTimeLabel } from '@/lib/social-time'
+import { ITS_CHANNELS, PUBLISH_NOW, publishNowLabel } from '@/components/deliverables/socials/socials-publish-controls'
 
 const HASH = 'a'.repeat(64)
+/** Publish now on the default post: on LinkedIn and X. */
+const PUBLISH_NOW_TO_BOTH = 'Publish now to LinkedIn, X'
 
 function target(toolkit: string, over: Partial<SocialPostTarget> = {}): SocialPostTarget {
   return {
@@ -106,14 +110,20 @@ describe('an approved post', () => {
     expect(api.scheduleSocialPost).toHaveBeenCalledWith('p1', new Date('2026-11-09T09:30').toISOString(), browserTz)
   })
 
-  it('publishes now only after a confirmation that names its channels', async () => {
+  it('publishes now on one click of a button that names its channels', async () => {
+    expect(publishNowLabel(post())).toBe(PUBLISH_NOW_TO_BOTH)
+    expect(PUBLISH_NOW).toBe('Publish now')
+    // A post with no channel (the server refuses it, 409) still says what the click does.
+    expect(publishNowLabel(post({ targets: [] }))).toBe(`${PUBLISH_NOW} to ${ITS_CHANNELS}`)
+    expect(ITS_CHANNELS).toBe('its channels')
     renderDetail(post())
-    fireEvent.click(screen.getByRole('button', { name: 'Publish now' }))
-    const confirm = screen.getByRole('alertdialog', { name: 'Publish now' })
-    expect(confirm.textContent).toContain('LinkedIn, X')
-    expect(api.publishSocialPostNow).not.toHaveBeenCalled()
-    fireEvent.click(within(confirm).getByRole('button', { name: 'Publish' }))
+    fireEvent.click(screen.getByRole('button', { name: PUBLISH_NOW_TO_BOTH }))
     await waitFor(() => expect(api.publishSocialPostNow).toHaveBeenCalledWith('p1'))
+    expect(api.publishSocialPostNow).toHaveBeenCalledTimes(1)
+    // No second step: nothing asks again, and there is no other Publish to press.
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Publish' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
   })
 
   it('shows the privacy level and the AI label a TikTok target will publish with', async () => {
@@ -174,6 +184,13 @@ describe('a scheduled post', () => {
     expect(screen.getByTestId('socials-post-slot').textContent).toContain('18:00 GMT+9')
     fireEvent.click(screen.getByRole('button', { name: 'Unschedule' }))
     await waitFor(() => expect(api.unscheduleSocialPost).toHaveBeenCalledWith('p1'))
+  })
+
+  it('publishes now on one click, before its slot', async () => {
+    renderDetail(scheduled)
+    fireEvent.click(screen.getByRole('button', { name: PUBLISH_NOW_TO_BOTH }))
+    await waitFor(() => expect(api.publishSocialPostNow).toHaveBeenCalledWith('p1'))
+    expect(screen.queryByRole('alertdialog')).toBeNull()
   })
 
   it('reschedules through the schedule route', async () => {
@@ -250,9 +267,9 @@ describe('a missed post', () => {
     renderDetail(post({ status: 'missed', scheduled_for: '2026-11-09T09:00:00Z', timezone: 'Europe/Lisbon' }))
     expect(screen.getByRole('alert').textContent).toContain('Missed its slot')
     expect(screen.getByRole('button', { name: 'Reschedule' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Publish now' }))
-    fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Publish now' })).getByRole('button', { name: 'Publish' }))
+    fireEvent.click(screen.getByRole('button', { name: PUBLISH_NOW_TO_BOTH }))
     await waitFor(() => expect(api.publishSocialPostNow).toHaveBeenCalledWith('p1'))
+    expect(screen.queryByRole('alertdialog')).toBeNull()
   })
 })
 
@@ -261,8 +278,7 @@ describe('a 409', () => {
     api.publishSocialPostNow.mockRejectedValue(Object.assign(new Error('the post changed'), { status: 409 }))
     renderDetail(post())
     const invalidate = vi.spyOn(client, 'invalidateQueries')
-    fireEvent.click(screen.getByRole('button', { name: 'Publish now' }))
-    fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Publish now' })).getByRole('button', { name: 'Publish' }))
+    fireEvent.click(screen.getByRole('button', { name: PUBLISH_NOW_TO_BOTH }))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(SOCIAL_POST_CHANGED_MESSAGE))
     expect(invalidate).toHaveBeenCalled()
   })

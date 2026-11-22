@@ -43,9 +43,9 @@ logger = logging.getLogger(__name__)
 
 
 def _exempt(workspace_id: Any, is_byok: bool, purpose: Optional[str]) -> bool:
-    from config import config
+    from core import editions
 
-    return bool(is_byok or not workspace_id or config.AUTH_EDITION == "local" or is_overhead(purpose))
+    return bool(is_byok or not workspace_id or not editions.current().billing or is_overhead(purpose))
 
 
 def _within_budget(state: asks.AskState) -> None:

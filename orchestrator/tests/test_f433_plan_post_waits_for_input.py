@@ -100,7 +100,7 @@ def _image_plan(env, monkeypatch, blocks, facts_topic=None):
 
 def _proposing(monkeypatch, variables, *, bind=None, questions=()):
     """The composer's answer: ``variables``; ``bind`` a field to the topic's first fact."""
-    def propose(db, plan, slot, topic, now, visual_slots=()):
+    def propose(db, plan, slot, topic, now, visual_slots=(), **_options):
         found = maker_mod.fact_candidates(topic, now)
         sources = {bind: {k: found[0][k] for k in ("kind", "ref", "as_of")}} if bind else {}
         return {"title": f"Post: {topic.title}", "copy": {"base": "Our month.", "channels": {}}, "variables": variables,

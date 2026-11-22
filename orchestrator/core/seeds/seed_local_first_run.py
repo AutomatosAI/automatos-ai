@@ -5,8 +5,9 @@ Local-edition first-run seed — the two-minute demo (PRD-233 S3)
 Runs at the end of the lifespan's boot leader block on every boot, whatever the
 seed fingerprint (``core/seeds/leader_stage.py``, PRD-262 US-031), and in the full
 seed loader that ``docker-entrypoint.sh migrate`` runs (``core.database.load_seed_data``);
-only in the local edition: ``config.AUTH_EDITION == "local"`` with a
-``config.DEFAULT_WORKSPACE_ID``. SaaS never enters this module's write path.
+only where the edition seeds it (``editions.current().seeds_first_run_content``: the
+local edition) with a ``config.DEFAULT_WORKSPACE_ID``. SaaS never enters this module's
+write path.
 
 What it seeds, all scoped to the DEFAULT_WORKSPACE_ID workspace:
 
@@ -60,6 +61,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from config import config
+from core import editions
 from core.models.core import Agent, BlogPost, User, WorkflowTemplate
 from core.models.workspaces import Workspace
 from core.seeds.seed_auto_agent import seed_auto_agent
@@ -93,7 +95,10 @@ LOCAL_OPERATOR_PLACEHOLDER_NAME = "Local Operator"  # PRD-233 S6 makes it editab
 # any seed text, add the fingerprint the OLD content produced (capture it with
 # ``current_fingerprints()`` before editing) so untouched rows keep refreshing.
 # Rows hashing to none of current ∪ prior are user edits and are never touched.
-PRIOR_SEED_FINGERPRINTS: frozenset[str] = frozenset()
+PRIOR_SEED_FINGERPRINTS: frozenset[str] = frozenset({
+    # The welcome post before the BYOK tab was renamed Model keys (17 Nov 2026): "Settings → API Keys".
+    "967f89d65fec16bd21e1c06136aa107b23011841db78001933ac7c93685b5691",
+})
 
 # ── Roster ───────────────────────────────────────────────────────────────────
 
@@ -298,7 +303,7 @@ This workspace runs entirely on your machine — the API, Postgres, Redis and ob
 
 ## The one thing to do first
 
-Agents need a language model. Add an API key under **Settings → API Keys** (OpenRouter, OpenAI, Anthropic, Google and others are supported). Nothing answers until a key is present; everything listed above works with only that key.
+Agents need a language model. Add an API key under **Settings → Model keys** (OpenRouter, OpenAI, Anthropic, Google and others are supported). Nothing answers until a key is present; everything listed above works with only that key.
 
 ## Try it
 
@@ -755,9 +760,9 @@ def _upsert_welcome_post(ctx: _SeedContext, auto_agent_id: Optional[int]) -> str
 
 def seed_local_first_run(db: Session) -> dict[str, Any]:
     """Seed (or refresh) the local edition's first-run content. The caller owns
-    the commit. Returns per-kind outcome counts; ``{"skipped": ...}`` outside
-    the local edition — SaaS is never written to."""
-    if config.AUTH_EDITION != "local":
+    the commit. Returns per-kind outcome counts; ``{"skipped": ...}`` where the
+    edition seeds no first-run content (``seeds_first_run_content``) — SaaS is never written to."""
+    if not editions.current().seeds_first_run_content:
         return {"skipped": "not-local"}
     raw_workspace_id = (config.DEFAULT_WORKSPACE_ID or "").strip()
     if not raw_workspace_id:

@@ -12,6 +12,10 @@
  * The fields ride `Agent.configuration` (runtime / provider / model /
  * working_directory). The backend validates them (`core/cli_runtime.py`), so a
  * bad alias is refused at save, not discovered at claim.
+ *
+ * PRD-274: under it, a saved agent's runtime profile (Full / Lean) and memory
+ * profile, in both editions (`agent-profile-fields.tsx`); they ride the same
+ * configuration JSON.
  */
 
 import { useEffect, useState } from 'react'
@@ -24,6 +28,9 @@ import { PermissionModeSelect, WORKSPACE_DEFAULT, isPermissionMode } from '@/com
 import type { SessionToolGapEntry, SkillToolGap } from '@/types/session-tools'
 import { useConfiguredAgentId } from './configured-agent-context'
 import { loadApiClient } from './lazy-api-client'
+import { AgentProfileFields } from './agent-profile-fields'
+import { memoryProfilePick, type MemoryProfilePick } from './memory-profile-model'
+import { isRuntimeProfile, type RuntimeProfile } from './runtime-profile-model'
 import { SessionToolsPanel } from './session-tools-panel'
 import { sessionGroupsField } from './session-tool-groups-model'
 import { useSessionToolPreview } from './use-session-tool-preview'
@@ -44,6 +51,17 @@ export interface RuntimeFields {
    * untouched agent saves nothing and keeps the backend's default (every group).
    */
   cli_session_tool_groups?: string[]
+  /**
+   * PRD-274: Full or Lean, as the person picked it. Undefined until they choose, so an untouched
+   * agent saves nothing and keeps its stored profile (absent = full).
+   */
+  runtime_profile?: RuntimeProfile
+  /**
+   * PRD-274 Wave 4: the memory profile, as the person picked it: a slug, or null to go back to
+   * the workspace's default (saved as `memory_profile: null`). Undefined until they choose, so an
+   * untouched agent saves nothing and keeps what it has.
+   */
+  memory_profile?: MemoryProfilePick
 }
 
 const DEFAULT_CLI_PROVIDER = 'claude'
@@ -131,8 +149,12 @@ function str(value: unknown): string {
 export function normalizeRuntimeFields(source: object | null | undefined): RuntimeFields {
   const src = (source ?? {}) as Record<string, unknown>
   const groups = sessionGroupsField(src.cli_session_tool_groups)
+  const profile = src.runtime_profile
+  const memoryProfile = memoryProfilePick(src.memory_profile)
   return {
     ...(groups ? { cli_session_tool_groups: groups } : {}),
+    ...(isRuntimeProfile(profile) ? { runtime_profile: profile } : {}),
+    ...(memoryProfile !== undefined ? { memory_profile: memoryProfile } : {}),
     runtime: src.runtime === 'cli' ? 'cli' : 'api',
     cli_provider: str(src.cli_provider) || DEFAULT_CLI_PROVIDER,
     cli_model: str(src.cli_model),
@@ -195,11 +217,19 @@ export function runtimeBadge(
  * The configuration fragment to save. An api agent carries only `runtime: 'api'`;
  * a cli agent carries provider/model/working_directory, blanks as null so the
  * host falls back to the CLI's default model and its default directory, and
- * `session_tool_groups` only when the owner changed the boxes (#942). The backend
- * merges this into the stored configuration, so a key left out keeps its value.
+ * `session_tool_groups` only when the owner changed the boxes (#942). Either kind
+ * carries `runtime_profile` and `memory_profile` only when the person picked one
+ * (PRD-274); a `memory_profile` of null is sent as null, clearing the agent's own.
+ * The backend merges this into the stored configuration, so a key left out keeps
+ * its value.
  */
 export function runtimeConfiguration(fields: RuntimeFields): Record<string, unknown> {
-  if (fields.runtime !== 'cli') return { runtime: 'api' }
+  const memoryProfile = memoryProfilePick(fields.memory_profile)
+  const profile = {
+    ...(fields.runtime_profile ? { runtime_profile: fields.runtime_profile } : {}),
+    ...(memoryProfile !== undefined ? { memory_profile: memoryProfile } : {}),
+  }
+  if (fields.runtime !== 'cli') return { runtime: 'api', ...profile }
   return {
     runtime: 'cli',
     provider: fields.cli_provider || DEFAULT_CLI_PROVIDER,
@@ -208,6 +238,7 @@ export function runtimeConfiguration(fields: RuntimeFields): Record<string, unkn
     worktree_per_ticket: fields.cli_worktree,
     permission_mode: fields.cli_permission_mode || null,
     ...(fields.cli_session_tool_groups ? { session_tool_groups: [...fields.cli_session_tool_groups] } : {}),
+    ...profile,
   }
 }
 
@@ -499,7 +530,8 @@ function WorkspaceFolderField({ value, onChange }: Pick<RuntimeSectionProps, 'va
   )
 }
 
-export function RuntimeSection({ value, onChange, sessionToolGaps }: RuntimeSectionProps) {
+/** Where the agent runs: an API model or a CLI session, and the session's fields. Local edition only. */
+function RuntimeKindGroup({ value, onChange, sessionToolGaps }: RuntimeSectionProps) {
   const sessionMode = isLocal && value.runtime === 'cli'
   const avail = useCliAvailability(sessionMode)
   // PRD-245 S1.5: the Automatos tools a ticket session gets, and one line per
@@ -624,6 +656,21 @@ export function RuntimeSection({ value, onChange, sessionToolGaps }: RuntimeSect
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * The Runtime group of an agent's Model step: where it runs (local edition only), then, for a
+ * saved agent, its runtime and memory profiles (both editions; PRD-274). The create wizard has no
+ * agent yet, so it gets no profile choices: a new agent starts Full, on its workspace's memory.
+ */
+export function RuntimeSection(props: RuntimeSectionProps) {
+  const agentId = useConfiguredAgentId()
+  return (
+    <>
+      <RuntimeKindGroup {...props} />
+      {agentId !== null && <AgentProfileFields agentId={agentId} value={props.value} onChange={props.onChange} />}
+    </>
   )
 }
 

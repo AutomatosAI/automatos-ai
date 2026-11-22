@@ -53,7 +53,7 @@ from services.board_drag_rules import (  # PRD-252 R6
     UNFINISHED_BY_HAND, drag_refusal, question_refusal,
 )
 from api import board_task_patch  # F259: the general PATCH's checks and writes
-from api.board_card_moves import approve_outside_review, call_off, left_as_it_is  # F294
+from api.board_card_moves import after_its_action, approve_outside_review, call_off, done_by_hand, its_merge_stands, left_as_it_is  # F294
 from api.board_mission_card import (  # F291: a mission's card waiting for its plan
     approve_from_its_card, is_mission_card, mission_card_refusal, start_its_mission, starts_its_mission,
 )
@@ -63,7 +63,7 @@ from services.send_back_rules import send_back_refusal  # N17-2 (F444): the Reje
 from services.step_lessons import a_cards_answer_goes_on_the_card  # F297 (night 8)
 from services.social_ticket_post import a_social_card_has_its_post  # F380 (night 11)
 from services.claims_taken_out import a_cards_claims_taken_out_are_noted  # N15-CI
-from services.done_needs_an_artifact import done_refusal, missing_artifact  # PRD-256 US-005: Done needs it
+from services.done_needs_an_artifact import done_refusal  # PRD-256 US-005: Done needs its artifact
 from services.result_document_links import a_cards_document_links_open_in_the_app  # F380
 from services.ticket_result_keep import kept_result as _kept_result  # F013: a shorter re-run never overwrites
 
@@ -168,42 +168,44 @@ async def _auto_create_task_report(
 async def _dispatch_task_complete(db: Session, workspace_id, task: BoardTask) -> None:
     """Fire a ``task_complete`` event through NotificationDispatcher.
 
-    Uses the caller's DB session so the notification row joins the
-    existing transaction (no extra commits). Dispatcher never raises on
-    delivery failures, but we still wrap in try/except so any programming
-    error cannot block the task-completion flow.
+    Uses the caller's DB session so the notification row joins its transaction; the
+    try/except keeps a programming error out of the task-completion flow. A heartbeat's
+    ticket and Auto's review of it end without one (a routine tick that found nothing told
+    the owner twice); the watch and knowledge hooks below still run for them.
     """
-    try:
-        from core.services.notification_dispatcher import NotificationDispatcher
+    from services.heartbeats.session_ticks import is_heartbeat_ticket
+    if not is_heartbeat_ticket(task):
+        try:
+            from core.services.notification_dispatcher import NotificationDispatcher
 
-        agent_name = None
-        if task.assigned_agent_id:
-            agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
-            agent_name = agent.name if agent else f"agent-{task.assigned_agent_id}"
+            agent_name = None
+            if task.assigned_agent_id:
+                agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
+                agent_name = agent.name if agent else f"agent-{task.assigned_agent_id}"
 
-        message = None
-        if task.result:
-            message = str(task.result)[:500]
-        elif task.description:
-            message = task.description[:500]
+            message = None
+            if task.result:
+                message = str(task.result)[:500]
+            elif task.description:
+                message = task.description[:500]
 
-        dispatcher = NotificationDispatcher(db, str(workspace_id))
-        await dispatcher.dispatch(
-            event_type="task_complete",
-            title=f"Task: {task.title}",
-            message=message,
-            link_type="task",
-            link_id=str(task.id),
-            agent_id=task.assigned_agent_id,
-            agent_name=agent_name,
-            status="ok",
-        )
-    except Exception:
-        logger.error(
-            "[BoardTasks] task_complete dispatch failed for task %s",
-            getattr(task, "id", "?"),
-            exc_info=True,
-        )
+            dispatcher = NotificationDispatcher(db, str(workspace_id))
+            await dispatcher.dispatch(
+                event_type="task_complete",
+                title=f"Task: {task.title}",
+                message=message,
+                link_type="task",
+                link_id=str(task.id),
+                agent_id=task.assigned_agent_id,
+                agent_name=agent_name,
+                status="ok",
+            )
+        except Exception:
+            logger.error(
+                "[BoardTasks] task_complete dispatch failed for task %s",
+                getattr(task, "id", "?"),
+                exc_info=True,
+            )
 
     # PRD-204 S3: board-task terminal choke point (success) -- every
     # completion path funnels through this helper. Fail-soft.
@@ -495,7 +497,7 @@ async def update_task(
     was = task.status
     new_status = board_task_patch.patch_status(db, task, body)
     agent = board_task_patch.patch_agent(db, ctx.workspace_id, task, body)
-    board_task_patch.refuse_the_patch(db, task, body, new_status, agent)
+    board_task_patch.refuse_the_patch(db, task, body, new_status, agent, ctx=ctx)
 
     if "assigned_agent_id" in body:
         board_task_patch.note_the_assign(db, task, agent)  # F294: the card says who it went to
@@ -713,7 +715,6 @@ async def approve_task(
 ):
     """
     Approve a board task in review status.
-
     If the task has an approval_action in planning_data, execute it
     (e.g., publish a blog post). Then move the task to done.
     """
@@ -724,8 +725,7 @@ async def approve_task(
         return approve_from_its_card(db, ctx, task, note=note)
     if task.status != "review":  # F294: in words; a card that finished by itself keeps the note
         return approve_outside_review(db, task, note)
-    if missing := missing_artifact(db, task):  # PRD-256 US-005 (F380): the thing the card was for exists
-        raise HTTPException(status_code=409, detail=missing)
+    by_a_person = done_by_hand(db, ctx, task)  # PRD-256 US-005 (#0065): a person's closes it; any other's needs it
     action_result, approval_action = None, (task.planning_data or {}).get("approval_action")
 
     # F195: the approval that moves the ticket out of review is the one that acts
@@ -739,11 +739,12 @@ async def approve_task(
     try:
         if approval_action:
             action_result = await _run_approval_action(db, ctx, approval_action)
-        still_approved = record_approval(db, task_id, workspace_id=ctx.workspace_id, decided_at=decided_at,
-                                         action_result=action_result, note=note)
+        missing, merged = await after_its_action(db, ctx, task, by_a_person=by_a_person, decided_at=decided_at, shown=body.get("pull_request"))  # its PR, as shown
+        still_approved = record_approval(db, task_id, workspace_id=ctx.workspace_id, decided_at=decided_at, action_result=action_result, note=note, missing=missing, merged=merged)
         db.commit()  # the action's own writes and the ticket's result, together
     except Exception:
-        _reopen_review(db, task_id, decided_at=decided_at, finished_before=finished_before)
+        if not its_merge_stands(db, task_id, ctx.workspace_id, decided_at=decided_at):  # a merged PR keeps it Done
+            _reopen_review(db, task_id, decided_at=decided_at, finished_before=finished_before)
         raise
     _refreshed(db, task, task_id)
 
@@ -1190,7 +1191,7 @@ async def update_task_status(
         raise HTTPException(status_code=422, detail=f"Invalid status: {new_status}")
     refusal = drag_refusal(task, new_status, running=_running_now(db, task),
                            mission_ticket=task.source_type in MISSION_TICKET_TYPES) \
-        or done_refusal(db, task, new_status)  # PRD-256 US-005: Done needs the card's artifact, as Approve does
+        or done_refusal(db, task, new_status, ctx=ctx)  # PRD-256 US-005: only a person's skips the artifact
     if refusal:
         raise HTTPException(status_code=409, detail=refusal)
     moved = _move_by_hand(db, ctx, task, new_status, body.get("blocked_reason"))
@@ -1231,6 +1232,7 @@ def _move_by_hand(db: Session, ctx: RequestContext, task: BoardTask, new_status:
     owned = mission_runs_it(db, task) if new_status in STARTING_STATUSES else None
     if owned:
         raise HTTPException(status_code=409, detail=owned)
+    board_task_patch.note_a_close_by_hand(db, ctx, task, new_status)  # PRD-256 US-005: what it lacked, on it
     _set_status_by_hand(task, new_status, blocked_reason, by=_operator_ref(ctx))
     return None
 

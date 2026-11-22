@@ -29,7 +29,7 @@ from services.cli_session_prompt import session_system_prompt, session_tool_gaps
 
 ORCH = Path(__file__).resolve().parents[1]
 POST_TOOLS = ("create_social_post", "update_social_post", "submit_social_post", "get_social_post",
-              "list_social_posts")
+              "list_social_posts", "get_social_plan", "add_social_topics", "get_social_history")
 API_POST_ACTIONS = ("platform_create_social_post", "platform_update_social_post", "platform_submit_social_post",
                     "platform_get_social_post")
 

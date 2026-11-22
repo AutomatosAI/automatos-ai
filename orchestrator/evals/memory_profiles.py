@@ -1,11 +1,11 @@
 """Memory-profile eval: does a domain profile keep more of what its domain needs? (Wave 4, §5.6)
 
-Three sample exchanges, one per seeded domain profile (``customer``, ``incident``, ``case``).
-Each names the facts the next conversation would need (``needed``, each a set of words that must
-appear together in one distilled fact, with alternatives) and what it should leave out
-(``unwanted``: a ruled-out hypothesis, general background). Each exchange is distilled with the
-``general`` prompt (today's) and with its domain profile, ``--runs`` times each, through the real
-prompt builder and parser (``SmartMemoryManager._build_distill_prompt`` /
+Four sample exchanges, one per seeded domain profile (``customer``, ``incident``, ``case``,
+``wellbeing``). Each names the facts the next conversation would need (``needed``, each a set of
+words that must appear together in one distilled fact, with alternatives) and what it should leave
+out (``unwanted``: a ruled-out hypothesis, general background, a health reading or a medicine).
+Each exchange is distilled with the ``general`` prompt (today's) and with its domain profile,
+``--runs`` times each, through the real prompt builder and parser (``SmartMemoryManager._build_distill_prompt`` /
 ``_parse_distilled_facts``, ``modules.memory.memory_profiles.with_profile``).
 
 Live only for the model: ``--live --model <OpenRouter model id>`` calls OpenRouter directly
@@ -100,6 +100,26 @@ EXCHANGES: Tuple[Exchange, ...] = (
             "draft for review by 21 November": (("21 november",),),
         },
         unwanted={"general legal background (section 18)": (("section 18",), ("1927",))},
+    ),
+    Exchange(
+        profile="wellbeing",
+        user=("Rough week again. Work's been relentless and my watch says I'm sleeping four hours a night, resting "
+              "heart rate 88 bpm. The doctor has put me back on my tablets, 50mg. What helped last time was calling "
+              "my brother Tom in the evening and a walk before work; the breathing app did nothing for me. I'm "
+              "seeing my friend Ella for lunch on Saturday. And please keep replies short: long lists overwhelm me."),
+        assistant=("That sounds like a hard week, and it makes sense you're worn out. Calling Tom and a walk before "
+                   "work helped before, so they're worth leaning on again. Lunch with Ella on Saturday sounds good; "
+                   "I'll ask how it went. I'll keep my replies short."),
+        needed={
+            "Tom, the brother they call": (("tom", "brother"),),
+            "a walk before work helped": (("walk",),),
+            "the breathing app did not help": (("breathing",),),
+            "lunch with Ella on Saturday": (("ella", "saturday"),),
+            "prefers short replies": (("short", "repl"), ("brief", "repl"), ("short", "message")),
+        },
+        unwanted={"a body reading": (("four hours",), ("4 hours",), ("88", "bpm"), ("heart rate",)),
+                  "a medicine or dose": (("50mg",), ("50 mg",), ("tablets",)),
+                  "a treatment or doctor": (("doctor",), ("back on",))},
     ),
 )
 

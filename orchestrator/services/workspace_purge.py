@@ -32,6 +32,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from config import config
+from core import editions
 from core.auth.clerk import get_clerk_auth
 from core.database.database import SessionLocal
 from core.storage import get_s3_client, is_storage_configured
@@ -225,11 +226,12 @@ def _owner_has_nothing_left(db: Session, owner_id: Optional[int], workspace_id: 
     """True when purging ``workspace_id`` leaves its owner with no workspace at all (#1431).
 
     Another workspace they own, or one they are a member of, keeps their account (their
-    sign-in and their users row). Never on the local edition: its users are the install's
-    operator, whose main workspace often has no ``owner_id``, so an ownership count alone
-    found "nothing left" and the purge tried to delete the operator.
+    sign-in and their users row). Never where a purge keeps the person
+    (``last_workspace_purge_deletes_person`` off, the local edition): its users are the
+    install's operator, whose main workspace often has no ``owner_id``, so an ownership
+    count alone found "nothing left" and the purge tried to delete the operator.
     """
-    if not owner_id or config.AUTH_EDITION == "local":
+    if not owner_id or not editions.current().last_workspace_purge_deletes_person:
         return False
     elsewhere = db.execute(
         text(

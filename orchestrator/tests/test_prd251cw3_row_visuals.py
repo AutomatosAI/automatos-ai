@@ -127,7 +127,7 @@ def test_a_save_without_a_named_toolkit_never_reads_the_registry(bank, monkeypat
 def _write(monkeypatch, mix, slot):
     posts_api = _PostsApi()
 
-    def propose(db, plan, slot, topic, now, visual_slots=()):
+    def propose(db, plan, slot, topic, now, visual_slots=(), **_options):
         return {"title": "Lisbon", "copy": {"base": "See you there."}, "variables": {}, "sources": {},
                 "template_id": str(TEMPLATE_ID), "visual_prompts": {}}
 

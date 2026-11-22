@@ -77,6 +77,12 @@ export function channelLabel(toolkit: string): string {
   return CHANNEL_LABELS[toolkit] ?? toolkit.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+/** The post's channels as Approve and Publish now name them: "LinkedIn, X" (each once). */
+export function channelNames(post: Pick<SocialPost, 'targets'>): string {
+  const names = (post.targets ?? []).map((t) => channelLabel(t.toolkit))
+  return Array.from(new Set(names)).join(', ')
+}
+
 /** Group order: what needs a person first, finished and archived work last. */
 export const SOCIAL_STATUS_ORDER: ReadonlyArray<SocialPostStatus> = [
   'needs_approval',

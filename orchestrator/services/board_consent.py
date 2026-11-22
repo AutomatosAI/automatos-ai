@@ -20,6 +20,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
+from core import editions
+
 logger = logging.getLogger(__name__)
 
 WHY_MOVED_TO_IN_PROGRESS = "the operator moved the ticket to In Progress"
@@ -30,8 +32,12 @@ WHY_ASKED_IN_CHAT = "the operator asked Auto for it in chat"
 WHY_SCHEDULED_LANE = "the operator's standing schedule filed it (heartbeat / lane)"
 WHY_SCHEDULED_AND_ASSIGNED = "the operator scheduled the ticket and assigned it"
 
-LOCAL_EDITION = "local"
 SKIPPED = "skipped"
+# What record_operator_consent found or did (its return value).
+ACTIVE = "active"
+GRANTED = "granted"
+CREATED = "created"
+ERROR = "error"
 
 # PRD-234 D16: tool calls that file, assign or re-queue a board ticket carry the
 # driving human so the local edition can record consent before dispatch.
@@ -65,22 +71,6 @@ def actor_from_user_id(user_id: Any) -> str:
     return f"user:{user_id}" if user_id else "user:unknown"
 
 
-def edition() -> str:
-    """The running edition (``local`` | ``saas``) from the canonical config object.
-
-    ``config.py`` exports the settings instance as ``config.config`` (the name
-    every service imports); the first cut looked for ``settings`` and fell back
-    to the bare module, which has no ``AUTH_EDITION`` — so the local edition read
-    as saas and ticket 85 was parked behind grant #21 like before.
-    """
-    try:
-        from config import config as app_config
-
-        return str(getattr(app_config, "AUTH_EDITION", "saas") or "saas").lower()
-    except Exception:  # noqa: BLE001 — an unreadable edition keeps the asking posture
-        return "saas"
-
-
 def driver_from_caller_context(caller_context: Any) -> Optional[str]:
     """The human behind a chat tool call, or None for an autonomous run.
 
@@ -95,33 +85,41 @@ def driver_from_caller_context(caller_context: Any) -> Optional[str]:
 
 
 def creation_is_consent() -> bool:
-    """True on the local edition only — one operator, so filing a ticket IS approving it."""
-    return edition() == LOCAL_EDITION
+    """True where one person runs the install (``multi_person`` off: the local edition), so
+    filing a ticket IS approving it. An edition that cannot be read keeps the asking posture."""
+    try:
+        return not editions.current().multi_person
+    except Exception:  # an unreadable edition keeps the asking posture
+        logger.exception("[board_consent] the edition could not be read; filing a ticket is not its approval")
+        return False
 
 
-def consent_for_lane_ticket(db: Any, *, workspace_id: Any, task: Any, source_type: str) -> str:
+def consent_for_lane_ticket(
+    db: Any, *, workspace_id: Any, task: Any, source_type: str, commit: bool = True,
+) -> str:
     """Pre-approve a ticket a scheduled lane just filed (local edition).
 
     Owner's words (2026-09-07): "if I ask Auto to create a task then just do it —
     less approval, more automation." On the local edition the operator enabled
     the heartbeat / schedule that files the ticket, so the standing schedule IS
     the approval; ``always_ask`` keeps holding only work nobody asked for.
-    SaaS is untouched (``creation_is_consent`` is False there).
+    SaaS is untouched (``creation_is_consent`` is False there). ``commit`` is
+    :func:`record_operator_consent`'s.
     """
     return consent_for_created_ticket(
         db, workspace_id=workspace_id, task=task,
-        actor=f"lane:{source_type or 'schedule'}", why=WHY_SCHEDULED_LANE,
+        actor=f"lane:{source_type or 'schedule'}", why=WHY_SCHEDULED_LANE, commit=commit,
     )
 
 
 def consent_for_created_ticket(
-    db: Any, *, workspace_id: Any, task: Any, actor: str, why: str,
+    db: Any, *, workspace_id: Any, task: Any, actor: str, why: str, commit: bool = True,
 ) -> str:
     """Pre-approve a ticket the operator just filed AND assigned (local edition).
 
     Returns ``"skipped"`` when the edition asks, or the ticket is not about to be
     dispatched (unassigned, or not in ``assigned``); otherwise the outcome of
-    :func:`record_operator_consent`.
+    :func:`record_operator_consent`, which ``commit`` is passed to.
     """
     if not creation_is_consent():
         return SKIPPED
@@ -129,46 +127,69 @@ def consent_for_created_ticket(
     if getattr(task, "status", None) != "assigned" or not agent_id:
         return SKIPPED
     return record_operator_consent(
-        db, workspace_id=workspace_id, task_id=task.id, agent_id=agent_id, actor=actor, why=why,
+        db, workspace_id=workspace_id, task_id=task.id, agent_id=agent_id, actor=actor, why=why, commit=commit,
     )
 
 
 def record_operator_consent(
     db: Any, *, workspace_id: Any, task_id: int, agent_id: Optional[int], actor: str, why: str,
+    commit: bool = True,
 ) -> str:
     """Make sure an ACTIVE board-task grant exists for ``task_id``.
 
     Returns ``"active"`` (one already authorised the task), ``"granted"`` (a
     pending grant was approved), ``"created"`` (a granted grant was recorded), or
     ``"error"`` (nothing recorded — the gate will ask as before; never raises).
+
+    ``commit=False`` is for the code that files the ticket: the grant is staged in
+    the caller's transaction, inside a savepoint, and nothing is committed, so the
+    ticket and its grant become visible in one commit. Committed apart, the
+    dispatcher claimed scheduled ticket 343 between the two commits, found no grant
+    and parked it behind a new request. A failure then rolls back the savepoint
+    alone: the caller's ticket still commits, and the gate asks as before.
     """
     try:
-        from core.models.approval_grants import KIND_APPROVAL, SUBJECT_BOARD_TASK
-        from core.services.approval_grants import (
-            create_grant, find_active_grant, find_pending_grant, grant_grant,
-        )
-        subject = str(task_id)
-        if find_active_grant(db, workspace_id, subject_type=SUBJECT_BOARD_TASK, subject_id=subject) is not None:
-            return "active"
-        # F259: only an approval is consent. An open question waits for its answer:
-        # granting it here dropped it from the Questions tab unanswered.
-        pending = find_pending_grant(db, workspace_id, subject_type=SUBJECT_BOARD_TASK, subject_id=subject,
-                                     kind=KIND_APPROVAL)
-        if pending is not None:
-            grant_grant(pending, granted_by=actor)
+        if not commit:
+            with db.begin_nested():
+                return _stage_grant(db, workspace_id=workspace_id, task_id=task_id, agent_id=agent_id,
+                                    actor=actor, why=why)
+        outcome = _stage_grant(db, workspace_id=workspace_id, task_id=task_id, agent_id=agent_id,
+                               actor=actor, why=why)
+        if outcome != ACTIVE:
             db.commit()
-            return "granted"
-        grant = create_grant(
-            db, workspace_id, subject_type=SUBJECT_BOARD_TASK, subject_id=subject,
-            agent_id=agent_id, reason=why,
-        )
-        grant_grant(grant, granted_by=actor)
-        db.commit()
-        return "created"
+        return outcome
     except Exception:  # noqa: BLE001 — consent is a convenience; the gate stays the safety net
         logger.warning("[BoardConsent] could not record consent for task %s", task_id, exc_info=True)
+        if not commit:
+            return ERROR  # the savepoint is rolled back; the caller's own writes are left to commit
         try:
             db.rollback()
         except Exception:  # noqa: BLE001
             pass
-        return "error"
+        return ERROR
+
+
+def _stage_grant(
+    db: Any, *, workspace_id: Any, task_id: int, agent_id: Optional[int], actor: str, why: str,
+) -> str:
+    """Stage the granted board-task grant ``record_operator_consent`` promises; commits nothing."""
+    from core.models.approval_grants import KIND_APPROVAL, SUBJECT_BOARD_TASK
+    from core.services.approval_grants import (
+        create_grant, find_active_grant, find_pending_grant, grant_grant,
+    )
+    subject = str(task_id)
+    if find_active_grant(db, workspace_id, subject_type=SUBJECT_BOARD_TASK, subject_id=subject) is not None:
+        return ACTIVE
+    # F259: only an approval is consent. An open question waits for its answer:
+    # granting it here dropped it from the Questions tab unanswered.
+    pending = find_pending_grant(db, workspace_id, subject_type=SUBJECT_BOARD_TASK, subject_id=subject,
+                                 kind=KIND_APPROVAL)
+    if pending is not None:
+        grant_grant(pending, granted_by=actor)
+        return GRANTED
+    grant = create_grant(
+        db, workspace_id, subject_type=SUBJECT_BOARD_TASK, subject_id=subject,
+        agent_id=agent_id, reason=why,
+    )
+    grant_grant(grant, granted_by=actor)
+    return CREATED

@@ -1,6 +1,6 @@
 /**
  * PRD-251B US-B107 — the Socials Studio shell: the sub-navigation Calendar · Queue (its
- * count) · Plans · Posted (PRD-251C US-C408) with New plan and New post (F250: the brand kit is its own Deliverables
+ * count: the posts waiting for approval and the approved posts with no time) · Plans · Posted (PRD-251C US-C408) with New plan and New post (F250: the brand kit is its own Deliverables
  * tab, with no second entry here), and the view held in the URL
  * (/deliverables?tab=socials&view=…&post=…&plan=…). A view change is a router.push, so
  * back returns to it; an unknown view is the calendar; ?post=<id> opens that post.
@@ -94,6 +94,17 @@ describe('the Socials Studio shell', () => {
     expect(screen.getByRole('button', { name: /New post/ })).toBeInTheDocument()
     expect(current()).toHaveTextContent('Calendar')
     expect(screen.getByTestId('view-calendar')).toBeInTheDocument()
+  })
+
+  it("the Queue's count adds an approved post with no time, which posts nothing until it gets one", async () => {
+    state.posts = [
+      ...state.posts,
+      post('p4444', 'approved', 'No time'),
+      { ...post('p55555', 'approved', 'Has a slot'), planned_for: '2026-10-20T09:00:00Z' },
+      { ...post('p666666', 'scheduled', 'Scheduled'), scheduled_for: '2026-10-20T09:00:00Z' },
+    ]
+    renderStudio()
+    expect(await within(nav()).findByText('3 posts need you')).toBeInTheDocument()
   })
 
   it('opens the view the URL names, and an unknown view is the calendar', async () => {

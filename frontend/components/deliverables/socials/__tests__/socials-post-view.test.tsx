@@ -8,6 +8,8 @@
  *   copy, the receipts, the history, the render lines, an approval an edit reset, the voice.
  * * It offers nothing the role may not do: a viewer gets no button at all; an author gets Retry
  *   on a partly published post's failed channels, and nothing else in these statuses.
+ * * An approved post with no time says nothing will post until a time is picked or it is posted
+ *   now, and, to a role that schedules, that Schedule and Publish now are below.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
@@ -37,7 +39,9 @@ vi.mock('@/components/widgets/FileWidget/FilePreview', () => ({
 import type { Workspace } from '@/components/workspace-provider'
 import type { SocialPost, SocialPostTarget, SocialReviewEntry } from '@/lib/api-client'
 import { SOCIAL_STATUS_LABELS, SOCIAL_STATUS_ORDER } from '@/components/deliverables/socials/socials-status'
-import { RENDERING_NOTE, RENDERS_AS_SAVED } from '@/components/deliverables/socials/studio/post-notices'
+import {
+  APPROVED_NO_TIME_NOTE, CONTROLS_BELOW, RENDERING_NOTE, RENDERS_AS_SAVED,
+} from '@/components/deliverables/socials/studio/post-notices'
 import { SocialsEditorActivity } from '@/components/deliverables/socials/studio/socials-editor-activity'
 import { SocialsPostPage } from '@/components/deliverables/socials/studio/socials-post-page'
 import { READ_ONLY_ROLE } from '@/components/deliverables/socials/studio/socials-post-view'
@@ -149,9 +153,10 @@ describe('a role that cannot author', () => {
       const card = view()
       expect(screen.queryByRole('region', { name: 'Post to approve' })).toBeNull()
       expect(within(card).getByText(READ_ONLY_ROLE)).toBeInTheDocument()
-      for (const name of ['Approve', 'Approve & post now', 'Request changes', 'Reject', 'Make another take', 'Edit post']) {
+      for (const name of ['Request changes', 'Reject', 'Make another take', 'Edit post']) {
         expect(screen.queryByRole('button', { name })).toBeNull()
       }
+      expect(screen.queryByRole('button', { name: /^Approve/ })).toBeNull()  // no Approve, whatever it says it does
       expect(within(card).queryAllByRole('button')).toHaveLength(0)
       cleanup()
     }
@@ -263,6 +268,43 @@ describe("the Activity card's full render, the older pane's Render", () => {
     for (const [p, role] of cases) {
       activity(p, role)
       expect(screen.queryByRole('button', { name: /^Render/ })).toBeNull()
+      cleanup()
+    }
+  })
+})
+
+describe('an approved post with no time', () => {
+  const activity = (p: SocialPost, role: Workspace['role'] = 'owner') => withClient(<SocialsEditorActivity post={p} role={role} />)
+  // Approved with no slot, the server leaves it approved "for a person to schedule": nothing posts it.
+  const NO_TIME = post({ status: 'approved', approved_hash: 'h1', approved_at: '2026-10-14T08:00:00Z' })
+
+  it('says nothing will post until a time is picked or it is posted now, above Schedule and Publish now', () => {
+    activity(NO_TIME)
+    const card = screen.getByRole('region', { name: 'Activity' })
+    const notice = within(card).getByRole('status')
+    expect(notice).toHaveTextContent(`${APPROVED_NO_TIME_NOTE} ${CONTROLS_BELOW}`)
+    const publishing = within(card).getByRole('region', { name: 'Publishing' })
+    expect(within(publishing).getByRole('button', { name: 'Schedule' })).toBeInTheDocument()
+    expect(within(publishing).getByRole('button', { name: 'Publish now to LinkedIn' })).toBeInTheDocument()
+    expect(notice.compareDocumentPosition(publishing) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('to a role that cannot schedule, says it without pointing at controls it does not have', () => {
+    renderPage(NO_TIME, 'viewer')
+    expect(within(view()).getByRole('status')).toHaveTextContent(APPROVED_NO_TIME_NOTE)
+    expect(screen.queryByText(CONTROLS_BELOW, { exact: false })).toBeNull()
+    expect(within(view()).queryAllByRole('button')).toHaveLength(0)
+  })
+
+  it('says nothing for a post with a slot, a scheduled one, or one not approved yet', () => {
+    const others = [
+      post({ ...NO_TIME, planned_for: '2026-10-20T09:00:00Z' }),
+      post({ status: 'scheduled', scheduled_for: '2026-10-20T09:00:00Z' }),
+      post({ status: 'needs_approval' }),
+    ]
+    for (const other of others) {
+      activity(other)
+      expect(screen.queryByText(APPROVED_NO_TIME_NOTE, { exact: false }), other.status).toBeNull()
       cleanup()
     }
   })

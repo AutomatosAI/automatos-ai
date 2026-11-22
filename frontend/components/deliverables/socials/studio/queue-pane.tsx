@@ -3,8 +3,10 @@
 /**
  * PRD-251B US-B111 — the Queue's pane: the post to approve, shown exactly (PRD-251's approval
  * view: the media through FilePreview, each channel's copy with its count, the claims and
- * their sources), with when it publishes, and the approver's actions: "Approve · publishes
- * HH:MM" (the approve that schedules it into its slot, US-B105), Request changes, which sends
+ * their sources), with when it publishes, and the approver's actions: one Approve whose label says
+ * what it does at the Queue's clock (`approveLabel`: "Approve · posts HH:MM" schedules it into its
+ * slot, US-B105, or a schedule kept from before an edit, `approvalSlot`, which the badge names too;
+ * "Approve & post now to X" publishes it at once), Request changes, which sends
  * it back to Auto with what should change, Make another take (F378: and Restore the earlier take,
  * once Auto made one), and Reject. Edit post opens
  * it in the editor (its channels, words and look) and an owner or admin can Delete it
@@ -21,7 +23,7 @@ import { hasEarlierTake } from '../socials-review'
 import { SocialsPostEvidence } from '../socials-post-evidence'
 import { SocialsPostReview } from '../socials-post-review'
 import { postTime } from './socials-calendar-model'
-import { approveLabel, metaLine, slotOfQueued, timeLeft } from './queue-model'
+import { approvalSlot, metaLine, slotOfQueued, timeLeft } from './queue-model'
 import { CARD, Hint } from './editor-ui'
 import { DeletePostButton } from './delete-post-button'
 
@@ -43,7 +45,8 @@ export function QueuePane({ post, campaignName, now, role, onEdit }: QueuePanePr
   const retake = useRetakeSocialPost()
   const undo = useUndoRetake()
   const sendBack = useSendBackToAuto()
-  const slot = slotOfQueued(post)
+  // The badge names the time Approve would schedule it into (as its label does), else its slot.
+  const slot = approvalSlot(post, now) ?? slotOfQueued(post)
   const anotherTake = (
     <>
       <Button size="sm" variant="outline" onClick={() => retake.mutate(post.id)} disabled={retake.isLoading}>
@@ -85,7 +88,7 @@ export function QueuePane({ post, campaignName, now, role, onEdit }: QueuePanePr
       <SocialsPostReview
         post={post}
         dirty={false}
-        approveLabel={approveLabel(post)}
+        now={now}
         extra={anotherTake}
         onEdit={onEdit}
         sendBack={{

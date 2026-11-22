@@ -6,7 +6,7 @@ request unless the caller's first sign-in factor was verified within the last
 ``max_age_minutes`` minutes, so code running in the page as the user (an
 installed theme) cannot finish these routes silently.
 
-Edition gate (``AUTH_EDITION``, never the caller's role):
+Edition gate (the ``step_up`` capability, ``core.editions``; never the caller's role):
 
 ==========  ==================================================================
 edition     behaviour
@@ -18,6 +18,9 @@ edition     behaviour
             other context (``api_key``, ``sdk_key``, ``anonymous``) is refused:
             none of them has a person who can sign in again.
 ==========  ==================================================================
+
+``enterprise`` (``reauth``: sign in again at the identity provider, PRD-277 US-406)
+refuses every context until that is built: never a pass, and never Clerk's ``fva``.
 
 The ``fva`` claim ("factor verification age") is Clerk's session-token claim
 ``[first_factor_minutes, second_factor_minutes]``, ``-1`` for a factor never
@@ -52,7 +55,7 @@ from typing import Any, Callable, Dict, Optional
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
-from config import config
+from core import editions
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 
@@ -74,13 +77,13 @@ FACTOR_NOT_VERIFIED = -1
 
 STEP_UP_CODE = "step_up_required"
 STEP_UP_UNAVAILABLE_CODE = "step_up_unavailable"
+STEP_UP_NOT_BUILT = "This action needs you to sign in again, which this build cannot do yet."
 
 # Marker stamped on every step-up dependency (its max age, in minutes), so the
 # wire story's test can find exactly the routes that carry it on the route table.
 STEP_UP_MARKER_ATTR = "_step_up_max_age_minutes"
 
 _CLERK_AUTH_TYPE = "clerk"
-_LOCAL_EDITION = "local"
 _SECONDS_PER_MINUTE = 60.0
 
 
@@ -157,8 +160,20 @@ def first_factor_is_fresh(claims: Any, max_age_minutes: int, now: float) -> bool
     return age + _minutes_since_issued(claims, now) < max_age_minutes
 
 
-def _is_local_edition() -> bool:
-    return str(getattr(config, "AUTH_EDITION", "") or "").strip().lower() == _LOCAL_EDITION
+def _skips_step_up() -> bool:
+    return editions.current().step_up == editions.STEP_UP_SKIP
+
+
+def _reads_clerk_freshness() -> bool:
+    return editions.current().step_up == editions.STEP_UP_CLERK_FRESHNESS
+
+
+def _refuse_not_built(auth_type: Any) -> HTTPException:
+    logger.warning("step-up refused: confirming a %s context is not built for this edition", auth_type)
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={"code": STEP_UP_UNAVAILABLE_CODE, "message": STEP_UP_NOT_BUILT},
+    )
 
 
 def _refuse_without_person(auth_type: Any) -> HTTPException:
@@ -174,9 +189,11 @@ def _refuse_without_person(auth_type: Any) -> HTTPException:
 
 def check_step_up(ctx: Any, max_age_minutes: int, now: float) -> None:
     """Raise unless ``ctx`` satisfies step-up in the current edition."""
-    if _is_local_edition():
+    if _skips_step_up():
         return
     auth_type = getattr(ctx, "auth_type", None)
+    if not _reads_clerk_freshness():
+        raise _refuse_not_built(auth_type)
     if auth_type != _CLERK_AUTH_TYPE:
         raise _refuse_without_person(auth_type)
     claims = getattr(getattr(ctx, "user", None), "raw_claims", None)

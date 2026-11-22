@@ -43,7 +43,7 @@ function QueueCount({ count }: { count: number }) {
 
 interface SocialsStudioNavProps {
   view: SocialsStudioView
-  /** Posts waiting for approval: the Queue's badge. */
+  /** Posts waiting for approval, and approved posts with no time (queue-model.ts `queueCount`): the Queue's badge. */
   queueCount: number
   canAuthor: boolean
   onView: (view: SocialsStudioView) => void

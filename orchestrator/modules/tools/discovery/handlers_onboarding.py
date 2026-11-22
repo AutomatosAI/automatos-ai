@@ -12,6 +12,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from core import editions
 from core.models.workspaces import Workspace
 from modules.tools.discovery.onboarding_plan_choice import plan_is_chosen_never_assigned
 from services.onboarding_state import (
@@ -51,6 +52,7 @@ _SAME_STAGE_HINTS = {
 
 # The third same-stage re-assert at 'building' with nothing built is refused.
 BUILDING_REASSERT_LIMIT = 3
+_AT_LEAST_ONE = "Provide advance_to, segment, plan, or timezone — at least one is required."
 
 
 def _stage_hint(db: Any, workspace: Any) -> str:
@@ -199,6 +201,148 @@ def _normalise_params(params: Any) -> Tuple[Dict[str, Any], List[str]]:
     return out, notes
 
 
+def _refuse_input(
+    params: Dict[str, Any], advance_to: Any, segment: Any, plan: Any, zone: Any
+) -> Optional[Dict[str, Any]]:
+    """The error for a call that carries nothing, or a timezone that isn't one; else None."""
+    if not advance_to and not segment and not plan and not zone and not params.get("_bare_answer"):
+        return {"success": False, "error": _AT_LEAST_ONE}
+    # F132 (night 6): where the business is decides when its schedules fire.
+    if zone is not None and not _is_zone(zone):
+        return {"success": False, "error": (
+            f"'{zone}' isn't a timezone. Pass the IANA name for where the business is, "
+            "e.g. 'Europe/London' for Bristol.")}
+    return None
+
+
+def _bare_answer_segment(workspace: Any, bare: Any, segment: Any, advance_to: Any) -> Any:
+    """``segment``, or the bare-text answer as the first question still unanswered.
+
+    A bare-text answer becomes the first question still unanswered (or the key the model
+    named). The questions are asked in QUESTION order, so the document says which one
+    this is; dropping the text was the freeze.
+    """
+    if not (bare and not segment and not advance_to and current_stage(workspace) in (INITIAL_STAGE, "questions")):
+        return segment
+    # Only while the questions are open: past 'questions' a bare sentence is
+    # not an answer to anything (the #656 rule — honest error — still holds).
+    key, text = bare
+    answered = get_onboarding(workspace).get("segment") or {}
+    if not key:
+        key = next((k for k in QUESTION_KEYS if answered.get(k) is None), None)
+    if not key:
+        return segment
+    logger.warning("[update_onboarding] bare-text answer recorded as '%s' (%s)", key,
+                   "key named by the model" if bare[0] else "first unanswered question")
+    return {key: text}
+
+
+def _same_stage_reply(db: Session, workspace: Any) -> Dict[str, Any]:
+    """The answer to a re-asserted stage with nothing else to write.
+
+    Honest no-op (local test 2026-09-02): Auto re-asserted 'building' twice while SAYING
+    "I'm proceeding with the installation" and installing nothing — a bare success read
+    as progress. Say what changed (nothing) and what the stage actually needs.
+    """
+    snap = public_snapshot(workspace)
+    stage = snap.get("stage")
+    n = record_same_stage_reassert(db, workspace, stage, commit=False)
+    if db is not None:
+        db.commit()  # the only write on this path
+    if (
+        stage == "building"
+        and n >= BUILDING_REASSERT_LIMIT
+        and not build_evidence(db, workspace)["any"]
+    ):
+        # Prod 2026-09-02: saffron re-asserted 'building' four times while
+        # narrating a build that never happened. The tool records progress
+        # — it cannot make it — and now says so as a refusal, which this
+        # model reacts to; a success-with-message it ignores.
+        return {
+            "success": False,
+            "noop": True,
+            "data": snap,
+            "error": (
+                f"Refused: 'building' re-asserted {n} times with nothing built. This tool "
+                "records progress — it cannot make it. Do not call it again until you have "
+                "installed the matched package (platform_install_package) or created an "
+                "agent (platform_create_agent); then advance_to boom."
+            ),
+        }
+    hint = _stage_hint(db, workspace)
+    return {
+        "success": True,
+        "data": snap,
+        "noop": True,
+        "message": f"Already at '{stage}' — nothing changed (re-assert {n}). {hint}".strip(),
+    }
+
+
+def _rollback(db: Optional[Session]) -> None:
+    if db is not None:
+        db.rollback()
+
+
+def _done(workspace: Any, zone_outcome: Optional[Dict[str, Any]], skip_powerup: bool) -> Dict[str, Any]:
+    """The success answer: the snapshot, the timezone outcome, and why powerup was skipped."""
+    result: Dict[str, Any] = {"success": True, "data": public_snapshot(workspace)}
+    if zone_outcome:
+        result["timezone"] = zone_outcome
+    if skip_powerup:
+        result["message"] = ("This local install has no powerup step (a key and the checklist are SaaS), "
+                             "so onboarding is completed.")
+    return result
+
+
+def _write(
+    db: Session, workspace: Any, advance_to: Any, segment: Any, zone: Any
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Every write of the call, committed once: ``(error, None)`` or ``(None, zone_outcome)``.
+
+    ATOMICITY (FR-4, RVW-2): every writer below runs with commit=False and the
+    WHOLE tool call is committed ONCE at the end. A state change (plan +
+    plan_limits, or a stage advance) and its funnel audit stamp therefore land
+    together or not at all — a durable change can never be reported success:False
+    (nothing committed on failure) nor left without its recorded audit event.
+    """
+    try:
+        if advance_to:
+            # A single write advances the stage and merges any segment answers.
+            advance_onboarding_stage(db, workspace, advance_to, segment=segment, commit=False)
+        elif segment:
+            set_segment(db, workspace, segment, commit=False)
+
+        # Funnel: reaching the proposal records the plan Auto will recommend
+        # (derived from the stored segment). Auditable, FR-4.
+        if advance_to == "proposal":
+            from services.plan_tiers import recommend_plan
+
+            rec_plan, _reason = recommend_plan(get_onboarding(workspace).get("segment") or {})
+            record_plan_event(db, workspace, "plan_recommended", rec_plan, commit=False)
+
+        zone_outcome = _set_business_zone(workspace, zone) if zone else None
+
+        # The single commit — all deferred writes land as one transaction.
+        if db is not None:
+            db.commit()
+    except InvalidStageTransition as exc:
+        _rollback(db)
+        # A refused move (backward, or the payoff without a build) names what the
+        # CURRENT stage needs — local test 2026-09-02: Auto tried building →
+        # proposal, was told "non-forward", and stalled.
+        hint = _stage_hint(db, workspace)
+        return {"success": False, "error": f"{exc} {hint}".strip()}, None
+    except ValueError as exc:
+        # e.g. set_segment called with no recognised keys.
+        _rollback(db)
+        return {"success": False, "error": str(exc)}, None
+    except Exception as exc:  # noqa: BLE001 - surface a clean tool error, never crash
+        logger.error("[update_onboarding] failed: %s", exc, exc_info=True)
+        _rollback(db)
+        return {"success": False, "error": str(exc)}, None
+    return None, zone_outcome
+
+
 @plan_is_chosen_never_assigned  # PRD-265 US-006: a plan is recorded as a choice, never assigned
 async def update_onboarding(
     db: Session, workspace_id: UUID, params: Dict[str, Any]
@@ -228,24 +372,16 @@ async def update_onboarding(
     segment = params.get("segment")
     plan = params.get("plan")
     zone = params.get("timezone")
-    # F188: on local, powerup (the key and the checklist cards) has no UI. The
-    # stage after boom is completed, as advance_past_boom moves it there.
-    from config import config
-
-    local_finish = advance_to == "powerup" and config.IS_LOCAL_EDITION
-    if local_finish:
+    # F188: where Automatos does not bill (``billing`` off: local), powerup (the key and
+    # the checklist cards) has no UI. The stage after boom is completed, as
+    # advance_past_boom moves it there.
+    skip_powerup = advance_to == "powerup" and not editions.current().billing
+    if skip_powerup:
         advance_to = "completed"
 
-    if not advance_to and not segment and not plan and not zone and not params.get("_bare_answer"):
-        return {
-            "success": False,
-            "error": "Provide advance_to, segment, plan, or timezone — at least one is required.",
-        }
-    # F132 (night 6): where the business is decides when its schedules fire.
-    if zone is not None and not _is_zone(zone):
-        return {"success": False, "error": (
-            f"'{zone}' isn't a timezone. Pass the IANA name for where the business is, "
-            "e.g. 'Europe/London' for Bristol.")}
+    refused = _refuse_input(params, advance_to, segment, plan, zone)
+    if refused:
+        return refused
 
     workspace = (
         db.query(Workspace).filter(Workspace.id == workspace_id).first()
@@ -253,26 +389,9 @@ async def update_onboarding(
     if not workspace:
         return {"success": False, "error": "workspace not found"}
 
-    # A bare-text answer becomes the first question still unanswered (or the
-    # key the model named). The questions are asked in QUESTION order, so the
-    # document says which one this is; dropping the text was the freeze.
-    bare = params.get("_bare_answer")
-    if bare and not segment and not advance_to and current_stage(workspace) in (INITIAL_STAGE, "questions"):
-        # Only while the questions are open: past 'questions' a bare sentence is
-        # not an answer to anything (the #656 rule — honest error — still holds).
-        key, text = bare
-        answered = get_onboarding(workspace).get("segment") or {}
-        if not key:
-            key = next((k for k in QUESTION_KEYS if answered.get(k) is None), None)
-        if key:
-            segment = {key: text}
-            logger.warning("[update_onboarding] bare-text answer recorded as '%s' (%s)", key,
-                           "key named by the model" if bare[0] else "first unanswered question")
+    segment = _bare_answer_segment(workspace, params.get("_bare_answer"), segment, advance_to)
     if not advance_to and not segment and not plan and not zone:
-        return {
-            "success": False,
-            "error": "Provide advance_to, segment, plan, or timezone — at least one is required.",
-        }
+        return {"success": False, "error": _AT_LEAST_ONE}
 
     # Idempotent same-stage advance (live-test 2026-08-29): the LLM routinely
     # re-asserts the stage it is already in — e.g. calling advance_to="building"
@@ -289,91 +408,7 @@ async def update_onboarding(
         )
         advance_to = None
         if not segment and not plan and not zone:
-            # Honest no-op (local test 2026-09-02): Auto re-asserted 'building'
-            # twice while SAYING "I'm proceeding with the installation" and
-            # installing nothing — a bare success read as progress. Say what
-            # changed (nothing) and what the stage actually needs.
-            snap = public_snapshot(workspace)
-            stage = snap.get("stage")
-            n = record_same_stage_reassert(db, workspace, stage, commit=False)
-            if db is not None:
-                db.commit()  # the only write on this path
-            if (
-                stage == "building"
-                and n >= BUILDING_REASSERT_LIMIT
-                and not build_evidence(db, workspace)["any"]
-            ):
-                # Prod 2026-09-02: saffron re-asserted 'building' four times while
-                # narrating a build that never happened. The tool records progress
-                # — it cannot make it — and now says so as a refusal, which this
-                # model reacts to; a success-with-message it ignores.
-                return {
-                    "success": False,
-                    "noop": True,
-                    "data": snap,
-                    "error": (
-                        f"Refused: 'building' re-asserted {n} times with nothing built. This tool "
-                        "records progress — it cannot make it. Do not call it again until you have "
-                        "installed the matched package (platform_install_package) or created an "
-                        "agent (platform_create_agent); then advance_to boom."
-                    ),
-                }
-            hint = _stage_hint(db, workspace)
-            return {
-                "success": True,
-                "data": snap,
-                "noop": True,
-                "message": f"Already at '{stage}' — nothing changed (re-assert {n}). {hint}".strip(),
-            }
+            return _same_stage_reply(db, workspace)
 
-    # ATOMICITY (FR-4, RVW-2): every writer below runs with commit=False and the
-    # WHOLE tool call is committed ONCE at the end. A state change (plan +
-    # plan_limits, or a stage advance) and its funnel audit stamp therefore land
-    # together or not at all — a durable change can never be reported success:False
-    # (nothing committed on failure) nor left without its recorded audit event.
-    try:
-        if advance_to:
-            # A single write advances the stage and merges any segment answers.
-            advance_onboarding_stage(db, workspace, advance_to, segment=segment, commit=False)
-        elif segment:
-            set_segment(db, workspace, segment, commit=False)
-
-        # Funnel: reaching the proposal records the plan Auto will recommend
-        # (derived from the stored segment). Auditable, FR-4.
-        if advance_to == "proposal":
-            from services.plan_tiers import recommend_plan
-
-            rec_plan, _reason = recommend_plan(get_onboarding(workspace).get("segment") or {})
-            record_plan_event(db, workspace, "plan_recommended", rec_plan, commit=False)
-
-        zone_outcome = _set_business_zone(workspace, zone) if zone else None
-
-        # The single commit — all deferred writes land as one transaction.
-        if db is not None:
-            db.commit()
-    except InvalidStageTransition as exc:
-        if db is not None:
-            db.rollback()
-        # A refused move (backward, or the payoff without a build) names what the
-        # CURRENT stage needs — local test 2026-09-02: Auto tried building →
-        # proposal, was told "non-forward", and stalled.
-        hint = _stage_hint(db, workspace)
-        return {"success": False, "error": f"{exc} {hint}".strip()}
-    except ValueError as exc:
-        # e.g. set_segment called with no recognised keys.
-        if db is not None:
-            db.rollback()
-        return {"success": False, "error": str(exc)}
-    except Exception as exc:  # noqa: BLE001 - surface a clean tool error, never crash
-        logger.error("[update_onboarding] failed: %s", exc, exc_info=True)
-        if db is not None:
-            db.rollback()
-        return {"success": False, "error": str(exc)}
-
-    result: Dict[str, Any] = {"success": True, "data": public_snapshot(workspace)}
-    if zone_outcome:
-        result["timezone"] = zone_outcome
-    if local_finish:
-        result["message"] = ("This local install has no powerup step (a key and the checklist are SaaS), "
-                             "so onboarding is completed.")
-    return result
+    error, zone_outcome = _write(db, workspace, advance_to, segment, zone)
+    return error or _done(workspace, zone_outcome, skip_powerup)

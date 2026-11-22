@@ -6,7 +6,10 @@ week (``make.notified["weekly_note"]``), with Socials on in its workspace: the w
 their numbers (``posted.posted``), the plan's health (``plan_health.health_for``) and Auto's
 proposals (``proposals``) become the note (``weekly_note.compose``), recorded as sent, then sent
 through the platform's notifications, linked to the plan's Posted view. A week with no post
-out and nothing to fix sends nothing. One plan's failure is logged and never stops the rest.
+out sends nothing, whatever the plan's health: the note is how the week's posts went, and a plan's
+faults (an empty content bank, a cap close) have their own notices. A new plan with an empty bank
+once got "0 posts went out this week" within minutes of being made (18 Nov). One plan's failure
+is logged and never stops the rest.
 """
 from __future__ import annotations
 
@@ -50,13 +53,13 @@ def week_posts(db: Any, plan: Any, now: datetime) -> List[weekly_note.WeekPost]:
 
 
 def build(db: Any, plan: Any, workspace: Any, now: datetime) -> Optional[Tuple[str, str]]:
-    """The plan's note for this week, or ``None`` when there is nothing to say."""
+    """The plan's note for this week, or ``None`` when no post of it went out in the week."""
     posts = week_posts(db, plan, now)
+    if not posts:
+        return None
     health = [item.title for item in plan_health.health_for(db, plan, workspace, now)]
     since = now - timedelta(days=proposals.LOOKBACK_DAYS)
     proposed = [item.title for item in proposals.proposals(plan, proposals.read_posts(db, plan, since))]
-    if not posts and not health:
-        return None
     return weekly_note.compose(plan.name, posts, health, proposed, posted_url(plan.id))
 
 

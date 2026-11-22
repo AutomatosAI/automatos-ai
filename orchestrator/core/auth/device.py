@@ -3,7 +3,7 @@
 Reached only through the bearer-prefix registry (``core/auth/bearer_registry.py``), which
 runs it BEFORE the Clerk lane, so a device token is never shown to Clerk.
 
-* Local edition only (``AUTH_EDITION=local``, read through ``config.IS_LOCAL_EDITION``). On
+* Only where devices pair (``core.editions`` ``device_pairing``: the local edition). On
   saas an ``amd_`` bearer is 401 and nothing is looked up: a paired row never exists there (§8).
 * The row is found by the SHA-256 of the token (``token_hash``) and confirmed in constant
   time (``core.auth.pairing.secrets_match``), or by ``prev_token_hash`` while the rotation
@@ -19,6 +19,9 @@ runs it BEFORE the Clerk lane, so a device token is never shown to Clerk.
   ``_local_operator_user_context`` says why), the operator is ``super_admin`` and anyone
   else a plain ``user``, and ``raw_claims`` carries ``{source: "mobile_device", device_id,
   user_id}`` so ``core.auth.principal.resolve_user_pk`` reads the integer PK without a query.
+  Only an edition with an operator (``anonymous_operator``: local) has one: elsewhere
+  (enterprise, PRD-277 FR-22) a person whose email is ``LOCAL_OPERATOR_EMAIL`` is a plain
+  ``user`` like anyone else, and must still be a member of the device's workspace.
 * ``last_seen_at`` is written at most once every ``LAST_SEEN_WRITE_INTERVAL``, never on
   every request; a failed write is logged and never costs the caller the request.
 * The lookup runs in the threadpool on its own session, always closed. Nothing here logs a
@@ -41,6 +44,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from config import config
+from core import editions
 from core.auth.dependencies import RequestContext, UserContext
 from core.auth.pairing import hash_secret, secrets_match, within_rotation_overlap
 from core.auth.principal import MOBILE_DEVICE_CLAIM_SOURCE
@@ -132,6 +136,11 @@ def _bound_person(db: Session, user_pk: int) -> Optional[Tuple[int, str]]:
     return (int(row[0]), row[1]) if row is not None and row[1] else None
 
 
+def _is_the_operator(email: str) -> bool:
+    """True for the install's one operator, who exists only where the edition has one."""
+    return editions.current().anonymous_operator and email == config.LOCAL_OPERATOR_EMAIL
+
+
 def _assert_still_a_member(
     db: Session, device: MobileDevice, person: Tuple[int, str], hybrid: ModuleType
 ) -> None:
@@ -144,7 +153,7 @@ def _assert_still_a_member(
     exempt, same as every other lane that binds them.
     """
     user_pk, email = person
-    if email == config.LOCAL_OPERATOR_EMAIL:
+    if _is_the_operator(email):
         return
     if not hybrid._user_pk_is_workspace_member(db, device.workspace_id, user_pk):
         raise _unauthorized(f"device {device.id}'s person is no longer a member of its workspace")
@@ -153,7 +162,7 @@ def _assert_still_a_member(
 def _user_context(device: MobileDevice, person: Tuple[int, str]) -> UserContext:
     """The device's person, bound as the local-operator lane binds the operator."""
     user_pk, email = person
-    role = LOCAL_OPERATOR_ROLE if email == config.LOCAL_OPERATOR_EMAIL else PERSON_ROLE
+    role = LOCAL_OPERATOR_ROLE if _is_the_operator(email) else PERSON_ROLE
     return UserContext(
         id=email,
         email=email,
@@ -214,10 +223,10 @@ def _resolve_in_own_session(request: Request, token: str) -> RequestContext:
 async def resolve_device_context(request: Request, token: str) -> RequestContext:
     """The registry's resolver for ``amd_`` bearers: the caller's ``RequestContext``, or 401/403.
 
-    Local edition only (saas: 401, nothing looked up). The lookup runs off the event loop;
-    the log context is set here, on the request's own context.
+    Only where devices pair (``device_pairing``; saas: 401, nothing looked up). The lookup runs
+    off the event loop; the log context is set here, on the request's own context.
     """
-    if not config.IS_LOCAL_EDITION:
+    if not editions.current().device_pairing:
         raise _unauthorized("device tokens are a local-edition credential")
     context = await run_in_threadpool(_resolve_in_own_session, request, token)
     _hybrid()._enrich_log_context(context)

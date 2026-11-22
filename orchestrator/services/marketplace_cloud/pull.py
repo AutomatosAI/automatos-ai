@@ -40,7 +40,7 @@ from sqlalchemy import distinct, func, or_
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from config import config
+from core import editions
 from core.models.marketplace_cloud import MARKETPLACE_CLOUD_SYNC_ROW_ID, MarketplaceCloudSync
 from core.models.themes import THEME_SOURCE_CLOUD, ThemePackage, ThemeReviewEvent
 from services.marketplace_bundles.held_items import items_held
@@ -125,7 +125,7 @@ class Held(NamedTuple):
 
 def sync_enabled() -> bool:
     """True in the local edition with ``AUTOMATOS_CLOUD_URL`` set (the hosted edition serves the catalogue)."""
-    return bool(config.IS_LOCAL_EDITION) and bool(configured_url())
+    return editions.current().calls_automatos_cloud and bool(configured_url())
 
 
 # --------------------------------------------------------------------------- applying

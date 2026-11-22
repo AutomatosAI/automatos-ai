@@ -22,6 +22,7 @@ import { useApproveTask, useRejectTask } from '@/hooks/use-board-tasks'
 import { DISCUSS_AFTER_REJECTS, discussHref } from '@/lib/discussion'
 import { ticketCalled } from '@/lib/ticket-number'
 import type { BoardTask } from '@/types/board'
+import { approvalIdentity } from '@/lib/ticket-pull-request'
 import { approveEffect, approveLabel, approvedMessage } from './approval-effect'
 
 // The API's own bounds (api/board_tasks.py): a reject note is read by a model,
@@ -57,7 +58,8 @@ export function ReviewVerdict({ task, onDecided }: { task: BoardTask; onDecided:
   }
 
   const approveNow = () => {
-    approve.mutate({ taskId: task.id, note: mode === 'approve-note' ? note || undefined : undefined }, {
+    const shown = approvalIdentity(task.pull_request)  // Ticket PR fields: the pull request this page showed
+    approve.mutate({ taskId: task.id, note: mode === 'approve-note' ? note || undefined : undefined, ...(shown ? { pullRequest: shown } : {}) }, {
       onSuccess: (result) => {
         toast.success(approvedMessage(result, ticketCalled(task, true)))
         onDecided()

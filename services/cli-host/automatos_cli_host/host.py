@@ -23,7 +23,9 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from . import dev_box
 from . import state
+from . import usage_limit
 from . import __version__
 from .allowlist import NotAllowed, choose_default_root, session_deliverables_dir
 from .api import BackendClient, BackendError
@@ -64,12 +66,19 @@ class HostRefused(RuntimeError):
 
 
 def check_backend(api: BackendClient) -> Dict[str, Any]:
-    """The backend must be the local edition with session mode enabled."""
+    """The backend must have session mode, and it must be enabled.
+
+    A newer backend says whether it has session mode (``/health`` ``session_mode``). An older one
+    reports only its ``edition``; session mode was the local edition's alone, so the edition still
+    decides for it."""
     health = api.health()
     edition = health.get("edition")
-    if edition is None:
-        raise HostRefused("the backend does not report its edition — update Automatos to a build with PRD-234 S1b")
-    if edition != "local":
+    session_mode = health.get("session_mode")
+    if session_mode is None:
+        if edition is None:
+            raise HostRefused("the backend does not report its edition — update Automatos to a build with PRD-234 S1b")
+        session_mode = edition == "local"
+    if not session_mode:
         raise HostRefused(f"refusing to serve a '{edition}' edition backend: session mode is local-only (PRD-234 §Terms)")
     if not health.get("cli_runtime_enabled"):
         raise HostRefused("session mode is off on this backend — set CLI_RUNTIME_ENABLED=true in .env and restart the stack")
@@ -187,16 +196,25 @@ class Host:
                 "paused": {cli: reason for cli, (_, reason, _) in paused.items()}}
 
     # ── F083: usage limits ───────────────────────────────────────────────────
-    def _pause_cli(self, cli: str, until_iso: Optional[str], reason: str) -> None:
+    def _pause_cli(self, cli: str, until_iso: Optional[str], reason: str, stated: bool = True) -> None:
         """Stop claiming this CLI's tickets until its window reopens, and tell the
         backend on the very next tick (a fresh heartbeat carries the capabilities
-        its claim filter reads)."""
+        its claim filter reads). ``stated``: the CLI said when it resets. A stated
+        reset always replaces the pause held, so a wrong long pause is corrected by
+        the next screen. Only the short re-check (no stated time) leaves a later
+        held pause standing: the other slot's session ending on the same limit
+        must not cut a days-long pause to 15 minutes."""
         try:
             from datetime import datetime
 
-            until = datetime.fromisoformat(until_iso).timestamp() if until_iso else time.time() + 15 * 60
+            until = (datetime.fromisoformat(until_iso).timestamp() if until_iso
+                     else time.time() + usage_limit.RECHECK_SECONDS)
         except ValueError:
-            until = time.time() + 15 * 60
+            until = time.time() + usage_limit.RECHECK_SECONDS
+        held = self.limited.get(cli)
+        if not stated and held is not None and held[0] >= until:
+            log.info("%s usage limit seen again — the pause stands: %s", cli, held[1])
+            return
         self.limited[cli] = (until, reason, until_iso)
         self._capabilities = None
         self._last_heartbeat = 0.0
@@ -243,6 +261,8 @@ class Host:
         host_id = self.identity["host_id"]
         log.info("CLI host %s (v%s) serving %s — directories: %s", host_id, __version__, self.cfg.url, ", ".join(self.allow_roots))
         log.info("%s", secret_protection_summary())       # F042: a host with no checkout says so
+        if self.cfg.dev_box:
+            dev_box.log_summary(self.cfg)                  # dev-box mode: is the GitHub token there?
         state.write_pid(self.cfg.pid_path)
         try:
             while not self.stop.is_set():
@@ -372,7 +392,8 @@ class Host:
         def _runner() -> None:
             outcome = session.run()
             if outcome.status == "usage_limit":
-                self._pause_cli(session.cli, outcome.resets_at, outcome.error or f"paused: {session.cli} usage limit")
+                self._pause_cli(session.cli, outcome.resets_at, outcome.error or f"paused: {session.cli} usage limit",
+                                stated=outcome.reset_stated)
             self._upload(ticket, outcome)   # #848: before the result, which names the files by their paths
             self.pending_results[task_id] = outcome.as_result_payload(session.attempt)
 

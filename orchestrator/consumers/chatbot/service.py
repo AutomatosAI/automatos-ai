@@ -37,6 +37,7 @@ from modules.tools.execution.telemetry import resolve_action_name
 from core.models import Chat, Message, Vote
 from core.services.image_store import get_image_store
 from config import config
+from core import editions
 from core.database.read_release import release_if_read_only
 from modules.tools.discovery.card_note import grounds_the_cards  # F241 (night 8): the cards the owner named
 
@@ -102,6 +103,20 @@ from consumers.chatbot.marked_reply_images import reply_images_are_marked  # PRD
 
 logger = logging.getLogger(__name__)
 
+# Plan mode's system prompt: research and plan, no actions, no tools.
+PLAN_MODE_PROMPT = (
+    "You are in PLAN MODE. Your role is to research, analyze, and produce a structured plan. "
+    "Do NOT execute actions, call tools, or make changes. Focus entirely on strategy and planning.\n\n"
+    "Output format:\n"
+    "1. **Goal Summary** — 2-3 sentence overview of what will be accomplished\n"
+    "2. **Steps** — Numbered list of concrete steps with agent assignments and tool recommendations\n"
+    "3. **Dependencies** — What needs to happen before each step\n"
+    "4. **Risks & Mitigations** — Potential failure points and how to handle them\n"
+    "5. **Success Criteria** — How to verify the plan worked\n\n"
+    "The user will iterate on this plan conversationally. When they are satisfied, "
+    "they can launch it as a Mission. Keep plans actionable and specific — "
+    "name the agents, tools, and data sources that should be used."
+)
 
 NARRATED_ACTIONS_NOTICE = (
     "No tools ran in this reply, so nothing it describes was "
@@ -851,58 +866,13 @@ class StreamingChatService:
             (llm_messages, use_tools, orchestrated)
         """
         import asyncio
-        from consumers.chatbot.auto import Complexity
-        from consumers.chatbot.integration import SmartChatIntegration, apply_orchestration_to_messages
 
         latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
-        smart_chat = SmartChatIntegration(
-            workspace_id=str(self.workspace_id) if self.workspace_id else self.workspace_id,
-            agent_id=agent_runtime.agent_id,
-            agent_name=agent_runtime.metadata.name,
-            widget_mode=self.widget_mode,
-            db_session=self.db,
+        smart_chat = self._smart_chat_for(agent_runtime)
+        llm_messages, use_tools, orchestrated = await self._prepare_path(
+            messages, agent_runtime, agent_ctx, all_tools, smart_chat, chat_id, complexity_assessment,
+            attachment_ids=attachment_ids, model_id=model_id, force_text_only=force_text_only,
         )
-        # PRD-233 S6: seed the greeting with the driving human's name from their
-        # users row. IdentitySection already renders the ``user_name`` kwarg the
-        # orchestrator forwards from this state ("You're talking to <name>");
-        # memory-derived names still win there (``_user_name`` is read first).
-        # The ATOM prompt below reads the same state — one source, both lanes.
-        # Local edition only (owner rule for this wave: the SaaS prompt stays
-        # byte-identical). Flipping the seed on for saas is this one condition.
-        if config.AUTH_EDITION == "local":
-            smart_chat.orchestrator.state.user_name = (
-                smart_chat.orchestrator.state.user_name
-                or resolve_known_user_name(self.db, getattr(self, "_driving_user_id", None))
-            )
-
-        _complexity = (
-            complexity_assessment.complexity
-            if complexity_assessment
-            else Complexity.MOLECULE
-        )
-        # Proactive openers (force_text_only) are self-contained: page-context
-        # directive in, one line of text out. They carry no complexity_assessment,
-        # so without this they'd default to MOLECULE and take the full
-        # ContextService path (internal tool load + Mem0 read) — exactly the
-        # work stream_response_with_agent already decided to skip. Pin to ATOM.
-        if force_text_only:
-            _complexity = Complexity.ATOM
-
-        if _complexity == Complexity.ATOM:
-            llm_messages, use_tools, orchestrated = await self._prepare_atom_path(
-                messages, agent_runtime, smart_chat,
-                atom_tools=all_tools,
-                attachment_ids=attachment_ids,
-                model_id=model_id,
-                force_text_only=force_text_only,
-            )
-        else:
-            llm_messages, use_tools, orchestrated = await self._prepare_full_path(
-                messages, agent_runtime, agent_ctx, all_tools,
-                smart_chat, chat_id, complexity_assessment,
-                attachment_ids=attachment_ids,
-                model_id=model_id,
-            )
 
         # PRD-67: CTO Agent system prompt override
         if is_cto_agent:
@@ -925,48 +895,76 @@ class StreamingChatService:
 
         # Plan mode: inject research-focused system prompt, disable tools
         if plan_mode:
-            llm_messages.insert(
-                1,
-                {
-                    "role": "system",
-                    "content": (
-                        "You are in PLAN MODE. Your role is to research, analyze, and produce a structured plan. "
-                        "Do NOT execute actions, call tools, or make changes. Focus entirely on strategy and planning.\n\n"
-                        "Output format:\n"
-                        "1. **Goal Summary** — 2-3 sentence overview of what will be accomplished\n"
-                        "2. **Steps** — Numbered list of concrete steps with agent assignments and tool recommendations\n"
-                        "3. **Dependencies** — What needs to happen before each step\n"
-                        "4. **Risks & Mitigations** — Potential failure points and how to handle them\n"
-                        "5. **Success Criteria** — How to verify the plan worked\n\n"
-                        "The user will iterate on this plan conversationally. When they are satisfied, "
-                        "they can launch it as a Mission. Keep plans actionable and specific — "
-                        "name the agents, tools, and data sources that should be used."
-                    ),
-                },
-            )
+            llm_messages.insert(1, {"role": "system", "content": PLAN_MODE_PROMPT})
             use_tools = None  # Disable tool execution in plan mode
 
-        # Context Window Guard
-        from core.context_guard import ContextGuard
-        _guard = ContextGuard()
-        _model_name = getattr(agent_runtime.llm_manager, 'config', None)
-        _model_name = getattr(_model_name, 'model', config.LLM_MODEL) if _model_name else config.LLM_MODEL
-        llm_messages, _was_compacted, use_tools = await _guard.check_and_compact(
-            messages=llm_messages,
-            model_name=_model_name,
-            llm_manager=agent_runtime.llm_manager,
-            workspace_id=str(self.workspace_id) if self.workspace_id else None,
-            agent_id=agent_runtime.agent_id,
-            db_session=self.db,
-            tools=use_tools,
-        )
-        if _was_compacted:
-            logger.info("[ContextGuard] Messages compacted before LLM call")
+        llm_messages, use_tools = await self._guard_context(llm_messages, agent_runtime, use_tools)
 
         # Stash smart_chat on self for memory storage in post_response
         self._smart_chat = smart_chat
 
         return llm_messages, use_tools, orchestrated
+
+    def _smart_chat_for(self, agent_runtime) -> Any:
+        """The turn's ``SmartChatIntegration``, its state holding the driving person's name."""
+        from consumers.chatbot.integration import SmartChatIntegration
+
+        smart_chat = SmartChatIntegration(
+            workspace_id=str(self.workspace_id) if self.workspace_id else self.workspace_id,
+            agent_id=agent_runtime.agent_id, agent_name=agent_runtime.metadata.name,
+            widget_mode=self.widget_mode, db_session=self.db,
+        )
+        # PRD-233 S6: seed the greeting with the driving human's name from their
+        # users row. IdentitySection already renders the ``user_name`` kwarg the
+        # orchestrator forwards from this state ("You're talking to <name>");
+        # memory-derived names still win there (``_user_name`` is read first).
+        # The ATOM prompt reads the same state — one source, both lanes.
+        # Only where ``chat_seeds_user_name`` (local; the SaaS prompt stays byte-identical).
+        if editions.current().chat_seeds_user_name:
+            smart_chat.orchestrator.state.user_name = (
+                smart_chat.orchestrator.state.user_name
+                or resolve_known_user_name(self.db, getattr(self, "_driving_user_id", None))
+            )
+        return smart_chat
+
+    async def _prepare_path(self, messages, agent_runtime, agent_ctx, all_tools, smart_chat, chat_id,
+                            complexity_assessment, *, attachment_ids, model_id, force_text_only):
+        """The ATOM or the full path's ``(llm_messages, use_tools, orchestrated)`` for the turn."""
+        from consumers.chatbot.auto import Complexity
+
+        _complexity = complexity_assessment.complexity if complexity_assessment else Complexity.MOLECULE
+        # Proactive openers (force_text_only) are self-contained: page-context
+        # directive in, one line of text out. They carry no complexity_assessment,
+        # so without this they'd default to MOLECULE and take the full
+        # ContextService path (internal tool load + Mem0 read) — exactly the
+        # work stream_response_with_agent already decided to skip. Pin to ATOM.
+        if force_text_only:
+            _complexity = Complexity.ATOM
+
+        if _complexity == Complexity.ATOM:
+            return await self._prepare_atom_path(
+                messages, agent_runtime, smart_chat, atom_tools=all_tools, attachment_ids=attachment_ids,
+                model_id=model_id, force_text_only=force_text_only,
+            )
+        return await self._prepare_full_path(
+            messages, agent_runtime, agent_ctx, all_tools, smart_chat, chat_id, complexity_assessment,
+            attachment_ids=attachment_ids, model_id=model_id,
+        )
+
+    async def _guard_context(self, llm_messages, agent_runtime, use_tools):
+        """Context Window Guard: the messages and tools, compacted when they overflow the model."""
+        from core.context_guard import ContextGuard
+        _guard = ContextGuard()
+        _model_name = getattr(agent_runtime.llm_manager, 'config', None)
+        _model_name = getattr(_model_name, 'model', config.LLM_MODEL) if _model_name else config.LLM_MODEL
+        llm_messages, _was_compacted, use_tools = await _guard.check_and_compact(
+            messages=llm_messages, model_name=_model_name, llm_manager=agent_runtime.llm_manager,
+            workspace_id=str(self.workspace_id) if self.workspace_id else None,
+            agent_id=agent_runtime.agent_id, db_session=self.db, tools=use_tools,
+        )
+        if _was_compacted:
+            logger.info("[ContextGuard] Messages compacted before LLM call")
+        return llm_messages, use_tools
 
     async def _prepare_atom_path(
         self,

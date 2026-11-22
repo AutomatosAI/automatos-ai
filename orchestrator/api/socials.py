@@ -100,7 +100,7 @@ from sqlalchemy.orm import Session
 
 from api.socials_campaigns import router as campaigns_router
 from api.socials_channels import router as channels_router
-from api import socials_brand, socials_compose, socials_instant_preview, socials_preview, socials_render_crops
+from api import socials_brand, socials_compose, socials_instant_preview, socials_preview, socials_publish, socials_render_crops
 from api.socials_publish import router as publish_router
 from api.socials_compose import router as compose_router
 from api.socials_delete import router as delete_router
@@ -223,6 +223,7 @@ class ApproveRequest(_Strict):
     content_hash: str = Field(..., pattern=service.CONTENT_HASH_PATTERN)
     override_unsourced: bool = False
     comment: Optional[str] = None
+    post_now: bool = False  # its button said "Approve & post now": publish it at once, if the server agrees
 
 
 class RequestChangesRequest(_Strict):
@@ -706,26 +707,25 @@ def approve_social_post(  # a plain def (F105): it awaits nothing, and its write
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
-    """Approve the version the reviewer saw (D6). ``content_hash`` differs from
-    the post's → 409 with the current hash. An edit another worker commits
-    after the load is caught by the compare-and-set → the same 409, nothing
-    written. Every source is resolved again first (D7): a claim whose source is
-    gone from the workspace counts as unsourced, and so does a value in a field the
-    post's template marks a claim, flagged or not (F433). The approved post's files are
-    then copied into the workspace's socials folders (``workspace_copies``)."""
+    """Approve the version the reviewer saw (D6). ``content_hash`` differs from the post's → 409 with the
+    current hash; an edit another worker commits after the load is caught by the compare-and-set → the same
+    409, nothing written. Every source is resolved again first (D7): a claim whose source is gone counts as
+    unsourced, and so does a value in a field the post's template marks a claim, flagged or not (F433). Its files
+    are then copied to the workspace's socials folders (``workspace_copies``). One Approve (17 Nov 2026): a slot
+    ahead, or a schedule kept from an edit, schedules it; ``post_now`` publishes one with neither (socials_publish)."""
     post = _load(db, ctx, post_id)
     unresolved = post_sources.unresolved(db, ctx.workspace_id, post.sources)
     claims = template_claims.names(db, ctx.workspace_id, post.template_id)  # a query: before the mutation
     try:
         service.approve(
             post, _actor(ctx), content_hash=body.content_hash, override_unsourced=body.override_unsourced,
-            comment=body.comment, unresolved_sources=unresolved, template_claims=claims,
+            comment=body.comment, unresolved_sources=unresolved, template_claims=claims, keep_schedule=True,
         )
         saved = _commit_unchanged(db, post, status=service.NEEDS_APPROVAL, content_hash=body.content_hash)
     except service.SocialsError as exc:
         _raise_for(exc)
     workspace_copies.copy_when_approved(db, post)
-    return saved
+    return socials_publish.publish_on_approval(db, ctx, post, post_now=body.post_now) or saved  # after the commit
 
 
 @router.post("/posts/{post_id}/request-changes", dependencies=[CAN_REVIEW])

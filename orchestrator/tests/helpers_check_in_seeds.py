@@ -19,7 +19,10 @@ the edge of the action's own code, and the action's code runs from there to its 
   ``last_accessed`` and the substrate tile's event, each on a session of its own (a stand-in
   ``retrieve`` ends as the real one does, with the same two calls);
 - ``platform_render_preview``: a session's ticket and a template's page: the picture, written
-  over HTTP to the session's folder.
+  over HTTP to the session's folder;
+- ``platform_list_connected_apps``: a workspace app whose sign-in finished at Composio while
+  its row stayed pending: ``EntityManager.get_connected_apps`` settles it to active,
+  committed on the caller's session.
 
 ``Seed.marks`` are what each writes outside a check-in, so a seed that stops reaching its
 write fails its own test instead of passing quietly. ``Seed.answers`` is part of what each
@@ -184,6 +187,18 @@ def _render_preview(monkeypatch: Any, tmp_path: Any) -> SessionFor:
     return spy_session
 
 
+def _connected_apps(monkeypatch: Any, tmp_path: Any) -> SessionFor:
+    from core.models.composio import ComposioConnection, ComposioEntity
+
+    entity = NS(id=1, workspace_id=None, composio_entity_id="workspace-entity", created_at=None)
+
+    def session_for(log: WriteLog) -> Any:
+        pending = NS(id=1, entity_id=1, app_name="INSTAGRAM", status="pending", connected_at=None,
+                     connection_id="ca_instagram", last_synced_at=None)
+        return seeded_session(log, found={ComposioEntity: entity, ComposioConnection: pending})
+    return session_for
+
+
 SEEDS: Tuple[Seed, ...] = (
     Seed("platform_search_packages", {"text": "a cafe that roasts its own coffee"}, _packages, ("commit",),
          {"success": True, "count": 1}),
@@ -200,6 +215,8 @@ SEEDS: Tuple[Seed, ...] = (
     Seed("platform_render_preview", {"template_id": TEMPLATE_ID, "_session_task_id": TICKET}, _render_preview,
          ("HTTP POST worker.test",), {"success": False, "error": NOT_IN_A_CHECK_IN},
          context={"session_task_id": TICKET}),
+    Seed("platform_list_connected_apps", {}, _connected_apps, ("commit",),
+         {"success": True, "count": 1, "connected_count": 1}),
 )
 
 __all__ = ["AuditRow", "DOC_ID", "SEEDS", "Seed", "TICKET", "TrainingExample", "WORKER"]

@@ -28,6 +28,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from config import config
+from core import editions
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid, invalidate_local_operator_cache
 from core.auth.workspace_permission import require_workspace_permission
@@ -43,7 +44,6 @@ router = APIRouter(prefix="/api/profile", tags=["profile"])
 # Module constant so tests override the exact dependency object.
 _PROFILE_WRITE_GATE = require_workspace_permission("workspace:manage")
 
-LOCAL_EDITION = "local"
 EMAIL_NOTE_LOCAL = (
     "Email is the operator lookup key — it is set by LOCAL_OPERATOR_EMAIL in .env "
     "and cannot be changed here."
@@ -116,17 +116,17 @@ def _resolve_user_row(db: Session, ctx: RequestContext) -> Optional[User]:
 
 
 def _to_out(ctx: RequestContext, row: Optional[User]) -> ProfileOut:
-    is_local = config.AUTH_EDITION == LOCAL_EDITION
+    editable = editions.current().profile_editable
     return ProfileOut(
-        edition=config.AUTH_EDITION,
-        editable=is_local,
+        edition=editions.current_name(),
+        editable=editable,
         id=row.id if row is not None else None,
         email=row.email if row is not None else ctx.user.email,
         name=row.name if row is not None else None,
         username=row.username if row is not None else None,
         avatar_url=row.avatar_url if row is not None else None,
         system_role=ctx.user.system_role,
-        email_note=EMAIL_NOTE_LOCAL if is_local else EMAIL_NOTE_SAAS,
+        email_note=EMAIL_NOTE_LOCAL if editable else EMAIL_NOTE_SAAS,
     )
 
 
@@ -155,7 +155,7 @@ def update_profile(
     db: Session = Depends(get_db),
 ) -> ProfileOut:
     """Edit the local operator's profile row (local edition only)."""
-    if config.AUTH_EDITION != LOCAL_EDITION:
+    if not editions.current().profile_editable:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=MANAGED_BY_IDENTITY_PROVIDER)
 
     operator = User.email == config.LOCAL_OPERATOR_EMAIL

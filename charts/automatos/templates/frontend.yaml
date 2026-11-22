@@ -16,7 +16,7 @@ spec:
       labels:
         {{- include "automatos.selectorLabels" (dict "ctx" $ "component" "frontend") | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "automatos.serviceAccountName" . }}
+      serviceAccountName: {{ include "automatos.serviceAccountName" (dict "ctx" $ "component" "frontend") }}
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
@@ -49,6 +49,8 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
 ---

@@ -19,6 +19,7 @@ from typing import Any, AsyncIterator, Dict, Optional, Union
 
 import httpx
 from config import config
+from core import editions
 from core.local_projects_mount import worker_workspace_for
 
 logger = logging.getLogger(__name__)
@@ -73,7 +74,7 @@ def _connection_error(action: str, err: Exception) -> Dict[str, Any]:
     logger.error("WorkspaceClient %s failed: %s", action, err)
     if isinstance(err, httpx.TimeoutException) and not isinstance(err, httpx.ConnectTimeout):
         return {"success": False, "error": f"Workspace worker timed out ({action})", "status_code": WORKER_UNAVAILABLE}
-    hint = WORKER_START_HINT if config.IS_LOCAL_EDITION else ""
+    hint = WORKER_START_HINT if editions.current().operator_is_user else ""
     return {"success": False, "error": f"{WORKER_NOT_RUNNING} ({action}){hint}", "status_code": WORKER_UNAVAILABLE}
 
 

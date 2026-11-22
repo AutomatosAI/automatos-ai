@@ -25,6 +25,7 @@ from core.models.core import LLMUsage, LLMModel, UserApiKey, Agent, RecipeExecut
 from core.models import WorkflowTemplate as WorkflowRecipe
 from core.models.workspaces import Workspace
 from core.credentials.encryption import get_encryption_service
+from core import editions
 from core.llm.providers import describe_usage_provider
 from api.llm_marketplace import route_capabilities
 from config import config
@@ -878,13 +879,12 @@ def _resolve_openrouter_key(workspace_id, db: Session, byok_only: bool = False) 
     If byok_only=True, only returns workspace BYOK keys (blocks env fallback).
     Raises HTTPException 404 if not found.
 
-    F244 (night 7): in the local edition the owner pays for every call, so the
-    balance is the one on the key the calls use (core.llm.key_resolver). Night 7's
-    calls ran on the operator workspace's key, and the card said "No OpenRouter API
-    key configured" beside $22.65 of OpenRouter spend. The hosted edition keeps the
-    rule above: a tenant never reads the operator's balance.
+    F244 (night 7): where Automatos does not bill, the owner pays for every call, so the balance
+    is the one on the key the calls use (core.llm.key_resolver): night 7's card said "No OpenRouter
+    API key configured" beside $22.65 of spend on the operator workspace's key. Where it bills, the
+    rule above holds: a tenant never reads the operator's balance.
     """
-    if config.IS_LOCAL_EDITION and not byok_only:
+    if not editions.current().billing and not byok_only:
         from core.llm.key_resolver import resolve_provider_key
 
         resolved = resolve_provider_key(db, "openrouter", workspace_id=workspace_id)
@@ -913,9 +913,9 @@ def _resolve_openrouter_key(workspace_id, db: Session, byok_only: bool = False) 
 
     raise HTTPException(
         404,
-        "No OpenRouter API key configured. Add one in Settings → API Keys."
+        "No OpenRouter API key configured. Add one in Settings → Model keys."
         if byok_only
-        else "No OpenRouter API key configured. Add one in Settings → API Keys or set OPENROUTER_API_KEY.",
+        else "No OpenRouter API key configured. Add one in Settings → Model keys or set OPENROUTER_API_KEY.",
     )
 
 

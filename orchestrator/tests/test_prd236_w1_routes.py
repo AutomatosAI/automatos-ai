@@ -441,10 +441,15 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     assert 'down_revision = (' in joined
     assert '"prd251d_wave3"' in joined and '"chat_turn_keys_20261116"' in joined
     assert "from alembic import op" not in joined
+    # 2026-11-20 (PRD-277 Wave 2, US-201 and US-203): prd277_w2_identities_20261120 chains onto
+    # the merge — user_identities, a new table, and users.system_role, a new nullable column;
+    # the guard follows it.
+    people = (versions / "prd277_w2_identities_20261120.py").read_text()
+    assert 'down_revision = "merge_heads_20261117"' in people
     # 2026-11-13 (Automatos for products, spend cap): product_spend_cap_20261113 chains onto the
-    # merge; the guard follows it.
+    # identities; the guard follows it.
     capped = (versions / "product_spend_cap_20261113.py").read_text()
-    assert 'down_revision = "merge_heads_20261117"' in capped
+    assert 'down_revision = "prd277_w2_identities_20261120"' in capped
     assert 'EXPECTED_HEAD = "product_spend_cap_20261113"' in guard
 
 

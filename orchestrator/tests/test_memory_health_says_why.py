@@ -5,7 +5,7 @@ envs/api.defaults sets QDRANT_URL=http://qdrant:6333. A fresh install still has 
 embeddings key, and without one the durable store's embedder falls back to the degraded
 stand-in that refuses to embed, so nothing can be remembered. ``GET /api/v1/memory/health``
 answered "degraded" with no memories and no reason; now it answers "unavailable" with the
-reason to show: add the embeddings key in Settings → API Keys. An install with memory off
+reason to show: add the embeddings key in Settings → Model keys. An install with memory off
 (QDRANT_URL empty) and a store that does not answer each get their own reason.
 
 The route runs for real with its memory service, its listing and its database faked; the
@@ -81,7 +81,7 @@ def test_no_embeddings_key_is_unavailable_and_says_to_add_one(monkeypatch):
     body = _health(monkeypatch, _service(ready=False))
     assert body["health_status"] == "unavailable"
     assert body["reason"] == health.NO_EMBEDDINGS
-    assert "Settings → API Keys" in body["reason"] and "embeddings key" in body["reason"]
+    assert "Settings → Model keys" in body["reason"] and "embeddings key" in body["reason"]
     # 7 Nov 2026: it says what is off, and names it with the reason code readiness uses too.
     assert body["reason"].startswith("Memory and knowledge search are off: no embedding provider.")
     assert body["reason_code"] == "no_embedding_provider"

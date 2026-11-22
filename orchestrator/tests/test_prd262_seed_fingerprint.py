@@ -308,10 +308,25 @@ def _config_owner(node: ast.expr, objects: Set[str], modules: Set[str]) -> bool:
             and isinstance(node.value, ast.Name) and node.value.id in modules)
 
 
+def _reads_the_edition(tree: ast.AST) -> bool:
+    """Imports ``core.editions``, whose capabilities are read from ``config.AUTH_EDITION`` (PRD-277)."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import) and any(alias.name == "core.editions" for alias in node.names):
+            return True
+        if isinstance(node, ast.ImportFrom) and not node.level and (
+                node.module == "core.editions" or (node.module == "core" and any(
+                    alias.name == "editions" for alias in node.names))):
+            return True
+    return False
+
+
 def config_reads(source: str) -> Set[str]:
-    """Every config setting a source reads: ``config.X``, ``getattr(config, "X")`` or ``from config import X``."""
+    """Every config setting a source reads: ``config.X``, ``getattr(config, "X")`` or ``from config import X``,
+    and ``AUTH_EDITION`` through ``core.editions``."""
     tree = ast.parse(source)
     objects, modules, reads = _config_names(tree)
+    if _reads_the_edition(tree):
+        reads.add("AUTH_EDITION")
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and _config_owner(node.value, objects, modules):
             reads.add(node.attr)
@@ -404,6 +419,8 @@ def test_the_walk_allows_the_orm_the_database_and_hashed_modules(source, module)
     ("import config\nx = config.config.AUTH_EDITION\n", {"AUTH_EDITION"}),
     ("from config import PLAN_TIERS\n", {"PLAN_TIERS"}),
     ("from config import config\nx = config.AUTH_EDITION == 'local'\n", {"AUTH_EDITION"}),
+    ("from core import editions\nx = editions.current().billing\n", {"AUTH_EDITION"}),
+    ("def seed():\n    from core.editions import current\n", {"AUTH_EDITION"}),
 ])
 def test_the_walk_finds_every_config_read(source, reads):
     assert config_reads(source) == reads

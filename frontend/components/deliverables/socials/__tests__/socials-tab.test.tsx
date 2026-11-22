@@ -4,7 +4,9 @@
  * a content edit to an approved post voids the approval and sends it back to
  * needs_approval, and approve takes the content_hash of the version on screen
  * (a post changed since answers 409; so does a save another writer's commit
- * overtook). The workspace comes through the REAL WorkspaceProvider (its
+ * overtook). Approve answers as the server's one Approve does (17 Nov 2026): a planned slot
+ * still ahead schedules the post there, no slot and a channel publish it at once. The
+ * workspace comes through the REAL WorkspaceProvider (its
  * GET /api/workspaces/current is the only stubbed fetch), so turning Socials on
  * is proven to refetch the workspace and swap the card for the list in place.
  *
@@ -64,6 +66,14 @@ vi.mock('@/lib/api-client', () => {
     ...post.review_log,
     { at: tick(), by: 'user-1', action, comment },
   ]
+  // One Approve: what the server's approve does with the post once approved (`service.approve`, then
+  // `publish_on_approval`): a slot still ahead (planned, else a schedule kept from before an edit)
+  // schedules it; asked to post now (`postNow`), no slot, no schedule and a channel publish it now.
+  const approvedTo = (p: any, postNow: boolean) => {
+    const ahead = [p.planned_for, p.scheduled_for].find((slot) => slot && new Date(slot).getTime() > Date.now())
+    if (ahead) return { status: 'scheduled', scheduled_for: ahead }
+    return postNow && !p.planned_for && !p.scheduled_for && (p.targets ?? []).length > 0 ? { status: 'publishing' } : {}
+  }
   const move = (id: string, action: string, comment: string | null = null, extra: (p: any) => object = () => ({})) => {
     const post = find(id)
     const to = TRANSITIONS[action][post.status]
@@ -107,12 +117,13 @@ vi.mock('@/lib/api-client', () => {
       })
     }),
     submitSocialPost: vi.fn(async (id: string) => move(id, 'submit')),
-    approveSocialPost: vi.fn(async (id: string, contentHash: string) => {
+    approveSocialPost: vi.fn(async (id: string, contentHash: string, options: { postNow?: boolean } = {}) => {
       // D6: only the version the reviewer saw is approved; a post changed since is a 409.
       if (find(id).content_hash !== contentHash) {
         throw Object.assign(new Error('the post changed since you opened it'), { status: 409 })
       }
-      return move(id, 'approve', null, (p) => ({ approved_hash: p.content_hash, approved_by: 'user-1', approved_at: tick() }))
+      const approved = move(id, 'approve', null, (p) => ({ approved_hash: p.content_hash, approved_by: 'user-1', approved_at: tick() }))
+      return store({ ...approved, ...approvedTo(approved, !!options.postNow) })
     }),
     requestSocialPostChanges: vi.fn(async (id: string, comment: string) => move(id, 'request_changes', comment)),
     rejectSocialPost: vi.fn(async (id: string) => move(id, 'reject')),
@@ -132,6 +143,7 @@ import { apiClient } from '@/lib/api-client'
 import { WorkspaceProvider, useWorkspace } from '@/components/workspace-provider'
 import { SocialsTab } from '@/components/deliverables/socials/socials-tab'
 import { APPROVE_CARD } from '@/components/deliverables/socials/studio/editor-approve-card'
+import { APPROVED_NO_TIME_NOTE } from '@/components/deliverables/socials/studio/post-notices'
 import { READ_ONLY_ROLE } from '@/components/deliverables/socials/studio/socials-post-view'
 import { SOCIAL_POST_CHANGED_MESSAGE, SOCIAL_POST_REVIEW_STALE_MESSAGE } from '@/hooks/use-socials-api'
 
@@ -165,6 +177,8 @@ function seedPost(overrides: Record<string, unknown>) {
 
 /** F256: a post with no channel cannot be approved; the posts these tests approve go to LinkedIn. */
 const CHANNEL = { id: 't-linkedin', toolkit: 'linkedin', post_kind: 'text', options: {}, status: 'pending' }
+/** A planned slot always ahead, on the minute, in UTC: approving its post schedules it there. */
+const SLOT_AHEAD = new Date(Date.UTC(new Date().getUTCFullYear() + 1, 0, 15, 12, 0)).toISOString()
 
 /** Marks the moment the provider has the workspace, so "renders nothing" is not vacuous. */
 function WorkspaceLoaded() {
@@ -189,6 +203,8 @@ const detail = (title: string) => screen.getByRole('article', { name: `Post: ${t
 const statusOf = (title: string) => within(detail(title)).getByTestId('socials-post-status')
 /** The editor's status, beside its title. */
 const editorStatus = () => screen.getByTestId('socials-editor-status')
+/** Approve on a post waiting with a channel (LinkedIn) and no slot: approving it posts it now. */
+const POST_NOW = 'Approve & post now to LinkedIn'
 /** The Queue's pane, where a post that waits for approval opens. */
 const findPane = () => screen.findByRole('region', { name: 'Post to approve' })
 const nav = () => screen.getByRole('navigation', { name: 'Socials' })
@@ -287,9 +303,11 @@ describe('Socials on', () => {
     expect(screen.getByRole('heading', { name: 'Needs approval 1' })).toBeInTheDocument()
   })
 
-  it('approving moves it to Approved; editing its copy afterwards moves it to Needs approval', async () => {
+  it('approving schedules it into its slot; editing its copy afterwards moves it to Needs approval', async () => {
     // A text post: Submit sends it as it is (a post with a visual renders first, PRD-251D US-D102).
-    const post = seedPost({ title: 'Launch week teaser', format: 'text', copy: { base: 'v1' }, targets: [CHANNEL] })
+    const post = seedPost({
+      title: 'Launch week teaser', format: 'text', copy: { base: 'v1' }, targets: [CHANNEL], planned_for: SLOT_AHEAD, timezone: 'UTC',
+    })
     renderTab()
 
     // The List opens the draft in its editor, which submits it.
@@ -299,10 +317,14 @@ describe('Socials on', () => {
     expect(api.submitSocialPost).toHaveBeenCalledWith(post.id)
 
     // Waiting for approval, it is approved where it is (US-D101), by the hash of the version on screen.
-    fireEvent.click(within(await screen.findByRole('region', { name: APPROVE_CARD })).getByRole('button', { name: 'Approve' }))
-    await waitFor(() => expect(editorStatus()).toHaveTextContent('Approved'))
+    // Its slot is ahead, so Approve says when it posts, and approving schedules it there.
+    fireEvent.click(within(await screen.findByRole('region', { name: APPROVE_CARD })).getByRole('button', { name: 'Approve · posts 12:00' }))
+    await waitFor(() => expect(editorStatus()).toHaveTextContent('Scheduled'))
     expect(api.approveSocialPost).toHaveBeenCalledWith(post.id, server.posts[0].content_hash)
     expect(server.posts[0].approved_hash).toBe(server.posts[0].content_hash)
+    expect(server.posts[0].scheduled_for).toBe(SLOT_AHEAD)
+    // It has a time, so the editor says nothing of a post that will not go out.
+    expect(screen.queryByText(APPROVED_NO_TIME_NOTE, { exact: false })).toBeNull()
 
     // An edit saved afterwards voids the approval (D6).
     fireEvent.change(screen.getByRole('textbox', { name: 'Copy' }), { target: { value: 'v2, sharper' } })
@@ -332,24 +354,28 @@ describe('Socials on', () => {
     server.posts = [{ ...edited, content_hash: contentHashOf(edited) }]
     const fetches = api.listSocialPosts.mock.calls.length
 
-    fireEvent.click(within(pane).getByRole('button', { name: 'Approve' }))
+    // No slot and a channel: the one Approve posts it now, and says so.
+    fireEvent.click(within(pane).getByRole('button', { name: POST_NOW }))
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(SOCIAL_POST_REVIEW_STALE_MESSAGE))
     expect(within(pane).getByRole('alert')).toHaveTextContent(SOCIAL_POST_REVIEW_STALE_MESSAGE)
-    expect(api.approveSocialPost).toHaveBeenCalledWith(post.id, post.content_hash)
+    expect(api.approveSocialPost).toHaveBeenCalledWith(post.id, post.content_hash, { postNow: true })
     await waitFor(() => expect(api.listSocialPosts.mock.calls.length).toBeGreaterThan(fetches))
     expect(await within(pane).findByText('v2 from another editor')).toBeInTheDocument()
     expect(server.posts[0].status).toBe('needs_approval')
     expect(server.posts[0].approved_hash).toBeNull()
     expect(toast.success).not.toHaveBeenCalled()
 
-    // Now shown the edit, the reviewer approves exactly it; it leaves the Queue and the List says Approved.
-    fireEvent.click(within(pane).getByRole('button', { name: 'Approve' }))
+    // Now shown the edit, the reviewer approves exactly it, on one click: it leaves the Queue, the
+    // server publishes it at once, and the List says Publishing.
+    fireEvent.click(within(pane).getByRole('button', { name: POST_NOW }))
     expect(await screen.findByText('Nothing is waiting for your approval.')).toBeInTheDocument()
-    expect(api.approveSocialPost).toHaveBeenLastCalledWith(post.id, server.posts[0].content_hash)
+    expect(api.approveSocialPost).toHaveBeenLastCalledWith(post.id, server.posts[0].content_hash, { postNow: true })
+    expect(api.approveSocialPost).toHaveBeenCalledTimes(2)
     expect(server.posts[0].approved_hash).toBe(server.posts[0].content_hash)
+    expect(server.posts[0].status).toBe('publishing')
     toTheList()
-    await screen.findByRole('heading', { name: 'Approved 1' })
+    await screen.findByRole('heading', { name: 'Publishing 1' })
   })
 
   it("Save draft answering 409 (another writer committed first) says so, refetches the posts and shows the server's version", async () => {

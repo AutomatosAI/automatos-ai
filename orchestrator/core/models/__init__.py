@@ -113,6 +113,7 @@ from .harness import HarnessRun, HarnessTaskLedger  # noqa: F401  # F156 ledger;
 from .content_provenance import ContentProvenance  # noqa: F401  # PRD-264 EUAI-10: marked files, by hash
 from .ticket_numbers import WorkspaceTicketCounter  # noqa: F401  # PRD-252 R4: numbers tickets on insert
 from . import review_entries  # noqa: F401  # PRD-266 US-012a: a ticket entering Review is announced after its commit
+from . import kept_runtime_keys  # noqa: F401  # Ticket PR fields: runtime_ref.pull_request survives whole-document writes
 from .clerk_user_relinks import ClerkUserRelink  # noqa: F401  # Clerk production cutover: one relink per users row
 from .credits import CreditBalance, CreditLedgerEntry  # noqa: F401  # PRD-265: the credit ledger + balances
 from .billing import BillingAccount, BillingEvent  # noqa: F401  # PRD-265 W2: subscriptions + provider events
@@ -125,6 +126,7 @@ from .end_users import EndUser  # noqa: F401  # PRD-274 W3: a product's end user
 from .chat_turn_keys import ChatTurnKey  # noqa: F401  # PRD-274 W1: a key's chat turn under an Idempotency-Key
 from .jobs import Job, JobSchedule  # noqa: F401  # PRD-276: the durable job queue, its schedules' cursors
 from .products import Product, ProductWorkspaceSpend  # noqa: F401  # PRD-274 W5: a product, and the workspaces it runs for its customers
+from .user_identities import UserIdentity  # noqa: F401  # PRD-277 W2: a person's (issuer, subject) sign-in link
 
 # PRD-38.4: SDK API Keys (safe — standalone table, no FK deps on workspaces)
 try:

@@ -205,10 +205,13 @@ class _ReviewDb:
     def add(self, row):
         self.added.append(row)
 
-    def commit(self):
-        self.committed = True
+    def flush(self):
         for row in self.added:
             row.id = 400
+
+    def commit(self):
+        self.committed = True
+        self.flush()
 
     def rollback(self):
         pass
@@ -225,7 +228,9 @@ def test_auto_s_review_ticket_is_filed_for_the_workspace_s_auto(monkeypatch, aut
 
     db, consented = _ReviewDb(auto), []
     monkeypatch.setattr(database, "SessionLocal", lambda: db)
-    monkeypatch.setattr(consent, "consent_for_lane_ticket", lambda session, **kw: consented.append(kw))
+    # The consent is staged before the ticket's commit, so the two commit together.
+    monkeypatch.setattr(consent, "consent_for_lane_ticket",
+                        lambda session, **kw: consented.append({**kw, "committed_first": session.committed}))
 
     out = file_auto_review(workspace_id=WS, source_agent_id=17, source_agent_name="News & Research",
                            message=FOUND, link_id=171, status="ok")
@@ -237,7 +242,9 @@ def test_auto_s_review_ticket_is_filed_for_the_workspace_s_auto(monkeypatch, aut
     (task,) = db.added
     assert out == 400 and task.assigned_agent_id == 1 and task.status == "assigned"
     assert task.source_type == "heartbeat" and task.source_id == "171" and task.title.startswith("Review News")
-    assert consented == [{"workspace_id": WS, "task": task, "source_type": "heartbeat"}]
+    assert consented == [{"workspace_id": WS, "task": task, "source_type": "heartbeat", "commit": False,
+                          "committed_first": False}]
+    assert db.committed
 
 
 def test_a_queued_tick_files_no_report(monkeypatch):

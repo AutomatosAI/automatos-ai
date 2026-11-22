@@ -27,7 +27,7 @@ def test_the_local_credit_card_reads_the_key_the_calls_use(monkeypatch):
     from config import config
     from core.llm import key_resolver
 
-    monkeypatch.setattr(type(config), "IS_LOCAL_EDITION", True)
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
     monkeypatch.setattr(key_resolver, "resolve_provider_key", lambda db, provider, workspace_id=None, agent_name="":
                         key_resolver.ResolvedKey("sk-or-operator", "platform_workspace", False, provider))
     assert llm_analytics._resolve_openrouter_key("ws-1", db=None) == "sk-or-operator"
@@ -54,7 +54,7 @@ def test_the_hosted_card_never_reads_the_operators_key(monkeypatch):
     from config import config
     from core.llm import key_resolver
 
-    monkeypatch.setattr(type(config), "IS_LOCAL_EDITION", False)
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
     monkeypatch.setattr(config, "OPENROUTER_API_KEY", "")
     monkeypatch.setattr(key_resolver, "resolve_provider_key", lambda *a, **k: pytest.fail("the operator's key"))
     with pytest.raises(HTTPException) as refused:
@@ -256,7 +256,7 @@ def test_new_work_has_the_credit_looked_at_at_most_every_quarter_hour(watch, mon
     async def check(workspace_id):
         checked.append(workspace_id)
 
-    monkeypatch.setattr(type(config), "IS_LOCAL_EDITION", True)
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
     monkeypatch.setattr(watch.module, "check_credit", check)
     guard = watch.module.watches_the_credit(lambda db, ws, what: "over the day's ceiling")
 
@@ -267,7 +267,7 @@ def test_new_work_has_the_credit_looked_at_at_most_every_quarter_hour(watch, mon
 
     assert asyncio.run(starts()) == ["over the day's ceiling"] * 2       # the guard's answer is unchanged
     assert checked == ["ws-7"]
-    monkeypatch.setattr(type(config), "IS_LOCAL_EDITION", False)
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
     monkeypatch.setattr(watch.module, "_last_check", {})
     asyncio.run(starts())
     assert checked == ["ws-7"]                                            # the hosted edition never looks

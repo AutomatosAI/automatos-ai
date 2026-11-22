@@ -11,12 +11,17 @@
  * - Request changes needs a comment; reject takes an optional reason.
  * - F256: a post with no channel publishes nothing, so Approve waits for one and says why;
  *   with ``onEdit`` (the Queue) the hint opens the post to add one (3 Oct 2026).
- * - Approve & post now approves and publishes at once (socials-approve-post-now.tsx).
+ * - One Approve (17 Nov 2026, Gerard: "are you sure, are you really sure?"): one button, whose
+ *   label says what the server does with the post (studio/queue-model.ts `approveLabel`):
+ *   "Approve · posts 12:00" schedules it into its slot (planned, else a schedule kept from before an
+ *   edit), "Approve & post now to X" publishes it at once on its one click (it sends `post_now`, and
+ *   the server publishes only if it agrees), and plain "Approve" leaves it approved. The separate
+ *   Approve & post now and its second question are gone; only unsourced claims still ask first (D7).
+ *   A publish that did not start after the approval says so ("Approved, but posting didn't start").
  * - PRD-251D US-D108: a post whose file was made before its last change to what a render reads
- *   (`file_current` false) is refused by the server, so Approve and Approve & post now are off,
- *   and the sentence the server refuses with says so beside Render again, the full render that
- *   makes the file from the post as it is. The Queue's pane and the editor's approve card both
- *   show it here.
+ *   (`file_current` false) is refused by the server, so Approve is off, and the sentence the
+ *   server refuses with says so beside Render again, the full render that makes the file from the
+ *   post as it is. The Queue's pane and the editor's approve card both show it here.
  */
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Loader2 } from 'lucide-react'
@@ -32,9 +37,9 @@ import {
   useSocialPostAction,
   type SocialPostAction,
 } from '@/hooks/use-socials-api'
-import { ApproveAndPostNow } from './socials-approve-post-now'
 import { SOCIAL_COMMENT_MAX_CHARS } from './socials-status'
 import { FILE_OLDER_THAN_WORDS, hasChannels, unsourcedClaims } from './socials-review'
+import { approveLabel, approvePostsNow } from './studio/queue-model'
 
 type Asking = 'changes' | 'reject' | null
 
@@ -109,8 +114,8 @@ interface SocialsPostReviewProps {
   post: SocialPost
   /** Unsaved edits on screen: approving them would approve what the server does not have. */
   dirty: boolean
-  /** PRD-251B US-B111: the Queue's wording, "Approve · publishes HH:MM". */
-  approveLabel?: string
+  /** The time Approve's label reads the post's slot against (the Queue's clock); now by default. */
+  now?: Date
   /** PRD-251B US-B111: Request changes sends the post back to Auto instead of its author. */
   sendBack?: SendBack
   /** PRD-251B US-B111: more actions beside these (the Queue's Make another take). */
@@ -158,7 +163,7 @@ function FileOlderHint({ postId, disabled }: { postId: string; disabled: boolean
   )
 }
 
-export function SocialsPostReview({ post, dirty, approveLabel = 'Approve', sendBack, extra, onEdit }: SocialsPostReviewProps) {
+export function SocialsPostReview({ post, dirty, now, sendBack, extra, onEdit }: SocialsPostReviewProps) {
   const [asking, setAsking] = useState<Asking>(null)
   const [confirmClaims, setConfirmClaims] = useState<string[] | null>(null)
   const [stale, setStale] = useState(false)
@@ -177,7 +182,7 @@ export function SocialsPostReview({ post, dirty, approveLabel = 'Approve', sendB
   const run = (action: SocialPostAction) => act.mutate({ postId: post.id, action }, { onSuccess: () => setAsking(null) })
   const approveShown = (overrideUnsourced = false) => {
     setStale(false)
-    approve.mutate({ postId: post.id, contentHash: post.content_hash, overrideUnsourced })
+    approve.mutate({ postId: post.id, contentHash: post.content_hash, overrideUnsourced, postNow: approvePostsNow(post) })
   }
   const startApprove = () => {
     const claims = unsourcedClaims(post)
@@ -194,9 +199,8 @@ export function SocialsPostReview({ post, dirty, approveLabel = 'Approve', sendB
       )}
       <div className="flex flex-wrap gap-2">
         <Button size="sm" onClick={startApprove} disabled={approveOff}>
-          {approveLabel}
+          {approveLabel(post, now)}
         </Button>
-        <ApproveAndPostNow post={post} disabled={approveOff} />
         <Button size="sm" variant="outline" onClick={() => setAsking('changes')} disabled={busy}>
           Request changes
         </Button>

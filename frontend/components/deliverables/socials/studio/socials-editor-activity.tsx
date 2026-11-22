@@ -22,14 +22,16 @@ interface SocialsEditorActivityProps {
   role: Workspace['role']
   /** The editor above holds unsaved edits: the full render here waits for the save. */
   dirty?: boolean
+  /** The editor says at its top that an approved post has no time (post-notices.tsx `EditorNoTimeNotice`): not again here. */
+  hideNoTime?: boolean
 }
 
-export function SocialsEditorActivity({ post, role, dirty = false }: SocialsEditorActivityProps) {
+export function SocialsEditorActivity({ post, role, dirty = false, hideNoTime = false }: SocialsEditorActivityProps) {
   return (
     <section aria-label="Activity" className={CARD}>
       <h2 className="text-[15px] font-semibold text-foreground">Activity</h2>
       <SocialsApprovalResetBanner post={post} />
-      <SocialsPostNotices post={post} role={role} dirty={dirty} />
+      <SocialsPostNotices post={post} role={role} dirty={dirty} hideNoTime={hideNoTime} />
       <SocialsPostReceipts post={post} role={role} />
       <SocialsPublishControls post={post} role={role} />
       <SocialsPostHistory post={post} />

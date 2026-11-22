@@ -1,5 +1,5 @@
 /**
- * PRD-261 A-07f (#1157) — creating an SDK key under step-up (Settings › Widget SDK › API keys).
+ * PRD-261 A-07f (#1157) — creating an SDK key under step-up (Settings › API keys).
  *
  * In SaaS the server refuses `POST /api/api-keys` without a sign-in from the last few minutes
  * (orchestrator/api/api_keys.py `STEP_UP`) with HTTP 403 and Clerk's reverification hint at the

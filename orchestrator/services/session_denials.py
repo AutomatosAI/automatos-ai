@@ -59,6 +59,7 @@ REFUSED_REASON_MARKERS: Tuple[str, ...] = (
     "path traversal",
     "is not one this ticket may call",
     "reads its program from a file the gate cannot judge",
+    "reads its program through an option the gate cannot judge",
     "program runs a command of its own",
     # NOT "redirection outside the session directory": it carries the read_outside
     # wording and is classified there, which is the same verdict by a better name.

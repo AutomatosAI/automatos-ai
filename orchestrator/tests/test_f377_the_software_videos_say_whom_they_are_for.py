@@ -106,3 +106,12 @@ def test_the_gallery_the_composer_and_the_agents_see_it():
     assert entries[0]["fields_cut_out"]["15"] and "closing_line" in entries[1]["fields_cut_out"]["15"]
     assert template_row(ui_story).endswith("| made for software only: pick it only when the brief is about software")
     assert "made for" not in template_row(data_story)
+
+
+def test_the_app_promo_is_for_a_learning_app_and_sends_other_software_to_the_ui_story():
+    """19 Nov 2026: the App promo's screens are a study plan, a quiz, a tutor and a grade. Said only
+    "for a phone app", it was picked for a business-software app and filled with a made-up quiz."""
+    description = {s["slug"]: s for s in social_starters("social_video")}["app-promo"]["description"]
+    assert description.startswith("For a phone app only: a learning or study app")
+    assert "Pick it only for a brief about a learning app" in description
+    assert "For any other app or software product, pick the UI story promo" in description

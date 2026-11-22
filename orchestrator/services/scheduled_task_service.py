@@ -496,8 +496,10 @@ class ScheduledTaskService:
         The same three steps the HTTP create path takes — insert, PRD-234 D16
         consent when the operator who scheduled it also assigned it (local
         edition), then the board SSE push and the dispatcher wake — so the
-        ticket runs exactly like one filed by hand. A recurring row files a fresh
-        ticket per fire (``source_id`` carries the fire time).
+        ticket runs exactly like one filed by hand. The ticket and its consent
+        commit together: committed apart, a dispatcher woken by anything else
+        claimed ticket 343 before its grant existed and parked it. A recurring
+        row files a fresh ticket per fire (``source_id`` carries the fire time).
         """
         from services.board_consent import (
             WHY_SCHEDULED_AND_ASSIGNED, actor_from_user_id, consent_for_created_ticket,
@@ -508,10 +510,15 @@ class ScheduledTaskService:
         created_by_user_id = getattr(task, "created_by_user_id", None)
         ticket = ticket_for(task, task_id)
         db.add(ticket)
-        db.flush()  # the id the notice carries
+        db.flush()  # the id the consent and the notice carry
+        if created_by_user_id:
+            consent_for_created_ticket(
+                db, workspace_id=task.workspace_id, task=ticket,
+                actor=actor_from_user_id(created_by_user_id), why=WHY_SCHEDULED_AND_ASSIGNED, commit=False,
+            )
         # F119: each notice before the commit that carries it — the loop closes
-        # this session without another commit, which dropped both. The dispatch
-        # wake still goes out only after the D16 consent is committed.
+        # this session without another commit, which dropped both. The D16 consent
+        # commits with the ticket here; the dispatch wake follows in its own commit.
         notify_board_event(
             db, workspace_id=str(task.workspace_id), task_id=ticket.id,
             status=ticket.status, event="task_created",
@@ -519,11 +526,6 @@ class ScheduledTaskService:
         db.commit()
         db.refresh(ticket)
 
-        if created_by_user_id:
-            consent_for_created_ticket(
-                db, workspace_id=task.workspace_id, task=ticket,
-                actor=actor_from_user_id(created_by_user_id), why=WHY_SCHEDULED_AND_ASSIGNED,
-            )
         if ticket.status == "assigned":
             notify_task_available(db, workspace_id=str(task.workspace_id), task_id=ticket.id)
             db.commit()

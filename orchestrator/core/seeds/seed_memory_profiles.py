@@ -105,6 +105,43 @@ SEEDED_PROFILES: List[Dict[str, Any]] = [
              "type": "decision"},
         ],
     },
+    {
+        "slug": "wellbeing",
+        "name": "Wellbeing",
+        "description": "For an agent that supports one person through stress and hard days: the people they "
+                       "turn to, what helps them, and how they like to be spoken to.",
+        "focus": "This agent supports one person through stress and hard days. Keep what would help the next "
+                 "conversation support this person: the people in their life, what has helped and what hasn't, "
+                 "their routines, their plans, and how they like to be spoken to. Never keep their health "
+                 "record: no body or health readings, no conditions, diagnoses or symptoms, no medicines, "
+                 "treatment or appointments, and nothing about another person's health. This overrides "
+                 "preserving specifics: leave out the figure, the dose and the condition even when it is stated "
+                 "exactly. If the exchange raised a safety concern (self-harm, suicide, crisis), return an empty "
+                 "array for the whole exchange, including anything in it you would otherwise keep.",
+        "keep": [
+            "the people in their life, and who they turn to when things are hard",
+            "what has helped them before, and what hasn't",
+            "their routines and habits, such as when they work, walk or wind down",
+            "their plans, and anything left open to pick up next time (as open_loop)",
+            "how they like to be spoken to, and what they prefer",
+        ],
+        "skip": [
+            "any body or health reading, such as heart rate, sleep numbers, steps or weight",
+            "any named medical or mental-health condition or diagnosis",
+            "any symptom, even without a number, such as sleeping badly or panic attacks",
+            "any medicine or dose",
+            "any treatment, therapy, appointment or doctor's visit",
+            "the whole exchange when it raised a safety concern (self-harm, suicide, crisis), even in passing",
+            "anything about a different person's health",
+        ],
+        "examples": [
+            {"fact": "When work gets too much, Sam calls their sister Maya in the evening.", "type": "user_fact"},
+            {"fact": "On a hard morning, Sam prefers a short walk before work to breathing exercises, which have "
+                     "not helped.", "type": "preference"},
+            {"fact": "Sam is meeting their friend Leo for coffee on Saturday and would like to be asked how it went.",
+             "type": "open_loop"},
+        ],
+    },
 ]
 
 _FIELDS = ("name", "description", "focus", "keep", "skip", "examples")

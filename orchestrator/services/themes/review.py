@@ -49,7 +49,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from config import config
+from core import editions
 from core.models.themes import THEME_REVOCATION_ORIGIN_LOCAL, ThemePackage, ThemeReviewEvent, ThemeRevocation
 from services.themes import signature_verify, signing
 from services.themes.auto_update import apply_listed_update, roll_back_installs
@@ -182,8 +182,8 @@ def approval_refusal(db: Session, package: ThemePackage, note: Optional[ThemeRev
         return SCAN_NOT_RUN
     if is_disabled(db, package):
         return REVOKED
-    if config.IS_LOCAL_EDITION:
-        return None  # the local edition never has the isolated stage (C-02b)
+    if not editions.current().hosts_automatos_cloud:
+        return None  # only Automatos Cloud has the isolated stage (C-02b)
     outcome = _note_outcome(note)
     if outcome is None:
         return NOTE_MISSING

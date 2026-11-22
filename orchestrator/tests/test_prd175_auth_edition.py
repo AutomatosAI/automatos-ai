@@ -125,8 +125,6 @@ def test_default_edition_is_saas_and_require_auth_stays_secure():
     """Default (no flag) must remain the SaaS product: edition=saas, auth on."""
     cfg = _fresh_config()  # no AUTH_EDITION, no REQUIRE_AUTH override
     assert cfg.AUTH_EDITION == "saas"
-    assert cfg.IS_SAAS_EDITION is True
-    assert cfg.IS_LOCAL_EDITION is False
     # REQUIRE_AUTH secure-by-default in saas (unset env → true).
     assert cfg.REQUIRE_AUTH is True
 
@@ -137,7 +135,6 @@ def test_local_edition_forces_require_auth_false():
     cfg = _fresh_config(AUTH_EDITION="local", DEFAULT_WORKSPACE_ID=str(LOCAL_WS),
                         REQUIRE_AUTH="true")
     assert cfg.AUTH_EDITION == "local"
-    assert cfg.IS_LOCAL_EDITION is True
     assert cfg.REQUIRE_AUTH is False
 
 

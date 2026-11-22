@@ -152,7 +152,7 @@ def test_publishing_gives_each_channel_its_own_crop():
 def test_the_plan_maker_crops_a_library_still_instead_of_sending_it_as_it_is(monkeypatch):
     posts_api = _PostsApi()  # applies the template, format and media as service.update_post does
     monkeypatch.setattr(maker_mod, "_posts_api", lambda: posts_api)
-    monkeypatch.setattr(maker_mod, "_propose", lambda db, plan, slot, topic, now, visual_slots=(): {
+    monkeypatch.setattr(maker_mod, "_propose", lambda db, plan, slot, topic, now, visual_slots=(), **_options: {
         "title": "Lisbon", "copy": {"base": "See you there."}, "variables": {}, "sources": {}, "template_id": None, "visual_prompts": {}})
     monkeypatch.setattr(maker_mod, "slot_targets", lambda db, ws, slot: [])
     monkeypatch.setattr(socials_targets, "set_post_targets", lambda db, post, actor, targets, agent=None: None)

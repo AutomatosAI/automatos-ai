@@ -27,7 +27,7 @@ def edition(monkeypatch):
     from config import config
 
     def _set(local):
-        monkeypatch.setattr(type(config), "IS_LOCAL_EDITION", local)
+        monkeypatch.setattr(config, "AUTH_EDITION", "local" if local else "saas")
     return _set
 
 
@@ -65,7 +65,9 @@ def test_the_hosted_edition_says_people_sign_in_and_the_plan_sets_the_helpers(ed
     assert "hosted edition" in facts and "signs in with their own account" in facts
     assert "Settings has these tabs: Orchestrator, Webhooks," in facts and "Profile" not in facts
     # PRD-265 W2: hosted Settings has a Billing tab, so Auto sends the owner there, not nowhere.
-    assert "Widget SDK, Billing." in facts and "There is no Billing" not in facts
+    assert "Widget SDK, API keys, Billing." in facts and "There is no Billing" not in facts
+    # The workspace's API keys (widget and server) are hosted only; the person's own model keys are in both.
+    assert "Model keys" in facts
     assert "There is no Plans or Team Management tab: the plan, the credits and payments are on the Billing tab." in facts
 
 

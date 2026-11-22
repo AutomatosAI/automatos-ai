@@ -190,8 +190,12 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-11-17: merge_heads_20261117 joins the two — a pure merge, no schema operations. Neither
 # is re-chained: a database that ran `alembic upgrade heads` is stamped at both, and refuses a
 # rewritten lineage (the prd266_merge_heads lesson).
-# 2026-11-13 (Automatos for products, spend cap): product_spend_cap_20261113 chains onto the merge —
-# products.workspace_monthly_credit_cap (a new nullable column) and product_workspace_spend (a new table).
+# 2026-11-20 (PRD-277 Wave 2, US-201 and US-203): prd277_w2_identities_20261120 chains onto
+# merge_heads_20261117 — user_identities (a new table) and users.system_role (a new nullable
+# column with its CHECK): a person's (issuer, subject) link and an install-wide role.
+# 2026-11-13 (Automatos for products, spend cap): product_spend_cap_20261113 chains onto
+# prd277_w2_identities_20261120 — products.workspace_monthly_credit_cap (a new nullable column) and
+# product_workspace_spend (a new table).
 EXPECTED_HEAD = "product_spend_cap_20261113"
 
 

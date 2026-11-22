@@ -10,8 +10,14 @@ isolation does not depend on the layout: ``search()`` is fail-closed on
 ``workspace_id`` metadata (PRD-186 S1), and deletes are scoped to the
 caller's own file keys. One index per bucket: dimension from
 S3_VECTORS_DIMENSION, metric from S3_VECTORS_METRIC.
+
+PRD-278: with ``AWS_USE_WORKLOAD_IDENTITY`` on the client gets no key pair (the
+SDK's chain finds the pod's role). With ``S3_VECTORS_CREATE_IF_MISSING`` off core
+never creates the bucket or the index: a missing index is an error, at start-up
+for one shared bucket (``verify_vector_index``) and on first use otherwise.
 """
 
+import asyncio
 import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -22,6 +28,44 @@ from botocore.exceptions import ClientError
 from config import config
 
 logger = logging.getLogger(__name__)
+
+# GetIndex's answer for an index (or vector bucket) that is not there.
+_INDEX_MISSING_CODES = frozenset({"NotFoundException", "ResourceNotFoundException"})
+_WORKSPACE_PLACEHOLDER = "{workspace_id}"
+# Start-up's limit for proving the index exists (PRD-278 US-104).
+STARTUP_CHECK_TIMEOUT_SECONDS = 10.0
+# Any id will do: a shared bucket has no placeholder, and the check reads no vectors.
+_STARTUP_CHECK_WORKSPACE = "startup-check"
+
+
+class VectorIndexMissingError(RuntimeError):
+    """``S3_VECTORS_CREATE_IF_MISSING`` is off and the index core looked for is not there.
+
+    Core never creates one in that mode (PRD-278 US-104): an operator who makes the
+    index with their own key gets an error for a setup mistake, not a second index.
+    """
+
+    def __init__(self, bucket: str, index: str) -> None:
+        super().__init__(
+            f"S3 Vectors index '{index}' was not found in vector bucket '{bucket}', and "
+            "S3_VECTORS_CREATE_IF_MISSING is off, so core will not create it. Create the bucket "
+            "and the index (S3_VECTORS_BUCKET, S3_VECTORS_INDEX_NAME, S3_VECTORS_DIMENSION), "
+            "or turn S3_VECTORS_CREATE_IF_MISSING on."
+        )
+
+
+class VectorIndexCheckError(RuntimeError):
+    """The index check was refused for a reason other than "not found" (PRD-278 US-104).
+
+    Names the bucket, the index and AWS's error code only; AWS's own message stays out
+    of the error and its traceback.
+    """
+
+    def __init__(self, bucket: str, index: str, code: str) -> None:
+        super().__init__(
+            f"S3 Vectors could not check index '{index}' in vector bucket '{bucket}': "
+            f"AWS answered with error code {code or 'unknown'}."
+        )
 
 
 class IndexDimensionMismatchError(RuntimeError):
@@ -74,12 +118,7 @@ class S3VectorsBackend:
         # Get region from config
         self.region = region or config.AWS_REGION
 
-        self.client = boto3.client(
-            "s3vectors",
-            region_name=self.region,
-            aws_access_key_id=config.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
-        )
+        self.client = boto3.client("s3vectors", region_name=self.region, **_credential_kwargs())
 
         self._setup_complete = False
 
@@ -90,12 +129,46 @@ class S3VectorsBackend:
         self._ensure_setup()
 
     def _ensure_setup(self) -> None:
-        """Create bucket and index if they don't already exist.
+        """Make sure the bucket and index are there before a call uses them.
 
-        If an existing index reports a dimension different from the configured
-        one, setup raises ``IndexDimensionMismatchError`` (PRD-186 S2) — a
-        populated index is never deleted or recreated from here.
+        ``S3_VECTORS_CREATE_IF_MISSING`` on (the default): create both when they
+        don't already exist. Off (PRD-278 US-104): never create; a missing index
+        raises ``VectorIndexMissingError``. Either way an existing index that
+        reports a dimension different from the configured one raises
+        ``IndexDimensionMismatchError`` (PRD-186 S2) — a populated index is never
+        deleted or recreated from here.
         """
+        if config.S3_VECTORS_CREATE_IF_MISSING:
+            self._create_if_missing()
+        else:
+            self._require_existing_index()
+
+    def _require_existing_index(self) -> None:
+        """Check the index is there, then its dimension; create nothing (PRD-278 US-104).
+
+        Checked once per backend. A refusal raises ``VectorIndexMissingError`` ("not found")
+        or ``VectorIndexCheckError`` (any other code), without AWS's exception as its cause;
+        the code and the exception's class are logged once.
+        """
+        if self._setup_complete:
+            return
+        try:
+            self.client.get_index(vectorBucketName=self.bucket_name, indexName=self.index_name)
+        except ClientError as e:
+            code = str(e.response.get("Error", {}).get("Code", ""))
+            logger.error("S3 Vectors index check failed for %s/%s: %s [%s]",
+                         self.bucket_name, self.index_name, code, type(e).__name__)
+            failure: RuntimeError = (VectorIndexMissingError(self.bucket_name, self.index_name)
+                                     if code in _INDEX_MISSING_CODES
+                                     else VectorIndexCheckError(self.bucket_name, self.index_name, code))
+        else:
+            self._assert_index_dimension()
+            self._setup_complete = True
+            return
+        raise failure from None
+
+    def _create_if_missing(self) -> None:
+        """Create bucket and index if they don't already exist (the default)."""
         # Create bucket
         try:
             self.client.create_vector_bucket(vectorBucketName=self.bucket_name)
@@ -434,3 +507,39 @@ def _hit_from_match(match: Dict[str, Any], required_ws: str, min_score: float) -
         "file_name": metadata.get("file_name", ""), "file_path": metadata.get("file_path", ""),
         "external_file_id": metadata.get("external_file_id", ""), "chunk_index": metadata.get("chunk_index", 0),
     }
+
+
+def _credential_kwargs() -> Dict[str, Any]:
+    """The key pair as config holds it, or none with ``AWS_USE_WORKLOAD_IDENTITY`` on
+    (PRD-278 US-101): the SDK's own chain then finds the pod's role."""
+    if config.AWS_USE_WORKLOAD_IDENTITY:
+        return {}
+    return {"aws_access_key_id": config.AWS_ACCESS_KEY_ID, "aws_secret_access_key": config.AWS_SECRET_ACCESS_KEY}
+
+
+async def verify_vector_index() -> None:
+    """Start-up (PRD-278 US-104): with ``S3_VECTORS_CREATE_IF_MISSING`` off, prove the index exists.
+
+    Runs only when S3 Vectors is on, creation is off and ``S3_VECTORS_BUCKET`` is one
+    shared bucket. A ``{workspace_id}`` bucket has no single index to look at before a
+    workspace uses it, so each one is checked on its first use instead. The check runs
+    off the event loop, inside ``STARTUP_CHECK_TIMEOUT_SECONDS``; a missing index
+    raises ``VectorIndexMissingError`` and aborts boot.
+    """
+    if not config.S3_VECTORS_ENABLED or config.S3_VECTORS_CREATE_IF_MISSING:
+        return
+    if _WORKSPACE_PLACEHOLDER in (config.S3_VECTORS_BUCKET or ""):
+        logger.info("S3 Vectors: per-workspace buckets; each index is checked on its workspace's first use")
+        return
+    try:
+        await asyncio.wait_for(asyncio.to_thread(_check_shared_index), timeout=STARTUP_CHECK_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        message = (f"S3 Vectors index '{config.S3_VECTORS_INDEX_NAME}' in vector bucket "
+                   f"'{config.S3_VECTORS_BUCKET}' gave no answer within {STARTUP_CHECK_TIMEOUT_SECONDS:g} seconds.")
+        logger.error(message)
+        raise RuntimeError(message) from None
+
+
+def _check_shared_index() -> None:
+    """Build a backend on the shared bucket and check its index. Runs in a worker thread."""
+    S3VectorsBackend(workspace_id=_STARTUP_CHECK_WORKSPACE)._require_existing_index()

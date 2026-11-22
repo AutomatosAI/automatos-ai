@@ -46,6 +46,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from config import config
+from core import editions
 from core.models.themes import (
     THEME_REVOCATION_ORIGIN_FEED,
     THEME_REVOCATION_SYNC_ROW_ID,
@@ -115,7 +116,7 @@ def feed_url() -> str:
 
 def pull_enabled() -> bool:
     """True in the local edition with a feed URL set (the hosted edition serves the feed)."""
-    return bool(config.IS_LOCAL_EDITION) and bool(feed_url())
+    return editions.current().calls_automatos_cloud and bool(feed_url())
 
 
 def _is_loopback(host: str) -> bool:

@@ -9,7 +9,7 @@ SQLite. Pins:
   once per value, and again after a well-formed read; the answer is a frozenset;
 * ``signature_state.revoked_key_ids`` is that reader, and ``revocation_pull.stored_revoked_keys``
   is its sorted list (the sync status's ``revokedKeys``);
-* the reader is a leaf (the models, ``config`` and the standard library), so the revocation rule
+* the reader is a leaf (the models, ``core.editions`` and the standard library), so the revocation rule
   (``revocations``) never imports the pull or the feed: no import cycle.
 """
 from __future__ import annotations
@@ -45,7 +45,7 @@ KEY_A, KEY_B = "ed25519:" + "a" * 16, "ed25519:" + "b" * 16
 THEMES = _ORCH / "services" / "themes"
 THEMES_PACKAGE = "services.themes"
 # What the leaf may import beyond the standard library.
-LEAF_FIRST_PARTY = {"config", "core.models.themes"}
+LEAF_FIRST_PARTY = {"core", "core.editions", "core.models.themes"}
 FIRST_PARTY_ROOTS = {"api", "config", "core", "modules", "services"}
 
 

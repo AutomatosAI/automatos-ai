@@ -93,7 +93,9 @@ Refused on Windows, each with a sentence: an older Windows (`__main__.py`), a
    (the ticket — which names its deliverables folder — a stable system prompt that
    says what the session can reach and how to ask, a hooks-only `settings.json`)
    — never into your repository — and records the folder-trust decision where
-   Claude Code reads it (`~/.claude.json`, one flag, backup kept).
+   Claude Code reads it (`~/.claude.json`, one flag, backup kept), for the
+   working folder and for that session folder, which the launch adds with
+   `--add-dir` and Claude Code would otherwise stop to ask about.
 4. Spawns **your** CLI under a pseudo-terminal it only drains — interactively
    for Claude Code and Codex, `copilot -p` for GitHub Copilot (below) — with the
    argv its preset spells — for Claude Code: `--session-id`,
@@ -105,16 +107,27 @@ Refused on Windows, each with a sentence: an older Windows (`__main__.py`), a
 5. Hooks carry the turn over one bus, whatever the CLI: `PreToolUse` is the
    policy gate — it reads what the call *does* (read, write, run a shell) so the
    rules are the same for every CLI: file tools inside the directory, the Bash
-   gate below, never `git push`; `PostToolUse` the files touched; `Stop` the end
-   of the turn with the final text. A permission prompt that would reach the TUI
-   is denied — nobody is watching it. (GitHub Copilot can ask again for a call the
-   gate already allowed, for a path or URL check of its own: that request gets the
-   gate's verdict on the same call, at once.)
+   gate below, never `git push` (outside dev-box mode); `PostToolUse` the files touched; `Stop` the end
+   of the turn with the final text; for Claude Code, `StopFailure` a turn that
+   ended on an API error (a dropped connection, say), which ends the session at
+   once and fails the ticket with the error's own words instead of leaving it
+   idle at its prompt until the session timeout. A permission prompt that would
+   reach the TUI is denied — nobody is watching it. (GitHub Copilot can ask
+   again for a call the gate already allowed, for a path or URL check of its
+   own: that request gets the gate's verdict on the same call, at once.)
 6. On `Stop` (for a CLI whose turn is the process, its exit) it reads the
    transcript for token usage, terminates the process,
    copies what the session wrote in its own ticket folder into the deliverables
    folder (below) and posts the result. Only a held command forces `review`
    (below).
+7. A usage limit is a pause, not a failure. When Claude Code shows its limit (its
+   usage limit menu, its note that it will carry on by itself at the reset, or a
+   `rate_limit` API error) the host ends the session as soon as it appears, puts
+   the ticket back in the queue and claims no Claude Code ticket until the reset
+   the screen states, a weekly limit's date included ("resets Nov 20, 9am
+   (Europe/Berlin)"). With no reset time it can read, it checks again after 15
+   minutes, and that re-check never cuts a later stated reset short; a newly
+   stated reset always replaces the one held.
 
 ## The Bash gate (PRD-245)
 
@@ -140,7 +153,9 @@ command in it:
   and `sudo` are never on it. `git push`, `git remote add`, `gh pr create`,
   `sudo`, `rm -rf /` and `curl … | sh` are denied on sight, in every spelling
   the gate can read (`git -C x push`, a newline, `$(git push)`, a subshell).
-- **`gh` reads, and only reads.** Sessions never publish, so every `gh`
+  In [dev-box mode](#dev-box-mode-the-session-publishes-its-own-work) git and gh
+  follow that section's table instead.
+- **`gh` reads, and only reads** (outside dev-box mode). Sessions never publish, so every `gh`
   subcommand not known to be a read is refused — an issue, a pull request, a
   release, a workflow run, an SSH key, an extension, an alias — and so is `gh api`
   with a body or any method but `GET`/`HEAD` (PRD-253 S0.3).
@@ -165,9 +180,29 @@ command in it:
 - **A program is read, not just its verb.** `awk` and `sed` stay on the list
   because a ticket needs them, but their program is refused when it can run a
   command of its own (`awk 'BEGIN{system(…)}'`, a pipe to a command, `print >
-  file`, sed's `e` command or `s///e` flag) or when the gate cannot see it at
-  all (`-f progfile`). A program is not a path: `sed '/foo/d'` opens with a
-  regex address, so program text is left out of the path check.
+  file`, gawk's `@include`, sed's `e` command or `s///e` flag) or when the gate
+  cannot see it at all (`-f progfile`, gawk's `-E`). Options are read as getopt
+  reads them (`sed -e's/a/b/e'`, `sed -n p f -e …`). An awk program is read as
+  written: a `|` anywhere in it, a regex or a string too, is refused
+  (`awk '!/tests\/|alembic/'`). A sed script is read as sed reads it
+  (`sed_script.py`): `e`, `r`/`R`, `w`/`W` and the `e`/`w` flags of `s` are
+  refused where sed reads a command or a flag, so `sed -n '/warning/p'` runs and
+  `sed '/x/r ../y'` is refused. A script the gate cannot follow (an unterminated
+  regex, an unknown command, a control character, a shell variable in it) is
+  refused.
+- **A pattern or a program is data** (`shell_data.py`). A grep, rg or `git grep`
+  pattern, a `git log --grep`/`-S`/`-G` value, a sed program and a jq filter
+  are text the tool reads, so the command-word rules (a migration tool,
+  `docker`, `psql`, …), the `..` check and the path check leave them out:
+  `jq '.. | objects'` and `grep -v /tests/` are not a traversal or a read of
+  `/tests`. An awk program is left out of the path check only. Only when the reading is
+  certain: an option the gate does not know, or a pattern option after the
+  first operand, leaves every word judged. Quoting a path hides nothing
+  (`cat "../x"` is refused), text a shell runs (`bash -c`, `eval`, `$(…)`)
+  is still a command, a wrapper hides no rule (`time alembic upgrade head` is
+  asked), and the never-allowed list still reads the raw line. A pattern or
+  program held in a variable (`jq "$F"`) is not data. `ssh` is not read: only
+  its argument's words meet the ask-list (`ssh h 'alembic upgrade head'` runs).
 - **What `find` would run is judged too.** `-exec`/`-execdir`/`-ok`/`-okdir`
   hand their command to the same rules (`-exec cat {} \;` runs, `-exec rm {} +`
   and `-exec sh -c …` are held), and `-delete`/`-fprint…` are held for you.
@@ -219,7 +254,8 @@ starts. Credential stores (`~/.aws`, `~/.ssh`, `~/.config/gh`,
 `~/.git-credentials`, …), the Claude login, the host's state dir and the
 platform checkout's `.env` family are unreadable; writes stay in the session's
 folders (`.git/hooks` and `.git/config` stay read-only); the network is the
-package registries plus `--session-allow-domain HOST`, and any other host is
+package registries plus `--session-allow-domain HOST` (and GitHub, for a
+[dev-box](#dev-box-mode-the-session-publishes-its-own-work) session), and any other host is
 refused, never asked. `failIfUnavailable` and `allowUnsandboxedCommands: false`
 leave no unsandboxed path, and `autoAllowBashIfSandboxed: false` keeps the gate
 deciding every call first. On Linux the host checks for `bwrap` and `socat` and,
@@ -230,6 +266,181 @@ sandboxed session is refused with the same reason and the way out.
 container, a dedicated user with no credentials).
 Codex sandboxes itself (`-s workspace-write`). GitHub Copilot sessions get
 Copilot's own sandbox, configured the same way ([below](#github-copilot-cli-prd-253)).
+
+## Dev-box mode: the session publishes its own work
+
+For a machine that is your development machine, where Auto helps build the code it
+runs on. With `--dev-box`, a Claude Code session commits, pushes its own ticket
+branch and opens a pull request itself, then reports it on its ticket. You review
+and merge. Off by default: without the flag nothing in this section applies.
+
+**GitHub is the wall.** Sessions push with a fine-grained token of your own GitHub
+account, so what stops a push to the default branch or a merge without review is the
+repository's ruleset, with its admin bypass set to "pull requests only": GitHub then
+refuses a direct push to the default branch even from an admin. The command gate is a
+second layer that refuses those on its own, and much else (below).
+
+**Only under the sandbox.** With `--no-session-sandbox` the mode never applies: no
+token, no GitHub network, the gate and the brief as without it. The host says so once
+at start, and announces `dev_box: false`.
+
+### Turning it on
+
+1. Set up the token and the ruleset ([below](#setting-up-github-once)).
+2. Put the token in the host's state directory, alone on one line, readable by you only.
+   Paste it at the prompt (then Enter, Ctrl-D) so it stays out of your shell history:
+   ```
+   ( umask 077 && cat > ~/.automatos/cli-host/agent-github-token )
+   chmod 600 ~/.automatos/cli-host/agent-github-token
+   ```
+3. Set your git identity if you have not: `git config --global user.name …` and
+   `git config --global user.email …`. The host reads it once at start and hands it to
+   each session (`GIT_AUTHOR_*`, `GIT_COMMITTER_*`): the sandbox cannot read
+   `~/.gitconfig`, and git refuses to commit without one. Unset: a warning, and none.
+4. Start the host with the flag: `make cli-host CLI_HOST_ARGS=--dev-box`, or
+   `make cli-host-install CLI_HOST_ARGS=--dev-box` for the login service (the
+   installed service keeps the flag). The host log says at start whether the token
+   loaded, and the host announces `dev_box: true` in its capabilities.
+
+The file is read for every session, so a new token is used by the next ticket with
+no restart. If it is missing, open to other users (any group or other permission
+bit), a link, owned by another user or not a single token, the host logs a warning
+and the session runs exactly as it would without the mode. On Windows the host
+cannot check the file's permissions and loads no token.
+
+Only Claude Code sessions get it. GitHub Copilot would take `GH_TOKEN` as its own
+login, and Codex's sandbox has no per-host network list; both run as before on a
+dev-box host. The Canvas terminal is your own shell and never carries the token.
+
+### What a dev-box session gets
+
+| Piece | In dev-box mode | Where |
+|---|---|---|
+| Environment | `GH_TOKEN` = the token, the only variable that holds it. Git is configured through `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n`, never a file in the session folder or the repository: `credential.https://github.com.helper` is reset, then set to a helper that answers `x-access-token` and `$GH_TOKEN` (read when git runs; the value is in no config entry); `push.default=simple`; `url.https://github.com/.insteadOf` for `git@github.com:` and `ssh://git@github.com/`, so an SSH remote pushes over https with the token. `GH_CONFIG_DIR` is a folder of the session's own, which does not exist (gh starts on its defaults; the sandbox keeps `~/.config/gh` unreadable) and is removed when the session ends. `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, `GIT_COMMITTER_EMAIL` = your global git identity. An inherited `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`, `GH_CONFIG_DIR`, `GIT_CONFIG_PARAMETERS`, git identity and every inherited `GIT_CONFIG_*` are dropped. | `env.github_env` |
+| Sandbox network | adds `github.com` (git), `api.github.com` (gh), `codeload.github.com` and `raw.githubusercontent.com` (archives and raw files package installs fetch). Not `uploads.github.com` or `objects.githubusercontent.com`: release uploads and downloads, which no allowed command makes. Every other restriction stays: the credential stores, the Claude login, the platform's secrets and the host's state directory (the token file is in it) stay unreadable. | `sandbox.GITHUB_DOMAINS` |
+| Command gate | the table below. What it allows joins the session's Bash allowlist, so it runs without a card in every mode but Plan, where a push is a card like any write. | `dev_box_policy.py`, `dev_box_git.py`, `dev_box_config.py`, `dev_box_gh.py` |
+| File tools | Write and Edit inside any `.git` folder (its config, its hooks, a worktree's `.git` file), as written or through a link: refused. A path the host cannot resolve is logged and refused. | `dev_box_policy.write_refusals` |
+| System prompt | "never push" is replaced by a short section: work on your own ticket branch, `git commit -s` with `type(scope): description`, `git push -u origin <branch>`, a ready pull request with `gh pr create --base <default> --head <branch>` and a body that says what changed, why, how it was verified and what was not, never merge or push the default branch or force-push a shared one, then `update_ticket` with `pull_request_url`, `branch`, `commits`, `tested` and a `note`, never a status: the ticket goes to you for review. The same text for every ticket on the host, so the prompt cache holds. | `session_prompt.DEV_BOX_SECTION` |
+
+The repository's own default branch is read from the checkout when the session
+starts (`git symbolic-ref refs/remotes/origin/HEAD`, no network) and protected beside
+the named list; origin's owner (`git config remote.origin.url`) is the only owner a
+new remote, a `gh -R` write or a `gh api repos/<owner>/…` write may name.
+
+### The command gate in dev-box mode
+
+| Command | Dev-box mode | Why |
+|---|---|---|
+| `git push -u origin <branch>`, `--set-upstream`, `-f`, `--force`, `--force-with-lease`, `+<branch>`, `HEAD:<branch>`, `git push origin --delete <branch>`, `:<branch>` | allowed when every destination is an unprotected branch | publishing the ticket's branch is the work |
+| a push to `main`, `master`, `mainline`, `develop`, `dev`, `trunk`, `production`, `prod`, `live`, `stable`, `next`, `staging`, `uat`, `qa`, `gh-pages`, `release*`, `hotfix*`, `main.*` or origin's own default branch, in any case and any spelling (`HEAD:main`, `:main`, `+x:refs/heads/main`, `x:heads/main`), forced or deleted | refused | the long-lived branches are the owner's |
+| a tag: `git push origin <name>`, `tag <name>`, `refs/tags/<name>` | allowed unless it matches `v[0-9]*` or `release*` | release tags are the owner's |
+| `git push` with no remote or no branch named, `HEAD` or `@` with no destination, a variable, `$(…)`, a brace expansion (`{a,main}`), a glob or `*` in a refspec, an empty destination (`:`), a URL or a path as the remote | refused | the gate cannot tell where it lands: spell it out |
+| `git push --mirror`, `--all`, `--branches`, `--tags`, `--follow-tags`, `--prune`, `--repo`, `--receive-pack`, `--exec`, `--recurse-submodules=on-demand` or `only`, an option the gate does not know (git takes abbreviations) | refused | each pushes more than the refs it names, or runs a program |
+| `git fetch`, `pull`, `rebase`, `merge`, `cherry-pick`, `reset`, `revert`, `branch`, `tag`, `stash`, `worktree`, `checkout`, `switch`, `mv`, `rm`, `ls-remote` | allowed | local work, and reads |
+| `git rebase -x`/`--exec` (any abbreviation), `git submodule foreach`, `git bisect run`, `git difftool`, `git mergetool`, `--upload-pack` (fetch, pull, ls-remote, clone), `git clone -u`, `--template` (clone, init), `git archive --remote`/`--exec` | refused | each runs a program the gate never sees |
+| `git config` reads of any key | allowed | |
+| `git config`, `git -c`, `--config-env`, `git clone -c`: setting `user.*`, `commit.*` (not `commit.template`, `commit.gpgSign` or a hook key), `core.autocrlf`, `core.filemode`, `core.ignorecase`, `core.longpaths`, `pull.*`, `fetch.*`, `rebase.autosquash`, `init.defaultBranch`, `merge.ff`, `push.autoSetupRemote`, `branch.autosetuprebase`, `diff.renames`, `color.*`, `column.*` | allowed, unless the key ends `.cmd`, `.command`, `.program`, `.driver`, `.clean`, `.smudge` or `.textconv` | |
+| setting any other key (`credential.*`, `url.*`, `remote.*`, `core.pager`, `core.editor`, `core.sshCommand`, `core.hooksPath`, `core.fsmonitor`, `sequence.editor`, `gpg.*`, `diff.external`, `filter.*`, `alias.*`, `include*`, `init.templateDir`, `uploadpack.*`, `trailer.*`, …); `git config --edit`; renaming or removing a section; a `git config` option the gate does not know | refused | a key can redirect a push, swap the credential, or run a program |
+| `git remote add` or `set-url` to a github.com repository of origin's owner | allowed | a fork or a second remote of the same owner |
+| `git remote add` or `set-url` anywhere else; `set-url --push`, `--add`, `--delete`; `add --mirror`; `rename`, `remove`, `set-head`, `set-branches` | refused | pushes go where origin's owner is, and only there |
+| `git credential …`, `git --exec-path=…`, a git subcommand the gate does not know (an alias, an extension) | refused | it prints the token, swaps git's own programs, or runs what the gate cannot read |
+| a push, a remote change or a gh write run by another command (`xargs`, `timeout`, `env`, `find -exec`, `parallel`, `eval`) | refused | that command can hand it arguments the gate never sees |
+| any command that names a path in a `.git` folder (as a path part, in any case, through `-C`, `--git-dir`, `--work-tree`, an option's value such as `of=`, `--output=` or `-o`, or a link on disk), and any redirection there: `cat`, `ls`, `cp`, `mv`, `tee`, `sort -o`, `uniq`, `tar -C`, `unzip -d`, `curl -o`, `wget -O`, `dd of=`, `ln -s`, `sed -i`, `git config --file .git/config`, `git -C .git …`, `cd .git`; the Write and Edit tools | refused | its config and hooks run code and redirect pushes |
+| git's own reads naming it (`git status`, `log`, `diff`, `show`, `blame`, `rev-parse`, `ls-files`, `ls-tree`, `cat-file`, `branch --list`), unless they write a file there (`--output`); a name filter (`find -name .git -prune`, `grep --exclude-dir=.git`, `rg -g '!.git'`); a pattern or a commit message | allowed | they read, or the word is not a path |
+| `gh pr create`, `edit`, `ready`, `comment`, `review` (comment or request changes), `view`, `list`, `diff`, `checks`, `close`, `reopen`, `status` | allowed | |
+| `gh issue create`, `edit`, `comment`, `close`, `reopen`, `view`, `list`, `status` | allowed | |
+| `gh run view`, `list`, `watch`, `rerun`; `gh workflow view`, `list`; `gh repo view`, `clone` | allowed | |
+| `gh pr merge` (`--auto` included); `gh pr review --approve`, `-a` alone, in any short-flag cluster (`-ca`) or as `-a=…`; a `gh pr review` cluster the gate cannot read whole (`-bok`, `-cb ok`: give `-b` and `-F` on their own) | refused | the owner approves and merges |
+| any gh write with `-R`/`--repo` naming another owner's repository; `GH_REPO=…`; a `gh pr`/`gh issue` write (comment, edit, close, reopen, review, ready) whose target is a URL of another owner's pull request or issue, or a URL off github.com (a number or a branch name is this repository's; a body or a closing comment is text, not a target) | refused | a session writes only to origin's owner; reads of other repositories run |
+| `gh repo delete`, `edit`, `rename`, `archive`, `create`, `fork`, `transfer` | refused | the repository is the owner's |
+| `gh secret`, `variable`, `ssh-key`, `gpg-key`, `auth`, `codespace`, `extension`, `alias`, `config`, reads included | refused | secrets, keys, the login, code the gate cannot read |
+| any other gh subcommand | as outside the mode: a read runs (a card in Edit automatically), a write is refused | |
+| `gh api` GET or HEAD | allowed | |
+| `gh api` POST or PATCH to `repos/<origin's owner>/<r>/issues…` and `…/pulls…` (a review: comment or request changes); POST `…/git/refs` with `-f ref=refs/heads/<unprotected>`; PATCH `…/git/refs/heads/<unprotected>` | allowed | what a ticket's pull request needs |
+| `gh api` DELETE anywhere; PUT; `graphql`; a path with `merge`, `merges`, `collaborators`, `invitations`, `hooks`, `keys`, `secrets`, `variables`, `protection`, `rulesets`, `environments`; a commit status (`…/statuses/<sha>`: one can pass a required check, so only CI reports them); a review with `event=APPROVE` (or an event it cannot read, `--input`); a write under another owner's `repos/<owner>/…`; any other write (`check-runs` included); a full URL, an encoded path or a variable in the path; `-X` twice; `git/refs` with `--input`; an option the gate does not know | refused | merging, approving, access, settings, and what the gate cannot read |
+| a file gh sends (`gh api -F/-f/--field/--raw-field key=@file`, `--input file`, `gh pr`/`gh issue --body-file`) outside the session's folders, or anywhere in the host's state directory | refused | gh would upload it |
+| `printenv`; `env` with no command; `set` with no arguments; `export`, `declare`, `typeset` with no names or with `-p`; `ps e`, `ps -E`; jq's `env` and `$ENV`; awk's `ENVIRON`; `/proc/*/environ` | refused | they print the environment, the token with it |
+| `GH_TOKEN` named anywhere on the line (a quoted here-document's body is data and may name it; to search code for the name, use the Grep tool); `${!name}` | refused | git and gh read the token themselves |
+| assigning `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`, `GH_HOST`, `GH_CONFIG_DIR`, `GH_REPO`, `GIT_CONFIG*`, `GIT_ASKPASS`, `SSH_ASKPASS`, `GIT_SSH`, `GIT_SSH_COMMAND`, `GIT_EXEC_PATH`, `GIT_DIR`, `GIT_WORK_TREE`, `GIT_NAMESPACE`, `GIT_EXTERNAL_DIFF`, `GIT_PAGER`, `GIT_EDITOR`, `GIT_SEQUENCE_EDITOR`, `GIT_PROXY_COMMAND`, `GIT_ALLOW_PROTOCOL`, `GIT_TRACE*`, `GIT_CURL_VERBOSE`, `HOME` or `XDG_CONFIG_HOME` | refused | they swap the credential, or where git and gh find their config, programs or repository |
+
+Every refusal reads `never allowed in a session: '<command>' — <rule> (dev-box mode)`,
+which the backend files as a refusal by the gate, never as a held command. Everything
+else the gate does is unchanged: paths, `..`, awk and sed programs, `rg --pre`, the
+ask-list. With the mode off the gate is exactly what it was. The pull request body
+goes in a quoted here-document (`--body-file - <<'EOF'`): an inline `--body` that
+mentions a `.env` name is held, like any command that touches one. Without
+`GIT_EDITOR` or `core.editor`, finish a rebase or a merge with `--no-edit`
+(`git commit --no-edit`, `git merge --no-edit`) rather than an editor.
+
+### Residual risk
+
+What dev-box mode does not stop, and what it assumes:
+- **GitHub's rules are the wall for the default branch.** The gate refuses the pushes
+  it can read; a ruleset with admin bypass "pull requests only" is what refuses the
+  rest, from any program.
+- **The gate reads command lines, not programs.** `python x.py`, `node`, `make`,
+  `npm run`, `pytest` (a `conftest.py`), a shell script, and `bash x.sh` in Auto mode run
+  code the session may have written, with `GH_TOKEN` in its environment and the GitHub
+  hosts open. Such code can do anything the token allows: push any unprotected branch,
+  comment, label, open and close pull requests and issues, re-run workflows.
+- **Any pushed branch runs CI**, with the secrets the repository's workflows hand to
+  branch builds.
+- **The session can comment, label and re-run workflows** on the owner's repositories,
+  in its own name, which is the owner's.
+- **Dev-box assumes you review every pull request,** workflow changes included, before
+  you merge it.
+
+What the token must be, so the rest holds:
+- a fine-grained personal access token of your own account;
+- repository access: only the named repositories Auto works on;
+- permissions: Contents, Pull requests and Issues, read and write (Metadata read comes
+  with them); not Workflows, Administration or Secrets, so GitHub refuses a push that
+  changes `.github/workflows` and any change to settings, access or secrets;
+- an expiry of 90 days or less, and the file replaced when you rotate it.
+
+### What redaction covers
+
+The host replaces the token's exact value with `[GH_TOKEN redacted]` in:
+- the session's `terminal.log` and the output tail a result quotes, a value split
+  between two reads of the terminal included;
+- every event it sends the ticket: tool subjects and reasons, notifications, held
+  commands, the plan;
+- the result: the final text, the error, each refusal's command;
+- `plan.md` in the deliverables folder.
+
+It cannot reach:
+- Claude Code's own transcript (`~/.claude/projects/…/<session>.jsonl`). Claude Code
+  writes it; the host only reads it (the usage, and the last message, redacted on its
+  way out) and sends its path;
+- what the model sends to Anthropic, and what Claude Code shows in its own window;
+- a file the session writes, a deliverable it leaves, a commit or a pull request it
+  pushes (GitHub's secret scanning is the net there);
+- the token in another form: part of it, encoded, or broken up on the screen by a
+  line wrap or a colour code.
+
+### Setting up GitHub (once)
+
+1. On your own GitHub account, create a fine-grained personal access token as the
+   requirements above say: resource owner the account or organisation that owns the
+   repositories (an organisation may have to allow fine-grained tokens and approve this
+   one), only those repositories, Contents, Pull requests and Issues read and write,
+   nothing else, 90 days.
+2. On each of those repositories, add a ruleset for the default branch (and for
+   `release*` and `hotfix*` branches, and for release tags `v*`): require a pull request
+   with an approval, block force pushes and deletion, and set the bypass for
+   repository admins to **"pull requests only"** (never "always"), so GitHub refuses a
+   direct push to the default branch even from your own admin account. Leave no one else
+   on the bypass list.
+3. With only those permissions `gh run …` answers 403 (it needs Actions read). Grant
+   Actions read only if you want sessions to use it; never Actions write, and never
+   Commit statuses write (the gate refuses commit statuses anyway).
+4. The session's commits carry your git identity (step 3 of *Turning it on*), signed off
+   with `git commit -s`.
+
+Not verified on a live machine yet: Claude Code's sandbox keeps `.git/config`
+read-only, so `git push -u` may push the branch but fail to record its upstream
+(the push itself lands; `gh pr create --head <branch>` does not need the upstream).
+`gh run view --log` fetches from Actions log hosts that are not on the list above.
 
 ## GitHub Copilot CLI (PRD-253)
 
@@ -372,7 +583,9 @@ no default root copies nothing.
 - the unmodified CLI from your login-shell `PATH` (or `--cli-binary claude=/path`);
   nothing bundled or patched;
 - your own login (`claude login`, `codex login`, `copilot login` or `gh`); no
-  credential is ever read, copied or set; `CLAUDE_CONFIG_DIR` is never overridden;
+  credential is ever read, copied or set — with one exception you choose: the
+  GitHub token of [dev-box mode](#dev-box-mode-the-session-publishes-its-own-work);
+  `CLAUDE_CONFIG_DIR` is never overridden;
 - no identity games: each preset names the keys and session markers stripped from
   its session environment (`ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`,
   `CLAUDE_CODE_ENTRYPOINT`, every `CLAUDE*` marker for Claude Code); the Canvas
@@ -389,7 +602,8 @@ no default root copies nothing.
 
 | Path | Purpose |
 |---|---|
-| `~/.automatos/cli-host/host.json` (0600) | the host token minted at pairing — the only secret |
+| `~/.automatos/cli-host/host.json` (0600) | the host token minted at pairing — the only secret the host makes |
+| `~/.automatos/cli-host/agent-github-token` (0600) | dev-box mode only: the GitHub token sessions push with, which you put there |
 | `~/.automatos/cli-host/allowlist.json` | directories sessions may work in |
 | `~/.automatos/cli-host/sessions.json` | process table (killed on the next start if left behind) |
 | `~/.automatos/cli-host/hooks.sock` | the loopback socket hooks talk to (on Windows: a named pipe with a random name, both ends holding a per-start key) |

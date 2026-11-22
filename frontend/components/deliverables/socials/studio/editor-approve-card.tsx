@@ -2,10 +2,11 @@
 
 /**
  * PRD-251D (E3, US-D101) — approve where you are: the editor shows the Queue's own approve
- * controls (socials-post-review.tsx: "Approve · publishes HH:MM", Approve & post now, Request
- * changes, which sends the post back to Auto as the Queue does, Reject, and the unsourced-claims
- * confirmation) for a post that waits for approval, to a person who may approve (the Queue's
- * role rule, `postActions(...).review`). Approval binds to the stored content (D6), so while the
+ * controls (socials-post-review.tsx: the one Approve, labelled for what it does, "Approve · posts
+ * HH:MM" or "Approve & post now to X", Request changes, which sends the post back to Auto as the
+ * Queue does, Reject, and the unsourced-claims confirmation) for a post that waits for approval,
+ * to a person who may approve (the Queue's role rule, `postActions(...).review`). Approval binds
+ * to the stored content (D6), so while the
  * editor holds unsaved edits Approve is off and the card says to save first. A post whose file was
  * made before its last change to what a render reads (its `file_current`, US-D108) shows the
  * Queue's own sentence in place of a working Approve, with Render again (socials-post-review.tsx).
@@ -15,7 +16,6 @@ import type { SocialPost } from '@/lib/api-client'
 import { useSendBackToAuto } from '@/hooks/use-socials-queue'
 import { SocialsPostReview, type SendBack } from '../socials-post-review'
 import { postActions } from '../socials-status'
-import { approveLabel } from './queue-model'
 import { SEND_BACK_HINT } from './queue-pane'
 import { EditorCard, Hint } from './editor-ui'
 
@@ -50,7 +50,7 @@ export function EditorApproveCard({ post, role, dirty }: EditorApproveCardProps)
   return (
     <EditorCard label={APPROVE_CARD}>
       {dirty && <Hint>{SAVE_BEFORE_APPROVING}</Hint>}
-      <SocialsPostReview post={post} dirty={dirty} approveLabel={approveLabel(post)} sendBack={sendBack} />
+      <SocialsPostReview post={post} dirty={dirty} sendBack={sendBack} />
     </EditorCard>
   )
 }

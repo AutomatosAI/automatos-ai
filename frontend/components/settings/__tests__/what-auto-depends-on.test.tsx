@@ -57,7 +57,7 @@ const MODEL: ReadinessItem = {
   label: "Auto's model",
   detail: "Auto's model has no key to run with.",
   state: 'needs_setup',
-  fix: { label: 'Add a key', href: '/settings?tab=api-keys' },
+  fix: { label: 'Add a key', href: '/settings?tab=model-keys' },
   needed_by: ['brief', 'check_in'],
 }
 const SEARCH: ReadinessItem = { id: 'web_search', label: 'Web search', detail: "Didn't answer in time.", state: 'not_checked', needed_by: ['voice'] }
@@ -105,7 +105,7 @@ describe("What Auto depends on: the server's items", () => {
     expect(screen.getByRole('listitem', { name: 'Automatos server: ready.' })).toBeInTheDocument()
     expect(screen.getByRole('listitem', { name: "Auto's model: needs setup. Add a key." })).toBeInTheDocument()
     expect(screen.getByRole('listitem', { name: 'Web search: not checked.' })).toHaveAccessibleDescription("Didn't answer in time.")
-    expect(screen.getByRole('link', { name: 'Add a key' })).toHaveAttribute('href', '/settings?tab=api-keys')
+    expect(screen.getByRole('link', { name: 'Add a key' })).toHaveAttribute('href', '/settings?tab=model-keys')
   })
 })
 

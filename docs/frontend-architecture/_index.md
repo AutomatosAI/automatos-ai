@@ -134,7 +134,7 @@ Sources: [frontend/components/providers.tsx:127-140](), [frontend/hooks/use-glob
 
 The supplied frontend files show theme management as one settings area: `InstalledList` loads installed themes and the active choice, then renders `InstalledRow` entries [frontend/components/settings/themes/installed-list.tsx:35-67](). Rows display theme status and expose management actions such as setting a default, reviewing an update, rolling back, and uninstalling [frontend/components/settings/themes/installed-row.tsx:46-74]()[frontend/components/settings/themes/installed-row.tsx:99-133]().
 
-For the `SettingsPanel` and its system settings, LLM models, API keys, webhooks, channels, notifications, widget SDK, session mode, and Composio deny-list tabs, see [Settings Panels](#19.6).
+For the `SettingsPanel` and its system settings, LLM models, API keys, model keys, webhooks, channels, notifications, widget SDK, session mode, and Composio deny-list tabs, see [Settings Panels](#19.6).
 
 Sources: [frontend/components/settings/themes/installed-list.tsx:35-67](), [frontend/components/settings/themes/installed-row.tsx:46-74](), [frontend/components/settings/themes/installed-row.tsx:99-133]()
 

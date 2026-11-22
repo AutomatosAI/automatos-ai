@@ -5,7 +5,8 @@ migrates, seeds and (local edition) creates the workspace and operator, then
 exits. A failed seed fails the Job, and a failed Job fails the install/upgrade.
 
 As a hook it runs before the release's ordinary resources exist, so it takes its
-settings inline (automatos.apiEnv) and does not use the chart's ServiceAccount.
+settings inline (automatos.apiEnv), and its own account is a hook too, of a lower
+weight, so it exists before the Job (serviceaccount.yaml).
 */ -}}
 apiVersion: batch/v1
 kind: Job
@@ -28,10 +29,8 @@ spec:
         {{- include "automatos.selectorLabels" (dict "ctx" $ "component" "migrate") | nindent 8 }}
     spec:
       restartPolicy: Never
+      serviceAccountName: {{ include "automatos.serviceAccountName" (dict "ctx" $ "component" "migrate") }}
       automountServiceAccountToken: false
-      {{- if and (not .Values.serviceAccount.create) .Values.serviceAccount.name }}
-      serviceAccountName: {{ .Values.serviceAccount.name }}
-      {{- end }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -47,5 +46,7 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           resources:
             {{- toYaml .Values.migrations.resources | nindent 12 }}

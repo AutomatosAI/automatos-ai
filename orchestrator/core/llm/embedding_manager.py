@@ -6,10 +6,12 @@ Centralized manager for all embedding operations.
 Reads configuration from General Settings and provides unified interface.
 """
 
+import functools
 import inspect
 import logging
 import threading
-from typing import Optional, List
+from dataclasses import dataclass
+from typing import Optional, List, Tuple
 
 from core.loop_scoped_clients import adopt
 from .embed_once import embed_once
@@ -17,8 +19,10 @@ from .clients.base import (
     BaseEmbeddingProvider,
     EmbeddingConfig,
     EmbeddingProvider,
-    DeterministicEmbeddingProvider
+    DeterministicEmbeddingProvider,
+    UnusableEmbeddingProvider,
 )
+from .clients.bedrock_embedding import BedrockEmbeddingProvider, DEFAULT_BEDROCK_EMBEDDING_MODEL
 from .clients.openai_embedding import OpenAIEmbeddingProvider
 from .clients.huggingface_embedding import HuggingFaceLocalEmbeddingProvider
 from .clients.openrouter_embedding import OpenRouterEmbeddingProvider
@@ -29,6 +33,34 @@ logger = logging.getLogger(__name__)
 _embedding_lock = threading.Lock()
 _embedding_manager: Optional["EmbeddingManager"] = None
 _init_logged = False
+
+# The seeded size; a stored "2048" means "not chosen here": VECTOR_STORE_DIMENSIONS decides.
+DEFAULT_DIMENSION = "2048"
+DISABLED = EmbeddingProvider.DISABLED.value
+BEDROCK = EmbeddingProvider.BEDROCK.value
+# Providers the manager looks up no API key for: the local model, and Bedrock, whose
+# provider takes the Bedrock chat client's credentials itself (PRD-278 US-501).
+NO_KEY_PROVIDERS = frozenset({EmbeddingProvider.HUGGINGFACE_LOCAL.value, BEDROCK})
+# Where the size the provider cuts to came from, as the start-up check names it (PRD-278 US-502).
+DIMENSION_FROM_CONFIG = "VECTOR_STORE_DIMENSIONS"
+DIMENSION_FROM_SETTING = "the embeddings 'dimensions' system setting (Settings → System Settings → Embeddings)"
+
+
+@dataclass(frozen=True)
+class EmbeddingChoice:
+    """What the settings choose: the provider (None when none is set), its model, the size its
+    vectors are cut to and which setting gave that size, and the local model cache."""
+
+    provider: Optional[str]
+    model: Optional[str]
+    dimension: int
+    dimension_setting: str
+    cache_dir: str
+
+    @property
+    def is_set(self) -> bool:
+        """A real provider is set (not unset, not ``disabled``)."""
+        return bool(self.provider) and self.provider != DISABLED
 
 
 def get_system_setting(key: str, default_value: Optional[str] = None) -> Optional[str]:
@@ -52,6 +84,103 @@ def get_credential_field(provider_type: str, field: str = "api_key") -> Optional
     except Exception as e:
         logger.debug(f"Failed to get credential for {provider_type}: {e}")
         return None
+
+
+def _names_bedrock(value: Optional[str]) -> bool:
+    return (value or "").strip().lower() == BEDROCK
+
+
+def _provider_and_model() -> Tuple[Optional[str], Optional[str]]:
+    """The provider and model the settings choose.
+
+    The ``embeddings`` system settings (PRD-197 S2: the canonical short keys), else
+    ``EMBEDDING_PROVIDER`` / ``EMBEDDING_MODEL``. PRD-278 US-501: ``EMBEDDING_PROVIDER=bedrock``
+    is read first, with ``EMBEDDING_MODEL`` (Titan Text Embeddings V2 when unset): a seeded
+    install's ``embeddings.provider`` row says ``openrouter`` and would otherwise hide it.
+    """
+    from config import config as _config
+
+    if _names_bedrock(_config.EMBEDDING_PROVIDER):
+        return BEDROCK, _config.EMBEDDING_MODEL or DEFAULT_BEDROCK_EMBEDDING_MODEL
+    provider = get_system_setting("provider") or _config.EMBEDDING_PROVIDER
+    model = get_system_setting("model") or _config.EMBEDDING_MODEL
+    return provider, model
+
+
+def configured_provider() -> Optional[str]:
+    """The embedding provider the settings choose, read as the manager reads it (None: unset)."""
+    return _provider_and_model()[0]
+
+
+@functools.lru_cache(maxsize=None)
+def _unreadable_size(stored: str) -> None:
+    """Log, once per process and value, a stored size that is not a number."""
+    logger.warning("The embeddings 'dimensions' system setting is %r, not a number: VECTOR_STORE_DIMENSIONS "
+                   "is used instead", stored[:40])
+
+
+def _cut_size(provider: Optional[str]) -> Tuple[int, str]:
+    """The size the provider's vectors are cut to, and the setting that gave it.
+
+    ``VECTOR_STORE_DIMENSIONS``, unless the ``dimensions`` system setting names another size
+    than its seeded 2048. For Bedrock, always ``VECTOR_STORE_DIMENSIONS``: its every setting
+    comes from the environment, so an operator can fix a size without the API (PRD-278 Wave 5).
+    A stored size that is not a number is logged once and ``VECTOR_STORE_DIMENSIONS`` used.
+    """
+    from config import config as _config
+
+    from_config = int(_config.VECTOR_STORE_DIMENSIONS or DEFAULT_DIMENSION), DIMENSION_FROM_CONFIG
+    if provider == BEDROCK:
+        return from_config
+    stored = str(get_system_setting("dimensions") or DEFAULT_DIMENSION).strip()
+    if stored == DEFAULT_DIMENSION:
+        return from_config
+    try:
+        return int(stored), DIMENSION_FROM_SETTING
+    except ValueError:
+        _unreadable_size(stored)
+        return from_config
+
+
+def read_embedding_choice() -> EmbeddingChoice:
+    """What the settings choose, read as the manager loads its provider: a settings read, so
+    call it off the event loop."""
+    provider, model = _provider_and_model()
+    dimension, source = _cut_size(provider)
+    cache_dir = get_system_setting("cache_dir") or "./model_cache"
+    return EmbeddingChoice(provider=provider, model=model, dimension=dimension, dimension_setting=source,
+                           cache_dir=cache_dir)
+
+
+def _api_key_for(provider_type: str) -> Optional[str]:
+    """The API key for a provider that needs one: the operator workspace's key first (the
+    credential-store copy can drift: a dead openrouter_api row served for months, 2026-07-30),
+    then the credential store, then the env key."""
+    from config import config as _config
+    from core.llm.workspace_keys import get_platform_workspace_key
+
+    api_key = get_platform_workspace_key(provider_type) or get_credential_field(provider_type)
+    if api_key:
+        return api_key
+    env_map = {
+        "openai": "OPENAI_API_KEY",
+        "google": "GOOGLE_API_KEY",
+        "cohere": "COHERE_API_KEY",
+        "huggingface_api": "HUGGINGFACE_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY"
+    }
+    env_var = env_map.get(provider_type)
+    return getattr(_config, env_var, None) if env_var else None
+
+
+def _provider_classes() -> dict:
+    """The provider each built client serves, read when a provider is created."""
+    return {
+        EmbeddingProvider.OPENAI: OpenAIEmbeddingProvider,
+        EmbeddingProvider.OPENROUTER: OpenRouterEmbeddingProvider,
+        EmbeddingProvider.HUGGINGFACE_LOCAL: HuggingFaceLocalEmbeddingProvider,
+        EmbeddingProvider.BEDROCK: BedrockEmbeddingProvider,
+    }
 
 
 class EmbeddingManager:
@@ -82,103 +211,54 @@ class EmbeddingManager:
             await close()
     
     def _load_provider(self):
-        """Load embedding provider from system settings"""
+        """Load the embedding provider the settings choose (``read_embedding_choice``).
+
+        No provider set (unset or ``disabled``): the deterministic stand-in, which refuses to
+        embed. A provider set but unusable (no key, not built, or its set-up failed): a provider
+        that names it and raises on every call (PRD-278 US-503), never the stand-in.
+        """
         try:
-            # PRD-197 S2: read the CANONICAL (embeddings, *) keys. PRD-136
-            # renamed the rows to the short names (provider/model/cache_dir/
-            # dimensions); these reads kept the old long names, so every
-            # lookup missed and the admin embeddings card was a placebo —
-            # it wrote keys nothing ever read back.
-            provider_type = get_system_setting("provider")
-            model = get_system_setting("model")
-            cache_dir = get_system_setting("cache_dir") or "./model_cache"
-            dimension_str = get_system_setting("dimensions") or "2048"
+            choice = read_embedding_choice()
+        except Exception:
+            logger.exception("Could not read the embedding settings; no provider is used")
+            self.provider = DeterministicEmbeddingProvider(dimension=int(DEFAULT_DIMENSION))
+            return
+        logger.debug("Loaded embedding settings: provider=%s, model=%s, dim=%s",
+                     choice.provider, choice.model, choice.dimension)
+        if not choice.is_set:
+            logger.debug("Embedding provider disabled - using deterministic fallback")
+            self.provider = DeterministicEmbeddingProvider(dimension=choice.dimension)
+            return
+        self.provider = self._set_provider(choice)
 
-            logger.debug(f"Loaded embedding settings: provider={provider_type}, model={model}, dim={dimension_str}")
-
-            # Fallback to config if DB settings failed
-            from config import config as _config
-            if not provider_type:
-                provider_type = _config.EMBEDDING_PROVIDER
-
-            if not model:
-                model = _config.EMBEDDING_MODEL
-
-            if dimension_str == "2048": # If default was used
-                dimension_str = str(_config.VECTOR_STORE_DIMENSIONS or 2048)
-                
-            dimension = int(dimension_str)
-            
-            if not provider_type or provider_type == "disabled":
-                logger.debug("Embedding provider disabled - using deterministic fallback")
-                self.provider = DeterministicEmbeddingProvider(dimension=dimension)
-                return
-            
-            # Get API key for provider (if needed).
-            # Operator workspace key first — the credential-store copy can
-            # drift (dead openrouter_api row served for months, 2026-07-30).
+    def _set_provider(self, choice: EmbeddingChoice) -> BaseEmbeddingProvider:
+        """The provider ``choice`` sets, or ``UnusableEmbeddingProvider`` saying why it cannot be used."""
+        try:
             api_key = None
-            if provider_type != "huggingface_local":
-                from core.llm.workspace_keys import get_platform_workspace_key
-                api_key = get_platform_workspace_key(provider_type)
+            if choice.provider not in NO_KEY_PROVIDERS:
+                api_key = _api_key_for(choice.provider)
                 if not api_key:
-                    api_key = get_credential_field(provider_type)
-                
-                # Fallback to environment variables
-                if not api_key:
-                    env_map = {
-                        "openai": "OPENAI_API_KEY",
-                        "google": "GOOGLE_API_KEY",
-                        "cohere": "COHERE_API_KEY",
-                        "huggingface_api": "HUGGINGFACE_API_KEY",
-                        "openrouter": "OPENROUTER_API_KEY"
-                    }
-                    env_var = env_map.get(provider_type)
-                    if env_var:
-                        api_key = getattr(_config, env_var, None)
-                
-                if not api_key:
-                    logger.warning(
-                        f"No API key found for {provider_type} embedding provider. "
-                        "Using deterministic fallback."
-                    )
-                    self.provider = DeterministicEmbeddingProvider(dimension=dimension)
-                    return
-            
-            # Create config
-            config = EmbeddingConfig(
-                provider=EmbeddingProvider(provider_type),
-                model=model,
-                dimension=dimension,
-                api_key=api_key,
-                cache_dir=cache_dir
-            )
-            
-            # Create provider
-            self.provider = self._create_provider(config)
-            logger.debug(
-                f"Initialized {provider_type} embedding provider "
-                f"(model: {model}, dimension: {dimension})"
-            )
-            
-        except Exception as e:
-            logger.error(f"Failed to load embedding provider: {e}. Using fallback.")
-            dimension_str = get_system_setting("dimensions") or "2048"
-            self.provider = DeterministicEmbeddingProvider(dimension=int(dimension_str))
-    
+                    return UnusableEmbeddingProvider(choice.provider, "no API key was found for it", choice.dimension)
+            provider = self._create_provider(EmbeddingConfig(
+                provider=EmbeddingProvider(choice.provider), model=choice.model, dimension=choice.dimension,
+                api_key=api_key, cache_dir=choice.cache_dir))
+        except Exception as exc:
+            logger.exception("The embedding provider '%s' could not be set up", choice.provider)
+            return UnusableEmbeddingProvider(choice.provider, f"it could not be set up ({type(exc).__name__})",
+                                             choice.dimension)
+        logger.debug("Initialized %s embedding provider (model: %s, dimension: %s)",
+                     choice.provider, choice.model, choice.dimension)
+        return provider
+
     def _create_provider(self, config: EmbeddingConfig) -> BaseEmbeddingProvider:
         """Create embedding provider from config"""
-        if config.provider == EmbeddingProvider.OPENAI:
-            return OpenAIEmbeddingProvider(config)
-        elif config.provider == EmbeddingProvider.OPENROUTER:
-            return OpenRouterEmbeddingProvider(config)
-        elif config.provider == EmbeddingProvider.HUGGINGFACE_LOCAL:
-            return HuggingFaceLocalEmbeddingProvider(config)
-        elif config.provider == EmbeddingProvider.DISABLED:
+        if config.provider == EmbeddingProvider.DISABLED:
             return DeterministicEmbeddingProvider(config.dimension)
-        else:
-            logger.warning(f"Unsupported embedding provider: {config.provider}. Using fallback.")
-            return DeterministicEmbeddingProvider(config.dimension)
+        provider_class = _provider_classes().get(config.provider)
+        if provider_class is None:
+            return UnusableEmbeddingProvider(config.provider.value, "no embedding client is built for it",
+                                             config.dimension)
+        return provider_class(config)
     
     def _ensure_provider(self):
         """Lazy-load provider on first use (when database is ready)"""
@@ -204,6 +284,15 @@ class EmbeddingManager:
         # Inside a chat turn's scope (TURN_EMBED_ONCE) a repeat of the same text is answered
         # from the turn's memo; with no scope open this is the provider's call, as before.
         return await embed_once(self._model_key(), text, self.provider.generate_embedding)
+
+    def space_key(self) -> str:
+        """What the vectors this manager makes are, for a cache to key them by: the provider, its
+        model and the size they come back at (as the action index keys its cache). Loads the
+        provider first: a settings read. A vector cached under another key never answers for
+        this one (PRD-278 Wave 5: a switch of model must not serve the old model's vectors)."""
+        self._ensure_provider()
+        info = self.get_provider_info()
+        return f"{info['provider']}:{info['model']}:{info['dimension']}"
 
     def _model_key(self) -> str:
         """What tells one embedding space from another: the provider's class, model and dimension."""

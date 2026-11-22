@@ -333,9 +333,11 @@ def test_a_ticket_for_another_workspaces_agent_is_refused(shop):
 
 
 def test_a_workspace_with_no_owner_gets_no_suggestion(shop, monkeypatch):
+    from core.editions import capabilities_for
     from core.workspaces import owner
 
-    monkeypatch.setattr(owner, "config", NS(IS_LOCAL_EDITION=False))  # no local operator to fall back to
+    no_operator = capabilities_for("saas")  # no local operator to fall back to
+    monkeypatch.setattr(owner, "editions", NS(current=lambda: no_operator))
     shop.ws = _workspace(shop.db, None)
     shop.db.commit()
 

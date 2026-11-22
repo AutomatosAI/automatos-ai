@@ -10,7 +10,8 @@ under the template's id like a preview file, and its KEY is written to
 
 Rendered at most once per template: a template with a key is skipped, and a save
 that changes the composition clears the key (``template_service``) so the next list
-renders it again. It is a still, so it books no render minutes and holds nothing
+renders it again. A composition the check refuses is not sent again until it changes
+(``refused_recently``). It is a still, so it books no render minutes and holds nothing
 against the quota; media-render's own admission bound still applies through
 ``submit_when_free``.
 
@@ -26,11 +27,13 @@ render does).
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import threading
 import time
 from types import SimpleNamespace
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -54,8 +57,38 @@ TEMPLATE_COLUMNS = (
     DocumentTemplate.sample_data, DocumentTemplate.thumbnail_url,
 )
 
+# 19 Nov 2026: a template whose composition the check refuses was sent to media-render again on
+# every gallery list (51 refused renders in 30 hours for two templates, each holding a render slot
+# for a minute or more). A refusal is the composition's own, so it is remembered by the composition
+# and tried again only once that changes, or after CHECK_REFUSED_RETRY_SECONDS.
+CHECK_FAILED = "check_failed"
+CHECK_REFUSED_RETRY_SECONDS = 6 * 3600
+
 _in_flight: Set[UUID] = set()
+_refused: Dict[Tuple[UUID, str], float] = {}
 _lock = threading.Lock()
+
+
+def composition_print(template: Any) -> str:
+    """What the thumbnail is rendered from (its blocks and sample data), as one digest."""
+    material = json.dumps([template.blocks, template.sample_data], sort_keys=True, default=str)
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def refused_recently(template: Any, now: float) -> bool:
+    """The check refused this very composition within CHECK_REFUSED_RETRY_SECONDS."""
+    with _lock:
+        at = _refused.get((template.id, composition_print(template)))
+    return at is not None and now - at < CHECK_REFUSED_RETRY_SECONDS
+
+
+def _remember_refusal(template: Any, now: float) -> None:
+    """The refusal, kept beside the others still within CHECK_REFUSED_RETRY_SECONDS (older ones go)."""
+    global _refused
+    key = (template.id, composition_print(template))
+    with _lock:
+        kept = {k: at for k, at in _refused.items() if now - at < CHECK_REFUSED_RETRY_SECONDS}
+        _refused = {**kept, key: now}
 
 
 def _stub_post(template: Any, workspace_id: UUID) -> SimpleNamespace:
@@ -166,6 +199,8 @@ async def render_thumbnail(
         media = await render._store_outputs(client, store, session_factory, job, finished)
     except render.RenderFailure as failure:
         logger.warning("[Socials] thumbnail of template %s failed: %s (%s)", template.id, failure.message, failure.code)
+        if failure.code == CHECK_FAILED:
+            _remember_refusal(template, time.monotonic())
         return None
     key = first_image_key(job, media)
     if key is None:
@@ -195,6 +230,8 @@ async def ensure_thumbnails(
         return []
     made: List[str] = []
     for template in templates:
+        if refused_recently(template, time.monotonic()):
+            continue  # the check refused this composition; it is not sent again until it changes
         key = await render_thumbnail(
             template, workspace, client=client, store=store, session_factory=factory, brand_kit_of=brand_kit_of,
         )

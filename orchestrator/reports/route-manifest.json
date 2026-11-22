@@ -3482,6 +3482,10 @@
       "path": "/api/v1/tasks/{task_id}/cancel"
     },
     {
+      "method": "DELETE",
+      "path": "/api/v1/tasks/{task_id}/pull-request"
+    },
+    {
       "method": "POST",
       "path": "/api/v1/tasks/{task_id}/rebrief"
     },

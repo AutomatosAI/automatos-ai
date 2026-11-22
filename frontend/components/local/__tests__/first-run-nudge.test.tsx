@@ -83,6 +83,10 @@ describe('FirstRunNudge (PRD-233 S3)', () => {
     vi.restoreAllMocks()
   })
 
+  it('links to the Model keys tab it names, not the default tab', () => {
+    expect(FIRST_RUN_NUDGE_SETTINGS_HREF).toBe('/settings?tab=model-keys')
+  })
+
   it('shows when the local workspace has no LLM key at all, linking to Settings', async () => {
     respond([], NO_PLATFORM_KEYS)
     renderNudge()

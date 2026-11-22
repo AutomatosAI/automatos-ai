@@ -18,7 +18,8 @@ Redis are **external**: use managed services, or anything you run yourself.
 | Job `<release>-migrate` | A `pre-install`/`pre-upgrade` hook running `docker-entrypoint.sh migrate`: waits for PostgreSQL, builds an empty database, migrates, seeds, and (local edition) creates the workspace and operator. A failure fails the install or upgrade. |
 | Deployment `<release>-api` | The API. It starts uvicorn with `AUTOMATOS_SKIP_MIGRATIONS=true`, so the image's entrypoint runs no boot step and the Job is the only thing that changes the schema. **One replica**: the in-process schedulers use a per-container lock, so a second replica would run every scheduled job twice. |
 | Deployment `<release>-frontend` | The web app. |
-| Deployment `<release>-worker` | The workspace worker (Code Canvas runtime). One pod, `Recreate` strategy. Its entrypoint starts as root with four capabilities (`CHOWN`, `DAC_READ_SEARCH`, `SETGID`, `SETUID`) to fix the volume's ownership, then drops to uid 1000 with no capabilities; nothing in the container can gain privileges (`allowPrivilegeEscalation: false`). |
+| Deployment `<release>-worker` | The workspace worker (Code Canvas runtime). One pod, `Recreate` strategy. Its entrypoint starts as root with four capabilities (`CHOWN`, `DAC_OVERRIDE`, `SETGID`, `SETUID`) to fix the volume's ownership, then drops to uid 1000 with no capabilities; nothing in the container can gain privileges (`allowPrivilegeEscalation: false`). |
+| ServiceAccounts `<fullname>-api`, `<fullname>-frontend`, `<fullname>-worker`, `<fullname>-migrate` | One account for each component, so a cloud role you tie to one reaches that component only (`<fullname>` is the prefix the chart puts on every resource's name: the release name, with `-automatos` added unless the release name already contains it (release `demo`: `demo-automatos`)). The migration Job's account is a hook that runs just before the Job. Helm deletes it once the hooks succeed; after a failed Job it can be left behind until the next install or upgrade replaces it. None of them mounts a token for the cluster's own API: nothing in Automatos calls it. |
 | PVC `<release>-workspaces` | Agent files: the worker reads and writes, the API reads. Kept on `helm uninstall`. Pods on several nodes need `ReadWriteMany` storage. |
 | PVC `<release>-api-data` | The API's files at `/app/data`: uploads, brand files and generated documents. Kept on `helm uninstall`. With `ReadWriteOnce`, the default, every rollout stops the old API pod first, so the API is down until the new pod is ready. |
 | Ingress (off by default) | `/api` and `/ws` to the API, everything else to the web app. Useful once the web app reads its API address at runtime. |
@@ -40,7 +41,7 @@ Redis are **external**: use managed services, or anything you run yourself.
    | Key | |
    |---|---|
    | `DATABASE_URL` | PostgreSQL with `pgvector`. |
-   | `REDIS_URL` | |
+   | `REDIS_URL` | `redis://` is a plain connection. A Redis that requires TLS takes `rediss://`, and the server's certificate and host name are then checked against the image's trust store; nothing in the address can switch that check off. A user name (a Redis ACL user) goes before the password: `rediss://USER:PASSWORD@HOST:6379/0`. |
    | `API_KEY` | The platform API key. |
    | `CREDENTIAL_ENCRYPTION_KEY` | A Fernet key. **Keep it and back it up**: credentials saved in the app are encrypted with it, and every pod must share it. |
    | `WORKER_INTERNAL_TOKEN` | Optional. Shared secret between the API and the worker. |
@@ -62,7 +63,7 @@ Redis are **external**: use managed services, or anything you run yourself.
    open http://localhost:3000
    ```
 
-LLM keys are added in the app (Settings → API Keys) and stored encrypted in the
+LLM keys are added in the app (Settings → Model keys) and stored encrypted in the
 database.
 
 ## Settings
@@ -79,9 +80,23 @@ See [`values.yaml`](values.yaml). The ones you're most likely to change:
 | `api.image.pullPolicy`, `frontend.image.pullPolicy`, `worker.image.pullPolicy` | empty: the chart chooses | `Always` for a tag that moves (`edge`, or a `MAJOR.MINOR` release line), `IfNotPresent` for a digest or a fixed tag. A value you set is used as given. |
 | `workspaces.storageClass`, `workspaces.accessModes` | cluster default, `ReadWriteMany` | |
 | `api.data.enabled`, `api.data.size`, `api.data.storageClass`, `api.data.accessModes` | on, `10Gi`, cluster default, `ReadWriteOnce` | The API's files. Off, they're lost on every restart. `accessModes` can't change once the claim exists; more than one API replica needs a mode other than `ReadWriteOnce` or `ReadWriteOncePod`. The storage must honour the pod's `fsGroup`, or the API can't write here: some NFS-style drivers don't. |
+| `serviceAccount.create` | `true` | The chart creates one account for each component (above). `false`: it creates none, and each pod runs under the account `serviceAccount.<component>.name` names, or the namespace's `default`; several components may name the same one. |
+| `serviceAccount.api`, `.frontend`, `.worker`, `.migrate` (`.name`, `.annotations`) | `<fullname>-<component>`, none | `name` renames that account; `annotations` go on it alone, e.g. `eks.amazonaws.com/role-arn` or `iam.gke.io/gcp-service-account` on the API's. With `serviceAccount.create=true` each account needs a name of its own. Tying a role to an account is yours to do; a token a cloud's webhook projects for that role (EKS IRSA) is separate from the cluster token the chart turns off. |
 | `ingress.*` | off | |
 | `otel.enabled`, `otel.endpoint` | off | OpenTelemetry traces from the API, the worker and the web app's server side, and the API's GenAI metrics, over OTLP/HTTP to your collector ([`deploy/otel/`](../../deploy/otel/) has a reference config). Headers for the endpoint go in the Secret as `OTEL_EXPORTER_OTLP_HEADERS`. `otel.samplerRatio` keeps a share of new traces; `otel.resourceAttributes` adds to the pod and namespace names on every span. |
 | `sessionMode.enabled` | off | Session mode: your own Claude Code, Codex or Copilot sessions as agents, through the CLI host on your machine. Local edition only. Each session's files are uploaded into the workspace volume; the projects folder isn't browsable on a cluster. With the ingress on, `/api/v1/cli-hosts` gets its own Ingress (`sessionMode.ingressAnnotations`, a 64 MB body limit for ingress-nginx). |
+
+## Pod security
+
+Every container runs with the runtime's default system-call filter (`seccompProfile: RuntimeDefault`), cannot gain privileges (`allowPrivilegeEscalation: false`) and drops every capability. The API, the web app and the migration Job also run as a non-root user. The worker is the exception until a later release: it starts as root and adds back the four capabilities in the table above, so it passes the "baseline" pod security level, not "restricted".
+
+## Upgrading to 0.7.0
+
+- **Each component gets its own account,** `<fullname>-api`, `-frontend`, `-worker` and `-migrate`, in place of the one `<fullname>` account the API, the web app and the worker shared (`<fullname>` is the prefix the chart puts on every resource's name: the release name, with `-automatos` added unless the release name already contains it (release `demo`: `demo-automatos`)). The upgrade creates the new accounts and deletes the old one.
+- **`serviceAccount.name` and `serviceAccount.annotations` are gone.** Rendering stops with a message if either is set: put the name or the annotations on the account that needs them, e.g. `serviceAccount.api.annotations`, and with `serviceAccount.create=false` name your account under each component (`serviceAccount.api.name`, `.frontend.name`, `.worker.name`, `.migrate.name`; they may all name the same one).
+- **A cloud role trusts an account by its name** (an IRSA trust policy's subject, an EKS Pod Identity association, a GKE or AKS federated identity, a RoleBinding), so one bound to the old `<fullname>` account now reaches nothing. Bind it to the new account, or keep the old name for the component that needs it: `--set serviceAccount.api.name=<fullname>` (release `demo`: `--set serviceAccount.api.name=demo-automatos`). EKS Pod Identity needs no annotation, so for it rendering does not stop: check before you upgrade.
+- **The API no longer mounts a cluster token,** and the migration Job now runs under `<fullname>-migrate` rather than the namespace's `default` account.
+- **Every container gets the default system-call filter.** The worker already ran under it. In the API, the web app and the migration Job, a system call the runtime's default profile blocks now fails with an error.
 
 ## Upgrading to 0.6.0
 

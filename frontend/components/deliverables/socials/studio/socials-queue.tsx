@@ -14,6 +14,10 @@
  *
  * P256-FIX-SOC-2: a plan's drafts that wait for the owner's input are listed apart, "Waits for
  * you" (queue-waiting.tsx): each opens its editor, and none is offered for approval.
+ *
+ * An approved post with no time posts nothing until a person gives it one or publishes it now,
+ * and no other view lists it but the calendar's List: "Approved, no time yet" (queue-waiting.tsx)
+ * lists it apart, each row opening the post's page, where its Schedule and Publish now are.
  */
 import { useMemo } from 'react'
 import { Inbox, Loader2 } from 'lucide-react'
@@ -27,9 +31,10 @@ import { hasChannels } from '../socials-review'
 import { postActions } from '../socials-status'
 import { QueueList } from './queue-list'
 import { QueuePane } from './queue-pane'
-import { QueueWaiting } from './queue-waiting'
+import { QueueApprovedNoTime, QueueWaiting } from './queue-waiting'
 import {
-  inBatch, isMonthBatch, queueBatches, queueGroups, queueHeading, waitingForInput, waitingToday, type QueueBatch, type QueueGroup,
+  inBatch, isMonthBatch, queueBatches, queueGroups, queueHeading, waitingForATime, waitingForInput, waitingToday, type QueueBatch,
+  type QueueGroup,
 } from './queue-model'
 import { SocialsPostView } from './socials-post-view'
 
@@ -78,6 +83,7 @@ export function SocialsQueue({ role, posts, selectedId, onSelect, onEdit }: Soci
   ], [posts, campaigns])
   const shown = groups.flatMap((group) => group.posts)
   const waitingInput = useMemo(() => waitingForInput(posts), [posts])
+  const noTime = useMemo(() => waitingForATime(posts), [posts])
   // F256: a post with no channel publishes nothing: Approve all shown leaves it out.
   const approvable = shown.filter(hasChannels)
   const selected = shown.find((post) => post.id === selectedId) ?? shown[0] ?? null
@@ -104,6 +110,7 @@ export function SocialsQueue({ role, posts, selectedId, onSelect, onEdit }: Soci
         )}
       </div>
       <QueueWaiting posts={waitingInput} onEdit={onEdit} />
+      <QueueApprovedNoTime posts={noTime} onEdit={onEdit} />
       {shown.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border px-6 py-10 text-center">
           <Inbox className="h-7 w-7 text-muted-foreground" aria-hidden />
@@ -113,7 +120,7 @@ export function SocialsQueue({ role, posts, selectedId, onSelect, onEdit }: Soci
         <div className="grid items-start gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
           <QueueList groups={groups} selectedId={selected?.id ?? null} onSelect={onSelect} action={reviewer ? batchAction : undefined} />
           {selected && (reviewer
-            // Keyed by the post: a confirmation left open on one post (Approve & post now, Reject)
+            // Keyed by the post: a confirmation left open on one post (its unsourced claims, Reject)
             // never carries over to the next one the pane falls back to once the first leaves the queue.
             ? <QueuePane key={selected.id} post={selected} campaignName={campaignName} now={now} role={role}
                 onEdit={onEdit ? () => onEdit(selected.id) : undefined} />

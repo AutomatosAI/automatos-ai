@@ -223,7 +223,9 @@ def test_codex_plans_too_its_plan_is_the_turns_final_message(tmp_path):
     ("sort < data.txt", "allow"), ("ls > /dev/null", "allow"), ("grep -rn x . 2>&1", "allow"),
     ("git commit -m x", "ask"), ("git add a", "ask"), ("pytest", "ask"), ("npm run build", "ask"),
     ("echo x > notes.md", "ask"), ("cat a >> b.txt", "ask"), ("sed -i 's/a/b/' f", "ask"),
-    ("sed --in-place 's/a/b/' f", "ask"), ("awk -i inplace '{print}' f", "ask"), ("sed -n '1p' f", "allow"),
+    # ``awk -i`` now loads awk source from a file the gate cannot read (gawk's include,
+    # ``-i inplace`` among it), so it is refused outright rather than held as a write.
+    ("sed --in-place 's/a/b/' f", "ask"), ("awk -i inplace '{print}' f", "deny"), ("sed -n '1p' f", "allow"),
 ])
 def test_plan_is_read_only_in_the_shell_too(tmp_path, command, expected):
     """Plan is read-only on every CLI; a CLI with no plan mode has only the gate holding it there."""

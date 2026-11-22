@@ -37,6 +37,7 @@ import { stageReason } from '@/components/activity/board/ticket-stage'
 import { runsInSession, ticketKind } from '@/components/activity/board/ticket-kind'
 import { HostOfflineBanner } from '@/components/activity/board/host-offline-banner'
 import { RowStatusLabel } from '@/components/proactive/row-status'
+import { PR_CHIP, PR_CHIP_TITLE } from '@/lib/ticket-pull-request'
 import type { BoardTask, BoardStatus } from '@/types/board'
 import { toneFor } from './agent-tones'
 import { BoardToolbar, type BoardDensity as Density, type BoardMode as Mode } from './board-toolbar'
@@ -247,6 +248,8 @@ function KanbanKindRow({ task }: { task: BoardTask }) {
       <Icon style={{ width: 11, height: 11 }} />
       {kind.toUpperCase()}
       {runsInSession(task) && <span className="session" title="A Claude Code session runs this ticket">· &gt;_ SESSION</span>}
+      {/* Ticket PR fields: its session opened a pull request */}
+      {task.pull_request?.url && <span className="session" title={PR_CHIP_TITLE} data-testid="pull-request-chip">· {PR_CHIP}</span>}
       {(task.priority === 'urgent' || task.priority === 'high') && (
         <span className="high">· {task.priority.toUpperCase()}</span>
       )}

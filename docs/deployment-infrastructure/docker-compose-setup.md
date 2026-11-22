@@ -145,7 +145,7 @@ Sources: [docker-compose.yml:83-114]()
 
 ### Qdrant (Vector Store)
 
-Qdrant holds durable (L3) and field memory. It is in the default stack, and `envs/api.defaults` sets `QDRANT_URL=http://qdrant:6333`; writing a memory also needs an embeddings key (Settings → API Keys). `QDRANT_URL=` (empty) in `envs/api.local` turns memory off.
+Qdrant holds durable (L3) and field memory. It is in the default stack, and `envs/api.defaults` sets `QDRANT_URL=http://qdrant:6333`; writing a memory also needs an embeddings key (Settings → Model keys). `QDRANT_URL=` (empty) in `envs/api.local` turns memory off.
 
 Sources: [docker-compose.yml:116-133]()
 

@@ -61,9 +61,10 @@ SESSION_TOOL_GROUPS: Tuple[ToolGroup, ...] = (
     # PRD-256 F430: a CLI agent makes the Socials posts an API agent makes (never approves or publishes).
     ToolGroup("socials", "Socials",
               "Draft the workspace's Socials posts on its templates, change and re-render them, read them and "
-              "send them for approval; never approves, schedules or publishes.",
+              "send them for approval; read a plan and what the workspace already posted, and add researched "
+              "topics to a plan's content bank; never approves, schedules or publishes.",
               ("create_social_post", "update_social_post", "submit_social_post", "get_social_post",
-               "list_social_posts")),
+               "list_social_posts", "get_social_plan", "add_social_topics", "get_social_history")),
 )
 GROUP_IDS: Tuple[str, ...] = tuple(g.id for g in SESSION_TOOL_GROUPS)
 DEFAULT_SESSION_TOOL_GROUPS: Tuple[str, ...] = GROUP_IDS

@@ -64,7 +64,8 @@ def test_the_tool_list_is_the_one_definition_and_is_stable():
                      "list_missions", "get_mission", "search_mission_findings",
                      "create_social_post", "update_social_post",   # PRD-256 F430: the Socials group,
                      "submit_social_post", "get_social_post",      # last in the display order
-                     "list_social_posts")
+                     "list_social_posts", "get_social_plan",       # the research playbook's three
+                     "add_social_topics", "get_social_history")
     assert st.tool_names() == names                      # stable per process
     first = json.dumps(st.definitions(), sort_keys=True)
     assert json.dumps(st.definitions(), sort_keys=True) == first   # byte-stable (prompt cache)
@@ -125,7 +126,8 @@ def test_a_session_notes_progress_on_its_own_ticket_and_moves_it_nowhere():
     # and it never reads ``blocked_reason`` at all. The note vanished and the
     # model was told it had landed.
     assert tool.runner is not None
-    assert sorted(tool.input_schema["properties"]) == ["note"]
+    # Ticket PR fields: the pull request a session opened rides the same tool (services/ticket_pull_request.py)
+    assert sorted(tool.input_schema["properties"]) == ["branch", "commits", "note", "pull_request_url", "tested"]
     assert tool.input_schema["required"] == ["note"]
 
     assert st.resolve_parameters(tool, {"note": "reading the brief"}, CTX) == {"note": "reading the brief"}

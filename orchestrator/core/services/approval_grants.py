@@ -14,10 +14,10 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 from uuid import UUID
 
-from core.models.approval_grants import ApprovalGrant, GrantStatus, KIND_APPROVAL
+from core.models.approval_grants import ApprovalGrant, GrantStatus, KIND_APPROVAL, SUBJECT_BOARD_TASK
 
 logger = logging.getLogger(__name__)
 
@@ -192,11 +192,29 @@ def find_pending_grant(
         return None
 
 
+def approval_values(grant: Any, *, granted_by: str, now: datetime) -> Dict[str, Any]:
+    """The columns a yes given at ``now`` writes on a pending approval, by attribute name.
+
+    ``grant_grant`` and the approvals API's compare-and-set both write these, so every path
+    that approves a grant approves it alike. A board ticket's approval also authorises the
+    ticket for a full window from the yes: its pending row kept the expiry it was asked with,
+    so a yes given after that (grant #87, approved two days after it was asked) authorised
+    nothing, and the gate asked again five seconds later. A tool call's card keeps its expiry:
+    one past it is closed, never approved (P256-FIX-N17-3, ``is_lapsed``).
+    """
+    values: Dict[str, Any] = {
+        "status": GrantStatus.GRANTED.value, "granted_at": now, "granted_by": granted_by,
+    }
+    if getattr(grant, "subject_type", None) == SUBJECT_BOARD_TASK:
+        values["expires_at"] = now + timedelta(seconds=DEFAULT_TTL_SECONDS)
+    return values
+
+
 def grant_grant(grant: ApprovalGrant, *, granted_by: str, now: Optional[datetime] = None) -> ApprovalGrant:
-    """Approve a PENDING grant (a human said yes). Mutates the row in place."""
-    grant.status = GrantStatus.GRANTED.value
-    grant.granted_at = _now(now)
-    grant.granted_by = granted_by
+    """Approve a PENDING grant (a human said yes). Mutates the row in place, with
+    ``approval_values``."""
+    for name, value in approval_values(grant, granted_by=granted_by, now=_now(now)).items():
+        setattr(grant, name, value)
     return grant
 
 

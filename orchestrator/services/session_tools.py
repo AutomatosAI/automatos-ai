@@ -32,6 +32,7 @@ from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 from services.session_file_reads import (run_read_document, run_read_step_file, scope_read_document,
                                          scope_read_step_file)
 from services.session_work_tools import GROUP_TOOL_SPECS
+from services.ticket_pull_request import PULL_REQUEST_PROPERTIES, PullRequestRefused, pull_request_fields
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +142,7 @@ class SessionContext:
 
 
 def _scope_update_ticket(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
-    """Just the note. A session cannot move its ticket at all.
+    """The note, and the pull request a session opened. A session cannot move its ticket at all.
 
     ``done`` was always refused — the host records the outcome when the turn
     ends. ``blocked`` and ``review`` were allowed at first and turned out to be
@@ -159,12 +160,16 @@ def _scope_update_ticket(params: Dict[str, Any], ctx: SessionContext) -> Dict[st
             "for an answer use ask_human, which parks the ticket properly and keeps everything. To "
             "finish, just end your turn: the host records the outcome. This tool only leaves a note."
         )
+    try:  # Ticket PR fields: the pull request the session opened, checked (services/ticket_pull_request.py)
+        reported = pull_request_fields(params)
+    except PullRequestRefused as refused:
+        raise SessionToolRefused(str(refused)) from refused
     note = str(params.get("note") or "").strip()
-    if not note:
+    if not note and not reported:  # a call that reports a pull request keeps it, note or not
         raise SessionToolRefused(
             "update_ticket leaves a progress note — say what you are doing, in a sentence."
         )
-    return {"note": note[:MAX_NOTE_CHARS]}
+    return {"note": note[:MAX_NOTE_CHARS], **reported}
 
 
 async def _run_update_ticket(db: Any, params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
@@ -175,14 +180,13 @@ async def _run_update_ticket(db: Any, params: Dict[str, Any], ctx: SessionContex
     that action takes its atomic-claim branch, whose ``UPDATE … WHERE status <>
     'in_progress'`` matches no row; it returned ``{"success": True}`` having
     written nothing at all, and never read ``blocked_reason``. The note vanished
-    and the model was told it had landed.
+    and the model was told it had landed. Ticket PR fields: a pull request the call reports is kept
+    with the note, in one transaction (``services/ticket_pull_request.record_ticket_update``).
     """
-    from services.cli_host_service import record_session_note
+    from services.ticket_pull_request import record_ticket_update
 
-    return record_session_note(
-        db, task_id=ctx.task_id, workspace_id=ctx.workspace_id,
-        agent_name=ctx.agent_name, note=params.get("note") or "",
-    )
+    return record_ticket_update(db, task_id=ctx.task_id, workspace_id=ctx.workspace_id,
+                                agent_name=ctx.agent_name, params=params)
 
 
 def _scope_submit_report(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
@@ -450,13 +454,16 @@ SESSION_TOOLS: Tuple[SessionTool, ...] = (
             "Leave a progress note on YOUR OWN ticket while you work — the operator sees it live on "
             "the ticket. You cannot move the ticket anywhere: closing it is the host's job when your "
             "turn ends, and any other status would end the run and throw your work away. If you "
-            "genuinely cannot proceed without an answer, use ask_human instead."
+            "genuinely cannot proceed without an answer, use ask_human instead. Once you have opened a "
+            "pull request, also pass pull_request_url, branch, commits and tested: they go on the ticket's "
+            "card, which is where the owner reviews your work and approves it."
         ),
         input_schema={
             "type": "object",
             "properties": {
                 "note": {"type": "string",
                          "description": "What you are doing, or what changed. One or two sentences."},
+                **PULL_REQUEST_PROPERTIES,  # Ticket PR fields (services/ticket_pull_request.py)
             },
             "required": ["note"],
         },

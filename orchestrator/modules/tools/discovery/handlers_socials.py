@@ -47,7 +47,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from core.social_post_schema import LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT, PLANNED_FOR, PLANNED_ZONE
-from modules.tools.discovery.actions_socials import HISTORY_MAX_DAYS, HISTORY_MAX_LIMIT
+from core.social_plan_schema import HISTORY_MAX_DAYS, HISTORY_MAX_LIMIT
 
 logger = logging.getLogger(__name__)
 
@@ -695,7 +695,9 @@ async def get_social_plan(db: Session, workspace_id: UUID, params: Dict[str, Any
     except _Refused as exc:
         return _refused(str(exc))
     keys = ("id", "name", "goal", "audience", "starts_on", "ends_on", "timezone", "cadence", "sources", "status")
-    bank = [{"title": t.title, "formats": list(t.formats or []), "used": t.used_at is not None} for t in topics.list_topics(db, plan)]
+    # 19 Nov 2026: "facts" says which unused topics research must give facts (topics.give_facts).
+    bank = [{"title": t.title, "formats": list(t.formats or []), "used": t.used_at is not None, "facts": len(t.facts or [])}
+            for t in topics.list_topics(db, plan)]
     plan_view = {key: plan.to_dict()[key] for key in keys}
     return {
         "success": True, "plan": plan_view, "bank": bank, "history": history.history(db, workspace_id),

@@ -112,11 +112,11 @@ def test_self_hosted_keeps_a_private_endpoint(local, resolves_to):
 
 def test_saas_needs_the_endpoint_and_self_hosted_can_use_the_env_one(monkeypatch):
     monkeypatch.setattr(be.config, "AZURE_OPENAI_ENDPOINT", RESOURCE)
-    assert be.endpoint_required("azure", "saas") is True
-    assert be.endpoint_required("azure", "local") is False
+    assert be.endpoint_required("azure", True) is True
+    assert be.endpoint_required("azure", False) is False
     monkeypatch.setattr(be.config, "AZURE_OPENAI_ENDPOINT", None)
-    assert be.endpoint_required("azure", "local") is True
-    assert be.endpoint_required("openai", "saas") is False
+    assert be.endpoint_required("azure", False) is True
+    assert be.endpoint_required("openai", True) is False
 
 
 def test_the_save_answers_400_with_the_reason(saas, resolves_to):

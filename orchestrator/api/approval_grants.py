@@ -33,6 +33,7 @@ from core.models.approval_grants import (
     SUBJECT_BOARD_TASK,
 )
 from api.approval_grant_lapses import the_card_can_run
+from core.services.approval_grants import approval_values
 from core.models.core import BoardTask
 from modules.policy.ai_act import oversight_for_risk
 from services.click_memory import APPROVED, DECLINED, remembers_the_decision
@@ -209,24 +210,21 @@ async def grant_approval(
 def _cas_grant(db: Session, grant: ApprovalGrant, *, actor: str, now: datetime) -> bool:
     """Flip ``grant`` PENDING -> GRANTED only while it is still PENDING (F193): the
     approval that wins resumes the call; one that lost matches 0 rows, and the
-    caller answers "already decided". The in-memory row is synced either way."""
+    caller answers "already decided". The in-memory row is synced either way. It
+    writes ``approval_values``, as ``record_operator_consent``'s yes does: a board
+    ticket's approval runs a full window from now."""
+    values = approval_values(grant, granted_by=actor, now=now)
     flipped = (
         db.query(ApprovalGrant)
         .filter(ApprovalGrant.id == grant.id, ApprovalGrant.status == GrantStatus.PENDING.value)
-        .update(
-            {ApprovalGrant.status: GrantStatus.GRANTED.value,
-             ApprovalGrant.granted_at: now,
-             ApprovalGrant.granted_by: actor},
-            synchronize_session=False,
-        )
+        .update(values, synchronize_session=False)
     )
     if not flipped:
         db.rollback()
         db.refresh(grant)
         return False
-    grant.status = GrantStatus.GRANTED.value
-    grant.granted_at = now
-    grant.granted_by = actor
+    for name, value in values.items():
+        setattr(grant, name, value)
     return True
 
 

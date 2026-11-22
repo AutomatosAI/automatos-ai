@@ -31,6 +31,7 @@ from cachetools import TTLCache
 from sqlalchemy.orm import Session
 
 from config import config
+from core import editions
 from core.security.rate_limiter import DEFAULT_LIMITS
 from services.readiness import probes
 from services.readiness.contract import Readiness, ReadinessFix, ReadinessItem
@@ -168,7 +169,7 @@ def _item(result: Result, locale: str, local: bool) -> ReadinessItem:
 
 def render(checked: Checked, locale: str) -> Dict[str, Any]:
     """``Readiness@1`` in ``locale``, for this edition."""
-    local = config.IS_LOCAL_EDITION
+    local = editions.current().operator_is_user
     readiness = Readiness(v=VERSION, checked_at=checked.checked_at.isoformat(),
                           items=[_item(result, locale, local) for result in checked.results])
     return readiness.model_dump(exclude_none=True)

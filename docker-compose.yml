@@ -19,7 +19,7 @@
 #   keeps the anonymous owner and warns at every boot.
 #   2. Run: make up (or docker compose up)
 #   3. Access: http://localhost:3000
-#   4. Add an LLM key: Settings → API Keys in the UI, or OPENAI_API_KEY /
+#   4. Add an LLM key: Settings → Model keys in the UI, or OPENAI_API_KEY /
 #      ANTHROPIC_API_KEY / OPENROUTER_API_KEY in .env (passed through below)
 #
 # This file runs the production images, the ones CI builds and scans: the code is
@@ -46,7 +46,7 @@
 # A .env file IS REQUIRED with at minimum: POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY,
 # none of them a CHANGE_ME placeholder from .env.example: the backend refuses to start
 # on one (orchestrator/docker-secrets-guard.sh).
-# LLM keys live in the database (Settings → API Keys) or in .env; the stored key
+# LLM keys live in the database (Settings → Model keys) or in .env; the stored key
 # also drives embeddings locally (PLATFORM_KEY_WORKSPACE_ID in envs/api.defaults).
 #
 # Profiles:

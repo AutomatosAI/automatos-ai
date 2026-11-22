@@ -15,9 +15,18 @@ It does what the host relies on, and nothing else:
 Scenario knobs (environment): ``FAKE_CLAUDE_SCENARIO`` = ``happy`` (default),
 ``exit-early`` (dies before Stop), ``slow`` (sleeps before Stop), ``no-start`` (never fires a hook),
 ``usage-limit`` (prints a plan-limit notice mid-turn and exits 1 — ``FAKE_CLAUDE_LIMIT_TEXT`` overrides it),
-``usage-limit-parked`` (prints Claude Code's own limit lines, then holds the turn like the TUI does);
+``usage-limit-parked`` (prints Claude Code's own limit lines, then holds the turn like the TUI does),
+``usage-limit-menu`` (prints the limit notice and Claude Code's usage limit menu, then waits on it —
+``FAKE_CLAUDE_LIMIT_TEXT`` overrides the notice, ``FAKE_CLAUDE_LIMIT_PADDING_LINES`` draws that many
+200-column border lines under the menu in the same write), ``api-error`` (the turn ends on an API error: it fires
+``StopFailure``, never ``Stop``, and idles at its prompt — ``FAKE_CLAUDE_API_ERROR`` names the error type,
+``FAKE_CLAUDE_API_ERROR_TEXT`` the words, ``FAKE_CLAUDE_OUTPUT_BEFORE`` a line printed before the error);
 ``FAKE_CLAUDE_SESSION_NOTE=1`` also writes ``note.md`` into the ticket folder (the
 ``--add-dir``) and reports an edit of the host's own ``ticket.md`` there (PRD-245 S0.7).
+``FAKE_CLAUDE_PRINT_ENV=A,B`` prints ``A=<value>`` lines on the terminal after SessionStart
+(dev-box mode: what reached the session, and what the host's terminal log keeps of it);
+``FAKE_CLAUDE_MKDIR_ENV=NAME`` creates the folder that variable names, as gh may create its
+config folder (dev-box mode: the host removes it when the session ends).
 """
 from __future__ import annotations
 
@@ -33,6 +42,19 @@ import uuid
 from pathlib import Path
 
 FORBIDDEN = {"-p", "--print", "--bare", "--dangerously-skip-permissions"}
+# Claude Code's usage limit screen as a stalled session's terminal recorded it: the
+# notice, the menu's command, then the menu itself, with its colours and the cursor
+# moves it draws some words with.
+LIMIT_NOTICE = "\x1b[38;2;153;153;153m  ⎿ \xa0\x1b[38;2;255;107;128m{notice}\r\x1b[2B"
+LIMIT_COMMAND = "\x1b[48;2;55;55;55m❯ \x1b[38;2;255;255;255m/rate-limit-options\x1b[39m\r\x1b[32B\x1b[49m"
+LIMIT_MENU = (
+    "\x1b[38;2;177;185;249m\x1b[1mWhat do you want to do?\r\x1b[180C\x1b[1B\x1b[22m\x1b[39m\x1b[K\r\x1b[1B   "
+    "\x1b[38;2;177;185;249m❯\x1b[39m \x1b[38;2;153;153;153m1. \x1b[38;2;177;185;249m"
+    "Stop and wait for limit to reset\x1b[39m\x1b[K\r\x1b[1B  \x1b[6G\x1b[38;2;153;153;153m2. \x1b[39m"
+    "Wait\x1b[14Ghere,\x1b[20Gthen\x1b[25Gcontinue\x1b[34Gautomatically\x1b[48Gat\x1b[51GNov\x1b[55G20,\x1b[59G9am"
+    "\r\x1b[1B     \x1b[38;2;153;153;153m3. \x1b[39mSwitch to usage credits\x1b[K\r\x1b[2C\x1b[1B\x1b[K\r\x1b[2C\x1b[1B "
+    "\x1b[38;2;153;153;153m\x1b[3mEnter to confirm · Esc to cancel\x1b[23m\x1b[39m\x1b[K"
+)
 
 
 def _arg(args, name, default=None):
@@ -84,6 +106,20 @@ def _write_session_note(hook, session_dir: str) -> None:
         hook("PostToolUse", tool_name="Edit", tool_input=own, tool_use_id="toolu_5", tool_response={"type": "text", "text": "ok"})
 
 
+def _idle_until_terminated(hook) -> int:
+    """Sit at the prompt like the TUI until the host terminates us, then end the session."""
+    stop = {"flag": False}
+
+    def _term(*_):
+        stop["flag"] = True
+
+    signal.signal(signal.SIGTERM, _term)
+    while not stop["flag"]:
+        time.sleep(0.1)
+    hook("SessionEnd", reason="other")
+    return 0
+
+
 def main(argv) -> int:
     args = list(argv)
     if "--version" in args:
@@ -118,6 +154,12 @@ def main(argv) -> int:
             time.sleep(0.2)
 
     hook("SessionStart", source="startup", model=model)
+    for name in filter(None, os.environ.get("FAKE_CLAUDE_PRINT_ENV", "").split(",")):
+        sys.stdout.write(f"{name}={os.environ.get(name, '<unset>')}\r\n")
+    sys.stdout.flush()
+    folder = os.environ.get(os.environ.get("FAKE_CLAUDE_MKDIR_ENV", ""), "")
+    if folder:
+        os.makedirs(os.path.join(folder, "made-by-the-session"), exist_ok=True)
     transcript_line({"type": "user", "message": {"role": "user", "content": prompt}, "sessionId": session_id, "cwd": cwd})
     ctx = hook("UserPromptSubmit", prompt=prompt)
     extra_ctx = ((ctx.get("hookSpecificOutput") or {}).get("additionalContext")) if isinstance(ctx, dict) else None
@@ -142,6 +184,27 @@ def main(argv) -> int:
         while True:
             time.sleep(0.2)
 
+    if scenario == "usage-limit-menu":
+        # A weekly limit's screen: the notice, then the menu Claude Code opens and waits
+        # on until someone picks an option.
+        notice = os.environ.get("FAKE_CLAUDE_LIMIT_TEXT", "You've hit your weekly limit · resets Nov 20, 9am (Europe/Berlin)")
+        padding = ("─" * 200 + "\r\n") * int(os.environ.get("FAKE_CLAUDE_LIMIT_PADDING_LINES", "0"))
+        sys.stdout.write(LIMIT_NOTICE.format(notice=notice) + LIMIT_COMMAND + LIMIT_MENU + padding)
+        sys.stdout.flush()
+        while True:
+            time.sleep(0.2)
+
+    if scenario == "api-error":
+        # The response was lost mid-turn: Claude Code prints the error, fires StopFailure
+        # instead of Stop, and waits at its empty prompt.
+        said = os.environ.get("FAKE_CLAUDE_API_ERROR_TEXT",
+                              "API Error: Connection lost mid-response. The response above may be incomplete.")
+        before = os.environ.get("FAKE_CLAUDE_OUTPUT_BEFORE")
+        sys.stdout.write((f"{before}\r\n" if before else "") + f"\x1b[31m●\x1b[39m {said}\r\n✻ Cooked for 1m 24s\r\n❯ \r\n")
+        sys.stdout.flush()
+        hook("StopFailure", error=os.environ.get("FAKE_CLAUDE_API_ERROR", "unknown"), last_assistant_message=said)
+        return _idle_until_terminated(hook)
+
     # One allowed edit inside cwd, one Bash outside the allowlist (must be denied).
     edit = {"file_path": os.path.join(cwd, "hello.txt"), "content": "hi"}
     d1 = hook("PreToolUse", tool_name="Write", tool_input=edit, tool_use_id="toolu_1")
@@ -164,18 +227,7 @@ def main(argv) -> int:
         time.sleep(float(os.environ.get("FAKE_CLAUDE_SLOW_SECONDS", "3")))
     hook("Notification", notification_type="idle_prompt", message="Claude is waiting for your input")
     hook("Stop", stop_hook_active=False, last_assistant_message=text)
-
-    # Idle like a TUI until the host terminates us.
-    stop = {"flag": False}
-
-    def _term(*_):
-        stop["flag"] = True
-
-    signal.signal(signal.SIGTERM, _term)
-    while not stop["flag"]:
-        time.sleep(0.1)
-    hook("SessionEnd", reason="other")
-    return 0
+    return _idle_until_terminated(hook)
 
 
 if __name__ == "__main__":

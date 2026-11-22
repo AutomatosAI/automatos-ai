@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, desc
 from sqlalchemy.orm import Session
 
+from core import editions
 from core.database.database import get_db
 from core.models import Agent
 from core.models.workspaces import Workspace
@@ -127,11 +128,9 @@ def get_current_workspace(
         # marketplace depth + tier display info. Field addition only, same route
         # (route-manifest unchanged). Hidden ≠ deleted (D5): the client trims
         # nav/marketplace labels; no route or data is removed.
-        "exposure": (
-            # PRD-233 S7: the local edition is never plan-gated (see plan_tiers).
-            exposure_for_local_edition()
-            if config.AUTH_EDITION == "local"
-            else exposure_for_plan(workspace.plan or "basic")
+        "exposure": (  # PRD-233 S7: an install that does not bill is never plan-gated (see plan_tiers)
+            exposure_for_plan(workspace.plan or "basic") if editions.current().billing
+            else exposure_for_local_edition()
         ),
         # PRD-222 W1S2: server-side onboarding stage + trial snapshot ({stage,
         # trial}). Field addition only — no new route (route-manifest unchanged).

@@ -108,3 +108,15 @@ def test_one_note_per_plan_per_week_with_the_weeks_posts_and_numbers(notes):
     assert "• Stand map: 300 views · 12 likes" in message and f"view=posted&plan={plan['id']}" in message
     assert socials_weekly_notes.send_due(notes.factory, monday + timedelta(hours=3)) == 0  # once that week
     assert len(notes.sent) == 1
+
+
+def test_a_week_with_no_post_out_sends_no_note_even_when_the_plan_has_a_health_item(notes, monkeypatch):
+    """18 Nov: a new plan with an empty content bank sent "0 posts went out this week" within minutes."""
+    monkeypatch.setattr(plan_health, "health_for",
+                        lambda db, plan, workspace, now: [SimpleNamespace(title="The content bank is running low")])
+    _create_plan(notes, timezone="UTC", make={"rhythm": "daily", "time": "07:00"})
+    now = datetime.now(UTC)
+    monday = (now - timedelta(days=now.weekday())).replace(hour=8, minute=0, second=0, microsecond=0)
+
+    assert socials_weekly_notes.send_due(notes.factory, monday) == 0
+    assert notes.sent == []

@@ -574,7 +574,8 @@
       "type": "text",
       "label": "Results: the count",
       "max_chars": 14,
-      "description": "In the brand colour in the middle of the line: how much was made, as a number and a word. It is a fact, so it needs its source.",
+      "description": "In the brand colour mid-line: how much was made, as a number and a word. A fact, so it needs its source; without one, leave it empty and write the words around it as one line.",
+      "default": "",
       "claim": true
     },
     "outputs_tail": {

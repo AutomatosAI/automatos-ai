@@ -33,20 +33,20 @@ from services.credits.routing import (
 
 
 def test_the_local_edition_never_meters():
-    funding = funding_for("basic", Balance(), edition="local")
+    funding = funding_for("basic", Balance(), billing=False)
     assert funding.funded_by == FUNDED_BY_LOCAL
     assert can_pay(funding, 10_000)
 
 
 def test_enterprise_is_an_allowance_never_gated():
-    funding = funding_for("enterprise", Balance(), edition="saas")
+    funding = funding_for("enterprise", Balance(), billing=True)
     assert funding.funded_by == FUNDED_BY_ALLOWANCE
     assert can_pay(funding, 10_000)
 
 
 def test_own_keys_spends_only_its_trial():
     assert spend_buckets_for("basic") == (BUCKET_TRIAL,)
-    funding = funding_for("basic", Balance(trial=0, monthly=900, topup=900), edition="saas")
+    funding = funding_for("basic", Balance(trial=0, monthly=900, topup=900), billing=True)
     assert funding.funded_by == FUNDED_BY_CREDITS
     assert funding.spendable == 0  # monthly/top-up can't pay for platform AI on Own keys
     assert funding.own_keys_plan is True
@@ -54,7 +54,7 @@ def test_own_keys_spends_only_its_trial():
 
 def test_pro_spends_trial_then_monthly_then_topup():
     assert spend_buckets_for("pro") == (BUCKET_TRIAL, BUCKET_MONTHLY, BUCKET_TOPUP)
-    funding = funding_for("pro", Balance(trial=2, monthly=10, topup=5), edition="saas")
+    funding = funding_for("pro", Balance(trial=2, monthly=10, topup=5), billing=True)
     assert funding.spendable == 17
     assert funding.own_keys_plan is False
 
@@ -66,18 +66,18 @@ def test_an_unknown_plan_is_treated_as_own_keys():
 @pytest.mark.parametrize("plan", ["basic", "pro", "business"])
 def test_background_work_never_spends_the_trial(plan):
     assert BUCKET_TRIAL not in spend_buckets_for(plan, background=True)
-    funding = funding_for(plan, Balance(trial=500), edition="saas", background=True)
+    funding = funding_for(plan, Balance(trial=500), billing=True, background=True)
     assert funding.spendable == 0
 
 
 def test_any_credit_left_can_pay():
-    assert can_pay(funding_for("pro", Balance(trial=1), edition="saas"), 1)
-    assert not can_pay(funding_for("pro", Balance(trial=0, monthly=-3), edition="saas"), 1)
+    assert can_pay(funding_for("pro", Balance(trial=1), billing=True), 1)
+    assert not can_pay(funding_for("pro", Balance(trial=0, monthly=-3), billing=True), 1)
 
 
 def test_the_paused_error_names_the_way_out():
-    own_keys = paused_error(funding_for("basic", Balance(), edition="saas"))
-    pro = paused_error(funding_for("pro", Balance(), edition="saas"))
+    own_keys = paused_error(funding_for("basic", Balance(), billing=True))
+    pro = paused_error(funding_for("pro", Balance(), billing=True))
     assert isinstance(own_keys, CreditsExhaustedError) and own_keys.error_code == CREDITS_EXHAUSTED_CODE
     assert "own keys" in own_keys.message.lower() and "add your" in own_keys.message.lower()
     assert "top up" in pro.message.lower()

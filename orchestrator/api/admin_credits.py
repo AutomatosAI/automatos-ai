@@ -59,10 +59,10 @@ class CreditAdjustBody(BaseModel):
 
 
 def _require_platform_admin(ctx: RequestContext) -> None:
-    from config import config
+    from core import editions
     from core.auth.roles import caller_is_admin
 
-    if config.AUTH_EDITION == "local":  # the local edition has no billing, so no credits to adjust
+    if not editions.current().billing:  # an install that does not bill has no credits to adjust
         raise HTTPException(status_code=404, detail="Not found")
     if not ctx.user or not caller_is_admin(ctx.user):
         raise HTTPException(status_code=403, detail="Admin access required")

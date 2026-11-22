@@ -73,6 +73,7 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     RouterSpec("api.deliverable_knowledge"),  # F354 — "Add to Knowledge" on a Deliverable, and remove
     RouterSpec("api.board_tasks"),
     RouterSpec("api.board_task_rebrief"),  # PRD-252 R2 — Discuss: "Update ticket and re-queue"
+    RouterSpec("api.board_task_pull_request"),  # Ticket PR fields — the owner takes a wrong pull request off
     RouterSpec("api.add_to_knowledge"),  # F305 — "Add to knowledge" on an approved card
     RouterSpec("api.add_report_to_knowledge"),  # F305 — ... and on a report
     RouterSpec("api.missions"),

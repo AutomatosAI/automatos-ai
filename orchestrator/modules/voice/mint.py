@@ -28,6 +28,7 @@ from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from config import config
+from core import editions
 from modules.voice import live_billing, retell_api
 from modules.voice.live_socket import CALL_STATUS_SUPERSEDED, LIVE_CALL_STATUSES
 
@@ -95,7 +96,7 @@ def plan_allows_voice_live(plan: Optional[str]) -> bool:
     layers treat it; a workspace without a plan is the entry tier. The local edition is
     never plan-gated. The mint refuses on it; ``GET /api/voice/live-status`` reports it.
     """
-    if config.IS_LOCAL_EDITION:
+    if not editions.current().billing:
         return True
     from services.plan_tiers import family_enabled
 
@@ -108,7 +109,7 @@ def require_voice_live_plan(db: Session, workspace_id: Any) -> None:
     for a tier table that turns it off. Then D-6: a call is paid by the minute from credits,
     so a workspace that pays in credits and has none left is refused (402, coded
     ``credits_exhausted``) before Retell is asked (``live_billing.has_credits``)."""
-    if config.IS_LOCAL_EDITION:
+    if not editions.current().billing:
         return
     from core.models.workspaces import Workspace
     from services.credits.routing import CREDITS_EXHAUSTED_CODE

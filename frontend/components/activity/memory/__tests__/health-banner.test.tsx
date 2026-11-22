@@ -17,7 +17,7 @@ import { HealthBanner } from '../health-banner'
 
 const NO_KEY =
   'Memory needs an embeddings key. Add the key for your embedding provider (OpenRouter, unless ' +
-  'Settings → System Settings → Embeddings names another) in Settings → API Keys, then restart ' +
+  'Settings → System Settings → Embeddings names another) in Settings → Model keys, then restart ' +
   'the backend so memory picks it up.'
 
 function health(overrides: Partial<MemoryHealthResponse>): MemoryHealthResponse {

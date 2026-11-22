@@ -15,7 +15,8 @@ Pinned, for each of the three:
 * no field marked as a claim, and no field a voice line speaks, has words as its default (an empty
   default, for an optional part of a line, is not words);
 * the count of required fields: App promo 68 before US-D302 and 67 after (the big moment's button),
-  Cinematic product promo 69 and UI story promo 66, unchanged.
+  Cinematic product promo 69 and UI story promo 66, unchanged; on 19 Nov 2026 one fewer each (66, 68,
+  65): the claim a line shows without, empty until a sourced figure fills it.
 """
 from __future__ import annotations
 
@@ -34,7 +35,8 @@ from modules.documents import social_starters  # noqa: E402
 APP, CINEMATIC, UI_STORY = "app-promo", "cinematic-product-promo", "ui-story-promo"
 SLUGS = (APP, CINEMATIC, UI_STORY)
 FIELDS = {APP: 87, CINEMATIC: 122, UI_STORY: 120}
-REQUIRED = {APP: 67, CINEMATIC: 69, UI_STORY: 66}
+# 19 Nov 2026: one fewer each, the claim a line shows without (tracks_detail, outputs_count).
+REQUIRED = {APP: 66, CINEMATIC: 68, UI_STORY: 65}
 
 # Each default, and why its words are right for any business.
 APP_DEFAULTS = {
@@ -58,6 +60,7 @@ APP_DEFAULTS = {
     "dock_4": "a menu tab every app has",
     "mock_button": "US-D302: a generic button word that begins a step, pressed on screen",
     "end_note": "empty: small print only when the business's copy rules call for it",
+    "tracks_detail": "empty: a claim, shown only with its sourced figure; the list reads whole without it",
 }
 # The chat, the board, the question card, the morning, the results and the team: the screens the
 # Cinematic product promo and the UI story promo share, field for field.
@@ -108,6 +111,7 @@ SCREEN_DEFAULTS = {
     "outputs_pill_2": "a generic filter tab",
     "outputs_pill_3": "a generic filter tab",
     "outputs_pill_4": "a generic filter tab",
+    "outputs_count": "empty: a claim, shown only with its sourced count; the line reads whole without it",
     "team_line_2": "empty: the team's statement can be one line",
     "team_line_2_accent": "empty: the line reads whole without accent words",
     "team_line_3": "empty: the team's statement can be one line",

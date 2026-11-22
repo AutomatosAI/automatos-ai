@@ -216,6 +216,15 @@ def test_seed_module_reads_config_only_and_carries_no_personal_data():
     assert "clerk" not in content.lower()
 
 
+def test_the_welcome_post_from_before_model_keys_is_a_prior_version():
+    """An untouched welcome post still saying "Settings → API Keys" is refreshed, not kept as a user edit."""
+    old = WELCOME_CONTENT.replace("**Settings → Model keys**", "**Settings → API Keys**")
+    assert old != WELCOME_CONTENT
+    columns = {**seed_mod._post_columns(uuid.UUID(int=0), None), "content": old,
+               "reading_time_minutes": seed_mod._reading_time_minutes(old)}
+    assert post_fingerprint(SimpleNamespace(**columns)) in seed_mod.PRIOR_SEED_FINGERPRINTS
+
+
 def test_welcome_post_is_the_db_resident_outputs_member():
     columns = seed_mod._post_columns(uuid.uuid4(), None)
     assert columns["file_path"] is None  # content served from blog_posts.content — no worker fetch
@@ -233,8 +242,8 @@ def test_load_seed_data_calls_the_seed_gated_inside_its_own_try_except():
     assert "from core.seeds.seed_local_first_run import seed_local_first_run" in before
     assert "try:" in before
     assert "except Exception" in after, "a seed failure must not abort the other seeders"
-    # the gate lives in the seed itself (config.AUTH_EDITION), not in the loader
-    assert 'config.AUTH_EDITION != "local"' in _SEED_SRC
+    # the gate lives in the seed itself (the edition's capability), not in the loader
+    assert "if not editions.current().seeds_first_run_content:" in _SEED_SRC
 
 
 # --------------------------------------------------------------------------- #

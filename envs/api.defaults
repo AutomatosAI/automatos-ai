@@ -113,7 +113,7 @@ LOCAL_OPERATOR_EMAIL=local@automatos.local
 # from the PLATFORM key slot — core/llm/workspace_keys.py reads the key row of
 # THIS workspace (the PR #610 'read the key where it lives' seam). Locally that
 # is the single default workspace, so the OpenRouter/OpenAI key you add in
-# Settings → API Keys powers embeddings too. Unset, every document upload ends
+# Settings → Model keys powers embeddings too. Unset, every document upload ends
 # 'failed' (no embedding provider) while the API still says 'uploaded'.
 PLATFORM_KEY_WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1
 
@@ -176,7 +176,7 @@ S3_VECTORS_ENABLED=false
 # -----------------------------------------------------------------------------
 # [ACTIVE] Durable (L3) memory and field memory run on Qdrant, which the default
 # stack starts (the qdrant service in docker-compose.yml). Writing a memory also
-# needs an embeddings key in Settings → API Keys: OpenRouter's, or the key of the
+# needs an embeddings key in Settings → Model keys: OpenRouter's, or the key of the
 # provider chosen under Settings → System Settings → Embeddings (see
 # PLATFORM_KEY_WORKSPACE_ID above); until there is one, Knowledge → Memory says so.
 # Your own Qdrant: QDRANT_URL in envs/api.local. Memory off: QDRANT_URL= (empty) in

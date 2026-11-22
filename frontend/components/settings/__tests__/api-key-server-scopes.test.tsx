@@ -1,5 +1,5 @@
 /**
- * The create-key form's scopes (Settings › Widget SDK › API keys).
+ * The create-key form's scopes (Settings › API keys).
  *
  * The server accepts six scopes for a product's own backend (orchestrator/api/api_keys.py
  * `VALID_PERMISSIONS`: tasks:read, tasks:write, memory:read, memory:write, agents:chat,

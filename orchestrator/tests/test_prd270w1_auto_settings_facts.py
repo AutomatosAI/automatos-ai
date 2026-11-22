@@ -21,7 +21,7 @@ def install(monkeypatch):
     from config import config
 
     def _set(local: bool, cloud_url: str) -> None:
-        monkeypatch.setattr(type(config), "IS_LOCAL_EDITION", local)
+        monkeypatch.setattr(config, "AUTH_EDITION", "local" if local else "saas")
         monkeypatch.setattr(config, "AUTOMATOS_CLOUD_URL", cloud_url)
     return _set
 
@@ -43,6 +43,8 @@ def test_a_local_install_with_the_sync_off_does_not_name_it(install, cloud_url):
     facts = edition_facts()
     assert "Automatos Cloud" not in facts
     assert "Appearance, Widget SDK. There is no Billing" in facts
+    # A local install has Model keys but not the hosted-only API keys tab.
+    assert "Model keys" in facts and "API keys" not in facts
 
 
 def test_the_hosted_edition_never_names_it(install):
@@ -51,7 +53,7 @@ def test_the_hosted_edition_never_names_it(install):
     install(False, CLOUD)
     facts = edition_facts()
     assert "Automatos Cloud" not in facts
-    assert "Widget SDK, Billing." in facts
+    assert "Widget SDK, API keys, Billing." in facts
 
 
 def test_the_local_tab_list_is_the_local_tabs_and_the_shared_ones():

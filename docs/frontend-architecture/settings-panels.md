@@ -68,6 +68,7 @@ flowchart TD
   Tabs --> System["system-settings"]
   Tabs --> Orchestrator["orchestrator"]
   Tabs --> ApiKeys["api-keys"]
+  Tabs --> ModelKeys["model-keys"]
   Tabs --> Webhooks["webhooks"]
   Tabs --> Channels["channels"]
   Tabs --> Notifications["notifications"]
@@ -75,7 +76,8 @@ flowchart TD
   Tabs --> Session["session-mode"]
   System --> SystemComponent["SystemSettingsTab"]
   Orchestrator --> LLMComponent["SystemLLMSettingsTab"]
-  ApiKeys --> ApiComponent["ApiKeysSettingsTab"]
+  ApiKeys --> ApiComponent["ApiKeyManager"]
+  ModelKeys --> ModelComponent["ApiKeysSettingsTab"]
   Webhooks --> WebhookComponent["WebhooksSettingsTab"]
   Channels --> ChannelComponent["ChannelsSettingsTab"]
   Notifications --> NotificationComponent["NotificationsSettingsTab"]
@@ -217,9 +219,11 @@ Sources: [orchestrator/core/llm/manager.py:70-179](), [frontend/components/setti
 
 ---
 
-## 5. API Keys, Credentials, Webhooks, Channels, Notifications, and Widget SDK
+## 5. API keys, Model keys, Credentials, Webhooks, Channels, Notifications, and Widget SDK
 
-The panel registers separate tabs for API keys, credentials, webhooks, channels, notifications, and Widget SDK. The supplied code establishes their component names and edition visibility, but does not include the implementations of the corresponding API-key, webhook, channel, notification, or widget components [frontend/components/settings/SettingsPanel.tsx:3-15](), [frontend/components/settings/SettingsPanel.tsx:59-97]().
+**API keys** (`api-keys`, hosted only) holds the workspace's own keys through `ApiKeyManager`: public keys for the widget in a web page, and server keys for a product's backend. **Model keys** (`model-keys`, both editions) holds the person's own model-provider keys (BYOK) through `ApiKeysSettingsTab`.
+
+The panel registers separate tabs for API keys, model keys, credentials, webhooks, channels, notifications, and Widget SDK. The supplied code establishes their component names and edition visibility, but does not include the implementations of the corresponding API-key, webhook, channel, notification, or widget components [frontend/components/settings/SettingsPanel.tsx:3-15](), [frontend/components/settings/SettingsPanel.tsx:59-97]().
 
 The credentials API uses `CredentialStore` through a dependency provider and exposes credential-type listing. The API code describes credential types as schemas used for dynamic form generation. Credential access is workspace-scoped: `_check_credential_workspace()` rejects a credential with a mismatched workspace, and denies a null-workspace credential to non-admin callers except for the specified API-key lane [orchestrator/api/credentials.py:33-37](), [orchestrator/api/credentials.py:53-56](), [orchestrator/api/credentials.py:66-84](), [orchestrator/api/credentials.py:90-109]().
 

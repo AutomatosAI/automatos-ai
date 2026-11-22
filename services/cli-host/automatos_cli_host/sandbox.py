@@ -16,7 +16,8 @@ confines every shell command AND every process that command starts:
 * reads: everywhere except the credential stores below, the host's own state
   and the platform's secrets;
 * network: the package registries plus what the operator adds
-  (``--session-allow-domain``); any other host is refused, never asked;
+  (``--session-allow-domain``) and, in dev-box mode, GitHub over https
+  (``GITHUB_DOMAINS``); any other host is refused, never asked;
 * no way out: ``allowUnsandboxedCommands`` is false, and ``failIfUnavailable``
   is true — a machine that cannot sandbox never runs the session unsandboxed.
 
@@ -41,6 +42,12 @@ from .env import user_shell_path
 DEFAULT_ALLOWED_DOMAINS = (
     "registry.npmjs.org", "registry.yarnpkg.com", "pypi.org", "files.pythonhosted.org",
 )
+# Dev-box mode (``dev_box.py``): what git and gh need over https to push a branch and
+# open a pull request (github.com: git; api.github.com: gh), plus GitHub's archive and
+# raw-file hosts that package installs fetch from. Only for a session that carries the
+# dev-box token. Not uploads.github.com or objects.githubusercontent.com: release
+# uploads and downloads, which no allowed command makes.
+GITHUB_DOMAINS = ("github.com", "api.github.com", "codeload.github.com", "raw.githubusercontent.com")
 
 # Where the usual CLIs keep a login. Claude Code's sandbox can READ the whole
 # machine by default, these included (its docs say so); a session never needs them.
@@ -113,21 +120,23 @@ def deny_read(secret_roots: Sequence[Path] = (), off_limits: Sequence[Path] = ()
 
 
 def claude_settings(sandbox: SessionSandbox, *, secret_roots: Sequence[Path] = (),
-                    off_limits: Sequence[Path] = ()) -> Dict[str, Any]:
+                    off_limits: Sequence[Path] = (), github: bool = False) -> Dict[str, Any]:
     """The ``sandbox`` block of a Claude session's ``--settings`` file. A
     ``--settings`` file loads whatever ``--setting-sources`` says; its booleans
-    win over the operator's user settings, its lists add to theirs."""
+    win over the operator's user settings, its lists add to theirs. ``github``:
+    a dev-box session, which also reaches ``GITHUB_DOMAINS``; nothing else changes."""
+    domains = dict.fromkeys((*sandbox.allowed_domains, *(GITHUB_DOMAINS if github else ())))
     return {
         "enabled": True,
         "failIfUnavailable": True,
         "allowUnsandboxedCommands": False,
         "autoAllowBashIfSandboxed": False,
         "filesystem": {"denyRead": deny_read(secret_roots, off_limits)},
-        "network": {"allowedDomains": list(sandbox.allowed_domains), "strictAllowlist": True},
+        "network": {"allowedDomains": list(domains), "strictAllowlist": True},
     }
 
 
 __all__ = [
-    "CREDENTIAL_PATHS", "DEFAULT_ALLOWED_DOMAINS", "INSTALL_HINT", "LINUX_TOOLS", "SessionSandbox",
+    "CREDENTIAL_PATHS", "DEFAULT_ALLOWED_DOMAINS", "GITHUB_DOMAINS", "INSTALL_HINT", "LINUX_TOOLS", "SessionSandbox",
     "claude_settings", "deny_read", "missing_tools", "unavailable_reason",
 ]

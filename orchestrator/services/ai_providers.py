@@ -51,6 +51,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from config import config
+from core import editions
 from core.cli_presets import USAGE_PROVIDER_LABELS, usage_provider_slug
 from core.cli_runtime import is_cli_agent, session_cli
 from core.llm import embedding_manager, rerank_manager
@@ -168,13 +169,14 @@ def _overrides_on(workspace: Optional[Workspace]) -> List[str]:
 def _platform_routes(db: Session, workspace_id: uuid.UUID) -> ProviderNames:
     """(b) Chat providers this edition allows a platform key for, with a platform key present.
 
-    ``workspace_id`` is unused: a platform key serves every workspace.
+    ``workspace_id`` is unused: a platform key serves every workspace. The pod's own role
+    counts as Bedrock's key when ``AWS_USE_WORKLOAD_IDENTITY`` is on (PRD-278 US-103).
     """
     allowed = [slug for slug in registry.chat_slugs() if registry.platform_key_allowed(slug)]
     present = (
         set(_operator_workspace_slugs(db))
         | set(_credential_store_slugs(db, allowed))
-        | {slug for slug in allowed if registry.env_api_key(slug)}
+        | {slug for slug in allowed if registry.env_api_key(slug) or registry.runs_on_workload_identity(slug)}
     )
     return _registry_names(slug for slug in allowed if slug in present)
 
@@ -236,13 +238,14 @@ def _credential_store_slugs(db: Session, slugs: List[str]) -> List[str]:
 
 
 def _embeddings(_db: Session, _workspace_id: uuid.UUID) -> ProviderNames:
-    """(c) The embeddings provider, read as ``EmbeddingManager._load_provider`` reads it.
+    """(c) The embeddings provider, read by the manager's own read (``configured_provider``).
 
-    The ``embeddings.provider`` system setting, else ``config.EMBEDDING_PROVIDER``.
+    The ``embeddings.provider`` system setting, else ``config.EMBEDDING_PROVIDER``;
+    ``EMBEDDING_PROVIDER=bedrock`` first (PRD-278 US-501), listed as AWS Bedrock.
     Unset, ``disabled`` and ``huggingface_local`` add none; a slug the registry
     knows takes its label, so a provider that is also a chat route appears once.
     """
-    provider = embedding_manager.get_system_setting("provider") or config.EMBEDDING_PROVIDER
+    provider = embedding_manager.configured_provider()
     if not provider or provider in EMBEDDINGS_STAY_HERE:
         return {}
     return _registry_names([EMBEDDINGS_REGISTRY_SLUGS.get(provider, provider)])
@@ -268,7 +271,7 @@ def _session_runtimes(db: Session, workspace_id: uuid.UUID) -> ProviderNames:
     CLI with no preset adds none: no host runs it, and its text is never shown.
     Nothing on saas, where session mode cannot be switched on.
     """
-    if not (config.IS_LOCAL_EDITION and config.CLI_RUNTIME_ENABLED):
+    if not (editions.current().session_mode and config.CLI_RUNTIME_ENABLED):
         return {}
     rows = db.query(Agent.configuration).filter(Agent.workspace_id == workspace_id).all()
     slugs = {
@@ -309,7 +312,7 @@ def _plan_allows_voice(plan: Optional[str]) -> bool:
     an unknown plan resolves to the entry tier, which does. A local install is
     never plan-gated.
     """
-    if not config.IS_SAAS_EDITION:
+    if not editions.current().billing:
         return True
     plan_name = plan or DEFAULT_PLAN
     if bool(plan_tiers.exposure_for_plan(plan_name)["families"].get(VOICE_FAMILY)):
