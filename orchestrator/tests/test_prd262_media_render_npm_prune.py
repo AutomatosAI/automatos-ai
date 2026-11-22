@@ -33,7 +33,7 @@ LOCK = json.loads((MEDIA_RENDER / "js" / "package-lock.json").read_text())
 TRACE_STEP = "Render, check and snapshot never load the pruned npm paths (Node's module loading traced)"
 SIZE_STEP = "The image is at most 1.30 GB on disk (amd64)"
 
-# What render, check and snapshot never load (hyperframes 0.8.220's cli.js, read 5 Nov).
+# What render, check and snapshot never load (hyperframes 0.8.220's cli.js, read 5 Nov; its imports the same in 0.9.70).
 PRUNED = (
     "hyperframes/dist/studio",
     "hyperframes/dist/skills",
