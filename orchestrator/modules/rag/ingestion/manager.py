@@ -32,6 +32,7 @@ import psycopg2
 from botocore.exceptions import ClientError
 
 from core.database.tls import database_tls
+from core.llm.clients.base import EmbeddingUnavailableError
 from core.storage import FAST_FAIL, ensure_bucket, get_s3_client
 from modules.rag.chunking.text_splitters import PythonCodeTextSplitter, RecursiveCharacterTextSplitter  # PRD-262 US-026
 from modules.rag.ingestion.section_chunks import sections_first  # F311 (night 9)
@@ -87,6 +88,14 @@ def _kb_entities_table_exists(cursor) -> bool:
         logger.debug("kb_entities existence check failed — skipping entity extraction", exc_info=True)
         return False
     return _KB_ENTITIES_EXISTS
+
+
+def _log_cache_split(total: int, misses: int, stale: int, target_dim: int) -> None:
+    """The embedding cache's answer for a batch, in the log."""
+    if stale:
+        logger.warning(f"Embedding cache: {stale} stale entries (dim != {target_dim}), truncating/regenerating")
+    if total > misses:
+        logger.info(f"Embedding cache: {total - misses}/{total} hits, {misses} misses")
 
 
 class DocumentStatus(Enum):
@@ -1420,115 +1429,94 @@ class DocumentManager:
         return embedding
 
     async def _generate_embedding(self, text: str) -> List[float]:
-        """Generate embedding for text with caching"""
+        """Generate embedding for text with caching.
+
+        The cache is keyed by the embedding manager's space (provider, model and size:
+        ``EmbeddingManager.space_key``), so a vector another model made is never served for this
+        one (PRD-278 Wave 5); within one space a longer cached vector is cut to size, as before.
+        """
         try:
-            # Try cache first (massive cost savings!)
             from core.cache import get_cache_service
             cache = get_cache_service()
+            space = self.embedding_manager.space_key()
             target_dim = self._get_target_dimension()
 
-            cached_embedding = cache.get_embedding(text)
+            cached_embedding = cache.get_embedding(text, model=space)
             if cached_embedding is not None:
-                # Validate dimension — stale cache may have wrong size
                 if len(cached_embedding) == target_dim:
-                    logger.debug(f"✅ Using cached embedding (saved API call)")
+                    logger.debug("Using cached embedding (saved API call)")
                     return cached_embedding
-                elif len(cached_embedding) > target_dim:
-                    # Matryoshka: truncate and re-cache
+                if len(cached_embedding) > target_dim:
                     truncated = cached_embedding[:target_dim]
-                    cache.set_embedding(text, truncated)
-                    logger.debug(f"✅ Truncated cached embedding {len(cached_embedding)}→{target_dim}")
+                    cache.set_embedding(text, truncated, model=space)
+                    logger.debug(f"Truncated cached embedding {len(cached_embedding)}→{target_dim}")
                     return truncated
-                else:
-                    # Dimension too small — discard, regenerate
-                    logger.warning(f"Cached embedding dim {len(cached_embedding)} < {target_dim}, regenerating")
+                logger.warning(f"Cached embedding dim {len(cached_embedding)} < {target_dim}, regenerating")
 
-            # Cache miss - generate new embedding
             embedding = await self.embedding_manager.generate_embedding(text)
-
-            # Cache for future use
-            cache.set_embedding(text, embedding)
-            logger.debug(f"💾 Cached new embedding")
-
+            cache.set_embedding(text, embedding, model=space)
+            logger.debug("Cached new embedding")
             return embedding
         except Exception as e:
             logger.error(f"Error generating embedding: {e}")
             raise
 
+    @staticmethod
+    def _split_cached(texts: List[str], cached: Dict[str, Optional[List[float]]],
+                      target_dim: int) -> Tuple[List[Optional[List[float]]], List[int], Dict[str, List[float]], int]:
+        """Each text's cached vector at the target size (a longer one cut to it), and what is left
+        to embed: (results, the positions to embed, the cut vectors to cache again, stale count)."""
+        results: List[Optional[List[float]]] = [None] * len(texts)
+        misses: List[int] = []
+        recache: Dict[str, List[float]] = {}
+        stale = 0
+        for i, text in enumerate(texts):
+            emb = cached.get(text)
+            if emb is not None and len(emb) == target_dim:
+                results[i] = emb
+            elif emb is not None and len(emb) > target_dim:
+                results[i] = recache[text] = emb[:target_dim]
+                stale += 1
+            else:
+                misses.append(i)
+                stale += 0 if emb is None else 1  # too short: embedded again
+        return results, misses, recache, stale
+
     async def _generate_embeddings_batch(self, texts: List[str], max_concurrent: int = 5) -> List[List[float]]:
         """
         Generate embeddings for multiple texts with caching and parallel processing.
 
-        Checks cache first, then batch-embeds only the cache misses.
-        Uses parallel API calls for providers that support it (OpenRouter).
+        Checks the cache (keyed by the embedding space, as ``_generate_embedding``), then
+        batch-embeds only the misses. Any failure but one falls back to embedding the texts one
+        at a time; ``EmbeddingUnavailableError`` (no provider, or one that will not work until it
+        is changed: PRD-278 Wave 5) raises at once, since one at a time would meet it again.
         """
         try:
             from core.cache import get_cache_service
             cache = get_cache_service()
-
-            # Check cache for all texts
-            cached = cache.get_embeddings_batch(texts)
-
-            # Separate hits from misses (with dimension validation)
-            miss_indices = []
-            miss_texts = []
-            results = [None] * len(texts)
+            space = self.embedding_manager.space_key()
             target_dim = self._get_target_dimension()
-            stale_count = 0
-            recache_entries = {}
-
-            for i, text in enumerate(texts):
-                emb = cached.get(text)
-                if emb is not None:
-                    if len(emb) == target_dim:
-                        results[i] = emb
-                    elif len(emb) > target_dim:
-                        # Matryoshka: truncate stale cache entry
-                        truncated = emb[:target_dim]
-                        results[i] = truncated
-                        recache_entries[text] = truncated
-                        stale_count += 1
-                    else:
-                        # Too small — treat as miss
-                        miss_indices.append(i)
-                        miss_texts.append(text)
-                        stale_count += 1
-                else:
-                    miss_indices.append(i)
-                    miss_texts.append(text)
-
-            cache_hits = len(texts) - len(miss_texts)
-            if stale_count > 0:
-                logger.warning(f"Embedding cache: {stale_count} stale entries (dim != {target_dim}), truncating/regenerating")
-            if cache_hits > 0:
-                logger.info(f"Embedding cache: {cache_hits}/{len(texts)} hits, {len(miss_texts)} misses")
-
-            # Re-cache truncated entries
-            if recache_entries:
-                cache.set_embeddings_batch(recache_entries)
-                logger.info(f"Re-cached {len(recache_entries)} truncated embeddings")
-
-            if not miss_texts:
+            results, misses, recache, stale = self._split_cached(
+                texts, cache.get_embeddings_batch(texts, model=space), target_dim)
+            _log_cache_split(len(texts), len(misses), stale, target_dim)
+            if recache:
+                cache.set_embeddings_batch(recache, model=space)
+                logger.info(f"Re-cached {len(recache)} truncated embeddings")
+            if not misses:
                 return results
 
-            # Batch embed the misses
             new_embeddings = await self.embedding_manager.generate_embeddings_batch(
-                miss_texts, max_concurrent=max_concurrent
-            )
-
-            # Fill results and cache the new embeddings
-            new_cache_entries = {}
-            for idx, emb in zip(miss_indices, new_embeddings):
-                results[idx] = emb
-                new_cache_entries[texts[idx]] = emb
-
-            if new_cache_entries:
-                cache.set_embeddings_batch(new_cache_entries)
-                logger.info(f"Cached {len(new_cache_entries)} new embeddings")
-
+                [texts[i] for i in misses], max_concurrent=max_concurrent)
+            fresh = {}
+            for idx, emb in zip(misses, new_embeddings):
+                results[idx] = fresh[texts[idx]] = emb
+            if fresh:
+                cache.set_embeddings_batch(fresh, model=space)
+                logger.info(f"Cached {len(fresh)} new embeddings")
             return results
-
-        except Exception as e:
+        except EmbeddingUnavailableError:
+            raise
+        except Exception as e:  # noqa: BLE001 — as before: the sequential pass raises if it fails too
             logger.warning(f"Batch embedding with cache failed ({e}), falling back to sequential")
             return [await self._generate_embedding(t) for t in texts]
     
