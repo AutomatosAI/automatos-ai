@@ -11,6 +11,10 @@ fullnameOverride: ""
 # Vault CSI driver...). The chart never generates or stores secrets. Keys:
 #   DATABASE_URL               postgresql://USER:PASSWORD@HOST:5432/DB
 #   REDIS_URL                  redis://:PASSWORD@HOST:6379/0
+#                              with TLS (certificate checked) and an ACL user:
+#                              rediss://USER:PASSWORD@HOST:6379/0
+#                              The certificate is checked against the image's trust
+#                              store; nothing in the address can switch that off.
 #   API_KEY                    the platform API key
 #   CREDENTIAL_ENCRYPTION_KEY  a Fernet key; every pod must share it, or credentials
 #                              saved by one pod can't be read by another
