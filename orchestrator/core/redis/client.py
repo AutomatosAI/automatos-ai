@@ -8,6 +8,13 @@ import redis.asyncio as aioredis
 from typing import Optional, Dict, Any
 from contextlib import contextmanager, asynccontextmanager
 
+from core.redis.connection import (
+    ConnectionKind,
+    RedisTarget,
+    connection_kwargs,
+    redis_target_from_config,
+)
+
 logger = logging.getLogger(__name__)
 
 #: Several services call the SYNC client on the event loop (memory L1, the
@@ -24,16 +31,10 @@ REDIS_HEALTH_CHECK_INTERVAL_S = 30
 class RedisClient:
     """Redis client for publishing workflow execution updates"""
     
-    def __init__(self, host: str = '127.0.0.1', port: int = 6379, password: Optional[str] = None, db: int = 0):
-        self.host = host
-        self.port = port
-        self.password = password
-        self.db = db
+    def __init__(self, target: RedisTarget):
+        self.target = target
         self.pool = redis.ConnectionPool(
-            host=host,
-            port=port,
-            password=password,
-            db=db,
+            **connection_kwargs(target, ConnectionKind.POOL),
             decode_responses=True,
             max_connections=50,
             socket_timeout=REDIS_SOCKET_TIMEOUT_S,
@@ -42,7 +43,7 @@ class RedisClient:
             health_check_interval=REDIS_HEALTH_CHECK_INTERVAL_S,
         )
         self.logger = logging.getLogger(__name__)
-        self.logger.info(f"Redis connection pool created for {host}:{port}")
+        self.logger.info("Redis connection pool created for %s", target.describe())
 
     def get_redis(self):
         """Get a Redis connection from the pool"""
@@ -67,10 +68,7 @@ class RedisClient:
         """
         # Connect bounded; no read timeout — a subscription idles by design.
         redis_async = aioredis.Redis(
-            host=self.host,
-            port=self.port,
-            password=self.password,
-            db=self.db,
+            **connection_kwargs(self.target, ConnectionKind.ASYNC),
             decode_responses=True,
             socket_connect_timeout=REDIS_CONNECT_TIMEOUT_S,
             socket_keepalive=True,
@@ -156,63 +154,35 @@ class RedisClient:
 _redis_client: Optional[RedisClient] = None
 
 
-def init_redis_client(host: str = '127.0.0.1', port: int = 6379, password: Optional[str] = None, db: int = 0):
-    """Initialize the global Redis client (explicit init)"""
+def init_redis_client(target: RedisTarget) -> None:
+    """Initialize the global Redis client (explicit init)."""
     global _redis_client
-    _redis_client = RedisClient(host=host, port=port, password=password, db=db)
+    _redis_client = RedisClient(target)
     _redis_client.test_connection()
     logger.info("Redis client initialized")
 
 
 def get_redis_client() -> Optional[RedisClient]:
-    """
-    Get the global Redis client instance with lazy initialization.
-    Uses centralized config - supports REDIS_URL (Railway, Heroku) or individual vars.
-    Returns None if Redis is not configured (optional service).
-    """
-    global _redis_client
-    if _redis_client is None:
-        from config import config
-        from urllib.parse import urlparse
-        
-        # Try REDIS_URL first (Railway, Heroku, etc.)
-        redis_url = config.REDIS_URL
-        if redis_url:
-            try:
-                parsed = urlparse(redis_url)
-                host = parsed.hostname
-                port = parsed.port or 6379
-                password = parsed.password
-                db = int(parsed.path.lstrip('/')) if parsed.path.lstrip('/') else 0
-                
-                if host and port:
-                    try:
-                        logger.info("Redis target %s:%s db=%s (from REDIS_URL)", host, port, db)
-                        init_redis_client(host=host, port=port, password=password, db=db)
-                    except Exception as e:
-                        logger.error(f"Failed to initialize Redis client from URL: {e}")
-                        return None
-                else:
-                    logger.warning("Redis URL provided but could not parse host/port")
-                    return None
-            except Exception as e:
-                logger.error(f"Failed to parse REDIS_URL: {e}")
-                return None
-        else:
-            # Fallback to individual environment variables
-            host = config.REDIS_HOST
-            port = config.REDIS_PORT
-            password = config.REDIS_PASSWORD
-            
-            if not host or not port:
-                logger.warning("Redis not configured (REDIS_URL or REDIS_HOST/REDIS_PORT missing). Redis features disabled.")
-                return None
-            
-            try:
-                logger.info("Redis target %s:%s (from REDIS_HOST/REDIS_PORT)", host, port)
-                init_redis_client(host=host, port=int(port), password=password)
-            except Exception as e:
-                logger.error(f"Failed to initialize Redis client: {e}")
-                return None
-    return _redis_client
+    """The global Redis client, built on first use from the settings.
 
+    The address is ``REDIS_URL``, or one built from ``REDIS_HOST``/``REDIS_PORT``
+    (see ``core.redis.connection``). Returns None when Redis is not configured
+    (an optional service) or cannot be set up.
+    """
+    if _redis_client is None:
+        try:
+            target = redis_target_from_config()
+        except ValueError as e:
+            # Never the address or the error's text: either can hold part of a password.
+            logger.error("REDIS_URL is not a usable Redis address (%s). Redis features disabled.", type(e).__name__)
+            return None
+        if target is None:
+            logger.warning("Redis not configured (REDIS_URL or REDIS_HOST/REDIS_PORT missing). Redis features disabled.")
+            return None
+        try:
+            logger.info("Redis target %s", target.describe())
+            init_redis_client(target)
+        except Exception:
+            logger.exception("Failed to initialize Redis client for %s", target.describe())
+            return None
+    return _redis_client

@@ -142,11 +142,12 @@ def test_every_marker_op_is_bounded(monkeypatch):
 
 def test_registry_client_retries_nothing_and_times_out_fast(monkeypatch):
     import core.redis.client as redis_client_module
+    from core.redis.connection import RedisTarget
 
     monkeypatch.setattr(
         redis_client_module,
         "get_redis_client",
-        lambda: SimpleNamespace(host="127.0.0.1", port=1, password=None, db=0),
+        lambda: SimpleNamespace(target=RedisTarget(host="127.0.0.1", port=1)),
     )
     client = TurnRegistry()._client()
     assert client is not None
