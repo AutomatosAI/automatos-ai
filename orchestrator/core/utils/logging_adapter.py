@@ -37,9 +37,7 @@ __all__ = [
     "ContextFilter",
     "install_request_context_logging",
     "set_request_id",
-    "clear_request_id",
     "set_run_context",
-    "set_request_context",
 ]
 
 
@@ -96,10 +94,6 @@ def set_request_id(request_id: Optional[str] = None) -> Token[str]:
     return request_id_var.set(rid)
 
 
-def clear_request_id(token: Token[str]) -> None:
-    request_id_var.reset(token)
-
-
 def set_run_context(
     *,
     run_id: Optional[str] = None,
@@ -116,34 +110,3 @@ def set_run_context(
         workflow_id_var.set(workflow_id)
     if tenant_id is not None:
         tenant_id_var.set(tenant_id)
-
-
-def set_request_context(
-    *,
-    request_id: str = "",
-    workspace_id: str = "",
-    user_id: str = "",
-    method: str = "",
-    path: str = "",
-    correlation_id: str = "",
-    agent_id: str = "",
-) -> None:
-    """Set full request context for structured logging.
-
-    Call from FastAPI middleware to auto-enrich all logs
-    within the request lifecycle. No need to pass extra={} at call sites.
-    """
-    if request_id:
-        request_id_var.set(request_id)
-    if workspace_id:
-        workspace_id_var.set(workspace_id)
-    if user_id:
-        user_id_var.set(user_id)
-    if method:
-        http_method_var.set(method)
-    if path:
-        http_path_var.set(path)
-    if correlation_id:
-        correlation_id_var.set(correlation_id)
-    if agent_id:
-        agent_id_var.set(agent_id)

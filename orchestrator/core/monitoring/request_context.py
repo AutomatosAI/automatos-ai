@@ -9,11 +9,13 @@ never seen outside it: not by the middleware around it, not by uvicorn's access 
 here, in uvicorn's task and before any other middleware of the app runs, the request's id is
 on every line the request writes, its access line included (``server_log_lines``).
 
-What it sets is what the old middleware set: the request's ``X-Request-ID``, or a new
-12-character id; the method and the path; the workspace from ``X-Workspace-ID`` (or
+What it sets is what the old middleware set: the request's ``X-Request-ID``, kept to the
+characters ``safe_request_id`` keeps and at most 128 of them, or a new 12-character id when
+it sends none or none is left; the method and the path; the workspace from ``X-Workspace-ID`` (or
 ``X-Workspace``) unless it is ``__all__``; the two ids on the server span (PRD-256); and
-``X-Request-ID`` on the response, the request's own when it sent one. Each value is put
-back when the request ends. Anything but an HTTP request passes through untouched.
+``X-Request-ID`` on the response. That one id is on every line the request writes, on the
+response, in a 500's body and on each call the API makes to the workspace worker. Each value
+is put back when the request ends, whether it answered or raised. Anything but an HTTP request passes through untouched.
 """
 from __future__ import annotations
 
@@ -24,6 +26,7 @@ from typing import Any, Awaitable, Callable, List, MutableMapping, Tuple
 from starlette.datastructures import URL, Headers
 
 from core.monitoring.automatos_logging import http_method_var, http_path_var, request_id_var, workspace_id_var
+from core.observability.error_response import safe_request_id
 from core.observability.otel import annotate_request
 
 REQUEST_ID_HEADER = "x-request-id"
@@ -75,7 +78,7 @@ class RequestContextMiddleware:
             await self.app(scope, receive, send)
             return
         headers = Headers(scope=scope)
-        request_id = headers.get(REQUEST_ID_HEADER) or uuid.uuid4().hex[:NEW_ID_LENGTH]
+        request_id = safe_request_id(headers.get(REQUEST_ID_HEADER)) or uuid.uuid4().hex[:NEW_ID_LENGTH]
         held = _hold(scope, headers, request_id)
         annotate_request(request_id_var.get(""), workspace_id_var.get(""))
         try:

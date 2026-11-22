@@ -155,6 +155,27 @@ def test_text_lines_are_as_before_and_the_access_line_ends_with_the_request_id()
     assert MARKER not in done.stdout + done.stderr and HASH not in done.stdout + done.stderr
 
 
+def test_at_warning_uvicorns_access_and_start_up_lines_are_dropped_too():
+    records = _json_lines(_run(BOOT + REQUEST, LOG_FORMAT="json", LOG_LEVEL="warning"))
+    assert {record["logger"] for record in records} == {"prd282.app", "urllib3.connectionpool", "prd282.boot"}
+    assert {record["level"] for record in records} == {"WARNING", "ERROR"}
+    assert not [record for record in records if record["logger"].startswith("uvicorn")]
+
+
+UNFIT = """
+logging.getLogger('prd282.app').info('%d items in %s', 'many')
+logging.getLogger('prd282.app').info('after')
+"""
+
+
+def test_a_message_that_cannot_be_built_is_still_one_record_that_says_so():
+    done = _run(BOOT + UNFIT, LOG_FORMAT="json")
+    unfit, after = _json_lines(done)
+    assert unfit["message"] == "log line could not be formatted: TypeError"
+    assert (unfit["logger"], unfit["level"]) == ("prd282.app", "INFO") and after["message"] == "after"
+    assert "--- Logging error ---" not in done.stderr
+
+
 RELAY = """
 import logging
 from core.monitoring.automatos_logging import LogRelayHandler, setup_logging

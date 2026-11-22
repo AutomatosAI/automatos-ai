@@ -130,20 +130,29 @@ def test_off_leaves_the_lifespan_as_it_was(monkeypatch):
     assert otel.with_tracing(lifespan) is lifespan
 
 
-def _called_names(relative: str) -> set:
-    tree = ast.parse((_ORCH / relative).read_text(encoding="utf-8"))
+def _called_names(tree: ast.AST) -> set:
     return {node.func.id for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+
+
+def _parsed(relative: str) -> ast.Module:
+    return ast.parse((_ORCH / relative).read_text(encoding="utf-8"))
 
 
 def test_main_wires_the_lifespan_and_the_instrumentation():
     """main.py: the provider around the lifespan, the server spans on the app, the IDs per request.
 
     PRD-282 US-301 moved the IDs per request into ``RequestContextMiddleware``, which main.py
-    registers, so the span's ``annotate_request`` call is in its module."""
-    assert {"with_tracing", "instrument_app"} <= _called_names("main.py")
-    assert "annotate_request" in _called_names("core/monitoring/request_context.py")
-    main_source = (_ORCH / "main.py").read_text(encoding="utf-8")
-    assert "app.add_middleware(RequestContextMiddleware)" in main_source
+    registers: the span's ``annotate_request`` call is in that middleware's ``__call__``."""
+    main = _parsed("main.py")
+    assert {"with_tracing", "instrument_app"} <= _called_names(main)
+    registered = [node for node in ast.walk(main) if isinstance(node, ast.Call)
+                  and isinstance(node.func, ast.Attribute) and node.func.attr == "add_middleware"
+                  and [getattr(arg, "id", None) for arg in node.args] == ["RequestContextMiddleware"]]
+    assert len(registered) == 1, "main.py registers RequestContextMiddleware once"
+    (middleware,) = [node for node in _parsed("core/monitoring/request_context.py").body
+                     if isinstance(node, ast.ClassDef) and node.name == "RequestContextMiddleware"]
+    (call,) = [node for node in middleware.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "__call__"]
+    assert "annotate_request" in _called_names(call)
 
 
 # ── settings ─────────────────────────────────────────────────────────────────

@@ -49,7 +49,7 @@ from config import config
 # PRD-282 US-301: LOG_FORMAT and LOG_LEVEL, the JSON line, and uvicorn's own lines (standard library only).
 from core.monitoring import log_settings
 from core.monitoring.json_log_format import JsonLineFormatter
-from core.monitoring.server_log_lines import format_server_lines
+from core.monitoring.server_log_lines import format_server_lines, level_server_lines
 # PRD-264 FR-17: no file hash from a request path in a log line (logging and re only).
 from core.monitoring.path_digests import guard_access_log_digests, redact_digest_segments
 # The request-log guard (#1051, #1178): its own module, which imports nothing but logging,
@@ -370,6 +370,10 @@ def request_log_fields() -> dict:
 # Setup Function
 # ─────────────────────────────────────────────
 
+# PRD-282: credential handling is not debug-logged. Loggers under this name stay at INFO or
+# above, whatever LOG_LEVEL says.
+CREDENTIALS_LOGGER = "core.credentials"
+
 # The console's text line before main.py's request-context format replaces it
 # (core.utils.logging_adapter.install_request_context_logging).
 TEXT_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -399,18 +403,20 @@ def setup_logging(
         enable_relay: Override LOG_RELAY_ENABLED env var
         log_format: ``text`` or ``json`` (default: LOG_FORMAT, text when unset)
 
-    Raises ``log_settings.LogSettingRefused``, naming the setting, when LOG_LEVEL or
-    LOG_FORMAT holds a value it cannot use (PRD-282 US-301): the install does not start.
-    The log-relay handler is the same in both formats.
+    A LOG_LEVEL or LOG_FORMAT that logging cannot use (PRD-282 US-301) never stops start-up:
+    the default is used (INFO, text) and one warning names the setting and what it may be.
+    uvicorn's own loggers take the level too. The log-relay handler is the same in both formats.
 
     Returns:
         Root logger (already configured)
     """
+    format_raw = config.LOG_FORMAT if log_format is None else log_format
+    unusable = log_settings.unusable(format_raw, config.LOG_LEVEL if level is None else None)
     level = log_settings.log_level(config.LOG_LEVEL) if level is None else level
-    console_formatter = _console_formatter(
-        service, log_settings.log_format(config.LOG_FORMAT if log_format is None else log_format))
+    console_formatter = _console_formatter(service, log_settings.log_format(format_raw))
     root = logging.getLogger()
     root.setLevel(level)
+    logging.getLogger(CREDENTIALS_LOGGER).setLevel(max(level, logging.INFO))
 
     # httpx logs every request line at INFO, URL included, and some URLs carry a
     # secret in the path: python-telegram-bot polls
@@ -445,8 +451,11 @@ def setup_logging(
     # uvicorn's own handlers: the same JSON line, or the text access line with the request id.
     json_formatter = console_formatter if isinstance(console_formatter, JsonLineFormatter) else None
     format_server_lines(json_formatter, request_id_var.get)
+    level_server_lines(level)
     guard_request_logs()
     guard_access_log_digests()   # PRD-264 FR-17: no checked file hash in the access log
+    for warning in unusable:
+        logging.getLogger(__name__).warning(warning)
     return root
 
 

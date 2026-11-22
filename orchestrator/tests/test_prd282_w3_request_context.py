@@ -6,8 +6,9 @@ own middleware, so the request's id is set in the task the server writes its acc
 from. These tests stand in for the server with a shim around the app that reads the id
 when the response starts, as uvicorn's access line does.
 
-* The id is the request's ``X-Request-ID``, or a new 12-character one; the response
-  carries it once. The method, path and workspace are set as before, ``__all__`` is no
+* The id is the request's ``X-Request-ID`` cleaned by ``safe_request_id`` (the characters
+  it keeps, at most 128), or a new 12-character one when none is sent or none is left; the
+  response carries it once, and a 500's body and its log line carry the same id. The method, path and workspace are set as before, ``__all__`` is no
   workspace, and every value is put back when the request ends.
 * A middleware inside it (``api_tracking_middleware`` is one) and the route see the id.
 * With tracing on, the server span carries the ids (``annotate_request``), and a JSON line
@@ -111,6 +112,59 @@ def test_a_request_without_an_id_gets_a_new_one_and_the_response_says_it():
 def test_the_workspace_is_the_one_the_request_names(headers, workspace):
     _, seen = _get(headers)
     assert seen["route"][1] == workspace
+
+
+@pytest.mark.parametrize("sent, kept", [
+    ("req 282 [x]", "req282x"), ("a" * 300, "a" * 128), ("evil\tline <script>", "evillinescript"),
+])
+def test_the_id_is_cleaned_once_and_every_reader_sees_that_value(sent, kept):
+    response, seen = _get({"X-Request-ID": sent})
+    assert response.headers.get_list("x-request-id") == [kept]
+    assert seen["access"] == seen["inner"] == seen["route"][0] == seen["line"]["request_id"] == kept
+
+
+@pytest.mark.parametrize("sent", [" [ ] ", "<>", "\t"])
+def test_an_id_that_cleans_to_nothing_is_replaced_by_a_new_one(sent):
+    response, seen = _get({"X-Request-ID": sent})
+    (request_id,) = response.headers.get_list("x-request-id")
+    assert re.fullmatch(r"[0-9a-f]{12}", request_id) and seen["route"][0] == request_id
+
+
+@pytest.mark.parametrize("sent", ["req 282 [x]", " [ ] "])
+def test_a_500_says_the_same_id_as_the_response_and_its_log_line(sent, caplog):
+    from core.observability.error_response import json_500_for_unhandled_errors
+
+    app = FastAPI()
+    app.middleware("http")(json_500_for_unhandled_errors)   # inside it, as main.py registers them
+
+    @app.get("/boom")
+    def boom():
+        raise RuntimeError("it broke")
+
+    app.add_middleware(RequestContextMiddleware)
+    with caplog.at_level(logging.ERROR, logger="core.observability.error_response"):
+        response = TestClient(app, raise_server_exceptions=False).get("/boom", headers={"X-Request-ID": sent})
+    (request_id,) = response.headers.get_list("x-request-id")
+    assert response.status_code == 500 and response.json()["request_id"] == request_id
+    (line,) = [r.getMessage() for r in caplog.records if r.name == "core.observability.error_response"]
+    assert line.endswith(f"(request_id={request_id})")
+
+
+def test_the_context_is_put_back_after_the_app_raises():
+    import asyncio
+
+    async def app(scope, receive, send):
+        raise RuntimeError("downstream")
+
+    async def serve() -> tuple:
+        scope = {"type": "http", "method": "GET", "path": "/x", "query_string": b"", "root_path": "",
+                 "scheme": "http", "server": ("t", 80),
+                 "headers": [(b"x-request-id", b"req-282"), (b"x-workspace-id", WS.encode())]}
+        with pytest.raises(RuntimeError):
+            await RequestContextMiddleware(app)(scope, None, None)
+        return _context()
+
+    assert asyncio.run(serve()) == ("", "", "", "")
 
 
 def test_anything_but_an_http_request_passes_through_untouched():
