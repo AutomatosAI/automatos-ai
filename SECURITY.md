@@ -37,6 +37,7 @@ Every report ends in one of two places: a published advisory, or a closed one wi
 ### 1. Triage, within two working days
 
 - Open the draft in the **Security** tab → **Advisories**. A report from a contributor arrives there too, often with a private fork.
+- **A report that came by email** has no draft yet. Open one (**Advisories** → **New draft security advisory**), paste in what the reporter sent, and add them to it so they can follow it and be credited.
 - Reproduce it, then set the severity with a CVSS vector (the advisory form has a calculator).
 - **Accept it,** or **close it** with the reason (not a vulnerability, out of scope, a duplicate). Either way, tell the reporter.
 
@@ -48,7 +49,11 @@ Every report ends in one of two places: a published advisory, or a closed one wi
 ### 3. Fix and merge
 
 - The fix ships with the test that proves it, as every change does.
-- **Private route:** merge from the advisory, which puts the fix on `main`.
+- **Private route:** merging from the advisory puts the fix, and its tests, on public `main`, which shows anyone reading the history what was wrong. So steps 3 to 5 happen together, on the same day and in this order:
+  1. prepare the release notes and the advisory text first, while the fix is still private;
+  2. merge from the advisory;
+  3. deploy the hosted edition and cut the release;
+  4. tell customers who run their own install (step 4), then publish (step 5).
 - **Public route:** merge the pull request, and link it from the advisory.
 
 ### 4. Ship it and tell people
