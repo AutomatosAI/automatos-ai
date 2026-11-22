@@ -18,8 +18,8 @@ from typing import Any, Optional
 
 import redis.asyncio as aioredis
 
-from config import config
 from core.ports.context import SharedContextPort
+from core.redis.connection import DEFAULT_DB, new_async_client, redis_target_from_url_or_host_settings
 
 logger = logging.getLogger(__name__)
 
@@ -35,17 +35,15 @@ def _patterns_key(context_id: str) -> str:
 
 
 async def _get_async_redis() -> aioredis.Redis:
-    """Build an async Redis connection from centralised config."""
-    url = config.REDIS_URL
-    if url:
-        return aioredis.from_url(url, decode_responses=True)
+    """Build an async Redis connection to the platform's Redis.
 
-    host = config.REDIS_HOST or "127.0.0.1"
-    port = int(config.REDIS_PORT or 6379)
-    password = config.REDIS_PASSWORD or None
-    return aioredis.Redis(
-        host=host, port=port, password=password, db=0, decode_responses=True
-    )
+    Through ``core.redis.connection`` like every other client, so ``rediss://``
+    and a user name are honoured. ``REDIS_URL`` when set; otherwise the host
+    settings, with 127.0.0.1 and 6379 for a missing host or port, database 0.
+    A malformed ``REDIS_URL`` raises ``ValueError``, as ``from_url`` did.
+    """
+    target = redis_target_from_url_or_host_settings(DEFAULT_DB)
+    return new_async_client(target, decode_responses=True)
 
 
 def _keyword_score(query: str, text: str) -> float:

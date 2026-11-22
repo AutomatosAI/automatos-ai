@@ -238,13 +238,14 @@ def _credential_store_slugs(db: Session, slugs: List[str]) -> List[str]:
 
 
 def _embeddings(_db: Session, _workspace_id: uuid.UUID) -> ProviderNames:
-    """(c) The embeddings provider, read as ``EmbeddingManager._load_provider`` reads it.
+    """(c) The embeddings provider, read by the manager's own read (``configured_provider``).
 
-    The ``embeddings.provider`` system setting, else ``config.EMBEDDING_PROVIDER``.
+    The ``embeddings.provider`` system setting, else ``config.EMBEDDING_PROVIDER``;
+    ``EMBEDDING_PROVIDER=bedrock`` first (PRD-278 US-501), listed as AWS Bedrock.
     Unset, ``disabled`` and ``huggingface_local`` add none; a slug the registry
     knows takes its label, so a provider that is also a chat route appears once.
     """
-    provider = embedding_manager.get_system_setting("provider") or config.EMBEDDING_PROVIDER
+    provider = embedding_manager.configured_provider()
     if not provider or provider in EMBEDDINGS_STAY_HERE:
         return {}
     return _registry_names([EMBEDDINGS_REGISTRY_SLUGS.get(provider, provider)])
