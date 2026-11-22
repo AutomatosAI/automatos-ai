@@ -1097,12 +1097,6 @@ async def api_tracking_middleware(request, call_next):
             pass  # Never let stats tracking break the response
 
 
-# PRD-282 US-301: the request's id, method, path and workspace for its logs, its span and its
-# X-Request-ID header. Plain ASGI and added last, so it is the outermost of the app's own
-# middleware: every line of the request, uvicorn's access line included, has its id.
-app.add_middleware(RequestContextMiddleware)
-
-
 # Include API routers
 app.include_router(agents_router)
 app.include_router(agent_execute_router)  # PRD-274 Wave 1: a run of one agent, filed as a board ticket
@@ -1224,6 +1218,12 @@ try:
     logger.info("Prometheus /metrics endpoint enabled")
 except Exception as e:
     logger.warning(f"Prometheus metrics disabled: {e}")
+
+# PRD-282 US-301: the request's id, method, path and workspace for its logs, its span and its
+# X-Request-ID header. Plain ASGI and added last, AFTER setup_metrics: its Prometheus
+# middleware runs the rest of the app in a task of its own, so this one must sit outside it
+# for uvicorn's access line to carry the request's id. Outermost of the app's own middleware.
+app.add_middleware(RequestContextMiddleware)
 
 # AlertManager webhook ingest → infrastructure_alerts table
 try:
