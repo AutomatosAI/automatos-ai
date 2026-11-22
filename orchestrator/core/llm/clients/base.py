@@ -11,6 +11,7 @@ import contextvars
 import functools
 import logging
 import re
+from concurrent.futures import Executor
 from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -65,6 +66,7 @@ class EmbeddingProvider(Enum):
     HUGGINGFACE_LOCAL = "huggingface_local"
     HUGGINGFACE_API = "huggingface_api"
     OPENROUTER = "openrouter"  # OpenRouter aggregator (20+ embedding models)
+    BEDROCK = "bedrock"  # bedrock-runtime, with the Bedrock chat client's credentials (PRD-278 US-501)
     DISABLED = "disabled"  # Deterministic fallback
 
 
@@ -141,9 +143,13 @@ def takes_one_sampling_param(model: Optional[str]) -> bool:
 _T = TypeVar("_T")
 
 
-async def run_blocking(fn: Callable[..., _T], *args: Any) -> _T:
-    """Run a provider's blocking SDK call on the default executor, in a copy of
-    the caller's context.
+def start_blocking(fn: Callable[..., _T], *args: Any, executor: Optional[Executor] = None) -> "asyncio.Future[_T]":
+    """Start a provider's blocking SDK call on ``executor`` (the default one when
+    None), in a copy of the caller's context, and return its future.
+
+    The one place a provider hops to a thread. ``run_blocking`` awaits it; a
+    caller that needs the future itself, to time a call from the moment a thread
+    takes it, calls this with its own executor.
 
     F196, reopened after the refresh-6 build: loop.run_in_executor does not
     carry context variables into its thread. The request, built in the thread,
@@ -152,7 +158,13 @@ async def run_blocking(fn: Callable[..., _T], *args: Any) -> _T:
     (req/ws/agent) was empty on the same lines.
     """
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, functools.partial(contextvars.copy_context().run, fn, *args))
+    return loop.run_in_executor(executor, functools.partial(contextvars.copy_context().run, fn, *args))
+
+
+async def run_blocking(fn: Callable[..., _T], *args: Any) -> _T:
+    """Run a provider's blocking SDK call on the default executor, in a copy of
+    the caller's context (``start_blocking``)."""
+    return await start_blocking(fn, *args)
 
 
 def live_stream(provider: Any, on_delta: Any) -> Optional[Callable[..., Awaitable[Any]]]:
@@ -344,5 +356,41 @@ class DeterministicEmbeddingProvider(BaseEmbeddingProvider):
             "No embedding provider configured/reachable; refusing to return random vectors."
         )
     
+    def get_dimension(self) -> int:
+        return self.dimension
+
+
+class UnusableEmbeddingProvider(BaseEmbeddingProvider):
+    """A provider is set but cannot be used (PRD-278 US-503).
+
+    It is not the stand-in: the stand-in is for an install with no provider at all. This one
+    names the provider that was set and why it cannot be used, and every embedding call raises
+    ``EmbeddingUnavailableError`` with that reason, so nothing is written to an index from it.
+    It reports itself degraded (``is_degraded``) like the stand-in, so readiness and the memory
+    surfaces say that memory and knowledge search are off. The reason is a fixed sentence or an
+    exception's class, never a credential; the detail is in the server log.
+    """
+
+    is_degraded = True
+
+    def __init__(self, provider: str, reason: str, dimension: int):
+        self.dimension = dimension
+        self.wanted = provider
+        self.reason = reason
+        self.config = EmbeddingConfig(provider=EmbeddingProvider.DISABLED, model=f"unusable:{provider}",
+                                      dimension=dimension)
+        self.client = None
+        logger.warning("The embedding provider '%s' is set but cannot be used: %s. Nothing is embedded "
+                       "until it is fixed.", provider, reason)
+
+    def _initialize_client(self):
+        pass  # No client: it could not be built
+
+    async def generate_embedding(self, text: str) -> List[float]:
+        """Raise: the provider that was set cannot be used."""
+        raise EmbeddingUnavailableError(
+            f"The embedding provider '{self.wanted}' is set but cannot be used: {self.reason}."
+        )
+
     def get_dimension(self) -> int:
         return self.dimension
