@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Mapping, Optional
 
 # Workspace mount root inside the worker container (PRD-233 S1). Compose
 # bind-mounts the host directory ``${AUTOMATOS_WORKSPACE_DIR:-./workspaces}``
@@ -46,6 +46,46 @@ def model_auth_env() -> Dict[str, str]:
     if key:
         env["ANTHROPIC_API_KEY"] = key
     return env
+
+
+# The coding agent's environment. The Claude Agent SDK starts the CLI with the worker's own
+# environment, with ``ClaudeAgentOptions.env`` laid over it, and every command the agent runs
+# inherits the result. The worker holds the install's database and Redis addresses, its token
+# for the API and its cloud role, none of which the agent needs. So every variable the worker
+# holds is blanked for the agent, except these names and prefixes: what a CLI and its commands
+# need to run (paths, locale, time zone, terminal, temp folders, proxies, CA bundles) and the
+# CLI's own switches. The model credential is added back by ``model_auth_env``.
+AGENT_ENV_KEPT_NAMES = frozenset({
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "PWD", "LANG", "LANGUAGE", "TZ", "TERM",
+    "TMPDIR", "TMP", "TEMP",
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "NODE_EXTRA_CA_CERTS",
+    "ANTHROPIC_BASE_URL",
+})
+AGENT_ENV_KEPT_PREFIXES = ("LC_", "DISABLE_")
+# The CLI's own switches, except its credentials (``CLAUDE_CODE_OAUTH_TOKEN``, the OAuth refresh
+# token, any later ``*_TOKEN``/``*_KEY``/``*_SECRET``): only ``model_auth_env`` passes a credential.
+AGENT_ENV_CLI_PREFIX = "CLAUDE_CODE_"
+AGENT_ENV_CLI_SECRET_SUFFIXES = ("_TOKEN", "_KEY", "_SECRET")
+
+
+def _kept_for_agent(name: str) -> bool:
+    """True when the coding agent may see the worker's own value of ``name``."""
+    if name in AGENT_ENV_KEPT_NAMES or name.startswith(AGENT_ENV_KEPT_PREFIXES):
+        return True
+    return name.startswith(AGENT_ENV_CLI_PREFIX) and not name.endswith(AGENT_ENV_CLI_SECRET_SUFFIXES)
+
+
+def agent_environment(inherited: Optional[Mapping[str, str]] = None) -> Dict[str, str]:
+    """What the coding agent's ``ClaudeAgentOptions.env`` lays over the worker's environment.
+
+    Every variable in ``inherited`` (the worker's own environment by default) that the agent is
+    not to see is set to the empty string. The SDK cannot drop a variable from the environment it
+    passes on, only replace its value, so blanking is how one is withheld. The result never adds
+    a value of its own: the caller adds ``CLAUDE_CONFIG_DIR`` and the model credential after it.
+    """
+    names = os.environ if inherited is None else inherited
+    return {name: "" for name in names if not _kept_for_agent(name)}
 
 
 def has_model_auth() -> bool:
