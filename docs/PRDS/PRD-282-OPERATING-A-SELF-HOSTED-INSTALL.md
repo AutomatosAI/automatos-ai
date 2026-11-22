@@ -227,9 +227,9 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As an operator, I want an API that has lost its database to stop receiving traffic, so that people get a clear failure and not a broken page.
 
 **Acceptance Criteria:**
-- [ ] `/health/ready` returns 200 only when start-up has finished and the last database check passed.
-- [ ] "Busy" is ready. "Unreachable" and "stuck" are not.
-- [ ] The route does no database work itself. A test with a full pool shows it answers at once.
+- [x] `/health/ready` returns 200 only when start-up has finished and the last database check passed.
+- [x] "Busy" is ready. "Unreachable" and "stuck" are not.
+- [x] The route does no database work itself. A test with a full pool shows it answers at once.
 - [ ] `test_f229_health_off_the_loop.py`, `test_f458_health_never_waits_on_a_full_pool.py` and `test_prd262_health_gates.py` pass, changed only where they pin the old meaning of ready.
 - [ ] The chart's probes are unchanged.
 

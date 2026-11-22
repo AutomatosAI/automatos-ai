@@ -39,7 +39,7 @@ from router_manifest import mount_manifest_routers  # PRD-155 S3: fail-loud rout
 # Import database and models
 from core.database.database import init_database, get_db, SessionLocal
 from core.database import pool_watch
-from core import editions, health_probe  # GET /health's session mode (PRD-277) and probes (F229, F458)
+from core import editions, health_probe, health_readiness  # /health: session mode, probes; /health/ready (PRD-282)
 from core.models import Base
 
 # Import API routers
@@ -536,9 +536,11 @@ def _start_board_dispatch(app_instance: "FastAPI", trust_passed: bool) -> None:
 
 
 async def _mark_ready(app_instance: "FastAPI", report: "BootstrapReport") -> None:
-    """READY, the last stage: /health/ready answers 200 from here on, failed stages or not."""
+    """READY, the last stage: from here /health/ready answers 200 while the database check
+    passes, failed stages or not. It waits for the first check first (PRD-282 US-201)."""
     from core.models.bootstrap import BootstrapStage, run_stage
 
+    await health_readiness.first_check(app_instance.state)
     report.ready_at = datetime.now(timezone.utc)
     await run_stage(report, BootstrapStage.READY, lambda: None)
     app_instance.state.ready = True
@@ -565,8 +567,9 @@ async def _boot_in_background(
     In order: the starters pass (the leader stage's last part), the Composio catalogue,
     sign-in's start-up (PRD-277: registration closes; in enterprise, an oidc_provider
     stage), Phase 2 (scheduler, channels), then board dispatch, as always last. Each stage
-    shows in /health/bootstrap. app.state.ready (/health/ready 200) is set once all of them
-    finished, whether or not a stage failed. A crash outside a stage leaves it at 503.
+    shows in /health/bootstrap. app.state.ready is set once all of them finished, whether
+    or not a stage failed; /health/ready also needs the database check. A crash outside a
+    stage leaves it at 503.
     """
     from core.auth.sign_in_start_up import finish_sign_in_start_up
     from core.models.bootstrap import BootstrapStage, run_stage
@@ -592,12 +595,14 @@ def _start_serving(
     /health/bootstrap shows the report from here on, its stages as they finish. The
     loop watchdog starts now, while requests are already served (F105: from here on,
     a stall of the loop logs the stack that caused it; LOOP_STALL_LOG_SECONDS=0
-    starts nothing; never raises). The background boot runs the rest.
+    starts nothing; never raises). So does readiness's database check (PRD-282 US-201).
+    The background boot runs the rest.
     """
     from core.loop_watchdog import start_loop_watchdog
 
     app_instance.state.bootstrap_report = report
     app_instance.state.loop_watchdog = start_loop_watchdog()
+    health_readiness.start(app_instance.state)
     app_instance.state.background_boot = asyncio.create_task(
         _boot_in_background(app_instance, report, seeds, trust_passed)
     )
@@ -704,6 +709,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down Automatos AI API Server...")
     await _stop_background_boot(app)
+    await health_readiness.stop(app.state)
 
     _watchdog = getattr(app.state, "loop_watchdog", None)
     if _watchdog is not None:
@@ -1302,22 +1308,15 @@ async def serve_export(file_path: str, ctx = Depends(get_request_context_hybrid)
 # WebSocket endpoint removed - using AI SDK SSE streaming instead
 # See consumers/workflows/streaming.py and consumers/chatbot/streaming.py
 
-# Readiness probe (PRD-262 US-034). The server listens, and GET /health answers, once
-# the lifespan's core (tables, the boot leader's seeds, the trust gate) is done. The
-# rest of the boot (the starters, the Composio catalogue, the scheduler and channels,
-# board dispatch) runs in the background; this answers 503 until it has finished and
-# 200 after, whether or not a stage failed (GET /health/bootstrap shows which). A
-# deploy healthcheck that must wait for the scheduler targets this one.
-@app.get("/health/ready",
-         summary="Readiness probe",
-         tags=["🏥 System Health"])
+# Readiness probe (PRD-262 US-034, PRD-282 US-201). GET /health answers once the
+# lifespan's core is done; the rest of the boot runs in the background, and this
+# answers 503 until it has finished. Then 200 while the database check, refreshed in
+# the background (core/health_readiness.py), passes ("busy" passes), 503 when not.
+# A failed boot stage does not make it 503 (GET /health/bootstrap shows which failed).
+@app.get("/health/ready", summary="Readiness probe", tags=["🏥 System Health"])
 async def readiness_probe(request: Request):
-    if not getattr(request.app.state, "ready", False):
-        return JSONResponse(
-            status_code=503,
-            content={"status": "starting", "message": "Boot in progress"},
-        )
-    return {"status": "ready"}
+    status_code, body = health_readiness.answer(request.app.state)
+    return body if status_code == health_probe.HTTP_OK else JSONResponse(status_code=status_code, content=body)
 
 
 # Health check endpoint

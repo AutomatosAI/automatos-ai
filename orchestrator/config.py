@@ -1893,6 +1893,12 @@ class Config:
     # /health answers 503, so the liveness watchdog (docker-entrypoint.sh, F416)
     # restarts the backend. A dead or hung backend still restarts within ~2 min.
     HEALTH_POOL_STUCK_SECONDS: float = float(os.getenv("HEALTH_POOL_STUCK_SECONDS", "300"))
+    # PRD-282 US-201: GET /health/ready reads the last database check, made in the
+    # background this often (half the chart's 10 s readiness period, so its answer is
+    # never older than one probe)...
+    HEALTH_READY_CHECK_SECONDS: float = float(os.getenv("HEALTH_READY_CHECK_SECONDS", "5"))
+    # ...each given this long to answer, or it counts as unreachable.
+    HEALTH_READY_CHECK_TIMEOUT_SECONDS: float = float(os.getenv("HEALTH_READY_CHECK_TIMEOUT_SECONDS", "3"))
     # F458: when a checkout leaves the pool full, one WARNING lists who holds every
     # connection and where each holder is now (core/database/pool_watch.py), at most
     # once per this many seconds. 0 = off.
