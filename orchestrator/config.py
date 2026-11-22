@@ -11,6 +11,7 @@ import json
 import os
 import logging
 from pathlib import Path
+from urllib.parse import quote
 from dotenv import load_dotenv
 from uuid import UUID
 
@@ -67,17 +68,27 @@ class Config:
     REDIS_PORT: str = os.getenv("REDIS_PORT")
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD")
     REDIS_DB: str = os.getenv("REDIS_DB", "0")
-    
+    # PRD-278: TLS (rediss://, certificate checked) for an address built from the parts
+    # above. A REDIS_URL that is set says it itself. See core/redis/connection.py.
+    REDIS_TLS: bool = os.getenv("REDIS_TLS", "false").lower() == "true"
+
+    @staticmethod
+    def redis_url_as_set():
+        """REDIS_URL exactly as set, or None: tells an address someone gave from one
+        REDIS_URL below builds from the parts (the task queue needs the difference)."""
+        return os.getenv("REDIS_URL") or None
+
     @property
     def REDIS_URL(self) -> str:
         """Get Redis URL from env or construct from parts"""
-        url = os.getenv("REDIS_URL")
+        url = Config.redis_url_as_set()
         if url:
             return url
         
         if self.REDIS_HOST and self.REDIS_PORT:
-            auth = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
-            return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/0"
+            auth = f":{quote(self.REDIS_PASSWORD, safe='')}@" if self.REDIS_PASSWORD else ""
+            scheme = "rediss" if self.REDIS_TLS else "redis"
+            return f"{scheme}://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/0"
         
         return None
 

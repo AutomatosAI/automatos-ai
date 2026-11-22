@@ -68,15 +68,19 @@ class _StaticToken:
 
 
 def runtime_client(api_key: Optional[str], secret_key: Optional[str], region: Optional[str],
-                   use_role: bool = False) -> Any:
+                   use_role: bool = False, extra: Optional[Any] = None) -> Any:
     """A ``bedrock-runtime`` client for these credentials (see the module docstring).
 
     ``use_role``: the key resolver answered with the install's own role (PRD-278), the only
     case in which, with ``AWS_USE_WORKLOAD_IDENTITY`` on, the default chain is used.
+    ``extra``: a botocore ``Config`` merged over this one's (the embedding provider's time
+    limits and retries, PRD-278 US-501); None keeps the chat client's own.
     """
     import botocore.session
 
     config = Config(region_name=region or DEFAULT_REGION, retries={"max_attempts": 3, "mode": "adaptive"})
+    if extra is not None:
+        config = config.merge(extra)
     if api_key and not _ACCESS_KEY_ID.match(api_key):
         session = botocore.session.Session()
         session.register_component("token_provider", _StaticToken(api_key))
@@ -90,6 +94,13 @@ def runtime_client(api_key: Optional[str], secret_key: Optional[str], region: Op
     raise ValueError(_KEY_WITHOUT_SECRET if api_key else _NOT_CONFIGURED)
 
 
+def model_not_served(text: str) -> bool:
+    """True when Bedrock's error text says it will not serve the model ID at all: retired,
+    misspelt or not offered in this region. The chat client words that case for the operator
+    (``_plain_error``); the embedding provider treats it as a refusal that will not get better."""
+    return "model identifier is invalid" in text or "end of its life" in text or "marked by provider as Legacy" in text
+
+
 def _plain_error(error: Exception, model_id: str) -> Optional[str]:
     """What to do about a model ID Bedrock won't serve, in plain words, with what Bedrock
     said; None for any other error."""
@@ -98,7 +109,7 @@ def _plain_error(error: Exception, model_id: str) -> Optional[str]:
         return (f"AWS Bedrock serves {model_id} only through an inference profile. Set the model to the "
                 f"profile for where your data may go: us.{model_id}, eu.{model_id}, apac.{model_id} "
                 f"or global.{model_id}. (Bedrock said: {text})")
-    if "model identifier is invalid" in text or "end of its life" in text or "marked by provider as Legacy" in text:
+    if model_not_served(text):
         return (f"AWS Bedrock won't serve {model_id}: it is retired, misspelt or not offered in this region. "
                 f"Pick a current model ID from the Bedrock console's model catalog. (Bedrock said: {text})")
     return None

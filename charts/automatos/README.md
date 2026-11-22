@@ -41,7 +41,7 @@ Redis are **external**: use managed services, or anything you run yourself.
    | Key | |
    |---|---|
    | `DATABASE_URL` | PostgreSQL with `pgvector`. |
-   | `REDIS_URL` | |
+   | `REDIS_URL` | `redis://` is a plain connection. A Redis that requires TLS takes `rediss://`, and the server's certificate and host name are then checked against the image's trust store; nothing in the address can switch that check off. A user name (a Redis ACL user) goes before the password: `rediss://USER:PASSWORD@HOST:6379/0`. |
    | `API_KEY` | The platform API key. |
    | `CREDENTIAL_ENCRYPTION_KEY` | A Fernet key. **Keep it and back it up**: credentials saved in the app are encrypted with it, and every pod must share it. |
    | `WORKER_INTERNAL_TOKEN` | Optional. Shared secret between the API and the worker. Required, in this Secret and the worker's, when the worker has a Secret of its own (`worker.existingSecret`). |
