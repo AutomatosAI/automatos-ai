@@ -168,47 +168,8 @@ class HeartbeatService:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def start(self, scheduler: Optional[AsyncIOScheduler] = None):
-        """Initialize scheduler and load all active heartbeat configs.
-
-        Args:
-            scheduler: Shared APScheduler instance from UnifiedScheduler.
-                        If None, creates a local scheduler (useful for tests).
-        """
-        if scheduler:
-            self._scheduler = scheduler
-            self._owns_scheduler = False
-        else:
-            # Standalone mode (tests / backwards compat)
-            jobstores = {"default": MemoryJobStore()}
-            try:
-                from config import config as app_config
-
-                if app_config.REDIS_URL:
-                    from apscheduler.jobstores.redis import RedisJobStore
-
-                    jobstores["default"] = RedisJobStore(url=app_config.REDIS_URL)
-                    logger.info("[Heartbeat] Using Redis job store (standalone)")
-            except Exception:
-                pass
-            self._scheduler = AsyncIOScheduler(jobstores=jobstores)
-            self._scheduler.start()
-            self._owns_scheduler = True
-
-        # Load and schedule all active heartbeats
-        await self._load_heartbeat_configs()
-
-        # Schedule daily summary at 1 AM UTC
-        self._scheduler.add_job(
-            self._daily_summary_tick,
-            "cron",
-            hour=1,
-            minute=0,
-            id="daily_summary",
-            replace_existing=True,
-            max_instances=1,
-        )
-
+    def _schedule_durable_memory_probe(self) -> None:
+        """Register the durable-store health probe, unless memory is off in this edition."""
         # PRD-187 S1: durable-store health probe (was the PRD-141 US-006 mem0
         # HTTP probe). Pings the in-process Qdrant durable store on a fixed
         # interval and feeds the per-workspace memory primitive tile (W3-S1).
@@ -239,6 +200,41 @@ class HeartbeatService:
             pass
         except Exception:
             logger.error("[Heartbeat] Failed to schedule Mem0 health probe", exc_info=True)
+
+    async def start(self, scheduler: Optional[AsyncIOScheduler] = None):
+        """Initialize scheduler and load all active heartbeat configs.
+
+        Args:
+            scheduler: Shared APScheduler instance from UnifiedScheduler.
+                        If None, creates a local scheduler (useful for tests).
+        """
+        if scheduler:
+            self._scheduler = scheduler
+            self._owns_scheduler = False
+        else:
+            # Standalone mode (tests / backwards compat): jobs in memory, as the
+            # shared scheduler keeps them. (A Redis job store was tried here, but it
+            # was built as RedisJobStore(url=...), which redis-py rejects, so it never
+            # ran: the store was always this one. PRD-278 US-202.)
+            self._scheduler = AsyncIOScheduler(jobstores={"default": MemoryJobStore()})
+            self._scheduler.start()
+            self._owns_scheduler = True
+
+        # Load and schedule all active heartbeats
+        await self._load_heartbeat_configs()
+
+        # Schedule daily summary at 1 AM UTC
+        self._scheduler.add_job(
+            self._daily_summary_tick,
+            "cron",
+            hour=1,
+            minute=0,
+            id="daily_summary",
+            replace_existing=True,
+            max_instances=1,
+        )
+
+        self._schedule_durable_memory_probe()
 
         # PRD-185 S2: per-lane telemetry canary. Alarms when organic tool-execution
         # rows stop landing (the 2-month type-poison outage S1 repaired had no such
