@@ -550,12 +550,33 @@ The backend writes its logs to the console (`make logs s=backend`). Two settings
 | `LOG_FORMAT` | `text` | `json`: one JSON record per line, for a log collector. Set it in `envs/api.local`. |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`, in any case. Set it in `.env`: compose passes it to the backend. |
 
+Any other value of either setting does not stop the backend: it uses the default (`INFO`,
+`text`) and writes one warning that names the setting and the values it takes.
+
+`LOG_LEVEL` applies to uvicorn's own loggers (`uvicorn`, `uvicorn.error`, `uvicorn.access`) as
+well as the app's, so `WARNING` also drops the access lines and the start-up lines. Two kinds of
+logger never go below a floor: the HTTP libraries and the AWS SDK (`botocore`, `boto3`,
+`s3transfer`, `urllib3`, `httpx`) stay at `WARNING`, and loggers under `core.credentials` stay at
+`INFO`, because credential handling is not debug-logged. `DEBUG` is for a development install:
+the app's debug lines were written when they could not be switched on in the backend, and they
+can carry fragments of what people type.
+
 A JSON record holds `time`, `level`, `logger`, `message`, `service` and `version`, then, when they
 have a value, the request's `request_id`, `workspace_id`, `method` and `path`, the `trace_id` and
-`span_id` of a trace being recorded, and `exception`, the whole traceback in one field. uvicorn's
-own lines are written the same way. A text line carries the request's id as `req=…`, and
-uvicorn's access line ends with it. Any other value of either setting stops the backend at
-start-up, with a message naming the setting.
+`span_id` of a trace being recorded, and `exception`, the whole traceback in one field. A message
+that cannot be built from its arguments is still one record, whose message says so and names the
+error. `workspace_id` is the workspace the request named in its header, not yet checked by
+sign-in. `request_id` is the request's `X-Request-ID`, keeping letters, digits and `._:-`, at
+most 128 characters, or a new id when none is left; the response, a 500's body and every line of
+the request carry that one value. uvicorn's own lines are written the same way, in each server
+process and, with more than one, in the process that supervises them (the start script points
+uvicorn at `core/monitoring/server_log_config.json`). A text line carries the request's id as
+`req=…`, and uvicorn's access line ends with it.
+
+What is still text with `LOG_FORMAT=json`: the start script's own lines (its banner and its
+boot steps' messages, before uvicorn starts), the migration tool's output when the start script
+or the migration Job migrates, and anything a process writes before logging is set up, such as a
+crash while it starts.
 
 ## 4. First boot — what happens and how long it takes
 
