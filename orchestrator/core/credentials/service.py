@@ -650,109 +650,6 @@ class CredentialStore:
                 tested_at=datetime.utcnow()
             )
     
-    async def _test_database_connection(
-        self,
-        cred_type_name: str,
-        data: Dict[str, Any]
-    ) -> CredentialTestResponse:
-        """Test database connection"""
-        import asyncio
-        
-        try:
-            if cred_type_name == 'postgres_credentials':
-                import psycopg2
-                conn = psycopg2.connect(
-                    host=data.get('host'),
-                    port=data.get('port', 5432),
-                    database=data.get('database'),
-                    user=data.get('user'),
-                    password=data.get('password'),
-                    connect_timeout=5
-                )
-                conn.close()
-                return CredentialTestResponse(
-                    success=True,
-                    message="PostgreSQL connection successful",
-                    details={"database": data.get('database'), "host": data.get('host')},
-                    tested_at=datetime.utcnow()
-                )
-            
-            elif cred_type_name == 'redis_credentials':
-                import redis
-                client = redis.Redis(
-                    host=data.get('host'),
-                    port=data.get('port', 6379),
-                    password=data.get('password'),
-                    db=data.get('database', 0),
-                    socket_connect_timeout=5
-                )
-                client.ping()
-                client.close()
-                return CredentialTestResponse(
-                    success=True,
-                    message="Redis connection successful",
-                    details={"host": data.get('host'), "db": data.get('database', 0)},
-                    tested_at=datetime.utcnow()
-                )
-            
-            else:
-                return CredentialTestResponse(
-                    success=False,
-                    message=f"No test implementation for {cred_type_name}",
-                    tested_at=datetime.utcnow()
-                )
-        
-        except Exception as e:
-            return CredentialTestResponse(
-                success=False,
-                message=f"Connection failed: {str(e)}",
-                details={"error": str(e)},
-                tested_at=datetime.utcnow()
-            )
-    
-    async def _test_api_call(
-        self,
-        test_config: Dict[str, Any],
-        data: Dict[str, Any]
-    ) -> CredentialTestResponse:
-        """Test API credential with HTTP call"""
-        import httpx
-        
-        # Replace placeholders in URL and headers
-        url = self._replace_placeholders(test_config.get('url', ''), data)
-        headers = {}
-        
-        if test_config.get('headers'):
-            for key, value in test_config['headers'].items():
-                headers[key] = self._replace_placeholders(value, data)
-        
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url, headers=headers, timeout=10.0)
-                
-                if response.status_code == 200:
-                    return CredentialTestResponse(
-                        success=True,
-                        message="API connection successful",
-                        details={"status_code": response.status_code, "url": url},
-                        tested_at=datetime.utcnow()
-                    )
-                else:
-                    return CredentialTestResponse(
-                        success=False,
-                        message=f"API returned status {response.status_code}",
-                        details={"status_code": response.status_code, "response": response.text[:200]},
-                        tested_at=datetime.utcnow()
-                    )
-        
-        except Exception as e:
-            return CredentialTestResponse(
-                success=False,
-                message=f"API test failed: {str(e)}",
-                details={"error": str(e)},
-                tested_at=datetime.utcnow()
-            )
-    
     async def _test_oauth2(
         self,
         test_config: Dict[str, Any],
@@ -834,13 +731,6 @@ class CredentialStore:
                 
                 if field_type == 'boolean' and not isinstance(value, bool):
                     raise CredentialValidationError(f"Field '{field_name}' must be a boolean")
-    
-    def _replace_placeholders(self, template: str, data: Dict[str, Any]) -> str:
-        """Replace {field_name} placeholders in template string"""
-        result = template
-        for key, value in data.items():
-            result = result.replace(f"{{{key}}}", str(value))
-        return result
     
     def _create_audit_log(
         self,

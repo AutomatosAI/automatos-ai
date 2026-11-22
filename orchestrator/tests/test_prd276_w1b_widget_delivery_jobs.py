@@ -193,7 +193,9 @@ def test_the_dashboard_test_send_makes_one_attempt_per_destination(site, channel
 def test_a_webhook_gets_the_delivery_id_and_a_chat_driver_never_does(monkeypatch):
     from channels import sender
     from channels.drivers import webhook
+    from tests.helpers_outbound_dns import public_dns
 
+    public_dns(monkeypatch, "hooks.example.com")  # saas checks the address before it sends
     got = []
     transport = httpx.MockTransport(lambda request: got.append(request) or httpx.Response(204))
     real = httpx.AsyncClient
