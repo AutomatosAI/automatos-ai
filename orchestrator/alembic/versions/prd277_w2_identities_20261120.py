@@ -18,18 +18,27 @@ only when ``users`` lacks them (a DO block that asks ``pg_attribute`` and ``pg_c
 ``prd270_w1_cloud_sync`` does), so a database ``create_all`` built ends exactly as it was, with no
 lock taken on ``users``, and running it twice changes nothing. No row is written or changed.
 
-The locks, and why none scans or rewrites ``users``:
+The locks, in the order they are taken, and why none scans or rewrites ``users``:
 
-* ``CREATE TABLE user_identities`` (only when it is missing): its foreign key takes SHARE ROW
-  EXCLUSIVE on ``users`` to add the key's triggers; nothing in ``users`` is read, as the new
-  table is empty. Skipped, with no lock on ``users``, when the table exists.
-* The two ``CREATE [UNIQUE] INDEX`` statements: at most a SHARE lock on ``user_identities``, a
-  new or ``create_all``-built table; never a lock on ``users``.
+* ``SET LOCAL lock_timeout`` (``_LOCK_TIMEOUT``) first: a statement below that waits longer than
+  that for its lock fails, and the migration run fails with it, instead of waiting in the lock
+  queue with every later ``users`` query waiting behind it. ``alembic/env.py`` runs the pending revisions in one
+  transaction, so the setting applies to this revision's statements; the value in force before
+  it is kept in ``_SAVED_LOCK_TIMEOUT`` and put back as the upgrade's last statement, so a later
+  revision in the same run waits exactly as it did before.
 * ``ALTER TABLE users ADD COLUMN system_role`` (only when missing): ACCESS EXCLUSIVE, held for
-  a catalog change only. A nullable column with no default rewrites no row.
+  a catalog change only. A nullable column with no default rewrites no row. It runs before the
+  table, so the strongest lock on ``users`` is the first one taken: no statement after it asks
+  for a stronger lock on ``users`` than the run already holds.
 * ``ALTER TABLE users ADD CONSTRAINT ck_users_system_role ... NOT VALID`` (only when missing):
   ACCESS EXCLUSIVE, held for a catalog change only. ``NOT VALID`` skips the scan of existing
   rows, every one of which is NULL at that point; each row written from then on is checked.
+* ``CREATE TABLE user_identities`` (only when it is missing): its foreign key needs SHARE ROW
+  EXCLUSIVE on ``users`` to add the key's triggers; when the column was added in this run, the
+  ACCESS EXCLUSIVE already held covers it. Nothing in ``users`` is read, as the new table is
+  empty. Skipped, with no lock on ``users``, when the table exists.
+* The two ``CREATE [UNIQUE] INDEX`` statements: at most a SHARE lock on ``user_identities``, a
+  new or ``create_all``-built table; never a lock on ``users``.
 
 The downgrade drops the table and the column (its CHECK goes with it), and only them.
 
@@ -43,6 +52,16 @@ revision = "prd277_w2_identities_20261120"
 down_revision = "merge_heads_20261117"
 branch_labels = None
 depends_on = None
+
+# How long one statement here may wait for a lock before the migration fails.
+_LOCK_TIMEOUT = "5s"
+# Where the lock_timeout in force before this revision is kept until the upgrade ends.
+_SAVED_LOCK_TIMEOUT = "automatos.lock_timeout_before_prd277_w2"
+_BOUND_LOCK_WAIT = (
+    f"SELECT set_config('{_SAVED_LOCK_TIMEOUT}', current_setting('lock_timeout'), true);",
+    f"SET LOCAL lock_timeout = '{_LOCK_TIMEOUT}';",
+)
+_RESTORE_LOCK_WAIT = f"SELECT set_config('lock_timeout', current_setting('{_SAVED_LOCK_TIMEOUT}'), true);"
 
 _TABLE = """
 CREATE TABLE IF NOT EXISTS user_identities (
@@ -88,7 +107,7 @@ _DOWNGRADE = (
 
 
 def upgrade() -> None:
-    for statement in (_TABLE, *_INDEXES, _SYSTEM_ROLE):
+    for statement in (*_BOUND_LOCK_WAIT, _SYSTEM_ROLE, _TABLE, *_INDEXES, _RESTORE_LOCK_WAIT):
         op.execute(statement)
 
 
