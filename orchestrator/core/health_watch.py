@@ -10,7 +10,8 @@ thread of its own, never on the event loop, and the wait for it ends at ``limit_
 a check that has not answered by then reads as ``failed_state``. A check still running
 when the next one is due is not started again, so a dependency that hangs holds one
 thread, never a growing number; and a daemon thread never holds up the process's exit.
-A check that raises is logged and reads as ``failed_state`` too.
+A check that raises is logged and reads as ``failed_state`` too. ``on_reading``, when
+given, is told each reading as it is made (the dependency gauges in /metrics, US-203).
 """
 from __future__ import annotations
 
@@ -53,13 +54,14 @@ class Watch:
     """One background check: its timer, its time limit and its last reading."""
 
     def __init__(self, name: str, check: Callable[[], str], *, every_s: float, limit_s: float,
-                 failed_state: str) -> None:
+                 failed_state: str, on_reading: Optional[Callable[[str, Reading], None]] = None) -> None:
         self.name = name
         self.last: Optional[Reading] = None
         self._check = check
         self._every_s = every_s
         self._limit_s = limit_s
         self._failed_state = failed_state
+        self._on_reading = on_reading
         self._running: Optional[concurrent.futures.Future] = None
         self._first = asyncio.Event()
 
@@ -86,6 +88,8 @@ class Watch:
             logger.info("Health: %s is %s", self.name, reading.state)
         self.last = reading
         self._first.set()
+        if self._on_reading is not None:
+            self._on_reading(self.name, reading)
         return reading
 
     async def first_reading(self) -> Optional[Reading]:

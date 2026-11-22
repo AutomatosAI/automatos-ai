@@ -1899,6 +1899,13 @@ class Config:
     HEALTH_READY_CHECK_SECONDS: float = float(os.getenv("HEALTH_READY_CHECK_SECONDS", "5"))
     # ...each given this long to answer, or it counts as unreachable.
     HEALTH_READY_CHECK_TIMEOUT_SECONDS: float = float(os.getenv("HEALTH_READY_CHECK_TIMEOUT_SECONDS", "3"))
+    # PRD-282 US-202: GET /health's dependency entries (Redis, object storage, the search
+    # index, the memory store, the model provider) are each checked in the background this
+    # often, on a timer of its own: an alarm hears within a minute, and two pings or
+    # metadata calls a minute cost nothing worth counting...
+    HEALTH_DEPENDENCY_CHECK_SECONDS: float = float(os.getenv("HEALTH_DEPENDENCY_CHECK_SECONDS", "30"))
+    # ...each given this long to answer, or it counts as down.
+    HEALTH_DEPENDENCY_CHECK_TIMEOUT_SECONDS: float = float(os.getenv("HEALTH_DEPENDENCY_CHECK_TIMEOUT_SECONDS", "3"))
     # F458: when a checkout leaves the pool full, one WARNING lists who holds every
     # connection and where each holder is now (core/database/pool_watch.py), at most
     # once per this many seconds. 0 = off.

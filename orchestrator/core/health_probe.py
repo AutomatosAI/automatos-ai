@@ -40,6 +40,8 @@ DATABASE_STUCK = "stuck"  # ...and has been at every probe for HEALTH_POOL_STUCK
 HTTP_OK = 200
 HTTP_UNAVAILABLE = 503
 
+# The settings the database's address is built from when DATABASE_URL is unset.
+_POSTGRES_SETTINGS = ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB")
 # How a component's own state counts toward the overall status.
 _COUNTS_AS = {DATABASE_BUSY: DEGRADED, DATABASE_STUCK: UNHEALTHY}
 
@@ -91,6 +93,14 @@ def _select_one() -> str:
     except Exception:
         logger.exception("Health: database check failed")
         return UNHEALTHY
+
+
+def config_status() -> str:
+    """``healthy`` when the database is configured: ``DATABASE_URL``, or every ``POSTGRES_*``
+    setting, the two ways core/database/database.py builds its address (PRD-282 US-203)."""
+    if config.DATABASE_URL or all(getattr(config, name) for name in _POSTGRES_SETTINGS):
+        return HEALTHY
+    return DEGRADED
 
 
 def overall_status(components: Dict[str, str]) -> str:

@@ -33,7 +33,7 @@ from .vendor_fit import fitted, keyless_via_openrouter
 from .key_resolver import with_workload_identity
 from .list_prices import list_rates
 
-from core.llm import failover, output_budget, usage_status
+from core.llm import failover, last_call, output_budget, usage_status
 from core.llm.usage_counts import UsageCounts, usage_counts
 from core.observability.genai import traced_llm_call
 
@@ -854,8 +854,8 @@ class LLMManager:
         """
         latency_ms = int((time.monotonic() - start) * 1000)
         counts = usage_counts(response)
-        # Cost audit logging — always log regardless of workspace
-        self._log_cost_audit(
+        last_call.note(status)  # PRD-282 US-202: /health's model provider entry
+        self._log_cost_audit(  # cost audit logging: always, whatever the workspace
             input_tokens=counts.input_tokens,
             output_tokens=counts.output_tokens,
             latency_ms=latency_ms,

@@ -39,7 +39,7 @@ from router_manifest import mount_manifest_routers  # PRD-155 S3: fail-loud rout
 # Import database and models
 from core.database.database import init_database, get_db, SessionLocal
 from core.database import pool_watch
-from core import editions, health_probe, health_readiness  # /health: session mode, probes; /health/ready (PRD-282)
+from core import editions, health_dependencies, health_probe, health_readiness  # /health, /health/ready (PRD-282)
 from core.models import Base
 
 # Import API routers
@@ -595,14 +595,14 @@ def _start_serving(
     /health/bootstrap shows the report from here on, its stages as they finish. The
     loop watchdog starts now, while requests are already served (F105: from here on,
     a stall of the loop logs the stack that caused it; LOOP_STALL_LOG_SECONDS=0
-    starts nothing; never raises). So does readiness's database check (PRD-282 US-201).
-    The background boot runs the rest.
+    starts nothing; never raises). So do the background health checks (PRD-282: the
+    database's, for readiness, and each dependency's). The background boot runs the rest.
     """
     from core.loop_watchdog import start_loop_watchdog
 
     app_instance.state.bootstrap_report = report
     app_instance.state.loop_watchdog = start_loop_watchdog()
-    health_readiness.start(app_instance.state)
+    health_dependencies.start(app_instance.state)
     app_instance.state.background_boot = asyncio.create_task(
         _boot_in_background(app_instance, report, seeds, trust_passed)
     )
@@ -709,7 +709,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down Automatos AI API Server...")
     await _stop_background_boot(app)
-    await health_readiness.stop(app.state)
+    await health_dependencies.stop(app.state)
 
     _watchdog = getattr(app.state, "loop_watchdog", None)
     if _watchdog is not None:
@@ -1327,7 +1327,7 @@ async def readiness_probe(request: Request):
          response_description="Detailed system health information")
 def health_check():
     """
-    System health check with real probes for database, config, and resources.
+    Probes for database, config and resources; each dependency's last background check.
 
     A plain ``def`` (F229, F105): its probes (core/health_probe.py) run in the
     threadpool, never on the event loop, and none of them waits long. A full
@@ -1343,7 +1343,7 @@ def health_check():
     components = {
         "api_server": "healthy",
         "database": health_probe.database_status(),
-        "config": "healthy" if config.DATABASE_URL else "degraded",  # critical config
+        "config": health_probe.config_status(),  # DATABASE_URL or POSTGRES_* (PRD-282 US-203)
     }
 
     # PRD-123 Pattern #2: Include trust gate and extension health
@@ -1360,7 +1360,7 @@ def health_check():
         "service": "automatos-ai-api",
         "version": config.AUTOMATOS_VERSION,
         "timestamp": datetime.utcnow().isoformat(),
-        "components": components,
+        "components": {**components, **health_dependencies.components(app.state)},  # PRD-282 US-202
         "db_pool": pool_watch.pool_numbers(),
         "metrics": health_probe.host_metrics(),
         "extensions": deferred_init.as_dict() if deferred_init else None,

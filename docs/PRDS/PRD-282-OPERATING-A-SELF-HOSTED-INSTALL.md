@@ -237,19 +237,19 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As an operator, I want the health route to tell me which dependency is down, so that I do not work it out from error logs.
 
 **Acceptance Criteria:**
-- [ ] `/health`'s list of components has an entry for Redis, object storage, the search index, the memory store and the model provider, each up, down or not configured, with the time of its last check.
-- [ ] Each check runs in the background with its own time limit. The route only reads results, and a test with every dependency hanging shows it still answers at once.
-- [ ] The model provider is never called by a check. Its entry comes from whether one is configured and how the last real call ended.
-- [ ] With Redis down, `/health` still returns 200. Its status code changes only for the database, as today.
-- [ ] No entry holds an address, a credential or error text from a dependency.
+- [x] `/health`'s list of components has an entry for Redis, object storage, the search index, the memory store and the model provider, each up, down or not configured, with the time of its last check.
+- [x] Each check runs in the background with its own time limit. The route only reads results, and a test with every dependency hanging shows it still answers at once.
+- [x] The model provider is never called by a check. Its entry comes from whether one is configured and how the last real call ended.
+- [x] With Redis down, `/health` still returns 200. Its status code changes only for the database, as today.
+- [x] No entry holds an address, a credential or error text from a dependency.
 - [ ] No new route is added, and the three existing health tests pass.
 
 #### US-203: The same in metrics, and the configuration line · S
 **Description:** As an operator, I want an alarm to be able to watch each dependency, so that I hear about it before a person does.
 
 **Acceptance Criteria:**
-- [ ] `/metrics` has one gauge per dependency, 1 for up and 0 for down, absent when not configured.
-- [ ] `/health`'s configuration line is "healthy" for an install configured with `POSTGRES_*` and no `DATABASE_URL`.
+- [x] `/metrics` has one gauge per dependency, 1 for up and 0 for down, absent when not configured.
+- [x] `/health`'s configuration line is "healthy" for an install configured with `POSTGRES_*` and no `DATABASE_URL`.
 
 ### Wave 3: Logs
 

@@ -23,7 +23,8 @@ from typing import Any, Tuple
 
 from config import config
 from core import health_probe
-from core.health_watch import Watch
+from core.health_watch import Reading, Watch
+from core.monitoring.automatos_metrics import set_dependency_up
 
 READY_STATES = frozenset({health_probe.HEALTHY, health_probe.DATABASE_BUSY})
 UNCHECKED = "unchecked"  # no database check has finished yet
@@ -34,10 +35,16 @@ def _database_status() -> str:
     return health_probe.database_status()  # looked up per call, so a test can replace it
 
 
+def _database_gauge(name: str, reading: Reading) -> None:
+    """/metrics' database series (PRD-282 US-203): 1 when ready, 0 when not."""
+    set_dependency_up(name, reading.state in READY_STATES)
+
+
 def database_watch() -> Watch:
     """The database check readiness reads, on its own timer and time limit."""
     return Watch("database", _database_status, every_s=config.HEALTH_READY_CHECK_SECONDS,
-                 limit_s=config.HEALTH_READY_CHECK_TIMEOUT_SECONDS, failed_state=health_probe.UNHEALTHY)
+                 limit_s=config.HEALTH_READY_CHECK_TIMEOUT_SECONDS, failed_state=health_probe.UNHEALTHY,
+                 on_reading=_database_gauge)
 
 
 def start(state: Any) -> None:
