@@ -15,7 +15,7 @@ import asyncio
 import json
 import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any, Dict
 
 import pytest
@@ -127,19 +127,30 @@ _WORKER_SECRETS = {
 }
 
 
+def _fake_sdk_module(built: list) -> ModuleType:
+    """A stand-in ``claude_agent_sdk``: records the options the default factory builds."""
+    module = ModuleType("claude_agent_sdk")
+    module.ClaudeAgentOptions = lambda **kwargs: kwargs
+    module.ClaudeSDKClient = lambda options: built.append(options) or _FakeSDKClient(options)
+    return module
+
+
 def test_the_agent_never_sees_the_workers_own_variables(tmp_path, monkeypatch):
     for name, value in _WORKER_SECRETS.items():
         monkeypatch.setenv(name, value)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-agent")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_REFRESH_TOKEN", "refresh-token")
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    built: list = []
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", _fake_sdk_module(built))
 
     async def scenario():
-        factory = _FactorySpy()
-        mgr = css.CanvasSessionManager(str(tmp_path), sdk_client_factory=factory, init_timeout=2.0)
-        await mgr.start_session("ws-env")
-        env = factory.calls[0]["env"]
+        # The DEFAULT factory, the one the worker runs, so the test covers the real path.
+        mgr = css.CanvasSessionManager(str(tmp_path), init_timeout=2.0)
+        assert (await mgr.start_session("ws-env"))["success"] is True
+        env = built[0]["env"]
         # Each is laid over the inherited environment as empty, so the CLI and its commands get "".
-        for name in _WORKER_SECRETS:
+        for name in (*_WORKER_SECRETS, "CLAUDE_CODE_OAUTH_REFRESH_TOKEN"):
             assert env[name] == "", name
         assert env["ANTHROPIC_API_KEY"] == "sk-ant-agent"
         assert env["CLAUDE_CONFIG_DIR"].startswith(str(tmp_path))
@@ -148,20 +159,35 @@ def test_the_agent_never_sees_the_workers_own_variables(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
+def test_the_session_values_override_the_blanked_ones():
+    session = {"cwd": "/w", "env": {"CLAUDE_CONFIG_DIR": "/w/.canvas", "ANTHROPIC_API_KEY": "sk"}}
+    options = css.agent_option_kwargs(session)
+    assert options["cwd"] == "/w"
+    assert options["env"]["CLAUDE_CONFIG_DIR"] == "/w/.canvas"
+    assert options["env"]["ANTHROPIC_API_KEY"] == "sk"
+    assert session["env"] == {"CLAUDE_CONFIG_DIR": "/w/.canvas", "ANTHROPIC_API_KEY": "sk"}
+
+
 def test_what_a_cli_needs_to_run_is_left_as_the_worker_has_it():
     inherited = {
         "PATH": "/usr/bin", "HOME": "/home/worker", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
         "TZ": "UTC", "HTTPS_PROXY": "http://proxy:3128", "NODE_EXTRA_CA_CERTS": "/ca.pem",
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_TELEMETRY": "1",
-        "CLAUDE_CODE_OAUTH_TOKEN": "tok", "ANTHROPIC_API_KEY": "sk", "DATABASE_URL": "postgresql://x",
+        "CLAUDE_CODE_OAUTH_TOKEN": "tok", "CLAUDE_CODE_OAUTH_REFRESH_TOKEN": "rtok",
+        "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "8000", "ANTHROPIC_API_KEY": "sk",
+        "DATABASE_URL": "postgresql://x",
     }
     blanked = css.agent_environment(inherited)
     # Kept names are left out of the overlay, so the agent sees the worker's own value.
     for kept in ("PATH", "HOME", "LANG", "LC_ALL", "TZ", "HTTPS_PROXY", "NODE_EXTRA_CA_CERTS",
-                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_TELEMETRY"):
+                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+                 "DISABLE_TELEMETRY"):
         assert kept not in blanked, kept
     # The credentials are blanked here and added back only by model_auth_env, when configured.
-    assert blanked == {"CLAUDE_CODE_OAUTH_TOKEN": "", "ANTHROPIC_API_KEY": "", "DATABASE_URL": ""}
+    assert blanked == {
+        "CLAUDE_CODE_OAUTH_TOKEN": "", "CLAUDE_CODE_OAUTH_REFRESH_TOKEN": "",
+        "ANTHROPIC_API_KEY": "", "DATABASE_URL": "",
+    }
 
 
 def test_the_blanked_environment_adds_no_value_of_its_own():

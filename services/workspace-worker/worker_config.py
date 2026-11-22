@@ -63,16 +63,17 @@ AGENT_ENV_KEPT_NAMES = frozenset({
     "ANTHROPIC_BASE_URL",
 })
 AGENT_ENV_KEPT_PREFIXES = ("LC_", "DISABLE_")
-# The CLI's own switches, except the subscription token, which only ``model_auth_env`` passes.
+# The CLI's own switches, except its credentials (``CLAUDE_CODE_OAUTH_TOKEN``, the OAuth refresh
+# token, any later ``*_TOKEN``/``*_KEY``/``*_SECRET``): only ``model_auth_env`` passes a credential.
 AGENT_ENV_CLI_PREFIX = "CLAUDE_CODE_"
-AGENT_ENV_CLI_SECRETS = frozenset({"CLAUDE_CODE_OAUTH_TOKEN"})
+AGENT_ENV_CLI_SECRET_SUFFIXES = ("_TOKEN", "_KEY", "_SECRET")
 
 
 def _kept_for_agent(name: str) -> bool:
     """True when the coding agent may see the worker's own value of ``name``."""
     if name in AGENT_ENV_KEPT_NAMES or name.startswith(AGENT_ENV_KEPT_PREFIXES):
         return True
-    return name.startswith(AGENT_ENV_CLI_PREFIX) and name not in AGENT_ENV_CLI_SECRETS
+    return name.startswith(AGENT_ENV_CLI_PREFIX) and not name.endswith(AGENT_ENV_CLI_SECRET_SUFFIXES)
 
 
 def agent_environment(inherited: Optional[Mapping[str, str]] = None) -> Dict[str, str]:

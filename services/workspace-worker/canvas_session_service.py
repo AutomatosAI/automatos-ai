@@ -128,7 +128,17 @@ def _default_sdk_client_factory(option_kwargs: Dict[str, Any]) -> Any:
     dependency; tests and import-time code never need it)."""
     from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
-    return ClaudeSDKClient(options=ClaudeAgentOptions(**option_kwargs))
+    return ClaudeSDKClient(options=ClaudeAgentOptions(**agent_option_kwargs(option_kwargs)))
+
+
+def agent_option_kwargs(option_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """``option_kwargs`` with the worker's own variables blanked under the session's ``env``.
+
+    The SDK starts the CLI with the worker's environment and lays ``env`` over it, so the
+    blanked names (``worker_config.agent_environment``) go first and the session's own values
+    (``CLAUDE_CONFIG_DIR``, the model credential) override them. A new dict; the input is kept.
+    """
+    return {**option_kwargs, "env": {**agent_environment(), **option_kwargs.get("env", {})}}
 
 
 DENY_OUT_OF_MOUNT = "Denied: path outside the workspace mount"
@@ -369,11 +379,9 @@ class CanvasSessionManager:
 
         option_kwargs: Dict[str, Any] = {
             "cwd": str(root),
-            # The worker's own variables blanked (worker_config.agent_environment), then the
-            # transcript + CLI state on the persistent volume -> survives restarts.
+            # Transcript + CLI state on the persistent volume -> survives restarts.
             "env": {
-                **agent_environment(),
-                "CLAUDE_CONFIG_DIR": str(root / STATE_DIR_NAME / CLAUDE_CONFIG_DIR_NAME),
+                "CLAUDE_CONFIG_DIR": str(root / STATE_DIR_NAME / CLAUDE_CONFIG_DIR_NAME)
             },
             "permission_mode": "default",
             "can_use_tool": self._make_tool_gate(workspace_id, root),
