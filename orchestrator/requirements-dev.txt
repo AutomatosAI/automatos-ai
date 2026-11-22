@@ -7,10 +7,10 @@
 # required: .github/workflows/test.yml, .github/workflows/nl2sql-eval-scheduled.yml
 # and .oss-scanner/Dockerfile. orchestrator/tests/test_prd262_test_tools_leave_the_image.py
 # and test_prd262_api_locks.py hold all of that.
-pytest==7.4.3
-pytest-asyncio==0.21.1
+pytest==9.0.3
+pytest-asyncio==1.3.0
 pytest-timeout==2.3.1  # per-test timeout net for CI (PRD-142 W2-S3); kills hangs fast
-pytest-cov==4.1.0  # PRD-182 W12-S4 (F092): measured coverage + ratchet (compatible with pytest 7.4.x)
+pytest-cov==7.1.0  # PRD-182 W12-S4 (F092): measured coverage + ratchet (pytest-cov 7 for pytest 9)
 black==26.10.1
 isort==5.12.0
 # PRD-211: in-repo topology discipline. `import-linter` (pulls grimp, pure
