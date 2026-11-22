@@ -688,6 +688,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to initialize services: {e}")
         raise
+    # PRD-278 US-502: an embedding model too small for an index refuses the start. After the
+    # boot leader seeded the settings it reads, before the server listens; no call is made.
+    from core.llm.embedding_sizes import verify_embedding_sizes
+
+    await verify_embedding_sizes()
 
     # PRD-262 US-034: uvicorn listens once the lifespan yields, so /health answers
     # from here; the rest of the boot runs in the background, and /health/ready
