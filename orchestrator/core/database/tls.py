@@ -19,23 +19,26 @@ Two settings, read through ``config``:
   (``without_sslmode_aliases``, ``with_libpq_params``). An address handed to
   ``psycopg2.connect`` as its DSN needs nothing: psycopg2 parses it with libpq, which folds
   both into ``sslmode``, before the keywords replace it.
-  A mode that requires TLS (``TLS_REQUIRING_MODES``) also gives libpq ``gssencmode=disable``
-  (``NO_GSS_ENCRYPTION``): libpq uses GSSAPI encryption, where Kerberos credentials allow it, in
-  preference to TLS whatever ``sslmode`` says, and would then check no certificate. So a mode
-  that requires TLS is the one in force. The keyword replaces a ``gssencmode`` in the address or
-  the caller's dict on every path above, as ``sslmode`` does. ``disable``, ``allow`` and
-  ``prefer`` require no TLS and get no ``gssencmode``: GSSAPI encryption defeats nothing they
-  ask for, and turning it off could leave a connection unencrypted.
+  A mode that checks a certificate (``CERTIFICATE_CHECKING_MODES``) also gives libpq
+  ``gssencmode=disable`` (``NO_GSS_ENCRYPTION``): where Kerberos credentials allow it, libpq
+  uses GSSAPI encryption in preference to TLS whatever ``sslmode`` says, and would then check
+  no certificate. So a certificate check that was asked for is the one in force on the libpq
+  connections that read ``DATABASE_SSLMODE``: the app's engines, the RAG code's psycopg2
+  connections, migrations, the seed loader, the worker's write (its own copy, in
+  ``worker_config``) and the start script's ``pg_isready`` and ``psql``. The keyword
+  replaces a ``gssencmode`` in the address or the caller's dict on every path above, as
+  ``sslmode`` does. The other modes check no certificate and get no ``gssencmode``: there,
+  GSSAPI encryption, a different channel that Kerberos authenticates, may still be used.
 * **asyncpg** (``asyncpg_kwargs``): the ``ssl`` argument, which wins over an ``sslmode`` in
   the address. asyncpg takes no ``sslrootcert`` keyword, so with a CA file it is given an
   ``ssl.SSLContext`` that trusts only that file, requires the certificate, and checks the
   host name for ``verify-full``. A mode that checks no certificate is given as text, which asyncpg
   applies the way libpq does.
-* **asyncpg** never negotiates GSSAPI encryption (it sends only an SSLRequest, and refuses GSSAPI
-  authentication), so it needs no ``gssencmode`` and takes none.
+* **asyncpg** sends only an SSL request, never a GSSAPI encryption request, and its ``connect``
+  takes no ``gssencmode``, so it is given none.
 * **libpq's tools** (``pg_isready``, ``psql``): ``PGSSLMODE`` and ``PGSSLROOTCERT``, which
   ``docker-entrypoint.sh`` sets from the same two settings on those commands only, with
-  ``PGGSSENCMODE=disable`` for a mode that requires TLS.
+  ``PGGSSENCMODE=disable`` for a mode that checks a certificate.
 
 With neither setting, nothing is added to any connection, so each connects as it did
 before the settings existed. The main engine keeps its own default: in production,
@@ -72,9 +75,8 @@ from config import config
 SSLMODES = ("disable", "allow", "prefer", "require", "verify-ca", "verify-full")
 CERTIFICATE_CHECKING_MODES = frozenset({"verify-ca", "verify-full"})
 SERVER_VERIFYING_MODE = "verify-full"
-# The modes that refuse a connection without TLS. With one of them, libpq is also told not to
-# use GSSAPI encryption, which it would otherwise prefer to TLS whatever sslmode says.
-TLS_REQUIRING_MODES = frozenset({"require", "verify-ca", "verify-full"})
+# With a mode that checks a certificate, libpq is also told not to use GSSAPI encryption, which
+# it would otherwise prefer to TLS whatever sslmode says, checking no certificate.
 NO_GSS_ENCRYPTION = MappingProxyType({"gssencmode": "disable"})
 # The main engine's own default, unchanged: in production, encrypted when the address names
 # no sslmode. It applies only while DATABASE_SSLMODE is unset.
@@ -129,22 +131,17 @@ class DatabaseTLS:
         """
         return self.sslmode == SERVER_VERIFYING_MODE
 
-    @property
-    def requires_tls(self) -> bool:
-        """True for a mode that refuses a connection without TLS (``TLS_REQUIRING_MODES``)."""
-        return self.sslmode in TLS_REQUIRING_MODES
-
     def libpq_params(self) -> Dict[str, str]:
         """The keywords for ``psycopg2.connect`` and for SQLAlchemy's ``connect_args``.
 
-        A mode that requires TLS also carries ``NO_GSS_ENCRYPTION`` (see the module docstring).
+        A mode that checks a certificate also carries ``NO_GSS_ENCRYPTION`` (see the module docstring).
         """
         params: Dict[str, str] = {}
         if self.sslmode:
             params["sslmode"] = self.sslmode
         if self.sslrootcert:
             params["sslrootcert"] = self.sslrootcert
-        if self.requires_tls:
+        if self.checks_certificate:
             params.update(NO_GSS_ENCRYPTION)
         return params
 

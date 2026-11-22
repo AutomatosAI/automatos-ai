@@ -255,7 +255,7 @@ Each wave is one pull request or a short series. CI is the only gate: nothing he
 - [x] A test fails if a file in the orchestrator opens a connection to the application's database another way. Connections to a user's own data source are not covered.
 - [ ] The pull request lists every path it changed, with file and line.
 
-Note: libpq prefers GSSAPI encryption to TLS whatever `sslmode` says, so a mode that requires TLS (`require`, `verify-ca`, `verify-full`) also gives every libpq path `gssencmode=disable` (`PGGSSENCMODE` for the entrypoint's tools). asyncpg never negotiates GSSAPI encryption.
+Note: libpq prefers GSSAPI encryption to TLS whatever `sslmode` says, so with `verify-ca` or `verify-full` the libpq connections that read `DATABASE_SSLMODE` (the app's engines, the RAG code's psycopg2 connections, migrations, the seed loader, the worker's write, and the entrypoint's `pg_isready` and `psql`) also get `gssencmode=disable` (`PGGSSENCMODE` for the entrypoint's tools). asyncpg sends no GSSAPI encryption request and takes no `gssencmode`.
 
 #### US-303: The worker · S
 **Description:** As an operator, I want the workspace worker's database connection secured the same way, for as long as it has one.

@@ -11,8 +11,8 @@ passed as given. With the mode set, the address's own ``sslmode`` and ``sslrootc
 get, since libpq prefers the connection string to the environment; a query key written with
 a percent-escape, which libpq decodes before matching, stops the script instead. The settings are read the way config.py's reader reads them (trimmed, the mode
 lowercased); a value the app would refuse, verify-ca or verify-full without a CA file among
-them, stops the script before it waits for the database. A mode that requires TLS (require,
-verify-ca, verify-full) also sets ``PGGSSENCMODE=disable`` and drops the address's own
+them, stops the script before it waits for the database. A mode that checks a certificate
+(verify-ca, verify-full) also sets ``PGGSSENCMODE=disable`` and drops the address's own
 ``gssencmode``: libpq prefers GSSAPI encryption to TLS whatever sslmode says, and would then
 check no certificate.
 
@@ -155,15 +155,20 @@ def test_the_keys_libpq_turns_into_sslmode_are_dropped_too(tmp_path):
     assert {line.split(" ", 1)[1] for line in addresses} == {_address("?application_name=boot")}
 
 
-@pytest.mark.parametrize(("mode", "gssencmode"), [("disable", "unset"), ("allow", "unset"), ("prefer", "unset"),
-                                                  ("require", "disable")])
-def test_only_a_mode_that_requires_tls_turns_gss_encryption_off(tmp_path, mode, gssencmode):
+@pytest.mark.parametrize("mode", ["disable", "allow", "prefer", "require"])
+def test_a_mode_that_checks_no_certificate_leaves_gss_encryption_alone(tmp_path, mode):
     tools = _by_tool(_run(tmp_path, {"DATABASE_SSLMODE": mode}))
-    expected = {f"PGSSLMODE={mode} PGSSLROOTCERT=unset PGGSSENCMODE={gssencmode}"}
+    expected = {f"PGSSLMODE={mode} PGSSLROOTCERT=unset PGGSSENCMODE=unset"}
     assert tools["pg_isready"] == expected and tools["psql"] == expected
 
 
-def test_the_addresses_gssencmode_is_dropped_beside_a_mode_that_requires_tls(tmp_path):
+def test_verify_ca_turns_gss_encryption_off(tmp_path):
+    tools = _by_tool(_run(tmp_path, {"DATABASE_SSLMODE": "verify-ca", "DATABASE_SSLROOTCERT": CA_IN_POD}))
+    expected = {f"PGSSLMODE=verify-ca PGSSLROOTCERT={CA_IN_POD} PGGSSENCMODE=disable"}
+    assert tools["pg_isready"] == expected and tools["psql"] == expected
+
+
+def test_the_addresses_gssencmode_is_dropped_beside_a_mode_that_checks_a_certificate(tmp_path):
     """libpq prefers the connection string to PGGSSENCMODE, so the address's own key goes."""
     query = "?gssencmode=prefer&application_name=boot"
     proc, calls, addresses = _execute(tmp_path, {"DATABASE_URL": _address(query), "DATABASE_SSLMODE": "verify-full",
@@ -172,8 +177,8 @@ def test_the_addresses_gssencmode_is_dropped_beside_a_mode_that_requires_tls(tmp
     assert {line.split(" ", 1)[1] for line in addresses} == {_address("?application_name=boot")}
 
 
-@pytest.mark.parametrize("env", [{}, {"DATABASE_SSLMODE": "prefer"}])
-def test_without_a_mode_that_requires_tls_the_addresses_gssencmode_is_kept(tmp_path, env):
+@pytest.mark.parametrize("env", [{}, {"DATABASE_SSLMODE": "prefer"}, {"DATABASE_SSLMODE": "require"}])
+def test_without_a_certificate_check_the_addresses_gssencmode_is_kept(tmp_path, env):
     query = "?gssencmode=require"
     proc, calls, addresses = _execute(tmp_path, {"DATABASE_URL": _address(query), **env})
     assert calls, proc.stdout + proc.stderr

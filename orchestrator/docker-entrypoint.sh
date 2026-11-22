@@ -79,8 +79,9 @@ require_database_settings() {
 DB_TLS_SSLMODE=""
 DB_TLS_SSLROOTCERT=""
 # libpq uses GSSAPI encryption, where Kerberos credentials allow it, in preference to TLS
-# whatever sslmode says, and then checks no certificate. With a mode that requires TLS,
-# PGGSSENCMODE turns it off, so the mode set is the one in force (core/database/tls.py).
+# whatever sslmode says, and then checks no certificate. With verify-ca or verify-full,
+# PGGSSENCMODE turns it off, so the certificate check asked for is in force
+# (core/database/tls.py). A gssencmode in a libpq service file is read before it.
 DB_TLS_GSSENCMODE=""
 NO_GSS_ENCRYPTION="disable"
 
@@ -91,6 +92,7 @@ trim() {
 }
 
 read_database_tls() {
+    DB_TLS_GSSENCMODE=""
     DB_TLS_SSLMODE="$(trim "${DATABASE_SSLMODE:-}")"
     DB_TLS_SSLMODE="${DB_TLS_SSLMODE,,}"
     DB_TLS_SSLROOTCERT="$(trim "${DATABASE_SSLROOTCERT:-}")"
@@ -118,7 +120,7 @@ read_database_tls() {
         esac
     fi
     case "$DB_TLS_SSLMODE" in
-        require|verify-ca|verify-full) DB_TLS_GSSENCMODE="$NO_GSS_ENCRYPTION" ;;
+        verify-ca|verify-full) DB_TLS_GSSENCMODE="$NO_GSS_ENCRYPTION" ;;
     esac
 }
 

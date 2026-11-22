@@ -7,7 +7,7 @@ database is secured, and each driver gets it in the form it takes.
   production default (``sslmode=require`` added when the address names none);
 * with ``verify-full`` and a CA file, libpq gets ``sslmode`` and ``sslrootcert`` (psycopg2,
   and SQLAlchemy through ``connect_args``), with ``gssencmode=disable`` as for every mode that
-  requires TLS, so libpq cannot use GSSAPI encryption in place of TLS; asyncpg gets an ``ssl.SSLContext`` that
+  checks a certificate, so libpq cannot use GSSAPI encryption in place of that check; asyncpg gets an ``ssl.SSLContext`` that
   requires the certificate, trusts that CA and checks the host name;
 * a mode libpq doesn't know, a CA file without a mode that checks it, verify-ca or
   verify-full without a CA file, or a CA file that is missing or holds no certificate, stops
@@ -320,18 +320,7 @@ def test_a_mode_that_checks_no_certificate_reaches_asyncpg_as_text(settings, mod
     """asyncpg reads the mode text the way libpq does. A checking mode needs a CA file (below)."""
     settings(sslmode=mode)
     assert tls.database_tls().asyncpg_kwargs() == {"ssl": mode}
-
-
-@pytest.mark.parametrize(("mode", "expected"), [
-    ("disable", {"sslmode": "disable"}),
-    ("allow", {"sslmode": "allow"}),
-    ("prefer", {"sslmode": "prefer"}),
-    ("require", {"sslmode": "require", "gssencmode": "disable"}),
-])
-def test_a_mode_without_a_ca_gives_libpq_its_keywords(settings, mode, expected):
-    """Only a mode that requires TLS turns GSSAPI encryption off: the others ask for no TLS it could replace."""
-    settings(sslmode=mode)
-    assert tls.database_tls().libpq_params() == expected
+    assert tls.database_tls().libpq_params() == {"sslmode": mode}
 
 
 def test_only_verify_full_verifies_the_server():
@@ -345,14 +334,16 @@ def test_only_verify_full_verifies_the_server():
 
 # ── GSSAPI encryption: libpq prefers it to TLS whatever sslmode says ─────────
 # With Kerberos credentials at hand, libpq tries a GSSAPI-encrypted connection first and, if it
-# is accepted, uses it and checks no certificate. A mode that requires TLS turns that off.
+# is accepted, uses it and checks no certificate. A mode that checks a certificate turns that off.
 GSS_QUERIES = ["?gssencmode=prefer", "?sslmode=disable&gssencmode=require", "?gss%65ncmode=prefer"]
 
 
-def test_exactly_the_modes_that_require_tls_turn_gss_encryption_off():
-    required = {mode for mode in tls.SSLMODES if tls.DatabaseTLS(sslmode=mode).requires_tls}
-    assert required == {"require", "verify-ca", "verify-full"}
-    assert not tls.DatabaseTLS().requires_tls
+def test_exactly_the_modes_that_check_a_certificate_turn_gss_encryption_off():
+    """require checks no certificate: GSSAPI encryption, a channel Kerberos authenticates, may stay."""
+    off = {mode for mode in tls.SSLMODES if "gssencmode" in tls.DatabaseTLS(sslmode=mode).libpq_params()}
+    assert off == tls.CERTIFICATE_CHECKING_MODES == {"verify-ca", "verify-full"}
+    assert tls.DatabaseTLS(sslmode="verify-ca").libpq_params()["gssencmode"] == "disable"
+    assert "gssencmode" not in tls.DatabaseTLS().libpq_params()
     assert dict(tls.NO_GSS_ENCRYPTION) == {"gssencmode": "disable"}
 
 
@@ -390,9 +381,8 @@ def test_libpq_gets_no_gss_encryption_through_the_seed_loaders_dsn(settings, mon
     assert _libpq_reads(libpq_strings[0])["gssencmode"] == "disable"
 
 
-@pytest.mark.parametrize("mode", [None, "prefer"])
-def test_without_a_mode_that_requires_tls_the_addresses_gssencmode_reaches_libpq_as_given(settings, libpq_strings,
-                                                                                           mode):
+@pytest.mark.parametrize("mode", [None, "prefer", "require"])
+def test_without_a_certificate_check_the_addresses_gssencmode_reaches_libpq_as_given(settings, libpq_strings, mode):
     from sqlalchemy.pool import NullPool
 
     settings(sslmode=mode)

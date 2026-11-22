@@ -5,8 +5,8 @@ same two settings as the platform's, read in its own config module.
 ``DATABASE_SSLROOTCERT``; the worker reads them once at start and hands them to
 ``task_executions_db.record_task_status``, which passes them to ``psycopg2.connect`` as
 libpq's ``sslmode`` and ``sslrootcert`` keywords, over the same keys in the address, with
-``gssencmode=disable`` for a mode that requires TLS, so libpq cannot use GSSAPI encryption
-in place of TLS.
+``gssencmode=disable`` for a mode that checks a certificate, so libpq cannot use GSSAPI
+encryption in place of that check.
 psycopg2 parses the address with libpq first, which turns its ``requiressl`` and ``ssl`` into
 ``sslmode``, so the keywords replace those too. libpq then checks the server's certificate against that CA, and its host name for verify-full.
 Neither set: no keyword, as before. verify-ca or verify-full without a CA file, and a CA
@@ -92,29 +92,24 @@ def test_neither_setting_gives_no_keyword(tls_env):
     assert worker_config.database_tls_params() == {}
 
 
-@pytest.mark.parametrize(("mode", "expected"), [
-    ("disable", {"sslmode": "disable"}),
-    ("allow", {"sslmode": "allow"}),
-    ("prefer", {"sslmode": "prefer"}),
-    ("require", {"sslmode": "require", "gssencmode": "disable"}),
-])
-def test_a_mode_that_checks_no_certificate_needs_no_ca(tls_env, mode, expected):
-    """Only a mode that requires TLS turns GSSAPI encryption off."""
+@pytest.mark.parametrize("mode", ["disable", "allow", "prefer", "require"])
+def test_a_mode_that_checks_no_certificate_needs_no_ca_and_gives_sslmode_alone(tls_env, mode):
+    """No CA file, and no gssencmode: GSSAPI encryption is turned off only for a certificate check."""
     tls_env(sslmode=mode)
-    assert worker_config.database_tls_params() == expected
+    assert worker_config.database_tls_params() == {"sslmode": mode}
 
 
-def test_verify_full_with_a_ca_path_gives_both_keywords(tls_env, ca_file):
+def test_verify_full_with_a_ca_path_gives_its_keywords_and_turns_gss_encryption_off(tls_env, ca_file):
     tls_env(sslmode="VERIFY-FULL ", sslrootcert=ca_file)
     assert worker_config.database_tls_params() == {"sslmode": "verify-full", "sslrootcert": ca_file,
                                                    "gssencmode": "disable"}
 
 
-def test_exactly_the_modes_the_platform_calls_tls_requiring_turn_gss_encryption_off():
+def test_the_worker_turns_gss_encryption_off_for_the_modes_the_platform_does():
     """The worker cannot import the orchestrator, so its copy is pinned to core.database.tls here."""
     from core.database import tls
 
-    assert set(worker_config.DATABASE_TLS_REQUIRING_MODES) == tls.TLS_REQUIRING_MODES
+    assert set(worker_config.DATABASE_CERTIFICATE_CHECKING_MODES) == tls.CERTIFICATE_CHECKING_MODES
     assert dict(worker_config.NO_GSS_ENCRYPTION) == dict(tls.NO_GSS_ENCRYPTION)
 
 
