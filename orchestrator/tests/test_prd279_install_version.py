@@ -7,7 +7,8 @@
   (OpenAPI), ``GET /`` and ``GET /health`` in main.py, and ``GET /api/system/health``
   (api/system.py), which the web app reads to show it beside the edition.
 * images.yml builds the API with it: the tag's version on a ``v*`` tag, the full commit id on
-  every other run, as one build arg the picker adds to the API alone.
+  every other run, as one build arg the picker adds to the API and the workspace worker
+  (PRD-282: the version its JSON log lines name), and to no other image.
 * The arg is declared after the production stage's last filesystem layer, so a value that
   changes on every commit rebuilds no layer, and the cache keys and tree tags are as before.
 
@@ -33,6 +34,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MAIN = ROOT / "orchestrator" / "main.py"
 SYSTEM = ROOT / "orchestrator" / "api" / "system.py"
 DOCKERFILE = (ROOT / "orchestrator" / "Dockerfile").read_text(encoding="utf-8")
+WORKER_DOCKERFILE = (ROOT / "services" / "workspace-worker" / "Dockerfile").read_text(encoding="utf-8")
 WORKFLOW = yaml.safe_load((ROOT / ".github" / "workflows" / "images.yml").read_text(encoding="utf-8"))
 PICK = next(step for step in WORKFLOW["jobs"]["changes"]["steps"] if step.get("id") == "pick")
 IMAGES = json.loads(PICK["env"]["IMAGES"])
@@ -116,8 +118,8 @@ def test_the_running_app_reports_the_setting():
 # --------------------------------------------------------------------------- the image
 
 
-def _production() -> list:
-    code = "\n".join(line for line in DOCKERFILE.splitlines() if not line.lstrip().startswith("#"))
+def _production(dockerfile: str = DOCKERFILE) -> list:
+    code = "\n".join(line for line in dockerfile.splitlines() if not line.lstrip().startswith("#"))
     lines = [" ".join(line.split()) for line in re.sub(r"\\[ \t]*\n", " ", code).splitlines() if line.strip()]
     start = next(i for i, line in enumerate(lines) if re.fullmatch(r"FROM \S+ as production", line, re.I))
     return lines[start + 1:]
@@ -133,6 +135,16 @@ def test_the_api_image_takes_the_version_after_its_last_layer_and_sets_it_for_th
     assert not [line for line in after if line.split()[0].upper() in {"RUN", "COPY", "ADD", "WORKDIR"}]
 
 
+def test_the_worker_image_takes_the_version_after_its_last_layer_too():
+    production = _production(WORKER_DOCKERFILE)
+    code_copy = production.index("COPY --chown=1000:1000 . .")
+    assert production.index("ARG AUTOMATOS_VERSION") > code_copy, "no layer is rebuilt for a new value"
+    assert production.index("ENV AUTOMATOS_VERSION=${AUTOMATOS_VERSION}") == production.index("ARG AUTOMATOS_VERSION") + 1
+    assert WORKER_DOCKERFILE.count("ARG AUTOMATOS_VERSION") == 1, "declared in the production stage only, with no default"
+    after = production[code_copy + 1:]
+    assert not [line for line in after if line.split()[0].upper() in {"RUN", "COPY", "ADD", "WORKDIR"}]
+
+
 def _entries(version: str) -> dict:
     built = picker.matrix(IMAGES, [image["name"] for image in IMAGES], RUNNERS, True, "AutomatosAI", LOCAL,
                           version=version)
@@ -140,12 +152,14 @@ def _entries(version: str) -> dict:
 
 
 @pytest.mark.parametrize("version", ["0.12.0", "0.12.0-rc.1", COMMIT])
-def test_the_api_alone_is_built_with_the_version(version):
+def test_the_api_and_the_worker_and_no_other_image_are_built_with_the_version(version):
     with_version, without = _entries(version), _entries("")
     for key, entry in with_version.items():
         args = entry["build_args"].splitlines()
         if key[0] == "api":
             assert args == ["SOURCE_DATE_EPOCH=1792368000", f"AUTOMATOS_VERSION={version}"], args
+        elif key[0] == "workspace-worker":
+            assert args == ["INSTALL_BROWSER=false", f"AUTOMATOS_VERSION={version}"], args
         else:
             assert not [arg for arg in args if arg.startswith("AUTOMATOS_VERSION")], key
         # Only the build args differ: the cache keys, the image name and the edge it is
@@ -163,8 +177,10 @@ def test_the_workflow_passes_the_tags_version_or_the_commit_id():
     assert PICK["env"]["BUILD_VERSION"] == "${{ steps.release.outputs.version || github.sha }}"
     assert '--version "$BUILD_VERSION"' in PICK["run"]
     api = next(image for image in IMAGES if image["name"] == "api")
+    worker = next(image for image in IMAGES if image["name"] == "workspace-worker")
     assert api["version_arg"] == "AUTOMATOS_VERSION" and api["build_args"] == []
-    assert not [image["name"] for image in IMAGES if image.get("version_arg") and image["name"] != "api"]
+    assert worker["version_arg"] == "AUTOMATOS_VERSION" and worker["build_args"] == ["INSTALL_BROWSER=false"]
+    assert sorted(image["name"] for image in IMAGES if image.get("version_arg")) == ["api", "workspace-worker"]
 
 
 def test_the_tree_tags_are_still_the_build_contexts_git_tree():

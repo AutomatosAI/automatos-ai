@@ -354,9 +354,10 @@ jobs:
           # and never published, for the same reason (GPL-3.0 espeak-ng and
           # phonemizer), but keeps the GHA cache: `min`, so the 310 MB model is
           # cached once, in the image's own layer, not again in its fetch stage.
-          # version_arg (the API only, PRD-279 US-303): the build arg image_matrix.py
-          # sets to BUILD_VERSION, which the API reports; its Dockerfile reads it after
-          # the last layer, so it rebuilds nothing and leaves the tree tags as they were.
+          # version_arg (the API and the worker, PRD-279 US-303, PRD-282): the build arg
+          # image_matrix.py sets to BUILD_VERSION, which the API reports and the worker's
+          # log lines name; each Dockerfile reads it after the last layer, so it rebuilds
+          # nothing and leaves the tree tags as they were.
           IMAGES: |
             [
               {"name": "api", "context": "orchestrator", "target": "production",
@@ -397,6 +398,7 @@ jobs:
                           "frontend/scripts/check-enterprise-image.sh"]},
               {"name": "workspace-worker", "context": "services/workspace-worker", "target": "",
                "build_args": ["INSTALL_BROWSER=false"],
+               "version_arg": "AUTOMATOS_VERSION",
                "cache_mode": "max", "no_cache_filters": ["production"],
                "arches": ["amd64", "arm64"], "publish": true,
                "inputs": ["services/workspace-worker/**"]},
