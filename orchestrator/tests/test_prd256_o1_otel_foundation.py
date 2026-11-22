@@ -130,12 +130,20 @@ def test_off_leaves_the_lifespan_as_it_was(monkeypatch):
     assert otel.with_tracing(lifespan) is lifespan
 
 
+def _called_names(relative: str) -> set:
+    tree = ast.parse((_ORCH / relative).read_text(encoding="utf-8"))
+    return {node.func.id for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+
+
 def test_main_wires_the_lifespan_and_the_instrumentation():
-    """main.py: the provider around the lifespan, the server spans on the app, the IDs per request."""
-    tree = ast.parse((_ORCH / "main.py").read_text(encoding="utf-8"))
-    calls = {node.func.id for node in ast.walk(tree)
-             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
-    assert {"with_tracing", "instrument_app", "annotate_request"} <= calls
+    """main.py: the provider around the lifespan, the server spans on the app, the IDs per request.
+
+    PRD-282 US-301 moved the IDs per request into ``RequestContextMiddleware``, which main.py
+    registers, so the span's ``annotate_request`` call is in its module."""
+    assert {"with_tracing", "instrument_app"} <= _called_names("main.py")
+    assert "annotate_request" in _called_names("core/monitoring/request_context.py")
+    main_source = (_ORCH / "main.py").read_text(encoding="utf-8")
+    assert "app.add_middleware(RequestContextMiddleware)" in main_source
 
 
 # ── settings ─────────────────────────────────────────────────────────────────

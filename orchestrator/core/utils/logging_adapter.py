@@ -19,6 +19,7 @@ from core.monitoring.automatos_logging import (
     http_method_var,
     http_path_var,
 )
+from core.monitoring.json_log_format import JsonLineFormatter
 from core.monitoring.path_digests import redact_digest_segments
 
 # Re-export for backwards compat (existing code imports from here)
@@ -72,21 +73,21 @@ class ContextFilter(logging.Filter):
 
 
 def install_request_context_logging(format_with_context: Optional[str] = None) -> None:
-    """Attach the context filter to all handlers and optionally update formats."""
+    """Attach the context filter to all handlers and optionally update formats.
+
+    A handler writing JSON lines (``LOG_FORMAT=json``, PRD-282 US-301) keeps its formatter:
+    its fields are a fixed list, the request's among them.
+    """
     context_filter = ContextFilter()
+    default_fmt = (
+        "%(asctime)s - %(name)s - %(levelname)s - "
+        "[req=%(request_id)s ws=%(workspace_id)s agent=%(agent_id)s%(_trace_context)s] - %(message)s"
+    )
     logger = logging.getLogger()
     for handler in logger.handlers:
         handler.addFilter(context_filter)
-        if format_with_context:
-            handler.setFormatter(logging.Formatter(format_with_context))
-
-    if not format_with_context:
-        default_fmt = (
-            "%(asctime)s - %(name)s - %(levelname)s - "
-            "[req=%(request_id)s ws=%(workspace_id)s agent=%(agent_id)s%(_trace_context)s] - %(message)s"
-        )
-        for handler in logger.handlers:
-            handler.setFormatter(logging.Formatter(default_fmt))
+        if not isinstance(handler.formatter, JsonLineFormatter):
+            handler.setFormatter(logging.Formatter(format_with_context or default_fmt))
 
 
 def set_request_id(request_id: Optional[str] = None) -> Token[str]:

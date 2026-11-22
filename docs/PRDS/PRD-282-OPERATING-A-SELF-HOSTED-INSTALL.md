@@ -257,11 +257,11 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As an operator, I want logs my monitoring system can parse, so that I can search by request, workspace and level.
 
 **Acceptance Criteria:**
-- [ ] `LOG_FORMAT` and `LOG_LEVEL` exist in `config.py` and `config-surface.json`.
+- [x] `LOG_FORMAT` and `LOG_LEVEL` exist in `config.py` and `config-surface.json`.
 - [ ] With `LOG_FORMAT=json`, every line the API writes is one JSON object with the fields in section 5.7.
-- [ ] An exception is one record with the trace in a field.
-- [ ] The web server's access lines are in the same format.
-- [ ] With `LOG_FORMAT=text`, a line is as today with the request id added.
+- [x] An exception is one record with the trace in a field.
+- [x] The web server's access lines are in the same format.
+- [x] With `LOG_FORMAT=text`, a line is as today with the request id added.
 - [ ] `test_1178_request_log_guard.py` and `test_prd256_o5_logs_metrics.py` pass, and the filters they cover apply to both formats.
 - [ ] No new dependency is added.
 

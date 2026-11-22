@@ -540,6 +540,23 @@ containers; `make reset` removes it with the rest.
 
 You should not need to open the last three for a standard install.
 
+### Logs
+
+The backend writes its logs to the console (`make logs s=backend`). Two settings choose how
+([PRD-282](../PRDS/PRD-282-OPERATING-A-SELF-HOSTED-INSTALL.md) §5.7):
+
+| Setting | Default | Values |
+|---|---|---|
+| `LOG_FORMAT` | `text` | `json`: one JSON record per line, for a log collector. Set it in `envs/api.local`. |
+| `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`, in any case. Set it in `.env`: compose passes it to the backend. |
+
+A JSON record holds `time`, `level`, `logger`, `message`, `service` and `version`, then, when they
+have a value, the request's `request_id`, `workspace_id`, `method` and `path`, the `trace_id` and
+`span_id` of a trace being recorded, and `exception`, the whole traceback in one field. uvicorn's
+own lines are written the same way. A text line carries the request's id as `req=…`, and
+uvicorn's access line ends with it. Any other value of either setting stops the backend at
+start-up, with a message naming the setting.
+
 ## 4. First boot — what happens and how long it takes
 
 1. **Images.** `make up` pulls the app images CI built, scanned and published

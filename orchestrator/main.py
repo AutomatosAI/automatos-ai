@@ -19,7 +19,6 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from core.auth.hybrid import get_request_context_hybrid
 import uvicorn
-import uuid
 import time
 from datetime import datetime, timezone
 from collections import defaultdict, deque
@@ -179,20 +178,11 @@ from api.dashboard_integration import (
 
 # WebSocket manager removed - using AI SDK SSE streaming instead
 from core.observability.otel import (
-    FASTAPI_TELEMETRY, annotate_request, instrument_app, instrument_libraries, with_tracing,
+    FASTAPI_TELEMETRY, instrument_app, instrument_libraries, with_tracing,
 )
 from core.route_tree import route_template  # PRD-262 US-008: API stats key by the full template
-from core.utils.logging_adapter import (
-    install_request_context_logging,
-    set_request_id,
-    clear_request_id,
-    set_request_context,
-    request_id_var,
-    workspace_id_var,
-    user_id_var,
-    http_method_var,
-    http_path_var,
-)
+from core.utils.logging_adapter import install_request_context_logging
+from core.monitoring.request_context import RequestContextMiddleware  # PRD-282 US-301
 
 # Configure logging — ships to log-relay → Loki when LOG_RELAY_URL is set
 from core.monitoring.automatos_logging import setup_logging
@@ -1054,35 +1044,12 @@ async def add_security_headers(request, call_next):
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
     return response
 
-# Install logging context filter and add request-id middleware
+# Install the logging context filter (the request's context comes from RequestContextMiddleware, below)
 install_request_context_logging()
 # PRD-256 (#847): a server span per request, when OTEL_ENABLED. It wraps the whole
 # middleware stack, so it must be in place before the first ASGI call (the lifespan's).
 instrument_app(app)
 instrument_libraries()   # PRD-256 O2a: SQL, Redis, outbound HTTP and AWS spans under each request
-
-@app.middleware("http")
-async def add_request_id_middleware(request, call_next):
-    inbound = request.headers.get("X-Request-ID")
-    token = set_request_id(inbound or uuid.uuid4().hex[:12])
-
-    # PRD-73 Phase 2: Enrich logs with request context (workspace, user, method, path)
-    # ContextVars are captured automatically by LogRelayHandler — zero cost at call sites
-    http_method_var.set(request.method)
-    http_path_var.set(request.url.path)
-
-    # Extract workspace_id and user_id from auth headers (best-effort, pre-auth)
-    ws_header = request.headers.get("x-workspace-id", "") or request.headers.get("x-workspace", "")
-    if ws_header and ws_header != "__all__":
-        workspace_id_var.set(ws_header)
-    annotate_request(request_id_var.get(""), workspace_id_var.get(""))  # PRD-256: the IDs on the server span
-
-    try:
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request.headers.get("X-Request-ID") or request_id_var.get("")
-        return response
-    finally:
-        clear_request_id(token)
 
 @app.middleware("http")
 async def api_tracking_middleware(request, call_next):
@@ -1128,6 +1095,12 @@ async def api_tracking_middleware(request, call_next):
                     stats["error_count"] += 1
         except Exception:
             pass  # Never let stats tracking break the response
+
+
+# PRD-282 US-301: the request's id, method, path and workspace for its logs, its span and its
+# X-Request-ID header. Plain ASGI and added last, so it is the outermost of the app's own
+# middleware: every line of the request, uvicorn's access line included, has its id.
+app.add_middleware(RequestContextMiddleware)
 
 
 # Include API routers
