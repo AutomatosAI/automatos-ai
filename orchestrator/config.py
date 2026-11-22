@@ -40,6 +40,10 @@ CLERK_DEFAULT_AUTHORIZED_PARTIES = "https://ui.automatos.app,http://localhost:30
 SESSION_IDLE_MINUTES_DEFAULT = 120
 SESSION_ABSOLUTE_HOURS_DEFAULT = 12
 
+# The memory store's address when QDRANT_URL is unset. GET /health (PRD-282 US-202) reads
+# a store that does not answer here as not configured, not down.
+QDRANT_URL_DEFAULT = "http://localhost:6333"
+
 # PRD-279 US-303: what an API built without a version reports (a checkout's own build, the
 # test suite). images.yml builds every API image with AUTOMATOS_VERSION set.
 UNVERSIONED_BUILD = "dev"
@@ -1816,7 +1820,7 @@ class Config:
     # =============================================================================
     # QDRANT — PRD-108 Memory Field (Shared Semantic Context)
     # =============================================================================
-    QDRANT_URL: str = os.getenv("QDRANT_URL", "http://localhost:6333")
+    QDRANT_URL: str = os.getenv("QDRANT_URL", QDRANT_URL_DEFAULT)
     QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY", "")
     # PRD-187 S1: in-process L3 durable memory — a second collection on the same
     # running Qdrant (field memory is the first). Wave-3 P2-16 consolidates both

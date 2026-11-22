@@ -691,12 +691,13 @@ class LLMManager:
         start = time.monotonic()
         budget = self._call_budget()
         try:
-            with output_budget.call_budget(budget):
+            with output_budget.call_budget(budget), last_call.watching(self) as call:  # PRD-282: /health
                 stream = live_stream(self.provider, on_delta)
                 if stream is not None:
                     response = await in_owner_words(stream, messages, tools, on_delta)
                 else:
                     response = await self.provider.generate_response(messages, tools)
+                call.answered(response)
             self._track_usage(response, start, status=usage_status.call_status(response))  # F295
             self._note_success(budget)
             self._note_cut(response, budget)
@@ -727,8 +728,8 @@ class LLMManager:
         start = time.monotonic()
         budget = self._call_budget()
         try:
-            with output_budget.call_budget(budget):
-                response = self.provider.generate_response_sync(messages)
+            with output_budget.call_budget(budget), last_call.watching(self) as call:  # PRD-282: /health
+                response = call.answered(self.provider.generate_response_sync(messages))
             self._track_usage(response, start, status=usage_status.call_status(response))  # F295
             self._note_cut(response, budget)
             return response
@@ -854,7 +855,6 @@ class LLMManager:
         """
         latency_ms = int((time.monotonic() - start) * 1000)
         counts = usage_counts(response)
-        last_call.note(status)  # PRD-282 US-202: /health's model provider entry
         self._log_cost_audit(  # cost audit logging: always, whatever the workspace
             input_tokens=counts.input_tokens,
             output_tokens=counts.output_tokens,

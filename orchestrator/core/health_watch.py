@@ -15,7 +15,12 @@ logged and the next tick comes anyway, so the watch never stops on its own.
   started, and no new reading is made, so the reading ages; when the thread does
   finish, its answer is recorded then. A daemon thread never holds up the process's exit.
 * **Quiet logs.** A check that raises reads as ``failed_state``. The watch logs a state
-  only when it changes (a failure with its traceback, once) and when it recovers.
+  only when it changes (a failure at WARNING, with its traceback when it raised, once)
+  and when it recovers;
+  ``notes`` adds a fixed line to a state's log entry (what a refused check needs).
+* **A check that knows when.** A check may return a ``Reading`` instead of a state, when
+  what it reports happened before the tick (the model provider's last call): that
+  reading is kept with its own ``checked_at``, so its age is the event's.
 * ``on_reading``, when given, is told the current reading after every tick (None when
   there is none or it is stale); a callback that fails is logged and the reading stands.
 """
@@ -27,7 +32,8 @@ import logging
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable, Optional, Tuple
+from types import MappingProxyType
+from typing import Callable, Mapping, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +44,7 @@ STALE_AFTER_CHECKS = 3
 # loop's turn, never a second check.
 _FIRST_READING_SLACK_S = 1.0
 
-Outcome = Tuple[str, Optional[BaseException]]
+_NO_NOTES: Mapping[str, str] = MappingProxyType({})
 
 
 @dataclass(frozen=True)
@@ -47,6 +53,9 @@ class Reading:
 
     state: str
     checked_at: datetime
+
+
+Outcome = Tuple[Union[str, Reading], Optional[BaseException]]
 
 
 def _now() -> datetime:
@@ -68,9 +77,9 @@ def _on_a_thread(name: str, check: Callable[[], Outcome]) -> concurrent.futures.
 class Watch:
     """One background check: its timer, its time limit and its last reading."""
 
-    def __init__(self, name: str, check: Callable[[], str], *, every_s: float, limit_s: float,
+    def __init__(self, name: str, check: Callable[[], Union[str, Reading]], *, every_s: float, limit_s: float,
                  failed_state: str, on_reading: Optional[Callable[[str, Optional[Reading]], None]] = None,
-                 stale_after_s: Optional[float] = None) -> None:
+                 stale_after_s: Optional[float] = None, notes: Mapping[str, str] = _NO_NOTES) -> None:
         self.name = name
         self.last: Optional[Reading] = None
         self.stale_after_s = stale_after_s if stale_after_s is not None else STALE_AFTER_CHECKS * every_s + limit_s
@@ -79,6 +88,7 @@ class Watch:
         self._limit_s = limit_s
         self._failed_state = failed_state
         self._on_reading = on_reading
+        self._notes = notes
         self._running: Optional[asyncio.Future] = None
         self._first = asyncio.Event()
 
@@ -116,19 +126,22 @@ class Watch:
         if not running.cancelled():
             self._record(*running.result())
 
-    def _record(self, state: str, error: Optional[BaseException], *, timed_out: bool = False) -> None:
-        previous, reading = self.last, Reading(state, _now())
+    def _record(self, found: Union[str, Reading], error: Optional[BaseException], *, timed_out: bool = False) -> None:
+        previous = self.last
+        reading = found if isinstance(found, Reading) else Reading(found, _now())
         self.last = reading
         self._first.set()
-        if previous is None or previous.state != state:
-            self._log_change(state, error, timed_out)
+        if previous is None or previous.state != reading.state:
+            self._log_change(reading.state, error, timed_out)
         self._publish()
 
     def _log_change(self, state: str, error: Optional[BaseException], timed_out: bool) -> None:
-        if error is not None:
+        if error is not None or (state == self._failed_state and not timed_out):
             logger.warning("Health: %s is %s", self.name, state, exc_info=error)
         elif timed_out:
             logger.warning("Health: %s is %s: no answer within %gs", self.name, state, self._limit_s)
+        elif state in self._notes:
+            logger.info("Health: %s is %s: %s", self.name, state, self._notes[state])
         else:
             logger.info("Health: %s is %s", self.name, state)
 
