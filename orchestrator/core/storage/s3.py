@@ -47,8 +47,8 @@ _BUCKET_MISSING_CODES = frozenset({"404", "NoSuchBucket", "NotFound"})
 
 STORAGE_NOT_CONFIGURED_MESSAGE = (
     "Object storage is not configured — set S3_ENDPOINT_URL (local: the MinIO "
-    "service, http://minio:9000) or AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY "
-    "(AWS S3)."
+    "service, http://minio:9000), AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY "
+    "(AWS S3), or AWS_USE_WORKLOAD_IDENTITY=true (AWS S3 from the pod's own role)."
 )
 
 
@@ -90,12 +90,13 @@ _ensured_buckets: Set[str] = set()
 def is_storage_configured() -> bool:
     """True when the platform has somewhere to put objects.
 
-    An endpoint (MinIO) or an explicit AWS key pair counts; the ambient boto
-    credential chain alone does not — both editions configure storage through
-    ``config``, and a silent fallback to ``~/.aws`` is exactly the kind of
-    hidden dependency this factory exists to remove.
+    An endpoint (MinIO), an explicit AWS key pair, or ``AWS_USE_WORKLOAD_IDENTITY``
+    counts. The ambient boto credential chain alone does not: a silent fallback
+    to a stray ``~/.aws`` profile is exactly the kind of hidden dependency this
+    factory exists to remove, so using the pod's own role is said in words
+    (PRD-278 US-101; ``core.storage.workload_identity`` checks it at start-up).
     """
-    if config.S3_ENDPOINT_URL:
+    if config.S3_ENDPOINT_URL or config.AWS_USE_WORKLOAD_IDENTITY:
         return True
     return bool(config.AWS_ACCESS_KEY_ID and config.AWS_SECRET_ACCESS_KEY)
 
@@ -105,7 +106,8 @@ def _client_kwargs(*, endpoint_url: Optional[str], profile: ClientProfile) -> Di
 
     With ``endpoint_url`` None and ``S3_USE_PATH_STYLE`` off this reproduces the
     legacy SaaS constructors: no ``endpoint_url`` kwarg, no ``s3`` addressing
-    key, credentials only when ``config`` carries both halves.
+    key, credentials only when ``config`` carries both halves. With
+    ``AWS_USE_WORKLOAD_IDENTITY`` on, never a key: the SDK's chain finds the role.
     """
     from botocore.config import Config as BotoConfig
 
@@ -129,7 +131,7 @@ def _client_kwargs(*, endpoint_url: Optional[str], profile: ClientProfile) -> Di
     }
     if endpoint_url:
         kwargs["endpoint_url"] = endpoint_url
-    if config.AWS_ACCESS_KEY_ID and config.AWS_SECRET_ACCESS_KEY:
+    if not config.AWS_USE_WORKLOAD_IDENTITY and config.AWS_ACCESS_KEY_ID and config.AWS_SECRET_ACCESS_KEY:
         kwargs["aws_access_key_id"] = config.AWS_ACCESS_KEY_ID
         kwargs["aws_secret_access_key"] = config.AWS_SECRET_ACCESS_KEY
     return kwargs

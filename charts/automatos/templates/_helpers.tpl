@@ -28,12 +28,63 @@ app.kubernetes.io/instance: {{ .ctx.Release.Name }}
 app.kubernetes.io/component: {{ .component }}
 {{- end }}
 
-{{- define "automatos.serviceAccountName" -}}
-{{- if .Values.serviceAccount.create }}
-{{- default (include "automatos.fullname" .) .Values.serviceAccount.name }}
-{{- else }}
-{{- default "default" .Values.serviceAccount.name }}
+{{/*
+The components that run under an account of their own (PRD-280 US-101), as the keys of
+serviceAccount in values.yaml: (include "automatos.serviceAccountComponents" . | splitList " ").
+Only those that are on, in the order serviceaccount.yaml renders them.
+*/}}
+{{- define "automatos.serviceAccountComponents" -}}
+api{{ if .Values.frontend.enabled }} frontend{{ end }}{{ if .Values.worker.enabled }} worker{{ end }} migrate
 {{- end }}
+
+{{/*
+Stops the render on serviceAccount values that no longer do anything. Until chart 0.7.0 one
+account served every pod; a value meant for it would otherwise be dropped without a word.
+*/}}
+{{- define "automatos.validateServiceAccounts" -}}
+{{- $accounts := .Values.serviceAccount | default dict -}}
+{{- if $accounts.name }}
+{{- fail "serviceAccount.name: since chart 0.7.0 each component has its own account. Set serviceAccount.api.name, serviceAccount.frontend.name, serviceAccount.worker.name and serviceAccount.migrate.name instead (with serviceAccount.create=false they may all name the same account), and remove serviceAccount.name" }}
+{{- end }}
+{{- if $accounts.annotations }}
+{{- fail "serviceAccount.annotations: since chart 0.7.0 each component has its own account. Put the annotations on the account that needs them, e.g. serviceAccount.api.annotations, and remove serviceAccount.annotations" }}
+{{- end }}
+{{- range $key, $_ := $accounts }}
+{{- if not (has $key (list "create" "name" "annotations" "api" "frontend" "worker" "migrate")) }}
+{{- fail (printf "serviceAccount.%s: unknown key. The accounts are serviceAccount.api, serviceAccount.frontend (the web app), serviceAccount.worker and serviceAccount.migrate" $key) }}
+{{- end }}
+{{- end }}
+{{- if $accounts.create }}
+{{- $seen := dict }}
+{{- range $component := include "automatos.serviceAccountComponents" $ | splitList " " }}
+{{- $name := include "automatos.serviceAccountNameUnchecked" (dict "ctx" $ "component" $component) }}
+{{- with get $seen $name }}
+{{- fail (printf "serviceAccount.%s.name and serviceAccount.%s.name are both %q: with serviceAccount.create=true each component's account needs a name of its own" . $component $name) }}
+{{- end }}
+{{- $_ := set $seen $name $component }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+A component's account, without the checks: (dict "ctx" $ "component" "api"). With
+serviceAccount.create, the chart's own account, <fullname>-<component> unless
+serviceAccount.<component>.name renames it. Without, the account that value names, or the
+namespace's default account when it names none.
+*/}}
+{{- define "automatos.serviceAccountNameUnchecked" -}}
+{{- $account := index .ctx.Values.serviceAccount .component | default dict -}}
+{{- if .ctx.Values.serviceAccount.create -}}
+{{- default (printf "%s-%s" (include "automatos.fullname" .ctx) .component) $account.name -}}
+{{- else -}}
+{{- default "default" $account.name -}}
+{{- end -}}
+{{- end }}
+
+{{/* A component's account, after the checks above: (dict "ctx" $ "component" "api"). */}}
+{{- define "automatos.serviceAccountName" -}}
+{{- include "automatos.validateServiceAccounts" .ctx -}}
+{{- include "automatos.serviceAccountNameUnchecked" . -}}
 {{- end }}
 
 {{/*
