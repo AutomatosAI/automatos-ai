@@ -98,10 +98,15 @@ class WorkspaceWorker:
 
         import redis.asyncio as aioredis
         import redis.exceptions
+        from worker_redis import redis_address_and_tls
+        # PRD-278: a rediss:// address is TLS with the certificate checked, whatever its
+        # query string says; any other address is passed as given, with nothing added.
+        redis_address, redis_tls = redis_address_and_tls(self.redis_url)
         self._redis = aioredis.from_url(
-            self.redis_url,
+            redis_address,
             decode_responses=True,
             retry_on_error=[redis.exceptions.BusyLoadingError],
+            **redis_tls,
         )
 
         # Wait for Redis to be ready (handles BusyLoadingError on startup)

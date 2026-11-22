@@ -20,7 +20,7 @@ spec:
       labels:
         {{- include "automatos.selectorLabels" (dict "ctx" $ "component" "worker") | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "automatos.serviceAccountName" . }}
+      serviceAccountName: {{ include "automatos.serviceAccountName" (dict "ctx" $ "component" "worker") }}
       automountServiceAccountToken: false
       # No runAsNonRoot: the image's entrypoint starts as root to fix the workspace
       # volume's ownership, then drops to the `worker` user (uid 1000) with setpriv

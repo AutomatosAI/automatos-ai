@@ -75,7 +75,7 @@ This PRD makes the chart fit such a cluster without changing what a local user g
 
 ### 5.1 One service account for each component
 
-`api`, `web`, `worker`, `migrate` and, when it is enabled, `qdrant`. Each has a fixed, documented name and takes its own annotations, for clouds that tie a role to an account by annotation.
+`api`, `frontend`, `worker`, `migrate` and, when it is enabled, `qdrant`. Each has a fixed, documented name and takes its own annotations, for clouds that tie a role to an account by annotation.
 
 No pod mounts the cluster token. Nothing in the orchestrator calls the cluster's API **[T]**, so the API loses it too.
 
@@ -191,10 +191,10 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As an operator, I want each component to have its own account, so that a cloud role I give the API is not also given to the worker.
 
 **Acceptance Criteria:**
-- [ ] `api`, `web`, `worker` and `migrate` each have their own account, with a documented name and their own annotations.
-- [ ] No pod mounts the cluster token, the API's included.
+- [x] `api`, `frontend`, `worker` and `migrate` each have their own account, with a documented name and their own annotations.
+- [x] No pod mounts the cluster token, the API's included.
 - [ ] The migration job's account exists before the job runs, on a first install and on an upgrade.
-- [ ] `serviceAccount.create=false` with named accounts still works.
+- [x] `serviceAccount.create=false` with named accounts still works.
 - [ ] The chart's unit tests cover each, and `helm lint` and the render check pass in CI.
 
 #### US-102: A system-call filter on every pod · S
@@ -202,7 +202,7 @@ Each wave is one pull request or a short series. CI is the only gate.
 
 **Acceptance Criteria:**
 - [ ] Every container has the default system-call filter, no privilege escalation and no capability.
-- [ ] A unit test renders the chart with every optional component on and fails if any container lacks one.
+- [x] A unit test renders the chart with every optional component on and fails if any container lacks one.
 
 #### US-103: A table of everywhere a component writes · M · analysis only
 **Description:** As a maintainer, I want every path each component writes to listed, so that a read-only root file system breaks nothing.

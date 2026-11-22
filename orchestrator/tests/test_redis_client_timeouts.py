@@ -9,10 +9,11 @@ from __future__ import annotations
 import asyncio
 
 from core.redis import client as redis_client_module
+from core.redis.connection import RedisTarget
 
 
 def test_sync_pool_is_bounded_and_health_checked():
-    rc = redis_client_module.RedisClient(host="127.0.0.1", port=1)
+    rc = redis_client_module.RedisClient(RedisTarget(host="127.0.0.1", port=1))
     kwargs = rc.pool.connection_kwargs
     assert kwargs["socket_timeout"] == redis_client_module.REDIS_SOCKET_TIMEOUT_S
     assert kwargs["socket_connect_timeout"] == redis_client_module.REDIS_CONNECT_TIMEOUT_S
@@ -37,7 +38,7 @@ def test_async_pubsub_bounds_connect_but_not_the_idle_read(monkeypatch):
             return _FakePubSub()
 
     monkeypatch.setattr(redis_client_module.aioredis, "Redis", _FakeRedis)
-    rc = redis_client_module.RedisClient(host="127.0.0.1", port=1)
+    rc = redis_client_module.RedisClient(RedisTarget(host="127.0.0.1", port=1))
     _, pubsub = asyncio.run(rc.get_async_pubsub("events"))
     assert captured["channel"] == "events"
     assert captured["socket_connect_timeout"] == redis_client_module.REDIS_CONNECT_TIMEOUT_S

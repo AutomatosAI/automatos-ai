@@ -169,13 +169,14 @@ def _overrides_on(workspace: Optional[Workspace]) -> List[str]:
 def _platform_routes(db: Session, workspace_id: uuid.UUID) -> ProviderNames:
     """(b) Chat providers this edition allows a platform key for, with a platform key present.
 
-    ``workspace_id`` is unused: a platform key serves every workspace.
+    ``workspace_id`` is unused: a platform key serves every workspace. The pod's own role
+    counts as Bedrock's key when ``AWS_USE_WORKLOAD_IDENTITY`` is on (PRD-278 US-103).
     """
     allowed = [slug for slug in registry.chat_slugs() if registry.platform_key_allowed(slug)]
     present = (
         set(_operator_workspace_slugs(db))
         | set(_credential_store_slugs(db, allowed))
-        | {slug for slug in allowed if registry.env_api_key(slug)}
+        | {slug for slug in allowed if registry.env_api_key(slug) or registry.runs_on_workload_identity(slug)}
     )
     return _registry_names(slug for slug in allowed if slug in present)
 
@@ -237,13 +238,14 @@ def _credential_store_slugs(db: Session, slugs: List[str]) -> List[str]:
 
 
 def _embeddings(_db: Session, _workspace_id: uuid.UUID) -> ProviderNames:
-    """(c) The embeddings provider, read as ``EmbeddingManager._load_provider`` reads it.
+    """(c) The embeddings provider, read by the manager's own read (``configured_provider``).
 
-    The ``embeddings.provider`` system setting, else ``config.EMBEDDING_PROVIDER``.
+    The ``embeddings.provider`` system setting, else ``config.EMBEDDING_PROVIDER``;
+    ``EMBEDDING_PROVIDER=bedrock`` first (PRD-278 US-501), listed as AWS Bedrock.
     Unset, ``disabled`` and ``huggingface_local`` add none; a slug the registry
     knows takes its label, so a provider that is also a chat route appears once.
     """
-    provider = embedding_manager.get_system_setting("provider") or config.EMBEDDING_PROVIDER
+    provider = embedding_manager.configured_provider()
     if not provider or provider in EMBEDDINGS_STAY_HERE:
         return {}
     return _registry_names([EMBEDDINGS_REGISTRY_SLUGS.get(provider, provider)])
