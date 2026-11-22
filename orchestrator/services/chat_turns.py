@@ -86,22 +86,19 @@ class TurnRegistry:
         self._redis_resolved = True
         try:
             from core.redis.client import get_redis_client
+            from core.redis.connection import new_async_client
 
             base = get_redis_client()
             if base is None:
                 return None
-            import redis.asyncio as aioredis
             from redis.asyncio.retry import Retry
             from redis.backoff import NoBackoff
 
             # No retries: a marker read that fails is a marker read that fails.
             # redis-py's default (10 retries with backoff, at the client AND the
             # connection level) multiplies one timeout into minutes.
-            self._redis = aioredis.Redis(
-                host=base.host,
-                port=base.port,
-                password=base.password,
-                db=base.db,
+            self._redis = new_async_client(
+                base.target,
                 decode_responses=True,
                 socket_connect_timeout=1,
                 socket_timeout=1,
