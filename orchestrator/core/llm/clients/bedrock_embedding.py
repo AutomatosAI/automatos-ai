@@ -252,17 +252,17 @@ class BedrockEmbeddingProvider(BaseEmbeddingProvider):
         if blank:
             raise ValueError(f"Bedrock cannot embed an empty or whitespace-only text (positions {blank[:5]})")
         gate = asyncio.Semaphore(max_concurrent)
-        refused: Optional[EmbeddingUnavailableError] = None
+        refused: Optional[str] = None  # the code of this batch's first refusal that will not get better
 
         async def one(text: str) -> List[float]:
             nonlocal refused
             async with gate:
                 if refused is not None:
-                    raise refused
+                    raise BedrockEmbeddingUnavailable(refused, self.model.model_id)
                 try:
                     return await self.generate_embedding(text)
-                except EmbeddingUnavailableError as error:
-                    refused = refused or error
+                except BedrockEmbeddingUnavailable as error:
+                    refused = refused or error.code
                     raise
 
         tasks = [asyncio.ensure_future(one(text)) for text in texts]
