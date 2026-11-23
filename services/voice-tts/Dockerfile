@@ -18,12 +18,12 @@
 # id=s/<service-id>-<path> (PRD-262 §10).
 
 # uv from its own image, in a named stage so the tag@digest pin sits on a FROM line.
-FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d AS uv
 
 # Kokoro v1.0 (Apache-2.0 weights) from its GitHub release: the fp32 model media-render
 # runs and the voices file, all 54 voices in nine languages. The build fails unless each
 # matches kokoro/SHA256SUMS (the same pins as media-render's).
-FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS kokoro
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS kokoro
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends curl; \
@@ -48,7 +48,7 @@ RUN cd /opt/kokoro && sha256sum -c SHA256SUMS && rm SHA256SUMS && chmod -R a+rX 
 #   about 160 characters, phonemizer resolves symlinks, and Kokoro takes the path from
 #   VOICE_TTS_ESPEAK_DATA_PATH. Every dictionary stays: the voices speak nine languages.
 # Each native part is loaded before the layer is kept.
-FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS py
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS py
 COPY --from=uv /uv /usr/local/bin/uv
 COPY requirements.lock /opt/voice-tts/requirements.lock
 RUN set -eux; \
@@ -75,7 +75,7 @@ RUN set -eux; \
     /opt/venv/bin/python -c 'import ctypes, aiohttp, numpy, espeakng_loader; ctypes.CDLL(espeakng_loader.get_library_path()).espeak_Initialize'; \
     /opt/venv/bin/python -c 'import onnxruntime as o; print(o.get_available_providers())'
 
-FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS runtime
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS runtime
 
 WORKDIR /app
 
