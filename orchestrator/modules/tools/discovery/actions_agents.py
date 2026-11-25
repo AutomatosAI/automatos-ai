@@ -170,7 +170,9 @@ def register_agents_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_get_agent",
         description=(
-            "Get detailed config for ONE specific agent by name or ID — model, tools, prompt, activity. "
+            "Get detailed config for ONE specific agent by name or ID — model, tools, prompt, activity, "
+            "its public_id (the UUID a product such as a website calls it by), runtime_profile "
+            "('full' or 'lean') and memory_profile (its own memory profile; null = the workspace's). "
             "Use when asked about a specific agent's setup. "
             "For listing ALL agents, use platform_list_agents instead. "
             "Provide agent_name or agent_id."
