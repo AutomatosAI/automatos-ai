@@ -9,7 +9,12 @@ from uuid import UUID
 
 from core.security.ssh_host_keys import apply_trust_on_first_use_policy
 from modules.tools.execution.agent_request import marks_an_agent_request
-from modules.tools.execution.http_hosts import allowed_http_hosts
+from modules.tools.execution.http_hosts import (
+    HostNotAllowed,
+    allowed_http_hosts,
+    refuse_hosts_off_the_list,
+    verifies_tls,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +41,16 @@ async def execute_shell(
 def _get_allowed_http_domains():
     """The hosts ``http_request`` may call: the install's own, and Automatos's public two outside ``enterprise`` (PRD-277 D-12)."""
     return set(allowed_http_hosts())
+
+
+def _response_body(resp: Any) -> Any:
+    """The response's body: its JSON when it says it is JSON and parses, else its first 50,000 characters."""
+    if "application/json" in resp.headers.get("content-type", ""):
+        try:
+            return resp.json()
+        except ValueError:  # not JSON after all (json.JSONDecodeError and UnicodeDecodeError are both ValueError)
+            return resp.text[:50_000]
+    return resp.text[:50_000]
 
 
 @marks_an_agent_request  # PRD-264 EUAI-07: the platform's email routes know an agent asked
@@ -99,7 +114,8 @@ async def execute_http_request(
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(timeout),
             follow_redirects=True,
-            verify=False,  # Internal Railway URLs use self-signed certs
+            event_hooks={"request": [refuse_hosts_off_the_list]},  # every redirect hop too (#1656)
+            verify=verifies_tls(),
         ) as client:
             # Build request kwargs
             kwargs: Dict[str, Any] = {"headers": headers}
@@ -109,17 +125,7 @@ async def execute_http_request(
             resp = await client.request(method, url, **kwargs)
 
         duration_ms = int((time.time() - t0) * 1000)
-
-        # Parse response body (try JSON first, fall back to text)
-        resp_body: Any
-        content_type = resp.headers.get("content-type", "")
-        if "application/json" in content_type:
-            try:
-                resp_body = resp.json()
-            except Exception:
-                resp_body = resp.text[:50_000]
-        else:
-            resp_body = resp.text[:50_000]
+        resp_body = _response_body(resp)
 
         result = {
             "success": True,
@@ -138,6 +144,15 @@ async def execute_http_request(
         )
         return result
 
+    except HostNotAllowed as e:
+        logger.warning(f"[http_request] {method} {url} redirected off the list to {e.host}; refused")
+        return {
+            "success": False,
+            "error": f"{e}. Allowed: {', '.join(sorted(_get_allowed_http_domains()))}",
+            "tool": tool_name,
+            "url": url,
+            "duration_ms": int((time.time() - t0) * 1000),
+        }
     except httpx.TimeoutException:
         return {
             "success": False,
