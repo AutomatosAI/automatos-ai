@@ -85,7 +85,7 @@ services:
   # PostgreSQL Database with pgvector
   # ===========================================================================
   postgres:
-    image: pgvector/pgvector:pg16@sha256:0dd3149a06e4579a0d70d8fef9945636cd514005e7237deb27f9b67886f8dc4f
+    image: pgvector/pgvector:pg16@sha256:484e838076e04939d27d3e176e91c86eea96236126023be8d3059761122e579f
     container_name: automatos_postgres
     restart: unless-stopped
     environment:
@@ -116,7 +116,7 @@ services:
   # Redis Cache & Session Store
   # ===========================================================================
   redis:
-    image: redis:7-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
+    image: redis:7-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
     container_name: automatos_redis
     restart: unless-stopped
     # PRD-70 FIX-05: Disable dangerous Redis commands to prevent data wipe if exposed.
@@ -165,7 +165,7 @@ services:
   # $$ is a literal $ to compose, which would otherwise read $owner as a variable.
   # ===========================================================================
   minio-volume-owner:
-    image: redis:7-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
+    image: redis:7-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
     container_name: automatos_minio_volume_owner
     restart: "no"
     user: "0:0"
@@ -206,7 +206,7 @@ services:
     # `docker compose up` and the fresh-clone smoke lane. Chainguard publishes a
     # maintained build; its free tier offers only `latest`, so the digest pins it
     # and Dependabot moves the digest weekly (.github/dependabot.yml, PRD-262).
-    image: cgr.dev/chainguard/minio:latest@sha256:3c60a2a8c4d33409a9bc7a623a7fcbfb4605adc3d89422d2f53b3f673a6e5597
+    image: cgr.dev/chainguard/minio:latest@sha256:548147b5fc95a67e3e45285dff7e0e50326c3eb1977c6218039461771156c5e7
     container_name: automatos_minio
     restart: unless-stopped
     # No user: key. MinIO runs as the image's own user, uid 65532, never root
@@ -247,7 +247,7 @@ services:
   # §3). Prod is unchanged (hosted Qdrant via its own QDRANT_URL).
   # ===========================================================================
   qdrant:
-    image: qdrant/qdrant:latest@sha256:9bfc89f9914fc14876a88c05270685921a55b8877b254a98bcc1cc2f0a424cd2
+    image: qdrant/qdrant:latest@sha256:d277592721d2e3b73f9b797b53cf05e6a5bb2134f6d13fdbda4ca51782afbcac
     container_name: automatos_qdrant
     restart: unless-stopped
     ports:
@@ -545,10 +545,15 @@ services:
         org.opencontainers.image.revision: ${AUTOMATOS_REVISION:-unknown}
     container_name: automatos_workspace_worker
     restart: unless-stopped
+    # PRD-280 US-201: the image starts as uid 1000; compose starts it as root on purpose. The
+    # entrypoint then takes your deliverables folder's owner when uid 1000 cannot write it (a
+    # Linux host whose user is another uid) and re-owns the volume, before it drops to the
+    # worker. The chart starts it as uid 1000, and it repairs nothing there.
+    user: "0:0"
     # F452 (#1309): the worker runs agent code. Its entrypoint starts as root only to re-own
     # the workspace volume (CHOWN; DAC_OVERRIDE to walk folders it doesn't own) and drop to
     # uid 1000 (SETUID, SETGID) with setpriv --no-new-privs; nothing after needs a capability.
-    # The chart's worker securityContext keeps the same four.
+    # The chart adds none: it never starts the worker as root.
     cap_drop:
       - ALL
     cap_add:

@@ -79,11 +79,55 @@ name: images
 #   `media_assets` publishes ghcr.io/<owner>/automatos-media-assets, the Kokoro
 #   model files and the music library media-render builds from, and nothing else.
 #   The image jobs skip; the run's title says so, and smoke-images skips it too.
+# - A version (PRD-279 Waves 1 and 2; docs/deployment-infrastructure/releases.md): a
+#   `v*` tag, which only maintainers can create (a repository ruleset). Every step
+#   below that only a `v*` tag runs says so in its name or `if:`; a push to main, a pull
+#   request, the weekly run and a manual run on a branch do what they did before.
+#   Nothing carries a version tag until it has been scanned, signed and its signature
+#   checked, and no version is ever replaced:
+#   - The changes job reads the version off the tag (scripts/ci/release_version.py),
+#     then refuses the run before anything builds (scripts/ci/release_preflight.py) if
+#     any published image already has `<image>:<version>`, or if the tagged commit is
+#     in neither the default branch nor `release/MAJOR.MINOR`. Beside it, the release page
+#     check refuses, before anything builds, whatever the release page would be refused
+#     for later (scripts/ci/release_page.py check).
+#   - The scan policy runs in `fail` mode whatever POLICY_MODE says, so a failing image
+#     fails its build job, and the merge job, which needs every build, publishes
+#     nothing.
+#   - The merge job publishes each image only under `release-staging-<run>-<attempt>`
+#     (no version, and no `sha-<short>`: the tagged commit's main push published that),
+#     signs the digest its create step (buildx v0.32+) pushed once the index holds just this run's
+#     scanned builds, one per arch (release_digests.py), and checks it at the tag (release_signing.py).
+#   - The release-images job, once every merge leg has, tags every image `X.Y.Z`, and
+#     `X.Y` unless the tag has a suffix (a candidate, `v0.8.0-rc.1`), by digest, in one
+#     step (scripts/ci/release_tags.py). smoke-images never runs on a tag, so `edge`
+#     stays put.
+#   - The release-chart job, after that, packages charts/automatos with the version and
+#     every image's digest (scripts/ci/release_chart.py), renders it and fails on any
+#     image named by a tag, pushes it to ghcr.io/<owner>/charts/automatos (never over an
+#     existing version), signs it and checks the signature; a chart it could not prove
+#     is deleted again.
+#   - The release-notes job, after both, creates the version's release page with the
+#     notes of PRD-279 §5.4 (scripts/ci/release_page.py): what changed, the database,
+#     upgrading, what to install and checking it. A candidate's page is a pre-release.
+#     It is the only job with `contents: write`, and it holds nothing else.
+#
+# - The enterprise web image (PRD-277 US-505): enterprise-frontend, published as
+#   ghcr.io/<owner>/automatos-enterprise-frontend beside the local one. Its own name, so
+#   the local image's name, tags, build inputs, cache scope and digests are what they
+#   were: a name that starts with `frontend-` would also match the merge job's
+#   `digests-frontend-*` download and join the local index. Built from the same context
+#   with NEXT_PUBLIC_AUTH_EDITION=enterprise and the API and WebSocket addresses empty
+#   (its build refuses any other value: it calls the API on the page's own address), and
+#   measured, scanned, signed, checked on a tag, tagged and released by the same steps as
+#   every other published image. Its server reads BACKEND_INTERNAL_URL and MEDIA_ORIGINS
+#   when it starts, so its boot step is its own (frontend/scripts/check-enterprise-image.sh).
 #
 # Build args match docker-compose.yml, i.e. the local edition: no bundled
 # Chromium, and the frontend built for AUTH_EDITION=local against
 # http://localhost:8000 (NEXT_PUBLIC_* are inlined at build time, for now).
-# The API takes none: Railway's build installs the same lock (PRD-262 US-027).
+# The API takes no variant arg: Railway's build installs the same lock (PRD-262 US-027).
+# Its one build arg is AUTOMATOS_VERSION, the version it reports (PRD-279 US-303).
 # The API reads AUTH_EDITION at runtime; only the frontend fixes its edition
 # at build time, and a hosted-edition frontend can't be published generically
 # because its Clerk key is per deployment. Railway builds its own images and
@@ -113,6 +157,9 @@ on:
   pull_request:
     branches:
       - main
+      # PRD-279 US-304: a fix cherry-picked to an older release's patch branch is built and
+      # scanned as on main. A merge there publishes nothing: only its patch tag does.
+      - "release/**"
     # Exactly the changes job's SHARED_INPUTS plus every image's `inputs`
     # (orchestrator/tests/test_prd262_image_matrix.py holds them equal).
     paths:
@@ -133,9 +180,12 @@ on:
       - "frontend/package-lock.json"
       - "frontend/next.config.js"
       - "frontend/csp-sources.js"
+      - "frontend/csp-policy.mjs"
+      - "frontend/enterprise-build.js"
       - "frontend/.npmrc"
       - "frontend/public/**"
       - "frontend/scripts/check-standalone-image.sh"
+      - "frontend/scripts/check-enterprise-image.sh"
       - "services/workspace-worker/**"
       - "services/agent-opt-worker/**"
       - "services/media-render/**"
@@ -185,7 +235,8 @@ jobs:
     # job, so they skip with it.
     if: inputs.media_assets != true
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    # 15, not 5: on a `v*` tag this job also clones the full history (the release page check).
+    timeout-minutes: 15
     permissions:
       actions: read
       contents: read
@@ -194,12 +245,76 @@ jobs:
       matrix: ${{ steps.pick.outputs.matrix }}
       any: ${{ steps.pick.outputs.any }}
       weekly_tag: ${{ steps.pick.outputs.weekly_tag }}
+      # PRD-279 US-101: set on a `v*` tag only, empty on every other run.
+      version: ${{ steps.release.outputs.version }}
     steps:
       - name: Checkout (the picker)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           sparse-checkout: scripts/ci
+
+      # PRD-279 US-101, on a `v*` tag only: the version the tag names, before any image
+      # builds. A tag that is not vMAJOR.MINOR.PATCH[-suffix], or a version below the
+      # chart's own, fails this job, so nothing builds or publishes. Chart.yaml is read
+      # at the tagged commit, because this checkout holds scripts/ci only.
+      - name: The release version (v* tags only)
+        id: release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -H "Accept: application/vnd.github.raw+json" \
+            "repos/${GITHUB_REPOSITORY}/contents/charts/automatos/Chart.yaml?ref=${GITHUB_SHA}" > "${RUNNER_TEMP}/Chart.yaml"
+          python3 scripts/ci/release_version.py --ref "$GITHUB_REF" --chart-yaml "${RUNNER_TEMP}/Chart.yaml" \
+            --outputs "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+
+      # PRD-279 FR-6 and §5.5, on a `v*` tag only, before any image builds: no published
+      # image has this version yet (read anonymously: the images are public), and the
+      # tagged commit is in the default branch or in release/MAJOR.MINOR (GitHub's
+      # compare API, with this job's read-only token). Either one failing, or not
+      # answering, stops the run. A run whose version tags were never applied can run
+      # again; once they exist, the next version is cut instead.
+      - name: Release preflight (v* tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.release.outputs.version }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          python3 scripts/ci/release_preflight.py --version "$VERSION" --sha "$GITHUB_SHA" \
+            --repo "$GITHUB_REPOSITORY" --default-branch "$DEFAULT_BRANCH" \
+            --prefix "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/automatos-" \
+            --image api --image frontend --image enterprise-frontend --image workspace-worker \
+            --summary "$GITHUB_STEP_SUMMARY"
+
+      # PRD-279 US-301, on a `v*` tag only, before any image builds: everything the release
+      # page will say that needs no digest, refused here rather than after the images and
+      # the chart are public (scripts/ci/release_page.py check): the upgrade file, the
+      # previous release, the history, both sets of migrations, the notes rendered with
+      # placeholder digests, and no page yet for the tag. The release-notes job makes the
+      # same checks again before it creates the page. It needs every tag and the full
+      # history, so the tagged commit is checked out again, whole, beside the picker's
+      # sparse checkout, with no credentials kept. This job's token may read contents and
+      # nothing more, so it cannot create a release.
+      - name: Checkout (the history the release page is written from; v* tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          path: release-history
+
+      - name: Release page check (v* tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: release-history
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          python3 scripts/ci/release_page.py check --repo "$GITHUB_REPOSITORY" --version "$VERSION" --sha "$GITHUB_SHA" \
+            --image api --image frontend --image enterprise-frontend --image workspace-worker \
+            --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Pick the images
         id: pick
@@ -239,11 +354,16 @@ jobs:
           # and never published, for the same reason (GPL-3.0 espeak-ng and
           # phonemizer), but keeps the GHA cache: `min`, so the 310 MB model is
           # cached once, in the image's own layer, not again in its fetch stage.
+          # version_arg (the API and the worker, PRD-279 US-303, PRD-282): the build arg
+          # image_matrix.py sets to BUILD_VERSION, which the API reports and the worker's
+          # log lines name; each Dockerfile reads it after the last layer, so it rebuilds
+          # nothing and leaves the tree tags as they were.
           IMAGES: |
             [
               {"name": "api", "context": "orchestrator", "target": "production",
                "build_args": [],
                "source_date_epoch": 1792368000,
+               "version_arg": "AUTOMATOS_VERSION",
                "cache_mode": "min", "no_cache_filters": ["base"],
                "arches": ["amd64", "arm64"], "publish": true,
                "inputs": ["orchestrator/Dockerfile", "orchestrator/.dockerignore",
@@ -260,10 +380,25 @@ jobs:
                "inputs": ["frontend/Dockerfile", "frontend/.dockerignore",
                           "frontend/package.json", "frontend/package-lock.json",
                           "frontend/next.config.js", "frontend/csp-sources.js",
+                          "frontend/csp-policy.mjs", "frontend/enterprise-build.js",
                           "frontend/.npmrc", "frontend/public/**",
                           "frontend/scripts/check-standalone-image.sh"]},
+              {"name": "enterprise-frontend", "context": "frontend", "target": "production",
+               "build_args": ["NEXT_PUBLIC_AUTH_EDITION=enterprise",
+                              "NEXT_PUBLIC_API_URL=",
+                              "NEXT_PUBLIC_WS_URL="],
+               "cache_mode": "max", "no_cache_filters": ["production"],
+               "arches": ["amd64", "arm64"], "publish": true,
+               "inputs": ["frontend/Dockerfile", "frontend/.dockerignore",
+                          "frontend/package.json", "frontend/package-lock.json",
+                          "frontend/next.config.js", "frontend/csp-sources.js",
+                          "frontend/csp-policy.mjs", "frontend/enterprise-build.js",
+                          "frontend/.npmrc", "frontend/public/**",
+                          "frontend/scripts/check-standalone-image.sh",
+                          "frontend/scripts/check-enterprise-image.sh"]},
               {"name": "workspace-worker", "context": "services/workspace-worker", "target": "",
                "build_args": ["INSTALL_BROWSER=false"],
+               "version_arg": "AUTOMATOS_VERSION",
                "cache_mode": "max", "no_cache_filters": ["production"],
                "arches": ["amd64", "arm64"], "publish": true,
                "inputs": ["services/workspace-worker/**"]},
@@ -290,6 +425,9 @@ jobs:
              "scripts/ci/image_*.py"]
           RUNNERS: '{"amd64": "ubuntu-24.04", "arm64": "ubuntu-24.04-arm"}'
           LOCAL_REGISTRY: registry:2@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373 # 2.8.3
+          # PRD-279 US-303: what the API image reports. The tag's version on a `v*` tag
+          # (the step above has checked its form), the full commit id on every other run.
+          BUILD_VERSION: ${{ steps.release.outputs.version || github.sha }}
         run: |
           set -euo pipefail
           weekly=()
@@ -300,7 +438,8 @@ jobs:
           pick() {
             python3 scripts/ci/image_matrix.py --images "$IMAGES" --shared-inputs "$SHARED_INPUTS" \
               --runners "$RUNNERS" --owner "$GITHUB_REPOSITORY_OWNER" --publish "$PUBLISH" \
-              --no-cache "$NO_CACHE" --local-registry "$LOCAL_REGISTRY" "${weekly[@]}" "$@" | tee -a "$GITHUB_OUTPUT"
+              --no-cache "$NO_CACHE" --local-registry "$LOCAL_REGISTRY" --version "$BUILD_VERSION" \
+              "${weekly[@]}" "$@" | tee -a "$GITHUB_OUTPUT"
           }
           if [ "$EVENT" != "pull_request" ]; then pick --every < /dev/null; exit 0; fi
           if ! files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)'); then
@@ -546,6 +685,9 @@ jobs:
       # `report` (warnings only) until the W1 wave's last commit sets `fail`, once
       # every current finding is fixed or allowlisted. An allowlist entry without
       # a reason or an expiry, or one more than 90 days out, fails in either mode.
+      # PRD-279 US-102: on a `v*` tag (--ref) the policy runs in `fail` mode whatever
+      # POLICY_MODE says, so no version is published from an image it would fail. On
+      # every other ref --ref changes nothing.
       - name: Scan policy
         env:
           POLICY_MODE: report
@@ -555,13 +697,15 @@ jobs:
           # PRD-262 US-054: an image scanned here for the first time (IMAGES'
           # `scan_report_only`: media-render) is judged report only, whatever
           # POLICY_MODE says, until each finding it shows is fixed or allowlisted.
-          # It can only lower the mode, never raise it.
+          # It can only lower the mode, never raise it, on a `v*` tag too: such an
+          # image is never published, so it is in no release.
           SCAN_REPORT_ONLY: ${{ matrix.scan_report_only }}
         run: |
           if [ "$SCAN_REPORT_ONLY" = "true" ]; then POLICY_MODE=report; fi
           python -m pip install --disable-pip-version-check --quiet "pyyaml==6.0.3"
           python scripts/ci/image_scan_policy.py check --report "$REPORT" --allowlist .grype.yaml \
-            --mode "$POLICY_MODE" --name "$NAME" --arch "$ARCH" --summary "$GITHUB_STEP_SUMMARY"
+            --mode "$POLICY_MODE" --ref "$GITHUB_REF" --report-only "$SCAN_REPORT_ONLY" \
+            --name "$NAME" --arch "$ARCH" --summary "$GITHUB_STEP_SUMMARY"
 
       # PRD-262 US-014: the API's production stage compiles the stdlib once, as
       # root. In the layer listing above, the layer that RUN made holds stdlib
@@ -711,6 +855,22 @@ jobs:
           docker pull --quiet "${IMAGE}@${DIGEST}"
           bash frontend/scripts/check-standalone-image.sh "${IMAGE}@${DIGEST}" /chat
 
+      # PRD-277 US-505, PRD-279 US-402: the enterprise web image this job pushed, on this arch,
+      # started as an install starts it. Its server refuses to start without BACKEND_INTERNAL_URL
+      # or with a bad MEDIA_ORIGINS; started with both, it passes the local image's checks above
+      # (with /sign-in, the page a signed-out request renders), and a page's content security
+      # policy names the media origin given when it started (frontend/scripts/
+      # check-enterprise-image.sh says what each check proves and what it does not). Same
+      # conditions as the step above; on main a failure leaves the digest untagged and unsigned.
+      - name: The enterprise web image starts with its run-time settings and stops without them
+        if: ${{ !cancelled() && matrix.name == 'enterprise-frontend' && steps.build.outcome == 'success' }}
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          docker pull --quiet "${IMAGE}@${DIGEST}"
+          bash frontend/scripts/check-enterprise-image.sh "${IMAGE}@${DIGEST}"
+
       # PRD-262, the worker's trims (rows 16 and 19 of the 19 Oct size breakdown, and
       # the rows each check names): in the image this job pushed, on this arch, the
       # agent toolchain still works. gcc -flto links without lto-dump; git makes,
@@ -728,7 +888,9 @@ jobs:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           docker pull --quiet "${IMAGE}@${DIGEST}"
-          docker run --rm -i --entrypoint python "${IMAGE}@${DIGEST}" - < scripts/ci/image_worker_toolchain.py
+          # As root: the script checks root's paths and drops to the worker as the root start
+          # does. The image itself starts as uid 1000 (PRD-280 US-201).
+          docker run --rm -i --user 0 --entrypoint python "${IMAGE}@${DIGEST}" - < scripts/ci/image_worker_toolchain.py
 
       # PRD-262, the worker's Python layer (rows 27, 40 and 47, and the rows each check
       # names): every library the stable layer's strip touched still loads, as the
@@ -743,7 +905,7 @@ jobs:
           IMAGE: ${{ matrix.image }}
           DIGEST: ${{ steps.build.outputs.digest }}
           # docker-compose.yml's database image, the one the worker writes task status to.
-          POSTGRES_IMAGE: pgvector/pgvector:pg16@sha256:0dd3149a06e4579a0d70d8fef9945636cd514005e7237deb27f9b67886f8dc4f
+          POSTGRES_IMAGE: pgvector/pgvector:pg16@sha256:484e838076e04939d27d3e176e91c86eea96236126023be8d3059761122e579f
         run: |
           docker pull --quiet "${IMAGE}@${DIGEST}"
           docker network create worker-probe > /dev/null
@@ -821,6 +983,9 @@ jobs:
           - name: frontend
             context: frontend
             description: Automatos AI web app, local edition. The API address is currently fixed at build time to http://localhost:8000; a runtime setting is coming.
+          - name: enterprise-frontend
+            context: frontend
+            description: Automatos AI web app, enterprise edition. People sign in with their organisation's identity provider, and the web app calls the API on its own address, so serve both on one host. The server reads BACKEND_INTERNAL_URL (required) and MEDIA_ORIGINS when it starts.
           - name: workspace-worker
             context: services/workspace-worker
             description: Automatos AI workspace worker (Code Canvas runtime), built without Chromium.
@@ -869,22 +1034,25 @@ jobs:
           # No `latest` until the maintainers choose to publish one. No `edge`
           # either: smoke-images.yml's promote-edge job moves it once this
           # `sha-<short>` has booted on both arches (PRD-262 US-003).
-          # A schedule run publishes only `weekly-<yyyymmdd>` (PRD-262 US-011):
-          # every other tag is off for it, so a `sha-<short>` is never re-pushed
-          # with other packages.
+          # A schedule run publishes only `weekly-<yyyymmdd>` (PRD-262 US-011): every other
+          # tag is off for it, so a `sha-<short>` is never re-pushed with other packages.
+          # A `v*` tag (PRD-279 US-101) publishes the index only under release-staging-<run id>-
+          # <attempt>, not a version and no `sha-<short>` (its main push made that): the release-images
+          # job adds the version tags once every image is signed and checked. Every other run
+          # pushes what it did before.
           flavor: |
             latest=false
           tags: |
-            type=sha,enable=${{ github.event_name != 'schedule' }}
+            type=sha,enable=${{ github.event_name != 'schedule' && !startsWith(github.ref, 'refs/tags/v') }}
             type=schedule,pattern=${{ needs.changes.outputs.weekly_tag }}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=release-staging-${{ github.run_id }}-${{ github.run_attempt }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
       - name: Create the multi-arch index
         working-directory: ${{ runner.temp }}/digests
         env:
           ANNOTATIONS: ${{ steps.meta.outputs.annotations }}
         run: |
+          docker buildx version | python3 "${GITHUB_WORKSPACE}/scripts/ci/release_digests.py" buildx
           mapfile -t tag_args < <(jq -r '.tags[] | "-t", .' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           annotation_args=()
           while IFS= read -r annotation; do
@@ -892,16 +1060,17 @@ jobs:
           done <<< "$ANNOTATIONS"
           sources=()
           for digest in *; do sources+=("${IMAGE}@sha256:${digest}"); done
-          docker buildx imagetools create "${tag_args[@]}" "${annotation_args[@]}" "${sources[@]}"
+          docker buildx imagetools create --metadata-file "${RUNNER_TEMP}/index-metadata.json" "${tag_args[@]}" "${annotation_args[@]}" "${sources[@]}"
 
-      - name: Resolve the index digest
+      - name: The index digest, from the create step
         id: index
+        env:
+          MATRIX: ${{ needs.changes.outputs.matrix }}
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # A tag the previous step actually pushed.
-          tag=$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
-          digest=$(docker buildx imagetools inspect "$tag" --format '{{json .Manifest}}' | jq -r .digest)
-          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
-          echo "Published ${IMAGE}@${digest}" >> "$GITHUB_STEP_SUMMARY"
+          python3 scripts/ci/release_digests.py index --metadata "${RUNNER_TEMP}/index-metadata.json" --matrix "$MATRIX" \
+            --built "${RUNNER_TEMP}/digests" --image "$IMAGE" --outputs "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
@@ -910,6 +1079,39 @@ jobs:
         env:
           DIGEST: ${{ steps.index.outputs.digest }}
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      # PRD-279 US-103, on a `v*` tag only: the signature just made must check against
+      # this repository's images.yml at the tag that ran, with the certificate's
+      # identity, issuer, repository, ref, commit and workflow name pinned exactly
+      # (scripts/ci/release_signing.py). A failed check fails the job, so the chart is
+      # not published.
+      - name: Verify the signature (v* tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          DIGEST: ${{ steps.index.outputs.digest }}
+        run: |
+          python3 scripts/ci/release_signing.py verify --image "${IMAGE}@${DIGEST}" \
+            --repository "$GITHUB_REPOSITORY" --ref "$GITHUB_REF" --sha "$GITHUB_SHA"
+
+      # PRD-279 US-201, on a `v*` tag only: the signed index digest, for the
+      # release-chart job to write into the chart's default values.
+      - name: Record the digest for the chart (v* tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          NAME: ${{ matrix.image.name }}
+          DIGEST: ${{ steps.index.outputs.digest }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/release-digest"
+          printf '%s\n' "$DIGEST" > "${RUNNER_TEMP}/release-digest/${NAME}"
+
+      - name: Upload the digest for the chart (v* tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-digest-${{ matrix.image.name }}
+          path: ${{ runner.temp }}/release-digest/${{ matrix.image.name }}
+          if-no-files-found: error
+          retention-days: 30
 
       # PRD-262 US-036: tree-<12> of the image's build context, which `make up`
       # pulls for a commit with no sha-<short> of its own (scripts/stack_images.py
@@ -935,6 +1137,283 @@ jobs:
                echo "Published ${IMAGE}:${tag}" >> "$GITHUB_STEP_SUMMARY" ;;
             *) echo "::warning title=tree tag::could not tell whether ${IMAGE}:${tag} is published, so it was not pushed" ;;
           esac
+
+  # PRD-279 US-101, on a `v*` tag only, once every merge leg has published its image
+  # under the staging tag, signed it and checked the signature: one step puts the
+  # version tags on every image, by digest (scripts/ci/release_tags.py). It reads every
+  # image's tags before it writes any, refuses a version that points elsewhere, and
+  # finishes a set a stopped run of this job began (re-run the failed jobs).
+  # `X.Y.Z` always, `X.Y` for a full release only; imagetools adds a tag without
+  # writing a new manifest, so each tag is the very digest that was signed.
+  release-images:
+    name: tag the images with the version (v* tags only)
+    needs: [changes, merge]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.changes.outputs.version }}
+    steps:
+      - name: Checkout (the release tools)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+
+      - name: Download the signed digests
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/release-digests
+          pattern: release-digest-*
+          merge-multiple: true
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The images the merge job publishes (a test holds the lists equal).
+      - name: Tag every image with the version
+        env:
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 scripts/ci/release_tags.py --digests "${RUNNER_TEMP}/release-digests" \
+            --prefix "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/automatos-" --version "$VERSION" \
+            --image api --image frontend --image enterprise-frontend --image workspace-worker \
+            --summary "$GITHUB_STEP_SUMMARY"
+
+  # PRD-279 Wave 2 (US-201, US-202), on a `v*` tag only, once every image is signed,
+  # checked and tagged with the version. charts/automatos is copied, each image's
+  # repository and signed digest written into the copy's values (scripts/ci/
+  # release_chart.py), and the copy packaged with the tag's version as its `version`
+  # and `appVersion`; the chart in the repository keeps `appVersion: "edge"`. The
+  # package is rendered with only existingSecret set and must name every image by
+  # digest. It is pushed to ghcr.io/<owner>/charts/automatos as an OCI artifact, never
+  # over a version that exists (GHCR would overwrite a tag, so this job refuses), and
+  # signed and checked as the images are. `helm push` tags the chart with its version,
+  # so it is visible before it is signed: when signing or the check fails, the job
+  # deletes the version it pushed (GitHub's packages API, the built-in token) and fails.
+  # A new package is private until an org owner makes it public
+  # (docs/deployment-infrastructure/releases.md).
+  release-chart:
+    name: publish the chart (v* tags only)
+    needs: [changes, release-images]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      # cosign keyless signing exchanges the job's OIDC token for a certificate.
+      id-token: write
+    # The release page names the chart by this digest (PRD-279 US-301).
+    outputs:
+      digest: ${{ steps.chart.outputs.digest }}
+    env:
+      VERSION: ${{ needs.changes.outputs.version }}
+      HELM_VERSION: v4.3.0
+      # https://get.helm.sh/helm-v4.3.0-linux-amd64.tar.gz.sha256sum
+      HELM_SHA256: 86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb
+      # cosign-installer v4.1.3's default, checked against the hash the action carries.
+      COSIGN_VERSION: v3.1.4
+    steps:
+      - name: Checkout (the chart and the release tools)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            charts
+            scripts
+
+      - name: Set up Python (the release tools read YAML)
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Helm (pinned, checksum checked)
+        run: |
+          curl -sSfL -o "${RUNNER_TEMP}/helm.tar.gz" "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  ${RUNNER_TEMP}/helm.tar.gz" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/helm.tar.gz" -C "${RUNNER_TEMP}" linux-amd64/helm
+          sudo mv "${RUNNER_TEMP}/linux-amd64/helm" /usr/local/bin/helm
+          helm version
+
+      - name: Chart names
+        run: |
+          {
+            echo "CHART_REGISTRY=oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts"
+            echo "CHART=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts/automatos"
+            echo "PACKAGE=${RUNNER_TEMP}/dist/automatos-${VERSION}.tgz"
+          } >> "$GITHUB_ENV"
+
+      - name: Download the image digests
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/release-digests
+          pattern: release-digest-*
+          merge-multiple: true
+
+      - name: Package the chart with every image's digest
+        run: |
+          python -m pip install --disable-pip-version-check --quiet "pyyaml==6.0.3"
+          python scripts/ci/release_chart.py prepare --chart charts/automatos --out "${RUNNER_TEMP}/chart" \
+            --digests "${RUNNER_TEMP}/release-digests" --prefix "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/automatos-" \
+            --version "$VERSION" --images "${RUNNER_TEMP}/images.json" \
+            --render-values "${RUNNER_TEMP}/render-values" --summary "$GITHUB_STEP_SUMMARY"
+          helm package "${RUNNER_TEMP}/chart/automatos" --version "$VERSION" --app-version "$VERSION" \
+            --destination "${RUNNER_TEMP}/dist"
+
+      # US-201: an install of the packaged chart runs exactly the published images, in
+      # every published edition. One render per edition (local, the chart's default, and
+      # enterprise, PRD-277 US-505), each with existingSecret and the values file
+      # release_chart.py wrote for that edition (the least it renders with, made-up
+      # values); check-rendered fails when an edition was not rendered, or its render
+      # names an image by a tag or runs any image but that edition's published ones.
+      - name: Render the packaged chart; fail on any image named by a tag
+        run: |
+          mkdir -p "${RUNNER_TEMP}/rendered"
+          for values in "${RUNNER_TEMP}/render-values"/*.yaml; do
+            helm template automatos "$PACKAGE" --set existingSecret=ci --values "$values" \
+              > "${RUNNER_TEMP}/rendered/$(basename "$values")"
+          done
+          python scripts/ci/release_chart.py check-rendered --rendered "${RUNNER_TEMP}/rendered" \
+            --images "${RUNNER_TEMP}/images.json" --version "$VERSION"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # US-202: a published version is never overwritten. GHCR moves a tag that is
+      # pushed again, so the job reads the registry first and pushes only when the
+      # version is not there; a registry it cannot read pushes nothing. Runs of one tag
+      # never overlap (the workflow's concurrency group is per ref).
+      - name: Refuse a version that is already published
+        env:
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          status=0
+          python scripts/stack_images.py published "${CHART}:${VERSION}" || status=$?
+          case "$status" in
+            1) echo "${CHART}:${VERSION} is not published yet" ;;
+            0) echo "::error title=Chart version exists::${CHART}:${VERSION} is already published, and a version is never overwritten: cut a new tag"
+               exit 1 ;;
+            *) echo "::error title=Chart version unknown::could not tell whether ${CHART}:${VERSION} is published, so nothing was pushed"
+               exit 1 ;;
+          esac
+
+      - name: Push the chart
+        id: push
+        env:
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          helm registry login ghcr.io --username "$REGISTRY_USER" --password-stdin <<< "$REGISTRY_TOKEN"
+          helm push "$PACKAGE" "$CHART_REGISTRY" > "${RUNNER_TEMP}/helm-push.log"
+
+      - name: The chart's digest, from the push
+        id: chart
+        env:
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/ci/release_digests.py chart --push-log "${RUNNER_TEMP}/helm-push.log" --chart "$CHART" --version "$VERSION" --package "$PACKAGE" --outputs "$GITHUB_OUTPUT"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: ${{ env.COSIGN_VERSION }}
+
+      - name: Sign the chart (keyless)
+        env:
+          DIGEST: ${{ steps.chart.outputs.digest }}
+        run: cosign sign --yes "${CHART}@${DIGEST}"
+
+      # US-202: the chart's signature is checked as each image's is (US-103).
+      - name: Verify the chart's signature
+        env:
+          DIGEST: ${{ steps.chart.outputs.digest }}
+        run: |
+          python scripts/ci/release_signing.py verify --image "${CHART}@${DIGEST}" \
+            --repository "$GITHUB_REPOSITORY" --ref "$GITHUB_REF" --sha "$GITHUB_SHA"
+          {
+            echo "Published \`${CHART}:${VERSION}\` (\`${DIGEST}\`), signed by images.yml at \`${GITHUB_REF}\`."
+            echo
+            echo '```bash'
+            echo "helm install automatos ${CHART_REGISTRY}/automatos --version ${VERSION} --set existingSecret=<your Secret>"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # US-202: a chart that was pushed but not proven (the digest unread, signing or
+      # the check failed) does not stay published under the version. GitHub lets the
+      # built-in token delete a version of a package the repository's workflow
+      # published (the repository holds its admin role); if GitHub refuses, the step
+      # names what a maintainer must delete by hand. The job fails either way.
+      - name: Remove the chart version it could not prove
+        if: failure() && steps.push.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER_TYPE: ${{ github.event.repository.owner.type }}
+        run: |
+          python scripts/ci/release_chart.py remove --owner "$GITHUB_REPOSITORY_OWNER" \
+            --owner-type "$OWNER_TYPE" --tag "$VERSION"
+
+  # PRD-279 US-301, on a `v*` tag only, once every image is signed, checked and tagged with
+  # the version and the chart is published, signed and checked: the release page, with the
+  # notes of §5.4 (scripts/ci/release_page.py; the Markdown is release_notes.py's, the
+  # history release_history.py's). It is the one job that may write the repository's
+  # contents, which creating a release needs, and it holds nothing else: no packages, no
+  # OIDC token, so it cannot sign. Commit text reaches it only as git's output, read by
+  # the script as data and shown inside code spans; nothing from a tag, a commit or a file
+  # reaches the shell. A release page that exists is never changed: the job fails instead.
+  # The full history is fetched, so the previous release's tag and files can be read. The
+  # changes job has already made every one of these checks that needs no digest, before
+  # any image was built; this job makes them again (`release_page.py publish`).
+  release-notes:
+    name: create the release page (v* tags only)
+    needs: [changes, release-images, release-chart]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.changes.outputs.version }}
+      CHART_DIGEST: ${{ needs.release-chart.outputs.digest }}
+    steps:
+      - name: Checkout (every tag and the history between releases)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Download the signed digests
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/release-digests
+          pattern: release-digest-*
+          merge-multiple: true
+
+      # The images the merge job publishes (a test holds the lists equal).
+      - name: Write the notes and create the release page
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/ci/release_page.py publish --repo "$GITHUB_REPOSITORY" --version "$VERSION" --sha "$GITHUB_SHA" \
+            --digests "${RUNNER_TEMP}/release-digests" --chart-digest "$CHART_DIGEST" \
+            --image api --image frontend --image enterprise-frontend --image workspace-worker \
+            --notes "${RUNNER_TEMP}/release-notes.md" --summary "$GITHUB_STEP_SUMMARY"
 
   # PRD-262 US-053: the media assets image, ghcr.io/<owner>/automatos-media-assets.
   # media-render's build is to copy the Kokoro model and voices and the music tracks

@@ -1,9 +1,25 @@
 {{- if .Values.worker.enabled }}
-{{- $secret := include "automatos.secretName" . }}
+{{- include "automatos.validateWorker" . }}
+{{- include "automatos.validateLogFormat" . }}
+{{- /*
+The worker's own Secret (worker.existingSecret, PRD-280 US-202) holds only what it needs, and
+the token it shares with the API is a key it must hold. With the chart's one Secret, as
+before, that key stays optional.
+*/}}
+{{- $secret := include "automatos.workerSecretName" . }}
+{{- $required := list "DATABASE_URL" "REDIS_URL" }}
+{{- $optional := list "WORKER_INTERNAL_TOKEN" "ANTHROPIC_API_KEY" "CLAUDE_CODE_OAUTH_TOKEN" }}
+{{- if .Values.worker.existingSecret }}
+{{- $required = append $required "WORKER_INTERNAL_TOKEN" }}
+{{- $optional = without $optional "WORKER_INTERNAL_TOKEN" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "automatos.fullname" . }}-worker
+  {{- if include "automatos.workerApart" . }}
+  namespace: {{ .Values.worker.namespace }}
+  {{- end }}
   labels:
     {{- include "automatos.labels" . | nindent 4 }}
     app.kubernetes.io/component: worker
@@ -22,10 +38,18 @@ spec:
     spec:
       serviceAccountName: {{ include "automatos.serviceAccountName" (dict "ctx" $ "component" "worker") }}
       automountServiceAccountToken: false
-      # No runAsNonRoot: the image's entrypoint starts as root to fix the workspace
-      # volume's ownership, then drops to the `worker` user (uid 1000) with setpriv
-      # --no-new-privs. The container's securityContext keeps that root start narrow,
-      # and a uid other than 0 holds none of the capabilities below.
+      # PRD-280 US-201: the worker starts as itself, uid 1000, as the image does. The
+      # storage hands the volume over to the pod's group (fsGroup), as it must for the API's
+      # volume, and the entrypoint re-owns nothing: it checks it can write the volume, and
+      # stops with a message that says what the storage must provide when it cannot.
+      # OnRootMismatch: the kubelet changes the volume's group and permissions only when its
+      # top folder does not already match, so a start does not walk every agent file.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: worker
           image: {{ include "automatos.image" (dict "ctx" $ "image" .Values.worker.image) }}
@@ -43,14 +67,17 @@ spec:
               value: workspace-worker
             - name: LOG_RELAY_ENABLED
               value: "false"
-            {{- range $key := list "DATABASE_URL" "REDIS_URL" }}
+            {{- with include "automatos.workerLogFormatEnv" . | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- range $key := $required }}
             - name: {{ $key }}
               valueFrom:
                 secretKeyRef:
                   name: {{ $secret }}
                   key: {{ $key }}
             {{- end }}
-            {{- range $key := list "WORKER_INTERNAL_TOKEN" "ANTHROPIC_API_KEY" "CLAUDE_CODE_OAUTH_TOKEN" }}
+            {{- range $key := $optional }}
             - name: {{ $key }}
               valueFrom:
                 secretKeyRef:
@@ -58,7 +85,10 @@ spec:
                   key: {{ $key }}
                   optional: true
             {{- end }}
-            {{- include "automatos.otelEnv" (dict "ctx" $ "service" "automatos-workspace-worker") | nindent 12 }}
+            {{- include "automatos.otelEnv" (dict "ctx" $ "service" "automatos-workspace-worker" "secret" $secret) | nindent 12 }}
+            {{- with include "automatos.databaseTlsEnv" . | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 8081
@@ -77,29 +107,30 @@ spec:
           volumeMounts:
             - name: workspaces
               mountPath: /workspaces
+            {{- with include "automatos.databaseCaMount" . | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- if .Values.worker.readOnlyRootFilesystem }}
+            # A read-only root (PRD-280 US-104): scratch volumes for the two paths the worker
+            # writes outside its volume, /tmp and the home folder the entrypoint sets
+            # (docs/PRDS/PRD-280-US-103-WRITE-PATHS.md).
+            - name: tmp
+              mountPath: /tmp
+            - name: home
+              mountPath: /home/worker
+            {{- end }}
           # F452 (#1309): the worker runs agent code. No process in it may gain a privilege
           # (a setuid-root binary such as su or passwd runs without root), every capability
-          # is dropped but the four the root entrypoint needs, and the runtime's default
-          # seccomp profile applies (compose already runs the worker under Docker's).
-          # This passes PodSecurity "baseline", not "restricted": the pod starts as root
-          # and keeps capabilities beyond NET_BIND_SERVICE, for the entrypoint above.
-          #
-          # NOTE (fix/f452-worker-extra-privs, reconcile against #1309/#1311 before merge):
-          # #1311 measured this exact set against the built image (see its PR description's
-          # table) and kept DAC_OVERRIDE, not DAC_READ_SEARCH -- without DAC_OVERRIDE the
-          # volume walk failed with EACCES on a mode-700 folder. An earlier, unmeasured
-          # draft of this change (13c03f89f) used DAC_READ_SEARCH instead; that capability
-          # set is NOT kept here because it was never run against the built image. Confirm
-          # DAC_OVERRIDE is still right now that the Dockerfile also strips every setuid/
-          # setgid bit (below) before dropping either set further.
+          # is dropped and none is added (PRD-280 US-201: nothing runs as root), and the
+          # runtime's default seccomp profile applies. With the pod's non-root settings
+          # above, this passes PodSecurity "restricted".
           securityContext:
             allowPrivilegeEscalation: false
+            {{- if .Values.worker.readOnlyRootFilesystem }}
+            readOnlyRootFilesystem: true
+            {{- end }}
             capabilities:
               drop: ["ALL"]
-              # chown -h re-owns the volume (CHOWN; DAC_OVERRIDE to walk folders it doesn't
-              # own), then setpriv drops to uid 1000 (SETUID, SETGID). Measured: without
-              # DAC_OVERRIDE the walk fails on a mode-700 folder; FOWNER isn't needed.
-              add: ["CHOWN", "DAC_OVERRIDE", "SETUID", "SETGID"]
             seccompProfile:
               type: RuntimeDefault
           resources:
@@ -107,12 +138,27 @@ spec:
       volumes:
         - name: workspaces
           persistentVolumeClaim:
-            claimName: {{ include "automatos.workspacesClaim" . }}
+            claimName: {{ include "automatos.workerWorkspacesClaim" . }}
+        {{- with include "automatos.databaseCaVolume" . | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.worker.readOnlyRootFilesystem }}
+        - name: tmp
+          emptyDir: {}
+        - name: home
+          emptyDir: {}
+        {{- end }}
+      {{- with include "automatos.placement" .Values.worker | trim }}
+      {{- . | nindent 6 }}
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "automatos.fullname" . }}-worker
+  {{- if include "automatos.workerApart" . }}
+  namespace: {{ .Values.worker.namespace }}
+  {{- end }}
   labels:
     {{- include "automatos.labels" . | nindent 4 }}
     app.kubernetes.io/component: worker

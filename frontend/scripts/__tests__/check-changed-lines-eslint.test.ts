@@ -60,6 +60,59 @@ describe('isFinding', () => {
   })
 })
 
+describe('classifyFindings', () => {
+  const touched = new Set([20])
+  const file = 'frontend/lib/x.ts'
+  const levels = (head: object[], base: object[]) =>
+    gate.classifyFindings(head, base, file, touched).map((finding: { level: string }) => finding.level)
+
+  it('warns on a function that was already too long, even when it grew', () => {
+    expect(levels([longFunction('formatRow', 75)], [longFunction('formatRow', 73)])).toEqual(['warning'])
+  })
+
+  it('still matches an old long function that gains async', () => {
+    const asyncRow = { ...longFunction('formatRow', 75), message: "Async function 'formatRow' has too many lines (75). Maximum allowed is 50." }
+    expect(levels([asyncRow], [longFunction('formatRow', 73)])).toEqual(['warning'])
+  })
+
+  it('judges nesting by how many deep blocks the file has, since the message names no function', () => {
+    const deep = (line: number) => ({ ruleId: 'max-depth', message: 'Blocks are nested too deeply (5). Maximum allowed is 4.', line, endLine: line + 20 })
+    expect(levels([deep(10)], [deep(300)])).toEqual(['warning'])
+    expect(levels([deep(10)], [])).toEqual(['error'])
+  })
+
+  it('fails a function the change adds or pushes over the limit', () => {
+    expect(levels([longFunction('formatRow', 51)], [])).toEqual(['error'])
+    expect(levels([longFunction('formatRow', 73)], [longFunction('otherRow', 90)])).toEqual(['error'])
+  })
+
+  it('fails a component that grows past the component limit', () => {
+    expect(levels([longFunction('SocialsTab', 160)], [longFunction('SocialsTab', 140)])).toEqual(['error'])
+  })
+
+  it('fails when the file gains another unnamed function over the limit', () => {
+    const unnamed = (line: number) => ({
+      ruleId: 'max-lines-per-function',
+      message: 'Arrow function has too many lines (60). Maximum allowed is 50.',
+      line,
+      endLine: line + 70,
+    })
+    expect(levels([unnamed(10), unnamed(100)], [unnamed(10)])).toEqual(['error'])
+  })
+
+  it('still fails a raw fetch on a changed line, whatever the file had before', () => {
+    const rawFetch = { ruleId: 'no-restricted-syntax', message: 'Use apiClient instead of raw fetch', line: 20, endLine: 20 }
+    expect(levels([rawFetch], [rawFetch])).toEqual(['error'])
+  })
+})
+
+describe('renamedFiles', () => {
+  it('maps each renamed file to its old path', () => {
+    const result = gate.renamedFiles('R096\tfrontend/old.ts\tfrontend/new.ts\n')
+    expect([...result]).toEqual([['frontend/new.ts', 'frontend/old.ts']])
+  })
+})
+
 describe('fileSizeFinding', () => {
   it('fails a new file over the limit and warns when an existing big file grows', () => {
     expect(gate.fileSizeFinding('frontend/new.tsx', true, 0, 801).level).toBe('error')

@@ -14,8 +14,13 @@ can hold in their head. This check holds every Python function a change touches 
   split it instead.
 
 Only the change is judged. A function counts as touched when any line of it is in
-the diff against the base (``git diff <merge-base>``). Existing code meets the rule
-the next time someone edits it, the same ratchet the TypeScript baseline uses.
+the diff against the base (``git diff <merge-base>``). For length and nesting only what
+the change introduces fails: a function that is new and over a limit, or one the change
+pushes over it. A function that was already over that limit at the merge base is a
+warning, even if it grew, as in the TypeScript gate. Functions are matched by qualified
+name (``Class.method``), so a renamed or moved-to-another-class function counts as new.
+Defs that share a name (a property's getter and setter) are judged together: one that
+was already over a limit makes another that newly breaks it a warning too.
 Tests and migrations are exempt from length and nesting.
 
 Output is GitHub annotations (``::error file=…,line=…::``), so failures show inline
@@ -31,7 +36,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Set
+from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple
 
 MAX_FUNCTION_LINES = 50
 MAX_NESTING = 4
@@ -119,27 +124,59 @@ def max_nesting(node: ast.AST) -> int:
     return walk(node, 0)
 
 
-def function_findings(path: str, source: str, touched: Set[int]) -> List[Finding]:
-    """Length and nesting findings for the functions of ``source`` that ``touched`` reaches."""
+def functions(node: ast.AST, prefix: str = "") -> Iterator[Tuple[str, ast.AST]]:
+    """Every function under ``node`` with its qualified name (``Class.method``, ``outer.inner``)."""
+    for child in ast.iter_child_nodes(node):
+        if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            yield from functions(child, prefix)
+            continue
+        name = f"{prefix}{child.name}"
+        if not isinstance(child, ast.ClassDef):
+            yield name, child
+        yield from functions(child, f"{name}.")
+
+
+def function_sizes(source: str) -> Dict[str, Tuple[int, int]]:
+    """Each function's (code lines, nesting depth); the larger of each where a name repeats."""
+    lines = source.splitlines()
+    sizes: Dict[str, Tuple[int, int]] = {}
+    for name, node in functions(ast.parse(source)):
+        length, depth = sizes.get(name, (0, 0))
+        sizes[name] = (max(length, code_line_count(node, lines)), max(depth, max_nesting(node)))
+    return sizes
+
+
+def _shape_finding(path: str, line: int, message: str, advice: str, was_over: bool) -> Finding:
+    """An error for what the change introduces; a warning for what the base already had."""
+    if was_over:
+        return Finding("warning", path, line, f"{message} Already over the limit before this change.")
+    return Finding("error", path, line, f"{message} {advice}")
+
+
+def function_findings(path: str, source: str, touched: Set[int], base_source: Optional[str] = None) -> List[Finding]:
+    """Length and nesting findings for the functions of ``source`` that ``touched`` reaches.
+
+    ``base_source`` is the file at the merge base, or None for a file the change adds.
+    """
     tree = ast.parse(source, filename=path)
     lines = source.splitlines()
+    before = function_sizes(base_source) if base_source is not None else {}
     findings: List[Finding] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    for name, node in functions(tree):
         span = range(node.lineno, (node.end_lineno or node.lineno) + 1)
         if not any(number in touched for number in span):
             continue
+        old_length, old_depth = before.get(name, (0, 0))
         length = code_line_count(node, lines)
         if length > MAX_FUNCTION_LINES:
-            findings.append(Finding("error", path, node.lineno,
-                                    f"{node.name}() has {length} code lines (max {MAX_FUNCTION_LINES}). "
-                                    "Split it into smaller functions."))
+            findings.append(_shape_finding(
+                path, node.lineno, f"{node.name}() has {length} code lines (max {MAX_FUNCTION_LINES}).",
+                "Split it into smaller functions.", old_length > MAX_FUNCTION_LINES))
         depth = max_nesting(node)
         if depth > MAX_NESTING:
-            findings.append(Finding("error", path, node.lineno,
-                                    f"{node.name}() nests {depth} levels deep (max {MAX_NESTING}). "
-                                    "Return early or extract a helper."))
+            findings.append(_shape_finding(
+                path, node.lineno, f"{node.name}() nests {depth} levels deep (max {MAX_NESTING}).",
+                "Return early or extract a helper.", old_depth > MAX_NESTING))
     return findings
 
 
@@ -159,11 +196,18 @@ def _git(*args: str) -> str:
     return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout
 
 
-def _line_count(ref: str, path: str) -> int:
+def _source_at(ref: str, path: str) -> Optional[str]:
+    """The file's text at ``ref``, or None when it isn't there."""
     try:
-        return len(_git("show", f"{ref}:{path}").splitlines())
+        return _git("show", f"{ref}:{path}")
     except subprocess.CalledProcessError:
-        return 0
+        return None
+
+
+def renamed_files(name_status: str) -> Dict[str, str]:
+    """New path to old path, from ``git diff --name-status`` output."""
+    rows = (row.split("\t") for row in name_status.splitlines())
+    return {row[2]: row[1] for row in rows if row[0].startswith("R")}
 
 
 def check(base: str) -> List[Finding]:
@@ -171,15 +215,18 @@ def check(base: str) -> List[Finding]:
     merge_base = _git("merge-base", "HEAD", base).strip()
     added = set(_git("diff", "--name-only", "--diff-filter=A", merge_base, "HEAD", "--", "*.py").split())
     touched_by_file = changed_lines(_git("diff", "-U0", "--diff-filter=AMR", merge_base, "HEAD", "--", "*.py"))
+    renamed = renamed_files(_git("diff", "--name-status", "-M", "--diff-filter=R", merge_base, "HEAD", "--", "*.py"))
     findings: List[Finding] = []
     for path, touched in sorted(touched_by_file.items()):
         with open(f"{root}/{path}", encoding="utf-8") as handle:
             source = handle.read()
-        size = file_size_finding(path, path in added, _line_count(merge_base, path), len(source.splitlines()))
+        base_source = None if path in added else _source_at(merge_base, renamed.get(path, path))
+        lines_before = len(base_source.splitlines()) if base_source is not None else 0
+        size = file_size_finding(path, path in added, lines_before, len(source.splitlines()))
         if size is not None:
             findings.append(size)
         if not is_exempt(path):
-            findings.extend(function_findings(path, source, touched))
+            findings.extend(function_findings(path, source, touched, base_source))
     return findings
 
 

@@ -77,14 +77,16 @@ class _Session:
     def __init__(self):
         self.sent = []
 
-    def post(self, url, headers=None, json=None):
+    def post(self, url, headers=None, json=None, **_pinning):
         self.sent.append(json)
         return _Response()
 
 
-def test_an_anthropic_key_is_probed_with_the_named_current_model():
+def test_an_anthropic_key_is_probed_with_the_named_current_model(monkeypatch):
     import core.credentials.tester as tester_module
+    from tests.helpers_outbound_dns import public_dns
 
+    public_dns(monkeypatch, "api.anthropic.com")  # saas checks the address before it sends
     tester = tester_module.CredentialTester()
     tester.session = _Session()
     result = asyncio.run(tester._test_anthropic({"api_key": "probe-test-key"}))

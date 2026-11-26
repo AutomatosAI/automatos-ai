@@ -13,45 +13,18 @@ import asyncio
 import aiohttp
 import asyncpg
 import io
-import ipaddress
 import redis
 import paramiko
 import json
 import logging
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any
 from datetime import datetime
-from urllib.parse import urlparse
 
+from core.credentials.destinations import connect_address, http_destination, postgres_tls, ssh_socket
 from core.llm.defaults import ANTHROPIC_KEY_PROBE_MODEL
+from core.security.web_access import operator_host_async
 
 logger = logging.getLogger(__name__)
-
-def _is_private_ip(hostname: str) -> bool:
-    """Check if a hostname resolves to a private/reserved IP address (SSRF protection)."""
-    try:
-        addr = ipaddress.ip_address(hostname)
-        return addr.is_private or addr.is_reserved or addr.is_loopback or addr.is_link_local
-    except ValueError:
-        # Not a raw IP — resolve via DNS is deferred to runtime;
-        # we block known private hostnames as best-effort.
-        lower = hostname.lower()
-        return lower in ('localhost', '127.0.0.1', '::1', '0.0.0.0') or lower.endswith('.local')
-
-
-def _validate_url_not_ssrf(url: str) -> Optional[str]:
-    """Validate that a URL does not point to a private/internal network. Returns error string or None."""
-    try:
-        parsed = urlparse(url)
-        if not parsed.scheme or parsed.scheme not in ('http', 'https'):
-            return "Only http/https URLs are allowed"
-        hostname = parsed.hostname
-        if not hostname:
-            return "URL has no hostname"
-        if _is_private_ip(hostname):
-            return "URLs targeting private/internal networks are not allowed"
-        return None
-    except Exception:
-        return "Invalid URL"
 
 
 class CredentialTester:
@@ -136,14 +109,13 @@ class CredentialTester:
         if not api_key:
             return {'success': False, 'message': 'API key is required'}
 
-        ssrf_err = _validate_url_not_ssrf(base_url)
-        if ssrf_err:
-            return {'success': False, 'message': f'Invalid base_url: {ssrf_err}'}
-
         url = f"{base_url}/models"
         headers = {'Authorization': f'Bearer {api_key}'}
-        
-        async with self.session.get(url, headers=headers) as response:
+        destination = await http_destination(url, headers)
+        if destination.refusal:
+            return {'success': False, 'message': f'Invalid base_url: {destination.refusal}'}
+
+        async with self.session.get(destination.url, **destination.options) as response:
             if response.status == 200:
                 models = await response.json()
                 return {
@@ -170,25 +142,24 @@ class CredentialTester:
         if not api_key:
             return {'success': False, 'message': 'API key is required'}
 
-        ssrf_err = _validate_url_not_ssrf(base_url)
-        if ssrf_err:
-            return {'success': False, 'message': f'Invalid base URL: {ssrf_err}'}
-
         url = f"{base_url}/v1/messages"
         headers = {
             'x-api-key': api_key,
             'anthropic-version': '2023-06-01',
             'content-type': 'application/json'
         }
-        
+        destination = await http_destination(url, headers)
+        if destination.refusal:
+            return {'success': False, 'message': f'Invalid base URL: {destination.refusal}'}
+
         # Test with a simple message
         payload = {
             'model': ANTHROPIC_KEY_PROBE_MODEL,
             'max_tokens': 10,
             'messages': [{'role': 'user', 'content': 'Hello'}]
         }
-        
-        async with self.session.post(url, headers=headers, json=payload) as response:
+
+        async with self.session.post(destination.url, json=payload, **destination.options) as response:
             if response.status == 200:
                 result = await response.json()
                 return {
@@ -221,29 +192,18 @@ class CredentialTester:
             return {'success': False, 'message': 'Host, database, user, and password are required'}
         
         try:
-            # Handle SSL configuration based on mode
-            import ssl as ssl_module
-            ssl_param = None
-            
-            if ssl_mode == 'disable':
-                ssl_param = False  # Explicitly disable SSL
-            elif ssl_mode in ['require', 'verify-ca', 'verify-full']:
-                ssl_context = ssl_module.create_default_context()
-                if allow_unauthorized or ssl_mode == 'require':
-                    # Don't verify certificates
-                    ssl_context.check_hostname = False
-                    ssl_context.verify_mode = ssl_module.CERT_NONE
-                ssl_param = ssl_context
-            # For 'allow' and 'prefer' modes, use None to let asyncpg decide
-            # (it will try SSL first and fall back to non-SSL)
-            
+            # The outbound guard: on a shared server, connect to the checked address only.
+            target = await operator_host_async(str(host), int(port))
+            if not target.ok:
+                return {'success': False, 'message': f'Invalid host: {target.reason}'}
+            # TLS (if any) is named for the host, not the address connected to.
             conn = await asyncpg.connect(
-                host=host,
+                host=connect_address(target),
                 port=int(port),
                 database=database,
                 user=user,
                 password=password,
-                ssl=ssl_param
+                ssl=postgres_tls(ssl_mode, allow_unauthorized, target.host)
             )
             
             # Test query
@@ -274,8 +234,12 @@ class CredentialTester:
         database = data.get('database', 0)
         
         try:
+            # The outbound guard: on a shared server, connect to the checked address only.
+            target = await operator_host_async(str(host), int(port))
+            if not target.ok:
+                return {'success': False, 'message': f'Invalid host: {target.reason}'}
             r = redis.Redis(
-                host=host,
+                host=connect_address(target),
                 port=int(port),
                 password=password,
                 db=int(database),
@@ -345,23 +309,25 @@ class CredentialTester:
         if not all([host, username]):
             return {'success': False, 'message': 'Host and username are required'}
 
-        if _is_private_ip(host):
-            return {'success': False, 'message': 'SSH connections to private/internal networks are not allowed'}
-        
         try:
             from core.security.ssh_host_keys import apply_trust_on_first_use_policy
 
+            # The outbound guard checks every address the host resolves to; on a shared
+            # server the connection goes to the checked one (the host key stays the name's).
+            target = await operator_host_async(str(host), int(port))
+            if not target.ok:
+                return {'success': False, 'message': f'SSH connections to this host are not allowed: {target.reason}'}
             ssh = paramiko.SSHClient()
             # CodeQL py/paramiko-missing-host-key-validation: trust on first use, as exec_shell.
             apply_trust_on_first_use_policy(ssh)
-            
+
             if auth_method == 'password' and password:
-                ssh.connect(host, port=int(port), username=username, password=password)
+                ssh.connect(host, port=int(port), username=username, password=password, sock=ssh_socket(target))
             elif auth_method == 'key' and private_key:
                 # Never read key files from user-provided paths (arbitrary file read risk)
                 # Always treat private_key as inline PEM content
                 key = paramiko.RSAKey.from_private_key(io.StringIO(private_key))
-                ssh.connect(host, port=int(port), username=username, pkey=key)
+                ssh.connect(host, port=int(port), username=username, pkey=key, sock=ssh_socket(target))
             else:
                 return {'success': False, 'message': 'Invalid authentication method or missing credentials'}
             
@@ -400,22 +366,22 @@ class CredentialTester:
         if not base_url:
             return {'success': False, 'message': 'Base URL is required for testing'}
 
-        ssrf_err = _validate_url_not_ssrf(base_url)
-        if ssrf_err:
-            return {'success': False, 'message': f'Invalid base_url: {ssrf_err}'}
-        
         headers = {}
         params = {}
-        
+
         if auth_method == 'header':
             headers[header_name] = api_key
         elif auth_method == 'query':
             params['api_key'] = api_key
         elif auth_method == 'bearer':
             headers['Authorization'] = f'Bearer {api_key}'
-        
+
+        destination = await http_destination(base_url, headers)
+        if destination.refusal:
+            return {'success': False, 'message': f'Invalid base_url: {destination.refusal}'}
+
         try:
-            async with self.session.get(base_url, headers=headers, params=params) as response:
+            async with self.session.get(destination.url, params=params, **destination.options) as response:
                 if response.status in [200, 201, 202]:
                     return {
                         'success': True,
@@ -490,10 +456,10 @@ class CredentialTester:
         if not webhook_url:
             return {'success': False, 'message': 'Webhook URL is required'}
 
-        ssrf_err = _validate_url_not_ssrf(webhook_url)
-        if ssrf_err:
-            return {'success': False, 'message': f'Invalid webhook_url: {ssrf_err}'}
-        
+        destination = await http_destination(webhook_url)
+        if destination.refusal:
+            return {'success': False, 'message': f'Invalid webhook_url: {destination.refusal}'}
+
         payload = {
             'content': '🔧 Credential test from Automatos AI Platform',
             'embeds': [{
@@ -504,7 +470,7 @@ class CredentialTester:
             }]
         }
         
-        async with self.session.post(webhook_url, json=payload) as response:
+        async with self.session.post(destination.url, json=payload, **destination.options) as response:
             if response.status == 204:
                 return {
                     'success': True,

@@ -1,0 +1,315 @@
+suite: The memory store, Qdrant (PRD-280 US-601)
+# The StatefulSet and its Service. The API's side (QDRANT_URL, QDRANT_API_KEY) is
+# qdrant_api_test.yaml's, the account serviceaccount_test.yaml's, the refusals
+# qdrant_refusals_test.yaml's and qdrant_refusals_job_test.yaml's, values with no qdrant key
+# qdrant_absent_test.yaml's, and the default render (nothing at all) default_render_test.yaml's.
+templates:
+  - templates/qdrant.yaml
+release:
+  name: demo
+  namespace: automatos
+set:
+  existingSecret: automatos-secrets
+  qdrant:
+    enabled: true
+tests:
+  - it: renders nothing while qdrant.enabled is off
+    set:
+      qdrant:
+        enabled: false
+    asserts:
+      - hasDocuments: {count: 0}
+  - it: renders one StatefulSet and its Service
+    asserts:
+      - hasDocuments: {count: 2}
+      - isKind: {of: StatefulSet}
+        documentIndex: 0
+      - isAPIVersion: {of: apps/v1}
+        documentIndex: 0
+      - isKind: {of: Service}
+        documentIndex: 1
+      - equal:
+          path: metadata.name
+          value: demo-automatos-qdrant
+      - equal:
+          path: metadata.labels["app.kubernetes.io/component"]
+          value: qdrant
+
+  - it: runs one copy, governed by its Service, and keeps its claim when deleted or scaled down
+    documentIndex: 0
+    asserts:
+      - equal: {path: spec.replicas, value: 1}
+      - equal: {path: spec.serviceName, value: demo-automatos-qdrant}
+      - equal:
+          path: spec.persistentVolumeClaimRetentionPolicy
+          value: {whenDeleted: Retain, whenScaled: Retain}
+      - equal:
+          path: spec.selector.matchLabels
+          value:
+            app.kubernetes.io/name: automatos
+            app.kubernetes.io/instance: demo
+            app.kubernetes.io/component: qdrant
+
+  - it: gives the store a disk of its own from a claim template that carries no label of the chart's version
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates
+          value:
+            - metadata:
+                name: storage
+                labels:
+                  app.kubernetes.io/name: automatos
+                  app.kubernetes.io/instance: demo
+                  app.kubernetes.io/component: qdrant
+              spec:
+                accessModes: [ReadWriteOnce]
+                resources: {requests: {storage: 10Gi}}
+  - it: takes the disk's size, class and access modes
+    documentIndex: 0
+    set:
+      qdrant:
+        storage:
+          size: 50Gi
+          storageClass: fast-ssd
+          accessModes: [ReadWriteOncePod]
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[0].spec
+          value:
+            accessModes: [ReadWriteOncePod]
+            storageClassName: fast-ssd
+            resources: {requests: {storage: 50Gi}}
+
+  # The pod spec whole: non-root, read-only root, no capability, the default seccomp profile, no
+  # cluster token, no call home, the key from the Secret only and required (a check stops an empty
+  # one, then the image's own ./entrypoint.sh runs), and the three volumes it writes.
+  - it: runs the store as uid 1000 under "restricted", with a read-only root and a scratch volume for each path it writes
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template
+          value:
+            metadata:
+              labels:
+                app.kubernetes.io/name: automatos
+                app.kubernetes.io/instance: demo
+                app.kubernetes.io/component: qdrant
+            spec:
+              serviceAccountName: demo-automatos-qdrant
+              automountServiceAccountToken: false
+              securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, fsGroupChangePolicy: OnRootMismatch}
+              containers:
+                - name: qdrant
+                  image: docker.io/qdrant/qdrant@sha256:d277592721d2e3b73f9b797b53cf05e6a5bb2134f6d13fdbda4ca51782afbcac
+                  imagePullPolicy: IfNotPresent
+                  command: [/bin/bash, -c]
+                  args:
+                    - |
+                      if [ -z "$QDRANT__SERVICE__API_KEY" ]; then
+                        echo "QDRANT_API_KEY in the Secret automatos-secrets is empty: the memory store starts only with a key" >&2
+                        exit 1
+                      fi
+                      exec ./entrypoint.sh
+                  env:
+                    - {name: QDRANT__TELEMETRY_DISABLED, value: "true"}
+                    - {name: QDRANT_INIT_FILE_PATH, value: /qdrant/init/.qdrant-initialized}
+                    - {name: QDRANT__SERVICE__API_KEY, valueFrom: {secretKeyRef: {name: automatos-secrets, key: QDRANT_API_KEY}}}
+                  ports:
+                    - {name: http, containerPort: 6333}
+                  startupProbe: {httpGet: {path: /livez, port: http}, periodSeconds: 5, failureThreshold: 60}
+                  readinessProbe: {httpGet: {path: /readyz, port: http}, periodSeconds: 10, timeoutSeconds: 5}
+                  livenessProbe: {httpGet: {path: /livez, port: http}, periodSeconds: 20, timeoutSeconds: 5}
+                  volumeMounts:
+                    - {name: storage, mountPath: /qdrant/storage}
+                    - {name: snapshots, mountPath: /qdrant/snapshots}
+                    - {name: init, mountPath: /qdrant/init}
+                  securityContext:
+                    allowPrivilegeEscalation: false
+                    readOnlyRootFilesystem: true
+                    capabilities: {drop: [ALL]}
+                    seccompProfile: {type: RuntimeDefault}
+                  resources:
+                    requests: {cpu: 100m, memory: 512Mi}
+                    limits: {memory: 2Gi}
+              volumes:
+                - {name: snapshots, emptyDir: {}}
+                - {name: init, emptyDir: {}}
+
+  - it: reads the key from the chart's Secret, not the worker's own, and names that Secret when it is empty
+    documentIndex: 0
+    set:
+      existingSecret: automatos-api-secrets
+      worker:
+        existingSecret: automatos-worker-secrets
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: QDRANT__SERVICE__API_KEY
+            valueFrom: {secretKeyRef: {name: automatos-api-secrets, key: QDRANT_API_KEY}}
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: QDRANT_API_KEY in the Secret automatos-api-secrets is empty
+  - it: requires the key, as no reference to it is optional
+    documentIndex: 0
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].env[2].valueFrom.secretKeyRef.optional
+      - equal:
+          path: spec.template.spec.containers[0].env[2].name
+          value: QDRANT__SERVICE__API_KEY
+  - it: runs under the account serviceAccount.qdrant.name names, with the chart's accounts off
+    documentIndex: 0
+    set:
+      serviceAccount:
+        create: false
+        qdrant:
+          name: memory-store
+    asserts:
+      - equal: {path: spec.template.spec.serviceAccountName, value: memory-store}
+  - it: runs under the namespace's default account with the chart's accounts off and no name for the store
+    documentIndex: 0
+    set:
+      serviceAccount:
+        create: false
+    asserts:
+      - equal: {path: spec.template.spec.serviceAccountName, value: default}
+
+  - it: puts no size limit on the snapshot scratch volume unless qdrant.snapshots.sizeLimit is set
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: snapshots, emptyDir: {}}
+  - it: limits the snapshot scratch volume to qdrant.snapshots.sizeLimit
+    documentIndex: 0
+    set:
+      qdrant:
+        snapshots:
+          sizeLimit: 20Gi
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes
+          value:
+            - {name: snapshots, emptyDir: {sizeLimit: 20Gi}}
+            - {name: init, emptyDir: {}}
+
+  - it: runs the digest set, pulled IfNotPresent, or with the pull policy set
+    documentIndex: 0
+    set:
+      qdrant:
+        image:
+          repository: registry.example.com/mirror/qdrant
+          digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+          pullPolicy: Always
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.example.com/mirror/qdrant@sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: Always
+
+  - it: stops without a digest, as a tag can move under it
+    set:
+      qdrant:
+        image:
+          digest: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "qdrant.image.digest is required: the memory store runs one exact build"
+  - it: stops on a digest that is not sha256:<64 hex>
+    set:
+      qdrant:
+        image:
+          digest: sha256:abc
+    asserts:
+      - failedTemplate:
+          errorPattern: "image.digest must be sha256:<64 hex digits>"
+
+  - it: offers the REST port, 6333, on its Service, and no other
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: spec
+          value:
+            selector:
+              app.kubernetes.io/name: automatos
+              app.kubernetes.io/instance: demo
+              app.kubernetes.io/component: qdrant
+            ports:
+              - {name: http, port: 6333, targetPort: http}
+  - it: sets no type on its Service, so it is reachable only inside the cluster
+    documentIndex: 1
+    asserts:
+      - notExists: {path: spec.type}
+
+  # Placement (PRD-280 US-203), through automatos.placement.
+  - it: places the store's pod as its values say
+    documentIndex: 0
+    set:
+      qdrant:
+        nodeSelector: {automatos.dev/pool: memory}
+        tolerations:
+          - {key: automatos.dev/pool, operator: Equal, value: memory, effect: NoSchedule}
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: {app.kubernetes.io/component: worker}
+        topologySpreadConstraints:
+          - {maxSkew: 1, topologyKey: topology.kubernetes.io/zone, whenUnsatisfiable: ScheduleAnyway}
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value: {automatos.dev/pool: memory}
+      - equal:
+          path: spec.template.spec.tolerations
+          value:
+            - {key: automatos.dev/pool, operator: Equal, value: memory, effect: NoSchedule}
+      - equal:
+          path: spec.template.spec.affinity
+          value:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - topologyKey: kubernetes.io/hostname
+                  labelSelector:
+                    matchLabels: {app.kubernetes.io/component: worker}
+      - equal:
+          path: spec.template.spec.topologySpreadConstraints
+          value:
+            - {maxSkew: 1, topologyKey: topology.kubernetes.io/zone, whenUnsatisfiable: ScheduleAnyway}
+  - it: renders one placement field without the others
+    documentIndex: 0
+    set:
+      qdrant:
+        tolerations:
+          - {key: automatos.dev/pool, operator: Exists}
+    asserts:
+      - equal:
+          path: spec.template.spec.tolerations
+          value:
+            - {key: automatos.dev/pool, operator: Exists}
+      - notExists: {path: spec.template.spec.nodeSelector}
+      - notExists: {path: spec.template.spec.affinity}
+      - notExists: {path: spec.template.spec.topologySpreadConstraints}
+  - it: takes no placement from another component's values
+    documentIndex: 0
+    set:
+      api:
+        nodeSelector: {automatos.dev/pool: api}
+      worker:
+        tolerations:
+          - {key: automatos.dev/pool, operator: Exists}
+        affinity:
+          nodeAffinity: {}
+      migrations:
+        topologySpreadConstraints:
+          - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway}
+    asserts:
+      - notExists: {path: spec.template.spec.nodeSelector}
+      - notExists: {path: spec.template.spec.tolerations}
+      - notExists: {path: spec.template.spec.affinity}
+      - notExists: {path: spec.template.spec.topologySpreadConstraints}

@@ -53,6 +53,42 @@ def test_untouched_long_function_passes():
     assert shape.function_findings("pkg/mod.py", source, touched={last}) == []
 
 
+def test_a_function_already_too_long_only_warns_even_when_it_grew():
+    base = _function("old_and_long", body_lines=shape.MAX_FUNCTION_LINES + 5)
+    grown = _function("old_and_long", body_lines=shape.MAX_FUNCTION_LINES + 9)
+    findings = shape.function_findings("pkg/mod.py", grown, touched={3}, base_source=base)
+    assert [f.level for f in findings] == ["warning"]
+    assert "Already over the limit" in findings[0].message
+
+
+def test_a_function_pushed_over_the_limit_fails():
+    base = _function("growing", body_lines=shape.MAX_FUNCTION_LINES - 2)
+    grown = _function("growing", body_lines=shape.MAX_FUNCTION_LINES)
+    findings = shape.function_findings("pkg/mod.py", grown, touched={3}, base_source=base)
+    assert [f.level for f in findings] == ["error"]
+
+
+def test_an_old_long_method_does_not_excuse_a_new_one_of_the_same_name():
+    def method(owner: str) -> str:
+        body = textwrap.indent(_function("run", body_lines=shape.MAX_FUNCTION_LINES), "    ")
+        return f"class {owner}:\n{body}"
+
+    findings = shape.function_findings("pkg/mod.py", method("New"), touched={3}, base_source=method("Old"))
+    assert [f.level for f in findings] == ["error"]
+
+
+def test_length_already_over_does_not_excuse_new_deep_nesting():
+    base = _function("mixed", body_lines=shape.MAX_FUNCTION_LINES + 5)
+    nest = "".join(f"{'    ' * level}if x0:\n" for level in range(1, shape.MAX_NESTING + 2))
+    deeper = base.replace("    return None", nest + "    " * (shape.MAX_NESTING + 2) + "return None")
+    findings = shape.function_findings("pkg/mod.py", deeper, touched={3}, base_source=base)
+    assert sorted(f.level for f in findings) == ["error", "warning"]
+
+
+def test_renamed_files_maps_each_new_path_to_its_old_one():
+    assert shape.renamed_files("R096\tpkg/old.py\tpkg/new.py\n") == {"pkg/new.py": "pkg/old.py"}
+
+
 def test_docstring_blank_and_comment_lines_do_not_count():
     source = _function("documented", body_lines=shape.MAX_FUNCTION_LINES - 2, docstring=True, blanks=5)
     source = source.replace("    x0 = 0\n", "    # a comment\n    x0 = 0\n")

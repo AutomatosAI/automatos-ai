@@ -314,6 +314,17 @@ def test_the_reference_script_refuses_to_record_without_graspologic(capsys):
     assert script.communities([["b", "a"], ["c"], ["e", "d"]]) == [["a", "b"], ["d", "e"], ["c"]]
 
 
+def test_the_reference_switches_off_graphifys_direct_native_call():
+    script = _load("prd262_leiden_reference_native", REFERENCE / "leiden_partitions.py")
+    assert callable(graphify_cluster._native_leiden), "the installed graphify still has the call to switch off"
+    stand_in = SimpleNamespace(_native_leiden=lambda stable, resolution: {"a": 0})
+    script.use_graspologic(stand_in)
+    assert stand_in._native_leiden(nx.Graph(), 1.0) is None, "so _partition falls through to graspologic"
+    with pytest.raises(RuntimeError, match="_native_leiden"):
+        script.use_graspologic(SimpleNamespace())
+    assert "use_graspologic(graphify_cluster)" in inspect.getsource(script.record), "record() makes the switch"
+
+
 def test_ci_re_records_the_partitions_whenever_they_or_their_inputs_change():
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     match = next(step for step in workflow["jobs"]["changes"]["steps"] if step.get("id") == "match")

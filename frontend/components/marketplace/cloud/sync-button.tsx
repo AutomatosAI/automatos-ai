@@ -6,7 +6,8 @@
  * While a Sync runs the button is disabled and shows a spinner; after it, the toast says what it
  * brought (hooks/use-cloud-sync.ts).
  *
- * Shown only on the local edition (by edition, never by role: lib/auth-edition.ts), to a workspace
+ * Shown only where this install syncs with Automatos Cloud (the local edition, or an enterprise install
+ * whose operator switched it on: hooks/use-hosted-services.ts; by edition, never by role), to a workspace
  * owner or admin (`canManageThemes`, the routes' `workspace:manage`), while the status says the Sync
  * is on (`AUTOMATOS_CLOUD_URL` set). On the hosted edition nothing mounts, so nothing is asked; a
  * member asks nothing either. The server enforces every gate itself. The button is secondary: the
@@ -18,7 +19,7 @@ import { canManageThemes } from '@/components/settings/themes/theme-labels'
 import { Button } from '@/components/ui/button'
 import { useWorkspace } from '@/components/workspace-provider'
 import { useCloudSync, useCloudSyncStatus } from '@/hooks/use-cloud-sync'
-import { isLocal } from '@/lib/auth-edition'
+import { useHostedService } from '@/hooks/use-hosted-services'
 import type { CloudSyncStatus } from '@/lib/marketplace/cloud-sync'
 
 import { SYNCING, SYNC_WITH_CLOUD, syncedLine } from './copy'
@@ -68,7 +69,7 @@ function CloudSyncControls() {
   )
 }
 
-/** Sync with Automatos Cloud, for the Marketplace header's actions: the local edition only. */
+/** Sync with Automatos Cloud, for the Marketplace header's actions: where this install syncs (PRD-277 US-704). */
 export function SyncButton() {
-  return isLocal ? <CloudSyncControls /> : null
+  return useHostedService('cloudSync') === true ? <CloudSyncControls /> : null
 }

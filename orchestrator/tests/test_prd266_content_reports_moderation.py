@@ -45,6 +45,7 @@ from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 from services.content_reports import moderation, service  # noqa: E402
 from services.content_reports.targets import clip_excerpt  # noqa: E402
+from tests.helpers_outbound_dns import PUBLIC_IP, public_dns  # noqa: E402
 
 WS_ID = uuid.uuid4()
 ROUTE = "/api/v1/reports"
@@ -53,6 +54,8 @@ BODY = {"target_type": "message", "target_id": MESSAGE_ID, "reason": "harmful", 
 # K19: an example.test host, never a Slack-shaped webhook URL.
 INBOX_HOST = "moderation.example.test"
 INBOX_URL = f"https://{INBOX_HOST}/inbox/T0KEN-in-the-path"
+#: Where the real helper sends it on SaaS: the address the outbound guard checked.
+PINNED_INBOX_URL = f"https://{PUBLIC_IP}/inbox/T0KEN-in-the-path"
 REPORTER_ID = "reporter-7731"
 REPORTER_CLERK = "user_reporter_clerk_7731"
 REPORTER_EMAIL = "reporter-7731@reports.example.test"
@@ -113,6 +116,7 @@ def _warn_once_fresh():
 def saas(monkeypatch):
     monkeypatch.setattr(config, "AUTH_EDITION", "saas")
     monkeypatch.setattr(config, "MODERATION_WEBHOOK_URL", INBOX_URL)
+    public_dns(monkeypatch, INBOX_HOST)
 
 
 @pytest.fixture
@@ -387,8 +391,8 @@ def test_the_post_goes_through_the_webhook_helper_and_never_a_drivers_send(saas,
         async def __aexit__(self, *_exc):
             return False
 
-        async def post(self, url, json, headers):
-            posts.append((url, json, self.timeout))
+        async def post(self, url, json, headers, extensions):
+            posts.append((url, json, self.timeout, headers["Host"], extensions["sni_hostname"]))
             return SimpleNamespace(status_code=200)
 
     monkeypatch.setattr(webhook_mod.httpx, "AsyncClient", _AsyncClient)
@@ -399,7 +403,7 @@ def test_the_post_goes_through_the_webhook_helper_and_never_a_drivers_send(saas,
 
     assert posted is True
     assert moderation.post_webhook is webhook_mod.post_webhook
-    assert posts == [(INBOX_URL, _body(summary), 15.0)]
+    assert posts == [(PINNED_INBOX_URL, _body(summary), 15.0, INBOX_HOST, INBOX_HOST)]
 
 
 def test_the_real_helpers_network_error_text_never_reaches_a_log(saas, caplog):
@@ -413,8 +417,8 @@ def test_the_real_helpers_network_error_text_never_reaches_a_log(saas, caplog):
         async def __aexit__(self, *_exc):
             return False
 
-        async def post(self, url, json, headers):
-            raise httpx.ConnectError(f"cannot reach {url}")
+        async def post(self, url, json, headers, extensions):
+            raise httpx.ConnectError(f"cannot reach {url} ({headers['Host']})")
 
     caplog.set_level(logging.DEBUG)
     with pytest.MonkeyPatch.context() as patch:

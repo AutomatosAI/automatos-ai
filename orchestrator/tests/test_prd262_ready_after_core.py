@@ -65,6 +65,11 @@ class _Boot:
         monkeypatch.setattr(main, "shutdown_dashboard", self._shutdown_dashboard)
         # PRD-278 US-502: the embedding size check reads settings; stubbed, as every step is.
         monkeypatch.setattr("core.llm.embedding_sizes.verify_embedding_sizes", self._sizes)
+        # PRD-282 US-201: /health/ready also needs the database check, answered here.
+        self.database = "healthy"
+        monkeypatch.setattr("core.health_probe.database_status", lambda **_kwargs: self.database)
+        # PRD-282 US-202: the dependency checks are held in their own tests; none runs here.
+        monkeypatch.setattr("core.health_dependencies.dependency_watches", lambda: ())
         monkeypatch.setattr(loop_watchdog, "start_loop_watchdog",
                             lambda: SimpleNamespace(stop=lambda: self.calls.append("watchdog stopped")))
         if dispatch:

@@ -170,10 +170,10 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As a maintainer, I want every place core calls an address someone else chose listed with its purpose, so that the allowance reaches only the callers it is meant for.
 
 **Acceptance Criteria:**
-- [ ] A table lists each caller: file, line, who chooses the address, and which of the five purposes it is.
-- [ ] Each row says whether the call goes through the guard today.
-- [ ] A caller that does not is listed for Dave, with what it does instead.
-- [ ] A row whose purpose is not obvious is listed for Gerard, not guessed.
+- [x] A table lists each caller: file, line, who chooses the address, and which of the five purposes it is. (Callers that go through the guard are in the table; fixed and infrastructure destinations are in a short list. [PRD-282-US-101-OUTBOUND-CALLERS.md](PRD-282-US-101-OUTBOUND-CALLERS.md), read at `2d90dab0a`.)
+- [x] Each row says whether the call goes through the guard today. (Each table row names its guard call.)
+- [x] A caller that does not is listed for Dave, with what it does instead. (Anything of this kind goes to a maintainer privately, not onto the page.)
+- [x] A row whose purpose is not obvious is listed for Gerard, not guessed. (Section 4 of the page.)
 
 #### US-102: The guard takes a purpose · M
 **Description:** As a developer, I want every outbound check to say why it is being made, so that a rule can depend on it.
@@ -227,9 +227,9 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As an operator, I want an API that has lost its database to stop receiving traffic, so that people get a clear failure and not a broken page.
 
 **Acceptance Criteria:**
-- [ ] `/health/ready` returns 200 only when start-up has finished and the last database check passed.
-- [ ] "Busy" is ready. "Unreachable" and "stuck" are not.
-- [ ] The route does no database work itself. A test with a full pool shows it answers at once.
+- [x] `/health/ready` returns 200 only when start-up has finished and the last database check passed.
+- [x] "Busy" is ready. "Unreachable" and "stuck" are not.
+- [x] The route does no database work itself. A test with a full pool shows it answers at once.
 - [ ] `test_f229_health_off_the_loop.py`, `test_f458_health_never_waits_on_a_full_pool.py` and `test_prd262_health_gates.py` pass, changed only where they pin the old meaning of ready.
 - [ ] The chart's probes are unchanged.
 
@@ -238,18 +238,20 @@ Each wave is one pull request or a short series. CI is the only gate.
 
 **Acceptance Criteria:**
 - [ ] `/health`'s list of components has an entry for Redis, object storage, the search index, the memory store and the model provider, each up, down or not configured, with the time of its last check.
-- [ ] Each check runs in the background with its own time limit. The route only reads results, and a test with every dependency hanging shows it still answers at once.
+  - also `unchecked`: no finished check yet, a stale one, or a check the role may not make; the owner's to accept
+- [x] Each check runs in the background with its own time limit. The route only reads results, and a test with every dependency hanging shows it still answers at once.
 - [ ] The model provider is never called by a check. Its entry comes from whether one is configured and how the last real call ended.
-- [ ] With Redis down, `/health` still returns 200. Its status code changes only for the database, as today.
-- [ ] No entry holds an address, a credential or error text from a dependency.
+  - never `not configured`: `unchecked` until a call through the model manager ends, since a key stored in Settings cannot be seen without decrypting it; the owner's to accept
+- [x] With Redis down, `/health` still returns 200. Its status code changes only for the database, as today.
+- [x] No entry holds an address, a credential or error text from a dependency.
 - [ ] No new route is added, and the three existing health tests pass.
 
 #### US-203: The same in metrics, and the configuration line · S
 **Description:** As an operator, I want an alarm to be able to watch each dependency, so that I hear about it before a person does.
 
 **Acceptance Criteria:**
-- [ ] `/metrics` has one gauge per dependency, 1 for up and 0 for down, absent when not configured.
-- [ ] `/health`'s configuration line is "healthy" for an install configured with `POSTGRES_*` and no `DATABASE_URL`.
+- [x] `/metrics` has one gauge per dependency, 1 for up and 0 for down, absent when not configured.
+- [x] `/health`'s configuration line is "healthy" for an install configured with `POSTGRES_*` and no `DATABASE_URL`.
 
 ### Wave 3: Logs
 
@@ -257,11 +259,11 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As an operator, I want logs my monitoring system can parse, so that I can search by request, workspace and level.
 
 **Acceptance Criteria:**
-- [ ] `LOG_FORMAT` and `LOG_LEVEL` exist in `config.py` and `config-surface.json`.
+- [x] `LOG_FORMAT` and `LOG_LEVEL` exist in `config.py` and `config-surface.json`.
 - [ ] With `LOG_FORMAT=json`, every line the API writes is one JSON object with the fields in section 5.7.
-- [ ] An exception is one record with the trace in a field.
-- [ ] The web server's access lines are in the same format.
-- [ ] With `LOG_FORMAT=text`, a line is as today with the request id added.
+- [x] An exception is one record with the trace in a field.
+- [x] The web server's access lines are in the same format.
+- [x] With `LOG_FORMAT=text`, a line is as today with the request id added.
 - [ ] `test_1178_request_log_guard.py` and `test_prd256_o5_logs_metrics.py` pass, and the filters they cover apply to both formats.
 - [ ] No new dependency is added.
 
@@ -269,16 +271,16 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As an operator, I want the worker's logs in the same shape, so that one parser reads everything.
 
 **Acceptance Criteria:**
-- [ ] The worker reads the same two settings in its own config module.
-- [ ] With `json`, its lines carry the same fields, with its own service name.
+- [x] The worker reads the same two settings in its own config module.
+- [x] With `json`, its lines carry the same fields, with its own service name.
 - [ ] `test_prd262_worker_starlette.py` passes.
 
 #### US-303: The chart · S
 **Description:** As an operator, I want to choose the format when I install, so that I need no patch.
 
 **Acceptance Criteria:**
-- [ ] The chart passes `LOG_FORMAT` to the API, the migration job and the worker, beside the `LOG_LEVEL` it already passes.
-- [ ] With `LOG_FORMAT` unset, the rendered chart is unchanged. A test pins it.
+- [x] The chart passes `LOG_FORMAT` to the API, the migration job and the worker, beside the `LOG_LEVEL` it already passes.
+- [x] With `LOG_FORMAT` unset, the rendered chart is unchanged. A test pins it.
 
 ## 7. Functional requirements
 

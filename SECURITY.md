@@ -30,6 +30,56 @@ Contributors and coding agents take the same private route, and the fix stays pr
 
 If your local branch tracks a branch on the public repository, unset it (`git branch --unset-upstream`) so a plain `git push` cannot publish the fix early.
 
+## For maintainers: handling a report
+
+Every report ends in one of two places: a published advisory, or a closed one with the reason written down. A report is never left in triage once it is fixed.
+
+### 1. Triage, within two working days
+
+- Open the draft in the **Security** tab → **Advisories**. A report from a contributor arrives there too, often with a private fork.
+- **A report that came by email** has no draft yet. Open one (**Advisories** → **New draft security advisory**), paste in what the reporter sent, and add them to it so they can follow it and be credited.
+- Reproduce it, then set the severity with a CVSS vector (the advisory form has a calculator).
+- **Accept it,** or **close it** with the reason (not a vulnerability, out of scope, a duplicate). Either way, tell the reporter.
+
+### 2. Choose the route
+
+- **Private, the default.** Fix it in the advisory's temporary private fork, as in "If you find one while working on the code". Nothing about the problem is public until the advisory is published.
+- **Public pull request, before the first customer release only.** While no customer runs an install of their own, a maintainer may decide a fix goes as an ordinary pull request, because that is the quickest route. The pull request says what the fix does, and names the class of problem, but gives no steps to reproduce it. The advisory is still accepted, and published or closed in step 5. After the first customer release, this route is closed.
+
+### 3. Fix and merge
+
+- The fix ships with the test that proves it, as every change does.
+- **Private route:** merging from the advisory puts the fix, and its tests, on public `main`, which shows anyone reading the history what was wrong. So steps 3 to 5 happen together, on the same day and in this order:
+  1. prepare the release notes and the advisory text first, while the fix is still private;
+  2. merge from the advisory;
+  3. deploy the hosted edition and cut the release;
+  4. tell customers who run their own install (step 4), then publish (step 5).
+- **Public route:** merge the pull request, and link it from the advisory.
+
+### 4. Ship it and tell people
+
+- **The hosted edition** is fixed when `main` is deployed. Note the deploy in the advisory.
+- **Self-hosted installs** get the fix in the next release, on every supported version.
+- **Customers who run their own install** are told directly, with the advisory's link and the version to move to, on the day the advisory is published.
+
+### 5. Publish, or close
+
+- **Publish the advisory** with the affected and patched versions. Request a CVE from the advisory page when the problem can affect anyone running a release, and credit the reporter unless they asked not to be named.
+- **A fix that shipped before any release** may instead be closed, with a link to the pull request that fixed it.
+
+### Targets
+
+From an accepted report to a fix on `main`:
+
+| Severity (CVSS) | Target |
+| --- | --- |
+| Critical (9.0 to 10) | 2 days |
+| High (7.0 to 8.9) | 7 days |
+| Medium (4.0 to 6.9) | 30 days |
+| Low (0.1 to 3.9) | 90 days, or the next release |
+
+A finding that is being exploited, or that exposes stored credentials or customer data, is treated as Critical whatever its score.
+
 ## Supported versions
 
 Security fixes land on `main` and ship in the next release of both editions. Older tags are not patched separately.

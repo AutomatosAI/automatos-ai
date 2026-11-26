@@ -540,6 +540,54 @@ containers; `make reset` removes it with the rest.
 
 You should not need to open the last three for a standard install.
 
+### Logs
+
+The backend writes its logs to the console (`make logs s=backend`). Two settings choose how
+([PRD-282](../PRDS/PRD-282-OPERATING-A-SELF-HOSTED-INSTALL.md) §5.7):
+
+| Setting | Default | Values |
+|---|---|---|
+| `LOG_FORMAT` | `text` | `json`: one JSON record per line, for a log collector. Set it in `envs/api.local`. |
+| `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`, in any case. Set it in `.env`: compose passes it to the backend. |
+
+Any other value of either setting does not stop the backend: it uses the default (`INFO`,
+`text`) and writes one warning that names the setting and the values it takes.
+
+`LOG_LEVEL` applies to uvicorn's own loggers (`uvicorn`, `uvicorn.error`, `uvicorn.access`) as
+well as the app's, so `WARNING` also drops the access lines and the start-up lines. Two kinds of
+logger never go below a floor: the HTTP libraries and the AWS SDK (`botocore`, `boto3`,
+`s3transfer`, `urllib3`, `httpx`) stay at `WARNING`, and loggers under `core.credentials` stay at
+`INFO`, because credential handling is not debug-logged. `DEBUG` is for a development install:
+the app's debug lines were written when they could not be switched on in the backend, and they
+can carry fragments of what people type.
+
+A JSON record holds `time`, `level`, `logger`, `message`, `service` and `version`, then, when they
+have a value, the request's `request_id`, `workspace_id`, `method` and `path`, the `trace_id` and
+`span_id` of a trace being recorded, and `exception`, the whole traceback in one field. A message
+that cannot be built from its arguments is still one record, whose message says so and names the
+error. `workspace_id` is the workspace the request named in its header, not yet checked by
+sign-in. `request_id` is the request's `X-Request-ID`, keeping letters, digits and `._:-`, at
+most 128 characters, or a new id when none is left; the response, a 500's body and every line of
+the request carry that one value. uvicorn's own lines are written the same way, in each server
+process and, with more than one, in the process that supervises them (the start script points
+uvicorn at `core/monitoring/server_log_config.json`). A text line carries the request's id as
+`req=…`, and uvicorn's access line ends with it.
+
+What is still text with `LOG_FORMAT=json`: the start script's own lines (its banner and its
+boot steps' messages, before uvicorn starts), the migration tool's and the seed loader's output
+when the start script or the migration Job migrates and seeds, and anything a process writes
+before logging is set up, such as a crash while it starts.
+
+The workspace worker reads the same two settings itself, in the same way: an unknown value is
+the default with one warning. With `json` it writes the same fields under its own service name,
+`workspace-worker`, with the backend's request id on the lines of each call the backend makes to
+it; in text, those lines carry `req=…` as the backend's do. Compose passes it `LOG_LEVEL` from
+`.env`, not `LOG_FORMAT`, so under compose it writes text. The Helm chart passes
+`config.LOG_FORMAT` to the backend, the worker and the migration Job's environment, but the
+Job's output stays text; it passes `config.LOG_LEVEL` to the backend and the Job (whose steps
+keep their own level), not the worker, which stays at `INFO`. Rendering the chart stops on a value of either that the
+code would not use (`charts/automatos/README.md`).
+
 ## 4. First boot — what happens and how long it takes
 
 1. **Images.** `make up` pulls the app images CI built, scanned and published
@@ -611,8 +659,8 @@ Readiness, not liveness, is the signal that it is usable:
 
 | URL | Meaning |
 |---|---|
-| `http://localhost:8000/health` | 200 as soon as the API process answers, with per-component status (database, config, resources). |
-| `http://localhost:8000/health/ready` | 503 `{"status": "starting"}` until the full boot finished, then 200 `{"status": "ready"}`. |
+| `http://localhost:8000/health` | 200 as soon as the API process answers, with per-component status (database, config, resources), and one entry each for Redis, object storage, the search index, the memory store and the model provider: `up`, `down` or `not configured`, with `checked_at`, or `unchecked` with no time (no check has finished yet, the last result is stale, or the pod's role may not make the check; a refusal for permissions is logged once, naming the permission). Each is checked in the background every `HEALTH_DEPENDENCY_CHECK_SECONDS` (30 s), given `HEALTH_DEPENDENCY_CHECK_TIMEOUT_SECONDS` (3 s); a result older than three intervals and one time limit (93 s by default) counts as none. A bucket or index that does not exist yet reads `up` (the store answered), except a missing index with `S3_VECTORS_CREATE_IF_MISSING` off. The memory store left at its default address reads `not configured` when nothing answers there, so an install that relies on the default address cannot be told apart from one with no memory store when the store is down; set `QDRANT_URL` and it reads `down`. The model provider is never called: its entry is how the last call through the model manager ended (no connection, a time-out, a 5xx or the install's key refused reads `down`; one refused request does not), `unchecked` before the first call and 15 minutes after the last. Only the database changes the status code. `/metrics` carries the same as `automatos_dependency_up{dependency="..."}` (1 up, 0 down, no series otherwise), the database included; each server process reports its own. |
+| `http://localhost:8000/health/ready` | 503 `{"status": "starting"}` until the full boot finished, then 200 `{"status": "ready"}` while the database answers. The database is checked in the background every `HEALTH_READY_CHECK_SECONDS` (5 s), each check given `HEALTH_READY_CHECK_TIMEOUT_SECONDS` (3 s); a full connection pool still counts as ready, and a database that does not answer makes it 503 `{"status": "not_ready"}` until it does. A result older than three check intervals and one time limit (18 s by default) counts as no check at all (503, `"database": "unchecked"`). Redis plays no part. |
 | `http://localhost:8000/health/bootstrap` | The per-stage boot report with timings. |
 | `http://localhost:8000/docs` | The OpenAPI reference. |
 
@@ -1927,10 +1975,12 @@ ones.
   web app, and only when the proxy is on another machine, or on a plain home
   network (above).
 - **An API port that clients can reach around the proxy.**
-  `POST /api/v1/mobile/pair` allows 10 tries per client address per 10 minutes. It
-  reads that address from the first `X-Forwarded-For` hop, so a client that reaches
-  the API directly can write the header itself. Caddy replaces the header by default.
-  Let only the proxy reach the published ports. The limit changes with
+  `POST /api/v1/mobile/pair` allows 10 tries per client address per 10 minutes. The
+  address comes from `orchestrator/core/security/client_ip.py` and its two settings:
+  `CLIENT_IP_HEADER`, the header your proxy writes the address to, and
+  `CLIENT_IP_PROXY_COUNT`, how many of your own proxies append to it. With neither set it
+  is the first `X-Forwarded-For` hop, which Caddy replaces by default. Let only the proxy
+  reach the published ports. The limit changes with
   `RATE_LIMIT_MOBILE_PAIR_IP_MAX` and `RATE_LIMIT_MOBILE_PAIR_IP_WINDOW_SECONDS` in
   `envs/api.local`.
 

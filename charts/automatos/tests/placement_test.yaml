@@ -1,0 +1,219 @@
+suite: Where each component's pods may run (PRD-280 US-203)
+# The API, the web app, the worker and the migration Job each take nodeSelector, tolerations,
+# affinity and topologySpreadConstraints, rendered as given into their pod spec. Unset, none
+# is rendered: default_render_test.yaml pins each pod spec whole. The memory store takes the same
+# four (US-601): qdrant_test.yaml.
+templates:
+  - templates/api-deployment.yaml
+  - templates/frontend.yaml
+  - templates/migrate-job.yaml
+  - templates/worker.yaml
+release:
+  name: demo
+set:
+  existingSecret: automatos-secrets
+tests:
+  - it: places the API's pods as its values say
+    template: templates/api-deployment.yaml
+    set:
+      api:
+        nodeSelector: {automatos.dev/pool: api}
+        tolerations:
+          - {key: automatos.dev/pool, operator: Equal, value: api, effect: NoSchedule}
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - {key: kubernetes.io/arch, operator: In, values: [amd64]}
+        topologySpreadConstraints:
+          - maxSkew: 1
+            topologyKey: topology.kubernetes.io/zone
+            whenUnsatisfiable: ScheduleAnyway
+            labelSelector:
+              matchLabels: {app.kubernetes.io/component: api}
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value: {automatos.dev/pool: api}
+      - equal:
+          path: spec.template.spec.tolerations
+          value:
+            - {key: automatos.dev/pool, operator: Equal, value: api, effect: NoSchedule}
+      - equal:
+          path: spec.template.spec.affinity
+          value:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - {key: kubernetes.io/arch, operator: In, values: [amd64]}
+      - equal:
+          path: spec.template.spec.topologySpreadConstraints
+          value:
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels: {app.kubernetes.io/component: api}
+  - it: places the web app's pods as its values say
+    template: templates/frontend.yaml
+    documentIndex: 0
+    set:
+      frontend:
+        nodeSelector: {automatos.dev/pool: web}
+        tolerations:
+          - {key: automatos.dev/pool, operator: Exists, effect: NoSchedule}
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  topologyKey: kubernetes.io/hostname
+                  labelSelector:
+                    matchLabels: {app.kubernetes.io/component: frontend}
+        topologySpreadConstraints:
+          - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: DoNotSchedule}
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value: {automatos.dev/pool: web}
+      - equal:
+          path: spec.template.spec.tolerations
+          value:
+            - {key: automatos.dev/pool, operator: Exists, effect: NoSchedule}
+      - equal:
+          path: spec.template.spec.affinity
+          value:
+            podAntiAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 100
+                  podAffinityTerm:
+                    topologyKey: kubernetes.io/hostname
+                    labelSelector:
+                      matchLabels: {app.kubernetes.io/component: frontend}
+      - equal:
+          path: spec.template.spec.topologySpreadConstraints
+          value:
+            - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: DoNotSchedule}
+  - it: places the worker's pod on nodes of its own, as its values say
+    template: templates/worker.yaml
+    documentIndex: 0
+    set:
+      worker:
+        nodeSelector: {automatos.dev/pool: worker}
+        tolerations:
+          - {key: automatos.dev/pool, operator: Equal, value: worker, effect: NoSchedule}
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: {app.kubernetes.io/component: api}
+        topologySpreadConstraints:
+          - {maxSkew: 1, topologyKey: topology.kubernetes.io/zone, whenUnsatisfiable: ScheduleAnyway}
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value: {automatos.dev/pool: worker}
+      - equal:
+          path: spec.template.spec.tolerations
+          value:
+            - {key: automatos.dev/pool, operator: Equal, value: worker, effect: NoSchedule}
+      - equal:
+          path: spec.template.spec.affinity
+          value:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - topologyKey: kubernetes.io/hostname
+                  labelSelector:
+                    matchLabels: {app.kubernetes.io/component: api}
+      - equal:
+          path: spec.template.spec.topologySpreadConstraints
+          value:
+            - {maxSkew: 1, topologyKey: topology.kubernetes.io/zone, whenUnsatisfiable: ScheduleAnyway}
+  - it: places the migration Job's pod as its values say
+    template: templates/migrate-job.yaml
+    set:
+      migrations:
+        nodeSelector: {automatos.dev/pool: api}
+        tolerations:
+          - {key: automatos.dev/pool, operator: Equal, value: api, effect: NoSchedule}
+        affinity:
+          nodeAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 50
+                preference:
+                  matchExpressions:
+                    - {key: kubernetes.io/os, operator: In, values: [linux]}
+        topologySpreadConstraints:
+          - {maxSkew: 2, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway}
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value: {automatos.dev/pool: api}
+      - equal:
+          path: spec.template.spec.tolerations
+          value:
+            - {key: automatos.dev/pool, operator: Equal, value: api, effect: NoSchedule}
+      - equal:
+          path: spec.template.spec.affinity
+          value:
+            nodeAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 50
+                  preference:
+                    matchExpressions:
+                      - {key: kubernetes.io/os, operator: In, values: [linux]}
+      - equal:
+          path: spec.template.spec.topologySpreadConstraints
+          value:
+            - {maxSkew: 2, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway}
+  - it: places each component by its own values only
+    template: templates/worker.yaml
+    documentIndex: 0
+    set:
+      api:
+        nodeSelector: {automatos.dev/pool: api}
+        tolerations:
+          - {key: automatos.dev/pool, operator: Exists}
+      frontend:
+        affinity:
+          nodeAffinity: {}
+      migrations:
+        topologySpreadConstraints:
+          - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway}
+      # The memory store's (US-601; its own placement is qdrant_test.yaml's).
+      qdrant:
+        enabled: true
+        nodeSelector: {automatos.dev/pool: memory}
+    asserts:
+      - notExists:
+          path: spec.template.spec.nodeSelector
+      - notExists:
+          path: spec.template.spec.tolerations
+      - notExists:
+          path: spec.template.spec.affinity
+      - notExists:
+          path: spec.template.spec.topologySpreadConstraints
+  - it: renders one field without the others
+    template: templates/frontend.yaml
+    documentIndex: 0
+    set:
+      frontend:
+        tolerations:
+          - {key: automatos.dev/pool, operator: Exists}
+    asserts:
+      - equal:
+          path: spec.template.spec.tolerations
+          value:
+            - {key: automatos.dev/pool, operator: Exists}
+      - notExists:
+          path: spec.template.spec.nodeSelector
+      - notExists:
+          path: spec.template.spec.affinity
+      - notExists:
+          path: spec.template.spec.topologySpreadConstraints
+      - equal:
+          path: spec.template.spec.containers[0].name
+          value: frontend

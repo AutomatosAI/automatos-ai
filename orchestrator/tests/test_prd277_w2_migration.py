@@ -1,7 +1,6 @@
 """PRD-277 Wave 2 (US-201, US-203): prd277_w2_identities_20261120, the wave's one migration.
 
-* The revision chains onto ``merge_heads_20261117``; the spend cap (``product_spend_cap_20261113``)
-  chains onto it and is the one head, which both head pins follow.
+* The revision chains onto ``merge_heads_20261117``, and Wave 3's revision chains onto it.
 * Its upgrade bounds its lock waits with ``SET LOCAL lock_timeout``, adds the nullable
   ``users.system_role`` with its CHECK first (the strongest lock on ``users`` is the first one
   taken), then creates ``user_identities`` and its two indexes, each only when missing and the
@@ -49,6 +48,8 @@ from modules.policy.roles import ADMIN, SUPER_ADMIN, USER
 ORCH = Path(__file__).resolve().parents[1]
 VERSIONS = ORCH / "alembic" / "versions"
 REVISION, PARENT = "prd277_w2_identities_20261120", "merge_heads_20261117"
+WAVE_3 = "prd277_w3_sessions_20261120"
+HEAD = "product_spend_cap_20261113"  # the spend cap, on Wave 6 part 2's revision
 MIGRATION = VERSIONS / f"{REVISION}.py"
 TABLE = "user_identities"
 COLUMNS = ("id", "user_id", "issuer", "subject", "created_at", "updated_at")
@@ -98,16 +99,18 @@ def _parents(down) -> list:
     return list(down) if isinstance(down, (list, tuple)) else [down] if down else []
 
 
-def test_the_revision_chains_onto_the_merge_and_is_the_one_head():
+def test_the_revision_chains_onto_the_merge_and_wave_3_chains_onto_it():
     constants = _constants()
     assert (constants["revision"], constants["down_revision"]) == (REVISION, PARENT)
     revisions = _revisions()
     assert [rev for rev, down in revisions.items() if PARENT in _parents(down)] == [REVISION]
+    # PRD-277 Wave 3 chained prd277_w3_sessions_20261120 onto this revision, and Wave 4 chained
+    # prd277_w4_oidc_sign_ins_20261120 onto Wave 3's and prd277_w4b_step_up_20261120 onto that, and
+    # Wave 6 part 2 prd277_w6b_phone_sign_in_20261121 onto that, so the one head is Wave 6 part 2's and
+    # the head pins name it (tests/test_prd277_w6b_phone_sign_in_migration.py pins it).
+    assert [rev for rev, down in revisions.items() if REVISION in _parents(down)] == [WAVE_3]
     heads = set(revisions) - {parent for down in revisions.values() for parent in _parents(down)}
-    assert heads == {"product_spend_cap_20261113"}
-    assert [rev for rev, down in revisions.items() if REVISION in _parents(down)] == ["product_spend_cap_20261113"]
-    guard = (ORCH / "tests" / "test_prd209_alembic_single_head.py").read_text(encoding="utf-8")
-    assert 'EXPECTED_HEAD = "product_spend_cap_20261113"' in guard
+    assert heads == {HEAD}
     chain = (ORCH / "tests" / "test_prd236_w1_routes.py").read_text(encoding="utf-8")
     assert f'(versions / "{REVISION}.py")' in chain and f'down_revision = "{PARENT}"' in chain
 

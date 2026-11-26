@@ -23,12 +23,16 @@ import { useBackendHealth, type BackendHealth, type BackendHealthOptions } from 
 import { useBillingSummary, type BillingSummary } from '@/hooks/use-billing-summary'
 import { usePrefersReducedMotion } from '@/hooks/use-media-preferences'
 import { useThemeLayout as useHostThemeLayout } from '@/hooks/use-studio-theme'
-import { authEdition, type AuthEdition } from '@/lib/auth-edition'
+import { authEdition } from '@/lib/auth-edition'
 import type { ThemeLayout } from '@/lib/theme-host/registry-types'
 
 export { useOnline } from '@/hooks/use-online'
 
-export type HostEdition = AuthEdition
+/**
+ * The theme SDK's contract (packages/theme-sdk/areas/context.d.ts) names two editions. PRD-277's
+ * enterprise edition reads as 'saas' to a theme: people sign in, and there are many of them.
+ */
+export type HostEdition = 'local' | 'saas'
 export type HostWorkspaceRole = Workspace['role']
 export type HostSystemRole = 'super_admin' | 'admin' | 'user'
 export type HostTone = 'light' | 'dark'
@@ -122,7 +126,7 @@ export function useRole(): HostRole {
 
 /** 'local' (one operator, no sign-in) or 'saas'. Fixed for the life of the build. */
 export function useEdition(): HostEdition {
-  return authEdition
+  return authEdition === 'local' ? 'local' : 'saas'
 }
 
 function trialStateOf(summary: BillingSummary): HostTrial['state'] {

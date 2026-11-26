@@ -20,7 +20,7 @@ import logging
 import re
 from contextlib import closing
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 import psycopg2
 
@@ -74,17 +74,22 @@ def update_parameters(
 
 
 def record_task_status(
-    database_url: str, task_id: str, status: str, worker_id: str, error: Optional[str] = None
+    database_url: str, task_id: str, status: str, worker_id: str, error: Optional[str] = None,
+    tls: Optional[Mapping[str, str]] = None,
 ) -> bool:
     """Write one status change to ``task_executions``. False, logged, when the write fails.
 
     Synchronous and blocking: main.py runs it in a thread. The connection lasts
-    for this one statement, so no connection is shared between threads.
+    for this one statement, so no connection is shared between threads. ``tls`` is
+    libpq's ``sslmode`` and ``sslrootcert``, with ``gssencmode=disable`` for a mode that
+    checks a certificate (worker_config.database_tls_params), which win over the same keys
+    in the address; libpq checks the server's certificate for verify-ca and verify-full,
+    and its host name for verify-full (PRD-278 W3).
     """
     params = update_parameters(task_id, status, worker_id, error, datetime.now(timezone.utc))
     dsn = libpq_dsn(database_url)
     try:
-        with closing(psycopg2.connect(dsn, connect_timeout=CONNECT_TIMEOUT_SECONDS)) as conn:
+        with closing(psycopg2.connect(dsn, connect_timeout=CONNECT_TIMEOUT_SECONDS, **(tls or {}))) as conn:
             with conn, conn.cursor() as cursor:  # commits on success, rolls back on error
                 cursor.execute(UPDATE_TASK_EXECUTION, params)
     except REFUSED_WRITES:

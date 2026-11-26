@@ -19,7 +19,6 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from core.auth.hybrid import get_request_context_hybrid
 import uvicorn
-import uuid
 import time
 from datetime import datetime, timezone
 from collections import defaultdict, deque
@@ -39,7 +38,7 @@ from router_manifest import mount_manifest_routers  # PRD-155 S3: fail-loud rout
 # Import database and models
 from core.database.database import init_database, get_db, SessionLocal
 from core.database import pool_watch
-from core import editions, health_probe  # GET /health's session mode (PRD-277) and probes (F229, F458)
+from core import editions, health_dependencies, health_probe, health_readiness  # /health, /health/ready (PRD-282)
 from core.models import Base
 
 # Import API routers
@@ -112,6 +111,7 @@ from api.themes_mobile import router as mobile_theme_router
 from api.themes_looks import router as themes_looks_router
 from api.themes_settings import router as themes_settings_router
 from core.auth.step_up import install_step_up_handler  # PRD-261 A-07c: the reverification 403 body
+from core.auth.session_cookie import install_cookie_session_ended_handler  # PRD-277 Wave 3
 from services.themes.package import THEME_IMPORT_ROUTE, cap_bytes as theme_cap_bytes
 # PRD-261 W-C1: the theme Marketplace (submit, the Themes tab listings, the admin review queue).
 from api.marketplace_themes_submit import router as marketplace_themes_submit_router
@@ -178,20 +178,11 @@ from api.dashboard_integration import (
 
 # WebSocket manager removed - using AI SDK SSE streaming instead
 from core.observability.otel import (
-    FASTAPI_TELEMETRY, annotate_request, instrument_app, instrument_libraries, with_tracing,
+    FASTAPI_TELEMETRY, instrument_app, instrument_libraries, with_tracing,
 )
 from core.route_tree import route_template  # PRD-262 US-008: API stats key by the full template
-from core.utils.logging_adapter import (
-    install_request_context_logging,
-    set_request_id,
-    clear_request_id,
-    set_request_context,
-    request_id_var,
-    workspace_id_var,
-    user_id_var,
-    http_method_var,
-    http_path_var,
-)
+from core.utils.logging_adapter import install_request_context_logging
+from core.monitoring.request_context import RequestContextMiddleware  # PRD-282 US-301
 
 # Configure logging — ships to log-relay → Loki when LOG_RELAY_URL is set
 from core.monitoring.automatos_logging import setup_logging
@@ -295,8 +286,13 @@ async def _boot_phase_1_core():
     from core.seeds.leader_stage import run_leader_seeds, seed_local_first_run_on_boot
     from integrations.vertical_products import seed_vertical_products_on_boot
 
-    # DDL — safe for all workers (idempotent, fast no-op when tables exist)
-    create_tables()
+    from services.mobile.edition_change import confirm_edition
+    try:  # DDL — safe for all workers (idempotent, fast no-op when tables exist)
+        create_tables()
+    finally:  # PRD-277 US-601: every worker, before it serves; no device of another edition stays live.
+        # In a finally so a worker whose DDL failed still marks the check run or FAILED. confirm_edition
+        # never raises, so an error from create_tables is the one that propagates, unchanged.
+        confirm_edition()
 
     with boot_leader_lock(engine) as is_leader:
         if not is_leader:
@@ -530,9 +526,11 @@ def _start_board_dispatch(app_instance: "FastAPI", trust_passed: bool) -> None:
 
 
 async def _mark_ready(app_instance: "FastAPI", report: "BootstrapReport") -> None:
-    """READY, the last stage: /health/ready answers 200 from here on, failed stages or not."""
+    """READY, the last stage: from here /health/ready answers 200 while the database check
+    passes, failed stages or not. It waits for the first check first (PRD-282 US-201)."""
     from core.models.bootstrap import BootstrapStage, run_stage
 
+    await health_readiness.first_check(app_instance.state)
     report.ready_at = datetime.now(timezone.utc)
     await run_stage(report, BootstrapStage.READY, lambda: None)
     app_instance.state.ready = True
@@ -556,20 +554,21 @@ async def _boot_in_background(
 ) -> None:
     """PRD-262 US-034: the rest of the boot, as one task, once the server listens.
 
-    In order: the starters pass (the leader stage's last part), the Composio
-    catalogue, Phase 2 (scheduler, channels), then board dispatch, which starts
-    after Phase 2 as it always has. Each of the first three is a stage of the
-    bootstrap report, so a failure shows in /health/bootstrap. app.state.ready
-    (/health/ready 200) is set once all of them finished, whether or not a stage
-    failed, as before. A crash outside a stage is logged and leaves /health/ready
-    at 503.
+    In order: the starters pass (the leader stage's last part), the Composio catalogue,
+    sign-in's start-up (PRD-277: registration closes; in enterprise, an oidc_provider
+    stage), Phase 2 (scheduler, channels), then board dispatch, as always last. Each stage
+    shows in /health/bootstrap. app.state.ready is set once all of them finished, whether
+    or not a stage failed; /health/ready also needs the database check. A crash outside a
+    stage leaves it at 503.
     """
+    from core.auth.sign_in_start_up import finish_sign_in_start_up
     from core.models.bootstrap import BootstrapStage, run_stage
 
     try:
         await run_stage(report, BootstrapStage.SEED_SYSTEM_DATA, functools.partial(_run_starters, seeds))
         # PRD-233 S2: Composio catalogue — sync on the first keyed boot, re-bind seeds.
         await run_stage(report, BootstrapStage.TOOL_SYNC, _bootstrap_composio_catalog)
+        await finish_sign_in_start_up(report)
         await _boot_phase_2_stage(app_instance, report, trust_passed)
         _start_board_dispatch(app_instance, trust_passed)
     except Exception:
@@ -586,12 +585,14 @@ def _start_serving(
     /health/bootstrap shows the report from here on, its stages as they finish. The
     loop watchdog starts now, while requests are already served (F105: from here on,
     a stall of the loop logs the stack that caused it; LOOP_STALL_LOG_SECONDS=0
-    starts nothing; never raises). The background boot runs the rest.
+    starts nothing; never raises). So do the background health checks (PRD-282: the
+    database's, for readiness, and each dependency's). The background boot runs the rest.
     """
     from core.loop_watchdog import start_loop_watchdog
 
     app_instance.state.bootstrap_report = report
     app_instance.state.loop_watchdog = start_loop_watchdog()
+    health_dependencies.start(app_instance.state)
     app_instance.state.background_boot = asyncio.create_task(
         _boot_in_background(app_instance, report, seeds, trust_passed)
     )
@@ -698,6 +699,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down Automatos AI API Server...")
     await _stop_background_boot(app)
+    await health_dependencies.stop(app.state)
 
     _watchdog = getattr(app.state, "loop_watchdog", None)
     if _watchdog is not None:
@@ -826,7 +828,7 @@ app = FastAPI(
     
     **🌟 Ready to build the future of AI? Start exploring the endpoints below!**
     """,
-    version="1.0.0",
+    version=config.AUTOMATOS_VERSION,  # PRD-279 US-303: the version the image was built as
     contact={
         "name": "Automatos AI Development Team",
         "url": "https://github.com/AutomatosAI/automatos-ai",
@@ -946,6 +948,8 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # PRD-261 A-07c: StepUpRequired renders Clerk's reverification body with clerk_error at the top level.
 install_step_up_handler(app)
+# PRD-277 Wave 3: a 401 for an ended session the cookie held also clears the cookie.
+install_cookie_session_ended_handler(app)
 # F040: actually enforce the limits — without this middleware the limiter above
 # is inert on every route. Registered ONLY under the policy-plane flag; OFF keeps
 # today's (placebo) behaviour so the rollout stays byte-for-byte reversible.
@@ -1046,35 +1050,12 @@ async def add_security_headers(request, call_next):
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
     return response
 
-# Install logging context filter and add request-id middleware
+# Install the logging context filter (the request's context comes from RequestContextMiddleware, below)
 install_request_context_logging()
 # PRD-256 (#847): a server span per request, when OTEL_ENABLED. It wraps the whole
 # middleware stack, so it must be in place before the first ASGI call (the lifespan's).
 instrument_app(app)
 instrument_libraries()   # PRD-256 O2a: SQL, Redis, outbound HTTP and AWS spans under each request
-
-@app.middleware("http")
-async def add_request_id_middleware(request, call_next):
-    inbound = request.headers.get("X-Request-ID")
-    token = set_request_id(inbound or uuid.uuid4().hex[:12])
-
-    # PRD-73 Phase 2: Enrich logs with request context (workspace, user, method, path)
-    # ContextVars are captured automatically by LogRelayHandler — zero cost at call sites
-    http_method_var.set(request.method)
-    http_path_var.set(request.url.path)
-
-    # Extract workspace_id and user_id from auth headers (best-effort, pre-auth)
-    ws_header = request.headers.get("x-workspace-id", "") or request.headers.get("x-workspace", "")
-    if ws_header and ws_header != "__all__":
-        workspace_id_var.set(ws_header)
-    annotate_request(request_id_var.get(""), workspace_id_var.get(""))  # PRD-256: the IDs on the server span
-
-    try:
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request.headers.get("X-Request-ID") or request_id_var.get("")
-        return response
-    finally:
-        clear_request_id(token)
 
 @app.middleware("http")
 async def api_tracking_middleware(request, call_next):
@@ -1244,6 +1225,12 @@ try:
 except Exception as e:
     logger.warning(f"Prometheus metrics disabled: {e}")
 
+# PRD-282 US-301: the request's id, method, path and workspace for its logs, its span and its
+# X-Request-ID header. Plain ASGI and added last, AFTER setup_metrics: its Prometheus
+# middleware runs the rest of the app in a task of its own, so this one must sit outside it
+# for uvicorn's access line to carry the request's id. Outermost of the app's own middleware.
+app.add_middleware(RequestContextMiddleware)
+
 # AlertManager webhook ingest → infrastructure_alerts table
 try:
     from core.monitoring.automatos_alerts import create_alerts_router
@@ -1294,22 +1281,15 @@ async def serve_export(file_path: str, ctx = Depends(get_request_context_hybrid)
 # WebSocket endpoint removed - using AI SDK SSE streaming instead
 # See consumers/workflows/streaming.py and consumers/chatbot/streaming.py
 
-# Readiness probe (PRD-262 US-034). The server listens, and GET /health answers, once
-# the lifespan's core (tables, the boot leader's seeds, the trust gate) is done. The
-# rest of the boot (the starters, the Composio catalogue, the scheduler and channels,
-# board dispatch) runs in the background; this answers 503 until it has finished and
-# 200 after, whether or not a stage failed (GET /health/bootstrap shows which). A
-# deploy healthcheck that must wait for the scheduler targets this one.
-@app.get("/health/ready",
-         summary="Readiness probe",
-         tags=["🏥 System Health"])
+# Readiness probe (PRD-262 US-034, PRD-282 US-201). GET /health answers once the
+# lifespan's core is done; the rest of the boot runs in the background, and this
+# answers 503 until it has finished. Then 200 while the database check, refreshed in
+# the background (core/health_readiness.py), passes ("busy" passes), 503 when not.
+# A failed boot stage does not make it 503 (GET /health/bootstrap shows which failed).
+@app.get("/health/ready", summary="Readiness probe", tags=["🏥 System Health"])
 async def readiness_probe(request: Request):
-    if not getattr(request.app.state, "ready", False):
-        return JSONResponse(
-            status_code=503,
-            content={"status": "starting", "message": "Boot in progress"},
-        )
-    return {"status": "ready"}
+    status_code, body = health_readiness.answer(request.app.state)
+    return body if status_code == health_probe.HTTP_OK else JSONResponse(status_code=status_code, content=body)
 
 
 # Health check endpoint
@@ -1320,7 +1300,7 @@ async def readiness_probe(request: Request):
          response_description="Detailed system health information")
 def health_check():
     """
-    System health check with real probes for database, config, and resources.
+    Probes for database, config and resources; each dependency's last background check.
 
     A plain ``def`` (F229, F105): its probes (core/health_probe.py) run in the
     threadpool, never on the event loop, and none of them waits long. A full
@@ -1336,7 +1316,7 @@ def health_check():
     components = {
         "api_server": "healthy",
         "database": health_probe.database_status(),
-        "config": "healthy" if config.DATABASE_URL else "degraded",  # critical config
+        "config": health_probe.config_status(),  # DATABASE_URL or POSTGRES_* (PRD-282 US-203)
     }
 
     # PRD-123 Pattern #2: Include trust gate and extension health
@@ -1351,9 +1331,9 @@ def health_check():
     body = {
         "status": health_probe.overall_status(components),
         "service": "automatos-ai-api",
-        "version": "1.0.0",
+        "version": config.AUTOMATOS_VERSION,
         "timestamp": datetime.utcnow().isoformat(),
-        "components": components,
+        "components": {**components, **health_dependencies.components(app.state)},  # PRD-282 US-202
         "db_pool": pool_watch.pool_numbers(),
         "metrics": health_probe.host_metrics(),
         "extensions": deferred_init.as_dict() if deferred_init else None,
@@ -1462,22 +1442,10 @@ async def api_endpoint_health():
             "message": "Failed to retrieve API health statistics"
         }
 
-# Root endpoint
-@app.get("/", 
-         summary="🏠 API Overview & Navigation",
-         description="Get comprehensive API information, endpoints overview, and quick navigation links",
-         tags=["🏠 Getting Started"],
-         response_description="API overview with navigation information")
-async def root():
-    """
-    ## 🚀 Welcome to Automatos AI API
-    
-    This endpoint provides a comprehensive overview of all available API endpoints,
-    documentation links, and system information to help developers get started quickly.
-    """
-    return {
+# Root endpoint: what GET / returns, all but its timestamp.
+_ROOT_OVERVIEW = {
         "service": "Automatos AI API Server",
-        "version": "1.0.0",
+        "version": config.AUTOMATOS_VERSION,
         "status": "operational",
         "description": "World's Most Advanced Multi-Agent AI Orchestration Platform",
         
@@ -1555,9 +1523,21 @@ async def root():
             "caching": "Intelligent result caching",
             "rate_limiting": "Configurable per endpoint"
         },
-        
-        "🕐 timestamp": datetime.utcnow().isoformat()
     }
+
+@app.get("/",
+         summary="🏠 API Overview & Navigation",
+         description="Get comprehensive API information, endpoints overview, and quick navigation links",
+         tags=["🏠 Getting Started"],
+         response_description="API overview with navigation information")
+async def root():
+    """
+    ## 🚀 Welcome to Automatos AI API
+
+    This endpoint provides a comprehensive overview of all available API endpoints,
+    documentation links, and system information to help developers get started quickly.
+    """
+    return {**_ROOT_OVERVIEW, "🕐 timestamp": datetime.utcnow().isoformat()}
 
 # Global exception handler
 @app.exception_handler(Exception)

@@ -142,7 +142,9 @@ The first boot builds the database schema, runs the seeds and then serves.
 `http://localhost:8000/health` answers once the API's core is up (the schema, the
 seeds and the database check); `http://localhost:8000/health/ready` returns 503
 while the rest of the boot (the starters, the integrations catalogue, the scheduler
-and channels) runs in the background, and 200 once the instance is fully up.
+and channels) runs in the background, and 200 once the instance is fully up and its
+database answers (checked in the background every few seconds; 503 again while it
+does not).
 
 ## 3. Open it
 

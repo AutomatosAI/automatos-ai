@@ -136,44 +136,22 @@ Sources: [orchestrator/config.py:48-57](), [orchestrator/config.py:75-93](), [.g
 
 ### PostgreSQL
 
-`Config.get_database_url()` returns the configured `DATABASE_URL`. When that URL is absent, the method returns the absent value; the shown implementation does not construct a URL from the individual `POSTGRES_*` attributes. For a configured URL, it leaves URLs containing one of the listed local-host strings unchanged. For other hosts, it appends `sslmode=require` unless the URL already contains `sslmode`. [orchestrator/config.py:59-72]()
+The main engine's address comes from `get_database_url()` in `core/database/database.py`: the credential resolver's PostgreSQL parameters, else `DATABASE_URL`, else the individual `POSTGRES_*` attributes. TLS on every connection to the application's database is decided by `core/database/tls.py` from two settings (PRD-278):
 
 | Variable or function | Role |
 |---|---|
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT` | Individual PostgreSQL configuration attributes. [orchestrator/config.py:48-56]() |
 | `DATABASE_URL` | Direct database URL read by `Config`; documented as overriding individual parameters. [orchestrator/config.py:48-57]() |
-| `Config.get_database_url()` | Returns the direct URL and applies the non-local `sslmode=require` rule. [orchestrator/config.py:59-72]() |
+| `DATABASE_SSLMODE` | libpq's `sslmode` for every connection to the application's database: `disable`, `allow`, `prefer`, `require`, `verify-ca` or `verify-full`. `verify-full` checks the server's certificate against the CA and its host name. Set, it wins over an `sslmode` in the address. `verify-ca` and `verify-full` also set libpq's `gssencmode=disable`, over any in the address (see below). Any other value stops start-up. |
+| `DATABASE_SSLROOTCERT` | The CA file that check uses: a readable file holding at least one PEM certificate. Only with `verify-ca` or `verify-full`; otherwise start-up stops. |
+| `main_engine_url()` | With `DATABASE_SSLMODE` unset and `ENVIRONMENT=production`, adds `sslmode=require` to the main engine's address when it names no `sslmode`; otherwise the address is used as given. [orchestrator/core/database/tls.py]() |
+| `create_app_engine()`, `database_tls()` | Give each driver the two settings in the form it takes: libpq's `sslmode`/`sslrootcert` keywords (SQLAlchemy and psycopg2), an `ssl` argument for asyncpg, and `PGSSLMODE`/`PGSSLROOTCERT` (with `PGGSSENCMODE=disable` for `verify-ca` and `verify-full`) for the entrypoint's `pg_isready` and `psql`. [orchestrator/core/database/tls.py]() |
 
-Sources: [orchestrator/config.py:48-72]()
+With neither setting, no connection gains a keyword, and each connects as it did before the settings existed. The workspace worker reads the same two settings in `services/workspace-worker/worker_config.py`. On Kubernetes, the chart's `database.*` values set them and mount the CA (see `charts/automatos/README.md`).
 
-**Diagram: `Config.get_database_url()` Decision Flow**
+Where Kerberos credentials are present, libpq uses GSSAPI encryption in preference to TLS whatever `sslmode` says, and then checks no certificate. So with `verify-ca` or `verify-full`, the connections that read `DATABASE_SSLMODE` (the app's engines, the RAG code's psycopg2 connections, migrations, the seed loader, the worker's write, and the entrypoint's `pg_isready` and `psql`) also get `gssencmode=disable`, and the certificate check that was asked for is the one in force. With `require`, and with the setting unset (where production adds `sslmode=require` to an address that names none), GSSAPI encryption can still be used when Kerberos credentials are present: an encrypted channel that Kerberos authenticates. An install that wants the certificate checked sets `verify-ca` or `verify-full`. A `gssencmode` named in a libpq service file is read before the environment, so the entrypoint's `PGGSSENCMODE` does not override one.
 
-```mermaid
-flowchart TD
-    Start["Config.get_database_url"]
-    Read["Read Config.DATABASE_URL"]
-    Present{"URL is set"}
-    Local{"URL contains localhost, 127.0.0.1, postgres, or db"}
-    HasSSL{"URL contains sslmode"}
-    ReturnOriginal["Return URL unchanged"]
-    AddQuery["Append sslmode=require with ?"]
-    AddParameter["Append sslmode=require with &"]
-    ReturnResult["Return resulting URL"]
-
-    Start --> Read
-    Read --> Present
-    Present -->|"No"| ReturnOriginal
-    Present -->|"Yes"| Local
-    Local -->|"Yes"| ReturnOriginal
-    Local -->|"No"| HasSSL
-    HasSSL -->|"Yes"| ReturnResult
-    HasSSL -->|"No and no query string"| AddQuery
-    HasSSL -->|"No and query string exists"| AddParameter
-    AddQuery --> ReturnResult
-    AddParameter --> ReturnResult
-```
-
-Sources: [orchestrator/config.py:59-72]()
+Sources: [orchestrator/config.py](), [orchestrator/core/database/tls.py](), [orchestrator/core/database/database.py]()
 
 ### Redis
 

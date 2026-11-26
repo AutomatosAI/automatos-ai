@@ -54,7 +54,7 @@ from canvas_events import (
     session_status_event,
 )
 from workspace_manager import WorkspaceManager
-from worker_config import model_auth_env
+from worker_config import agent_environment, model_auth_env
 
 logger = logging.getLogger("workspace-worker.canvas")
 
@@ -128,7 +128,17 @@ def _default_sdk_client_factory(option_kwargs: Dict[str, Any]) -> Any:
     dependency; tests and import-time code never need it)."""
     from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
-    return ClaudeSDKClient(options=ClaudeAgentOptions(**option_kwargs))
+    return ClaudeSDKClient(options=ClaudeAgentOptions(**agent_option_kwargs(option_kwargs)))
+
+
+def agent_option_kwargs(option_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """``option_kwargs`` with the worker's own variables blanked under the session's ``env``.
+
+    The SDK starts the CLI with the worker's environment and lays ``env`` over it, so the
+    blanked names (``worker_config.agent_environment``) go first and the session's own values
+    (``CLAUDE_CONFIG_DIR``, the model credential) override them. A new dict; the input is kept.
+    """
+    return {**option_kwargs, "env": {**agent_environment(), **option_kwargs.get("env", {})}}
 
 
 DENY_OUT_OF_MOUNT = "Denied: path outside the workspace mount"

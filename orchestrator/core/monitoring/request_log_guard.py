@@ -12,8 +12,9 @@ import re
 
 
 # HTTP libraries whose INFO lines carry a full request URL, and a URL can carry a secret
-# (Telegram's bot<token> reached Loki on 23 Sep): only their warnings and errors pass.
-REQUEST_LIBRARIES = ("httpx", "httpcore", "httpx2", "httpcore2", "urllib3")
+# (Telegram's bot<token> reached Loki on 23 Sep), and the AWS SDK's (PRD-282), whose DEBUG
+# lines carry a request's URL, headers and body: only their warnings and errors pass.
+REQUEST_LIBRARIES = ("httpx", "httpcore", "httpx2", "httpcore2", "urllib3", "botocore", "boto3", "s3transfer")
 # Model and integration SDKs whose DEBUG lines carry a request's options, its body
 # (the prompt) included: their retry lines (INFO, a relative path) pass, DEBUG never.
 SDK_LIBRARIES = ("anthropic", "openai", "composio_client")

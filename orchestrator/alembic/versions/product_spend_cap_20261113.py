@@ -11,13 +11,13 @@ PRD-274 Wave 5, the spend cap proposed in #1520. Two additions, no row changed:
 only when missing, ``CREATE TABLE IF NOT EXISTS``. The downgrade drops both.
 
 Revision ID: product_spend_cap_20261113
-Revises: prd277_w2_identities_20261120
+Revises: prd277_w6b_phone_sign_in_20261121
 Create Date: 2026-11-13
 """
 from alembic import op
 
 revision = "product_spend_cap_20261113"
-down_revision = "prd277_w2_identities_20261120"
+down_revision = "prd277_w6b_phone_sign_in_20261121"
 branch_labels = None
 depends_on = None
 

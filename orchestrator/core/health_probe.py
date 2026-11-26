@@ -40,6 +40,8 @@ DATABASE_STUCK = "stuck"  # ...and has been at every probe for HEALTH_POOL_STUCK
 HTTP_OK = 200
 HTTP_UNAVAILABLE = 503
 
+# The settings the database's address is built from when DATABASE_URL is unset.
+_POSTGRES_SETTINGS = ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB")
 # How a component's own state counts toward the overall status.
 _COUNTS_AS = {DATABASE_BUSY: DEGRADED, DATABASE_STUCK: UNHEALTHY}
 
@@ -66,17 +68,21 @@ class FullPoolClock:
 _full_pool = FullPoolClock()
 
 
-def database_status(clock: FullPoolClock = _full_pool) -> str:
+def database_status(clock: FullPoolClock = _full_pool, *, raise_errors: bool = False) -> str:
     """``healthy`` or ``unhealthy`` (a SELECT 1 on a free connection), or, with no
-    connection free, ``busy`` / ``stuck`` without asking the pool for one."""
+    connection free, ``busy`` / ``stuck`` without asking the pool for one.
+
+    ``raise_errors``: a failed SELECT 1 raises instead of logging and answering
+    ``unhealthy``. Readiness's background watch (PRD-282) asks so: it logs a failure
+    once, when the state changes, where GET /health logs every one it meets."""
     if not pool_watch.pool_has_room():
         full_for = clock.saw_full(time.monotonic())
         return DATABASE_STUCK if full_for >= config.HEALTH_POOL_STUCK_SECONDS else DATABASE_BUSY
     clock.saw_room()
-    return _select_one()
+    return _select_one(raise_errors=raise_errors)
 
 
-def _select_one() -> str:
+def _select_one(*, raise_errors: bool = False) -> str:
     from sqlalchemy import text
 
     from core.database import database
@@ -89,8 +95,18 @@ def _select_one() -> str:
         finally:
             db.close()
     except Exception:
+        if raise_errors:
+            raise
         logger.exception("Health: database check failed")
         return UNHEALTHY
+
+
+def config_status() -> str:
+    """``healthy`` when the database is configured: ``DATABASE_URL``, or every ``POSTGRES_*``
+    setting, the two ways core/database/database.py builds its address (PRD-282 US-203)."""
+    if config.DATABASE_URL or all(getattr(config, name) for name in _POSTGRES_SETTINGS):
+        return HEALTHY
+    return DEGRADED
 
 
 def overall_status(components: Dict[str, str]) -> str:

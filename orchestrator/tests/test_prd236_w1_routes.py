@@ -446,10 +446,26 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # the guard follows it.
     people = (versions / "prd277_w2_identities_20261120.py").read_text()
     assert 'down_revision = "merge_heads_20261117"' in people
-    # 2026-11-13 (Automatos for products, spend cap): product_spend_cap_20261113 chains onto the
-    # identities; the guard follows it.
+    # 2026-11-20 (PRD-277 Wave 3, US-301): prd277_w3_sessions_20261120 chains onto Wave 2's
+    # revision — auth_sessions, a new table; the guard follows it.
+    sessions = (versions / "prd277_w3_sessions_20261120.py").read_text()
+    assert 'down_revision = "prd277_w2_identities_20261120"' in sessions
+    # 2026-11-20 (PRD-277 Wave 4, US-402): prd277_w4_oidc_sign_ins_20261120 chains onto Wave 3's
+    # revision — oidc_pending_sign_ins, a new table; the guard follows it.
+    sign_ins = (versions / "prd277_w4_oidc_sign_ins_20261120.py").read_text()
+    assert 'down_revision = "prd277_w3_sessions_20261120"' in sign_ins
+    # 2026-11-20 (PRD-277 Wave 4 part 2, US-406): prd277_w4b_step_up_20261120 chains onto Wave 4's
+    # first revision — oidc_pending_sign_ins.step_up_session_id, a new nullable column; the guard follows it.
+    step_up = (versions / "prd277_w4b_step_up_20261120.py").read_text()
+    assert 'down_revision = "prd277_w4_oidc_sign_ins_20261120"' in step_up
+    # 2026-11-21 (PRD-277 Wave 6 part 2, US-603): prd277_w6b_phone_sign_in_20261121 chains onto Wave 4
+    # part 2's revision — the 'oidc' device kind and the columns a phone's sign-in keeps; the guard follows it.
+    phone = (versions / "prd277_w6b_phone_sign_in_20261121.py").read_text()
+    assert 'down_revision = "prd277_w4b_step_up_20261120"' in phone
+    # 2026-11-26 (Automatos for products, spend cap): product_spend_cap_20261113 chains onto Wave 6
+    # part 2's revision; the guard follows it.
     capped = (versions / "product_spend_cap_20261113.py").read_text()
-    assert 'down_revision = "prd277_w2_identities_20261120"' in capped
+    assert 'down_revision = "prd277_w6b_phone_sign_in_20261121"' in capped
     assert 'EXPECTED_HEAD = "product_spend_cap_20261113"' in guard
 
 
