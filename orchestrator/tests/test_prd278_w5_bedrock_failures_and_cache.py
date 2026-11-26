@@ -166,6 +166,30 @@ def test_it_stops_the_batch_and_cancels_the_calls_not_yet_made(monkeypatch):
     assert runtime.calls <= 3, f"{runtime.calls} of 20 texts were sent after the refusal"
 
 
+def test_a_sibling_that_answers_right_after_the_refusal_does_not_let_the_batch_send_more(monkeypatch):
+    """Two texts are in flight. The first is refused and, in the same turn of the loop, the
+    second answers: that success clears the shared hold. The eighteen texts still waiting for
+    their turn are the calls not yet made, and the batch sends none of them."""
+    sent: list = []
+
+    async def in_turn(_invoke, text, timeout):
+        number = len(sent)
+        sent.append(text)
+        await asyncio.sleep(0)  # both of the first two are in flight before either answers
+        if number == 0:
+            raise DENIED
+        return [0.25] * 1024, 1
+
+    monkeypatch.setattr(bedrock_embedding, "in_pool", in_turn)
+    manager = _manager(_Runtime())
+
+    with pytest.raises(calls.BedrockEmbeddingUnavailable):
+        asyncio.run(manager.generate_embeddings_batch([f"text {n}" for n in range(20)], max_concurrent=2))
+
+    assert sent == ["text 0", "text 1"], f"{len(sent)} of 20 texts were sent; two were in flight at the refusal"
+    assert calls.HEALTH.holding() is None, "the second text's answer did clear the shared hold"
+
+
 def test_calls_are_held_back_after_it_and_the_next_success_clears_it(monkeypatch):
     runtime = _Runtime(error=DENIED, fail=lambda n: n == 0)
     manager = _manager(runtime)
