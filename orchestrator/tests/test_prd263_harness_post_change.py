@@ -38,7 +38,9 @@ from tests import helpers_harness_runs as hr
 
 APPLIED_AT = hdx.at(0)            # Wednesday 14 Oct 2026, 10:00 UTC (W42)
 ONE_WEEK_ON, TWO_WEEKS_ON = "2026-W43", "2026-W44"
-ORIGINAL, LATER = "rx-1-001", "rx-2-001"
+# Run 0 never exists (harness_runs ids start at 1), so these never collide with the rx-<run>-<seq>
+# the pipeline names its own prescriptions: on a fresh database the first run here is run 1.
+ORIGINAL, LATER = "rx-0-101", "rx-0-102"
 HEARTBEAT, REMOVAL = "heartbeat_tune", "tool_assignment_remove"
 GMAIL_BEFORE, GMAIL_AFTER = {"app_name": "GMAIL", "assigned": True}, {"app_name": "GMAIL", "assigned": False}
 UNDO = {"kind": HEARTBEAT, "value": {"interval_minutes": hgx.PRIOR}, "rx_id": ORIGINAL}
