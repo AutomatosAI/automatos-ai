@@ -25,10 +25,13 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Dict, Optional
+from typing import TYPE_CHECKING, Dict, Optional
 
 from config import config
 from core.database import pool_watch
+
+if TYPE_CHECKING:
+    from sqlalchemy.engine import Engine
 
 logger = logging.getLogger(__name__)
 
@@ -68,32 +71,45 @@ class FullPoolClock:
 _full_pool = FullPoolClock()
 
 
-def database_status(clock: FullPoolClock = _full_pool, *, raise_errors: bool = False) -> str:
+def database_status(clock: FullPoolClock = _full_pool, *, raise_errors: bool = False,
+                    engine: Optional["Engine"] = None) -> str:
     """``healthy`` or ``unhealthy`` (a SELECT 1 on a free connection), or, with no
     connection free, ``busy`` / ``stuck`` without asking the pool for one.
 
     ``raise_errors``: a failed SELECT 1 raises instead of logging and answering
     ``unhealthy``. Readiness's background watch (PRD-282) asks so: it logs a failure
-    once, when the state changes, where GET /health logs every one it meets."""
+    once, when the state changes, where GET /health logs every one it meets.
+
+    ``engine``: the SELECT 1 runs on this engine instead of the app's pool. Readiness
+    passes its own (core/database/readiness_engine.py, #1651), whose libpq timeouts end
+    a hung check; GET /health passes none and checks on the app's pool as it always has."""
     if not pool_watch.pool_has_room():
         full_for = clock.saw_full(time.monotonic())
         return DATABASE_STUCK if full_for >= config.HEALTH_POOL_STUCK_SECONDS else DATABASE_BUSY
     clock.saw_room()
-    return _select_one(raise_errors=raise_errors)
+    return _select_one(raise_errors=raise_errors, engine=engine)
 
 
-def _select_one(*, raise_errors: bool = False) -> str:
+def _run_select_one(engine: Optional["Engine"]) -> None:
     from sqlalchemy import text
 
+    if engine is not None:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return
     from core.database import database
 
+    db = database.SessionLocal()
     try:
-        db = database.SessionLocal()
-        try:
-            db.execute(text("SELECT 1"))
-            return HEALTHY
-        finally:
-            db.close()
+        db.execute(text("SELECT 1"))
+    finally:
+        db.close()
+
+
+def _select_one(*, raise_errors: bool = False, engine: Optional["Engine"] = None) -> str:
+    try:
+        _run_select_one(engine)
+        return HEALTHY
     except Exception:
         if raise_errors:
             raise

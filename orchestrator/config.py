@@ -1909,10 +1909,14 @@ class Config:
     HEALTH_POOL_STUCK_SECONDS: float = float(os.getenv("HEALTH_POOL_STUCK_SECONDS", "300"))
     # PRD-282 US-201: GET /health/ready reads the last database check, made in the
     # background this often (half the chart's 10 s readiness period, so its answer is
-    # never older than one probe)...
-    HEALTH_READY_CHECK_SECONDS: float = float(os.getenv("HEALTH_READY_CHECK_SECONDS", "5"))
-    # ...each given this long to answer, or it counts as unreachable.
-    HEALTH_READY_CHECK_TIMEOUT_SECONDS: float = float(os.getenv("HEALTH_READY_CHECK_TIMEOUT_SECONDS", "3"))
+    # never older than one probe)... At least 1 s: a zero or negative interval would open
+    # a database connection on every turn of the loop.
+    HEALTH_READY_CHECK_SECONDS: float = max(1.0, float(os.getenv("HEALTH_READY_CHECK_SECONDS", "5")))
+    # ...each given this long to answer, or it counts as unreachable. It also sets the
+    # check's own connection's libpq timeouts (core/database/readiness_engine.py, #1651).
+    # At least 1 s: shorter, a healthy database could never answer in time.
+    HEALTH_READY_CHECK_TIMEOUT_SECONDS: float = max(
+        1.0, float(os.getenv("HEALTH_READY_CHECK_TIMEOUT_SECONDS", "3")))
     # PRD-282 US-202: GET /health's dependency entries (Redis, object storage, the search
     # index, the memory store, the model provider) are each checked in the background this
     # often, on a timer of its own: an alarm hears within a minute, and two pings or

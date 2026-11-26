@@ -86,6 +86,7 @@ APP_DATABASE: Dict[str, str] = {
 APP_DATABASE_ENGINES: Dict[str, str] = {
     "core/database/database.py": "the main engine",
     "core/jobs/leadership.py": "the scheduler's lock connection",
+    "core/database/readiness_engine.py": "readiness's own SELECT 1 connection (#1651)",
     "modules/tools/formatting/result_formatter.py": "the tool-result formatter's engine",
     "api/recipe_executor.py": "a Playbook run's own engine (also services/playbook_run_refusal.py)",
     "scripts/init_fresh_db.py": "the entrypoint's fresh-database build",
