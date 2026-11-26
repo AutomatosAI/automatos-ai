@@ -579,6 +579,8 @@ def test_a_dependency_down_is_logged_when_it_changes_and_when_it_recovers_never_
 
 
 def test_with_every_dependency_hanging_the_route_answers_at_once(monkeypatch):
+    import main  # noqa: F401 — before the clock starts: main's first import in a process takes seconds
+
     release = threading.Event()
 
     def hangs():

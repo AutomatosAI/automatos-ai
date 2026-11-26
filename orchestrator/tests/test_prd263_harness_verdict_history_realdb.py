@@ -129,7 +129,7 @@ def _governed_change(db, ws, agent_id, *, raised, applied, state):
     """A change raised as an Approvals card and applied on the owner's click (PRD-263 US-051):
     its agent is target_agent_id and its moment applied_at; its entry names no target_id."""
     db.execute(text("INSERT INTO harness_task_ledger (workspace_id, state, entry, rx_id, kind, target_agent_id, "
-                    "applied_at, created_at) VALUES (CAST(:ws AS uuid), :state, CAST(:entry AS jsonb), 'rx-9-001', "
+                    "applied_at, created_at) VALUES (CAST(:ws AS uuid), :state, CAST(:entry AS jsonb), 'rx-0-901', "
                     "'heartbeat_tune', :agent, :applied, :raised)"),
                {"ws": str(ws), "state": state, "entry": '{"evidence_task_id": 1}', "agent": agent_id,
                 "applied": applied, "raised": raised})
