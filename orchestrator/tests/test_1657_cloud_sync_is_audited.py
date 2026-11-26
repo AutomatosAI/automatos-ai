@@ -160,3 +160,28 @@ def test_the_sync_stands_when_its_row_cannot_be_written_and_an_error_says_so(api
     assert resp.status_code == 200 and resp.json()["counts"] == COUNTS
     assert any(admin_audit.CLOUD_SYNC in r.getMessage() for r in caplog.records
                if r.name == admin_audit.logger.name and r.levelno == logging.ERROR)
+
+
+def test_a_sync_that_raises_after_its_pull_committed_is_recorded_as_failed(api, monkeypatch):
+    def _item_pass_breaks(db, outcome, factory, run):
+        raise RuntimeError("an item pass broke")
+
+    monkeypatch.setattr(sync_api, "run_item_passes", _item_pass_breaks)
+    with pytest.raises(RuntimeError):
+        _sync(api)
+    [row] = audit.rows(api.db, admin_audit.CLOUD_SYNC)
+    assert row["details"] == {"outcome": "failed"} and row["user_id"] == OPERATOR_PK
+    assert "an item pass broke" not in audit.written(row)
+
+
+def test_the_sync_stands_when_who_ran_it_cannot_be_read_and_an_error_says_so(api, monkeypatch, caplog):
+    def _no_person(db, ctx):
+        raise RuntimeError("users could not be read")
+
+    monkeypatch.setattr(admin_audit, "resolve_user_pk", _no_person)
+    with caplog.at_level(logging.ERROR, logger=admin_audit.logger.name):
+        resp = _sync(api)
+    assert resp.status_code == 200 and resp.json()["counts"] == COUNTS
+    assert audit.rows(api.db, admin_audit.CLOUD_SYNC) == []
+    assert any(admin_audit.CLOUD_SYNC in r.getMessage() for r in caplog.records
+               if r.name == admin_audit.logger.name and r.levelno == logging.ERROR)

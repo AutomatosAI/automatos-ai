@@ -68,6 +68,7 @@ from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 from core.edition_start_up import EditionNotReady, check_hosted_service_settings, check_start_up  # noqa: E402
+from services import admin_audit  # noqa: E402
 from services.marketplace_bundles import items_feed, items_gate, plugin_import, sync_items  # noqa: E402
 from services.marketplace_cloud import fetch, package, pull, urls  # noqa: E402
 from services.themes import revocation_pull, revocation_sync_state, signature_state  # noqa: E402
@@ -413,8 +414,11 @@ def test_on_the_revocation_routes_answer(monkeypatch):
     _switch(monkeypatch, "enterprise", revocations="true")
     monkeypatch.setattr(revocation_pull, "sync_status", lambda db: {"enabled": True})
     monkeypatch.setattr(revocation_pull, "pull_feed", lambda db, factory: revocation_pull.PullOutcome(ok=True))
+    recorded = []  # the Check now's audit row (#1657) is test_prd261_revocation_pull's; here only that it's asked for
+    monkeypatch.setattr(admin_audit, "record_after", lambda db, ctx, request, **row: recorded.append(row["action"]))
     answers = _answers(_client(revocation_api.router, []), REVOCATION_ROUTES)
     assert answers == [(200, {"enabled": True}), (200, {"enabled": True})]
+    assert recorded == [admin_audit.REVOCATION_PULL]
 
 
 # --------------------------------------------------------------------------- Cloud sync

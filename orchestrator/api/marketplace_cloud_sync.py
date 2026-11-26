@@ -38,6 +38,7 @@ start (409) writes none. Plain ``def`` handlers over the synchronous session (AG
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -56,6 +57,8 @@ from services.marketplace_bundles.sync_items import run_item_passes
 from services.marketplace_cloud import pull, updates
 from services.marketplace_cloud.fetch import CLOUD_OFF, ClientFactory
 from services.marketplace_cloud.urls import configured_url
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/marketplace/cloud-sync", tags=["Marketplace"])
 
@@ -98,9 +101,23 @@ def _refusal(outcome: pull.SyncOutcome) -> HTTPException:
 
 def _record(db: Session, ctx: RequestContext, request: Request, details: Dict[str, Any]) -> None:
     """The Sync's ``marketplace:cloud_sync`` row (counts only); the Sync stands if it can't be written."""
-    who = admin_audit.admin_request(db, ctx, request)
-    admin_audit.record_after(db, who, action=admin_audit.CLOUD_SYNC, resource_type=admin_audit.CLOUD_SYNC_RESOURCE,
-                             details=details)
+    admin_audit.record_after(db, ctx, request, action=admin_audit.CLOUD_SYNC,
+                             resource_type=admin_audit.CLOUD_SYNC_RESOURCE, details=details)
+
+
+def _passes_and_updates(db: Session, ctx: RequestContext, request: Request, outcome: pull.SyncOutcome,
+                        client_factory: Optional[ClientFactory]) -> Dict[str, Any]:
+    """The item passes and the auto-update after a catalogue pull that committed. When either raises, the
+    Sync is recorded ``failed`` (what it committed stands) and the error goes on to the 500."""
+    try:
+        passes = run_item_passes(db, outcome, client_factory, asyncio.run)
+        moved = updates.apply_cloud_updates(db, client_factory)
+    except Exception:
+        logger.exception("Sync with Automatos Cloud failed after its catalogue pull committed")
+        db.rollback()
+        _record(db, ctx, request, {"outcome": admin_audit.OUTCOME_FAILED})
+        raise
+    return {**passes, "updatesApplied": moved.applied, "updatesFailed": moved.failed}
 
 
 @router.get("/status")
@@ -134,12 +151,11 @@ def run_cloud_sync(
         _record(db, ctx, request, {"outcome": admin_audit.OUTCOME_FAILED})
     if not outcome.ok:
         raise _refusal(outcome)
-    passes = run_item_passes(db, outcome, client_factory, asyncio.run)
-    moved = updates.apply_cloud_updates(db, client_factory)
-    _record(db, ctx, request, {"outcome": admin_audit.OUTCOME_OK, "counts": passes["counts"],
-                               "pluginsWaiting": passes["plugins"]["waiting"], "updatesApplied": moved.applied,
-                               "updatesFailed": moved.failed})
-    return {**passes, "updatesApplied": moved.applied, "updatesFailed": moved.failed, "status": pull.sync_status(db)}
+    done = _passes_and_updates(db, ctx, request, outcome, client_factory)
+    _record(db, ctx, request, {"outcome": admin_audit.OUTCOME_OK, "counts": done["counts"],
+                               "pluginsWaiting": done["plugins"]["waiting"], "updatesApplied": done["updatesApplied"],
+                               "updatesFailed": done["updatesFailed"]})
+    return {**done, "status": pull.sync_status(db)}
 
 
 __all__ = ["get_cloud_client_factory", "require_local_edition", "require_sync_admin", "router"]

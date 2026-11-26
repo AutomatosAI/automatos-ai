@@ -99,7 +99,7 @@ def pull_revocation_feed(
     outcome = revocation_pull.pull_feed(db, client_factory)
     details = ({"outcome": admin_audit.OUTCOME_OK, "rows": outcome.rows} if outcome.ok
                else {"outcome": admin_audit.OUTCOME_FAILED})
-    admin_audit.record_after(db, admin_audit.admin_request(db, ctx, request), action=admin_audit.REVOCATION_PULL,
+    admin_audit.record_after(db, ctx, request, action=admin_audit.REVOCATION_PULL,
                              resource_type=admin_audit.REVOCATION_SYNC_RESOURCE, details=details)
     if not outcome.ok:
         raise HTTPException(status_code=BAD_GATEWAY, detail=outcome.error)
