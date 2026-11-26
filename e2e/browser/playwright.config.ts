@@ -26,6 +26,10 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
+    // The page scrolls smoothly unless the reader asks for reduced motion. A locator's screenshot
+    // scrolls its element into view first; in WebKit that scroll animates, the element is "not
+    // stable", and Playwright retried the scroll until the test timed out (cloud-items.spec.ts:247).
+    reducedMotion: 'reduce',
   },
   projects: [
     {

@@ -3274,6 +3274,7 @@ html {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
   .parallax-bg { background-attachment: scroll; }
   .stage-active, .progress-shimmer, .flow-particle, .agent-avatar-active,
   .log-entry-new, .stage-active-badge { animation: none; }
