@@ -112,6 +112,7 @@ from api.themes_mobile import router as mobile_theme_router
 from api.themes_looks import router as themes_looks_router
 from api.themes_settings import router as themes_settings_router
 from core.auth.step_up import install_step_up_handler  # PRD-261 A-07c: the reverification 403 body
+from core.auth.session_cookie import install_cookie_session_ended_handler  # PRD-277 Wave 3
 from services.themes.package import THEME_IMPORT_ROUTE, cap_bytes as theme_cap_bytes
 # PRD-261 W-C1: the theme Marketplace (submit, the Themes tab listings, the admin review queue).
 from api.marketplace_themes_submit import router as marketplace_themes_submit_router
@@ -295,8 +296,13 @@ async def _boot_phase_1_core():
     from core.seeds.leader_stage import run_leader_seeds, seed_local_first_run_on_boot
     from integrations.vertical_products import seed_vertical_products_on_boot
 
-    # DDL — safe for all workers (idempotent, fast no-op when tables exist)
-    create_tables()
+    from services.mobile.edition_change import confirm_edition
+    try:  # DDL — safe for all workers (idempotent, fast no-op when tables exist)
+        create_tables()
+    finally:  # PRD-277 US-601: every worker, before it serves; no device of another edition stays live.
+        # In a finally so a worker whose DDL failed still marks the check run or FAILED. confirm_edition
+        # never raises, so an error from create_tables is the one that propagates, unchanged.
+        confirm_edition()
 
     with boot_leader_lock(engine) as is_leader:
         if not is_leader:
@@ -556,20 +562,20 @@ async def _boot_in_background(
 ) -> None:
     """PRD-262 US-034: the rest of the boot, as one task, once the server listens.
 
-    In order: the starters pass (the leader stage's last part), the Composio
-    catalogue, Phase 2 (scheduler, channels), then board dispatch, which starts
-    after Phase 2 as it always has. Each of the first three is a stage of the
-    bootstrap report, so a failure shows in /health/bootstrap. app.state.ready
-    (/health/ready 200) is set once all of them finished, whether or not a stage
-    failed, as before. A crash outside a stage is logged and leaves /health/ready
-    at 503.
+    In order: the starters pass (the leader stage's last part), the Composio catalogue,
+    sign-in's start-up (PRD-277: registration closes; in enterprise, an oidc_provider
+    stage), Phase 2 (scheduler, channels), then board dispatch, as always last. Each stage
+    shows in /health/bootstrap. app.state.ready (/health/ready 200) is set once all of them
+    finished, whether or not a stage failed. A crash outside a stage leaves it at 503.
     """
+    from core.auth.sign_in_start_up import finish_sign_in_start_up
     from core.models.bootstrap import BootstrapStage, run_stage
 
     try:
         await run_stage(report, BootstrapStage.SEED_SYSTEM_DATA, functools.partial(_run_starters, seeds))
         # PRD-233 S2: Composio catalogue — sync on the first keyed boot, re-bind seeds.
         await run_stage(report, BootstrapStage.TOOL_SYNC, _bootstrap_composio_catalog)
+        await finish_sign_in_start_up(report)
         await _boot_phase_2_stage(app_instance, report, trust_passed)
         _start_board_dispatch(app_instance, trust_passed)
     except Exception:
@@ -826,7 +832,7 @@ app = FastAPI(
     
     **🌟 Ready to build the future of AI? Start exploring the endpoints below!**
     """,
-    version="1.0.0",
+    version=config.AUTOMATOS_VERSION,  # PRD-279 US-303: the version the image was built as
     contact={
         "name": "Automatos AI Development Team",
         "url": "https://github.com/AutomatosAI/automatos-ai",
@@ -946,6 +952,8 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # PRD-261 A-07c: StepUpRequired renders Clerk's reverification body with clerk_error at the top level.
 install_step_up_handler(app)
+# PRD-277 Wave 3: a 401 for an ended session the cookie held also clears the cookie.
+install_cookie_session_ended_handler(app)
 # F040: actually enforce the limits — without this middleware the limiter above
 # is inert on every route. Registered ONLY under the policy-plane flag; OFF keeps
 # today's (placebo) behaviour so the rollout stays byte-for-byte reversible.
@@ -1351,7 +1359,7 @@ def health_check():
     body = {
         "status": health_probe.overall_status(components),
         "service": "automatos-ai-api",
-        "version": "1.0.0",
+        "version": config.AUTOMATOS_VERSION,
         "timestamp": datetime.utcnow().isoformat(),
         "components": components,
         "db_pool": pool_watch.pool_numbers(),
@@ -1462,22 +1470,10 @@ async def api_endpoint_health():
             "message": "Failed to retrieve API health statistics"
         }
 
-# Root endpoint
-@app.get("/", 
-         summary="🏠 API Overview & Navigation",
-         description="Get comprehensive API information, endpoints overview, and quick navigation links",
-         tags=["🏠 Getting Started"],
-         response_description="API overview with navigation information")
-async def root():
-    """
-    ## 🚀 Welcome to Automatos AI API
-    
-    This endpoint provides a comprehensive overview of all available API endpoints,
-    documentation links, and system information to help developers get started quickly.
-    """
-    return {
+# Root endpoint: what GET / returns, all but its timestamp.
+_ROOT_OVERVIEW = {
         "service": "Automatos AI API Server",
-        "version": "1.0.0",
+        "version": config.AUTOMATOS_VERSION,
         "status": "operational",
         "description": "World's Most Advanced Multi-Agent AI Orchestration Platform",
         
@@ -1555,9 +1551,21 @@ async def root():
             "caching": "Intelligent result caching",
             "rate_limiting": "Configurable per endpoint"
         },
-        
-        "🕐 timestamp": datetime.utcnow().isoformat()
     }
+
+@app.get("/",
+         summary="🏠 API Overview & Navigation",
+         description="Get comprehensive API information, endpoints overview, and quick navigation links",
+         tags=["🏠 Getting Started"],
+         response_description="API overview with navigation information")
+async def root():
+    """
+    ## 🚀 Welcome to Automatos AI API
+
+    This endpoint provides a comprehensive overview of all available API endpoints,
+    documentation links, and system information to help developers get started quickly.
+    """
+    return {**_ROOT_OVERVIEW, "🕐 timestamp": datetime.utcnow().isoformat()}
 
 # Global exception handler
 @app.exception_handler(Exception)

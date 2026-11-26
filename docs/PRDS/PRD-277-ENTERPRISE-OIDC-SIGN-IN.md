@@ -55,7 +55,7 @@ This PRD adds a third edition, `enterprise`. People sign in through the customer
 | Phone discovery | `GET /.well-known/automatos.json` lists `auth.modes`. The code comment reserves `"oidc"` and says this build never emits it. A test pins that. | `services/mobile/discovery.py:4-8` **[T]**; `tests/test_prd266_discovery.py:165-173` **[T]** | Emit it in enterprise. |
 | Device rows | `mobile_devices.kind` may be `paired` or `clerk`. A test asserts `oidc` is refused. PRD-266 §4.11 says an OIDC phone becomes a third kind, not a new table. | `alembic/versions/prd266_mobile_devices.py:71` **[T]** | Widen the check in a new migration. |
 | Web app seam | Components import `useAuth`, `useUser` and friends from `frontend/lib/auth-hooks.ts`, which switches on the edition. All API calls take their token from one getter on `apiClient`. | `frontend/lib/auth-hooks.ts`; `frontend/lib/api-client.ts:1469` **[T]** | Add a third provider behind the same seam. |
-| Web app edition | Fixed when the image is built (`NEXT_PUBLIC_AUTH_EDITION`). Only the `local` image is published. | `frontend/lib/auth-edition.ts:33-37`; `.github/workflows/images.yml:253-257` **[T]** | Publish an enterprise image. See §9. |
+| Web app edition | Fixed when the image is built (`NEXT_PUBLIC_AUTH_EDITION`). Only the `local` image is published. *Correction (US-505): `images.yml` now builds and publishes an enterprise image too, `automatos-enterprise-frontend`.* | `frontend/lib/auth-edition.ts:33-37`; `.github/workflows/images.yml:253-257` **[T]** | Publish an enterprise image. See §9. |
 | Phone app | Knows three modes (`clerk`, `device`, `oidc`) but registers only the first two. `expo-auth-session` is installed and unused. Its PRD planned an `oidc.ts` provider. | `automatos-go/src/auth/providers/registry.ts:10-13`, `types.ts:27`; `package.json:39` **[T]** | Add the provider in a later app release. Pairing covers phones until then. |
 | JWT libraries | `PyJWT` 2.15.1 and `cryptography` 50.0.2 are installed. `PyJWKClient` already verifies Clerk's keys. No `authlib`, no `python-jose`. | `orchestrator/requirements.lock:2856, 791`; `core/auth/clerk.py:59-67` **[T]** | No new dependency needed. |
 | Audit | `audit_logs` records who did what, with the person's id, IP and browser. Sign-ins are not recorded. | `core/workspaces/audit.py:10-55` **[T]** | Add sign-in events. |
@@ -103,7 +103,7 @@ Today the edition flag answers many different questions at once: is there a sign
 | Step-up for sensitive actions | Skipped | Clerk's freshness claim | Sign in again at the IdP |
 | Device pairing | By setting | No | By setting (D-7) |
 | Session mode | Yes | No | No |
-| Calls to Automatos's hosted services (theme revocations, Cloud sync, marketplace) | On by default | It is the host | **Off unless switched on** (D-12) |
+| Calls to Automatos's hosted services (theme revocations, Cloud sync, Cloud items) | On by default | It is the host | **Off unless switched on**, each by its own setting (D-12, US-704: `ENTERPRISE_CALLS_THEME_REVOCATIONS`, `ENTERPRISE_CALLS_CLOUD_SYNC`, `ENTERPRISE_CALLS_CLOUD_ITEMS`) |
 
 Wave 1 builds the full table from the 91 call sites. The table above shows the intent, not the final list.
 
@@ -111,7 +111,7 @@ Wave 1 builds the full table from the 91 call sites. The table above shows the i
 - startup refuses to run unless the issuer, client id, client secret and the install's public address are set;
 - `REQUIRE_AUTH` is forced on and cannot be turned off;
 - the anonymous operator does not exist;
-- until US-704 builds the per-service settings, every call to Automatos's hosted services is off.
+- every call to Automatos's hosted services is off until the operator switches that service on with its own setting (US-704). *Built: the three settings are off by default, and start-up refuses a value that is not true or false, Cloud sync without theme revocations and Cloud items without Cloud sync.*
 
 ### 5.2 Signing in from a browser
 
@@ -153,11 +153,11 @@ The web app and the API are served from one address (`/` and `/api` on one host)
 
 ### 5.4 People, identities and roles
 
-**Identity.** A new table, `user_identities`, links a person to `(issuer, subject)`, unique on the pair. `users.clerk_user_id` is untouched and stays Clerk's.
+**Identity.** A new table, `user_identities`, links a person to `(issuer, subject)`, unique on the pair. `users.clerk_user_id` is untouched and stays Clerk's. The subject is the value of the claim `OIDC_CLAIM_SUBJECT` names in the verified ID token (`sub` unless set). Every use of the person's identity reads that one value: the identity link, step-up, the first-admin list's `sub:` entries and a phone's sign-in. The ID token must still carry `sub` (OIDC Core §2, §5.11) whatever the setting names: the setting changes which claim identifies the person, not which tokens are valid. When it names another claim, the token's `sub` is still read once more at a first sign-in, only to refuse a person already linked under it (§5.10).
 
 **Never by email.** A sign-in is matched to a person only by issuer and subject. If the email in the token is already on another person's row, the sign-in is refused with a clear message for an admin, and no row changes. This is today's rule in `ensure_user_row`, and it is also what Microsoft tells applications to do: its `email` claim "isn't guaranteed to be correct".
 
-**Who gets in (the access rule).** The first gate is the customer's own IdP: only people assigned to the application there can complete sign-in. Automatos adds a second gate, `OIDC_REQUIRED_CLAIMS`: named claims that must have given values. For an issuer shared by many organisations (Google's, or Microsoft's multi-tenant addresses) startup refuses to run without such a rule, because otherwise anyone with an account at that provider could sign in.
+**Who gets in (the access rule).** The first gate is the customer's own IdP: only people assigned to the application there can complete sign-in. Automatos adds a second gate, `OIDC_REQUIRED_CLAIMS`: named claims that must have given values. For an issuer shared by many organisations (Google's, or Microsoft's multi-tenant addresses) startup refuses to run without such a rule, because otherwise anyone with an account at that provider could sign in. That list of shared issuers cannot be complete; the rule is the control. Startup also refuses a default role (`ENTERPRISE_DEFAULT_ROLE`) with no rule, and a rule on a claim every valid token carries (`iss`, `aud`, `azp`, `exp`, `iat`, `nbf`, `nonce`, `auth_time`, `at_hash`, `c_hash`, `sid`, `jti`), which would let everyone in.
 
 **First sign-in.** The person's row and identity link are created. No personal workspace and no trial grant. What they can reach is decided next.
 
@@ -165,16 +165,17 @@ The web app and the API are served from one address (`/` and `/api` on one host)
 
 A default role for everyone who passes the access rule is a setting (decision D-4). The default is none: signed in, in no workspace, sees a page saying to ask an admin.
 
-**Install admins (decision D-6).** `users` gains a nullable `system_role`, read only in enterprise. `ENTERPRISE_BOOTSTRAP_ADMINS`, a list in settings, makes the named people install admins when they first sign in. The list names subjects, or emails where the IdP marks the email verified. That is how the first admin gets in without anyone touching the database. After that, an install admin can make another person one, in Automatos.
+**Install admins (decision D-6).** `users` gains a nullable `system_role`, read only in enterprise. `ENTERPRISE_BOOTSTRAP_ADMINS`, a list in settings, makes the named people install admins when they first sign in, and at any sign-in while the install has no active install admin (counted under the lock the last-admin guard takes), so a list corrected after a mistyped first try still works. Once an install admin exists, the list does nothing for people who already exist. The list names subjects, or emails where the IdP marks the email verified in the standard `email` claim. A listed person becomes the default workspace's owner when it has none, and an admin of it when it has one. That is how the first admin gets in without anyone touching the database. After that, an install admin can make another person one, in Automatos.
 
 ### 5.5 Step-up
 
-The 25 sensitive routes keep their gate. In enterprise the gate reads when the person last proved who they are, stored on the session (`auth_time` from the ID token). When that is older than `STEP_UP_MAX_AGE_MINUTES`, the route answers with a body the web app recognises. The web app sends the person through `/start` again with `max_age=0`, the IdP makes them sign in again, and the callback refreshes the session's `auth_time`. An IdP that returns no `auth_time` after being asked fails the step-up closed.
+The 25 sensitive routes keep their gate. In enterprise the gate reads when the person last proved who they are, stored on the session (`auth_time` from the ID token). When that is older than `STEP_UP_MAX_AGE_MINUTES`, the route answers with a body the web app recognises. The web app sends the person through `/start` again. That start asks the IdP to make them sign in again, with `max_age=0` and, where the IdP takes it, `prompt=login`. Like every sign-in, it also asks for `auth_time` in the ID token with the `claims` parameter (§5.9). The callback then refreshes the session's `auth_time`. These parameters only ask: freshness is judged from the returned token's `auth_time` alone. An IdP that ignores them signs people in as before, but returns no `auth_time` or an old one, and the step-up fails closed (`step_up_no_auth_time`, `step_up_refused`). So an install whose IdP never sends it cannot use the admin actions (§5.9). Fresh means not earlier than the step-up's start; the ID token's 60-second leeway allows only for the two clocks disagreeing, either way. A step-up starts only from the install's own pages or the address bar (`Sec-Fetch-Site` `same-origin` or `none`); a browser that sends no such header is let through, since a step-up can only refresh the session's own person.
 
 ### 5.6 Signing out and losing access
 
 - **Sign out** revokes the session on the server, clears the cookie, and sends the browser to the IdP's end-session address when its metadata lists one.
 - **An admin can end** one session or all of a person's sessions, and can deactivate a person. `users.is_active` already exists and the device lane already checks it.
+- **Ending all of another person's sessions ends their phones too.** When an admin ends every session of another person, every device that person holds is revoked in the same transaction, one `device:revoked` audit row each (reason `sessions_ended`). A person ending their own sessions, and an admin ending one session, leave the phones; a person removes their own phones in Settings.
 - **A person removed at the IdP** cannot start a new session. Their existing session ends at its absolute lifetime at the latest.
 
 ### 5.7 Phones
@@ -188,6 +189,18 @@ Two steps (decision D-7).
 **Discovery.** In enterprise the document lists `auth.modes: ["oidc", "device"]` (or `["oidc"]` when pairing is off) and an `oidc` block. The app picks the first mode it supports, so today's release uses pairing and a later release uses sign-in. The schema stays `automatos-discovery/v1`.
 
 The app work is a companion PRD in `automatos-go`. Core only defines the contract.
+
+**The app contract (US-603, built).** This is the one place it is written; US-604's app PRD matches it.
+
+1. **Discovery.** `auth.oidc` is `{start_url, exchange_url, app_link, code_challenge_method}`: the install's own `/api/v1/auth/oidc/start` and `/api/v1/mobile/sign-in/exchange` on its public address, the app link key `go`, and `S256`.
+2. **Start.** The app makes a PKCE verifier (RFC 7636: 43 to 128 unreserved characters) and opens the system browser (`ASWebAuthenticationSession` on iOS, Custom Tabs on Android) at `start_url` with, each exactly once: `app_link=go`, `code_challenge` (BASE64URL(SHA-256(verifier)), 43 characters), `code_challenge_method=S256`, `install_id` (the id it sends `POST /pair`, 8 to 128 of `A-Z a-z 0-9 _ -`) and `platform` (`ios` or `android`). Any of them missing, repeated or malformed, or sent with `step_up`, is `400 {"detail": {"code": "invalid_phone_start"}}`, and nothing is stored. All five absent is a browser's start.
+3. **Sign-in.** Everything between is the browser's sign-in: the same provider redirect, state, nonce and Automatos's own PKCE towards the provider, access rule, first sign-in, first admin, deactivation checks and audit. The system browser keeps the sign-in's binding cookie from start to callback. A phone's start asks the provider for a fresh sign-in (`max_age=0` and `prompt=login`, as a step-up does), so a session the browser already holds at the provider is not reused silently. The callback does not check the `auth_time` the provider returns for a phone (open question 13).
+4. **A page of the install sits in between.** The callback makes no code and sets no session cookie. It records the sign-in as awaiting the person, on a pending `mobile_devices` row of kind `oidc` holding the app's challenge, install id, platform and app link key, behind a 256-bit token kept only as its SHA-256 in its own column (`sign_in_confirm_hash`), alive five minutes. The token goes to the browser in a `__Host-automatos_phone_sign_in` cookie (Secure, HttpOnly, SameSite=Lax, `Path=/`, five minutes), and the callback answers `303` to the install's own page `/sign-in/phone`, with nothing in the address. A person has at most one pending phone sign-in per workspace: recording one deletes their others there, and every expired one anyone left. The page reads `GET /api/v1/auth/oidc/phone/waiting`, which answers only the person's e-mail (or name), the app's name `Automatos Go`, the platform, and whether someone other than the person removed this phone before; with nothing awaiting it is `404 nothing_waiting` and the page offers nothing. The page says who is signing in to which app on which phone, and to continue only if they started this from the app. **Continue** is `POST /api/v1/auth/oidc/phone/continue`, refused `403 cross_site_request_refused` unless it comes from the install's own page (US-302's check: the install's Origin and the `X-Automatos-CSRF` header). It works once: it destroys the token, makes the code, writes `auth:sign_in` (with `{"phone": true, "platform"}`) in the same transaction, clears the cookie, and answers `{"app_link": "automatos://go/signed-in?code=<code>"}`, which the page opens. **Cancel** is `POST …/phone/cancel` under the same check: it deletes what waits and clears the cookie.
+5. **The answer.** The app link is `automatos://go/signed-in` (the only one; the key, never an address, comes from the start) with `code=<code>` or `error=<code>`. The code is 256 random bits, kept only as its SHA-256, lives 60 seconds and is spent by the first exchange that finds it. A refusal at the callback once the sign-in's start is found goes to the app link with `error=`, one of `sign_in_refused`, `sign_in_not_allowed`, `identity_provider_unavailable` and `sign_in_failed`. The three refusals that only a phone meets once the person is known (`no_workspace`, `several_workspaces`, `device_limit_reached`) go to the page (`/sign-in/phone?error=<code>`), which says why in a sentence, and are audited as a refused sign-in; the app is told nothing and sees its browser session end. A refusal before the start is found (an unknown, used or expired sign-in) is the web app's `/sign-in?error=…`, as for a browser. The app treats its browser session ending without its link as a sign-in that did not finish.
+6. **Exchange.** `POST exchange_url` with `{"code", "code_verifier", "name"?, "app_version"?}`, public and limited per address in its own bucket (`phone_sign_in_exchange_ip`, 300 in 10 minutes). A live code whose challenge S256(verifier) matches is `200` with `no-store` and `{"device_id", "workspace_id", "token", "rotate_after"}`, the token an `amd_` device token of kind `oidc`, shown once, rotated (`POST /api/v1/mobile/devices/{id}/rotate`) and revoked as a paired device's. Every other exchange (unknown, used, expired, a wrong verifier, which spends the code, a confirmation token sent as a code) is `401 {"detail": {"code": "invalid_sign_in_code"}}`; the edition not signing in with OIDC is 404.
+7. **The workspace and the device cap.** The device belongs to the person's one active membership in a workspace that is not paused. A person in several workspaces is refused (`several_workspaces`) and pairs the phone with a code from Settings instead, where they choose the workspace. A person holding the most active devices there is `device_limit_reached`, unless this same phone (`install_id`) is already one of them, which keeps its device and gets a new token. The cap is counted at the callback, again at Continue, and again inside the exchange, each time under the person's own transaction-scoped advisory lock (`pg_advisory_xact_lock(0x70686F6E, users.id)`, `sign_in_codes.DEVICE_CAP_LOCK_SPACE`), so two exchanges at once cannot both pass it.
+8. **One row per phone, either kind.** A phone's row is found by its install id. Signing in on the phone turns that phone's `paired` row into `oidc`, and pairing it with a code turns an `oidc` row back into `paired`; either way it gets a new token and the old one stops working. A phone that was removed and signs in again is added again: the page says so when someone other than the person removed it, and `device:paired` records `re_enrolled`, the row's earlier kind and status and, for a removed one, who removed it.
+9. **Why a custom scheme.** Every install runs on its own domain, and an app from a store can claim universal links (App Links on Android) only for domains fixed in its build, so the app link is the custom scheme. PKCE binds the code to whoever started the sign-in, not to the app; the person's Continue on the install's own page, after a fresh sign-in, is what stands in for knowing the app.
 
 ### 5.8 Web app
 
@@ -205,7 +218,7 @@ Automatos reads the provider's own metadata document (`<issuer>/.well-known/open
 
 | Provider | Issuer looks like | Groups in the ID token | What to watch |
 |---|---|---|---|
-| Microsoft Entra ID | `https://login.microsoftonline.com/<tenant>/v2.0` | Optional. Above 200 groups the list is left out of the token. App roles arrive in `roles`. | `email` is optional and unverified. Use the tenant's own issuer, never `common`. An access rule on `groups` fails for a person over the limit; a rule on an app role does not. |
+| Microsoft Entra ID | `https://login.microsoftonline.com/<tenant>/v2.0` | Optional. Above 200 groups the list is left out of the token. App roles arrive in `roles`. | `email` is optional and unverified. Use the tenant's own issuer, never `common`. An access rule on `groups` fails for a person over the limit; a rule on an app role does not. `sub` is different for each app registration, so an app registration made again gives everyone a new `sub`: set `OIDC_CLAIM_SUBJECT=oid`, the person's id in the tenant (Microsoft's ID token claims page says it is sent when `profile` is asked for, as it is by default), and require the tenant's id in the access rule (`OIDC_REQUIRED_CLAIMS=tid=<tenant id>`). |
 | Google Workspace | `https://accounts.google.com` | None | One issuer for every Google account, so the access rule must require the `hd` (domain) claim. |
 | Okta, Auth0 | `https://<domain>` | Through a custom claim | The claim's name is the customer's choice; the access rule names it. |
 | Keycloak | `https://<host>/realms/<realm>` | Through a mapper | May sit on a private address with a private certificate authority (FR-9, FR-10). Used in CI. |
@@ -213,6 +226,42 @@ Automatos reads the provider's own metadata document (`<issuer>/.well-known/open
 | AWS IAM Identity Center | **[?]** | **[?]** | AWS's FAQ says it supports only SAML applications; its user guide describes OAuth 2.0 applications. Confirm before telling an AWS customer it works. |
 
 Groups matter in this PRD only for the access rule. Roles are set in Automatos.
+
+**Endpoint hosts.** Automatos calls two addresses the metadata names: the token endpoint and the keys address (`jwks_uri`). Each must be on the issuer's own host, or on a host listed in `OIDC_ENDPOINT_HOSTS`. The sign-in page (`authorization_endpoint`) is opened by the browser, not by Automatos, so its host is not limited. Some providers publish the two on other hosts:
+
+| Provider | Token endpoint and keys address | What to list in `OIDC_ENDPOINT_HOSTS` |
+|---|---|---|
+| Google Workspace | Token endpoint `https://oauth2.googleapis.com/token`; keys `https://www.googleapis.com/oauth2/v3/certs` | `oauth2.googleapis.com, www.googleapis.com` |
+| Amazon Cognito | Token endpoint on the user pool's domain (`https://<prefix>.auth.<region>.amazoncognito.com/oauth2/token`, or the pool's custom domain) | That domain |
+| Microsoft Entra ID | Both on `login.microsoftonline.com`, the issuer's host | Nothing |
+| Keycloak | Both under the realm's own address (`https://<host>/realms/<realm>/protocol/openid-connect/token` and `…/certs`), the issuer's host | Nothing |
+| Okta | Both on the Okta domain, the issuer's host (`https://<okta-domain>/oauth2/<server>/v1/token` and `…/v1/keys`; the org server's under `/oauth2/v1/`) | Nothing |
+
+Google's and Entra's rows were checked against their published metadata documents, and Cognito's against Amazon's token endpoint documentation, on 20 Nov 2026. Keycloak's and Okta's were checked against their own documentation on 20 Nov 2026. Auth0 is left out: its documentation read that day did not settle the token endpoint's host for a tenant with a custom domain. Other providers are not listed until their metadata is checked.
+
+**Signing out at the provider (§5.6).** Automatos sends only `client_id` and `post_logout_redirect_uri` (`<install>/sign-in`, which the customer registers at the provider), and no `id_token_hint`, because no ID token is kept. Providers differ on that: Keycloak accepts it with `client_id` and shows its own confirm page; Okta's documentation requires `id_token_hint`, so the person may stay signed in at Okta; Auth0 asks the person to confirm. The conformance run (US-703) records what each does. The end-session address must be on the issuer's host or a host in `OIDC_ENDPOINT_HOSTS`, as the token endpoint and the keys address must; one anywhere else is treated as no address, and the person is signed out of Automatos only.
+
+**Shared issuers.** Startup refuses these with no access rule: Google's (`https://accounts.google.com`; Google's OpenID Connect page says its ID tokens carry that or `accounts.google.com`, but `OIDC_ISSUER` must be an https address, so the second form is refused at startup for that and is not on the list), and Microsoft's `common`, `organizations` and `consumers` authorities and the personal-accounts tenant `9188040d-6c67-4c5b-b112-36a304b66dad` (Microsoft's v2.0 OpenID Connect and ID token claims pages), with their v1 forms. Checked on 20 Nov 2026. Others are added only when the provider's own documentation shows one. The list cannot be complete: the access rule is the control.
+
+**The email address.** `email_verified` speaks only for the standard `email` claim. An address read from any other claim (`OIDC_CLAIM_EMAIL` set to another name) counts as unverified and is not kept, unless the operator sets `OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES=true` to say the provider puts only addresses it has verified in that claim. Set it only when that is true: a person who can edit that claim at the provider can take another person's address. `ENTERPRISE_BOOTSTRAP_ADMINS` reads only the standard `email` claim, whatever this says.
+
+**`auth_time` (step-up, §5.5).** Every sign-in asks for it with the standard `claims` parameter, `{"id_token":{"auth_time":{"essential":true}}}` (OIDC Core §5.5). A step-up also sends `max_age=0` and `prompt=login`. All three only ask; whether a step-up passes is still read from the returned token's `auth_time` alone.
+
+- **`claims`** is left out only when the provider's metadata says it does not take it: `claims_parameter_supported` present and anything but `true`. Discovery 1.0 reads an absent field as false. But OIDC Core says a provider that does not support the parameter should still answer with the claims it judges useful, ignores parameters it does not recognise, and never errors over a claim it does not return, even an essential one. Google, Microsoft, Okta and Auth0 publish no such field, and Google documents the parameter as the way to ask for `auth_time`. So absent is read as "send it".
+- **`prompt=login`** is sent where the metadata's `prompt_values_supported` lists `login`. A provider listing its values without `login` is not sent it, because it may answer `invalid_request` (Initiating User Registration 1.0 §4.1). A provider that lists no values is sent it, because OIDC Core §15.1 requires every provider to support `prompt` "including ... none and login". The one exception is an issuer whose own documentation lists its values without `login`: Google's (`oidc_provider.PROMPT_LOGIN_UNLISTED_HOSTS`).
+
+What each provider's documentation says, read on 20 Nov 2026:
+
+| Provider | `auth_time` in the ID token | What its side needs |
+|---|---|---|
+| Okta | Always: one of the "base claims (always present)". `max_age` is an `/authorize` parameter, and `prompt=login` is documented: "Always prompt the user for authentication, regardless of whether they have an Okta session." The `claims` parameter is not listed. | Nothing. |
+| Auth0 | Included when the request carries `prompt=login` or `max_age=0`. | Nothing: a step-up sends both. |
+| Amazon Cognito | Listed among the ID token's claims; only `iss`, `sub`, `aud`, `exp` and `iat` are guaranteed. `prompt=login` "requires users to re-authenticate even if they have an existing session", and is "available in the managed login branding version only, not in the classic hosted UI". With the hosted UI (classic), Cognito "silently ignores `acr_values` and `max_age`". | Managed login, for a step-up to make the person sign in again. Whether an ordinary token carries `auth_time` is not settled by the documentation; the conformance run checks it. |
+| Microsoft Entra ID | An optional claim ("Time when the user last authenticated", JWT), not in the token by default. `prompt=login` "forces the user to enter their credentials on that request". `max_age` is not among the documented request parameters; Entra documents the `claims` parameter for claims challenges. | Add `auth_time` to the ID token's optional claims in the app registration. |
+| Google Workspace | "Provided when the `auth_time` claim is included in the authentication request and enabled in settings"; the request is the `claims` parameter Automatos now sends. `prompt` lists only `none`, `consent` and `select_account`, so no `prompt=login` is sent; `max_age` is not among the documented request parameters. | Enable `auth_time` in the client's settings. Nothing documented makes Google ask for the password again, so a step-up passes only when Google's `auth_time` is newer than the step-up's start. |
+| Keycloak | Its metadata (built by Keycloak's `OIDCWellKnownProvider`; read in its source, not its documentation) lists `auth_time` among the claims, says it takes the `claims` parameter, and lists `none`, `login` and `consent` as prompt values. | Nothing found; the Keycloak CI job checks a step-up end to end. |
+
+An install whose provider never sends `auth_time` signs in, but cannot use the admin actions: each refuses with `step_up_no_auth_time`.
 
 Rows marked without **[T]** come from the providers' documentation and are **[I]** until the conformance run (US-703) proves them. The Microsoft rows were checked against Microsoft's documentation on 19 Nov 2026.
 
@@ -229,11 +278,19 @@ Names are provisional. Final names are fixed in each wave's PR and recorded in `
 | `FRONTEND_URL` | none, required in enterprise | The install's public address, which the web app and the API share. An existing setting: its built-in `localhost` default does not count (US-103). |
 | `OIDC_SCOPES` | `openid profile email` | What is asked for at sign-in. |
 | `OIDC_DISPLAY_NAME` | `your organisation` | The text on the sign-in button. |
-| `OIDC_REQUIRED_CLAIMS` | empty | Claims that must match before anyone is let in. Required for shared issuers. |
+| `OIDC_REQUIRED_CLAIMS` | empty | Claims that must match before anyone is let in. Required for shared issuers and with a default role; never on a claim every token carries (§5.4). |
 | `OIDC_CLAIM_EMAIL`, `OIDC_CLAIM_NAME` | `email`, `name` | Which claims carry these. |
+| `OIDC_CLAIM_SUBJECT` | `sub` | The claim that, with the issuer, identifies the person (§5.4). A token without it, or with anything there but a string that is not blank and holds no control character, is refused as one without `sub` is. Choose a claim that is unique to one person, never changes, is never reused, and that the person cannot edit: start-up cannot check that for a claim it does not know. It refuses an empty name; a claim that describes the token (the access rule's list, §5.4); a claim many people share or one that changes and is reused (`email_verified`, `acr`, `amr`, `ver`, `tid`, `hd`, `groups`, `roles`, `picture`, `locale`, `preferred_username`, `upn`); and the claim `OIDC_CLAIM_EMAIL` or `OIDC_CLAIM_NAME` names, or `email` (FR-7). Names are compared without regard to case. Choose it before the first sign-in: changing it on an install people already use changes who everyone is. Each person's next sign-in then matches no identity link and is handled as a first sign-in. A person whose token's `sub` is already linked (they signed in while the setting was `sub`) is refused, audited `subject_claim_changed`, and logged at error. Any other first sign-in goes on as usual: refused by the email rule (§5.4) when the token's verified address is on another row, and otherwise made a new person, who gets `ENTERPRISE_DEFAULT_ROLE` if one is set. So a change from another claim to `sub`, or between two claims other than `sub`, is not detected: each person's next sign-in makes a new person unless the email rule refuses it. §5.9 says which provider needs another value than `sub`. |
+| `OIDC_CLAIM_EMAIL_HOLDS_ONLY_VERIFIED_ADDRESSES` | `false` | `true` says the provider puts only addresses it has verified in the claim `OIDC_CLAIM_EMAIL` names, when that is not `email`, so they are kept as verified. Off, an address from such a claim is unverified and not kept. Risk: a person who can edit that claim at the provider can take another person's address (§5.9). `true` or `false`; start-up refuses anything else. |
 | `OIDC_CA_BUNDLE_FILE` | empty | A certificate authority file for an IdP with a private certificate. |
-| `ENTERPRISE_BOOTSTRAP_ADMINS` | empty | People who become install admins at first sign-in. |
-| `ENTERPRISE_DEFAULT_ROLE` | `none` | Role in the default workspace for anyone who passes the access rule. |
+| `ENTERPRISE_BOOTSTRAP_ADMINS` | empty | People who become install admins at first sign-in, or at any sign-in while the install has no active install admin (§5.4). |
+| `ENTERPRISE_DEFAULT_ROLE` | `none` | Role in the default workspace for anyone who passes the access rule. A role needs `OIDC_REQUIRED_CLAIMS`: start-up refuses one with no rule. |
+| `OIDC_ENDPOINT_HOSTS` | empty | Host names, comma separated, besides the issuer's own, on which the metadata may put the token endpoint and the keys address (§5.9). Host names only: no scheme, port, wildcard or address. |
+| `OIDC_PENDING_SIGN_INS_MAX` | `10000` | Sign-ins started and not finished that may be held at once. At the ceiling a new start is never refused: the oldest sign-ins under way are ended to make room for it (§5.11). A whole number of at least 1. |
+| `OIDC_PENDING_SIGN_INS_PER_ADDRESS` | `100` | Sign-ins started and not finished that one client address (one IPv4 address or one IPv6 /64, as the per-address rate limits count) may hold at once. The bound exists so that one address can never hold more than a small share of the table: when an address starts another, its own oldest are ended to make room. The default leaves room for a whole office or VPN signing in through one shared address in the same minute. Lower it where people reach the install from addresses of their own, so that one address's flood ends fewer of the others' sign-ins; raise it only for a shared address busier than that. A whole number of at least 1, and no greater than `OIDC_PENDING_SIGN_INS_MAX`: start-up refuses either otherwise. |
+| `DEFAULT_WORKSPACE_ID` | none, required in enterprise | An existing setting (the local edition's one workspace): in enterprise, the workspace sign-ins are recorded in, `ENTERPRISE_DEFAULT_ROLE` gives a role in and the first admins own. A UUID; the migration Job makes the workspace with no owner. |
+| `CLIENT_IP_HEADER` | none, required in enterprise | An existing setting: the header the proxy in front writes the caller's address to. Sign-in limits requests by that address and writes it to the audit log, so where sign-in is OIDC start-up refuses to start without it. Name the header your proxy sets on every request; if your proxies append to it instead, say how many in `CLIENT_IP_PROXY_COUNT`. |
+| `CLIENT_IP_PROXY_COUNT` | empty | How many of your own proxies append the caller's address to `CLIENT_IP_HEADER`: 1 for one load balancer (an AWS application load balancer appends to `X-Forwarded-For`), 2 for a content network in front of one. The count is for proxies that append (the load balancer's default mode); one that passes the header on unchanged is not counted. The address is the value that many from the header's end, read with the header's repeated lines as one list; empty, it is the first value of the header's last line. A plain whole number from 1 to 8. In enterprise start-up requires it when `CLIENT_IP_HEADER` is `X-Forwarded-For` or `X-Original-Forwarded-For` (an operator whose proxies append to another header states it too), and refuses `0`, any other value out of range, and a count without `CLIENT_IP_HEADER`; it also refuses `CLIENT_IP_HEADER=Forwarded`, whose values are `for=` parameters, not addresses. In `local` and `saas` nothing about it stops start-up: an unusable count is logged once at start and ignored, so the address is read as if it were unset. A request whose header carries fewer values than the count is answered with the connection's address, and the first one logs one warning for the process (`core/client_ip_settings.py`, `core/security/client_ip.py`). |
 | `ENTERPRISE_DEVICE_PAIRING` | `on` | Whether phones and browsers may pair. |
 | `SESSION_IDLE_MINUTES`, `SESSION_ABSOLUTE_HOURS` | `120`, `12` | The two session clocks. |
 
@@ -245,6 +302,7 @@ These are requirements, each with a test.
 
 - **The ID token** is accepted only if its signature verifies against the IdP's published keys, with an allow-list of algorithms (RS256, PS256, ES256). `none` and the shared-secret algorithms are refused.
 - **Issuer** must equal `OIDC_ISSUER` exactly, and the metadata document must name the same issuer.
+- **Subject:** `sub` must be a non-empty string, as OIDC Core §2 requires of every ID token, and so must the claim `OIDC_CLAIM_SUBJECT` names when that is another (§5.4). A person is never identified by an address or a display name (FR-7): start-up refuses `OIDC_CLAIM_SUBJECT` set to the claim `OIDC_CLAIM_EMAIL` or `OIDC_CLAIM_NAME` names, or to `email`.
 - **Audience** must contain the client id. With several audiences, `azp` must equal the client id.
 - **Times:** `exp`, `iat` and `nbf` are checked with at most 60 seconds of leeway.
 - **`nonce`** must match the one made at `/start`. **`state`** must match and is single use.
@@ -252,12 +310,13 @@ These are requirements, each with a test.
 - **Keys rotate:** an unknown key id triggers one refetch of the keys, rate limited.
 - **Nothing sensitive is logged or shown:** no code, token, secret or raw IdP error reaches a log line, a span or the browser.
 - **Rate limits** on `/start` and `/callback`, per IP.
+- **Unfinished sign-ins are bounded so that a flood costs the flooder.** Each one records the SHA-256 of the client address that started it, never the address. One address holds at most `OIDC_PENDING_SIGN_INS_PER_ADDRESS`: starting another ends that address's oldest, so a person who clicks sign-in again and again loses only their own older attempts. Overall, at `OIDC_PENDING_SIGN_INS_MAX`, a start ends the oldest sign-ins under way and is stored, in the same transaction; a start is never refused for want of room. What this does not do: a sign-in ended to make room comes back as "sign-in expired, start again". With enough addresses a flood can still end real sign-ins at the ceiling, but only by starting more than the ceiling inside the few seconds a real sign-in takes to come back, and it can never stop a new sign-in from starting.
 - **Server keys and the platform key are unchanged** as machine credentials. They cannot pass step-up, as today. The platform API key stays as it is (decision D-14).
 
 ### 5.12 Audit
 
 New `audit_logs` actions, each with the person's id where one is known, the IP and the browser:
-`auth:sign_in`, `auth:sign_in_refused` (with the reason: access rule, email conflict, deactivated, invalid token), `auth:sign_out`, `auth:session_revoked`, `auth:step_up`, `auth:identity_linked`, `auth:bootstrap_admin`. Role changes are already recorded.
+`auth:sign_in` (a phone's, at its Continue, with `{"phone": true, "platform"}`; US-603), `auth:sign_in_refused` (with the reason: access rule, email conflict, deactivated, invalid token, `subject_claim_changed` (§5.10), and for a phone `no_workspace`, `several_workspaces` or `device_limit_reached`), `auth:sign_out`, `auth:session_revoked`, `auth:step_up` (confirmed, or refused: another person, no `auth_time`, a stale or a future one, an ended session, a deactivated person), `auth:identity_linked`, `auth:bootstrap_admin` (with the workspace role given). Role changes are already recorded. Every sign-in makes the default workspace, when it is missing, before its first row, so no row is lost to a missing workspace.
 
 ### 5.13 Where more can plug in
 
@@ -310,8 +369,9 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 - [x] Startup aborts, naming the missing setting and never its value, when any of the issuer, client id, client secret or public address is unset. The public address is the existing `FRONTEND_URL`, set in the environment (§5.10).
 - [x] `REQUIRE_AUTH` is true in enterprise whatever the environment says.
 - [x] A request with no credential gets 401. A test proves no operator context is ever returned (`orchestrator/tests/test_prd277_enterprise_no_operator.py`).
-- [x] Until Wave 4 merges, startup in enterprise aborts with "not available in this build", so a half-built edition cannot be run. One switch, `OIDC_SIGN_IN_IN_THIS_BUILD` in `orchestrator/core/edition_start_up.py`, which Wave 4 deletes.
+- [x] Until Wave 4 merges, startup in enterprise aborts with "not available in this build", so a half-built edition cannot be run. One switch, `OIDC_SIGN_IN_IN_THIS_BUILD` in `orchestrator/core/edition_start_up.py`, which Wave 4 deletes. Deleted in Wave 4 part 2, with its check and its message: the start-up checks are now the only gate, a correctly configured install starts, and each half-configured one names what is missing (`test_prd277_enterprise_start_up.py`).
 - [x] New settings are in `config-surface.json`: `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`.
+- [ ] Behind proxies that append to the client address header (issue #1600), startup names `CLIENT_IP_PROXY_COUNT`, never a value, when `CLIENT_IP_HEADER` is `X-Forwarded-For` or `X-Original-Forwarded-For` and the count is unset, when the count is not a plain whole number from 1 to 8, and when a count is set without `CLIENT_IP_HEADER` (that one named before the missing header); it names `CLIENT_IP_HEADER` when that is `Forwarded`. `local` and `saas` start whatever the two hold, and ignore a count that is not one. The chart refuses the same values, and `config.FORWARDED_ALLOW_IPS`, at render. *Built: `core/client_ip_settings.py` holds the rules, `core/edition_start_up.py` applies them, and `core/security/client_ip.py` reads the address that many values from the header's end (`test_prd277_client_ip_proxy_count.py`, `test_client_ip_behind_appending_proxies.py`). Left unticked until CI runs the tests.*
 
 ### Wave 2: People without Clerk
 
@@ -348,40 +408,40 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As a signed-in person, I want a session that lasts while I work and ends when it should, so that I do not sign in on every request.
 
 **Acceptance Criteria:**
-- [ ] A migration adds `auth_sessions` (person, token hash, created, last seen, idle and absolute expiry, `auth_time`, revoked at and why, IP, browser).
-- [ ] Tokens are `ams_` plus 32 random bytes. Only the SHA-256 is stored, using the hashing kernel device tokens use.
-- [ ] `BEARER_RESOLVERS` gains an `ams_` entry. `hybrid.py` gains no branch.
-- [ ] The resolver accepts the token from the `Authorization` header, or from the `__Host-` cookie when there is no header.
-- [ ] An expired, revoked or unknown session gets 401 with a code the web app recognises.
-- [ ] A session for a deactivated person is refused.
-- [ ] The session records the ID token's `sid` when the IdP sends one.
-- [ ] `last seen` is written at most every 5 minutes, as the device lane does.
-- [ ] The resolver is registered only in enterprise. In `local` and `saas` an `ams_` token is refused.
+- [x] A migration adds `auth_sessions` (person, token hash, created, last seen, idle and absolute expiry, `auth_time`, revoked at and why, IP, browser). `prd277_w3_sessions_20261120`, unique on the token hash and indexed on the person; the model is `core/models/auth_sessions.py`, and the two head pins moved.
+- [x] Tokens are `ams_` plus 32 random bytes. Only the SHA-256 is stored, using the hashing kernel device tokens use. `issue_session` in `core/auth/sessions.py` (`mint_token`, `hash_secret`); a lookup is confirmed in constant time (`secrets_match`).
+- [x] `BEARER_RESOLVERS` gains an `ams_` entry. `hybrid.py` gains no branch. The lane is `core/auth/session_lane.py`.
+- [x] The resolver accepts the token from the `Authorization` header, or from the `__Host-` cookie when there is no header. The cookie is read only when there is no `Authorization` header of any scheme and no API key; its name is `SESSION_COOKIE_NAME`, which start-up refuses without the `__Host-` prefix.
+- [x] An expired, revoked or unknown session gets 401 with a code the web app recognises. `{"code": "session_ended", "reason": "expired" | "revoked" | "unknown"}`. When the token came from the cookie, the answer also clears the cookie.
+- [x] A session for a deactivated person is refused. At resolution (`session_ended`, `revoked`), and `issue_session` issues none (`SignInRefused`).
+- [x] The session records the ID token's `sid` when the IdP sends one. `auth_sessions.idp_session_id`; Wave 4's callback passes it to `issue_session`.
+- [x] `last seen` is written at most every 5 minutes, as the device lane does. With the idle clock, by the device lane's own `LAST_SEEN_WRITE_INTERVAL`.
+- [x] The resolver is registered only in enterprise. In `local` and `saas` an `ams_` token is refused. The new capability `issues_sessions` gates the registry entry (`LANE_REGISTERED_WHEN`); elsewhere an `ams_` token reaches the Clerk lane as before and is refused there. Tests: `test_prd277_w3_session_lane.py`, `test_prd277_w3_sessions_realdb.py`, `test_prd277_w3_migration.py`.
 
 #### US-302: Requests that change things cannot be forged from another site · M · security review
 **Description:** As a signed-in person, I want another website to be unable to act as me, so that a session cookie is safe.
 
 **Acceptance Criteria:**
-- [ ] A cookie-authenticated request with an unsafe method is refused unless its origin is the install's own and it carries the required header.
-- [ ] A request authenticated by the `Authorization` header is not subject to the check.
-- [ ] Tests cover: cross-site form post refused, same-origin fetch allowed, header-authenticated call allowed.
+- [x] A cookie-authenticated request with an unsafe method is refused unless its origin is the install's own and it carries the required header. `core/auth/session_cookie.py`: the `Origin` (else the `Referer`) must equal `FRONTEND_URL`'s origin, and `SESSION_CSRF_HEADER` must be present; checked before the session is looked up.
+- [x] A request authenticated by the `Authorization` header is not subject to the check.
+- [x] Tests cover: cross-site form post refused, same-origin fetch allowed, header-authenticated call allowed. `test_prd277_w3_session_lane.py`.
 
 #### US-303: Ending a session · M
 **Description:** As a person or an admin, I want to end a session now, so that access stops when it should.
 
 **Acceptance Criteria:**
-- [ ] `POST /api/v1/auth/sign-out` revokes the caller's session and clears the cookie.
-- [ ] An admin route revokes one session or every session of a person. It requires step-up.
-- [ ] Deactivating a person revokes their sessions and device tokens in the same transaction.
-- [ ] New routes are in `route-manifest.json`, authenticated and authorised.
+- [x] `POST /api/v1/auth/sign-out` revokes the caller's session and clears the cookie. `api/auth_sessions.py`. Sending the browser to the IdP's end-session address (§5.6) needs the IdP metadata, which Wave 4 reads. Since Wave 4 part 2 the answer is 200 `{"redirect_to": …}` when the metadata lists one (`oidc_sign_in.end_session_address`), else 204.
+- [x] An admin route revokes one session or every session of a person. It requires step-up. `POST /api/v1/auth/sessions/{session_id}/revoke` and `POST /api/v1/auth/people/{user_id}/sessions/revoke`, with `GET /api/v1/auth/people/{user_id}/sessions` to list them. Step-up in enterprise goes through `step_up.confirm_by_signing_in_again`, which US-406 filled.
+- [x] Deactivating a person revokes their sessions and device tokens in the same transaction. `deactivate_person` in `core/auth/people.py`, served as `POST /api/v1/auth/people/{user_id}/deactivate` (step-up).
+- [x] New routes are in `route-manifest.json`, authenticated and authorised. Sign-out by the session itself; the others by an install admin on the session lane, in the boundary sweep. In `local` and `saas` each route's declared method answers 404 before any authentication or database work; another method on the same path answers 405, as it does in every edition.
 
 #### US-304: Sign-ins are in the audit log · S
 **Description:** As a compliance reviewer, I want every sign-in, refusal and sign-out recorded, so that I can show who had access and when.
 
 **Acceptance Criteria:**
-- [ ] The actions in §5.12 are written through `AuditService.log`.
-- [ ] A refusal records its reason and never the token.
-- [ ] A test asserts one row per event with the person's id where known.
+- [x] The actions in §5.12 are written through `AuditService.log`. Wave 3 writes `auth:sign_in`, `auth:sign_in_refused` (deactivated), `auth:sign_out`, `auth:session_revoked` and `user:deactivated`. `auth:step_up`, `auth:identity_linked`, `auth:bootstrap_admin` and the other refusal reasons are named in `core/auth/session_audit.py` and written by Wave 4's code (US-401 to US-406). Wave 4 writes `auth:identity_linked`, the `access_rule`, `email_conflict` and `invalid_token` refusals, and `auth:step_up` (confirmed, or refused with its reason) through it. `auth:bootstrap_admin`, like a hook's `member:role_changed`, is an `audit_logs` row added to the first sign-in's own transaction (`stage_bootstrap_admin`), so the grant and its row land together or not at all; the commit that writes it is `AuditService.log`'s for `auth:identity_linked`.
+- [x] A refusal records its reason and never the token. `record_sign_in_refused` in `core/auth/session_audit.py` writes only the reason, one of those in §5.12 (four, and since US-603 a phone's three).
+- [x] A test asserts one row per event with the person's id where known. `test_prd277_w3_sessions_realdb.py`: sign-in, refusal, sign-out, ended sessions and deactivation.
 
 ### Wave 4: OIDC
 
@@ -389,80 +449,80 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As the platform, I want to read the IdP's published metadata and signing keys safely, so that I can verify what it sends.
 
 **Acceptance Criteria:**
-- [ ] The metadata is fetched from `<OIDC_ISSUER>/.well-known/openid-configuration` over `https` only. Its `issuer` must equal the setting.
-- [ ] Keys are fetched with the `PyJWKClient` pattern already in `core/auth/clerk.py`. An unknown key id causes one rate-limited refetch.
-- [ ] The configured issuer's host is reachable even on a private address. No other private address becomes reachable through sign-in. A test proves both. (PRD-282 covers the private addresses an operator may name for other purposes.)
-- [ ] `OIDC_CA_BUNDLE_FILE` is honoured.
-- [ ] If the IdP cannot be reached, the API still starts; sign-in answers with a clear error and `/health/bootstrap` reports it.
-- [ ] No new Python dependency.
+- [x] The metadata is fetched from `<OIDC_ISSUER>/.well-known/openid-configuration` over `https` only. Its `issuer` must equal the setting. `core/auth/oidc_provider.py`, through `core/auth/oidc_http.py`; its endpoints must be `https` too, and it must offer the code flow, PKCE S256, an allowed algorithm and a secret-based client authentication.
+- [x] Keys are fetched with the `PyJWKClient` pattern already in `core/auth/clerk.py`. An unknown key id causes one rate-limited refetch. The same pattern (a key set held five minutes, a key picked by `kid` among signing keys, built by PyJWT's `PyJWK`), fetched through `oidc_http` rather than by `PyJWKClient` itself, which opens addresses with `urllib` where the pinned connection and the private-address rule cannot apply. At most one refetch a minute.
+- [x] The configured issuer's host is reachable even on a private address. No other private address becomes reachable through sign-in. A test proves both. (PRD-282 covers the private addresses an operator may name for other purposes.) The token endpoint and key address come from the metadata; any host other than the issuer's must resolve to public addresses only, and the checked address is the one connected to. `test_prd277_w4_oidc_http.py`.
+- [x] `OIDC_CA_BUNDLE_FILE` is honoured. Trusted on top of the operating system's authorities; start-up refuses a file it cannot read. `test_prd277_w4_provider_and_tokens.py` signs in against a provider whose certificate only that file trusts.
+- [x] If the IdP cannot be reached, the API still starts; sign-in answers with a clear error and `/health/bootstrap` reports it. The `oidc_provider` stage of the background boot (`core/auth/sign_in_start_up.py`); sign-in sends the person to `/sign-in?error=identity_provider_unavailable`.
+- [x] No new Python dependency. `httpx`, `PyJWT` and `cryptography`, already pinned.
 
 #### US-402: Start and callback · L · security review + Dave
 **Description:** As a person, I want to sign in with my work account, so that I can use Automatos.
 
 **Acceptance Criteria:**
-- [ ] `GET /api/v1/auth/oidc/start` makes `state`, `nonce` and a PKCE verifier, keeps them server-side for 10 minutes, and redirects to the IdP.
-- [ ] `GET /api/v1/auth/oidc/callback` exchanges the code, verifies the ID token against every rule in §5.11, and issues a session.
-- [ ] Tests, each against the fake issuer (US-407): wrong signature, `alg: none`, wrong issuer, wrong audience, expired, missing or wrong nonce, reused state, replayed code, redirect to another host.
-- [ ] No token, code or secret appears in any log line or response body. A test scans the captured logs.
-- [ ] Both routes are public, rate limited per IP, and in `route-manifest.json`.
+- [x] `GET /api/v1/auth/oidc/start` makes `state`, `nonce` and a PKCE verifier, keeps them server-side for 10 minutes, and redirects to the IdP. In `oidc_pending_sign_ins` (§12, entry 5), as digests of the state and nonce; the state is also bound to the browser by a `__Host-` cookie, so a callback carried to another browser is not a sign-in there.
+- [x] `GET /api/v1/auth/oidc/callback` exchanges the code, verifies the ID token against every rule in §5.11, and issues a session. The state is ended in one `DELETE … RETURNING` before the code is exchanged, so two callbacks with one state cannot both use it (`core/auth/oidc_pending.py`); the rules are `core/auth/oidc_tokens.py`.
+- [x] Tests, each against the fake issuer (US-407): wrong signature, `alg: none`, wrong issuer, wrong audience, expired, missing or wrong nonce, reused state, replayed code, redirect to another host. `test_prd277_w4_sign_in_realdb.py`, `test_prd277_w4_provider_and_tokens.py`, `test_prd277_w4_pending_realdb.py`.
+- [x] No token, code or secret appears in any log line or response body. A test scans the captured logs. Over a sign-in that succeeds and each way one fails; the access log replaces a sign-in path's query with `?{redacted}`.
+- [x] Both routes are public, rate limited per IP, and in `route-manifest.json`. `oidc_start_ip` and `oidc_callback_ip`, 300 per IP per 10 minutes each; both 404 unless the edition signs in with OIDC.
 
 #### US-403: The access rule · M
 **Description:** As an operator, I want to say which claims a person must have, so that only my organisation's people get in.
 
 **Acceptance Criteria:**
-- [ ] `OIDC_REQUIRED_CLAIMS` is parsed at startup. A malformed value aborts startup.
-- [ ] A sign-in whose token fails a rule is refused, audited, and shown a plain message.
-- [ ] With an issuer on the known shared list and no rule, startup aborts and says why.
-- [ ] A claim name containing a colon or a dot can be named.
+- [x] `OIDC_REQUIRED_CLAIMS` is parsed at startup. A malformed value aborts startup. `core/auth/access_rule.py`: `name=value` rules joined by `;`, split at the first `=`; every rule must hold, and a rule holds for a claim that is that exact string or a list holding it. The refusal names the setting, never its value; `local` and `saas` never read it (`test_prd277_w4b_access_rule.py`). A rule on a claim every token carries (`access_rule.PROTOCOL_CLAIMS`) is malformed, and a default role with no rule stops start-up.
+- [x] A sign-in whose token fails a rule is refused, audited, and shown a plain message. Before any person is found or created: `/sign-in?error=sign_in_not_allowed`, one `auth:sign_in_refused` row with reason `access_rule`, no person, link or session. Only the verified ID token's claims are read (`test_prd277_w4b_sign_in_rules_realdb.py`).
+- [x] With an issuer on the known shared list and no rule, startup aborts and says why. `access_rule.SHARED_ISSUERS`: Google's issuer (its https form: a configured issuer must be https), Microsoft's `common`, `organizations` and `consumers` addresses (v1 and v2.0) and the personal-accounts tenant. The list cannot be complete; the rule is the control (§5.9).
+- [x] A claim name containing a colon or a dot can be named. A name is one top-level claim read literally: `cognito:groups`, `https://example.test/roles`.
 
 #### US-404: First sign-in · M
 **Description:** As a new person, I want my first sign-in to work without anyone preparing my account, so that I can start as soon as an admin gives me a workspace.
 
 **Acceptance Criteria:**
-- [ ] A `users` row and an identity link are created. No personal workspace, no trial grant.
-- [ ] With `ENTERPRISE_DEFAULT_ROLE=none`, the person is signed in and in no workspace, and the API tells the web app so.
-- [ ] With `ENTERPRISE_DEFAULT_ROLE` set to a role, the person gets that role in the default workspace at first sign-in only.
-- [ ] A later sign-in changes no membership. A test proves a role an admin changed survives the next sign-in.
-- [ ] Sign-in succeeds when the ID token carries only a subject and an email.
-- [ ] The caller passes the provider's own statement that the email is verified, taken from the verified ID token, as `email_verified`; the link service (US-201) enforces it: an email the token does not mark verified is no email.
-- [ ] The refusal a person sees never differs by whether an address is already known to the install.
+- [x] A `users` row and an identity link are created. No personal workspace, no trial grant. Through `people.link_person`, with one `auth:identity_linked` row.
+- [x] With `ENTERPRISE_DEFAULT_ROLE=none`, the person is signed in and in no workspace, and the API tells the web app so. `403 {"code": "workspace_required"}` from the session lane.
+- [x] With `ENTERPRISE_DEFAULT_ROLE` set to a role, the person gets that role in the default workspace at first sign-in only. `viewer`, `editor` or `admin`; start-up refuses any other value, and a role without `DEFAULT_WORKSPACE_ID`.
+- [x] A later sign-in changes no membership. A test proves a role an admin changed survives the next sign-in.
+- [x] Sign-in succeeds when the ID token carries only a subject and an email. With no `auth_time`, the session records the epoch, so a step-up can never pass on it.
+- [x] The caller passes the provider's own statement that the email is verified, taken from the verified ID token, as `email_verified`; the link service (US-201) enforces it: an email the token does not mark verified is no email. Only the JSON `true` counts: absent, `false`, `"true"` and `1` are not verified.
+- [x] The refusal a person sees never differs by whether an address is already known to the install. An email conflict and a bad token give the same answer (`/sign-in?error=sign_in_refused`); only the audit row's reason differs.
 
 #### US-405: The first admin · S
 **Description:** As the operator, I want to name the first admins in settings, so that nobody edits the database to get in.
 
 **Acceptance Criteria:**
-- [ ] A person listed in `ENTERPRISE_BOOTSTRAP_ADMINS` becomes an install admin and owner of the default workspace at first sign-in. It is audited.
-- [ ] An entry given as an email matches only when the token marks the email verified.
-- [ ] An install admin can make another person an install admin. It requires step-up and is audited.
-- [ ] The migration Job creates the default workspace with no owner, as the local first-run seed does.
+- [x] A person listed in `ENTERPRISE_BOOTSTRAP_ADMINS` becomes an install admin and owner of the default workspace at first sign-in, or at any sign-in while the install has no active install admin (counted under the last-admin guard's lock). Once an admin exists, the list does nothing for a person who already exists. It is audited. `core/auth/first_admin.py`, after the access rule: `system_role = admin`, an `owner` membership and `owner_id` when the workspace has no owner, else an `admin` membership (one owner stays one owner), one `auth:bootstrap_admin` row naming the workspace role. Entries are `sub:<subject>` or `email:<address>`; a pattern, an address without a dotted domain or an entry without a prefix stops start-up. `DEFAULT_WORKSPACE_ID` is now required in enterprise.
+- [x] An entry given as an email matches only when the token marks the email verified. The `email` claim with `email_verified` the JSON `true`; the domain compared without regard to case.
+- [x] An install admin can make another person an install admin. It requires step-up and is audited. `POST /api/v1/auth/people/{user_id}/system-role` (`people.set_install_role`): only a role the admin's own includes, never on a higher stored role, `user:system_role_changed`. The last active install admin can neither lose the role nor be deactivated (409, `people.LastInstallAdmin`; `test_prd277_w4b_install_admins_realdb.py`).
+- [x] The migration Job creates the default workspace with no owner, as the local first-run seed does. `core/seeds/seed_default_workspace.py`, in the full seed loader, only where sign-in is OIDC; insert-if-absent.
 
 #### US-406: Step-up by signing in again · M
 **Description:** As a person doing something sensitive, I want to prove it is still me, so that a borrowed session cannot change roles or keys.
 
 **Acceptance Criteria:**
-- [ ] In enterprise, `check_step_up` reads `auth_time` from the session.
-- [ ] `/start?step_up=1` sends `max_age=0`. The callback updates the session's `auth_time` only when the returned token carries a fresh one.
-- [ ] No `auth_time` in the token means the step-up fails.
-- [ ] The `local` and `saas` step-up tests pass unchanged.
+- [x] In enterprise, `check_step_up` reads `auth_time` from the session. `step_up.confirm_by_signing_in_again`: older than `STEP_UP_MAX_AGE_MINUTES` is 403 `step_up_required` with `step_up.start`, never a `clerk_error`.
+- [x] Every `/start` sends the `claims` parameter asking for `auth_time` in the ID token as essential, unless the metadata's `claims_parameter_supported` says otherwise; `/start?step_up=1` also sends `max_age=0` and `prompt=login`, the last only where the metadata lists `login` or lists no prompt values and the issuer is not one whose documentation leaves `login` out (§5.9; `oidc_sign_in.auth_time_values`, `test_prd277_w4b_auth_time_request_realdb.py`). A provider that ignores them still signs people in. The callback updates the session's `auth_time` only when the returned token carries a fresh one. Only for a live session, and only for the same person: another person, an ended session, or an `auth_time` older than the step-up's start is refused (`step_up_refused`), changes nothing and never switches the session's person. No session is issued; `auth:step_up` is written either way (`core/auth/step_up_sign_in.py`, migration `prd277_w4b_step_up_20261120`).
+- [x] No `auth_time` in the token means the step-up fails. Reason `no_auth_time`, shown as its own code, `step_up_no_auth_time`. An `auth_time` that is not a finite number, is before the epoch or is out of range refuses the sign-in (`sign_in_refused`), never an error. Fresh means not earlier than the step-up's start and not later than now, each allowing only the 60-second clock leeway (`future_auth_time`, `stale_auth_time`). A step-up started from another site (`Sec-Fetch-Site` neither `same-origin` nor `none`) is refused.
+- [ ] The `local` and `saas` step-up tests pass unchanged. Not edited in Wave 4 part 2; CI proves it.
 
 #### US-407: A fake identity provider for CI · M
 **Description:** As a developer, I want a small OIDC issuer that runs inside the test process, so that every flow is tested without a real provider.
 
 **Acceptance Criteria:**
-- [ ] A test helper serves metadata, keys, an authorize step that approves at once, and a token endpoint, on a loopback address, using `PyJWT` and `cryptography` only.
-- [ ] It can be told to misbehave: wrong signature, rotated key, missing claim, shared issuer.
-- [ ] A separate CI job runs the sign-in flow against a real Keycloak container. It is allowed to fail at first and becomes required at the end of the wave.
+- [x] A test helper serves metadata, keys, an authorize step that approves at once, and a token endpoint, on a loopback address, using `PyJWT` and `cryptography` only. `orchestrator/tests/helpers_fake_oidc_provider.py`, over TLS with a certificate made at run time.
+- [x] It can be told to misbehave: wrong signature, rotated key, missing claim, shared issuer. Also `alg: none`, HS256 with the public key, a wrong or missing nonce, other metadata, an error status and a redirect.
+- [ ] A separate CI job runs the sign-in flow against a real Keycloak container. It is allowed to fail at first and becomes required at the end of the wave. `.github/workflows/oidc-keycloak.yml` and `test_prd277_w4_keycloak_sign_in.py`: the image pinned by digest, the certificate, credentials and realm made in the job, run only when the sign-in code, its settings, the default workspace's seed, the Team routes or its tests change. A failure fails the job (no `continue-on-error`); the job is named non-required. Not yet seen green, and not yet required.
 
 #### US-408: One interface and one hook for sign-in · M
 **Description:** As a developer, I want sign-in written against a small interface with a hook, so that another way of proving identity can be added without touching sessions or permissions.
 
 **Acceptance Criteria:**
-- [ ] The start and callback routes call an identity interface. OIDC is its implementation in core.
-- [ ] A hook runs after the identity is verified and before the session is issued. It can refuse the sign-in, or set memberships through the people service.
-- [ ] Creating a person, linking an identity, setting a membership and deactivating a person are functions in one module, used by sign-in and by the Team routes.
-- [ ] Registration is refused after startup, and registering the same thing twice raises an error.
-- [ ] A test registers a second, fake implementation and a hook, and signs in through them with no change to the session or permission code.
-- [ ] With no hook registered, every US-402 and US-404 test passes unchanged.
+- [x] The start and callback routes call an identity interface. OIDC is its implementation in core. `core/auth/sign_in_methods.py` (`IdentityMethod`), `core/auth/oidc_sign_in.py`, called through `core/auth/sign_in_flow.py`.
+- [x] A hook runs after the identity is verified and before the session is issued. It can refuse the sign-in, or set memberships through the people service. A refusal is audited as the access rule's.
+- [x] Creating a person, linking an identity, setting a membership and deactivating a person are functions in one module, used by sign-in and by the Team routes. In `core/auth/people.py` (`link_person`, `set_membership`, `deactivate_person`) and used by sign-in. Since Wave 4 part 2 the Team routes call it too: a role change (`change_member_role`), a removal (`member_to_remove`, `end_membership`) and accepting an invitation (`person_for_invitee`, `join_from_invitation`), each the same statements the routes ran before, so `local` and `saas` behave as they did. The rules live in the service, not the route: the target is looked up in the workspace named only, the owner's role is never changed, nobody is made owner and the owner is never removed (`MemberNotFound` is 404, `MembershipRefused` 400, with the messages the routes gave before).
+- [x] Registration is refused after startup, and registering the same thing twice raises an error. Closed when the background boot runs and by the first sign-in.
+- [x] A test registers a second, fake implementation and a hook, and signs in through them with no change to the session or permission code. `test_prd277_w4_sign_in_realdb.py`.
+- [ ] With no hook registered, every US-402 and US-404 test passes unchanged. They register none; CI proves it.
 
 ### Wave 5: Web app
 
@@ -470,46 +530,64 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As a developer, I want the web app's sign-in hooks to work in enterprise, so that components do not change.
 
 **Acceptance Criteria:**
-- [ ] `resolveEdition()` accepts `enterprise`.
-- [ ] `auth-hooks.ts` returns the same shapes in enterprise, filled from a "who am I" API call.
-- [ ] The role comes from the API, not from Clerk session data.
-- [ ] No component outside the existing Clerk files imports `@clerk/*`. The existing rule's test covers it.
+- [x] `resolveEdition()` accepts `enterprise`. `frontend/lib/edition-name.ts` (re-exported by `lib/auth-edition.ts`, with `isEnterprise`); an unknown value is still `saas`.
+- [x] `auth-hooks.ts` returns the same shapes in enterprise, filled from a "who am I" API call. `GET /api/v1/auth/me` (`api/auth_web.py`: the person, their install role, their workspaces; it answers a person in no workspace, which the shared request context refuses), read by `components/enterprise/enterprise-session-provider.tsx` and handed to the five hooks by `lib/enterprise/auth-hooks.ts`; no token (the session cookie travels by itself).
+- [x] The role comes from the API, not from Clerk session data. `RoleProvider` reads `/me`'s `system_role` in enterprise (`lib/enterprise/session-context.ts`); `user` until it answers.
+- [x] No component outside the existing Clerk files imports `@clerk/*`. `lib/enterprise/__tests__/clerk-import-guard.test.ts` pins the files that import it to the sixteen that did before this wave. Every file this edition adds (any path naming `enterprise`, and `lib/edition-name.ts`, `lib/public-routes.ts`, `lib/initials.ts`) is followed through its imports, and none reaches `@clerk/*`.
 - [ ] `tsc` and `vitest` pass in CI.
 
 #### US-502: Sign-in page, signed-out redirect and sign-out · M
 **Description:** As a person, I want one button that takes me to my organisation's sign-in, so that I never see a password field that is not my employer's.
 
 **Acceptance Criteria:**
-- [ ] `/sign-in` in enterprise shows one button with `OIDC_DISPLAY_NAME`. No sign-up, no reset.
-- [ ] A browser with no session cookie is sent to `/sign-in` and returned to where it was going afterwards.
-- [ ] A 401 from the API in the middle of work shows "your session ended" with a button to sign in again. Unsaved text in the chat box is kept.
-- [ ] Sign-out calls the API and then goes to the IdP's end-session address when there is one.
-- [ ] The browser e2e lane runs sign-in, a protected page and sign-out against the fake issuer.
+- [x] `/sign-in` in enterprise shows one button with `OIDC_DISPLAY_NAME`. No sign-up, no reset. `components/enterprise/enterprise-sign-in.tsx`; the name from the public `GET /api/v1/auth/sign-in-page`, checked at start-up to be plain text of 1 to 64 characters. `return_to` is passed through to the start route, whose own rule decides it; `?error=` shows one sentence per refusal code (`lib/enterprise/messages.ts`), none saying whether a person is known.
+- [x] A browser with no session cookie is sent to `/sign-in` and returned to where it was going afterwards. `lib/enterprise/session-middleware.ts` (middleware.ts's enterprise branch; `/api/…` and the public routes are left alone), and a 401 from `/me` does the same from the browser. The public routes are one list (`lib/public-routes.ts`), read by the middleware in saas and enterprise and by the session provider, so a public page is never sent to sign in.
+- [x] A 401 from the API in the middle of work shows "your session ended" with a button to sign in again. Unsaved text in the chat box is kept. Any 401 from the app's own API (apiClient, the chat route, and a request made outside apiClient through `lib/enterprise/session-fetch.ts`) opens `session-ended-dialog.tsx` over the mounted page, with the reason when the API's `session_ended` gives one. The chat box's text is kept in the tab's sessionStorage for 30 minutes with the id of the person who typed it, and given back only to that person (`lib/enterprise/kept-chat-draft.ts`); it is removed at sign-out, when another person signs in, and once expired.
+- [x] Sign-out calls the API and then goes to the IdP's end-session address when there is one. `signOutOfEnterprise` (`lib/enterprise/session-context.ts`), else `/sign-in`. The address must parse as a plain `https:` address with a host and no user name or password (`safeEndSessionAddress`).
+- [ ] The browser e2e lane runs sign-in, a protected page and sign-out against the fake issuer. `e2e/browser/specs/enterprise-sign-in.spec.ts` (`@enterprise`) is written; it runs only where `E2E_ENTERPRISE_APP_URL` names an enterprise stack, which no lane job starts yet.
 
 #### US-503: Server routes forward the session · S
 **Description:** As a person, I want pages that load through the web app's own server to know who I am.
 
 **Acceptance Criteria:**
-- [ ] The theme files route and `boot-server.ts` forward the session cookie in enterprise, as they use Clerk's token in `saas`.
-- [ ] The chat and stream routes pass the cookie through.
-- [ ] A test covers each.
+- [x] The theme files route and `boot-server.ts` forward the session cookie in enterprise, as they use Clerk's token in `saas`. The session cookie alone, never a bearer (`lib/enterprise/server-session.ts`); the boot cache is keyed by the cookie's SHA-256.
+- [x] The chat and stream routes pass the cookie through. With the workspace, and for an unsafe call the browser's cross-site header and Origin; no API key or Authorization, which would stop the API reading the cookie. The chat route hands a 401's own body back.
+- [x] A test covers each. `lib/enterprise/__tests__/server-routes.test.ts`, `session-transport.test.ts`.
 
 #### US-504: Team and profile screens · M
 **Description:** As an admin, I want to see who has signed in and set their workspace and role.
 
 **Acceptance Criteria:**
-- [ ] The Team page lists members and people waiting for a workspace. Role changes work and require step-up.
-- [ ] Invitations are not shown in enterprise.
-- [ ] The profile page is read-only and says the account is managed by the organisation's identity provider.
-- [ ] An admin can end a person's sessions and deactivate them.
+- [x] The Team page lists members and people waiting for a workspace. Role changes work and require step-up. `GET` and `POST /api/workspaces/{workspace_id}/team/waiting[/{user_id}]` (`api/team_waiting.py`: `members:invite`, an install admin, step-up on the POST; `people.give_workspace` places the person in a role below owner, audited `member:added_from_waiting`). The list is oldest first, a page at a time (`limit` 1 to 100, `offset`, and the `total`), and the card pages through it. In enterprise `useStepUp` sends the browser to sign in again (`lib/enterprise/step-up.ts`), and the change is made again on return. The waiting list and the admin's buttons are components only enterprise renders (`components/team/enterprise-*.tsx`), so the Team page runs no new hook in `local` or `saas`.
+- [x] Invitations are not shown in enterprise. No "Invite Member", no pending invitations, no invite dialog.
+- [x] The profile page is read-only and says the account is managed by the organisation's identity provider. `app/settings/profile/enterprise-profile.tsx`.
+- [x] An admin can end a person's sessions and deactivate them. Two buttons on each member's row for an install admin (`components/team/enterprise-member-actions.tsx`), on the existing step-up routes.
+- [x] `/me` reports, for each workspace, the role the permission gate uses: the member row's role as it is, and `owner` only for the workspace's owner with no member row.
+
+#### Wave 5 notes
+
+- **One web build per cookie and header name.** The web image expects the API's default session cookie name (`__Host-automatos_session`) and cross-site header name (`X-Automatos-CSRF`); they are fixed when the web app is built. An install that changes either on the API needs its own web build.
+- **Open points for the owners** (not built in this wave):
+  - An install admin has no screen across workspaces in this edition: the waiting list and the access buttons are on each workspace's Team page.
+  - Theme files and boot cannot carry a workspace, so a person outside the default workspace sees the base theme.
+  - The browser e2e spec cannot run until a lane starts this edition's stack (web and API) on one host, with a standalone fake provider.
 
 #### US-505: An enterprise web image · S
 **Description:** As an operator, I want a published web image for this edition, so that I do not build one myself.
 
 **Acceptance Criteria:**
-- [ ] `images.yml` publishes an enterprise build beside the local one, signed and scanned the same way.
-- [ ] It calls the API by relative address, so the same image works on any install's address.
-- [ ] The chart selects it when `edition.authEdition=enterprise`.
+- [ ] `images.yml` publishes an enterprise build beside the local one, signed and scanned the same way. *Built: `enterprise-frontend` in images.yml's matrix, published as `ghcr.io/automatosai/automatos-enterprise-frontend` with the build arguments in "US-505 notes", on both arches, through the same measure, scan, sign, signature check, release-tag and edge steps as every published image; the local image's name, tags, inputs and cache scope are unchanged (`tests/test_prd262_image_matrix.py`). Each build job starts the image it pushed (`frontend/scripts/check-enterprise-image.sh`, `tests/test_prd277_enterprise_web_image.py`): it must stop without `BACKEND_INTERNAL_URL` and with a bad `MEDIA_ORIGINS`, naming the setting and not the value, pass the local image's standalone checks on `/sign-in`, and carry the start-up's media origin in a page's content security policy. Left unticked until a push to main has published and signed it and that check has passed on both arches. GHCR makes the new package private; an organisation owner makes it public once (`docs/deployment-infrastructure/releases.md`).*
+- [ ] It calls the API by relative address, so the same image works on any install's address. *Built, and left unticked until CI runs the tests and an enterprise image is built from it. `apiClient`'s base address is `''` in enterprise (`lib/api-base-url.ts`), so every call is `/api/…` on the page's own origin; `lib/__tests__/api-base-url.test.ts` loads `apiClient` as each edition builds it and checks the address it fetches. The enterprise build refuses `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` (`enterprise-build.js`; `lib/enterprise/__tests__/runtime-csp.test.ts`). The WebSocket address comes from the page (PRD-279 US-401), the CLI's `/automatos-host.json` answers the request's own origin, and the workflow stream route's GET reaches the API at `BACKEND_INTERNAL_URL` (`lib/enterprise/__tests__/one-image-server.test.ts`). The server stops at start-up without `BACKEND_INTERNAL_URL` (`lib/enterprise/start-up.ts`), but never during `next build`. The Playbook webhook address a person copies is the page's origin in enterprise (`lib/api-address-shown.ts`, `lib/__tests__/api-address-shown.test.ts`), and an unset `NEXT_PUBLIC_API_URL` is inlined as `""` in every enterprise build, never as `undefined`.*
+- [ ] The chart selects it when `edition.authEdition=enterprise`. *Built: `frontend.enterpriseImage` (`ghcr.io/automatosai/automatos-enterprise-frontend`) runs in place of `frontend.image` in that edition, on port 3000 with `BACKEND_INTERNAL_URL` (the API's Service) and `MEDIA_ORIGINS` (`frontend.mediaOrigins`), and the local edition runs the local image as before (`charts/automatos/tests/enterprise_web_test.yaml`). The routes on one host are the ingress's (chart 0.11.0): in every edition it sends `/api`, `/ws` and exactly `/.well-known/automatos.json` to the API and the rest to the web app, and routes no `/exports/`, `/health`, `/metrics`, `/docs` or `/.well-known/` prefix (`charts/automatos/tests/ingress_test.yaml`). chart.yml's install lane starts the enterprise image built in the same run from the chart's enterprise render, in a namespace that enforces "restricted", and checks that it becomes ready, sends a page to sign in and puts the media origin it was given in the sign-in page's policy (`deploy/kind/strict.sh enterprise`); the enterprise API is rendered there but not started, and nothing signs in. Left unticked until CI runs the suite and that lane.*
+
+#### US-505 notes
+
+- **Same origin is required, not chosen.** The session cookie is `__Host-` and same-origin, the cross-site header is added only to same-origin requests, and the CSRF check reads the Origin (§5.3). So the enterprise build does not accept an absolute API or WebSocket address at all: `next build` stops, naming the variable, rather than producing an image that sends its calls where the cookie does not go.
+- **Build arguments for the enterprise image:** `NEXT_PUBLIC_AUTH_EDITION=enterprise`, and `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` left empty (the Dockerfile's defaults). Any other value, spaces included, stops the build; an unset one is made `""` before Next inlines it. `NEXT_PUBLIC_MEDIA_ORIGINS` and the Clerk build arguments are not read by this edition.
+- **Settings the web app reads when it runs** (environment of the web container, not `NEXT_PUBLIC_*`): `BACKEND_INTERNAL_URL`, the API's origin inside the cluster, required, `http(s)://<host>[:port]` with no path and no trailing slash; `MEDIA_ORIGINS`, the media origins for the content security policy (PRD-279 US-402), optional, at most 16 origins in at most 1,024 characters. Name the narrowest host that works, the storage's own public host, rather than the wildcard form `https://*.<domain>.<suffix>`. A bad or missing value stops the server at start-up with one line naming the setting; `next build` never runs the check.
+- **Redirects carry no policy.** The seven `redirects()` in `next.config.js` are answered before the middleware runs (Next's execution order: `headers`, `redirects`, then middleware), so in this edition they carry the other security headers but no content security policy; a redirect renders no document for one to govern.
+- **What the `images.yml` line needs:** a second frontend entry with the build arguments above and the same inputs as the local one (which now include `frontend/csp-policy.mjs` and `frontend/enterprise-build.js`), published, signed and scanned as the local one is, and its boot test given `BACKEND_INTERNAL_URL` or it will not start.
+- **What the chart line needs:** the web container on port 3000 with `BACKEND_INTERNAL_URL` (the API service's in-cluster origin) and `MEDIA_ORIGINS`. On the one host, `/api` and `/ws` go to the API, and so does exactly `/.well-known/automatos.json` (the discovery document a phone reads); everything else goes to the web app, its own `/.well-known/apple-app-site-association`, `/.well-known/assetlinks.json` and `/automatos-host.json` among it. `/exports/`, `/health`, `/metrics` and `/docs` are not exposed outside the cluster: nothing in the web app or the phone app calls `/exports/`, and a route is added to the ingress when something needs it. The ingress routes `/.well-known/automatos.json` in every edition; in this edition it offers sign-in and, while pairing is on, pairing (US-602), every address in it built from the public address. Since `/health` is not exposed, in this edition the web app's connection indicator asks the public `GET /api/v1/auth/sign-in-page` instead of `/health` (under `/api`, so routed to the API on every install; it needs no session, reads one setting, does no database work and is not one of the two sign-in steps limited per address), and counts any answer as reachable and only a network failure, a timeout or a 502, 503 or 504 as down (`lib/enterprise/api-reachable.ts`). The web app's own `/api/chat`, `/api/workflows/stream`, `/api/themes/files/…` and `/api/generated-images/…` handlers share their paths with API routes, so on one host they are bypassed, as intended: they are pass-throughs to the API routes of the same path.
 
 ### Wave 6: Phones
 
@@ -517,30 +595,30 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As a signed-in person, I want to pair my phone from Settings, so that I can use Automatos Go with my own role.
 
 **Acceptance Criteria:**
-- [ ] The device lane is allowed in enterprise when `ENTERPRISE_DEVICE_PAIRING` is on.
-- [ ] The pairing code is made by a signed-in person and the device row carries their `user_id`.
-- [ ] The device's role is that person's membership role. A test proves a paired device in enterprise is never the operator and never `super_admin` by default.
-- [ ] Deactivating the person or removing their membership refuses the device, as `device.py` already checks.
-- [ ] In enterprise, agreeing that push notifications leave through the push service is an install admin's decision, not a workspace admin's.
-- [ ] A device paired while the install was `local` does not survive the install becoming `enterprise`: every paired device is revoked when the edition changes, and a test proves a token issued before the change is refused.
+- [ ] The device lane is allowed in enterprise when `ENTERPRISE_DEVICE_PAIRING` is on. *Built: the setting is read in `config.py` only (on when unset, §5.10) and combined with the edition in one place, `editions.with_device_pairing_setting`, so enterprise's `device_pairing` is on only for a plain on form and `local` and `saas` never move; start-up refuses a malformed value naming the setting, never its value; the chart sets it from `edition.enterprise.devicePairing` and refuses it in `config`. With it off a paired device's token is 401 and the pairing routes are 404; since US-603 a device signed in on the phone (kind `oidc`) is still taken, and where no kind is taken (saas) a device token is 401 before any lookup (`core.auth.device.token_kinds`; `test_prd277_w6_paired_phone.py`, `test_prd277_edition_capabilities.py`, the chart's `enterprise_api_test.yaml` and `enterprise_refusals_test.yaml`). Left unticked until CI runs the tests.*
+- [ ] The pairing code is made by a signed-in person and the device row carries their `user_id`. *Built: in enterprise `POST /api/v1/mobile/pairing-codes` takes only a person signed in on the session lane, for themselves, in a workspace they are an active member of; a device, a key and the all-workspaces view are 403. The code's row, and so the paired device, carries their `users.id`. A person holds one pending code per workspace (a new one replaces theirs), makes at most ten codes in ten minutes (`mobile_codes_person`), and makes none while they hold `MAX_ACTIVE_DEVICES_PER_PERSON` active devices there (409 `device_limit_reached`). The pair link names the install's configured public address, never the request's. A code exchanged with an install id another person already paired leaves that person's row as it was. A revoke of a device already revoked writes no second audit row. `local` keeps its workspace-admin gate, and its codes and limits are as before (`test_prd277_w6_paired_phone.py`, `test_prd277_w6_paired_phone_realdb.py`). Left unticked until CI runs the tests.*
+- [ ] The device's role is that person's membership role. A test proves a paired device in enterprise is never the operator and never `super_admin` by default. *Built: in enterprise a device resolves at each request to the person in its row with the plain `user` role, whatever their install role and even when their email is `LOCAL_OPERATOR_EMAIL`; its workspace role is read from their membership at each request (`test_prd277_w6_paired_phone_realdb.py`). Left unticked until CI runs the tests.*
+- [ ] Deactivating the person or removing their membership refuses the device, as `device.py` already checks. *Built: proved in enterprise: deactivating revokes the device (`device_revoked`), an inactive person and an ended or deleted membership are 401 at the next request (`test_prd277_w6_paired_phone_realdb.py`). An admin ending every session of another person revokes that person's devices too (§5.6, `test_prd277_w3_sessions_realdb.py`). Left unticked until CI runs the tests.*
+- [ ] In enterprise, agreeing that push notifications leave through the push service is an install admin's decision, not a workspace admin's. *Built: in enterprise both push-consent routes need an install admin signed in on the session lane who also runs the workspace, and the answer needs a fresh sign-in; each answer is one `push:consent_changed` audit row. A workspace admin who is not an install admin, a device and a key are 403. `local` and `saas` are unchanged (`test_prd277_w6_paired_phone.py`, the web app's `phones-devices-enterprise.test.tsx`). Left unticked until CI runs the tests.*
+- [ ] A device paired while the install was `local` does not survive the install becoming `enterprise`: every paired device is revoked when the edition changes, and a test proves a token issued before the change is refused. *Built: each worker, before it serves, compares what the install starts as (the edition and, in enterprise, whether it pairs: `local`, `saas`, `enterprise:pairing_on`, `enterprise:pairing_off`) with what it last started as (a `system_settings` row in the install's own category, which the settings API and Auto's settings tools neither list nor change; an install with none was `local`) under an advisory lock it waits for at most five seconds, and on a change revokes every paired device and pending code once, with one `device:revoked` row each, in either direction: reason `edition_changed`, or `pairing_switched_off` when only pairing changed. Switching pairing back on brings none back. Since US-603 an edition change revokes devices signed in on the phone (kind `oidc`) too, and pairing switched off leaves them (`edition_change.KINDS_REVOKED`). The check never stops a start: until it has run, device tokens and pairing are refused, and the next request runs it again (`test_prd277_w6_paired_phone.py`, `test_prd277_w6_paired_phone_realdb.py`, `test_prd277_w6_install_state_settings_realdb.py`). Left unticked until CI runs the tests.*
 
 #### US-602: Discovery says how to sign in · S
 **Description:** As the phone app, I want the server to say which sign-in it offers, so that one app works with every install.
 
 **Acceptance Criteria:**
-- [ ] In enterprise, `auth.modes` is `["oidc", "device"]`, or `["oidc"]` with pairing off, and `auth.oidc` carries what the app needs to start sign-in.
-- [ ] `local` and `saas` documents are byte-for-byte unchanged.
-- [ ] `tests/test_prd266_discovery.py` is updated: `"oidc"` is emitted only in enterprise.
+- [ ] In enterprise, `auth.modes` is `["oidc", "device"]`, or `["oidc"]` with pairing off, and `auth.oidc` carries what the app needs to start sign-in. *Built: `auth.oidc` is `{start_url, exchange_url, app_link, code_challenge_method}` since US-603 (the app contract, §5.7): the install's own `/api/v1/auth/oidc/start` and `/api/v1/mobile/sign-in/exchange` on its configured public address (`FRONTEND_URL`, which `api_url` and `web_url` are too, whatever the request's host or scheme), and nothing about the identity provider; `clerk` is null and `pairing.enabled` follows the setting (`test_prd266_discovery.py`). Left unticked until CI runs the tests.*
+- [ ] `local` and `saas` documents are byte-for-byte unchanged. *Built: both are pinned as the exact bytes the route sends (`test_prd266_discovery.py`). Left unticked until CI runs the tests.*
+- [ ] `tests/test_prd266_discovery.py` is updated: `"oidc"` is emitted only in enterprise. *Built. Left unticked until CI runs the tests.*
 
 #### US-603: Signing in on the phone · L · security review
 **Description:** As a person, I want to sign in on my phone with my work account, so that I do not need a code from a browser.
 
 **Acceptance Criteria:**
-- [ ] The phone starts at Automatos's own start address with its own PKCE challenge. Automatos returns a one-time code to the app's registered link, and the app exchanges it with its verifier for a device token.
-- [ ] A migration widens `ck_mobile_devices_kind` to allow `oidc`. `tests/test_prd266_mobile_devices_model.py:333` flips.
-- [ ] The token is an `amd_` device token with today's rotation and revoke.
-- [ ] No IdP token is sent to the phone.
-- [ ] The return link is one of a fixed set of app links, never a value the caller supplies.
+- [ ] The phone starts at Automatos's own start address with its own PKCE challenge. Automatos returns a one-time code to the app's registered link, and the app exchanges it with its verifier for a device token. *Built (the app contract is §5.7): the start takes `app_link`, `code_challenge`, `code_challenge_method=S256`, `install_id` and `platform`, all or none, refused whole (400 `invalid_phone_start`) before anything is stored, and keeps them on the sign-in's own row (`oidc_pending_sign_ins.phone_*`); a phone's start asks the provider for a fresh sign-in. Every other step is the browser's. The callback issues no session and makes no code: it records the sign-in as awaiting on a pending `mobile_devices` row of kind `oidc` in the person's one unpaused workspace, behind a five-minute token kept as its SHA-256 and set in a `__Host-` cookie, and answers 303 to the install's page `/sign-in/phone` with nothing in the address (`no_workspace`, `several_workspaces` and `device_limit_reached` go to that page, audited as a refused sign-in). Only the person's Continue there, a POST from the install's own page (US-302's check), makes the 60-second code, destroys the token, writes `auth:sign_in` with a phone marker in the same transaction and answers the app link with `code` only; Cancel deletes what waits. `POST /api/v1/mobile/sign-in/exchange` (public, its own per-address limit) spends any code it finds, checks S256(verifier) in constant time, counts the device cap again under the person's lock, and answers the one `401 invalid_sign_in_code` for every refusal (`core/auth/phone_sign_in.py`, `api/phone_sign_in.py`, `services/mobile/sign_in_confirmation.py`, `services/mobile/sign_in_codes.py`, `frontend/app/sign-in/phone`; `test_prd277_w6b_phone_sign_in.py`, `test_prd277_w6b_phone_sign_in_realdb.py`, `phone-sign-in-confirm.test.tsx`). Left unticked until CI runs the tests.*
+- [ ] A migration widens `ck_mobile_devices_kind` to allow `oidc`. `tests/test_prd266_mobile_devices_model.py:333` flips. *Built: `prd277_w6b_phone_sign_in_20261121` (on `prd277_w4b_step_up_20261120`) widens it and `ck_mobile_devices_clerk_holds_no_token` (an `oidc` row holds a code and token hash as a `paired` row does), each added `NOT VALID` and then validated, and adds `mobile_devices.sign_in_challenge`, `sign_in_install_id`, `sign_in_app_link`, `sign_in_confirm_hash` and `oidc_pending_sign_ins.phone_app_link`, `phone_code_challenge`, `phone_install_id`, `phone_platform`, all nullable and `create_all`-safe; the downgrade drops the eight columns and restores the narrow checks `NOT VALID`. The model test's refused kind is now `sso`, and an `oidc` row is accepted (`test_prd266_mobile_devices_model.py`, `test_prd277_w6b_phone_sign_in_migration.py`). Left unticked until CI runs the tests.*
+- [ ] The token is an `amd_` device token with today's rotation and revoke. *Built: the exchange enrols the row as pairing does (`pairing.enrol`), so the token, its hash, its rotation (`POST /devices/{id}/rotate` takes kind `oidc`) and its revoke are pairing's; the device lane takes kind `oidc` wherever people sign in with OIDC, pairing on or off (`device.token_kinds`), as the person in its row with the plain `user` role. Deactivation, an admin ending access, the membership ending and a revoke stop it; an edition change revokes it, pairing switched off does not; as a device it makes no pairing code, decides no push question and passes no step-up (`test_prd277_w6b_phone_sign_in_realdb.py`, `test_prd277_w6b_phone_sign_in.py`). Left unticked until CI runs the tests.*
+- [ ] No IdP token is sent to the phone. *Built: the app link carries only the code (or a refusal's code), and the exchange answers only the device's id, workspace, token and rotation time; a test plants a marker in the provider's claims and checks neither holds it, nor any code or token the provider issued, nor its address or client id (`test_prd277_w6b_phone_sign_in_realdb.py`). Left unticked until CI runs the tests.*
+- [ ] The return link is one of a fixed set of app links, never a value the caller supplies. *Built: `phone_sign_in.APP_LINKS` is a read-only map, `{"go": "automatos://go/signed-in"}`; the start takes a key of it, never an address, and an address or unknown key is 400 (`test_prd277_w6b_phone_sign_in.py`). Left unticked until CI runs the tests.*
 
 #### US-604: The app's OIDC provider · companion PRD in `automatos-go`
 **Description:** As a phone user, I want Automatos Go to offer "Sign in with my organisation" when the server says so.
@@ -555,16 +633,16 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As an operator, I want to switch the edition on from the chart's values.
 
 **Acceptance Criteria:**
-- [ ] `edition.authEdition=enterprise` renders the OIDC settings and reads `OIDC_CLIENT_SECRET` from the existing Secret.
-- [ ] Rendering fails with a clear message when a required value is missing.
-- [ ] helm-unittest covers both.
+- [ ] `edition.authEdition=enterprise` renders the OIDC settings and reads `OIDC_CLIENT_SECRET` from the existing Secret. *Built (chart 0.11.0): `edition.enterprise.*` sets `FRONTEND_URL`, `CLIENT_IP_HEADER`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, and when given `CLIENT_IP_PROXY_COUNT` (`clientIpProxyCount`, required when `clientIpHeader` is `X-Forwarded-For`), `OIDC_DISPLAY_NAME`, `OIDC_SCOPES`, `OIDC_REQUIRED_CLAIMS`, `OIDC_ENDPOINT_HOSTS`, `ENTERPRISE_DEFAULT_ROLE`, `ENTERPRISE_BOOTSTRAP_ADMINS` and `OIDC_CA_BUNDLE_FILE` (a ConfigMap mounted read-only), with `DEFAULT_WORKSPACE_ID` from `edition.defaultWorkspaceId`, in the API and the migration Job; `OIDC_CLIENT_SECRET` is a required key of `existingSecret`, and `config.OIDC_CLIENT_SECRET` stops the render in every edition. The other settings in §5.10 have working defaults and go in `config`; the session cookie's name and the CSRF header's may not, because the enterprise web image fixes them. The chart README's "The enterprise edition" lists each. Left unticked until CI runs the suite.*
+- [ ] Rendering fails with a clear message when a required value is missing. *Built: each required value missing stops the render with a message naming the value and the setting, never its content, and so do the values the API would refuse at start where the chart can judge them (an issuer or public address that is not https with a host, a header that is not one name, a role it does not know or one with no access rule, a sign-in button text, scopes without `openid`, an endpoint host that is not a host name, a default workspace that is not a UUID), and so do an issuer or public address holding a user name or password, a CA ConfigMap name Kubernetes would refuse, a CA key that is not a plain file name, and an `edition.authEdition` spelled other than `local`, `enterprise` or `saas`; `config.OIDC_CLIENT_SECRET` stops the render in every edition. What only the API can judge, it still judges at start: the access rule's and the first admins' syntax, an issuer many organisations share, and whether the CA file holds a certificate. Left unticked until CI runs the suite.*
+- [ ] helm-unittest covers both. *Written: `charts/automatos/tests/enterprise_api_test.yaml` and `enterprise_refusals_test.yaml`, and the install notes in `notes_test.yaml`. Left unticked until CI runs them.*
 
 #### US-702: A setup guide for each provider · M
 **Description:** As a customer's administrator, I want exact steps for my IdP, so that I register the application correctly the first time.
 
 **Acceptance Criteria:**
 - [ ] Guides for Microsoft Entra ID, Google Workspace, Okta, Keycloak and Amazon Cognito, each with the application registration, the redirect address, the claims to send and the matching settings.
-- [ ] Each guide says what that provider cannot do (for example, Google sends no groups).
+- [ ] Each guide says what that provider cannot do (for example, Google sends no groups), and what to set on the provider's side so `auth_time` arrives, from §5.9's table: Entra's optional claim, Google's client setting, Cognito's managed login. An install whose provider never sends `auth_time` cannot use the admin actions: each step-up refuses with `step_up_no_auth_time`.
 - [ ] AWS IAM Identity Center is either documented from a working run or listed as not supported, with the reason.
 
 #### US-703: Proof on the first install · M
@@ -579,10 +657,14 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As an operator, I want to choose which of Automatos's hosted services my install calls, so that nothing leaves the install unless I switched it on (D-12).
 
 **Acceptance Criteria:**
-- [ ] One named setting for each hosted service the code calls: theme revocations (the revocation pull, its schedule, its sync status and manual pull), Cloud sync (the Cloud Sync routes and the sync pull) and Cloud items (the "Items brought from Cloud" routes). The list is the `calls_automatos_cloud` rows of `PRD-277-EDITION-CHECKS.md`; a service added later gets its own setting.
-- [ ] Each setting is off by default in enterprise, and the code reads it through a capability, never the edition's name.
-- [ ] `local` and `saas` behave as before: `local` calls each service as today, and `saas` remains the host.
-- [ ] Tests prove each service is not called in enterprise with its setting off, is called with it on, and that `local` and `saas` are unchanged.
+- [ ] One named setting for each hosted service the code calls: theme revocations (the revocation pull, its schedule, its sync status and manual pull), Cloud sync (the Cloud Sync routes and the sync pull) and Cloud items (the "Items brought from Cloud" routes). The list is the `calls_automatos_cloud` rows of `PRD-277-EDITION-CHECKS.md`; a service added later gets its own setting. *Built: `ENTERPRISE_CALLS_THEME_REVOCATIONS`, `ENTERPRISE_CALLS_CLOUD_SYNC` and `ENTERPRISE_CALLS_CLOUD_ITEMS` (`config.py`, in `reports/config-surface.json`), one capability each (`calls_theme_revocations`, `calls_cloud_sync`, `calls_cloud_items`) replacing `calls_automatos_cloud` everywhere. A setting stops requests; it never stops the install reading what it already holds. Theme revocations also guards the pull itself (`revocation_pull.pull_feed`); the revocations and revoked keys a pull stored still apply once it is off (`revocation_sync_state` reads them everywhere but on the hosted edition). Cloud sync also guards a Cloud theme's package download and the Cloud screenshot address. Cloud items covers the Sync's item and plugin passes, and the bundle and package requests themselves (`services/marketplace_bundles/items_gate.py`, asked by `items_feed` and `plugin_import` before each request); the "Items brought from Cloud" routes only read what the install holds, so they answer in an enterprise install whatever the setting says, and an item brought earlier is still reviewed before anyone adds it (open question 9). Cloud sync needs theme revocations and Cloud items needs Cloud sync, refused at start (`core/edition_start_up.py`) and at chart render; no setting turns another on. The web app reads which are on from `GET /api/hosted-services`. The chart sets each from `edition.enterprise.hostedServices` and refuses them in `config`. In an enterprise install Sync now is an install admin's, after a fresh sign-in (`api/marketplace_cloud_sync.py` `require_sync_admin`, then `require_step_up`; open question 10); `local` is unchanged. Left unticked until CI runs the tests.*
+- [ ] Each setting is off by default in enterprise, and the code reads it through a capability, never the edition's name. *Built: `editions.current()` gives each capability its setting's value only where the row says `hosted_services_by_setting` (enterprise), through `with_hosted_service_settings`, on only for `1`, `true`, `yes` or `on` (config's own switch forms), so a malformed value reads as off, and start-up refuses it. Every call site reads the capability (`test_prd277_us704_hosted_services.py`, `test_prd277_edition_capabilities.py`). Left unticked until CI runs the tests.*
+- [ ] `local` and `saas` behave as before: `local` calls each service as today, and `saas` remains the host. *Built: their rows hold the three answers and no setting can move them; saas keeps its 404 sentences, and the local and hosted web builds answer from the build and ask nothing. Left unticked until CI runs the tests.*
+- [ ] Tests prove each service is not called in enterprise with its setting off, is called with it on, and that `local` and `saas` are unchanged. *Built: `test_prd277_us704_hosted_services.py` (with the HTTP transports and every client seam set to fail and record if touched, and every "off" test asserting that record is empty: no request, no scheduled job, the routes' 404 before anything runs; with it on, the request reaches a mock Automatos host; a key revoked while on still revoked once off; items brought while on still listed and reviewed once off); `test_prd277_us704_cloud_sync_admin.py` (who may run a Sync in enterprise, and `local` unchanged); the chart's `enterprise_api_test.yaml` and `enterprise_refusals_test.yaml`; the web app's `hosted-services.test.ts`, `use-hosted-services.test.tsx`, `cloud-install-gate-enterprise.test.ts`, `enterprise-hosted-services.test.tsx` and `revocations-panel-enterprise.test.tsx`. Left unticked until CI runs them.*
+
+#### US-704 notes
+
+- **Two lists that name hosts follow D-12 too (#1605).** Neither makes a request by itself. The enterprise web app's content security policy names no Automatos host and no host of the hosted edition's sign-in provider or payment provider (`frontend/csp-policy.mjs` `enterpriseContentSecurityPolicy`, at build time and in the middleware). Automatos Cloud's screenshot path is in `img-src` only while Cloud sync is on: the web container reads `ENTERPRISE_CALLS_CLOUD_SYNC` when it starts, as it reads `MEDIA_ORIGINS`, and the chart gives it `edition.enterprise.hostedServices.cloudSync`. An agent's `http_request` tool may call only the install's own hosts, and its description names only those (`agent_http_own_hosts_only`, `modules/tools/execution/http_hosts.py`). `local` and `saas` are unchanged. Tests: `lib/enterprise/__tests__/enterprise-own-hosts-csp.test.ts`, `runtime-csp.test.ts`, `tests/test_prd277_d12_agent_http_hosts.py`, the chart's `enterprise_web_test.yaml` and `hosted_services_web_refusals_test.yaml`, and the image check (`frontend/scripts/check-enterprise-image.sh`), none of them run until CI runs them.
 
 ## 7. Functional requirements
 
@@ -613,7 +695,7 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 - **FR-25:** `local` and `saas` must behave as before. Their existing tests must pass without being weakened.
 - **FR-26:** No source file may name an identity provider.
 - **FR-27:** Sign-in must be written against one identity interface, with one hook after verification, and registration must close at startup.
-- **FR-28:** In enterprise the system must call each of Automatos's hosted services only when the operator has switched that service on with its own setting, each off by default, and `local` and `saas` must call them as before.
+- **FR-28:** In enterprise the system must call each of Automatos's hosted services only when the operator has switched that service on with its own setting, each off by default, and `local` and `saas` must call them as before. *Built in US-704.*
 
 ## 8. Decisions for Gerard
 
@@ -639,7 +721,7 @@ All answered by Gerard on 19 Nov 2026. The options he was given are kept, so eac
 
 ## 9. Technical considerations
 
-- **The web app's build-time settings.** The enterprise image calls the API by relative address, which removes the per-install API address. Media origins in the content security policy are still fixed at build time, so an install whose stored media lives on another host needs the web app to read those settings at run time. That work is a sibling PRD, not yet written. The first development install can run before it lands.
+- **The web app's build-time settings.** The enterprise image calls the API by relative address, which removes the per-install API address. Media origins in the content security policy were fixed at build time; for the enterprise image they are now read when the server starts (`MEDIA_ORIGINS`), and the WebSocket address comes from the page. That work is PRD-279 Wave 4 (US-401, US-402), built with US-505's second line.
 - **PRD-257.** Its people sign-in (D5, question 4) moves here. Its runner identity (W2a) reuses US-401's key handling. The two should share one module.
 - **PRD-253.** Session mode in an enterprise edition stays out, as that PRD's own decision O1 says.
 - **PRD-276.** Sweeping expired sessions should be a scheduled job on the durable queue, not a new loop.
@@ -680,7 +762,12 @@ All answered by Gerard on 19 Nov 2026. The options he was given are kept, so eac
 2. **[?] Which identity provider does the first customer use?** The dev install's conformance run starts with it.
 3. **[?] Does anything in the 25 API files that query by Clerk id run in `local` today?** If so, US-202 fixes a latent bug there; if not, those routes are `saas`-only and need a capability.
 4. **[?] Apple's rule on third-party sign-in** has an exemption for apps that sign in with an existing enterprise account. Confirm against the current text in the app PRD (US-604).
-5. **[?] Where pre-sign-in state is kept** for its 10 minutes: Redis with `SET NX EX`, as webhook dedup does, or a table. Decided in US-402's PR.
+5. **[decided, US-402] Where pre-sign-in state is kept** for its 10 minutes: Redis with `SET NX EX`, as webhook dedup does, or a table. A table, `oidc_pending_sign_ins` (`prd277_w4_oidc_sign_ins_20261120`), holding digests of the state, the nonce, the browser binding and the client address, the PKCE verifier, the return path and the expiry; bounded per address and overall by ending the oldest (§5.11). Single use is one `DELETE … RETURNING`, committed before the code is exchanged, which Postgres serialises: of two callbacks with one state, exactly one gets it, and a test races two. Redis was not chosen because the rate limiter lets requests through when it is unreachable, and single use must never fail open.
 6. **[?] Emails that differ only by case must belong to one person**, on the OIDC path and on the Clerk path. The check before an insert compares emails case-insensitively; for it to hold when two sign-ins arrive at the same moment, `users` needs a unique index on `LOWER(email)`. Adding it needs the owner's decision and a check of existing data for rows it would refuse.
-7. **[?] Which workspace an install-wide role change is audited under.** A change to `users.system_role` belongs to no workspace, and `audit_logs.workspace_id` is required. Today the caller of `set_system_role` passes it. US-405 settles it.
-8. **[?] Whether a person's placeholder address becomes their real address** once a later sign-in carries it verified. Today a repeat sign-in never rewrites a stored address. Open: Wave 4 decides it.
+7. **[decided, US-405] Which workspace an install-wide role change is audited under.** A change to `users.system_role` belongs to no workspace, and `audit_logs.workspace_id` is required. Today the caller of `set_system_role` passes it. US-405 settles it: the workspace the admin acted from, else the install's default workspace (`people.set_install_role`); a first admin's `auth:bootstrap_admin` is in the default workspace.
+8. **[decided, US-404] Whether a person's placeholder address becomes their real address** once a later sign-in carries it verified. No, in v1: a repeat sign-in never rewrites a stored address, placeholder or not. A person is found by issuer and subject only, so a placeholder never stops anyone signing in; rewriting it safely needs the address conflict check under concurrent sign-ins, which waits on entry 6.
+9. **[?] What Cloud items covers (US-704).** As built, `ENTERPRISE_CALLS_CLOUD_ITEMS` covers the requests for items: the Sync's item and plugin passes. The "Items brought from Cloud" routes only read what the install holds, so they answer in an enterprise install whatever the setting says, and an item brought while the setting was on is still listed and still reviewed in the web app before anyone adds it. The owner confirms this reading of the acceptance line, which names those routes.
+10. **[?] Who may run Sync with Automatos Cloud in an enterprise install (US-704).** As built, an install admin with a fresh sign-in, because a Sync brings packages and items in and moves installs for the whole install; the status read stays with a workspace owner or admin. The web app still shows Sync now to a workspace owner or admin, and the server refuses one who is not an install admin with a plain sentence. Check now, for the revocation list, keeps its admin check and has no step-up: it runs sooner the pull the schedule runs anyway.
+11. **[?] How long a device token may live (US-601).** A device token has no maximum age, so a phone is not bounded by the identity provider's access rule: it keeps working until its person is deactivated, loses their membership of its workspace, or the phone is revoked. This is an open decision for the owner; one option is a maximum-age setting after which a phone must pair again.
+12. **[?] What a device with an admin's membership role can do (US-601).** A device acts with its person's membership role, so a device whose person is a workspace owner or admin can do what that role can do wherever no fresh sign-in is asked.
+13. **[?] Whether a phone's sign-in must prove it was fresh (US-603).** A phone's start asks the provider for a fresh sign-in (`max_age=0`, `prompt=login`), but the callback does not check the `auth_time` the provider returns for a phone, as it does for a step-up: a provider that ignores the request lets a session it already holds through, and the person's Continue on the install's page is then the only step the person takes. Checking it would refuse a phone at providers that return no `auth_time`. The owner decides whether to check it, and what a phone meets at such a provider.

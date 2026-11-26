@@ -1,6 +1,6 @@
 """PRD-266 §4.2 — mobile devices: the phones (and paired browsers) of Automatos Go.
 
-One row per device a person uses with one workspace. Two kinds:
+One row per device a person uses with one workspace. Three kinds:
 
 * ``paired`` — the local edition. Studio issues a one-time code (only its SHA-256 is
   stored), the phone or browser pairs with it and receives a device token (only its
@@ -9,6 +9,14 @@ One row per device a person uses with one workspace. Two kinds:
   be told ``device_revoked``.
 * ``clerk`` — SaaS. The phone signs in with Clerk and registers for push only, so it
   never holds a code or token hash (``ck_mobile_devices_clerk_holds_no_token``).
+* ``oidc`` — enterprise (PRD-277 US-603). The person signed in on the phone at the install's own
+  OIDC start address; the callback leaves a PENDING row awaiting their confirmation, holding only
+  the SHA-256 of a confirmation token bound to their browser (``sign_in_confirm_hash``), the app's
+  PKCE challenge (``sign_in_challenge``), its install id (``sign_in_install_id``) and its app link's
+  key (``sign_in_app_link``). Continue swaps the confirmation hash for the SHA-256 of a one-time
+  code (``pairing_code_hash``), and the app exchanges the code with its verifier for a device
+  token, kept as a paired row keeps it. Revision ``prd277_w6b_phone_sign_in_20261121`` widens
+  ``ck_mobile_devices_kind`` and adds the four columns.
 
 A pending row is a code waiting for a phone, so ``install_id`` (the id the app keeps
 in SecureStore) is null until it pairs; it is unique per workspace and person.
@@ -47,11 +55,17 @@ from core.database.base import Base
 
 
 class MobileDeviceKind(str, Enum):
-    """``PAIRED`` — local edition, holds a device token.
-    ``CLERK`` — SaaS, signed in with Clerk, push registration only."""
+    """``PAIRED`` — paired with a one-time code, holds a device token.
+    ``CLERK`` — SaaS, signed in with Clerk, push registration only.
+    ``OIDC`` — enterprise, signed in on the phone (PRD-277 US-603), holds a device token."""
 
     PAIRED = "paired"
     CLERK = "clerk"
+    OIDC = "oidc"
+
+
+# The kinds that hold a device token (``amd_``): rotated, revoked and refused alike.
+TOKEN_KINDS = (MobileDeviceKind.PAIRED.value, MobileDeviceKind.OIDC.value)
 
 
 class MobileDeviceStatus(str, Enum):
@@ -78,20 +92,26 @@ SHA256_HEX_LENGTH = 64
 EXPO_PUSH_TOKEN_LENGTH = 255
 REASON_LENGTH = 64
 PUSH_KEY_LENGTH = 128
+# RFC 7636 §4.2: an S256 challenge is BASE64URL(SHA-256), 43 characters without padding.
+CODE_CHALLENGE_LENGTH = 43
+# What a phone's install id may be (the id the app keeps in SecureStore): POST /pair's rule.
+INSTALL_ID_MIN_LENGTH = 8
+INSTALL_ID_PATTERN = rf"^[A-Za-z0-9_-]{{{INSTALL_ID_MIN_LENGTH},{INSTALL_ID_LENGTH}}}$"
 
 # Never leave the server through to_dict(): the hashes and the push signing key.
-SECRET_COLUMNS = ("pairing_code_hash", "token_hash", "prev_token_hash", "push_key")
-
-# PRD-266 §8: a clerk row never holds a code or token hash.
-CLERK_HOLDS_NO_TOKEN = (
-    "kind = 'paired' OR "
-    "(token_hash IS NULL AND prev_token_hash IS NULL AND pairing_code_hash IS NULL)"
-)
-
+SECRET_COLUMNS = ("pairing_code_hash", "token_hash", "prev_token_hash", "push_key", "sign_in_confirm_hash")
 
 def _in_list(column: str, values: tuple) -> str:
     quoted = ", ".join(f"'{v}'" for v in values)
     return f"{column} IN ({quoted})"
+
+
+# PRD-266 §8: a clerk row never holds a code or token hash.
+KIND_CHECK = _in_list("kind", tuple(k.value for k in MobileDeviceKind))
+CLERK_HOLDS_NO_TOKEN = (
+    f"{_in_list('kind', TOKEN_KINDS)} OR "
+    "(token_hash IS NULL AND prev_token_hash IS NULL AND pairing_code_hash IS NULL)"
+)
 
 
 def _iso(value) -> str | None:
@@ -110,9 +130,7 @@ class MobileDevice(Base):
         UniqueConstraint("expo_push_token", name="uq_mobile_devices_expo_push_token"),
         # /pair finds the code with no workspace: one code leads to one pending row only.
         UniqueConstraint("pairing_code_hash", name="uq_mobile_devices_pairing_code_hash"),
-        CheckConstraint(
-            _in_list("kind", tuple(k.value for k in MobileDeviceKind)), name="ck_mobile_devices_kind",
-        ),
+        CheckConstraint(KIND_CHECK, name="ck_mobile_devices_kind"),
         CheckConstraint(
             _in_list("status", tuple(s.value for s in MobileDeviceStatus)), name="ck_mobile_devices_status",
         ),
@@ -170,6 +188,15 @@ class MobileDevice(Base):
     # The optional push categories the app registered (PRD-268 §6.12.5): a suggestion push
     # goes only to a device listing 'suggestion'. Last, as prd268_w2_delivery appends it.
     push_categories = Column(JSONB, nullable=False, default=list, server_default=text("'[]'"))
+    # PRD-277 US-603, a pending oidc row only (null on every other): the app's PKCE S256 challenge its
+    # sign-in code is bound to, and the install id that signed in. Cleared when the code is exchanged.
+    sign_in_challenge = Column(String(CODE_CHALLENGE_LENGTH), nullable=True)
+    sign_in_install_id = Column(String(INSTALL_ID_LENGTH), nullable=True)
+    # The key of core.auth.phone_sign_in.APP_LINKS the code goes to, and, while the sign-in awaits the
+    # person's Continue, the SHA-256 of the token in their browser's cookie. The exchange never reads
+    # the second: it finds a code by pairing_code_hash only, which is null until Continue.
+    sign_in_app_link = Column(String(ENUM_LENGTH), nullable=True)
+    sign_in_confirm_hash = Column(String(SHA256_HEX_LENGTH), nullable=True)
 
     def to_dict(self) -> dict:
         """The device as the API shows it: never a hash, the push key or the push token."""

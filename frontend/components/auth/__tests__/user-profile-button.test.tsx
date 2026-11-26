@@ -55,7 +55,7 @@ afterEach(() => {
 
 describe('initialsFor', () => {
   it('derives initials from the name, then the email, then a placeholder', async () => {
-    const { initialsFor } = await loadButton('local')
+    const { initialsFor } = await import('@/lib/initials')
     expect(initialsFor('Ada Lovelace', null)).toBe('AL')
     expect(initialsFor('Ada Byron Lovelace', null)).toBe('AL')
     expect(initialsFor('ada', null)).toBe('AD')

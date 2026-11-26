@@ -6,8 +6,9 @@
   runs pins its signer exactly, so a signature from a pull request build, a branch,
   another tag, another workflow or a fork does not pass it.
 * ``scripts/ci/release_chart.py`` (US-201): the packaged chart's values name every
-  image by digest and change nothing else, the web app's one slot takes the default
-  edition's image, and a rendered chart that names an image by a tag fails.
+  image by digest, one web image per published edition in that edition's slot, and
+  change nothing else; each edition's render is checked against that edition's images,
+  and a rendered chart that names an image by a tag, or an edition left unrendered, fails.
 
 Pure file reads and temporary files: no Docker, no helm, no cosign, no network.
 """
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -27,7 +29,11 @@ CHART = ROOT / "charts" / "automatos"
 REPO = "AutomatosAI/automatos-ai"
 SHA = "0d9f0ac594c3783e62a30e6c5ce75164028850db"
 TAG = "refs/tags/v0.8.0-rc.1"
-DIGESTS = {"api": "sha256:" + "a" * 64, "frontend": "sha256:" + "b" * 64, "workspace-worker": "sha256:" + "c" * 64}
+DIGESTS = {"api": "sha256:" + "a" * 64, "frontend": "sha256:" + "b" * 64, "workspace-worker": "sha256:" + "c" * 64,
+           "enterprise-frontend": "sha256:" + "d" * 64}
+# Each published edition's images: the shared ones and its own web image (PRD-277 US-505).
+EDITION_IMAGES = {"local": ["api", "frontend", "workspace-worker"],
+                  "enterprise": ["api", "enterprise-frontend", "workspace-worker"]}
 PREFIX = "ghcr.io/automatosai/automatos-"
 
 
@@ -170,26 +176,34 @@ def test_verify_runs_cosign_and_a_failed_check_fails(capsys):
 # --------------------------------------------------------------------------- the packaged chart (US-201)
 
 
-def _prepared(tmp_path: Path) -> tuple[dict, str, list]:
+SLOT_IMAGES = ((("api", "image"), "api"), (("frontend", "image"), "frontend"),
+               (("frontend", "enterpriseImage"), "enterprise-frontend"), (("worker", "image"), "workspace-worker"))
+
+
+def _refs(names) -> list:
+    return [f"{PREFIX}{name}@{DIGESTS[name]}" for name in names]
+
+
+def _prepared(tmp_path: Path) -> tuple[dict, str, dict]:
     references = chart.prepare(CHART, tmp_path, DIGESTS, PREFIX, "0.8.0-rc.1")
     text = (tmp_path / "automatos" / "values.yaml").read_text(encoding="utf-8")
     return yaml.safe_load(text), text, references
 
 
-def test_the_packaged_values_name_every_image_by_its_digest(tmp_path):
+def test_the_packaged_values_name_every_image_by_its_digest_one_web_image_per_edition(tmp_path):
     values, _, references = _prepared(tmp_path)
-    for key, name in (("api", "api"), ("frontend", "frontend"), ("worker", "workspace-worker")):
-        assert values[key]["image"]["repository"] == f"{PREFIX}{name}"
-        assert values[key]["image"]["digest"] == DIGESTS[name]
-    assert references == sorted(f"{PREFIX}{name}@{digest}" for name, digest in DIGESTS.items())
+    for (key, slot), name in SLOT_IMAGES:
+        assert values[key][slot]["repository"] == f"{PREFIX}{name}"
+        assert values[key][slot]["digest"] == DIGESTS[name]
+    assert references == {edition: _refs(names) for edition, names in EDITION_IMAGES.items()}
 
 
 def test_nothing_else_in_the_values_changes_and_the_comments_stay(tmp_path):
     values, text, _ = _prepared(tmp_path)
     original_text = (CHART / "values.yaml").read_text(encoding="utf-8")
     original = yaml.safe_load(original_text)
-    for key in ("api", "frontend", "worker"):
-        values[key]["image"] = {**values[key]["image"], "digest": "", "repository": original[key]["image"]["repository"]}
+    for (key, slot), _name in SLOT_IMAGES:
+        values[key][slot] = {**values[key][slot], "digest": "", "repository": original[key][slot]["repository"]}
     assert values == original
     comments = [line for line in original_text.splitlines() if line.lstrip().startswith("#")]
     assert [line for line in text.splitlines() if line.lstrip().startswith("#")][2:] == comments
@@ -197,12 +211,51 @@ def test_nothing_else_in_the_values_changes_and_the_comments_stay(tmp_path):
     assert (CHART / "values.yaml").read_text(encoding="utf-8") == original_text, "the repository's chart is untouched"
 
 
-def test_the_web_slot_takes_the_default_editions_image_and_refuses_an_edition_it_cannot_hold():
-    assert chart.plan("local") == {"api": "api", "worker": "workspace-worker", "frontend": "frontend"}
-    with pytest.raises(chart.ChartError, match="the editions \\['enterprise'\\] need a slot each"):
-        chart.web_image("local", {"local": "frontend", "enterprise": "frontend-enterprise"})
+def test_each_edition_has_a_web_slot_of_its_own_and_one_without_an_image_is_refused(tmp_path):
+    """The second edition no longer refused (PRD-279 US-201 line 2): its image has its own slot."""
+    assert chart.plan() == {slot: name for slot, name in SLOT_IMAGES}
+    assert chart.published_names() == sorted(DIGESTS)
+    for edition, names in EDITION_IMAGES.items():
+        assert chart.edition_images(edition) == sorted(names)
     with pytest.raises(chart.ChartError, match="no published web image"):
-        chart.web_image("saas")
+        chart.edition_images("saas")
+    saas = tmp_path / "saas-chart"
+    shutil.copytree(CHART, saas)
+    values = (saas / "values.yaml").read_text(encoding="utf-8")
+    (saas / "values.yaml").write_text(values.replace("  authEdition: local\n", "  authEdition: saas\n"), encoding="utf-8")
+    with pytest.raises(chart.ChartError, match="defaults to the 'saas' edition, which has no published web image"):
+        chart.prepare(saas, tmp_path / "out", DIGESTS, PREFIX, "0.8.0-rc.1")
+
+
+def test_a_release_with_one_digest_in_two_web_slots_publishes_nothing(tmp_path):
+    """The enterprise slot filled with the local image would run the local web app in enterprise."""
+    same = {**DIGESTS, "enterprise-frontend": DIGESTS["frontend"]}
+    expected = r"one digest in frontend\.enterpriseImage \(enterprise\) and frontend\.image \(local\)"
+    with pytest.raises(chart.ChartError, match=expected):
+        chart.check_distinct_web_digests(same)
+    with pytest.raises(chart.ChartError, match=expected):
+        chart.prepare(CHART, tmp_path, same, PREFIX, "0.8.0-rc.1")
+    assert not (tmp_path / "automatos").exists(), "nothing is copied for a refused release"
+    chart.check_distinct_web_digests(DIGESTS)
+    # The shared images may hold any digest: only the web slots are each one edition's build.
+    chart.check_distinct_web_digests({**DIGESTS, "workspace-worker": DIGESTS["api"]})
+
+
+def test_each_editions_render_values_hold_only_what_it_needs_and_nothing_secret_shaped(tmp_path):
+    written = chart.write_render_values(tmp_path / "render")
+    assert [path.name for path in written] == ["enterprise.yaml", "local.yaml"]
+    local = yaml.safe_load((tmp_path / "render" / "local.yaml").read_text(encoding="utf-8"))
+    enterprise = yaml.safe_load((tmp_path / "render" / "enterprise.yaml").read_text(encoding="utf-8"))
+    assert local == {}, "the default edition renders with existingSecret alone"
+    assert enterprise["edition"]["authEdition"] == "enterprise"
+    # PRD-277 US-701: each value the chart requires in this edition, and nothing else.
+    assert enterprise["edition"]["enterprise"] == {
+        "publicUrl": "https://automatos.example.com", "clientIpHeader": "X-Real-IP",
+        "oidc": {"issuer": "https://id.example.com/realms/automatos", "clientId": "automatos"}}
+    # PRD-278 D-6: the edition renders only on a database connection that checks the server.
+    assert enterprise["database"] == {"sslmode": "verify-full", "caConfigMap": "database-ca"}
+    assert set(enterprise) == {"edition", "database"}
+    assert "secret" not in json.dumps(enterprise).lower()
 
 
 def test_a_missing_or_malformed_digest_publishes_nothing(tmp_path):
@@ -226,7 +279,7 @@ def _rendered(images: list, version_label: str = "0.8.0-rc.1") -> list:
 
 
 def test_a_render_that_runs_exactly_the_published_digests_passes():
-    expected = sorted(f"{PREFIX}{name}@{digest}" for name, digest in DIGESTS.items())
+    expected = _refs(EDITION_IMAGES["local"])
     assert chart.check_rendered(_rendered(expected), expected, "0.8.0-rc.1") == []
 
 
@@ -237,29 +290,74 @@ def test_a_render_that_runs_exactly_the_published_digests_passes():
     "ghcr.io/automatosai/automatos-api:0.8@sha256:" + "a" * 64,
 ])
 def test_a_render_with_an_image_named_by_a_tag_fails(image):
-    expected = sorted(f"{PREFIX}{name}@{digest}" for name, digest in DIGESTS.items())
+    expected = _refs(EDITION_IMAGES["local"])
     problems = chart.check_rendered(_rendered([*expected[1:], image]), expected, "0.8.0-rc.1")
     assert f"named by a tag, not a digest: {image}" in problems
     assert f"published but not run by the chart: {expected[0]}" in problems
 
 
 def test_a_render_with_another_image_or_the_wrong_version_fails():
-    expected = sorted(f"{PREFIX}{name}@{digest}" for name, digest in DIGESTS.items())
+    expected = _refs(EDITION_IMAGES["local"])
     stranger = "ghcr.io/someone/else@sha256:" + "e" * 64
     assert chart.check_rendered(_rendered([*expected, stranger]), expected, "0.8.0-rc.1") == [
-        f"run by the chart but not published by this release: {stranger}"]
+        f"run by the chart but not one of the images this render should run: {stranger}"]
     problems = chart.check_rendered(_rendered(expected, "edge"), expected, "0.8.0-rc.1")
     assert any(problem.startswith("label helm.sh/chart is") for problem in problems)
     assert chart.check_rendered([], expected, "0.8.0-rc.1")[-1] == "the render names no image at all"
 
 
-def test_the_cli_prepares_the_chart_and_lists_its_images(tmp_path):
+def _expected_by_edition() -> dict:
+    return {edition: _refs(names) for edition, names in EDITION_IMAGES.items()}
+
+
+def test_every_editions_render_is_checked_against_its_own_images():
+    expected = _expected_by_edition()
+    renders = {edition: _rendered(refs) for edition, refs in expected.items()}
+    assert chart.check_renders(renders, expected, "0.8.0-rc.1") == []
+
+
+def test_an_edition_running_the_other_editions_web_image_fails():
+    expected = _expected_by_edition()
+    local_web, enterprise_web = _refs(["frontend"])[0], _refs(["enterprise-frontend"])[0]
+    swapped = [ref for ref in expected["enterprise"] if ref != enterprise_web] + [local_web]
+    problems = chart.check_renders({"local": _rendered(expected["local"]), "enterprise": _rendered(swapped)},
+                                   expected, "0.8.0-rc.1")
+    assert problems == [f"enterprise: published but not run by the chart: {enterprise_web}",
+                        f"enterprise: run by the chart but not one of the images this render should run: {local_web}"]
+
+
+def test_an_edition_left_unrendered_or_one_never_published_fails():
+    expected = _expected_by_edition()
+    renders = {"local": _rendered(expected["local"]), "saas": _rendered(expected["local"])}
+    assert chart.check_renders(renders, expected, "0.8.0-rc.1") == [
+        "enterprise: not rendered", "saas: rendered, but not a published edition"]
+
+
+def test_the_cli_prepares_the_chart_and_lists_each_editions_images_and_render_values(tmp_path):
     digests = tmp_path / "digests"
     digests.mkdir()
     for name, digest in DIGESTS.items():
         (digests / name).write_text(digest + "\n", encoding="utf-8")
     images = tmp_path / "images.json"
     assert chart.main(["prepare", "--chart", str(CHART), "--out", str(tmp_path / "out"), "--digests", str(digests),
-                       "--prefix", PREFIX, "--version", "0.8.0-rc.1", "--images", str(images)]) == 0
-    assert json.loads(images.read_text(encoding="utf-8")) == sorted(f"{PREFIX}{n}@{d}" for n, d in DIGESTS.items())
+                       "--prefix", PREFIX, "--version", "0.8.0-rc.1", "--images", str(images),
+                       "--render-values", str(tmp_path / "render")]) == 0
+    assert json.loads(images.read_text(encoding="utf-8")) == _expected_by_edition()
+    assert sorted(path.name for path in (tmp_path / "render").iterdir()) == ["enterprise.yaml", "local.yaml"]
     assert (tmp_path / "out" / "automatos" / "templates" / "_helpers.tpl").is_file()
+
+
+def test_the_cli_checks_one_render_file_per_edition(tmp_path, capsys):
+    images = tmp_path / "images.json"
+    images.write_text(json.dumps(_expected_by_edition()), encoding="utf-8")
+    rendered = tmp_path / "rendered"
+    rendered.mkdir()
+    (rendered / "local.yaml").write_text(yaml.safe_dump_all(_rendered(_expected_by_edition()["local"])),
+                                         encoding="utf-8")
+    args = ["check-rendered", "--rendered", str(rendered), "--images", str(images), "--version", "0.8.0-rc.1"]
+    assert chart.main(args) == 1
+    assert "::error title=Release chart::enterprise: not rendered" in capsys.readouterr().out
+    (rendered / "enterprise.yaml").write_text(yaml.safe_dump_all(_rendered(_expected_by_edition()["enterprise"])),
+                                              encoding="utf-8")
+    assert chart.main(args) == 0
+    assert "manifests by edition: enterprise 3, local 3; 0 problems" in capsys.readouterr().out

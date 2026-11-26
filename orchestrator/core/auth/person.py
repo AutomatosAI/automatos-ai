@@ -83,6 +83,42 @@ _DEFAULT_WORKSPACE_SQL = (
 )
 
 
+# PRD-277 US-501: every usable workspace the person can open (owned, or an active membership),
+# with the role the permission gate uses (core/auth/workspace_permission.py ``_role_of``): the
+# active member row's role as it is, else ``owner`` for the workspace's owner with no member row.
+# In the default workspace's order: owned or owner-role first, then the most recent join, then the
+# newest workspace.
+_WORKSPACES_OF_SQL = (
+    "SELECT w.id, w.name, CASE WHEN wm.id IS NULL THEN 'owner' ELSE wm.role END AS role FROM users u "
+    "JOIN workspaces w "
+    "  ON w.owner_id = u.id "
+    "  OR EXISTS ("
+    "    SELECT 1 FROM workspace_members m "
+    "    WHERE m.workspace_id = w.id AND m.user_id = u.id AND m.is_active = true "
+    "  ) "
+    "LEFT JOIN workspace_members wm "
+    "  ON wm.workspace_id = w.id AND wm.user_id = u.id AND wm.is_active = true "
+    "WHERE u.id = {person} "
+    "  AND w.is_active IS NOT FALSE "
+    "  AND w.deleted_at IS NULL "
+    "ORDER BY "
+    "  CASE WHEN w.owner_id = u.id OR COALESCE(wm.role, '') = 'owner' THEN 0 ELSE 1 END, "
+    "  wm.joined_at DESC NULLS LAST, "
+    "  w.created_at DESC "
+    "LIMIT :limit"
+)
+WORKSPACES_LISTED_MAX = 200
+
+
+@dataclass(frozen=True)
+class HeldWorkspace:
+    """A workspace a person can open, and their role in it (None when the member row holds none)."""
+
+    id: str
+    name: str
+    role: Optional[str]
+
+
 @dataclass(frozen=True)
 class Person:
     """A person as a statement names them: an expression that is their ``users.id``, and the
@@ -148,8 +184,16 @@ def default_workspace(db: Any, person: Person) -> Optional[Any]:
     return row[0] if row and row[0] else None
 
 
+def workspaces_of(db: Any, person: Person, limit: int = WORKSPACES_LISTED_MAX) -> Tuple[HeldWorkspace, ...]:
+    """Every usable workspace the person can open, with their role in each (see ``_WORKSPACES_OF_SQL``)."""
+    rows = db.execute(*person_statement(_WORKSPACES_OF_SQL, person, limit=limit)).fetchall()
+    return tuple(HeldWorkspace(id=str(row[0]), name=row[1] or "", role=row[2]) for row in rows)
+
+
 __all__ = [
     "PERSON_SLOT",
+    "WORKSPACES_LISTED_MAX",
+    "HeldWorkspace",
     "Person",
     "by_clerk_id",
     "by_user_pk",
@@ -159,4 +203,5 @@ __all__ = [
     "owns_or_holds_role",
     "owns_workspace",
     "person_statement",
+    "workspaces_of",
 ]

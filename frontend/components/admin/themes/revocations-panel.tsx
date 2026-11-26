@@ -12,13 +12,18 @@
  * (`revocation_admin._feed_rows_liftable_here`), which still decides: a refusal (409) shows its
  * sentence and the list is read again.
  *
- * Both editions: the hosted edition has no sync to show (`hosted`), and its rows are all local.
+ * Both editions: the hosted edition has no sync to show (`hosted`), and its rows are all local. An
+ * enterprise install pulls the list only while its operator has switched it on (PRD-277 US-704,
+ * `pullsRevocations`); while off the panel says so in one plain line, asks for no sync status, and its
+ * feed rows (from a time it was on) can be lifted, as the server's rule allows.
  */
 import { useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { useHostedService } from '@/hooks/use-hosted-services'
 import type { ThemeRevocationRow, ThemeRevocationSyncStatus } from '@/lib/api-client'
+import { isEnterprise } from '@/lib/edition-name'
 import { formatRelative } from '@/lib/format-relative'
 import { themeErrorMessage } from '@/lib/theme-host/api'
 
@@ -113,17 +118,27 @@ function RevocationList({ feedLiftable }: { feedLiftable: boolean }) {
   )
 }
 
+/**
+ * Whether this install pulls the revocation list: never on the hosted edition (it serves the list), always on
+ * the local edition, and on an enterprise install as its operator switched it (`answer`; unknown while loading).
+ */
+export function pullsRevocations(hosted: boolean, enterprise: boolean, answer: boolean | undefined): boolean | undefined {
+  if (hosted) return false
+  return enterprise ? answer : true
+}
+
 export function RevocationsPanel({ hosted }: { hosted: boolean }) {
-  const sync = useRevocationSync(!hosted)
+  const pulls = pullsRevocations(hosted, isEnterprise, useHostedService('themeRevocations'))
+  const sync = useRevocationSync(pulls === true)
   return (
     <section aria-label={REVOCATIONS_TITLE} className="space-y-3" data-testid="theme-revocations">
       <div className="space-y-1">
         <h2 className="text-lg font-semibold">{REVOCATIONS_TITLE}</h2>
         <p className="text-xs text-muted-foreground">{REVOCATIONS_LEDE}</p>
       </div>
-      <RevocationSyncStatus hosted={hosted} sync={sync} />
+      <RevocationSyncStatus hosted={hosted} switchedOff={!hosted && pulls === false} sync={sync} />
       <RevocationForm />
-      <RevocationList feedLiftable={feedRowsLiftable(hosted, sync.data)} />
+      <RevocationList feedLiftable={feedRowsLiftable(hosted || pulls === false, sync.data)} />
     </section>
   )
 }

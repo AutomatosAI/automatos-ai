@@ -193,7 +193,16 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-11-20 (PRD-277 Wave 2, US-201 and US-203): prd277_w2_identities_20261120 chains onto
 # merge_heads_20261117 — user_identities (a new table) and users.system_role (a new nullable
 # column with its CHECK): a person's (issuer, subject) link and an install-wide role.
-EXPECTED_HEAD = "prd277_w2_identities_20261120"
+# 2026-11-20 (PRD-277 Wave 3, US-301): prd277_w3_sessions_20261120 chains onto
+# prd277_w2_identities_20261120 — auth_sessions, a new table: the sessions Automatos issues.
+# 2026-11-20 (PRD-277 Wave 4, US-402): prd277_w4_oidc_sign_ins_20261120 chains onto
+# prd277_w3_sessions_20261120 — oidc_pending_sign_ins, a new table: sign-ins started, not finished.
+# 2026-11-20 (PRD-277 Wave 4 part 2, US-406): prd277_w4b_step_up_20261120 chains onto
+# prd277_w4_oidc_sign_ins_20261120 — oidc_pending_sign_ins.step_up_session_id, a new nullable column.
+# 2026-11-21 (PRD-277 Wave 6 part 2, US-603): prd277_w6b_phone_sign_in_20261121 chains onto
+# prd277_w4b_step_up_20261120 — ck_mobile_devices_kind allows 'oidc', two nullable columns on
+# mobile_devices and four on oidc_pending_sign_ins: signing in on the phone.
+EXPECTED_HEAD = "prd277_w6b_phone_sign_in_20261121"
 
 
 def _literal(node: ast.AST):

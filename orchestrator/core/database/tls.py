@@ -5,19 +5,25 @@ Two settings, read through ``config``:
 * ``DATABASE_SSLMODE``: libpq's ``sslmode`` (disable, allow, prefer, require, verify-ca,
   verify-full). ``verify-ca`` checks the server's certificate against a CA; ``verify-full``
   also checks that the certificate names the host connected to.
-* ``DATABASE_SSLROOTCERT``: the CA file that check uses. Only with ``verify-ca`` or
-  ``verify-full``.
+* ``DATABASE_SSLROOTCERT``: the CA file that check uses: a file (a PEM bundle), not a
+  directory and not libpq's ``system``. Only with ``verify-ca`` or ``verify-full``, and
+  required with either.
 
 ``database_tls()`` turns them into what each driver takes:
 
 * **libpq**, which ``psycopg2.connect`` and SQLAlchemy's psycopg2 dialect both use: the
   keywords ``sslmode`` and ``sslrootcert`` (``libpq_params``; SQLAlchemy gets them in
   ``connect_args``, which win over the same keys in the address). libpq does the check.
+  libpq also turns ``requiressl`` and ``ssl`` into ``sslmode`` (``SSLMODE_ALIASES``), so with
+  the mode set those two keys are dropped from an engine's address and from a keyword dict
+  (``without_sslmode_aliases``, ``with_libpq_params``). An address handed to
+  ``psycopg2.connect`` as its DSN needs nothing: psycopg2 parses it with libpq, which folds
+  both into ``sslmode``, before the keywords replace it.
 * **asyncpg** (``asyncpg_kwargs``): the ``ssl`` argument, which wins over an ``sslmode`` in
   the address. asyncpg takes no ``sslrootcert`` keyword, so with a CA file it is given an
   ``ssl.SSLContext`` that trusts only that file, requires the certificate, and checks the
-  host name for ``verify-full``. Without a CA file it is given the mode as text, which
-  asyncpg applies the way libpq does, from ``~/.postgresql/root.crt``.
+  host name for ``verify-full``. A mode that checks no certificate is given as text, which asyncpg
+  applies the way libpq does.
 * **libpq's tools** (``pg_isready``, ``psql``): ``PGSSLMODE`` and ``PGSSLROOTCERT``, which
   ``docker-entrypoint.sh`` sets from the same two settings on those commands only.
 
@@ -25,9 +31,10 @@ With neither setting, nothing is added to any connection, so each connects as it
 before the settings existed. The main engine keeps its own default: in production,
 ``sslmode=require`` when its address names no ``sslmode`` (``main_engine_url``).
 
-``database_tls()`` also checks that the CA file is a readable file holding at least one
-certificate, so a missing or unusable file stops start-up (the main engine's module calls it
-on import) rather than the first connection.
+``database_tls()`` also checks that a checking mode names a CA file, and that the file is a
+readable file holding at least one certificate, so a missing or unusable CA stops start-up
+(the main engine's module calls it on import) rather than the first connection. Each
+refusal names the settings, never an address or the file's path.
 
 The asyncpg context is cached by the CA file's path, size and modification time: a file
 replaced at the same path (a ConfigMap update) is loaded again on the next connection, as
@@ -47,7 +54,7 @@ from typing import Any, Dict, Mapping, Optional, Tuple, Union
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import URL, Engine, make_url
 
 from config import config
 
@@ -62,6 +69,15 @@ DEFAULT_ENVIRONMENT = "development"
 # One SSLContext per CA file version and host-name rule, reused by every asyncpg connection.
 _CONTEXT_CACHE_SIZE = 4
 _UNUSABLE_CA = "DATABASE_SSLROOTCERT must name a readable file holding at least one PEM certificate"
+_CA_REQUIRED = (
+    "DATABASE_SSLMODE verify-ca and verify-full need DATABASE_SSLROOTCERT: the path of a file holding "
+    "the CA certificate(s) that signed the database server's certificate"
+)
+
+# The address keys libpq turns into sslmode: requiressl (1 is require, anything else prefer) and,
+# in a URI, ssl=true (require). libpq applies keys in the order written, so with the mode set
+# neither reaches it beside the setting's sslmode.
+SSLMODE_ALIASES = frozenset({"requiressl", "ssl"})
 
 AsyncpgSSL = Union[str, ssl.SSLContext]
 
@@ -91,8 +107,10 @@ class DatabaseTLS:
     def verifies_server(self) -> bool:
         """True when both the server's certificate and its host name are checked (verify-full).
 
-        The predicate an install that must refuse an unchecked connection can require
-        (PRD-278 D-6). Nothing requires it yet.
+        Exactly the mode PRD-278 D-6 requires of the ``enterprise`` edition
+        (``core.edition_start_up.REQUIRED_DATABASE_SSLMODE``), and no wider: ``verify-ca`` checks
+        the certificate but not the host name. ``parse_database_tls`` refuses it without a CA
+        file, so where it is True the check runs against the operator's CA.
         """
         return self.sslmode == SERVER_VERIFYING_MODE
 
@@ -106,8 +124,15 @@ class DatabaseTLS:
         return params
 
     def with_libpq_params(self, params: Mapping[str, Any]) -> Dict[str, Any]:
-        """A copy of a psycopg2 keyword dict with these settings over it."""
-        return {**params, **self.libpq_params()}
+        """A copy of a psycopg2 keyword dict with these settings over it.
+
+        With the mode set, ``SSLMODE_ALIASES`` are left out of the copy, so libpq sees the
+        setting's ``sslmode`` and nothing it would read as another. Unset: a plain copy.
+        """
+        if not self.configured:
+            return {**params}
+        kept = {key: value for key, value in params.items() if key not in SSLMODE_ALIASES}
+        return {**kept, **self.libpq_params()}
 
     def asyncpg_kwargs(self) -> Dict[str, AsyncpgSSL]:
         """The keywords for ``asyncpg.connect``: none, or ``ssl`` (see the module docstring)."""
@@ -160,7 +185,11 @@ def _verifying_context(cafile: str, mtime_ns: int, size: int, check_hostname: bo
 
 
 def parse_database_tls(sslmode: Optional[str], sslrootcert: Optional[str]) -> DatabaseTLS:
-    """The two settings, checked. Blank counts as unset. Raises ``DatabaseTLSConfigError``."""
+    """The two settings, checked. Blank counts as unset. Raises ``DatabaseTLSConfigError``.
+
+    Refused: a mode libpq doesn't know, a CA file without a mode that checks it, and a mode
+    that checks the certificate with no CA file named.
+    """
     mode = (sslmode or "").strip().lower() or None
     rootcert = (sslrootcert or "").strip() or None
     if mode is not None and mode not in SSLMODES:
@@ -172,6 +201,8 @@ def parse_database_tls(sslmode: Optional[str], sslrootcert: Optional[str]) -> Da
             "DATABASE_SSLROOTCERT is used only with DATABASE_SSLMODE verify-ca or verify-full: "
             "set DATABASE_SSLMODE=verify-full to check the server's certificate and host name"
         )
+    if mode in CERTIFICATE_CHECKING_MODES and rootcert is None:
+        raise DatabaseTLSConfigError(_CA_REQUIRED)
     return DatabaseTLS(sslmode=mode, sslrootcert=rootcert)
 
 
@@ -204,9 +235,26 @@ def main_engine_url(url: str, environment: Optional[str], tls: DatabaseTLS) -> s
     return urlunparse(parsed._replace(query=urlencode(params, doseq=True)))
 
 
-def create_app_engine(url: str, *, connect_args: Optional[Mapping[str, Any]] = None, **kwargs: Any) -> Engine:
+def without_sslmode_aliases(url: Union[str, URL]) -> Union[str, URL]:
+    """``url`` with its query keys in ``SSLMODE_ALIASES`` dropped, read as SQLAlchemy reads them.
+
+    SQLAlchemy hands an address's query keys to psycopg2 as keywords, beside ``connect_args``, in
+    the order written. An address with neither key is returned as given; one with either comes
+    back as a ``URL`` with every other part unchanged.
+    """
+    parsed = make_url(url)
+    if not SSLMODE_ALIASES & set(parsed.query):
+        return url
+    return parsed.difference_update_query(SSLMODE_ALIASES)
+
+
+def create_app_engine(url: Union[str, URL], *, connect_args: Optional[Mapping[str, Any]] = None,
+                      **kwargs: Any) -> Engine:
     """A SQLAlchemy engine on the application's own database, secured by ``database_tls()``.
 
-    The settings' libpq keywords go in ``connect_args``, over any the caller passes.
+    The settings' libpq keywords go in ``connect_args``, over any the caller passes. With the
+    mode set, the address's ``SSLMODE_ALIASES`` are dropped first; unset, it is used as given.
     """
-    return create_engine(url, connect_args=database_tls().with_libpq_params(connect_args or {}), **kwargs)
+    tls = database_tls()
+    address = without_sslmode_aliases(url) if tls.configured else url
+    return create_engine(address, connect_args=tls.with_libpq_params(connect_args or {}), **kwargs)

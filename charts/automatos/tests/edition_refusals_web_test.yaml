@@ -1,0 +1,81 @@
+suite: An edition spelled other than the chart documents stops the web app's render
+# The web app's template alone, so a failed render can only be reported against it (helm-unittest
+# reports a failed render against the first template, in reverse alphabetical order, that fails).
+# The chart chooses the web image by the edition, so a near miss would run the other edition's web
+# app. The API's template has its own suite, edition_refusals_test.yaml.
+templates:
+  - templates/frontend.yaml
+release:
+  name: demo
+  namespace: automatos
+set:
+  existingSecret: automatos-secrets
+tests:
+  - it: renders local, the default
+    asserts:
+      - hasDocuments:
+          count: 2
+  - it: renders enterprise, spelled exactly
+    set:
+      edition:
+        authEdition: enterprise
+    asserts:
+      - hasDocuments:
+          count: 2
+  - it: renders saas, spelled exactly
+    set:
+      edition:
+        authEdition: saas
+    asserts:
+      - hasDocuments:
+          count: 2
+
+  - it: stops on an upper-case Enterprise, naming the key and the accepted spellings
+    set:
+      edition:
+        authEdition: Enterprise
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.authEdition must be exactly local, enterprise or saas, in lower case with no spaces"
+  - it: stops on enterprise with a trailing space
+    set:
+      edition:
+        authEdition: "enterprise "
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.authEdition must be exactly local, enterprise or saas"
+  - it: stops on local with a leading space
+    set:
+      edition:
+        authEdition: " local"
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.authEdition must be exactly local, enterprise or saas"
+  - it: stops on LOCAL
+    set:
+      edition:
+        authEdition: LOCAL
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.authEdition must be exactly local, enterprise or saas"
+  - it: stops on SaaS
+    set:
+      edition:
+        authEdition: SaaS
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.authEdition must be exactly local, enterprise or saas"
+  - it: stops on an edition the chart does not know
+    set:
+      edition:
+        authEdition: hosted
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.authEdition must be exactly local, enterprise or saas"
+  - it: stops on an empty edition
+    set:
+      edition:
+        authEdition: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.authEdition must be exactly local, enterprise or saas"
