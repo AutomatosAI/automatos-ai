@@ -49,6 +49,7 @@ PART_2 = "prd277_w4b_step_up_20261120"
 PART_2_COLUMNS = ("step_up_session_id",)
 # Wave 6 part 2 (US-603) adds four more: what a phone's start asked for.
 PHONE_SIGN_IN = "prd277_w6b_phone_sign_in_20261121"
+SPEND_CAP = "product_spend_cap_20261113"  # the one head, on PHONE_SIGN_IN
 PHONE_COLUMNS = ("phone_app_link", "phone_code_challenge", "phone_install_id", "phone_platform")
 TABLE = "oidc_pending_sign_ins"
 COLUMNS = ("id", "state_hash", "nonce_hash", "binding_hash", "client_hash", "code_verifier", "return_to", "created_at",
@@ -109,9 +110,9 @@ def test_the_revision_chains_onto_wave_3_and_part_2_chains_onto_it():
     # (tests/test_prd277_w6b_phone_sign_in_migration.py pins it).
     assert [rev for rev, down in revisions.items() if REVISION in _parents(down)] == [PART_2]
     heads = set(revisions) - {parent for down in revisions.values() for parent in _parents(down)}
-    assert heads == {PHONE_SIGN_IN}
+    assert heads == {SPEND_CAP}
     single_head = (ORCH / "tests" / "test_prd209_alembic_single_head.py").read_text(encoding="utf-8")
-    assert REVISION in single_head and f'EXPECTED_HEAD = "{PHONE_SIGN_IN}"' in single_head
+    assert REVISION in single_head and f'EXPECTED_HEAD = "{SPEND_CAP}"' in single_head
     chain = (ORCH / "tests" / "test_prd236_w1_routes.py").read_text(encoding="utf-8")
     assert f'(versions / "{REVISION}.py")' in chain and f'down_revision = "{PARENT}"' in chain
 
