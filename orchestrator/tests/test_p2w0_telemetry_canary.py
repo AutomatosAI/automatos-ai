@@ -105,3 +105,47 @@ def test_the_tick_runs_the_canary_off_the_event_loop(monkeypatch):
                         lambda: ran_on.append(threading.current_thread()) or {"alert": False})
     assert asyncio.run(telemetry_canary.telemetry_canary_tick()) == {"alert": False}
     assert ran_on and ran_on[0] is not threading.main_thread()
+
+
+def test_the_boot_probe_runs_when_boot_holds_the_loop_past_the_grace(monkeypatch):
+    """The services started after the heartbeat one can hold the loop for over a second at boot. The
+    boot-probe is due "now", and with APScheduler's one-second default grace it was skipped as missed,
+    so the canary stayed silent for a whole interval. It runs late instead."""
+    import asyncio
+    import time
+
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+    from config import config
+    from services import heartbeat_service, telemetry_canary
+
+    ran = []
+
+    async def _tick():
+        ran.append(True)
+
+    monkeypatch.setattr(config, "TELEMETRY_CANARY_ENABLED", True)
+    monkeypatch.setattr(telemetry_canary, "telemetry_canary_tick", _tick)
+    service = heartbeat_service.HeartbeatService()
+
+    async def _nothing():
+        return None
+
+    monkeypatch.setattr(service, "_load_heartbeat_configs", _nothing)
+    monkeypatch.setattr(service, "_schedule_durable_memory_probe", lambda: None)
+
+    async def _boot():
+        scheduler = AsyncIOScheduler()
+        scheduler.start()
+        try:
+            await service.start(scheduler=scheduler)
+            time.sleep(1.5)  # the next service's synchronous work, on the loop
+            for _ in range(20):
+                await asyncio.sleep(0.05)
+                if ran:
+                    break
+        finally:
+            scheduler.shutdown(wait=False)
+
+    asyncio.run(_boot())
+    assert ran == [True]
