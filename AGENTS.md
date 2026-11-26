@@ -76,7 +76,7 @@ Use these in identifiers and in user-facing copy.
 
 ## Code shape
 
-CI checks these on the lines your change touches. In TypeScript, length and nesting fail only what your change introduces: a function that was already over the limit gets a warning.
+CI checks these on the lines your change touches. Length and nesting fail only what your change introduces: a function that was already over the limit gets a warning.
 
 | Rule | Limit | Checked by |
 |---|---|---|

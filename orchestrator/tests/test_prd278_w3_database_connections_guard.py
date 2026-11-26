@@ -105,7 +105,6 @@ class Exempt(NamedTuple):
 
 USER_DATA_SOURCES: Dict[str, Exempt] = {
     "api/database_knowledge.py": Exempt(1, "runs a question's SQL on the database a user saved as a knowledge source"),
-    "core/credentials/service.py": Exempt(1, "tests a PostgreSQL credential a user saved, with its own host and settings"),
     "core/credentials/tester.py": Exempt(1, "tests a PostgreSQL credential a user saved, with its own ssl_mode"),
     "modules/nl2sql/schema/grounding.py": Exempt(1, "NL2SQL: reads the schema of a user's own data source"),
     "modules/nl2sql/schema/introspection.py": Exempt(1, "NL2SQL: introspects a user's own data source"),
