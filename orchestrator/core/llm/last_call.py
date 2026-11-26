@@ -12,17 +12,22 @@ What is noted, built on the error class a failed check-in records
 
 * **up:** the provider answered with text or a tool call.
 * **down:** the provider could not be reached or would not accept the install: a
-  connection error, a time-out, a 5xx, or a 401/403 on the install's own key.
+  connection error, a time-out, a 5xx, or a 401/403 on the install's own key, on
+  FAILURES_BEFORE_DOWN calls in a row. Fewer leave the note as it was, so one failed
+  call does not read ``down`` for as long as the reading lasts; an answer starts the
+  count again.
 * **Nothing changes** for a refusal of one request: any other 4xx (a bad request, a
   content refusal, a rate or output limit), an account out of credit, an empty answer,
   and a 401/403 on a workspace's own key (``is_byok`` on the manager: that workspace's
   key, not the install's provider).
 
-One frozen value, replaced whole: safe to read from any thread. No database read.
+One frozen value, replaced whole under a lock with the failure count: safe to read from
+any thread. No database read.
 """
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional, TypeVar
@@ -38,6 +43,8 @@ _SERVER_ERROR_FROM = 500
 # The class names the SDKs and httpx give a connection that failed: APIConnectionError,
 # ConnectionError, ConnectionRefusedError, ConnectError.
 _UNREACHED_NAMES = ("Connection", "ConnectError")
+# Unreachable calls in a row before the provider is noted down.
+FAILURES_BEFORE_DOWN = 3
 
 
 @dataclass(frozen=True)
@@ -49,11 +56,16 @@ class LastCall:
 
 
 _last: Optional[LastCall] = None
+_failures_in_a_row = 0
+_lock = threading.Lock()
 
 
 def _note(succeeded: bool) -> None:
-    global _last
-    _last = LastCall(succeeded=succeeded, ended_at=datetime.now(timezone.utc))
+    global _last, _failures_in_a_row
+    with _lock:
+        _failures_in_a_row = 0 if succeeded else _failures_in_a_row + 1
+        if succeeded or _failures_in_a_row >= FAILURES_BEFORE_DOWN:
+            _last = LastCall(succeeded=succeeded, ended_at=datetime.now(timezone.utc))
 
 
 def last() -> Optional[LastCall]:
@@ -76,8 +88,9 @@ def note_answer(response: Any) -> None:
 
 
 def note_failure(exc: BaseException, *, own_key: bool) -> None:
-    """A provider call that raised: ``down`` only when the provider could not be reached
-    or would not accept the install's key; any other failure leaves the note as it was.
+    """A provider call that raised: counts toward ``down`` only when the provider could not
+    be reached or would not accept the install's key; any other failure leaves the note
+    and the count as they were.
     Never raises: the caller's own error is the one that goes on."""
     try:
         if provider_unreachable(exc, own_key=own_key):
