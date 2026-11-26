@@ -94,6 +94,7 @@ def record_after(db: Session, ctx: Any, request: Any, *, action: str, resource_t
         who = admin_request(db, ctx, request)
     except Exception:  # noqa: BLE001 — logged; the action has committed, so its answer must not become a 500
         logger.exception("Audit %s not written: who acted could not be read; the action itself stands", action)
+        db.rollback()  # end a transaction the failed read aborted, so the route's next read can run
         return
     if record(db, who, action=action, resource_type=resource_type, details=details) is None:
         logger.error("Audit %s by users.id=%s could not be written; the action itself stands", action, who.user_id)

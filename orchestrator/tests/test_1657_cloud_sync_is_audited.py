@@ -179,9 +179,13 @@ def test_the_sync_stands_when_who_ran_it_cannot_be_read_and_an_error_says_so(api
         raise RuntimeError("users could not be read")
 
     monkeypatch.setattr(admin_audit, "resolve_user_pk", _no_person)
+    rolled_back = []
+    rollback = api.db.rollback
+    monkeypatch.setattr(api.db, "rollback", lambda: rolled_back.append(True) or rollback())
     with caplog.at_level(logging.ERROR, logger=admin_audit.logger.name):
         resp = _sync(api)
     assert resp.status_code == 200 and resp.json()["counts"] == COUNTS
+    assert rolled_back  # on Postgres the failed read aborted the transaction the status read then needs
     assert audit.rows(api.db, admin_audit.CLOUD_SYNC) == []
     assert any(admin_audit.CLOUD_SYNC in r.getMessage() for r in caplog.records
                if r.name == admin_audit.logger.name and r.levelno == logging.ERROR)
