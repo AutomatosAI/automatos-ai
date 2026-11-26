@@ -7,8 +7,10 @@ name: voice-tts
 
 on:
   pull_request:
+    # release/** too: a patch's pull request runs what main's does (docs/deployment-infrastructure/patching-a-release.md).
     branches:
       - main
+      - "release/**"
     paths:
       - "services/voice-tts/**"
       - ".github/workflows/voice-tts.yml"

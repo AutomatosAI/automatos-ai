@@ -269,14 +269,30 @@ jobs:
           python3 scripts/ci/release_version.py --ref "$GITHUB_REF" --chart-yaml "${RUNNER_TEMP}/Chart.yaml" \
             --outputs "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
 
+      # On a `v*` tag only: the tagged commit again, whole (every tag and the full history),
+      # beside the picker's sparse checkout, with no credentials kept. The preflight reads
+      # the releases the commit already holds from it, and the release page check its
+      # history and migrations. This job's token may read contents and nothing more, so it
+      # cannot create a release.
+      - name: Checkout (the history the preflight and the release page read; v* tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          path: release-history
+
       # PRD-279 FR-6 and §5.5, on a `v*` tag only, before any image builds: no published
       # image has this version yet (read anonymously: the images are public), and the
       # tagged commit is in the default branch or in release/MAJOR.MINOR (GitHub's
-      # compare API, with this job's read-only token). Either one failing, or not
+      # compare API, with this job's read-only token), and holds no full release above its
+      # version (git, in the full-history checkout: a v0.11.3 tag on a main commit after
+      # v0.12.0 is refused, and is cut from release/0.11 instead). Any one failing, or not
       # answering, stops the run. A run whose version tags were never applied can run
       # again; once they exist, the next version is cut instead.
       - name: Release preflight (v* tags only)
         if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: release-history
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.release.outputs.version }}
@@ -293,18 +309,7 @@ jobs:
       # the chart are public (scripts/ci/release_page.py check): the upgrade file, the
       # previous release, the history, both sets of migrations, the notes rendered with
       # placeholder digests, and no page yet for the tag. The release-notes job makes the
-      # same checks again before it creates the page. It needs every tag and the full
-      # history, so the tagged commit is checked out again, whole, beside the picker's
-      # sparse checkout, with no credentials kept. This job's token may read contents and
-      # nothing more, so it cannot create a release.
-      - name: Checkout (the history the release page is written from; v* tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-          path: release-history
-
+      # same checks again before it creates the page. It reads the full-history checkout above.
       - name: Release page check (v* tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         working-directory: release-history

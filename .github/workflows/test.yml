@@ -85,7 +85,11 @@ jobs:
           EVENT: ${{ github.event_name }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
-          BACKEND_SHARDS: 4
+          # Each full shard finishes within 10 minutes on main (CONTRIBUTING.md, "Backend test
+          # shards"). A shard is about 5 minutes of fixed cost (the job's set-up, then pytest's
+          # collection and imports) plus its share of the tests: 33 minutes of them on 26 Nov,
+          # so 8 shards of about 9 minutes. 4 ran 11-19 minutes against the 20-minute timeout.
+          BACKEND_SHARDS: 8
           # What the three default-args builds bake: Dockerfiles, dependency
           # manifests and locks (with the splitter the API's pybuild runs, PRD-262
           # US-022), the frontend's install config (.npmrc, PRD-262 US-047), the
