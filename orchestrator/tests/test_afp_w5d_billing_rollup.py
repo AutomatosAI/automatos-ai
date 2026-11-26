@@ -198,11 +198,18 @@ def test_the_lookups_use_the_primary_key_indexes_and_a_malformed_id_is_never_cas
     s = new_session()
     try:
         s.execute(text("SET LOCAL enable_seqscan = off"))
-        plan = "\n".join(r[0] for r in s.execute(text("EXPLAIN " + str(payer._OWNERS)), {"ids": [world.customer]}))
-        assert "workspaces_pkey" in plan
+        # The id predicate on workspaces alone: on the whole join the planner may reach workspaces through
+        # the small partial index uq_workspaces_product_external_id instead (the join implies its
+        # predicate), a cost tie in a test database with a row or two that made this flaky. Alone, only
+        # the primary key can serve it, and only while ``w.id`` itself is not cast.
+        where = str(payer._OWNERS).split(" WHERE ", 1)[1]
+        plan = "\n".join(r[0] for r in s.execute(text("EXPLAIN SELECT 1 FROM workspaces w WHERE " + where),
+                                                  {"ids": [world.customer]}))
+        # An index condition, not a filter over a whole-index scan (what a cast id gives with seqscan off).
+        assert "workspaces_pkey" in plan and "Index Cond: (id = ANY" in plan
         owner_plan = "\n".join(r[0] for r in s.execute(text("EXPLAIN " + str(payer._OWNER)),
                                                          {"product": world.product}))
-        assert "products_pkey" in owner_plan
+        assert "products_pkey" in owner_plan and "Index Cond: (id = " in owner_plan
         s.rollback()
         assert payer.paying_workspaces(s, [world.customer, "not-a-uuid"]) == {
             world.customer: world.owner, "not-a-uuid": "not-a-uuid"}
