@@ -49,7 +49,9 @@
 #   unchanged, as the image's 4 does on Railway.
 #
 # Database connection: POSTGRES_HOST/PORT/USER/PASSWORD/DB when POSTGRES_HOST
-# is set (compose); otherwise DATABASE_URL (Railway, Kubernetes secrets).
+# is set (compose); otherwise DATABASE_URL (Railway, Kubernetes secrets). Either way,
+# pg_isready and psql get the password in PGPASSWORD for their one command, and no
+# command line carries it.
 # =============================================================================
 
 set -e
@@ -58,15 +60,20 @@ set -e
 # Database connection helpers
 # =============================================================================
 # pg_isready and psql against whichever connection the environment provides.
-# The password travels in PGPASSWORD for the POSTGRES_* form and inside the
-# URL for the DATABASE_URL form; it is never passed on the command line.
+# The password reaches them in PGPASSWORD, set for the one command, never on the
+# command line. The POSTGRES_* form: psql gets POSTGRES_PASSWORD there, and
+# pg_isready, which only asks whether the server answers, gets none. The
+# DATABASE_URL form: read_database_password takes the password out of the address
+# once, and both tools get the address without it and the password, decoded, in
+# PGPASSWORD. Nothing is exported for the whole script, so the command it finally
+# execs is given no PGPASSWORD.
 require_database_settings() {
     if [ -z "${POSTGRES_HOST:-}" ] && [ -z "${DATABASE_URL:-}" ]; then
         echo "❌ No database configured: set POSTGRES_HOST (with POSTGRES_PORT/USER/PASSWORD/DB) or DATABASE_URL"
         exit 1
     fi
     read_database_tls
-    require_plain_query_names
+    read_database_password
 }
 
 # PRD-278 W3: DATABASE_SSLMODE and DATABASE_SSLROOTCERT, the settings the app's own
@@ -114,25 +121,115 @@ read_database_tls() {
     fi
 }
 
-# With DATABASE_SSLMODE set, libpq_url drops the address's own TLS keys by their plain
-# names. libpq (fe-connect.c, conninfo_uri_parse_params) percent-decodes a query key
-# before it matches it, so with the mode set a key holding a % stops the script here,
-# naming the setting, never the address. libpq matches keys case-sensitively and refuses
-# a key it does not know, so another letter case fails to connect rather than winning.
-# Neither setting set: nothing is checked and the address is passed as given.
-require_plain_query_names() {
-    [ -n "$DB_TLS_SSLMODE" ] && [ -z "${POSTGRES_HOST:-}" ] || return 0
-    case "$DATABASE_URL" in *\?*) ;; *) return 0 ;; esac
-    local param params
-    IFS='&' read -r -a params <<<"${DATABASE_URL#*\?}"
+# The DATABASE_URL form's password, read the way libpq reads a URI (fe-connect.c,
+# conninfo_uri_parse_options and conninfo_uri_parse_params): the user part ends at the
+# first @ before any /, and the password follows its first :. A password query key, read
+# after it, wins over it, an empty one included. Both are percent-decoded once. When the
+# password libpq would use is set, the tools get the address without either
+# (DB_URL_ADDRESS) and that password, decoded (DB_URL_PASSWORD). When it is empty, they
+# get the address without the user part's password and with its query as given. An
+# address with no password is passed as given. None of these variables is exported.
+#
+# Each of these stops the script before it waits for the database, with a line that
+# names the setting, never the address or the password:
+#   - a control character anywhere in DATABASE_URL, a line break or a tab among them;
+#   - a DATABASE_URL that is not a URL (libpq's keyword form) and names a password: the
+#     app reads DATABASE_URL only as a URL (SQLAlchemy's make_url wants scheme://);
+#   - a query parameter name written with a percent-escape: libpq decodes a name before
+#     it matches it, so the password key, and with DATABASE_SSLMODE set the TLS keys that
+#     libpq_url drops, are read here by their plain names only. libpq matches names
+#     case-sensitively and refuses one it does not know, so another letter case fails
+#     to connect rather than counting;
+#   - a password libpq could not decode: a % without two hex digits after it, %00, or a
+#     raw @ left in the address after the user part (a raw @ or / in the password).
+DB_URL_ADDRESS=""
+DB_URL_PASSWORD=""
+KEPT_QUERY=""
+QUERY_PASSWORD=""
+QUERY_HAS_PASSWORD=""
+PERCENT='%'
+BACKSLASH='\'
+HEX_DIGIT='[0123456789ABCDEFabcdef]'
+PASSWORD_KEY='password='
+URL_CONTROL_CHARACTER="DATABASE_URL holds a control character, such as a line break or a tab: remove it"
+URL_KEYWORD_FORM="DATABASE_URL names a password but is not a URL: write it as postgresql://user:password@host:port/database"
+URL_ENCODED_QUERY_NAME="A query parameter name in DATABASE_URL is percent-encoded: write each name plainly, so the entrypoint finds the address's password and TLS keys by name"
+URL_UNDECODABLE_PASSWORD="DATABASE_URL holds a password libpq cannot decode: write each reserved character, @ and / among them, as % and two hex digits, and no %00"
+
+refuse_database_url() {
+    echo "❌ $1"
+    exit 1
+}
+
+# True when every % in $1 starts two hex digits and none is %00, as libpq requires
+# (conninfo_uri_decode).
+is_percent_encoded() {
+    local rest="${1//"$PERCENT"$HEX_DIGIT$HEX_DIGIT/}"
+    case "$rest" in *"$PERCENT"*) return 1 ;; esac
+    case "$1" in *"$PERCENT"00*) return 1 ;; esac
+}
+
+# $1 decoded once, for a value is_percent_encoded accepts: each %XX becomes that byte.
+# Backslashes are doubled first, so printf's %b reads only the \xXX escapes made here,
+# and a trailing x, which the caller drops, keeps a trailing newline through $(...).
+percent_decode() {
+    local value="${1//"$BACKSLASH"/"$BACKSLASH$BACKSLASH"}"
+    printf '%b' "${value//"$PERCENT"/"${BACKSLASH}x"}x"
+}
+
+# Sets KEPT_QUERY (the query $1 without its password keys, joined by &), QUERY_PASSWORD
+# (the last one's value) and QUERY_HAS_PASSWORD. Stops the script on a percent-encoded
+# name or a password value libpq could not decode.
+split_query_password() {
+    local param params=() kept=()
+    KEPT_QUERY="" QUERY_PASSWORD="" QUERY_HAS_PASSWORD=""
+    [ -z "$1" ] || IFS='&' read -r -a params <<<"$1"
     for param in "${params[@]}"; do
-        case "${param%%=*}" in
-            *%*)
-                echo "❌ DATABASE_SSLMODE is set, and a query parameter name in DATABASE_URL is percent-encoded: write each name plainly, so the setting replaces the address's own TLS keys"
-                exit 1
+        case "${param%%=*}" in *"$PERCENT"*) refuse_database_url "$URL_ENCODED_QUERY_NAME" ;; esac
+        case "$param" in
+            "$PASSWORD_KEY"*)
+                QUERY_PASSWORD="${param#"$PASSWORD_KEY"}"
+                QUERY_HAS_PASSWORD=1
+                is_percent_encoded "$QUERY_PASSWORD" || refuse_database_url "$URL_UNDECODABLE_PASSWORD"
                 ;;
+            *) kept+=("$param") ;;
         esac
     done
+    KEPT_QUERY="$(IFS='&'; printf '%s' "${kept[*]}")"
+}
+
+read_database_password() {
+    DB_URL_ADDRESS="${DATABASE_URL:-}" DB_URL_PASSWORD=""
+    [ -z "${POSTGRES_HOST:-}" ] || return 0
+    case "$DB_URL_ADDRESS" in *[[:cntrl:]]*) refuse_database_url "$URL_CONTROL_CHARACTER" ;; esac
+    case "$DB_URL_ADDRESS" in
+        *://*) ;;
+        *password*) refuse_database_url "$URL_KEYWORD_FORM" ;;
+        *) return 0 ;;
+    esac
+    local scheme="${DB_URL_ADDRESS%%://*}://" rest="${DB_URL_ADDRESS#*://}"
+    local userinfo="" user="" user_password="" password="" query=""
+    case "${rest%%/*}" in
+        *@*)
+            userinfo="${rest%%@*}"
+            rest="${rest#*@}"
+            user="${userinfo%%:*}@"
+            ;;
+    esac
+    case "$userinfo" in *:*) user_password="${userinfo#*:}" ;; esac
+    case "${rest%%\?*}" in *@*) refuse_database_url "$URL_UNDECODABLE_PASSWORD" ;; esac
+    is_percent_encoded "$user_password" || refuse_database_url "$URL_UNDECODABLE_PASSWORD"
+    case "$rest" in *\?*) query="${rest#*\?}" ;; esac
+    split_query_password "$query"
+    password="$user_password"
+    [ -z "$QUERY_HAS_PASSWORD" ] || password="$QUERY_PASSWORD"
+    if [ -z "$password" ]; then
+        [ -z "$user_password" ] || DB_URL_ADDRESS="${scheme}${user}${rest}"
+        return 0
+    fi
+    DB_URL_ADDRESS="${scheme}${user}${rest%%\?*}${KEPT_QUERY:+?$KEPT_QUERY}"
+    DB_URL_PASSWORD="$(percent_decode "$password")"
+    DB_URL_PASSWORD="${DB_URL_PASSWORD%x}"
 }
 
 # libpq tools accept postgresql:// or postgres:// only. Drop a SQLAlchemy driver
@@ -141,10 +238,10 @@ require_plain_query_names() {
 # libpq turns into sslmode or sslrootcert are dropped too: sslmode, sslrootcert, and
 # requiressl and ssl, which libpq translates to sslmode. libpq prefers the connection
 # string to PGSSLMODE and PGSSLROOTCERT, and the settings win here as they do in the app.
-# Neither set: the address is passed as given.
+# Neither set: the address is passed as given. It is DB_URL_ADDRESS, without its password.
 libpq_url() {
     local url
-    url="$(printf '%s' "$DATABASE_URL" | sed -E 's#^(postgres(ql)?)\+[A-Za-z0-9_]+://#\1://#')"
+    url="$(printf '%s' "$DB_URL_ADDRESS" | sed -E 's#^(postgres(ql)?)\+[A-Za-z0-9_]+://#\1://#')"
     if [ -n "$DB_TLS_SSLMODE" ]; then
         url="$(printf '%s' "$url" | sed -E -e ':strip' -e 's/([?&])(sslmode|sslrootcert|requiressl|ssl)=[^&]*(&|$)/\1/' -e 't strip' -e 's/[?&]$//')"
     fi
@@ -154,6 +251,8 @@ libpq_url() {
 # The settings are exported in a subshell around the one command, never for this whole
 # script: the server it execs would pass them to every libpq connection, a user's own
 # database included. Neither set: neither is exported, and libpq behaves as before.
+# The DATABASE_URL form's password goes the same way, as PGPASSWORD, when the address had
+# one (DB_URL_PASSWORD); otherwise PGPASSWORD is left as the script was given it.
 with_database_tls() {
     (
         if [ -n "$DB_TLS_SSLMODE" ]; then
@@ -161,6 +260,9 @@ with_database_tls() {
         fi
         if [ -n "$DB_TLS_SSLROOTCERT" ]; then
             export PGSSLROOTCERT="$DB_TLS_SSLROOTCERT"
+        fi
+        if [ -n "$DB_URL_PASSWORD" ]; then
+            export PGPASSWORD="$DB_URL_PASSWORD"
         fi
         "$@"
     )
