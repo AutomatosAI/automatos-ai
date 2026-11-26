@@ -3,6 +3,7 @@
 
 import { ClerkProvider } from '@clerk/nextjs'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MotionConfig } from 'framer-motion'
 import { useState } from 'react'
 import { ThemeProvider } from './theme-provider'
 import { WorkspaceProvider } from './workspace-provider'
@@ -114,6 +115,9 @@ export function Providers({ children, initialUiStyle, initialTone, initialTheme 
   }))
 
   return (
+    // framer-motion ignores the reader's motion preference unless asked: "user" skips its transform
+    // and layout animations when they want reduced motion, as globals.css does for CSS motion.
+    <MotionConfig reducedMotion="user">
     <AuthBoundary>
       <RoleProvider>
         <ThemeProvider
@@ -155,5 +159,6 @@ export function Providers({ children, initialUiStyle, initialTone, initialTheme 
         </ThemeProvider>
       </RoleProvider>
     </AuthBoundary>
+    </MotionConfig>
   )
 }
