@@ -16,6 +16,11 @@
 # (workspaces.api.existingClaim, workspaces.worker.existingClaim; strict-workspaces.yaml).
 # Placement (US-203): a nodeSelector on the API, the migration Job, the web app and the
 # worker, and on the worker all four values; the single node meets each.
+# PRD-280 Wave 6 (US-601): the memory store (qdrant.enabled), pulled by the digest the chart
+# pins, on a claim kind's default storage class makes, with a nodeSelector, its account
+# renamed and annotated, and QDRANT_API_KEY in the Secret, required while qdrant.enabled is
+# true and not read otherwise: the store requires it and the API sends it. check writes,
+# snapshots and deletes through the API's pod with the key.
 #
 # Not exercised here (the chart's unit tests render each):
 # - the database CA mount (database.caConfigMap, verify-ca/verify-full): the dev
@@ -106,6 +111,14 @@ worker:
       labelSelector:
         matchLabels: {app.kubernetes.io/component: worker}
 
+qdrant:
+  enabled: true
+  storage:
+    size: 1Gi
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+  nodeSelector: {kubernetes.io/os: linux}
+
 serviceAccount:
   create: true
   api:
@@ -120,6 +133,9 @@ serviceAccount:
   migrate:
     name: automatos-ci-migrate
     annotations: {ci.automatos.dev/account: migrate}
+  qdrant:
+    name: automatos-ci-qdrant
+    annotations: {ci.automatos.dev/account: qdrant}
 
 otel:
   enabled: true

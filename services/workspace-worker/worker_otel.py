@@ -208,19 +208,29 @@ class TracingMiddleware:
         await _traced(self.app, scope, receive, send)
 
 
+def tracing_started() -> bool:
+    """True once :func:`start_tracing` has installed this process's provider."""
+    return _State.provider is not None
+
+
+def current_trace_ids() -> Tuple[str, str]:
+    """(trace id, span id) of the current span when it is being recorded; ("", "") otherwise."""
+    from opentelemetry import trace
+
+    context = trace.get_current_span().get_span_context()
+    if not (context.is_valid and context.trace_flags.sampled):
+        return "", ""
+    return format(context.trace_id, "032x"), format(context.span_id, "016x")
+
+
 class TraceIdsFilter(logging.Filter):
     """PRD-256 O5: the current sampled span's ``trace_id`` and ``span_id`` on every log
     record, which log-relay ships to Loki; ``_trace_context`` is the console line's
     `` trace=<id>``, underscored so log-relay doesn't ship it twice."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        from opentelemetry import trace
-
-        context = trace.get_current_span().get_span_context()
-        sampled = context.is_valid and context.trace_flags.sampled
-        record.trace_id = format(context.trace_id, "032x") if sampled else ""
-        record.span_id = format(context.span_id, "016x") if sampled else ""
-        record._trace_context = f" trace={record.trace_id}" if sampled else ""
+        record.trace_id, record.span_id = current_trace_ids()
+        record._trace_context = f" trace={record.trace_id}" if record.trace_id else ""
         return True
 
 
@@ -258,4 +268,4 @@ def attach(app: Any) -> None:
 
 
 __all__ = ["ATTR_WORKSPACE_ID", "UNTRACED_PATHS", "TraceIdsFilter", "TracingMiddleware", "attach", "build_provider",
-           "flush_tracing", "otlp_headers", "sampler_ratio", "start_tracing"]
+           "current_trace_ids", "flush_tracing", "otlp_headers", "sampler_ratio", "start_tracing", "tracing_started"]

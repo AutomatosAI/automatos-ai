@@ -1,7 +1,8 @@
 suite: Where each component's pods may run (PRD-280 US-203)
 # The API, the web app, the worker and the migration Job each take nodeSelector, tolerations,
 # affinity and topologySpreadConstraints, rendered as given into their pod spec. Unset, none
-# is rendered: default_render_test.yaml pins each pod spec whole.
+# is rendered: default_render_test.yaml pins each pod spec whole. The memory store takes the same
+# four (US-601): qdrant_test.yaml.
 templates:
   - templates/api-deployment.yaml
   - templates/frontend.yaml
@@ -182,6 +183,10 @@ tests:
       migrations:
         topologySpreadConstraints:
           - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway}
+      # The memory store's (US-601; its own placement is qdrant_test.yaml's).
+      qdrant:
+        enabled: true
+        nodeSelector: {automatos.dev/pool: memory}
     asserts:
       - notExists:
           path: spec.template.spec.nodeSelector

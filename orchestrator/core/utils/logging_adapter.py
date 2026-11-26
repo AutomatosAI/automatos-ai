@@ -19,6 +19,7 @@ from core.monitoring.automatos_logging import (
     http_method_var,
     http_path_var,
 )
+from core.monitoring.json_log_format import JsonLineFormatter
 from core.monitoring.path_digests import redact_digest_segments
 
 # Re-export for backwards compat (existing code imports from here)
@@ -36,9 +37,7 @@ __all__ = [
     "ContextFilter",
     "install_request_context_logging",
     "set_request_id",
-    "clear_request_id",
     "set_run_context",
-    "set_request_context",
 ]
 
 
@@ -72,31 +71,27 @@ class ContextFilter(logging.Filter):
 
 
 def install_request_context_logging(format_with_context: Optional[str] = None) -> None:
-    """Attach the context filter to all handlers and optionally update formats."""
+    """Attach the context filter to all handlers and optionally update formats.
+
+    A handler writing JSON lines (``LOG_FORMAT=json``, PRD-282 US-301) keeps its formatter:
+    its fields are a fixed list, the request's among them.
+    """
     context_filter = ContextFilter()
+    default_fmt = (
+        "%(asctime)s - %(name)s - %(levelname)s - "
+        "[req=%(request_id)s ws=%(workspace_id)s agent=%(agent_id)s%(_trace_context)s] - %(message)s"
+    )
     logger = logging.getLogger()
     for handler in logger.handlers:
         handler.addFilter(context_filter)
-        if format_with_context:
-            handler.setFormatter(logging.Formatter(format_with_context))
-
-    if not format_with_context:
-        default_fmt = (
-            "%(asctime)s - %(name)s - %(levelname)s - "
-            "[req=%(request_id)s ws=%(workspace_id)s agent=%(agent_id)s%(_trace_context)s] - %(message)s"
-        )
-        for handler in logger.handlers:
-            handler.setFormatter(logging.Formatter(default_fmt))
+        if not isinstance(handler.formatter, JsonLineFormatter):
+            handler.setFormatter(logging.Formatter(format_with_context or default_fmt))
 
 
 def set_request_id(request_id: Optional[str] = None) -> Token[str]:
     """Set request_id for current context; returns a token to reset later."""
     rid = request_id or uuid.uuid4().hex[:12]
     return request_id_var.set(rid)
-
-
-def clear_request_id(token: Token[str]) -> None:
-    request_id_var.reset(token)
 
 
 def set_run_context(
@@ -115,34 +110,3 @@ def set_run_context(
         workflow_id_var.set(workflow_id)
     if tenant_id is not None:
         tenant_id_var.set(tenant_id)
-
-
-def set_request_context(
-    *,
-    request_id: str = "",
-    workspace_id: str = "",
-    user_id: str = "",
-    method: str = "",
-    path: str = "",
-    correlation_id: str = "",
-    agent_id: str = "",
-) -> None:
-    """Set full request context for structured logging.
-
-    Call from FastAPI middleware to auto-enrich all logs
-    within the request lifecycle. No need to pass extra={} at call sites.
-    """
-    if request_id:
-        request_id_var.set(request_id)
-    if workspace_id:
-        workspace_id_var.set(workspace_id)
-    if user_id:
-        user_id_var.set(user_id)
-    if method:
-        http_method_var.set(method)
-    if path:
-        http_path_var.set(path)
-    if correlation_id:
-        correlation_id_var.set(correlation_id)
-    if agent_id:
-        agent_id_var.set(agent_id)

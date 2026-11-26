@@ -28,11 +28,14 @@ GUARDED = ("httpx", "httpcore", "httpx2", "httpcore2", "urllib3")
 SERVICE_COPIES = sorted((Path(__file__).resolve().parents[2] / "services").glob("*/automatos_logging.py"))
 
 
-def _setup_logging_of(service: str):
-    """The backend's setup_logging, or the one in services/<service>/automatos_logging.py."""
+def _setup_logging_of(service: str, monkeypatch):
+    """The backend's setup_logging, or the one in services/<service>/automatos_logging.py,
+    with its service's folder on the path, as in its image: the worker's imports its own
+    config and formatter (PRD-282 US-302)."""
     if service == "backend":
         return setup_logging
     path = next(p for p in SERVICE_COPIES if p.parent.name == service)
+    monkeypatch.syspath_prepend(str(path.parent))
     spec = importlib.util.spec_from_file_location(f"{service}_automatos_logging", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -51,8 +54,8 @@ def _fresh_loggers(monkeypatch):
 
 @pytest.mark.parametrize("service", ["backend", *(p.parent.name for p in SERVICE_COPIES)])
 @pytest.mark.parametrize("name", GUARDED)
-def test_a_request_line_with_a_token_in_its_url_is_not_logged(caplog, service, name):
-    _setup_logging_of(service)(service="test", level=logging.INFO, enable_relay=False)
+def test_a_request_line_with_a_token_in_its_url_is_not_logged(caplog, monkeypatch, service, name):
+    _setup_logging_of(service, monkeypatch)(service="test", level=logging.INFO, enable_relay=False)
     with caplog.at_level(logging.INFO):
         logging.getLogger(name).info(LINE)
     assert "AAtestTOKENvalue" not in caplog.text

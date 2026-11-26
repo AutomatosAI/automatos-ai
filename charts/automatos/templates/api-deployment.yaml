@@ -51,6 +51,9 @@ spec:
             - {{ .Values.api.uvicornWorkers | quote }}
           env:
             {{- include "automatos.apiEnv" . | nindent 12 }}
+            {{- with include "automatos.qdrantApiEnv" . | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
             {{- include "automatos.otelEnv" (dict "ctx" . "service" "automatos-api") | nindent 12 }}
             {{- if .Values.api.data.enabled }}
             # The API pods only: the migration Job writes no files here.

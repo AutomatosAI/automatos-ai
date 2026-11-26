@@ -27,6 +27,9 @@ fullnameOverride: ""
 #                              e.g. Authorization=Basic%20<base64>, values URL-encoded
 #   OIDC_CLIENT_SECRET         the enterprise edition only, and required there: the
 #                              application's client secret at the identity provider
+#   QDRANT_API_KEY             required while qdrant.enabled is true, and not read
+#                              otherwise: the memory store requires it on every
+#                              request, and the API sends it. Not empty
 existingSecret: ""
 
 edition:
@@ -131,13 +134,21 @@ edition:
 # Quote LOCAL_REMOTE_ACCESS: YAML reads a bare `off` as false, which the API refuses.
 config:
   ENVIRONMENT: production
+  # DEBUG, INFO, WARNING, ERROR or CRITICAL (WARN and FATAL too), in any case: rendering
+  # stops on any other value (at run time one would be INFO, with a warning). DEBUG is for a
+  # development install. The worker is not given it and stays at INFO.
   LOG_LEVEL: INFO
+  # PRD-282: json writes one JSON record per line from the API and the worker (the worker
+  # reads only this from config). The migration Job gets it too, but its output (the start
+  # script's, the migration tool's and the seed loader's) stays text. Rendering stops on
+  # anything but text or json. Unset: text, as before.
+  # LOG_FORMAT: json
   # The log relay targets Railway's internal Loki by default.
   LOG_RELAY_ENABLED: "false"
   # Optional services are OFF unless you point at one. Unset, config.py
   # defaults them to localhost addresses that don't exist in a pod, and the
   # API logs connection errors (the same choice envs/api.defaults makes).
-  QDRANT_URL: ""            # durable memory (Qdrant)
+  QDRANT_URL: ""            # durable memory (Qdrant): your own, or qdrant.enabled below
   AGENT_OPT_WORKER_URL: ""  # the agent-optimisation worker
   LOKI_URL: ""              # log search
   PROMETHEUS_URL: ""        # metrics queries
@@ -145,7 +156,7 @@ config:
 # TLS on the connection to PostgreSQL from the API, the migration Job and the worker
 # (PRD-278). All empty, the default: nothing is set or mounted, and each connection
 # behaves as it does today. Set these here, not in `config` (rendering fails there):
-# the worker doesn't read `config`. The enterprise edition renders only with
+# the worker reads nothing from `config` but LOG_FORMAT. The enterprise edition renders only with
 # sslmode verify-full and a caConfigMap (PRD-278 D-6); its API refuses to start otherwise.
 #
 # The API holds two session-level advisory locks on this database: the scheduler's lock,
@@ -215,8 +226,8 @@ api:
     limits:
       memory: 2Gi
   # Where the pods may run, each as the pod spec's field of that name; empty: anywhere, the
-  # scheduler's choice. The web app, the worker and the migration Job take the same four
-  # (PRD-280 US-203).
+  # scheduler's choice. The web app, the worker, the migration Job and the memory store take
+  # the same four (PRD-280 US-203, US-601).
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -371,12 +382,50 @@ workspaces:
   worker:
     existingClaim: ""
 
+# The memory store (PRD-280 US-601): Qdrant, for agent memory, in the release's namespace. Off:
+# nothing is rendered, and the API uses config.QDRANT_URL, as before. On: one StatefulSet with a
+# disk of its own, a Service on port 6333, its own account, and the API's QDRANT_URL set to
+# http://<fullname>-qdrant:6333 (rendering stops on a QDRANT_URL in config). On, the Secret
+# must hold QDRANT_API_KEY, not empty: the store does not start without it. The disk, the claim
+# storage-<fullname>-qdrant-0, is kept on `helm uninstall`; delete it yourself to remove it.
+qdrant:
+  enabled: false
+  # Qdrant's published image, by the digest docker-compose.yml pins
+  # (orchestrator/tests/test_prd280_qdrant_image_pin.py holds the two equal). Required.
+  image:
+    repository: docker.io/qdrant/qdrant
+    digest: sha256:9bfc89f9914fc14876a88c05270685921a55b8877b254a98bcc1cc2f0a424cd2
+    pullPolicy: ""
+  # size, storageClass and accessModes can't change once the claim exists. The storage must
+  # honour the pod's fsGroup (1000), as for the API's data volume.
+  storage:
+    size: 10Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  # The scratch volume a snapshot is made in. sizeLimit (e.g. 20Gi) is unset: a snapshot can be
+  # as large as the data, and a pod over its limit is evicted.
+  snapshots:
+    sizeLimit: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+  # Where the store's pod may run (PRD-280 US-203), as api.nodeSelector and the rest.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+
 # One ServiceAccount for each component (PRD-280), so a cloud role tied to one account
 # reaches that component only. The chart creates <fullname>-api, -frontend (the web app),
-# -worker and -migrate, <fullname> being the prefix of every resource's name (release
-# `demo`: demo-automatos-api). The migration Job's account is created by a hook just
-# before the Job and deleted once the hooks succeed; after a failed Job it can be left
-# behind until the next install or upgrade replaces it. No pod mounts a token for the
+# -worker, -migrate and, with qdrant.enabled, -qdrant (the memory store), <fullname> being
+# the prefix of every resource's name (release `demo`: demo-automatos-api). The migration
+# Job's account is created by a hook just before the Job and deleted once the hooks succeed;
+# after a failed Job it can be left behind until the next install or upgrade replaces it.
+# No pod mounts a token for the
 # cluster's own API: nothing in Automatos calls it. Tokens a cloud's own webhook projects
 # (EKS IRSA) are separate and still work.
 #   create: false  the chart creates no account; each pod runs under the account its `name`
@@ -397,6 +446,9 @@ serviceAccount:
     name: ""
     annotations: {}
   migrate:
+    name: ""
+    annotations: {}
+  qdrant:
     name: ""
     annotations: {}
 

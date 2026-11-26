@@ -1,6 +1,6 @@
 # PRD-280 US-103: every path a component writes at run time
 
-**For:** [PRD-280](PRD-280-CHART-HARDENING-AND-WORKER-ISOLATION.md) US-103 (analysis) and US-104 (a read-only root file system, which mounts what this page lists).
+**For:** [PRD-280](PRD-280-CHART-HARDENING-AND-WORKER-ISOLATION.md) US-103 (analysis), US-601 (section 5) and US-104 (a read-only root file system, which mounts what this page lists).
 **Read at:** branch `feat/prd280-w1-strict-namespace`, 20 Nov 2026, from the code and the images' Dockerfiles. Nothing was run.
 **Labels:** **[T]** read in code; **[I]** inferred from a library's documented default, not read in its source.
 
@@ -79,7 +79,15 @@ The image runs `node server.js`, Next.js's standalone server (`frontend/Dockerfi
 
 ## 5. The memory store
 
-Not in the chart until PRD-280 Wave 6 (US-601). Nothing to list.
+Added by PRD-280 Wave 6 (US-601): Qdrant's published image (`qdrant/qdrant`, v1.20.0 at the digest the compose file pins), read at its `v1.20.0` tag on GitHub, run by the chart as uid 1000 in `/qdrant`. Its `Dockerfile` copies every file in as root's (`USER_ID=0`), so the process can read and run them and write none; it reads `config/config.yaml` and `config/production.yaml`, with `QDRANT__…` settings from the environment over them.
+
+| Path | Written by | Survives a restart? | Becomes |
+|---|---|---|---|
+| `/qdrant/storage` (`storage_path: ./storage`): collections, their write-ahead logs, the cluster state, and `storage/tmp` for scratch files (`temp_path` is unset) | Qdrant (`config/config.yaml`; `lib/storage/src/content_manager/toc/temp_directories.rs`) | Yes | Volume: the StatefulSet's claim `storage` |
+| `/qdrant/snapshots` (`snapshots_path: ./snapshots`): snapshots, `snapshots/tmp`, and `snapshots/tmp/upload` for an uploaded snapshot, made at start (`src/actix/mod.rs`, `upload_dir()`); Qdrant cannot serve without it | Qdrant | No: the API's snapshot job (`orchestrator/services/qdrant_snapshots.py`) copies each snapshot to object storage | Scratch: `emptyDir` at `/qdrant/snapshots` |
+| `.qdrant-initialized`, by default in the working directory `/qdrant`; `QDRANT_INIT_FILE_PATH` moves it | Qdrant, once started (`src/startup.rs`, `touch_started_file_indicator`; a failed write is a warning); read by the image's `entrypoint.sh` after a kill, only with `QDRANT_ALLOW_RECOVERY_MODE=true` | No | Scratch: `emptyDir` at `/qdrant/init`, `QDRANT_INIT_FILE_PATH=/qdrant/init/.qdrant-initialized` |
+| Logs | standard output | — | None |
+| `/tmp` | nothing the chart turns on: uploads go to `snapshots/tmp/upload` (`TempFileConfig`), a partial snapshot to `snapshots/tmp`; only the Pyroscope profiler (`src/common/pyroscope_state.rs`), off unless configured, writes under `TMPDIR` | — | None |
 
 ## 6. Owner decision: rows on the container's own disk today that are read again later
 

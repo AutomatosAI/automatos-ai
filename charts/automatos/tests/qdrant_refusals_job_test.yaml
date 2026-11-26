@@ -1,0 +1,31 @@
+suite: The migration Job stops on the same store values as the API (PRD-280 US-601)
+# The Job's template alone (helm-unittest reports a failed render against the first template, in
+# reverse alphabetical order, that fails). The Job renders the API's checks through
+# automatos.apiEnv, so a release with these values stops before the Job runs.
+templates:
+  - templates/migrate-job.yaml
+release:
+  name: demo
+  namespace: automatos
+set:
+  existingSecret: automatos-secrets
+  qdrant:
+    enabled: true
+tests:
+  - it: renders with the default config
+    asserts:
+      - hasDocuments: {count: 1}
+  - it: stops on a hand-written QDRANT_URL beside qdrant.enabled
+    set:
+      config:
+        QDRANT_URL: http://qdrant.elsewhere:6333
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.QDRANT_URL is set and qdrant.enabled is true"
+  - it: stops on QDRANT_API_KEY in config beside qdrant.enabled
+    set:
+      config:
+        QDRANT_API_KEY: not-a-real-key
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.QDRANT_API_KEY: a secret is never a chart value"

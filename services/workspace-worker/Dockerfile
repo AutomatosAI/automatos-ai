@@ -292,6 +292,12 @@ ENV PYTHONPATH=/app
 # observability), last and worker-owned: a code change rebuilds only this layer.
 COPY --chown=1000:1000 . .
 
+# The version the worker's JSON log lines name (PRD-279 US-303, PRD-282): images.yml passes it,
+# as it does the API's. Declared after the last filesystem layer, so a value that changes on
+# every commit rebuilds no layer. A build given none reports `dev` (worker_config).
+ARG AUTOMATOS_VERSION
+ENV AUTOMATOS_VERSION=${AUTOMATOS_VERSION}
+
 # PRD-280 US-201: the image starts as the worker, uid 1000, by number, so a cluster can
 # check it is not root. Nothing in it re-owns a volume then: the storage must hand the
 # volume over writable (entrypoint.sh says what to do when it does not). Compose starts it

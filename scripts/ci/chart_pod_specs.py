@@ -10,7 +10,8 @@ chart.yml's install lane runs it on a release's manifest and hooks, converted to
   pods are made by controllers, and the migration Job's pod is gone once its hook
   succeeds, so their specs are checked this way. The Pod keeps its template's spec,
   without the service account: the probe namespace has only its ``default`` account, and
-  the account plays no part in the pod security level.
+  the account plays no part in the pod security level. A StatefulSet's claim templates
+  become claim volumes, as its controller adds them to its pods.
 - ``read-only-roots``: one line, ``<owner name>/<container>``, for each container or init
   container whose root file system is not read-only; exit 1 if there is one.
 - ``violations``: stdin is the API server's refusal of one Pod; one line per violation of
@@ -92,9 +93,25 @@ def pod_spec(obj: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return node if isinstance(node, dict) else None
 
 
-def probe_pod(name: str, spec: Dict[str, Any]) -> Dict[str, Any]:
-    """A bare Pod named after its owner, with the template's spec and no service account."""
+def claim_volumes(obj: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """A StatefulSet's claim templates as the volumes its controller adds to its first pod,
+    each a claim named ``<template>-<StatefulSet>-0``; none for any other kind. Without them a
+    Pod's mount of such a volume names no volume, and the API server refuses it as invalid."""
+    if obj.get("kind") != "StatefulSet":
+        return []
+    owner = obj["metadata"]["name"]
+    templates = (obj.get("spec") or {}).get("volumeClaimTemplates") or []
+    return [{"name": template["metadata"]["name"],
+             "persistentVolumeClaim": {"claimName": f"{template['metadata']['name']}-{owner}-0"}}
+            for template in templates]
+
+
+def probe_pod(name: str, spec: Dict[str, Any], claims: Sequence[Dict[str, Any]] = ()) -> Dict[str, Any]:
+    """A bare Pod named after its owner, with the template's spec and no service account, and
+    ``claims`` (``claim_volumes``) after the template's own volumes."""
     kept = {key: value for key, value in copy.deepcopy(spec).items() if key not in ACCOUNT_FIELDS}
+    if claims:
+        kept = {**kept, "volumes": [*(kept.get("volumes") or []), *copy.deepcopy(list(claims))]}
     return {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": name}, "spec": kept}
 
 
@@ -104,7 +121,7 @@ def probe_pods(document: Dict[str, Any]) -> Iterable[Tuple[str, Dict[str, Any]]]
         spec = pod_spec(obj)
         if spec is not None:
             name = obj["metadata"]["name"]
-            yield name, probe_pod(name, spec)
+            yield name, probe_pod(name, spec, claim_volumes(obj))
 
 
 def writable_roots(spec: Dict[str, Any]) -> List[str]:

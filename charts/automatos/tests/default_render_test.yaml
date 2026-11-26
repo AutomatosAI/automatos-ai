@@ -15,6 +15,8 @@ suite: With no new value set, the chart renders what chart 0.9.0 rendered, but f
 #    (its capabilities are drop: [ALL] alone).
 # Nothing else differs: WORKER_INTERNAL_TOKEN stays optional with the one Secret, and US-203's
 # placement values render nothing while empty.
+# The memory store (US-601) is off by default: its template renders nothing, and the API's
+# QDRANT_URL is config's empty value, with no QDRANT_API_KEY, as before.
 templates:
   - templates/api-data-pvc.yaml
   - templates/api-deployment.yaml
@@ -23,6 +25,7 @@ templates:
   - templates/ingress-session-mode.yaml
   - templates/ingress.yaml
   - templates/migrate-job.yaml
+  - templates/qdrant.yaml
   - templates/serviceaccount.yaml
   - templates/worker.yaml
   - templates/workspaces-pvc.yaml
@@ -49,6 +52,10 @@ tests:
     template: templates/worker.yaml
     asserts:
       - hasDocuments: {count: 2}
+  - it: renders no memory store
+    template: templates/qdrant.yaml
+    asserts:
+      - hasDocuments: {count: 0}
 
   # ── the accounts ───────────────────────────────────────────────────────────────
   - it: renders the four accounts as before

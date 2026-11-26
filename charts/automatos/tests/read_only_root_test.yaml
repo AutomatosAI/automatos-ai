@@ -3,6 +3,7 @@ templates:
   - templates/api-deployment.yaml
   - templates/frontend.yaml
   - templates/migrate-job.yaml
+  - templates/qdrant.yaml
   - templates/worker.yaml
 set:
   existingSecret: automatos-secrets
@@ -236,6 +237,29 @@ tests:
           path: spec.template.spec.containers[0].volumeMounts
           value:
             - {name: workspaces, mountPath: /workspaces}
+
+  # ── the memory store (PRD-280 US-601): always read-only, no value turns it off ──
+  - it: gives the memory store a read-only root, its disk at /qdrant/storage and two scratch paths
+    template: templates/qdrant.yaml
+    documentIndex: 0
+    set:
+      qdrant:
+        enabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts
+          value:
+            - {name: storage, mountPath: /qdrant/storage}
+            - {name: snapshots, mountPath: /qdrant/snapshots}
+            - {name: init, mountPath: /qdrant/init}
+      - equal:
+          path: spec.template.spec.volumes
+          value:
+            - {name: snapshots, emptyDir: {}}
+            - {name: init, emptyDir: {}}
 
   # ── the migration Job (its volumes: database_tls_test.yaml) ───────────────────
   - it: gives the migration Job a read-only root

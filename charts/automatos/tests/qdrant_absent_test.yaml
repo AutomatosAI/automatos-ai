@@ -1,0 +1,27 @@
+suite: Values with no qdrant key at all leave the memory store off (PRD-280 US-601)
+# Values written before chart 0.11.0 have no qdrant key; null removes the chart's own default, so
+# these tests render with none. The store renders nothing, and the API keeps config's QDRANT_URL.
+templates:
+  - templates/qdrant.yaml
+  - templates/api-deployment.yaml
+release:
+  name: demo
+  namespace: automatos
+set:
+  existingSecret: automatos-secrets
+  qdrant: null
+tests:
+  - it: renders no memory store
+    template: templates/qdrant.yaml
+    asserts:
+      - hasDocuments: {count: 0}
+  - it: gives the API config's QDRANT_URL and no store key
+    template: templates/api-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: QDRANT_URL, value: ""}
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: QDRANT_API_KEY}
+          any: true

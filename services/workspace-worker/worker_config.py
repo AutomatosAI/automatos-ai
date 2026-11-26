@@ -135,6 +135,32 @@ def worker_bind_host() -> str:
     return os.environ.get(BIND_HOST_ENV, DEFAULT_BIND_HOST)
 
 
+# PRD-282 US-302: the log format and level, read as the text in the environment.
+# log_settings.py (a copy of the platform's) checks both when logging starts, so a value
+# it cannot use stops the worker, naming the setting and never the value.
+LOG_FORMAT_ENV = "LOG_FORMAT"
+LOG_LEVEL_ENV = "LOG_LEVEL"
+# The version a JSON log line names (PRD-279): the platform's setting, under the same
+# name and fallback (orchestrator/config.py). The worker's image is not built with it.
+AUTOMATOS_VERSION_ENV = "AUTOMATOS_VERSION"
+UNVERSIONED_BUILD = "dev"
+
+
+def log_format_setting() -> str:
+    """``LOG_FORMAT`` as set; empty when unset (``text``)."""
+    return os.environ.get(LOG_FORMAT_ENV, "")
+
+
+def log_level_setting() -> str:
+    """``LOG_LEVEL`` as set; empty when unset (``INFO``)."""
+    return os.environ.get(LOG_LEVEL_ENV, "")
+
+
+def automatos_version() -> str:
+    """``AUTOMATOS_VERSION``, or ``dev`` when it is unset or blank."""
+    return os.environ.get(AUTOMATOS_VERSION_ENV, "").strip() or UNVERSIONED_BUILD
+
+
 # PRD-256 O2b (#847): OpenTelemetry traces (worker_otel.py), the same names and
 # defaults as the platform's (orchestrator/config.py), and default OFF.
 DEFAULT_OTEL_SERVICE_NAME = "automatos-workspace-worker"

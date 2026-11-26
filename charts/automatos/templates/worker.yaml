@@ -1,5 +1,6 @@
 {{- if .Values.worker.enabled }}
 {{- include "automatos.validateWorker" . }}
+{{- include "automatos.validateLogFormat" . }}
 {{- /*
 The worker's own Secret (worker.existingSecret, PRD-280 US-202) holds only what it needs, and
 the token it shares with the API is a key it must hold. With the chart's one Secret, as
@@ -66,6 +67,9 @@ spec:
               value: workspace-worker
             - name: LOG_RELAY_ENABLED
               value: "false"
+            {{- with include "automatos.workerLogFormatEnv" . | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
             {{- range $key := $required }}
             - name: {{ $key }}
               valueFrom:

@@ -1011,6 +1011,11 @@ class Config:
     # OBSERVABILITY — log relay, Prometheus metrics, Loki query API, alerts
     # (PRD-142 W3-S5 / G7 — centralized so monitoring modules stop reading env directly)
     # =============================================================================
+    # PRD-282 US-301: the console's format (text, or json: one record per line) and level (INFO
+    # unless set). Read as written; setup_logging refuses a value it cannot use, naming the
+    # setting (core/monitoring/log_settings.py), and empty is the default.
+    LOG_FORMAT: str = os.getenv("LOG_FORMAT", "")
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "")
     # Log relay client (core/monitoring/automatos_logging.py).
     # PRD-176 F068: local-safe default host + OFF by default. SaaS points this at
     # log-relay.railway.internal and sets LOG_RELAY_ENABLED=true via env; a fresh
