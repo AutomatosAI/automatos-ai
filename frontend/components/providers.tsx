@@ -115,10 +115,10 @@ export function Providers({ children, initialUiStyle, initialTone, initialTheme 
   }))
 
   return (
-    // framer-motion ignores the reader's motion preference unless asked: "user" skips its transform
-    // and layout animations when they want reduced motion, as globals.css does for CSS motion.
-    <MotionConfig reducedMotion="user">
     <AuthBoundary>
+      {/* framer-motion ignores the reader's motion preference unless asked: "user" skips its transform
+          and layout animations when they want reduced motion, as globals.css does for CSS motion. */}
+      <MotionConfig reducedMotion="user">
       <RoleProvider>
         <ThemeProvider
           attribute="class"
@@ -158,7 +158,7 @@ export function Providers({ children, initialUiStyle, initialTone, initialTheme 
           </UiStyleProvider>
         </ThemeProvider>
       </RoleProvider>
+      </MotionConfig>
     </AuthBoundary>
-    </MotionConfig>
   )
 }
