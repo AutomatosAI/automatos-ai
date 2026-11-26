@@ -171,8 +171,8 @@ or is one the API would refuse at start.
 | `edition.enterprise.oidc.clientId` | `OIDC_CLIENT_ID` | Required. The application's client id at the provider. |
 | `edition.enterprise.oidc.displayName` | `OIDC_DISPLAY_NAME` | The sign-in button's text, 1 to 64 characters, no `<` or `>`. Empty: "your organisation". |
 | `edition.enterprise.oidc.scopes` | `OIDC_SCOPES` | Separated by spaces, `openid` among them. Empty: `openid profile email`. |
-| `edition.enterprise.oidc.requiredClaims` | `OIDC_REQUIRED_CLAIMS` | The access rule: `claim=value` rules separated by `;`. The API requires one for an issuer many organisations share, and checks the rules' syntax at start. |
-| `edition.enterprise.oidc.endpointHosts` | `OIDC_ENDPOINT_HOSTS` | Host names, besides the issuer's, where the provider's metadata may put its token endpoint and keys. |
+| `edition.enterprise.oidc.requiredClaims` | `OIDC_REQUIRED_CLAIMS` | The access rule: `claim=value` rules separated by `;`. The API requires one for an issuer many organisations share, and checks the rules' syntax at start. At a shared issuer the rule must name your organisation (`hd=<domain>` for Google, `tid=<tenant-id>` for Microsoft); start-up cannot check that. |
+| `edition.enterprise.oidc.endpointHosts` | `OIDC_ENDPOINT_HOSTS` | Host names, besides the issuer's, where the provider's metadata may put its token endpoint and keys. They must resolve to public addresses: only the issuer's own host may resolve to a private one. |
 | `edition.enterprise.oidc.caConfigMap`, `caKey` | `OIDC_CA_BUNDLE_FILE` | A ConfigMap you create in the release's namespace holding the CA of a provider with a private certificate, under `caKey` (`ca.crt`). Mounted read-only at `/etc/automatos/oidc-ca` in the API and the Job. |
 | `edition.enterprise.defaultRole` | `ENTERPRISE_DEFAULT_ROLE` | `none` (the default), `viewer`, `editor` or `admin`: the role in the default workspace for anyone the access rule lets in. Any role but `none` needs `requiredClaims`. |
 | `edition.enterprise.bootstrapAdmins` | `ENTERPRISE_BOOTSTRAP_ADMINS` | `sub:<subject>` and `email:<address>` entries, separated by commas: install admins at their first sign-in. The API checks the entries at start. |
@@ -214,7 +214,7 @@ it or signed in on it longer ago than that is removed at its next request.
 Until that request, Settings lists the phone as expired and no push is sent to it.
 
 Signing in on a phone needs the provider to return `auth_time` in the ID token when the phone asks
-for a fresh sign-in, no earlier than the sign-in's start: Entra's optional claim, Google's
+for a fresh sign-in, no earlier than 60 seconds before the sign-in's start: Entra's optional claim, Google's
 project setting "Session age claims", Cognito's managed login (the PRD's §5.9). Without it every phone sign-in is refused and
 the app is told `sign_in_refused`; the reason is recorded in the `auth:sign_in_refused` audit row
 and in the API's warning log line. Such a phone pairs with a code from Settings instead.

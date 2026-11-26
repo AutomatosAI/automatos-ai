@@ -33,10 +33,18 @@ AWS documents connecting IAM Identity Center to an Amazon Cognito user pool over
 3. Copy the **IAM Identity Center SAML metadata** address it shows.
 4. Set the application's ACS URL to `https://<user-pool-domain>/saml2/idpresponse`.
 5. Set the application's SAML audience to `urn:amazon:cognito:sp:<user-pool-id>`.
-6. Map the attributes. AWS's worked example maps **Subject** to `${user:email}` (format `emailAddress`) and adds `email`. Cognito's SAML page says to "Map NameId … from an IdP attribute that has values that don't change". IAM Identity Center's attribute list includes `${user:subject}`.
+6. Map the attributes. Map **Subject** to `${user:subject}`, not to `${user:email}` as AWS's worked example does (format `emailAddress`), and add `email` as the example does. Cognito's SAML page says to "Map NameId … from an IdP attribute that has values that don't change". Cognito keeps one user, and one `sub`, per subject it is sent; with an address as the subject, the next person given that address would sign in to Automatos as the person who held it before. IAM Identity Center's attribute list includes `${user:subject}`. The pages read do not say outright that it never changes or which format to pair it with; the conformance run confirms it. Until it does, never give a username that someone has held to another person: if `${user:subject}` is the username, the new person would sign in as the one who held it before.
 7. Assign the users or groups who may use Automatos.
 8. In the Cognito user pool, add a SAML identity provider from the metadata address in step 3.
-9. Assign that identity provider to the Automatos app client.
+9. Assign that identity provider to the Automatos app client, and remove **Cognito user pool** from the app client's identity providers, so people sign in only through IAM Identity Center.
+10. Turn off self-service sign-up in the user pool ([Amazon Cognito](enterprise-sign-in-amazon-cognito.md#2-register-the-application)).
+
+**An install people already sign in to with Subject mapped to `${user:email}`:** leave that mapping as it is. Cognito keeps one user per subject, so a new mapping signs each person in as a new Cognito user, with a new `sub`. Automatos finds a person only by the pair (issuer, `sub`), never by email, so each person's next sign-in is a first sign-in:
+
+- with a verified address that their existing person holds, the sign-in is refused: `sign_in_refused`, audited `email_conflict`;
+- without a verified address, Automatos makes a second person. The existing person keeps their records and access, and the new one has none of them.
+
+Automatos has no step that moves a person to a new subject. Change the mapping only on an install nobody has signed in to yet.
 
 The install's settings are the Cognito ones: `oidc.issuer` is the user pool's issuer, and `oidc.endpointHosts` its domain.
 
