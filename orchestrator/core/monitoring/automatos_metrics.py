@@ -17,7 +17,7 @@ import time
 from typing import Optional
 
 from config import config
-from core.monitoring.path_digests import redact_digest_segments
+from core.monitoring.path_digests import redact_path
 
 try:
     from prometheus_client import (
@@ -227,9 +227,10 @@ def _normalize_path(path: str) -> str:
 
     A SHA-256 segment goes first (PRD-264 FR-17): each file hash checked at the public
     provenance route would otherwise be its own label on the unauthenticated /metrics.
+    So does a workspace webhook's key (#1642), the credential in its path.
     """
     import re
-    path = redact_digest_segments(path)
+    path = redact_path(path)
     # Replace UUIDs
     path = re.sub(
         r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",

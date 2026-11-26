@@ -25,7 +25,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from core.monitoring.automatos_logging import request_id_var
-from core.monitoring.path_digests import redact_digest_segments
+from core.monitoring.path_digests import redact_path
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ async def json_500_for_unhandled_errors(
         request_id = request_id_var.get("") or safe_request_id(request.headers.get("X-Request-ID"))
         logger.exception(  # the path without a file hash in it (PRD-264 FR-17)
             "Unhandled error in %s %s (request_id=%s)", request.method,
-            redact_digest_segments(request.url.path), request_id,
+            redact_path(request.url.path), request_id,
         )
         body = {"detail": INTERNAL_ERROR_DETAIL}
         if request_id:

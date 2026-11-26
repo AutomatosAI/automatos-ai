@@ -43,15 +43,15 @@ import threading
 import time
 import traceback
 from contextvars import ContextVar
-from typing import Optional
+from typing import Any, MutableMapping, Optional
 
 from config import config
 # PRD-282 US-301: LOG_FORMAT and LOG_LEVEL, the JSON line, and uvicorn's own lines (standard library only).
 from core.monitoring import log_settings
 from core.monitoring.json_log_format import JsonLineFormatter
 from core.monitoring.server_log_lines import format_server_lines, level_server_lines
-# PRD-264 FR-17: no file hash from a request path in a log line (logging and re only).
-from core.monitoring.path_digests import guard_access_log_digests, redact_digest_segments
+# PRD-264 FR-17, #1642: no file hash or webhook key from a request path in a log line (logging and re only).
+from core.monitoring.path_digests import guard_access_log_digests, redact_path
 # The request-log guard (#1051, #1178): its own module, which imports nothing but logging,
 # so a script that sets up logging itself can use it without config.
 from core.monitoring.request_log_guard import REQUEST_LIBRARIES, guard_request_logs
@@ -85,6 +85,8 @@ run_id_var: ContextVar[str] = ContextVar("run_id", default="")
 tenant_id_var: ContextVar[str] = ContextVar("tenant_id", default="")
 http_method_var: ContextVar[str] = ContextVar("http_method", default="")
 http_path_var: ContextVar[str] = ContextVar("http_path", default="")
+# #1659: the request's ASGI scope, which routing fills in later, for the route template on its lines.
+http_scope_var: ContextVar[Optional[MutableMapping[str, Any]]] = ContextVar("http_scope", default=None)
 
 
 # ─────────────────────────────────────────────
@@ -211,8 +213,8 @@ class LogRelayHandler(logging.Handler):
         for var_name, ctx_var in _CONTEXT_VARS.items():
             val = ctx_var.get("")
             if val:
-                # A request path never leaves with a file hash in it (PRD-264 FR-17).
-                context[var_name] = redact_digest_segments(val) if var_name == "path" else val
+                # A request path never leaves with a file hash or a key in it (PRD-264 FR-17, #1659).
+                context[var_name] = logged_path() if var_name == "path" else val
 
         # Override with explicit extra fields (extra={} takes precedence)
         for key in _EXTRA_FIELDS:
@@ -348,10 +350,21 @@ _STANDARD_RECORD_ATTRS = frozenset(
 )
 
 
+def logged_path() -> str:
+    """The request's path as a log line carries it (#1659): the route template it was routed to
+    (``/api/webhooks/ws/{workspace_key}``), so no path value is on the line; before routing, or
+    when no route matched, the path with a webhook's key and a file hash collapsed."""
+    from core.route_tree import route_template
+
+    scope = http_scope_var.get()
+    template = route_template(scope) if scope is not None else None
+    return template or redact_path(http_path_var.get(""))
+
+
 def request_log_fields() -> dict:
     """The request's own fields for a JSON line (PRD-282 US-301), from the context the
     request middleware sets (``core.monitoring.request_context``): its id, workspace,
-    method and path (a file hash collapsed, PRD-264 FR-17), and the trace and span ids
+    method and path (its route template, :func:`logged_path`), and the trace and span ids
     while a sampled span is current (PRD-256 O5). Each is empty when there is none."""
     from core.observability.otel import current_trace_ids
 
@@ -360,7 +373,7 @@ def request_log_fields() -> dict:
         "request_id": request_id_var.get(""),
         "workspace_id": workspace_id_var.get(""),
         "method": http_method_var.get(""),
-        "path": redact_digest_segments(http_path_var.get("")),
+        "path": logged_path(),
         "trace_id": trace_id,
         "span_id": span_id,
     }

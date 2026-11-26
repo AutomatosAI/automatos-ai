@@ -12,8 +12,10 @@ on every line the request writes, its access line included (``server_log_lines``
 
 What it sets is what the old middleware set: the request's ``X-Request-ID``, kept to the
 characters ``safe_request_id`` keeps and at most 128 of them, or a new 12-character id when
-it sends none or none is left; the method and the path; the workspace from ``X-Workspace-ID`` (or
-``X-Workspace``) unless it is ``__all__``; the two ids on the server span (PRD-256); and
+it sends none or none is left; the method and the path, and the scope, whose route the log
+lines name instead of the path (#1659); the workspace from ``X-Workspace-ID`` (or
+``X-Workspace``) when it is a workspace id, a UUID of at most 64 characters, and none otherwise
+(``__all__`` included): it is the caller's, read before sign-in (#1659); the two ids on the server span (PRD-256); and
 ``X-Request-ID`` on the response. That one id is on every line the request writes, on the
 response, in a 500's body and on each call the API makes to the workspace worker. Each value
 is put back when the request ends, whether it answered or raised. Anything but an HTTP request passes through untouched.
@@ -26,30 +28,40 @@ from typing import Any, Awaitable, Callable, List, MutableMapping, Tuple
 
 from starlette.datastructures import URL, Headers
 
-from core.monitoring.automatos_logging import http_method_var, http_path_var, request_id_var, workspace_id_var
+from core.monitoring.automatos_logging import (
+    http_method_var, http_path_var, http_scope_var, request_id_var, workspace_id_var,
+)
 from core.observability.error_response import safe_request_id
 from core.observability.otel import annotate_request
 
 REQUEST_ID_HEADER = "x-request-id"
 WORKSPACE_HEADERS = ("x-workspace-id", "x-workspace")
-ALL_WORKSPACES = "__all__"
 NEW_ID_LENGTH = 12
+# The longest header value read as a workspace id; a UUID in any form UUID() takes fits.
+MAX_WORKSPACE_ID_LEN = 64
 
 Message = MutableMapping[str, Any]
 Send = Callable[[Message], Awaitable[None]]
 
 
 def _workspace(headers: Headers) -> str:
-    """The workspace a request names (best effort, before sign-in), or ''."""
+    """The workspace a request names (best effort, before sign-in) as a canonical UUID, or ''
+    when it names none or anything that is not a workspace id."""
     named = next((headers[name] for name in WORKSPACE_HEADERS if headers.get(name)), "")
-    return "" if named == ALL_WORKSPACES else named
+    if len(named) > MAX_WORKSPACE_ID_LEN:
+        return ""
+    try:
+        return str(uuid.UUID(named.strip()))
+    except ValueError:
+        return ""
 
 
 def _hold(scope: Message, headers: Headers, request_id: str) -> List[Tuple[ContextVar, Token]]:
-    """Set the request's context variables; the tokens put each back. All four are set every
+    """Set the request's context variables; the tokens put each back. Each is set every
     time: a request that names no workspace holds none, whatever the context around it held."""
     values = [(request_id_var, request_id), (http_method_var, scope["method"]),
-              (http_path_var, URL(scope=scope).path), (workspace_id_var, _workspace(headers))]
+              (http_path_var, URL(scope=scope).path), (http_scope_var, scope),
+              (workspace_id_var, _workspace(headers))]
     return [(var, var.set(value)) for var, value in values]
 
 
@@ -87,4 +99,4 @@ class RequestContextMiddleware:
                 var.reset(token)
 
 
-__all__ = ["ALL_WORKSPACES", "NEW_ID_LENGTH", "REQUEST_ID_HEADER", "RequestContextMiddleware", "WORKSPACE_HEADERS"]
+__all__ = ["MAX_WORKSPACE_ID_LEN", "NEW_ID_LENGTH", "REQUEST_ID_HEADER", "RequestContextMiddleware", "WORKSPACE_HEADERS"]

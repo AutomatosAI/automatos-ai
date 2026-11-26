@@ -216,7 +216,10 @@ class TrustedClientAddressMiddleware:
     address read from it as ``client_ip`` reads it, so everything that reads the socket peer (the
     widget limiter, ``request.client``) reads the caller, not the proxy. Unset, or no address in
     the header, the scope is left as it is.
-    Registered outermost in ``main.py``, as uvicorn's own proxy-headers middleware would be."""
+    Registered outermost in ``main.py``, as uvicorn's own proxy-headers middleware would be. The
+    address is set on the scope itself, as uvicorn's middleware does, not on a copy: the request's
+    log context holds this scope, and routing writes the route into it (``scope["route"]``), so a
+    copy would hide the route template from every log line (#1659)."""
 
     def __init__(self, app: Any) -> None:
         self.app = app
@@ -230,5 +233,5 @@ class TrustedClientAddressMiddleware:
             address = _header_address(lines, count)
             if address:
                 client = scope.get("client")
-                scope = {**scope, "client": (address, client[1] if client else 0)}
+                scope["client"] = (address, client[1] if client else 0)
         await self.app(scope, receive, send)

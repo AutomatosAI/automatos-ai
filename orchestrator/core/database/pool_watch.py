@@ -84,12 +84,12 @@ class Holder:
 def _request_line() -> str:
     """The request being served ("GET /api/x req=ab12"), path hashes redacted (PRD-264 FR-17)."""
     from core.monitoring.automatos_logging import http_method_var, http_path_var, request_id_var
-    from core.monitoring.path_digests import redact_digest_segments
+    from core.monitoring.path_digests import redact_path
 
     path = http_path_var.get()
     if not path:
         return ""
-    return f" {http_method_var.get()} {redact_digest_segments(path)} req={request_id_var.get()}".rstrip()
+    return f" {http_method_var.get()} {redact_path(path)} req={request_id_var.get()}".rstrip()
 
 
 def _current_task() -> Optional["weakref.ReferenceType[asyncio.Task]"]:

@@ -40,7 +40,7 @@ from typing import Any, AsyncIterator, Callable, Dict, Optional, Tuple
 
 from config import config
 from core import editions
-from core.monitoring.path_digests import redact_digest_segments
+from core.monitoring.path_digests import redact_path
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ def _scrubbed_url_value(name: str, value: str) -> str:
     """One URL attribute's value with no query value and no file hash in its path."""
     if name == "url.query":
         return redact_query("?" + value)[1:] if value else value
-    return redact_digest_segments(redact_query(value))
+    return redact_path(redact_query(value))
 
 
 def _scrub_url_attributes(span: Any, scope: Any = None) -> None:
