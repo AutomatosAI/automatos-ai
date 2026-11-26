@@ -6,11 +6,12 @@ database is secured, and each driver gets it in the form it takes.
 * with neither set, no connection path gains a keyword, and the main engine keeps its
   production default (``sslmode=require`` added when the address names none);
 * with ``verify-full`` and a CA file, libpq gets ``sslmode`` and ``sslrootcert`` (psycopg2,
-  and SQLAlchemy through ``connect_args``), and asyncpg gets an ``ssl.SSLContext`` that
+  and SQLAlchemy through ``connect_args``), with ``gssencmode=disable`` as for every mode that
+  checks a certificate, so libpq cannot use GSSAPI encryption in place of that check; asyncpg gets an ``ssl.SSLContext`` that
   requires the certificate, trusts that CA and checks the host name;
-* a mode libpq doesn't know, a CA file without a mode that checks it, or a CA file that is
-  missing or holds no certificate, stops start-up with a message that names the setting
-  and never the file's path;
+* a mode libpq doesn't know, a CA file without a mode that checks it, verify-ca or
+  verify-full without a CA file, or a CA file that is missing or holds no certificate, stops
+  start-up with a message that names the settings and never the file's path;
 * a CA file replaced at the same path is loaded again for the next asyncpg connection.
 
 The CA files are made at run time (``tests/helpers_prd278_w3_ca.py``).
@@ -23,6 +24,8 @@ import ast
 import asyncio
 import os
 import ssl
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -131,10 +134,10 @@ def test_create_app_engine_passes_the_callers_arguments_unchanged_with_neither_s
 # ── verify-full with a CA file ───────────────────────────────────────────────
 
 
-def test_verify_full_with_a_ca_gives_libpq_both_keywords(settings, ca_file):
+def test_verify_full_with_a_ca_gives_libpq_its_keywords(settings, ca_file):
     settings(sslmode="verify-full", sslrootcert=ca_file)
     found = tls.database_tls()
-    assert found.libpq_params() == {"sslmode": "verify-full", "sslrootcert": ca_file}
+    assert found.libpq_params() == {"sslmode": "verify-full", "sslrootcert": ca_file, "gssencmode": "disable"}
     assert found.configured and found.checks_certificate and found.verifies_server
 
 
@@ -142,7 +145,7 @@ def test_the_settings_win_over_the_same_keys_and_the_callers_dict_is_not_changed
     settings(sslmode="verify-full", sslrootcert=ca_file)
     given = {"host": "db", "sslmode": "disable"}
     merged = tls.database_tls().with_libpq_params(given)
-    assert merged == {"host": "db", "sslmode": "verify-full", "sslrootcert": ca_file}
+    assert merged == {"host": "db", "sslmode": "verify-full", "sslrootcert": ca_file, "gssencmode": "disable"}
     assert given == {"host": "db", "sslmode": "disable"}
 
 
@@ -153,7 +156,8 @@ def test_create_app_engine_puts_the_settings_in_connect_args_over_the_callers(se
     tls.create_app_engine(_address(), connect_args={"keepalives": 1, "sslmode": "prefer"})
     ((url, kwargs),) = recorder.calls
     assert url == _address()
-    assert kwargs["connect_args"] == {"keepalives": 1, "sslmode": "verify-full", "sslrootcert": ca_file}
+    assert kwargs["connect_args"] == {"keepalives": 1, "sslmode": "verify-full", "sslrootcert": ca_file,
+                                      "gssencmode": "disable"}
 
 
 def test_psycopg2_receives_the_settings_over_the_addresses_own_sslmode(settings, monkeypatch, ca_file):
@@ -177,6 +181,104 @@ def test_psycopg2_receives_the_settings_over_the_addresses_own_sslmode(settings,
     assert seen, "psycopg2.connect was not reached"
     assert seen[0]["sslmode"] == "verify-full" and seen[0]["sslrootcert"] == ca_file
     assert seen[0]["host"] == "db.example.invalid"
+
+
+# ── the address's own keys that libpq reads as sslmode ──────────────────────
+# libpq turns requiressl (1: require, else prefer) and, in a URI, ssl=true (require) into sslmode,
+# applying keys in the order written. psycopg2's final connection string is recorded at
+# psycopg2._connect and read back with libpq's own parser (parse_dsn), which applies them the same
+# way, so each assertion is on the mode libpq would use.
+ALIASED_QUERIES = ["?sslmode=disable&requiressl=0", "?sslmode=disable&ssl=true",
+                   "?requiressl=1&sslmode=disable&requiressl=0", "?sslmode=disable&requiress%6C=0",
+                   "?application_name=api&sslmode=disable&requiressl=0"]
+
+
+@pytest.fixture
+def libpq_strings(monkeypatch):
+    """psycopg2's final connection strings, recorded where psycopg2.connect hands them to libpq."""
+    import psycopg2
+
+    seen = []
+
+    def record(dsn, *args, **kwargs):
+        seen.append(dsn)
+        raise psycopg2.OperationalError("recorded; no connection is made")
+
+    monkeypatch.setattr(psycopg2, "_connect", record)
+    return seen
+
+
+def _libpq_reads(dsn: str) -> dict:
+    from psycopg2.extensions import parse_dsn
+
+    return parse_dsn(dsn)
+
+
+@pytest.mark.parametrize("query", ALIASED_QUERIES)
+def test_libpq_ends_on_the_settings_mode_through_an_engine(settings, libpq_strings, ca_file, query):
+    from sqlalchemy.pool import NullPool
+
+    settings(sslmode="verify-full", sslrootcert=ca_file)
+    engine = tls.create_app_engine(_address(query), poolclass=NullPool)
+    with pytest.raises(Exception):
+        engine.connect()
+    assert libpq_strings, "psycopg2 built no connection string"
+    used = _libpq_reads(libpq_strings[0])
+    assert (used["sslmode"], used["sslrootcert"]) == ("verify-full", ca_file)
+    assert "requiressl" not in libpq_strings[0] and "ssl=" not in libpq_strings[0]
+
+
+@pytest.mark.parametrize("query", ["?sslmode=disable&requiressl=0", "?sslmode=disable&ssl=true"])
+def test_libpq_ends_on_the_settings_mode_through_the_seed_loaders_dsn(settings, monkeypatch, libpq_strings,
+                                                                      ca_file, query):
+    """psycopg2.connect(url, **keywords) parses the address with libpq first, then the keywords replace it."""
+    import psycopg2
+    from core.database import load_seed_data
+
+    monkeypatch.setattr("core.database.database.get_database_url", lambda: _address(query))
+    settings(sslmode="verify-full", sslrootcert=ca_file)
+    with pytest.raises(psycopg2.OperationalError):
+        load_seed_data._connect()
+    used = _libpq_reads(libpq_strings[0])
+    assert (used["sslmode"], used["sslrootcert"]) == ("verify-full", ca_file)
+
+
+def test_a_keyword_dict_loses_libpqs_other_sslmode_keys_and_the_callers_dict_is_kept(settings, ca_file):
+    settings(sslmode="verify-full", sslrootcert=ca_file)
+    given = {"host": "db", "sslmode": "disable", "requiressl": "0", "ssl": "true"}
+    merged = tls.database_tls().with_libpq_params(given)
+    assert merged == {"host": "db", "sslmode": "verify-full", "sslrootcert": ca_file, "gssencmode": "disable"}
+    assert given == {"host": "db", "sslmode": "disable", "requiressl": "0", "ssl": "true"}
+
+
+def test_an_address_without_those_keys_is_returned_as_given():
+    address = _address("?sslmode=disable&application_name=api")
+    assert tls.without_sslmode_aliases(address) is address
+
+
+def test_only_those_keys_leave_the_address():
+    kept = tls.without_sslmode_aliases(_address("?requiressl=0&application_name=api&ssl=true&sslmode=disable"))
+    assert dict(kept.query) == {"application_name": "api", "sslmode": "disable"}
+    assert (kept.host, kept.port, kept.database, kept.username) == ("db.example.invalid", 5432, "app", "app")
+
+
+def test_with_neither_setting_the_address_and_the_dict_reach_the_builder_as_given(settings, monkeypatch):
+    recorder = _EngineRecorder()
+    monkeypatch.setattr(tls, "create_engine", recorder)
+    address = _address("?sslmode=disable&requiressl=1&ssl=true")
+    tls.create_app_engine(address, connect_args={"requiressl": "1"})
+    assert recorder.calls == [(address, {"connect_args": {"requiressl": "1"}})]
+    given = {"host": "db", "requiressl": "1", "ssl": "true"}
+    assert tls.database_tls().with_libpq_params(given) == given
+
+
+def test_with_neither_setting_libpq_receives_the_addresses_own_keys(settings, libpq_strings):
+    from sqlalchemy.pool import NullPool
+
+    engine = tls.create_app_engine(_address("?sslmode=disable&requiressl=1"), poolclass=NullPool)
+    with pytest.raises(Exception):
+        engine.connect()
+    assert "sslmode=disable" in libpq_strings[0] and "requiressl=1" in libpq_strings[0]
 
 
 def test_verify_full_with_a_ca_gives_asyncpg_a_context_that_checks_the_certificate_and_host(settings, ca_file):
@@ -213,21 +315,82 @@ def test_the_asyncpg_context_trusts_only_the_named_ca(settings, monkeypatch, ca_
     assert made == [(ssl.Purpose.SERVER_AUTH, {"cafile": ca_file})], "built once, from that file only"
 
 
-@pytest.mark.parametrize("mode", ["disable", "allow", "prefer", "require", "verify-ca", "verify-full"])
-def test_a_mode_without_a_ca_reaches_asyncpg_as_text(settings, mode):
-    """asyncpg reads the mode text the way libpq does (its own root.crt for verify-*)."""
+@pytest.mark.parametrize("mode", ["disable", "allow", "prefer", "require"])
+def test_a_mode_that_checks_no_certificate_reaches_asyncpg_as_text(settings, mode):
+    """asyncpg reads the mode text the way libpq does. A checking mode needs a CA file (below)."""
     settings(sslmode=mode)
     assert tls.database_tls().asyncpg_kwargs() == {"ssl": mode}
     assert tls.database_tls().libpq_params() == {"sslmode": mode}
 
 
 def test_only_verify_full_verifies_the_server():
-    """The predicate a later edition check can require (PRD-278 D-6)."""
+    """The predicate the enterprise edition's start-up requires (PRD-278 D-6), and no wider."""
     verified = {mode for mode in tls.SSLMODES if tls.DatabaseTLS(sslmode=mode).verifies_server}
     checked = {mode for mode in tls.SSLMODES if tls.DatabaseTLS(sslmode=mode).checks_certificate}
     assert verified == {"verify-full"}
     assert checked == {"verify-ca", "verify-full"}
     assert not tls.DatabaseTLS().verifies_server
+
+
+# ── GSSAPI encryption: libpq prefers it to TLS whatever sslmode says ─────────
+# With Kerberos credentials at hand, libpq tries a GSSAPI-encrypted connection first and, if it
+# is accepted, uses it and checks no certificate. A mode that checks a certificate turns that off.
+GSS_QUERIES = ["?gssencmode=prefer", "?sslmode=disable&gssencmode=require", "?gss%65ncmode=prefer"]
+
+
+def test_exactly_the_modes_that_check_a_certificate_turn_gss_encryption_off():
+    """require checks no certificate: GSSAPI encryption, a channel Kerberos authenticates, may stay."""
+    off = {mode for mode in tls.SSLMODES if "gssencmode" in tls.DatabaseTLS(sslmode=mode).libpq_params()}
+    assert off == tls.CERTIFICATE_CHECKING_MODES == {"verify-ca", "verify-full"}
+    assert tls.DatabaseTLS(sslmode="verify-ca").libpq_params()["gssencmode"] == "disable"
+    assert "gssencmode" not in tls.DatabaseTLS().libpq_params()
+    assert dict(tls.NO_GSS_ENCRYPTION) == {"gssencmode": "disable"}
+
+
+def test_a_keyword_dicts_own_gssencmode_is_replaced(settings, ca_file):
+    settings(sslmode="verify-full", sslrootcert=ca_file)
+    given = {"host": "db", "gssencmode": "require"}
+    assert tls.database_tls().with_libpq_params(given)["gssencmode"] == "disable"
+    assert given == {"host": "db", "gssencmode": "require"}
+
+
+@pytest.mark.parametrize("query", GSS_QUERIES)
+def test_libpq_gets_no_gss_encryption_through_an_engine_whatever_the_address_says(settings, libpq_strings,
+                                                                                   ca_file, query):
+    from sqlalchemy.pool import NullPool
+
+    settings(sslmode="verify-full", sslrootcert=ca_file)
+    engine = tls.create_app_engine(_address(query), poolclass=NullPool)
+    with pytest.raises(Exception):
+        engine.connect()
+    used = _libpq_reads(libpq_strings[0])
+    assert (used["sslmode"], used["gssencmode"]) == ("verify-full", "disable")
+    assert "gssencmode=prefer" not in libpq_strings[0] and "gssencmode=require" not in libpq_strings[0]
+
+
+@pytest.mark.parametrize("query", GSS_QUERIES)
+def test_libpq_gets_no_gss_encryption_through_the_seed_loaders_dsn(settings, monkeypatch, libpq_strings,
+                                                                   ca_file, query):
+    import psycopg2
+    from core.database import load_seed_data
+
+    monkeypatch.setattr("core.database.database.get_database_url", lambda: _address(query))
+    settings(sslmode="verify-full", sslrootcert=ca_file)
+    with pytest.raises(psycopg2.OperationalError):
+        load_seed_data._connect()
+    assert _libpq_reads(libpq_strings[0])["gssencmode"] == "disable"
+
+
+@pytest.mark.parametrize("mode", [None, "prefer", "require"])
+def test_without_a_certificate_check_the_addresses_gssencmode_reaches_libpq_as_given(settings, libpq_strings, mode):
+    from sqlalchemy.pool import NullPool
+
+    settings(sslmode=mode)
+    engine = tls.create_app_engine(_address("?gssencmode=require"), poolclass=NullPool)
+    with pytest.raises(Exception):
+        engine.connect()
+    assert _libpq_reads(libpq_strings[0])["gssencmode"] == "require"
+    assert "gssencmode" not in tls.database_tls().libpq_params()
 
 
 # ── values that can't work stop start-up, saying which setting ──────────────
@@ -245,6 +408,56 @@ def test_a_ca_without_a_checking_mode_is_refused_without_quoting_its_path(settin
     with pytest.raises(tls.DatabaseTLSConfigError, match="DATABASE_SSLROOTCERT is used only with") as refused:
         tls.database_tls()
     assert CA_IN_POD not in str(refused.value)
+
+
+@pytest.mark.parametrize("rootcert", [None, "", "   "])
+@pytest.mark.parametrize("mode", ["verify-ca", "verify-full", " VERIFY-FULL "])
+def test_a_checking_mode_without_a_ca_is_refused_naming_both_settings(settings, mode, rootcert):
+    """Refused at start, not after a wait: libpq would look for a root.crt the image does not hold."""
+    settings(sslmode=mode, sslrootcert=rootcert)
+    with pytest.raises(tls.DatabaseTLSConfigError) as refused:
+        tls.database_tls()
+    message = str(refused.value)
+    assert message.startswith("DATABASE_SSLMODE verify-ca and verify-full need DATABASE_SSLROOTCERT")
+    assert "a file" in message and CA_IN_POD not in message
+
+
+# The engine module imported in a fresh interpreter, with psycopg2.connect replaced by a refusal
+# that prints a marker: the import is the API's start, and nothing may connect before it refuses.
+_IMPORT_THE_ENGINE_MODULE = (
+    "import psycopg2\n"
+    "def refuse(*args, **kwargs):\n"
+    "    print('CONNECT_ATTEMPTED', flush=True)\n"
+    "    raise SystemExit(3)\n"
+    "psycopg2.connect = refuse\n"
+    "import core.database.database\n"
+    "print('ENGINE_MODULE_IMPORTED', flush=True)\n"
+)
+
+
+def _import_the_engine_module(**settings):
+    """A fresh interpreter importing core/database/database.py as an enterprise API: (code, output)."""
+    env = {key: value for key, value in os.environ.items() if key not in ("DATABASE_SSLMODE", "DATABASE_SSLROOTCERT")}
+    env.update({"AUTH_EDITION": "enterprise", "DATABASE_URL": _address(), **settings})
+    done = subprocess.run([sys.executable, "-c", _IMPORT_THE_ENGINE_MODULE], cwd=ORCH, env=env,
+                          capture_output=True, text=True, timeout=120)
+    return done.returncode, done.stdout + done.stderr
+
+
+def test_an_enterprise_api_with_verify_full_and_no_ca_stops_at_the_engine_import_before_any_connection():
+    """Refused by core.database.tls when the engine module is imported, not by the edition check."""
+    code, output = _import_the_engine_module(DATABASE_SSLMODE="verify-full")
+    assert code != 0, output
+    assert "DatabaseTLSConfigError" in output and "need DATABASE_SSLROOTCERT" in output
+    assert "CONNECT_ATTEMPTED" not in output and "ENGINE_MODULE_IMPORTED" not in output
+    assert "db.example.invalid" not in output
+
+
+def test_the_same_api_with_a_ca_file_imports_the_engine_module_and_connects_to_nothing(ca_file):
+    """The control: only the missing CA file stopped the import above."""
+    code, output = _import_the_engine_module(DATABASE_SSLMODE="verify-full", DATABASE_SSLROOTCERT=ca_file)
+    assert code == 0, output[-2000:]
+    assert "ENGINE_MODULE_IMPORTED" in output and "CONNECT_ATTEMPTED" not in output
 
 
 def _no_certificate(tmp_path) -> str:
@@ -361,7 +574,8 @@ def test_the_scheduler_lock_keeps_its_keepalive_and_gains_the_settings(settings,
     leadership.SchedulerLock(_address())._connect()
     (_, unset), (_, verified) = recorder.calls
     assert unset["connect_args"] == leadership.KEEPALIVE
-    assert verified["connect_args"] == {**leadership.KEEPALIVE, "sslmode": "verify-full", "sslrootcert": ca_file}
+    assert verified["connect_args"] == {**leadership.KEEPALIVE, "sslmode": "verify-full", "sslrootcert": ca_file,
+                                        "gssencmode": "disable"}
 
 
 def test_the_seed_loader_connects_with_the_settings(settings, monkeypatch, ca_file):
@@ -372,7 +586,7 @@ def test_the_seed_loader_connects_with_the_settings(settings, monkeypatch, ca_fi
     monkeypatch.setattr("core.database.database.get_database_url", lambda: _address())
     settings(sslmode="verify-full", sslrootcert=ca_file)
     load_seed_data._connect()
-    connect.assert_called_once_with(_address(), sslmode="verify-full", sslrootcert=ca_file)
+    connect.assert_called_once_with(_address(), sslmode="verify-full", sslrootcert=ca_file, gssencmode="disable")
 
 
 class _StubEmbeddings:
@@ -390,4 +604,4 @@ def test_the_ingestion_managers_connections_carry_the_settings(settings, monkeyp
     assert mgr_mod.DocumentManager(db_config=given, workspace_id="ws").db_config == given
     settings(sslmode="verify-full", sslrootcert=ca_file)
     secured = mgr_mod.DocumentManager(db_config=given, workspace_id="ws").db_config
-    assert secured == {**given, "sslmode": "verify-full", "sslrootcert": ca_file}
+    assert secured == {**given, "sslmode": "verify-full", "sslrootcert": ca_file, "gssencmode": "disable"}

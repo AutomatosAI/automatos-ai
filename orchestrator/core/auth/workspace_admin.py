@@ -22,7 +22,9 @@ it can never surface another tenant's data. Fail-closed: anonymous / plain-membe
 A paired phone or browser (PRD-266, ``auth_type`` ``device``) has no Clerk identity:
 the same rule is read for its bound person by ``users.id``
 (``core.auth.principal.resolve_user_pk``). The local operator's device is
-``super_admin`` and passes as the operator does.
+``super_admin`` and passes as the operator does. A person signed in to Automatos (PRD-277,
+``auth_type`` ``session``) is read the same way, by the ``users.id`` the session lane bound
+(``core.auth.principal.claimed_user_pk``), never by email.
 
 PRD-266 D16 (Gerard, 20 Oct; reverses PRD-196's owner/admin posture for these verbs):
 ``require_workspace_answerer`` is the same rule widened by one role. An owner, admin or
@@ -40,7 +42,8 @@ from core.auth import person as people
 from core.auth.dependencies import RequestContext
 from core.auth.device import DEVICE_AUTH_TYPE
 from core.auth.hybrid import get_request_context_hybrid
-from core.auth.principal import resolve_user_pk
+from core.auth.principal import claimed_user_pk, resolve_user_pk
+from core.auth.session_lane import SESSION_AUTH_TYPE
 from core.auth.super_admin import SUPER_ADMIN_ROLE
 from core.database.database import get_db
 from modules.policy.roles import WorkspaceRole
@@ -60,6 +63,14 @@ def _is_device_member_in(db, ctx: RequestContext, roles: Sequence[str]) -> bool:
     return people.owns_or_holds_role(db, people.by_user_pk(user_pk), ctx.workspace_id, roles)
 
 
+def _is_session_member_in(db, ctx: RequestContext, roles: Sequence[str]) -> bool:
+    """``_is_member_in`` for a signed-in person: the ``users.id`` the session lane bound, never an email."""
+    user_pk = claimed_user_pk(ctx) if ctx.workspace_id is not None else None
+    if user_pk is None:
+        return False
+    return people.owns_or_holds_role(db, people.by_user_pk(user_pk), ctx.workspace_id, roles)
+
+
 def _is_member_in(db, ctx: RequestContext, roles: Sequence[str]) -> bool:
     """True when ``ctx.user`` owns ``ctx.workspace_id``, or is an active member of it
     whose role is one of ``roles``.
@@ -67,13 +78,15 @@ def _is_member_in(db, ctx: RequestContext, roles: Sequence[str]) -> bool:
     Mirrors ``hybrid._user_has_workspace_access`` (owner OR active member) and
     narrows it to ``roles``. Owning the workspace always qualifies — the
     personal-workspace owner is its admin by definition. A caller with no
-    ``clerk_user_id`` is read by ``users.id`` only on the device path. Both paths
-    read by ``users.id`` (``core.auth.person``, PRD-277 US-202).
+    ``clerk_user_id`` is read by ``users.id`` only on the device and session paths.
+    Every path reads by ``users.id`` (``core.auth.person``, PRD-277 US-202).
     """
     user = getattr(ctx, "user", None)
     clerk_uid = getattr(user, "clerk_user_id", None) if user else None
     if not clerk_uid and getattr(ctx, "auth_type", None) == DEVICE_AUTH_TYPE:
         return _is_device_member_in(db, ctx, roles)
+    if not clerk_uid and getattr(ctx, "auth_type", None) == SESSION_AUTH_TYPE:
+        return _is_session_member_in(db, ctx, roles)
     if not clerk_uid or ctx.workspace_id is None:
         return False
     return people.owns_or_holds_role(db, people.by_clerk_id(clerk_uid), ctx.workspace_id, roles)

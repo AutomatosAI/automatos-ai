@@ -81,9 +81,10 @@ def record_task_status(
 
     Synchronous and blocking: main.py runs it in a thread. The connection lasts
     for this one statement, so no connection is shared between threads. ``tls`` is
-    libpq's ``sslmode`` and ``sslrootcert`` (worker_config.database_tls_params), which
-    win over the same keys in the address; libpq checks the server's certificate for
-    verify-ca and verify-full, and its host name for verify-full (PRD-278 W3).
+    libpq's ``sslmode`` and ``sslrootcert``, with ``gssencmode=disable`` for a mode that
+    checks a certificate (worker_config.database_tls_params), which win over the same keys
+    in the address; libpq checks the server's certificate for verify-ca and verify-full,
+    and its host name for verify-full (PRD-278 W3).
     """
     params = update_parameters(task_id, status, worker_id, error, datetime.now(timezone.utc))
     dsn = libpq_dsn(database_url)

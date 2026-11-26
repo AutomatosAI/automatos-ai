@@ -22,7 +22,9 @@ revision, through W1's guarded GET (``fetch.fetch_bytes``: no redirect, identity
 Cookie or X-Workspace-ID) capped at ``AUTOMATOS_CLOUD_BUNDLE_MAX_KB``. The body's sha256 must be the
 revision; it must be UTF-8 JSON, a bundle ``validate_bundle`` passes, in its canonical form (the same bytes
 on both sides, K8), and of the entry's type, externalId and version. ``fetch_bundles`` does that for each
-entry: one that fails is refused, and the next is fetched.
+entry: one that fails is refused, and the next is fetched. Both ask ``items_gate.brings_items`` before any
+request (PRD-277 US-704): where this install doesn't bring items from Automatos Cloud, every entry is refused
+for that one reason and nothing is requested.
 
 Every refusal is a plain sentence of this module's own, W1's fetch's or the validator's, none of which
 echoes what it received, logged with the type and, once it passed its pattern, the externalId. A leaf for
@@ -44,6 +46,7 @@ from core.models.marketplace_cloud import MarketplaceCloudItem
 from services.marketplace_bundles.canonical import canonical_bytes
 from services.marketplace_bundles.catalog_paths import bundle_path
 from services.marketplace_bundles.errors import BundleError
+from services.marketplace_bundles.items_gate import ITEMS_NOT_SWITCHED_ON, brings_items
 from services.marketplace_bundles.resolve import NOTHING_AWAITED, Awaited, awaited, held_now
 from services.marketplace_bundles.schema import (
     BUNDLE_TYPES, CATEGORY_MAX, DESCRIPTION_MAX, EXTERNAL_ID_LENGTH, EXTERNAL_ID_PATTERN, ICON_MAX, ICON_PATTERN,
@@ -259,7 +262,10 @@ def _bundle_of(data: bytes) -> Dict[str, Any]:
 
 
 def _origin() -> str:
-    """The configured Automatos Cloud origin, else ``EntryRefused`` saying why the setting isn't one."""
+    """The configured Automatos Cloud origin, else ``EntryRefused`` saying why: this install doesn't bring items
+    from Automatos Cloud (``items_gate``), or the setting isn't one."""
+    if not brings_items():
+        raise EntryRefused(ITEMS_NOT_SWITCHED_ON)
     try:
         return checked_origin(configured_url())
     except CloudFetchFailed as failed:

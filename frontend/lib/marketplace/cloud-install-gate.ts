@@ -1,6 +1,8 @@
 /**
  * PRD-270 W2 US-270-14d (§5.6, §5.8, K19) — the install gate: on the local edition, an Add or Enable of an
- * Automatos Cloud item waits for its disclosure, and nothing is added unless Add is clicked.
+ * Automatos Cloud item waits for its disclosure, and nothing is added unless Add is clicked. An enterprise
+ * install is gated the same way, always (lib/hosted-services.ts `holdsCloudItems`, PRD-277 US-704): whatever
+ * ENTERPRISE_CALLS_CLOUD_ITEMS holds, an item brought from Automatos Cloud is reviewed before it is added.
  *
  * apiClient.request() calls `cloudInstallGate(endpoint, options, this)` once, before anything else it
  * awaits; it is the one choke point every install of an agent, Playbook, package or plugin passes, from
@@ -23,7 +25,7 @@
  *
  * It imports nothing from lib/api-client.ts (which imports it): request() hands itself in as `client`.
  */
-import { isLocal } from '@/lib/auth-edition'
+import { holdsCloudItems } from '@/lib/hosted-services'
 
 import { installCallOf, installKey, UNREADABLE_INSTALL } from './cloud-install-call'
 import type { CloudInstallCall } from './cloud-install-call'
@@ -135,11 +137,12 @@ async function reviewed(call: CloudInstallCall, client: CloudGateClient): Promis
 /**
  * Called once by apiClient.request() before it sends anything. Returns at once (nothing to await) for any
  * request that isn't one of K19's four install calls, and for every request on the hosted edition; for an
- * install call on the local edition, resolves when the request may go and throws a `CloudInstallRefused`
- * when it may not.
+ * install call where this install may hold Cloud items (the local and enterprise editions:
+ * lib/hosted-services.ts `holdsCloudItems`), resolves when the request may go and throws a
+ * `CloudInstallRefused` when it may not.
  */
 export function cloudInstallGate(endpoint: string, options: RequestInit, client: CloudGateClient): Promise<void> | undefined {
-  if (!isLocal) return undefined
+  if (!holdsCloudItems()) return undefined
   const call = installCallOf(endpoint, options)
   if (call === null) return undefined
   if (call === UNREADABLE_INSTALL) return Promise.reject(new CloudInstallRefused(CLOUD_INSTALL_UNCHECKED))

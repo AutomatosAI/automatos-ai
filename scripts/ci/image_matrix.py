@@ -44,11 +44,18 @@ to the build step's ``outputs``), which clamps every file's mtime in the layers 
 writes to that time. A layer rebuilt from the same inputs is then the same bytes.
 Every other entry gets neither.
 
+The version an image reports (PRD-279 US-303): an image definition with ``version_arg``
+(the API's ``AUTOMATOS_VERSION``) gets ``<version_arg>=<--version>`` among its build
+args, ``--version`` being the tag's version on a ``v*`` tag and the full commit id on any
+other run. Its Dockerfile declares the arg after its last filesystem layer, so the value,
+which changes on every commit, rebuilds no layer. Every other entry, and a run with no
+``--version``, gets none.
+
 Patterns follow GitHub's path filters: ``*`` stops at ``/``, ``**`` does not.
 
     image_matrix.py --images JSON --shared-inputs JSON --runners JSON \\
         --owner OWNER --publish true|false --local-registry IMAGE \\
-        [--no-cache true|false] [--created ISO-8601] [--every] < files
+        [--no-cache true|false] [--created ISO-8601] [--version VERSION] [--every] < files
 """
 from __future__ import annotations
 
@@ -70,6 +77,19 @@ WEEKLY_DATE_FORMAT = "%Y%m%d"
 REWRITE_TIMESTAMP = ",rewrite-timestamp=true"
 CACHE_BACKENDS = ("gha", "registry")
 BUILDCACHE_TAG_PREFIX = "buildcache-"
+# A release's version (release_version.py's form) or a commit id: one line, nothing a
+# build-args list could read as a second argument.
+BUILD_VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.-]{0,127}")
+
+
+def version_args(image: dict, version: str) -> List[str]:
+    """``[<version_arg>=<version>]`` for an image that reports its version; [] otherwise."""
+    name = image.get("version_arg")
+    if not name or not version:
+        return []
+    if not BUILD_VERSION.fullmatch(version):
+        raise ValueError(f"{image['name']}: {version!r} is not a version or a commit id")
+    return [f"{name}={version}"]
 
 
 def glob_regex(pattern: str) -> re.Pattern:
@@ -123,18 +143,19 @@ def cache_refs(image: dict, arch: str, publish_run: bool, published: str) -> Tup
 
 
 def entry(image: dict, arch: str, runner: str, publish_run: bool, owner: str, local_registry: str,
-          no_cache: bool = False) -> dict:
+          no_cache: bool = False, version: str = "") -> dict:
     """One build job: what to build, where it runs, where it pushes, what it is compared with."""
     name = image["name"]
     published = f"ghcr.io/{owner.lower()}/automatos-{name}"
     to_ghcr = publish_run and image["publish"]
     epoch = image.get("source_date_epoch")
     cache_from, cache_to = cache_refs(image, arch, publish_run, published)
+    build_args = image["build_args"] + ([f"SOURCE_DATE_EPOCH={int(epoch)}"] if epoch else [])
     return {
         "name": name,
         "context": image["context"],
         "target": image["target"],
-        "build_args": "\n".join(image["build_args"] + ([f"SOURCE_DATE_EPOCH={int(epoch)}"] if epoch else [])),
+        "build_args": "\n".join(build_args + version_args(image, version)),
         "rewrite_timestamp": REWRITE_TIMESTAMP if epoch else "",
         "cache_from": cache_from,
         "cache_to": cache_to,
@@ -152,10 +173,10 @@ def entry(image: dict, arch: str, runner: str, publish_run: bool, owner: str, lo
 
 
 def matrix(images: List[dict], names: List[str], runners: dict, publish_run: bool,
-           owner: str, local_registry: str, no_cache: bool = False) -> dict:
+           owner: str, local_registry: str, no_cache: bool = False, version: str = "") -> dict:
     """The build job's ``strategy.matrix`` for ``names``."""
     return {"include": [
-        entry(image, arch, runners[arch], publish_run, owner, local_registry, no_cache)
+        entry(image, arch, runners[arch], publish_run, owner, local_registry, no_cache, version)
         for image in images if image["name"] in names
         for arch in image["arches"]
     ]}
@@ -184,13 +205,15 @@ def main(argv: List[str] | None = None) -> int:
     parser.add_argument("--no-cache", default="false", choices=("true", "false"),
                         help="rebuild each image's no_cache_filters stages (the weekly OS rebuild)")
     parser.add_argument("--created", help="a schedule run's created_at: adds weekly_tag")
+    parser.add_argument("--version", default="",
+                        help="what an image with version_arg reports: the tag's version, or the commit id")
     parser.add_argument("--every", action="store_true", help="build every image")
     args = parser.parse_args(argv)
     images = json.loads(args.images)
     files = [line.strip() for line in sys.stdin if line.strip()]
     names = selected(images, json.loads(args.shared_inputs), files, args.every)
     built = matrix(images, names, json.loads(args.runners), args.publish == "true",
-                   args.owner, args.local_registry, args.no_cache == "true")
+                   args.owner, args.local_registry, args.no_cache == "true", args.version)
     print(f"matrix={json.dumps(built, separators=(',', ':'))}")
     print(f"any={'true' if built['include'] else 'false'}")
     if args.created:

@@ -67,6 +67,9 @@ _POSTGRES_ENV = {
     "POSTGRES_DB": "orchestrator_db",
 }
 _DATABASE_URL = "postgresql://u:p@db.internal:5432/app"
+# What pg_isready and psql are handed: the address without its password, which they get
+# in PGPASSWORD (tests/test_prd278_entrypoint_database_password.py).
+_TOOLS_DATABASE_URL = "postgresql://u@db.internal:5432/app"
 
 # psql logs its arguments and any SQL it reads on stdin (one line), and answers
 # the queries the script parses; FAKE_DB_STATE is the fresh-path state the
@@ -522,9 +525,9 @@ def test_database_url_is_used_when_postgres_host_is_unset(tmp_path):
     """Railway and Kubernetes secrets provide DATABASE_URL, not POSTGRES_HOST."""
     code, calls, out = _run(tmp_path, ["migrate"], {"DATABASE_URL": _DATABASE_URL})
     assert code == 0, out
-    assert f"pg_isready -d {_DATABASE_URL}" in calls
+    assert f"pg_isready -d {_TOOLS_DATABASE_URL}" in calls
     psql_calls = [c for c in calls if c.startswith("psql")]
-    assert psql_calls and all(c.startswith(f"psql {_DATABASE_URL}") for c in psql_calls)
+    assert psql_calls and all(c.startswith(f"psql {_TOOLS_DATABASE_URL}") for c in psql_calls)
 
 
 @pytest.mark.parametrize("driver", ["psycopg2", "asyncpg"])
@@ -533,9 +536,9 @@ def test_sqlalchemy_driver_suffix_is_dropped_for_libpq(tmp_path, driver):
     url = _DATABASE_URL.replace("postgresql://", f"postgresql+{driver}://")
     code, calls, out = _run(tmp_path, ["migrate"], {"DATABASE_URL": url})
     assert code == 0, out
-    assert f"pg_isready -d {_DATABASE_URL}" in calls
+    assert f"pg_isready -d {_TOOLS_DATABASE_URL}" in calls
     psql_calls = [c for c in calls if c.startswith("psql")]
-    assert psql_calls and all(c.startswith(f"psql {_DATABASE_URL}") for c in psql_calls)
+    assert psql_calls and all(c.startswith(f"psql {_TOOLS_DATABASE_URL}") for c in psql_calls)
 
 
 def test_local_edition_seeds_workspace_and_operator(tmp_path):

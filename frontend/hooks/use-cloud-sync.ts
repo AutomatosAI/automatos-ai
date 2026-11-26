@@ -8,6 +8,10 @@
  * workspace (the listings, the installed list) is read again, without holding the button busy while
  * they load, and its answer's status replaces the cached one. A refused or failed Sync shows the
  * server's own sentence and reads the status again, which then carries the error it recorded.
+ *
+ * Sync now goes through `useStepUp` (lib/theme-host/api.ts), as the theme admin actions do: on an enterprise
+ * install the API asks an install admin for a fresh sign-in (PRD-277 US-704), and the browser signs in again
+ * at the organisation's provider; in the local edition it is the action itself, as before.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -18,7 +22,7 @@ import { cloudItemsKeys } from '@/hooks/use-cloud-items'
 import { themeQueryKeys } from '@/hooks/use-installed-themes'
 import { getCloudSyncStatus, runCloudSync } from '@/lib/marketplace/cloud-sync'
 import type { CloudSyncResult, CloudSyncStatus } from '@/lib/marketplace/cloud-sync'
-import { themeErrorMessage } from '@/lib/theme-host/api'
+import { themeErrorMessage, useStepUp } from '@/lib/theme-host/api'
 
 const STATUS_STALE_MS = 30_000
 
@@ -46,8 +50,9 @@ export function useCloudSync() {
   const workspaceId = useWorkspaceId()
   const client = useQueryClient()
   const refreshThemes = () => client.invalidateQueries({ queryKey: themeQueryKeys.all(workspaceId) })
+  const sync = useStepUp(runCloudSync)
   return useMutation<CloudSyncResult, unknown, void>({
-    mutationFn: () => runCloudSync(),
+    mutationFn: () => sync(),
     onSuccess: (result) => {
       client.setQueryData(cloudSyncKeys.status(workspaceId), result.status)
       toast.success(syncedMessage(result.counts))

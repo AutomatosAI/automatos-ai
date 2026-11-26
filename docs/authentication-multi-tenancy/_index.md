@@ -201,6 +201,13 @@ Sources: [orchestrator/api/workspaces.py:118-141](), [frontend/components/settin
 ## Child Pages
 - [Authentication Flow](#17.1) — Clerk JWT vs API key, get_request_context_hybrid, AUTH_EDITION saas vs local, sign-in/sign-up pages, Edge proxy security
 - [Clerk Authorized Parties (azp)](clerk-authorized-parties.md) — the azp check in verify_token, CLERK_AUTHORIZED_PARTIES and CLERK_AZP_REQUIRED, Automatos Go's mobile JWT template marker, log lines, 401 diagnosis
+- [Enterprise Sign-In with OIDC](enterprise-sign-in-oidc.md) — the enterprise edition's OIDC sign-in: redirect address, scopes, claims, access rule, first admins, sessions, step-up and auth_time, sign-out, phones, settings, error codes, provider comparison
+  - [Microsoft Entra ID](enterprise-sign-in-entra-id.md) — app registration, oid as the subject, the auth_time optional claim, app roles and groups
+  - [Google Workspace](enterprise-sign-in-google-workspace.md) — OAuth client, the hd access rule, session age claims for auth_time, endpoint hosts
+  - [Okta](enterprise-sign-in-okta.md) — OIDC web app integration, org or custom authorization server, groups claim
+  - [Keycloak](enterprise-sign-in-keycloak.md) — confidential client, protocol mappers, private certificate authority; the CI job's realm
+  - [Amazon Cognito](enterprise-sign-in-amazon-cognito.md) — app client, managed login for step-up, cognito:groups, endpoint hosts
+  - [AWS IAM Identity Center](enterprise-sign-in-aws-iam-identity-center.md) — not supported as an OIDC provider; AWS's reason and the Cognito alternative
 - [Workspace Management](#17.2) — Workspace model, workspace_id context injection, workspace switching, model seeding, workspace purge, provisioning
 - [Data Isolation](#17.3) — Database foreign keys, tenancy matrix tests, query key scoping, memory namespacing, cache isolation, team access
 - [Admin Access Control](#17.4) — system_role field, admin gates, workspace_admin/workspace_permission dependencies, bootstrap mode, authz boundary sweeps

@@ -1,0 +1,95 @@
+suite: Media origins the enterprise web server would refuse stop the render (PRD-279 US-402)
+# The web app's template alone, so a failed render can only be reported against it (helm-unittest
+# reports a failed render against the first template, in reverse alphabetical order, that fails).
+# The rules are the server's (frontend/lib/enterprise/media-origins.ts): it refuses to start on
+# anything else, so the chart says so before anything is installed.
+templates:
+  - templates/frontend.yaml
+release:
+  name: demo
+  namespace: automatos
+set:
+  existingSecret: automatos-secrets
+  edition:
+    authEdition: enterprise
+tests:
+  - it: renders with each form of origin the server accepts
+    set:
+      frontend:
+        mediaOrigins: "https://media.example.com/ https://*.storage.example.com:8443,HTTP://LOCALHOST:9000 http://127.0.0.1"
+    asserts:
+      - hasDocuments:
+          count: 2
+  - it: renders with sixteen origins
+    set:
+      frontend:
+        mediaOrigins: "https://a1.example.com https://a2.example.com https://a3.example.com https://a4.example.com https://a5.example.com https://a6.example.com https://a7.example.com https://a8.example.com https://a9.example.com https://b1.example.com https://b2.example.com https://b3.example.com https://b4.example.com https://b5.example.com https://b6.example.com https://b7.example.com"
+    asserts:
+      - hasDocuments:
+          count: 2
+  - it: stops on media origins in the local edition, whose image fixes them at build time
+    set:
+      edition:
+        authEdition: local
+      frontend:
+        mediaOrigins: https://media.example.com
+    asserts:
+      - failedTemplate:
+          errorPattern: "frontend.mediaOrigins is set, but edition.authEdition is \"local\": only the enterprise web image reads its media origins when it starts"
+  # The refusal is one fixed message (_enterprise.tpl), so it never holds the value.
+  - it: stops on http to anything but a local address
+    set:
+      frontend:
+        mediaOrigins: http://media.example.com
+    asserts:
+      - failedTemplate:
+          errorPattern: "frontend.mediaOrigins must list at most 16 origins, in at most 1024 characters, separated by commas or spaces, each https://<host>\\[:port\\] .* the enterprise web server refuses to start on anything else \\(MEDIA_ORIGINS\\)"
+  - it: stops on seventeen origins
+    set:
+      frontend:
+        mediaOrigins: "https://a1.example.com https://a2.example.com https://a3.example.com https://a4.example.com https://a5.example.com https://a6.example.com https://a7.example.com https://a8.example.com https://a9.example.com https://b1.example.com https://b2.example.com https://b3.example.com https://b4.example.com https://b5.example.com https://b6.example.com https://b7.example.com https://b8.example.com"
+    asserts:
+      - failedTemplate:
+          errorPattern: "frontend.mediaOrigins must list at most 16 origins"
+  - it: stops on an origin with a path
+    set:
+      frontend:
+        mediaOrigins: https://media.example.com/files
+    asserts:
+      - failedTemplate:
+          errorPattern: "frontend.mediaOrigins must list at most 16 origins"
+  - it: stops on a wildcard over a single label
+    set:
+      frontend:
+        mediaOrigins: https://*.com
+    asserts:
+      - failedTemplate:
+          errorPattern: "frontend.mediaOrigins must list at most 16 origins"
+  - it: stops on a port out of range
+    set:
+      frontend:
+        mediaOrigins: https://media.example.com:65536
+    asserts:
+      - failedTemplate:
+          errorPattern: "frontend.mediaOrigins must list at most 16 origins"
+  - it: stops on a port of zero
+    set:
+      frontend:
+        mediaOrigins: https://media.example.com:0
+    asserts:
+      - failedTemplate:
+          errorPattern: "frontend.mediaOrigins must list at most 16 origins"
+  - it: stops on a quote, which would end the policy's directive
+    set:
+      frontend:
+        mediaOrigins: "https://media.example.com 'unsafe-inline'"
+    asserts:
+      - failedTemplate:
+          errorPattern: "frontend.mediaOrigins must list at most 16 origins"
+  - it: stops on a value over 1024 characters
+    set:
+      frontend:
+        mediaOrigins: "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example.com https://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.example.com https://ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.example.com https://ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.example.com https://eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.example.com https://fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff.example.com https://ggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg.example.com https://hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh.example.com https://iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii.example.com https://jjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjj.example.com https://kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk.example.com https://lllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll.example.com https://mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm.example.com"
+    asserts:
+      - failedTemplate:
+          errorPattern: "frontend.mediaOrigins must list at most 16 origins"

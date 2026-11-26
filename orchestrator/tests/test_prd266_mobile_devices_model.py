@@ -7,6 +7,9 @@ One row per phone (or paired browser) a person uses with one workspace (§4.2). 
   nullability (``install_id`` is null on a pending row), foreign keys (the workspace and
   the person CASCADE), uniques, CHECKs, defaults and indexes. A column a later revision
   appends (``push_categories``, ``prd268_w2_delivery``, PRD-268 K19) is read from it.
+* PRD-277 US-603: revision ``prd277_w6b_phone_sign_in_20261121`` widens ``ck_mobile_devices_kind`` to
+  ``oidc`` and lets an ``oidc`` row hold a code and token hash as a ``paired`` row does; the model's two
+  checks are that revision's, and an ``oidc`` row is accepted.
 * ``to_dict()`` never carries a code or token hash, the push key or the push token.
 * The revision chains onto the old head, creates only what is absent (a ``create_all``
   database survives it and gains only a missing index), alters no other table, and its
@@ -34,7 +37,10 @@ ORCH = Path(__file__).resolve().parents[1]
 MIGRATION = ORCH / "alembic" / "versions" / "prd266_mobile_devices.py"
 OLD_HEAD = "clerk_user_relinks_20261019"
 # The later revisions that append a column (ALTER TABLE … ADD COLUMN IF NOT EXISTS), oldest first.
-ADDED_BY = (ORCH / "alembic" / "versions" / "prd268_w2_delivery.py",)
+PHONE_SIGN_IN = ORCH / "alembic" / "versions" / "prd277_w6b_phone_sign_in_20261121.py"
+ADDED_BY = (ORCH / "alembic" / "versions" / "prd268_w2_delivery.py", PHONE_SIGN_IN)
+# The checks PRD-277 US-603's revision drops and adds back wider (the model declares its versions).
+WIDENED_CHECKS = ("ck_mobile_devices_kind", "ck_mobile_devices_clerk_holds_no_token")
 ADD_COLUMN = re.compile(r"ALTER TABLE mobile_devices ADD COLUMN IF NOT EXISTS ((\w+) [^;\"]+);")
 
 COLUMNS = (
@@ -43,6 +49,7 @@ COLUMNS = (
     "token_hash", "token_rotated_at", "prev_token_hash", "prev_token_valid_until",
     "expo_push_token", "push_enabled", "push_disabled_reason", "push_key", "last_seen_at",
     "paired_at", "revoked_at", "revoked_by", "events", "created_at", "updated_at", "push_categories",
+    "sign_in_challenge", "sign_in_install_id", "sign_in_app_link", "sign_in_confirm_hash",
 )
 NOT_NULL = {"id", "workspace_id", "user_id", "kind", "status", "push_enabled", "events",
             "created_at", "updated_at", "push_categories"}
@@ -56,7 +63,7 @@ INDEXES = {
     "ix_mobile_devices_workspace_status": ["workspace_id", "status"],
     "ix_mobile_devices_prev_token_hash": ["prev_token_hash"],
 }
-SECRETS = ("pairing_code_hash", "token_hash", "prev_token_hash", "push_key")
+SECRETS = ("pairing_code_hash", "token_hash", "prev_token_hash", "push_key", "sign_in_confirm_hash")
 CODE_HASH = "a" * 64
 TOKEN_HASH = "b" * 64
 PREV_HASH = "c" * 64
@@ -86,8 +93,8 @@ def _ddl_columns() -> dict[str, str]:
     return {**created, **appended}
 
 
-def _statements(step: str) -> list[str]:
-    spec = importlib.util.spec_from_file_location(f"prd266_mobile_devices_{step}", MIGRATION)
+def _statements(step: str, path: Path = MIGRATION) -> list[str]:
+    spec = importlib.util.spec_from_file_location(f"{path.stem}_{step}", path)
     migration = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(migration)
     statements: list[str] = []
@@ -154,15 +161,21 @@ def test_the_checks_hold_kind_status_and_platform_and_keep_tokens_off_clerk_rows
     checks = {c.name: str(c.sqltext) for c in _table().constraints if isinstance(c, CheckConstraint)}
     assert set(checks) == {"ck_mobile_devices_kind", "ck_mobile_devices_status",
                            "ck_mobile_devices_platform", "ck_mobile_devices_clerk_holds_no_token"}
-    assert set(re.findall(r"'([a-z]+)'", checks["ck_mobile_devices_kind"])) == {"paired", "clerk"}
-    assert {k.value for k in model.MobileDeviceKind} == {"paired", "clerk"}
+    assert set(re.findall(r"'([a-z]+)'", checks["ck_mobile_devices_kind"])) == {"paired", "clerk", "oidc"}
+    assert {k.value for k in model.MobileDeviceKind} == {"paired", "clerk", "oidc"}
+    assert set(re.findall(r"'([a-z]+)'", checks["ck_mobile_devices_clerk_holds_no_token"])) == {"paired", "oidc"}
     assert set(re.findall(r"'([a-z]+)'", checks["ck_mobile_devices_status"])) == {"pending", "active", "revoked"}
     assert {s.value for s in model.MobileDeviceStatus} == {"pending", "active", "revoked"}
     assert model.MOBILE_DEVICE_PLATFORMS == ("ios", "android", "web")
     assert checks["ck_mobile_devices_platform"].startswith("platform IS NULL OR ")
     for hash_column in ("token_hash", "prev_token_hash", "pairing_code_hash"):
         assert f"{hash_column} IS NULL" in checks["ck_mobile_devices_clerk_holds_no_token"]
+    widened = _statements("upgrade", PHONE_SIGN_IN)
     for name, sqltext in checks.items():
+        if name in WIDENED_CHECKS:
+            added = widened.index(f"ALTER TABLE mobile_devices ADD CONSTRAINT {name} CHECK ({sqltext}) NOT VALID;")
+            assert widened[added + 1] == f"ALTER TABLE mobile_devices VALIDATE CONSTRAINT {name};", name
+            continue
         assert f"CONSTRAINT {name} CHECK ({sqltext})" in _ddl_lines()
 
 
@@ -200,6 +213,7 @@ def test_to_dict_never_carries_a_hash_the_push_key_or_the_push_token():
         install_id="install-1", platform="ios", pairing_code_hash=CODE_HASH, token_hash=TOKEN_HASH,
         prev_token_hash=PREV_HASH, prev_token_valid_until=NOW, push_key=PUSH_KEY,
         expo_push_token=PUSH_TOKEN, push_enabled=True, events=[{"event": "enrolled"}], paired_at=NOW,
+        sign_in_confirm_hash=CODE_HASH,
     )
     shown = device.to_dict()
     for hidden in (*SECRETS, "expo_push_token"):
@@ -329,8 +343,18 @@ def test_a_clerk_row_never_holds_a_code_or_token_hash(db_session, seed_workspace
     assert clerk.token_hash is None and paired.token_hash == TOKEN_HASH
 
 
+def test_a_device_signed_in_on_the_phone_is_a_kind_and_holds_a_code_and_a_token(db_session, seed_workspace):
+    """PRD-277 US-603: ``oidc`` is a kind, and like ``paired`` it may hold a code and a token hash."""
+    ws, user = seed_workspace(), _seed_user(db_session)
+    pending = _device(db_session, ws, user, kind="oidc", pairing_code_hash=CODE_HASH, sign_in_challenge="c" * 43,
+                      sign_in_install_id="oidc-phone")
+    active = _device(db_session, ws, user, kind="oidc", install_id="oidc-phone", status="active",
+                     token_hash=TOKEN_HASH, prev_token_hash=PREV_HASH)
+    assert (pending.kind, active.kind, active.token_hash) == ("oidc", "oidc", TOKEN_HASH)
+
+
 @pytest.mark.parametrize("bad, constraint", [
-    ({"kind": "oidc"}, "ck_mobile_devices_kind"),
+    ({"kind": "sso"}, "ck_mobile_devices_kind"),
     ({"status": "paired"}, "ck_mobile_devices_status"),
     ({"platform": "windows"}, "ck_mobile_devices_platform"),
 ])

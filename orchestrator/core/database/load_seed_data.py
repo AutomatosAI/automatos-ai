@@ -327,6 +327,25 @@ def _seed_local_edition_first_run() -> None:
         logger.exception("Error loading local-edition first-run content")
 
 
+def _seed_enterprise_default_workspace() -> None:
+    """PRD-277 US-405: the default workspace where sign-in is OIDC, with no owner.
+
+    Gated INSIDE the seed on the edition signing in with OIDC and on DEFAULT_WORKSPACE_ID (local and
+    saas: a no-op); inserted only when missing.
+    """
+    try:
+        from core.seeds.seed_default_workspace import seed_default_workspace
+        from core.database.database import get_db_session
+
+        with get_db_session() as db:
+            outcome = seed_default_workspace(db)
+        logger.info("Default workspace: %s", outcome)
+    except Exception:
+        # logger.exception logs at ERROR. Sign-in makes the workspace too, before its first audit row
+        # (core.auth.sign_in_flow.ensure_audit_workspace).
+        logger.exception("The default workspace could not be seeded")
+
+
 # Every platform-default section, in order: `migrate` and a manual run.
 _ALL_SECTIONS = (
     _seed_system_settings,
@@ -340,6 +359,7 @@ _ALL_SECTIONS = (
     _seed_packages,
     _seed_plugin_categories,
     _seed_local_edition_first_run,
+    _seed_enterprise_default_workspace,
 )
 # The lifespan leader block seeds these on a boot (and the packages create-only), so the
 # boot loader leaves them out (PRD-262 US-031).

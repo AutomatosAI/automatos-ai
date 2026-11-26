@@ -180,6 +180,7 @@ def build_app(worker) -> Starlette:
     """The worker's app: the internal-token check, Prometheus metrics, every route, and
     (PRD-256 O2b, when OTEL_ENABLED) a server span per request that continues the caller's trace."""
     from automatos_metrics import add_starlette_metrics
+    from worker_log_context import RequestLogContextMiddleware
     from worker_otel import attach as attach_tracing
     from worker_routes_canvas import make_canvas_event_sink
 
@@ -192,6 +193,7 @@ def build_app(worker) -> Starlette:
                                        canvas_event_sink=make_canvas_event_sink(worker))
     # Prometheus metrics endpoint + request tracking, outside the token check
     add_starlette_metrics(app, service="workspace-worker")
+    app.add_middleware(RequestLogContextMiddleware)   # PRD-282: the request's fields on its log lines
     attach_tracing(app)   # outermost, so the span covers everything below it
     return app
 

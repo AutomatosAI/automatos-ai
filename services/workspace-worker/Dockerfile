@@ -274,7 +274,8 @@ RUN uv pip install --system --no-cache --compile-bytecode --require-hashes --no-
 # scripts/ci/image_worker_toolchain.py finds no such file in the built image.
 RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} +
 
-# Entrypoint fixes volume ownership then drops to worker user. --chmod sets the mode
+# The entrypoint: started as the worker (the USER below) it checks its volume and starts;
+# started as root it re-owns the volume, then drops to the worker. --chmod sets the mode
 # in the copy itself; a separate chmod RUN published an empty layer, since git already
 # carries the exec bit (PRD-262 US-045).
 COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -290,6 +291,19 @@ ENV PYTHONPATH=/app
 # Worker code (includes automatos_logging.py + automatos_metrics.py for
 # observability), last and worker-owned: a code change rebuilds only this layer.
 COPY --chown=1000:1000 . .
+
+# The version the worker's JSON log lines name (PRD-279 US-303, PRD-282): images.yml passes it,
+# as it does the API's. Declared after the last filesystem layer, so a value that changes on
+# every commit rebuilds no layer. A build given none reports `dev` (worker_config).
+ARG AUTOMATOS_VERSION
+ENV AUTOMATOS_VERSION=${AUTOMATOS_VERSION}
+
+# PRD-280 US-201: the image starts as the worker, uid 1000, by number, so a cluster can
+# check it is not root. Nothing in it re-owns a volume then: the storage must hand the
+# volume over writable (entrypoint.sh says what to do when it does not). Compose starts it
+# as root on purpose (docker-compose.yml's `user`), to match your deliverables folder's
+# owner, and so must a platform that mounts its volumes as root.
+USER 1000:1000
 
 # While the worker starts, Docker probes every 2 s instead of waiting a whole interval,
 # so it reports healthy within seconds of the health server listening (PRD-262

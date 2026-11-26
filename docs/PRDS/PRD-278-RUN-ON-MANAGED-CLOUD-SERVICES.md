@@ -242,7 +242,7 @@ Each wave is one pull request or a short series. CI is the only gate: nothing he
 - [x] `DATABASE_SSLMODE` and `DATABASE_SSLROOTCERT` exist in `config.py` and `config-surface.json`.
 - [x] One function returns what SQLAlchemy with `psycopg2`, a raw `psycopg2` connection and `asyncpg` each need.
 - [x] With neither setting, the main engine behaves as today, and a test pins that.
-- [ ] If D-6 is accepted: in the `enterprise` edition, start-up fails unless `DATABASE_SSLMODE` is `verify-full`.
+- [x] If D-6 is accepted: in the `enterprise` edition, start-up fails unless `DATABASE_SSLMODE` is `verify-full` (`core/edition_start_up.py`, through the `requires_verified_database_tls` capability), and the chart does not render it otherwise. The API enforces the rule itself; the worker and the migration step get it from the chart's values, so an enterprise install made without the chart sets both settings on all three. In every edition, `verify-ca` or `verify-full` without a CA file is refused at start (the API, the worker, the entrypoint and the chart).
 - [x] `Config.get_database_url()` is deleted.
 
 #### US-302: Every connection path · L
@@ -254,6 +254,8 @@ Each wave is one pull request or a short series. CI is the only gate: nothing he
 - [x] The start-up scripts that open their own connection use it.
 - [x] A test fails if a file in the orchestrator opens a connection to the application's database another way. Connections to a user's own data source are not covered.
 - [ ] The pull request lists every path it changed, with file and line.
+
+Note: libpq prefers GSSAPI encryption to TLS whatever `sslmode` says, so with `verify-ca` or `verify-full` the libpq connections that read `DATABASE_SSLMODE` (the app's engines, the RAG code's psycopg2 connections, migrations, the seed loader, the worker's write, and the entrypoint's `pg_isready` and `psql`) also get `gssencmode=disable` (`PGGSSENCMODE` for the entrypoint's tools). asyncpg sends no GSSAPI encryption request and takes no `gssencmode`.
 
 #### US-303: The worker · S
 **Description:** As an operator, I want the workspace worker's database connection secured the same way, for as long as it has one.
@@ -276,9 +278,9 @@ Each wave is one pull request or a short series. CI is the only gate: nothing he
 **Description:** As a maintainer, I want every place the API keeps a file listed, so that "no disk of its own" is checked and not assumed.
 
 **Acceptance Criteria:**
-- [ ] A table lists each writer: file, line, what it writes, whether it must survive a restart, and whether an object-storage copy exists today.
-- [ ] Temporary files that need no home are marked as such.
-- [ ] Anything that cannot move to object storage is listed for Gerard, not guessed.
+- [x] A table lists each writer: file, line, what it writes, whether it must survive a restart, and whether an object-storage copy exists today. Done in [PRD-278-US-401-DISK-WRITERS.md](PRD-278-US-401-DISK-WRITERS.md), section 2 (11 rows) and section 6 (every path-valued setting); the few writers whose reach or library behaviour could not be settled are listed in its section 5, item 6.
+- [x] Temporary files that need no home are marked as such. Done: [PRD-278-US-401-DISK-WRITERS.md](PRD-278-US-401-DISK-WRITERS.md), section 3 (24 rows, each with where it is removed or "not removed") and section 4 (library caches).
+- [x] Anything that cannot move to object storage is listed for Gerard, not guessed. Done: [PRD-278-US-401-DISK-WRITERS.md](PRD-278-US-401-DISK-WRITERS.md), section 5. The decisions on those rows are still the owner's.
 
 #### US-402: The upload route stores the original in object storage · M
 **Description:** As an operator, I want an uploaded file's original in object storage, so that it survives the pod and its zone.

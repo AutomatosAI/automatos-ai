@@ -68,8 +68,17 @@ JOBS = WORKFLOW["jobs"]
 IMAGES_WORKFLOW = _yaml(_IMAGES)
 PICK = next(step for step in IMAGES_WORKFLOW["jobs"]["changes"]["steps"] if step.get("id") == "pick")
 PUBLISHED = [image for image in json.loads(PICK["env"]["IMAGES"]) if image["publish"]]
-# docker-compose.yml's service for each published image.
+# docker-compose.yml's service for each published image compose runs.
 SERVICES = {"api": "backend", "frontend": "frontend", "workspace-worker": "workspace-worker"}
+# Published, but in no compose service, so the pull-request variant cannot boot it: the
+# enterprise web app (PRD-277 US-505), whose start images.yml's build job checks on both arches.
+OUTSIDE_COMPOSE = {"enterprise-frontend"}
+STACK = [image for image in PUBLISHED if image["name"] in SERVICES]
+
+
+def test_every_published_image_is_in_the_compose_stack_or_named_as_outside_it():
+    assert {image["name"] for image in PUBLISHED} == set(SERVICES) | OUTSIDE_COMPOSE
+    assert not set(SERVICES) & OUTSIDE_COMPOSE
 
 
 def _step(job: str, predicate) -> dict:
@@ -275,7 +284,7 @@ def _compose_images() -> dict:
     return {service: services[service]["image"] for service in SERVICES.values()}
 
 
-@pytest.mark.parametrize("image", PUBLISHED, ids=lambda image: image["name"])
+@pytest.mark.parametrize("image", STACK, ids=lambda image: image["name"])
 def test_the_pr_variant_builds_each_image_as_images_yml_does(image):
     name = image["name"]
     build = _step("smoke-images-pr", lambda step: step.get("name") == f"Build {name} (amd64)")["with"]
@@ -289,7 +298,7 @@ def test_the_pr_variant_builds_each_image_as_images_yml_does(image):
     assert build["labels"] == f"${{{{ steps.meta-{name}.outputs.labels }}}}"
 
 
-@pytest.mark.parametrize("image", PUBLISHED, ids=lambda image: image["name"])
+@pytest.mark.parametrize("image", STACK, ids=lambda image: image["name"])
 def test_the_pr_variant_tags_each_image_with_the_name_compose_runs(image):
     name = image["name"]
     build = _step("smoke-images-pr", lambda step: step.get("name") == f"Build {name} (amd64)")["with"]
@@ -297,7 +306,7 @@ def test_the_pr_variant_tags_each_image_with_the_name_compose_runs(image):
     assert build["tags"] == compose_image.replace("${AUTOMATOS_IMAGE_TAG:-edge}", "${{ steps.target.outputs.tag }}")
 
 
-@pytest.mark.parametrize("image", PUBLISHED, ids=lambda image: image["name"])
+@pytest.mark.parametrize("image", STACK, ids=lambda image: image["name"])
 def test_the_pr_variant_stamps_the_labels_images_yml_stamps(image):
     name = image["name"]
     meta = _step("smoke-images-pr", lambda step: step.get("id") == f"meta-{name}")

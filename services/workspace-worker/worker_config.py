@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import ssl
 from pathlib import Path
+from types import MappingProxyType
 from typing import Dict, Mapping, Optional
 
 # Workspace mount root inside the worker container (PRD-233 S1). Compose
@@ -134,6 +135,32 @@ def worker_bind_host() -> str:
     return os.environ.get(BIND_HOST_ENV, DEFAULT_BIND_HOST)
 
 
+# PRD-282 US-302: the log format and level, read as the text in the environment.
+# log_settings.py (a copy of the platform's) checks both when logging starts, so a value
+# it cannot use stops the worker, naming the setting and never the value.
+LOG_FORMAT_ENV = "LOG_FORMAT"
+LOG_LEVEL_ENV = "LOG_LEVEL"
+# The version a JSON log line names (PRD-279): the platform's setting, under the same
+# name and fallback (orchestrator/config.py). The worker's image is not built with it.
+AUTOMATOS_VERSION_ENV = "AUTOMATOS_VERSION"
+UNVERSIONED_BUILD = "dev"
+
+
+def log_format_setting() -> str:
+    """``LOG_FORMAT`` as set; empty when unset (``text``)."""
+    return os.environ.get(LOG_FORMAT_ENV, "")
+
+
+def log_level_setting() -> str:
+    """``LOG_LEVEL`` as set; empty when unset (``INFO``)."""
+    return os.environ.get(LOG_LEVEL_ENV, "")
+
+
+def automatos_version() -> str:
+    """``AUTOMATOS_VERSION``, or ``dev`` when it is unset or blank."""
+    return os.environ.get(AUTOMATOS_VERSION_ENV, "").strip() or UNVERSIONED_BUILD
+
+
 # PRD-256 O2b (#847): OpenTelemetry traces (worker_otel.py), the same names and
 # defaults as the platform's (orchestrator/config.py), and default OFF.
 DEFAULT_OTEL_SERVICE_NAME = "automatos-workspace-worker"
@@ -179,12 +206,20 @@ def database_url() -> str:
 
 # PRD-278 W3: TLS on that connection, from the same two settings the platform reads
 # (orchestrator/core/database/tls.py): libpq's sslmode, and the CA file a verify-ca or
-# verify-full check uses. Both unset: no keyword is added, and the write connects as before.
+# verify-full check uses, which must be a file (a PEM bundle) and is required with either.
+# Both unset: no keyword is added, and the write connects as before.
 DATABASE_SSLMODE_ENV = "DATABASE_SSLMODE"
 DATABASE_SSLROOTCERT_ENV = "DATABASE_SSLROOTCERT"
 DATABASE_SSLMODES = ("disable", "allow", "prefer", "require", "verify-ca", "verify-full")
 DATABASE_CERTIFICATE_CHECKING_MODES = ("verify-ca", "verify-full")
+# A mode that checks a certificate also turns off libpq's GSSAPI encryption, which libpq would
+# otherwise use in preference to TLS whatever sslmode says, checking no certificate.
+NO_GSS_ENCRYPTION = MappingProxyType({"gssencmode": "disable"})
 _UNUSABLE_CA = f"{DATABASE_SSLROOTCERT_ENV} must name a readable file holding at least one PEM certificate"
+_CA_REQUIRED = (
+    f"{DATABASE_SSLMODE_ENV} verify-ca and verify-full need {DATABASE_SSLROOTCERT_ENV}: the path of a file "
+    "holding the CA certificate(s) that signed the database server's certificate"
+)
 
 
 def _require_usable_ca(cafile: str) -> None:
@@ -201,9 +236,11 @@ def _require_usable_ca(cafile: str) -> None:
 def database_tls_params() -> Dict[str, str]:
     """psycopg2's ``sslmode`` and ``sslrootcert`` keywords from the two settings, checked.
 
+    A mode that checks a certificate also gets ``NO_GSS_ENCRYPTION``, so that check is in force.
     Empty when neither is set. Raises ValueError, naming the setting and never the CA
-    file's path, for a mode libpq doesn't know, a CA file without a mode that checks it, or
-    a CA file that is missing, unreadable or holds no certificate.
+    file's path, for a mode libpq doesn't know, a CA file without a mode that checks it, a
+    mode that checks the certificate with no CA file, or a CA file that is missing,
+    unreadable or holds no certificate.
     """
     mode = os.environ.get(DATABASE_SSLMODE_ENV, "").strip().lower()
     rootcert = os.environ.get(DATABASE_SSLROOTCERT_ENV, "").strip()
@@ -213,10 +250,14 @@ def database_tls_params() -> Dict[str, str]:
         raise ValueError(
             f"{DATABASE_SSLROOTCERT_ENV} is used only with {DATABASE_SSLMODE_ENV} verify-ca or verify-full"
         )
+    if mode in DATABASE_CERTIFICATE_CHECKING_MODES and not rootcert:
+        raise ValueError(_CA_REQUIRED)
     params: Dict[str, str] = {}
     if mode:
         params["sslmode"] = mode
     if rootcert:
         _require_usable_ca(rootcert)
         params["sslrootcert"] = rootcert
+    if mode in DATABASE_CERTIFICATE_CHECKING_MODES:
+        params.update(NO_GSS_ENCRYPTION)
     return params

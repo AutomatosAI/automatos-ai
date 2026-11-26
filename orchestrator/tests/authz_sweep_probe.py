@@ -17,7 +17,13 @@ served route+method with the authorization facts the sweep asserts on:
   ``_require_platform_admin(ctx)``)
 - ``own_gate_in_handler`` — the endpoint body carries its own explicit
   auth-type gate (credentials resolve, the voice mint, the mobile device routes,
-  digest now)
+  the pairing-code mint, digest now)
+- ``writes`` — the state-changing calls the endpoint and its dependencies make in their own
+  source (``tests/helpers_safe_method_writes.py``), and ``reads_session_cookie`` — the endpoint
+  reads the session cookie itself (PRD-277 US-302's safe-method guard)
+
+Every declared method gets a record, HEAD and OPTIONS included; the sweep reads only the mutating
+ones.
 
 Usage (from ``orchestrator/``)::
 
@@ -56,6 +62,7 @@ def main() -> None:
     from core.auth.workspace_eraser import require_workspace_eraser
     from core.auth.workspace_permission import PERMISSION_MARKER_ATTR
     from main import app
+    from tests.helpers_safe_method_writes import route_writes
 
     records = []
     # FastAPI 0.137+ keeps an included router as one node of app.routes; the walk
@@ -78,7 +85,8 @@ def main() -> None:
         except (OSError, TypeError):
             src = ""
 
-        for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
+        writes = route_writes(route.endpoint, calls)
+        for method in sorted(route.methods):
             records.append(
                 {
                     "method": method,
@@ -108,10 +116,17 @@ def main() -> None:
                         or "Live voice requires a signed-in user" in src
                         # PRD-266 api/mobile_devices.py: the device routes' person gate.
                         or "caller = _caller(db, ctx" in src
+                        # PRD-277 US-601 api/mobile_devices.py: who may make a pairing code.
+                        or "Depends(pairing_code_owner)" in src
                         # PRD-266 api/mobile_push.py digest now: the caller's own
                         # person and membership gate (404 / 403 before anything runs).
                         or "user_pk = _digest_asker(db, ctx)" in src
                     ),
+                    # PRD-277 US-302 (test_prd277_safe_methods_change_nothing.py): the writes the
+                    # endpoint and its dependencies make in their own source, and whether the
+                    # endpoint reads the session cookie itself.
+                    "writes": list(writes),
+                    "reads_session_cookie": "session_cookie_token(" in src,
                 }
             )
 

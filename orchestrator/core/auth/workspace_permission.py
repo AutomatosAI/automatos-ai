@@ -34,6 +34,9 @@ lane            behaviour
                 (``core.auth.principal.resolve_user_pk``), since the lane
                 carries no Clerk identity. The local operator's device is
                 ``super_admin`` and bypasses, as the operator does.
+``session``     a person signed in to Automatos (PRD-277 enterprise): the same
+                member-row-then-owner read, by the ``users.id`` the session lane
+                put on the context (``claimed_user_pk``), never by email.
 ==============  =============================================================
 
 Cross-workspace drift guard: when the route carries a ``workspace_id`` path
@@ -54,7 +57,8 @@ from core.auth import person as people
 from core.auth.dependencies import RequestContext
 from core.auth.device import DEVICE_AUTH_TYPE
 from core.auth.hybrid import get_request_context_hybrid
-from core.auth.principal import resolve_user_pk
+from core.auth.principal import claimed_user_pk, resolve_user_pk
+from core.auth.session_lane import SESSION_AUTH_TYPE
 from core.auth.super_admin import SUPER_ADMIN_ROLE
 from core.database.database import get_db
 from modules.policy.roles import WorkspaceRole, workspace_has_permission
@@ -83,6 +87,15 @@ def _device_workspace_role(db: Any, ctx: Any) -> Optional[str]:
     return _role_of(db, people.by_user_pk(user_pk), ws_id)
 
 
+def _session_workspace_role(db: Any, ctx: Any) -> Optional[str]:
+    """A signed-in person's role in the session's workspace, by the ``users.id`` the lane bound."""
+    ws_id = getattr(ctx, "workspace_id", None)
+    user_pk = claimed_user_pk(ctx) if db is not None and ws_id else None
+    if user_pk is None:
+        return None
+    return _role_of(db, people.by_user_pk(user_pk), ws_id)
+
+
 def resolve_workspace_role(db: Any, ctx: Any) -> Optional[str]:
     """The caller's workspace role: active member row, else owner fallback.
 
@@ -96,6 +109,8 @@ def resolve_workspace_role(db: Any, ctx: Any) -> Optional[str]:
     """
     if getattr(ctx, "auth_type", None) == DEVICE_AUTH_TYPE:
         return _device_workspace_role(db, ctx)
+    if getattr(ctx, "auth_type", None) == SESSION_AUTH_TYPE:
+        return _session_workspace_role(db, ctx)
     user = getattr(ctx, "user", None)
     clerk_uid = getattr(user, "clerk_user_id", None) if user else None
     ws_id = getattr(ctx, "workspace_id", None)
@@ -126,8 +141,8 @@ def workspace_permission_granted(db: Any, ctx: Any, permission: str) -> bool:
         # trusted single-user posture owns its resolved workspace (PRD-175).
         return workspace_has_permission(WorkspaceRole.OWNER.value, permission)
 
-    # clerk, device (its bound person, by users.id) and api_key (no clerk
-    # identity, so it refuses):
+    # clerk, device and session (their bound person, by users.id) and api_key
+    # (no clerk identity, so it refuses):
     role = resolve_workspace_role(db, ctx)
     return workspace_has_permission(role, permission)
 

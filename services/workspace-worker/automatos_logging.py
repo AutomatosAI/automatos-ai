@@ -20,7 +20,8 @@ Env vars:
     LOG_RELAY_ENABLED   - Default: true
     SERVICE_NAME        - Fallback service name
     ENVIRONMENT         - Default: from RAILWAY_ENVIRONMENT or "development"
-    LOG_LEVEL           - Default: INFO
+    LOG_LEVEL           - Default: INFO (PRD-282: read by worker_config, checked by log_settings)
+    LOG_FORMAT          - Default: text; json writes one JSON record per line (PRD-282 US-302)
     LOG_RELAY_BATCH_SIZE    - Default: 50
     LOG_RELAY_FLUSH_INTERVAL - Default: 2.0 (seconds)
 """
@@ -35,6 +36,11 @@ import threading
 import time
 import traceback
 from typing import Optional
+
+import log_settings
+import worker_config
+from json_log_format import JsonLineFormatter
+from worker_log_context import TextLineFormatter, request_log_fields
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +266,13 @@ class LogRelayHandler(logging.Handler):
 # Setup Function
 # ---------------------------------------------------------------------------
 
+def _console_formatter(service: str, log_format: str) -> logging.Formatter:
+    """The console's line: the text one, or (PRD-282 US-302) one JSON record with the API's fields."""
+    if log_format == log_settings.LOG_FORMAT_JSON:
+        return JsonLineFormatter(service, worker_config.automatos_version(), request_log_fields)
+    return TextLineFormatter()
+
+
 def setup_logging(
     service: str,
     level: Optional[int] = None,
@@ -271,7 +284,7 @@ def setup_logging(
 
     Args:
         service: Service name (e.g. "workspace-worker", "mem0-server")
-        level: Log level (default from LOG_LEVEL env or INFO)
+        level: Log level (default from LOG_LEVEL, or INFO; for a value it cannot use, INFO and a warning)
         relay_url: Override LOG_RELAY_URL
         environment: Override ENVIRONMENT
         enable_relay: Override LOG_RELAY_ENABLED
@@ -279,8 +292,11 @@ def setup_logging(
     Returns:
         Root logger
     """
+    format_raw, level_raw = worker_config.log_format_setting(), worker_config.log_level_setting()
+    unusable = log_settings.unusable(format_raw, level_raw if level is None else None)
+    log_format = log_settings.log_format(format_raw)
     if level is None:
-        level = getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO)
+        level = log_settings.log_level(level_raw)
 
     root = logging.getLogger()
     root.setLevel(level)
@@ -298,11 +314,7 @@ def setup_logging(
     if not any(isinstance(h, logging.StreamHandler) for h in root.handlers):
         console = logging.StreamHandler()
         console.setLevel(level)
-        # PRD-256 O5: " trace=<id>" when a sampled span is current (worker_otel); empty otherwise.
-        console.setFormatter(logging.Formatter(
-            "%(asctime)s [%(name)s] %(levelname)s:%(_trace_context)s %(message)s",
-            defaults={"_trace_context": ""},
-        ))
+        console.setFormatter(_console_formatter(service, log_format))
         root.addHandler(console)
 
     # Log-relay handler (ships to Loki)
@@ -320,4 +332,7 @@ def setup_logging(
             "Log relay enabled → %s", relay_url or LOG_RELAY_URL
         )
 
+    # PRD-282: a LOG_FORMAT or LOG_LEVEL it cannot use is the default, and says so once.
+    for warning in unusable:
+        logging.getLogger(service).warning(warning)
     return root

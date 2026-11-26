@@ -11,7 +11,12 @@ Both are local edition only: 404 on SaaS, before any authentication runs, where 
 goes through the platform's Expo project. Both require ``require_workspace_admin``: the local
 operator passes as super_admin, and so does a phone bound to the operator through W1's
 device lane (``core/auth/device.py``); a plain member or a viewer is 403. The answer is
-install-wide (``services.push.consent``), not a workspace row.
+install-wide (``services.push.consent``), not a workspace row. Where one install holds many
+people (``multi_person``: enterprise, PRD-277 US-601) it is an install admin's decision: both
+also need a person signed in on the session lane whose install-wide role is admin
+(``push_consent_decider``), so no workspace admin, device or key decides it, and the PUT needs
+a fresh sign-in (``STEP_UP``, behind that check) and writes one ``push:consent_changed`` audit
+row in the same commit. ``local`` skips step-up and writes no row, as before.
 
 * ``PUT /push-settings`` ``{redact_questions: bool}`` — US-014b (D20): with it on, this
   workspace's question pushes say only that a question is waiting (no text, no options, Open
@@ -45,22 +50,27 @@ import logging
 from typing import Any, Dict, Union
 
 import anyio
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, StrictBool
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from api.credentials import get_client_ip
+from config import config
 from core import editions
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
-from core.auth.principal import resolve_user_pk
+from core.auth.principal import claimed_user_pk, resolve_user_pk
+from core.auth.roles import caller_is_admin
+from core.auth.session_lane import SESSION_AUTH_TYPE
+from core.auth.step_up import require_step_up
 from core.auth.workspace_admin import require_workspace_admin
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.workspaces import Workspace
-from services.mobile import digest, digest_now
+from services.mobile import device_audit, digest, digest_now
 from services.push import consent
 from services.push.payload import PUSH_SETTINGS_KEY, REDACT_QUESTIONS_KEY, with_redact_questions
 
@@ -82,6 +92,8 @@ DIGEST_UNAVAILABLE = "digest_unavailable"
 NO_WORKSPACE = "Choose a workspace first."
 NO_PERSON = "Today's brief is posted to a person, and this caller is not one."
 NOT_A_MEMBER = "Today's brief is only for the people in this workspace."
+INSTALL_ADMINS_ONLY = "Only an install admin signed in to Automatos decides how notifications are sent."
+STEP_UP = require_step_up(config.STEP_UP_MAX_AGE_MINUTES)
 
 
 class PushConsentRequest(BaseModel):
@@ -106,9 +118,32 @@ def _require_push_consent() -> None:
         raise HTTPException(status_code=404, detail=NOT_FOUND)
 
 
+def push_consent_decider(ctx: RequestContext = Depends(require_workspace_admin)) -> RequestContext:
+    """Who answers the push question: a workspace owner or admin, the operator included (local).
+
+    Where one install holds many people (``multi_person``: enterprise) also an install admin
+    signed in on the session lane, never a device, a key or a workspace admin alone: 403.
+    """
+    if not editions.current().multi_person:
+        return ctx
+    person = claimed_user_pk(ctx) if ctx.auth_type == SESSION_AUTH_TYPE else None
+    if person is None or not caller_is_admin(ctx.user):
+        raise HTTPException(status_code=403, detail=INSTALL_ADMINS_ONLY)
+    return ctx
+
+
+def _record_push_decision(db: Session, ctx: RequestContext, request: Request, agreed: bool) -> None:
+    """Stage ``push:consent_changed`` in this transaction, where the edition records devices."""
+    if device_audit.records_devices():
+        device_audit.stage(db, action=device_audit.PUSH_CONSENT_CHANGED, workspace_id=ctx.workspace_id,
+                           actor=claimed_user_pk(ctx), resource_type=device_audit.PUSH_CONSENT_RESOURCE,
+                           details={"agreed": agreed}, ip_address=get_client_ip(request),
+                           user_agent=request.headers.get("user-agent"))
+
+
 @router.get("/push-consent", dependencies=[Depends(_require_push_consent)])
 def get_push_consent(
-    ctx: RequestContext = Depends(require_workspace_admin),
+    ctx: RequestContext = Depends(push_consent_decider),
 ) -> Dict[str, Any]:
     """The operator's answer: ``{agreed, answered, answered_at}``; 503 when it cannot be read."""
     try:
@@ -121,12 +156,15 @@ def get_push_consent(
 @router.put("/push-consent", dependencies=[Depends(_require_push_consent)])
 def put_push_consent(
     body: PushConsentRequest,
-    ctx: RequestContext = Depends(require_workspace_admin),
+    request: Request,
+    ctx: RequestContext = Depends(push_consent_decider),
+    _fresh: RequestContext = Depends(STEP_UP),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Record whether this install may send notifications through Expo, and when it was asked."""
     try:
         state = consent.set_push_consent(db, body.agreed)
+        _record_push_decision(db, ctx, request, body.agreed)
         db.commit()
     except SQLAlchemyError as failure:
         db.rollback()
