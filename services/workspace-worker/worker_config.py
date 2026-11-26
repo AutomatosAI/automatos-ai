@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import ssl
 from pathlib import Path
+from types import MappingProxyType
 from typing import Dict, Mapping, Optional
 
 # Workspace mount root inside the worker container (PRD-233 S1). Compose
@@ -185,6 +186,9 @@ DATABASE_SSLMODE_ENV = "DATABASE_SSLMODE"
 DATABASE_SSLROOTCERT_ENV = "DATABASE_SSLROOTCERT"
 DATABASE_SSLMODES = ("disable", "allow", "prefer", "require", "verify-ca", "verify-full")
 DATABASE_CERTIFICATE_CHECKING_MODES = ("verify-ca", "verify-full")
+# A mode that checks a certificate also turns off libpq's GSSAPI encryption, which libpq would
+# otherwise use in preference to TLS whatever sslmode says, checking no certificate.
+NO_GSS_ENCRYPTION = MappingProxyType({"gssencmode": "disable"})
 _UNUSABLE_CA = f"{DATABASE_SSLROOTCERT_ENV} must name a readable file holding at least one PEM certificate"
 _CA_REQUIRED = (
     f"{DATABASE_SSLMODE_ENV} verify-ca and verify-full need {DATABASE_SSLROOTCERT_ENV}: the path of a file "
@@ -206,6 +210,7 @@ def _require_usable_ca(cafile: str) -> None:
 def database_tls_params() -> Dict[str, str]:
     """psycopg2's ``sslmode`` and ``sslrootcert`` keywords from the two settings, checked.
 
+    A mode that checks a certificate also gets ``NO_GSS_ENCRYPTION``, so that check is in force.
     Empty when neither is set. Raises ValueError, naming the setting and never the CA
     file's path, for a mode libpq doesn't know, a CA file without a mode that checks it, a
     mode that checks the certificate with no CA file, or a CA file that is missing,
@@ -227,4 +232,6 @@ def database_tls_params() -> Dict[str, str]:
     if rootcert:
         _require_usable_ca(rootcert)
         params["sslrootcert"] = rootcert
+    if mode in DATABASE_CERTIFICATE_CHECKING_MODES:
+        params.update(NO_GSS_ENCRYPTION)
     return params
