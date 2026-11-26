@@ -51,6 +51,7 @@ TRUTH_TABLE = {
         "last_workspace_purge_deletes_person": False,
         "issues_sessions": False,
         "agent_http_own_hosts_only": False,
+        "agent_http_verifies_tls": False,
         "api_on_public_address": False,
         "requires_verified_database_tls": False,
         "device_tokens_age_out": False,
@@ -80,6 +81,7 @@ TRUTH_TABLE = {
         "last_workspace_purge_deletes_person": True,
         "issues_sessions": False,
         "agent_http_own_hosts_only": False,
+        "agent_http_verifies_tls": True,
         "api_on_public_address": False,
         "requires_verified_database_tls": False,
         "device_tokens_age_out": False,
@@ -109,6 +111,7 @@ TRUTH_TABLE = {
         "last_workspace_purge_deletes_person": False,   # G-8: never
         "issues_sessions": True,                        # D-3, §5.3 (Wave 3)
         "agent_http_own_hosts_only": True,              # D-12 (#1605): the platform's API is the install's
+        "agent_http_verifies_tls": True,                # #1656: TLS verification stays on (AGENTS.md)
         "api_on_public_address": True,                  # US-602: one public origin, FRONTEND_URL
         "requires_verified_database_tls": True,         # PRD-278 D-6: DATABASE_SSLMODE=verify-full
         "device_tokens_age_out": True,                  # US-601: ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS, 90 by default
@@ -125,7 +128,7 @@ LOCAL_TRUE = (
 )
 SAAS_TRUE = (
     "multi_person", "billing", "hosts_automatos_cloud", "guards_user_endpoints",
-    "last_workspace_purge_deletes_person",
+    "last_workspace_purge_deletes_person", "agent_http_verifies_tls",
 )
 # Capabilities no comparison ever made: new with enterprise, so off in local and saas (PRD-277
 # Wave 3 sessions, US-704's settings, D-12's agent host list, US-601's pairing setting, US-602's one
