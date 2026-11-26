@@ -32,7 +32,8 @@ from an id that does not exist.
   A person holds at most ``MAX_ACTIVE_DEVICES_PER_PERSON`` active devices in a workspace (the
   W2 review: each one is a push target). A Clerk registration that would add one more (a new
   install, or one its person signed out of) is ``DeviceConflict(device_limit_reached)``, with a
-  plain message; updating a device already active is never refused. Counted, not locked: two
+  plain message; updating a device already active is never refused. Where device tokens age out
+  (PRD-277 US-601), a device past its maximum age is not counted. Counted, not locked: two
   registrations at the same instant may both pass.
 * ``list_devices``: the caller's own devices; a workspace owner/admin (or the local
   operator) sees the workspace's. A pending row is a code waiting for a phone, not a
@@ -275,11 +276,18 @@ def _clerk_row(db: Session, caller: DeviceCaller, install_id: str) -> Optional[M
 
 
 def _check_room(db: Session, caller: DeviceCaller) -> None:
-    """``DeviceConflict(device_limit_reached)`` when the person already holds the most active devices here."""
+    """``DeviceConflict(device_limit_reached)`` when the person already holds the most active devices here.
+
+    Where device tokens age out (PRD-277 US-601), an active device past its maximum age is not
+    counted: its token is refused, so a lost phone that aged out never blocks a new one.
+    """
+    from services.mobile import token_age  # token_age imports this module
+
     active = db.query(MobileDevice.id).filter(
         MobileDevice.workspace_id == caller.workspace_id,
         MobileDevice.user_id == caller.user_pk,
         MobileDevice.status == MobileDeviceStatus.ACTIVE.value,
+        *token_age.within_max_age_filters(_now()),
     ).count()
     if active >= MAX_ACTIVE_DEVICES_PER_PERSON:
         raise DeviceConflict(DEVICE_LIMIT_REACHED, DEVICE_LIMIT_MESSAGE)

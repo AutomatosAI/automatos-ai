@@ -5,17 +5,22 @@ Where the edition says ``device_tokens_age_out`` (enterprise), a device's token 
 it: the phone's last pairing with a code, or its last sign-in on the phone. Both are an enrolment
 (``services.mobile.pairing.enrol``), which stamps ``paired_at``; enrolling again restarts the count. A
 rotation does not: a rotation is the device trading its own token for a new one, and proves nothing
-about its person. A row with no ``paired_at`` counts from when it was created. A ``paired_at`` later
-than now is read as now, so it never makes a device past its age: such a device ages out one
-maximum age after that time. Both kinds that hold a token (``paired``, ``oidc``) age alike. ``local`` and
-``saas`` never call into the rule and never read the setting.
+about its person. A row with no ``paired_at`` counts from when it was created. Both kinds that hold a
+token (``paired``, ``oidc``) age alike. ``local`` and ``saas`` never call into the rule and never read
+the setting.
 
-**One rule, three readers.** A device is past its maximum age when the moment its age starts
-(``ISSUED_AT``: ``paired_at``, else ``created_at``) is at or before ``cutoff(now)``. The device lane
-asks ``is_past_max_age`` on every request; push fan-out leaves such a device out
-(``within_max_age_filters``, the same comparison in SQL); the device list shows it as
-``EXPIRED_STATUS`` (``view_status``). Clamping a future ``paired_at`` to now changes no answer, since
-the maximum age is at least one day.
+**A start in the future fails closed.** A ``paired_at`` later than now by no more than ``CLOCK_SKEW``
+(the ID token's own leeway: two servers' clocks disagreeing) is read as now. One later than that (a
+replica whose clock runs well ahead, or a hand-edited row) makes the device past its maximum age: read
+as now it would stay young until that time and then live a whole maximum age more, so its life would
+be the maximum plus the gap. Each such device is logged once, by id, as a warning.
+
+**One rule, four readers.** A device is past its maximum age when the moment its age starts
+(``ISSUED_AT``: ``paired_at``, else ``created_at``) is at or before ``cutoff(now)``, or later than
+``now + CLOCK_SKEW``. The device lane asks ``is_past_max_age`` on every request; push fan-out leaves
+such a device out and the device cap does not count it (``within_max_age_filters``, the same
+comparisons in SQL); the device list shows it as ``EXPIRED_STATUS`` (``view_status``). Reading a start
+within the skew as now changes no answer, since the maximum age is at least one day.
 
 **The revoke.** The first request that finds a device past it revokes the device by the install and
 records one ``device:revoked`` row, reason ``token_max_age_reached``, in the same commit
@@ -28,6 +33,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from typing import Any, Optional, Tuple
 from uuid import UUID
 
@@ -37,6 +43,7 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core import editions
+from core.auth.oidc_tokens import TIME_LEEWAY_SECONDS
 from core.models.mobile_devices import MobileDevice, MobileDeviceStatus
 from services.mobile import device_audit
 from services.mobile.devices import revoke_active_device_if
@@ -48,6 +55,10 @@ ISSUED_AT = func.coalesce(MobileDevice.paired_at, MobileDevice.created_at)
 # What the device list shows for an active device past its maximum age (the row stays active until
 # its next request revokes it, or a person does).
 EXPIRED_STATUS = "expired"
+# How far ahead of now a device's age may start and still be read as starting now: two clocks disagreeing.
+CLOCK_SKEW = timedelta(seconds=TIME_LEEWAY_SECONDS)
+# How many devices with a start in the future this process remembers having warned about.
+FUTURE_START_WARNINGS_KEPT = 1024
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -74,14 +85,31 @@ def issued_at(device: MobileDevice, now: datetime) -> datetime:
     return min(_as_utc(device.paired_at or device.created_at), now)
 
 
+def starts_in_the_future(device: MobileDevice, now: datetime) -> bool:
+    """Whether the device's age starts later than ``now`` by more than ``CLOCK_SKEW``."""
+    return _as_utc(device.paired_at or device.created_at) > now + CLOCK_SKEW
+
+
+@lru_cache(maxsize=FUTURE_START_WARNINGS_KEPT)
+def _warn_future_start(device_id: Any) -> None:
+    """Log, once per device this process remembers, that its age starts in the future (its id only)."""
+    logger.warning("Device %s has a pairing time later than now beyond the clock skew; "
+                   "treated as past its maximum age", device_id)
+
+
 def is_past_max_age(device: MobileDevice, now: datetime) -> bool:
-    """True from the moment the device's age reaches ``max_age``."""
+    """True from the moment the device's age reaches ``max_age``, and while its age starts later than
+    ``now + CLOCK_SKEW`` (fail closed: a start in the future would lengthen its life)."""
+    if starts_in_the_future(device, now):
+        _warn_future_start(getattr(device, "id", None))
+        return True
     return issued_at(device, now) <= cutoff(now)
 
 
 def within_max_age_filters(now: datetime) -> Tuple[Any, ...]:
-    """The SQL filters that keep only devices inside their maximum age; none where tokens never age out."""
-    return (ISSUED_AT > cutoff(now),) if ages_out() else ()
+    """The SQL filters that keep only devices inside their maximum age (``is_past_max_age`` false);
+    none where tokens never age out."""
+    return (ISSUED_AT > cutoff(now), ISSUED_AT <= now + CLOCK_SKEW) if ages_out() else ()
 
 
 def view_status(device: MobileDevice, now: datetime) -> str:
@@ -121,6 +149,7 @@ def revoke_aged_out(db: Session, device_id: UUID, now: datetime, *, ip_address: 
 
 
 __all__ = [
+    "CLOCK_SKEW",
     "EXPIRED_STATUS",
     "ISSUED_AT",
     "ages_out",
@@ -129,6 +158,7 @@ __all__ = [
     "issued_at",
     "max_age",
     "revoke_aged_out",
+    "starts_in_the_future",
     "view_status",
     "within_max_age_filters",
 ]
