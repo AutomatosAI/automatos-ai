@@ -61,6 +61,11 @@ def _fresh_redis_clients(monkeypatch):
     monkeypatch.setattr(checks, "_redis_clients", {})
 
 
+@pytest.fixture(autouse=True)
+def _no_provider_failures_counted(monkeypatch):
+    monkeypatch.setattr(last_call, "_failures_in_a_row", 0)
+
+
 def _now():
     return datetime.now(timezone.utc)
 
@@ -196,7 +201,10 @@ class _Bucket:
     (None, checks.UP),
     (_client_error("404", 404, "HeadBucket"), checks.UP),          # the store answered: no such bucket
     (_client_error("NoSuchBucket", 404, "HeadBucket"), checks.UP),
-    (_client_error("403", 403, "HeadBucket"), checks.NOT_PERMITTED),
+    (_client_error("403", 403, "HeadBucket"), checks.DOWN),        # bare 403: a wrong key or revoked role too
+    (_client_error("Forbidden", 403, "HeadBucket"), checks.DOWN),
+    (_client_error("InvalidAccessKeyId", 403, "HeadBucket"), checks.DOWN),
+    (_client_error("SignatureDoesNotMatch", 403, "HeadBucket"), checks.DOWN),
     (_client_error("AccessDenied", 403, "HeadBucket"), checks.NOT_PERMITTED),
     (_client_error("500", 500, "HeadBucket"), checks.DOWN),
     (_client_error("503", 503, "HeadBucket"), checks.DOWN),
@@ -208,10 +216,25 @@ def test_object_storage_is_head_bucket_on_the_fast_fail_client(monkeypatch, erro
     from core.storage import s3
 
     bucket, profiles = _Bucket(error), []
+    monkeypatch.setattr(config, "S3_ENDPOINT_URL", "http://" + "storage-test:9000")
     monkeypatch.setattr(s3, "is_storage_configured", lambda: True)
     monkeypatch.setattr(s3, "get_s3_client", lambda profile: profiles.append(profile) or bucket)
     assert checks.object_storage_state() == expected
     assert bucket.asked == [config.S3_DOCUMENTS_BUCKET] and profiles == [s3.FAST_FAIL]
+
+
+@pytest.mark.parametrize("code", ["404", "NoSuchBucket", "NotFound"])
+@pytest.mark.parametrize("endpoint,expected", [
+    ("http://" + "storage-test:9000", checks.UP),  # MinIO: ensure_bucket makes it on first use
+    ("", checks.DOWN),                             # AWS: ensure_bucket never makes it
+])
+def test_a_missing_bucket_is_up_only_where_core_makes_it(monkeypatch, code, endpoint, expected):
+    from core.storage import s3
+
+    monkeypatch.setattr(config, "S3_ENDPOINT_URL", endpoint)
+    monkeypatch.setattr(s3, "is_storage_configured", lambda: True)
+    monkeypatch.setattr(s3, "get_s3_client", lambda profile: _Bucket(_client_error(code, 404, "HeadBucket")))
+    assert checks.object_storage_state() == expected
 
 
 # --------------------------------------------------------------------------- the search index
@@ -254,6 +277,9 @@ def test_the_search_index_is_a_metadata_call_on_the_kept_client(monkeypatch, buc
     (_client_error("ResourceNotFoundException", 404, "GetIndex"), False, checks.DOWN),
     (_client_error("AccessDeniedException", 403, "GetIndex"), True, checks.NOT_PERMITTED),
     (_client_error("AccessDeniedException", 403, "GetIndex"), False, checks.NOT_PERMITTED),
+    (_client_error("UnrecognizedClientException", 403, "GetIndex"), True, checks.DOWN),  # a bad key
+    (_client_error("InvalidSignatureException", 403, "GetIndex"), True, checks.DOWN),
+    (_client_error("403", 403, "GetIndex"), True, checks.DOWN),
     (_client_error("ServiceUnavailableException", 503, "GetIndex"), True, checks.DOWN),
     (EndpointConnectionError(endpoint_url="https://" + "vectors-test"), True, checks.DOWN),
     (ReadTimeoutError(endpoint_url="https://" + "vectors-test"), True, checks.DOWN),
@@ -386,8 +412,24 @@ class APIConnectionError(Exception):
 def test_only_reach_or_acceptance_failures_note_the_provider_down(monkeypatch, error, own_key, noted_down):
     before = last_call.LastCall(succeeded=True, ended_at=_now())
     monkeypatch.setattr(last_call, "_last", before)
-    last_call.note_failure(error, own_key=own_key)
+    for _ in range(last_call.FAILURES_BEFORE_DOWN):
+        last_call.note_failure(error, own_key=own_key)
     assert (last_call.last().succeeded is False) if noted_down else (last_call.last() is before)
+
+
+def test_the_provider_is_noted_down_only_after_failures_in_a_row(monkeypatch):
+    before = last_call.LastCall(succeeded=True, ended_at=_now())
+    monkeypatch.setattr(last_call, "_last", before)
+    refused = httpx.ConnectError("refused")
+    for _ in range(last_call.FAILURES_BEFORE_DOWN - 1):
+        last_call.note_failure(refused, own_key=False)
+    assert last_call.last() is before  # one blip is not an outage
+    last_call.note_answer(_Answer())  # an answer starts the count again
+    for _ in range(last_call.FAILURES_BEFORE_DOWN - 1):
+        last_call.note_failure(refused, own_key=False)
+    assert last_call.last().succeeded is True
+    last_call.note_failure(refused, own_key=False)
+    assert last_call.last().succeeded is False
 
 
 def test_an_empty_answer_leaves_the_note_as_it_was(monkeypatch):
@@ -467,9 +509,11 @@ def test_the_managers_call_methods_note_an_answer_and_an_unreachable_provider(mo
     _call(_manager(_provider())[0], run_async)
     assert last_call.last().succeeded is True
     manager, failed = _manager(_provider(httpx.ConnectError("refused")))
-    with pytest.raises(httpx.ConnectError):
-        _call(manager, run_async)
-    assert last_call.last().succeeded is False and len(failed) == 1  # the manager's own failure path still ran
+    for _ in range(last_call.FAILURES_BEFORE_DOWN):
+        with pytest.raises(httpx.ConnectError):
+            _call(manager, run_async)
+    # the manager's own failure path still ran, every time
+    assert last_call.last().succeeded is False and len(failed) == last_call.FAILURES_BEFORE_DOWN
 
 
 @pytest.mark.parametrize("run_async", [True, False])
