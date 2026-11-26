@@ -62,6 +62,8 @@ from core.auth.pairing import mint_token  # noqa: E402
 from core.auth.principal import resolve_user_pk  # noqa: E402
 from core.models.mobile_devices import MobileDevice  # noqa: E402
 
+pytestmark = pytest.mark.usefixtures("edition_confirmed")  # the boot check passed (#1660)
+
 T0 = datetime(2026, 10, 20, 9, 0, tzinfo=timezone.utc)
 TOKEN_BYTES = 32
 
