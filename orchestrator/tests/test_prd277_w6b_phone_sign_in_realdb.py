@@ -126,7 +126,7 @@ def install(db_session, seed_workspace, monkeypatch, tmp_path):
     for module in (session_lane, device, edition_change):
         monkeypatch.setattr(module, "SessionLocal", lambda: borrowed)
     monkeypatch.setattr(hybrid, "_enrich_log_context", lambda ctx: None)
-    monkeypatch.setattr(edition_change, "_status", edition_change.NOT_RUN)
+    monkeypatch.setattr(edition_change, "_status", edition_change.CONFIRMED)  # this install's boot check passed
     app = FastAPI()
     for router in (auth_oidc.router, phone_routes.router, mobile_devices.router):
         app.include_router(router)

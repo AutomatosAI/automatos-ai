@@ -8,7 +8,7 @@ How to register Automatos with Keycloak for the enterprise edition. Read [Enterp
 - **The realm file.** No realm file is committed. The workflow's step "Make the certificate, the credentials and the realm" writes `realm.json` at run time, with a generated client secret and password, and Keycloak imports it at start (`--import-realm`). [Register the application](#2-register-the-application) shows that realm's client.
 - **What the job checks:**
   - a person signs in through Keycloak's own login form and gets a session;
-  - the access rule reads a claim with a colon in its name (`automatos:team`): `=finance` is refused, `=ops` is admitted;
+  - the access rule reads a claim with a colon in its name (`automatos:team`): `=finance` is refused, `=ops` is admitted. The claim is hard-coded for every user, so this checks how the rule reads a claim, not who it keeps out (see [Claims](#4-claims));
   - a step-up sends `max_age=0`, `prompt=login` and the `claims` parameter, Keycloak asks for the password again, and a new session is issued;
   - sign-out sends the browser to Keycloak's end-session address with `client_id` and `post_logout_redirect_uri`, and Keycloak accepts it.
 - The job is not a required check. PRD-277 US-407 records whether it has been seen green.
@@ -63,7 +63,9 @@ https://<keycloak-host>/realms/<realm>
 ```
 
 - The metadata address is `https://<keycloak-host>/realms/<realm>/.well-known/openid-configuration`.
+- A Keycloak served under the legacy `/auth` path has the issuer `https://<keycloak-host>/auth/realms/<realm>`: older Keycloak releases (the WildFly distribution) used it, and a newer one can be set up to keep it. Not run here. Automatos requires the metadata's `issuer` to equal `oidc.issuer` exactly, so open the metadata address and copy the `issuer` it shows.
 - The token endpoint (`…/protocol/openid-connect/token`) and the keys (`…/protocol/openid-connect/certs`) are under the realm's address. Leave `oidc.endpointHosts` empty.
+- A Keycloak inside your network may resolve to a private address, but only on the issuer's own host and port. If its metadata puts the token endpoint or the keys on another host, that host must resolve to public addresses, even when listed in `oidc.endpointHosts`; otherwise sign-in answers `identity_provider_unavailable` (see [What the provider's metadata must offer](enterprise-sign-in-oidc.md#what-the-providers-metadata-must-offer)). Keycloak's hostname settings decide which host its metadata names for them; not run here.
 - A Keycloak with a certificate from a private certificate authority: put the authority's certificate in a ConfigMap, and set `oidc.caConfigMap` and `oidc.caKey`. The CI job signs in this way, with a certificate it makes for `localhost` and `OIDC_CA_BUNDLE_FILE` naming it.
 
 ## 4. Claims
@@ -94,7 +96,16 @@ The CI realm adds a claim with a protocol mapper of type `oidc-hardcoded-claim-m
 }
 ```
 
-The access rule `automatos:team=ops` admits its users. For access by group, add a mapper that puts the user's group membership in the ID token, and name that claim in the rule. Keycloak's mapper types are listed in the [Server Administration Guide](https://www.keycloak.org/docs/latest/server_admin/index.html); this page does not name one, because it has not been run here.
+**This rule restricts nothing.** An `oidc-hardcoded-claim-mapper` puts the same claim in the ID token of every user who signs in through the client, so `automatos:team=ops` admits every user of the realm. It is scaffolding for the CI job, which checks how the access rule reads a claim. Do not copy it into an install.
+
+To restrict who may sign in, put a claim in the ID token that an administrator sets and the person cannot change, and name it in the rule:
+
+- **A group-membership mapper** (`oidc-group-membership-mapper`): the user's groups, and a rule naming one group.
+- **A client-role mapper** (`oidc-usermodel-client-role-mapper`): the user's roles on the client, and a rule naming one role.
+
+Never base the rule on a user attribute the person can edit, for example in Keycloak's account console: they could give themselves the value the rule asks for.
+
+The mapper type names are Keycloak's provider ids, not run here. What the claim holds depends on the mapper's settings (a group's full path, such as `/automatos`, or its name), so read one ID token before writing the rule. A list claim matches when it contains the rule's value. Keycloak's mapper types are listed in the [Server Administration Guide](https://www.keycloak.org/docs/latest/server_admin/index.html).
 
 ## 5. `auth_time`
 
@@ -116,7 +127,7 @@ edition:
       issuer: https://id.example.com/realms/<realm>
       clientId: automatos
       displayName: Keycloak
-      requiredClaims: automatos:team=ops
+      requiredClaims: groups=<group>   # from a group-membership mapper (see Claims)
       caConfigMap: <configmap-name>   # only with a private certificate authority
       caKey: ca.crt
 database:
@@ -138,7 +149,7 @@ OIDC_ISSUER=https://id.example.com/realms/<realm>
 OIDC_CLIENT_ID=automatos
 OIDC_CLIENT_SECRET=<from the Kubernetes Secret>
 OIDC_DISPLAY_NAME=Keycloak
-OIDC_REQUIRED_CLAIMS=automatos:team=ops
+OIDC_REQUIRED_CLAIMS=groups=<group>
 OIDC_CA_BUNDLE_FILE=/etc/automatos/oidc-ca/ca.crt
 DEFAULT_WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1
 DATABASE_SSLMODE=verify-full
@@ -147,7 +158,9 @@ DATABASE_SSLROOTCERT=/etc/automatos/database-ca/ca.crt
 
 The chart sets the last three itself: `DEFAULT_WORKSPACE_ID` from `edition.defaultWorkspaceId`, and `DATABASE_SSLMODE` and `DATABASE_SSLROOTCERT` from `database.*`. Set them yourself only for an install made without the chart. The enterprise edition connects to its database only with `verify-full` ([chart README, Settings](../../charts/automatos/README.md#settings)).
 
-The chart sets `OIDC_CA_BUNDLE_FILE` from `caConfigMap` and `caKey`. The access rule is optional for a realm that serves one organisation. It is required when `ENTERPRISE_DEFAULT_ROLE` is not `none`.
+The chart sets `OIDC_CA_BUNDLE_FILE` from `caConfigMap` and `caKey`. The access rule is optional for a realm that serves one organisation; without one, every user who can sign in to the client is let in. It is required when `ENTERPRISE_DEFAULT_ROLE` is not `none`.
+
+`groups=<group>` assumes the mapper's claim name is `groups`. Use the claim name and value your mapper sends.
 
 ## 7. What this provider cannot do
 
@@ -164,6 +177,6 @@ Nothing the sign-in needs was found missing. Keycloak may ask the person to conf
 
 Follow the [checklist](enterprise-sign-in-oidc.md#check-a-registration-works). The CI job does the same against a throwaway realm. On your own realm, also check:
 
-1. A user without the rule's claim is refused with `sign_in_not_allowed`.
+1. A user outside the rule's group or role is refused with `sign_in_not_allowed`.
 2. A step-up after `STEP_UP_MAX_AGE_MINUTES` makes Keycloak ask for the password.
 3. Sign-out shows Keycloak's confirm page, if it shows one, then returns to `/sign-in`.

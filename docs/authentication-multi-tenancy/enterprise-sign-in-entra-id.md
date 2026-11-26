@@ -46,12 +46,12 @@ Create the client secret:
 5. Copy the secret's **Value** now. Microsoft never shows it again.
 6. Put it in the Kubernetes Secret that `existingSecret` names, under the key `OIDC_CLIENT_SECRET`.
 
-Replace the secret before it expires: put the new value in the Kubernetes Secret and restart the API, which reads it at start.
+Replace the secret before it expires: put the new value in the Kubernetes Secret and restart the API, which reads it at start. An app registration can hold more than one client secret (the credentials page above), so the change needs no gap; see [Rotating the client secret](enterprise-sign-in-oidc.md#rotating-the-client-secret).
 
 Choose who may sign in. Two ways, which can be combined:
 
 - **Assignment at Entra ID.** In **Enterprise apps** > **All applications** > your app > **Users and groups**, select **Add user/group**, choose people or groups, and select **Assign**. Microsoft's page says group-based assignment requires Microsoft Entra ID P1 or P2, and nested groups are not supported. Turn on the application's setting that requires assignment, so that only assigned people can sign in; Microsoft's page links to it under "Manage access to an application".
-- **The access rule in Automatos** (`OIDC_REQUIRED_CLAIMS`), on `tid`, `roles` or `groups` (see [Claims](#4-claims)).
+- **The access rule in Automatos** (`OIDC_REQUIRED_CLAIMS`): always `tid=<tenant-id>`, and `roles` or `groups` as well if you want them (see [Claims](#4-claims)).
 
 ## 3. The issuer address
 
@@ -60,7 +60,7 @@ https://login.microsoftonline.com/<tenant-id>/v2.0
 ```
 
 - Use the tenant ID, a GUID. Microsoft says the `iss` claim of a v2.0 token "ends in /v2.0" and identifies the tenant, and that "Your app should use the GUID portion". Automatos requires `iss` to equal `OIDC_ISSUER` exactly.
-- Never use `common`, `organizations` or `consumers`. Those authorities serve many tenants. Automatos refuses to start with one of them unless an access rule is set.
+- Never use `common`, `organizations` or `consumers`. They do not work at all, even with an access rule. Those authorities serve many tenants, and their metadata's `issuer` is not their own address: `https://login.microsoftonline.com/{tenantid}/v2.0` for `common` and `organizations`, the personal-accounts tenant's address for `consumers` (read from Microsoft's metadata on 26 November 2026). Automatos refuses metadata whose `issuer` is not `OIDC_ISSUER`, so every sign-in answers `identity_provider_unavailable`. Without an access rule, the API also refuses to start with one of them.
 - The metadata address is `https://login.microsoftonline.com/<tenant-id>/v2.0/.well-known/openid-configuration`. Entra shows it under **App registrations** > your app > **Endpoints**.
 - `oidc.endpointHosts`: leave it empty. The token endpoint and the keys are on `login.microsoftonline.com`, the issuer's host (PRD-277 §5.9).
 
@@ -70,7 +70,7 @@ https://login.microsoftonline.com/<tenant-id>/v2.0
 |---|---|---|
 | `sub` | "a pairwise identifier and is unique to an application ID". A new app registration gives everyone a new `sub`. | Do not use. Set `OIDC_CLAIM_SUBJECT=oid`. |
 | `oid` | "The immutable identifier" for the person in the tenant; it "can't be reused". "the `profile` scope is required to receive this claim". | `OIDC_CLAIM_SUBJECT=oid`. Keep `profile` in `oidc.scopes` (it is in the default). |
-| `tid` | The tenant's GUID. | Access rule: `tid=<tenant-id>`. |
+| `tid` | The tenant's GUID. | Access rule: `tid=<tenant-id>`. Required whenever `OIDC_CLAIM_SUBJECT=oid`. |
 | `email` | "isn't guaranteed to be correct and is mutable". Requested with the `email` scope. | Read, but see below. |
 | `email_verified` | Not among the ID token claims Microsoft lists. | none |
 | `name` | The person's display name. | `OIDC_CLAIM_NAME` default. |
@@ -150,6 +150,8 @@ DATABASE_SSLROOTCERT=/etc/automatos/database-ca/ca.crt
 ```
 
 The chart sets the last three itself: `DEFAULT_WORKSPACE_ID` from `edition.defaultWorkspaceId`, and `DATABASE_SSLMODE` and `DATABASE_SSLROOTCERT` from `database.*`. Set them yourself only for an install made without the chart. The enterprise edition connects to its database only with `verify-full` ([chart README, Settings](../../charts/automatos/README.md#settings)).
+
+Keep `tid=<tenant-id>` in the rule whenever `OIDC_CLAIM_SUBJECT=oid`. Microsoft describes `oid` as the person's identifier within a tenant, so the rule pins the tenant it belongs to. Start-up does not check this.
 
 To admit only people with an app role, add it to the rule: `tid=<tenant-id>;roles=<app-role-value>`.
 

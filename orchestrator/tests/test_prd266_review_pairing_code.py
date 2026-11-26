@@ -37,6 +37,8 @@ from core.models.mobile_devices import MobileDevice
 from core.workspaces.audit import AuditLog
 from scripts import mint_pairing_code as script
 
+pytestmark = pytest.mark.usefixtures("edition_confirmed")  # the boot check passed (#1660)
+
 ORCH = Path(__file__).resolve().parents[1]
 STUDIO = "https://studio.prd266.test"
 BACKEND = "http://192.168.1.20:8000"

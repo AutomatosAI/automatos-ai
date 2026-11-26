@@ -8,6 +8,11 @@ does no database work of its own.
 
 * ``healthy`` and ``busy`` (the pool is full, the database answers) are ready.
 * ``unhealthy`` (no answer, or none within the time limit) and ``stuck`` are not.
+* The SELECT 1 runs on a connection of its own (core/database/readiness_engine.py:
+  the main engine's address and TLS, no pool, and libpq connect, TCP and keepalive
+  timeouts set from the time limit), so after a failover that sends no TCP reset the
+  check's thread ends near its time limit and the next tick checks again (#1651).
+  GET /health still checks on the app's pool.
 * A reading older than the watch's stale bound (core/health_watch.py: three check
   intervals plus one time limit, 18 s by default) is no passed check: 503, with the
   database ``unchecked``. So a check that hangs, or a watch that stops, never leaves
@@ -29,6 +34,7 @@ from typing import Any, Optional, Tuple
 
 from config import config
 from core import health_probe
+from core.database.readiness_engine import readiness_engine
 from core.health_watch import Reading, Watch
 from core.monitoring.automatos_metrics import set_dependency_up
 
@@ -39,8 +45,9 @@ _WATCH, _TASK = "database_watch", "database_watch_task"  # where each lives on a
 
 def _database_status() -> str:
     # Looked up per call, so a test can replace it. A failure raises, so the watch can log
-    # it once, at the state change, rather than every tick.
-    return health_probe.database_status(raise_errors=True)
+    # it once, at the state change, rather than every tick. The SELECT 1 runs on readiness's
+    # own engine, whose libpq timeouts end a hung check near its time limit (#1651).
+    return health_probe.database_status(raise_errors=True, engine=readiness_engine())
 
 
 def _database_gauge(name: str, reading: Optional[Reading]) -> None:

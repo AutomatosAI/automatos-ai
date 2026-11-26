@@ -29,6 +29,8 @@ from core.auth.pairing import hash_secret, normalize_pairing_code
 from core.models.mobile_devices import NAME_LENGTH, MobileDevice
 from scripts import mint_pairing_code as script
 
+pytestmark = pytest.mark.usefixtures("edition_confirmed")  # the boot check passed (#1660)
+
 STUDIO = "https://studio.prd266.test"
 BACKEND = "http://192.168.1.20:8000"
 CODE_LINE = re.compile(r"^Pairing code: ([A-Z0-9]{4}-[A-Z0-9]{4})$", re.M)

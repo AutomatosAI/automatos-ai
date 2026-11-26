@@ -96,12 +96,15 @@ Nothing carries a version tag until it has been scanned, signed and its signatur
 checked.
 
 1. **The version and the preflight** (`changes` job). `scripts/ci/release_version.py`
-   reads the version off the tag, and `scripts/ci/release_preflight.py` refuses the
-   run if a published image already has that version or the commit is on no release
-   line. A registry or API that does not answer stops the run too. Beside it, the
-   release page check (`scripts/ci/release_page.py check`) makes, before any image is
-   built, every check the release page makes later that needs no digest: it checks the
-   tagged commit out again with its full history (a shallow checkout is refused), reads
+   reads the version off the tag. The job checks the tagged commit out again with its
+   full history (a shallow checkout is refused), and `scripts/ci/release_preflight.py`
+   refuses the run if a published image already has that version, the commit is on no
+   release line, or the commit already holds a full release above the version (a patch
+   to an older line is cut from `release/MAJOR.MINOR`: see
+   [Patching an older release](patching-a-release.md)). A registry, API or git that does
+   not answer stops the run too. Beside it, the release page check
+   (`scripts/ci/release_page.py check`) makes, before any image is built, every check the
+   release page makes later that needs no digest: it reads
    the upgrade file, finds the previous release, reads the history and both sets of
    migrations, renders the notes with placeholder digests into the step summary, and
    asks GitHub whether the tag already has a page. Anything the release page would be

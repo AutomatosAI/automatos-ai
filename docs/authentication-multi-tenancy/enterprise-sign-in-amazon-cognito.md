@@ -43,6 +43,10 @@ Then edit the app client's settings:
 
 Copy the client ID and the client secret. Put the secret in the Kubernetes Secret that `existingSecret` names, under the key `OIDC_CLIENT_SECRET`.
 
+Turn off self-registration. With self-service sign-up on, anyone can create a user in the pool and sign in through it. The access rule is optional for a pool that serves one organisation, and with none, Automatos lets that user in and makes them a person. In the user pool's sign-up settings, turn off **Self-service sign-up**. A rule on `cognito:groups` also keeps such users out, because a user is added to a group by an administrator. The console label and the group behaviour are from Amazon's documentation, not run here.
+
+When the pool federates another identity provider (for example [AWS IAM Identity Center](enterprise-sign-in-aws-iam-identity-center.md)), remove the pool's own user directory, **Cognito user pool**, from the app client's identity providers, so people sign in only through the federated provider. Not run here.
+
 Amazon's app client page describes an option to have Amazon Cognito manage the secret in AWS Secrets Manager, where "Amazon Cognito stores and rotates the secret". Automatos reads `OIDC_CLIENT_SECRET` from the Kubernetes Secret at start. Keep that value the same as the app client's current secret, and restart the API after changing it.
 
 ## 3. The issuer address
@@ -78,7 +82,7 @@ For a step-up and a phone's sign-in, Automatos sends `max_age=0`, and `prompt=lo
 - With managed login, "If the current time minus auth_time is greater than max_age, the user must authenticate again from scratch".
 - With the classic hosted UI, Cognito "silently ignores acr_values and max_age".
 
-So use managed login. With the classic hosted UI, a step-up confirms only when Cognito returns an `auth_time` no earlier than the step-up's start; otherwise it is refused with `step_up_refused`.
+So use managed login. With the classic hosted UI, a step-up confirms only when Cognito returns an `auth_time` no earlier than 60 seconds before the step-up's start (the clocks' allowance); otherwise it is refused with `step_up_refused`.
 
 ## 6. The matching install settings
 

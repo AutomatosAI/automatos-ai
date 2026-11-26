@@ -10,7 +10,11 @@ branch holds the commit; ``behind`` or ``diverged``: it does not; None: no such 
 * a patch tag, or a patch's release candidate, on its own release branch builds, though main
   has moved past it;
 * a tag on a commit that is on neither stops the run;
-* a tag on a release branch of another MAJOR.MINOR stops the run: that branch is never asked.
+* a tag on a release branch of another MAJOR.MINOR stops the run: that branch is never asked;
+* a tag whose commit already holds a higher full release (``v0.11.3`` on a main commit after
+  ``v0.12.0``) stops the run, naming that release and the release branch to cut from; the
+  tags reachable from the commit come from git (faked), and a shallow or unreadable history
+  stops the run too (#1658).
 
 And the rest of the tag path treats a patch as any release: its images move their own
 ``MAJOR.MINOR`` line (a candidate's do not), and nothing on the tag path names main.
@@ -20,6 +24,7 @@ Fakes stand in for GitHub and the registry: no network.
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -55,11 +60,27 @@ class Compare:
         return self.statuses.get(branch)
 
 
-def _run(version: str, statuses: dict) -> tuple:
+class Git:
+    """git in the full-history checkout: the version tags reachable from the tagged commit."""
+
+    def __init__(self, reachable=(), shallow=False):
+        self.reachable, self.shallow, self.calls = list(reachable), shallow, []
+
+    def __call__(self, args):
+        args = list(args)
+        self.calls.append(args)
+        if args == ["rev-parse", "--is-shallow-repository"]:
+            return "true\n" if self.shallow else "false\n"
+        if args == ["tag", "--list", "--merged", SHA, "v*"]:
+            return "".join(f"{tag}\n" for tag in self.reachable)
+        raise AssertionError(args)
+
+
+def _run(version: str, statuses: dict, git=None) -> tuple:
     compare = Compare(statuses)
     args = ["--version", version, "--sha", SHA, "--repo", "AutomatosAI/automatos-ai", "--default-branch", "main",
             "--prefix", PREFIX, "--image", "api", "--image", "frontend"]
-    return preflight.main(args, state=lambda ref: False, compare=compare), compare.asked
+    return preflight.main(args, state=lambda ref: False, compare=compare, git=git or Git()), compare.asked
 
 
 @pytest.mark.parametrize("version", ["0.12.0", "0.12.0-rc.1", "0.11.3"])
@@ -105,6 +126,49 @@ def test_a_tag_on_another_lines_release_branch_stops_the_run(version, other, cap
     assert "a version is cut from main, or from the release branch of its own MAJOR.MINOR" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("version,reachable,higher", [
+    ("0.11.3", ["v0.11.2", "v0.12.0"], "v0.12.0"),
+    ("0.11.3-rc.1", ["v0.11.2", "v0.12.0-rc.1", "v0.12.0", "v0.12.1"], "v0.12.1"),
+    ("0.9.0", ["v0.10.0", "v1.0.0", "v0.11.2"], "v1.0.0"),
+    ("1.4.12", ["v1.5.0"], "v1.5.0"),
+])
+def test_a_tag_below_a_release_the_commit_already_holds_stops_the_run(version, reachable, higher, capsys):
+    code, _ = _run(version, {"main": "ahead"}, Git(reachable))
+    assert code == 1
+    line = ".".join(version.split(".")[:2])
+    assert f"{SHA[:12]} already holds {higher}, a later release than {version}: cut {version} from release/{line}" \
+        in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("version,reachable", [
+    ("0.12.0", ["v0.11.2", "v0.12.0-rc.1"]),
+    ("0.12.0", ["v0.11.2", "v0.12.0-rc.1", "v0.12.0"]),
+    ("0.12.1", ["v0.12.0", "v0.13.0-rc.1"]),
+    ("0.11.3", ["v0.11.2", "v0.11.3-rc.1", "v0.11.3", "not-a-version", "v0.12"]),
+    ("0.11.3", []),
+])
+def test_a_tag_at_or_above_every_release_the_commit_holds_builds(version, reachable, capsys):
+    """Its own tag, candidates and anything that is not a full release never count against it."""
+    code, _ = _run(version, {"main": "ahead"}, Git(reachable))
+    assert code == 0, capsys.readouterr().out
+
+
+def test_a_patch_on_its_release_branch_builds_beside_a_higher_release_on_main(capsys):
+    """release/0.11 is made from v0.11.2: main's v0.12.0 is not reachable from its commits."""
+    code, _ = _run("0.11.3", {"main": "diverged", "release/0.11": "ahead"}, Git(["v0.11.0", "v0.11.2"]))
+    assert code == 0, capsys.readouterr().out
+
+
+def test_a_history_that_cannot_be_read_stops_the_run(capsys):
+    assert _run("0.11.3", {"main": "ahead"}, Git(shallow=True))[0] == 1
+    assert f"could not read the releases reachable from {SHA[:12]}" in capsys.readouterr().out
+
+    def broken(args):
+        raise subprocess.CalledProcessError(128, ["git", *args])
+    assert _run("0.11.3", {"main": "ahead"}, broken)[0] == 1
+    assert f"could not read the releases reachable from {SHA[:12]}" in capsys.readouterr().out
+
+
 def test_a_patch_moves_its_own_line_and_a_patch_candidate_moves_none():
     digest = "sha256:" + "a" * 64
     plans = tags.plan({"api": digest}, PREFIX, "0.11.3", lambda ref: None)
@@ -120,6 +184,22 @@ def test_the_tag_path_runs_on_any_v_tag_whatever_branch_it_was_cut_on():
     assert triggers["pull_request"]["branches"] == ["main", "release/**"], "a cherry-pick is built and scanned"
     for job in ("release-images", "release-chart", "release-notes"):
         assert workflow["jobs"][job]["if"] == "startsWith(github.ref, 'refs/tags/v')", job
+
+
+def test_every_lane_a_pull_request_into_main_runs_runs_into_a_release_branch_too():
+    """A patch's pull request runs main's checks (#1658): a lane filtered to main lists release/** too."""
+    filtered = []
+    for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        triggers = workflow.get("on", workflow.get(True))  # YAML 1.1 reads a bare `on` as True
+        triggers = triggers if isinstance(triggers, dict) else {}
+        assert "pull_request_target" not in triggers, f"{path.name}: a pull request never gets the base's secrets"
+        branches = (triggers.get("pull_request") or {}).get("branches")
+        if branches is not None:
+            filtered.append(path.name)
+            assert "release/**" in branches, f"{path.name} runs on pull requests into {branches} only"
+    for lane in ("smoke-images.yml", "codeql.yml", "smoke-fresh-clone.yml", "voice-tts.yml"):
+        assert lane in filtered, lane
 
 
 def test_the_patch_page_records_the_branch_the_cherry_pick_the_tag_and_the_branch_setting():
