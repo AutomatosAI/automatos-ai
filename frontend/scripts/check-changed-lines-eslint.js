@@ -12,6 +12,13 @@
  *   no-restricted-syntax    the repository's own rules: apiClient instead of fetch('/api…'),
  *                           and design tokens instead of `orange-*` (.eslintrc.json)
  *
+ * For length and depth it also lints each file as it was at the merge base, and fails only
+ * on what the change introduces: a function that is new and too long (or too deep), or one
+ * the change pushes over the limit. A function that was already over it before the change
+ * is a warning, even if it grew. A renamed function counts as new. Findings are matched by
+ * count per file, not by position, and nesting findings and unnamed functions carry no name:
+ * a change that removes one such violation and adds another in the same file only warns.
+ *
  * It also checks size: a NEW file has at most 800 lines, and an existing file already over
  * that may change, but growing it is a warning. Test files are exempt from length and
  * depth (a describe() callback is long by design).
@@ -78,11 +85,48 @@ function withinComponentAllowance(message) {
   return Boolean(name && lines && /^[A-Z]/.test(name[1]) && Number(lines[1]) <= MAX_COMPONENT_LINES)
 }
 
-function isFinding(message, relPath, touched) {
+function isEnforced(message, relPath) {
   if (!ENFORCED_RULES.has(message.ruleId)) return false
   if (SHAPE_RULES.has(message.ruleId) && TEST_FILE.test(relPath)) return false
-  if (!overlaps(message, touched)) return false
   return !withinComponentAllowance(message)
+}
+
+function isFinding(message, relPath, touched) {
+  return overlaps(message, touched) && isEnforced(message, relPath)
+}
+
+/**
+ * The rule and the function it names, without the measured size or the async and static
+ * modifiers, so a function that grew or gained one still matches itself.
+ */
+function shapeKey(message) {
+  const text = message.message.replace(/ \(\d+\)/, '').replace(/\b(async|static) /gi, '')
+  return `${message.ruleId}:${text.toLowerCase()}`
+}
+
+function countByKey(messages) {
+  return messages.reduce((counts, message) => {
+    const key = shapeKey(message)
+    return counts.set(key, (counts.get(key) || 0) + 1)
+  }, new Map())
+}
+
+/**
+ * The findings on the change's lines, each an error or, for length and depth the file already
+ * had before the change, a warning. Unnamed functions share a key, so when a file gains one
+ * more of them over the limit, every touched one is reported.
+ */
+function classifyFindings(headMessages, baseMessages, relPath, touched) {
+  const enforced = headMessages.filter((message) => isEnforced(message, relPath))
+  const after = countByKey(enforced)
+  const before = countByKey(baseMessages.filter((message) => isEnforced(message, relPath)))
+  return enforced
+    .filter((message) => overlaps(message, touched))
+    .map((message) => {
+      const key = shapeKey(message)
+      const preExisting = SHAPE_RULES.has(message.ruleId) && after.get(key) <= (before.get(key) || 0)
+      return { level: preExisting ? 'warning' : 'error', message }
+    })
 }
 
 function fileSizeFinding(relPath, isNew, linesBefore, linesAfter) {
@@ -102,7 +146,30 @@ function lineCount(root, ref, relPath) {
   }
 }
 
-async function lintChanged(root, touchedByFile) {
+/** New path to old path, for the files the change renamed. */
+function renamedFiles(nameStatusText) {
+  const rows = nameStatusText.split('\n').map((row) => row.split('\t'))
+  return new Map(rows.filter(([status]) => status.startsWith('R')).map(([, from, to]) => [to, from]))
+}
+
+/** The messages the file had at the merge base; none for a file the change adds. */
+async function lintBase(eslint, root, mergeBase, basePath, headPath) {
+  let source
+  try {
+    source = git(['show', `${mergeBase}:${basePath}`], root)
+  } catch {
+    return []
+  }
+  const [result] = await eslint.lintText(source, { filePath: path.join(root, headPath) })
+  return result ? result.messages : []
+}
+
+function toFinding(file, { level, message }) {
+  const note = level === 'warning' ? ' Already over the limit before this change.' : ''
+  return { level, file, line: message.line, text: `${message.message} (${message.ruleId})${note}` }
+}
+
+async function lintChanged(root, mergeBase, touchedByFile, renamed) {
   const { ESLint } = require('eslint')
   const eslint = new ESLint({
     cwd: path.join(root, 'frontend'),
@@ -115,12 +182,14 @@ async function lintChanged(root, touchedByFile) {
   })
   const files = [...touchedByFile.keys()].map((rel) => path.join(root, rel))
   const results = files.length ? await eslint.lintFiles(files) : []
-  return results.flatMap((result) => {
+  const findings = []
+  for (const result of results) {
     const rel = path.relative(root, result.filePath)
-    return result.messages
-      .filter((message) => isFinding(message, rel, touchedByFile.get(rel) || new Set()))
-      .map((message) => ({ level: 'error', file: rel, line: message.line, text: `${message.message} (${message.ruleId})` }))
-  })
+    const baseMessages = await lintBase(eslint, root, mergeBase, renamed.get(rel) || rel, rel)
+    const classified = classifyFindings(result.messages, baseMessages, rel, touchedByFile.get(rel) || new Set())
+    findings.push(...classified.map((finding) => toFinding(rel, finding)))
+  }
+  return findings
 }
 
 async function main() {
@@ -136,14 +205,17 @@ async function main() {
     const size = fileSizeFinding(rel, added.has(rel), lineCount(root, mergeBase, rel), after)
     if (size) findings.push(size)
   }
-  findings.push(...(await lintChanged(root, touchedByFile)))
+  const renamed = renamedFiles(git(['diff', '--name-status', '-M', '--diff-filter=R', mergeBase, 'HEAD', ...spec], root))
+  findings.push(...(await lintChanged(root, mergeBase, touchedByFile, renamed)))
   for (const f of findings) console.log(`::${f.level} file=${f.file},line=${f.line}::${f.text}`)
   const errors = findings.filter((f) => f.level === 'error').length
   console.log(`code shape: ${errors} error(s) on changed frontend lines (functions ≤${MAX_FUNCTION_LINES} lines, components ≤${MAX_COMPONENT_LINES}, depth ≤${MAX_DEPTH}, new files ≤${MAX_FILE_LINES})`)
   return errors ? 1 : 0
 }
 
-module.exports = { changedLines, overlaps, withinComponentAllowance, isFinding, fileSizeFinding }
+module.exports = {
+  changedLines, overlaps, withinComponentAllowance, isFinding, classifyFindings, renamedFiles, fileSizeFinding,
+}
 
 if (require.main === module) {
   main().then((code) => process.exit(code), (error) => {
