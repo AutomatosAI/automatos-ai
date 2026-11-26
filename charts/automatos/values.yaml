@@ -394,7 +394,7 @@ qdrant:
   # (orchestrator/tests/test_prd280_qdrant_image_pin.py holds the two equal). Required.
   image:
     repository: docker.io/qdrant/qdrant
-    digest: sha256:9bfc89f9914fc14876a88c05270685921a55b8877b254a98bcc1cc2f0a424cd2
+    digest: sha256:d277592721d2e3b73f9b797b53cf05e6a5bb2134f6d13fdbda4ca51782afbcac
     pullPolicy: ""
   # size, storageClass and accessModes can't change once the claim exists. The storage must
   # honour the pod's fsGroup (1000), as for the API's data volume.

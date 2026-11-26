@@ -240,7 +240,7 @@ def test_the_trace_ids_are_on_a_line_once_tracing_has_started(monkeypatch):
 
 
 def test_the_workers_app_holds_the_request_context_outside_the_token_check(monkeypatch, tmp_path):
-    from helpers_workspace_worker import load_worker_main
+    from tests.helpers_workspace_worker import load_worker_main
 
     monkeypatch.setenv("WORKER_INTERNAL_TOKEN", "")
     monkeypatch.delenv("OTEL_ENABLED", raising=False)
