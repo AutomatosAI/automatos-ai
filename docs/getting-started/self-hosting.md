@@ -566,7 +566,12 @@ have a value, the request's `request_id`, `workspace_id`, `method` and `path`, t
 `span_id` of a trace being recorded, and `exception`, the whole traceback in one field. A message
 that cannot be built from its arguments is still one record, whose message says so and names the
 error. `workspace_id` is the workspace the request named in its header, not yet checked by
-sign-in. `request_id` is the request's `X-Request-ID`, keeping letters, digits and `._:-`, at
+sign-in, and only when it is a workspace id (a UUID); anything else leaves it out. `path` is
+the route the request was routed to, such as `/api/webhooks/ws/{workspace_key}`, never the
+values in it; a request no route matched carries its path with a webhook's key and a file hash
+collapsed. The access line collapses them too, and leaves out the query of the routes whose query
+carries a credential (sign-in's callback, a webhook's verification, the invitation lookup).
+`request_id` is the request's `X-Request-ID`, keeping letters, digits and `._:-`, at
 most 128 characters, or a new id when none is left; the response, a 500's body and every line of
 the request carry that one value. uvicorn's own lines are written the same way, in each server
 process and, with more than one, in the process that supervises them (the start script points
