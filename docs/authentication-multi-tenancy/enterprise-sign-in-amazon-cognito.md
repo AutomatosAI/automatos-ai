@@ -82,7 +82,7 @@ For a step-up and a phone's sign-in, Automatos sends `max_age=0`, and `prompt=lo
 - With managed login, "If the current time minus auth_time is greater than max_age, the user must authenticate again from scratch".
 - With the classic hosted UI, Cognito "silently ignores acr_values and max_age".
 
-So use managed login. With the classic hosted UI, a step-up confirms only when Cognito returns an `auth_time` no earlier than the step-up's start; otherwise it is refused with `step_up_refused`.
+So use managed login. With the classic hosted UI, a step-up confirms only when Cognito returns an `auth_time` no earlier than 60 seconds before the step-up's start (the clocks' allowance); otherwise it is refused with `step_up_refused`.
 
 ## 6. The matching install settings
 

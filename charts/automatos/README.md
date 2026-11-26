@@ -214,7 +214,7 @@ it or signed in on it longer ago than that is removed at its next request.
 Until that request, Settings lists the phone as expired and no push is sent to it.
 
 Signing in on a phone needs the provider to return `auth_time` in the ID token when the phone asks
-for a fresh sign-in, no earlier than the sign-in's start: Entra's optional claim, Google's
+for a fresh sign-in, no earlier than 60 seconds before the sign-in's start: Entra's optional claim, Google's
 project setting "Session age claims", Cognito's managed login (the PRD's §5.9). Without it every phone sign-in is refused and
 the app is told `sign_in_refused`; the reason is recorded in the `auth:sign_in_refused` audit row
 and in the API's warning log line. Such a phone pairs with a code from Settings instead.
