@@ -55,23 +55,12 @@ class Config:
     POSTGRES_HOST: str = os.getenv("POSTGRES_HOST")
     POSTGRES_PORT: str = os.getenv("POSTGRES_PORT")
     DATABASE_URL: str = os.getenv("DATABASE_URL")  # If set, overrides individual params
+    # PRD-278 W3: TLS on every connection to this database (core/database/tls.py). libpq's
+    # sslmode, and the CA file verify-ca or verify-full checks against. Unset: as before.
+    DATABASE_SSLMODE: str = os.getenv("DATABASE_SSLMODE")
+    DATABASE_SSLROOTCERT: str = os.getenv("DATABASE_SSLROOTCERT")
     SQL_DEBUG: bool = os.getenv("SQL_DEBUG", "false").lower() == "true"
 
-    # PRD-70 FIX-05: Enforce SSL for database connections in production.
-    # Skipped for local dev (localhost / docker-compose internal hostnames).
-    @staticmethod
-    def get_database_url() -> str:
-        """Return DATABASE_URL with sslmode=require enforced for non-local hosts."""
-        url = Config.DATABASE_URL
-        if not url:
-            return url
-        _local_hosts = ("localhost", "127.0.0.1", "postgres", "db")
-        if any(h in url for h in _local_hosts):
-            return url
-        if "sslmode" not in url:
-            url += "?sslmode=require" if "?" not in url else "&sslmode=require"
-        return url
-    
     # =============================================================================
     # REDIS - Caching/PubSub (optional)
     # =============================================================================
