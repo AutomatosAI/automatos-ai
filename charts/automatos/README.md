@@ -66,6 +66,31 @@ Redis are **external**: use managed services, or anything you run yourself.
 LLM keys are added in the app (Settings → Model keys) and stored encrypted in the
 database.
 
+## Install a released version
+
+Each release (a `vMAJOR.MINOR.PATCH` tag) publishes this chart to GHCR as an OCI
+artifact, with its `version` and `appVersion` set to the release's version and every
+image named by the digest that release published and signed. No checkout is needed:
+
+```bash
+helm install automatos oci://ghcr.io/automatosai/charts/automatos --version 0.7.0 \
+  -n automatos --set existingSecret=automatos-secrets --wait --timeout 20m
+```
+
+A version is released when its release run (the `images` workflow on the tag) has
+finished green. Check the chart's and the images' signatures with the command in
+[`docs/deployment-infrastructure/releases.md`](../../docs/deployment-infrastructure/releases.md#checking-a-signature)
+before you trust them. Name the version: a release never replaces a published
+version, so the same version always installs the same images. The registry does not
+enforce that; the release workflow's checks and the repository's tag ruleset do. The
+same page covers release candidates and what a run that fails part-way leaves behind.
+
+## Supported Kubernetes versions
+
+CI renders the chart and checks it against the schemas of Kubernetes **1.31** (the
+oldest it supports) and **1.37** (the newest), on every change to the chart
+(`.github/workflows/chart.yml`).
+
 ## Settings
 
 See [`values.yaml`](values.yaml). The ones you're most likely to change:
@@ -125,8 +150,8 @@ install, pin one build instead, and the chart pulls it `IfNotPresent`:
 
 - **Unit tests, no cluster:** `helm unittest charts/automatos` (the
   [helm-unittest](https://github.com/helm-unittest/helm-unittest) plugin). CI runs
-  them with `helm lint` and a kubeconform schema check
-  (`.github/workflows/chart.yml`).
+  them with `helm lint` and a kubeconform schema check against the oldest and the
+  newest supported Kubernetes (`.github/workflows/chart.yml`).
 - **End to end, on a throwaway kind cluster:** `deploy/kind/e2e.sh cycle 2`
   creates a cluster, loads the images (the API built from your checkout), installs
   with dev PostgreSQL and Redis, runs the checks, upgrades, runs them again and
