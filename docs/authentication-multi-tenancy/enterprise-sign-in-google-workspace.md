@@ -73,7 +73,7 @@ Google's audience page says the publishing status "is not applicable to Internal
 
 For a step-up and a phone's sign-in, the request carries `max_age=0` and no `prompt=login`: Google lists only `none`, `consent` and `select_account` as `prompt` values. Google's documentation lists no `max_age` parameter.
 
-So a step-up is confirmed only when the person's Google session began after the step-up started. A person who is still signed in to Google is refused with `step_up_refused`. What to do: sign out of Google, for example from the account menu in another Google tab, then make the change in Automatos again. The new step-up sends you to Google, Google asks you to sign in, and its `auth_time` is after the step-up's start. Not yet run against a live domain.
+So a step-up is confirmed only when the person's Google session began no earlier than 60 seconds before the step-up started. The 60 seconds allow for Google's clock and the install's disagreeing (the ID token's leeway), so a Google sign-in made in the minute before the step-up also confirms it. A person who is still signed in to Google is refused with `step_up_refused`. What to do: sign out of Google, for example from the account menu in another Google tab, then make the change in Automatos again. The new step-up sends you to Google, Google asks you to sign in, and its `auth_time` is after the step-up's start. Not yet run against a live domain.
 
 ## 6. The matching install settings
 
@@ -127,7 +127,7 @@ The chart sets the last three itself: `DEFAULT_WORKSPACE_ID` from `edition.defau
 
 - **No groups.** Google sends no groups, so access by group is not available with Google. Access is by domain (`hd`), and by the app's **Audience** at Google.
 - **No end-session endpoint.** Google publishes none, so sign-out ends the Automatos session; the Google session continues.
-- **No documented way to ask for the password again.** Google lists no `prompt=login` and no `max_age`. A step-up confirms only when Google returns an `auth_time` no earlier than the step-up's start. When Google returns an earlier sign-in time, the step-up is refused with `step_up_refused`: sign out of Google and try again (see [`auth_time`](#5-auth_time)). A phone's sign-in follows the same rule, and is refused with `sign_in_refused`; such a phone pairs with a code from Settings.
+- **No documented way to ask for the password again.** Google lists no `prompt=login` and no `max_age`. A step-up confirms only when Google returns an `auth_time` no earlier than 60 seconds before the step-up's start (the clocks' allowance). When Google returns an earlier sign-in time, the step-up is refused with `step_up_refused`: sign out of Google and try again (see [`auth_time`](#5-auth_time)). A phone's sign-in follows the same rule, and is refused with `sign_in_refused`; such a phone pairs with a code from Settings.
 - **`auth_time` needs a published, verified project** with session age claims on. Without it, every step-up is refused with `step_up_no_auth_time`.
 
 ## 8. Sign-out

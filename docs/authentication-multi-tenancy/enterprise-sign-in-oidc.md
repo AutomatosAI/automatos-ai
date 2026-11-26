@@ -179,6 +179,8 @@ The rule is required in two cases. The API refuses to start without one:
 
 **At a shared issuer the rule must name your organisation:** `hd=<domain>` for Google, `tid=<tenant-id>` for Microsoft. Start-up cannot check this. It only checks that some valid rule exists [orchestrator/core/edition_start_up.py:373-385](), so `given_name=Alex` at `https://accounts.google.com` starts, and admits every Google account with that name.
 
+`tid=9188040d-6c67-4c5b-b112-36a304b66dad` names no organisation. It is the personal-accounts tenant, the `tid` of every personal Microsoft account [orchestrator/core/auth/access_rule.py:66-73](), so that rule admits every personal account that can sign in to the app. Use your organisation's own tenant ID.
+
 Example: `OIDC_REQUIRED_CLAIMS=hd=example.com` lets in only accounts in the `example.com` Google Workspace domain.
 
 Microsoft's `common`, `organizations` and `consumers` authorities do not work at all, with or without a rule. Their metadata's `issuer` is not their own address: `https://login.microsoftonline.com/{tenantid}/v2.0` for `common` and `organizations`, and the personal-accounts tenant's address for `consumers` (Microsoft's metadata, read on 26 November 2026). Automatos refuses metadata whose `issuer` is not `OIDC_ISSUER` [orchestrator/core/auth/oidc_provider.py:235-240](), so every sign-in answers `identity_provider_unavailable`. Use your tenant's own issuer ([Microsoft Entra ID](enterprise-sign-in-entra-id.md#3-the-issuer-address)).
@@ -240,13 +242,13 @@ Admin actions need a recent sign-in [orchestrator/core/auth/step_up.py:85-90](),
 1. The session's `auth_time` is older than `STEP_UP_MAX_AGE_MINUTES` (10 by default). The API answers `403 step_up_required` and names `/api/v1/auth/oidc/start?step_up=1`.
 2. The browser opens that address. It is accepted when the browser's `Sec-Fetch-Site` is `same-origin` or `none`, or when the request sends no `Sec-Fetch-Site` [orchestrator/api/auth_oidc.py:204-215](). `same-site` and `cross-site` are refused with `step_up_refused`.
 3. Automatos asks the provider for a fresh sign-in: `max_age=0`, plus `prompt=login` where the provider takes it (below).
-4. The callback reads `auth_time` from the new ID token. It confirms the step-up only when that time is no earlier than the step-up's start, less 60 seconds, and not in the future.
+4. The callback reads `auth_time` from the new ID token. It confirms the step-up only when that time is no earlier than the step-up's start, less 60 seconds, and no more than 60 seconds after now. The 60 seconds allow for the provider's clock and the install's disagreeing (the ID token's leeway) [orchestrator/core/auth/step_up_sign_in.py:124-131]().
 5. A confirmed step-up issues a new session. The new session keeps the old one's absolute expiry.
 
 A step-up is refused with:
 
 - `step_up_no_auth_time` when the ID token carries no `auth_time`;
-- `step_up_refused` when `auth_time` is older than the start, in the future, or when another person signed in, the session ended, or the browser did not present the session.
+- `step_up_refused` when `auth_time` is more than 60 seconds before the start or more than 60 seconds after now, or when another person signed in, the session ended, or the browser did not present the session.
 
 The audit reasons are `no_auth_time`, `stale_auth_time`, `future_auth_time`, `another_person`, `session_ended`, `session_not_presented` and `deactivated` [orchestrator/core/auth/session_audit.py:84-96]().
 
@@ -287,7 +289,7 @@ Automatos Go signs in through the same start address. Nothing extra is registere
 
 1. The app opens `/api/v1/auth/oidc/start` with `app_link=go`, `code_challenge`, `code_challenge_method=S256`, `install_id` and `platform` (`ios` or `android`). A malformed start is answered `400 invalid_phone_start`.
 2. Automatos asks the provider for a fresh sign-in (`max_age=0`, and `prompt=login` where taken).
-3. The callback requires `auth_time` no earlier than the phone's start. Otherwise the app link is answered `error=sign_in_refused`, audited `no_auth_time`, `stale_auth_time` or `future_auth_time`. Any refusal before the person is known goes to the app link the same way, as `error=<code>` with the code from [the sign-in page's list](#on-the-sign-in-page). A callback whose sign-in is unknown or already used goes to the browser's `/sign-in` page instead.
+3. The callback requires `auth_time` no earlier than the phone's start, less 60 seconds, and no more than 60 seconds after now, as a step-up does. Otherwise the app link is answered `error=sign_in_refused`, audited `no_auth_time`, `stale_auth_time` or `future_auth_time`. Any refusal before the person is known goes to the app link the same way, as `error=<code>` with the code from [the sign-in page's list](#on-the-sign-in-page). A callback whose sign-in is unknown or already used goes to the browser's `/sign-in` page instead.
 4. The browser shows the confirm page `/sign-in/phone`. The person presses Continue within 5 minutes.
 5. The app link `automatos://go/signed-in?code=…` opens the app.
 6. The app exchanges the code at `POST /api/v1/mobile/sign-in/exchange`. A bad code is answered `401 invalid_sign_in_code`.
@@ -343,7 +345,11 @@ The Secret `existingSecret` names holds more than `OIDC_CLIENT_SECRET`: `DATABAS
 
 ### Rotating the client secret
 
-The API reads `OIDC_CLIENT_SECRET` when it starts [orchestrator/config.py:618](), and uses that value until it restarts. To change it without a gap:
+The API reads `OIDC_CLIENT_SECRET` when it starts [orchestrator/config.py:618](), and uses that value until it restarts. The steps below keep both secrets valid through the restart, so no sign-in fails on the secret.
+
+The restart itself can still be an outage. With the chart's defaults (one API replica, and the `api.data` volume `ReadWriteOnce`), the rollout stops the old pod before it starts the new one, so the API answers no requests until the new pod is ready ([charts/automatos/values.yaml](../../charts/automatos/values.yaml), `api.data`). Plan the restart in a maintenance window. An install whose `api.data` volume is `ReadWriteMany`, or off, starts the new pod before stopping the old one, and rolls over without that gap.
+
+To change the secret:
 
 1. At the provider, create a second client secret. Leave the old one in place.
 2. Put the new value in the Secret `existingSecret` names, under `OIDC_CLIENT_SECRET`.
