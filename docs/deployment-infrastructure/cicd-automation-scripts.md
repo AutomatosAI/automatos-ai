@@ -72,12 +72,12 @@ The `test` workflow runs on pull requests, pushes to `main`, and manual `workflo
 
 The `changes` job determines which path-gated lanes a run needs. It has a five-minute timeout, read permissions for contents and pull requests, and exposes outputs for the image, frontend, CLI host, simulation, agent optimization, references, and backend test planning lanes. Its checkout is sparse: it includes `orchestrator/tests` and `scripts/ci`. [.github/workflows/test.yml:43-80]()
 
-The planner step receives the GitHub event, repository, PR number, and a backend shard count of four. The workflow comments identify `scripts/ci/backend_test_plan.py` as the backend planner: broad backend-impacting changes run all tests in parallel shards; narrower changes select tests based on touched files; changes with no test readers can select no backend tests. The available excerpt does not show the planner implementation or the commands used by downstream jobs, so those details are not inferred here. [.github/workflows/test.yml:49-72](), [.github/workflows/test.yml:82-88]()
+The planner step receives the GitHub event, repository, PR number, and a backend shard count of eight. The workflow comments identify `scripts/ci/backend_test_plan.py` as the backend planner: broad backend-impacting changes run all tests in parallel shards; narrower changes select tests based on touched files; changes with no test readers can select no backend tests. The available excerpt does not show the planner implementation or the commands used by downstream jobs, so those details are not inferred here. [.github/workflows/test.yml:49-72](), [.github/workflows/test.yml:82-88]()
 
 | Workflow input or output | Role evidenced in the workflow |
 |---|---|
 | `EVENT`, `REPO`, `PR` | Identify the event and PR context passed to the planner step. |
-| `BACKEND_SHARDS` | Sets the backend shard count to `4`. |
+| `BACKEND_SHARDS` | Sets the backend shard count to `8`: each full shard within 10 minutes ([CONTRIBUTING.md](../../CONTRIBUTING.md#backend-test-shards)). |
 | `backend_mode`, `backend_keywords` | Outputs for backend test selection. |
 | `backend_shards`, `backend_shard_count` | Outputs for backend shard planning. |
 | `prod_images`, `frontend`, `cli_host`, `sim`, `agent_opt`, `references` | Outputs controlling path-gated lanes. |

@@ -122,6 +122,7 @@ CI checks these on the lines your change touches. Length and nesting fail only w
 - **Where tests live.** Backend tests are in `orchestrator/tests/` (pytest; CI runs them against Postgres in the local edition). Frontend tests use vitest (`*.test.ts(x)`).
 - **Never weaken, skip or delete a test,** or a CI check, to make a change pass.
 - **Never claim a test passed** unless you saw it pass, on your machine or in CI. No invented results in commit messages or pull requests.
+- **Keep the backend shards under 10 minutes.** When the slowest `orchestrator-tests` shard on `main` regularly takes longer, rebuild the durations record and add shards ([CONTRIBUTING.md](CONTRIBUTING.md#backend-test-shards)).
 
 ---
 
