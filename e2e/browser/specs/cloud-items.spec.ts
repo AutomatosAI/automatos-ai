@@ -240,6 +240,12 @@ function expectNothingAskedOfCloud(stub: CloudStub): void {
 }
 
 test.describe('Automatos Cloud items (local edition)', () => {
+  // As a reader who asks for reduced motion: the page's entrance slide (framer-motion) and smooth
+  // scroll then stay still, so a card is stable for its screenshot and click in WebKit too. Not for
+  // the whole lane: Play's style sheet holds its clips back under reduced motion, which
+  // play-parity/mascot-states.spec.ts plays.
+  test.use({ reducedMotion: 'reduce' })
+
   test.beforeEach(async ({ page }) => {
     await chooseCoreStyle(page, STUDIO_STYLE, APP_URL)
   })
