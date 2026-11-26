@@ -321,6 +321,8 @@ These are requirements, each with a test.
 New `audit_logs` actions, each with the person's id where one is known, the IP and the browser:
 `auth:sign_in` (a phone's, at its Continue, with `{"phone": true, "platform"}`; US-603), `auth:sign_in_refused` (with the reason: access rule, email conflict, deactivated, invalid token, `subject_claim_changed` (§5.10), and for a phone `no_workspace`, `several_workspaces` or `device_limit_reached`, or, before its person is known, `no_auth_time`, `stale_auth_time` or `future_auth_time`), `auth:sign_out`, `auth:session_revoked`, `auth:step_up` (confirmed, or refused: another person, no `auth_time`, a stale or a future one, an ended session, a callback not presenting the session that asked, a deactivated person), `auth:identity_linked`, `auth:bootstrap_admin` (with the workspace role given). Role changes are already recorded. Every sign-in makes the default workspace, when it is missing, before its first row, so no row is lost to a missing workspace.
 
+An install admin's install-wide actions are recorded too, in the workspace the admin acted from, else the default workspace (`services/admin_audit.py`, #1657): `marketplace:cloud_sync` (a Sync now that ran: ok with its counts, or failed), `themes:revocation_pull` (a Check now that ran: ok with the rows it wrote, or failed) and `themes:revocation_lifted` (a revocation lifted, with its origin and level). A Sync or Check now stands when its row can't be written (an ERROR is logged); a lift is rolled back with its row.
+
 ### 5.13 Where more can plug in
 
 Sign-in is built so that more can be added later without changing the code that issues sessions or checks permissions.

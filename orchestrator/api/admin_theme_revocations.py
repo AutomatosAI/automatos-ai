@@ -18,9 +18,11 @@ the admin check (A-07c, ``STEP_UP_MAX_AGE_MINUTES``; the ``admin_themes.py`` ``A
 pattern): ``require_revocation_admin`` runs first as a dependency, so a non-admin gets the plain
 403 and is never asked to reverify. The local edition has no step-up (``core/auth/step_up.py``).
 Every check and refusal is ``services/themes/revocation_admin.py``'s; a create writes only an
-``origin='local'`` row (the body has no ``origin``: an unknown field is a 422). A lift of a ``feed``
-row (only while revocation sync is off or stale) is logged at warning level with who lifted it:
-this install then no longer follows the hosted list for that row.
+``origin='local'`` row (the body has no ``origin``: an unknown field is a 422). Every lift writes a
+``themes:revocation_lifted`` row in ``audit_logs`` (who, the row's origin and level) in the same
+commit, or is rolled back with it and answers 503 (``services/admin_audit.py``, #1657). A lift of a
+``feed`` row (only while revocation sync is off or stale) is also logged at warning level with who
+lifted it: this install then no longer follows the hosted list for that row.
 
 The paths sit beside the review queue (``admin_themes.py``), whose ``/{package_id}/<action>``
 routes have two segments and fixed tails, so neither router shadows the other. Plain ``def``
@@ -30,10 +32,10 @@ handlers over the synchronous session (AGENTS.md).
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, Optional, TypeVar
+from typing import Any, Callable, Dict, Optional, Tuple, TypeVar
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -46,6 +48,7 @@ from core.auth.roles import caller_is_admin
 from core.auth.step_up import require_step_up
 from core.database.database import get_db
 from core.models.themes import THEME_REVOCATION_ORIGIN_FEED
+from services import admin_audit
 from services.themes import revocation_admin
 from services.themes.choices import CONFLICT, ThemeInstallError
 
@@ -53,9 +56,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin/themes", tags=["Admin Themes"])
 
-OK, CREATED, FORBIDDEN = 200, 201, 403
+OK, CREATED, FORBIDDEN, SERVICE_UNAVAILABLE = 200, 201, 403, 503
 ADMIN_REQUIRED = "Only an Automatos admin can revoke a theme or lift a revocation."
 CONCURRENT_CHANGE = "Someone changed this revocation at the same moment. Reload and try again."
+LIFT_NOT_RECORDED = "The revocation was not lifted: the lift could not be recorded. Try again."
 
 STEP_UP = require_step_up(config.STEP_UP_MAX_AGE_MINUTES)
 
@@ -137,16 +141,29 @@ def create_theme_revocation(
 
 @router.post("/revocations/{revocation_id}/lift", dependencies=ADMIN_STEP_UP)
 def lift_theme_revocation(
-    revocation_id: UUID, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db),
+    revocation_id: UUID, request: Request,
+    ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Lift a revocation written here; a row the hosted feed sent is the feed's to lift (409) while
-    revocation sync works."""
+    revocation sync works. The lift lands with its ``themes:revocation_lifted`` row, or not at all (503)."""
     _require_admin(ctx)
-    actor = resolve_user_pk(db, ctx)
-    row, lifted = _run(db, lambda: revocation_admin.lift_revocation(db, revocation_id))
+    who = admin_audit.admin_request(db, ctx, request)
+    row, lifted = _run(db, lambda: _lift_recorded(db, revocation_id, who))
     if lifted and row.origin == THEME_REVOCATION_ORIGIN_FEED:
         logger.warning("theme revocation %s from the feed lifted here by user %s (revocation sync off or stale)",
-                       revocation_id, actor)
-    elif lifted:
-        logger.info("theme revocation %s lifted by user %s", revocation_id, actor)
+                       revocation_id, who.user_id)
     return {"revocation": revocation_admin.revocation_view(row)}
+
+
+def _lift_recorded(db: Session, revocation_id: UUID, who: admin_audit.AdminRequest) -> Tuple[Any, bool]:
+    """Lift, then write its ``audit_logs`` row, which commits the lift with it. When the row can't be
+    written the lift was rolled back with it (``people.give_workspace``'s rule): a 503, nothing lifted."""
+    row, lifted = revocation_admin.lift_revocation(db, revocation_id)
+    if not lifted:
+        return row, lifted
+    details = {"origin": row.origin, "level": row.level}
+    entry = admin_audit.record(db, who, action=admin_audit.REVOCATION_LIFTED,
+                               resource_type=admin_audit.REVOCATION_RESOURCE, resource_id=row.id, details=details)
+    if entry is None:
+        raise ThemeInstallError(SERVICE_UNAVAILABLE, LIFT_NOT_RECORDED)
+    return row, lifted
