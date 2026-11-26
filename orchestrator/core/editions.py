@@ -136,6 +136,11 @@ class EditionCapabilities:
         hosts (its internal API and web hosts, and the loopback names), never Automatos's public
         API and web hosts: the platform's API is the install's own (D-12). Where it is off, those
         two hosts are on the tool's list as well (``modules/tools/execution/http_hosts.py``).
+    agent_http_verifies_tls: an agent's ``http_request`` tool checks the server's certificate and
+        host name on an ``https`` call (#1656). The hosted install reaches its internal hosts over
+        plain ``http`` and its public hosts carry public certificates, so nothing it calls relies
+        on a self-signed one. Where it is off (``local``), a certificate is not checked, so a
+        self-signed one on the operator's own machine still answers.
     api_on_public_address: the API is reached on the install's one public address, the web app's
         (``FRONTEND_URL``, which start-up requires to be ``https``): every address a phone is handed
         (discovery's ``api_url`` and sign-in start, the pairing link) is built from it, never from
@@ -173,6 +178,7 @@ class EditionCapabilities:
     last_workspace_purge_deletes_person: bool
     issues_sessions: bool
     agent_http_own_hosts_only: bool
+    agent_http_verifies_tls: bool
     api_on_public_address: bool
     requires_verified_database_tls: bool
     device_tokens_age_out: bool
@@ -203,6 +209,7 @@ _LOCAL = EditionCapabilities(
     last_workspace_purge_deletes_person=False,
     issues_sessions=False,
     agent_http_own_hosts_only=False,
+    agent_http_verifies_tls=False,
     api_on_public_address=False,
     requires_verified_database_tls=False,
     device_tokens_age_out=False,
@@ -233,6 +240,7 @@ _SAAS = EditionCapabilities(
     last_workspace_purge_deletes_person=True,
     issues_sessions=False,
     agent_http_own_hosts_only=False,
+    agent_http_verifies_tls=True,
     api_on_public_address=False,
     requires_verified_database_tls=False,
     device_tokens_age_out=False,
@@ -267,6 +275,7 @@ _ENTERPRISE = EditionCapabilities(
     last_workspace_purge_deletes_person=False,
     issues_sessions=True,
     agent_http_own_hosts_only=True,
+    agent_http_verifies_tls=True,
     api_on_public_address=True,
     requires_verified_database_tls=True,
     device_tokens_age_out=True,
