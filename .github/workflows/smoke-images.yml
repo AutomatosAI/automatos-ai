@@ -116,8 +116,13 @@ on:
         required: true
         type: string
   pull_request:
+    # release/** too: a patch's pull request builds and boots its images as main's does
+    # (docs/deployment-infrastructure/patching-a-release.md). make-up-pr pulls the merge
+    # base's published images, or those of the nearest commit CI published: on a release
+    # branch, a commit from main that the branch was made from.
     branches:
       - main
+      - "release/**"
     # images.yml's pull_request paths (orchestrator/tests/test_prd262_smoke_images.py
     # holds them in), plus compose, the Makefile, envs/, the backend's entrypoint and
     # healthcheck, and this lane's script, tools and workflow.

@@ -26,8 +26,21 @@ merges back into main, and main never merges into it. The branch stays for as lo
 is patched.
 
 Pushing to the branch, and merging into it, publishes nothing: the image workflow publishes
-from main and from `v*` tags only. A pull request into the branch is built and scanned by the
-image workflow as one into main is, and runs the same tests.
+from main and from `v*` tags only. A pull request into the branch runs the checks one into main
+runs, each when the pull request touches the paths it watches, as on main: the tests; the image
+workflow, which builds and scans its images; `smoke-images`, which boots the images it builds
+and runs `make up` on the merge base's published ones; CodeQL; `smoke-fresh-clone`; and
+`voice-tts`. Every workflow whose pull requests are filtered by branch lists `release/**` beside
+`main` (`orchestrator/tests/test_prd279_patch_releases.py` holds them to it). CodeQL also
+analyses each merge into a release branch, so the next pull request into it is compared with
+that branch, not with main. GitHub reads a pull request's workflows from its merge with the
+release branch, so this holds for a release branch made from a tag that has these triggers,
+which every release does.
+
+One run stays on main: `smoke-images`' boot of the published images, and the `edge` promotion
+after it, follow main's publishes only. Boot a patch's images by hand before the patch itself
+is tagged: from the Actions tab, **smoke-images**, **Run workflow**, using the workflow from the
+release branch, with the candidate's version (`0.11.3-rc.1`) as the tag.
 
 ## The fix, by pull request
 
@@ -71,12 +84,17 @@ git push origin v0.11.3
 
 The image workflow runs on any `v*` tag, wherever it was cut. Its preflight lets a version be
 cut only from a commit on a release line: one that main holds, or that `release/MAJOR.MINOR`
-holds for the tag's own `MAJOR.MINOR` (`scripts/ci/release_preflight.py`). So:
+holds for the tag's own `MAJOR.MINOR` (`scripts/ci/release_preflight.py`). And it refuses a
+version below a full release the commit already holds (git's tags reachable from it, in a
+full-history checkout): once main has `v0.12.0`, a `v0.11.3` tag on a later main commit would
+ship 0.12 code as 0.11.3 and move the `0.11` tag onto it, so `v0.11.3` is cut from
+`release/0.11`. So:
 
 | The tag | Its commit is on | The run |
 |---|---|---|
 | `v0.12.0` | main | builds |
 | `v0.11.3` or `v0.11.3-rc.1` | `release/0.11` only | builds |
+| `v0.11.3` | main, after `v0.12.0` | stops: the commit holds `v0.12.0`; cut it from `release/0.11` |
 | `v0.11.3` | neither main nor `release/0.11` | stops before anything builds |
 | `v0.12.1` | `release/0.11` only | stops: `release/0.11` is not its line, and it is never asked |
 
