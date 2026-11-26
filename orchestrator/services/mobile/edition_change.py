@@ -25,10 +25,12 @@ pairing off or on leaves it as it is (``KINDS_REVOKED``).
   boot (``main.py`` ``_boot_phase_1_core``, right after ``create_tables``, even when that fails),
   before the server listens. It never raises: a check that cannot run (the database unreachable,
   the lock not had in time, any other error) is logged and leaves the check FAILED, and the start
-  goes on. The device lane and the pairing routes ask ``ensure_confirmed`` first, which runs the
-  check again and refuses them (503) while it cannot run, so no device token is accepted in this
-  process before the check has passed. A process whose boot never ran it (a test client with no
-  lifespan) is not held up.
+  goes on. The device lane and the pairing routes ask ``ensure_confirmed`` first, which refuses them
+  (503) until the check has passed in this process, so no device token is accepted before it has.
+  A check that never ran (NOT_RUN: a boot that stopped before it, a client with no lifespan) is run
+  by the first request that asks. A FAILED one is run again at most once every
+  ``RETRY_INTERVAL_SECONDS`` per process, by one request at a time; the others are answered 503 at
+  once, without a session or a wait on the lock.
 * Each revoked device gets one ``device:revoked`` row in its workspace (``device_audit``), by the
   install, with what it started as before and now, and the reason: ``edition_changed`` when the
   edition differs, ``pairing_switched_off`` when only pairing does. Nothing here logs a token, a
@@ -37,6 +39,8 @@ pairing off or on leaves it as it is (``KINDS_REVOKED``).
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -68,12 +72,20 @@ _LOCK = text("SELECT pg_advisory_xact_lock(hashtext(:key))")
 LOCK_KEY = "automatos:edition_change"
 NOT_RUN, CONFIRMED, FAILED = "not_run", "confirmed", "failed"
 NOT_CONFIRMED = "Phones are unavailable right now. Try again in a minute."
+# The least time between two runs of a FAILED check in one process: in between, device requests get 503 at once.
+RETRY_INTERVAL_SECONDS = 30.0
 
 _status = NOT_RUN
+_last_attempt = 0.0  # time.monotonic() when the check last started; read only while it is FAILED
+_attempt_lock = threading.Lock()  # requests run in the threadpool: one of them claims each attempt
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _seconds() -> float:
+    return time.monotonic()
 
 
 def stored_edition(db: Session) -> Optional[str]:
@@ -148,32 +160,59 @@ def _run_check() -> None:
         db.close()
 
 
-def confirm_edition() -> bool:
-    """Run the check; whether it ran. Never raises, so it never stops a start.
+def _start_attempt() -> None:
+    """Mark the check FAILED until it passes, and when this attempt started. Under ``_attempt_lock``."""
+    global _status, _last_attempt
+    _status, _last_attempt = FAILED, _seconds()
 
-    FAILED until it has run: any error (the database unreachable, the lock not had within
-    ``LOCK_WAIT_LIMIT``, anything else) is logged and answered ``False``, and device tokens stay
-    refused in this process until a request runs it again (``ensure_confirmed``).
-    """
+
+def _claim_attempt() -> bool:
+    """Whether this caller runs the check now: it never ran, or it FAILED at least
+    ``RETRY_INTERVAL_SECONDS`` ago. Claiming starts the attempt, so concurrent callers do not also run it."""
+    with _attempt_lock:
+        due = _status == NOT_RUN or (_status == FAILED and _seconds() - _last_attempt >= RETRY_INTERVAL_SECONDS)
+        if due:
+            _start_attempt()
+        return due
+
+
+def _attempt() -> bool:
+    """Run the check of an attempt already started; whether it ran. Never raises."""
     global _status
-    _status = FAILED
     try:
         _run_check()
-    except Exception:  # logged with its traceback; the check stays FAILED and the next request retries it
+    except Exception:  # logged with its traceback; the check stays FAILED and is retried after the interval
         logger.exception("Edition check could not run: device tokens are refused until it does")
         return False
     _status = CONFIRMED
     return True
 
 
+def confirm_edition() -> bool:
+    """Run the check now (at boot); whether it ran. Never raises, so it never stops a start.
+
+    FAILED until it has run: any error (the database unreachable, the lock not had within
+    ``LOCK_WAIT_LIMIT``, anything else) is logged and answered ``False``, and device tokens stay
+    refused in this process until a request runs it again (``ensure_confirmed``).
+    """
+    with _attempt_lock:
+        _start_attempt()
+    return _attempt()
+
+
 def needs_confirming() -> bool:
-    """True while this process's check FAILED: a cheap read, safe on the event loop."""
-    return _status == FAILED
+    """True until this process's check has passed: a cheap read, safe on the event loop."""
+    return _status != CONFIRMED
 
 
 def ensure_confirmed() -> None:
-    """503 while this process's check FAILED and still cannot run; nothing otherwise."""
-    if _status == FAILED and not confirm_edition():
+    """Nothing once this process's check has passed; until then run it when it is due
+    (``_claim_attempt``), and 503 unless it has now passed."""
+    if _status == CONFIRMED:
+        return
+    if _claim_attempt():
+        _attempt()
+    if _status != CONFIRMED:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=NOT_CONFIRMED)
 
 
@@ -183,6 +222,7 @@ __all__ = [
     "MARKER_CATEGORY",
     "MARKER_KEY",
     "RESERVED_SETTING_CATEGORIES",
+    "RETRY_INTERVAL_SECONDS",
     "confirm_edition",
     "ensure_confirmed",
     "needs_confirming",

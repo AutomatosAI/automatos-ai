@@ -17,8 +17,9 @@
 * **The edition check** (``services.mobile.edition_change``): what the install starts as names the edition and,
   in enterprise, whether it pairs; the lock is waited for at most ``LOCK_WAIT_LIMIT`` and taken before the
   marker is read, so two pods starting at once revoke once; a check that cannot run, for any error or a lock not
-  had in time, never raises, refuses device tokens (503) until it does, and the next request retries it; every
-  worker runs it in ``_boot_phase_1_core`` after the tables, before it serves.
+  had in time, never raises, refuses device tokens (503) until it does, and the first request after
+  ``RETRY_INTERVAL_SECONDS`` retries it; every worker runs it in ``_boot_phase_1_core`` after the tables, before
+  it serves.
 """
 from __future__ import annotations
 
@@ -492,9 +493,11 @@ def test_a_check_never_stops_a_start_whatever_fails(monkeypatch, caplog, session
     assert any(record.exc_info for record in caplog.records if record.name == edition_change.__name__)
 
 
-def test_a_lock_not_had_in_time_leaves_the_check_failed_and_the_next_request_retries(monkeypatch):
+def test_a_lock_not_had_in_time_leaves_the_check_failed_and_a_request_after_the_interval_retries(monkeypatch):
     _enterprise(monkeypatch)
     monkeypatch.setattr(edition_change, "_status", edition_change.NOT_RUN)
+    clock = SimpleNamespace(now=1000.0)
+    monkeypatch.setattr(edition_change, "_seconds", lambda: clock.now)
     waiting = _LockNotHad()
     monkeypatch.setattr(edition_change, "SessionLocal", lambda: waiting)
 
@@ -504,6 +507,7 @@ def test_a_lock_not_had_in_time_leaves_the_check_failed_and_the_next_request_ret
         edition_change.ensure_confirmed()
     assert refused.value.status_code == 503
 
+    clock.now += edition_change.RETRY_INTERVAL_SECONDS
     monkeypatch.setattr(edition_change, "SessionLocal", lambda: _Failing())
     monkeypatch.setattr(edition_change, "revoke_if_edition_changed", lambda db, now: 0)
     edition_change.ensure_confirmed()
