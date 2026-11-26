@@ -110,6 +110,10 @@ def _make_index():
     idx._lock = None
     idx._inflight = {}
     idx._rank_inflight = {}
+    # No time budget: these tests count rankings, and the first build in a process reads the
+    # utterance corpus from disk, which a loaded CI runner took over the 2.5 s default for. The
+    # ranking then fell back to lexical, once per surface, and the count read 4.
+    idx._embed_timeout_s = lambda: None
     return idx
 
 
