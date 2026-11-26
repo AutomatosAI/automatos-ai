@@ -34,8 +34,9 @@ and runs `make up` on the merge base's published ones; CodeQL; `smoke-fresh-clon
 `main` (`orchestrator/tests/test_prd279_patch_releases.py` holds them to it). CodeQL also
 analyses each merge into a release branch, so the next pull request into it is compared with
 that branch, not with main. GitHub reads a pull request's workflows from its merge with the
-release branch, so this holds for a release branch made from a tag that has these triggers,
-which every release does.
+release branch, so this holds for a release branch made from a tag that has these triggers:
+every release tagged after this change. A branch made from an earlier tag has its old
+workflows, so commit these triggers to it before its first pull request.
 
 One run stays on main: `smoke-images`' boot of the published images, and the `edge` promotion
 after it, follow main's publishes only. Boot a patch's images by hand before the patch itself
