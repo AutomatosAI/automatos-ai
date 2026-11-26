@@ -51,6 +51,8 @@ from services.push import fanout  # noqa: E402
 from services.push.fanout import PushEvent  # noqa: E402
 from services.push.sender import DEVICE_NOT_REGISTERED, TICKET_OK, PushTicket  # noqa: E402
 
+pytestmark = pytest.mark.usefixtures("edition_confirmed")  # the boot check passed (#1660)
+
 DEVICES = "/api/v1/mobile/devices"
 PREFERENCES_REVISION = ORCH / "alembic" / "versions" / "prd128_notifications.py"
 T0 = datetime(2026, 10, 24, 9, 0, tzinfo=timezone.utc)
