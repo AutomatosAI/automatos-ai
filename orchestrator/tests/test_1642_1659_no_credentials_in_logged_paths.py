@@ -133,6 +133,29 @@ def test_a_json_lines_path_is_the_route_template_not_the_key():
     assert KEY not in json.dumps(seen) and VERIFY not in json.dumps(seen)
 
 
+def test_behind_a_proxy_header_the_path_is_still_the_route_template(monkeypatch):
+    """main.py's order: the request context outermost, the client-address middleware inside it. A route
+    whose path the redaction leaves alone, so only the route template can make the line read right."""
+    from config import config
+    from core.security.client_ip import TrustedClientAddressMiddleware
+
+    monkeypatch.setattr(config, "CLIENT_IP_HEADER", "X-Real-IP")
+    seen: dict = {}
+    app = FastAPI()
+
+    @app.get("/api/agents/{agent_id}")
+    def agent(agent_id: str):
+        seen["line"] = request_log_fields()
+        return {"ok": True}
+
+    app.add_middleware(TrustedClientAddressMiddleware)
+    app.add_middleware(RequestContextMiddleware)
+    response = TestClient(app).get("/api/agents/42", headers={"X-Real-IP": "203.0.113.20"})
+
+    assert response.status_code == 200
+    assert seen["line"]["path"] == "/api/agents/{agent_id}"
+
+
 def test_with_no_route_the_path_is_the_redacted_path():
     seen: dict = {}
     response = TestClient(_as_the_server_sees_it(_app(seen), seen)).get(f"{WEBHOOK}/{KEY}/extra")

@@ -1072,7 +1072,7 @@ async def api_tracking_middleware(request, call_next):
         status_code = response.status_code
         return response
     except Exception as e:
-        logger.error(f"Error in request {request.url.path}: {e}")
+        logger.error("Error in request %s (its path, redacted, is the line's own field): %s", request.method, e)
         raise
     finally:
         # Calculate response time
