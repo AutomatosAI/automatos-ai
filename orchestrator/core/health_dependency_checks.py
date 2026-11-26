@@ -18,16 +18,23 @@ has none:
   default address (QDRANT_URL_DEFAULT), a store that does not answer is taken as one the
   install does not run: ``not configured``. Set to any other address, it is ``down``.
 * **The model provider:** never called. How the last provider call through the LLM
-  manager ended (core/llm/last_call.py), as a Reading stamped when that call ended.
+  manager ended (core/llm/last_call.py), as a Reading stamped when that call ended;
+  ``down`` only after FAILURES_BEFORE_DOWN failed calls in a row.
 
 Each answer means one thing:
 
 * ``up``: the dependency answered. A bucket or index that is not there is ``up`` too (the
-  store answered), except an index that is missing with ``S3_VECTORS_CREATE_IF_MISSING``
-  off, which is ``down`` (core will not make it).
-* ``not permitted``: the pod's role may not make the check (403 or AccessDenied).
-  /health shows it as ``unchecked`` and /metrics has no series: neither up nor down.
-* ``down``: anything else: no answer, a time-out, a refused connection, a 5xx.
+  store answered) only where core makes it on first use: the documents bucket with
+  ``S3_ENDPOINT_URL`` set (MinIO; core/storage/s3.py ensure_bucket never creates on AWS),
+  the index with ``S3_VECTORS_CREATE_IF_MISSING`` on. Otherwise it is ``down``.
+* ``not permitted``: the pod's role may not make the check: an explicit access-denied
+  code (AccessDenied, AccessDeniedException). /health shows it as ``unchecked`` and
+  /metrics has no series: neither up nor down.
+* ``down``: anything else: no answer, a time-out, a refused connection, a 5xx, and a 403
+  with no access-denied code. HeadBucket's 403 has no body, and is also what a wrong key,
+  a bad signature or a revoked role gives, as are S3 Vectors' UnrecognizedClientException
+  and InvalidSignatureException: those must reach an alert, so they are ``down``. A role
+  without s3:ListBucket on the bucket gets that same bare 403, so it reads ``down`` too.
 
 Each is synchronous: a Watch runs it on a thread of its own, with a time limit
 (core/health_watch.py). Each returns a state and nothing else: no address, credential or
@@ -52,9 +59,9 @@ PERMISSIONS = {
     "search_index": ("the check is GetIndex on the shared index, which needs s3vectors:GetIndex, or with a "
                      "bucket per workspace ListVectorBuckets, which needs s3vectors:ListVectorBuckets"),
 }
-# The S3 Vectors code for a refusal, beside the ones the storage start-up check reads.
-_VECTORS_DENIED_CODE = "AccessDeniedException"
-_HTTP_FORBIDDEN = 403
+# The codes that say the role was refused, and nothing else: S3's and S3 Vectors'. Not a
+# bare 403 (botocore's code for a HEAD's empty 403 is "403"), which bad credentials give too.
+_DENIED_CODES: FrozenSet[str] = frozenset({"AccessDenied", "AccessDeniedException"})
 _NOTHING_ANSWERED: FrozenSet[str] = frozenset()
 
 _redis_lock = threading.Lock()
@@ -115,10 +122,12 @@ def object_storage_state() -> str:
 
     from core.storage.s3 import _BUCKET_MISSING_CODES
 
+    # ensure_bucket makes a missing bucket only on a configured endpoint (MinIO), never on AWS.
+    missing_is_up = _BUCKET_MISSING_CODES if config.S3_ENDPOINT_URL else _NOTHING_ANSWERED
     try:
         get_s3_client(FAST_FAIL).head_bucket(Bucket=config.S3_DOCUMENTS_BUCKET)
     except ClientError as exc:
-        return refusal_state(exc, answered=_BUCKET_MISSING_CODES)
+        return refusal_state(exc, answered=missing_is_up)
     except BotoCoreError:
         return DOWN
     return UP
@@ -151,13 +160,11 @@ def search_index_state() -> str:
 
 
 def refusal_state(exc: Any, *, answered: FrozenSet[str]) -> str:
-    """An AWS refusal's state, from its error code and HTTP status alone (never its
-    message): denied is ``not permitted``; a code in ``answered`` is ``up``; else ``down``."""
-    from core.storage.workload_identity import _ACCESS_DENIED_CODES
-
+    """An AWS refusal's state, from its error code alone (never its message): an explicit
+    access-denied code is ``not permitted``; a code in ``answered`` is ``up``; anything
+    else, a bare 403 and a bad-credential code included, is ``down``."""
     code = str(exc.response.get("Error", {}).get("Code", ""))
-    status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-    if code in _ACCESS_DENIED_CODES or code == _VECTORS_DENIED_CODE or status == _HTTP_FORBIDDEN:
+    if code in _DENIED_CODES:
         return NOT_PERMITTED
     return UP if code in answered else DOWN
 

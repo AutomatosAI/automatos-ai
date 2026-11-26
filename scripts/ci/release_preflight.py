@@ -12,10 +12,16 @@ and before any image builds. It refuses the run, so nothing is built or publishe
   branch, or in ``release/MAJOR.MINOR`` for the tag's own line (the patch branch of
   §5.5). GitHub's compare API answers it with the job's read-only token; nothing is
   fetched.
-* **either answer cannot be read.** A registry or API that does not answer stops the
+* **a later release is already in the commit.** A full release higher than the tag's
+  version is reachable from the tagged commit (``git tag --merged``, in a full-history
+  checkout: a shallow one is refused). Cut there, ``v0.11.3`` after ``v0.12.0`` would ship
+  0.12 code as 0.11.3 and move the ``0.11`` tag onto it; a patch to an older line is cut
+  from ``release/MAJOR.MINOR`` instead.
+* **any answer cannot be read.** A registry, API or git that does not answer stops the
   run: the check never passes on what it could not read.
 
-The images are public, so the registry is read anonymously.
+The images are public, so the registry is read anonymously. Run it in a checkout of the
+tagged commit with every tag and the full history (``fetch-depth: 0``).
 
     python3 scripts/ci/release_preflight.py --version 0.7.0 --sha "$GITHUB_SHA" \\
         --repo "$GITHUB_REPOSITORY" --default-branch main \\
@@ -27,6 +33,7 @@ import argparse
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -52,6 +59,8 @@ def _sibling(name: str):
 
 registry = _sibling("image_registry")
 release_version = _sibling("release_version")
+# The release page's git edge: its version tags and its refusal of a shallow checkout.
+page = _sibling("release_page")
 
 # A ref -> True (exists), False (the registry says it does not), None (not read).
 State = Callable[[str], Optional[bool]]
@@ -92,6 +101,27 @@ def line_holding(branches: Sequence[str], compare: Compare) -> Optional[str]:
     return next((branch for branch in branches if compare(branch) in CONTAINS), None)
 
 
+def higher_release(version: str, reachable_tags: Sequence[str]) -> Optional[str]:
+    """The highest full release above ``version`` among the tags reachable from the commit; None if none."""
+    current = release_version.parse_version(version).core
+    later = {core: tag for core, tag in page.history.full_releases(reachable_tags).items() if core > current}
+    return later[max(later)] if later else None
+
+
+def history_problems(args: argparse.Namespace, git: page.Git) -> List[str]:
+    """A full release above the tag's version that the tagged commit already holds, or a history not read."""
+    try:
+        page.refuse_shallow(git)
+        higher = higher_release(args.version, page.version_tags(git, args.sha))
+    except (page.PageError, subprocess.CalledProcessError, OSError) as error:
+        return [f"could not read the releases reachable from {args.sha[:12]} ({error})"]
+    if higher is None:
+        return []
+    line = release_version.parse_version(args.version).major_minor
+    return [f"{args.sha[:12]} already holds {higher}, a later release than {args.version}: "
+            f"cut {args.version} from release/{line}, which holds only its own line's code"]
+
+
 def github_compare(repo: str, sha: str, token: str = "") -> Compare:
     """GitHub's compare of each branch (head) against ``sha`` (base); None for a missing branch."""
     headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
@@ -112,10 +142,10 @@ def github_compare(repo: str, sha: str, token: str = "") -> Compare:
     return compare
 
 
-def check(args: argparse.Namespace, state: State, compare: Compare) -> List[str]:
+def check(args: argparse.Namespace, state: State, compare: Compare, git: page.Git) -> List[str]:
     """Every reason the run must not build; an empty list lets it go on."""
     refs = [f"{args.prefix}{name}:{args.version}" for name in args.image]
-    problems = version_problems(refs, state)
+    problems = version_problems(refs, state) + history_problems(args, git)
     branches = release_lines(args.version, args.default_branch)
     try:
         holder = line_holding(branches, compare)
@@ -127,7 +157,8 @@ def check(args: argparse.Namespace, state: State, compare: Compare) -> List[str]
     return problems
 
 
-def main(argv: Optional[List[str]] = None, state: State = published, compare: Optional[Compare] = None) -> int:
+def main(argv: Optional[List[str]] = None, state: State = published, compare: Optional[Compare] = None,
+         git: page.Git = page.run_git) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     for flag in ("--version", "--sha", "--repo", "--default-branch", "--prefix"):
         parser.add_argument(flag, required=True)
@@ -135,12 +166,13 @@ def main(argv: Optional[List[str]] = None, state: State = published, compare: Op
     parser.add_argument("--summary", help="append Markdown here ($GITHUB_STEP_SUMMARY)")
     args = parser.parse_args(argv)
     compare = compare or github_compare(args.repo, args.sha, os.environ.get("GH_TOKEN", ""))
-    problems = check(args, state, compare)
+    problems = check(args, state, compare, git)
     for problem in problems:
         print(f"::error title=Release preflight::{problem}")
     if args.summary and not problems:
         with open(args.summary, "a", encoding="utf-8") as out:
-            out.write(f"Preflight: no image is published as `{args.version}` yet, and the commit is on a release line.\n")
+            out.write(f"Preflight: no image is published as `{args.version}` yet, the commit is on a release line, "
+                      "and no later release is in it.\n")
     print(f"preflight: {len(problems)} problem(s)")
     return 1 if problems else 0
 

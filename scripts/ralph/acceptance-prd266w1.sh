@@ -353,7 +353,7 @@ ci_commit_for_head() {
   echo "$sha"
 }
 # Required jobs = test.yml's CURRENT jobs (read on origin/main 630fc1c85, 20 Oct, all green there). This wave touches
-# orchestrator/ (backend_mode full → the four shards, orchestrator-tests, Alembic from-zero, Schema-drift, the module +
+# orchestrator/ (backend_mode full → the backend shards, orchestrator-tests, Alembic from-zero, Schema-drift, the module +
 # integration tests F056) and frontend/ + route-manifest.json (Frontend CI). Code standards runs on every PR. Path-gated,
 # green or skipped: "Prod images built" (Dockerfiles, manifests, next.config.*, lib/auth-edition.ts, test.yml) and the
 # "CLI host (PRD-234)" lane (services/cli-host/; the wave changes the orchestrator side of pairing only).
