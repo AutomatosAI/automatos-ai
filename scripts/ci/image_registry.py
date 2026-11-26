@@ -15,6 +15,8 @@ API with the standard library only, because the arm64 runner image has no
 * ``platform_digest(index, arch)`` picks one architecture's manifest out of the
   index BuildKit pushes. With ``provenance`` and ``sbom`` on, a per-arch push is an
   index of two manifests: the image, and an ``unknown/unknown`` attestation.
+* ``manifest_bytes(session, reference)`` is a manifest's bytes as the registry served
+  them, for a caller that checks they hash to the digest it asked for.
 * ``resolve(ref)`` is the digest a tag points at: for a published tag, the
   multi-arch index (smoke-images, PRD-262 US-003, checks that a pulled image's
   ``RepoDigests`` holds it, and promote-edge that ``edge`` lands on it).
@@ -43,6 +45,8 @@ MANIFEST_TYPES = ",".join((
     "application/vnd.docker.distribution.manifest.v2+json",
 ))
 ATTEMPTS = 3
+# The OCI distribution spec: implementations SHOULD support manifests of at least 4 megabytes.
+MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 TIMEOUT_SECONDS = 120
 LOCAL_HOSTS = ("localhost", "127.0.0.1")
 CHALLENGE_PARAM = re.compile(r'(\w+)="([^"]*)"')
@@ -161,11 +165,22 @@ def connect(ref: str) -> Tuple[Session, str]:
     return Session(base, repo, _token(challenge, repo)), reference
 
 
-def manifest(session: Session, reference: str) -> dict:
-    """The index or manifest ``reference`` (tag or digest) names, as JSON."""
+def manifest_bytes(session: Session, reference: str) -> bytes:
+    """The bytes of the index or manifest ``reference`` (tag or digest) names, as served.
+
+    A body over ``MAX_MANIFEST_BYTES`` is refused (ValueError) rather than read whole.
+    """
     url = f"{session.base}/v2/{session.repo}/manifests/{reference}"
     with _open(_request(url, MANIFEST_TYPES, session.token)) as response:
-        return json.load(response)
+        body = response.read(MAX_MANIFEST_BYTES + 1)
+    if len(body) > MAX_MANIFEST_BYTES:
+        raise ValueError(f"{url} served a manifest over {MAX_MANIFEST_BYTES} bytes")
+    return body
+
+
+def manifest(session: Session, reference: str) -> dict:
+    """The index or manifest ``reference`` (tag or digest) names, as JSON."""
+    return json.loads(manifest_bytes(session, reference))
 
 
 def resolve(ref: str) -> str:

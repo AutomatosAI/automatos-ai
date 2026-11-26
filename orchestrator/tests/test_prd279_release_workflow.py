@@ -13,6 +13,9 @@ Static checks on the workflow files:
 * a failing scan leaves nothing tagged or signed: the merge job needs every build, and
   the chart job needs the merge job (US-102);
 * each image's signature is checked right after it is made (US-103);
+* every digest signed is the one its own push reported, the index's from the create
+  step's metadata file and the chart's from `helm push`'s output, never read back from a
+  tag (US-101, US-202);
 * the chart job packages, renders, refuses an existing version, pushes, signs and
   checks, with only the permissions it needs, no secret but the built-in token, and
   every tool pinned (US-201, US-202).
@@ -32,10 +35,11 @@ IMAGES = yaml.safe_load((WORKFLOWS / "images.yml").read_text(encoding="utf-8"))
 SMOKE = yaml.safe_load((WORKFLOWS / "smoke-images.yml").read_text(encoding="utf-8"))
 JOBS = IMAGES["jobs"]
 ON_A_TAG = "startsWith(github.ref, 'refs/tags/v')"
-# The merge job's steps before PRD-279: they run on every publishing run, as they did.
+# The merge job's steps before PRD-279: they run on every publishing run, as they did. One
+# is renamed: on every run the index digest comes from the create step, not a tag.
 MERGE_STEPS_BEFORE = [
     "Checkout", "Image name", "Download digests", "Set up Buildx", "Log in to GHCR", "Metadata",
-    "Create the multi-arch index", "Resolve the index digest", "Install cosign", "Sign (keyless)",
+    "Create the multi-arch index", "The index digest, from the create step", "Install cosign", "Sign (keyless)",
     "Tag the context's tree (tree-<12>, once per tree)",
 ]
 _INTERPOLATION = re.compile(r"\$\{\{")
@@ -101,7 +105,7 @@ def test_on_a_tag_the_merge_job_publishes_only_a_staging_tag_and_no_sha():
 
 def test_on_a_tag_the_order_is_stage_sign_verify_then_every_image_is_tagged():
     names = [step["name"] for step in _steps("merge")]
-    order = ["Create the multi-arch index", "Resolve the index digest", "Sign (keyless)",
+    order = ["Create the multi-arch index", "The index digest, from the create step", "Sign (keyless)",
              "Verify the signature (v* tags only)", "Upload the digest for the chart (v* tags only)"]
     assert [names.index(name) for name in order] == sorted(names.index(name) for name in order)
     job = JOBS["release-images"]
@@ -162,7 +166,7 @@ def test_the_chart_job_runs_on_a_tag_only_with_only_the_permissions_it_needs():
 def test_the_chart_job_packages_renders_refuses_pushes_signs_and_checks_in_that_order():
     names = [step["name"] for step in _steps("release-chart")]
     order = ["Package the chart with every image's digest", "Render the packaged chart; fail on any image named by a tag",
-             "Refuse a version that is already published", "Push the chart", "Resolve the chart's digest",
+             "Refuse a version that is already published", "Push the chart", "The chart's digest, from the push",
              "Sign the chart (keyless)", "Verify the chart's signature", "Remove the chart version it could not prove"]
     assert [names.index(name) for name in order] == sorted(names.index(name) for name in order)
     package = _step("release-chart", order[0])["run"]
@@ -233,3 +237,56 @@ def test_a_chart_that_was_not_proven_is_removed_and_only_one_this_job_pushed():
     assert 'release_chart.py remove --owner "$GITHUB_REPOSITORY_OWNER"' in remove["run"]
     assert '--tag "$VERSION"' in remove["run"]
     assert remove["env"]["GH_TOKEN"] == "${{ github.token }}", "the built-in token, no broader one"
+
+
+# --------------------------------------------------------------------------- digests from the push (US-101, US-202)
+
+
+def test_the_signed_index_digest_is_the_one_the_create_step_pushed_never_a_tags():
+    create = _step("merge", "Create the multi-arch index")
+    assert 'imagetools create --metadata-file "${RUNNER_TEMP}/index-metadata.json"' in create["run"]
+    assert create["working-directory"] == "${{ runner.temp }}/digests"
+    assert _step("merge", "Download digests")["with"]["path"] == "${{ runner.temp }}/digests"
+    index = _step("merge", "The index digest, from the create step")
+    assert index["id"] == "index" and "if" not in index, "on every publishing run"
+    for part in ('release_digests.py index --metadata "${RUNNER_TEMP}/index-metadata.json"', '--matrix "$MATRIX"',
+                 '--built "${RUNNER_TEMP}/digests"', '--image "$IMAGE"', '--outputs "$GITHUB_OUTPUT"'):
+        assert part in index["run"], part
+    # One build per architecture the build job's own matrix published (the build job runs that matrix).
+    assert index["env"]["MATRIX"] == "${{ needs.changes.outputs.matrix }}"
+    assert JOBS["build"]["strategy"]["matrix"] == "${{ fromJSON(needs.changes.outputs.matrix) }}"
+    for name in ("Sign (keyless)", "Verify the signature (v* tags only)", "Record the digest for the chart (v* tags only)",
+                 "Tag the context's tree (tree-<12>, once per tree)"):
+        assert _step("merge", name)["env"]["DIGEST"] == "${{ steps.index.outputs.digest }}", name
+    assert not any("imagetools inspect" in step.get("run", "") for step in _steps("merge"))
+    assert not _INTERPOLATION.search(index["run"])
+
+
+def test_the_signed_chart_digest_is_the_one_helm_push_printed_never_its_tags():
+    push = _step("release-chart", "Push the chart")["run"]
+    assert 'helm push "$PACKAGE" "$CHART_REGISTRY" > "${RUNNER_TEMP}/helm-push.log"' in push
+    chart = _step("release-chart", "The chart's digest, from the push")
+    assert chart["id"] == "chart"
+    for part in ('release_digests.py chart --push-log "${RUNNER_TEMP}/helm-push.log"', '--chart "$CHART"',
+                 '--version "$VERSION"', '--package "$PACKAGE"', '--outputs "$GITHUB_OUTPUT"'):
+        assert part in chart["run"], part
+    assert not any("release_chart.py digest" in step.get("run", "") for step in _steps("release-chart"))
+
+
+def test_the_merge_job_checks_its_own_buildx_has_the_metadata_file_before_creating_the_index():
+    """The runner's buildx, never a downloaded one; release_digests.py stops below v0.32.0."""
+    setup = next(step for step in _steps("merge") if "docker/setup-buildx-action@" in step.get("uses", ""))
+    assert "with" not in setup, "no version input: the action would download a buildx"
+    run = _step("merge", "Create the multi-arch index")["run"]
+    check = 'docker buildx version | python3 "${GITHUB_WORKSPACE}/scripts/ci/release_digests.py" buildx'
+    assert run.splitlines()[0] == check
+    assert run.index(check) < run.index("docker buildx imagetools create")
+
+
+def test_no_release_job_reads_a_digest_back_by_name_or_hides_a_failure():
+    readers = ("imagetools inspect", "docker manifest", "skopeo", "crane")
+    for job in ("merge", "release-images", "release-chart", "release-notes"):
+        for step in _steps(job):
+            assert not any(reader in step.get("run", "") for reader in readers), (job, step.get("name"))
+    text = (WORKFLOWS / "images.yml").read_text(encoding="utf-8")
+    assert "continue-on-error" not in text and "|| true" not in text

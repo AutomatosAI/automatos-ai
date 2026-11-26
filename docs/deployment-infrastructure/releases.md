@@ -115,9 +115,17 @@ checked.
    the same as on any branch.
 3. **Staged, signed and checked** (`merge` jobs, one per image). Each image's
    multi-arch index is published under `release-staging-<run id>-<attempt>`, not under
-   a version, and not as `sha-<7>` (the commit's main push published it). Its digest is
-   signed, and the signature checked with the identity of this workflow at the tag
-   (the command below). A failed check fails the run, and no version tag is applied.
+   a version, and not as `sha-<7>` (the commit's main push published it). The digest
+   signed is the one `docker buildx imagetools create` reports it pushed (its
+   `--metadata-file`), never one read back from a tag, and only once the index, read by
+   that digest, holds exactly the per-architecture builds this run pushed and scanned
+   (`scripts/ci/release_digests.py index`): one build for each architecture the build
+   matrix published, and every entry of those builds, none extra. The signature is checked
+   with the identity of this workflow at the tag (the command below). A failed check fails
+   the run. The create step tags the index as it pushes it, so when the check or signing
+   fails, the staging tag (on `main` the `sha-<7>` tag, on the weekly run
+   `weekly-<yyyymmdd>`) names an index that is not signed; the tree tag, `edge`, the
+   version tags and the chart are not applied.
 4. **The version tags, all at once** (`release-images` job, after every image is
    checked). `scripts/ci/release_tags.py` reads every image's tags first, then adds
    `X.Y.Z`, and `X.Y` for a full release, to each image's signed digest. `edge` does
@@ -136,8 +144,10 @@ checked.
    edition runs is missing or another one appears, or if the labels do not carry the
    version.
 7. **The chart is published, signed and checked.** It is pushed to
-   `oci://ghcr.io/automatosai/charts/automatos` under the version, signed by digest,
-   and its signature checked with the same command as the images.
+   `oci://ghcr.io/automatosai/charts/automatos` under the version and signed by the
+   digest `helm push` prints, once the manifest it names, read by that digest, holds the
+   packaged chart byte for byte (`scripts/ci/release_digests.py chart`). Its signature is
+   checked with the same command as the images.
 8. **The release page** (`release-notes` job, after the chart). `scripts/ci/release_page.py`
    creates the version's page under the repository's Releases, named `Automatos <version>`,
    with five sections (PRD-279 §5.4), described under [The release page](#the-release-page).

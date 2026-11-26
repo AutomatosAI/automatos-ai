@@ -2,7 +2,8 @@
 """The chart a release publishes, naming every image by digest (PRD-279 US-201, US-202).
 
 images.yml's ``release-chart`` job runs this on a ``v*`` tag, after the merge job has
-published and signed each image. Three commands:
+published and signed each image. Three commands (the pushed chart's digest comes from
+``helm push`` itself, read by ``release_digests.py chart``):
 
 * ``prepare`` copies ``charts/automatos`` and writes, into the copy's ``values.yaml``,
   each published image's repository and the digest of the index the merge job signed.
@@ -17,8 +18,6 @@ published and signed each image. Three commands:
   edition's values file only, and fails if an edition's render is missing, if any image
   is named by a tag, if an image that edition should run is missing or another one
   appears, or if the chart's labels do not carry the release's version.
-* ``digest`` prints the digest a pushed chart's tag resolves to, so it is signed and
-  checked by digest, never by tag.
 * ``remove`` takes back a chart version whose signature was not made or did not check
   (``helm push`` tags it before it can be signed). It deletes that version of the
   ``charts/automatos`` package through GitHub's packages API with the job's built-in
@@ -36,7 +35,6 @@ whichever edition an install picks.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import os
 import re
@@ -315,15 +313,6 @@ def remove(owner: str, owner_type: str, tag: str, token: str, call=None) -> str:
 # --------------------------------------------------------------------------- commands
 
 
-def _sibling(name: str):
-    """``scripts/ci/<name>.py``, loaded by path, as the other CI scripts load their siblings."""
-    spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(f"{name}.py"))
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
 def _append(path: Optional[str], text: str) -> None:
     if path:
         with open(path, "a", encoding="utf-8") as out:
@@ -358,15 +347,6 @@ def cmd_check_rendered(args: argparse.Namespace) -> int:
     return 1 if problems else 0
 
 
-def cmd_digest(args: argparse.Namespace) -> int:
-    digest = _sibling("image_registry").resolve(args.ref)
-    if not DIGEST.match(digest):
-        raise ChartError(f"{args.ref} resolved to {digest!r}")
-    _append(args.outputs, f"digest={digest}\n")
-    print(digest)
-    return 0
-
-
 def cmd_remove(args: argparse.Namespace) -> int:
     chart = f"ghcr.io/{args.owner.lower()}/{PACKAGE}:{args.tag}"
     try:
@@ -390,19 +370,15 @@ def parser() -> argparse.ArgumentParser:
     two = commands.add_parser("check-rendered", help="fail on any image named by a tag, in any edition's render")
     for flag in ("--rendered", "--images", "--version"):
         two.add_argument(flag, required=True)
-    three = commands.add_parser("digest", help="the digest a pushed chart's tag resolves to")
-    three.add_argument("--ref", required=True)
-    three.add_argument("--outputs")
-    four = commands.add_parser("remove", help="delete a pushed chart version whose signature was not proven")
+    three = commands.add_parser("remove", help="delete a pushed chart version whose signature was not proven")
     for flag in ("--owner", "--owner-type", "--tag"):
-        four.add_argument(flag, required=True)
+        three.add_argument(flag, required=True)
     return root
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = parser().parse_args(argv)
-    command = {"prepare": cmd_prepare, "check-rendered": cmd_check_rendered, "digest": cmd_digest,
-               "remove": cmd_remove}[args.command]
+    command = {"prepare": cmd_prepare, "check-rendered": cmd_check_rendered, "remove": cmd_remove}[args.command]
     try:
         return command(args)
     except (ChartError, OSError, yaml.YAMLError) as error:
