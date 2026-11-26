@@ -72,7 +72,9 @@ from core.models.themes import (  # noqa: E402
     THEME_REVOCATION_ORIGIN_FEED, THEME_REVOCATION_ORIGIN_LOCAL, ThemeChoice, ThemeInstallation, ThemeLook,
     ThemeOptIn, ThemePackage, ThemeReviewEvent, ThemeRevocation, ThemeRevocationSync, ThemeWorkspaceSettings,
 )
+from services import admin_audit  # noqa: E402
 from services.themes import review, revocation_admin, revocation_pull  # noqa: E402
+from tests import helpers_audit_sqlite as audit  # noqa: E402
 
 WS = uuid.uuid4()
 ADMIN_PK, OPERATOR_PK = 7, 1
@@ -110,6 +112,7 @@ def api(monkeypatch):
     with engine.begin() as conn:
         conn.execute(sa.text("CREATE TABLE users (id INTEGER PRIMARY KEY, clerk_user_id TEXT, email TEXT)"))
         conn.execute(sa.text("INSERT INTO users (id, clerk_user_id) VALUES (7, 'clerk-7'), (8, 'clerk-8')"))
+        audit.create_audit_logs(conn)
     monkeypatch.setattr(config, "AUTH_EDITION", "saas")
     monkeypatch.setattr(permission_mod, "resolve_workspace_role", lambda db, ctx: "owner")
     session = sessionmaker(bind=engine)()
@@ -433,6 +436,35 @@ def test_a_feed_row_lifts_here_while_sync_is_off_or_stale_and_who_lifted_it_is_l
     assert feed.lifted_at is not None
     [record] = [r for r in caplog.records if r.name == revocations_api.logger.name and r.levelno == logging.WARNING]
     assert str(feed.id) in record.getMessage() and f"user {actor}" in record.getMessage()
+    [row] = audit.rows(api.db, admin_audit.REVOCATION_LIFTED)  # #1604 item 3: the lift is in audit_logs too
+    assert (row["user_id"], row["workspace_id"], row["resource_id"]) == (actor, WS, str(feed.id))
+    assert row["details"] == {"origin": "feed", "level": "disable"}
+
+
+# --- #1657: every lift is in audit_logs, committed with it -----------------------------------
+
+
+def test_a_lift_writes_one_audit_row_with_the_admin_and_nothing_secret(api):
+    created = _create(api, digest=DIGEST).json()["revocation"]
+    resp = api.client.post(f"{BASE}/{created['id']}/lift",
+                           headers={"Authorization": "Bearer test-token", "User-Agent": "audit-test/1"})
+    assert resp.status_code == 200, resp.text
+    assert _lift(api, created["id"]).status_code == 200  # lifting a lifted row changes nothing: no second row
+    [row] = audit.rows(api.db, admin_audit.REVOCATION_LIFTED)
+    assert (row["user_id"], row["actor_type"], row["workspace_id"]) == (ADMIN_PK, "user", WS)
+    assert (row["resource_type"], row["resource_id"]) == (admin_audit.REVOCATION_RESOURCE, created["id"])
+    assert row["details"] == {"origin": "local", "level": "disable"} and row["user_agent"] == "audit-test/1"
+    assert "test-token" not in audit.written(row) and REASON not in audit.written(row)
+
+
+def test_a_lift_whose_audit_row_cannot_be_written_is_rolled_back_with_it(api):
+    created = _create(api, digest=DIGEST).json()["revocation"]
+    api.db.execute(sa.text("DROP TABLE audit_logs"))
+    api.db.commit()
+    resp = _lift(api, created["id"])
+    assert (resp.status_code, resp.json()["detail"]) == (503, revocations_api.LIFT_NOT_RECORDED)
+    [row] = _rows(api)
+    assert row.lifted_at is None
 
 
 def test_lift_sets_lifted_at_once_and_an_unknown_id_is_404(api):

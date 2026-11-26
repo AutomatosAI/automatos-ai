@@ -21,16 +21,17 @@ operator switched it on (PRD-277 US-704), so both answer 404 otherwise, with the
 on the hosted edition. No step-up, in an enterprise install as in the local edition: Check now
 runs sooner the same pull the schedule runs on its own every ``THEME_REVOCATIONS_PULL_MINUTES``
 while the service is switched on, takes nothing from the caller, and copies only what Automatos's
-list says; the admin check already limits it to install admins. Plain ``def`` handlers over the
-synchronous session (AGENTS.md).
+list says; the admin check already limits it to install admins. Each Check now that ran writes one
+``themes:revocation_pull`` row in ``audit_logs`` with who ran it and the rows it wrote, or that it
+failed (``services/admin_audit.py``, #1657). Plain ``def`` handlers over the synchronous session
+(AGENTS.md).
 """
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from core import editions
@@ -38,10 +39,9 @@ from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.roles import caller_is_admin
 from core.database.database import get_db
+from services import admin_audit
 from services.themes import revocation_pull
 from services.themes.revocation_pull import ClientFactory
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin/themes/revocations/sync", tags=["Admin Themes"])
 
@@ -85,19 +85,24 @@ def get_revocation_sync(
 
 @router.post("/pull")
 def pull_revocation_feed(
+    request: Request,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
     client_factory: Optional[ClientFactory] = Depends(get_pull_client_factory),
 ) -> Dict[str, Any]:
-    """Check now: pull the feed once and answer the status, or the plain error the pull recorded."""
+    """Check now: pull the feed once and answer the status, or the plain error the pull recorded. Either
+    way the pull writes its ``themes:revocation_pull`` row (the pull stands if that row can't be written)."""
     _require_admin(ctx)
     _require_local_edition()
     if not revocation_pull.feed_url():
         raise HTTPException(status_code=CONFLICT, detail=revocation_pull.PULL_OFF)
     outcome = revocation_pull.pull_feed(db, client_factory)
+    details = ({"outcome": admin_audit.OUTCOME_OK, "rows": outcome.rows} if outcome.ok
+               else {"outcome": admin_audit.OUTCOME_FAILED})
+    admin_audit.record_after(db, ctx, request, action=admin_audit.REVOCATION_PULL,
+                             resource_type=admin_audit.REVOCATION_SYNC_RESOURCE, details=details)
     if not outcome.ok:
         raise HTTPException(status_code=BAD_GATEWAY, detail=outcome.error)
-    logger.info("theme revocation feed pulled on demand by user %s", getattr(ctx.user, "id", None))
     return revocation_pull.sync_status(db)
 
 

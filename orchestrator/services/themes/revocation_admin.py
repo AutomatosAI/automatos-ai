@@ -25,7 +25,8 @@ answer 404). This module is the admin's hand on that table:
   409, and the local pull lifts it when the feed says ``liftedAt``. While sync is off
   (``revocation_pull.pull_enabled`` is false: the hosted edition, or no feed URL) or stale (no
   successful pull for ``revocation_pull.STALE_AFTER``), the admin may lift it here, and the
-  router logs who did; a later pull never un-lifts it. The last live ``local`` disable covering
+  router records who did (a ``themes:revocation_lifted`` row in ``audit_logs``, committed with the
+  lift, as for every lift); a later pull never un-lifts it. The last live ``local`` disable covering
   a deactivated Marketplace version (``review.deactivate``) is a 409 too, whatever it was written
   for: a deactivation is not undone by lifting a revocation. Those versions are locked first, so
   two lifts of a version's last two disables can't both pass.

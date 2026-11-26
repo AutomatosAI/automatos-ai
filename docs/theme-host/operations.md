@@ -215,6 +215,8 @@ lifted.
 **Lift** a revocation from the panel, then **Confirm lift** (`POST /api/admin/themes/revocations/{revocationId}/lift`). A row written here
 (`local`) can be lifted at any time. A row pulled from the feed (`feed`) is the hosted list's to lift; in the local
 edition you may lift it only while sync is off or stale, and the server logs who did. A later pull never un-lifts it.
+Every lift is recorded in the audit log (`themes:revocation_lifted`: who, the row's origin and level) in the same commit;
+if that record can't be written, nothing is lifted and the server answers 503.
 
 On the hosted edition, a revocation that covers a listed Marketplace version goes out in the feed, and each local
 edition applies it on its next pull. A lifted one stays in the feed for `THEME_REVOCATIONS_LIFTED_DAYS`, so a local
@@ -238,7 +240,8 @@ local edition to read; the server logs which as an error.
   the last error, when the hosted server built the feed, how many feed rows this server holds, the revoked keys, and
   `stale`: no successful pull in the last 7 days, or none yet.
 - **Check now** (`POST /api/admin/themes/revocations/sync/pull`) pulls once. It answers the new status, or 502 with the
-  error the pull recorded, or 409 while the URL is empty.
+  error the pull recorded, or 409 while the URL is empty. A Check now that ran is recorded in the audit log
+  (`themes:revocation_pull`: who ran it, and the rows it wrote or that it failed).
 
 A failed pull changes no revocation and keeps the revoked keys it had. The errors it records:
 

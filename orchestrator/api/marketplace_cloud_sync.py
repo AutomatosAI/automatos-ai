@@ -30,7 +30,9 @@ fresh step-up (``require_step_up``, as the admin theme routes have: ``admin_them
 check runs first, so a workspace admin who is not an install admin is never asked to sign in again. The local
 edition is as before: its operator is the person using it, so no install-admin check runs there, and its
 step-up is ``skip`` (``core/auth/step_up.py``), so the step-up passes. Nothing schedules a Sync (§8-Q2): this
-button is the only way one runs. Plain ``def`` handlers over the synchronous session (AGENTS.md).
+button is the only way one runs. Each Sync that ran, good or failed, writes one ``marketplace:cloud_sync``
+row in ``audit_logs`` with who ran it and its counts (``services/admin_audit.py``, #1657); a Sync that couldn't
+start (409) writes none. Plain ``def`` handlers over the synchronous session (AGENTS.md).
 """
 
 from __future__ import annotations
@@ -39,7 +41,7 @@ import asyncio
 import logging
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from config import config
@@ -50,6 +52,7 @@ from core.auth.roles import caller_is_admin
 from core.auth.step_up import require_step_up
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
+from services import admin_audit
 from services.marketplace_bundles.sync_items import run_item_passes
 from services.marketplace_cloud import pull, updates
 from services.marketplace_cloud.fetch import CLOUD_OFF, ClientFactory
@@ -96,6 +99,27 @@ def _refusal(outcome: pull.SyncOutcome) -> HTTPException:
     return HTTPException(status_code=status_code, detail=outcome.error)
 
 
+def _record(db: Session, ctx: RequestContext, request: Request, details: Dict[str, Any]) -> None:
+    """The Sync's ``marketplace:cloud_sync`` row (counts only); the Sync stands if it can't be written."""
+    admin_audit.record_after(db, ctx, request, action=admin_audit.CLOUD_SYNC,
+                             resource_type=admin_audit.CLOUD_SYNC_RESOURCE, details=details)
+
+
+def _passes_and_updates(db: Session, ctx: RequestContext, request: Request, outcome: pull.SyncOutcome,
+                        client_factory: Optional[ClientFactory]) -> Dict[str, Any]:
+    """The item passes and the auto-update after a catalogue pull that committed. When either raises, the
+    Sync is recorded ``failed`` (what it committed stands) and the error goes on to the 500."""
+    try:
+        passes = run_item_passes(db, outcome, client_factory, asyncio.run)
+        moved = updates.apply_cloud_updates(db, client_factory)
+    except Exception:
+        logger.exception("Sync with Automatos Cloud failed after its catalogue pull committed")
+        db.rollback()
+        _record(db, ctx, request, {"outcome": admin_audit.OUTCOME_FAILED})
+        raise
+    return {**passes, "updatesApplied": moved.applied, "updatesFailed": moved.failed}
+
+
 @router.get("/status")
 def get_cloud_sync_status(
     _local: None = Depends(require_local_edition),
@@ -109,6 +133,7 @@ def get_cloud_sync_status(
 
 @router.post("")
 def run_cloud_sync(
+    request: Request,
     _local: None = Depends(require_local_edition),
     ctx: RequestContext = Depends(MANAGE),
     _admin: None = Depends(require_sync_admin),
@@ -122,12 +147,15 @@ def run_cloud_sync(
     if not configured_url():
         raise HTTPException(status_code=CONFLICT, detail=CLOUD_OFF)
     outcome = pull.sync_catalog(db, client_factory)
+    if not (outcome.ok or outcome.off or outcome.busy):
+        _record(db, ctx, request, {"outcome": admin_audit.OUTCOME_FAILED})
     if not outcome.ok:
         raise _refusal(outcome)
-    logger.info("Sync with Automatos Cloud run on demand by user %s", getattr(ctx.user, "id", None))
-    passes = run_item_passes(db, outcome, client_factory, asyncio.run)
-    moved = updates.apply_cloud_updates(db, client_factory)
-    return {**passes, "updatesApplied": moved.applied, "updatesFailed": moved.failed, "status": pull.sync_status(db)}
+    done = _passes_and_updates(db, ctx, request, outcome, client_factory)
+    _record(db, ctx, request, {"outcome": admin_audit.OUTCOME_OK, "counts": done["counts"],
+                               "pluginsWaiting": done["plugins"]["waiting"], "updatesApplied": done["updatesApplied"],
+                               "updatesFailed": done["updatesFailed"]})
+    return {**done, "status": pull.sync_status(db)}
 
 
 __all__ = ["get_cloud_client_factory", "require_local_edition", "require_sync_admin", "router"]

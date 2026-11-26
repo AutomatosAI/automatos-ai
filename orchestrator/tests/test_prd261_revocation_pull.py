@@ -18,6 +18,7 @@ import base64
 import gzip
 import inspect
 import json
+import logging
 import os
 import sys
 import time
@@ -60,10 +61,12 @@ from core.models.themes import (  # noqa: E402
     ThemeChoice, ThemeInstallation, ThemeLook, ThemeOptIn, ThemePackage, ThemeRevocation, ThemeRevocationSync,
     ThemeWorkspaceSettings,
 )
+from services import admin_audit  # noqa: E402
 from services.themes import revocation_feed, revocation_pull, signature_state, signature_verify, signing  # noqa: E402
 from services.themes.digest import package_digest  # noqa: E402
 from services.themes.revocation_feed import as_utc  # noqa: E402
 from services.themes.signature_state import SIGNATURE_DISABLE_REASON  # noqa: E402
+from tests import helpers_audit_sqlite as audit  # noqa: E402
 
 WS = uuid.uuid4()
 OPERATOR_PK = 1
@@ -118,6 +121,7 @@ def api(monkeypatch):
     with engine.begin() as conn:
         conn.execute(sa.text("CREATE TABLE users (id INTEGER PRIMARY KEY, clerk_user_id TEXT, email TEXT)"))
         conn.execute(sa.text("INSERT INTO users (id, email) VALUES (1, 'operator@local')"))
+        audit.create_audit_logs(conn)
     monkeypatch.setattr(config, "AUTH_EDITION", "local")
     monkeypatch.setattr(config, revocation_pull.URL_SETTING, FEED_URL, raising=False)
     monkeypatch.setattr(permission_mod, "resolve_workspace_role", lambda db, ctx: None)
@@ -374,6 +378,47 @@ def test_check_now_with_an_empty_feed_url_is_409(api, monkeypatch):
     resp = _pull(api)
     assert (resp.status_code, resp.json()["detail"]) == (409, revocation_pull.PULL_OFF)
     assert api.client.get(SYNC).json()["enabled"] is False and api.seen == []
+
+
+# --------------------------------------------------------------------------- #1657: Check now in audit_logs
+
+
+def test_check_now_writes_one_audit_row_with_who_ran_it_and_the_rows_never_the_feed(api):
+    api.answer = _answer(_feed([_row(), _row(digest="cd" * 32)], keys=[KEY_A]))
+    assert _pull(api, Authorization="Bearer test-token", **{"User-Agent": "audit-test/1"}).status_code == 200
+    [row] = audit.rows(api.db, admin_audit.REVOCATION_PULL)
+    assert (row["user_id"], row["actor_type"], row["workspace_id"]) == (OPERATOR_PK, "user", WS)
+    assert row["resource_type"] == admin_audit.REVOCATION_SYNC_RESOURCE and row["user_agent"] == "audit-test/1"
+    assert row["details"] == {"outcome": "ok", "rows": 2}
+    text = audit.written(row)
+    assert "test-token" not in text and "feed.example.test" not in text and "leaks data" not in text
+
+
+def test_a_failed_check_now_is_recorded_as_failed_without_the_error(api):
+    api.answer = _answer(b"", 500)
+    assert _pull(api).status_code == 502
+    [row] = audit.rows(api.db, admin_audit.REVOCATION_PULL)
+    assert row["details"] == {"outcome": "failed"} and row["user_id"] == OPERATOR_PK
+
+
+def test_check_now_stands_when_its_audit_row_cannot_be_written_and_says_so_loudly(api, caplog):
+    api.db.execute(sa.text("DROP TABLE audit_logs"))
+    api.db.commit()
+    api.answer = _answer(_feed([_row()]))
+    with caplog.at_level(logging.ERROR, logger=admin_audit.logger.name):
+        assert _pull(api).status_code == 200
+    assert len(_rows(api.db)) == 1 and _sync(api.db).last_success_at is not None
+    assert any(admin_audit.REVOCATION_PULL in r.getMessage() for r in caplog.records
+               if r.name == admin_audit.logger.name and r.levelno == logging.ERROR)
+
+
+def test_a_refused_check_now_writes_no_audit_row(api, monkeypatch):
+    api.ctx = _clerk("user")
+    assert _pull(api).status_code == 403
+    api.ctx = _operator()
+    monkeypatch.setattr(config, revocation_pull.URL_SETTING, "", raising=False)
+    assert _pull(api).status_code == 409
+    assert audit.rows(api.db, admin_audit.REVOCATION_PULL) == []
 
 
 def test_the_routes_are_plain_defs_that_check_the_admin_in_the_handler():
