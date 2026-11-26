@@ -42,6 +42,10 @@ SESSION_ABSOLUTE_HOURS_DEFAULT = 12
 # PRD-277 US-601: the most days a device token lives in enterprise, from its phone's last pairing or sign-in.
 DEVICE_TOKEN_MAX_AGE_DAYS_DEFAULT = 90
 
+# The memory store's address when QDRANT_URL is unset. GET /health (PRD-282 US-202) reads
+# a store that does not answer here as not configured, not down.
+QDRANT_URL_DEFAULT = "http://localhost:6333"
+
 # PRD-279 US-303: what an API built without a version reports (a checkout's own build, the
 # test suite). images.yml builds every API image with AUTOMATOS_VERSION set.
 UNVERSIONED_BUILD = "dev"
@@ -1821,7 +1825,7 @@ class Config:
     # =============================================================================
     # QDRANT — PRD-108 Memory Field (Shared Semantic Context)
     # =============================================================================
-    QDRANT_URL: str = os.getenv("QDRANT_URL", "http://localhost:6333")
+    QDRANT_URL: str = os.getenv("QDRANT_URL", QDRANT_URL_DEFAULT)
     QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY", "")
     # PRD-187 S1: in-process L3 durable memory — a second collection on the same
     # running Qdrant (field memory is the first). Wave-3 P2-16 consolidates both
@@ -1898,6 +1902,19 @@ class Config:
     # /health answers 503, so the liveness watchdog (docker-entrypoint.sh, F416)
     # restarts the backend. A dead or hung backend still restarts within ~2 min.
     HEALTH_POOL_STUCK_SECONDS: float = float(os.getenv("HEALTH_POOL_STUCK_SECONDS", "300"))
+    # PRD-282 US-201: GET /health/ready reads the last database check, made in the
+    # background this often (half the chart's 10 s readiness period, so its answer is
+    # never older than one probe)...
+    HEALTH_READY_CHECK_SECONDS: float = float(os.getenv("HEALTH_READY_CHECK_SECONDS", "5"))
+    # ...each given this long to answer, or it counts as unreachable.
+    HEALTH_READY_CHECK_TIMEOUT_SECONDS: float = float(os.getenv("HEALTH_READY_CHECK_TIMEOUT_SECONDS", "3"))
+    # PRD-282 US-202: GET /health's dependency entries (Redis, object storage, the search
+    # index, the memory store, the model provider) are each checked in the background this
+    # often, on a timer of its own: an alarm hears within a minute, and two pings or
+    # metadata calls a minute cost nothing worth counting...
+    HEALTH_DEPENDENCY_CHECK_SECONDS: float = float(os.getenv("HEALTH_DEPENDENCY_CHECK_SECONDS", "30"))
+    # ...each given this long to answer, or it counts as down.
+    HEALTH_DEPENDENCY_CHECK_TIMEOUT_SECONDS: float = float(os.getenv("HEALTH_DEPENDENCY_CHECK_TIMEOUT_SECONDS", "3"))
     # F458: when a checkout leaves the pool full, one WARNING lists who holds every
     # connection and where each holder is now (core/database/pool_watch.py), at most
     # once per this many seconds. 0 = off.

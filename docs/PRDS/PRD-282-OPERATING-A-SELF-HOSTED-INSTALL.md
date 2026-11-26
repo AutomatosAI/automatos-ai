@@ -227,9 +227,9 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As an operator, I want an API that has lost its database to stop receiving traffic, so that people get a clear failure and not a broken page.
 
 **Acceptance Criteria:**
-- [ ] `/health/ready` returns 200 only when start-up has finished and the last database check passed.
-- [ ] "Busy" is ready. "Unreachable" and "stuck" are not.
-- [ ] The route does no database work itself. A test with a full pool shows it answers at once.
+- [x] `/health/ready` returns 200 only when start-up has finished and the last database check passed.
+- [x] "Busy" is ready. "Unreachable" and "stuck" are not.
+- [x] The route does no database work itself. A test with a full pool shows it answers at once.
 - [ ] `test_f229_health_off_the_loop.py`, `test_f458_health_never_waits_on_a_full_pool.py` and `test_prd262_health_gates.py` pass, changed only where they pin the old meaning of ready.
 - [ ] The chart's probes are unchanged.
 
@@ -238,18 +238,20 @@ Each wave is one pull request or a short series. CI is the only gate.
 
 **Acceptance Criteria:**
 - [ ] `/health`'s list of components has an entry for Redis, object storage, the search index, the memory store and the model provider, each up, down or not configured, with the time of its last check.
-- [ ] Each check runs in the background with its own time limit. The route only reads results, and a test with every dependency hanging shows it still answers at once.
+  - also `unchecked`: no finished check yet, a stale one, or a check the role may not make; the owner's to accept
+- [x] Each check runs in the background with its own time limit. The route only reads results, and a test with every dependency hanging shows it still answers at once.
 - [ ] The model provider is never called by a check. Its entry comes from whether one is configured and how the last real call ended.
-- [ ] With Redis down, `/health` still returns 200. Its status code changes only for the database, as today.
-- [ ] No entry holds an address, a credential or error text from a dependency.
+  - never `not configured`: `unchecked` until a call through the model manager ends, since a key stored in Settings cannot be seen without decrypting it; the owner's to accept
+- [x] With Redis down, `/health` still returns 200. Its status code changes only for the database, as today.
+- [x] No entry holds an address, a credential or error text from a dependency.
 - [ ] No new route is added, and the three existing health tests pass.
 
 #### US-203: The same in metrics, and the configuration line · S
 **Description:** As an operator, I want an alarm to be able to watch each dependency, so that I hear about it before a person does.
 
 **Acceptance Criteria:**
-- [ ] `/metrics` has one gauge per dependency, 1 for up and 0 for down, absent when not configured.
-- [ ] `/health`'s configuration line is "healthy" for an install configured with `POSTGRES_*` and no `DATABASE_URL`.
+- [x] `/metrics` has one gauge per dependency, 1 for up and 0 for down, absent when not configured.
+- [x] `/health`'s configuration line is "healthy" for an install configured with `POSTGRES_*` and no `DATABASE_URL`.
 
 ### Wave 3: Logs
 

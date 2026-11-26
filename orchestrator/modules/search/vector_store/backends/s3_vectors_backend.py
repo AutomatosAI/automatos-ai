@@ -19,6 +19,7 @@ for one shared bucket (``verify_vector_index``) and on first use otherwise.
 
 import asyncio
 import logging
+import threading
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
@@ -36,6 +37,9 @@ _WORKSPACE_PLACEHOLDER = "{workspace_id}"
 STARTUP_CHECK_TIMEOUT_SECONDS = 10.0
 # Any id will do: a shared bucket has no placeholder, and the check reads no vectors.
 _STARTUP_CHECK_WORKSPACE = "startup-check"
+# The metadata client (PRD-282's health check), one per region, built once under the lock.
+_metadata_lock = threading.Lock()
+_metadata_clients: Dict[Optional[str], Any] = {}
 
 
 class VectorIndexMissingError(RuntimeError):
@@ -507,6 +511,34 @@ def _hit_from_match(match: Dict[str, Any], required_ws: str, min_score: float) -
         "file_name": metadata.get("file_name", ""), "file_path": metadata.get("file_path", ""),
         "external_file_id": metadata.get("external_file_id", ""), "chunk_index": metadata.get("chunk_index", 0),
     }
+
+
+def metadata_client() -> Any:
+    """One S3 Vectors client for metadata calls (GET /health's search index check, PRD-282),
+    built once and kept. It has a boto3 session of its own, so it is never built from the
+    shared default session while another thread builds there, and the storage factory's
+    fast-fail profile (core/storage/s3.FAST_FAIL): one attempt, short connect and read
+    timeouts. The backend's own per-workspace clients are left as they are."""
+    region = config.AWS_REGION
+    client = _metadata_clients.get(region)
+    if client is not None:
+        return client
+    with _metadata_lock:
+        client = _metadata_clients.get(region)
+        if client is None:
+            client = _fast_fail_session_client(region)
+            _metadata_clients[region] = client
+    return client
+
+
+def _fast_fail_session_client(region: Optional[str]) -> Any:
+    from botocore.config import Config as BotoConfig
+
+    from core.storage.s3 import FAST_FAIL
+
+    fast_fail = BotoConfig(retries={"max_attempts": FAST_FAIL.max_attempts},
+                           connect_timeout=FAST_FAIL.connect_timeout, read_timeout=FAST_FAIL.read_timeout)
+    return boto3.session.Session().client("s3vectors", region_name=region, config=fast_fail, **_credential_kwargs())
 
 
 def _credential_kwargs() -> Dict[str, Any]:

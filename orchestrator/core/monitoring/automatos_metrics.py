@@ -112,6 +112,15 @@ if PROMETHEUS_AVAILABLE:
         ["error_type"],
     )
 
+    # ─────────────────────────────────────────────
+    # Dependency Metrics (PRD-282 US-203)
+    # ─────────────────────────────────────────────
+    DEPENDENCY_UP = Gauge(
+        "automatos_dependency_up",
+        "Whether a dependency answered its last background health check (1 up, 0 down)",
+        ["dependency"],
+    )
+
     # LLM calls: the OpenTelemetry GenAI metrics over OTLP (PRD-256 O5,
     # core/observability/metrics.py), which replaced three Prometheus series here
     # that nothing ever recorded.
@@ -123,6 +132,21 @@ if PROMETHEUS_AVAILABLE:
         "automatos_service",
         "Service build information",
     )
+
+
+def set_dependency_up(dependency: str, up: Optional[bool]) -> None:
+    """PRD-282 US-203: one series per dependency, 1 up and 0 down, from its last background
+    check (core/health_dependencies.py). ``None`` (not configured, or not known yet) removes
+    the series, so an alarm sees no value rather than a false 0."""
+    if not PROMETHEUS_AVAILABLE:
+        return
+    if up is not None:
+        DEPENDENCY_UP.labels(dependency=dependency).set(1 if up else 0)
+        return
+    try:
+        DEPENDENCY_UP.remove(dependency)
+    except KeyError:
+        pass  # it had no series: nothing to remove
 
 
 def setup_metrics(app, service_name: Optional[str] = None):
