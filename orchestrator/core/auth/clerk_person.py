@@ -19,7 +19,14 @@ ID (deleting the Clerk user) or match a row recorded under it (a mission's ``cre
 
 Each helper keeps the statement shape its callers had: the same SQL text, or the same
 ``db.query(entity).filter(...)`` chain. A caller moved onto it makes the reads it always made.
-``users.clerk_user_id`` is unique, so a Clerk user ID names at most one person.
+Every read here names at most one person, and the same one, even when two ``users`` rows carry
+the same Clerk user ID: the row with the lowest ``users.id`` wins (``ORDER BY id LIMIT 1``). The
+model declares ``users.clerk_user_id`` unique, but no migration creates that constraint, so a
+database built by migrations may not have it (#1654). A bare scalar subquery over two rows makes
+Postgres raise "more than one row returned by a subquery", which would fail every request that
+person makes. The lowest id is the row made first: the original account, the one their
+workspaces and memberships were made under, while a later duplicate holds nothing. Sign-in
+(``core/auth/user_link.py``) picks the same row.
 """
 from __future__ import annotations
 
@@ -31,15 +38,16 @@ from sqlalchemy import select, text
 # The bound parameter that carries a Clerk user ID in every statement below.
 CLERK_ID_PARAM = "cid"
 # The person a Clerk user ID names, as their ``users.id``: NULL when no row carries it, so a
-# comparison with it matches nothing (a person with no row has no role, as before).
-CLERK_PERSON_PK_SQL = "(SELECT id FROM users WHERE clerk_user_id = :cid)"
+# comparison with it matches nothing (a person with no row has no role, as before). Never more
+# than one row: the lowest ``users.id`` wins when two rows share the Clerk user ID (see above).
+CLERK_PERSON_PK_SQL = "(SELECT id FROM users WHERE clerk_user_id = :cid ORDER BY id LIMIT 1)"
 
 # The same read under each parameter name a caller already binds: ``cid`` everywhere, and
 # ``value`` for ``core.auth.principal.resolve_user_pk``, whose parameters a test pins.
 PRINCIPAL_PARAM = "value"
 _PK_BY_CLERK_ID = MappingProxyType({
-    CLERK_ID_PARAM: text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
-    PRINCIPAL_PARAM: text("SELECT id FROM users WHERE clerk_user_id = :value LIMIT 1"),
+    CLERK_ID_PARAM: text("SELECT id FROM users WHERE clerk_user_id = :cid ORDER BY id LIMIT 1"),
+    PRINCIPAL_PARAM: text("SELECT id FROM users WHERE clerk_user_id = :value ORDER BY id LIMIT 1"),
 })
 _CLERK_ID_BY_PK = text("SELECT clerk_user_id FROM users WHERE id = :id")
 
@@ -53,19 +61,30 @@ def clerk_person_row(db: Any, clerk_user_id: Optional[str], param: str = CLERK_I
 def clerk_person_query(db: Any, entity: Any, clerk_user_id: Optional[str]) -> Any:
     """``db.query(entity)`` narrowed to the person this Clerk user ID names.
 
+    Narrowed by ``users.id`` to ``clerk_person_pk_expression``, so it holds at most one row, the
+    same person every other read here names, and keeps the ``query(...).filter(...)`` shape.
     The caller asks for what it needs (``.first()``, ``.scalar()``). The model is imported
     here, at call time, as each caller imported it.
     """
     from core.models.core import User
 
-    return db.query(entity).filter(User.clerk_user_id == clerk_user_id)
+    return db.query(entity).filter(User.id == clerk_person_pk_expression(clerk_user_id))
 
 
 def clerk_person_pk_expression(clerk_user_id: str) -> Any:
-    """The person's ``users.id`` as a scalar subquery, for an ORM filter keyed on ``users.id``."""
+    """The person's ``users.id`` as a scalar subquery, for an ORM filter keyed on ``users.id``.
+
+    At most one row, the lowest ``users.id``, as ``CLERK_PERSON_PK_SQL``.
+    """
     from core.models.core import User
 
-    return select(User.id).where(User.clerk_user_id == clerk_user_id).scalar_subquery()
+    return (
+        select(User.id)
+        .where(User.clerk_user_id == clerk_user_id)
+        .order_by(User.id)
+        .limit(1)
+        .scalar_subquery()
+    )
 
 
 def clerk_id_row(db: Any, user_pk: Optional[int]) -> Any:

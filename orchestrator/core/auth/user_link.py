@@ -70,9 +70,10 @@ UNIQUE_VIOLATION = "23505"
 
 
 def user_id_for_clerk_id(db, clerk_user_id: str) -> Optional[int]:
-    """The ``users.id`` linked to this Clerk user ID, or None."""
+    """The ``users.id`` linked to this Clerk user ID, or None: the lowest one, should two rows
+    carry it, as ``core.auth.clerk_person`` reads it."""
     row = db.execute(
-        text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
+        text("SELECT id FROM users WHERE clerk_user_id = :cid ORDER BY id LIMIT 1"),
         {"cid": clerk_user_id},
     ).fetchone()
     return row[0] if row else None
