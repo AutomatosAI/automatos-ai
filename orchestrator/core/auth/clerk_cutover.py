@@ -156,8 +156,10 @@ def decide(
 
 
 def _app_user(db, clerk_user_id: str) -> Optional[AppUser]:
+    """The person a Clerk user ID names: the lowest ``users.id`` when two rows share it, the row every
+    request reads (``core.auth.clerk_person``, #1654), so the cutover decides on that same person."""
     row = db.execute(
-        text("SELECT id, clerk_user_id, email FROM users WHERE clerk_user_id = :cid"),
+        text("SELECT id, clerk_user_id, email FROM users WHERE clerk_user_id = :cid ORDER BY id LIMIT 1"),
         {"cid": clerk_user_id},
     ).fetchone()
     return AppUser(id=row[0], clerk_user_id=row[1], email=row[2]) if row else None
