@@ -12,8 +12,10 @@ on:
       - main
       - "ralph/**"
   pull_request:
+    # release/** too: a patch's pull request runs what main's does (docs/deployment-infrastructure/patching-a-release.md).
     branches:
       - main
+      - "release/**"
 
 jobs:
   check-shopify-isolation:

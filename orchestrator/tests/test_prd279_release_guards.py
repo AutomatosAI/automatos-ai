@@ -49,10 +49,15 @@ def _http(code: int) -> urllib.error.HTTPError:
 # --------------------------------------------------------------------------- the preflight
 
 
+def _no_releases_yet(args) -> str:
+    """git in a full-history checkout that holds no version tag."""
+    return "false\n" if list(args) == ["rev-parse", "--is-shallow-repository"] else ""
+
+
 def _preflight(version: str, state, compare) -> tuple:
     args = ["--version", version, "--sha", SHA, "--repo", "AutomatosAI/automatos-ai", "--default-branch", "main",
             "--prefix", PREFIX] + [arg for name in IMAGES for arg in ("--image", name)]
-    return preflight.main(args, state=state, compare=compare)
+    return preflight.main(args, state=state, compare=compare, git=_no_releases_yet)
 
 
 def test_a_new_version_on_main_may_build(capsys):

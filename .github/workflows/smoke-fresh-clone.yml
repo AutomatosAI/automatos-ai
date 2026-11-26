@@ -163,8 +163,10 @@ on:
       - ".env.example"
       - ".github/workflows/smoke-fresh-clone.yml"
   pull_request:
+    # release/** too: a patch's pull request runs what main's does (docs/deployment-infrastructure/patching-a-release.md).
     branches:
       - main
+      - "release/**"
     paths:
       - "docker-compose.yml"
       - "docker-compose.dev.yml"

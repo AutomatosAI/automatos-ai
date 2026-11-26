@@ -209,11 +209,11 @@ def test_the_early_check_refuses_whatever_the_final_run_refuses(tmp_path, capsys
 def test_the_check_runs_in_the_changes_job_before_anything_builds():
     steps = JOBS["changes"]["steps"]
     names = [step.get("name") for step in steps]
-    checkout = steps[names.index("Checkout (the history the release page is written from; v* tags only)")]
+    checkout = steps[names.index("Checkout (the history the preflight and the release page read; v* tags only)")]
     check = steps[names.index("Release page check (v* tags only)")]
     preflight = names.index("Release preflight (v* tags only)")
     pick = next(i for i, step in enumerate(steps) if step.get("id") == "pick")
-    assert preflight < steps.index(checkout) < steps.index(check) < pick
+    assert steps.index(checkout) < preflight < steps.index(check) < pick
     assert JOBS["build"]["needs"] == "changes", "every build waits for the job the check is in"
     assert checkout["if"] == check["if"] == ON_A_TAG
     assert checkout["uses"] == steps[0]["uses"], "the pin the job already uses"
