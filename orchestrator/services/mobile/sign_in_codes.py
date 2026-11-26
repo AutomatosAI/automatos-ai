@@ -18,7 +18,8 @@ code. The app exchanges it with its PKCE verifier (``exchange_code``,
   to choose here.
 * **The device cap** (``hold_room_for_a_device``): a person at ``MAX_ACTIVE_DEVICES_PER_PERSON``
   active devices there is ``DEVICE_LIMIT_REACHED``, unless this very phone is already one of them
-  (signing in again replaces its token). It is counted under the person's own transaction-scoped
+  (signing in again replaces its token); a device past its token's maximum age is not counted
+  (``devices.assert_room_for_a_device``). It is counted under the person's own transaction-scoped
   advisory lock (``pg_advisory_xact_lock(DEVICE_CAP_LOCK_SPACE, users.id)``), so two exchanges of the
   same person at once count each other: the second waits for the first's commit, then counts its
   device. It is checked at Continue and again inside the exchange's transaction before a device is

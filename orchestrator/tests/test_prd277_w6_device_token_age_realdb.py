@@ -10,8 +10,11 @@ Through the real device lane (``core.auth.hybrid`` to ``core.auth.device``), on 
 * a rotation does not restart the count, and the rotate route issues no new token for such a device;
   enrolling the same phone again restarts it; a row with no pairing time counts from its creation;
 * a device inside its maximum age is served, and the setting decides the maximum;
+* a pairing time later than now within the clock skew is served; one later than that is refused as past
+  the maximum age (fail closed), and the SQL filters keep exactly the devices the Python rule serves;
 * a revoke whose commit fails leaves the device active and the request refused; the next one revokes it;
 * push fan-out leaves such a device out in enterprise, and reaches it in ``local``;
+* the device cap (a pairing code, a phone's sign-in) does not count a device past its maximum age;
 * ``local`` never reads the setting: a phone paired years ago keeps working there; ``saas`` neither
   refuses nor revokes one for its age.
 
@@ -40,7 +43,7 @@ from core.auth import device  # noqa: E402
 from core.auth.pairing import mint_token  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 from core.models.mobile_devices import MobileDevice  # noqa: E402
-from services.mobile import device_audit  # noqa: E402
+from services.mobile import device_audit, devices, sign_in_codes, token_age  # noqa: E402
 from services.push import fanout  # noqa: E402
 from tests.test_prd277_w6_paired_phone_realdb import (  # noqa: E402,F401  (fixtures and helpers)
     PAIR,
@@ -199,11 +202,65 @@ async def test_enrolling_the_same_phone_again_restarts_the_count(db_session, ins
 
 
 @pytest.mark.asyncio
-async def test_a_pairing_time_in_the_future_counts_as_now(db_session, install):
-    phone = _phone(db_session, install, paired_days_ago=-400)
+async def test_a_pairing_time_in_the_future_within_the_clock_skew_counts_as_now(db_session, install):  # noqa: F811  (the imported fixtures)
+    phone = _phone(db_session, install, paired_days_ago=-30 / 86400)  # 30 seconds ahead
 
     assert (await _resolve(phone.token)).auth_type == device.DEVICE_AUTH_TYPE
     assert _status_of(db_session, phone.id) == "active" and not _revocations(db_session, install)
+
+
+@pytest.mark.asyncio
+async def test_a_pairing_time_in_the_future_beyond_the_clock_skew_is_past_the_maximum_age(db_session, install):  # noqa: F811
+    phone = _phone(db_session, install, paired_days_ago=-400)
+
+    refused = await _refused(phone.token)
+
+    assert (refused.status_code, refused.detail) == (401, {"code": device.DEVICE_TOKEN_EXPIRED})
+    assert _status_of(db_session, phone.id) == "revoked" and len(_revocations(db_session, install)) == 1
+
+
+def test_the_sql_filters_keep_exactly_the_devices_the_python_rule_serves(db_session, install):  # noqa: F811
+    now = _now()
+    starts = [timedelta(days=-91), timedelta(days=-90), timedelta(days=-89), timedelta(0),
+              token_age.CLOCK_SKEW, token_age.CLOCK_SKEW + timedelta(microseconds=1), timedelta(days=400)]
+    rows = [MobileDevice(workspace_id=install.workspace_id, user_id=install.person, kind="paired",
+                         status="active", install_id=f"prd277-age-{os.urandom(6).hex()}", platform="ios",
+                         token_hash=mint_token("amd_", 32)[1], paired_at=now + start, events=[])
+            for start in starts]
+    db_session.add_all(rows)
+    db_session.commit()
+
+    kept = {row_id for (row_id,) in db_session.query(MobileDevice.id).filter(
+        MobileDevice.id.in_([row.id for row in rows]), *token_age.within_max_age_filters(now))}
+    served = {row.id for row in rows if not token_age.is_past_max_age(row, now)}
+
+    assert kept == served
+    assert [row.id in served for row in rows] == [False, False, True, True, True, False, False]
+
+
+def _aged_out_phones(db, owner, count):
+    """``count`` active phones of this person, all past their maximum age (one with its age in the future)."""
+    for index in range(count):
+        _phone(db, owner, paired_days_ago=-400 if index == 0 else 91)
+
+
+def test_a_pairing_code_is_made_while_the_persons_devices_have_all_aged_out(db_session, install):  # noqa: F811
+    _aged_out_phones(db_session, install, devices.MAX_ACTIVE_DEVICES_PER_PERSON)
+
+    made = _client(db_session, _session_ctx(install)).post(PAIRING_CODES)
+
+    assert made.status_code == 200 and made.json()["code"]
+
+
+def test_a_phones_sign_in_has_room_while_the_persons_devices_have_all_aged_out(db_session, install):  # noqa: F811
+    _aged_out_phones(db_session, install, devices.MAX_ACTIVE_DEVICES_PER_PERSON)
+
+    sign_in_codes.hold_room_for_a_device(db_session, install.workspace_id, install.person, "prd277-age-new")
+
+    for _ in range(devices.MAX_ACTIVE_DEVICES_PER_PERSON):  # inside their age: these do count
+        _phone(db_session, install, paired_days_ago=1)
+    with pytest.raises(sign_in_codes.NoSignInCode):
+        sign_in_codes.hold_room_for_a_device(db_session, install.workspace_id, install.person, "prd277-age-new")
 
 
 @pytest.mark.asyncio
