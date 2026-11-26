@@ -8,7 +8,9 @@ graph, and again on any community too large to keep. Every other image fell back
 networkx's Louvain. US-027 serves both calls from
 ``orchestrator/modules/knowledge/leiden_partition.py``, which calls graspologic-native
 itself. For every graph ``orchestrator/tests/fixtures/leiden_graphs.py`` builds, this
-script writes what graphify made of it with graspologic installed:
+script writes what graphify made of it with graspologic installed. graphifyy 0.9.70's
+``_partition`` calls graspologic-native itself before it tries graspologic, which is the
+adapter's own library, so the script switches that call off (``use_graspologic``):
 
 - ``partition``: ``_partition(graph)``, the communities of one Leiden call, largest
   first, ties by their node ids (a partition's community numbers carry no meaning);
@@ -84,6 +86,17 @@ def version_errors() -> List[str]:
     return errors
 
 
+def use_graspologic(graphify_cluster: ModuleType) -> None:
+    """Make graphify's _partition reach graspologic.partition.leiden, not graspologic-native directly.
+
+    Raises RuntimeError when graphify has no such direct call to switch off: the path it takes
+    to graspologic has then changed, and this reference needs checking first.
+    """
+    if not callable(getattr(graphify_cluster, "_native_leiden", None)):
+        raise RuntimeError("graphify.cluster has no _native_leiden: check what _partition calls now")
+    graphify_cluster._native_leiden = lambda stable, resolution: None
+
+
 def communities(groups: Iterable[Iterable[Hashable]]) -> List[List[str]]:
     """Each community's node ids sorted, the communities largest first, ties by their ids."""
     lists = [sorted(map(str, group)) for group in groups]
@@ -93,6 +106,7 @@ def communities(groups: Iterable[Iterable[Hashable]]) -> List[List[str]]:
 def record() -> Dict[str, Dict[str, Dict[str, List[List[str]]]]]:
     """Every fixture graph's partition and clusters, as graphify with graspologic makes them."""
     graphify_cluster = importlib.import_module("graphify.cluster")  # only the reference venv has graspologic
+    use_graspologic(graphify_cluster)
     graphs = {}
     for name, build in load_graphs().GRAPHS.items():
         by_community: Dict[int, List[Hashable]] = {}
