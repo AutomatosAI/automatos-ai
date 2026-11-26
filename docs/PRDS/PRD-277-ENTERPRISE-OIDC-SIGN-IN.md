@@ -329,8 +329,8 @@ Each wave is one pull request or a short series. Waves 1 to 3 change nothing for
 **Description:** As a developer, I want every membership and role read to go through one resolver keyed on `users.id`, so that it works for any way of signing in.
 
 **Acceptance Criteria:**
-- [ ] `workspace_permission.py`, `workspace_admin.py` and the workspace lookups in `hybrid.py` read by `users.id`.
-- [ ] No SQL outside `core/auth/clerk*.py` and `core/auth/user_link.py` mentions `clerk_user_id`. A test fails if one does. The API files that query by Clerk id are changed to the resolver and listed in the PR.
+- [x] `workspace_permission.py`, `workspace_admin.py` and the workspace lookups in `hybrid.py` read by `users.id`. The reads are `core/auth/person.py`; a Clerk caller's `users.id` is read inside the same statement (`core/auth/clerk_person.py`), so each check makes the round trips it made before.
+- [ ] No SQL outside `core/auth/clerk*.py` and `core/auth/user_link.py` mentions `clerk_user_id`. A test fails if one does. The API files that query by Clerk id are changed to the resolver and listed in the PR. The test is `orchestrator/tests/test_prd277_us202_no_clerk_id_sql.py`. One statement is still on its allow-list, keyed on the statement itself so a second use in the same function fails: in `_stream_tool_loop` in `consumers/chatbot/service.py`, the read of the driving user's Clerk user ID from their `users.id` (the way back, not a lookup by Clerk user ID). That function is far over the 50-line limit, so moving the read to `clerk_id_row` in `core/auth/clerk_person.py` means splitting the function first.
 - [ ] In `saas`, every existing auth, permission and boundary-sweep test passes unchanged.
 - [ ] Dave and the security reviewer sign off before merge.
 
