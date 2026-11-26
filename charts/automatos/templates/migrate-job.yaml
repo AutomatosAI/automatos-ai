@@ -42,6 +42,10 @@ spec:
           args: ["migrate"]
           env:
             {{- include "automatos.apiEnv" . | nindent 12 }}
+          {{- with include "automatos.databaseCaMount" . | trim }}
+          volumeMounts:
+            {{- . | nindent 12 }}
+          {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -50,3 +54,7 @@ spec:
               type: RuntimeDefault
           resources:
             {{- toYaml .Values.migrations.resources | nindent 12 }}
+      {{- with include "automatos.databaseCaVolume" . | trim }}
+      volumes:
+        {{- . | nindent 8 }}
+      {{- end }}

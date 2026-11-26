@@ -95,7 +95,7 @@ def test_the_marker_decides_before_alembic_version_does(has_marker, has_version,
 
 def _main_with(monkeypatch, state: tuple) -> tuple[int, list]:
     built: list = []
-    monkeypatch.setattr(init_fresh_db, "create_engine", lambda url: object())
+    monkeypatch.setattr(init_fresh_db, "create_app_engine", lambda url: object())
     monkeypatch.setattr(init_fresh_db, "_inspect", lambda engine: state)
     monkeypatch.setattr(init_fresh_db, "build_schema", lambda engine: built.append(engine) or 154)
     return init_fresh_db.main(), built
