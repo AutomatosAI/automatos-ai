@@ -170,10 +170,10 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Description:** As a maintainer, I want every place core calls an address someone else chose listed with its purpose, so that the allowance reaches only the callers it is meant for.
 
 **Acceptance Criteria:**
-- [ ] A table lists each caller: file, line, who chooses the address, and which of the five purposes it is.
-- [ ] Each row says whether the call goes through the guard today.
-- [ ] A caller that does not is listed for Dave, with what it does instead.
-- [ ] A row whose purpose is not obvious is listed for Gerard, not guessed.
+- [x] A table lists each caller: file, line, who chooses the address, and which of the five purposes it is. (Callers that go through the guard are in the table; fixed and infrastructure destinations are in a short list. [PRD-282-US-101-OUTBOUND-CALLERS.md](PRD-282-US-101-OUTBOUND-CALLERS.md), read at `2d90dab0a`.)
+- [x] Each row says whether the call goes through the guard today. (Each table row names its guard call.)
+- [x] A caller that does not is listed for Dave, with what it does instead. (Anything of this kind goes to a maintainer privately, not onto the page.)
+- [x] A row whose purpose is not obvious is listed for Gerard, not guessed. (Section 4 of the page.)
 
 #### US-102: The guard takes a purpose · M
 **Description:** As a developer, I want every outbound check to say why it is being made, so that a rule can depend on it.
