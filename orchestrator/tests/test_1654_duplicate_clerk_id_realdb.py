@@ -29,7 +29,7 @@ os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
 os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
-from core.auth import clerk_person  # noqa: E402
+from core.auth import clerk_cutover, clerk_person  # noqa: E402
 from core.auth import hybrid  # noqa: E402
 from core.auth import person as people  # noqa: E402
 from core.auth.user_link import user_id_for_clerk_id  # noqa: E402
@@ -80,6 +80,18 @@ def test_the_row_reads_take_the_lowest_id():
     query = " ".join(str(clerk_person.clerk_person_query(Session(), User.id, "c")).split())
     assert "WHERE users.id = (SELECT users.id FROM users WHERE users.clerk_user_id = " in query
     assert query.endswith("ORDER BY users.id LIMIT :param_1)")
+
+
+def test_the_cutover_reads_the_same_lowest_id_row():
+    seen = []
+
+    class _Db:
+        def execute(self, statement, params):
+            seen.append(str(statement))
+            return SimpleNamespace(fetchone=lambda: (3, "c", "a@example.test"))
+
+    assert clerk_cutover._app_user(_Db(), "c").id == 3
+    assert seen == ["SELECT id, clerk_user_id, email FROM users WHERE clerk_user_id = :cid ORDER BY id LIMIT 1"]
 
 
 # --------------------------------------------------------------------------- the reads, on Postgres
