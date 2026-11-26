@@ -26,6 +26,7 @@ from config import config
 from core.auth import device, hybrid
 from core.auth.dependencies import RequestContext, UserContext
 from core.utils.logging_adapter import user_id_var, workspace_id_var
+from services.mobile import edition_change
 
 WS = UUID("6a0f3c1e-2b4d-4e8f-9a1b-f10500a0c001")
 CLERK_USER = "user_2f105owner"
@@ -179,6 +180,7 @@ def test_a_board_sdk_key_resolves_off_the_loop(seen, monkeypatch):
 
 def test_a_paired_device_resolves_off_the_loop_and_never_reaches_the_clerk_lane(seen, monkeypatch):
     monkeypatch.setattr(config, "AUTH_EDITION", "local")
+    monkeypatch.setattr(edition_change, "_status", edition_change.CONFIRMED)  # this install's boot check passed
     paired = RequestContext(workspace_id=WS, user=UserContext(id="owner@f105.test"), auth_type=device.DEVICE_AUTH_TYPE)
 
     def lookup(request, token):

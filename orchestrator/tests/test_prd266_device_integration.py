@@ -114,8 +114,8 @@ def _settle(db) -> None:
 
 
 @pytest.fixture
-def local(monkeypatch, db_session):
-    """The local edition, the real device lane on the test's session, a frozen clock."""
+def local(monkeypatch, db_session, edition_confirmed):
+    """The local edition, whose boot check passed, the real device lane on the test's session, a frozen clock."""
     monkeypatch.setattr(config, "AUTH_EDITION", "local")
     monkeypatch.setattr(device, "SessionLocal", lambda: _BorrowedSession(db_session))
     monkeypatch.setattr(device, "_now", lambda: T0)

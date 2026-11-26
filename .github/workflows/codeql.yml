@@ -3,8 +3,8 @@ name: CodeQL
 # PRD-173 (F092, W3 slice) — SAST lane.
 #
 # Static analysis (CodeQL) over the repo's two languages: the Python
-# orchestrator and the TypeScript/JavaScript frontend. Runs on PRs to main
-# (so new alerts surface before merge) and weekly (to catch newly-published
+# orchestrator and the TypeScript/JavaScript frontend. Runs on PRs to main and
+# to release branches (so new alerts surface before merge) and weekly (to catch newly-published
 # query updates against the existing tree).
 #
 # Interpreted languages use build-mode: none — no compile step. CodeQL's
@@ -15,15 +15,20 @@ name: CodeQL
 # the tree on day one against pre-existing findings (see PRD-173 §6).
 
 on:
+  # release/** too: a patch's pull request is analysed as main's is
+  # (docs/deployment-infrastructure/patching-a-release.md), and each merge into a release
+  # branch is, so the next pull request into it has that branch's analysis to compare with.
   push:
     branches:
       - main
+      - "release/**"
   pull_request:
     branches:
       - main
+      - "release/**"
     # A PR that changes only markdown has nothing to analyse (#1455). Only the
-    # PR is filtered: CodeQL compares a PR with main's last analysis, so every
-    # push to main is analysed. CodeQL is not a required check, so a skipped
+    # PR is filtered: CodeQL compares a PR with its base branch's last analysis,
+    # so every push to main or a release branch is analysed. CodeQL is not a required check, so a skipped
     # run blocks no merge. docs/ is not ignored whole: it holds .py and .html.
     paths-ignore:
       - "**/*.md"

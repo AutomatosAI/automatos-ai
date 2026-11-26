@@ -30,6 +30,8 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import text
 
+pytestmark = pytest.mark.usefixtures("edition_confirmed")  # the boot check passed (#1660)
+
 ORCH = Path(__file__).resolve().parents[1]
 DEVICES = "/api/v1/mobile/devices"
 T0 = datetime(2026, 10, 20, 9, 0, tzinfo=timezone.utc)

@@ -499,3 +499,16 @@ def new_session(engine):
     # Files with no sweep of their own must still not pin row locks for the
     # rest of the run -- a leak here would hang a LATER module's sweep.
     _release_sessions(created)
+
+
+@pytest.fixture
+def edition_confirmed(monkeypatch):
+    """This process's edition check has passed, as on an install whose boot ran it (#1660).
+
+    A test app has no lifespan, so its check never ran, and a check that never ran refuses device
+    tokens and the pairing routes until a request runs it on the real database. Tests of those
+    routes that are not about the check say it passed with this fixture.
+    """
+    from services.mobile import edition_change
+
+    monkeypatch.setattr(edition_change, "_status", edition_change.CONFIRMED)

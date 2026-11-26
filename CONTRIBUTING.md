@@ -109,6 +109,17 @@ AI-assisted contributions are welcome, and most contributions now start in one. 
 
 Lanes marked non-required in their workflow file still run and still report. Treat red as red.
 
+### Backend test shards
+
+On a pull request that runs the whole backend suite, `orchestrator-tests` splits it into `BACKEND_SHARDS` parallel shards (`.github/workflows/test.yml`). `scripts/ci/backend_test_plan.py` gives each test file to one shard, balanced by the seconds recorded in `scripts/ci/backend_test_durations.json`. A file missing from that record weighs the median, so a stale record unbalances the shards.
+
+The standard: **every full shard finishes within 10 minutes on `main`.** The job's timeout is 20 minutes, so a slow runner still has room. When the slowest shard regularly takes over 10 minutes, or the shards' times differ by more than a few minutes:
+
+1. Rebuild the record from a green full run on `main`. Parse each shard's log on its own, then merge the results: `python3 scripts/ci/backend_test_plan.py durations < <shard log>` (the log from `gh api repos/AutomatosAI/automatos-ai/actions/jobs/<job id>/logs`).
+2. If the balanced shards would still take over 10 minutes, raise `BACKEND_SHARDS`. Each shard costs about 5 minutes before its first test: the job's set-up, then pytest's collection and imports. So a shard's share of the tests should be about 5 minutes.
+
+Put the change in a pull request of its own.
+
 ---
 
 ## Security

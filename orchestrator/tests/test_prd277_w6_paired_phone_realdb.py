@@ -126,6 +126,7 @@ def install(db_session, seed_workspace, monkeypatch):
     borrowed = _BorrowedSession(db_session)
     monkeypatch.setattr(device, "SessionLocal", lambda: borrowed)
     monkeypatch.setattr(edition_change, "SessionLocal", lambda: borrowed)
+    monkeypatch.setattr(edition_change, "_status", edition_change.CONFIRMED)  # this install's boot check passed
     monkeypatch.setattr(hybrid, "_enrich_log_context", lambda ctx: None)
     monkeypatch.setattr(mobile_devices, "_rate_store", RateLimitStore(redis_factory=lambda: None))
     return SimpleNamespace(workspace_id=workspace_id, person=person.pk, email=person.email)

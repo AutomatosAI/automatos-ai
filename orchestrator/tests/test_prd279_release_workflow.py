@@ -90,6 +90,10 @@ def test_the_version_and_the_preflight_come_before_anything_builds_and_only_on_a
     assert sorted(named) == sorted(entry["name"] for entry in JOBS["merge"]["strategy"]["matrix"]["image"])
     for part in ("scripts/ci/release_preflight.py", '--sha "$GITHUB_SHA"', '--default-branch "$DEFAULT_BRANCH"'):
         assert part in preflight["run"], part
+    # It reads the releases the commit holds with git, so it runs in the full-history checkout.
+    assert preflight["working-directory"] == "release-history"
+    checkout = next(step for step in steps if step.get("with", {}).get("path") == "release-history")
+    assert checkout["with"]["fetch-depth"] == 0 and steps.index(checkout) < steps.index(preflight)
     assert JOBS["changes"]["permissions"] == {"actions": "read", "contents": "read", "pull-requests": "read"}
 
 

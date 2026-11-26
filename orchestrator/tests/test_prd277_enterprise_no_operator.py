@@ -48,6 +48,8 @@ from core.auth.workspace_permission import workspace_permission_granted  # noqa:
 from core.models.mobile_devices import MobileDeviceStatus  # noqa: E402
 from services.mobile import discovery  # noqa: E402
 
+pytestmark = pytest.mark.usefixtures("edition_confirmed")  # the boot check passed (#1660)
+
 WS = uuid.UUID("00000000-0000-0000-0000-0000000277bb")
 # Stand-ins for credentials, built from parts so no literal looks like one.
 CLERK_SHAPED_TOKEN = ".".join(("header", "claims", "signature"))

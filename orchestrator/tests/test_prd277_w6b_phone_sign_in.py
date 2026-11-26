@@ -352,7 +352,7 @@ class _Db:
 
 def _exchange_client(monkeypatch, db=None) -> TestClient:
     monkeypatch.setattr(devices_api, "_rate_store", SimpleNamespace(check=lambda *a, **k: (True, 30, 29, 600)))
-    monkeypatch.setattr(edition_change, "_status", edition_change.NOT_RUN)
+    monkeypatch.setattr(edition_change, "_status", edition_change.CONFIRMED)  # this install's boot check passed
     app = FastAPI()
     app.include_router(devices_api.router)
     app.dependency_overrides[get_db] = lambda: db or _Db()

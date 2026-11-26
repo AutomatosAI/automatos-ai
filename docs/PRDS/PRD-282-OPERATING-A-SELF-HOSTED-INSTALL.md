@@ -239,9 +239,11 @@ Each wave is one pull request or a short series. CI is the only gate.
 **Acceptance Criteria:**
 - [ ] `/health`'s list of components has an entry for Redis, object storage, the search index, the memory store and the model provider, each up, down or not configured, with the time of its last check.
   - also `unchecked`: no finished check yet, a stale one, or a check the role may not make; the owner's to accept
+  - "may not make" means an explicit access-denied code. A bare 403, which a wrong key or a revoked role also gives, is `down`; so is a missing documents bucket on AWS, which core does not create (#1661)
 - [x] Each check runs in the background with its own time limit. The route only reads results, and a test with every dependency hanging shows it still answers at once.
 - [ ] The model provider is never called by a check. Its entry comes from whether one is configured and how the last real call ended.
   - never `not configured`: `unchecked` until a call through the model manager ends, since a key stored in Settings cannot be seen without decrypting it; the owner's to accept
+  - `down` only after 3 failed calls in a row, so one failed call does not show `down` until the reading goes stale (#1661)
 - [x] With Redis down, `/health` still returns 200. Its status code changes only for the database, as today.
 - [x] No entry holds an address, a credential or error text from a dependency.
 - [ ] No new route is added, and the three existing health tests pass.

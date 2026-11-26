@@ -27,6 +27,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
+pytestmark = pytest.mark.usefixtures("edition_confirmed")  # the boot check passed (#1660)
+
 ORCH = Path(__file__).resolve().parents[1]
 PAIRING_CODES = "/api/v1/mobile/pairing-codes"
 PAIR = "/api/v1/mobile/pair"

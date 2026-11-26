@@ -49,6 +49,8 @@ from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.editions import capabilities_for  # noqa: E402
 from services.mobile import remote_access  # noqa: E402
 
+pytestmark = pytest.mark.usefixtures("edition_confirmed")  # the boot check passed (#1660)
+
 WS = uuid.UUID("00000000-0000-0000-0000-0000000266a5")
 TEST_API_KEY = "prd266-remote-access-test-key"
 PAIRING_REQUIRED = "device_pairing_required"
