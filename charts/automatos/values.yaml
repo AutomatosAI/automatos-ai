@@ -110,10 +110,13 @@ edition:
       # The access rule (OIDC_REQUIRED_CLAIMS): claim=value rules separated by ';', which a
       # token must match before anyone is let in. Required for an issuer many organisations
       # share and with a default role; the API checks the rules and both cases at start.
+      # At a shared issuer the rule must name your organisation: hd=<domain> for Google,
+      # tid=<tenant-id> for Microsoft. Start-up checks only that some valid rule exists.
       requiredClaims: ""
       # Host names, separated by commas, besides the issuer's own, on which the provider's
       # metadata may put its token endpoint and keys (OIDC_ENDPOINT_HOSTS). No scheme, port,
-      # wildcard or address.
+      # wildcard or address. Each must resolve to public addresses: only the issuer's own host
+      # may resolve to a private one.
       endpointHosts: ""
       # A ConfigMap in the release's namespace holding the certificate authority of a provider
       # with a private certificate, under caKey. Mounted read-only at /etc/automatos/oidc-ca in

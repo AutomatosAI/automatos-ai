@@ -43,6 +43,10 @@ Then edit the app client's settings:
 
 Copy the client ID and the client secret. Put the secret in the Kubernetes Secret that `existingSecret` names, under the key `OIDC_CLIENT_SECRET`.
 
+Turn off self-registration. With self-service sign-up on, anyone can create a user in the pool and sign in through it. The access rule is optional for a pool that serves one organisation, and with none, Automatos lets that user in and makes them a person. In the user pool's sign-up settings, turn off **Self-service sign-up**. A rule on `cognito:groups` also keeps such users out, because a user is added to a group by an administrator. The console label and the group behaviour are from Amazon's documentation, not run here.
+
+When the pool federates another identity provider (for example [AWS IAM Identity Center](enterprise-sign-in-aws-iam-identity-center.md)), remove the pool's own user directory, **Cognito user pool**, from the app client's identity providers, so people sign in only through the federated provider. Not run here.
+
 Amazon's app client page describes an option to have Amazon Cognito manage the secret in AWS Secrets Manager, where "Amazon Cognito stores and rotates the secret". Automatos reads `OIDC_CLIENT_SECRET` from the Kubernetes Secret at start. Keep that value the same as the app client's current secret, and restart the API after changing it.
 
 ## 3. The issuer address

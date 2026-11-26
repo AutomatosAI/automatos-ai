@@ -73,6 +73,7 @@ The API reads the metadata at start and refuses metadata it cannot use [orchestr
 - Its `issuer` equals `OIDC_ISSUER` exactly.
 - Every endpoint is an `https` address.
 - The `token_endpoint` and the `jwks_uri` are on the issuer's host, or on a host listed in `OIDC_ENDPOINT_HOSTS`. The `authorization_endpoint` is opened by the browser, so its host is not limited [orchestrator/core/auth/oidc_provider.py:173-176]().
+- Only the issuer's own host, on the issuer's port, may resolve to a private, loopback or link-local address: an identity provider inside your network. Every other host Automatos calls, a host in `OIDC_ENDPOINT_HOSTS` included, must resolve to public addresses only. A token endpoint or keys address on a private host other than the issuer's is refused, and sign-in answers `identity_provider_unavailable` [orchestrator/core/auth/oidc_http.py:163-184](). So a provider inside your network, a self-hosted Keycloak for example, must serve its token endpoint and keys on the issuer's own host.
 - It offers the response type `code`, the PKCE method `S256`, and one of the signing algorithms `RS256`, `PS256` or `ES256` [orchestrator/core/auth/oidc_provider.py:69](). A list the metadata leaves out counts as offering everything.
 - It offers client authentication with a secret. Automatos uses `client_secret_basic` when it is listed or the list is absent, else `client_secret_post` [orchestrator/core/auth/oidc_provider.py:197-204](). The provider must issue the application a client secret.
 
@@ -89,6 +90,8 @@ The origin is the scheme, host and port of `FRONTEND_URL` (the chart's `edition.
 ```
 https://automatos.example.com/api/v1/auth/oidc/callback
 ```
+
+Register it exactly as shown. Never register a wildcard or a pattern that would also match it: the provider would then accept other addresses as the place to send a sign-in's code.
 
 Register the address after sign-out as well, where the provider asks for one:
 
@@ -174,7 +177,11 @@ The rule is required in two cases. The API refuses to start without one:
 - The issuer is shared by many organisations: `https://accounts.google.com`, or Microsoft's `common`, `organizations` or `consumers` authorities or the personal-accounts tenant `9188040d-6c67-4c5b-b112-36a304b66dad` [orchestrator/core/auth/access_rule.py:74-79]().
 - `ENTERPRISE_DEFAULT_ROLE` is anything but `none`.
 
+**At a shared issuer the rule must name your organisation:** `hd=<domain>` for Google, `tid=<tenant-id>` for Microsoft. Start-up cannot check this. It only checks that some valid rule exists [orchestrator/core/edition_start_up.py:373-385](), so `given_name=Alex` at `https://accounts.google.com` starts, and admits every Google account with that name.
+
 Example: `OIDC_REQUIRED_CLAIMS=hd=example.com` lets in only accounts in the `example.com` Google Workspace domain.
+
+Microsoft's `common`, `organizations` and `consumers` authorities do not work at all, with or without a rule. Their metadata's `issuer` is not their own address: `https://login.microsoftonline.com/{tenantid}/v2.0` for `common` and `organizations`, and the personal-accounts tenant's address for `consumers` (Microsoft's metadata, read on 26 November 2026). Automatos refuses metadata whose `issuer` is not `OIDC_ISSUER` [orchestrator/core/auth/oidc_provider.py:235-240](), so every sign-in answers `identity_provider_unavailable`. Use your tenant's own issuer ([Microsoft Entra ID](enterprise-sign-in-entra-id.md#3-the-issuer-address)).
 
 ### The first admin
 
@@ -204,7 +211,7 @@ Groups matter only for the access rule. Roles are set in Automatos. What each pr
 | Microsoft Entra ID | `roles` (app roles), `groups`, `tid` | Above 200 groups, Entra leaves `groups` out of the token. A rule on an app role is not affected. |
 | Google Workspace | `hd` | Google sends no groups. Access by group is not available with Google. |
 | Okta | `groups`, once a groups claim is configured | A groups filter matching more than 100 groups fails the request at Okta. |
-| Keycloak | Any claim a protocol mapper adds | The CI realm adds `automatos:team`. |
+| Keycloak | A claim from a group-membership or client-role protocol mapper | The CI realm's `automatos:team` is hard-coded: every user gets it, so it restricts nothing. See the [Keycloak guide](enterprise-sign-in-keycloak.md#4-claims). |
 | Amazon Cognito | `cognito:groups` | A user belongs to at most 100 groups. |
 
 ---
@@ -333,6 +340,18 @@ The session cookie's name (`SESSION_COOKIE_NAME`) and the CSRF header's (`SESSIO
 The database settings are documented in the [chart README's Settings table](../../charts/automatos/README.md#settings): the chart stops rendering unless `database.sslmode` is `verify-full` with `database.caConfigMap`.
 
 The Secret `existingSecret` names holds more than `OIDC_CLIENT_SECRET`: `DATABASE_URL`, `REDIS_URL`, `API_KEY`, `CREDENTIAL_ENCRYPTION_KEY` and others. See the [chart README's Install section](../../charts/automatos/README.md#install) for the list.
+
+### Rotating the client secret
+
+The API reads `OIDC_CLIENT_SECRET` when it starts [orchestrator/config.py:618](), and uses that value until it restarts. To change it without a gap:
+
+1. At the provider, create a second client secret. Leave the old one in place.
+2. Put the new value in the Secret `existingSecret` names, under `OIDC_CLIENT_SECRET`.
+3. Restart the API: `kubectl -n <namespace> rollout restart deploy/<fullname>-api`.
+4. Once every API pod has restarted, sign in to check the new secret works.
+5. At the provider, revoke the old secret.
+
+Whether a provider holds two secrets at once is the provider's own; check its documentation. With a provider that holds only one, sign-in fails between changing the secret there and the API's restart.
 
 ---
 
