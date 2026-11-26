@@ -278,9 +278,9 @@ Note: libpq prefers GSSAPI encryption to TLS whatever `sslmode` says, so with `v
 **Description:** As a maintainer, I want every place the API keeps a file listed, so that "no disk of its own" is checked and not assumed.
 
 **Acceptance Criteria:**
-- [ ] A table lists each writer: file, line, what it writes, whether it must survive a restart, and whether an object-storage copy exists today.
-- [ ] Temporary files that need no home are marked as such.
-- [ ] Anything that cannot move to object storage is listed for Gerard, not guessed.
+- [x] A table lists each writer: file, line, what it writes, whether it must survive a restart, and whether an object-storage copy exists today. Done in [PRD-278-US-401-DISK-WRITERS.md](PRD-278-US-401-DISK-WRITERS.md), section 2 (11 rows) and section 6 (every path-valued setting); the few writers whose reach or library behaviour could not be settled are listed in its section 5, item 6.
+- [x] Temporary files that need no home are marked as such. Done: [PRD-278-US-401-DISK-WRITERS.md](PRD-278-US-401-DISK-WRITERS.md), section 3 (24 rows, each with where it is removed or "not removed") and section 4 (library caches).
+- [x] Anything that cannot move to object storage is listed for Gerard, not guessed. Done: [PRD-278-US-401-DISK-WRITERS.md](PRD-278-US-401-DISK-WRITERS.md), section 5. The decisions on those rows are still the owner's.
 
 #### US-402: The upload route stores the original in object storage · M
 **Description:** As an operator, I want an uploaded file's original in object storage, so that it survives the pod and its zone.
