@@ -239,7 +239,10 @@ class HeartbeatService:
         # PRD-185 S2: per-lane telemetry canary. Alarms when organic tool-execution
         # rows stop landing (the 2-month type-poison outage S1 repaired had no such
         # signal). Registered here beside the Mem0 probe; the first run fires at boot
-        # as the boot-probe, then every TELEMETRY_CANARY_INTERVAL_SECONDS.
+        # as the boot-probe, then every TELEMETRY_CANARY_INTERVAL_SECONDS. The boot-probe
+        # runs late rather than not at all: the services started after this one can hold
+        # the loop past APScheduler's one-second default grace, which skipped it as missed
+        # and left the canary silent for a whole interval.
         try:
             from config import config as _cfg
 
@@ -255,6 +258,7 @@ class HeartbeatService:
                     replace_existing=True,
                     max_instances=1,
                     coalesce=True,
+                    misfire_grace_time=None,  # a late boot-probe still runs
                     next_run_time=datetime.now(timezone.utc),  # boot-probe: run once now
                 )
                 logger.info(
