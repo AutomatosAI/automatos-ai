@@ -15,7 +15,8 @@ on the install's address) and the in-process provider, each test in a transactio
   US-405's sign-in rules: ``test_prd277_w4b_first_admin_realdb.py``.)
 * **Step-up** (US-406): ``/start?step_up=1`` needs a live session, sends ``max_age=0`` and keeps
   the session's id (every parameter it sends: ``test_prd277_w4b_auth_time_request_realdb.py``);
-  the callback refreshes that session's ``auth_time`` for the same person only, issues no session and sets no cookie, audited ``auth:step_up``. Another person, a token with no
+  for the same person only, the callback ends that session and sets the cookie of a new one with
+  the fresh ``auth_time``, the old token refused at once, audited ``auth:step_up``. Another person, a token with no
   (its own code, ``step_up_no_auth_time``) or an old ``auth_time``, and an ended session are
   refused, changing nothing and creating nobody; the step-up runs before anything that finds or
   creates a person. (Its edges: ``test_prd277_w4b_step_up_edges_realdb.py``.)
@@ -49,10 +50,12 @@ os.environ.setdefault("POSTGRES_DB", "test")
 from api import auth_oidc as routes  # noqa: E402
 from api import auth_sessions  # noqa: E402
 from config import config  # noqa: E402
-from core.auth import first_admin, hybrid, oidc_provider, people, session_lane, sessions, sign_in_flow  # noqa: E402
+from core.auth import first_admin, hybrid, oidc_provider, people, session_cookie, session_lane, sessions  # noqa: E402
+from core.auth import sign_in_flow  # noqa: E402
 from core.auth import step_up, step_up_sign_in  # noqa: E402
 from core.auth.oidc_sign_in import OidcSignIn, SIGNED_OUT_PATH, STEP_UP_MAX_AGE  # noqa: E402
 from core.auth.pairing import hash_secret  # noqa: E402
+from core.models.auth_sessions import AuthSession  # noqa: E402
 from core.auth.sign_in_methods import SignInRegistry  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 from core.seeds.seed_default_workspace import DEFAULT_WORKSPACE_NAME, seed_default_workspace  # noqa: E402
@@ -358,6 +361,17 @@ def _step_ups(install) -> list:
     return [(uid, d) for a, uid, d in _audits(install.db, install.workspace_id) if a == "auth:step_up"]
 
 
+def _new_session(db, answer):
+    """The session a confirmed step-up's answer set in the cookie: its token and its row."""
+    token = answer.cookies[config.SESSION_COOKIE_NAME]
+    db.expire_all()
+    return token, sessions.find_session(db, token)
+
+
+def _confirmed(new_session_id) -> dict:
+    return {"confirmed": True, "new_session_id": str(new_session_id)}
+
+
 def test_the_step_up_start_named_in_the_403_is_the_step_up_route():
     assert step_up.SIGN_IN_AGAIN_START == step_up_sign_in.STEP_UP_START == START + "?step_up=1"
 
@@ -372,9 +386,11 @@ def test_a_step_up_without_a_live_session_is_refused_and_stores_nothing(install)
     assert "set-cookie" not in answer.headers  # no sign-in bound to this browser
 
 
-def test_a_step_up_sends_max_age_0_and_refreshes_only_the_asking_session(install):
+def test_a_step_up_sends_max_age_0_and_replaces_the_asking_session_with_a_new_one(install):
     me = _signed_in(install, "steps-up")
     assert "max_age" not in install.idp.authorize_requests[-1]  # a plain sign-in never asks for it
+    asked = install.db.get(AuthSession, me.session_id)
+    absolute = asked.absolute_expires_at
 
     started = _start(install, step_up_too=True)
     assert _query(started.headers["location"])["max_age"] == STEP_UP_MAX_AGE == "0"
@@ -385,10 +401,44 @@ def test_a_step_up_sends_max_age_0_and_refreshes_only_the_asking_session(install
     answer = install.client.get(install.idp.approve(started.headers["location"]), follow_redirects=False)
 
     assert answer.status_code == 303 and answer.headers["location"] == "/settings"
-    assert not _sets_session_cookie(answer)
-    assert _count(install.db, "SELECT COUNT(*) FROM auth_sessions WHERE user_id = :u", u=me.user_id) == 1
-    assert _auth_time(install.db, me.session_id) > datetime.now(timezone.utc) - timedelta(minutes=2)
-    assert _step_ups(install) == [(me.user_id, {"confirmed": True})]
+    assert _sets_session_cookie(answer)
+    token, new = _new_session(install.db, answer)
+    assert token != me.token and new.id != me.session_id and new.user_id == me.user_id
+    assert new.auth_time > datetime.now(timezone.utc) - timedelta(minutes=2)
+    assert new.absolute_expires_at == absolute  # a step-up never lengthens a session
+    assert _auth_time(install.db, me.session_id) == me.old  # the old row is ended, not rewritten
+    ended = install.db.get(AuthSession, me.session_id)
+    assert ended.revoked_reason == sessions.REVOKED_STEP_UP and ended.revoked_at is not None
+    assert _count(install.db, "SELECT COUNT(*) FROM auth_sessions WHERE user_id = :u", u=me.user_id) == 2
+    assert _step_ups(install) == [(me.user_id, _confirmed(new.id))]
+
+
+def test_after_a_step_up_the_old_token_is_refused_and_the_new_one_works(install):
+    me = _signed_in(install, "swaps-tokens")
+    answer = _sign_in(install, step_up_too=True)
+    token, _ = _new_session(install.db, answer)
+
+    refused = install.client.post(SIGN_OUT, headers={"authorization": "Bearer " + me.token})
+
+    assert refused.status_code == 401
+    assert refused.json()["detail"]["code"] == "session_ended"
+    assert refused.json()["detail"]["reason"] == sessions.REVOKED
+    assert install.client.post(SIGN_OUT, headers={"authorization": "Bearer " + token}).status_code == 200
+
+
+def test_the_old_token_in_a_cookie_is_401_and_leaves_the_cookie_that_now_holds_the_new_one(install):
+    """A request that left before the step-up finished must not clear the successor's cookie."""
+    session_cookie.install_cookie_session_ended_handler(install.client.app)  # as main.py does
+    me = _signed_in(install, "keeps-its-cookie")
+    _sign_in(install, step_up_too=True)
+    late = TestClient(install.client.app, base_url=INSTALL)
+
+    answer = late.get(f"/api/v1/auth/people/{me.user_id}/sessions",
+                      headers={"cookie": f"{config.SESSION_COOKIE_NAME}={me.token}"})
+
+    assert answer.status_code == 401 and "set-cookie" not in answer.headers
+    assert answer.json()["detail"]["code"] == "session_ended"
+    assert answer.json()["detail"]["reason"] == sessions.REVOKED
 
 
 def test_another_person_signing_in_is_refused_and_never_switches_the_session(install, monkeypatch):
@@ -427,8 +477,10 @@ def test_a_step_up_under_another_subject_claim_finds_the_same_person(install, mo
     answer = install.client.get(install.idp.approve(started.headers["location"]), follow_redirects=False)
 
     assert answer.status_code == 303 and answer.headers["location"] == "/settings"
-    assert _auth_time(install.db, session_id) > datetime.now(timezone.utc) - timedelta(minutes=2)
-    assert _step_ups(install) == [(_identity_user(install.db, "oid-that-steps-up"), {"confirmed": True})]
+    _token, new = _new_session(install.db, answer)
+    person = _identity_user(install.db, "oid-that-steps-up")
+    assert new.user_id == person and new.auth_time > datetime.now(timezone.utc) - timedelta(minutes=2)
+    assert _step_ups(install) == [(person, _confirmed(new.id))]
 
 
 @pytest.mark.parametrize(("behaviour", "reason", "code"), [
@@ -443,8 +495,10 @@ def test_a_token_that_does_not_prove_a_fresh_sign_in_is_refused(install, behavio
 
     answer = install.client.get(install.idp.approve(started.headers["location"]), follow_redirects=False)
 
-    assert _refusal(answer) == code
+    assert _refusal(answer) == code and not _sets_session_cookie(answer)
     assert _auth_time(install.db, me.session_id) == me.old
+    assert _count(install.db, "SELECT COUNT(*) FROM auth_sessions WHERE user_id = :u AND revoked_at IS NULL",
+                  u=me.user_id) == 1  # the session that asked lives on, and no other was issued
     assert _step_ups(install) == [(me.user_id, {"confirmed": False, "reason": reason})]
 
 
@@ -524,17 +578,19 @@ def test_no_secret_reaches_a_log_line_or_an_answer_over_step_up_and_sign_out(ins
     answers, values = [], [install.idp.client_secret]
     with caplog.at_level(logging.DEBUG):
         me = _signed_in(install, "careful")
-        values += _step_up_round(install, "careful", answers)        # confirmed
+        values += _step_up_round(install, "careful", answers)        # confirmed: a new session
+        renewed = answers[-1].cookies[config.SESSION_COOKIE_NAME]
         values += _step_up_round(install, "an-impostor", answers)    # refused: another person
-        answers.append(install.client.post(SIGN_OUT, headers={"authorization": "Bearer " + me.token}))
+        answers.append(install.client.post(SIGN_OUT, headers={"authorization": "Bearer " + renewed}))
     assert [answer.status_code for answer in answers] == [303, 303, 200]
 
     formatter = logging.Formatter("%(name)s %(message)s")
     logged = "\n".join(formatter.format(record) for record in caplog.records
                        if not (record.name == "httpx" and (INSTALL in record.getMessage()
                                                            or "/authorize?" in record.getMessage())))
-    for value in (*values, *install.idp.issued, me.token):
+    tokens = (me.token, renewed, hash_secret(me.token), hash_secret(renewed))
+    for value in (*values, *install.idp.issued, *tokens):
         assert value not in logged
     for answer in answers:
         shown = answer.headers.get("location", "") + answer.text
-        assert not any(value in shown for value in (*values, *install.idp.issued, me.token))
+        assert not any(value in shown for value in (*values, *install.idp.issued, *tokens))

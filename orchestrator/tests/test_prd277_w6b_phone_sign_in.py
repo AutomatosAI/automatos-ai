@@ -454,3 +454,32 @@ def test_pairing_off_revokes_paired_devices_only_and_another_edition_revokes_bot
         device_audit.REVOKED_EDITION_CHANGED: ("paired", "oidc"),
         device_audit.REVOKED_PAIRING_SWITCHED_OFF: ("paired",),
     }
+
+
+# --------------------------------------------------------------------------- a fresh sign-in (open question 13)
+
+
+def test_a_phones_sign_in_time_is_judged_by_the_step_ups_own_rule():
+    from datetime import datetime, timedelta, timezone
+
+    from core.auth import step_up_sign_in
+    from core.auth.oidc_sign_in import NO_AUTH_TIME
+
+    started = datetime(2026, 11, 21, 12, 0, tzinfo=timezone.utc)
+    now, skew = started + timedelta(minutes=1), step_up_sign_in.CLOCK_SKEW
+    judged = {
+        NO_AUTH_TIME: session_audit.STEP_UP_NO_AUTH_TIME,
+        started - skew - timedelta(seconds=1): session_audit.STEP_UP_STALE,
+        now + skew + timedelta(seconds=1): session_audit.STEP_UP_FUTURE,
+        started - skew: None,
+        now: None,
+    }
+    for auth_time, reason in judged.items():
+        assert step_up_sign_in.sign_in_time_refusal(auth_time, started, now) == reason, auth_time
+
+
+def test_a_phones_sign_in_time_refusals_are_audited_and_go_to_the_app_link_as_sign_in_refused():
+    assert session_audit.PHONE_SIGN_IN_TIME_REASONS == (
+        session_audit.STEP_UP_NO_AUTH_TIME, session_audit.STEP_UP_STALE, session_audit.STEP_UP_FUTURE)
+    assert set(session_audit.PHONE_SIGN_IN_TIME_REASONS) <= set(session_audit.REFUSAL_REASONS)
+    assert not set(session_audit.PHONE_SIGN_IN_TIME_REASONS) & set(PHONE_REFUSALS)

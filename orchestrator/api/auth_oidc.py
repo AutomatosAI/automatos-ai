@@ -21,10 +21,11 @@ shared limiter's store cannot be reached, these two routes count in this process
   ``max_age=0``; with no live session it is refused (``step_up_refused``) and nothing is stored, as
   it is when the browser's ``Sec-Fetch-Site`` says another site sent it (``_step_up_sent_from_here``).
 * ``GET /callback`` finishes it (``sign_in_flow.finish_sign_in``): 303 to the stored path, with the
-  session cookie set (``session_cookie.set_session_cookie``). After a step-up no session is issued
-  and the cookie is left as it is: the browser's own session now carries a fresh ``auth_time``. A
-  callback with more than ``CALLBACK_PARAMS_MAX`` parameters is read as carrying none, so it is
-  refused.
+  session cookie set (``session_cookie.set_session_cookie``). After a step-up the cookie holds the
+  new session that replaced the browser's own (``step_up_sign_in.confirm_step_up``), which ended. A
+  step-up's callback must present the asking session in the session cookie (``session_cookie_token``):
+  one that presents another session, or none, is refused (``step_up_refused``). A callback with
+  more than ``CALLBACK_PARAMS_MAX`` parameters is read as carrying none, so it is refused.
 
 A phone (US-603, ``core.auth.phone_sign_in``) starts at the same address with
 ``app_link``, ``code_challenge``, ``code_challenge_method=S256``, ``install_id`` and ``platform``:
@@ -163,7 +164,8 @@ def _refused(code: str, phone: Optional[PhoneStart] = None) -> RedirectResponse:
 
 def _signed_in(done: sign_in_flow.SignInDone) -> RedirectResponse:
     """303 to where the person was going with the session cookie, or, for a phone, to the confirmation
-    page with its cookie. No session after a step-up (the browser keeps its own, refreshed one)."""
+    page with its cookie. After a step-up the cookie is the new session's, in place of the one
+    that asked."""
     if done.phone_confirmation is not None:
         response = _redirect(CONFIRM_PAGE)
         set_confirm_cookie(response, done.phone_confirmation)
@@ -180,7 +182,9 @@ def _clear_binding(response: RedirectResponse) -> None:
 
 
 def _browser(request: Request) -> sign_in_flow.Browser:
-    return sign_in_flow.Browser(ip_address=get_client_ip(request), user_agent=request.headers.get("user-agent"))
+    """The request's address and agent, and the session cookie a step-up's callback must present."""
+    return sign_in_flow.Browser(ip_address=get_client_ip(request), user_agent=request.headers.get("user-agent"),
+                                session_token=session_cookie_token(request))
 
 
 def _params(request: Request) -> Dict[str, Tuple[str, ...]]:

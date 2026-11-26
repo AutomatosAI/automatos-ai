@@ -8,7 +8,9 @@ with it (``device:paired``), a device revoked (``device:revoked``) and the insta
 write none of these (``records_devices``). The devices revoked when the install starts as another
 edition, or with pairing switched off, are recorded in every edition (``services.mobile.edition_change``),
 reason ``edition_changed`` or ``pairing_switched_off``; those an install admin revokes by ending their
-person's sessions (``core.auth.people.end_access_of``), reason ``sessions_ended``.
+person's sessions (``core.auth.people.end_access_of``), reason ``sessions_ended``. In an edition whose device tokens age out, one whose token is past its
+maximum age is recorded at its first request after, reason ``token_max_age_reached``
+(``services.mobile.token_age``).
 
 Each row is staged in the caller's transaction and never committed here, so a change and its row
 land together or not at all. A row holds the device's id, its person and why, the caller's address
@@ -32,11 +34,13 @@ DEVICE_PAIRED = "device:paired"
 DEVICE_REVOKED = "device:revoked"
 PUSH_CONSENT_CHANGED = "push:consent_changed"
 # Why a device was revoked: by a person (its own, or a workspace owner or admin); by an install admin
-# ending its person's sessions; at the first start as another edition; at the first start with pairing off.
+# ending its person's sessions; at the first start as another edition; at the first start with pairing off;
+# at its first request once its token is past its maximum age.
 REVOKED_BY_PERSON = "revoked"
 REVOKED_SESSIONS_ENDED = "sessions_ended"
 REVOKED_EDITION_CHANGED = "edition_changed"
 REVOKED_PAIRING_SWITCHED_OFF = "pairing_switched_off"
+REVOKED_TOKEN_MAX_AGE = "token_max_age_reached"
 
 
 def records_devices() -> bool:
@@ -71,6 +75,7 @@ __all__ = [
     "REVOKED_EDITION_CHANGED",
     "REVOKED_PAIRING_SWITCHED_OFF",
     "REVOKED_SESSIONS_ENDED",
+    "REVOKED_TOKEN_MAX_AGE",
     "records_devices",
     "stage",
 ]

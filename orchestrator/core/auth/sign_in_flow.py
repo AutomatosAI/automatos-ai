@@ -11,9 +11,17 @@ provider directly. ``finish_sign_in`` runs, in this order:
    hold for the verified token's claims (``core.auth.access_rule``). A refusal is audited
    (``access_rule``) and answered ``sign_in_not_allowed``, before any person is found, created or
    linked, so a refused person leaves no row.
-3. **A step-up** (US-406, a sign-in started with ``step_up=1``) ends here: the asking session's
-   ``auth_time`` is refreshed or the step-up refused (``core.auth.step_up_sign_in``), and no person
-   is created or linked and no session issued. Before any first-sign-in step.
+3. **A step-up** (US-406, a sign-in started with ``step_up=1``) ends here: the asking session ends
+   and a new one is issued with the fresh ``auth_time``, keeping that session's person and absolute
+   expiry, or the step-up is refused and no session changes (``core.auth.step_up_sign_in``). No
+   person is created or linked. Before any first-sign-in step. Anything else the step-up raises
+   (``_STEP_UP_FAILURES``) is rolled back and answered ``sign_in_failed``.
+   **A phone's sign-in** (US-603) must prove here, by the step-up's own sign-in time rule
+   (``step_up_sign_in.sign_in_time_refusal``), that the provider signed the person in since the
+   phone's start: an ``auth_time`` that is missing, later than now or earlier than the start (each
+   beyond the clock skew) is refused, audited ``auth:sign_in_refused`` with that rule's reason
+   (``no_auth_time``, ``future_auth_time``, ``stale_auth_time``) and answered ``sign_in_refused``,
+   before any person is created or linked and before anything awaits the person's Continue.
 4. **The person**, found by ``(issuer, subject)`` or created (``people.link_person``), with
    ``email_verified`` exactly as the verified ID token states it (absent is false).
 5. **A deactivated person** is refused here, before anything is granted.
@@ -51,14 +59,16 @@ Every refusal is a ``SignInRefusal`` whose ``code`` is all the person is shown:
   time, or ended to make room for newer ones (``core.auth.oidc_pending``). Logged, not audited
   (nobody is known, and anyone can send such a request).
 * ``sign_in_refused``: the token did not verify, the provider answered with an error, the email
-  belongs to another person, the person is deactivated, or a hook refused. One code for all, so
+  belongs to another person, the person is deactivated, a hook refused, or a phone's sign-in did not
+  prove by its ``auth_time`` that it was made since the phone's start. One code for all, so
   the answer never tells whether an address is known to the install. Audited as
   ``auth:sign_in_refused`` with its reason; anything pending is rolled back first.
 * ``sign_in_not_allowed``: the person signed in at the provider, but the access rule does not let
   them in. Audited as ``auth:sign_in_refused`` with reason ``access_rule``. It tells the person only
   that this install does not admit their account, which they already know they hold.
 * ``step_up_refused``: a step-up could not start (no live session in this browser, or a request
-  sent from another site) or did not confirm the session's own person with a fresh sign-in.
+  sent from another site) or did not confirm the session's own person with a fresh sign-in, in the
+  browser holding that session (its callback must present that session's cookie).
   Audited as ``auth:step_up`` when it got as far as the callback.
 * ``step_up_no_auth_time``: the provider's ID token said nothing of when the person signed in
   (``auth_time``), so a step-up cannot be confirmed; the provider must be set up to send it.
@@ -100,7 +110,8 @@ from core.auth.sign_in_methods import (
     Started,
     VerifiedIdentity,
 )
-from core.auth.user_link import IdentityLinkRefused, LinkedPerson
+from core.auth.system_role import UnknownPerson
+from core.auth.user_link import IdentityLinkRefused, LinkedPerson, user_id_for_identity
 from core.edition_start_up import DEFAULT_ROLES, NO_DEFAULT_ROLE
 from core.seeds.seed_default_workspace import ensure_default_workspace
 from services.mobile import sign_in_codes, sign_in_confirmation
@@ -139,18 +150,20 @@ class SignInRefusal(Exception):
 
 @dataclass(frozen=True)
 class Browser:
-    """Where the sign-in came from: the ``audit_logs`` fields of its rows."""
+    """Where the sign-in came from: the ``audit_logs`` fields of its rows, and the session token its
+    cookie presents (a step-up's callback must present the session that asked; never in a repr)."""
 
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
+    session_token: Optional[str] = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
 class SignInDone:
     """The new session and the path on this install the person goes to.
 
-    ``session`` is None after a step-up: the browser's own session was refreshed, none was issued.
-    It is None after a phone's sign-in too (US-603): ``phone_confirmation`` is then the token that
+    After a step-up ``session`` is the new session that replaced the browser's own (US-406). It is
+    None after a phone's sign-in (US-603): ``phone_confirmation`` is then the token that
     binds what awaits the person's Continue to this browser, for its cookie; no code exists yet.
     """
 
@@ -378,21 +391,26 @@ def _issue(db: Session, identity: VerifiedIdentity, user_id: int, browser: Brows
     raise SignInRefusal(failure)
 
 
+# What a step-up can raise besides its refusal: each is a failed sign-in, rolled back, never a 500.
+_STEP_UP_FAILURES = (session_audit.SessionAuditFailed, sessions.SignInFailed, sessions.SessionsNotIssued,
+                     UnknownPerson, TypeError, ValueError, SQLAlchemyError)
+
+
 def _step_up(db: Session, finished: Finished, browser: Browser) -> SignInDone:
-    """US-406: the asking session refreshed, and no session issued; else ``SignInRefusal``."""
+    """US-406: a new session in place of the one that asked (which ends); else ``SignInRefusal``."""
     failure: Optional[str] = None
     try:
-        step_up_sign_in.confirm_step_up(db, finished, ip_address=browser.ip_address,
-                                        user_agent=browser.user_agent)
+        issued = step_up_sign_in.confirm_step_up(db, finished, presented=browser.session_token,
+                                                 ip_address=browser.ip_address, user_agent=browser.user_agent)
     except step_up_sign_in.StepUpRefused as refused:
         failure = STEP_UP_NO_AUTH_TIME if str(refused) == session_audit.STEP_UP_NO_AUTH_TIME else STEP_UP_REFUSED
-    except (session_audit.SessionAuditFailed, SQLAlchemyError) as error:
+    except _STEP_UP_FAILURES as error:
         db.rollback()
         logger.error("A step-up could not be recorded (%s)", type(error).__name__)
         failure = FAILED
     if failure is not None:
         raise SignInRefusal(failure)
-    return SignInDone(session=None, return_to=finished.return_to)
+    return SignInDone(session=issued, return_to=finished.return_to)
 
 
 def _phone_waits(db: Session, finished: Finished, user_id: int, browser: Browser) -> SignInDone:
@@ -420,12 +438,27 @@ def _phone_waits(db: Session, finished: Finished, user_id: int, browser: Browser
     raise SignInRefusal(failure)
 
 
+def _assert_phone_sign_in_fresh(db: Session, finished: Finished, browser: Browser) -> None:
+    """US-603: a phone's sign-in proves, by the step-up's sign-in time rule, that the provider signed the
+    person in since the phone's start; else refused, audited with that rule's reason, naming the person
+    only when one is already linked to the identity. Nothing is created, linked or kept."""
+    identity = finished.identity
+    reason = step_up_sign_in.sign_in_time_refusal(identity.auth_time, finished.started_at)
+    if reason is None:
+        return
+    known = user_id_for_identity(db, identity.issuer, identity.subject)
+    logger.warning("A phone's sign-in refused: its sign-in time does not prove a fresh sign-in (%s)", reason)
+    raise _refuse(db, reason, browser, known)
+
+
 def _signed_in(db: Session, finished: Finished, browser: Browser) -> SignInDone:
     """From a verified identity to a session, or a phone's awaiting record: steps 2 to 9 of this module's docstring."""
     identity = finished.identity
     apply_access_rule(db, identity, browser)
     if finished.step_up_session_id is not None:
         return _step_up(db, finished, browser)
+    if finished.phone is not None:
+        _assert_phone_sign_in_fresh(db, finished, browser)
     linked = _linked(db, identity, browser)
     if not linked.created and not people.person_is_active(db, linked.user_id):
         logger.warning("users.id=%s: sign-in refused, the person is deactivated", linked.user_id)

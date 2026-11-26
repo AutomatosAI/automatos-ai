@@ -495,3 +495,53 @@ tests:
     asserts:
       - hasDocuments:
           count: 1
+  # ── the device token's maximum age (PRD-277 US-601) ──────────────────────────
+  - it: stops on the device token's maximum age in config
+    set:
+      config:
+        ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS: "30"
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS: in the enterprise edition the chart sets it from edition.enterprise"
+  - it: stops on a maximum age of 0 days, read as a number and never as off
+    set:
+      edition: {enterprise: {deviceTokenMaxAgeDays: 0}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.deviceTokenMaxAgeDays must be a whole number of days from 1 to 3650 \\(ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS\\)"
+  - it: stops on a maximum age over 3650 days
+    set:
+      edition: {enterprise: {deviceTokenMaxAgeDays: 3651}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.deviceTokenMaxAgeDays must be a whole number of days from 1 to 3650"
+  - it: stops on a negative maximum age
+    set:
+      edition: {enterprise: {deviceTokenMaxAgeDays: -1}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.deviceTokenMaxAgeDays must be a whole number of days from 1 to 3650"
+  - it: stops on a maximum age that is not a whole number
+    set:
+      edition: {enterprise: {deviceTokenMaxAgeDays: 1.5}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.deviceTokenMaxAgeDays must be a whole number of days from 1 to 3650"
+  - it: stops on a maximum age in words
+    set:
+      edition: {enterprise: {deviceTokenMaxAgeDays: never}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.deviceTokenMaxAgeDays must be a whole number of days from 1 to 3650"
+  - it: stops on a quoted maximum age with a leading zero
+    set:
+      edition: {enterprise: {deviceTokenMaxAgeDays: "090"}}
+    asserts:
+      - failedTemplate:
+          errorPattern: "edition.enterprise.deviceTokenMaxAgeDays must be a whole number of days from 1 to 3650"
+  - it: renders with a maximum age of 1 day
+    set:
+      edition: {enterprise: {deviceTokenMaxAgeDays: 1}}
+    asserts:
+      - hasDocuments:
+          count: 1

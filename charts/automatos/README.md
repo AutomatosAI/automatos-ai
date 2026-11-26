@@ -171,6 +171,7 @@ or is one the API would refuse at start.
 | `edition.enterprise.hostedServices.cloudSync` | `ENTERPRISE_CALLS_CLOUD_SYNC` | `false` (the default) or `true`: Sync with Automatos Cloud, its catalogue and the themes it lists, from `AUTOMATOS_CLOUD_URL`. Needs `themeRevocations`. |
 | `edition.enterprise.hostedServices.cloudItems` | `ENTERPRISE_CALLS_CLOUD_ITEMS` | `false` (the default) or `true`: the agents, Playbooks, packages and plugins a Sync brings from Automatos Cloud. Needs `cloudSync`. |
 | `edition.enterprise.devicePairing` | `ENTERPRISE_DEVICE_PAIRING` | `true` (the default) or `false`: whether people may pair their phones (PRD-277 US-601). Each person pairs their own phone from Settings, signed in as themselves, and the phone acts as that person with their current role. |
+| `edition.enterprise.deviceTokenMaxAgeDays` | `ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS` | `90` (the default): how many days, from 1 to 3650, a phone keeps its token after its person last paired it or signed in on it (PRD-277 US-601). There is no "off". |
 
 The hosted services are off by default: an enterprise install calls none of Automatos's hosted
 services until you switch one on. Each is `true` or `false`, written without quotes; rendering
@@ -193,6 +194,21 @@ paired under the local edition never carries into the enterprise edition; switch
 on brings none back. Change the edition or this setting with the pods of the earlier
 configuration stopped.
 
+A phone's token lives at most `deviceTokenMaxAgeDays` days, 90 by default, counted from the last
+time its person paired it or signed in on it; a token rotation does not restart the count. The
+first request after that is refused, the phone is removed and that is recorded in the audit log
+once, and its person signs in on the phone or pairs it again. The value is a whole number from 1
+to 3650, written without quotes; rendering stops on any other value and on
+`ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS` in `config`. On an upgrade, a phone whose person last paired
+it or signed in on it longer ago than that is removed at its next request.
+Until that request, Settings lists the phone as expired and no push is sent to it.
+
+Signing in on a phone needs the provider to return `auth_time` in the ID token when the phone asks
+for a fresh sign-in, no earlier than the sign-in's start: Entra's optional claim, Google's
+project setting "Session age claims", Cognito's managed login (the PRD's §5.9). Without it every phone sign-in is refused and
+the app is told `sign_in_refused`; the reason is recorded in the `auth:sign_in_refused` audit row
+and in the API's warning log line. Such a phone pairs with a code from Settings instead.
+
 The client secret goes in the Secret as `OIDC_CLIENT_SECRET`, never in values. The
 session clocks (`SESSION_IDLE_MINUTES`, `SESSION_ABSOLUTE_HOURS`), the claim names
 (`OIDC_CLAIM_SUBJECT`, `OIDC_CLAIM_EMAIL`, `OIDC_CLAIM_NAME`,
@@ -213,6 +229,9 @@ forwarded-header handling trusting only its own host.
 
 At the provider, register the sign-in callback `<publicUrl origin>/api/v1/auth/oidc/callback`
 and the address after sign-out `<publicUrl origin>/sign-in`; the install notes print both.
+Each provider's registration, claims and matching values are in
+[Enterprise Sign-In with OIDC](../../docs/authentication-multi-tenancy/enterprise-sign-in-oidc.md),
+with a guide for Microsoft Entra ID, Google Workspace, Okta, Keycloak and Amazon Cognito.
 Turn the ingress on (`ingress.enabled`, `ingress.host` the host of `publicUrl`, and `ingress.tls`):
 the enterprise web app calls the API on its own origin, and the session cookie is a
 `__Host-` cookie, sent over https only.

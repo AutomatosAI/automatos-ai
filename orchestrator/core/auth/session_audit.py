@@ -11,7 +11,8 @@ deactivates. Wave 4 writes ``auth:identity_linked`` (a first sign-in), ``auth:bo
 first admin, ``stage_bootstrap_admin``), ``auth:step_up`` (a step-up confirmed or refused, with its
 reason, ``record_step_up``) and the access rule's refusal (``access_rule``). Wave 6 writes a
 phone's ``auth:sign_in`` when its person presses Continue (``record_phone_sign_in``) and its
-refusals once the person is known (``PHONE_REFUSAL_REASONS``).
+refusals once the person is known (``PHONE_REFUSAL_REASONS``), and a phone's sign-in refused for its
+sign-in time before then (``PHONE_SIGN_IN_TIME_REASONS``).
 
 Which workspace a row goes in: ``audit_logs.workspace_id`` is required, and signing in or out
 belongs to no workspace. Such a row goes in the workspace the caller names, else the install's
@@ -73,20 +74,26 @@ REFUSED_NO_WORKSPACE = "no_workspace"
 REFUSED_SEVERAL_WORKSPACES = "several_workspaces"
 REFUSED_DEVICE_LIMIT = "device_limit_reached"
 PHONE_REFUSAL_REASONS = (REFUSED_NO_WORKSPACE, REFUSED_SEVERAL_WORKSPACES, REFUSED_DEVICE_LIMIT)
-REFUSAL_REASONS = (REFUSED_ACCESS_RULE, REFUSED_EMAIL_CONFLICT, REFUSED_DEACTIVATED, REFUSED_INVALID_TOKEN,
-                   REFUSED_SUBJECT_CLAIM_CHANGED, *PHONE_REFUSAL_REASONS)
 
 # Why a step-up was refused (``auth:step_up`` with ``confirmed`` false, US-406): someone other than the
 # session's person signed in, the token carried no ``auth_time``, one older than the step-up or one
-# later than now, the session that asked has ended, or its person is deactivated.
+# later than now, the session that asked has ended, the callback's request did not present that
+# session in its cookie (it presented another, or none), or its person is deactivated.
 STEP_UP_ANOTHER_PERSON = "another_person"
 STEP_UP_NO_AUTH_TIME = "no_auth_time"
 STEP_UP_STALE = "stale_auth_time"
 STEP_UP_FUTURE = "future_auth_time"
 STEP_UP_SESSION_ENDED = "session_ended"
+STEP_UP_NOT_PRESENTED = "session_not_presented"
 STEP_UP_DEACTIVATED = "deactivated"
 STEP_UP_REASONS = (STEP_UP_ANOTHER_PERSON, STEP_UP_NO_AUTH_TIME, STEP_UP_STALE, STEP_UP_FUTURE,
-                   STEP_UP_SESSION_ENDED, STEP_UP_DEACTIVATED)
+                   STEP_UP_SESSION_ENDED, STEP_UP_NOT_PRESENTED, STEP_UP_DEACTIVATED)
+# PRD-277 US-603: a phone's sign-in refused before its person is known because the sign-in time the
+# provider reported does not prove a sign-in made since the phone's start: the step-up's own rule and
+# names (``core.auth.step_up_sign_in.sign_in_time_refusal``).
+PHONE_SIGN_IN_TIME_REASONS = (STEP_UP_NO_AUTH_TIME, STEP_UP_STALE, STEP_UP_FUTURE)
+REFUSAL_REASONS = (REFUSED_ACCESS_RULE, REFUSED_EMAIL_CONFLICT, REFUSED_DEACTIVATED, REFUSED_INVALID_TOKEN,
+                   REFUSED_SUBJECT_CLAIM_CHANGED, *PHONE_REFUSAL_REASONS, *PHONE_SIGN_IN_TIME_REASONS)
 
 SESSION_RESOURCE = "auth_session"
 PERSON_RESOURCE = "user"
@@ -230,16 +237,23 @@ def stage_bootstrap_admin(db, *, user_id: int, workspace_id: Union[UUID, str], m
 
 
 def record_step_up(db, *, user_id: Optional[int], session_id: UUID, reason: Optional[str],
-                   ip_address: Optional[str], user_agent: Optional[str]) -> None:
+                   ip_address: Optional[str], user_agent: Optional[str],
+                   new_session_id: Optional[UUID] = None) -> None:
     """``auth:step_up`` (US-406): confirmed when ``reason`` is None, else refused with that reason.
 
-    A confirmation is granting: it commits the session's new ``auth_time`` with its row, or both are
-    rolled back and ``SessionAuditFailed`` is raised. A refusal changes nothing, so a failed row is
-    logged and the refusal stands. ``user_id`` is the person of the session that asked.
+    The row is on the session that asked (``session_id``). A confirmation is granting: it commits
+    the new session (``new_session_id``, named in its details) and the end of the one that asked
+    with its row, or all are rolled back and ``SessionAuditFailed`` is raised. A refusal changes
+    nothing, so a failed row is logged and the refusal stands. ``user_id`` is the person of the
+    session that asked.
     """
     if reason is not None and reason not in STEP_UP_REASONS:
         raise ValueError(f"unknown step-up refusal reason {reason!r}")
-    details: Dict[str, Any] = {"confirmed": reason is None, **({"reason": reason} if reason else {})}
+    details: Dict[str, Any] = {"confirmed": reason is None}
+    if reason is not None:
+        details = {**details, "reason": reason}
+    elif new_session_id is not None:
+        details = {**details, "new_session_id": str(new_session_id)}
     entry = _write(db, action=STEP_UP, workspace_id=None, user_id=user_id, resource_type=SESSION_RESOURCE,
                    resource_id=session_id, details=details, ip_address=ip_address, user_agent=user_agent)
     if entry is not None:
@@ -287,6 +301,7 @@ __all__ = [
     "PERSON_DEACTIVATED",
     "PERSON_RESOURCE",
     "PHONE_REFUSAL_REASONS",
+    "PHONE_SIGN_IN_TIME_REASONS",
     "REFUSAL_REASONS",
     "REFUSED_ACCESS_RULE",
     "REFUSED_DEACTIVATED",

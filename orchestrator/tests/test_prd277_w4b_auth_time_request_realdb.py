@@ -154,7 +154,9 @@ def test_a_provider_that_lists_prompt_values_without_login_is_never_sent_it(inst
     sent = install.idp.authorize_requests[-1]
     assert "prompt" not in sent and sent["max_age"] == "0"
     assert answer.status_code == 303 and answer.headers["location"] == "/settings"
-    assert _auth_time(install.db, me.session_id) > datetime.now(timezone.utc) - timedelta(minutes=2)
+    # Confirmed: the cookie holds a new session with the fresh auth_time; the old one keeps its own.
+    assert _session_auth_time(install, answer) > datetime.now(timezone.utc) - timedelta(minutes=2)
+    assert _auth_time(install.db, me.session_id) == me.old
 
 
 def test_a_provider_that_answers_prompt_login_with_an_error_refuses_the_step_up(install):

@@ -13,6 +13,8 @@ those write.
 1. ``recipients.recipients`` — who may be pushed this type, membership and role read now.
 2. ``eligible_devices`` — their active ios/android phones in this workspace with push on, an
    Expo token and a push key: ``clerk`` rows on SaaS, ``paired`` rows on a local install (§8),
+   and in enterprise only those inside their token's maximum age (PRD-277 US-601,
+   ``services.mobile.token_age.within_max_age_filters``: the device lane's own rule),
    none at all from a local install until the operator agreed (``consent``, K13), minus the
    people whose push switch for the event is off (K7: a ``notification_preferences`` row with
    destination ``push``; the person's row wins over the workspace's, no row means on). The
@@ -58,6 +60,7 @@ from core.models.mobile_devices import MobileDevice, MobileDeviceKind, MobileDev
 from core.models.mobile_push import MobilePushTicket
 from core.models.proactive import ProactiveSuggestion
 from core.models.workspaces import Workspace
+from services.mobile import token_age
 from services.mobile.events import PUSH_FAILED, with_event
 from services.push import consent
 from services.push.payload import (
@@ -177,7 +180,8 @@ def _edition_kinds() -> Tuple[str, ...]:
 
 
 def _device_filters(workspace_id: Any) -> Tuple[Any, ...]:
-    """A phone push can reach in this workspace, whoever holds it."""
+    """A phone push can reach in this workspace, whoever holds it: in enterprise, only one inside its
+    token's maximum age (``token_age.within_max_age_filters``, none elsewhere)."""
     return (
         MobileDevice.workspace_id == _workspace_uuid(workspace_id),
         MobileDevice.kind.in_(_edition_kinds()),
@@ -186,6 +190,7 @@ def _device_filters(workspace_id: Any) -> Tuple[Any, ...]:
         MobileDevice.expo_push_token.isnot(None),
         MobileDevice.push_key.isnot(None),
         MobileDevice.platform.in_(PUSH_PLATFORMS),
+        *token_age.within_max_age_filters(_now()),
     )
 
 

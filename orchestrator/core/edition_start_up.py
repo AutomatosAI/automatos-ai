@@ -46,6 +46,9 @@
    in a Sync). No setting turns another on (``check_hosted_service_settings``).
 5. where device pairing is a setting (``device_pairing_by_setting``, PRD-277 US-601), when
    ``ENTERPRISE_DEVICE_PAIRING`` is not a plain on or off form (``check_device_pairing_setting``).
+6. where device tokens age out (``device_tokens_age_out``, PRD-277 US-601), when
+   ``ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS`` is not a whole number of days from 1 to
+   ``DEVICE_TOKEN_MAX_AGE_DAYS_MAX`` (``check_device_token_max_age``). There is no "off".
 
 Each refusal names the setting, never its value. ``config.py`` reads these settings so that no
 value can stop another edition from starting. A correctly configured install starts.
@@ -192,6 +195,13 @@ HOSTED_SWITCH_PROBLEM = (
 DEVICE_PAIRING_SETTING_NAMES: Tuple[str, ...] = (editions.DEVICE_PAIRING_SETTING,)
 DEVICE_PAIRING_PROBLEM = (
     "must be true or false (or 1/0, yes/no, on/off): true lets the people of this install pair their phones"
+)
+# PRD-277 US-601: the most days a device token lives (``editions.DEVICE_TOKEN_MAX_AGE_SETTING``).
+DEVICE_TOKEN_MAX_AGE_SETTING_NAMES: Tuple[str, ...] = (editions.DEVICE_TOKEN_MAX_AGE_SETTING,)
+DEVICE_TOKEN_MAX_AGE_DAYS_MAX = 3650
+DEVICE_TOKEN_MAX_AGE_PROBLEM = (
+    f"must be a whole number of days from 1 to {DEVICE_TOKEN_MAX_AGE_DAYS_MAX}: how long a phone keeps its token "
+    "after its person last paired it or signed in on it"
 )
 CLOUD_SYNC_NEEDS_REVOCATIONS = (
     f"needs {THEME_REVOCATIONS_SETTING}: a theme brought from Automatos Cloud is withdrawn only through "
@@ -391,16 +401,18 @@ def check_start_up(capabilities: editions.EditionCapabilities, settings: Mapping
 
     ``settings`` maps each name in ``OIDC_START_UP_SETTINGS``, ``OIDC_SIGN_IN_SETTINGS``,
     ``HOSTED_SERVICE_SETTING_NAMES`` and ``DEVICE_PAIRING_SETTING_NAMES`` to its value (``None`` when
-    unset). Where sign-in is OIDC, the missing settings are checked first, then the sign-in settings,
-    then the access rule, the first admins and the default workspace; then, where the hosted services
-    are settings, those (``check_hosted_service_settings``); then device pairing's
-    (``check_device_pairing_setting``). Every other edition passes untouched, and a correctly
-    configured install passes.
+    unset), and ``DEVICE_TOKEN_MAX_AGE_SETTING_NAMES`` to its value as ``config.py`` read it. Where
+    sign-in is OIDC, the missing settings are checked first, then the sign-in settings, then the access
+    rule, the first admins and the default workspace; then, where the hosted services are settings,
+    those (``check_hosted_service_settings``); then device pairing's (``check_device_pairing_setting``);
+    then the device token's maximum age (``check_device_token_max_age``). Every other edition passes
+    untouched, and a correctly configured install passes.
     """
     if capabilities.sign_in == editions.SIGN_IN_OIDC:
         _check_oidc_sign_in(settings)
     check_hosted_service_settings(capabilities, settings)
     check_device_pairing_setting(capabilities, settings)
+    check_device_token_max_age(capabilities, settings)
 
 
 def check_device_pairing_setting(capabilities: editions.EditionCapabilities, settings: Mapping[str, Any]) -> None:
@@ -414,6 +426,22 @@ def check_device_pairing_setting(capabilities: editions.EditionCapabilities, set
     name = editions.DEVICE_PAIRING_SETTING
     if not editions.is_switch_form(settings.get(name)):
         raise EditionNotReady(BAD_SESSION_SETTING.format(name=name, problem=DEVICE_PAIRING_PROBLEM))
+
+
+def check_device_token_max_age(capabilities: editions.EditionCapabilities, settings: Mapping[str, Any]) -> None:
+    """Raise ``EditionNotReady`` naming ``ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS``, never its value, unless it
+    is a whole number from 1 to ``DEVICE_TOKEN_MAX_AGE_DAYS_MAX``.
+
+    Only where the edition reads it (``device_tokens_age_out``). ``config.py`` always hands in the number
+    (its default when unset), or the text as it was when it is not one; a mapping that leaves the name
+    out leaves it unset, so its default holds.
+    """
+    name = editions.DEVICE_TOKEN_MAX_AGE_SETTING
+    if not capabilities.device_tokens_age_out or name not in settings:
+        return
+    days = settings[name]
+    if not (_whole_number_at_least_one(days) and days <= DEVICE_TOKEN_MAX_AGE_DAYS_MAX):
+        raise EditionNotReady(BAD_SESSION_SETTING.format(name=name, problem=DEVICE_TOKEN_MAX_AGE_PROBLEM))
 
 
 def _check_oidc_sign_in(settings: Mapping[str, Optional[str]]) -> None:
@@ -514,6 +542,9 @@ __all__ = [
     "DATABASE_TLS_START_UP_SETTINGS",
     "DEVICE_PAIRING_PROBLEM",
     "DEVICE_PAIRING_SETTING_NAMES",
+    "DEVICE_TOKEN_MAX_AGE_DAYS_MAX",
+    "DEVICE_TOKEN_MAX_AGE_PROBLEM",
+    "DEVICE_TOKEN_MAX_AGE_SETTING_NAMES",
     "HOSTED_SERVICE_SETTING_NAMES",
     "HOSTED_SWITCH_PROBLEM",
     "DEFAULT_ROLE_NEEDS_RULE_PROBLEM",
@@ -537,6 +568,7 @@ __all__ = [
     "EditionNotReady",
     "check_database_tls",
     "check_device_pairing_setting",
+    "check_device_token_max_age",
     "check_hosted_service_settings",
     "check_session_settings",
     "check_start_up",

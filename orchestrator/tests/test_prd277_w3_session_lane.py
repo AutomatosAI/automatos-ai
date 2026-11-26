@@ -40,7 +40,7 @@ os.environ.setdefault("POSTGRES_DB", "test")
 
 from config import config  # noqa: E402
 from core import edition_start_up, editions  # noqa: E402
-from core.auth import bearer_registry, hybrid, session_cookie, session_lane, step_up  # noqa: E402
+from core.auth import bearer_registry, hybrid, session_cookie, session_lane, sessions, step_up  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.principal import claimed_user_pk  # noqa: E402
 
@@ -455,6 +455,51 @@ def test_an_ended_session_in_the_cookie_is_401_and_clears_the_cookie(enterprise,
                                         "message": session_lane.SESSION_ENDED_MESSAGE}}
     parts = {part.strip().lower() for part in answer.headers["set-cookie"].split(";")}
     assert {"secure", "httponly", "path=/", "samesite=lax"} <= parts
+
+
+def _ended_by(revoked_reason):
+    def resolve(request, token):
+        raise session_lane._refused(SimpleNamespace(revoked_reason=revoked_reason), "revoked")
+
+    return resolve
+
+
+def test_a_session_a_step_up_replaced_is_the_same_401_and_keeps_the_cookie(enterprise, monkeypatch):
+    """The browser's cookie already holds the successor: a request that left earlier must not clear it."""
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(session_lane, "_resolve_in_own_session", _ended_by(sessions.REVOKED_STEP_UP))
+
+    answer = TestClient(_cookie_app()).get("/probe", headers=_cookie(_token()))
+
+    assert answer.status_code == 401 and "set-cookie" not in answer.headers
+    assert answer.json() == {"detail": {"code": "session_ended", "reason": "revoked",
+                                        "message": session_lane.SESSION_ENDED_MESSAGE}}
+
+
+@pytest.mark.parametrize("revoked_reason", [sessions.REVOKED_SIGN_OUT, sessions.REVOKED_BY_ADMIN,
+                                            sessions.REVOKED_DEACTIVATED])
+def test_a_session_any_other_end_revoked_still_clears_the_cookie(enterprise, monkeypatch, revoked_reason):
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(session_lane, "_resolve_in_own_session", _ended_by(revoked_reason))
+
+    answer = TestClient(_cookie_app()).get("/probe", headers=_cookie(_token()))
+
+    assert answer.status_code == 401 and _cleared(answer)
+    assert answer.json()["detail"] == {"code": "session_ended", "reason": "revoked",
+                                       "message": session_lane.SESSION_ENDED_MESSAGE}
+
+
+def test_only_the_step_ups_end_is_answered_without_clearing():
+    replaced = session_lane._refused(SimpleNamespace(revoked_reason=sessions.REVOKED_STEP_UP), "revoked")
+    others = [session_lane._refused(None, "unknown"),
+              session_lane._refused(SimpleNamespace(revoked_reason=None), "expired"),
+              session_lane._refused(SimpleNamespace(revoked_reason=sessions.REVOKED_BY_ADMIN), "revoked")]
+
+    assert isinstance(replaced, session_lane.SessionReplaced) and replaced.status_code == 401
+    assert not any(isinstance(refused, session_lane.SessionReplaced) for refused in others)
+    assert all(refused.detail["code"] == "session_ended" for refused in [replaced, *others])
 
 
 def test_an_ended_session_in_a_header_is_answered_as_before(enterprise, monkeypatch):

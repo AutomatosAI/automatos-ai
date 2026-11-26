@@ -39,6 +39,8 @@ CLERK_DEFAULT_AUTHORIZED_PARTIES = "https://ui.automatos.app,http://localhost:30
 # PRD-277 §5.3, D-15: the session clocks' defaults (2 hours idle, 12 hours absolute).
 SESSION_IDLE_MINUTES_DEFAULT = 120
 SESSION_ABSOLUTE_HOURS_DEFAULT = 12
+# PRD-277 US-601: the most days a device token lives in enterprise, from its phone's last pairing or sign-in.
+DEVICE_TOKEN_MAX_AGE_DAYS_DEFAULT = 90
 
 # PRD-279 US-303: what an API built without a version reports (a checkout's own build, the
 # test suite). images.yml builds every API image with AUTOMATOS_VERSION set.
@@ -637,6 +639,9 @@ class Config:
     ENTERPRISE_CALLS_CLOUD_ITEMS: str = (os.getenv("ENTERPRISE_CALLS_CLOUD_ITEMS") or "false").strip().lower()
     # PRD-277 US-601, §5.10: whether phones pair in enterprise (on when unset; read as these three are).
     ENTERPRISE_DEVICE_PAIRING: str = (os.getenv("ENTERPRISE_DEVICE_PAIRING") or "true").strip().lower()
+    # PRD-277 US-601: days a device token lives from its phone's last pairing or sign-in; enterprise only, 1 to 3650.
+    ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS: int = _whole_number_setting(
+        "ENTERPRISE_DEVICE_TOKEN_MAX_AGE_DAYS", DEVICE_TOKEN_MAX_AGE_DAYS_DEFAULT)
     # PRD-277 §5.3, D-15: sessions (core/auth/sessions.py): two clocks, a __Host- cookie and the CSRF header; a bad clock stops enterprise only.
     SESSION_IDLE_MINUTES: int = _whole_number_setting("SESSION_IDLE_MINUTES", SESSION_IDLE_MINUTES_DEFAULT)
     SESSION_ABSOLUTE_HOURS: int = _whole_number_setting("SESSION_ABSOLUTE_HOURS", SESSION_ABSOLUTE_HOURS_DEFAULT)
@@ -2892,9 +2897,9 @@ class Config:
         """
         # PRD-266 §4.3: imported here, at boot, so config.py never imports the app.
         from core.edition_start_up import (DATABASE_TLS_START_UP_SETTINGS, DEVICE_PAIRING_SETTING_NAMES,
-                                           HOSTED_SERVICE_SETTING_NAMES, OIDC_SIGN_IN_SETTINGS,
-                                           OIDC_START_UP_SETTINGS, SESSION_SETTINGS, check_database_tls,
-                                           check_session_settings, check_start_up)
+                                           DEVICE_TOKEN_MAX_AGE_SETTING_NAMES, HOSTED_SERVICE_SETTING_NAMES,
+                                           OIDC_SIGN_IN_SETTINGS, OIDC_START_UP_SETTINGS, SESSION_SETTINGS,
+                                           check_database_tls, check_session_settings, check_start_up)
         from core.editions import SIGN_IN_CLERK, capabilities_for
         from services.mobile import remote_access
         capabilities = capabilities_for(self.AUTH_EDITION)
@@ -2936,7 +2941,8 @@ class Config:
         addresses = {"API_PUBLISH_ADDRESS": self.API_PUBLISH_ADDRESS, "WEB_PUBLISH_ADDRESS": self.WEB_PUBLISH_ADDRESS}
         remote_access.enforce_boot_decision(capabilities.anonymous_operator, self.LOCAL_REMOTE_ACCESS, addresses)
         check_session_settings(capabilities, {name: getattr(self, name) for name in SESSION_SETTINGS})
-        start_up = OIDC_START_UP_SETTINGS + OIDC_SIGN_IN_SETTINGS + HOSTED_SERVICE_SETTING_NAMES + DEVICE_PAIRING_SETTING_NAMES
+        start_up = (OIDC_START_UP_SETTINGS + OIDC_SIGN_IN_SETTINGS + HOSTED_SERVICE_SETTING_NAMES
+                    + DEVICE_PAIRING_SETTING_NAMES + DEVICE_TOKEN_MAX_AGE_SETTING_NAMES)
         check_start_up(capabilities, {**{name: getattr(self, name) for name in start_up},
                                       "FRONTEND_URL": self._FRONTEND_URL_FROM_ENV})
         check_database_tls(capabilities, {name: getattr(self, name) for name in DATABASE_TLS_START_UP_SETTINGS})
