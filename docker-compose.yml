@@ -722,7 +722,7 @@ services:
   # ===========================================================================
   
   adminer:
-    image: adminer:latest@sha256:49a7d30e71de97fb18933ffe7d46cc2b343c49fd7a63a7791c8be2548eb65115
+    image: adminer:latest@sha256:037125c2bc4836b4917d4fd08a16f817eac2848778c4e9aab87a8340aef08dfd
     container_name: automatos_adminer
     restart: unless-stopped
     profiles: ["all"]
