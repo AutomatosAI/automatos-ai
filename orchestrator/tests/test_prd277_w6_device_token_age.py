@@ -4,11 +4,13 @@
   whole number from 1 to 3650 and refuses anything else, naming the setting and never the value. There is
   no "off". ``local`` and ``saas`` never read it: no value stops them.
 * **The age** counts from the phone's last pairing or sign-in on the phone (``paired_at``), never from a
-  rotation, from the row's creation where no pairing time was recorded. A pairing time later than now is read
-  as now, and the device ages out one maximum age after that time. A device is past its age from the
-  moment the age reaches the maximum.
-* **One rule, three readers**: push fan-out leaves a device past its age out in enterprise and builds
+  rotation, from the row's creation where no pairing time was recorded. A pairing time later than now by
+  no more than the clock skew is read as now; one later than that is past the maximum age (fail closed:
+  read as now, it would lengthen the device's life by the gap), and is warned about once per device. A
+  device is past its age from the moment the age reaches the maximum.
+* **One rule, four readers**: push fan-out leaves a device past its age out in enterprise and builds
   exactly today's filters elsewhere; the device list shows such a device as ``expired`` in enterprise only.
+  The SQL filters agree with the Python rule against Postgres (``test_prd277_w6_device_token_age_realdb.py``).
 
 The device lane's refusal, the revoke and its one audit row are proved against Postgres
 (``test_prd277_w6_device_token_age_realdb.py``).
@@ -174,15 +176,46 @@ def test_the_maximum_age_follows_the_setting(monkeypatch):
     assert token_age.is_past_max_age(_row(paired_at=NOW - timedelta(days=2)), NOW) is True
 
 
-def test_a_pairing_time_later_than_now_is_read_as_now_and_ages_from_that_time(monkeypatch):
+def test_a_pairing_time_later_than_now_within_the_clock_skew_is_read_as_now(monkeypatch):
+    monkeypatch.setattr(config, SETTING, 1)
+    row = _row(paired_at=NOW + token_age.CLOCK_SKEW)
+    assert token_age.CLOCK_SKEW == timedelta(seconds=60)
+    assert token_age.issued_at(row, NOW) == NOW
+    assert token_age.starts_in_the_future(row, NOW) is False
+    assert token_age.is_past_max_age(row, NOW) is False
+    # It ages from that time: one maximum age later, it is past it.
+    assert token_age.is_past_max_age(row, NOW + token_age.CLOCK_SKEW + timedelta(days=1)) is True
+
+
+def test_a_pairing_time_later_than_now_beyond_the_clock_skew_is_past_the_maximum_age(monkeypatch):
     monkeypatch.setattr(config, SETTING, 1)
     row = _row(paired_at=NOW + timedelta(days=30))
-    assert token_age.issued_at(row, NOW) == NOW
-    assert token_age.is_past_max_age(row, NOW) is False
-    # Read as now at every moment before it, so the device is never past its age early...
-    assert token_age.is_past_max_age(row, NOW + timedelta(days=30)) is False
-    # ...and one maximum age after that pairing time, it is.
-    assert token_age.is_past_max_age(row, NOW + timedelta(days=31)) is True
+    assert token_age.starts_in_the_future(row, NOW) is True
+    # Fail closed: read as now, it would stay young for 30 days and then live a whole day more (31 in all).
+    assert token_age.is_past_max_age(row, NOW) is True
+    assert token_age.is_past_max_age(row, NOW + timedelta(days=29)) is True
+    just_beyond = _row(paired_at=NOW + token_age.CLOCK_SKEW + timedelta(seconds=1))
+    assert token_age.is_past_max_age(just_beyond, NOW) is True
+
+
+def test_a_device_whose_age_starts_in_the_future_is_warned_about_once_by_id(monkeypatch, caplog):
+    monkeypatch.setattr(config, SETTING, 90)
+    token_age._warn_future_start.cache_clear()
+    row = _row(id="00000000-0000-0000-0000-0000000277fa", paired_at=NOW + timedelta(days=2),
+               token_hash="a-hash-never-logged")
+    with caplog.at_level("WARNING", logger=token_age.__name__):
+        for _ in range(3):
+            assert token_age.is_past_max_age(row, NOW) is True
+    warnings = [record.getMessage() for record in caplog.records if record.name == token_age.__name__]
+    assert len(warnings) == 1 and row.id in warnings[0] and "a-hash-never-logged" not in warnings[0]
+
+
+@pytest.mark.parametrize("edition, shown", [("enterprise", token_age.EXPIRED_STATUS), ("local", "active")])
+def test_the_device_list_shows_a_device_whose_age_starts_in_the_future_as_expired(monkeypatch, edition, shown):
+    monkeypatch.setattr(config, "AUTH_EDITION", edition)
+    monkeypatch.setattr(config, SETTING, 90)
+    assert token_age.view_status(_row(paired_at=NOW + timedelta(days=2), status="active"), NOW) == shown
+    assert token_age.view_status(_row(paired_at=NOW + timedelta(seconds=30), status="active"), NOW) == "active"
 
 
 # --------------------------------------------------------------------------- push fan-out and the device list
@@ -204,10 +237,13 @@ def test_fan_out_builds_todays_filters_where_tokens_never_age_out(monkeypatch, e
 
 def test_fan_out_in_enterprise_keeps_only_devices_inside_their_maximum_age(monkeypatch):
     monkeypatch.setattr(config, "AUTH_EDITION", "enterprise")
-    (kept,) = token_age.within_max_age_filters(NOW)
-    sql = str(kept.compile(compile_kwargs={"literal_binds": False})).lower()
+    (old_enough, not_future) = token_age.within_max_age_filters(NOW)
+    sql = str(old_enough.compile(compile_kwargs={"literal_binds": False})).lower()
     assert "coalesce(mobile_devices.paired_at, mobile_devices.created_at) >" in sql
-    assert kept.right.value == token_age.cutoff(NOW)
+    assert old_enough.right.value == token_age.cutoff(NOW)
+    sql = str(not_future.compile(compile_kwargs={"literal_binds": False})).lower()
+    assert "coalesce(mobile_devices.paired_at, mobile_devices.created_at) <=" in sql
+    assert not_future.right.value == NOW + token_age.CLOCK_SKEW
     assert "coalesce" in _fanout_sql(monkeypatch, "enterprise").lower()
 
 

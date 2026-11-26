@@ -7,7 +7,9 @@ install's hosts (``EditionCapabilities.agent_http_own_hosts_only``). ``local`` a
 the list, and the tool's description, exactly as they were.
 
 ``exec_shell._get_allowed_http_domains`` checks a call against ``allowed_http_hosts``; the tool
-registry gives the model a description naming the same hosts (``fitted_to_edition``).
+registry gives the model a description naming the same hosts (``fitted_to_edition``). Every
+redirect the call follows is checked against the same list (``refuse_hosts_off_the_list``), and
+outside ``local`` the server's certificate is checked (``verifies_tls``, #1656).
 """
 from __future__ import annotations
 
@@ -39,6 +41,30 @@ def allowed_http_hosts() -> Tuple[str, ...]:
     )
 
 
+class HostNotAllowed(Exception):
+    """A request the tool was about to send, a redirect's included, is to a host off the list."""
+
+    def __init__(self, host: str) -> None:
+        super().__init__(f"Redirect to '{host}' refused: that host is not whitelisted")
+        self.host = host
+
+
+async def refuse_hosts_off_the_list(request: Any) -> None:
+    """An httpx ``request`` event hook: raise ``HostNotAllowed`` unless ``request``'s host is on the list.
+
+    httpx runs a client's request hooks before every request it sends, each redirect it follows
+    included, so a redirect from an allowed host to any other is refused before it is sent (#1656).
+    """
+    host = (request.url.host or "").lower()
+    if host not in allowed_http_hosts():
+        raise HostNotAllowed(host)
+
+
+def verifies_tls() -> bool:
+    """Whether the tool checks an ``https`` server's certificate: everywhere but ``local`` (#1656)."""
+    return editions.current().agent_http_verifies_tls
+
+
 def fitted_to_edition(spec: Any) -> Any:
     """The ``http_request`` tool spec as the registry wrote it, or, in ``enterprise``, a copy naming only the install's hosts.
 
@@ -58,7 +84,10 @@ def fitted_to_edition(spec: Any) -> Any:
 __all__ = [
     "AUTOMATOS_PUBLIC_HOSTS",
     "LOOPBACK_HOSTS",
+    "HostNotAllowed",
     "allowed_http_hosts",
     "automatos_public_hosts",
     "fitted_to_edition",
+    "refuse_hosts_off_the_list",
+    "verifies_tls",
 ]

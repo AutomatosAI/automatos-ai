@@ -23,6 +23,7 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
+import sqlalchemy as sa
 
 _orchestrator_root = str(Path(__file__).resolve().parent.parent)
 if _orchestrator_root not in sys.path:
@@ -40,8 +41,10 @@ class MockToolExecutionLog:
 
 
 class _FakeUser:
-    id = "User.id"
-    clerk_user_id = "User.clerk_user_id"
+    # Column objects, not strings: the Clerk-ID read builds a real subquery over them
+    # (core.auth.clerk_person.clerk_person_pk_expression: ORDER BY id LIMIT 1, #1654).
+    id = sa.column("id")
+    clerk_user_id = sa.column("clerk_user_id")
 
 
 _mock_composio_cache = MagicMock()

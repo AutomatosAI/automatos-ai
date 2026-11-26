@@ -14,9 +14,9 @@ logged and the next tick comes anyway, so the watch never stops on its own.
   stamped when its time limit ran out. While that thread still runs no second check is
   started, and no new reading is made, so the reading ages; when the thread does
   finish, its answer is recorded then. A daemon thread never holds up the process's exit.
-* **Quiet logs.** A check that raises reads as ``failed_state``. The watch logs a state
-  only when it changes (a failure at WARNING, with its traceback when it raised, once)
-  and when it recovers;
+* **Quiet logs.** A check that raises (a ``BaseException`` included) reads as
+  ``failed_state``. The watch logs a state only when it changes (a failure at WARNING,
+  with its traceback when it raised, once) and when it recovers;
   ``notes`` adds a fixed line to a state's log entry (what a refused check needs).
 * **A check that knows when.** A check may return a ``Reading`` instead of a state, when
   what it reports happened before the tick (the model provider's last call): that
@@ -103,7 +103,11 @@ class Watch:
     def _guarded_check(self) -> Outcome:
         try:
             return self._check(), None
-        except Exception as exc:  # noqa: BLE001 — handed to the watch, which logs it at the state change
+        # BaseException too (#1651): one that escaped would leave the thread's future unresolved,
+        # and with it ``_running``, so no check would ever start again. On a check's own thread
+        # nothing is lost: KeyboardInterrupt reaches only the main thread, and SystemExit there
+        # would end only this thread.
+        except BaseException as exc:  # noqa: BLE001 — handed to the watch, which logs it at the state change
             return self._failed_state, exc
 
     async def check_now(self) -> Optional[Reading]:

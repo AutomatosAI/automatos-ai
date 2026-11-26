@@ -73,6 +73,7 @@ The API reads the metadata at start and refuses metadata it cannot use [orchestr
 - Its `issuer` equals `OIDC_ISSUER` exactly.
 - Every endpoint is an `https` address.
 - The `token_endpoint` and the `jwks_uri` are on the issuer's host, or on a host listed in `OIDC_ENDPOINT_HOSTS`. The `authorization_endpoint` is opened by the browser, so its host is not limited [orchestrator/core/auth/oidc_provider.py:173-176]().
+- Only the issuer's own host, on the issuer's port, may resolve to a private, loopback or link-local address: an identity provider inside your network. Every other host Automatos calls, a host in `OIDC_ENDPOINT_HOSTS` included, must resolve to public addresses only. A token endpoint or keys address on a private host other than the issuer's is refused, and sign-in answers `identity_provider_unavailable` [orchestrator/core/auth/oidc_http.py:163-184](). So a provider inside your network, a self-hosted Keycloak for example, must serve its token endpoint and keys on the issuer's own host.
 - It offers the response type `code`, the PKCE method `S256`, and one of the signing algorithms `RS256`, `PS256` or `ES256` [orchestrator/core/auth/oidc_provider.py:69](). A list the metadata leaves out counts as offering everything.
 - It offers client authentication with a secret. Automatos uses `client_secret_basic` when it is listed or the list is absent, else `client_secret_post` [orchestrator/core/auth/oidc_provider.py:197-204](). The provider must issue the application a client secret.
 
@@ -89,6 +90,8 @@ The origin is the scheme, host and port of `FRONTEND_URL` (the chart's `edition.
 ```
 https://automatos.example.com/api/v1/auth/oidc/callback
 ```
+
+Register it exactly as shown. Never register a wildcard or a pattern that would also match it: the provider would then accept other addresses as the place to send a sign-in's code.
 
 Register the address after sign-out as well, where the provider asks for one:
 
@@ -174,7 +177,13 @@ The rule is required in two cases. The API refuses to start without one:
 - The issuer is shared by many organisations: `https://accounts.google.com`, or Microsoft's `common`, `organizations` or `consumers` authorities or the personal-accounts tenant `9188040d-6c67-4c5b-b112-36a304b66dad` [orchestrator/core/auth/access_rule.py:74-79]().
 - `ENTERPRISE_DEFAULT_ROLE` is anything but `none`.
 
+**At a shared issuer the rule must name your organisation:** `hd=<domain>` for Google, `tid=<tenant-id>` for Microsoft. Start-up cannot check this. It only checks that some valid rule exists [orchestrator/core/edition_start_up.py:373-385](), so `given_name=Alex` at `https://accounts.google.com` starts, and admits every Google account with that name.
+
+`tid=9188040d-6c67-4c5b-b112-36a304b66dad` names no organisation. It is the personal-accounts tenant, the `tid` of every personal Microsoft account [orchestrator/core/auth/access_rule.py:66-73](), so that rule admits every personal account that can sign in to the app. Use your organisation's own tenant ID.
+
 Example: `OIDC_REQUIRED_CLAIMS=hd=example.com` lets in only accounts in the `example.com` Google Workspace domain.
+
+Microsoft's `common`, `organizations` and `consumers` authorities do not work at all, with or without a rule. Their metadata's `issuer` is not their own address: `https://login.microsoftonline.com/{tenantid}/v2.0` for `common` and `organizations`, and the personal-accounts tenant's address for `consumers` (Microsoft's metadata, read on 26 November 2026). Automatos refuses metadata whose `issuer` is not `OIDC_ISSUER` [orchestrator/core/auth/oidc_provider.py:235-240](), so every sign-in answers `identity_provider_unavailable`. Use your tenant's own issuer ([Microsoft Entra ID](enterprise-sign-in-entra-id.md#3-the-issuer-address)).
 
 ### The first admin
 
@@ -204,7 +213,7 @@ Groups matter only for the access rule. Roles are set in Automatos. What each pr
 | Microsoft Entra ID | `roles` (app roles), `groups`, `tid` | Above 200 groups, Entra leaves `groups` out of the token. A rule on an app role is not affected. |
 | Google Workspace | `hd` | Google sends no groups. Access by group is not available with Google. |
 | Okta | `groups`, once a groups claim is configured | A groups filter matching more than 100 groups fails the request at Okta. |
-| Keycloak | Any claim a protocol mapper adds | The CI realm adds `automatos:team`. |
+| Keycloak | A claim from a group-membership or client-role protocol mapper | The CI realm's `automatos:team` is hard-coded: every user gets it, so it restricts nothing. See the [Keycloak guide](enterprise-sign-in-keycloak.md#4-claims). |
 | Amazon Cognito | `cognito:groups` | A user belongs to at most 100 groups. |
 
 ---
@@ -233,13 +242,13 @@ Admin actions need a recent sign-in [orchestrator/core/auth/step_up.py:85-90](),
 1. The session's `auth_time` is older than `STEP_UP_MAX_AGE_MINUTES` (10 by default). The API answers `403 step_up_required` and names `/api/v1/auth/oidc/start?step_up=1`.
 2. The browser opens that address. It is accepted when the browser's `Sec-Fetch-Site` is `same-origin` or `none`, or when the request sends no `Sec-Fetch-Site` [orchestrator/api/auth_oidc.py:204-215](). `same-site` and `cross-site` are refused with `step_up_refused`.
 3. Automatos asks the provider for a fresh sign-in: `max_age=0`, plus `prompt=login` where the provider takes it (below).
-4. The callback reads `auth_time` from the new ID token. It confirms the step-up only when that time is no earlier than the step-up's start, less 60 seconds, and not in the future.
+4. The callback reads `auth_time` from the new ID token. It confirms the step-up only when that time is no earlier than the step-up's start, less 60 seconds, and no more than 60 seconds after now. The 60 seconds allow for the provider's clock and the install's disagreeing (the ID token's leeway) [orchestrator/core/auth/step_up_sign_in.py:124-131]().
 5. A confirmed step-up issues a new session. The new session keeps the old one's absolute expiry.
 
 A step-up is refused with:
 
 - `step_up_no_auth_time` when the ID token carries no `auth_time`;
-- `step_up_refused` when `auth_time` is older than the start, in the future, or when another person signed in, the session ended, or the browser did not present the session.
+- `step_up_refused` when `auth_time` is more than 60 seconds before the start or more than 60 seconds after now, or when another person signed in, the session ended, or the browser did not present the session.
 
 The audit reasons are `no_auth_time`, `stale_auth_time`, `future_auth_time`, `another_person`, `session_ended`, `session_not_presented` and `deactivated` [orchestrator/core/auth/session_audit.py:84-96]().
 
@@ -280,7 +289,7 @@ Automatos Go signs in through the same start address. Nothing extra is registere
 
 1. The app opens `/api/v1/auth/oidc/start` with `app_link=go`, `code_challenge`, `code_challenge_method=S256`, `install_id` and `platform` (`ios` or `android`). A malformed start is answered `400 invalid_phone_start`.
 2. Automatos asks the provider for a fresh sign-in (`max_age=0`, and `prompt=login` where taken).
-3. The callback requires `auth_time` no earlier than the phone's start. Otherwise the app link is answered `error=sign_in_refused`, audited `no_auth_time`, `stale_auth_time` or `future_auth_time`. Any refusal before the person is known goes to the app link the same way, as `error=<code>` with the code from [the sign-in page's list](#on-the-sign-in-page). A callback whose sign-in is unknown or already used goes to the browser's `/sign-in` page instead.
+3. The callback requires `auth_time` no earlier than the phone's start, less 60 seconds, and no more than 60 seconds after now, as a step-up does. Otherwise the app link is answered `error=sign_in_refused`, audited `no_auth_time`, `stale_auth_time` or `future_auth_time`. Any refusal before the person is known goes to the app link the same way, as `error=<code>` with the code from [the sign-in page's list](#on-the-sign-in-page). A callback whose sign-in is unknown or already used goes to the browser's `/sign-in` page instead.
 4. The browser shows the confirm page `/sign-in/phone`. The person presses Continue within 5 minutes.
 5. The app link `automatos://go/signed-in?code=…` opens the app.
 6. The app exchanges the code at `POST /api/v1/mobile/sign-in/exchange`. A bad code is answered `401 invalid_sign_in_code`.
@@ -333,6 +342,22 @@ The session cookie's name (`SESSION_COOKIE_NAME`) and the CSRF header's (`SESSIO
 The database settings are documented in the [chart README's Settings table](../../charts/automatos/README.md#settings): the chart stops rendering unless `database.sslmode` is `verify-full` with `database.caConfigMap`.
 
 The Secret `existingSecret` names holds more than `OIDC_CLIENT_SECRET`: `DATABASE_URL`, `REDIS_URL`, `API_KEY`, `CREDENTIAL_ENCRYPTION_KEY` and others. See the [chart README's Install section](../../charts/automatos/README.md#install) for the list.
+
+### Rotating the client secret
+
+The API reads `OIDC_CLIENT_SECRET` when it starts [orchestrator/config.py:618](), and uses that value until it restarts. The steps below keep both secrets valid through the restart, so no sign-in fails on the secret.
+
+The restart itself can still be an outage. With the chart's defaults (one API replica, and the `api.data` volume `ReadWriteOnce`), the rollout stops the old pod before it starts the new one, so the API answers no requests until the new pod is ready ([charts/automatos/values.yaml](../../charts/automatos/values.yaml), `api.data`). Plan the restart in a maintenance window. An install whose `api.data` volume is `ReadWriteMany`, or off, starts the new pod before stopping the old one, and rolls over without that gap.
+
+To change the secret:
+
+1. At the provider, create a second client secret. Leave the old one in place.
+2. Put the new value in the Secret `existingSecret` names, under `OIDC_CLIENT_SECRET`.
+3. Restart the API: `kubectl -n <namespace> rollout restart deploy/<fullname>-api`.
+4. Once every API pod has restarted, sign in to check the new secret works.
+5. At the provider, revoke the old secret.
+
+Whether a provider holds two secrets at once is the provider's own; check its documentation. With a provider that holds only one, sign-in fails between changing the secret there and the API's restart.
 
 ---
 
