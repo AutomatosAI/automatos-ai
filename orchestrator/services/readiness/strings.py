@@ -31,7 +31,8 @@ STRINGS: Mapping[str, Mapping[str, str]] = MappingProxyType({
         i.CORE_DOWN: "The database didn't answer.",
         i.MODEL_READY: "Auto's model is chosen and has a key to run with.",
         i.MODEL_UNSET: "No model is chosen for Auto.",
-        i.MODEL_NO_KEY: "Auto's model has no key to run with.",
+        i.MODEL_NO_KEY: ("Auto's model has no key to run with. Add a key for its provider, or choose a model "
+                         "whose provider has one."),
         i.SEARCH_OPENROUTER: "Searches go through OpenRouter.",
         i.SEARCH_COMPOSIO: "Searches go through Composio Search.",
         i.SEARCH_SEARXNG: "Searches go through this install's SearXNG.",
@@ -61,7 +62,8 @@ STRINGS: Mapping[str, Mapping[str, str]] = MappingProxyType({
         i.CORE_DOWN: "O banco de dados não respondeu.",
         i.MODEL_READY: "O modelo do Auto está escolhido e tem uma chave para funcionar.",
         i.MODEL_UNSET: "Nenhum modelo foi escolhido para o Auto.",
-        i.MODEL_NO_KEY: "O modelo do Auto não tem uma chave para funcionar.",
+        i.MODEL_NO_KEY: ("O modelo do Auto não tem uma chave para funcionar. Adicione uma chave para o provedor "
+                         "dele, ou escolha um modelo de um provedor que tenha uma."),
         i.SEARCH_OPENROUTER: "As buscas passam pelo OpenRouter.",
         i.SEARCH_COMPOSIO: "As buscas passam pelo Composio Search.",
         i.SEARCH_SEARXNG: "As buscas passam pelo SearXNG desta instalação.",

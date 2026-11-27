@@ -43,9 +43,12 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 from services.readiness import items as i
-from services.readiness import probes, service
+from core.llm.manager import LLMProvider
+from services.readiness import probes, service, strings
 from services.readiness.contract import ReadinessFix
 from services.readiness.items import FIXES, Finding, Item
+
+AUTO_S_MODEL = "Anthropic claude-haiku-5-5"  # how the readiness line names Auto's model (#1678)
 from services.readiness.strings import CHECKED_RECENTLY, NO_WORKSPACE, STRINGS
 
 ORCH = Path(__file__).resolve().parents[1]
@@ -120,7 +123,7 @@ def _manager(monkeypatch, api_key=None, refuse=False):
         built.append((workspace_id, agent_id))
         if refuse:
             raise ValueError("LLM provider not configured for service 'heartbeat'")
-        return NS(config=NS(api_key=api_key))
+        return NS(config=NS(api_key=api_key, provider=LLMProvider.ANTHROPIC, model="claude-haiku-5-5"))
 
     monkeypatch.setattr(probes, "heartbeat_llm", build)
     return built
@@ -130,7 +133,7 @@ def test_model_route_is_ready_when_auto_s_model_resolves_with_a_key(monkeypatch)
     ws = uuid.uuid4()
     built = _manager(monkeypatch, api_key="a-test-key")
 
-    assert probes.model_route(None, ws) == Finding("ready", "model_ready")
+    assert probes.model_route(None, ws) == Finding("ready", "model_ready", where=AUTO_S_MODEL)
     assert built == [(ws, None)]  # the check-in's own manager (K9), built, never called
 
 
@@ -145,7 +148,22 @@ def test_model_route_needs_setup_with_no_model_or_no_key(monkeypatch):
     assert probes.model_route(None, uuid.uuid4()) == Finding("needs_setup", "model_unset", fix="fix_choose_model")
 
     _manager(monkeypatch, api_key=None)
-    assert probes.model_route(None, uuid.uuid4()) == Finding("needs_setup", "model_no_key", fix="fix_add_key")
+    assert probes.model_route(None, uuid.uuid4()) == Finding("needs_setup", "model_no_key", fix="fix_add_key",
+                                                              where=AUTO_S_MODEL)
+
+
+def test_no_key_names_the_provider_and_model_that_need_one_and_both_ways_out(monkeypatch):
+    """#1678: a key saved for another provider doesn't run Auto's model; the line says which one does."""
+    _manager(monkeypatch, api_key=None)
+    finding = probes.model_route(None, uuid.uuid4())
+    assert finding.where == "Anthropic claude-haiku-5-5"
+    sentence = strings.say("en", finding.detail)
+    assert "Add a key for its provider" in sentence and "choose a model" in sentence
+    assert "Adicione uma chave" in strings.say("pt-BR", finding.detail)
+
+
+def test_a_provider_the_registry_does_not_know_is_named_by_its_slug():
+    assert probes._model_named(NS(provider="acme", model="m-1")) == "acme m-1"
 
 
 def _backend(monkeypatch, backend, provider="auto"):
