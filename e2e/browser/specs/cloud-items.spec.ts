@@ -239,14 +239,25 @@ function expectNothingAskedOfCloud(stub: CloudStub): void {
   expect(stub.syncs(), 'no Sync posted, so the backend never pulled').toBe(0)
 }
 
-test.describe('Automatos Cloud items (local edition)', () => {
-  // As a reader who asks for reduced motion: the page's entrance slide (framer-motion) and smooth
-  // scroll then stay still, so a card is stable for its screenshot and click in WebKit too. Not for
-  // the whole lane: Play's style sheet holds its clips back under reduced motion, which
-  // play-parity/mascot-states.spec.ts plays.
-  test.use({ reducedMotion: 'reduce' })
+/**
+ * #1684: Playwright 1.64.1's WebKit on Linux, headless with no GPU, stops producing animation frames
+ * on the Marketplace's frosted-glass panels (backdrop-filter: blur). Playwright waits for a card to be
+ * "stable" across two frames before a screenshot or click, so it waited until the test timed out. On
+ * 1.57.0 it didn't. The blur is turned off for this spec in WebKit; nothing it asserts depends on it.
+ */
+const NO_BACKDROP_BLUR = '*, *::before, *::after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }'
 
-  test.beforeEach(async ({ page }) => {
+async function withoutBackdropBlur(page: Page): Promise<void> {
+  await page.addInitScript((css) => {
+    const add = () => document.head.appendChild(Object.assign(document.createElement('style'), { textContent: css }))
+    if (document.head) add()
+    else document.addEventListener('DOMContentLoaded', add, { once: true })
+  }, NO_BACKDROP_BLUR)
+}
+
+test.describe('Automatos Cloud items (local edition)', () => {
+  test.beforeEach(async ({ page, browserName }) => {
+    if (browserName === 'webkit') await withoutBackdropBlur(page)
     await chooseCoreStyle(page, STUDIO_STYLE, APP_URL)
   })
 
