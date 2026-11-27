@@ -984,17 +984,22 @@ class AgentFactory:
 
         # Fallback: if direct provider has no credential, try OpenRouter. Never for a
         # provider the install's role signs for, with AWS_USE_WORKLOAD_IDENTITY on: its
-        # calls stay on it, or fail (PRD-278 US-105).
+        # calls stay on it, or fail (PRD-278 US-105). When OpenRouter has no key either, the
+        # agent stays on its own provider and model, so its error names the model the person
+        # chose, not OpenRouter's id for it (#1678).
         if not carries_calls(resolved) and provider_str != "openrouter" and not runs_on_workload_identity(provider_str):
-            self.logger.warning(
-                f"No credential for provider '{provider_str}' — falling back to OpenRouter for '{model_id_str}'"
+            routed = await self._resolve_api_key(
+                "openrouter", agent_name, workspace_id=effective_ws_id, own_keys_only=own_only,
             )
-            original_provider = (llm_config_dict.get("provider") or "").lower()
-            model_id_str = self._openrouter_model_id(original_provider, model_id_str)
-            provider_str = "openrouter"
-            resolved = await self._resolve_api_key(
-                provider_str, agent_name, workspace_id=effective_ws_id, own_keys_only=own_only,
-            )
+            if carries_calls(routed):
+                self.logger.warning(
+                    f"No credential for provider '{provider_str}' — falling back to OpenRouter for '{model_id_str}'"
+                )
+                original_provider = (llm_config_dict.get("provider") or "").lower()
+                model_id_str = self._openrouter_model_id(original_provider, model_id_str)
+                provider_str, resolved = "openrouter", routed
+            else:
+                self.logger.warning(f"No credential for provider '{provider_str}' nor OpenRouter: '{model_id_str}' has no key")
         if own_only and not carries_calls(resolved):
             from services.credits.routing import paused_error
 

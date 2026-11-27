@@ -32,6 +32,7 @@ except ImportError:  # pragma: no cover — the SDK is a hard dependency in prod
 
 from core.llm.web_citations import citations_from_annotations, sources_markdown  # PRD-240
 from core.llm.clients.search_recovery import SearchRecoveringClient  # F264
+from core.llm.no_key import no_key_sentence
 
 logger = logging.getLogger(__name__)
 
@@ -323,11 +324,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
 
     def _require_client(self):
         if self.client is None:
-            raise ValueError(
-                f"{self.spec.label} API key not configured. "
-                f"Set {self.spec.env_key or 'the provider key'} or add a {self.spec.slug} key "
-                "in Settings → Model keys."
-            )
+            raise ValueError(no_key_sentence(self.spec.slug, self.config.model))
 
     def _rate_limit_error(self, exc: Exception) -> ProviderRateLimitError:
         note = self.spec.rate_limit_note or "The provider's rate limit was reached."

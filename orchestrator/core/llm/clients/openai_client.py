@@ -11,6 +11,7 @@ from typing import Dict, Any, List, Optional
 from config import config
 from .base import BaseLLMProvider, LLMResponse, accepts_sampling_params, run_blocking
 from .openai_chat_request import chat_kwargs, tool_calls_from
+from core.llm.no_key import no_key_sentence
 
 try:
     from openai import OpenAI
@@ -71,10 +72,7 @@ class OpenAIProvider(BaseLLMProvider):
     async def generate_response(self, messages: List[Dict[str, str]], tools: List[Dict] = None) -> LLMResponse:
         """Generate response using OpenAI API without blocking the event loop"""
         if self.client is None:
-            raise ValueError(
-                "OpenAI API key not configured. Cannot generate response. "
-                "Please configure 'development_openai' credential or set OPENAI_API_KEY env var."
-            )
+            raise ValueError(no_key_sentence("openai", self.config.model))
         
         try:
             def _call():
@@ -118,10 +116,7 @@ class OpenAIProvider(BaseLLMProvider):
     def generate_response_sync(self, messages: List[Dict[str, str]]) -> LLMResponse:
         """Generate response using OpenAI API (synchronous)"""
         if self.client is None:
-            raise ValueError(
-                "OpenAI API key not configured. Cannot generate response. "
-                "Please configure 'development_openai' credential or set OPENAI_API_KEY env var."
-            )
+            raise ValueError(no_key_sentence("openai", self.config.model))
         
         try:
             response = self.client.chat.completions.create(**self._chat_kwargs(messages))

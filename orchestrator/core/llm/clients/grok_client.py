@@ -10,6 +10,7 @@ from typing import Dict, Any, List, Optional
 
 from config import config
 from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens, run_blocking
+from core.llm.no_key import no_key_sentence
 
 try:
     from openai import OpenAI
@@ -50,10 +51,7 @@ class GrokProvider(BaseLLMProvider):
     async def generate_response(self, messages: List[Dict[str, str]], tools: List[Dict] = None) -> LLMResponse:
         """Generate response using Grok API"""
         if self.client is None:
-            raise ValueError(
-                "xAI API key not configured. Cannot generate response. "
-                "Please configure 'development_xai' credential or set XAI_API_KEY env var."
-            )
+            raise ValueError(no_key_sentence("grok", self.config.model))
         
         
         try:
@@ -120,10 +118,7 @@ class GrokProvider(BaseLLMProvider):
     def generate_response_sync(self, messages: List[Dict[str, str]]) -> LLMResponse:
         """Generate response using Grok API (synchronous)"""
         if self.client is None:
-            raise ValueError(
-                "xAI API key not configured. Cannot generate response. "
-                "Please configure 'development_xai' credential or set XAI_API_KEY env var."
-            )
+            raise ValueError(no_key_sentence("grok", self.config.model))
         
         try:
             sync_kwargs = {

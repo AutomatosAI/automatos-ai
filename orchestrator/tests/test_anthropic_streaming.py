@@ -353,10 +353,11 @@ def test_a_call_with_no_key_fails_clearly_whole_and_streamed():
     provider = provider_on()
     provider.client = None
 
+    named = r"No API key for Anthropic \S+: add an Anthropic or OpenRouter key .* or choose a model"  # #1678
     for call in (provider.generate_response(MESSAGES), provider.stream_response(MESSAGES)):
-        with pytest.raises(ValueError, match="Anthropic API key not configured"):
+        with pytest.raises(ValueError, match=named):
             asyncio.run(call)
-    with pytest.raises(ValueError, match="Anthropic API key not configured"):
+    with pytest.raises(ValueError, match=named):
         provider.generate_response_sync(MESSAGES)
 
 

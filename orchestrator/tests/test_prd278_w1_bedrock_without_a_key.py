@@ -200,9 +200,24 @@ def test_on_the_activation_path_keeps_bedrock(monkeypatch):
 
 def test_off_the_activation_path_falls_back_to_openrouter_as_today(monkeypatch):
     _identity(monkeypatch, False)
+    factory = _factory(monkeypatch)
+    routed = ResolvedKey(api_key="sk-or-test", source="platform", is_byok=False, provider="openrouter")
+
+    async def resolve(provider, agent_name="", workspace_id=None, own_keys_only=False):
+        return routed if provider == "openrouter" else None
+
+    monkeypatch.setattr(factory, "_resolve_api_key", resolve)
     provider, _, resolved = asyncio.run(
-        _factory(monkeypatch)._activation_key({"provider": "aws_bedrock", "model": NOVA}, "agent", None))
-    assert provider == "openrouter" and resolved is None
+        factory._activation_key({"provider": "aws_bedrock", "model": NOVA}, "agent", None))
+    assert provider == "openrouter" and resolved is routed
+
+
+def test_off_with_no_openrouter_key_either_it_stays_on_its_own_model(monkeypatch):
+    """#1678: a fallback with no key can't run it either; the agent keeps the model the person chose,
+    so its error names that model, not OpenRouter's id for it."""
+    _identity(monkeypatch, False)
+    assert asyncio.run(_factory(monkeypatch)._activation_key(
+        {"provider": "aws_bedrock", "model": NOVA}, "agent", None)) == ("aws_bedrock", NOVA, None)
 
 
 def test_on_the_spoken_model_takes_the_role_as_a_key():
