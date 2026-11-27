@@ -14,7 +14,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const EXECUTION = '11111111-2222-4333-8444-555555555555'
+const EXECUTION = '42'  // execution ids are integers (#1664)
 const INTERNAL = 'http://api.internal.test:8000'
 const PUBLIC_API = 'https://api.example.test'
 

@@ -9,15 +9,10 @@ import { NextRequest } from 'next/server'
 
 import { isEnterprise } from '@/lib/edition-name'
 import { forwardedSession } from '@/lib/enterprise/server-session'
+import { executionIdPath } from '@/lib/workflow-execution-id'
 
 export const runtime = 'edge' // Edge runtime for true streaming
 
-// SECURITY: UUID v4 validation to prevent SSRF via path injection (OWASP A10:2021 - SSRF)
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-function isValidUUID(value: string): boolean {
-  return UUID_REGEX.test(value)
-}
 
 function getAuthHeaders(request: NextRequest): Record<string, string> {
   const headers: Record<string, string> = {
@@ -64,8 +59,9 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // SECURITY: Validate executionId is a UUID to prevent SSRF path injection
-    if (!isValidUUID(executionId)) {
+    // SECURITY: only a positive whole number reaches the backend URL's path
+    const executionPath = executionIdPath(executionId)
+    if (executionPath === null) {
       return new Response(JSON.stringify({ error: 'Invalid executionId format' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' }
@@ -76,7 +72,7 @@ export async function POST(request: NextRequest) {
 // browser-facing NEXT_PUBLIC_API_URL — inside the frontend container 'localhost'
 // is the frontend itself. Unset in SaaS ⇒ identical to before. (PRD-209)
 process.env.BACKEND_INTERNAL_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-    const streamUrl = `${backendUrl}/api/workflows/executions/${executionId}/stream/aisdk`
+    const streamUrl = `${backendUrl}/api/workflows/executions/${executionPath}/stream/aisdk`
 
     const backendResponse = await fetch(streamUrl, {
       method: 'GET',
@@ -124,8 +120,9 @@ export async function GET(request: NextRequest) {
     })
   }
 
-  // SECURITY: Validate executionId is a UUID to prevent SSRF path injection
-  if (!isValidUUID(executionId)) {
+  // SECURITY: only a positive whole number reaches the backend URL's path
+  const executionPath = executionIdPath(executionId)
+  if (executionPath === null) {
     return new Response(JSON.stringify({ error: 'Invalid executionId format' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' }
@@ -133,7 +130,7 @@ export async function GET(request: NextRequest) {
   }
 
   const backendUrl = getBackendUrlForGet()
-  const streamUrl = `${backendUrl}/api/workflows/executions/${executionId}/stream/aisdk`
+  const streamUrl = `${backendUrl}/api/workflows/executions/${executionPath}/stream/aisdk`
 
   try {
     const backendResponse = await fetch(streamUrl, {
