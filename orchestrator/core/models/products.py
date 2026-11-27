@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, ForeignKey, Integer, String, text
+from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, ForeignKey, Integer, SmallInteger, String, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.sql import func
 
@@ -36,6 +36,8 @@ class Product(Base):
         CheckConstraint("key_type IN ('public', 'server')", name="ck_products_key_type"),
         CheckConstraint("default_retention_days IS NULL OR default_retention_days >= 1",
                         name="ck_products_default_retention_days"),
+        CheckConstraint("workspace_monthly_credit_cap IS NULL OR workspace_monthly_credit_cap >= 1",
+                        name="ck_products_workspace_monthly_credit_cap"),
     )
 
     id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -56,5 +58,22 @@ class Product(Base):
     # the product's to keep); False mints one on every find, as Shopify's re-provision does.
     reuse_existing_key = Column(Boolean, nullable=False, default=True, server_default=text("true"))
     default_retention_days = Column(Integer, nullable=True)  # None: an end user's memories are kept until erased
+    # The credits each of its workspaces may spend of the owner's in a calendar month (UTC); a workspace's own
+    # ``settings.product_credit_cap`` overrides it. None: no cap, the owner's balance limits (services/credits/caps).
+    workspace_monthly_credit_cap = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ProductWorkspaceSpend(Base):
+    """What a product's workspace spent of its owner's credits in one calendar month (UTC), moved in the same
+    transaction as each debit (``services/credits/payer.debit``), so the credit gate reads its cap in one row. The
+    ledger stays the record (``credit_ledger.sub_tenant_id``); this is its running total. ``notified_level`` is the
+    owner's last notice this month: 1 at 80% of the cap, 2 at the cap."""
+
+    __tablename__ = "product_workspace_spend"
+
+    workspace_id = Column(PGUUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True)
+    month = Column(Date, primary_key=True)
+    credits = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    notified_level = Column(SmallInteger, nullable=False, default=0, server_default=text("0"))

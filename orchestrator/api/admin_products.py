@@ -60,6 +60,9 @@ class _Editable(BaseModel):
     key_scopes: Optional[List[str]] = Field(None, description="The scopes of the key each customer's workspace gets")
     reuse_existing_key: Optional[bool] = Field(None, description="Finding a workspace again mints no new key while it "
                                                                  "has an active one (default); false mints one each time")
+    workspace_monthly_credit_cap: Optional[int] = Field(None, ge=1, le=100_000_000,
+                                                        description="Credits each of its workspaces may spend of "
+                                                                    "the owner's a calendar month; none: no cap")
     default_retention_days: Optional[int] = Field(None, ge=1, le=RETENTION_MAX_DAYS,
                                                   description="Days an end user's memories are kept when the product "
                                                               "records none for them; none: until erased")
@@ -104,6 +107,7 @@ def _view(product: Product) -> Dict[str, Any]:
         "agent_slugs": list(product.agent_slugs or []), "ops_manager_slug": product.ops_manager_slug,
         "key_type": product.key_type, "key_scopes": list(product.key_scopes or []),
         "reuse_existing_key": product.reuse_existing_key,
+        "workspace_monthly_credit_cap": product.workspace_monthly_credit_cap,
         "default_retention_days": product.default_retention_days,
         "created_at": utc_iso(product.created_at), "updated_at": utc_iso(product.updated_at),
     }
@@ -188,7 +192,8 @@ def create_product(body: ProductCreate, ctx: RequestContext = Depends(get_reques
                       key_hash=key.key_hash, key_prefix=key.key_prefix, agent_slugs=agent_slugs,
                       ops_manager_slug=body.ops_manager_slug, key_type=body.key_type or "server",
                       key_scopes=list(body.key_scopes or []), default_retention_days=body.default_retention_days,
-                      reuse_existing_key=True if body.reuse_existing_key is None else body.reuse_existing_key)
+                      reuse_existing_key=True if body.reuse_existing_key is None else body.reuse_existing_key,
+                      workspace_monthly_credit_cap=body.workspace_monthly_credit_cap)
     db.add(product)
     try:
         db.commit()

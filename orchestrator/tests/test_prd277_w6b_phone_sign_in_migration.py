@@ -85,9 +85,11 @@ def test_the_revision_chains_onto_wave_4_part_2_and_is_the_one_head():
     revisions = _revisions()
     assert [rev for rev, down in revisions.items() if PARENT in _parents(down)] == [REVISION]
     heads = set(revisions) - {parent for down in revisions.values() for parent in _parents(down)}
-    assert heads == {REVISION}
+    # The spend cap chains onto this revision and is the one head.
+    assert [rev for rev, down in revisions.items() if REVISION in _parents(down)] == ["product_spend_cap_20261113"]
+    assert heads == {"product_spend_cap_20261113"}
     single_head = (ORCH / "tests" / "test_prd209_alembic_single_head.py").read_text(encoding="utf-8")
-    assert f'EXPECTED_HEAD = "{REVISION}"' in single_head
+    assert REVISION in single_head and 'EXPECTED_HEAD = "product_spend_cap_20261113"' in single_head
     chain = (ORCH / "tests" / "test_prd236_w1_routes.py").read_text(encoding="utf-8")
     assert f'(versions / "{REVISION}.py")' in chain and f'down_revision = "{PARENT}"' in chain
 

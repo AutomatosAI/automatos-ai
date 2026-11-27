@@ -462,7 +462,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # part 2's revision — the 'oidc' device kind and the columns a phone's sign-in keeps; the guard follows it.
     phone = (versions / "prd277_w6b_phone_sign_in_20261121.py").read_text()
     assert 'down_revision = "prd277_w4b_step_up_20261120"' in phone
-    assert 'EXPECTED_HEAD = "prd277_w6b_phone_sign_in_20261121"' in guard
+    # 2026-11-26 (Automatos for products, spend cap): product_spend_cap_20261113 chains onto Wave 6
+    # part 2's revision; the guard follows it.
+    capped = (versions / "product_spend_cap_20261113.py").read_text()
+    assert 'down_revision = "prd277_w6b_phone_sign_in_20261121"' in capped
+    assert 'EXPECTED_HEAD = "product_spend_cap_20261113"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

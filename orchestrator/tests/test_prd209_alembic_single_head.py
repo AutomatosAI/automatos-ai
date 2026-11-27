@@ -202,7 +202,10 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-11-21 (PRD-277 Wave 6 part 2, US-603): prd277_w6b_phone_sign_in_20261121 chains onto
 # prd277_w4b_step_up_20261120 — ck_mobile_devices_kind allows 'oidc', two nullable columns on
 # mobile_devices and four on oidc_pending_sign_ins: signing in on the phone.
-EXPECTED_HEAD = "prd277_w6b_phone_sign_in_20261121"
+# 2026-11-26 (Automatos for products, spend cap): product_spend_cap_20261113 chains onto
+# prd277_w6b_phone_sign_in_20261121 — products.workspace_monthly_credit_cap (a new nullable column) and
+# product_workspace_spend (a new table).
+EXPECTED_HEAD = "product_spend_cap_20261113"
 
 
 def _literal(node: ast.AST):

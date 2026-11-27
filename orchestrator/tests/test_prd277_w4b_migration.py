@@ -38,6 +38,7 @@ TABLE, COLUMN = "oidc_pending_sign_ins", "step_up_session_id"
 ROW_WRITES = re.compile(r"\b(DELETE FROM|TRUNCATE|UPDATE \w+ SET|INSERT INTO)\b")
 # Wave 6 part 2 (US-603) chains onto this revision and adds four more columns to the table.
 PHONE_SIGN_IN = "prd277_w6b_phone_sign_in_20261121"
+SPEND_CAP = "product_spend_cap_20261113"  # the one head, on PHONE_SIGN_IN
 
 
 def _constants(path: Path = MIGRATION) -> dict:
@@ -92,9 +93,9 @@ def test_the_revision_chains_onto_part_1_and_wave_6_part_2_chains_onto_it():
     # head is Wave 6 part 2's (tests/test_prd277_w6b_phone_sign_in_migration.py pins it).
     assert [rev for rev, down in revisions.items() if REVISION in _parents(down)] == [PHONE_SIGN_IN]
     heads = set(revisions) - {parent for down in revisions.values() for parent in _parents(down)}
-    assert heads == {PHONE_SIGN_IN}
+    assert heads == {SPEND_CAP}
     single_head = (ORCH / "tests" / "test_prd209_alembic_single_head.py").read_text(encoding="utf-8")
-    assert REVISION in single_head and f'EXPECTED_HEAD = "{PHONE_SIGN_IN}"' in single_head
+    assert REVISION in single_head and f'EXPECTED_HEAD = "{SPEND_CAP}"' in single_head
     chain = (ORCH / "tests" / "test_prd236_w1_routes.py").read_text(encoding="utf-8")
     assert f'(versions / "{REVISION}.py")' in chain and f'down_revision = "{PARENT}"' in chain
 

@@ -14,6 +14,8 @@ Its workspaces, by id (``services/product_lifecycle``, decision 25):
   and is purged after ``PRODUCT_CLOSE_GRACE_DAYS`` (7) unless it is restored. Closing it again changes nothing.
 - ``POST /api/products/{product_id}/workspaces/{workspace_id}/restore``: opens it again within the grace (409
   when it isn't closed, 410 when its grace has passed).
+- ``PATCH /api/products/{product_id}/workspaces/{workspace_id}``: its own monthly credit cap (``credit_cap``;
+  ``null``: back to the product's default), answered with the cap in force and what it spent this month.
 
 The caller is the product's server, with ``Authorization: Bearer <the product's key>`` (``core/models/products``),
 not a signed-in person, so these routes take no workspace context. A wrong key, or a product that doesn't exist,
@@ -41,6 +43,7 @@ router = APIRouter(prefix="/api/products", tags=["Products"])
 EXTERNAL_ID_PATTERN = r"^[A-Za-z0-9._:@/-]{1,255}$"
 METADATA_MAX_BYTES = 8192
 DOMAINS_MAX = 50
+CAP_MAX = 100_000_000  # credits a month (a million dollars at Automatos prices): a typo's guard, not a plan
 BAD_KEY = "Invalid product key"
 CLOSED = "That workspace is closed. Restore it, or wait for its purge to make a new one."
 NOT_THEIRS = "This product has no workspace with that id."
@@ -138,3 +141,22 @@ def restore_workspace(workspace_id: UUID, product: Product = Depends(the_product
         raise HTTPException(status_code=409, detail=NOT_CLOSED) from exc
     except PastGrace as exc:
         raise HTTPException(status_code=410, detail=PAST_GRACE) from exc
+
+
+class CapRequest(BaseModel):
+    credit_cap: Optional[int] = Field(..., ge=1, le=CAP_MAX,
+                                      description="Credits this workspace may spend a calendar month (UTC); "
+                                                  "null: the product's default")
+
+
+@router.patch("/{product_id}/workspaces/{workspace_id}")
+def set_workspace_cap(workspace_id: UUID, body: CapRequest, product: Product = Depends(the_product),
+                      db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Sets one workspace's monthly credit cap; a capped workspace's platform-key work stops at it, as it does at
+    an owner's empty balance, with the code ``workspace_cap_reached``."""
+    from services.product_lifecycle import NotTheirs, set_cap
+
+    try:
+        return set_cap(db, product, workspace_id, body.credit_cap)
+    except NotTheirs as exc:
+        raise HTTPException(status_code=404, detail=NOT_THEIRS) from exc
