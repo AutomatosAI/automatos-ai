@@ -131,7 +131,7 @@ def test_a_request_of_system_messages_alone_is_sent_as_the_users_turn(gemini):
 
 
 def test_no_key_fails_the_call_with_the_setup_message(gemini):
-    with pytest.raises(ValueError, match="Google API key not configured"):
+    with pytest.raises(ValueError, match=r"No API key for Google \S+: add a Google or OpenRouter key"):  # #1678
         asyncio.run(_provider(None).generate_response([{"role": "user", "content": "hi"}]))
 
 

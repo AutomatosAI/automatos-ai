@@ -26,7 +26,7 @@ from config import config
 from core.llm import LLMConfig, LLMManager
 from core.llm.defaults import DEFAULT_MAX_OUTPUT_TOKENS
 from core.llm.key_resolver import ResolvedKey, carries_calls, is_workload_identity, resolve_provider_key  # noqa: F401  # ResolvedKey: re-exported
-from core.llm.providers import runs_on_workload_identity, stored_provider_enum, workload_identity_region
+from core.llm.providers import platform_key_allowed, runs_on_workload_identity, stored_provider_enum, workload_identity_region
 from core.models import Agent, Base, PriorityLevel, Skill
 from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
 from core.security.memory_audience import reads_memory_as_its_agent
@@ -982,19 +982,19 @@ class AgentFactory:
             provider_str, agent_name, workspace_id=effective_ws_id, own_keys_only=own_only,
         )
 
-        # Fallback: if direct provider has no credential, try OpenRouter. Never for a
-        # provider the install's role signs for, with AWS_USE_WORKLOAD_IDENTITY on: its
-        # calls stay on it, or fail (PRD-278 US-105).
+        # Fallback: if direct provider has no credential, try OpenRouter. With no OpenRouter key either the
+        # agent keeps its own model, which its no-key error names (#1678); an own-keys-only provider never
+        # does, as its client would read the env key the resolver refused. Not under PRD-278 US-105.
         if not carries_calls(resolved) and provider_str != "openrouter" and not runs_on_workload_identity(provider_str):
-            self.logger.warning(
-                f"No credential for provider '{provider_str}' — falling back to OpenRouter for '{model_id_str}'"
+            routed = await self._resolve_api_key(
+                "openrouter", agent_name, workspace_id=effective_ws_id, own_keys_only=own_only,
             )
-            original_provider = (llm_config_dict.get("provider") or "").lower()
-            model_id_str = self._openrouter_model_id(original_provider, model_id_str)
-            provider_str = "openrouter"
-            resolved = await self._resolve_api_key(
-                provider_str, agent_name, workspace_id=effective_ws_id, own_keys_only=own_only,
-            )
+            stays = not carries_calls(routed) and platform_key_allowed(provider_str)
+            self.logger.warning(f"No credential for provider '{provider_str}'; "
+                                f"{'no OpenRouter key either' if stays else 'falling back to OpenRouter'} for '{model_id_str}'")
+            if not stays:
+                model_id_str = self._openrouter_model_id((llm_config_dict.get("provider") or "").lower(), model_id_str)
+                provider_str, resolved = "openrouter", routed
         if own_only and not carries_calls(resolved):
             from services.credits.routing import paused_error
 

@@ -36,7 +36,7 @@ from api.system_health_checks import _database
 from config import config
 from core import editions
 from core.llm.embedding_status import provider_ready
-from core.llm.providers import get_spec
+from core.llm.no_key import provider_label
 from services import web_search as search
 from services.proactive.runner import heartbeat_llm
 from services.push import consent
@@ -97,9 +97,7 @@ def model_route(db: Session, workspace_id: UUID) -> Finding:
 def _model_named(llm_config) -> str:
     """``Anthropic claude-haiku-5-5``: the provider's label (its slug when the registry has none),
     then the model, in no language's words."""
-    slug = getattr(llm_config.provider, "value", llm_config.provider)
-    spec = get_spec(slug)
-    return f"{spec.label if spec else slug} {llm_config.model}"
+    return f"{provider_label(getattr(llm_config.provider, 'value', llm_config.provider))} {llm_config.model}"
 
 
 def web_search(db: Session, workspace_id: UUID) -> Finding:

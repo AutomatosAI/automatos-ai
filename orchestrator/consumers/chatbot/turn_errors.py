@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from core.llm.credit import is_out_of_credit
+from core.llm.no_key import NO_KEY_LEAD
 from services.credits.routing import CREDITS_EXHAUSTED_CODE, is_credit_stop
 
 CODE_RATE_LIMITED = "rate_limited"
@@ -138,6 +139,17 @@ def _provider_error(status: int, text: str, who: str) -> TurnError:
                                            "happening, the details are in the server log.")
 
 
+def _no_key_error(text: str, who: str) -> Optional[TurnError]:
+    """A model call that had no key: ``core.llm.no_key``'s sentence as it is (it names the model
+    and both ways out, #1678), or a provider's own "API key not configured" wording; else None."""
+    if text.startswith(NO_KEY_LEAD):
+        return TurnError(CODE_NO_API_KEY, f"{who} can't answer. {_short(text)}")
+    lowered = text.lower()
+    if "api key" in lowered and ("not configured" in lowered or "no api key" in lowered or "missing" in lowered):
+        return TurnError(CODE_NO_API_KEY, f"{who} has no API key for its provider. {_short(text)}")
+    return None
+
+
 def describe_turn_error(exc: BaseException, *, agent_name: Optional[str] = None) -> TurnError:
     """One plain sentence + a code for an exception a chat turn raised."""
     if isinstance(exc, TurnFailed):
@@ -158,9 +170,9 @@ def describe_turn_error(exc: BaseException, *, agent_name: Optional[str] = None)
             CODE_RUNTIME_MISMATCH,
             f"{who} runs as a Claude Code session, not an API model — file a ticket for it instead.",
         )
-    lowered = text.lower()
-    if "api key" in lowered and ("not configured" in lowered or "no api key" in lowered or "missing" in lowered):
-        return TurnError(CODE_NO_API_KEY, f"{who} has no API key for its provider. {_short(text)}")
+    no_key = _no_key_error(text, who)
+    if no_key is not None:
+        return no_key
     if text.startswith("Failed to activate agent"):
         return TurnError(
             CODE_ACTIVATION_FAILED,

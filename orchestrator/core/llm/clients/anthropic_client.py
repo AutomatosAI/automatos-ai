@@ -28,6 +28,7 @@ from .base import BaseLLMProvider, LLMResponse, accepts_sampling_params, request
 from .image_blocks import decoded_image
 from .shared_clients import shared_client
 from core.llm.anthropic_workspace import CACHE_SECONDS, workspace_for_key, workspace_headers
+from core.llm.no_key import no_key_sentence
 
 try:
     import anthropic
@@ -55,8 +56,6 @@ _STREAM_ALL, _STREAM_SPOKEN, _STREAM_QUICK_ASK = "all", "spoken", "quick-ask"
 # The end of a stream's text on the queue between the reader thread and the event loop.
 _END = object()
 _MS = 1000
-_NO_KEY = ("Anthropic API key not configured. Cannot generate response. "
-           "Please configure 'development_anthropic' credential or set ANTHROPIC_API_KEY env var.")
 
 
 def _left_out(why: str) -> Dict[str, Any]:
@@ -426,7 +425,7 @@ class AnthropicProvider(BaseLLMProvider):
     def _require_client(self) -> None:
         """Fail a call clearly when no API key was configured (the client is built without one)."""
         if self.client is None:
-            raise ValueError(_NO_KEY)
+            raise ValueError(no_key_sentence("anthropic", self.config.model))
 
     def streams_now(self) -> bool:
         """Whether a listened-to call streams now (``ANTHROPIC_STREAMING``): every call on "all", a

@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from config import config
 from .base import BaseLLMProvider, LLMResponse, request_max_tokens, run_blocking
 from .image_blocks import decoded_image
+from core.llm.no_key import no_key_sentence
 
 try:
     from google import genai
@@ -38,10 +39,6 @@ _FINISH_REASONS = {
 }
 # The image types Gemini takes inline.
 _GEMINI_IMAGES = frozenset({"image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"})
-_NOT_CONFIGURED = (
-    "Google API key not configured. Cannot generate response. "
-    "Please configure 'development_google' credential or set GOOGLE_API_KEY env var."
-)
 
 
 def gemini_client(api_key: str, timeout_seconds: Optional[float] = None) -> Any:
@@ -174,7 +171,7 @@ class GoogleProvider(BaseLLMProvider):
         """Generate response using Google Gemini API. ``tools`` are not sent: this provider
         has never offered function calling."""
         if self.client is None:
-            raise ValueError(_NOT_CONFIGURED)
+            raise ValueError(no_key_sentence("google", self.config.model))
         try:
             return await run_blocking(self._generate, messages)
         except Exception as e:
@@ -184,7 +181,7 @@ class GoogleProvider(BaseLLMProvider):
     def generate_response_sync(self, messages: List[Dict[str, str]]) -> LLMResponse:
         """Generate response using Google Gemini API (synchronous)"""
         if self.client is None:
-            raise ValueError(_NOT_CONFIGURED)
+            raise ValueError(no_key_sentence("google", self.config.model))
         try:
             return self._generate(messages)
         except Exception as e:
