@@ -18,7 +18,7 @@ const COOKIE_NAME = '__Host-automatos_session'
 const SESSION = 'session' + '-' + 'w'.repeat(32)
 const ORIGIN = 'https://automatos.example.test'
 const WORKSPACE = '00000000-0000-0000-0000-0000000277f5'
-const EXECUTION = '11111111-2222-4333-8444-555555555555'
+const EXECUTION = '42'  // execution ids are integers (#1664)
 const DIGEST = 'b'.repeat(64)
 
 type BackendFetch = Mock<(url: string, init?: RequestInit) => Promise<Response>>
