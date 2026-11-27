@@ -88,3 +88,22 @@ def test_auto_with_only_an_openai_key_fails_its_first_call_naming_its_own_model(
         asyncio.run(manager.generate_response(messages=[{"role": "user", "content": "What is two plus three?"}]))
     assert str(failed.value) == SENTENCE
     assert describe_turn_error(failed.value, agent_name="Auto").message == f"Auto can't answer. {SENTENCE}"
+
+
+def test_an_initialism_takes_its_article_from_the_letters_name():
+    assert "add an NVIDIA key" in no_key_sentence("nvidia", "m")
+    assert "add an AWS Bedrock key" in no_key_sentence("aws_bedrock", "m")
+    assert "add a HuggingFace key" in no_key_sentence("huggingface", "m")
+
+
+@pytest.mark.parametrize(("edition", "runs_as"), [("saas", "openrouter"), ("local", "nvidia")])
+def test_an_own_keys_only_provider_never_stays_where_the_edition_bills(monkeypatch, edition, runs_as):
+    """NVIDIA's key is the workspace's own where Automatos bills (byok_only), and the resolver refuses
+    the server's. Left on NVIDIA with no key, its client would read that env key itself; it goes to
+    OpenRouter as before instead. Where nobody bills, the operator's key is theirs, so it stays."""
+    from config import config
+
+    monkeypatch.setattr(config, "AUTH_EDITION", edition)
+    provider, _, resolved = asyncio.run(
+        _factory(monkeypatch, {})._activation_key({"provider": "nvidia", "model": "m"}, "agent", "ws-1"))
+    assert (provider, resolved) == (runs_as, None)

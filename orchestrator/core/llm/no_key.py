@@ -14,6 +14,16 @@ from typing import Optional
 NO_KEY_LEAD = "No API key for "
 OPENROUTER = "openrouter"
 _VOWELS = frozenset("AEIOU")
+# Letters whose names start with a vowel sound: "an NVIDIA", "an AWS Bedrock", "an HTTP".
+_VOWEL_SOUNDING_LETTERS = frozenset("AEFHILMNORSX")
+
+
+def _article(label: str) -> str:
+    """"an" before a vowel sound: an initialism by its first letter's name (NVIDIA), else by its
+    first letter (OpenAI, HuggingFace)."""
+    word = label.split(" ", 1)[0]
+    initialism = len(word) > 1 and word.isupper()
+    return "an" if word[:1].upper() in (_VOWEL_SOUNDING_LETTERS if initialism else _VOWELS) else "a"
 
 
 def provider_label(provider: Optional[str]) -> str:
@@ -33,7 +43,7 @@ def no_key_sentence(provider: Optional[str], model: Optional[str]) -> str:
     label = provider_label(provider)
     slug = normalize_slug(provider) or provider
     via_openrouter = slug != OPENROUTER and bool(openrouter_prefix_for(slug))
-    article = "an" if label[:1].upper() in _VOWELS else "a"
+    article = _article(label)
     keys = f"{article} {label} or OpenRouter key" if via_openrouter else f"{article} {label} key"
     named = f"{label} {model}" if model else label
     return (f"{NO_KEY_LEAD}{named}: add {keys} in Settings → Model keys, "
