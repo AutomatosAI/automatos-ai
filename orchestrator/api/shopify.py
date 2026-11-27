@@ -85,7 +85,7 @@ def _resolve_sync_workspace(ctx: RequestContext, requested: Optional[str]) -> st
     return str(ctx.workspace_id)
 
 
-def _verify_internal_key(authorization: str = Header(...)) -> None:
+def _verify_internal_key(authorization: str = Header(...), db: Session = Depends(get_db)) -> None:
     """Verify the machine-lane shared secret (Shopify app server, GDPR routes).
 
     PRD-172 F004: fail-closed, and THIS check is the whole guard — there is no
@@ -102,7 +102,7 @@ def _verify_internal_key(authorization: str = Header(...)) -> None:
     """
     from api.verticals import _verify_vertical_internal_key
 
-    _verify_vertical_internal_key("shopify", authorization=authorization)
+    _verify_vertical_internal_key("shopify", authorization=authorization, db=db)
 
 
 # ── Pydantic models ─────────────────────────────────────────────────

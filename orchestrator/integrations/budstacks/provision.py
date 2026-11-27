@@ -66,11 +66,6 @@ class BudstacksProvisioner:
     external_id_key = "budstacks_tenant_id"
     # Never rotate a live storefront's key on re-provision (see module docstring).
     reuse_existing_key = True
-    # PRD-274 W5f: BudStacks is a product (integrations/vertical_products): its record is seeded from this key, and
-    # the workspace named here owns it and pays for every tenant's workspace (Wave 5d).
-    product_name = "BudStacks"
-    key_setting = "BUDSTACKS_INTERNAL_API_KEY"
-    owner_setting = "BUDSTACKS_PRODUCT_OWNER_WORKSPACE_ID"
 
     def allowed_domains(self, external_id: str, metadata: Dict[str, Any]) -> List[str]:
         """Origin allowlist from ``metadata.domains`` — required, normalized, deduped.
